@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: March 2026*
+*Generated: March 2026 | Last Updated: March 2026 — Added breach severity scoring, remediation tracking, Email Security Sweep, inbox takeover prevention*
 
 ---
 
@@ -153,6 +153,35 @@ RelayShield Phase 2 delivers all of this in one product, one WhatsApp conversati
 - No SMB-priced competitor combines all four capabilities
 - Detects active data theft — not just historical breaches
 
+### 8. Breach Severity Scoring (Phase 1)
+- Not all breaches are equal — RelayShield scores and prioritises
+- CRITICAL: Financial institutions, email providers, healthcare, government
+- HIGH: Social media, e-commerce with saved payment cards
+- MEDIUM: Shopping sites, forums, subscription services
+- LOW: Gaming sites, old accounts with minimal PII
+- Claude API assesses severity based on organisation type and exposed data types
+- Users told which breach to act on first — no competitor does this at consumer/SMB price point
+
+### 9. Remediation Status Tracking (Phase 1)
+- HIBP tells you what happened and stops — RelayShield follows up
+- Day 1: Breach detected → remediation started
+- Day 3: Follow-up WhatsApp — "Have you completed the password reset?"
+- Day 7: Reminder if remediation still outstanding
+- Remediation status tracked per breach in DynamoDB
+- Reduces churn — users who complete remediation feel protected and stay subscribed
+- No competitor offers persistent remediation follow-through
+
+### 10. Email Security Sweep (Phase 1)
+- Triggered automatically on every email breach detection
+- Five-step inbox backdoor audit delivered via WhatsApp conversation
+- Checks for silent forwarding rules (most dangerous persistent attack)
+- Checks for unknown recovery email addresses and phone numbers
+- Checks for malicious inbox filters deleting security alerts
+- Reviews unauthorised OAuth app permissions
+- Reviews active sessions on unknown devices
+- Sweep must complete BEFORE password reset — changing password without sweeping leaves backdoors open
+- No competitor guides users through inbox hardening as part of breach response
+
 ---
 
 ## 5. Breach Intelligence Engine
@@ -185,7 +214,229 @@ RelayShield Phase 2 delivers all of this in one product, one WhatsApp conversati
 
 ---
 
-## 6. Exfiltration Detection Engine (Phase 2)
+## 6. Phase 1 AI Remediation Engine
+
+### RelayShield vs HIBP — Why We Win
+
+| Capability | HIBP Free | RelayShield Phase 1 |
+|---|---|---|
+| Breach lookup | ✅ Manual, one-time | ✅ Automated daily monitoring |
+| Alerts | ❌ Email only (ignored) | ✅ WhatsApp (90%+ open rate) |
+| Remediation | ❌ None | ✅ Conversational AI step-by-step |
+| Breach severity scoring | ❌ None | ✅ Critical/High/Medium/Low |
+| Remediation tracking | ❌ None | ✅ Follow-up until resolved |
+| Inbox backdoor sweep | ❌ None | ✅ 5-step Email Security Sweep |
+| Password checking | ✅ Manual lookup | ✅ Built into onboarding flow |
+| Domain scanning | ❌ None | ✅ SMB multi-email monitoring |
+| Phone exposure | ❌ None | ✅ DataClasses detection |
+| Carrier monitoring | ❌ None | ✅ Twilio Lookup |
+| Cross-account password risk | ❌ None | ✅ Guided reuse detection |
+| SMB team dashboard | ❌ None | ✅ Phase 1 feature |
+| Pricing | Free | $12-$99/month |
+
+**The core distinction:**
+> HIBP answers: *"Was I ever breached?"*
+> RelayShield answers: *"Am I breached right now — and here is exactly what to do about it."*
+
+---
+
+### Breach Severity Scoring
+
+Every breach alert includes a severity rating before any remediation steps:
+
+```
+CRITICAL:   Financial institutions, email providers,
+            healthcare, government — act immediately
+
+HIGH:       Social media, e-commerce with saved
+            payment cards — act within 24 hours
+
+MEDIUM:     Shopping sites, forums, subscription
+            services — act within 1 week
+
+LOW:        Gaming sites, old accounts with
+            no PII — note and monitor
+```
+
+**Claude system prompt addition:**
+```
+"Assess the severity of each breach as CRITICAL, HIGH,
+MEDIUM, or LOW based on the organisation type and data
+classes exposed. Lead every alert with the severity
+level. Explain specifically why this breach poses risk
+to this user based on their exposed data types. Tell
+them which breach to remediate first if multiple are
+detected simultaneously."
+```
+
+---
+
+### Remediation Status Tracking
+
+Per-breach tracking stored in DynamoDB `relayshield_breach_alerts` table:
+
+```
+remediation_status field values:
+  "pending"       → Breach detected, alert sent
+  "started"       → User replied and began remediation
+  "completed"     → User confirmed completion
+  "snoozed"       → User requested reminder later
+  "ignored"       → No response after 14 days
+```
+
+**Follow-up WhatsApp conversation flow:**
+```
+Day 1:  Alert sent + remediation started
+        "Reply START to begin your Email Security Sweep"
+
+Day 3:  Follow-up if status = "pending" or "started"
+        "You started remediation for [breach] 3 days ago.
+         Have you completed the password reset?
+         Reply YES to mark complete or HELP to continue."
+
+Day 7:  Reminder if still outstanding
+        "Reminder: [breach] remediation still open.
+         Reply STEPS to continue where you left off."
+
+Day 14: Final reminder
+        "This is your last reminder about the [breach]
+         breach. Reply DONE if resolved or HELP if
+         you need assistance."
+```
+
+---
+
+### Email Security Sweep — 5-Step Inbox Backdoor Audit
+
+**Triggered automatically on every email breach detection.**
+
+**Why sweep BEFORE password reset:**
+```
+Changing password without sweeping = changing front door lock
+while leaving a window open. Attackers keep access via:
+  → Forwarding rules (survive password reset)
+  → OAuth tokens (survive password reset)
+  → Recovery email changes (survive password reset)
+```
+
+**WhatsApp trigger message:**
+```
+"🔴 RelayShield: [email] was found in the [breach] breach.
+[SEVERITY LEVEL]
+
+Before changing your password, I need to check if
+attackers already have backdoor access to your inbox.
+
+Reply SWEEP for a 5-minute Email Security Sweep:
+✓ Silent forwarding rules (most dangerous)
+✓ Unknown recovery options
+✓ Malicious inbox filters
+✓ Unauthorised app permissions
+✓ Active sessions on unknown devices
+
+Completing this sweep BEFORE your password reset
+closes every backdoor. Ready? Reply SWEEP."
+```
+
+**Step 1 — Silent Forwarding Detection (Most Critical)**
+```
+Attackers set up auto-forwarding rules so all your
+emails are silently copied to them. You never notice
+because emails still arrive normally.
+
+Gmail:
+→ Settings → See all settings → Forwarding and POP/IMAP
+→ Delete any forwarding addresses you did not set up
+
+Yahoo:
+→ Settings → More settings → Mailboxes → Forwarding
+
+Outlook:
+→ Settings → Mail → Forwarding → Disable unknown rules
+```
+
+**Step 2 — Unknown Recovery Options**
+```
+Attackers add their own recovery email or phone to lock
+you out and take over at any time.
+
+Gmail: myaccount.google.com/security
+Yahoo: account.yahoo.com/security
+→ Remove any recovery email/phone you do not recognise
+→ Verify your own recovery options are current
+```
+
+**Step 3 — Malicious Inbox Filters**
+```
+Attackers create rules that delete security alerts,
+password reset emails, and bank notifications so you
+never see warnings about suspicious activity elsewhere.
+
+Gmail:
+→ Settings → Filters and Blocked Addresses
+→ Delete any filter that deletes, skips inbox,
+  or forwards emails you did not create
+
+Outlook:
+→ Settings → Rules → Delete unknown rules
+```
+
+**Step 4 — Unauthorised OAuth App Permissions**
+```
+Attackers grant themselves persistent app access that
+survives password resets entirely.
+
+Gmail: myaccount.google.com/permissions
+Yahoo: account.yahoo.com/security/connected-apps
+→ Review all connected apps
+→ Revoke anything unrecognised
+```
+
+**Step 5 — Active Sessions on Unknown Devices**
+```
+Gmail:
+→ Scroll to bottom of inbox
+→ Click "Details" (bottom right corner)
+→ Sign out all other sessions
+
+Yahoo:
+→ account.yahoo.com/security/recent-activity
+→ Terminate unknown sessions
+```
+
+**After sweep completes → password reset begins:**
+```
+"✅ Email Security Sweep complete. All 5 checks done.
+Now let us reset your [breach service] password.
+
+Rule: Use a unique password for every service.
+Never reuse passwords across accounts.
+Reply RESET for a strong password guide, or
+MANAGER for password manager recommendations."
+```
+
+---
+
+### Cross-Account Password Risk Detection
+
+Triggered when a breach exposes a password:
+
+```
+"[Breach service] exposed your password.
+
+If you used the same password on any of these,
+those accounts are also at risk:
+  → Gmail or other email providers
+  → Your bank or financial accounts
+  → Amazon, PayPal, or shopping accounts
+
+Reply CHECK and I will walk you through
+each high-risk account one at a time."
+```
+
+---
+
+## 7. Exfiltration Detection Engine (Phase 2)
 
 ### The Key Distinction
 ```
@@ -335,6 +586,10 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 - ✅ Core breach + dark web monitoring (HIBP API)
 - ✅ WhatsApp alerts via existing Twilio stack
 - ✅ AI conversational remediation (Claude API)
+- ✅ Breach severity scoring (Critical/High/Medium/Low)
+- ✅ Email Security Sweep — 5-step inbox backdoor audit
+- ✅ Remediation status tracking with follow-up flows
+- ✅ Cross-account password risk detection
 - ✅ Password breach checking (Pwned Passwords — free)
 - ✅ Domain scanner for SMB onboarding
 - ✅ SMS/phone number exposure detection
@@ -483,7 +738,9 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 
 **Feature bullets:**
 - 🔍 Real-time breach & dark web monitoring
-- 📱 Instant WhatsApp alerts with AI remediation
+- 📱 Instant WhatsApp alerts with severity scoring
+- 🧹 Email Security Sweep — closes backdoors before password reset
+- 🔄 Remediation tracking — follows up until you are actually protected
 - 🔐 Secret & API key exposure detection (Phase 2)
 - 🕵️ Domain impersonation monitoring (Phase 2)
 - 📡 Telecom-layer SIM swap protection (Phase 2)
@@ -564,10 +821,11 @@ Post on r/personalfinance and r/privacy:
 - ✅ relayshield_breach_alerts (DynamoDB)
 - ✅ relayshield-breach-check (Lambda, Python 3.14)
 - ✅ relayshield/hibp_api_key (Secrets Manager)
-- ⬜ IAM policy: relayshield-breach-check-policy
-- ⬜ Lambda timeout: 3 minutes
-- ⬜ EventBridge scheduler (Week 1 completion)
-- ⬜ Test record in relayshield_monitored_emails
+- ✅ IAM policy: relayshield-breach-check-policy
+- ✅ Lambda timeout: 3 minutes
+- ✅ EventBridge scheduler: relayshield-daily-breach-check
+- ✅ Test records added — 20 breaches detected across 2 emails
+- ✅ Week 1 complete
 
 ---
 

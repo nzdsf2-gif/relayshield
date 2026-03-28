@@ -1,0 +1,55 @@
+# RelayShield — Git Ignore Rules
+# Prevents sensitive files from being accidentally committed
+
+# ── Secrets and credentials ──────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.json
+credentials.json
+config.local.*
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+
+# ── AWS ──────────────────────────────────────────────────────
+.aws/
+aws-exports.js
+samconfig.toml
+
+# ── macOS ────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# ── VS Code ──────────────────────────────────────────────────
+.vscode/settings.json
+.vscode/launch.json
+
+# ── Node (if used later) ─────────────────────────────────────
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Test output ──────────────────────────────────────────────
+.pytest_cache/
+coverage/
+.coverage

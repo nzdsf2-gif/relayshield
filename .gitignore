@@ -53,3 +53,6 @@ logs/
 .pytest_cache/
 coverage/
 .coverage
+
+# ── Claude Code local settings ─────────────────────────────────────
+.claude/settings.local.json

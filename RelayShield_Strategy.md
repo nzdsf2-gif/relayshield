@@ -33,7 +33,7 @@
 
 ### Primary Segments
 - **SMBs** (Small/Medium Businesses) — recurring B2B contracts, self-serve onboarding
-- **Privacy-conscious consumers** — volume play, $12/month
+- **Privacy-conscious consumers** — volume play, $12/month founding / $14.99 standard
 
 ### Pricing Strategy — Standard vs Founding Member
 
@@ -41,17 +41,19 @@
 
 | Tier | Target | Price | What They Get |
 |---|---|---|---|
-| **Personal Shield** | Consumers | $15/month | Email + phone breach monitoring, WhatsApp alerts, AI remediation |
+| **Personal Shield** | Consumers | $14.99/month | Email + phone breach monitoring, WhatsApp alerts, AI remediation |
 | **Business Shield** | SMBs | $99/month | Up to 10 employee emails, domain monitoring, team dashboard, WhatsApp alerts |
 | **Business Shield Pro** | Growing SMBs | $179/month | Up to 25 seats, SIM swap monitoring, priority support |
 
-**Founding Member Pricing (First 50 SMB Customers — Locked Forever):**
+**Founding Member Pricing (First N Customers — Rate Locked Forever):**
 
 | Tier | Standard Price | Founding Rate | Saving |
 |---|---|---|---|
-| **Personal Shield** | $15/month | $12/month | $3/month |
-| **Business Shield** | $99/month | $79/month | $20/month |
-| **Business Shield Pro** | $179/month | $149/month | $30/month |
+| **Personal Shield** | $14.99/month | **$12/month** | $2.99/month |
+| **Business Shield** | $99/month | **$79/month** | $20/month |
+| **Business Shield Pro** | $179/month | **$149/month** | $30/month |
+
+> 🔒 **Founding Member Offer:** Lock in your rate forever before spots close. Standard price is $14.99/month (Personal) or $99/month (Business). Sign up during the founding period and your rate never changes — no matter what features we add.
 
 ### Why This Approach Is Strategically Superior
 
@@ -97,10 +99,10 @@ RelayShield Phase 2 delivers all of this in one product, one WhatsApp conversati
 
 **After founding period closes (standard pricing):**
 - Pure SMB standard: 26 clients × $99 = $2,574
-- Mixed standard: 12 SMB ($1,188) + 110 consumers ($1,320) = $2,508
-- Consumer at $15: 167 consumers × $15 = $2,505
+- Mixed standard: 12 SMB ($1,188) + 88 consumers ($1,319) = $2,507
+- Consumer at $14.99: 167 consumers × $14.99 = $2,503
 
-**Break even:** 2 consumer subscribers at $15 covers all Phase 1 running costs (~$35/month)
+**Break even:** 3 consumer subscribers at $14.99 covers all Phase 1 running costs (~$35/month)
 
 ---
 
@@ -232,7 +234,7 @@ RelayShield Phase 2 delivers all of this in one product, one WhatsApp conversati
 | Carrier monitoring | ❌ None | ✅ Twilio Lookup |
 | Cross-account password risk | ❌ None | ✅ Guided reuse detection |
 | SMB team dashboard | ❌ None | ✅ Phase 1 feature |
-| Pricing | Free | $12-$99/month |
+| Pricing | Free | $12-$99/month (founding) / $14.99-$99 standard |
 
 **The core distinction:**
 > HIBP answers: *"Was I ever breached?"*
@@ -594,7 +596,7 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 - ✅ Domain scanner for SMB onboarding
 - ✅ SMS/phone number exposure detection
 - ✅ Carrier change monitoring (Twilio Lookup)
-- ✅ Consumer tier ($12/month founding / $15 standard) + SMB tier ($79/month founding / $99 standard)
+- ✅ Consumer tier ($12/month founding / $14.99 standard) + SMB tier ($79/month founding / $99 standard)
 - ✅ Self-serve landing page with founding member pricing offer (first 50 SMBs)
 - ✅ Stripe subscription billing
 - ✅ Instrument everything for dataset building

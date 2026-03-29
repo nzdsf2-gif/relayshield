@@ -810,7 +810,7 @@ Post on r/personalfinance and r/privacy:
 - ✅ HIBP API key — purchased ($4.50/month, Pwned 1)
 - ✅ HIBP API key stored in AWS Secrets Manager (relayshield/hibp_api_key)
 - ⬜ relayshield.ai — register on Namecheap
-- ⬜ relayshield.net — register on Namecheap
+- ✅ relayshield.net — purchased (1-year, March 2026)
 - ⬜ Anthropic account (Week 3)
 - ⬜ Stripe account (Week 4)
 - ⬜ Carrd account (Week 4)
@@ -828,6 +828,16 @@ Post on r/personalfinance and r/privacy:
 - ✅ EventBridge scheduler: relayshield-daily-breach-check
 - ✅ Test records added — 20 breaches detected across 2 emails
 - ✅ Week 1 complete
+- ✅ Week 2 in progress — Twilio secrets stored, IAM policy updated
+
+### Week 2 Progress
+- ✅ relayshield/twilio_account_sid stored in Secrets Manager
+- ✅ relayshield/twilio_auth_token stored in Secrets Manager
+- ✅ relayshield/twilio_whatsapp_number stored in Secrets Manager (whatsapp:+15706336558)
+- ✅ RelayShieldSecretsPolicy added to Lambda role (relayshield-breach-check-role-1sapnwdl) — covers all 4 secrets
+- ⬜ Lambda code updated to send WhatsApp alerts via Twilio REST API
+- ⬜ End-to-end test: breach detected → WhatsApp message received
+- ⬜ Fix empty breach_date field in DynamoDB
 
 ---
 
@@ -836,8 +846,9 @@ Post on r/personalfinance and r/privacy:
 | Secret Name | Status |
 |---|---|
 | relayshield/hibp_api_key | ✅ Created |
-| relayshield/twilio_account_sid | ⬜ Week 2 |
-| relayshield/twilio_auth_token | ⬜ Week 2 |
+| relayshield/twilio_account_sid | ✅ Created |
+| relayshield/twilio_auth_token | ✅ Created |
+| relayshield/twilio_whatsapp_number | ✅ Created |
 | relayshield/anthropic_api_key | ⬜ Week 3 |
 | relayshield/stripe_secret_key | ⬜ Week 4 |
 | relayshield/gitguardian_api_key | ⬜ Phase 2 |

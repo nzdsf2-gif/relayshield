@@ -526,9 +526,10 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 | Competitor | Threat Level | Category |
 |---|---|---|
 | **Aura** | 🔴 High | Identity protection suite |
+| **Flare / Foretrace** | 🔴 High | Enterprise dark web intelligence + new B2B2E employee product |
 | **LifeLock/Norton** | 🟡 Medium | Consumer brand |
 | **HaveIBeenPwned** | 🟡 Medium | Free breach lookup |
-| **Flare/SpyCloud** | 🟢 Low | Enterprise only ($500+/month) |
+| **SpyCloud** | 🟢 Low | Enterprise only ($500+/month) |
 | **Incogni** | 🟢 Low | Adjacent category (data broker removal) |
 | **IsItDangerous** | 🟢 Low | Different problem, weakening position |
 
@@ -594,6 +595,112 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 
 ---
 
+### Flare / Foretrace — Most Significant New Threat (March 2026)
+
+**What they do:** Flare is an enterprise threat exposure management platform. In March 2026 they launched **Foretrace** — a B2B2E (business-to-business-to-employee) product delivering personal identity protection to employees via employer adoption. Foretrace was originally a standalone competitor that Flare acquired in 2024.
+
+**Data infrastructure (critical to understand):**
+- 100 million stealer logs monitored
+- 57,000+ Telegram dark web channels monitored in real-time
+- 20 billion leaked credentials in proprietary database
+- Fully independent dataset — does not rely on HIBP
+- Detects credential exposure **before it reaches public breach databases**
+
+**Key facts:**
+- Launched Foretrace GA: March 26, 2026
+- Existing enterprise IEM platform integrates with Microsoft Entra ID (automatic credential disabling)
+- Forrester reports 321% ROI on enterprise IEM platform
+- No public pricing — enterprise sales only, contact required
+- No SIM swap or telecom detection
+
+**Foretrace B2B2E model:**
+- Employers adopt Foretrace as a security benefit and enrol employees
+- Employees get a **private personal identity profile** — employer cannot view individual data
+- Employer gains organisational risk reduction without surveillance of individuals
+- Delivered via Flare web platform — no WhatsApp, no conversational AI
+
+**Confirmed gaps RelayShield exploits:**
+
+| Foretrace Gap | RelayShield Advantage |
+|---|---|
+| No WhatsApp delivery | Two-way WhatsApp AI remediation — 90%+ open rate |
+| No conversational AI remediation | Step-by-step Claude-powered guidance |
+| No telecom / SIM swap layer | Core Phase 2 capability |
+| No SMS / phone number exposure | HIBP DataClasses detection |
+| Employer cannot see employee data | RelayShield SMB admin dashboard gives team visibility |
+| Requires employer adoption (B2B2E only) | RelayShield reaches individuals directly — no employer needed |
+| No breach severity scoring | Critical/High/Medium/Low per breach |
+| No remediation follow-up tracking | Day 1/3/7/14 follow-up until resolved |
+| No Email Security Sweep | 5-step inbox backdoor audit |
+| No pricing transparency | Self-serve, published pricing, no sales call |
+| No SMB self-serve | RelayShield direct sign-up at $79/month |
+
+**The critical data gap Foretrace exposes:**
+
+> ⚠️ **HIBP monitors historical public breach databases. Foretrace monitors stealer logs — credentials captured right now by info-stealer malware, sold on Telegram before any public database is updated. These are fundamentally different threat vectors. RelayShield Phase 2 (Flare API integration) closes this gap.**
+
+See Section 7.1 — Breach Intelligence Source Comparison for full analysis.
+
+**Positioning against Foretrace:**
+> *"Foretrace requires your employer to adopt it and can't tell you what to do next. RelayShield protects you directly — no employer required — and walks you through exactly what to do in your WhatsApp, including the telecom threats Foretrace cannot see."*
+
+**Strategic play:** Foretrace validates the B2B2E market. Use their launch as proof that employer-sponsored identity protection is a growing category — then differentiate on direct access, conversational AI, and telecom layer. Target SMB owners who want to protect their team without enterprise procurement cycles.
+
+---
+
+### Breach Intelligence Source Comparison — HIBP vs Stealer Logs
+*Section 7.1*
+
+Understanding the difference between these two data sources is critical for RelayShield's roadmap and positioning.
+
+#### What HIBP Monitors (RelayShield Phase 1)
+
+| Attribute | Detail |
+|---|---|
+| **Source type** | Historical public data breaches |
+| **How data enters** | Company databases breached → data published or sold → eventually reported to HIBP |
+| **Lag time** | Weeks to months between breach occurring and appearing in HIBP |
+| **Examples** | LinkedIn 2016, Dropbox 2012, Adobe 2013 — all historical, all public |
+| **What it misses** | Credentials captured by malware on a device last week — not yet public |
+| **Cost** | $4.50/month (Pwned 1 plan) |
+| **Coverage** | 14 billion accounts across thousands of historical breaches |
+
+#### What Stealer Logs Monitor (Foretrace / Flare — Phase 2 target)
+
+| Attribute | Detail |
+|---|---|
+| **Source type** | Real-time info-stealer malware output (Redline, Vidar, Raccoon, LummaC2) |
+| **How data enters** | Malware infects device → captures credentials live → attacker sells log on Telegram/dark web |
+| **Lag time** | Hours to days — often available for sale before victim knows anything happened |
+| **Examples** | Employee laptop infected → all saved browser passwords stolen → sold on Telegram channel same day |
+| **What it catches** | Active, fresh credential theft not yet in any public database |
+| **Cost** | Flare API ~$75/month (already in Phase 2 plan) |
+| **Coverage** | 100M+ stealer logs, 57K Telegram channels (Flare dataset) |
+
+#### Why Both Sources Are Needed
+
+```
+HIBP alone answers:    "Were your credentials ever part of a known public breach?"
+Stealer logs answer:   "Are your credentials actively being sold on the dark web right now?"
+
+A user with zero HIBP hits could still have credentials
+actively for sale from a stealer log captured yesterday.
+Foretrace catches this. RelayShield Phase 1 does not — yet.
+```
+
+#### RelayShield Roadmap Response
+
+| Phase | Action | Closes Gap |
+|---|---|---|
+| Phase 1 (now) | HIBP monitoring — historical public breaches | Partial — high recall on known breaches |
+| Phase 2 | Flare API integration — stealer logs + Telegram channel monitoring | Full — adds real-time stealer log coverage |
+| Phase 2 | Dark web marketplace monitoring (Flare) | Full — adds data-for-sale detection |
+| Phase 2 | Explicit stealer log alert messaging — "Your credentials were found in a fresh stealer log, not just a historical breach" | Differentiates severity messaging |
+
+**Phase 1 honest positioning:** RelayShield Phase 1 catches historical breaches via HIBP. This is the right starting point — HIBP is fast to integrate, low-cost, and catches the vast majority of credential exposure events. Stealer log coverage (Phase 2) elevates RelayShield to Foretrace's data depth while adding everything Foretrace lacks: WhatsApp delivery, conversational AI, telecom layer, and transparent pricing.
+
+---
+
 ### Competitive Pricing Comparison
 
 #### Consumer / Individual Tier
@@ -608,6 +715,7 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 | **DeleteMe** | $10.75/mo ($129/yr, 1 person) | $19.08/mo ($229/yr, couple) | $27.42/mo ($329/yr, family 4) | Data broker removal — quarterly reports, up to 40 custom removals |
 | **Kanary** | $14.99/mo (annual) | $16.99/mo (monthly) | — | Data broker removal — 150+ sites, 14-day trial |
 | **HaveIBeenPwned** | Free (manual lookup) | — | — | Breach database lookup only — no monitoring, no remediation |
+| **Flare / Foretrace** | Enterprise only (no public pricing) | — | — | B2B2E employee identity protection — stealer logs, Telegram, 20B credentials, employer-sponsored |
 | **RelayShield** | **$12/mo founding** | **$14.99/mo standard** | — | **Breach monitoring + WhatsApp AI remediation + telecom layer** |
 
 #### SMB / Business Tier
@@ -622,28 +730,33 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 | **DeleteMe** | Custom (contact sales) | Employee PII scanning, removals, reporting | Removal-only — no breach monitoring |
 | **Kanary** | ~$97/mo (11 users, annual) | Bulk user management, branded access, removal tracking | Removal-only — no breach monitoring, no WhatsApp |
 | **HaveIBeenPwned** | $379/mo (Pro API) | Domain breach search, 800 domains, 16K RPM | API product only — no alerts, no remediation |
+| **Flare / Foretrace** | Enterprise only — contact sales | Employee identity monitoring via employer, stealer logs + Telegram, private employee profiles | No WhatsApp, no conversational AI, no telecom, requires employer adoption, no self-serve |
 | **RelayShield** | **$79/mo founding / $99.99 standard** | **Up to 10 seats, domain monitoring, team dashboard, WhatsApp alerts** | — |
 | **RelayShield Pro** | **$149/mo founding / $199 standard** | **Up to 25 seats, SIM swap monitoring, priority support** | — |
 
 #### Key Differentiators — Where RelayShield Wins
 
-| Capability | Aura | LifeLock | Incogni | DeleteMe | RelayShield |
-|---|---|---|---|---|---|
-| Breach monitoring | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Data broker removal | ✅ | ✅ (Ultimate) | ✅ | ✅ | ❌ Phase 3 |
-| WhatsApp alerts (two-way) | ❌ one-way | ❌ | ❌ | ❌ | ✅ |
-| AI conversational remediation | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Breach severity scoring | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Email Security Sweep | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Remediation follow-up tracking | ❌ | ❌ | ❌ | ❌ | ✅ |
-| SIM swap / telecom layer | ❌ | ❌ | ❌ | ❌ | ✅ Phase 2 |
-| SMB team dashboard | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Exfiltration detection | ❌ | ❌ | ❌ | ❌ | ✅ Phase 2 |
-| Credit monitoring | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Fraud insurance | ✅ $1–5M | ✅ $1–2M | ❌ | ❌ | ❌ |
-| SMB price point | ❌ no product | ❌ no product | ❌ no product | Custom | **$79–$149/mo** |
+| Capability | Aura | LifeLock | Foretrace | Incogni | DeleteMe | RelayShield |
+|---|---|---|---|---|---|---|
+| Breach monitoring (HIBP / historical) | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Stealer log monitoring (real-time) | ❌ | ❌ | ✅ 100M logs | ❌ | ❌ | ✅ Phase 2 (Flare API) |
+| Telegram dark web monitoring | ❌ | ❌ | ✅ 57K channels | ❌ | ❌ | ✅ Phase 2 (Flare API) |
+| Data broker removal | ✅ | ✅ (Ultimate) | ❌ | ✅ | ✅ | ❌ Phase 3 |
+| WhatsApp alerts (two-way) | ❌ one-way | ❌ | ❌ | ❌ | ❌ | ✅ |
+| AI conversational remediation | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Breach severity scoring | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Email Security Sweep | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Remediation follow-up tracking | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| SIM swap / telecom layer | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Phase 2 |
+| SMB team dashboard (admin view) | ❌ | ❌ | ❌ employer-blind | ❌ | ❌ | ✅ |
+| Exfiltration / secret scanning | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Phase 2 |
+| Direct self-serve (no employer needed) | ✅ | ✅ | ❌ B2B2E only | ✅ | ✅ | ✅ |
+| Transparent published pricing | ✅ | ✅ | ❌ enterprise sales | ✅ | ✅ | ✅ |
+| Credit monitoring | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Fraud insurance | ✅ $1–5M | ✅ $1–2M | ❌ | ❌ | ❌ | ❌ |
+| SMB self-serve price point | ❌ no product | ❌ no product | ❌ enterprise only | ❌ no product | Custom | **$79–$149/mo** |
 
-**The whitespace RelayShield owns:** No competitor combines breach monitoring + two-way WhatsApp AI remediation + telecom-layer detection + SMB team management at under $150/month. The closest SMB alternative is stitching together HIBP Pro ($379/month) with manual processes — at 4–5× the price with no remediation.
+**The whitespace RelayShield owns:** No competitor combines real-time breach monitoring + two-way WhatsApp AI remediation + telecom-layer detection + SMB team dashboard + transparent self-serve pricing under $150/month. Foretrace has superior data depth but requires employer adoption, has no WhatsApp delivery, no conversational remediation, no telecom layer, and no published pricing. RelayShield Phase 2 closes the data depth gap via Flare API while maintaining every delivery and usability advantage.
 
 ---
 
@@ -669,8 +782,10 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 ### Phase 2 — Differentiate (Months 4-8)
 - Telecom layer: SIM swap detection, carrier signals, port-out alerts
 - Telegram Bot integration + agentic workflows
+- **Stealer log monitoring via Flare API** — real-time credential theft detection (closes Foretrace data gap)
+- **Telegram dark web channel monitoring via Flare API** — 57K+ channels, catches credentials before public databases
 - Secret/API key exposure monitoring (GitGuardian API)
-- Dark web data sale monitoring (Flare API)
+- Dark web marketplace monitoring (Flare API) — data-for-sale detection
 - Domain spoofing/typosquatting detection (dnstwist — free)
 - Proprietary heuristics engine
 - SMB team dashboard + risk scoring

@@ -42,16 +42,16 @@
 | Tier | Target | Price | What They Get |
 |---|---|---|---|
 | **Personal Shield** | Consumers | $14.99/month | Email + phone breach monitoring, WhatsApp alerts, AI remediation |
-| **Business Shield** | SMBs | $99/month | Up to 10 employee emails, domain monitoring, team dashboard, WhatsApp alerts |
-| **Business Shield Pro** | Growing SMBs | $179/month | Up to 25 seats, SIM swap monitoring, priority support |
+| **Business Shield** | SMBs | $99.99/month | Up to 10 employee emails, domain monitoring, team dashboard, WhatsApp alerts |
+| **Business Shield Pro** | Growing SMBs | $199/month | Up to 25 seats, SIM swap monitoring, priority support |
 
 **Founding Member Pricing (First N Customers — Rate Locked Forever):**
 
 | Tier | Standard Price | Founding Rate | Saving |
 |---|---|---|---|
 | **Personal Shield** | $14.99/month | **$12/month** | $2.99/month |
-| **Business Shield** | $99/month | **$79/month** | $20/month |
-| **Business Shield Pro** | $179/month | **$149/month** | $30/month |
+| **Business Shield** | $99.99/month | **$79/month** | $20.99/month |
+| **Business Shield Pro** | $199/month | **$149/month** | $50/month |
 
 > 🔒 **Founding Member Offer:** Lock in your rate forever before spots close. Standard price is $14.99/month (Personal) or $99/month (Business). Sign up during the founding period and your rate never changes — no matter what features we add.
 
@@ -89,18 +89,30 @@ When founding spots fill, simply close the offer. New customers pay $99. Existin
 | Telecom layer / SIM swap | Nothing comparable | — |
 | **Total standalone** | **4 separate tools** | **$120-190/month** |
 
-RelayShield Phase 2 delivers all of this in one product, one WhatsApp conversation, one dashboard, one invoice — at $99/month.
+RelayShield Phase 2 delivers all of this in one product, one WhatsApp conversation, one dashboard, one invoice — at $99.99/month.
+
+### Per-Seat Pricing Rationale
+
+Business pricing is justified on value delivered per employee, not just headcount:
+
+| Tier | Price | Seats | Per Seat | Comparable SaaS |
+|---|---|---|---|---|
+| Personal Shield | $14.99/mo | 1 | $14.99 | Baseline consumer |
+| Business Shield | $99.99/mo | 10 | **$10.00** | Below 1Password Business ($7.99) + breach monitoring + AI remediation |
+| Business Shield Pro | $199/mo | 25 | **$7.96** | Volume discount — still below Microsoft 365 Business Standard per seat |
+
+One remediated credential breach at an SMB prevents average losses of $4,400 (Ponemon Institute). RelayShield pays for itself in the first month it catches one breach.
 
 ### Revenue Path to $2,500/Month
 
-**During founding period (mix of $79 and $99 SMB):**
+**During founding period:**
 - Pure SMB founding: 32 clients × $79 = $2,528
 - Mixed founding: 15 SMB ($1,185) + 110 consumers ($1,320) = $2,505
 
 **After founding period closes (standard pricing):**
-- Pure SMB standard: 26 clients × $99 = $2,574
-- Mixed standard: 12 SMB ($1,188) + 88 consumers ($1,319) = $2,507
-- Consumer at $14.99: 167 consumers × $14.99 = $2,503
+- Pure SMB standard: 26 clients × $99.99 = $2,600
+- Mixed standard: 11 SMB ($1,100) + 94 consumers ($1,409) = $2,509
+- Consumer only: 167 consumers × $14.99 = $2,503
 
 **Break even:** 3 consumer subscribers at $14.99 covers all Phase 1 running costs (~$35/month)
 
@@ -610,8 +622,8 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 | **DeleteMe** | Custom (contact sales) | Employee PII scanning, removals, reporting | Removal-only — no breach monitoring |
 | **Kanary** | ~$97/mo (11 users, annual) | Bulk user management, branded access, removal tracking | Removal-only — no breach monitoring, no WhatsApp |
 | **HaveIBeenPwned** | $379/mo (Pro API) | Domain breach search, 800 domains, 16K RPM | API product only — no alerts, no remediation |
-| **RelayShield** | **$79/mo founding** | **Up to 10 seats, domain monitoring, team dashboard, WhatsApp alerts** | — |
-| **RelayShield Pro** | **$149/mo founding** | **Up to 25 seats, SIM swap monitoring, priority support** | — |
+| **RelayShield** | **$79/mo founding / $99.99 standard** | **Up to 10 seats, domain monitoring, team dashboard, WhatsApp alerts** | — |
+| **RelayShield Pro** | **$149/mo founding / $199 standard** | **Up to 25 seats, SIM swap monitoring, priority support** | — |
 
 #### Key Differentiators — Where RelayShield Wins
 
@@ -649,7 +661,7 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 - ✅ Domain scanner for SMB onboarding
 - ✅ SMS/phone number exposure detection
 - ✅ Carrier change monitoring (Twilio Lookup)
-- ✅ Consumer tier ($12/month founding / $14.99 standard) + SMB tier ($79/month founding / $99 standard)
+- ✅ Consumer tier ($12/month founding / $14.99 standard) + SMB tier ($79/month founding / $99.99 standard)
 - ✅ Self-serve landing page with founding member pricing offer (first 50 SMBs)
 - ✅ Stripe subscription billing
 - ✅ Instrument everything for dataset building
@@ -690,17 +702,123 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 
 ---
 
-## 10. Dataset Monetization Roadmap
+## 10. Revenue Expansion and Monetization Roadmap
 
-| Path | Timeline | Model |
+Beyond core subscriptions, RelayShield has multiple compounding revenue streams as the moat deepens. Each layer builds on the previous one — the dataset feeds the API, the API enables white-label, the white-label enables carrier partnerships.
+
+### Layer 1 — Subscription Enhancements (Phase 1-2)
+
+**Annual billing discount**
+- Offer 2 months free on annual prepay (~17% discount)
+- Consumer: $149.99/year (vs $179.88 monthly) — saves $29.89
+- Business Shield: $999/year (vs $1,199.88 monthly) — saves $200.88
+- Business Shield Pro: $1,990/year (vs $2,388 monthly) — saves $398
+- Benefit: improves cash flow, dramatically reduces monthly churn, signals commitment
+
+**Seat overages**
+- Business Shield: base 10 seats — charge $8.99/additional seat/month above 10
+- Business Shield Pro: base 25 seats — charge $6.99/additional seat/month above 25
+- Creates natural expansion revenue as SMB clients hire
+
+**Add-on modules (à la carte, Phase 2)**
+| Module | Price | What it adds |
 |---|---|---|
-| Threat intelligence API | Phase 3 | Per-call or subscription |
-| Industry breach reports | Phase 2 | B2B report licensing |
-| Anonymized risk benchmarks | Phase 2 | Research partnerships |
-| White-label data feeds | Phase 3 | Enterprise licensing |
-| Exfiltration pattern dataset | Phase 3 | Enterprise licensing |
+| Telecom Shield | +$4.99/mo (consumer) | SIM swap monitoring, carrier change alerts, SS7 advisory |
+| Domain Guard | +$14.99/mo (SMB) | Domain spoofing + typosquatting weekly scan |
+| Secret Sentinel | +$19.99/mo (SMB) | API key + credential exposure monitoring (GitGuardian) |
+| Dark Web Watch | +$24.99/mo (SMB) | Dark web marketplace monitoring (Flare) |
 
-**Key principle from Day 1:** Instrument everything. Log signals, outcomes, and remediation responses in structured formats. Every interaction builds the proprietary dataset.
+---
+
+### Layer 2 — B2B Channel Partnerships (Phase 2-3)
+
+**MSP / Reseller Programme**
+- Managed Service Providers (MSPs) serve thousands of SMBs
+- Offer 30% wholesale discount: MSP pays $69.99/seat (Business Shield), resells at $99.99
+- MSP margin: ~$30/client/month with zero acquisition cost on their end
+- Target: IT Glue, ConnectWise, Datto partner ecosystems
+
+**Cyber Insurance Partnerships**
+- Cyber insurers (Coalition, At-Bay, Cowbell, Corvus) increasingly mandate security controls
+- Partner as a preferred vendor: policyholders get discounted RelayShield as part of their policy
+- Model: insurer pays per-policyholder licence fee (~$5-10/month), we get volume; insurer reduces claims
+- Value prop to insurer: policyholders who actively monitor and remediate breaches have materially lower claims rates
+
+**Employee Benefits Programme**
+- HR and benefits managers (Gusto, Rippling, TriNet platforms) bundle personal identity protection as employee benefit
+- Company pays: ~$8-10/employee/month for Personal Shield as a perk
+- No sales cycle — employees are auto-enrolled, company pays annually
+- Similar model to MetLife, LifeLock employer programs — but at SMB price point
+- Target: companies with 10-100 employees on Gusto / Rippling
+
+**Telecom Carrier White-label (Phase 3)**
+- Carriers (Verizon, T-Mobile, AT&T MVNOs) bundle identity protection as premium add-on
+- Model: carrier white-labels RelayShield under their brand, pays per-subscriber fee (~$3-5/month/subscriber)
+- Volume play — even 10,000 subscribers at $4/month = $40,000 MRR from one carrier deal
+- Founder's 25-year telecom background = credibility and warm intro potential
+
+---
+
+### Layer 3 — Data and Intelligence Products (Phase 2-3)
+
+**Industry Breach Intelligence Reports**
+- Quarterly paid reports: "SMB Credential Breach Report — Q2 2026"
+- Target buyers: cyber insurance underwriters, MSPs, compliance consultants, VCs doing due diligence
+- Pricing: $499-$1,499 per report, or $2,999/year subscription for all verticals
+- Data already being collected from Day 1 — zero incremental cost to produce
+
+**Threat Intelligence API**
+- Expose anonymized breach pattern data and remediation outcome data via REST API
+- Target: SIEMs, security platforms (Splunk, Datadog), insurance actuaries, compliance tools
+- Model: $0.01-0.05 per API call, or $299-999/month subscription tier
+- Unique data asset: no other provider has breach detection + remediation outcome + telecom signal combined
+
+**Anonymized Risk Benchmarks**
+- Sell aggregated risk scoring data to research institutions, regulators, insurance actuaries
+- GDPR/CCPA compliant — fully anonymized, cohort-level only
+- Model: research partnership agreements, $5,000-25,000/year per institution
+
+**White-label Platform Licensing (Phase 3)**
+- License the entire RelayShield platform to large enterprises or government agencies
+- They deploy under their own brand, we receive platform licence fee
+- Target: national cybersecurity agencies, large banks, telcos operating in markets without a local equivalent
+- Model: $10,000-50,000/month platform licence + implementation fee
+
+---
+
+### Layer 4 — Premium Service Tiers (Phase 2-3)
+
+**Breach Response Retainer**
+- One-time emergency service: active breach in progress, priority human + AI assistance
+- Pricing: $299 one-time incident fee, or included in Business Shield Pro
+- Target: SMB owner whose employee credentials are being actively exploited
+
+**Compliance Reporting Add-on**
+- Automated GDPR/HIPAA/CCPA breach notification documentation
+- Generates audit-ready incident reports from breach detection events
+- Pricing: +$29.99/month (SMB add-on)
+- Target: SMBs in healthcare, legal, finance that have regulatory notification obligations
+
+---
+
+### Combined Revenue Potential (Phase 3 Scenario)
+
+| Revenue Stream | Conservative MRR | Stretch MRR |
+|---|---|---|
+| Consumer subscriptions (500 subscribers) | $6,000 | $7,500 |
+| SMB Business Shield (50 clients) | $4,000 | $5,000 |
+| SMB Business Shield Pro (20 clients) | $2,980 | $3,980 |
+| Seat overages | $500 | $1,500 |
+| Add-on modules | $1,000 | $3,000 |
+| Annual billing cash (amortised) | $800 | $1,500 |
+| MSP/reseller channel | $2,000 | $8,000 |
+| Cyber insurance partnerships | $1,500 | $5,000 |
+| Intelligence reports / API | $1,000 | $4,000 |
+| **Total MRR** | **~$19,780** | **~$39,480** |
+
+The $2,500/month target is a 6-week milestone. The platform architecture being built now supports $20,000-$40,000 MRR with no rebuild required — just additional integrations on the same Lambda/DynamoDB/WhatsApp stack.
+
+**Key principle from Day 1:** Instrument everything. Log signals, outcomes, and remediation responses in structured formats. Every interaction builds the proprietary dataset that powers every revenue layer above.
 
 ---
 

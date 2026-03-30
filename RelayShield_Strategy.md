@@ -582,6 +582,59 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 
 ---
 
+### Competitive Pricing Comparison
+
+#### Consumer / Individual Tier
+
+| Competitor | Entry Price | Mid Tier | Top Tier | Primary Focus |
+|---|---|---|---|---|
+| **Aura** | $12/mo (Individual) | $22/mo (Couple) | $32/mo (Family, 5 adults) | Full-stack: credit monitoring, dark web, VPN, antivirus, $1M–$5M fraud insurance |
+| **LifeLock / Norton** | $9.99/mo (Select) | ~$16.67/mo (Advantage) | $29.17/mo (Ultimate Plus) | Credit monitoring, ID theft insurance, dark web alerts, antivirus bundle |
+| **Identity Guard** | $7.50/mo (Value, annual) | $16.67/mo (Standard) | $25/mo (Ultra) | 3-bureau credit monitoring, dark web, criminal record monitoring, $1M insurance |
+| **McAfee+** | $49.99/yr (Premium) | ~$16.67/mo (Advanced) | $23.33/mo (Ultimate) | Antivirus + ID bundle, credit monitoring, data broker removal |
+| **Incogni** | $7.99/mo (Standard, annual) | $14.99/mo (Unlimited) | — | Data broker removal only — 420–2,000+ sites, recurring opt-outs |
+| **DeleteMe** | $10.75/mo ($129/yr, 1 person) | $19.08/mo ($229/yr, couple) | $27.42/mo ($329/yr, family 4) | Data broker removal — quarterly reports, up to 40 custom removals |
+| **Kanary** | $14.99/mo (annual) | $16.99/mo (monthly) | — | Data broker removal — 150+ sites, 14-day trial |
+| **HaveIBeenPwned** | Free (manual lookup) | — | — | Breach database lookup only — no monitoring, no remediation |
+| **RelayShield** | **$12/mo founding** | **$14.99/mo standard** | — | **Breach monitoring + WhatsApp AI remediation + telecom layer** |
+
+#### SMB / Business Tier
+
+| Competitor | Entry Price | What's Included | Gaps |
+|---|---|---|---|
+| **Aura** | No SMB product | Employee benefit program only (per-seat, negotiated) | No team dashboard, no domain monitoring, no admin controls |
+| **LifeLock / Norton** | No SMB product | Individual plans only | No multi-seat, no team management |
+| **Identity Guard** | No SMB product | Individual/family plans only | No business offering |
+| **McAfee+** | No SMB product | Individual/family plans only | No business offering |
+| **Incogni** | No SMB product | Family plan only (5 members, $15.99/mo) | Not purpose-built for business |
+| **DeleteMe** | Custom (contact sales) | Employee PII scanning, removals, reporting | Removal-only — no breach monitoring |
+| **Kanary** | ~$97/mo (11 users, annual) | Bulk user management, branded access, removal tracking | Removal-only — no breach monitoring, no WhatsApp |
+| **HaveIBeenPwned** | $379/mo (Pro API) | Domain breach search, 800 domains, 16K RPM | API product only — no alerts, no remediation |
+| **RelayShield** | **$79/mo founding** | **Up to 10 seats, domain monitoring, team dashboard, WhatsApp alerts** | — |
+| **RelayShield Pro** | **$149/mo founding** | **Up to 25 seats, SIM swap monitoring, priority support** | — |
+
+#### Key Differentiators — Where RelayShield Wins
+
+| Capability | Aura | LifeLock | Incogni | DeleteMe | RelayShield |
+|---|---|---|---|---|---|
+| Breach monitoring | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Data broker removal | ✅ | ✅ (Ultimate) | ✅ | ✅ | ❌ Phase 3 |
+| WhatsApp alerts (two-way) | ❌ one-way | ❌ | ❌ | ❌ | ✅ |
+| AI conversational remediation | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Breach severity scoring | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Email Security Sweep | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Remediation follow-up tracking | ❌ | ❌ | ❌ | ❌ | ✅ |
+| SIM swap / telecom layer | ❌ | ❌ | ❌ | ❌ | ✅ Phase 2 |
+| SMB team dashboard | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Exfiltration detection | ❌ | ❌ | ❌ | ❌ | ✅ Phase 2 |
+| Credit monitoring | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Fraud insurance | ✅ $1–5M | ✅ $1–2M | ❌ | ❌ | ❌ |
+| SMB price point | ❌ no product | ❌ no product | ❌ no product | Custom | **$79–$149/mo** |
+
+**The whitespace RelayShield owns:** No competitor combines breach monitoring + two-way WhatsApp AI remediation + telecom-layer detection + SMB team management at under $150/month. The closest SMB alternative is stitching together HIBP Pro ($379/month) with manual processes — at 4–5× the price with no remediation.
+
+---
+
 ## 8. Product Roadmap
 
 ### Phase 1 — Validate (Months 1-3)
@@ -811,7 +864,7 @@ Post on r/personalfinance and r/privacy:
 - ✅ HIBP API key stored in AWS Secrets Manager (relayshield/hibp_api_key)
 - ⬜ relayshield.ai — register on Namecheap
 - ✅ relayshield.net — purchased (1-year, March 2026)
-- ⬜ Anthropic account (Week 3)
+- ✅ Anthropic account — API key created, $4.85 credit, billing active
 - ⬜ Stripe account (Week 4)
 - ⬜ Carrd account (Week 4)
 - ⬜ GitGuardian account (Phase 2)
@@ -828,16 +881,20 @@ Post on r/personalfinance and r/privacy:
 - ✅ EventBridge scheduler: relayshield-daily-breach-check
 - ✅ Test records added — 20 breaches detected across 2 emails
 - ✅ Week 1 complete
-- ✅ Week 2 in progress — Twilio secrets stored, IAM policy updated
+- ✅ Week 2 complete
+- ✅ Week 3 complete
 
 ### Week 2 Progress
-- ✅ relayshield/twilio_account_sid stored in Secrets Manager
-- ✅ relayshield/twilio_auth_token stored in Secrets Manager
-- ✅ relayshield/twilio_whatsapp_number stored in Secrets Manager (whatsapp:+15706336558)
+- ✅ relayshield/twilio_account_sid stored in Secrets Manager (plaintext)
+- ✅ relayshield/twilio_auth_token stored in Secrets Manager (plaintext)
+- ✅ relayshield/twilio_whatsapp_number stored in Secrets Manager — sandbox: whatsapp:+14155238886
 - ✅ RelayShieldSecretsPolicy added to Lambda role (relayshield-breach-check-role-1sapnwdl) — covers all 4 secrets
-- ⬜ Lambda code updated to send WhatsApp alerts via Twilio REST API
-- ⬜ End-to-end test: breach detected → WhatsApp message received
-- ⬜ Fix empty breach_date field in DynamoDB
+- ✅ Lambda code updated to send WhatsApp alerts via Twilio REST API (urllib.request, no SDK)
+- ✅ IAM changes made via console only (smartasst-deployer constraint respected)
+- ✅ End-to-end test: breach detected → WhatsApp message received
+- ✅ breach_date fix: falls back to AddedDate when BreachDate null (some breaches have no date by design)
+- ✅ Twilio sandbox opt-in completed (join flies-fully → +14155238886)
+- ✅ relayshield_users table: user-test-001 record created with whatsapp_number
 
 ---
 

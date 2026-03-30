@@ -45,7 +45,7 @@
 | **Business Shield** | SMBs | $99.99/month | Up to 10 employee emails, domain monitoring, team dashboard, WhatsApp alerts |
 | **Business Shield Pro** | Growing SMBs | $199/month | Up to 25 seats, SIM swap monitoring, priority support |
 
-**Founding Member Pricing (First N Customers — Rate Locked Forever):**
+**Founding Member Pricing (First 25 Customers — Rate Locked Forever):**
 
 | Tier | Standard Price | Founding Rate | Saving |
 |---|---|---|---|
@@ -73,9 +73,9 @@ Result:         Loyalty, word of mouth, zero resentment
 
 Use the expiring discount — not a price increase — as the urgency driver:
 
-> *"🔒 Founding Member Offer — First 50 businesses only. Lock in Business Shield at $79/month forever. Standard price is $99/month. Sign up today and your rate never changes, no matter what features we add."*
+> *"🔒 Founding Member Offer — First 25 customers only. Lock in Business Shield at $79/month forever. Standard price is $99.99/month. Sign up today and your rate never changes, no matter what features we add."*
 
-When founding spots fill, simply close the offer. New customers pay $99. Existing customers keep $79 for life. No price increase conversation. Ever.
+When founding spots fill, simply close the offer. New customers pay $99.99. Existing customers keep $79 for life. No price increase conversation. Ever.
 
 ### Standalone Value Comparison (Phase 2 Justification)
 
@@ -775,7 +775,7 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - ✅ SMS/phone number exposure detection
 - ✅ Carrier change monitoring (Twilio Lookup)
 - ✅ Consumer tier ($12/month founding / $14.99 standard) + SMB tier ($79/month founding / $99.99 standard)
-- ✅ Self-serve landing page with founding member pricing offer (first 50 SMBs)
+- ✅ Self-serve landing page with founding member pricing offer (first 25 customers)
 - ✅ Stripe subscription billing
 - ✅ Instrument everything for dataset building
 
@@ -1037,7 +1037,7 @@ The $2,500/month target is a 6-week milestone. The platform architecture being b
 > *"Built by a 25-year telecom security professional. Already using Incogni or Aura? Now add the protection layer they can't provide."*
 
 **Founding member urgency block:**
-> *"🔒 Founding Member Pricing — First 50 businesses only. Lock in Business Shield at $79/month forever. Standard price is $99/month. Spots remaining: [X]"*
+> *"🔒 Founding Member Pricing — First 25 customers only. Lock in Business Shield at $79/month forever. Standard price is $99.99/month. Spots remaining: [X]"*
 
 **Dual CTA:**
 - "Protect My Business →"

@@ -53,29 +53,29 @@
 | **Business Shield** | $99.99/month | **$79/month** | $20.99/month |
 | **Business Shield Pro** | $199/month | **$149/month** | $50/month |
 
-> 🔒 **Founding Member Offer:** Lock in your rate forever before spots close. Standard price is $14.99/month (Personal) or $99/month (Business). Sign up during the founding period and your rate never changes — no matter what features we add.
+> 🔒 **Founding Member Offer:** Lock in your founding rate for 3 months before spots close. Standard price is $14.99/month (Personal) or $99.99/month (Business). Sign up during the founding period and your rate is guaranteed for your first 3 months — no matter what features we add.
 
 ### Why This Approach Is Strategically Superior
 
-No customer ever experiences a price increase. The frame is inverted entirely:
+Founding members get a 3-month guaranteed rate — a meaningful, time-limited reward for early adoption. After 3 months they move to standard pricing, which they already knew going in. The frame is inverted entirely:
 
 ```
-OLD APPROACH:   Launch at $79 → raise to $99 at Phase 2
+OLD APPROACH:   Launch at $79 → raise to $99.99 after 3 months
 Customer hears: "You're charging me more"
 Result:         Churn risk, complaints, negative reviews
 
-NEW APPROACH:   $99 standard price, $79 founding discount
-Customer hears: "I locked in a great rate early"
-Result:         Loyalty, word of mouth, zero resentment
+NEW APPROACH:   $99.99 standard price, $79 founding discount for 3 months
+Customer hears: "I got 3 months at a great rate for being an early supporter"
+Result:         Goodwill, word of mouth, smooth transition to standard pricing
 ```
 
 ### Founding Member Acquisition Strategy
 
 Use the expiring discount — not a price increase — as the urgency driver:
 
-> *"🔒 Founding Member Offer — First 25 customers only. Lock in Business Shield at $79/month forever. Standard price is $99.99/month. Sign up today and your rate never changes, no matter what features we add."*
+> *"🔒 Founding Member Offer — First 25 customers only. Lock in Business Shield at $79/month for your first 3 months. Standard price is $99.99/month. Sign up today and your founding rate is guaranteed for 3 months — no matter what features we add."*
 
-When founding spots fill, simply close the offer. New customers pay $99.99. Existing customers keep $79 for life. No price increase conversation. Ever.
+When founding spots fill, simply close the offer. New customers pay $99.99. Founding members keep $79 for their first 3 months, then move to standard pricing. Clean transition, no surprise increases.
 
 ### Standalone Value Comparison (Phase 2 Justification)
 
@@ -1037,11 +1037,69 @@ The $2,500/month target is a 6-week milestone. The platform architecture being b
 > *"Built by a 25-year telecom security professional. Already using Incogni or Aura? Now add the protection layer they can't provide."*
 
 **Founding member urgency block:**
-> *"🔒 Founding Member Pricing — First 25 customers only. Lock in Business Shield at $79/month forever. Standard price is $99.99/month. Spots remaining: [X]"*
+> *"🔒 Founding Member Pricing — First 25 customers only. Lock in your rate for 3 months — $12/month (Personal) or $79/month (Business). Standard price is $14.99/$99.99. Spots remaining: [X]"*
 
 **Dual CTA:**
 - "Protect My Business →"
 - "Join Early Access →"
+
+---
+
+**How It Works — 3 Steps**
+
+Keep it visual and frictionless. Three steps, no jargon:
+
+> **Step 1 — Sign up in 2 minutes**
+> Enter the email addresses and phone numbers you want monitored. No software to install. No app to download.
+
+> **Step 2 — We watch 24/7**
+> RelayShield monitors breach databases, dark web sources, and your carrier layer around the clock. You get on with your life.
+
+> **Step 3 — Get alerted and guided in WhatsApp**
+> The moment something is detected, you receive a WhatsApp message with a severity rating and step-by-step instructions. Reply to get personalised AI guidance through every remediation step.
+
+---
+
+**Pricing**
+
+Three tiers, transparent pricing, no hidden fees:
+
+| | Personal Shield | Business Shield | Business Shield Pro |
+|---|---|---|---|
+| **Standard price** | $14.99/month | $99.99/month | $199/month |
+| **Founding rate** | $12/month | $79/month | $149/month |
+| **Founding period** | 3 months | 3 months | 3 months |
+| **Seats** | 1 person | Up to 10 employees | Up to 25 employees |
+| **WhatsApp alerts** | ✅ | ✅ | ✅ |
+| **AI remediation** | ✅ | ✅ | ✅ |
+| **Domain monitoring** | ❌ | ✅ | ✅ |
+| **Team dashboard** | ❌ | ✅ | ✅ |
+| **SIM swap monitoring** | ❌ | ❌ | ✅ Phase 2 |
+| **Priority support** | ❌ | ❌ | ✅ |
+
+> *All plans include a 14-day free trial. Cancel anytime.*
+
+---
+
+**Frequently Asked Questions**
+
+**Is my data safe?**
+> RelayShield is built on AWS with encryption at rest and in transit. We never store your passwords. Payment processing is handled entirely by Stripe — we never see your card details. Our security architecture is published openly because we have nothing to hide.
+
+**How is this different from just using HaveIBeenPwned for free?**
+> HIBP tells you whether you were breached and stops there. RelayShield monitors daily, sends you a WhatsApp alert the moment a breach is detected, scores the severity, walks you through a 5-step inbox security sweep, tracks your remediation progress, and follows up until you are actually protected. HIBP is a lookup tool. RelayShield is a monitoring and response service.
+
+**Do I need to install an app?**
+> No. RelayShield delivers everything through WhatsApp, which you already have. There is nothing to download, install, or configure.
+
+**What if I'm already using Aura or Incogni?**
+> Aura focuses on credit monitoring and fraud insurance — it cannot detect SIM swap attacks, email backdoors, or exposed API keys. Incogni removes you from data broker lists but explicitly does not monitor the dark web. RelayShield fills the gaps they leave open. Many customers use both.
+
+**What happens after the 3-month founding rate?**
+> At the end of your 3-month founding period, your subscription moves to the standard price ($14.99/month Personal, $99.99/month Business). You will receive an email reminder 14 days before the change. Cancel any time before then with no charge.
+
+**Do you offer refunds?**
+> Yes — 14-day free trial on all plans, and we offer a full refund within 30 days of your first charge if RelayShield has not detected any value for you.
 
 ---
 

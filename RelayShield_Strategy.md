@@ -537,29 +537,92 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 
 ### Aura — Primary Competitor
 
-**What they do:** AI-powered all-in-one digital safety platform. Credit monitoring, dark web scanning, antivirus, VPN, password manager, fraud insurance.
+**What they do:** AI-powered all-in-one digital safety platform. Credit monitoring (3-bureau), dark web scanning, financial account monitoring, identity document monitoring, home/property title monitoring, antivirus (10 devices), VPN, password manager, data broker removal (200+ sites), and $1M–$5M fraud insurance.
 
 **Key facts:**
 - $1.6B valuation, $672M funding, $300M+ ARR
 - 1.1M+ subscribers, 1,700+ employer partners
-- March 2026: 900,000-record data breach (active trust crisis)
+- Fraud alerts delivered up to 650x faster than competitors (2025 testing)
+- March 2026 data breach — 900,000 records exposed (details below)
+
+**March 2026 Breach — Accurate Detail:**
+The breach is a trust event, but less catastrophic technically than initially reported:
+- **860,000** records were marketing contacts who were never Aura customers (acquired with a 2021 acquisition)
+- **~20,000** active customer records exposed: name, email, address, phone, customer service notes only
+- **~15,000** former customer records: same fields
+- **NOT exposed:** SSNs, passwords, financial data, payment cards — core protection data was not compromised
+- **Cause:** Targeted phone phishing attack on an Aura employee → compromised marketing tool access (~1 hour window)
+
+The trust damage is real — an identity protection company that cannot protect its own customer list is a powerful narrative regardless of technical scope. The attack vector (social engineering of an employee) is also ironic given their product category.
+
+**Full Aura Capability Inventory:**
+
+| Capability | Aura Detail |
+|---|---|
+| Dark web monitoring | Scans dark web marketplaces, forums, criminal chat rooms, breach databases |
+| Breach database monitoring | Yes — email, phone, SSN, credit card, DL, passport |
+| Credit monitoring | 3-bureau (Experian, TransUnion, Equifax) — alerts in minutes |
+| Credit lock | Experian only — must lock TransUnion and Equifax manually |
+| Financial account monitoring | Up to 20 linked accounts — bank, credit, investment, 401k |
+| Identity document monitoring | SSN, passport, driver's licence, government ID |
+| Home/property title monitoring | Home and vehicle title fraud detection |
+| Data broker removal | 200+ data broker sites — automated, recurring |
+| Fraud insurance | $1M–$5M (one claim per 12-month period, pre-existing fraud excluded) |
+| Password manager | Included — OTP/2FA, email alias, file vault |
+| VPN | Included — all plans |
+| Antivirus | Included — up to 10 devices |
+| Alert delivery | Email, SMS, in-app push — one-way only |
+| Remediation | 24/7 human phone/chat support, white-glove fraud recovery |
+| Social media monitoring | Conflicting reports — likely limited or absent |
+| USPS address change | Not monitored |
+| Medical ID monitoring | Not monitored |
+| SIM swap / telecom | Not monitored |
+| Stealer log monitoring | Not confirmed |
+| SMB product | No purpose-built SMB offering |
+| WhatsApp (two-way) | No |
+| Conversational AI remediation | No |
+| Exfiltration detection | No |
 
 **Confirmed gaps RelayShield exploits:**
 
 | Aura Gap | RelayShield Advantage |
 |---|---|
 | Zero SIM swap / telecom detection | Core Phase 2 capability |
-| One-way WhatsApp alerts only | Two-way conversational AI |
+| Zero stealer log / Telegram monitoring | Phase 2 via Flare API |
+| One-way alerts only (email/SMS/app) | Two-way WhatsApp conversational AI |
 | No Telegram | Phase 2 roadmap |
-| No SMB team dashboard | Core SMB product |
-| No published accuracy benchmarks | Explicit commitment |
+| No SMB purpose-built product | Core SMB offering at $79–$199/month |
+| No breach severity scoring | Critical/High/Medium/Low per breach |
+| No Email Security Sweep | 5-step inbox backdoor audit before password reset |
+| No remediation tracking / follow-up | Day 1/3/7/14 follow-up until resolved |
+| Social engineering vulnerability | Telecom-layer awareness and training built into remediation flows |
+| No published accuracy benchmarks | Explicit commitment from Day 1 |
 | No predictive analytics | Phase 2-3 roadmap |
 | No exfiltration detection | Phase 2 differentiator |
-| Billing complaints (BBB 1.06/5) | Transparent self-serve pricing |
-| March 2026 data breach | Active trust crisis — acquisition opportunity |
+| Billing and cancellation complaints | Self-serve, transparent pricing, no cancellation friction |
+| March 2026 breach — trust crisis | Actively monitoring your data while Aura was breached |
+| No USPS address change monitoring | Phase 2 roadmap addition (see gap analysis below) |
+
+**Where Aura leads RelayShield (honest gaps to address):**
+
+| Aura Capability | RelayShield Status | Roadmap Response |
+|---|---|---|
+| 3-bureau credit monitoring | ❌ Not offered | Phase 3 — requires credit bureau partnerships |
+| Financial account monitoring (up to 20 accounts) | ❌ Not offered | Phase 2 — Plaid API integration |
+| Identity document monitoring (SSN, passport, DL) | ⚠️ Partial — HIBP flags when these appear in breach data | Phase 1 enhancement — explicit SSN/document field in monitoring |
+| $1M–$5M fraud insurance | ❌ Not offered | Phase 3 — underwriting partnership |
+| Data broker removal (200+ sites) | ❌ Not offered | Phase 2 — partner with Incogni/DeleteMe API rather than build |
+| Password manager | ❌ Not built-in | Phase 2 — integrate or recommend 1Password/Bitwarden |
+| VPN | ❌ Not offered | Phase 3 — white-label partnership |
+| Antivirus (10 devices) | ❌ Not offered | Out of scope — not RelayShield's lane |
+| Home/property title monitoring | ❌ Not offered | Phase 3 — public records API |
+| 24/7 human fraud support | ❌ AI only | Phase 2 — escalation path to human for complex cases |
 
 **Positioning against Aura:**
-> *"Aura protects your credit. RelayShield protects the threats Aura can't see — your phone network, your team's credentials, your business secrets in public code repositories, and your next steps at 3am."*
+> *"Aura was breached by a phishing attack on one of their own employees — the exact attack vector their product is supposed to protect you from. RelayShield's breach detection, Email Security Sweep, and telecom-layer monitoring catch the threats Aura cannot see. And unlike Aura, we walk you through exactly what to do next — right in your WhatsApp, at 3am, without a hold queue."*
+
+**Migration pitch for displaced Aura customers:**
+> *"If you were an Aura customer affected by their March 2026 breach, your name, email, and address are now in the hands of the same attackers Aura is supposed to protect you from. RelayShield monitors for exactly this kind of personal data exposure — and when we detect it, we guide you through every remediation step in WhatsApp. No hold queues. No upselling. Just protection."*
 
 ---
 
@@ -778,6 +841,7 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - ✅ Self-serve landing page with founding member pricing offer (first 25 customers)
 - ✅ Stripe subscription billing
 - ✅ Instrument everything for dataset building
+- **Phase 1 enhancement (Aura gap):** Explicit SSN, passport, and driver's licence breach field detection via HIBP DataClasses — alert users when these specific document types appear in breach data
 
 ### Phase 2 — Differentiate (Months 4-8)
 - Telecom layer: SIM swap detection, carrier signals, port-out alerts
@@ -787,15 +851,23 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - Secret/API key exposure monitoring (GitGuardian API)
 - Dark web marketplace monitoring (Flare API) — data-for-sale detection
 - Domain spoofing/typosquatting detection (dnstwist — free)
+- **Financial account anomaly monitoring via Plaid API** — unusual transactions, new account holders, bank detail changes (closes Aura gap)
+- **Data broker removal via API partnership** (Incogni or DeleteMe API) — do not build, integrate existing provider (closes Aura gap)
+- **Password manager integration** — recommend and deep-link to 1Password or Bitwarden; evaluate white-label in Phase 3 (closes Aura gap)
+- **USPS address change monitoring** — alert when postal change of address filed against monitored identity (Aura gap — they do not monitor this either)
 - Proprietary heuristics engine
 - SMB team dashboard + risk scoring
 - Published accuracy benchmarks
 - Industry breach reports (first B2B data product)
 - SS7 advanced monitoring
-- **Close founding member offer — new customers pay standard pricing ($99/$179)**
+- **Human escalation path** — for complex active fraud cases, provide warm handoff to partner fraud recovery service (closes Aura 24/7 human support gap without building a call centre)
+- **Close founding member offer — new customers pay standard pricing ($99.99/$199)**
 
 ### Phase 3 — Monetize the Moat (Months 9-18)
 - Cloud account anomaly detection (Google Workspace + Microsoft 365)
+- **3-bureau credit monitoring** — requires credit bureau data partnership (Experian, TransUnion, Equifax); closes Aura's most significant capability advantage
+- **$1M fraud insurance product** — underwriting partnership with cyber insurer (Coalition, At-Bay, or Cowbell); closes Aura insurance gap and creates retention anchor
+- **Home and property title monitoring** — public records API integration (closes Aura gap, strong consumer retention feature)
 - Predictive analytics engine
 - Threat intelligence API (separate revenue stream)
 - Agentic Telegram workflows
@@ -1144,6 +1216,10 @@ Post on r/personalfinance and r/privacy:
 | 6 | First paying customer acquisition | 5 |
 
 **Total: 30 hours across 6 weeks to first revenue**
+
+### On First Paying Customer — Admin Tasks
+- ⬜ Set up virtual mailbox (Anytime Mailbox or iPostal1, ~$10/month) for Stripe customer support address
+- ⬜ Obtain EIN (Employer Identification Number) from IRS — free, apply at irs.gov, used as tax identity number for business income reporting
 
 ---
 

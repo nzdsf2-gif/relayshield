@@ -1,20 +1,23 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: March 2026 — Added breach severity scoring, remediation tracking, Email Security Sweep, inbox takeover prevention*
+*Generated: March 2026 | Last Updated: March 2026 — Sharpened positioning: response layer focus, Email Security Sweep as flagship, Phase 1 complete (Weeks 1-3)*
 
 ---
 
 ## 1. Product Overview
 
-**RelayShield** is an AI-native identity protection platform built on a telecom security foundation. It monitors credentials, email domains, phone numbers, and business secrets across breach databases, dark web feeds, carrier-layer signals, and public code repositories — delivering real-time alerts and conversational remediation via WhatsApp and Telegram.
+**RelayShield** owns the response layer of identity protection. Every other service — Aura, LifeLock, HIBP, Foretrace — sends an alert and stops. RelayShield is what happens next: a conversational AI in your WhatsApp that walks you through exactly what to do, catches the backdoors attackers leave behind that survive a password reset, and follows up until you are actually protected. Built on a 25-year telecom security foundation, with a carrier-layer detection capability no competitor has attempted.
+
+**The core insight:** Detection is commoditised. Google, Apple, and Firefox all monitor for breaches for free. The gap nobody has filled is response — guiding a real person through real remediation steps at 11pm when they are panicked, without a hold queue and without jargon.
 
 ### Core Positioning Statement
-> *"Actionable Security, Delivered to Your WhatsApp."*
-> *Your credentials are probably already on the dark web. RelayShield finds them first — then walks you through exactly what to do next, right in your WhatsApp.*
+> *"Every security service tells you when you've been breached. RelayShield is the only one that fixes it."*
 
 ### Supporting Taglines
-> *"Already using a data removal service? Smart start. Now add the protection layer it can't provide."*
+> *"Changing your password after a breach is not enough. Attackers leave backdoors that survive a password reset. RelayShield finds them first — in your WhatsApp, step by step."*
 
-> *"RelayShield doesn't just tell you that your credentials were breached. It monitors for signs that your data is actively being stolen — exposed secrets in public code repositories, domain impersonators targeting your business, and your company data appearing in dark web marketplaces. Built by a 25-year telecom security professional, priced for businesses that can't afford enterprise tools."*
+> *"Already using Aura or Incogni? They told you about the breach. We close it."*
+
+> *"Built by a 25-year telecom security professional. Priced for people who want protection, not a product bundle they will never use."*
 
 ---
 
@@ -41,9 +44,9 @@
 
 | Tier | Target | Price | What They Get |
 |---|---|---|---|
-| **Personal Shield** | Consumers | $14.99/month | Email + phone breach monitoring, WhatsApp alerts, AI remediation |
-| **Business Shield** | SMBs | $99.99/month | Up to 10 employee emails, domain monitoring, team dashboard, WhatsApp alerts |
-| **Business Shield Pro** | Growing SMBs | $199/month | Up to 25 seats, SIM swap monitoring, priority support |
+| **Personal Shield** | Consumers | $14.99/month | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved |
+| **Business Shield** | SMBs | $99.99/month | Up to 10 seats, domain monitoring, team dashboard, per-employee breach response, admin visibility |
+| **Business Shield Pro** | Growing SMBs | $199/month | Up to 25 seats, SIM swap monitoring, telecom-layer detection, priority support |
 
 **Founding Member Pricing (First 25 Customers — Rate Locked Forever):**
 
@@ -120,81 +123,88 @@ One remediated credential breach at an SMB prevents average losses of $4,400 (Po
 
 ## 4. Core Differentiators
 
-### 1. Telecom Layer (Primary Moat)
-- SIM swap detection and alerts
-- Phone number dark web exposure monitoring
-- Carrier account change notifications
-- SS7 vulnerability awareness and remediation
-- Carrier change monitoring via Twilio Lookup API (~$0.01/lookup)
-- No competitor addresses telecom-layer identity threats at consumer/SMB level
+RelayShield does not compete on detection. Detection is commoditised — Google, Apple, and Firefox already do it for free. RelayShield competes on **response**: what happens after detection, guided by AI, delivered in WhatsApp, tracked until complete. This is the gap every competitor has ignored.
 
-### 2. WhatsApp-Native Alerts
-- Two-way conversational delivery (not one-way push)
-- 90%+ open rates vs email
-- Already built in existing tech stack
-- Competitors send one-directional alerts only
+### 1. Email Security Sweep — The Flagship Capability ✅ LIVE
+**The insight no competitor has acted on:** Changing your password after a breach is not enough. Attackers plant backdoors that survive a password reset — forwarding rules that silently copy every email, OAuth tokens that persist regardless of password changes, recovery addresses they control. RelayShield catches these before the password reset, not after.
 
-### 3. Conversational AI Remediation
-- Step-by-step guidance via WhatsApp conversation
-- Available 24/7 including 3am on Sunday
-- Powered by Claude API
-- Competitors stop at the alert — RelayShield walks users through recovery
-
-### 4. SMB Team Dashboard
-- Monitor all employee emails from one account
-- Team-level risk scoring
-- Admin visibility across workforce
-- Justifies recurring monthly subscription
-- No competitor serves this segment with a purpose-built product
-
-### 5. Published Accuracy Benchmarks
-- Explicit commitment to transparency
-- No competitor publishes precision/recall metrics
-- Builds trust with enterprise buyers
-- Directly attacks Aura and Incogni credibility gap
-
-### 6. AI-Native Architecture
-- AI is the engine, not a feature bolt-on
-- Every interaction trains proprietary dataset
-- Enables predictive analytics in Phase 2-3
-- Dataset becomes separately monetizable asset
-
-### 7. Exfiltration Detection (Phase 2 Moat)
-- Secret and API key exposure monitoring via GitGuardian
-- Dark web data sale monitoring via Flare API
-- Domain spoofing and typosquatting detection via dnstwist
-- Cloud account anomaly detection (Phase 3)
-- No SMB-priced competitor combines all four capabilities
-- Detects active data theft — not just historical breaches
-
-### 8. Breach Severity Scoring (Phase 1)
-- Not all breaches are equal — RelayShield scores and prioritises
-- CRITICAL: Financial institutions, email providers, healthcare, government
-- HIGH: Social media, e-commerce with saved payment cards
-- MEDIUM: Shopping sites, forums, subscription services
-- LOW: Gaming sites, old accounts with minimal PII
-- Claude API assesses severity based on organisation type and exposed data types
-- Users told which breach to act on first — no competitor does this at consumer/SMB price point
-
-### 9. Remediation Status Tracking (Phase 1)
-- HIBP tells you what happened and stops — RelayShield follows up
-- Day 1: Breach detected → remediation started
-- Day 3: Follow-up WhatsApp — "Have you completed the password reset?"
-- Day 7: Reminder if remediation still outstanding
-- Remediation status tracked per breach in DynamoDB
-- Reduces churn — users who complete remediation feel protected and stay subscribed
-- No competitor offers persistent remediation follow-through
-
-### 10. Email Security Sweep (Phase 1)
 - Triggered automatically on every email breach detection
-- Five-step inbox backdoor audit delivered via WhatsApp conversation
-- Checks for silent forwarding rules (most dangerous persistent attack)
-- Checks for unknown recovery email addresses and phone numbers
-- Checks for malicious inbox filters deleting security alerts
-- Reviews unauthorised OAuth app permissions
-- Reviews active sessions on unknown devices
-- Sweep must complete BEFORE password reset — changing password without sweeping leaves backdoors open
-- No competitor guides users through inbox hardening as part of breach response
+- Five-step inbox backdoor audit delivered as a WhatsApp conversation
+- Step 1: Silent forwarding rules — the most dangerous and most overlooked
+- Step 2: Unknown recovery email addresses and phone numbers
+- Step 3: Malicious inbox filters deleting security alerts and bank notifications
+- Step 4: Unauthorised OAuth app permissions (survive password resets entirely)
+- Step 5: Active sessions on unknown devices
+- Sweep must complete BEFORE password reset — this sequence is the product insight
+- No competitor offers this. Not Aura. Not LifeLock. Not Foretrace.
+
+### 2. Conversational AI Remediation in WhatsApp ✅ LIVE
+**The channel is not a feature — it is the product.** Security alerts sent by email are ignored. Security guidance delivered as a two-way WhatsApp conversation at 90%+ open rates, available at 3am, with no hold queue, in plain language — that is a fundamentally different experience.
+
+- Step-by-step guidance via WhatsApp conversation — powered by Claude API
+- Two-way: users reply, ask questions, confirm steps — not a one-way broadcast
+- Available 24/7 with no hold time, no upselling, no friction
+- Competitors send one-directional alerts and assume users know what to do next
+
+### 3. Remediation Status Tracking ✅ LIVE
+**Every other service measures alerts sent. RelayShield measures people actually protected.**
+
+- Per-breach remediation status tracked in DynamoDB (pending / started / completed / snoozed / ignored)
+- Day 1: Breach detected → Email Security Sweep triggered
+- Day 3: Follow-up if status still pending — "Have you completed the password reset?"
+- Day 7: Reminder if remediation outstanding
+- Day 14: Final prompt — close the loop or escalate
+- Reduces churn: users who complete remediation feel protected and stay subscribed
+- No competitor tracks whether you actually did anything after their alert
+
+### 4. Breach Severity Scoring ✅ LIVE
+**Not all breaches are equal. Only RelayShield tells you which one to fix first.**
+
+- CRITICAL: Financial institutions, email providers, healthcare, government
+- HIGH: Social media platforms, e-commerce with saved payment cards
+- MEDIUM: Shopping sites, forums, subscription services
+- LOW: Gaming sites, dormant accounts with minimal PII
+- Claude API assesses severity from organisation type and exposed data classes
+- Tells users which breach to remediate first when multiple are detected simultaneously
+- No competitor offers this at consumer or SMB price point
+
+### 5. Telecom Layer — Phase 2 Moat
+**The only identity protection capability built on 25 years of carrier-layer expertise.**
+
+- SIM swap detection and real-time alerts
+- Port-out fraud monitoring
+- Phone number dark web exposure detection
+- SS7 vulnerability awareness built into remediation flows
+- Carrier change monitoring via Twilio Lookup API
+- No competitor — not Aura, not Foretrace, not LifeLock — addresses telecom-layer identity threats
+- Founder's background is the credibility moat; cannot be faked by a software company
+
+### 6. SMB Team Dashboard — Phase 1
+**The only purpose-built breach response product for teams under 25 people, priced under $200/month.**
+
+- Monitor all employee emails from a single admin account
+- Per-employee breach detection and WhatsApp remediation flows
+- Admin visibility across the whole workforce
+- Domain-level scanning — catch new employee breaches as they join
+- No SMB-priced competitor serves this segment with a purpose-built product
+
+### 7. Exfiltration Detection — Phase 2
+**Catches data being stolen now — not data stolen two years ago.**
+
+- Stealer log monitoring via Flare API — real-time credential theft from info-stealer malware
+- Telegram dark web channel monitoring — 57K+ channels, catches credentials before HIBP
+- Secret and API key exposure via GitGuardian — developer credential leaks
+- Dark web marketplace monitoring — data listed for sale detection
+- Domain spoofing and typosquatting via dnstwist — impersonation early warning
+- Closes the data depth gap with Foretrace while maintaining every delivery advantage
+
+### 8. AI-Native Architecture and Dataset Moat
+**Every interaction builds a proprietary dataset no competitor can replicate from scratch.**
+
+- AI is the engine, not a bolt-on feature
+- Every remediation conversation, severity assessment, and sweep outcome is structured and logged
+- Dataset becomes independently monetisable: threat intelligence API, industry reports, benchmarks
+- Enables predictive breach risk scoring in Phase 3
 
 ---
 
@@ -825,55 +835,64 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 
 ## 8. Product Roadmap
 
-### Phase 1 — Validate (Months 1-3)
-- ✅ Core breach + dark web monitoring (HIBP API)
-- ✅ WhatsApp alerts via existing Twilio stack
-- ✅ AI conversational remediation (Claude API)
-- ✅ Breach severity scoring (Critical/High/Medium/Low)
-- ✅ Email Security Sweep — 5-step inbox backdoor audit
-- ✅ Remediation status tracking with follow-up flows
+### Phase 1 — Validate (Months 1-3) ✅ COMPLETE
+
+**Week 1 — Breach Detection Engine ✅**
+- ✅ HIBP API integration — daily breach monitoring per email
+- ✅ DynamoDB schema — users, monitored emails, breach alerts tables
+- ✅ Lambda function — relayshield-breach-check (Python 3.14)
+- ✅ EventBridge scheduler — relayshield-daily-breach-check
+- ✅ AWS Secrets Manager — all credentials stored securely
+- ✅ 20 breaches detected across 3 test emails — engine confirmed working
+
+**Week 2 — WhatsApp Alert Delivery ✅**
+- ✅ Twilio WhatsApp integration — breach alerts delivered via WhatsApp
+- ✅ Breach severity scoring — Critical/High/Medium/Low per alert
+- ✅ SMS/phone number exposure detection via HIBP DataClasses
+- ✅ SSN, passport, driver's licence breach field detection via DataClasses
+
+**Week 3 — AI Remediation Engine ✅**
+- ✅ Claude API conversational remediation — step-by-step WhatsApp guidance
+- ✅ Email Security Sweep — 5-step inbox backdoor audit delivered via WhatsApp
+- ✅ Remediation status tracking — Day 1/3/7/14 follow-up flows
 - ✅ Cross-account password risk detection
-- ✅ Password breach checking (Pwned Passwords — free)
-- ✅ Domain scanner for SMB onboarding
-- ✅ SMS/phone number exposure detection
-- ✅ Carrier change monitoring (Twilio Lookup)
-- ✅ Consumer tier ($12/month founding / $14.99 standard) + SMB tier ($79/month founding / $99.99 standard)
-- ✅ Self-serve landing page with founding member pricing offer (first 25 customers)
-- ✅ Stripe subscription billing
-- ✅ Instrument everything for dataset building
-- **Phase 1 enhancement (Aura gap):** Explicit SSN, passport, and driver's licence breach field detection via HIBP DataClasses — alert users when these specific document types appear in breach data
+- ✅ Password breach checking (Pwned Passwords — free, k-anonymity)
 
-### Phase 2 — Differentiate (Months 4-8)
-- Telecom layer: SIM swap detection, carrier signals, port-out alerts
-- Telegram Bot integration + agentic workflows
-- **Stealer log monitoring via Flare API** — real-time credential theft detection (closes Foretrace data gap)
-- **Telegram dark web channel monitoring via Flare API** — 57K+ channels, catches credentials before public databases
-- Secret/API key exposure monitoring (GitGuardian API)
-- Dark web marketplace monitoring (Flare API) — data-for-sale detection
-- Domain spoofing/typosquatting detection (dnstwist — free)
-- **Financial account anomaly monitoring via Plaid API** — unusual transactions, new account holders, bank detail changes (closes Aura gap)
-- **Data broker removal via API partnership** (Incogni or DeleteMe API) — do not build, integrate existing provider (closes Aura gap)
-- **Password manager integration** — recommend and deep-link to 1Password or Bitwarden; evaluate white-label in Phase 3 (closes Aura gap)
-- **USPS address change monitoring** — alert when postal change of address filed against monitored identity (Aura gap — they do not monitor this either)
-- Proprietary heuristics engine
-- SMB team dashboard + risk scoring
-- Published accuracy benchmarks
-- Industry breach reports (first B2B data product)
-- SS7 advanced monitoring
-- **Human escalation path** — for complex active fraud cases, provide warm handoff to partner fraud recovery service (closes Aura 24/7 human support gap without building a call centre)
-- **Close founding member offer — new customers pay standard pricing ($99.99/$199)**
+**Remaining Phase 1 tasks:**
+- ⬜ Stripe subscription billing (Week 4)
+- ⬜ Carrd landing page (Week 4)
+- ⬜ Domain scanner for SMB onboarding (Week 5)
+- ⬜ SMB tier end-to-end testing (Week 5)
+- ⬜ Fix empty breach_date field in DynamoDB
+- ⬜ First paying customer (Week 6)
 
-### Phase 3 — Monetize the Moat (Months 9-18)
-- Cloud account anomaly detection (Google Workspace + Microsoft 365)
-- **3-bureau credit monitoring** — requires credit bureau data partnership (Experian, TransUnion, Equifax); closes Aura's most significant capability advantage
-- **$1M fraud insurance product** — underwriting partnership with cyber insurer (Coalition, At-Bay, or Cowbell); closes Aura insurance gap and creates retention anchor
-- **Home and property title monitoring** — public records API integration (closes Aura gap, strong consumer retention feature)
-- Predictive analytics engine
-- Threat intelligence API (separate revenue stream)
-- Agentic Telegram workflows
-- White-label licensing (carriers, insurers, SMB platforms)
-- Dataset licensing to research partners
-- Anonymized risk benchmarks for research partnerships
+### Phase 2 — Deepen the Moat (Months 4-8)
+*Focus: telecom layer, real-time threat intelligence, SMB dashboard. Do not add features that compete with Aura on their ground.*
+
+- Telecom layer: SIM swap detection, port-out fraud alerts, carrier signals
+- SS7 vulnerability advisory built into remediation flows
+- Telegram Bot integration + agentic remediation workflows
+- Stealer log monitoring via Flare API — real-time credential theft, not just historical breaches
+- Telegram dark web channel monitoring via Flare API — 57K+ channels
+- Dark web marketplace monitoring via Flare API — data listed for sale detection
+- Secret and API key exposure monitoring via GitGuardian API
+- Domain spoofing and typosquatting detection via dnstwist (free)
+- USPS address change monitoring — alert when postal change of address filed
+- SMB team dashboard + per-employee risk scoring
+- Published accuracy benchmarks — first in category
+- Industry breach intelligence reports — first B2B data product
+- Close founding member 3-month rate → all new customers on standard pricing
+
+### Phase 3 — Monetise the Moat (Months 9-18)
+*Focus: data products, carrier partnerships, platform licensing. Still not credit monitoring or fraud insurance — those are Aura's battlefield, not ours.*
+
+- Cloud account anomaly detection (Google Workspace + Microsoft 365 audit logs)
+- Predictive breach risk scoring — proprietary model from Phase 1-2 dataset
+- Threat intelligence API — sell anonymised breach pattern data to SIEMs and insurers
+- Agentic Telegram workflows — autonomous breach patrol and risk briefings
+- White-label licensing — carriers, cyber insurers, MSP platforms
+- Dataset licensing — anonymised risk benchmarks to research partners
+- Carrier partnership programme — RelayShield embedded in telco security bundles
 
 ---
 
@@ -1091,44 +1110,46 @@ The $2,500/month target is a 6-week milestone. The platform architecture being b
 ## 13. Landing Page Structure
 
 **Headline:**
-> *"Actionable Security, Delivered to Your WhatsApp."*
+> *"Every security service tells you when you've been breached. RelayShield is the only one that fixes it."*
 
 **Sub-headline:**
-> *Your credentials are probably already on the dark web. RelayShield finds them first — then walks you through exactly what to do next, right in your WhatsApp. Real-time breach monitoring with telecom-layer detection. Step-by-step remediation delivered to the device you already use.*
+> *Changing your password after a breach is not enough. Attackers plant backdoors — forwarding rules, OAuth tokens, recovery addresses — that survive a password reset. RelayShield finds them first, guides you through every step in WhatsApp, and follows up until your account is actually secure. No app. No hold queue. No jargon.*
+
+**Hero feature block — Email Security Sweep:**
+> *🧹 Before you reset your password, did you check whether attackers already have a backdoor?*
+> *RelayShield's Email Security Sweep audits the 5 things that survive a password reset — silent forwarding rules, unknown recovery options, malicious inbox filters, unauthorised app permissions, and active sessions on unknown devices. No other service does this.*
 
 **Feature bullets:**
-- 🔍 Real-time breach & dark web monitoring
-- 📱 Instant WhatsApp alerts with severity scoring
-- 🧹 Email Security Sweep — closes backdoors before password reset
-- 🔄 Remediation tracking — follows up until you are actually protected
-- 🔐 Secret & API key exposure detection (Phase 2)
-- 🕵️ Domain impersonation monitoring (Phase 2)
-- 📡 Telecom-layer SIM swap protection (Phase 2)
+- 🧹 Email Security Sweep — closes backdoors before you change your password
+- 🔴 Breach severity scoring — told exactly which breach to fix first
+- 🔄 Remediation tracking — followed up on Day 3, 7, and 14 until you are actually protected
+- 📱 Two-way WhatsApp AI — reply to get step-by-step guidance, 24/7, no hold queue
+- 📡 Telecom-layer SIM swap detection (Phase 2)
+- 🕵️ Real-time stealer log and dark web monitoring (Phase 2)
+- 🔐 Secret and API key exposure detection (Phase 2)
 
 **Trust signal:**
-> *"Built by a 25-year telecom security professional. Already using Incogni or Aura? Now add the protection layer they can't provide."*
+> *"Built by a 25-year telecom security professional. Aura and LifeLock tell you about the breach. RelayShield closes it."*
 
 **Founding member urgency block:**
 > *"🔒 Founding Member Pricing — First 25 customers only. Lock in your rate for 3 months — $12/month (Personal) or $79/month (Business). Standard price is $14.99/$99.99. Spots remaining: [X]"*
 
 **Dual CTA:**
+- "Secure My Account →"
 - "Protect My Business →"
-- "Join Early Access →"
 
 ---
 
 **How It Works — 3 Steps**
 
-Keep it visual and frictionless. Three steps, no jargon:
-
 > **Step 1 — Sign up in 2 minutes**
 > Enter the email addresses and phone numbers you want monitored. No software to install. No app to download.
 
-> **Step 2 — We watch 24/7**
-> RelayShield monitors breach databases, dark web sources, and your carrier layer around the clock. You get on with your life.
+> **Step 2 — We monitor 24/7**
+> RelayShield watches breach databases and dark web sources around the clock. The moment something is detected, we act — not just alert.
 
-> **Step 3 — Get alerted and guided in WhatsApp**
-> The moment something is detected, you receive a WhatsApp message with a severity rating and step-by-step instructions. Reply to get personalised AI guidance through every remediation step.
+> **Step 3 — Your WhatsApp guides you through the fix**
+> You receive a message with a severity rating and a prompt to start your Email Security Sweep. Reply to begin. Every step is explained in plain language. We follow up until it is done.
 
 ---
 
@@ -1206,16 +1227,17 @@ Post on r/personalfinance and r/privacy:
 
 ## 15. 6-Week MVP Build Plan
 
-| Week | Milestone | Hours |
-|---|---|---|
-| 1 | Breach detection engine (HIBP + Lambda + DynamoDB) | 5 |
-| 2 | WhatsApp alert delivery (Twilio integration) | 5 |
-| 3 | Claude AI conversational remediation | 5 |
-| 4 | Stripe payments + Carrd landing page | 5 |
-| 5 | SMB tier + end-to-end testing | 5 |
-| 6 | First paying customer acquisition | 5 |
+| Week | Milestone | Hours | Status |
+|---|---|---|---|
+| 1 | Breach detection engine (HIBP + Lambda + DynamoDB) | 5 | ✅ Complete |
+| 2 | WhatsApp alert delivery (Twilio integration) | 5 | ✅ Complete |
+| 3 | Claude AI conversational remediation + Email Security Sweep | 5 | ✅ Complete |
+| 4 | Stripe payments + Carrd landing page | 5 | ⬜ Next |
+| 5 | SMB tier + end-to-end testing | 5 | ⬜ Pending |
+| 6 | First paying customer acquisition | 5 | ⬜ Pending |
 
 **Total: 30 hours across 6 weeks to first revenue**
+**Progress: 3 of 6 weeks complete — core product is live and working**
 
 ### On First Paying Customer — Admin Tasks
 - ⬜ Set up virtual mailbox (Anytime Mailbox or iPostal1, ~$10/month) for Stripe customer support address
@@ -1247,21 +1269,31 @@ Post on r/personalfinance and r/privacy:
 - ✅ Lambda timeout: 3 minutes
 - ✅ EventBridge scheduler: relayshield-daily-breach-check
 - ✅ Test records added — 20 breaches detected across 2 emails
-- ✅ Week 1 complete
-- ✅ Week 2 complete
-- ✅ Week 3 complete
+- ✅ Weeks 1–3 complete — core product live and working
 
-### Week 2 Progress
-- ✅ relayshield/twilio_account_sid stored in Secrets Manager (plaintext)
-- ✅ relayshield/twilio_auth_token stored in Secrets Manager (plaintext)
-- ✅ relayshield/twilio_whatsapp_number stored in Secrets Manager — sandbox: whatsapp:+14155238886
-- ✅ RelayShieldSecretsPolicy added to Lambda role (relayshield-breach-check-role-1sapnwdl) — covers all 4 secrets
-- ✅ Lambda code updated to send WhatsApp alerts via Twilio REST API (urllib.request, no SDK)
-- ✅ IAM changes made via console only (smartasst-deployer constraint respected)
-- ✅ End-to-end test: breach detected → WhatsApp message received
-- ✅ breach_date fix: falls back to AddedDate when BreachDate null (some breaches have no date by design)
-- ✅ Twilio sandbox opt-in completed (join flies-fully → +14155238886)
-- ✅ relayshield_users table: user-test-001 record created with whatsapp_number
+### Week 1 — Breach Detection Engine ✅
+- ✅ relayshield_users, relayshield_monitored_emails, relayshield_breach_alerts (DynamoDB)
+- ✅ relayshield-breach-check Lambda (Python 3.14, 3-min timeout)
+- ✅ relayshield/hibp_api_key (Secrets Manager)
+- ✅ relayshield-daily-breach-check (EventBridge scheduler, 1-day rate)
+- ✅ 20 breaches detected across 3 test emails
+
+### Week 2 — WhatsApp Alert Delivery ✅
+- ✅ relayshield/twilio_account_sid, twilio_auth_token, twilio_whatsapp_number (Secrets Manager)
+- ✅ RelayShieldSecretsPolicy on Lambda role (relayshield-breach-check-role-1sapnwdl)
+- ✅ Lambda updated — Twilio REST API via urllib.request (no SDK, no Layer)
+- ✅ Breach severity scoring live — Critical/High/Medium/Low in every WhatsApp alert
+- ✅ End-to-end confirmed: breach detected → WhatsApp message received
+- ✅ breach_date: falls back to AddedDate when BreachDate null
+- ✅ relayshield.net purchased (1-year, March 2026)
+
+### Week 3 — AI Remediation + Email Security Sweep ✅
+- ✅ Claude API conversational remediation live in WhatsApp
+- ✅ Email Security Sweep — 5-step inbox backdoor audit delivered via WhatsApp
+- ✅ Remediation status tracking — Day 1/3/7/14 follow-up flows in DynamoDB
+- ✅ Cross-account password risk detection
+- ✅ SSN, passport, driver's licence breach field detection via HIBP DataClasses
+- ✅ relayshield/anthropic_api_key (Secrets Manager)
 
 ---
 
@@ -1273,7 +1305,7 @@ Post on r/personalfinance and r/privacy:
 | relayshield/twilio_account_sid | ✅ Created |
 | relayshield/twilio_auth_token | ✅ Created |
 | relayshield/twilio_whatsapp_number | ✅ Created |
-| relayshield/anthropic_api_key | ⬜ Week 3 |
+| relayshield/anthropic_api_key | ✅ Created |
 | relayshield/stripe_secret_key | ⬜ Week 4 |
 | relayshield/gitguardian_api_key | ⬜ Phase 2 |
 | relayshield/flare_api_key | ⬜ Phase 2 |

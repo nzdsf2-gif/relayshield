@@ -36,7 +36,81 @@
 
 ### Primary Segments
 - **SMBs** (Small/Medium Businesses) — recurring B2B contracts, self-serve onboarding
-- **Privacy-conscious consumers** — volume play, $12/month founding / $14.99 standard
+- **Privacy-conscious consumers** — volume play, $12/month for first 3 months / $14.99 standard thereafter
+
+---
+
+### Target Persona — The Mobile-Dependent SMB Owner
+
+**Profile:** Small retail, food service, or service business owner. Runs the business from her phone. Uses Square (or similar mPOS: Toast, Clover, PayPal Zettle) for payment processing. Business bank account is directly connected to the POS system. Has employees or contractors whose credentials also represent risk exposure. Not technical — security is not her domain. Her phone is her business.
+
+**Why this persona is the highest-priority SMB target:**
+- Her phone number IS her authentication factor for almost every critical business system
+- A single SIM swap hands an attacker her Square account, business bank account, email, and customer data simultaneously
+- She has no IT department — no one is watching for threats
+- The financial impact of a successful attack is immediate and potentially business-ending
+- She is currently unprotected by any purpose-built tool at her price point
+
+**The attack chain that keeps this persona up at night:**
+
+```
+Step 1 — Her email or phone number appears in a data breach
+          (she never finds out — no one is monitoring)
+
+Step 2 — Attacker buys breach data, initiates SIM swap
+          (calls her carrier, impersonates her using breach PII)
+
+Step 3 — Her phone goes dark — she assumes a network issue
+
+Step 4 — Attacker triggers Square "forgot password"
+          SMS verification code arrives on attacker's device
+
+Step 5 — Attacker resets Square password, changes payout
+          bank account to their own
+
+Step 6 — Attacker plants email forwarding rule
+          All Square alerts now silently go to attacker
+
+Step 7 — Her next day's card sales flow to the attacker's account
+          She does not notice until payout day — 1-2 business days later
+
+Step 8 — Attacker exports her full customer transaction history
+          Sells or uses it for targeted phishing against her customers
+
+Total time from SIM swap to payout redirect: under 30 minutes
+Average time until she notices: 24-48 hours
+```
+
+**Why RelayShield is the only solution for this persona:**
+
+| Her Risk | What exists today | RelayShield |
+|---|---|---|
+| SIM swap → Square takeover | Nothing at her price point | Phase 2 telecom layer — SIM swap alert before attacker reaches Square |
+| Email breach → forwarding rule | Google/Apple notify about breach, do nothing else | Email Security Sweep catches forwarding rule before password reset |
+| Credential stuffing → Square login | Square has 2FA — bypassed by SIM swap | Breach detection + cross-account password risk flags reuse before attack |
+| Phishing using her breach data | No protection | Breach alert warns her data is circulating before attacker uses it |
+| API key exposure (integrations) | Nothing | Phase 2 GitGuardian monitoring |
+| Payout account change alert lost in email | Square sends email — attacker deletes it | WhatsApp alert at 90%+ open rate, cannot be silently deleted |
+
+**The sales pitch in one sentence:**
+> *"Your Square account is only as secure as your phone number. If someone swaps your SIM, they own your business bank account in under 30 minutes. RelayShield watches your carrier line, monitors your credentials, and alerts you in WhatsApp before the attacker gets there."*
+
+**Why this persona suits the founder's background:**
+- 25 years telecom experience = credibility on SIM swap and carrier-layer threats that no software-only competitor can match
+- WhatsApp-native delivery = meets this persona where she already operates
+- SMB price point ($79-$99.99/month) = well within a retail business security budget
+- No IT knowledge required = self-serve onboarding via WhatsApp conversation
+
+**Target communities to reach this persona:**
+- r/smallbusiness — lead with the Square/SIM swap attack chain
+- r/Entrepreneur — frame as business continuity, not cybersecurity
+- Square Seller Community forums — post educational content about SIM swap risk
+- Local business Facebook groups — high concentration of mobile-dependent owners
+- Toast, Clover, PayPal Zettle user communities — same persona, same vulnerability
+- LinkedIn: target "small business owner", "retail owner", "restaurant owner" with telecom threat education content
+
+**Validation approach:**
+Find 3-5 Square/mPOS users in your network. Walk them through the 8-step attack chain above. The moment they hear "your phone goes dark and your next day's sales go to someone else" — that is the conversion moment. If they ask "how do I protect against this?", they are a paying customer.
 
 ### Pricing Strategy — Standard vs Founding Member
 
@@ -48,15 +122,22 @@
 | **Business Shield** | SMBs | $99.99/month | Up to 10 seats, domain monitoring, team dashboard, per-employee breach response, admin visibility |
 | **Business Shield Pro** | Growing SMBs | $199/month | Up to 25 seats, SIM swap monitoring, telecom-layer detection, priority support |
 
-**Founding Member Pricing (First 25 Customers — Rate Locked Forever):**
+**Founding Member Pricing (First 25 Customers — Discounted for First 3 Months):**
 
-| Tier | Standard Price | Founding Rate | Saving |
-|---|---|---|---|
-| **Personal Shield** | $14.99/month | **$12/month** | $2.99/month |
-| **Business Shield** | $99.99/month | **$79/month** | $20.99/month |
-| **Business Shield Pro** | $199/month | **$149/month** | $50/month |
+| Tier | Standard Price | Founding Rate | Saving | Duration |
+|---|---|---|---|---|
+| **Personal Shield** | $14.99/month | **$12/month** | $2.99/month | First 3 months |
+| **Business Shield** | $99/month | **$79/month** | $20/month | First 3 months |
+| **Business Shield Pro** | $199/month | **$169/month** | $30/month | First 3 months |
 
-> 🔒 **Founding Member Offer:** Lock in your founding rate for 3 months before spots close. Standard price is $14.99/month (Personal) or $99.99/month (Business). Sign up during the founding period and your rate is guaranteed for your first 3 months — no matter what features we add.
+> 🔒 **Founding Member Offer:** Limited spots. Sign up during the founding period and pay the founding rate for your first 3 months — then move to standard pricing. Stripe coupons: FOUNDING-PERSONAL ($2.99 off, 20 spots), FOUNDING-BUSINESS ($20 off, 10 spots), FOUNDING-PRO ($30 off, 10 spots). All coupons: fixed amount, repeating 3 months.
+
+### Stripe Payment Links
+| Product | Payment Link |
+|---|---|
+| Personal Shield | https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00 |
+| Business Shield | https://buy.stripe.com/7sYbJ2ceG7OZ4uw4RN0Ny01 |
+| Business Shield Pro | https://buy.stripe.com/14A5kE6Um6KVf9agAv0Ny02 |
 
 ### Why This Approach Is Strategically Superior
 
@@ -855,14 +936,14 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - ✅ Claude API conversational remediation — step-by-step WhatsApp guidance
 - ✅ Email Security Sweep — 5-step inbox backdoor audit delivered via WhatsApp
 - ✅ Remediation status tracking — Day 1/3/7/14 follow-up flows
-- ✅ Cross-account password risk detection
-- ✅ Password breach checking (Pwned Passwords — free, k-anonymity)
 
 **Remaining Phase 1 tasks:**
 - ⬜ Stripe subscription billing (Week 4)
 - ⬜ Carrd landing page (Week 4)
 - ⬜ Domain scanner for SMB onboarding (Week 5)
 - ⬜ SMB tier end-to-end testing (Week 5)
+- ⬜ Password breach checking — Pwned Passwords API (Week 5)
+- ⬜ Cross-account password risk detection (Week 5)
 - ⬜ Fix empty breach_date field in DynamoDB
 - ⬜ First paying customer (Week 6)
 
@@ -1204,10 +1285,29 @@ Three tiers, transparent pricing, no hidden fees:
 | r/privacy | Telecom-layer threats + WhatsApp remediation |
 | r/personalfinance | Cost of identity theft vs $12/month founding rate |
 | r/cybersecurity | Architecture credibility + exfiltration detection |
-| r/smallbusiness | Business credential + secret exposure awareness |
+| r/smallbusiness | Square/SIM swap attack chain — business bank account at risk |
+| r/Entrepreneur | Business continuity framing — phone goes dark, sales go elsewhere |
 | r/scams | Value-first: what to do if breached |
 | r/devops | API key and secret exposure monitoring angle |
-| LinkedIn | 25-year telecom expertise content |
+| Square Seller Community | SIM swap → Square takeover education post |
+| Toast / Clover / Zettle communities | Same attack chain, same persona |
+| Local business Facebook groups | Peer-to-peer trust — "this happened to someone I know" angle |
+| LinkedIn | 25-year telecom expertise + mPOS security threat content |
+
+### Mobile-Dependent SMB Outreach Play (Highest Priority)
+
+This is the highest-conversion outreach opportunity because the threat is concrete, immediate, and completely unaddressed by any existing tool at this price point.
+
+**Post template for r/smallbusiness and Square Seller Community:**
+> *"If you use Square (or any phone-based payment system), here's an attack that can empty your business bank account in under 30 minutes — and most small business owners have never heard of it.*
+>
+> *It's called a SIM swap. An attacker calls your mobile carrier, pretends to be you using information from a data breach, and transfers your phone number to their device. Your phone goes dark. You assume it's a network issue.*
+>
+> *Then they go to Square, click 'forgot password', and the verification SMS arrives on their phone. They reset your password, change your payout bank account, and your next day's card sales go to them. By the time you notice — usually on payout day — it's done.*
+>
+> *The fix isn't complicated: monitor your credentials, set a SIM lock with your carrier, and use an authenticator app instead of SMS for 2FA. Happy to share the full checklist if anyone wants it."*
+
+Value-first, no product pitch. The DMs asking for the checklist are your first customers.
 
 ### Aura Breach Timing Play (Active Now — March 2026)
 Post on r/personalfinance and r/privacy:
@@ -1239,9 +1339,34 @@ Post on r/personalfinance and r/privacy:
 **Total: 30 hours across 6 weeks to first revenue**
 **Progress: 3 of 6 weeks complete — core product is live and working**
 
+### Week 5 — SMB Tier + Password Protection + Carrd Expansion
+
+**Lambda — Password Protection (serves users relying on passwords, mobile, SMS)**
+- ⬜ **Pwned Passwords API** — add `call_pwned_passwords(hash_prefix)` function calling `https://api.pwnedpasswords.com/range/{first5chars}` with k-anonymity (free, no API key). Check password hashes when user opts in. Alert via WhatsApp if password is found in breach corpus.
+- ⬜ **Cross-account password risk detection** — when a password is found pwned, Claude alert warns user it may be reused across other accounts and prompts them to audit linked services via SWEEP reply
+
+**Lambda — SMB Tier**
+- ⬜ Domain scanner for SMB onboarding — check all email addresses on a domain
+- ⬜ SMB tier end-to-end testing — multi-seat breach detection and alert routing
+
+**Carrd Landing Page Expansion (SMB Tier)**
+When Business Shield launches, expand the existing Carrd single page:
+- ⬜ Add **Pricing section** — two-column table: Personal Shield vs Business Shield side by side
+- ⬜ Add **"For Teams"** section — highlight team dashboard, per-employee breach response, admin visibility
+- ⬜ Add Business Shield Pro payment link button to pricing section
+
+### Phase 2 — Dedicated SMB Page
+When SMB revenue justifies a separate buyer journey:
+- ⬜ Create `/business` sub-page in Carrd (Pro Standard supports multiple pages on one site)
+- ⬜ Separate SMB pitch: team dashboard demo, per-seat pricing, IT admin features
+- ⬜ Link from main relayshield.net homepage to `/business` page
+
 ### On First Paying Customer — Admin Tasks
-- ⬜ Set up virtual mailbox (Anytime Mailbox or iPostal1, ~$10/month) for Stripe customer support address
-- ⬜ Obtain EIN (Employer Identification Number) from IRS — free, apply at irs.gov, used as tax identity number for business income reporting
+- ⬜ Set up virtual mailbox — recommended provider: Anytime Mailbox or iPostal1 (~$10/month). Use for Stripe customer support address and business mailing address. Complete before or on first customer acquisition.
+- ⬜ Obtain EIN (Employer Identification Number) from IRS — free, apply at irs.gov, used as tax identity number for business income reporting. Complete before or on first customer acquisition.
+- ✅ Google Voice set up — number +13392987368, inbox at voice.google.com, linked to relayshieldadmin@gmail.com. Added as recovery phone in Google Security. Updated as Stripe customer support number. Personal mobile removed from relayshieldadmin@gmail.com account.
+- ⬜ Set up custom billing domain — replace billing.stripe.com with billing.relayshield.net. Requires DNS configuration in Namecheap. Complete within first month of paid subscribers.
+- ⬜ Create brand assets — minimum required: logo/wordmark, primary brand color (suggested: navy #0F2D52 + electric blue #0066FF), favicon 32x32px. Use Canva (free). Apply to Stripe branding settings and Carrd landing page. Complete before or on first customer acquisition.
 
 ---
 

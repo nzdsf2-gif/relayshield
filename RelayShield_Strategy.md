@@ -1325,6 +1325,67 @@ Post on r/personalfinance and r/privacy:
 
 ---
 
+## 14b. Security Hardening & Continuous Audit Program
+
+*RelayShield sells protection. Our own security posture must be beyond reproach. This section tracks the hardening work required to operate a credible security company.*
+
+### Tier 1 — Immediate (Before First Paying Customer)
+
+**Secrets & Credential Hygiene**
+- ⬜ Audit all AWS Secrets Manager entries — confirm no plaintext secrets exist outside Secrets Manager (no .env files, no hardcoded values in Lambda code, no secrets in CloudWatch logs)
+- ⬜ Enable AWS CloudTrail — log all API calls across the RelayShield AWS account for audit trail
+- ⬜ Enable AWS Config — track configuration changes to Lambda, DynamoDB, IAM policies
+- ⬜ Review IAM policy: relayshield-breach-check-policy — confirm least-privilege (no wildcard * permissions)
+- ⬜ Enable DynamoDB encryption at rest — confirm KMS key is applied to all three tables
+- ⬜ Rotate all API keys (HIBP, Anthropic, Twilio) — establish 90-day rotation schedule
+
+**Lambda Hardening**
+- ⬜ Confirm Lambda function URL is not publicly exposed — function should only trigger via EventBridge
+- ⬜ Add input validation to lambda_handler — reject malformed event payloads
+- ⬜ Confirm Lambda execution role has no unused permissions
+- ⬜ Set Lambda reserved concurrency to prevent runaway invocations
+
+**Dependency & Code Scanning**
+- ⬜ Run Bandit (Python SAST tool — free) against relayshield_breach_monitor.py — fix any flagged issues
+- ⬜ Set up GitGuardian free tier — connect to any code repository, scan for accidentally committed secrets
+- ⬜ Confirm no secrets appear in CloudWatch log output — review existing log groups
+
+### Tier 2 — Within First Month of Paid Subscribers
+
+**Penetration Testing**
+- ⬜ Conduct self-directed pen test against the Lambda/DynamoDB surface — test for: unauthorized DynamoDB access, Lambda event injection, Secrets Manager enumeration, IAM privilege escalation
+- ⬜ Document findings and remediation in a security log
+- ⬜ Schedule external pen test (budget: ~$500-$1,500 via Cobalt.io or HackerOne) before reaching 100 paying customers
+
+**Automated Continuous Scanning**
+- ⬜ Set up **GitHub Actions** (or AWS CodePipeline) with automated security checks on every code deploy:
+  - Bandit SAST scan
+  - Safety (Python dependency vulnerability check)
+  - GitGuardian secret scan
+  - Deploy blocked if any check fails
+- ⬜ Set up **AWS GuardDuty** — managed threat detection for the AWS account (~$1-3/month at this scale). Alerts on suspicious API calls, unauthorized access attempts, compromised credentials
+- ⬜ Set up **AWS Security Hub** — aggregates GuardDuty + Config findings into a single security dashboard
+
+**Data Protection**
+- ⬜ Confirm PII minimization — relayshield_users and relayshield_breach_alerts tables store only what is necessary
+- ⬜ Implement DynamoDB TTL on relayshield_breach_alerts — auto-delete records older than 2 years
+- ⬜ Confirm Stripe handles all payment data — verify no card data touches RelayShield infrastructure
+
+### Tier 3 — Phase 2 (Scale)
+
+**Advanced Monitoring**
+- ⬜ Upgrade GitGuardian to paid tier ($29/month) — real-time secret detection across all integrations
+- ⬜ Integrate Flare API — dark web monitoring for RelayShield's own credentials and infrastructure
+- ⬜ Set up AWS WAF if/when a public API or web endpoint is exposed
+- ⬜ Establish formal vulnerability disclosure policy and publish on relayshield.net/security
+
+**Compliance**
+- ⬜ Document data retention and deletion policy for GDPR/CCPA compliance
+- ⬜ Create incident response runbook — what happens if RelayShield itself is breached
+- ⬜ Consider SOC 2 Type I audit if pursuing enterprise/insurance channel partnerships
+
+---
+
 ## 15. 6-Week MVP Build Plan
 
 | Week | Milestone | Hours | Status |

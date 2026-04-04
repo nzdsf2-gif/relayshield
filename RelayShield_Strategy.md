@@ -148,13 +148,28 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 > **Business tiers do not offer founding member discounts.** Business buyers respond to ROI, not discounts. The SIM swap protection value proposition stands at full price.
 
 ### Stripe Payment Links
-| Product | Payment Link | Status |
+
+**Monthly Plans:**
+| Product | Price | Payment Link | Status |
+|---|---|---|---|
+| Personal Shield | $14.99/month | https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00 | ✅ Active |
+| Business Basic | $89.99/month | https://buy.stripe.com/aFa8wQ3Iab1b8KM9830Ny03 | ✅ Active |
+| Business Shield | $139.99/month | https://buy.stripe.com/8x24gA6Um2uF2mo9830Ny04 | ✅ Active |
+| Business Shield Pro | $299.99/month | https://buy.stripe.com/3cIeVeceG8T3f9a4RN0Ny05 | ✅ Active |
+
+**Annual Plans (10% off):**
+| Product | Price | Payment Link | Status |
+|---|---|---|---|
+| Personal Shield — Annual | $161.88/year | https://buy.stripe.com/eVqbJ26Um1qBbWY3NJ0Ny06 | ✅ Active |
+| Business Basic — Annual | $971.88/year | https://buy.stripe.com/eVqfZifqSd9j1ikfwr0Ny07 | ✅ Active |
+| Business Shield — Annual | $1,511.88/year | https://buy.stripe.com/cNiaEY0vYednaSUfwr0Ny08 | ✅ Active |
+| Business Shield Pro — Annual | $3,239.88/year | https://buy.stripe.com/6oU5kE0vY5GR4uwbgb0Ny09 | ✅ Active |
+
+**Archived (old pricing):**
+| Product | Old Price | Status |
 |---|---|---|
-| Personal Shield (monthly) | https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00 | ✅ Active |
-| Business Shield (monthly) | https://buy.stripe.com/7sYbJ2ceG7OZ4uw4RN0Ny01 | ⚠️ Stale — price was $99.99, now $139.99. Recreate in Stripe. |
-| Business Shield Pro (monthly) | https://buy.stripe.com/14A5kE6Um6KVf9agAv0Ny02 | ⚠️ Stale — price was $199, now $299.99. Recreate in Stripe. |
-| Business Basic (monthly) | — | ⬜ Create in Stripe |
-| All tiers (annual) | — | ⬜ Create in Stripe |
+| Business Shield | $99.99/month | ⛔ Archived |
+| Business Shield Pro | $199/month | ⛔ Archived |
 
 ### Why This Approach Is Strategically Superior
 

@@ -98,7 +98,7 @@ Average time until she notices: 24-48 hours
 **Why this persona suits the founder's background:**
 - 25 years telecom experience = credibility on SIM swap and carrier-layer threats that no software-only competitor can match
 - WhatsApp-native delivery = meets this persona where she already operates
-- SMB price point ($79-$99.99/month) = well within a retail business security budget
+- SMB price point ($89.99-$299.99/month) = well within a retail business security budget, especially when framed against the cost of a single successful SIM swap attack
 - No IT knowledge required = self-serve onboarding via WhatsApp conversation
 
 **Target communities to reach this persona:**
@@ -116,28 +116,45 @@ Find 3-5 Square/mPOS users in your network. Walk them through the 8-step attack 
 
 **Standard Pricing (Permanent — All New Customers After Founding Period):**
 
-| Tier | Target | Price | What They Get |
-|---|---|---|---|
-| **Personal Shield** | Consumers | $14.99/month | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved |
-| **Business Shield** | SMBs | $99.99/month | Up to 10 seats, domain monitoring, team dashboard, per-employee breach response, admin visibility |
-| **Business Shield Pro** | Growing SMBs | $199/month | Up to 25 seats, SIM swap monitoring, telecom-layer detection, priority support |
+| Tier | Target | Seats | Monthly | Per Seat | Key Differentiator |
+|---|---|---|---|---|---|
+| **Personal Shield** | Consumers | 1 | $14.99 | $14.99 | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved |
+| **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM swap monitoring + team dashboard + domain monitoring |
+| **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-employee breach response + admin visibility + priority alerts |
+| **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + telecom-layer detection + priority support + compliance reporting |
 
-**Founding Member Pricing (First 25 Customers — Discounted for First 3 Months):**
+> 💡 **SIM swap monitoring is included in ALL business tiers.** This is RelayShield's most compelling differentiator — no competitor offers carrier-layer SIM swap protection for SMBs at any price point. Validated by first prospective customer (salon owner, Square POS user): *"You identified a problem I didn't know I had. This is brilliant and I want to sign up."*
+
+**Annual Subscription Option (All Tiers):**
+Customers who pay upfront for a full year receive a **10% discount** on the monthly rate. This rewards commitment, improves cash flow, and reduces churn.
+
+| Tier | Monthly | Annual (10% off) | Annual Total | Savings |
+|---|---|---|---|---|
+| **Personal Shield** | $14.99 | $13.49/month | $161.88/year | $18/year |
+| **Business Basic** | $89.99 | $80.99/month | $971.88/year | $108/year |
+| **Business Shield** | $139.99 | $125.99/month | $1,511.88/year | $168/year |
+| **Business Shield Pro** | $299.99 | $269.99/month | $3,239.88/year | $360/year |
+
+> ⬜ **TODO:** Create annual pricing products and payment links in Stripe for all four tiers. Annual plans should be separate Stripe products with 10% discount baked in (not a coupon).
+
+**Founding Member Pricing (Consumers Only — First 20 Customers — Discounted for First 3 Months):**
 
 | Tier | Standard Price | Founding Rate | Saving | Duration |
 |---|---|---|---|---|
 | **Personal Shield** | $14.99/month | **$12/month** | $2.99/month | First 3 months |
-| **Business Shield** | $99/month | **$79/month** | $20/month | First 3 months |
-| **Business Shield Pro** | $199/month | **$169/month** | $30/month | First 3 months |
 
-> 🔒 **Founding Member Offer:** Limited spots. Sign up during the founding period and pay the founding rate for your first 3 months — then move to standard pricing. Stripe coupons: FOUNDING-PERSONAL ($2.99 off, 20 spots), FOUNDING-BUSINESS ($20 off, 10 spots), FOUNDING-PRO ($30 off, 10 spots). All coupons: fixed amount, repeating 3 months.
+> 🔒 **Founding Member Offer (Personal Shield only):** Limited to first 20 consumers. Sign up during the founding period and pay $12/month for your first 3 months — then move to standard pricing at $14.99/month. Stripe coupon: FOUNDING-PERSONAL ($2.99 off, 20 spots, fixed amount, repeating 3 months).
+>
+> **Business tiers do not offer founding member discounts.** Business buyers respond to ROI, not discounts. The SIM swap protection value proposition stands at full price.
 
 ### Stripe Payment Links
-| Product | Payment Link |
-|---|---|
-| Personal Shield | https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00 |
-| Business Shield | https://buy.stripe.com/7sYbJ2ceG7OZ4uw4RN0Ny01 |
-| Business Shield Pro | https://buy.stripe.com/14A5kE6Um6KVf9agAv0Ny02 |
+| Product | Payment Link | Status |
+|---|---|---|
+| Personal Shield (monthly) | https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00 | ✅ Active |
+| Business Shield (monthly) | https://buy.stripe.com/7sYbJ2ceG7OZ4uw4RN0Ny01 | ⚠️ Stale — price was $99.99, now $139.99. Recreate in Stripe. |
+| Business Shield Pro (monthly) | https://buy.stripe.com/14A5kE6Um6KVf9agAv0Ny02 | ⚠️ Stale — price was $199, now $299.99. Recreate in Stripe. |
+| Business Basic (monthly) | — | ⬜ Create in Stripe |
+| All tiers (annual) | — | ⬜ Create in Stripe |
 
 ### Why This Approach Is Strategically Superior
 
@@ -148,18 +165,18 @@ OLD APPROACH:   Launch at $79 → raise to $99.99 after 3 months
 Customer hears: "You're charging me more"
 Result:         Churn risk, complaints, negative reviews
 
-NEW APPROACH:   $99.99 standard price, $79 founding discount for 3 months
+NEW APPROACH:   $139.99 standard price, founding discount for consumers only
 Customer hears: "I got 3 months at a great rate for being an early supporter"
 Result:         Goodwill, word of mouth, smooth transition to standard pricing
 ```
 
-### Founding Member Acquisition Strategy
+### Founding Member Acquisition Strategy (Personal Shield Only)
 
 Use the expiring discount — not a price increase — as the urgency driver:
 
-> *"🔒 Founding Member Offer — First 25 customers only. Lock in Business Shield at $79/month for your first 3 months. Standard price is $99.99/month. Sign up today and your founding rate is guaranteed for 3 months — no matter what features we add."*
+> *"🔒 Founding Member Offer — First 20 customers only. Lock in Personal Shield at $12/month for your first 3 months. Standard price is $14.99/month. Sign up today and your founding rate is guaranteed for 3 months — no matter what features we add."*
 
-When founding spots fill, simply close the offer. New customers pay $99.99. Founding members keep $79 for their first 3 months, then move to standard pricing. Clean transition, no surprise increases.
+When founding spots fill, simply close the offer. New customers pay $14.99. Founding members keep $12 for their first 3 months, then move to standard pricing. Clean transition, no surprise increases.
 
 ### Standalone Value Comparison (Phase 2 Justification)
 
@@ -974,6 +991,51 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - White-label licensing — carriers, cyber insurers, MSP platforms
 - Dataset licensing — anonymised risk benchmarks to research partners
 - Carrier partnership programme — RelayShield embedded in telco security bundles
+- Data broker scan integration — partner with Incogni or DeleteMe API, resell as RelayShield add-on rather than build from scratch
+
+### Identity Exposure Score (Phase 2 → Phase 3)
+
+**What it is:** A proprietary 0-100 risk score generated by RelayShield for every monitored user — consumer and SMB. No credit bureau required. Built entirely from RelayShield's own monitoring signals.
+
+**Score inputs:**
+- Number of active breaches (unresolved)
+- Severity of data types exposed (passwords > emails > phone numbers > names)
+- SIM swap risk flag (phone number in breach corpus)
+- Email backdoor status (forwarding rules, linked apps detected)
+- Password found in Pwned Passwords corpus
+- Time since last breach remediation
+- Recency of breach events
+
+**Score tiers:**
+| Score | Rating | Meaning |
+|---|---|---|
+| 0-30 | 🟢 Low Risk | Minimal exposure, remediation complete |
+| 31-60 | 🟡 Medium Risk | Active exposure, action recommended |
+| 61-85 | 🟠 High Risk | Multiple unresolved breaches or SIM swap risk |
+| 86-100 | 🔴 Critical | Immediate action required |
+
+**SMB capability — per-employee + account-level scoring:**
+- Every business seat gets an individual Identity Exposure Score
+- Business admin sees an **account-level aggregate score** — weighted average across all employees
+- **Score trending** — is the business getting safer or more exposed over time?
+- Example dashboard view:
+```
+Business Risk Score: 67/100 — Medium Risk
+Employee 1 (owner):   45 — Low    — no active breaches
+Employee 2 (manager): 82 — High   — 2 active breaches, SIM swap risk flagged
+Employee 3 (stylist):  71 — Medium — password found in breach corpus
+```
+
+**Why this is differentiated:**
+- No competitor generates a proprietary remediation-weighted risk score
+- Aura and LifeLock show breach alerts — they do not score remediation progress
+- RelayShield score improves as the user completes remediation steps — creates engagement loop
+- SMB account scoring is unique in the market at this price point
+
+**Delivery:**
+- Phase 2: Score delivered in WhatsApp weekly summary message
+- Phase 3: Score displayed in SMB team dashboard (web UI)
+- Future: Score embedded in Stripe customer portal or dedicated RelayShield app
 
 ---
 
@@ -1400,13 +1462,21 @@ Post on r/personalfinance and r/privacy:
 **Total: 30 hours across 6 weeks to first revenue**
 **Progress: 3 of 6 weeks complete — core product is live and working**
 
-### Week 5 — SMB Tier + Password Protection + Carrd Expansion
+### Week 5 — SMB Tier + SIM Swap + Password Protection + Carrd Expansion
 
-**Lambda — Password Protection (serves users relying on passwords, mobile, SMS)**
+**Priority 1 — SIM Swap Monitoring (top priority — validated by salon owner prospect)**
+- ⬜ Build `monitor_sim_swap(phone_number)` Lambda function — detect SIM swap events via carrier API or third-party telco intelligence (e.g. Telnyx, Twilio Verify SIM Swap API)
+- ⬜ Alert user via WhatsApp immediately when SIM swap detected: "⚠️ SIM swap detected on your number. Your phone may be compromised. Call your carrier NOW."
+- ⬜ Include carrier hardening steps in alert: PIN lock, number lock, port freeze instructions per carrier (AT&T, Verizon, T-Mobile)
+- ⬜ Apply to all three business tiers (Business Basic, Business Shield, Business Shield Pro) — SIM swap is included in all business plans
+- ⬜ Store phone numbers for business seats in relayshield_users DynamoDB table
+- ⬜ Add SIM swap monitoring toggle to onboarding flow
+
+**Priority 2 — Password Protection (serves users relying on passwords, mobile, SMS)**
 - ⬜ **Pwned Passwords API** — add `call_pwned_passwords(hash_prefix)` function calling `https://api.pwnedpasswords.com/range/{first5chars}` with k-anonymity (free, no API key). Check password hashes when user opts in. Alert via WhatsApp if password is found in breach corpus.
 - ⬜ **Cross-account password risk detection** — when a password is found pwned, Claude alert warns user it may be reused across other accounts and prompts them to audit linked services via SWEEP reply
 
-**Lambda — SMB Tier**
+**Priority 3 — SMB Tier**
 - ⬜ Domain scanner for SMB onboarding — check all email addresses on a domain
 - ⬜ SMB tier end-to-end testing — multi-seat breach detection and alert routing
 

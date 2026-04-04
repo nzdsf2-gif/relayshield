@@ -995,6 +995,9 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - Published accuracy benchmarks — first in category
 - Industry breach intelligence reports — first B2B data product
 - Close founding member 3-month rate → all new customers on standard pricing
+- Self-serve account registration — customer-facing signup flow with email verification
+- SSO via Google — OAuth 2.0 login for consumer and SMB onboarding (update Termly privacy policy when implemented)
+- Virtual mailbox address — replace placeholder with permanent business mailing address (Anytime Mailbox or iPostal1)
 
 ### Phase 3 — Monetise the Moat (Months 9-18)
 *Focus: data products, carrier partnerships, platform licensing. Still not credit monitoring or fraud insurance — those are Aura's battlefield, not ours.*

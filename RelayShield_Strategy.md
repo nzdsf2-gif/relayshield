@@ -284,13 +284,31 @@ RelayShield does not compete on detection. Detection is commoditised — Google,
 ### 5. Telecom Layer — Phase 2 Moat
 **The only identity protection capability built on 25 years of carrier-layer expertise.**
 
-- SIM swap detection and real-time alerts
-- Port-out fraud monitoring
+- SIM swap detection and real-time alerts via carrier monitoring
+- Port-out fraud monitoring — catches number transfer to a different carrier
+- eSIM unauthorised provisioning detection — new attack surface carriers don't fully protect
 - Phone number dark web exposure detection
 - SS7 vulnerability awareness built into remediation flows
 - Carrier change monitoring via Twilio Lookup API
 - No competitor — not Aura, not Foretrace, not LifeLock — addresses telecom-layer identity threats
 - Founder's background is the credibility moat; cannot be faked by a software company
+
+**SIM Lock Onboarding Flow — a unique capability no competitor offers:**
+During onboarding, RelayShield walks every user through enabling their carrier's SIM lock via WhatsApp — before any breach is detected. Carrier-specific steps delivered conversationally:
+- AT&T: Enable Wireless Account Lock in myAT&T app
+- T-Mobile: Enable SIM Protection (requires in-store photo ID to remove — strongest option)
+- Verizon: Enable Number Lock in My Verizon app
+This is genuine prevention layered on top of monitoring. Monitoring then catches bypass attempts — insider threats, social engineering, eSIM provisioning — even after the lock is in place.
+
+**Why SIM locks don't eliminate the need for monitoring:**
+- Carrier employees are actively bribed $300–$3,000 per swap (documented Telegram recruitment channels)
+- T-Mobile call centre agents have issued remote eSIM QR codes despite "extra security" being enabled
+- Port-out fraud to a different carrier partially bypasses same-carrier SIM locks
+- FCC July 2024 mandate requires carriers to immediately notify customers of SIM changes — RelayShield intercepts this signal and acts before the attacker reaches financial accounts
+- 56% of consumers still use SMS 2FA — they are directly exposed until they migrate to authenticator apps
+
+**Authenticator app migration — built into breach remediation:**
+When a breach is detected on any account using SMS 2FA, the remediation flow includes a carrier-specific step to migrate to an authenticator app (Google Authenticator, Authy). Delivered per platform — Gmail, Square, banking apps — via WhatsApp. Closes the SMS 2FA exposure window regardless of whether a SIM swap has occurred.
 
 ### 6. SMB Team Dashboard — Phase 1
 **The only purpose-built breach response product for teams under 25 people, priced under $200/month.**
@@ -982,8 +1000,14 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 ### Phase 2 — Deepen the Moat (Months 4-8)
 *Focus: telecom layer, real-time threat intelligence, SMB dashboard. Do not add features that compete with Aura on their ground.*
 
-- Telecom layer: SIM swap detection, port-out fraud alerts, carrier signals
-- SS7 vulnerability advisory built into remediation flows
+- **Telecom layer — full implementation:**
+  - SIM swap detection and real-time WhatsApp alerts via carrier monitoring
+  - Port-out fraud detection — number transfer to a different carrier
+  - **eSIM unauthorised provisioning detection** — remote eSIM profile issuance to unauthorised device
+  - **SIM lock onboarding flow** — WhatsApp-guided setup of carrier SIM lock (AT&T/T-Mobile/Verizon) during customer onboarding — prevention layer on top of monitoring
+  - **Authenticator app migration flow** — when SMS 2FA detected on a breached account, guide user to migrate to authenticator app per platform (Gmail, Square, banking)
+  - Carrier change monitoring via Twilio Lookup API — detects carrier switch as early warning
+  - SS7 vulnerability advisory built into remediation flows
 - Telegram Bot integration + agentic remediation workflows
 - Stealer log monitoring via Flare API — real-time credential theft, not just historical breaches
 - Telegram dark web channel monitoring via Flare API — 57K+ channels

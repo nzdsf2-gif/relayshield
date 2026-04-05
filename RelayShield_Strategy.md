@@ -1493,6 +1493,12 @@ Post on r/personalfinance and r/privacy:
 **Priority 2 — Password Protection (serves users relying on passwords, mobile, SMS)**
 - ⬜ **Pwned Passwords API** — add `call_pwned_passwords(hash_prefix)` function calling `https://api.pwnedpasswords.com/range/{first5chars}` with k-anonymity (free, no API key). Check password hashes when user opts in. Alert via WhatsApp if password is found in breach corpus.
 - ⬜ **Cross-account password risk detection** — when a password is found pwned, Claude alert warns user it may be reused across other accounts and prompts them to audit linked services via SWEEP reply
+- ⬜ **Password Manager Breach Alert (optional remediation step)** — triggered only when breach contains email + password combination and user has opted into password manager monitoring. SpyCloud's 2026 Identity Exposure Report found 1.1 million password manager master passwords circulating in underground sources — a single compromised master password exposes every credential a user has. Implementation:
+  - Add opt-in flag `password_manager_user` (boolean) to `relayshield_users` DynamoDB table — default False
+  - During onboarding WhatsApp flow, ask: "Do you use a password manager? (1Password, Bitwarden, LastPass, Dashlane, etc.) Reply YES or NO." Set flag accordingly
+  - When breach fires and `password_manager_user = True`, append optional remediation step to WhatsApp alert: "🔐 *Password Manager Check:* Your breached email or password may have been tested against your password manager login. If your master password is similar to your breached password — change it immediately. Enable biometric unlock and store a backup recovery code offline."
+  - If breach severity is Medium and HIBP data shows password reuse indicators, bump severity to High when `password_manager_user = True`
+  - This step is skipped entirely for users who replied NO during onboarding — no false alarms for non-password-manager users
 
 **Priority 3 — SMB Tier**
 - ⬜ Domain scanner for SMB onboarding — check all email addresses on a domain

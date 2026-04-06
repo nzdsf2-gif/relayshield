@@ -112,18 +112,147 @@ Average time until she notices: 24-48 hours
 **Validation approach:**
 Find 3-5 Square/mPOS users in your network. Walk them through the 8-step attack chain above. The moment they hear "your phone goes dark and your next day's sales go to someone else" — that is the conversion moment. If they ask "how do I protect against this?", they are a paying customer.
 
+---
+
+### Mobile Number Theft — Threat Method Taxonomy
+*Reference section for sales conversations, outreach content, and product positioning*
+
+Mobile number theft is the master key attack against mobile-dependent business owners. A stolen number bypasses every SMS-based 2FA layer simultaneously — banking, Square, email, and anything else tied to that number. Here are the six primary methods, ranked by accessibility to low-skill attackers:
+
+#### Method 1 — Social Engineering the Call Centre
+**Attacker skill required: Very low | Cost: ~$0 | Time: 15–30 minutes**
+
+The attacker calls the carrier's support line, impersonates the victim, and requests a SIM replacement citing a lost or damaged phone. Success depends on the call centre agent, not the attacker's skill.
+
+**What the attacker needs** — all obtainable from a single breach data purchase:
+- Victim's name and phone number
+- Last 4 of SSN (147 million exposed in Equifax 2017 alone)
+- Billing address
+- Sometimes: last 4 of account number or a recent call made
+
+**How it works:** Multiple agents are tried until one approves. Pre-2024 FCC rules, first-attempt success rate was reported at 15–20%. Higher with persistence. The incentive structure of call centres rewards speed, not verification rigour.
+
+**SIM lock effectiveness:** Partial — a determined attacker tries multiple agents and escalation paths until one approves an override.
+
+---
+
+#### Method 2 — Insider Threat / Carrier Employee Bribery
+**Attacker skill required: Low (just Telegram) | Cost: $300–$3,000 per swap | Time: Minutes**
+
+Active Telegram channels recruit carrier store employees and call centre agents to execute swaps directly using their system access. This is a functioning criminal marketplace, not a theoretical risk.
+
+**Documented rates:**
+- Standard swap: $300
+- High-value target (crypto, executive): up to $3,000
+
+**Real cases:**
+- March 2024: AT&T employee Jonathan Katz prosecuted under CFAA for facilitating SIM swaps
+- 2025: T-Mobile ordered to pay $33 million in damages after an insider-facilitated swap enabled $38 million cryptocurrency theft
+
+**SIM lock effectiveness: Zero.** The employee has direct system access and can override any lock.
+
+---
+
+#### Method 3 — Port-Out Fraud
+**Attacker skill required: Low | Cost: ~$0 | Time: 2–4 hours**
+
+The attacker ports the victim's number to a completely different carrier they control, rather than swapping the SIM at the existing carrier.
+
+**How it works:**
+1. Attacker opens an account at any MVNO (Mint Mobile, Cricket, etc.)
+2. Submits a number port request with victim's name, address, and transfer PIN
+3. Original carrier is legally required to release the number within hours under FCC portability rules
+4. Victim's phone goes dead — number now active on attacker's device at a different carrier
+
+**Why this matters:** Port-out fraud partially bypasses same-carrier SIM locks because the request originates externally. The 2024 FCC rules added mandatory port-out lock options, but opt-in rates are even lower than SIM locks.
+
+**SIM lock effectiveness:** Partial — requires a separate port-out lock, which almost no one has enabled.
+
+---
+
+#### Method 4 — eSIM Remote Provisioning
+**Attacker skill required: Medium | Cost: ~$0 | Time: 30–60 minutes**
+
+The fastest-growing attack vector. eSIMs can be provisioned remotely via QR code — no physical SIM card required, no carrier store visit.
+
+**How it works:**
+1. Attacker socially engineers carrier support into issuing a new eSIM activation QR code
+2. QR code is sent to an email or number the attacker already controls (compromised email account)
+3. Attacker scans QR code — victim's number is now on the attacker's device
+4. No physical interaction with the victim's phone ever required
+
+**Why it is accelerating:**
+- eSIM adoption growing 40% year-over-year
+- Carrier support staff inconsistently trained on eSIM-specific fraud indicators
+- Leaves fewer physical evidence traces
+- SIM lock protocols were designed for physical SIM swaps — eSIM provisioning uses a different workflow
+
+**SIM lock effectiveness:** Low — eSIM provisioning uses a separate approval path that SIM locks were not designed to block.
+
+---
+
+#### Method 5 — Carrier Account Credential Phishing
+**Attacker skill required: Low | Cost: Nearly zero | Time: Automated**
+
+The attacker phishes the victim's carrier account credentials (AT&T, T-Mobile, Verizon login) and executes the SIM swap themselves through the carrier's self-service portal — no phone call, no insider required.
+
+**What self-service portals allow:**
+- Add a new SIM to the account
+- Change account PIN
+- Request a SIM replacement
+- Initiate a number transfer
+
+**Phishing lure:** Spoofed carrier email — "Your account has been locked. Verify your identity." Personalised with victim's name and last 4 of phone number (from breach data) for higher click-through rate.
+
+**SIM lock effectiveness:** Zero — the attacker is logged in as the account holder and can disable the lock themselves.
+
+---
+
+#### Method 6 — SS7 Network Interception
+**Attacker skill required: High | Cost: $1,000–$10,000+ | Time: Real-time**
+
+SS7 (Signalling System No. 7) is the 1970s-era protocol routing calls and SMS between carriers globally. Known architectural vulnerabilities allow interception of SMS messages in transit without ever touching the victim's SIM.
+
+**How it works:**
+- Attacker gains access to SS7 network via a rogue telecom operator, purchased access, or nation-state capability
+- Routes the victim's SMS 2FA codes to themselves in real time
+- Victim's phone continues working normally — they have no awareness the interception is occurring
+
+**Who uses this:** Primarily nation-state actors, organised crime targeting high-value individuals (executives, journalists, politicians, large crypto holders). Less relevant for the typical SMB owner but increasingly accessible as criminal infrastructure matures.
+
+---
+
+#### Attack Method Summary
+
+| Method | Skill | Cost | Time | SIM Lock Stops It? | RelayShield Detection |
+|---|---|---|---|---|---|
+| Call centre social engineering | Very low | ~$0 | 15–30 min | Partially | Carrier change event → instant WhatsApp alert |
+| Insider bribery | Low | $300–$3,000 | Minutes | No | Carrier change event → instant WhatsApp alert |
+| Port-out fraud | Low | ~$0 | 2–4 hours | Partially | Carrier change + new carrier detection |
+| eSIM remote provisioning | Medium | ~$0 | 30–60 min | Low | eSIM provisioning event monitoring (Phase 2) |
+| Carrier account phishing | Low | ~$0 | Automated | No | Carrier change event → instant WhatsApp alert |
+| SS7 interception | High | $1K–$10K+ | Real-time | N/A | SS7 advisory in remediation flows |
+
+**The key insight for RelayShield:** Methods 1, 2, 3, and 5 — the four most accessible attacks — all produce the same detectable signal: a carrier change event. The Twilio Lookup carrier monitoring layer fires on this event regardless of which method was used. This is why carrier monitoring is the right detection hook, not attempting to prevent each method individually.
+
+**The SIM lock onboarding flow** closes the social engineering and phishing vectors for customers who complete it. **Monitoring** catches what gets through. Together they form a genuine prevention-plus-detection layer that no competitor offers at any price point.
+
+---
+
 ### Pricing Strategy — Standard vs Founding Member
 
 **Standard Pricing (Permanent — All New Customers After Founding Period):**
 
 | Tier | Target | Seats | Monthly | Per Seat | Key Differentiator |
 |---|---|---|---|---|---|
-| **Personal Shield** | Consumers | 1 | $14.99 | $14.99 | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved |
-| **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM swap monitoring + team dashboard + domain monitoring |
-| **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-employee breach response + admin visibility + priority alerts |
-| **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + telecom-layer detection + priority support + compliance reporting |
+| **Personal Shield** | Consumers | 1 | $14.99 | $14.99 | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved + SIM/eSIM swap detection alert. Monitor up to **3 email addresses**. |
+| **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM/eSIM swap detection + carrier hardening steps + team dashboard + domain monitoring. Monitor up to **2 email addresses per employee**. |
+| **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-employee SIM/eSIM monitoring + authenticator migration flow + admin visibility + priority alerts. Monitor up to **2 email addresses per employee**. |
+| **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + SIM lock onboarding flow + eSIM profile audit + priority support + compliance reporting. Monitor up to **2 email addresses per employee**. |
 
-> 💡 **SIM swap monitoring is included in ALL business tiers.** This is RelayShield's most compelling differentiator — no competitor offers carrier-layer SIM swap protection for SMBs at any price point. Validated by first prospective customer (salon owner, Square POS user): *"You identified a problem I didn't know I had. This is brilliant and I want to sign up."*
+> 📧 **Email monitoring limits:** Personal Shield — 3 emails (personal + backup + one additional). Business tiers — 2 emails per employee (business address + one additional, e.g. owner's personal address or independent contractor email). Rationale: covers real-world usage without inflating HIBP API costs at scale.
+
+> 💡 **SIM/eSIM swap monitoring is included in ALL tiers.** Personal Shield receives detection alerts only. Business tiers additionally receive carrier-specific hardening steps, eSIM profile audit guidance, and (Pro) SIM lock onboarding. No competitor offers carrier-layer SIM/eSIM swap protection at any consumer or SMB price point. Validated by first prospective customer (salon owner, Square POS user): *"You identified a problem I didn't know I had. This is brilliant and I want to sign up."*
 
 **Annual Subscription Option (All Tiers):**
 Customers who pay upfront for a full year receive a **10% discount** on the monthly rate. This rewards commitment, improves cash flow, and reduces churn.
@@ -293,11 +422,26 @@ RelayShield does not compete on detection. Detection is commoditised — Google,
 - No competitor — not Aura, not Foretrace, not LifeLock — addresses telecom-layer identity threats
 - Founder's background is the credibility moat; cannot be faked by a software company
 
-**SIM Lock Onboarding Flow — a unique capability no competitor offers:**
-During onboarding, RelayShield walks every user through enabling their carrier's SIM lock via WhatsApp — before any breach is detected. Carrier-specific steps delivered conversationally:
-- AT&T: Enable Wireless Account Lock in myAT&T app
+**SIM/eSIM Swap Monitoring — tiered by plan:**
+
+| Tier | What's included |
+|---|---|
+| Personal Shield | Detection alert only — "SIM or eSIM change detected. Call your carrier NOW." |
+| Business Basic+ | Detection + carrier-specific hardening steps (AT&T/T-Mobile/Verizon) + eSIM profile audit guidance |
+| Business Shield Pro | All above + SIM lock onboarding flow + eSIM provisioning disable option + FCC complaint guidance |
+
+**eSIM-specific detection and response:**
+- Twilio Verify SIM Swap API detects both physical SIM swaps and eSIM provisioning events via IMSI change detection
+- On eSIM-flagged event: alert distinguishes eSIM vs physical SIM where detectable; delivers eSIM profile audit steps via carrier app
+- eSIM provisioning disable: where carrier supports it, Pro users are guided to disable remote eSIM provisioning entirely — strongest available protection
+- FCC July 2024 mandate requires carriers to immediately notify customers of SIM/eSIM changes — RelayShield intercepts this signal and acts before the attacker reaches financial accounts
+- Port-out fraud detection: number transferred to a different carrier flagged as CRITICAL
+
+**SIM Lock Onboarding Flow — Business Shield Pro only:**
+During onboarding, RelayShield walks Pro users through enabling their carrier's SIM lock via WhatsApp — before any breach is detected. Carrier-specific steps delivered conversationally:
+- AT&T: Enable Wireless Account Lock in myAT&T app; disable eSIM provisioning if supported
 - T-Mobile: Enable SIM Protection (requires in-store photo ID to remove — strongest option)
-- Verizon: Enable Number Lock in My Verizon app
+- Verizon: Enable Number Lock in My Verizon app; check eSIM Management settings
 This is genuine prevention layered on top of monitoring. Monitoring then catches bypass attempts — insider threats, social engineering, eSIM provisioning — even after the lock is in place.
 
 **Why SIM locks don't eliminate the need for monitoring:**
@@ -349,11 +493,12 @@ When a breach is detected on any account using SMS 2FA, the remediation flow inc
 - DataClasses field reveals phone number exposure
 - Upgrade trigger: Pwned 2 ($22/month, 50 RPM) at 50+ paying customers
 
-**Password Breach Checking** — FREE (Pwned Passwords API)
-- K-anonymity model — password never transmitted
-- Send first 5 chars of SHA-1 hash only
-- Returns count of times password seen in breaches
-- Consumer onboarding + post-breach conversation trigger
+**Password Exposure Response** — FREE (no additional API)
+- Detection source: HIBP DataClasses field — "Passwords" in breach data = password compromised
+- No user password submission required — response triggered by breach data alone
+- Cross-account reuse walkthrough delivered via WhatsApp (REUSE command)
+- Password manager master password alert when `password_manager_user = True`
+- Strategic decision: RelayShield does not implement Pwned Passwords hash checking — detection is not our lane
 
 **Domain Scanner** — Included in Pwned 1
 - SMB onboarding → instant domain-wide exposure report
@@ -728,7 +873,7 @@ The trust damage is real — an identity protection company that cannot protect 
 
 | Aura Gap | RelayShield Advantage |
 |---|---|
-| Zero SIM swap / telecom detection | Core Phase 2 capability |
+| Zero SIM swap / eSIM swap detection | SIM/eSIM swap detection on ALL tiers — detection alert (Personal), carrier hardening steps (Business+), SIM lock onboarding (Pro) |
 | Zero stealer log / Telegram monitoring | Phase 2 via Flare API |
 | One-way alerts only (email/SMS/app) | Two-way WhatsApp conversational AI |
 | No Telegram | Phase 2 roadmap |
@@ -951,7 +1096,7 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 | Breach severity scoring | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Email Security Sweep | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Remediation follow-up tracking | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| SIM swap / telecom layer | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Phase 2 |
+| SIM/eSIM swap monitoring | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ All tiers (detection); hardening on Business+ |
 | SMB team dashboard (admin view) | ❌ | ❌ | ❌ employer-blind | ❌ | ❌ | ✅ |
 | Exfiltration / secret scanning | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ Phase 2 |
 | Direct self-serve (no employer needed) | ✅ | ✅ | ❌ B2B2E only | ✅ | ✅ | ✅ |
@@ -1114,7 +1259,7 @@ Beyond core subscriptions, RelayShield has multiple compounding revenue streams 
 **Add-on modules (à la carte, Phase 2)**
 | Module | Price | What it adds |
 |---|---|---|
-| Telecom Shield | +$4.99/mo (consumer) | SIM swap monitoring, carrier change alerts, SS7 advisory |
+| Telecom Shield | Included all tiers | SIM/eSIM swap detection (all tiers); carrier hardening steps (Business+); SIM lock onboarding (Pro) |
 | Domain Guard | +$14.99/mo (SMB) | Domain spoofing + typosquatting weekly scan |
 | Secret Sentinel | +$19.99/mo (SMB) | API key + credential exposure monitoring (GitGuardian) |
 | Dark Web Watch | +$24.99/mo (SMB) | Dark web marketplace monitoring (Flare) |
@@ -1235,6 +1380,12 @@ The $2,500/month target is a 6-week milestone. The platform architecture being b
 - `relayshield_users`
 - `relayshield_monitored_emails`
 - `relayshield_breach_alerts`
+- `relayshield_sim_swap_alerts` ⬜ Phase 2 — create before deploying SIM swap monitor
+
+### New fields required in relayshield_users (Phase 2)
+- `sim_swap_monitoring` Boolean — True to enable monitoring for this user (default False)
+- `phone_number` String — E.164 format (+1XXXXXXXXXX); falls back to whatsapp_number if absent
+- `subscription_tier` String — personal_shield | business_basic | business_shield | business_shield_pro
 
 ### Monthly Running Costs
 
@@ -1242,12 +1393,38 @@ The $2,500/month target is a 6-week milestone. The platform architecture being b
 | Service | Cost |
 |---|---|
 | HIBP API | $4.50 |
-| Twilio WhatsApp | ~$10 |
+| Twilio WhatsApp (sandbox / early testing) | ~$10 |
 | Claude API | ~$15 |
 | AWS (Lambda + DynamoDB) | ~$2 |
 | Secrets Manager | ~$2 |
 | Carrd | $1.58 |
 | **Total** | **~$35/month** |
+
+**WhatsApp Business API — Production Upgrade (required before first paying subscriber)**
+
+Currently running on Twilio's WhatsApp Sandbox (development only). Paying subscribers receive messages automatically — no sandbox join required — once migrated to the WhatsApp Business API.
+
+| Component | Cost | Notes |
+|---|---|---|
+| Twilio per-message fee | $0.005/message | Flat — inbound or outbound |
+| Meta utility conversation fee (US) | ~$0.008/24h window | Breach alerts = utility category |
+| **Cost per breach alert** | **~$0.013** | One 24h conversation window per alert |
+| WhatsApp Business number | $0/month | Shared Twilio number — no monthly fee |
+
+**At scale:**
+| Subscribers | Est. alerts/month | WhatsApp cost/month |
+|---|---|---|
+| 50 | ~75 alerts | ~$1 |
+| 250 | ~375 alerts | ~$5 |
+| 1,000 | ~1,500 alerts | ~$20 |
+
+> WhatsApp cost is negligible relative to subscription revenue at all realistic subscriber counts. No pricing adjustment needed.
+
+**Migration process:** Submit business details via Twilio → Twilio submits to Meta/WhatsApp → approval in 3–7 business days. Requires Facebook Business Manager account.
+
+> ⚠️ **Kick off this process NOW** — before any founding member or paying subscriber goes live. Sandbox subscribers must manually send a join phrase to receive messages, which is not acceptable for a paid product. Approval takes up to 7 days so start immediately in parallel with remaining build items.
+
+**Current Twilio credit:** $20 purchased for sandbox/trial number. Same balance carries over to production — at $0.013/alert this covers ~1,500 production alerts before a top-up is needed.
 
 **Phase 2 (additional):**
 | Service | Cost |
@@ -1279,6 +1456,15 @@ The $2,500/month target is a 6-week milestone. The platform architecture being b
 - Deletion Protection: ON for all DynamoDB tables
 - Point-in-Time Recovery: ON for all DynamoDB tables
 - $1 billing alert on all AWS accounts
+
+### Twilio Account Security
+- **2FA enabled** on Twilio account (mandatory — Twilio credentials = WhatsApp delivery access)
+- **API keys scoped per Lambda** — separate API key for breach monitor vs whatsapp webhook vs sim swap monitor; no shared master credentials in code
+- **Webhook signature validation** — all inbound Twilio webhooks verified using Twilio-Signature header before processing; reject any request that fails validation
+- **Auth token rotation** — rotate Twilio auth token quarterly; update AWS Secrets Manager; no downtime required
+- **Account activity alerts** — enable Twilio account alerts for unusual usage spikes (potential webhook abuse or credential compromise)
+- **IP Access Control** — restrict Twilio Console access to known IPs where possible
+- ⚠️ **TODO: Migrate from Twilio WhatsApp Sandbox to WhatsApp Business API** before first paying subscriber goes live. Kick off immediately — Meta/WhatsApp approval takes 3–7 business days. Requires Facebook Business Manager account. See Monthly Running Costs section for pricing detail.
 
 ### Third-Party Vendor Policy
 | Vendor | Access Level |
@@ -1352,7 +1538,7 @@ Three tiers, transparent pricing, no hidden fees:
 | **AI remediation** | ✅ | ✅ | ✅ |
 | **Domain monitoring** | ❌ | ✅ | ✅ |
 | **Team dashboard** | ❌ | ✅ | ✅ |
-| **SIM swap monitoring** | ❌ | ❌ | ✅ Phase 2 |
+| **SIM/eSIM swap detection** | ✅ Alert only | ✅ Alert + carrier hardening | ✅ Alert + hardening + SIM lock onboarding |
 | **Priority support** | ❌ | ❌ | ✅ |
 
 > *All plans include a 14-day free trial. Cancel anytime.*
@@ -1506,23 +1692,40 @@ Post on r/personalfinance and r/privacy:
 
 ### Week 5 — SMB Tier + SIM Swap + Password Protection + Carrd Expansion
 
-**Priority 1 — SIM Swap Monitoring (top priority — validated by salon owner prospect)**
-- ⬜ Build `monitor_sim_swap(phone_number)` Lambda function — detect SIM swap events via carrier API or third-party telco intelligence (e.g. Telnyx, Twilio Verify SIM Swap API)
-- ⬜ Alert user via WhatsApp immediately when SIM swap detected: "⚠️ SIM swap detected on your number. Your phone may be compromised. Call your carrier NOW."
-- ⬜ Include carrier hardening steps in alert: PIN lock, number lock, port freeze instructions per carrier (AT&T, Verizon, T-Mobile)
-- ⬜ Apply to all three business tiers (Business Basic, Business Shield, Business Shield Pro) — SIM swap is included in all business plans
-- ⬜ Store phone numbers for business seats in relayshield_users DynamoDB table
-- ⬜ Add SIM swap monitoring toggle to onboarding flow
+**Priority 1 — SIM/eSIM Swap Monitoring (top priority — validated by salon owner prospect)**
 
-**Priority 2 — Password Protection (serves users relying on passwords, mobile, SMS)**
-- ⬜ **Pwned Passwords API** — add `call_pwned_passwords(hash_prefix)` function calling `https://api.pwnedpasswords.com/range/{first5chars}` with k-anonymity (free, no API key). Check password hashes when user opts in. Alert via WhatsApp if password is found in breach corpus.
-- ⬜ **Cross-account password risk detection** — when a password is found pwned, Claude alert warns user it may be reused across other accounts and prompts them to audit linked services via SWEEP reply
-- ⬜ **Password Manager Breach Alert (optional remediation step)** — triggered only when breach contains email + password combination and user has opted into password manager monitoring. SpyCloud's 2026 Identity Exposure Report found 1.1 million password manager master passwords circulating in underground sources — a single compromised master password exposes every credential a user has. Implementation:
-  - Add opt-in flag `password_manager_user` (boolean) to `relayshield_users` DynamoDB table — default False
-  - During onboarding WhatsApp flow, ask: "Do you use a password manager? (1Password, Bitwarden, LastPass, Dashlane, etc.) Reply YES or NO." Set flag accordingly
-  - When breach fires and `password_manager_user = True`, append optional remediation step to WhatsApp alert: "🔐 *Password Manager Check:* Your breached email or password may have been tested against your password manager login. If your master password is similar to your breached password — change it immediately. Enable biometric unlock and store a backup recovery code offline."
-  - If breach severity is Medium and HIBP data shows password reuse indicators, bump severity to High when `password_manager_user = True`
-  - This step is skipped entirely for users who replied NO during onboarding — no false alarms for non-password-manager users
+*Detection (ALL tiers including Personal Shield):*
+- ⬜ Build `monitor_sim_swap(phone_number)` Lambda function — detect SIM swap and eSIM provisioning events via Twilio Verify SIM Swap API (covers both physical SIM and eSIM changes via IMSI change detection)
+- ⬜ Personal Shield alert (detection only): "⚠️ SIM or eSIM change detected on your number. Your phone may be compromised. Call your carrier NOW and check your eSIM profiles in your carrier app."
+- ⬜ Detect whether change is likely physical SIM vs eSIM: cross-reference device type flags in Twilio Lookup response; if eSIM-capable device → flag as potential eSIM provisioning event
+- ⬜ Store phone numbers in relayshield_users DynamoDB table for all tiers including Personal Shield
+- ⬜ Add SIM/eSIM swap monitoring toggle to onboarding flow for all tiers
+- ⬜ Schedule `monitor_sim_swap` as a separate EventBridge rule — hourly checks (more frequent than daily breach check given time-sensitivity of SIM swap attacks)
+
+*Carrier Hardening Steps (Business Basic, Business Shield, Business Shield Pro only):*
+- ⬜ On SIM swap detection → append carrier-specific hardening steps per carrier:
+  - AT&T: Enable Wireless Account Lock in myAT&T app; check for unauthorized eSIM profiles under Account → Device
+  - T-Mobile: Enable SIM Protection (requires in-store photo ID to remove); audit eSIM profiles in T-Mobile app → Account → Lines
+  - Verizon: Enable Number Lock in My Verizon app; check eSIM provisioning under Device → eSIM Management
+- ⬜ On eSIM-flagged event → append eSIM-specific audit step: "Check your carrier app for eSIM profiles you did not add. Revoke any unrecognised profiles immediately."
+- ⬜ On eSIM-flagged event → include FCC complaint guidance: "File a complaint at fcc.gov/consumers/guides/filing-informal-complaint — carriers are required to respond within 30 days."
+- ⬜ Include port-out fraud detection — if number has transferred to a different carrier, flag as CRITICAL
+
+*SIM Lock Onboarding Flow (Business Shield Pro only):*
+- ⬜ During onboarding, walk Pro users through enabling carrier SIM lock via WhatsApp conversation before any breach is detected
+- ⬜ Carrier-specific SIM lock steps delivered conversationally (AT&T Wireless Account Lock / T-Mobile SIM Protection / Verizon Number Lock)
+- ⬜ Add option to disable eSIM provisioning entirely where carrier supports it (strongest protection)
+- ⬜ Authenticator app migration flow — when SMS 2FA detected on a breached account, guide user to migrate to authenticator app per platform
+
+**Priority 2 — Password Exposure Response (response layer only — no detection)**
+
+*Strategic decision: RelayShield does NOT implement Pwned Passwords hash checking or any password detection capability. Detection is commoditised — HIBP, Google, Apple, and Firefox already do it for free. Asking users to submit passwords (even hashed) via any channel puts us in competition with Aura, Norton, and HIBP on their ground. Our value is the response layer: what happens after a password is confirmed exposed in a breach.*
+
+- ⬜ **Password exposure detection from breach DataClasses** — when HIBP returns "Passwords" in DataClasses for a breach, treat the password as compromised and trigger response flow immediately. No user password submission required.
+- ⬜ **Severity bump** — any breach exposing passwords is bumped one severity level (MEDIUM→HIGH, HIGH→CRITICAL). If `password_manager_user = True`, bump to HIGH minimum regardless of breach type.
+- ⬜ **Cross-account reuse walkthrough (REUSE command)** — when passwords exposed, Claude walks user through high-risk accounts one at a time via WhatsApp: Gmail/Outlook, banking, Amazon/PayPal, Apple ID/Google Account, Facebook/LinkedIn, Square/payment tools. User replies YES/NO per account. Specific reset URL provided for each YES. Ends with password manager recommendation.
+- ⬜ **Password Manager Breach Alert** — add opt-in flag `password_manager_user` (boolean) to `relayshield_users` DynamoDB table — default False. During onboarding WhatsApp flow, ask: "Do you use a password manager? Reply YES or NO." When breach fires and `password_manager_user = True` and passwords exposed, append: "🔐 *Password Manager Alert:* Your master password may have been tested against your password manager login. Change it immediately. Enable biometric unlock. Store recovery code offline — not in email."
+- ⬜ **MANAGER command** — at end of cross-account walkthrough, user can reply MANAGER for a free Bitwarden setup guide delivered via WhatsApp (5-minute setup, recommended for all users without a password manager)
 
 **Priority 3 — SMB Tier**
 - ⬜ Domain scanner for SMB onboarding — check all email addresses on a domain
@@ -1567,11 +1770,15 @@ When SMB revenue justifies a separate buyer journey:
 - ✅ relayshield_users (DynamoDB)
 - ✅ relayshield_monitored_emails (DynamoDB)
 - ✅ relayshield_breach_alerts (DynamoDB)
+- ⬜ relayshield_sim_swap_alerts (DynamoDB) — create before SIM swap deploy
 - ✅ relayshield-breach-check (Lambda, Python 3.14)
+- ⬜ relayshield-sim-swap-monitor (Lambda, Python 3.14) — new, deploy from relayshield_sim_swap_monitor.py
 - ✅ relayshield/hibp_api_key (Secrets Manager)
 - ✅ IAM policy: relayshield-breach-check-policy
+- ⬜ IAM policy: relayshield-sim-swap-monitor-policy — needs DynamoDB read/write on users + sim_swap_alerts tables; Secrets Manager read on Twilio secrets
 - ✅ Lambda timeout: 3 minutes
 - ✅ EventBridge scheduler: relayshield-daily-breach-check
+- ⬜ EventBridge scheduler: relayshield-hourly-sim-swap-check — rate(1 hour)
 - ✅ Test records added — 20 breaches detected across 2 emails
 - ✅ Weeks 1–3 complete — core product live and working
 

@@ -40,6 +40,106 @@
 
 ---
 
+### Target Persona — The Breached Consumer
+
+**Profile:** Adult with one or more personal email accounts, multiple online accounts (banking, shopping, social media), and a smartphone. Has likely been in at least one data breach — HIBP has over 14 billion records across thousands of historical breaches. Has received a breach notification from Google, Apple, or Firefox at some point. Changed their password. Assumed they were protected. Was not.
+
+**Not a technical user.** Does not know what an OAuth token is. Does not know that forwarding rules survive a password reset. Does not have the time or knowledge to audit their inbox at 11pm when a breach alert arrives.
+
+**Key insight — why this consumer is underprotected despite free tools:**
+
+Google, Apple, and Firefox Monitor all detect breach credentials and notify users. None of them do what happens next:
+
+```
+Free tools stop here:    "Your password was in a breach. Change it."
+
+What attackers do first:  Log in and plant 3–5 backdoors that
+                          survive the password reset:
+                          → Silent forwarding rule
+                          → New recovery phone number
+                          → Inbox filter deleting security alerts
+                          → OAuth app access granted to attacker
+                          → Active session on attacker's device
+
+What the consumer does:   Changes password. Feels protected.
+                          All 5 backdoors still active.
+
+What happens next:        Attacker uses "forgot password" on
+                          banking, PayPal, Amazon.
+                          Reset emails arrive. Forwarding rule
+                          copies them to attacker before consumer sees them.
+                          Consumer locked out of financial accounts.
+```
+
+**Why this is the consumer's most exposed surface:**
+
+Email is the recovery mechanism for every other account. Whoever controls the email controls the "forgot my password" button on banking apps, PayPal, Amazon, Apple ID, Google account, and social media. A compromised email is not one breach — it is a master key to the entire digital life.
+
+**The attack chain in plain language:**
+
+```
+Step 1 — Email credentials appear in a data breach
+          (consumer never finds out — no one is monitoring daily)
+
+Step 2 — Attacker logs into Gmail/Outlook/Yahoo using breached credentials
+
+Step 3 — Plants silent forwarding rule — all emails copied to attacker
+          Consumer never notices — emails still arrive normally
+
+Step 4 — Adds attacker's recovery phone number to the account
+
+Step 5 — Creates inbox filter deleting security alerts and bank notifications
+
+Step 6 — Consumer eventually changes email password — feels safe
+
+Step 7 — Attacker still has full access via forwarding rule and OAuth token
+          Password change did nothing
+
+Step 8 — Attacker triggers "forgot password" on banking app, PayPal, Amazon
+          Reset emails intercepted before consumer sees them
+
+Step 9 — Consumer locked out of financial accounts
+          Average loss: $1,500–$8,000 (FTC 2024 identity theft data)
+```
+
+**Why RelayShield is the only solution for this persona:**
+
+| Her Risk | What exists today | RelayShield |
+|---|---|---|
+| Email breach — backdoors planted | Google/Apple detect breach, do not check backdoors | Email Security Sweep — 5-step audit before password reset |
+| Forwarding rule installed | No tool checks for this post-breach | Step 1 of sweep — most dangerous, caught first |
+| OAuth tokens granted to attacker | No consumer tool checks this | Step 4 of sweep — survives password reset |
+| Same password on 10 accounts | No tool identifies which other accounts are at risk | Cross-account password risk detection |
+| Breach ignored after alert | Every tool sends one alert and stops | Day 3 / 7 / 14 follow-up until remediation confirmed |
+| Multiple historical breaches — which to fix first | HIBP shows all equally — no prioritisation | Breach severity scoring — told exactly which to fix first |
+| SMS 2FA exposed via SIM swap | No consumer tool monitors carrier layer | SIM lock onboarding during signup + Phase 2 monitoring |
+
+**The consumer sales pitch in one sentence:**
+> *"Google told you your password was in a breach. It did not tell you whether the attacker already planted a backdoor that your password reset will not close. RelayShield checks that first — in your WhatsApp, step by step."*
+
+**Why $14.99/month is justified for this persona:**
+
+The consumer is not paying for breach detection — they can get that free. They are paying for:
+1. The Email Security Sweep — the only tool that checks for backdoors before the password reset
+2. AI-guided remediation in WhatsApp — available at 11pm, no hold queue, plain language
+3. Severity scoring — tells them which of their 10+ breach hits to act on first
+4. Follow-up until actually protected — the one thing every free tool refuses to do
+
+One prevented account takeover saves more than a year of RelayShield fees.
+
+**Target communities to reach this persona:**
+- r/privacy — lead with the forwarding rule insight: "changing your password is not enough"
+- r/personalfinance — frame as account takeover financial risk ($1,500–$8,000 average loss)
+- r/scams — value-first post: "5 things to check in your email after any breach notification"
+- r/technology — the Email Security Sweep technical walkthrough — credibility audience
+- Facebook groups: "Online Privacy", "Identity Theft Support", "Cybersecurity for Beginners"
+- Twitter/X: reply to breach announcement threads with the 5-step sweep as free value
+
+**Validation approach:**
+Ask 3–5 people who have received a Google or Apple breach notification: "Did you change your password?" (Yes.) "Did you check whether they had already set up a forwarding rule?" Watch the confusion. That confusion is the conversion moment. If they ask what a forwarding rule is — they are a paying customer.
+
+---
+
 ### Target Persona — The Mobile-Dependent SMB Owner
 
 **Profile:** Small retail, food service, or service business owner. Runs the business from her phone. Uses Square (or similar mPOS: Toast, Clover, PayPal Zettle) for payment processing. Business bank account is directly connected to the POS system. Has employees or contractors whose credentials also represent risk exposure. Not technical — security is not her domain. Her phone is her business.
@@ -250,7 +350,7 @@ SS7 (Signalling System No. 7) is the 1970s-era protocol routing calls and SMS be
 | **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-employee SIM/eSIM monitoring + authenticator migration flow + admin visibility + priority alerts. Monitor up to **2 email addresses per employee**. |
 | **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + SIM lock onboarding flow + eSIM profile audit + priority support + compliance reporting. Monitor up to **2 email addresses per employee**. |
 
-> 📧 **Email monitoring limits:** Personal Shield — 3 emails (personal + backup + one additional). Business tiers — 2 emails per employee (business address + one additional, e.g. owner's personal address or independent contractor email). Rationale: covers real-world usage without inflating HIBP API costs at scale.
+> 📧 **Email monitoring limits:** Personal Shield — 3 emails (personal + work + backup). Business tiers — 2 emails per employee seat (business address + one personal/backup). Total pool per account: Business Basic 10 (5 seats), Business Shield 20 (10 seats), Business Shield Pro 50 (25 seats). Rationale: 2 per employee covers real-world usage for every tier, keeps HIBP API costs predictable at scale, and leaves room for reputation scoring across the full account pool in a future release.
 
 > 💡 **SIM/eSIM swap monitoring is included in ALL tiers.** Personal Shield receives detection alerts only. Business tiers additionally receive carrier-specific hardening steps, eSIM profile audit guidance, and (Pro) SIM lock onboarding. No competitor offers carrier-layer SIM/eSIM swap protection at any consumer or SMB price point. Validated by first prospective customer (salon owner, Square POS user): *"You identified a problem I didn't know I had. This is brilliant and I want to sign up."*
 
@@ -1570,21 +1670,60 @@ Three tiers, transparent pricing, no hidden fees:
 ## 14. Validation Strategy
 
 ### Community Targets
+
+**Consumer channels — Email Security Sweep angle:**
 | Community | Message Angle |
 |---|---|
-| r/privacy | Telecom-layer threats + WhatsApp remediation |
-| r/personalfinance | Cost of identity theft vs $12/month founding rate |
-| r/cybersecurity | Architecture credibility + exfiltration detection |
+| r/privacy | "Changing your password after a breach is not enough — here are the 5 backdoors to check first" |
+| r/personalfinance | Email account takeover → financial loss ($1,500–$8,000 avg) — cost vs $14.99/month |
+| r/scams | Value-first: "5 things to check in your email after any breach notification" |
+| r/technology | Email Security Sweep technical walkthrough — credibility audience |
+| Facebook: Online Privacy groups | Forwarding rule insight — accessible language, non-technical framing |
+| Facebook: Identity Theft Support | Post-breach guidance — value-first, RelayShield as the follow-through tool |
+| Twitter/X | Reply to breach announcement threads with the 5-step sweep as free value |
+
+**SMB channels — SIM swap / Square angle:**
+| Community | Message Angle |
+|---|---|
 | r/smallbusiness | Square/SIM swap attack chain — business bank account at risk |
 | r/Entrepreneur | Business continuity framing — phone goes dark, sales go elsewhere |
-| r/scams | Value-first: what to do if breached |
+| r/cybersecurity | Architecture credibility + exfiltration detection |
 | r/devops | API key and secret exposure monitoring angle |
 | Square Seller Community | SIM swap → Square takeover education post |
 | Toast / Clover / Zettle communities | Same attack chain, same persona |
 | Local business Facebook groups | Peer-to-peer trust — "this happened to someone I know" angle |
 | LinkedIn | 25-year telecom expertise + mPOS security threat content |
 
-### Mobile-Dependent SMB Outreach Play (Highest Priority)
+---
+
+### Consumer Outreach Play — Email Security Sweep (Highest Priority alongside SMB)
+
+The consumer conversion moment is the forwarding rule insight. Most people have changed a password after a breach notification and assumed they were safe. The revelation that attackers plant backdoors that survive password resets is specific, credible, and immediately actionable.
+
+**Post template for r/privacy, r/scams, r/personalfinance:**
+> *"If you've ever received a breach notification from Google or Apple and changed your password — good. But here's what most people miss.*
+>
+> *Before you change your password, attackers often plant backdoors that survive the reset. The most common ones:*
+>
+> *1. Silent forwarding rule — all your emails are being copied to the attacker. You never notice because they still arrive normally.*
+> *2. Unknown recovery phone number — attacker added their number so they can lock you out any time.*
+> *3. Inbox filter deleting security alerts — your bank's fraud warnings and password reset confirmations go straight to trash.*
+> *4. OAuth app access — attacker granted themselves persistent inbox access that survives your password change entirely.*
+> *5. Active session on unknown device — attacker is still logged in.*
+>
+> *Here's how to check each one: [Gmail / Yahoo / Outlook steps]*
+>
+> *Check forwarding: Gmail → Settings → See all settings → Forwarding and POP/IMAP*
+> *Check recovery options: myaccount.google.com/security*
+> *Check filters: Settings → Filters and Blocked Addresses*
+> *Check app permissions: myaccount.google.com/permissions*
+> *Check active sessions: scroll to bottom of inbox → Details*
+>
+> *Do this BEFORE you reset your password. Changing the lock while the window is open does nothing.*"*
+
+Value-first, no product mention. Comments and DMs asking "is there a tool that does this automatically?" are your first customers.
+
+### Mobile-Dependent SMB Outreach Play (Equal Priority)
 
 This is the highest-conversion outreach opportunity because the threat is concrete, immediate, and completely unaddressed by any existing tool at this price point.
 

@@ -584,6 +584,38 @@ def msg_employee_welcome(admin_tier: str) -> str:
     )
 
 
+def msg_vishing_safe() -> str:
+    return (
+        "✅ *Good. You are prepared.*\n\n"
+        "Keep these rules in mind for any unexpected call:\n"
+        "→ Never confirm personal details to an inbound caller\n"
+        "→ Never read an OTP code — no legitimate company asks for this\n"
+        "→ Hang up and call back on the official number\n"
+        "→ Urgency is the attack — slow down\n\n"
+        "Reply *SWEEP* to run your Email Security Sweep, or *HELP* to see all commands."
+    )
+
+
+def msg_vishing_call() -> str:
+    return (
+        "🚨 *If you believe you have received a vishing call — act now.*\n\n"
+        "*Step 1 — Do not call them back on any number they gave you.*\n"
+        "Look up the official number on the company's website independently.\n\n"
+        "*Step 2 — Did you share any of these?*\n"
+        "→ OTP or verification code → Contact the service immediately to lock your account\n"
+        "→ Bank details → Call your bank's fraud line from the number on your card\n"
+        "→ Account PIN or password → Change it now before doing anything else\n"
+        "→ Remote access granted → Disconnect internet, contact your bank and carrier\n\n"
+        "*Step 3 — Report the call*\n"
+        "→ FTC (US): reportfraud.ftc.gov\n"
+        "→ FCC (carrier impersonation): fcc.gov/consumers/guides/filing-informal-complaint\n"
+        "→ Your carrier fraud line: AT&T 1-800-331-0500 / T-Mobile 1-877-778-2106 / Verizon 1-800-922-0204\n\n"
+        "*Step 4 — Run your Email Security Sweep*\n"
+        "Vishing often runs alongside inbox takeover. Reply *SWEEP* to check for backdoors now.\n\n"
+        "— RelayShield"
+    )
+
+
 def msg_unknown_command() -> str:
     return (
         "I didn't recognise that command.\n\n"
@@ -924,6 +956,16 @@ def handle_active_message(
         )
         return "phone_hardening_sent"
 
+    # --- SAFE (vishing warning acknowledged) ---
+    if body == "SAFE":
+        send_whatsapp(to_number, msg_vishing_safe(), account_sid, auth_token, from_number)
+        return "vishing_safe_ack"
+
+    # --- CALL (user received a suspicious call) ---
+    if body == "CALL":
+        send_whatsapp(to_number, msg_vishing_call(), account_sid, auth_token, from_number)
+        return "vishing_call_reported"
+
     # --- HELP ---
     if body == "HELP":
         send_whatsapp(
@@ -1037,7 +1079,7 @@ def lambda_handler(event, context):
     webhook_url = f"https://{headers.get('host', '')}{raw_path}"
     logger.info("Twilio signature check — url=%s sig=%s", webhook_url, twilio_sig[:10] if twilio_sig else "none")
 
-    if twilio_sig and not verify_twilio_signature(auth_token, twilio_sig, webhook_url, params):
+    if not twilio_sig or not verify_twilio_signature(auth_token, twilio_sig, webhook_url, params):
         logger.warning("Twilio signature verification failed — request rejected. url=%s", webhook_url)
         return {"statusCode": 403, "body": "Invalid Twilio signature"}
 

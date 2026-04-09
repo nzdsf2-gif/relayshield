@@ -104,6 +104,28 @@ HIGH_VALUE_DATA_CLASSES = {
     "security questions and answers",
 }
 
+# Data classes that enable convincing vishing (voice phishing) calls.
+# When any of these are exposed, a vishing preparedness warning is appended.
+VISHING_DATA_CLASSES = {
+    "phone numbers",
+    "physical addresses",
+    "bank account numbers",
+    "partial credit card data",
+    "carrier details",
+    "account numbers",
+    "dates of birth",
+    "government issued ids",
+}
+
+# Identity document exposure → escalate to CRITICAL regardless of breach source.
+# Attacker with SSN, passport, or driver's licence can impersonate the victim
+# on a voice call to financial institutions, carriers, and government agencies.
+IDENTITY_DOCUMENT_DATA_CLASSES = {
+    "social security numbers",
+    "passport numbers",
+    "driver's licence numbers",
+}
+
 # High-risk accounts for cross-account reuse walkthrough
 CROSS_ACCOUNT_SERVICES = [
     ("Gmail / Outlook / Yahoo Mail", "email — the master key to every other account"),
@@ -125,6 +147,7 @@ LOW — Gaming sites, old accounts with minimal PII. Note and monitor.
 SEVERITY BUMP RULES:
 → If "Passwords" appears in exposed data types: bump severity one level (LOW→MEDIUM, MEDIUM→HIGH, HIGH→CRITICAL)
 → If password_manager_user = True AND passwords exposed: severity is HIGH minimum regardless of breach type
+→ If "Social security numbers", "Passport numbers", or "Driver's licence numbers" appear in exposed data types: severity is CRITICAL regardless of breach source. These enable full identity impersonation on a voice call.
 
 FORMATTING (WhatsApp markdown):
 → Use *text* for bold
@@ -139,6 +162,36 @@ Lead with: "⚠️ *X new breaches detected.* Fix in this order:"
 PHONE NUMBER EXPOSURE:
 If "Phone numbers" appears in exposed data types, add:
 "📱 *Your phone number was exposed.* Risks: SIM swap attacks and smishing. Reply *PHONE* for carrier hardening steps."
+
+VISHING WARNING — add when ANY of the following appear in exposed data types:
+Phone numbers, Physical addresses, Bank account numbers, Partial credit card data, Dates of birth, Government issued IDs, Carrier details, Account numbers
+
+Insert this block:
+"☎️ *Vishing (AI voice scam) risk — read this before you get a call.*
+Attackers use this exact data to impersonate your bank, mobile carrier, or a government agency on a phone call — using your real name and details so they sound legitimate.
+
+For the next 30 days, if you receive any unexpected call:
+→ Never confirm personal details to an inbound caller
+→ Never read an OTP code to a caller — no legitimate company ever asks for this
+→ Hang up and call back on the official number from the company's website
+→ If the caller says the matter is urgent, that urgency is the attack
+
+Reply *SAFE* to confirm you have read this, or *CALL* if you have already received a suspicious call."
+
+IDENTITY DOCUMENT ESCALATION — add when "Social security numbers", "Passport numbers", or "Driver's licence numbers" appear:
+Severity is CRITICAL. Add this block immediately after the severity line:
+"🪪 *CRITICAL: Identity document data exposed.*
+Your [SSN / passport number / driver's licence] was in this breach. An attacker with this data can:
+→ Impersonate you by phone to banks, carriers, and government agencies
+→ Open new lines of credit in your name
+→ File fraudulent tax returns or insurance claims
+
+Immediate steps:
+→ Place a *credit freeze* at all three bureaus: Equifax, Experian, TransUnion (free, takes 10 minutes at each bureau's website)
+→ File an identity theft report at identitytheft.gov if fraud has already occurred
+→ Contact your carrier and ask for a verbal passcode on your account
+
+Reply *SAFE* once you have read this, or *CALL* if you believe you have already been targeted."
 
 PASSWORD EXPOSURE — add when "Passwords" appears in exposed data types:
 "🔑 *Your password was exposed.* Treat it as compromised regardless of whether you've changed it.

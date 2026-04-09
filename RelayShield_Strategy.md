@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: March 2026 — Sharpened positioning: response layer focus, Email Security Sweep as flagship, Phase 1 complete (Weeks 1-3)*
+*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection*
 
 ---
 
@@ -573,7 +573,59 @@ When a breach is detected on any account using SMS 2FA, the remediation flow inc
 - Domain spoofing and typosquatting via dnstwist — impersonation early warning
 - Closes the data depth gap with Foretrace while maintaining every delivery advantage
 
-### 8. AI-Native Architecture and Dataset Moat
+### 8. Vishing Preparedness Engine — Phase 1 Enhancement
+**The only identity protection service that connects breach detection to AI voice attack preparedness — for both consumers and businesses.**
+
+**Why this matters now:** AI voice cloning tools cost under $10/month and require under 10 seconds of source audio. AI-powered call centres run fully automated vishing campaigns at scale. The FBI reported $2.9 billion in losses from vishing and BEC combined in 2023. The Aura March 2026 breach — affecting a company with hundreds of security engineers — was caused by a single targeted phone call on one employee. The barrier to a devastating vishing attack is now effectively zero.
+
+**The core RelayShield insight:** Dark web monitoring does not detect an active vishing call — that is not the right framing. What it detects is the breach data that makes vishing calls convincing. A caller who knows your name, address, carrier, and last 4 of your account number sounds legitimate. That data comes from breaches. Detect the breach — warn the consumer before the call happens.
+
+**Consumer vishing alert — triggered automatically on breach detection:**
+
+Activated when a breach exposes data classes used to make vishing calls convincing: phone number, address, carrier details, account numbers, SSN partial.
+
+> *"⚠️ The [breach name] breach exposed your [phone number / address / carrier details]. Attackers use this data to call you pretending to be your bank, mobile carrier, or a government agency — using your real name and details to sound legitimate.*
+>
+> *If you receive any unexpected call in the next 30 days:*
+> *→ Never confirm personal details to an inbound caller*
+> *→ Never read an OTP code to a caller — no legitimate company will ask for this*
+> *→ Hang up and call back on the official number from the company's website*
+> *→ If the caller claims urgent action is needed, that urgency is the attack*
+>
+> *Reply SAFE to confirm you have read this, or CALL if you have already received a suspicious call."*
+
+**Business vishing alert — team-wide, triggered by domain breach:**
+
+Activated when employee credentials or domain data appear in a breach. Admin receives alert plus team briefing to forward.
+
+> *"⚠️ Employee credentials from [domain] were detected in the [breach]. This data is used to run targeted vishing campaigns against employees.*
+>
+> *Your team may receive calls from:*
+> *→ Fake IT helpdesk asking for credentials or remote access*
+> *→ Fake CEO or executive requesting urgent wire transfers*
+> *→ Fake carrier representative requesting account verification*
+> *→ Fake vendor requesting a change of bank account for invoice payments*
+>
+> *Forward this to your team: If any employee receives an unexpected call requesting credentials, payments, or account changes — hang up and verify through a known internal channel before taking any action.*
+>
+> *Reply BRIEF to receive a ready-to-forward team briefing, or TRAINING for a full WhatsApp vishing awareness walkthrough."*
+
+**Personal verification protocol — delivered during onboarding:**
+- **Callback rule:** Never act on inbound calls for credentials or payments — always call back on the official number
+- **OTP rule:** No legitimate company will ever ask you to read out a one-time code
+- **Family safe word:** Establish a personal verification code with trusted family members — AI voice cloning makes this essential
+- **Wire transfer rule:** Any urgent request for a bank transfer from a voice call is fraud until verified through a separate written channel
+
+**Phase 2 — dark web vishing campaign monitoring via Flare API:**
+- Monitor dark web forums for target lists containing monitored emails, domains, or phone numbers packaged for vishing campaigns
+- Detect vishing call scripts impersonating specific banks, carriers, or government agencies
+- Surface OTP interception service listings — real-time tools sold to enable live vishing attacks
+- Alert customers when their data appears in a pre-packaged vishing target list: CRITICAL severity
+
+**Why no competitor does this:**
+Every competitor detects the breach and stops. None connect the breach data to the specific downstream attack it enables. None warn consumers that their carrier details are now in the hands of someone who will call them pretending to be AT&T. None deliver a team-wide business briefing when employee credentials are compromised. RelayShield closes this gap in Phase 1 with no new infrastructure — the breach detection trigger already exists, the WhatsApp delivery already exists, the Claude AI prompt is the only addition.
+
+### 9. AI-Native Architecture and Dataset Moat
 **Every interaction builds a proprietary dataset no competitor can replicate from scratch.**
 
 - AI is the engine, not a bolt-on feature
@@ -1242,8 +1294,17 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - ⬜ Fix empty breach_date field in DynamoDB
 - ⬜ First paying customer (Week 6)
 
+**Phase 1 enhancements — Vishing Preparedness Engine:**
+- ⬜ **Consumer vishing alert** — Claude prompt addition: when breach exposes phone number, address, carrier details, or account numbers → append vishing warning to WhatsApp alert with OTP rule, callback rule, and urgency-as-attack signal
+- ⬜ **Business vishing alert** — domain breach triggers team-wide briefing template covering fake helpdesk, CEO fraud, fake vendor, carrier impersonation scenarios; admin receives alert + ready-to-forward team briefing via WhatsApp
+- ⬜ **Personal verification protocol** — onboarding WhatsApp flow: callback rule, OTP rule, family safe word, wire transfer rule — delivered to every new subscriber during setup
+- ⬜ **SSN/passport/DL vishing escalation** — when these data classes detected in breach, escalate to CRITICAL severity with explicit identity fraud call warning
+
 ### Phase 2 — Deepen the Moat (Months 4-8)
 *Focus: telecom layer, real-time threat intelligence, SMB dashboard. Do not add features that compete with Aura on their ground.*
+
+**Early Phase 2 — Retention & Billing Automation:**
+- ⬜ **Annual upsell webhook** — Stripe `invoice.payment_succeeded` webhook triggers WhatsApp message to subscriber after their 2nd monthly payment offering 10% annual discount with direct portal link. Reduces churn by locking customers into annual plans. Priority: first 10 subscribers.
 
 - **Telecom layer — full implementation:**
   - SIM swap detection and real-time WhatsApp alerts via carrier monitoring
@@ -1257,6 +1318,7 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - Stealer log monitoring via Flare API — real-time credential theft, not just historical breaches
 - Telegram dark web channel monitoring via Flare API — 57K+ channels
 - Dark web marketplace monitoring via Flare API — data listed for sale detection
+- **Vishing campaign monitoring via Flare API** — detect target lists, call scripts, and OTP interception services; CRITICAL alert when monitored email/domain/phone appears in a pre-packaged vishing campaign dataset
 - Secret and API key exposure monitoring via GitGuardian API
 - Domain spoofing and typosquatting detection via dnstwist (free)
 - USPS address change monitoring — alert when postal change of address filed

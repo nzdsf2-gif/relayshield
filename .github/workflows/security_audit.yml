@@ -18,7 +18,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # required by ggshield for full history scanning
+          fetch-depth: 0  # full history required by gitleaks for historical secret scanning
 
       # -----------------------------------------------------------------------
       # 2. Python setup
@@ -38,7 +38,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Install security tools
         run: |
-          pip install bandit safety ggshield
+          pip install bandit safety
 
       # -----------------------------------------------------------------------
       # 4. Bandit — static analysis for Python security issues
@@ -78,11 +78,11 @@ jobs:
             --full-report
 
       # -----------------------------------------------------------------------
-      # 6. GitGuardian — secret scanning
-      #    Requires GITGUARDIAN_API_KEY secret in the repository settings.
+      # 6. Gitleaks — secret scanning (open source, no API key required)
+      #    Scans full git history for accidentally committed secrets.
+      #    Uses GITHUB_TOKEN which is automatically available in all workflows.
       # -----------------------------------------------------------------------
-      - name: Run ggshield secret scan
+      - name: Run gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@v2
         env:
-          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
-        run: |
-          ggshield secret scan repo .
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

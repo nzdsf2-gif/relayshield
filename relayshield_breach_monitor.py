@@ -595,6 +595,15 @@ def generate_breach_alert(
     return build_static_fallback_message(email_address, new_breaches, password_manager_user)
 
 
+def _get_exposed_classes(new_breaches: list[dict]) -> set[str]:
+    """Return the union of all exposed data class names (lowercased) across all breaches."""
+    exposed = set()
+    for b in new_breaches:
+        for dt in b.get("data_types_exposed", []):
+            exposed.add(dt.lower())
+    return exposed
+
+
 def build_static_fallback_message(
     email_address: str,
     new_breaches: list[dict],
@@ -602,7 +611,9 @@ def build_static_fallback_message(
 ) -> str:
     """Static fallback alert used when Claude API is unavailable."""
     pw_exposed = any_passwords_exposed(new_breaches)
+    exposed_classes = _get_exposed_classes(new_breaches)
 
+    # --- Password block ---
     password_block = ""
     if pw_exposed:
         password_block = (
@@ -615,6 +626,35 @@ def build_static_fallback_message(
                 "immediately if it resembles your breached password.\n"
             )
 
+    # --- Identity document block (CRITICAL escalation) ---
+    identity_block = ""
+    identity_hits = exposed_classes & IDENTITY_DOCUMENT_DATA_CLASSES
+    if identity_hits:
+        identity_block = (
+            "\n🪪 *CRITICAL: Identity document data exposed.*\n"
+            "Immediately place a credit freeze at Equifax, Experian, and TransUnion "
+            "(free at each bureau's website — takes 10 minutes).\n"
+            "File an identity theft report at identitytheft.gov if fraud has occurred.\n"
+            "Reply *SAFE* once you have read this.\n"
+        )
+
+    # --- Vishing warning block ---
+    vishing_block = ""
+    vishing_hits = exposed_classes & VISHING_DATA_CLASSES
+    if vishing_hits and not identity_hits:
+        # Identity block already covers vishing escalation — avoid duplication
+        vishing_block = (
+            "\n☎️ *Vishing (AI voice scam) risk.*\n"
+            "This data can be used to impersonate your bank, carrier, or a government "
+            "agency on a phone call. For the next 30 days:\n"
+            "→ Never confirm personal details to an inbound caller\n"
+            "→ Never read an OTP code — no legitimate company asks for this\n"
+            "→ Hang up and call back on the official number\n"
+            "→ Urgency on a call is the attack\n"
+            "Reply *SAFE* to confirm you have read this, or *CALL* if you have already "
+            "received a suspicious call.\n"
+        )
+
     if len(new_breaches) == 1:
         b = new_breaches[0]
         date_part = f" ({b['breach_date']})" if b.get("breach_date") else ""
@@ -625,6 +665,8 @@ def build_static_fallback_message(
             f"🔴 *RelayShield Alert*\n\n"
             f"*{email_address}* was found in the *{b['breach_name']}* breach{date_part}.\n"
             f"Data exposed: {types_str}\n"
+            f"{identity_block}"
+            f"{vishing_block}"
             f"{password_block}\n"
             f"Before resetting your password, reply *SWEEP* for a 5-minute Email Security Sweep.\n\n"
             f"— RelayShield"
@@ -634,6 +676,8 @@ def build_static_fallback_message(
         return (
             f"🔴 *RelayShield Alert*\n\n"
             f"*{email_address}* was found in *{len(new_breaches)} new breaches*: {names}\n"
+            f"{identity_block}"
+            f"{vishing_block}"
             f"{password_block}\n"
             f"Before resetting any passwords, reply *SWEEP* for a 5-minute Email Security Sweep.\n\n"
             f"— RelayShield"

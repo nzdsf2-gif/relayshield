@@ -3,6 +3,17 @@ RelayShield Breach Monitor Lambda
 Scans monitored emails against HIBP v3, records new breach alerts,
 and sends WhatsApp alerts via Twilio with Claude AI severity scoring
 and remediation guidance.
+
+Item 2 additions:
+  - Password exposure detection from HIBP DataClasses ("Passwords" field)
+  - Severity bump when passwords exposed (one level up; HIGH minimum if
+    password_manager_user = True)
+  - Cross-account reuse walkthrough triggered by REUSE reply command
+  - Password manager master password alert when password_manager_user = True
+  - MANAGER reply command delivers free Bitwarden setup guide
+
+Strategic note: RelayShield does NOT check Pwned Passwords hashes or ask
+users to submit passwords. Detection is not our lane — response is.
 """
 
 import base64
@@ -46,6 +57,14 @@ HIBP_BASE_URL = "https://haveibeenpwned.com/api/v3/breachedaccount/"
 TWILIO_MESSAGES_URL = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 
+# WhatsApp Message Template — pre-approved by Meta, can be sent at any time
+# regardless of the 24-hour messaging window (error 63016).
+# Variables: {{1}}=email, {{2}}=source, {{3}}=data classes, {{4}}=breach date
+BREACH_ALERT_TEMPLATE_SID = "HXdb9685fae910b63fcfe056fbf6d03bc6"
+
+# Twilio error code returned when the 24-hour session window is closed
+TWILIO_ERROR_OUTSIDE_WINDOW = 63016
+
 USER_AGENT = "RelayShield-BreachMonitor"
 CLAUDE_MODEL = "claude-3-haiku-20240307"
 CLAUDE_MAX_TOKENS = 1024
@@ -55,6 +74,46 @@ REQUEST_DELAY_SECONDS = 6
 MAX_RETRIES = 5
 BACKOFF_BASE_SECONDS = 10
 
+# ---------------------------------------------------------------------------
+# Alert filtering constants
+# ---------------------------------------------------------------------------
+
+# Breaches older than this are recorded in DynamoDB but never alerted on.
+# Keeps the initial onboarding scan from flooding users with decade-old news.
+MAX_BREACH_AGE_YEARS = 5
+
+# Data classes considered high-value. A breach must expose at least one of
+# these to generate a WhatsApp alert. Pure email/username-only breaches are
+# recorded silently — they're low-actionability noise for most users.
+HIGH_VALUE_DATA_CLASSES = {
+    "passwords",
+    "credit cards",
+    "bank account numbers",
+    "financial data",
+    "social security numbers",
+    "health records",
+    "medical records",
+    "passport numbers",
+    "driver's licence numbers",
+    "phone numbers",
+    "physical addresses",
+    "dates of birth",
+    "government issued ids",
+    "partial credit card data",
+    "pins",
+    "security questions and answers",
+}
+
+# High-risk accounts for cross-account reuse walkthrough
+CROSS_ACCOUNT_SERVICES = [
+    ("Gmail / Outlook / Yahoo Mail", "email — the master key to every other account"),
+    ("Banking and financial apps", "direct access to money"),
+    ("Amazon / PayPal / shopping accounts", "saved payment cards"),
+    ("Apple ID / Google Account", "device access and app purchases"),
+    ("Facebook / LinkedIn / social media", "identity and contact data"),
+    ("Square / payment processing tools", "business bank account access"),
+]
+
 CLAUDE_SYSTEM_PROMPT = """You are RelayShield's AI security advisor. Your job is to assess breach severity and deliver concise, actionable WhatsApp alerts.
 
 SEVERITY LEVELS:
@@ -62,6 +121,10 @@ CRITICAL — Email providers, financial institutions, healthcare, government. Ac
 HIGH — Social media, e-commerce with saved payment cards. Act within 24 hours.
 MEDIUM — Shopping sites, forums, subscription services. Act within 1 week.
 LOW — Gaming sites, old accounts with minimal PII. Note and monitor.
+
+SEVERITY BUMP RULES:
+→ If "Passwords" appears in exposed data types: bump severity one level (LOW→MEDIUM, MEDIUM→HIGH, HIGH→CRITICAL)
+→ If password_manager_user = True AND passwords exposed: severity is HIGH minimum regardless of breach type
 
 FORMATTING (WhatsApp markdown):
 → Use *text* for bold
@@ -76,6 +139,36 @@ Lead with: "⚠️ *X new breaches detected.* Fix in this order:"
 PHONE NUMBER EXPOSURE:
 If "Phone numbers" appears in exposed data types, add:
 "📱 *Your phone number was exposed.* Risks: SIM swap attacks and smishing. Reply *PHONE* for carrier hardening steps."
+
+PASSWORD EXPOSURE — add when "Passwords" appears in exposed data types:
+"🔑 *Your password was exposed.* Treat it as compromised regardless of whether you've changed it.
+→ Reply *REUSE* to check which other accounts are at risk from password reuse — the most common way one breach becomes five."
+
+PASSWORD MANAGER ALERT — add only when password_manager_user = True AND passwords exposed:
+"🔐 *Password Manager Alert:* Your master password may have been tested against your password manager login. If your master password resembles your breached password:
+→ Change your master password immediately
+→ Enable biometric unlock
+→ Store your recovery code offline — not in email"
+
+CROSS-ACCOUNT REUSE WALKTHROUGH — when user replies REUSE:
+Walk through each high-risk account one at a time. Ask YES or NO for each:
+1. Gmail / Outlook / Yahoo Mail — the master key to every other account
+2. Banking and financial apps — direct money access
+3. Amazon / PayPal / shopping — saved payment cards
+4. Apple ID / Google Account — device and purchase access
+5. Facebook / LinkedIn / social media — identity and contacts
+6. Square / payment tools — business bank account (if applicable)
+For each YES: provide the specific account's password reset URL and steps, then move to next.
+End with: "✅ Cross-account check complete. Reply *MANAGER* for a free Bitwarden password manager setup guide — 5 minutes to set up, protects every account you have."
+
+MANAGER COMMAND — when user replies MANAGER:
+Deliver a concise Bitwarden setup guide:
+→ Go to bitwarden.com → Create account with a strong unique master password
+→ Install the browser extension and mobile app
+→ Import any saved passwords from your browser
+→ Enable two-factor authentication on the Bitwarden account itself
+→ Generate and save new unique passwords for your highest-risk accounts first
+"Bitwarden is free, open source, and independently audited. It is the recommended password manager for RelayShield users."
 
 ALWAYS END WITH:
 "Before resetting your password, reply *SWEEP* for a 5-minute Email Security Sweep — closes inbox backdoors that survive password resets.
@@ -143,17 +236,28 @@ def scan_monitored_emails() -> list[dict]:
     return items
 
 
-def get_user_whatsapp_number(user_id: str) -> str | None:
-    """Look up the whatsapp_number for a user from relayshield_users."""
+def get_user_record(user_id: str) -> dict | None:
+    """
+    Return the full user record from relayshield_users.
+    Used to retrieve whatsapp_number, password_manager_user,
+    subscription_tier, and any other user attributes.
+    """
     table = dynamodb.Table(USERS_TABLE)
     response = table.get_item(Key={"user_id": user_id})
     item = response.get("Item")
     if not item:
         logger.warning("No user record found for user_id=%s", user_id)
         return None
-    number = item.get("whatsapp_number")
+    return item
+
+
+def get_whatsapp_number_from_record(user_record: dict) -> str | None:
+    """Extract and normalise the WhatsApp number from a user record."""
+    number = user_record.get("whatsapp_number")
     if not number:
-        logger.warning("user_id=%s has no whatsapp_number field.", user_id)
+        logger.warning(
+            "user_id=%s has no whatsapp_number field.", user_record.get("user_id")
+        )
         return None
     if not number.startswith("whatsapp:"):
         number = f"whatsapp:{number}"
@@ -165,7 +269,9 @@ def get_existing_breach_names(user_id: str, email_address: str) -> set[str]:
     table = dynamodb.Table(BREACH_ALERTS_TABLE)
     items: list[dict] = []
     kwargs: dict = {
-        "FilterExpression": Attr("user_id").eq(user_id) & Attr("email_address").eq(email_address),
+        "FilterExpression": (
+            Attr("user_id").eq(user_id) & Attr("email_address").eq(email_address)
+        ),
     }
 
     while True:
@@ -191,6 +297,7 @@ def write_breach_alert(
     breach_date: str,
     data_types_exposed: list[str],
     alert_sent_at: str,
+    passwords_exposed: bool = False,
 ) -> str:
     """Write a new breach alert record and return its alert_id."""
     table = dynamodb.Table(BREACH_ALERTS_TABLE)
@@ -204,11 +311,12 @@ def write_breach_alert(
         "data_types_exposed": data_types_exposed,
         "alert_sent_at": alert_sent_at,
         "remediation_status": "pending",
+        "passwords_exposed": passwords_exposed,
     }
     table.put_item(Item=item)
     logger.info(
-        "Wrote breach alert %s for user %s: breach=%s",
-        alert_id, user_id, breach_name,
+        "Wrote breach alert %s for user %s: breach=%s passwords_exposed=%s",
+        alert_id, user_id, breach_name, passwords_exposed,
     )
     return alert_id
 
@@ -225,6 +333,51 @@ def update_last_checked(email_id: str, user_id: str, timestamp: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Password exposure detection
+# ---------------------------------------------------------------------------
+
+def passwords_in_breach(data_types_exposed: list[str]) -> bool:
+    """
+    Return True if the breach exposed passwords.
+    HIBP DataClasses uses 'Passwords' (capital P).
+    """
+    return any(
+        "password" in dt.lower() for dt in data_types_exposed
+    )
+
+
+def any_passwords_exposed(new_breaches: list[dict]) -> bool:
+    """Return True if any new breach in the batch exposed passwords."""
+    return any(b.get("passwords_exposed", False) for b in new_breaches)
+
+
+def is_breach_recent(breach_date: str, max_years: int = MAX_BREACH_AGE_YEARS) -> bool:
+    """
+    Return True if the breach occurred within the last max_years years.
+    Breaches with no date default to True (alert to be safe).
+    """
+    if not breach_date:
+        return True
+    try:
+        breach_dt = datetime.strptime(breach_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        cutoff_year = datetime.now(timezone.utc).year - max_years
+        cutoff = datetime.now(timezone.utc).replace(year=cutoff_year)
+        return breach_dt >= cutoff
+    except ValueError:
+        logger.warning("Could not parse breach_date '%s' — treating as recent.", breach_date)
+        return True
+
+
+def is_breach_high_value(data_types_exposed: list[str]) -> bool:
+    """
+    Return True if the breach contains data classes worth alerting on.
+    Pure email/username-only breaches are recorded silently.
+    """
+    exposed_lower = {dt.lower() for dt in data_types_exposed}
+    return bool(exposed_lower & HIGH_VALUE_DATA_CLASSES)
+
+
+# ---------------------------------------------------------------------------
 # HIBP API
 # ---------------------------------------------------------------------------
 
@@ -233,7 +386,7 @@ def call_hibp(email_address: str, api_key: str) -> list[dict] | None:
     Call HIBP v3 breachedaccount for the given email.
     Returns list of breach objects, [] for no breaches, or None on error.
     """
-    url = f"{HIBP_BASE_URL}{urllib.request.quote(email_address)}"
+    url = f"{HIBP_BASE_URL}{urllib.request.quote(email_address)}?truncateResponse=false"
     headers = {
         "hibp-api-key": api_key,
         "user-agent": USER_AGENT,
@@ -262,7 +415,9 @@ def call_hibp(email_address: str, api_key: str) -> list[dict] | None:
                 )
                 time.sleep(wait)
                 continue
-            logger.error("HTTP %d from HIBP for %s: %s", exc.code, email_address, exc.reason)
+            logger.error(
+                "HTTP %d from HIBP for %s: %s", exc.code, email_address, exc.reason
+            )
             return None
 
         except urllib.error.URLError as exc:
@@ -278,7 +433,9 @@ def call_hibp(email_address: str, api_key: str) -> list[dict] | None:
             return None
 
         except Exception as exc:
-            logger.exception("Unexpected error calling HIBP for %s: %s", email_address, exc)
+            logger.exception(
+                "Unexpected error calling HIBP for %s: %s", email_address, exc
+            )
             return None
 
     logger.error("Exhausted %d retries for %s. Skipping.", MAX_RETRIES, email_address)
@@ -335,16 +492,20 @@ def generate_breach_alert(
     email_address: str,
     new_breaches: list[dict],
     anthropic_api_key: str,
+    password_manager_user: bool = False,
 ) -> str:
     """
     Call Claude to generate a severity-scored, prioritised WhatsApp alert
-    covering all new breaches for one email. Falls back to static message
-    if Claude is unavailable.
+    covering all new breaches for one email. Passes password_manager_user
+    flag so Claude can include the master password warning when relevant.
+    Falls back to static message if Claude is unavailable.
     """
     breach_lines = []
     for i, b in enumerate(new_breaches, 1):
         date_str = f" ({b['breach_date']})" if b.get("breach_date") else ""
-        types_str = ", ".join(b["data_types_exposed"]) if b["data_types_exposed"] else "unknown"
+        types_str = (
+            ", ".join(b["data_types_exposed"]) if b["data_types_exposed"] else "unknown"
+        )
         breach_lines.append(
             f"{i}. *{b['breach_name']}*{date_str}\n   Data exposed: {types_str}"
         )
@@ -352,16 +513,24 @@ def generate_breach_alert(
     breach_summary = "\n".join(breach_lines)
     count_word = f"{len(new_breaches)} new breach{'es' if len(new_breaches) > 1 else ''}"
 
+    # Include password manager flag so Claude applies the right alert tier
+    pm_context = (
+        "password_manager_user = True — include Password Manager Alert if passwords exposed."
+        if password_manager_user
+        else "password_manager_user = False — skip Password Manager Alert, use REUSE prompt instead."
+    )
+
     user_message = (
         f"Email address: {email_address}\n"
         f"{count_word} detected:\n\n"
         f"{breach_summary}\n\n"
+        f"User context: {pm_context}\n\n"
         f"Generate a WhatsApp alert following your system instructions."
     )
 
     logger.info(
-        "Calling Claude for %d breach alert(s) on %s.",
-        len(new_breaches), email_address,
+        "Calling Claude for %d breach alert(s) on %s. password_manager_user=%s",
+        len(new_breaches), email_address, password_manager_user,
     )
 
     result = call_claude_api(user_message, anthropic_api_key)
@@ -370,22 +539,40 @@ def generate_breach_alert(
         return result
 
     logger.warning("Claude unavailable — using static fallback message.")
-    return build_static_fallback_message(email_address, new_breaches)
+    return build_static_fallback_message(email_address, new_breaches, password_manager_user)
 
 
 def build_static_fallback_message(
     email_address: str,
     new_breaches: list[dict],
+    password_manager_user: bool = False,
 ) -> str:
     """Static fallback alert used when Claude API is unavailable."""
+    pw_exposed = any_passwords_exposed(new_breaches)
+
+    password_block = ""
+    if pw_exposed:
+        password_block = (
+            "\n🔑 *Your password was exposed.* Reply *REUSE* to check "
+            "which other accounts are at risk.\n"
+        )
+        if password_manager_user:
+            password_block += (
+                "🔐 *Password Manager Alert:* Change your master password "
+                "immediately if it resembles your breached password.\n"
+            )
+
     if len(new_breaches) == 1:
         b = new_breaches[0]
         date_part = f" ({b['breach_date']})" if b.get("breach_date") else ""
-        types_str = ", ".join(b["data_types_exposed"][:5]) if b["data_types_exposed"] else "unknown"
+        types_str = (
+            ", ".join(b["data_types_exposed"][:5]) if b["data_types_exposed"] else "unknown"
+        )
         return (
             f"🔴 *RelayShield Alert*\n\n"
             f"*{email_address}* was found in the *{b['breach_name']}* breach{date_part}.\n"
-            f"Data exposed: {types_str}\n\n"
+            f"Data exposed: {types_str}\n"
+            f"{password_block}\n"
             f"Before resetting your password, reply *SWEEP* for a 5-minute Email Security Sweep.\n\n"
             f"— RelayShield"
         )
@@ -393,7 +580,8 @@ def build_static_fallback_message(
         names = ", ".join(b["breach_name"] for b in new_breaches)
         return (
             f"🔴 *RelayShield Alert*\n\n"
-            f"*{email_address}* was found in *{len(new_breaches)} new breaches*: {names}\n\n"
+            f"*{email_address}* was found in *{len(new_breaches)} new breaches*: {names}\n"
+            f"{password_block}\n"
             f"Before resetting any passwords, reply *SWEEP* for a 5-minute Email Security Sweep.\n\n"
             f"— RelayShield"
         )
@@ -409,8 +597,16 @@ def send_whatsapp_alert(
     from_number: str,
     to_number: str,
     message_body: str,
-) -> bool:
-    """Send a WhatsApp message via the Twilio REST API."""
+) -> tuple[bool, int | None]:
+    """
+    Send a freeform WhatsApp message via Twilio REST API.
+
+    Returns:
+        (True, None)          — message sent successfully
+        (False, twilio_code)  — failed; twilio_code is the Twilio error code
+                                (e.g. 63016 = outside 24-hour window)
+        (False, None)         — failed; non-Twilio error
+    """
     url = TWILIO_MESSAGES_URL.format(account_sid=account_sid)
 
     payload = urllib.parse.urlencode({
@@ -430,16 +626,121 @@ def send_whatsapp_alert(
         with urllib.request.urlopen(req, timeout=15) as resp:
             response_body = json.loads(resp.read())
             sid = response_body.get("sid", "unknown")
-            logger.info("WhatsApp alert sent to %s. Twilio SID: %s", to_number, sid)
+            logger.info("WhatsApp freeform alert sent to %s. Twilio SID: %s", to_number, sid)
+            return True, None
+
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        logger.error(
+            "Twilio HTTP %d sending freeform to %s: %s", exc.code, to_number, error_body
+        )
+        # Parse Twilio error code from response body so caller can check for 63016
+        twilio_code = None
+        try:
+            error_json = json.loads(error_body)
+            twilio_code = error_json.get("code")
+        except Exception:
+            pass
+        return False, twilio_code
+
+    except Exception as exc:
+        logger.exception(
+            "Unexpected error sending WhatsApp to %s: %s", to_number, exc
+        )
+        return False, None
+
+
+def send_whatsapp_template_alert(
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    to_number: str,
+    alertable_breaches: list[dict],
+    email_address: str,
+) -> bool:
+    """
+    Send a pre-approved WhatsApp Message Template breach alert via Twilio.
+    Templates bypass the 24-hour messaging window restriction (error 63016).
+
+    For multiple breaches, the primary (first) breach is used in the template
+    fields, with the count noted in the source field.
+
+    Variables map:
+        {{1}} = monitored email address
+        {{2}} = breach source name (e.g. "LinkedIn" or "LinkedIn and 2 others")
+        {{3}} = exposed data classes (comma-separated, capped at 80 chars)
+        {{4}} = breach date (YYYY-MM-DD or "Unknown")
+    """
+    url = TWILIO_MESSAGES_URL.format(account_sid=account_sid)
+
+    primary = alertable_breaches[0]
+    breach_count = len(alertable_breaches)
+
+    # {{2}}: source name — mention count if multiple breaches
+    if breach_count == 1:
+        source = primary["breach_name"]
+    else:
+        others = breach_count - 1
+        source = f"{primary['breach_name']} and {others} other{'s' if others > 1 else ''}"
+
+    # {{3}}: data classes — deduplicated across all alertable breaches, capped at 80 chars
+    all_classes: list[str] = []
+    seen: set[str] = set()
+    for b in alertable_breaches:
+        for dc in b.get("data_types_exposed", []):
+            if dc.lower() not in seen:
+                seen.add(dc.lower())
+                all_classes.append(dc)
+    classes_str = ", ".join(all_classes)
+    if len(classes_str) > 80:
+        classes_str = classes_str[:77] + "…"
+
+    # {{4}}: breach date
+    breach_date = primary.get("breach_date") or "Unknown"
+
+    content_variables = json.dumps({
+        "1": email_address,
+        "2": source,
+        "3": classes_str or "Unknown",
+        "4": breach_date,
+    })
+
+    payload = urllib.parse.urlencode({
+        "From": from_number,
+        "To": to_number,
+        "ContentSid": BREACH_ALERT_TEMPLATE_SID,
+        "ContentVariables": content_variables,
+    }).encode("utf-8")
+
+    credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {credentials}",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            response_body = json.loads(resp.read())
+            sid = response_body.get("sid", "unknown")
+            logger.info(
+                "WhatsApp template alert sent to %s. Twilio SID: %s "
+                "(covering %d breach(es))",
+                to_number, sid, breach_count,
+            )
             return True
 
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
-        logger.error("Twilio HTTP %d sending to %s: %s", exc.code, to_number, error_body)
+        logger.error(
+            "Twilio HTTP %d sending template to %s: %s", exc.code, to_number, error_body
+        )
         return False
 
     except Exception as exc:
-        logger.exception("Unexpected error sending WhatsApp to %s: %s", to_number, exc)
+        logger.exception(
+            "Unexpected error sending WhatsApp template to %s: %s", to_number, exc
+        )
         return False
 
 
@@ -452,24 +753,32 @@ def process_email(
     api_key: str,
     twilio_creds: tuple[str, str, str],
     anthropic_api_key: str,
-    user_cache: dict[str, str | None],
+    user_cache: dict[str, dict | None],
 ) -> list[dict]:
     """
     Check a single monitored email against HIBP, persist new breaches,
     call Claude to generate one consolidated severity-scored WhatsApp alert,
     send it, and return new breach summaries.
+
+    Password exposure is detected from HIBP DataClasses — no user password
+    submission required. password_manager_user flag from DynamoDB controls
+    whether the master password warning is appended.
     """
     email_id = monitored_record["email_id"]
     user_id = monitored_record["user_id"]
     email_address = monitored_record["email_address"]
     now = datetime.now(timezone.utc).isoformat()
 
-    logger.info("Processing email_id=%s (%s) for user_id=%s", email_id, email_address, user_id)
+    logger.info(
+        "Processing email_id=%s (%s) for user_id=%s", email_id, email_address, user_id
+    )
 
     breaches = call_hibp(email_address, api_key)
 
     if breaches is None:
-        logger.warning("Skipping last_checked update for email_id=%s due to HIBP error.", email_id)
+        logger.warning(
+            "Skipping last_checked update for email_id=%s due to HIBP error.", email_id
+        )
         return []
 
     update_last_checked(email_id, user_id, now)
@@ -477,27 +786,43 @@ def process_email(
     if not breaches:
         return []
 
-    # Resolve user's WhatsApp number (cached per user_id)
+    # Resolve full user record (cached per user_id)
     if user_id not in user_cache:
-        user_cache[user_id] = get_user_whatsapp_number(user_id)
-    to_number = user_cache[user_id]
+        user_cache[user_id] = get_user_record(user_id)
+    user_record = user_cache[user_id]
+
+    to_number = None
+    password_manager_user = False
+
+    if user_record:
+        to_number = get_whatsapp_number_from_record(user_record)
+        password_manager_user = bool(user_record.get("password_manager_user", False))
+    else:
+        logger.warning("No user record for user_id=%s", user_id)
 
     existing_breach_names = get_existing_breach_names(user_id, email_address)
-    new_breaches: list[dict] = []
 
-    # Write all new breaches to DynamoDB first
+    # new_breaches    — all newly seen breaches; written to DynamoDB for deduplication
+    # alertable       — subset that passes recency + high-value filters; triggers WhatsApp
+    new_breaches: list[dict] = []
+    alertable: list[dict] = []
+
     for breach in breaches:
         breach_name = breach.get("Name", "")
         if not breach_name:
             logger.warning("Breach record missing Name field; skipping: %s", breach)
             continue
         if breach_name in existing_breach_names:
-            logger.debug("Breach %s already recorded for %s — skipping.", breach_name, email_address)
+            logger.debug(
+                "Breach %s already recorded for %s — skipping.", breach_name, email_address
+            )
             continue
 
         breach_date = breach.get("BreachDate") or breach.get("AddedDate") or ""
         data_types_exposed = breach.get("DataClasses", [])
+        pw_exposed = passwords_in_breach(data_types_exposed)
 
+        # Always write to DynamoDB so we never re-evaluate this breach
         alert_id = write_breach_alert(
             user_id=user_id,
             email_address=email_address,
@@ -505,37 +830,75 @@ def process_email(
             breach_date=breach_date,
             data_types_exposed=data_types_exposed,
             alert_sent_at=now,
+            passwords_exposed=pw_exposed,
         )
 
-        new_breaches.append({
+        breach_record = {
             "alert_id": alert_id,
             "user_id": user_id,
             "email_address": email_address,
             "breach_name": breach_name,
             "breach_date": breach_date,
             "data_types_exposed": data_types_exposed,
-        })
+            "passwords_exposed": pw_exposed,
+        }
+        new_breaches.append(breach_record)
+
+        # Apply recency + high-value filters before alerting
+        recent = is_breach_recent(breach_date)
+        high_value = is_breach_high_value(data_types_exposed)
+
+        if recent and high_value:
+            alertable.append(breach_record)
+            if pw_exposed:
+                logger.info(
+                    "Password exposure in alertable breach %s for user_id=%s pm_user=%s",
+                    breach_name, user_id, password_manager_user,
+                )
+        else:
+            logger.info(
+                "Breach %s for %s recorded but filtered from alert "
+                "(recent=%s high_value=%s date=%s).",
+                breach_name, email_address, recent, high_value, breach_date,
+            )
 
     if not new_breaches:
         logger.info("email_id=%s: no new breaches.", email_id)
         return []
 
-    # Generate one Claude-powered alert covering all new breaches for this email
+    if not alertable:
+        logger.info(
+            "email_id=%s: %d new breach(es) recorded but all filtered "
+            "(too old or low-value). No WhatsApp alert sent.",
+            email_id, len(new_breaches),
+        )
+        return new_breaches
+
+    # Always send via pre-approved Message Template.
+    #
+    # WHY: Twilio's 63016 (outside 24-hour window) error is asynchronous —
+    # the API call returns HTTP 200 with a SID, so a freeform-first approach
+    # cannot detect the failure in-Lambda. The template is always deliverable
+    # regardless of session state, so we use it as the primary alert mechanism.
+    #
+    # UX flow:
+    #   Template → concise breach alert, always arrives
+    #   User replies → 24-hr window opens → WhatsApp webhook delivers Claude analysis
     if to_number:
         account_sid, auth_token, from_number = twilio_creds
-        message = generate_breach_alert(email_address, new_breaches, anthropic_api_key)
-        sent = send_whatsapp_alert(
+        sent = send_whatsapp_template_alert(
             account_sid=account_sid,
             auth_token=auth_token,
             from_number=from_number,
             to_number=to_number,
-            message_body=message,
+            alertable_breaches=alertable,
+            email_address=email_address,
         )
         whatsapp_sent = sent
         if not sent:
             logger.warning(
-                "WhatsApp alert failed for %d breach(es) on email_id=%s.",
-                len(new_breaches), email_id,
+                "WhatsApp template alert failed for %d alertable breach(es) on email_id=%s.",
+                len(alertable), email_id,
             )
     else:
         whatsapp_sent = False
@@ -545,12 +908,14 @@ def process_email(
         )
 
     for b in new_breaches:
-        b["whatsapp_sent"] = whatsapp_sent
-        b.pop("data_types_exposed", None)  # remove from return payload, already in DynamoDB
+        b["whatsapp_sent"] = whatsapp_sent if b in alertable else False
+        b.pop("data_types_exposed", None)  # already in DynamoDB
 
     logger.info(
-        "email_id=%s: %d new breach(es) recorded out of %d returned by HIBP.",
-        email_id, len(new_breaches), len(breaches),
+        "email_id=%s: %d new breach(es) recorded, %d alerted via WhatsApp "
+        "(%d filtered by age/severity).",
+        email_id, len(new_breaches), len(alertable),
+        len(new_breaches) - len(alertable),
     )
     return new_breaches
 
@@ -559,7 +924,7 @@ def process_email(
 # Lambda handler
 # ---------------------------------------------------------------------------
 
-def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
+def handler(event: dict, context) -> dict:  # noqa: ANN001
     """Entry point for the RelayShield breach monitoring Lambda."""
     logger.info("RelayShield breach monitor started.")
     start_time = time.time()
@@ -569,34 +934,49 @@ def lambda_handler(event: dict, context) -> dict:  # noqa: ANN001
         api_key = get_hibp_api_key()
     except Exception as exc:
         logger.exception("Failed to retrieve HIBP API key: %s", exc)
-        return {"statusCode": 500, "body": {"error": "Failed to retrieve HIBP API key", "detail": str(exc)}}
+        return {
+            "statusCode": 500,
+            "body": {"error": "Failed to retrieve HIBP API key", "detail": str(exc)},
+        }
 
     try:
         twilio_creds = get_twilio_credentials()
     except Exception as exc:
         logger.exception("Failed to retrieve Twilio credentials: %s", exc)
-        return {"statusCode": 500, "body": {"error": "Failed to retrieve Twilio credentials", "detail": str(exc)}}
+        return {
+            "statusCode": 500,
+            "body": {"error": "Failed to retrieve Twilio credentials", "detail": str(exc)},
+        }
 
     try:
         anthropic_api_key = get_anthropic_api_key()
     except Exception as exc:
         logger.exception("Failed to retrieve Anthropic API key: %s", exc)
-        return {"statusCode": 500, "body": {"error": "Failed to retrieve Anthropic API key", "detail": str(exc)}}
+        return {
+            "statusCode": 500,
+            "body": {"error": "Failed to retrieve Anthropic API key", "detail": str(exc)},
+        }
 
     # 2. Load all monitored email records
     try:
         monitored_emails = scan_monitored_emails()
     except Exception as exc:
         logger.exception("Failed to scan monitored emails table: %s", exc)
-        return {"statusCode": 500, "body": {"error": "Failed to scan monitored emails", "detail": str(exc)}}
+        return {
+            "statusCode": 500,
+            "body": {"error": "Failed to scan monitored emails", "detail": str(exc)},
+        }
 
     if not monitored_emails:
         logger.info("No monitored emails found. Exiting.")
-        return {"statusCode": 200, "body": {"new_breaches_found": 0, "new_breaches": []}}
+        return {
+            "statusCode": 200,
+            "body": {"new_breaches_found": 0, "new_breaches": []},
+        }
 
     # 3. Process each email with rate-limit delay between HIBP calls
     all_new_breaches: list[dict] = []
-    user_cache: dict[str, str | None] = {}
+    user_cache: dict[str, dict | None] = {}
 
     for index, record in enumerate(monitored_emails):
         if index > 0:

@@ -1,0 +1,5 @@
+# RelayShield Lambda dependencies
+# All four Lambda files use only boto3 and Python stdlib.
+# Twilio, Anthropic, HIBP, and Stripe APIs are called via raw urllib — no SDKs.
+
+boto3>=1.34.0

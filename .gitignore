@@ -56,3 +56,12 @@ coverage/
 
 # ── Claude Code local settings ─────────────────────────────────────
 .claude/settings.local.json
+
+# ── Lambda deployment packages (build artifacts — not source) ────────
+*.zip
+
+# ── Large binary and media assets ────────────────────────────────────
+*.png
+*.jpg
+*.jpeg
+*.pdf

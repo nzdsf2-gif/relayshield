@@ -114,26 +114,77 @@ Step 9 — Consumer locked out of financial accounts
 | Multiple historical breaches — which to fix first | HIBP shows all equally — no prioritisation | Breach severity scoring — told exactly which to fix first |
 | SMS 2FA exposed via SIM swap | No consumer tool monitors carrier layer | SIM lock onboarding during signup + Phase 2 monitoring |
 
+**The second attack chain — SIM swap + session hijacking → bank account takeover:**
+
+Most consumers believe 2FA protects their bank account. It does not — if the attacker controls their phone number or their authenticated session token.
+
+```
+Step 1 — Breach exposes: email, phone number, date of birth, address
+
+Step 2 — SIM swap: attacker calls carrier, impersonates consumer 
+          using breach PII → ports number to attacker's SIM
+
+Step 3 — Consumer's phone goes silent — assumes network issue
+
+Step 4 — Attacker hits "Forgot Password" on banking app
+          SMS OTP arrives on attacker's device
+          New password set in under 2 minutes
+
+Step 5 — Zelle transfer out — banks rarely reimburse "authorised" 
+          transfers, even when enabled by SIM swap
+          Average loss: $2,000–$15,000
+
+   — OR —
+
+Step 2 — AiTM phishing: attacker uses breached email + password to 
+          run a Tycoon 2FA proxy page
+          Consumer completes login including 2FA
+          Proxy harvests the authenticated session cookie
+
+Step 3 — Attacker replays session cookie from their device
+          No password needed. No 2FA prompt. Full account access.
+          Works on banking apps, Google, Microsoft 365, social media.
+```
+
+**The consumer insight that drives conversion:**
+> *"2FA protects your login. It does not protect your session once you are logged in. And it does not protect your bank account if your phone number is already in a data breach."*
+
+**Why RelayShield is the only solution for this persona:**
+
+| Her Risk | What exists today | RelayShield |
+|---|---|---|
+| Email breach — backdoors planted | Google/Apple detect breach, do not check backdoors | Email Security Sweep — 5-step audit before password reset |
+| Forwarding rule installed | No tool checks for this post-breach | Step 1 of sweep — most dangerous, caught first |
+| OAuth tokens granted to attacker | No consumer tool checks this | Step 4 of sweep — survives password reset |
+| Same password on 10 accounts | No tool identifies which other accounts are at risk | Cross-account password risk detection |
+| Breach ignored after alert | Every tool sends one alert and stops | Day 3 / 7 / 14 follow-up until remediation confirmed |
+| Multiple historical breaches — which to fix first | HIBP shows all equally — no prioritisation | Breach severity scoring — told exactly which to fix first |
+| Phone number exposed → SIM swap → bank takeover | No consumer tool monitors carrier layer | SIM swap detection alert fires before attacker reaches the bank |
+| Session cookie stolen via AiTM phishing (Tycoon 2FA) | No consumer tool warns about session hijacking risk | AiTM awareness block in breach alert + SESSIONS command to revoke active sessions |
+
 **The consumer sales pitch in one sentence:**
-> *"Google told you your password was in a breach. It did not tell you whether the attacker already planted a backdoor that your password reset will not close. RelayShield checks that first — in your WhatsApp, step by step."*
+> *"Your 2FA cannot protect your bank account if your phone number is already in a data breach. RelayShield monitors the full attack chain — from the breach that exposes your data, through the SIM swap that silences your alerts, to the session theft that defeats your 2FA — and walks you through every fix before the attacker gets there."*
 
 **Why $14.99/month is justified for this persona:**
 
 The consumer is not paying for breach detection — they can get that free. They are paying for:
 1. The Email Security Sweep — the only tool that checks for backdoors before the password reset
-2. AI-guided remediation in WhatsApp — available at 11pm, no hold queue, plain language
-3. Severity scoring — tells them which of their 10+ breach hits to act on first
-4. Follow-up until actually protected — the one thing every free tool refuses to do
+2. SIM swap monitoring — carrier-level alert before attacker reaches the bank account
+3. Session hijacking awareness — explicit AiTM warning when breach data enables session theft
+4. AI-guided remediation in WhatsApp — available at 11pm, no hold queue, plain language
+5. Severity scoring — tells them which of their 10+ breach hits to act on first
+6. Follow-up until actually protected — the one thing every free tool refuses to do
 
-One prevented account takeover saves more than a year of RelayShield fees.
+One prevented Zelle transfer reversal saves 3–10 years of RelayShield fees. One prevented account takeover saves more than a year.
 
 **Target communities to reach this persona:**
 - r/privacy — lead with the forwarding rule insight: "changing your password is not enough"
-- r/personalfinance — frame as account takeover financial risk ($1,500–$8,000 average loss)
+- r/personalfinance — frame as bank account takeover risk: "your 2FA doesn't protect your Zelle"
 - r/scams — value-first post: "5 things to check in your email after any breach notification"
-- r/technology — the Email Security Sweep technical walkthrough — credibility audience
+- r/technology — the full attack chain from breach to bank takeover — credibility audience
+- r/banking — SIM swap → Zelle fraud angle; banks won't reimburse authorised transfers
 - Facebook groups: "Online Privacy", "Identity Theft Support", "Cybersecurity for Beginners"
-- Twitter/X: reply to breach announcement threads with the 5-step sweep as free value
+- Twitter/X: reply to breach announcement threads and SIM swap news stories with free value
 
 **Validation approach:**
 Ask 3–5 people who have received a Google or Apple breach notification: "Did you change your password?" (Yes.) "Did you check whether they had already set up a forwarding rule?" Watch the confusion. That confusion is the conversion moment. If they ask what a forwarding rule is — they are a paying customer.

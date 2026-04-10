@@ -6,11 +6,10 @@
 ## HERO SECTION
 
 **Headline:**
-Every security service tells you when you've been breached.
-RelayShield is the only one that fixes it.
+Your 2FA can't protect your bank account if your phone number is already in a data breach.
 
 **Sub-headline:**
-Your credentials are already on the dark web. RelayShield finds them first — scores the risk, closes the backdoors, and walks you through every fix. Step by step. Right in your WhatsApp.
+RelayShield monitors the full attack chain — from the breach that exposes your data, through the SIM swap that silences your alerts, to the session theft that defeats your 2FA. Then walks you through every fix, step by step, right in your WhatsApp.
 
 **Primary CTA:** Secure My Account →
 **Secondary CTA:** See How It Works →
@@ -19,7 +18,41 @@ Your credentials are already on the dark web. RelayShield finds them first — s
 
 ## TRUST SIGNAL (below hero)
 
-> "Built by a 25-year telecom security professional. Already using Aura or Incogni? You have detection. You don't have a response layer. That's what RelayShield is."
+> "Built by a 25-year telecom security professional. Most identity protection tools detect the breach and stop. RelayShield monitors what happens after — the SIM swap, the session hijack, the bank account takeover. That's the attack chain nobody else is watching."
+
+---
+
+## THE ATTACK CHAIN BLOCK
+
+**Header:** The breach is step one. Your bank account is step five.
+
+**Body:**
+Most people think getting a breach notification is the problem. It isn't. The breach is just the starting pistol.
+
+Here's what actually happens after your data is exposed:
+
+```
+Step 1 — Your email, phone number, and date of birth 
+          appear in a data breach. Nobody tells you.
+
+Step 2 — Attacker calls your carrier, impersonates you 
+          using your breach data. Your number is ported 
+          to their SIM in under 10 minutes.
+
+Step 3 — Your phone goes silent. You assume a network issue.
+
+Step 4 — Attacker hits "Forgot Password" on your bank.
+          Your SMS verification code arrives on their phone.
+          New password set. Zelle transfer initiated.
+
+Step 5 — You find out 24–48 hours later. 
+          Your bank says the transfer was "authorised."
+          Average loss: $2,000–$15,000.
+```
+
+> The 2FA you set up to protect your account is only as strong as your phone number. And your phone number is already in a breach database.
+
+**CTA:** Check If Your Data Is Exposed →
 
 ---
 
@@ -32,11 +65,31 @@ Aura alerts you. HIBP alerts you. Your bank alerts you.
 
 Then they all stop.
 
-Nobody tells you that attackers planted backdoors before you even knew you were breached — silent forwarding rules that copy every email you receive, rogue app permissions that survive password resets, recovery email addresses you never added.
+Nobody tells you that attackers plant backdoors before you even knew you were breached — silent forwarding rules that copy every email you receive, rogue app permissions that survive password resets, session cookies stolen after a successful login that defeat your 2FA entirely.
 
 Resetting your password without sweeping for backdoors is like changing your front door lock while leaving a window open.
 
 RelayShield closes the window first.
+
+---
+
+## THE SESSION HIJACKING BLOCK
+
+**Header:** Changed your password? The attacker may still be logged in.
+
+**Sub-header:** A new class of attack called AiTM phishing defeats 2FA without ever touching your password.
+
+**Body:**
+Tools like Tycoon 2FA and EvilProxy sit between you and your real login page. You enter your credentials. You complete your 2FA. The proxy captures your authenticated session token — the cookie that proves you already logged in — and replays it from the attacker's device.
+
+No password needed. No 2FA prompt. Full access.
+
+This is how attackers get into Google accounts, Microsoft 365, and banking apps even when the victim "did everything right."
+
+**What RelayShield does:**
+→ When your breach exposes the data that enables session theft, RelayShield warns you explicitly — not just that you were breached, but that your data can be used to run an AiTM attack against you right now
+→ Reply **SESSIONS** to get a guided audit: active logins, OAuth permissions, unknown devices — everything that needs to be revoked
+→ The breach alert tells you which accounts to prioritise before the attacker does
 
 ---
 
@@ -71,7 +124,7 @@ RelayShield closes the window first.
 Close every backdoor before you reset anything. One wrong step leaves attackers with permanent access even after you change your password.
 
 **2. Remediate**
-AI-powered step-by-step guidance delivered to your WhatsApp. Not a PDF. Not a help article. A conversation that walks you through every action, in the right order, at any hour.
+AI-powered step-by-step guidance delivered to your WhatsApp. Not a PDF. Not a help article. A conversation that walks you through every action — sweep, session revocation, password reset, SIM lock — in the right order, at any hour.
 
 **3. Track**
 RelayShield follows up until you are actually protected. Day 3: did you complete the password reset? Day 7: is remediation still open? Most breaches go unresolved not because people don't care — because nobody followed up.
@@ -82,12 +135,12 @@ RelayShield follows up until you are actually protected. Day 3: did you complete
 
 **Header:** Three steps. One WhatsApp conversation.
 
-1. **RelayShield detects a breach** — daily monitoring across HIBP and dark web sources
-2. **You get a WhatsApp alert** — severity scored CRITICAL / HIGH / MEDIUM / LOW with the specific risk explained
-3. **You reply and we fix it** — sweep, remediate, and track until you are confirmed protected
+1. **RelayShield detects a breach** — daily monitoring across breach databases and carrier-layer signals
+2. **You get a WhatsApp alert** — severity scored CRITICAL / HIGH / MEDIUM / LOW, with the specific downstream attack risk explained in plain English
+3. **You reply and we fix it** — sweep for backdoors, revoke active sessions, reset the right accounts, lock your SIM — all guided, all tracked until confirmed complete
 
-> *"nzdsf@yahoo.com was found in the Wattpad breach (2020). Severity: MEDIUM — social platform, email exposure, phishing risk. Act within 1 week. Reply SWEEP to start your Email Security Sweep before resetting your password."*
-> — Actual RelayShield alert
+> *"Your phone number and home address were exposed in the DataBrokersPT breach (2024). Severity: HIGH — this data is used to impersonate you on a SIM swap call to your carrier. Reply SWEEP to audit your inbox, or SAFE to confirm you've read the SIM swap warning."*
+> — Example RelayShield alert
 
 ---
 
@@ -103,10 +156,12 @@ RelayShield follows up until you are actually protected. Day 3: did you complete
 | **WhatsApp alerts** | ✅ | ✅ | ✅ |
 | **AI severity scoring** | ✅ | ✅ | ✅ |
 | **Email Security Sweep** | ✅ | ✅ | ✅ |
+| **SIM swap monitoring** | ✅ | ✅ | ✅ |
+| **Session hijacking alerts** | ✅ | ✅ | ✅ |
 | **Remediation tracking** | ✅ | ✅ | ✅ |
+| **Vishing preparedness** | ✅ | ✅ | ✅ |
 | **Team dashboard** | — | ✅ | ✅ |
 | **Domain monitoring** | — | ✅ | ✅ |
-| **SIM swap monitoring** | — | — | ✅ |
 | **Priority support** | — | — | ✅ |
 
 ---
@@ -135,8 +190,9 @@ Sign up today and pay the founding rate for your first 3 months.
 
 → No CRM storing your PII — Aura's breach vector
 → No third-party data sharing beyond what monitoring requires
-→ Built by a 25-year telecom security professional who has seen every attack vector
+→ Built by a 25-year telecom security professional who has seen every attack vector from the carrier side
 → WhatsApp-native because that is where people actually respond
+→ Monitors the full chain: breach → SIM swap → session hijack → bank account — not just step one
 → AI that acts — not AI that notifies
 
 ---

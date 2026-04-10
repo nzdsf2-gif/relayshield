@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection*
+*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely.*
 
 ---
 
@@ -625,7 +625,41 @@ Activated when employee credentials or domain data appear in a breach. Admin rec
 **Why no competitor does this:**
 Every competitor detects the breach and stops. None connect the breach data to the specific downstream attack it enables. None warn consumers that their carrier details are now in the hands of someone who will call them pretending to be AT&T. None deliver a team-wide business briefing when employee credentials are compromised. RelayShield closes this gap in Phase 1 with no new infrastructure — the breach detection trigger already exists, the WhatsApp delivery already exists, the Claude AI prompt is the only addition.
 
-### 9. AI-Native Architecture and Dataset Moat
+### 9. Session Hijacking Detection Engine — Phase 1 Enhancement
+**The only identity protection service that warns consumers and SMBs before a stolen session cookie becomes a full account takeover.**
+
+**Why this matters now:** Tycoon 2FA, EvilProxy, and LummaC2 info-stealer malware have made password-based authentication an unreliable security boundary. Attackers no longer need your password. They steal the authenticated session token — the cookie your browser holds after you log in — and replay it from a different machine. No password required. No 2FA prompt triggered. The breach monitoring layer (HIBP, stealer logs) is the only early warning system that exists before the session theft becomes an account takeover.
+
+**The three attack vectors RelayShield detects and warns against:**
+
+**1. AiTM Phishing (Tycoon 2FA / EvilProxy):**
+Adversary-in-the-middle proxy sits between victim and legitimate login page. Victim completes full login including 2FA. Proxy harvests the authenticated session cookie. 2FA is defeated — the attacker has a valid session without ever knowing the password. Tycoon 2FA sells access via Telegram for ~$120/month. No technical expertise required.
+
+**2. Info-Stealer Malware (LummaC2, RedLine, Raccoon, Vidar):**
+Malware installed on victim device extracts all browser-saved credentials AND active session cookies simultaneously. Credentials sold on Telegram markets within hours of theft. Credential appears in stealer logs before any public breach database is updated — caught by Flare API (Phase 2), not HIBP.
+
+**3. OAuth Token Abuse:**
+Attacker tricks victim into granting OAuth permissions to a malicious app. App retains persistent access via refresh token — survives password resets and 2FA changes. Revocation requires explicit OAuth permissions audit.
+
+**Phase 1 — Detection and awareness (no new infrastructure required):**
+- **Session cookie / auth token exposure detection** — Add "Auth tokens" and "Session cookies" to HIGH_VALUE_DATA_CLASSES; when detected in a breach, trigger CRITICAL alert with immediate session revocation steps
+- **AiTM awareness block in breach alerts** — when passwords + email are both exposed in a breach, append a targeted Tycoon 2FA warning: "Attackers use exposed credentials to run phishing sites that defeat your 2FA by stealing your session token — change the password AND revoke all active sessions immediately"
+- **SESSIONS WhatsApp command** — on-demand guided session audit: check active logins (Google, Microsoft, Facebook, Instagram), revoke OAuth tokens, sign out all unknown devices
+- **OAuth token revocation guide** — when a Google or Microsoft-linked account breach is detected, include explicit steps to audit and revoke third-party OAuth app permissions
+
+**Phase 2 — Active session anomaly detection (requires cloud audit log access):**
+- Google Workspace audit log monitoring — detect impossible travel (simultaneous logins from geographically separated IPs), mass email deletion (attacker covering tracks), and new device logins at unusual hours
+- Microsoft 365 audit log monitoring — same pattern; covers SMB teams on M365
+- Concurrent session anomaly alerting — CRITICAL WhatsApp alert when active sessions detected from two or more distinct geographic locations simultaneously
+- Stealer log session token detection via Flare API — extend Flare integration to flag when session cookies (not just credentials) appear in stealer logs; tokens have a shorter exploitation window than passwords — alert must fire within minutes
+
+**SMB opportunity:**
+Every SMB on Google Workspace or Microsoft 365 is exposed. A single stolen session cookie gives an attacker full access to email, files, and connected apps — without triggering any MFA prompt. The session audit capability positions RelayShield as the only SMB tool that catches what 2FA misses. Direct tie-in to the Tycoon 2FA blog post as lead-gen content.
+
+**Why no competitor does this:**
+Aura, Foretrace, and HIBP all stop at credential detection. None warn specifically about session token theft vectors. None deliver a real-time guided session revocation flow via WhatsApp. None connect the breach data to the specific AiTM attack pattern it enables. RelayShield closes this gap in Phase 1 with no new infrastructure.
+
+### 10. AI-Native Architecture and Dataset Moat
 **Every interaction builds a proprietary dataset no competitor can replicate from scratch.**
 
 - AI is the engine, not a bolt-on feature
@@ -1300,6 +1334,12 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - ⬜ **Personal verification protocol** — onboarding WhatsApp flow: callback rule, OTP rule, family safe word, wire transfer rule — delivered to every new subscriber during setup
 - ⬜ **SSN/passport/DL vishing escalation** — when these data classes detected in breach, escalate to CRITICAL severity with explicit identity fraud call warning
 
+**Phase 1 enhancements — Session Hijacking Detection Engine:**
+- ⬜ **Session cookie / auth token data class detection** — add "Auth tokens" and "Session cookies" to HIGH_VALUE_DATA_CLASSES; CRITICAL alert with session revocation steps when detected in any breach
+- ⬜ **AiTM awareness block** — when passwords + email both exposed in breach, append Tycoon 2FA / EvilProxy warning: change password AND revoke all active sessions immediately; explain that 2FA does not protect against session token theft
+- ⬜ **SESSIONS WhatsApp command** — on-demand guided audit: check active logins across Google, Microsoft, Facebook, Instagram; revoke OAuth tokens; sign out unknown devices
+- ⬜ **OAuth token revocation guide** — when Google or Microsoft-linked account breach detected, include explicit steps to audit and revoke third-party OAuth app permissions (myaccount.google.com/permissions, account.microsoft.com/privacy/activity)
+
 ### Phase 2 — Deepen the Moat (Months 4-8)
 *Focus: telecom layer, real-time threat intelligence, SMB dashboard. Do not add features that compete with Aura on their ground.*
 
@@ -1329,6 +1369,11 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - Self-serve account registration — customer-facing signup flow with email verification
 - SSO via Google — OAuth 2.0 login for consumer and SMB onboarding (update Termly privacy policy when implemented)
 - Virtual mailbox address — replace placeholder with permanent business mailing address (Anytime Mailbox or iPostal1)
+- **Session hijacking — active detection layer:**
+  - Google Workspace audit log monitoring — impossible travel detection, mass email deletion, new device logins
+  - Microsoft 365 audit log monitoring — same pattern for SMB teams on M365
+  - Concurrent session anomaly alerting — CRITICAL WhatsApp alert when simultaneous logins detected from geographically separated IPs
+  - Stealer log session token detection via Flare API — extend Flare integration to flag stolen session cookies specifically; short exploitation window requires near-real-time alerting
 
 ### Phase 3 — Monetise the Moat (Months 9-18)
 *Focus: data products, carrier partnerships, platform licensing. Still not credit monitoring or fraud insurance — those are Aura's battlefield, not ours.*

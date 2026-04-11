@@ -102,6 +102,11 @@ HIGH_VALUE_DATA_CLASSES = {
     "partial credit card data",
     "pins",
     "security questions and answers",
+    # Session hijacking additions — auth token exposure is immediately
+    # exploitable without requiring password or 2FA
+    "auth tokens",
+    "session cookies",
+    "authentication tokens",
 }
 
 # Data classes that enable convincing vishing (voice phishing) calls.
@@ -124,6 +129,15 @@ IDENTITY_DOCUMENT_DATA_CLASSES = {
     "social security numbers",
     "passport numbers",
     "driver's licence numbers",
+}
+
+# Session token exposure → immediately exploitable without password or 2FA.
+# Attacker replays the token from a different device to gain full account access.
+# Distinct from credential exposure: revocation must happen before password reset.
+SESSION_HIJACKING_DATA_CLASSES = {
+    "auth tokens",
+    "session cookies",
+    "authentication tokens",
 }
 
 # High-risk accounts for cross-account reuse walkthrough
@@ -178,6 +192,19 @@ For the next 30 days, if you receive any unexpected call:
 
 Reply *SAFE* to confirm you have read this, or *CALL* if you have already received a suspicious call."
 
+SESSION TOKEN ESCALATION — add when "Auth tokens", "Session cookies", or "Authentication tokens" appear in exposed data types:
+Severity is CRITICAL. Add this block immediately after the severity line:
+"🍪 *CRITICAL: Active session tokens exposed.*
+An attacker with your session token can access your accounts RIGHT NOW — no password or 2FA required. They do not need to log in.
+
+Immediate steps (do these BEFORE changing your password):
+→ Google: myaccount.google.com/device-activity — sign out all unknown devices
+→ Google: myaccount.google.com/permissions — revoke all unrecognised apps
+→ Microsoft: account.microsoft.com/privacy/activity — sign out unknown sessions
+→ Change your passwords only AFTER revoking sessions — revoking first forces immediate logout regardless of whether the attacker has your password
+
+Reply *SESSIONS* for a full guided session revocation walkthrough across all major accounts."
+
 IDENTITY DOCUMENT ESCALATION — add when "Social security numbers", "Passport numbers", or "Driver's licence numbers" appear:
 Severity is CRITICAL. Add this block immediately after the severity line:
 "🪪 *CRITICAL: Identity document data exposed.*
@@ -196,6 +223,12 @@ Reply *SAFE* once you have read this, or *CALL* if you believe you have already 
 PASSWORD EXPOSURE — add when "Passwords" appears in exposed data types:
 "🔑 *Your password was exposed.* Treat it as compromised regardless of whether you've changed it.
 → Reply *REUSE* to check which other accounts are at risk from password reuse — the most common way one breach becomes five."
+
+AITM PHISHING WARNING — add when "Passwords" appears in exposed data types (append after the password block above, unless SESSION TOKEN ESCALATION already applied):
+"⚠️ *2FA bypass risk — AiTM phishing (Tycoon 2FA / EvilProxy).*
+Attackers use leaked credentials to create convincing fake login pages that sit between you and the real site. You complete your login including 2FA — the proxy captures your authenticated session token and replays it from the attacker's device. No password needed. No 2FA prompt. Full access.
+→ Only log in to accounts via saved bookmarks or by typing the URL directly — never via a link in an email or text
+→ After changing your password, reply *SESSIONS* to revoke all active sessions across Google, Microsoft, and social media"
 
 PASSWORD MANAGER ALERT — add only when password_manager_user = True AND passwords exposed:
 "🔐 *Password Manager Alert:* Your master password may have been tested against your password manager login. If your master password resembles your breached password:
@@ -589,6 +622,34 @@ def generate_breach_alert(
     result = call_claude_api(user_message, anthropic_api_key)
 
     if result:
+        # Programmatically append security blocks Claude may omit due to token limits
+        # or prompt prioritisation. Checked against result text to avoid duplication.
+        exposed_classes = _get_exposed_classes(new_breaches)
+        pw_exposed = any_passwords_exposed(new_breaches)
+        session_exposed = bool(exposed_classes & SESSION_HIJACKING_DATA_CLASSES)
+
+        # AiTM block — append when passwords exposed and session block not already present.
+        # Session token exposure already instructs users to reply SESSIONS, so skip to
+        # avoid duplicate guidance.
+        if pw_exposed and not session_exposed and "SESSIONS" not in result:
+            result += (
+                "\n\n⚠️ *2FA bypass risk — AiTM phishing (Tycoon 2FA / EvilProxy).*\n"
+                "Attackers use leaked credentials to run fake login pages that steal your "
+                "session token after you complete 2FA — bypassing 2FA entirely.\n"
+                "→ Only log in via saved bookmarks — never via a link in an email or text\n"
+                "→ After resetting your password, reply *SESSIONS* to revoke all active sessions"
+            )
+            logger.info("Appended AiTM phishing warning to Claude response.")
+
+        # Session token block — append when session tokens exposed and not already present.
+        if session_exposed and "SESSIONS" not in result:
+            result += (
+                "\n\n🍪 *CRITICAL: Active session tokens exposed.*\n"
+                "An attacker can access your accounts RIGHT NOW — no password or 2FA needed.\n"
+                "Reply *SESSIONS* immediately for a guided session revocation walkthrough."
+            )
+            logger.info("Appended session token escalation block to Claude response.")
+
         return result
 
     logger.warning("Claude unavailable — using static fallback message.")
@@ -612,6 +673,34 @@ def build_static_fallback_message(
     """Static fallback alert used when Claude API is unavailable."""
     pw_exposed = any_passwords_exposed(new_breaches)
     exposed_classes = _get_exposed_classes(new_breaches)
+
+    # --- Session token block (CRITICAL — check before password block) ---
+    session_block = ""
+    session_hits = exposed_classes & SESSION_HIJACKING_DATA_CLASSES
+    if session_hits:
+        session_block = (
+            "\n🍪 *CRITICAL: Active session tokens exposed.*\n"
+            "An attacker with your session token can access your accounts RIGHT NOW — "
+            "no password or 2FA needed.\n"
+            "Do these steps BEFORE changing your password:\n"
+            "→ Google: myaccount.google.com/device-activity — sign out unknown devices\n"
+            "→ Google: myaccount.google.com/permissions — revoke unknown apps\n"
+            "→ Microsoft: account.microsoft.com/privacy/activity — sign out unknown sessions\n"
+            "Reply *SESSIONS* for a full guided walkthrough.\n"
+        )
+
+    # --- AiTM phishing warning block ---
+    # Only shown when passwords exposed but no session token exposure
+    # (session block already covers revocation — avoid duplication)
+    aitm_block = ""
+    if pw_exposed and not session_hits:
+        aitm_block = (
+            "\n⚠️ *2FA bypass risk — AiTM phishing.*\n"
+            "Leaked passwords are used to create fake login pages (Tycoon 2FA, EvilProxy) "
+            "that steal your session token after you complete 2FA — making 2FA ineffective.\n"
+            "→ Only log in via saved bookmarks — never via a link in an email\n"
+            "→ After resetting your password, reply *SESSIONS* to revoke all active sessions\n"
+        )
 
     # --- Password block ---
     password_block = ""
@@ -665,8 +754,10 @@ def build_static_fallback_message(
             f"🔴 *RelayShield Alert*\n\n"
             f"*{email_address}* was found in the *{b['breach_name']}* breach{date_part}.\n"
             f"Data exposed: {types_str}\n"
+            f"{session_block}"
             f"{identity_block}"
             f"{vishing_block}"
+            f"{aitm_block}"
             f"{password_block}\n"
             f"Before resetting your password, reply *SWEEP* for a 5-minute Email Security Sweep.\n\n"
             f"— RelayShield"
@@ -676,8 +767,10 @@ def build_static_fallback_message(
         return (
             f"🔴 *RelayShield Alert*\n\n"
             f"*{email_address}* was found in *{len(new_breaches)} new breaches*: {names}\n"
+            f"{session_block}"
             f"{identity_block}"
             f"{vishing_block}"
+            f"{aitm_block}"
             f"{password_block}\n"
             f"Before resetting any passwords, reply *SWEEP* for a 5-minute Email Security Sweep.\n\n"
             f"— RelayShield"
@@ -979,8 +1072,11 @@ def process_email(
     # regardless of session state, so we use it as the primary alert mechanism.
     #
     # UX flow:
-    #   Template → concise breach alert, always arrives
-    #   User replies → 24-hr window opens → WhatsApp webhook delivers Claude analysis
+    #   Step 1 — Template → concise breach alert, always arrives
+    #   Step 2 — Claude freeform → detailed severity-scored analysis with AiTM/session
+    #             warnings sent immediately after. Succeeds when an active WhatsApp
+    #             session exists (user recently texted us). Gracefully skipped on 63016.
+    #   Step 3 — User replies → webhook handles SWEEP / SAFE / SESSIONS etc.
     if to_number:
         account_sid, auth_token, from_number = twilio_creds
         sent = send_whatsapp_template_alert(
@@ -997,6 +1093,40 @@ def process_email(
                 "WhatsApp template alert failed for %d alertable breach(es) on email_id=%s.",
                 len(alertable), email_id,
             )
+
+        # Step 2 — Claude freeform follow-up with full severity analysis.
+        # Sent immediately after the template. Works when the user has an active
+        # WhatsApp session (recently messaged us). Gracefully skipped on 63016
+        # (outside window) — template already delivered the core breach notification.
+        if sent:
+            detailed_alert = generate_breach_alert(
+                email_address=email_address,
+                new_breaches=alertable,
+                anthropic_api_key=anthropic_api_key,
+                password_manager_user=password_manager_user,
+            )
+            freeform_sent, twilio_code = send_whatsapp_alert(
+                account_sid=account_sid,
+                auth_token=auth_token,
+                from_number=from_number,
+                to_number=to_number,
+                message_body=detailed_alert,
+            )
+            if freeform_sent:
+                logger.info(
+                    "Claude freeform analysis sent to %s for email_id=%s.",
+                    to_number, email_id,
+                )
+            elif twilio_code == TWILIO_ERROR_OUTSIDE_WINDOW:
+                logger.info(
+                    "Freeform follow-up skipped — no active session (63016). "
+                    "Template delivered. Detailed analysis sent on next user reply."
+                )
+            else:
+                logger.warning(
+                    "Freeform follow-up failed (code=%s) for email_id=%s.",
+                    twilio_code, email_id,
+                )
     else:
         whatsapp_sent = False
         logger.warning(

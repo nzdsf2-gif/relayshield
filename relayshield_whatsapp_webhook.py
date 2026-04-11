@@ -11,9 +11,13 @@ Onboarding state machine:
 
 Reply commands (ACTIVE users):
   SWEEP    — Email Security Sweep instructions
+  RESET    — Strong password guide
   REUSE    — Cross-account password reuse walkthrough (next account in sequence)
   MANAGER  — Bitwarden setup guide
   PHONE    — SIM/eSIM carrier hardening steps
+  SESSIONS — Revoke active sessions and OAuth tokens (Google, Microsoft, social media)
+  SAFE     — Vishing warning acknowledged
+  CALL     — User received a suspicious call
   HELP     — List all available commands
   ADD +1XXXXXXXXXX — Business tier: add employee phone number (admin only)
 
@@ -429,9 +433,12 @@ def msg_help(is_business: bool, is_employee: bool = False) -> str:
         "*Available commands:*\n\n"
         "• *SWEEP* — 5-minute Email Security Sweep (closes backdoors that survive password resets)\n"
         "• *RESET* — Strong password guide (run after completing your Email Security Sweep)\n"
+        "• *SESSIONS* — Revoke active sessions and OAuth tokens across Google, Microsoft, and social media\n"
         "• *REUSE* — Check cross-account password reuse step by step\n"
         "• *MANAGER* — Get a free Bitwarden password manager setup guide\n"
         "• *PHONE* — Carrier hardening steps to protect your phone number from SIM swap\n"
+        "• *SAFE* — Confirm you have read a vishing or session hijacking warning\n"
+        "• *CALL* — You received a suspicious call — get immediate steps\n"
     )
     if is_business and not is_employee:
         commands += "• *ADD +1XXXXXXXXXX* — Add a team member for monitoring\n"
@@ -612,6 +619,41 @@ def msg_vishing_call() -> str:
         "→ Your carrier fraud line: AT&T 1-800-331-0500 / T-Mobile 1-877-778-2106 / Verizon 1-800-922-0204\n\n"
         "*Step 4 — Run your Email Security Sweep*\n"
         "Vishing often runs alongside inbox takeover. Reply *SWEEP* to check for backdoors now.\n\n"
+        "— RelayShield"
+    )
+
+
+def msg_sessions() -> str:
+    """
+    Guided active session revocation across Google, Microsoft, and social media.
+    Triggered by SESSIONS command or when session token exposure detected in a breach.
+    Critical ordering note: revoke BEFORE changing password so attacker is forced
+    out immediately regardless of whether they already have the password.
+    """
+    return (
+        "🔐 *Active Session Audit — revoke access before an attacker uses it*\n\n"
+        "A stolen session token gives full account access — no password or 2FA needed. "
+        "Complete all 4 steps in order.\n\n"
+        "*Step 1 — Google: sign out unknown devices*\n"
+        "→ myaccount.google.com/device-activity\n"
+        "→ Sign out of every device you don't recognise\n\n"
+        "*Step 2 — Google: revoke third-party app access*\n"
+        "→ myaccount.google.com/permissions\n"
+        "→ Remove any app you don't recognise or no longer use\n\n"
+        "*Step 3 — Microsoft: sign out unknown sessions*\n"
+        "→ account.microsoft.com/privacy/activity\n"
+        "→ Sign out of all unknown sessions\n"
+        "→ account.microsoft.com/permissions → remove unknown apps\n\n"
+        "*Step 4 — Social media*\n"
+        "Facebook: Settings → Security and Login → Where You're Logged In\n"
+        "Instagram: Settings → Security → Login Activity\n"
+        "→ Log out of all sessions you don't recognise\n\n"
+        "⚠️ *Complete steps 1–3 BEFORE changing your password.*\n"
+        "Revoking the session forces the attacker out immediately.\n"
+        "Changing the password first does nothing if they already have your session token.\n\n"
+        "✅ *Session audit complete.*\n\n"
+        "Reply *SWEEP* to also check for email backdoors (forwarding rules, rogue recovery options).\n"
+        "Reply *HELP* to see all available commands.\n\n"
         "— RelayShield"
     )
 
@@ -956,6 +998,11 @@ def handle_active_message(
         )
         return "phone_hardening_sent"
 
+    # --- SESSIONS (active session revocation walkthrough) ---
+    if body == "SESSIONS":
+        send_whatsapp(to_number, msg_sessions(), account_sid, auth_token, from_number)
+        return "sessions_audit_sent"
+
     # --- SAFE (vishing warning acknowledged) ---
     if body == "SAFE":
         send_whatsapp(to_number, msg_vishing_safe(), account_sid, auth_token, from_number)
@@ -1033,7 +1080,7 @@ def handle_active_message(
 # Lambda handler
 # ---------------------------------------------------------------------------
 
-def lambda_handler(event, context):
+def handler(event, context):
     """
     Entry point for API Gateway → Lambda (Twilio inbound webhook).
 

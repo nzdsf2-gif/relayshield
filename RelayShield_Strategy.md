@@ -1386,10 +1386,12 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - ⬜ **SSN/passport/DL vishing escalation** — when these data classes detected in breach, escalate to CRITICAL severity with explicit identity fraud call warning
 
 **Phase 1 enhancements — Session Hijacking Detection Engine:**
-- ⬜ **Session cookie / auth token data class detection** — add "Auth tokens" and "Session cookies" to HIGH_VALUE_DATA_CLASSES; CRITICAL alert with session revocation steps when detected in any breach
-- ⬜ **AiTM awareness block** — when passwords + email both exposed in breach, append Tycoon 2FA / EvilProxy warning: change password AND revoke all active sessions immediately; explain that 2FA does not protect against session token theft
-- ⬜ **SESSIONS WhatsApp command** — on-demand guided audit: check active logins across Google, Microsoft, Facebook, Instagram; revoke OAuth tokens; sign out unknown devices
-- ⬜ **OAuth token revocation guide** — when Google or Microsoft-linked account breach detected, include explicit steps to audit and revoke third-party OAuth app permissions (myaccount.google.com/permissions, account.microsoft.com/privacy/activity)
+- ✅ **Session cookie / auth token data class detection** — "Auth tokens", "Session cookies", "Authentication tokens" added to HIGH_VALUE_DATA_CLASSES; CRITICAL alert with session revocation steps when detected in any breach
+- ✅ **AiTM awareness block** — when passwords exposed in breach, Tycoon 2FA / EvilProxy warning appended to Claude response programmatically (reliability guard ensures it appears regardless of Claude's editorial choices)
+- ✅ **SESSIONS WhatsApp command** — 4-step guided session revocation: Google device activity, Google OAuth permissions, Microsoft sessions, social media; ordering enforces revocation before password reset
+- ✅ **OAuth token revocation guide** — included in SESSIONS command with direct URLs (myaccount.google.com/permissions, account.microsoft.com/privacy/activity)
+- ✅ **Two-message breach alert architecture** — template (always delivered, bypasses 24hr session window) + Claude freeform follow-up (sent immediately when active session exists; gracefully skipped on 63016)
+- ⬜ **Auto-send Claude analysis on first reply** — when an ACTIVE user messages after a new breach was detected and no freeform follow-up was sent (63016 at alert time), webhook auto-sends the full Claude analysis before handling their command. Ensures the detailed AiTM/session analysis is never more than one reply away regardless of session state
 
 ### Phase 2 — Deepen the Moat (Months 4-8)
 *Focus: telecom layer, real-time threat intelligence, SMB dashboard. Do not add features that compete with Aura on their ground.*

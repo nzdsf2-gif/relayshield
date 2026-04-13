@@ -2004,6 +2004,17 @@ Post on r/personalfinance and r/privacy:
 
 ## 15. 6-Week MVP Build Plan
 
+### 🚨 Launch Showstoppers — Must Complete Before First Paying Customer
+
+| # | Item | Status |
+|---|---|---|
+| 1 | **LLC formation** — File RelayShield LLC with Massachusetts Secretary of State ($500 at corp.sec.state.ma.us). Personal assets are unprotected until this is done. | ⬜ Blocking |
+| 2 | **Tech E&O insurance** — Obtain policy from Coalition or Embroker before customer #1 pays (~$600–$900/year). Security product E&O exposure begins at first paid subscriber. | ⬜ Blocking |
+| 3 | **EIN** — Obtain from IRS (free, instant at irs.gov). Required for business bank account and tax reporting. | ⬜ Blocking |
+| 4 | **Business bank account** — Open dedicated account (Mercury recommended). LLC liability shield is weakened if business and personal funds are commingled. | ⬜ Blocking |
+
+---
+
 | Week | Milestone | Hours | Status |
 |---|---|---|---|
 | 1 | Breach detection engine (HIBP + Lambda + DynamoDB) | 5 | ✅ Complete |

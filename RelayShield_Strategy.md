@@ -1918,6 +1918,33 @@ Post on r/personalfinance and r/privacy:
 
 *RelayShield sells protection. Our own security posture must be beyond reproach. This section tracks the hardening work required to operate a credible security company.*
 
+### Tier 0 — Immediate (Before First Paying Customer) — Legal & Insurance
+
+**LLC Formation**
+- ⬜ Form RelayShield LLC in Massachusetts via Massachusetts Secretary of State — filing fee $500 online at corp.sec.state.ma.us; personal assets unprotected until this is done
+- ⬜ Obtain EIN from IRS (irs.gov/businesses/small-businesses-self-employed/apply-for-an-employer-identification-number-ein-online) — free, instant, required for business bank account
+- ⬜ Open a dedicated business bank account — must be separate from personal finances for LLC liability shield to hold
+- ⬜ Draft a single-member Operating Agreement — not required in MA but recommended; protects LLC status if ever challenged
+
+**Terms of Service & Acceptance**
+- ✅ Privacy Policy published (Google Docs, linked from landing page)
+- ✅ Terms of Service published (Google Docs, linked from landing page — separate from Privacy Policy)
+- ⬜ Add ToS acceptance text to Stripe Payment Link (custom text field) — binds users to ToS at point of payment
+- ⬜ Confirm ToS liability cap language is in place: 3-month fee cap + $50 floor + consequential damages exclusion
+
+**Cyber Insurance**
+- ⬜ Get Tech E&O quote from Coalition (coalition.com) or Embroker (embroker.com) — target: policy active before customer #1 pays; estimated $600–$900/year
+- ⬜ Sign policy before customer #2 — non-negotiable threshold
+
+**Insurance Triggers (standing rules — review at each milestone):**
+| Trigger | Action |
+|---|---|
+| First paying customer | Tech E&O policy must be active |
+| $500/mo MRR (~33 customers) | Evaluate E&O + Cyber bundle ($1,200–$1,800/year) |
+| Any B2B / SMB contract signed | Confirm policy covers business clients before signing |
+| 500+ users | Add standalone Cyber Liability for breach notification cost coverage |
+| Press coverage or any public mention | Review coverage limits — exposure increases claim risk |
+
 ### Tier 1 — Immediate (Before First Paying Customer)
 
 **Secrets & Credential Hygiene**

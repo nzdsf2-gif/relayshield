@@ -1924,7 +1924,7 @@ Post on r/personalfinance and r/privacy:
 - ✅ Form RelayShield LLC in Massachusetts via Massachusetts Secretary of State — approved April 2026
 - ⬜ Obtain EIN from IRS (irs.gov/businesses/small-businesses-self-employed/apply-for-an-employer-identification-number-ein-online) — free, instant, required for business bank account
 - ⬜ Open a dedicated business bank account — must be separate from personal finances for LLC liability shield to hold
-- ⬜ Draft a single-member Operating Agreement — not required in MA but recommended; protects LLC status if ever challenged
+- ✅ Draft a single-member Operating Agreement — signed and stored April 2026
 
 **Terms of Service & Acceptance**
 - ✅ Privacy Policy published (Google Docs, linked from landing page)
@@ -2010,8 +2010,8 @@ Post on r/personalfinance and r/privacy:
 |---|---|---|
 | 1 | **LLC formation** — File RelayShield LLC with Massachusetts Secretary of State ($500 — go to www.sec.state.ma.us → Corporations Division → File Online → Domestic LLC → Certificate of Organization). Personal assets are unprotected until this is done. | ✅ Approved — April 2026 |
 | 2 | **Tech E&O insurance** — Obtain policy from Coalition or Embroker before customer #1 pays (~$600–$900/year). Security product E&O exposure begins at first paid subscriber. | ⬜ Blocking |
-| 3 | **EIN** — Obtain from IRS (free, instant at irs.gov). Required for business bank account and tax reporting. | ⬜ Blocking |
-| 4 | **Business bank account** — Open dedicated account (Mercury recommended). LLC liability shield is weakened if business and personal funds are commingled. | ⬜ Blocking |
+| 3 | **EIN** — Obtain from IRS (free, instant at irs.gov). Required for business bank account and tax reporting. | ✅ Complete |
+| 4 | **Business bank account** — Open dedicated account (Mercury recommended). LLC liability shield is weakened if business and personal funds are commingled. | ⏳ Mercury application pending |
 
 ---
 
@@ -2082,7 +2082,7 @@ When SMB revenue justifies a separate buyer journey:
 
 ### On First Paying Customer — Admin Tasks
 - ⬜ Set up virtual mailbox — recommended provider: Anytime Mailbox or iPostal1 (~$10/month). Use for Stripe customer support address and business mailing address. Complete before or on first customer acquisition.
-- ⬜ Obtain EIN (Employer Identification Number) from IRS — free, apply at irs.gov, used as tax identity number for business income reporting. Complete before or on first customer acquisition.
+- ✅ Obtain EIN (Employer Identification Number) from IRS — complete
 - ✅ Google Voice set up — number +13392987368, inbox at voice.google.com, linked to relayshieldadmin@gmail.com. Added as recovery phone in Google Security. Updated as Stripe customer support number. Personal mobile removed from relayshieldadmin@gmail.com account.
 - ⬜ Set up custom billing domain — replace billing.stripe.com with billing.relayshield.net. Requires DNS configuration in Namecheap. Complete within first month of paid subscribers.
 - ⬜ Create brand assets — minimum required: logo/wordmark, primary brand color (suggested: navy #0F2D52 + electric blue #0066FF), favicon 32x32px. Use Canva (free). Apply to Stripe branding settings and Carrd landing page. Complete before or on first customer acquisition.

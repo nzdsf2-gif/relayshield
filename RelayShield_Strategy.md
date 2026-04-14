@@ -397,11 +397,12 @@ SS7 (Signalling System No. 7) is the 1970s-era protocol routing calls and SMS be
 | Tier | Target | Seats | Monthly | Per Seat | Key Differentiator |
 |---|---|---|---|---|---|
 | **Personal Shield** | Consumers | 1 | $14.99 | $14.99 | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved + SIM/eSIM swap detection alert. Monitor up to **3 email addresses**. |
-| **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM/eSIM swap detection + carrier hardening steps + team dashboard + domain monitoring. Monitor up to **2 email addresses per employee**. |
-| **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-employee SIM/eSIM monitoring + authenticator migration flow + admin visibility + priority alerts. Monitor up to **2 email addresses per employee**. |
-| **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + SIM lock onboarding flow + eSIM profile audit + priority support + compliance reporting. Monitor up to **2 email addresses per employee**. |
+| **Business Starter** | Sole proprietors, single-owner businesses | 1 | $19.99 | $19.99 | All Personal Shield features + business-framed alert language + 3 monitored email addresses (personal + business + backup). Designed for owners whose business and personal identity are the same attack surface. No seat management. |
+| **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM/eSIM swap detection + carrier hardening steps + account management dashboard + domain monitoring. Monitor up to **2 email addresses per seat**. |
+| **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-seat SIM/eSIM monitoring + authenticator migration flow + aggregate risk visibility + priority alerts. Monitor up to **2 email addresses per seat**. |
+| **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + SIM lock onboarding flow + eSIM profile audit + priority support + compliance reporting. Monitor up to **2 email addresses per seat**. |
 
-> 📧 **Email monitoring limits:** Personal Shield — 3 emails (personal + work + backup). Business tiers — 2 emails per employee seat (business address + one personal/backup). Total pool per account: Business Basic 10 (5 seats), Business Shield 20 (10 seats), Business Shield Pro 50 (25 seats). Rationale: 2 per employee covers real-world usage for every tier, keeps HIBP API costs predictable at scale, and leaves room for reputation scoring across the full account pool in a future release.
+> 📧 **Email monitoring limits:** Personal Shield — 3 emails. Business Starter — 3 emails (sole owner, same as personal). Business Basic/Shield/Pro — 2 emails per seat (business address + one personal/backup). Total pool per account: Business Basic 10 (5 seats), Business Shield 20 (10 seats), Business Shield Pro 50 (25 seats). Rationale: 2 per seat covers real-world usage, keeps HIBP API costs predictable at scale, and leaves room for reputation scoring across the full account pool in a future release.
 
 > 💡 **SIM/eSIM swap monitoring is included in ALL tiers.** Personal Shield receives detection alerts only. Business tiers additionally receive carrier-specific hardening steps, eSIM profile audit guidance, and (Pro) SIM lock onboarding. No competitor offers carrier-layer SIM/eSIM swap protection at any consumer or SMB price point. Validated by first prospective customer (salon owner, Square POS user): *"You identified a problem I didn't know I had. This is brilliant and I want to sign up."*
 
@@ -411,6 +412,7 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 | Tier | Monthly | Annual (10% off) | Annual Total | Savings |
 |---|---|---|---|---|
 | **Personal Shield** | $14.99 | $13.49/month | $161.88/year | $18/year |
+| **Business Starter** | $19.99 | $17.99/month | $215.88/year | $24/year |
 | **Business Basic** | $89.99 | $80.99/month | $971.88/year | $108/year |
 | **Business Shield** | $139.99 | $125.99/month | $1,511.88/year | $168/year |
 | **Business Shield Pro** | $299.99 | $269.99/month | $3,239.88/year | $360/year |
@@ -433,6 +435,7 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 | Product | Price | Payment Link | Status |
 |---|---|---|---|
 | Personal Shield | $14.99/month | https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00 | ✅ Active |
+| Business Starter | $19.99/month | ⬜ Pending — create in Stripe | ⬜ Pending |
 | Business Basic | $89.99/month | https://buy.stripe.com/aFa8wQ3Iab1b8KM9830Ny03 | ✅ Active |
 | Business Shield | $139.99/month | https://buy.stripe.com/8x24gA6Um2uF2mo9830Ny04 | ✅ Active |
 | Business Shield Pro | $299.99/month | https://buy.stripe.com/3cIeVeceG8T3f9a4RN0Ny05 | ✅ Active |
@@ -441,6 +444,7 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 | Product | Price | Payment Link | Status |
 |---|---|---|---|
 | Personal Shield — Annual | $161.88/year | https://buy.stripe.com/eVqbJ26Um1qBbWY3NJ0Ny06 | ✅ Active |
+| Business Starter — Annual | $215.88/year | ⬜ Pending — create in Stripe | ⬜ Pending |
 | Business Basic — Annual | $971.88/year | https://buy.stripe.com/eVqfZifqSd9j1ikfwr0Ny07 | ✅ Active |
 | Business Shield — Annual | $1,511.88/year | https://buy.stripe.com/cNiaEY0vYednaSUfwr0Ny08 | ✅ Active |
 | Business Shield Pro — Annual | $3,239.88/year | https://buy.stripe.com/6oU5kE0vY5GR4uwbgb0Ny09 | ✅ Active |
@@ -605,13 +609,25 @@ This is genuine prevention layered on top of monitoring. Monitoring then catches
 **Authenticator app migration — built into breach remediation:**
 When a breach is detected on any account using SMS 2FA, the remediation flow includes a carrier-specific step to migrate to an authenticator app (Google Authenticator, Authy). Delivered per platform — Gmail, Square, banking apps — via WhatsApp. Closes the SMS 2FA exposure window regardless of whether a SIM swap has occurred.
 
-### 6. SMB Team Dashboard — Phase 1
+### 6. SMB Account Management Dashboard — Phase 2
 **The only purpose-built breach response product for teams under 25 people, priced under $200/month.**
 
-- Monitor all employee emails from a single admin account
-- Per-employee breach detection and WhatsApp remediation flows
-- Admin visibility across the whole workforce
-- Domain-level scanning — catch new employee breaches as they join
+RelayShield's dashboard is an **account management tool, not an employer surveillance tool.** Alerts go directly to each individual's WhatsApp — the owner never sees breach details or personal data. This privacy-respecting design works across employees, contractors, partners, and family members equally.
+
+**What the owner sees:**
+- Seat usage and onboarding status (who has set up, who hasn't)
+- Aggregate risk indicators (e.g. "2 team members have unresolved alerts") — without naming individuals or breach details
+- Billing and subscription management
+- Add / remove seats
+
+**What the owner cannot see (by design):**
+- Individual breach details or which services were exposed
+- Personal data of any seat holder
+- WhatsApp conversations or remediation actions taken
+
+**Why this matters competitively:** Flare and employer-focused competitors route breach data through the employer. RelayShield routes it to the individual — making it the only product that works for businesses with contractors or partners where employer surveillance would be legally or ethically problematic.
+
+- Domain-level scanning — catch new seat holder breaches as they join
 - No SMB-priced competitor serves this segment with a purpose-built product
 
 ### 7. Exfiltration Detection — Phase 2
@@ -1213,7 +1229,7 @@ The trust damage is real — an identity protection company that cannot protect 
 | No conversational AI remediation | Step-by-step Claude-powered guidance |
 | No telecom / SIM swap layer | Core Phase 2 capability |
 | No SMS / phone number exposure | HIBP DataClasses detection |
-| Employer cannot see employee data | RelayShield SMB admin dashboard gives team visibility |
+| Employer cannot see employee data | RelayShield routes alerts to individuals — owner sees aggregate status only, never individual breach details |
 | Requires employer adoption (B2B2E only) | RelayShield reaches individuals directly — no employer needed |
 | No breach severity scoring | Critical/High/Medium/Low per breach |
 | No remediation follow-up tracking | Day 1/3/7/14 follow-up until resolved |

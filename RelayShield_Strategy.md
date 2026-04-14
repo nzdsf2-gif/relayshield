@@ -435,7 +435,7 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 | Product | Price | Payment Link | Status |
 |---|---|---|---|
 | Personal Shield | $14.99/month | https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00 | ✅ Active |
-| Business Starter | $19.99/month | ⬜ Pending — create in Stripe | ⬜ Pending |
+| Business Starter | $19.99/month | https://buy.stripe.com/fZucN6ceGglv3qs9830Ny0a | ✅ Active |
 | Business Basic | $89.99/month | https://buy.stripe.com/aFa8wQ3Iab1b8KM9830Ny03 | ✅ Active |
 | Business Shield | $139.99/month | https://buy.stripe.com/8x24gA6Um2uF2mo9830Ny04 | ✅ Active |
 | Business Shield Pro | $299.99/month | https://buy.stripe.com/3cIeVeceG8T3f9a4RN0Ny05 | ✅ Active |
@@ -444,7 +444,7 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 | Product | Price | Payment Link | Status |
 |---|---|---|---|
 | Personal Shield — Annual | $161.88/year | https://buy.stripe.com/eVqbJ26Um1qBbWY3NJ0Ny06 | ✅ Active |
-| Business Starter — Annual | $215.88/year | ⬜ Pending — create in Stripe | ⬜ Pending |
+| Business Starter — Annual | $215.88/year | https://buy.stripe.com/fZubJ2emO0mx9OQ9830Ny0b | ✅ Active |
 | Business Basic — Annual | $971.88/year | https://buy.stripe.com/eVqfZifqSd9j1ikfwr0Ny07 | ✅ Active |
 | Business Shield — Annual | $1,511.88/year | https://buy.stripe.com/cNiaEY0vYednaSUfwr0Ny08 | ✅ Active |
 | Business Shield Pro — Annual | $3,239.88/year | https://buy.stripe.com/6oU5kE0vY5GR4uwbgb0Ny09 | ✅ Active |

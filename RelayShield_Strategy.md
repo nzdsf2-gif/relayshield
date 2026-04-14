@@ -1939,7 +1939,7 @@ Post on r/personalfinance and r/privacy:
 **LLC Formation**
 - ✅ Form RelayShield LLC in Massachusetts via Massachusetts Secretary of State — approved April 2026
 - ⬜ Obtain EIN from IRS (irs.gov/businesses/small-businesses-self-employed/apply-for-an-employer-identification-number-ein-online) — free, instant, required for business bank account
-- ⬜ Open a dedicated business bank account — must be separate from personal finances for LLC liability shield to hold
+- ✅ Open a dedicated business bank account — Relay Financial approved April 2026
 - ✅ Draft a single-member Operating Agreement — signed and stored April 2026
 
 **Terms of Service & Acceptance**
@@ -2027,7 +2027,7 @@ Post on r/personalfinance and r/privacy:
 | 1 | **LLC formation** — File RelayShield LLC with Massachusetts Secretary of State ($500 — go to www.sec.state.ma.us → Corporations Division → File Online → Domestic LLC → Certificate of Organization). Personal assets are unprotected until this is done. | ✅ Approved — April 2026 |
 | 2 | **Tech E&O insurance** — Obtain policy from Coalition or Embroker before customer #1 pays (~$600–$900/year). Security product E&O exposure begins at first paid subscriber. | ⬜ Blocking |
 | 3 | **EIN** — Obtain from IRS (free, instant at irs.gov). Required for business bank account and tax reporting. | ✅ Complete |
-| 4 | **Business bank account** — Open dedicated account (Mercury recommended). LLC liability shield is weakened if business and personal funds are commingled. | ⏳ Mercury application pending |
+| 4 | **Business bank account** — Open dedicated account. LLC liability shield is weakened if business and personal funds are commingled. | ✅ Approved — Relay Financial, April 2026 |
 
 ---
 

@@ -493,13 +493,15 @@ RelayShield Phase 2 delivers all of this in one product, one WhatsApp conversati
 
 ### Per-Seat Pricing Rationale
 
-Business pricing is justified on value delivered per employee, not just headcount:
+Business pricing is justified on value delivered per seat, not just headcount:
 
 | Tier | Price | Seats | Per Seat | Comparable SaaS |
 |---|---|---|---|---|
 | Personal Shield | $14.99/mo | 1 | $14.99 | Baseline consumer |
-| Business Shield | $99.99/mo | 10 | **$10.00** | Below 1Password Business ($7.99) + breach monitoring + AI remediation |
-| Business Shield Pro | $199/mo | 25 | **$7.96** | Volume discount — still below Microsoft 365 Business Standard per seat |
+| Business Starter | $19.99/mo | 1 | $19.99 | Sole proprietor premium — business identity protection for owners whose personal and business exposure are the same attack surface |
+| Business Basic | $89.99/mo | Up to 5 | **$18.00** | Below 1Password Business ($7.99) + breach monitoring + AI remediation + SIM swap — all in one |
+| Business Shield | $139.99/mo | Up to 10 | **$14.00** | Per-seat cost drops to Personal Shield level — team protection at individual pricing |
+| Business Shield Pro | $299.99/mo | Up to 25 | **$12.00** | Volume discount — below Microsoft 365 Business Standard per seat with full security stack included |
 
 One remediated credential breach at an SMB prevents average losses of $4,400 (Ponemon Institute). RelayShield pays for itself in the first month it catches one breach.
 

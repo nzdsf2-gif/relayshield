@@ -148,21 +148,38 @@ RelayShield follows up until you are actually protected. Day 3: did you complete
 
 **Header:** Simple pricing. No hidden fees. Cancel any time.
 
-| | Personal Shield | Business Shield | Business Shield Pro |
-|---|---|---|---|
-| **Price** | $14.99/month | $99/month | $199/month |
-| **Who it's for** | Individuals | SMBs up to 10 employees | Growing teams up to 25 |
-| **Breach monitoring** | ✅ | ✅ | ✅ |
-| **WhatsApp alerts** | ✅ | ✅ | ✅ |
-| **AI severity scoring** | ✅ | ✅ | ✅ |
-| **Email Security Sweep** | ✅ | ✅ | ✅ |
-| **SIM swap monitoring** | ✅ | ✅ | ✅ |
-| **Session hijacking alerts** | ✅ | ✅ | ✅ |
-| **Remediation tracking** | ✅ | ✅ | ✅ |
-| **Vishing preparedness** | ✅ | ✅ | ✅ |
-| **Team dashboard** | — | ✅ | ✅ |
-| **Domain monitoring** | — | ✅ | ✅ |
-| **Priority support** | — | — | ✅ |
+*Note: Pricing table rendered as HTML embed in Carrd. See below for content reference.*
+
+| | Personal Shield | Business Starter | Business Basic | Business Shield |
+|---|---|---|---|---|
+| **Who it's for** | Individuals & families | Sole proprietors & freelancers | Teams up to 5 | Teams up to 10 |
+| **Breach monitoring** | ✅ | ✅ | ✅ | ✅ |
+| **WhatsApp alerts** | ✅ | ✅ | ✅ | ✅ |
+| **AI remediation guidance** | ✅ | ✅ | ✅ | ✅ |
+| **SIM swap monitoring** | ✅ | ✅ | ✅ | ✅ |
+| **Session hijacking alerts** | ✅ | ✅ | ✅ | ✅ |
+| **Vishing preparedness** | ✅ | ✅ | ✅ | ✅ |
+| **Professional + personal identity** | — | ✅ | ✅ | ✅ |
+| **Team seat management** | — | — | ✅ | ✅ |
+| **Domain monitoring *** | — | — | ✅ | ✅ |
+
+*\* Planned roadmap feature. No pricing shown — visitors see pricing at checkout.*
+
+**Benefit tagline (below table):**
+🎁 Give your team something new: Personal breach protection as part of working with you — a benefit your employees and contractors will remember.
+
+**Business Starter subtitle (below Business Starter button):**
+*Your business email, personal email, and mobile number share one attack surface — RelayShield monitors all of them.*
+
+---
+
+## SELECT A PLAN
+
+*Buttons in order: PERSONAL → BUSINESS STARTER → BUSINESS → (each preceded by ToS/Privacy links)*
+
+- PERSONAL → https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00
+- BUSINESS STARTER → https://buy.stripe.com/fZucN6ceGglv3qs9830Ny0a
+- BUSINESS → (Business Basic payment link)
 
 ---
 
@@ -175,8 +192,6 @@ Sign up today and pay the founding rate for your first 3 months.
 | Tier | Standard Price | Founding Rate | Spots Remaining |
 |---|---|---|---|
 | Personal Shield | $14.99/month | **$12/month** | 20 spots |
-| Business Shield | $99/month | **$79/month** | 10 spots |
-| Business Shield Pro | $199/month | **$169/month** | 10 spots |
 
 > Founding rate applies to your first 3 months. Standard pricing applies from month 4. No surprise increases — you know exactly what you're signing up for.
 

@@ -9,7 +9,7 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **Tech E&O insurance** — Get quote from Coalition (coalition.com) or Embroker (embroker.com). ~$600–$900/year. Policy must be active before customer #1 pays. | 🚨 Blocking |
+| 1 | **Tech E&O insurance** — Embroker application submitted April 2026. $1M limit, $1M 1st party, $10K retention, Standard coverage. Quote expected via email in 1–2 days. Sign policy before first paying customer. | 🔄 Quote pending |
 | 2 | **Facebook Business verification** — Submitted as sole proprietor. Monitoring for Meta approval. | 🔄 Submitted — awaiting Meta |
 
 ---

@@ -125,13 +125,13 @@ RelayShield was built to guide users through this exact sequence — in the righ
 
 When a breach is detected on a monitored account, RelayShield scores its severity and immediately opens a remediation conversation:
 
-> *"nzdsf@yahoo.com was found in a credential breach. Before resetting your password, reply SWEEP for a 5-minute Email Security Sweep — closes inbox backdoors that survive password resets."*
+> *"xyz@yahoo.com was found in a credential breach. Before resetting your password, reply SWEEP for a 5-minute Email Security Sweep — closes inbox backdoors that survive password resets."*
 
 The Email Security Sweep covers all five layers: active sessions, OAuth app permissions, forwarding rules, inbox filters, and recovery options. In that order. With platform-specific instructions delivered conversationally.
 
 Three days later, if the sweep is not confirmed complete, RelayShield follows up. Seven days after that if it is still open.
 
-Session auditing and revocation is not a feature we added. It is the first step in every remediation flow — because a password change that leaves an active session untouched has accomplished nothing.
+Session auditing and revocation is the first step in every remediation flow — because a password change that leaves an active session untouched has accomplished nothing.
 
 **For businesses:** when employee credentials are detected in a breach, the business sweep includes guidance on auditing OAuth app grants at the organisational level (Microsoft Entra connected apps, Google Workspace third-party API access) — the surface area that most SMBs have no visibility into and that attackers increasingly target.
 
@@ -151,13 +151,13 @@ That is the gap RelayShield fills.
 
 ## Get the Response Layer
 
-RelayShield is available now with a founding member offer for early subscribers.
+RelayShield is available now with a founding member offer for Personal Shield subscribers.
 
 **Personal Shield — $12/month for your first 3 months** (then $14.99/month)
 Real-time breach monitoring, WhatsApp alerts with AI severity scoring, Email Security Sweep including active session audit and OAuth revocation guidance, and remediation tracking for individuals.
 
-**Business Shield — $79/month for your first 3 months** (then $99/month)
-Everything in Personal Shield, plus team monitoring for up to 10 employees, domain-level breach scanning, organisational OAuth audit guidance, and admin visibility across your workforce.
+**Business Basic — Sign up at below website.
+Everything in Personal Shield, plus team monitoring for up to 5 employees, domain-level breach scanning, organisational OAuth audit guidance, and admin visibility across your workforce.
 
 Founding member spots are limited. When they fill, standard pricing applies to all new subscribers.
 
@@ -165,4 +165,4 @@ Founding member spots are limited. When they fill, standard pricing applies to a
 
 ---
 
-*RelayShield is built by a 25-year telecom security professional. We do not store passwords, do not sell your data, and do not use a CRM with PII access. Breach monitoring is powered by HaveIBeenPwned. AI remediation is powered by Claude.*
+*RelayShield is built by a 25-year telecom security professional. We do not store passwords, do not sell your data, and do not use a CRM with PII access. AI remediation is powered by Claude.*

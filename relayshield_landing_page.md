@@ -177,6 +177,9 @@ RelayShield follows up until you are actually protected. Day 3: did you complete
 
 *Buttons in order: PERSONAL → BUSINESS STARTER → BUSINESS → (each preceded by ToS/Privacy links)*
 
+**WhatsApp requirement notice (above buttons):**
+📱 WhatsApp Required: Onboarding and interactive security alerts. Before subscribing, save +1 (740) 737-3961 as a contact in WhatsApp.
+
 - PERSONAL → https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00
 - BUSINESS STARTER → https://buy.stripe.com/fZucN6ceGglv3qs9830Ny0a
 - BUSINESS → (Business Basic payment link)
@@ -215,7 +218,7 @@ Sign up today and pay the founding rate for your first 3 months.
 ## FOOTER
 
 RelayShield — Identity Protection with a Response Layer
-relayshield.net | relayshieldadmin@gmail.com | +1 (339) 298-7368
+relayshield.net | relayshieldadmin@gmail.com | 📞 +1 (339) 203-9730
 
 © 2026 RelayShield. All rights reserved.
 Privacy Policy | Terms of Service

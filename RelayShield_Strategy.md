@@ -417,7 +417,6 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 | **Business Shield** | $139.99 | $125.99/month | $1,511.88/year | $168/year |
 | **Business Shield Pro** | $299.99 | $269.99/month | $3,239.88/year | $360/year |
 
-> ⬜ **TODO:** Create annual pricing products and payment links in Stripe for all four tiers. Annual plans should be separate Stripe products with 10% discount baked in (not a coupon).
 
 **Founding Member Pricing (Consumers Only — First 20 Customers — Discounted for First 3 Months):**
 
@@ -1057,6 +1056,48 @@ DATA EXFILTRATION DETECTION     Identifies that data HAS been stolen
 | **Phase 2 total running costs** | | **~$139/month** |
 
 Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with margin.
+
+---
+
+### Stealer Log Intelligence Add-On — Commercial Model
+
+Stealer log and Telegram monitoring (via Flare API or equivalent) is offered as a paid add-on for Business Basic and higher, and bundled into Business Shield Pro. This model recovers API licensing cost and creates a hard capability ceiling that drives upsell from Basic → Shield.
+
+**Add-on pricing structure:**
+
+| Tier | Stealer Log Intelligence | Notes |
+|---|---|---|
+| Personal Shield | ❌ Not available | Out of scope — consumer tier |
+| Business Starter | ❌ Not available | Sole proprietor — no team exposure surface to justify cost |
+| Business Basic | ✅ Optional add-on (~$20/mo) | Covers API pass-through cost + margin; natural upsell trigger to Shield |
+| Business Shield | ✅ Optional add-on (~$15/mo) | Lower per-seat cost at higher tier |
+| Business Shield Pro | ✅ Bundled (included) | Justifies price jump from Shield to Pro — no add-on needed |
+
+**API licensing cost:** ~$75–$79/month (Flare API SMB tier). Revenue neutral at 4–5 add-on subscribers.
+
+**Positioning language:**
+> *"Real-time monitoring of active infostealer logs and Telegram threat channels — the same data feeds used by enterprise security teams, delivered to your WhatsApp without an enterprise contract or security analyst on staff."*
+
+---
+
+### Infostealer Intelligence Provider Comparison
+
+Evaluated for API accessibility, Telegram monitoring depth, and SMB-accessible pricing. Flare remains the lead candidate.
+
+| Provider | Stealer Log Coverage | Telegram Monitoring | API Access | Pricing Tier | Notes |
+|---|---|---|---|---|---|
+| **Flare** | 100M+ logs, 1M+ new/week | 57,000+ channels | ✅ Yes | ~$75–$79/mo SMB | **Lead candidate** — strongest public coverage numbers, SMB-accessible, proven Telegram depth |
+| **Hudson Rock (Cavalier)** | Large corpus, MSSP-focused | Limited public detail | ✅ Yes (REST API) | Enterprise — contact required | Strong API docs, 4,600% ARR growth; pricing not public — likely above Flare for SMB |
+| **Breachsense** | Stealer logs + dark web | Not confirmed | ✅ API-first | Not public (demo required) | MSP/MSSP plans available; good reseller fit if pricing is competitive |
+| **Pegasus Intelligence** | Telegram-specific | ✅ Extensive — alerts, files, user data, channel profiles | ✅ Yes | Advertised as affordable/flexible | Telegram-specialist — possible complement to Flare for Telegram depth rather than replacement |
+| **SpyCloud** | Very large (billions of records) | Not primary focus | ✅ Enterprise API | Enterprise only | Strongest credential corpus but enterprise pricing puts it out of range |
+| **KELA** | Attacker-perspective focus | ✅ Yes | ✅ Enterprise API | Enterprise only | Expert-grade intelligence; not SMB-accessible |
+| **Cybersixgill** | Dark web + Telegram | ✅ Extensive | ✅ Enterprise API | Enterprise only | Comprehensive but enterprise-priced |
+
+**Decision framework:**
+- **Phase 2 launch:** Start with Flare — best combination of coverage, Telegram depth, SMB pricing, and proven API
+- **Evaluate at scale:** If Flare cost increases with subscriber volume, re-evaluate Breachsense (MSP pricing may be more favorable at 50+ customers)
+- **Telegram specialisation:** If Telegram monitoring becomes a standalone differentiator, evaluate Pegasus Intelligence as a complement or replacement
 
 ---
 

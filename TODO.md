@@ -18,9 +18,12 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **Salon owner (Rebecca) onboarded** — DynamoDB records created. Awaiting her HELP confirmation via WhatsApp. | 🔄 In progress |
-| 2 | **Additional beta testers** — Recruit 2–3 more testers. Add DynamoDB records using beta template. | ⬜ Pending |
-| 3 | **Collect beta feedback** — Was the breach alert clear? Was remediation actionable? Would you pay $14.99/month? | ⬜ Pending |
+| 1 | **Salon owner (Rebecca) onboarded** — Active. HELP confirmed. | ✅ Active |
+| 2 | **Tester 2 onboarded** — Cybersecurity background (Equifax). Active. HELP confirmed. Email Security Sweep completed ✅ | ✅ Active |
+| 3 | **Additional beta testers** — 1 confirmed ready to onboard, potentially more in the works. Target: 4–5 total. | 🔄 In progress |
+| 4 | **Beta feedback form** — Built and published. Link: https://docs.google.com/forms/d/e/1FAIpQLSeZ8G7Bj_gfrTybnFk8R8AQyxRXGi6kQo_7V7CnqASF1Kg6rw/viewform?usp=publish-editor — Send via WhatsApp to all testers at end of beta. | 🔄 Ready to send |
+| 5 | **Collect beta feedback** — Send form link via WhatsApp to all testers. Target signal: value perception at price point, sweep completion rate, differentiation validation from tester 2 (Equifax background). | ⬜ Pending |
+| 6 | **Referral program** — Post-launch Phase 2 item. Validate organic advocacy first (Q9 of feedback form). If strong, build referral incentive mechanic (e.g. one free month per converted referral). | 🔮 Phase 2 |
 
 ---
 
@@ -28,11 +31,21 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **Update landing page markdown in Git** — Sync relayshield_landing_page.md with all Carrd changes made today (pricing table, Business Starter button, benefit tagline, ToS links) | ⬜ Pending |
+| 1 | **Update landing page markdown in Git** — Sync relayshield_landing_page.md with all Carrd changes made today (pricing table, Business Starter button, benefit tagline, ToS links) | ✅ Complete |
 | 2 | **Stripe annual plans TODO** — Confirm all tiers have annual payment links active (Personal Shield, Business Basic, Business Shield, Business Shield Pro, Business Starter) | ✅ Complete |
 | 3 | **Stripe legal entity** — Update to RelayShield LLC in business details | ✅ Complete |
 | 4 | **Relay Financial bank account** — Connected to Stripe as default payout | ✅ Complete |
-| 5 | **Annual Stripe TODO note** — Remove the ⬜ TODO note in strategy doc re: annual plans | ⬜ Pending |
+| 5 | **Annual Stripe TODO note** — Remove the ⬜ TODO note in strategy doc re: annual plans | ✅ Complete |
+
+---
+
+## 🚀 Production Onboarding Flow
+
+| # | Item | Status |
+|---|---|---|
+| 1 | **End-to-end Stripe → welcome message test** — Complete a real test payment and confirm welcome WhatsApp arrives and onboarding conversation starts correctly | ⬜ Pending |
+| 2 | **Carrd copy — WhatsApp contact instruction** — Add explicit instruction on landing page: "Before completing payment, save the RelayShield WhatsApp number as a contact on your phone" — required for message delivery | ✅ Complete |
+| 3 | **Phone number mismatch mitigation** — Added "WhatsApp phone number" custom field (Text, Optional) to all 8 payment links in Stripe. Reduces risk of Stripe number differing from WhatsApp number. | ✅ Complete |
 
 ---
 
@@ -44,7 +57,11 @@
 | 2 | **Fix empty breach_date field in DynamoDB** | ⬜ Pending |
 | 3 | **Password breach checking** — Pwned Passwords API integration | ⬜ Pending |
 | 4 | **Cross-account password risk detection** | ⬜ Pending |
-| 5 | **Business Starter webhook code update** — Add TIER_STARTER constant, EMAIL_LIMITS entry, phone hardening parity with business tiers | ⬜ Pending (not blocking for beta) |
+| 5 | **Business Starter webhook code update** — Add TIER_STARTER constant, EMAIL_LIMITS entry (3 emails), phone hardening parity with business tiers | ⬜ Pending (post-beta) |
+| 5a | **Business Starter — 1 contractor seat** — Add TIER_STARTER to BUSINESS_TIERS, set SEAT_LIMIT of 1. Enables ADD command for one employee/contractor. Upsell path to Business Basic (5 seats). | ⬜ Pending (post-beta) |
+| 5b | **Business Starter+ — Quarterly proactive sweep reminder** — EventBridge scheduled rule per Business Starter, Basic, Shield, Pro subscriber. WhatsApp message every 90 days: "Time for your quarterly security sweep — no breach needed. Reply SWEEP to start." Differentiates all business tiers from Personal Shield reactive-only model. | ⬜ Pending (post-beta) |
+| 5c | **Business Starter+ — Monthly WhatsApp Security Digest** — EventBridge monthly trigger for all business tiers. Lambda queries DynamoDB for breach history, open remediation items. Sends formatted summary: breach count, all-clear confirmation, one rotating business-specific security tip. Send one digest to beta testers before conversion ask. | ⬜ Pending (post-beta) |
+| 5d | **Welcome message — all tiers** — Current onboarding is rough for manually added beta users and inconsistent across tiers. Implement a warm, tier-specific welcome message sent immediately when onboarding_state is set to AWAITING_EMAIL_1 — covers both Stripe webhook (paying customers) and manual DynamoDB onboarding (beta). Should set expectations, explain WhatsApp interaction model, and prompt first email submission. | ⬜ Pending (post-beta) |
 | 6 | **Consumer vishing alert** — Append vishing warning to WhatsApp alert when breach exposes phone/address/carrier/account numbers | ⬜ Pending |
 | 7 | **Personal verification protocol** — Onboarding WhatsApp flow: callback rule, OTP rule, family safe word, wire transfer rule | ⬜ Pending |
 | 8 | **SSN/passport/DL vishing escalation** — CRITICAL severity when these data classes detected | ⬜ Pending |
@@ -68,16 +85,25 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Audit AWS Secrets Manager — confirm no plaintext secrets in code or logs | ⬜ Pending |
-| 2 | Enable AWS CloudTrail — audit trail for all API calls | ⬜ Pending |
-| 3 | Enable AWS Config — track Lambda/DynamoDB/IAM configuration changes | ⬜ Pending |
-| 4 | Review IAM policy relayshield-breach-check-policy — confirm least-privilege | ⬜ Pending |
-| 5 | Enable DynamoDB encryption at rest — confirm KMS applied to all tables | ⬜ Pending |
-| 6 | Rotate all API keys (HIBP, Anthropic, Twilio) — establish 90-day rotation | ⬜ Pending |
-| 7 | Confirm Lambda function URL not publicly exposed | ⬜ Pending |
-| 8 | Run Bandit SAST against relayshield_breach_monitor.py | ⬜ Pending |
-| 9 | Set up GitGuardian free tier | ⬜ Pending |
-| 10 | Confirm no secrets in CloudWatch log output | ⬜ Pending |
+| 1 | Audit AWS Secrets Manager — confirm no plaintext secrets in code or logs | ✅ Complete |
+| 2 | Enable AWS CloudTrail — audit trail for all API calls | ✅ Complete |
+| 3 | Enable AWS Config — track Lambda/DynamoDB/IAM configuration changes | ✅ Complete |
+| 4 | Review IAM policy relayshield-breach-check-policy — confirm least-privilege | ✅ Complete |
+| 5 | Enable DynamoDB encryption at rest — confirm KMS applied to all tables | ✅ Complete |
+| 6 | Rotate all API keys (HIBP, Anthropic, Twilio) — update Secrets Manager, set 90-day calendar reminder for each | ✅ Complete |
+| 7 | Confirm Lambda function URL not publicly exposed | ✅ Complete — stripe-webhook uses direct Lambda URL (Auth: None) protected by Stripe signature verification. Move behind API Gateway at production launch. |
+| 8 | Run Bandit SAST against relayshield_breach_monitor.py | ✅ Complete |
+| 9 | Secret scanning — open-source tool (GitGuardian replacement) configured | ✅ Complete |
+| 10 | Confirm no secrets in CloudWatch log output | ✅ Complete |
+
+---
+
+## 🚀 Production Launch — Security
+
+| # | Item | Status |
+|---|---|---|
+| 1 | **Move relayshield-stripe-webhook behind API Gateway** — Currently using direct Lambda URL with Stripe signature verification as protection. Move to API Gateway + delete Lambda function URL before scaling beyond beta. | ⬜ Pending |
+| 2 | **Delete relayshield-whatsapp-webhook Lambda function URL** — ⚠️ Twilio is currently pointing directly at the Lambda URL (confirmed April 2026). Must move behind API Gateway and update Twilio webhook URL first, then delete Lambda URL. Do not delete until Twilio is updated. | ⬜ Blocked — do API Gateway first |
 
 ---
 
@@ -86,7 +112,7 @@
 | # | Item | Status |
 |---|---|---|
 | 1 | Self-directed pen test — Lambda/DynamoDB surface | ⬜ Pending |
-| 2 | Set up GitHub Actions CI with Bandit + Safety + GitGuardian | ⬜ Pending |
+| 2 | Set up GitHub Actions CI with Bandit + Safety + open-source secret scanner | ⬜ Pending |
 | 3 | Set up AWS GuardDuty (~$1–3/month) | ⬜ Pending |
 | 4 | Confirm PII minimization across DynamoDB tables | ⬜ Pending |
 | 5 | Implement DynamoDB TTL on relayshield_breach_alerts (2-year auto-delete) | ⬜ Pending |
@@ -104,19 +130,30 @@
 
 ---
 
+## ⚖️ Intellectual Property
+
+| # | Item | Status |
+|---|---|---|
+| 1 | **Provisional patent — ordered remediation sequence** — Claude to draft provisional patent overview covering the core method: breach detection → session revocation before password reset → ordered 5-layer sweep → follow-up until confirmed. Take to patent attorney for review and filing. | ⬜ Pending |
+| 2 | **Consult patent attorney** — Seek attorney specialising in software/fintech patents. Present provisional overview. Evaluate cost/benefit of full utility patent vs. provisional only. Budget: $1,500–$3,000 for provisional filing. | ⬜ Pending |
+| 3 | **Attack chain correlation engine** — Secondary patent candidate: method of mapping specific breach data classes to downstream attack vectors and triggering corresponding remediation paths. Include in attorney consultation. | ⬜ Pending |
+
+---
+
 ## 🔮 Phase 2 Features
 
 | # | Item | Status |
 |---|---|---|
 | 1 | **Annual upsell webhook** — After 2nd monthly payment, WhatsApp offer for annual plan | 🔮 Phase 2 |
 | 2 | **SMB account management dashboard** — Seat status, aggregate risk, onboarding completion | 🔮 Phase 2 |
-| 3 | **Flare API integration** — Dark web stealer log monitoring, session token detection | 🔮 Phase 2 |
+| 3 | **Flare API integration** — Dark web stealer log monitoring, Telegram channel monitoring, session token detection. Offered as paid add-on: BB (~$20/mo optional), BS (~$15/mo optional), BS Pro (bundled). API cost ~$79/mo — revenue neutral at 4–5 add-on subscribers. Flare is lead candidate; evaluate Breachsense at scale for MSP pricing. See strategy doc Section 7 — Stealer Log Intelligence Add-On. | 🔮 Phase 2 |
 | 4 | **Financial account monitoring** — Plaid API integration | 🔮 Phase 2 |
 | 5 | **Data broker removal** — Partner with Incogni/DeleteMe API | 🔮 Phase 2 |
 | 6 | **Google Workspace / M365 audit log monitoring** — Concurrent session anomaly detection | 🔮 Phase 2 |
 | 7 | **Compliance reporting add-on** — GDPR/HIPAA/CCPA breach notification docs ($29.99/month) | 🔮 Phase 2 |
 | 8 | **Seat expansion upsell** — Auto-prompt to upgrade tier when seat limit reached | 🔮 Phase 2 |
 | 9 | **Dedicated SMB Carrd page** — /business sub-page when SMB revenue justifies it | 🔮 Phase 2 |
+| 10 | **Business Basic+ differentiation** — Develop additional capabilities exclusive to Business Basic and higher to drive upsell from Business Starter. Candidates: priority incident response SLA, aggregate team risk dashboard, organisational OAuth audit, Google Workspace / M365 monitoring, compliance reporting add-on | 🔮 Phase 2 |
 
 ---
 

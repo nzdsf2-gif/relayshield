@@ -1069,11 +1069,11 @@ Stealer log and Telegram monitoring (via Flare API or equivalent) is offered as 
 |---|---|---|
 | Personal Shield | ❌ Not available | Out of scope — consumer tier |
 | Business Starter | ❌ Not available | Sole proprietor — no team exposure surface to justify cost |
-| Business Basic | ✅ Optional add-on (~$20/mo) | Covers API pass-through cost + margin; natural upsell trigger to Shield |
-| Business Shield | ✅ Optional add-on (~$15/mo) | Lower per-seat cost at higher tier |
+| Business Basic | ✅ Optional add-on (~$10/mo) | Low-friction upsell — 11% price bump, breaks even at 8 subscribers |
+| Business Shield | ✅ Optional add-on (~$10/mo) | Consistent pricing — <8% bump at this tier; same capability, same price |
 | Business Shield Pro | ✅ Bundled (included) | Justifies price jump from Shield to Pro — no add-on needed |
 
-**API licensing cost:** ~$75–$79/month (Flare API SMB tier). Revenue neutral at 4–5 add-on subscribers.
+**API licensing cost:** ~$75–$79/month (Flare API SMB tier). Revenue neutral at 8 add-on subscribers at $10/mo. Consistent $10/mo pricing across BB and BS avoids buyer confusion about why Shield would cost less than Basic for the same capability.
 
 **Positioning language:**
 > *"Real-time monitoring of active infostealer logs and Telegram threat channels — the same data feeds used by enterprise security teams, delivered to your WhatsApp without an enterprise contract or security analyst on staff."*

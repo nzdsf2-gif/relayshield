@@ -67,14 +67,16 @@ TWILIO_MESSAGES_URL = (
 # ---------------------------------------------------------------------------
 
 TIER_PERSONAL = "personal_shield"
+TIER_STARTER = "business_starter"
 TIER_BASIC = "business_basic"
 TIER_SHIELD = "business_shield"
 TIER_PRO = "business_shield_pro"
 
-VALID_TIERS = {TIER_PERSONAL, TIER_BASIC, TIER_SHIELD, TIER_PRO}
+VALID_TIERS = {TIER_PERSONAL, TIER_STARTER, TIER_BASIC, TIER_SHIELD, TIER_PRO}
 
 TIER_DISPLAY_NAMES = {
     TIER_PERSONAL: "Personal Shield",
+    TIER_STARTER: "Business Starter",
     TIER_BASIC: "Business Basic",
     TIER_SHIELD: "Business Shield",
     TIER_PRO: "Business Shield Pro",
@@ -98,6 +100,8 @@ PRICE_TIER_MAP = {
 PAYMENT_LINK_TIER_MAP = {
     "plink_1THTZrL2dcjOeFiYO4RQryp6": TIER_PERSONAL,   # Personal Shield (monthly)
     "plink_1TIVqjL2dcjOeFiYT0N51SFA": TIER_PERSONAL,   # Personal Shield (annual)
+    "plink_1TMA7lL2dcjOeFiYqfHQ7qkj": TIER_STARTER,    # Business Starter (monthly)
+    "plink_1TMAF5L2dcjOeFiYJZJrFiEz": TIER_STARTER,    # Business Starter (annual)
     "plink_1TIVhuL2dcjOeFiYeeNFYccF": TIER_BASIC,      # Business Basic (monthly)
     "plink_1TIVsoL2dcjOeFiYvHs8YgXU": TIER_BASIC,      # Business Basic (annual)
     "plink_1TIVkIL2dcjOeFiYCB6i7g5g": TIER_SHIELD,     # Business Shield (monthly)
@@ -109,6 +113,7 @@ PAYMENT_LINK_TIER_MAP = {
 # Max emails per subscriber (personal) or per employee (business)
 EMAIL_LIMITS = {
     TIER_PERSONAL: 3,
+    TIER_STARTER: 3,
     TIER_BASIC: 2,
     TIER_SHIELD: 2,
     TIER_PRO: 2,

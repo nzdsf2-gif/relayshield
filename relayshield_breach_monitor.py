@@ -174,8 +174,12 @@ If multiple breaches are provided, rank by severity and state clearly which to f
 Lead with: "⚠️ *X new breaches detected.* Fix in this order:"
 
 PHONE NUMBER EXPOSURE:
-If "Phone numbers" appears in exposed data types, add:
-"📱 *Your phone number was exposed.* Risks: SIM swap attacks and smishing. Reply *PHONE* for carrier hardening steps."
+If "Phone numbers" appears in exposed data types, add this block:
+"📱 *Your phone number was exposed.*
+Smishing campaigns — fraudulent texts impersonating your bank, carrier, or a delivery service — frequently follow phone number exposure in breaches. Attackers may already know your name and reference this breach to appear legitimate.
+→ Do not click links in unexpected texts, even if they look official
+→ Forward any suspicious text to RelayShield for analysis — reply *SMS* followed by the text
+→ Reply *PHONE* for carrier PIN hardening steps to protect your number from SIM swap and smishing attacks"
 
 VISHING WARNING — add when ANY of the following appear in exposed data types:
 Phone numbers, Physical addresses, Bank account numbers, Partial credit card data, Dates of birth, Government issued IDs, Carrier details, Account numbers
@@ -727,6 +731,22 @@ def build_static_fallback_message(
             "Reply *SAFE* once you have read this.\n"
         )
 
+    # --- Smishing warning block ---
+    # Fires specifically when phone numbers are exposed — separate from the
+    # vishing block below. Smishing (SMS phishing) campaigns frequently launch
+    # within days of a breach that exposes phone numbers.
+    smishing_block = ""
+    if "phone numbers" in exposed_classes:
+        smishing_block = (
+            "\n📱 *Your phone number was exposed.*\n"
+            "Smishing campaigns — fraudulent texts impersonating your bank, carrier, "
+            "or a delivery service — frequently follow phone number exposure in breaches.\n"
+            "→ Do not click links in unexpected texts, even if they look legitimate\n"
+            "→ Attackers already know your name and may reference this breach\n"
+            "→ Forward any suspicious text to RelayShield for analysis — reply *SMS* followed by the text\n"
+            "Reply *PHONE* for carrier PIN hardening steps to protect your number from SIM swap and smishing.\n"
+        )
+
     # --- Vishing warning block ---
     vishing_block = ""
     vishing_hits = exposed_classes & VISHING_DATA_CLASSES
@@ -756,6 +776,7 @@ def build_static_fallback_message(
             f"Data exposed: {types_str}\n"
             f"{session_block}"
             f"{identity_block}"
+            f"{smishing_block}"
             f"{vishing_block}"
             f"{aitm_block}"
             f"{password_block}\n"
@@ -769,6 +790,7 @@ def build_static_fallback_message(
             f"*{email_address}* was found in *{len(new_breaches)} new breaches*: {names}\n"
             f"{session_block}"
             f"{identity_block}"
+            f"{smishing_block}"
             f"{vishing_block}"
             f"{aitm_block}"
             f"{password_block}\n"

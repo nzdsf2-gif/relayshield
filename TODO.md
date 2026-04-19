@@ -65,10 +65,11 @@
 | 6 | **Consumer vishing alert** — Append vishing warning to WhatsApp alert when breach exposes phone/address/carrier/account numbers | ⬜ Pending |
 | 7 | **Personal verification protocol** — Onboarding WhatsApp flow: callback rule, OTP rule, family safe word, wire transfer rule | ⬜ Pending |
 | 8 | **SSN/passport/DL vishing escalation** — CRITICAL severity when these data classes detected | ⬜ Pending |
-| 9 | **Smishing — phone number breach escalation** — Detect "Phone numbers" in HIBP DataClasses → append smishing warning to existing breach alert. ~1–2 hrs. All tiers. | ⬜ Pending |
-| 10 | **Smishing — carrier PIN hardening messaging** — Add carrier PIN / number lock steps to onboarding flow and phone number breach alert. Framed as smishing + SIM swap defense. ~1–2 hrs. All tiers. | ⬜ Pending |
-| 11 | **Smishing — OTP warning flow** — New intent detection: user reports unexpected OTP. Claude identifies as account takeover attempt in progress. Guides account lockdown + SIM swap precursor warning. ~2–3 hrs. All tiers. | ⬜ Pending |
-| 12 | **Smishing — suspicious SMS analysis** — User forwards suspicious text to RelayShield WhatsApp. Extract URL, check via Google Safe Browsing API (free), return verdict + remediation flow. ~4–6 hrs. All tiers. Upgrade to VirusTotal at scale. | ⬜ Pending |
+| 9 | **Smishing — phone number breach escalation** — Detect "Phone numbers" in HIBP DataClasses → append smishing warning to existing breach alert. ~1–2 hrs. All tiers. | ✅ Complete |
+| 10 | **Smishing — carrier PIN hardening messaging** — `msg_phone_hardening()` updated with smishing context. Carriers never text/call asking for PIN framing added. All tiers. | ✅ Complete |
+| 11 | **Smishing — OTP warning flow** — `OTP` command added. `msg_unexpected_otp()` function built. HELP menu updated. Account lockdown + SIM swap precursor guidance. All tiers. | ✅ Complete |
+| 12 | **Smishing — suspicious SMS analysis (Phase 1 stub)** — `SMS <text>` command added. Returns immediate guidance + carrier reporting steps (7726). TODO stub in code for Google Safe Browsing URL analysis. Full URL analysis is next build item. | 🔄 Stub live — URL analysis pending |
+| 13 | **Smishing — URL analysis (Google Safe Browsing)** — Complete the SMS command: extract URLs from forwarded text, check via Google Safe Browsing API, return safe/suspicious/malicious verdict + remediation. ~3–4 hrs. | ⬜ Pending |
 
 ---
 

@@ -14,7 +14,9 @@ Reply commands (ACTIVE users):
   RESET    — Strong password guide
   REUSE    — Cross-account password reuse walkthrough (next account in sequence)
   MANAGER  — Bitwarden setup guide
-  PHONE    — SIM/eSIM carrier hardening steps
+  PHONE    — Carrier hardening steps (SIM swap + smishing defence)
+  OTP      — User received an unexpected OTP they did not request
+  SMS <text> — User forwards a suspicious text for analysis
   SESSIONS — Revoke active sessions and OAuth tokens (Google, Microsoft, social media)
   SAFE     — Vishing warning acknowledged
   CALL     — User received a suspicious call
@@ -436,7 +438,9 @@ def msg_help(is_business: bool, is_employee: bool = False) -> str:
         "• *SESSIONS* — Revoke active sessions and OAuth tokens across Google, Microsoft, and social media\n"
         "• *REUSE* — Check cross-account password reuse step by step\n"
         "• *MANAGER* — Get a free Bitwarden password manager setup guide\n"
-        "• *PHONE* — Carrier hardening steps to protect your phone number from SIM swap\n"
+        "• *PHONE* — Carrier hardening steps to protect your number from SIM swap and smishing\n"
+        "• *OTP* — You received an unexpected verification code — get immediate steps\n"
+        "• *SMS* — Forward a suspicious text for analysis (reply SMS followed by the message)\n"
         "• *SAFE* — Confirm you have read a vishing or session hijacking warning\n"
         "• *CALL* — You received a suspicious call — get immediate steps\n"
     )
@@ -544,9 +548,16 @@ def msg_manager() -> str:
 
 def msg_phone_hardening(subscription_tier: str) -> str:
     base = (
-        "📱 *SIM/eSIM Swap Protection — Carrier Hardening Steps*\n\n"
-        "SIM swap hands an attacker every SMS code you receive. "
-        "These steps lock your carrier account so only you can make changes.\n\n"
+        "📱 *Phone Number Protection — Carrier Hardening Steps*\n\n"
+        "Your phone number is a target for two related attacks:\n"
+        "→ *SIM swap* — attacker convinces your carrier to move your number to their SIM, "
+        "intercepting every SMS code you receive\n"
+        "→ *Smishing* — fraudulent texts impersonate your bank, carrier, or delivery services "
+        "to steal credentials or carrier PINs. Attackers often use smishing to gather the "
+        "information needed to execute a SIM swap.\n\n"
+        "These steps lock your carrier account against both attacks.\n\n"
+        "⚠️ *Your carrier will never text or call asking for your PIN. "
+        "Any message asking for it is an attack.*\n\n"
     )
     if subscription_tier in BUSINESS_TIERS:
         carrier_steps = (
@@ -619,6 +630,37 @@ def msg_vishing_call() -> str:
         "→ Your carrier fraud line: AT&T 1-800-331-0500 / T-Mobile 1-877-778-2106 / Verizon 1-800-922-0204\n\n"
         "*Step 4 — Run your Email Security Sweep*\n"
         "Vishing often runs alongside inbox takeover. Reply *SWEEP* to check for backdoors now.\n\n"
+        "— RelayShield"
+    )
+
+
+def msg_unexpected_otp() -> str:
+    """
+    Response when user reports receiving an OTP they did not request.
+    This is a strong signal of an active account takeover attempt or
+    credential stuffing in progress. May also be a SIM swap precursor
+    if the OTP is carrier-related.
+    """
+    return (
+        "🚨 *Unexpected OTP — an account takeover attempt may be in progress.*\n\n"
+        "An OTP you did not request means someone is actively trying to log in to one "
+        "of your accounts using your credentials right now.\n\n"
+        "*Step 1 — Do NOT share the OTP with anyone.*\n"
+        "No legitimate company — not your bank, not your carrier, not any tech support — "
+        "will ever call or text asking you to read back an OTP. "
+        "If anyone contacts you asking for this code, that contact is the attack.\n\n"
+        "*Step 2 — Identify which account sent the OTP.*\n"
+        "The sender name or message content will indicate the service. "
+        "Go directly to that service by typing the URL — do not click any link in the text.\n\n"
+        "*Step 3 — Lock the account immediately.*\n"
+        "→ Change your password for that account now\n"
+        "→ Check for active sessions you don't recognise — reply *SESSIONS* for a guided walkthrough\n"
+        "→ If it's your bank — call the fraud line on the back of your card\n"
+        "→ If it's your mobile carrier — call them immediately; this may be a SIM swap attempt\n\n"
+        "*Step 4 — Run your Email Security Sweep.*\n"
+        "If an attacker has your credentials, they may also have inbox access. "
+        "Reply *SWEEP* to check for forwarding rules and backdoors.\n\n"
+        "Reply *CALL* if you also received a suspicious phone call alongside this OTP.\n\n"
         "— RelayShield"
     )
 
@@ -1013,6 +1055,33 @@ def handle_active_message(
         send_whatsapp(to_number, msg_vishing_call(), account_sid, auth_token, from_number)
         return "vishing_call_reported"
 
+    # --- OTP (user received an unexpected OTP they did not request) ---
+    if body == "OTP":
+        send_whatsapp(to_number, msg_unexpected_otp(), account_sid, auth_token, from_number)
+        return "unexpected_otp_reported"
+
+    # --- SMS (user forwards a suspicious text for analysis) ---
+    # Full URL analysis via Google Safe Browsing requires Phase 1 build-out.
+    # For now: acknowledge the forward and provide immediate guidance.
+    # TODO: extract URLs from body[4:], check via Google Safe Browsing API,
+    # return verdict (safe / suspicious / malicious) + remediation steps.
+    if body.startswith("SMS "):
+        send_whatsapp(
+            to_number,
+            "📨 *Suspicious text received — immediate steps:*\n\n"
+            "→ Do not click any links in the message\n"
+            "→ Do not reply to the sender\n"
+            "→ Block the sender on your phone\n"
+            "→ Report to your carrier: forward the text to 7726 (SPAM) — works on AT&T, T-Mobile, and Verizon\n"
+            "→ Report to the FTC: reportfraud.ftc.gov\n\n"
+            "If the text referenced a breach, your accounts, or asked for a verification code — "
+            "reply *OTP* if you received a code, or *CALL* if you also received a suspicious call.\n\n"
+            "🔧 *Automated URL analysis coming in a future update.*\n\n"
+            "— RelayShield",
+            account_sid, auth_token, from_number,
+        )
+        return "suspicious_sms_reported"
+
     # --- HELP ---
     if body == "HELP":
         send_whatsapp(
@@ -1098,7 +1167,7 @@ def handler(event, context):
     from_number = params.get("From", "")
     message_body = params.get("Body", "").strip()
 
-    logger.info("Inbound WhatsApp from=%s body=%r", from_number, message_body[:80])
+    logger.info("Inbound WhatsApp from=%s body_len=%d", from_number, len(message_body))
 
     if not from_number:
         logger.warning("No From number in webhook payload.")

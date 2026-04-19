@@ -1103,12 +1103,37 @@ Evaluated for API accessibility, Telegram monitoring depth, and SMB-accessible p
 
 ## 7. Competitive Analysis
 
+### Competitive Positioning Philosophy
+
+> *"Every identity protection service tries to be everything. RelayShield does one thing no one else does: it fixes the breach after detection — the step every competitor skips."*
+
+RelayShield is not a super app. It is a specialist. Every feature decision, every partnership, every Phase roadmap item is evaluated against one question: **does this make us better at breach response, or does it dilute it?**
+
+**What RelayShield is:**
+- The response layer every competitor skips
+- A conversational AI that guides real people through real remediation in WhatsApp
+- The only identity protection product with a carrier-layer telecom moat
+- A specialist that goes deeper on one problem than any generalist can
+
+**What RelayShield is not and will never be:**
+- A VPN (recommend Mullvad/ProtonVPN)
+- A password manager (recommend 1Password/Bitwarden)
+- An antivirus (out of lane entirely)
+- A data broker removal service (partner with Incogni/DeleteMe — don't build it)
+- A credit monitoring service (requires bureau partnerships — Phase 3 via partner only)
+- A feature bundle that competes on spec count
+
+The bundlers — IDwatchdog, Aura, LifeLock, and now Cloaked — sacrifice depth for breadth. A customer who cares deeply about any single capability already has a better standalone tool. RelayShield wins by being the product those customers reach for when the thing they care about fails.
+
+---
+
 ### Competitor Map
 
 | Competitor | Threat Level | Category |
 |---|---|---|
 | **Aura** | 🔴 High | Identity protection suite |
 | **Flare / Foretrace** | 🔴 High | Enterprise dark web intelligence + new B2B2E employee product |
+| **Cloaked** | 🟡 Medium | Virtual identity masking — proactive prevention model, $375M raised March 2026, expanding to enterprise |
 | **LifeLock/Norton** | 🟡 Medium | Consumer brand |
 | **HaveIBeenPwned** | 🟡 Medium | Free breach lookup |
 | **SpyCloud** | 🟢 Low | Enterprise only ($500+/month) |
@@ -1290,6 +1315,55 @@ See Section 7.1 — Breach Intelligence Source Comparison for full analysis.
 > *"Foretrace requires your employer to adopt it and can't tell you what to do next. RelayShield protects you directly — no employer required — and walks you through exactly what to do in your WhatsApp, including the telecom threats Foretrace cannot see."*
 
 **Strategic play:** Foretrace validates the B2B2E market. Use their launch as proof that employer-sponsored identity protection is a growing category — then differentiate on direct access, conversational AI, and telecom layer. Target SMB owners who want to protect their team without enterprise procurement cycles.
+
+---
+
+### Cloaked — Watch Carefully (March 2026: $375M raised)
+
+**What they do:** Proactive identity masking. Generates unlimited virtual email addresses, phone numbers, and passwords — one unique identity per service. If a vendor is breached, the exposed alias is discarded and your real identity is untouched. Also offers data broker removal (140+ sites), AI call screening, VPN, identity theft insurance ($1M), and dark web monitoring.
+
+**Key facts:**
+- $375M Series B raised March 2026
+- 350,000 paying customers, 10x growth year-over-year
+- 50 million spam/scam calls processed via AI call screening
+- 1 billion records removed from data broker sites
+- Enterprise product launched late 2025: Digital Workforce Protection
+
+**Why they're different from every other competitor:**
+Cloaked is the only company attempting a **prevention-first** model — never expose your real identity rather than respond when it's exposed. Every other competitor (Aura, LifeLock, Foretrace, RelayShield Phase 1) operates in the response layer. Cloaked is trying to eliminate the need for response entirely.
+
+**Where the model is genuinely strong:**
+- Alias isolation works for new signups — breach at one vendor reveals nothing reusable
+- AI call screening is a compounding data moat — 50M calls processed makes the detection model better over time
+- Data broker removal is proven and integrated natively
+- $375M means this product will be aggressively marketed
+
+**Where the model structurally fails — and why RelayShield wins regardless:**
+
+1. **It only protects future signups.** The average person has used their real email for 10–20 years across dozens of services. All of that existing exposure is completely untouched by Cloaked. RelayShield addresses what already happened — Cloaked cannot.
+
+2. **Behavior change requirement is the fatal adoption barrier.** Virtual identity masking requires users to build a new habit for every new account signup, maintain a policy for which alias belongs to which service, and think proactively about identity hygiene before each transaction. Most people — including most SMB owners — will not do this systematically. The users who will are privacy-enthusiast power users, not the mainstream buyer RelayShield serves.
+
+3. **Stealer log attacks bypass the alias entirely.** If malware is on the device, it captures active browser session cookies and saved credentials directly — the email address (virtual or not) is irrelevant. The device is compromised, not the email. Cloaked provides zero protection against infostealer malware.
+
+4. **Session hijacking is invisible to alias masking.** AiTM proxies (Tycoon 2FA, EvilProxy) steal the authenticated session token after the user logs in. The alias is irrelevant — the attacker has a valid session regardless of whether the email was virtual.
+
+5. **They're becoming the bundle.** VPN + password manager + data broker removal + identity theft insurance + dark web monitoring + AI call screening. The $375M is accelerating them toward the same IDwatchdog bundler trajectory — broader, shallower, a feature list rather than a product with a clear core.
+
+**Confirmed gaps RelayShield exploits:**
+| Cloaked Gap | RelayShield Answer |
+|---|---|
+| Doesn't address existing real-identity exposure | Core product — monitors all historical breach databases |
+| No remediation guidance | Step-by-step WhatsApp AI remediation |
+| No stealer log / device-level theft protection | Phase 2 Flare API integration |
+| No session hijacking protection | Phase 1 SESSIONS command, AiTM awareness |
+| No telecom / SIM swap layer | Core Phase 2 moat |
+| Enterprise model routes through employer | Routes directly to individual — contractor-safe |
+
+**Positioning against Cloaked:**
+> *"Already using Cloaked? That protects your new signups. RelayShield protects everything before Cloaked — and the attack vectors no alias can stop."*
+
+**Watch:** Cloaked's 2026 AI agent roadmap includes automated password changes on compromised accounts — the first sign they're creeping toward the response layer. Monitor this.
 
 ---
 
@@ -1498,6 +1572,7 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - Dataset licensing — anonymised risk benchmarks to research partners
 - Carrier partnership programme — RelayShield embedded in telco security bundles
 - Data broker scan integration — partner with Incogni or DeleteMe API, resell as RelayShield add-on rather than build from scratch
+- **SIM/IMEI anomaly detection via carrier APIs** — Natural extension of Phase 2 SIM swap monitor. Uses carrier API signals to detect anomalous traffic patterns from a device's SIM/IMEI (unexpected data routing, new APN connections, traffic volume spikes). Distinct from SIM swap detection — this addresses IoT cellular backdoor exploitation (CPU-to-modem interface attacks, AT command abuse) where an attacker uses a device's trusted SIM/IMEI to route their own traffic. Leverages 25-year telecom carrier expertise as moat. No identity protection competitor has attempted this. Target: Business Shield and Pro tiers with IoT-connected operations.
 
 ### Identity Exposure Score (Phase 2 → Phase 3)
 

@@ -34,7 +34,7 @@
 | 1 | **Update landing page markdown in Git** — Sync relayshield_landing_page.md with all Carrd changes made today (pricing table, Business Starter button, benefit tagline, ToS links) | ✅ Complete |
 | 2 | **Stripe annual plans TODO** — Confirm all tiers have annual payment links active (Personal Shield, Business Basic, Business Shield, Business Shield Pro, Business Starter) | ✅ Complete |
 | 3 | **Stripe legal entity** — Update to RelayShield LLC in business details | ✅ Complete |
-| 4 | **Relay Financial bank account** — Connected to Stripe as default payout | ✅ Complete |
+| 4 | **Relay Financial bank account** — Connected to Stripe as default payout. Verified April 2026 — Thread Bank (Relay) ••••6633 confirmed as USD default payout account. | ✅ Complete |
 | 5 | **Annual Stripe TODO note** — Remove the ⬜ TODO note in strategy doc re: annual plans | ✅ Complete |
 
 ---
@@ -43,7 +43,7 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **End-to-end Stripe → welcome message test** — Complete a real test payment and confirm welcome WhatsApp arrives and onboarding conversation starts correctly | ⬜ Pending |
+| 1 | **End-to-end Stripe → welcome message test** — Verified April 2026. Signature verification, DynamoDB record creation, tier detection, and Twilio API call all confirmed working. WhatsApp delivery to new users requires approved template (Twilio 24hr window rule). Welcome message template submitted to Meta for approval. | ✅ Complete |
 | 2 | **Carrd copy — WhatsApp contact instruction** — Add explicit instruction on landing page: "Before completing payment, save the RelayShield WhatsApp number as a contact on your phone" — required for message delivery | ✅ Complete |
 | 3 | **Phone number mismatch mitigation** — Added "WhatsApp phone number" custom field (Text, Optional) to all 8 payment links in Stripe. Reduces risk of Stripe number differing from WhatsApp number. | ✅ Complete |
 
@@ -61,7 +61,7 @@
 | 5a | **Business Starter — 1 contractor seat** — Add TIER_STARTER to BUSINESS_TIERS, set SEAT_LIMIT of 1. Enables ADD command for one employee/contractor. Upsell path to Business Basic (5 seats). | ⬜ Pending (post-beta) |
 | 5b | **Business Starter+ — Quarterly proactive sweep reminder** — EventBridge scheduled rule per Business Starter, Basic, Shield, Pro subscriber. WhatsApp message every 90 days: "Time for your quarterly security sweep — no breach needed. Reply SWEEP to start." Differentiates all business tiers from Personal Shield reactive-only model. | ⬜ Pending (post-beta) |
 | 5c | **Business Starter+ — Monthly WhatsApp Security Digest** — EventBridge monthly trigger for all business tiers. Lambda queries DynamoDB for breach history, open remediation items. Sends formatted summary: breach count, all-clear confirmation, one rotating business-specific security tip. Send one digest to beta testers before conversion ask. | ⬜ Pending (post-beta) |
-| 5d | **Welcome message — all tiers** — Current onboarding is rough for manually added beta users and inconsistent across tiers. Implement a warm, tier-specific welcome message sent immediately when onboarding_state is set to AWAITING_EMAIL_1 — covers both Stripe webhook (paying customers) and manual DynamoDB onboarding (beta). Should set expectations, explain WhatsApp interaction model, and prompt first email submission. | ⬜ Pending (post-beta) |
+| 5d | **Welcome message — all tiers** — WhatsApp template `relayshield_welcome` submitted to Meta for approval April 2026. Template uses {{1}}=tier name, {{2}}=email limit. Code update: replace `build_welcome_message()` free-form send with approved template send via Twilio Content API. Covers both Stripe webhook (paying customers) and manual DynamoDB onboarding (beta). | ⬜ Pending (post-beta) — template awaiting Meta approval |
 | 6 | **Consumer vishing alert** — Append vishing warning to WhatsApp alert when breach exposes phone/address/carrier/account numbers | ⬜ Pending |
 | 7 | **Personal verification protocol** — Onboarding WhatsApp flow: callback rule, OTP rule, family safe word, wire transfer rule | ⬜ Pending |
 | 8 | **SSN/passport/DL vishing escalation** — CRITICAL severity when these data classes detected | ⬜ Pending |
@@ -127,6 +127,7 @@
 | 2 | **Tycoon 2FA blog post** — Draft exists, pending publication to relayshield.net | ⬜ Backburned |
 | 3 | **Salon owner conversion** — Send Business Starter payment link when beta period ends | ⬜ Pending |
 | 4 | **Facebook Business verification follow-up** — Monitor Meta approval (submitted April 2026) | 🔄 In progress |
+| 5 | **IoT cellular backdoor blog post** — Write plain-language breakdown of CPU-to-modem interface attack (Rapid7 research). Audience: r/smallbusiness, r/msp. Establishes telecom expertise authority. No product to build — purely a content play. | ⬜ Backburned |
 
 ---
 
@@ -154,6 +155,7 @@
 | 8 | **Seat expansion upsell** — Auto-prompt to upgrade tier when seat limit reached | 🔮 Phase 2 |
 | 9 | **Dedicated SMB Carrd page** — /business sub-page when SMB revenue justifies it | 🔮 Phase 2 |
 | 10 | **Business Basic+ differentiation** — Develop additional capabilities exclusive to Business Basic and higher to drive upsell from Business Starter. Candidates: priority incident response SLA, aggregate team risk dashboard, organisational OAuth audit, Google Workspace / M365 monitoring, compliance reporting add-on | 🔮 Phase 2 |
+| 11 | **SIM/IMEI anomaly detection via carrier APIs** — Phase 3 research item. Extends Phase 2 SIM swap monitor to detect anomalous carrier traffic patterns (unexpected APN routing, traffic volume spikes, AT command abuse on IoT cellular devices). Targets Business Shield and Pro tiers with IoT-connected operations. Leverages 25-year telecom expertise as moat — no competitor has attempted this. | 🔮 Phase 3 |
 
 ---
 

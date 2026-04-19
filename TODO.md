@@ -69,7 +69,7 @@
 | 10 | **Smishing — carrier PIN hardening messaging** — `msg_phone_hardening()` updated with smishing context. Carriers never text/call asking for PIN framing added. All tiers. | ✅ Complete |
 | 11 | **Smishing — OTP warning flow** — `OTP` command added. `msg_unexpected_otp()` function built. HELP menu updated. Account lockdown + SIM swap precursor guidance. All tiers. | ✅ Complete |
 | 12 | **Smishing — suspicious SMS analysis (Phase 1 stub)** — `SMS <text>` command added. Returns immediate guidance + carrier reporting steps (7726). TODO stub in code for Google Safe Browsing URL analysis. Full URL analysis is next build item. | 🔄 Stub live — URL analysis pending |
-| 13 | **Smishing — URL analysis (Google Safe Browsing)** — Complete the SMS command: extract URLs from forwarded text, check via Google Safe Browsing API, return safe/suspicious/malicious verdict + remediation. ~3–4 hrs. | ⬜ Pending |
+| 13 | **Smishing — URL analysis (Google Safe Browsing)** — Complete the SMS command: extract URLs from forwarded text, check via Google Safe Browsing API, return safe/suspicious/malicious verdict + remediation. ~3–4 hrs. | ✅ Complete |
 
 ---
 

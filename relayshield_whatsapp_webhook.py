@@ -70,10 +70,13 @@ TWILIO_SID_SECRET = "relayshield/twilio_account_sid"
 TWILIO_TOKEN_SECRET = "relayshield/twilio_auth_token"
 TWILIO_FROM_SECRET = "relayshield/twilio_whatsapp_number"
 TWILIO_AUTH_TOKEN_SECRET = "relayshield/twilio_auth_token"
+GSB_SECRET_NAME = "relayshield/google_safe_browsing"
+GSB_SECRET_KEY = "google_safe_browsing_api_key"
 
 TWILIO_MESSAGES_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 )
+GSB_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
 # ---------------------------------------------------------------------------
 # Tier constants
@@ -150,6 +153,173 @@ def get_twilio_credentials() -> tuple[str, str, str]:
     auth_token = get_secret_json(TWILIO_TOKEN_SECRET, "TWILIO_AUTH_TOKEN")
     from_number = get_secret_json(TWILIO_FROM_SECRET, "TWILIO_WHATSAPP_NUMBER")
     return account_sid, auth_token, from_number
+
+
+def get_gsb_api_key() -> str:
+    """Retrieve Google Safe Browsing API key from Secrets Manager."""
+    return get_secret_json(GSB_SECRET_NAME, GSB_SECRET_KEY)
+
+
+# ---------------------------------------------------------------------------
+# Google Safe Browsing URL analysis
+# ---------------------------------------------------------------------------
+
+def extract_urls(text: str) -> list[str]:
+    """
+    Extract all http/https URLs from a text string.
+    Returns a deduplicated list, preserving order of first appearance.
+    """
+    found = re.findall(r'https?://[^\s<>"\']+', text)
+    seen = set()
+    unique = []
+    for url in found:
+        # Strip trailing punctuation that may have been captured
+        url = url.rstrip(".,;:!?)")
+        if url not in seen:
+            seen.add(url)
+            unique.append(url)
+    return unique
+
+
+def check_urls_safe_browsing(urls: list[str], api_key: str) -> dict:
+    """
+    Submit a list of URLs to Google Safe Browsing API v4.
+    Returns a dict with keys:
+      "matches"  — list of threat match dicts (empty if all clean)
+      "error"    — error message string if API call failed, else None
+
+    Uses urllib.request to stay consistent with the rest of the codebase.
+    POST to GSB_URL?key={api_key} with JSON body.
+    """
+    payload = json.dumps({
+        "client": {
+            "clientId": "relayshield",
+            "clientVersion": "1.0",
+        },
+        "threatInfo": {
+            "threatTypes": [
+                "MALWARE",
+                "SOCIAL_ENGINEERING",
+                "UNWANTED_SOFTWARE",
+                "POTENTIALLY_HARMFUL_APPLICATION",
+            ],
+            "platformTypes": ["ANY_PLATFORM"],
+            "threatEntryTypes": ["URL"],
+            "threatEntries": [{"url": u} for u in urls],
+        },
+    }).encode("utf-8")
+
+    url_with_key = f"{GSB_URL}?key={api_key}"
+    headers = {
+        "Content-Type": "application/json",
+    }
+    req = urllib.request.Request(
+        url_with_key,
+        data=payload,
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+            # GSB returns {} when no threats found; "matches" key only present
+            # when threats are detected.
+            return {"matches": body.get("matches", []), "error": None}
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        logger.error("GSB API HTTPError %s: %s", e.code, error_body)
+        return {"matches": [], "error": f"HTTP {e.code}"}
+    except urllib.error.URLError as e:
+        logger.error("GSB API URLError: %s", e.reason)
+        return {"matches": [], "error": str(e.reason)}
+    except Exception as e:
+        logger.error("GSB API unexpected error: %s", e)
+        return {"matches": [], "error": str(e)}
+
+
+def build_sms_analysis_response(
+    forwarded_text: str,
+    urls: list[str],
+    gsb_result: dict,
+) -> str:
+    """
+    Build the WhatsApp response for the SMS command based on URL analysis results.
+    Three outcomes:
+      1. No URLs found — guidance only
+      2. URLs found, all clean — low-risk guidance
+      3. URLs found, threats detected — CRITICAL warning
+    Always falls back gracefully if GSB errored.
+    """
+    immediate_steps = (
+        "→ Do not click any links in the message\n"
+        "→ Do not reply to the sender\n"
+        "→ Block the sender on your phone\n"
+        "→ Report to your carrier: forward the text to *7726* (SPAM) — "
+        "works on AT&T, T-Mobile, and Verizon\n"
+        "→ Report to the FTC: reportfraud.ftc.gov\n"
+    )
+
+    if not urls:
+        return (
+            "📨 *Suspicious text received — no URLs detected.*\n\n"
+            "No links were found in the forwarded text to analyse. "
+            "If the message asked you to call a number or reply with personal details, "
+            "treat it as a smishing attempt.\n\n"
+            + immediate_steps
+            + "\nReply *OTP* if you received a verification code, "
+            "or *CALL* if you also received a suspicious call.\n\n"
+            "— RelayShield"
+        )
+
+    if gsb_result["error"]:
+        # API failed — return guidance without a verdict rather than crash
+        logger.warning("GSB analysis skipped due to error: %s", gsb_result["error"])
+        return (
+            "📨 *Suspicious text received.*\n\n"
+            f"Found {len(urls)} link(s) — automated analysis temporarily unavailable. "
+            "Treat the link(s) as unsafe until you can verify them.\n\n"
+            + immediate_steps
+            + "\nReply *OTP* if you received a verification code, "
+            "or *CALL* if you also received a suspicious call.\n\n"
+            "— RelayShield"
+        )
+
+    matches = gsb_result["matches"]
+    flagged_urls = {m["threat"]["url"] for m in matches}
+
+    if flagged_urls:
+        url_list = "\n".join(f"⛔ {u}" for u in flagged_urls)
+        return (
+            "🚨 *MALICIOUS LINK DETECTED*\n\n"
+            f"Google Safe Browsing flagged {len(flagged_urls)} of the "
+            f"{len(urls)} link(s) in that text as a confirmed threat "
+            "(malware, phishing, or social engineering):\n\n"
+            f"{url_list}\n\n"
+            "*Do NOT click these links under any circumstances.*\n\n"
+            + immediate_steps
+            + "\nIf you already clicked the link:\n"
+            "→ Do not enter any information on the page that opened\n"
+            "→ Close the browser tab immediately\n"
+            "→ Reply *SWEEP* to check your email accounts for backdoors\n"
+            "→ Reply *SESSIONS* to revoke active sessions on your accounts\n\n"
+            "— RelayShield"
+        )
+
+    # URLs found, all clean
+    url_list = "\n".join(f"✅ {u}" for u in urls)
+    return (
+        "📨 *Suspicious text analysed — no known threats detected.*\n\n"
+        f"Google Safe Browsing checked {len(urls)} link(s) and found no "
+        "confirmed malware or phishing:\n\n"
+        f"{url_list}\n\n"
+        "⚠️ *A clean result does not guarantee the link is safe.* "
+        "New phishing sites can take hours to appear in threat databases. "
+        "If the text was unexpected or asked for personal information, "
+        "treat it with caution regardless.\n\n"
+        + immediate_steps
+        + "\n— RelayShield"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1061,26 +1231,32 @@ def handle_active_message(
         return "unexpected_otp_reported"
 
     # --- SMS (user forwards a suspicious text for analysis) ---
-    # Full URL analysis via Google Safe Browsing requires Phase 1 build-out.
-    # For now: acknowledge the forward and provide immediate guidance.
-    # TODO: extract URLs from body[4:], check via Google Safe Browsing API,
-    # return verdict (safe / suspicious / malicious) + remediation steps.
+    # Extracts URLs from the forwarded text, checks via Google Safe Browsing
+    # API v4, and returns a verdict: malicious / clean / no URLs found.
+    # Falls back to guidance-only response if GSB API is unavailable.
     if body.startswith("SMS "):
-        send_whatsapp(
-            to_number,
-            "📨 *Suspicious text received — immediate steps:*\n\n"
-            "→ Do not click any links in the message\n"
-            "→ Do not reply to the sender\n"
-            "→ Block the sender on your phone\n"
-            "→ Report to your carrier: forward the text to 7726 (SPAM) — works on AT&T, T-Mobile, and Verizon\n"
-            "→ Report to the FTC: reportfraud.ftc.gov\n\n"
-            "If the text referenced a breach, your accounts, or asked for a verification code — "
-            "reply *OTP* if you received a code, or *CALL* if you also received a suspicious call.\n\n"
-            "🔧 *Automated URL analysis coming in a future update.*\n\n"
-            "— RelayShield",
-            account_sid, auth_token, from_number,
+        forwarded_text = message_body.strip()[4:].strip()
+        urls = extract_urls(forwarded_text)
+
+        if urls:
+            try:
+                gsb_api_key = get_gsb_api_key()
+                gsb_result = check_urls_safe_browsing(urls, gsb_api_key)
+            except Exception as e:
+                logger.error("Failed to retrieve GSB API key or run analysis: %s", e)
+                gsb_result = {"matches": [], "error": str(e)}
+        else:
+            gsb_result = {"matches": [], "error": None}
+
+        response_text = build_sms_analysis_response(forwarded_text, urls, gsb_result)
+        send_whatsapp(to_number, response_text, account_sid, auth_token, from_number)
+        logger.info(
+            "SMS analysis complete — urls_found=%d threats=%d error=%s",
+            len(urls),
+            len(gsb_result.get("matches", [])),
+            gsb_result.get("error"),
         )
-        return "suspicious_sms_reported"
+        return "suspicious_sms_analysed"
 
     # --- HELP ---
     if body == "HELP":

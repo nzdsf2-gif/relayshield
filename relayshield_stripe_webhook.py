@@ -62,6 +62,10 @@ TWILIO_MESSAGES_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 )
 
+# Approved Meta/Twilio WhatsApp template for new subscriber welcome message.
+# Variables: {{1}} = tier display name, {{2}} = email limit (as string).
+WELCOME_TEMPLATE_SID = "HX45e6bac7d790f79414f7b067e1a3edd9"
+
 # ---------------------------------------------------------------------------
 # Tier constants
 # ---------------------------------------------------------------------------
@@ -362,6 +366,63 @@ def send_whatsapp(
         return False
 
 
+def send_whatsapp_template(
+    to_number: str,
+    template_sid: str,
+    variables: dict,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+) -> bool:
+    """
+    Send an approved WhatsApp template message via Twilio Content API.
+    Uses ContentSid + ContentVariables instead of Body — required for
+    business-initiated messages outside the 24-hour messaging window.
+    variables must be a dict of string keys matching template placeholders,
+    e.g. {"1": "Personal Shield", "2": "3"}.
+    Returns True on success.
+    """
+    url = TWILIO_MESSAGES_URL.format(account_sid=account_sid)
+    credentials = base64.b64encode(
+        f"{account_sid}:{auth_token}".encode()
+    ).decode()
+
+    payload = urllib.parse.urlencode({
+        "From": to_whatsapp_number(from_number),
+        "To": to_whatsapp_number(to_number),
+        "ContentSid": template_sid,
+        "ContentVariables": json.dumps(variables),
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            logger.info(
+                "WhatsApp template %s sent to %s — SID: %s status: %s",
+                template_sid, to_number, result.get("sid"), result.get("status"),
+            )
+            return True
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        logger.error(
+            "Twilio template HTTP %d sending to %s: %s", exc.code, to_number, error_body
+        )
+        return False
+    except Exception as exc:
+        logger.exception("Twilio template send failed for %s: %s", to_number, exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Welcome message
 # ---------------------------------------------------------------------------
@@ -593,15 +654,34 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "Twilio credentials retrieval failed"}),
         }
 
-    # --- 9. Send welcome WhatsApp message ---
-    welcome_msg = build_welcome_message(subscription_tier)
-    sent = send_whatsapp(
+    # --- 9. Send welcome WhatsApp message via approved Meta template ---
+    # Template send works outside the 24-hour window (business-initiated).
+    # Falls back to free-form send if template delivery fails.
+    tier_name = TIER_DISPLAY_NAMES.get(subscription_tier, "RelayShield")
+    email_limit = EMAIL_LIMITS.get(subscription_tier, 3)
+
+    sent = send_whatsapp_template(
         to_number=phone,
-        body=welcome_msg,
+        template_sid=WELCOME_TEMPLATE_SID,
+        variables={"1": tier_name, "2": str(email_limit)},
         account_sid=account_sid,
         auth_token=auth_token,
         from_number=from_number,
     )
+
+    if not sent:
+        logger.warning(
+            "Template send failed for %s (user_id=%s) — attempting free-form fallback.",
+            phone, user_id,
+        )
+        welcome_msg = build_welcome_message(subscription_tier)
+        sent = send_whatsapp(
+            to_number=phone,
+            body=welcome_msg,
+            account_sid=account_sid,
+            auth_token=auth_token,
+            from_number=from_number,
+        )
 
     if not sent:
         logger.error(

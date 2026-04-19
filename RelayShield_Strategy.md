@@ -37,6 +37,60 @@
 ### Primary Segments
 - **SMBs** (Small/Medium Businesses) — recurring B2B contracts, self-serve onboarding
 - **Privacy-conscious consumers** — volume play, $12/month for first 3 months / $14.99 standard thereafter
+- **Senior / Medicare beneficiaries (Phase 2)** — Family Shield tier, adult children as buyer, senior as protected party. See Section 3b.
+
+---
+
+## 3b. Senior / Medicare Protection — Phase 2 Market Opportunity
+
+### Why This Market
+
+Medicare fraud is a $60B+ annual problem targeting 65 million US beneficiaries. Seniors are disproportionately victimised because attackers target the demographic least likely to recognise social engineering. The FTC consistently ranks Medicare impersonation among the top three fraud categories by volume and dollar loss.
+
+Key signals:
+- Medicare Beneficiary Identifier (MBI) is as valuable as an SSN — enables fraudulent claims for equipment, services, and prescriptions never rendered
+- Seniors receive more unsolicited calls per day than any other demographic
+- Phone vishing is the primary attack vector — not email phishing or smishing
+- Adult children are highly motivated buyers when a parent is victimised
+- Emotional purchase with strong willingness to pay ($15–20/month easily justified as peace of mind)
+
+### Attack Vectors RelayShield Will Cover
+
+| Attack type | Description | RelayShield response |
+|---|---|---|
+| Medicare number in data breach | MBI exposed via healthcare provider breach (HIBP) | Breach alert + CRITICAL severity escalation |
+| Vishing — CMS/Medicare impersonation | "Your card needs to be updated — give us your number" | Vishing engine: CMS never calls unsolicited |
+| Vishing — free equipment offer | Back brace, CPAP, genetic test kit — just need your Medicare number | Equipment offer = fraud pattern alert |
+| Smishing — Medicare portal link | Text with fake CMS link to "verify your account" | SMS command URL analysis |
+| Social Security impersonation | "Benefits suspended — call immediately" | CALL command vishing guidance |
+| Grandparent scam variant | Caller claims to be a grandchild in trouble, needs money or Medicare number | WASCAM / vishing engine guidance |
+
+### Product Requirements Before Entering This Market
+
+Two prerequisites must be met before targeting this segment:
+
+1. **Robust vishing engine** (Phase 1 pending) — Phone call defence is the primary attack vector for this demographic. The current CALL command is a stub. Must be built out with Medicare-specific guidance: CMS never calls unsolicited, free equipment offers are always fraud, never give your MBI or SSN over the phone.
+
+2. **SMS delivery channel** (Phase 2 strategy doc Section 9) — WhatsApp penetration among seniors is lower than the general population. SMS is the primary channel for this demographic. RelayShield cannot effectively serve 65+ without SMS as an alternative delivery option.
+
+### Go-To-Market Model — Family Shield
+
+- **Buyer:** Adult child (35–55), purchasing on behalf of a parent
+- **Protected party:** Senior Medicare beneficiary (65+)
+- **Positioning:** "Your parent gets Medicare scam calls every week. RelayShield monitors their credentials and tells them exactly what to do — and you — when something happens."
+- **Pricing:** Personal Shield tier ($14.99/month) — no new tier needed initially
+- **Channel:** Targeted LinkedIn and Facebook content reaching adult children; AARP-adjacent communities; elder care professional referrals
+- **Differentiator:** No competitor has Medicare-specific vishing guidance. Aura and LifeLock are generic. RelayShield can own this niche with targeted content and specific command responses.
+
+### Two Prerequisites Then a Clear Path
+
+```
+Phase 1 (now):       Build vishing engine → CALL command with Medicare-specific guidance
+Phase 2 (mid-year):  Add SMS delivery channel
+Phase 2 (launch):    Family Shield positioning — dedicated landing page section,
+                     LinkedIn content targeting adult children of seniors,
+                     Medicare-specific CALL/WASCAM responses activated
+```
 
 ---
 

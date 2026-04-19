@@ -167,6 +167,7 @@
 | 12 | **Smishing — team propagation alert** — When one employee number appears in Telegram smishing list, alert team admin. Business Basic and higher. | 🔮 Phase 2 |
 | 13 | **Smishing — SIM swap correlation alert** — When SIM swap detected, check if suspicious SMS analysis submitted in prior 48–72 hrs. If yes, escalate to CRITICAL coordinated attack chain alert. Business Shield and Pro only. | 🔮 Phase 2 |
 | 14 | **SIM/IMEI anomaly detection via carrier APIs** — Phase 3 research item. Extends Phase 2 SIM swap monitor to detect anomalous carrier traffic patterns (unexpected APN routing, traffic volume spikes, AT command abuse on IoT cellular devices). Targets Business Shield and Pro tiers with IoT-connected operations. Leverages 25-year telecom expertise as moat — no competitor has attempted this. | 🔮 Phase 3 |
+| 15 | **Family Shield / Senior Medicare protection** — Two prerequisites: (1) vishing engine built out with Medicare-specific guidance (CMS never calls unsolicited, free equipment = fraud, never give MBI over phone); (2) SMS delivery channel live. Then: Family Shield positioning on landing page targeting adult children buying for senior parents. Medicare number breach escalation to CRITICAL. Medicare-specific CALL and WASCAM response variants. See strategy doc Section 3b. | 🔮 Phase 2 — after vishing engine + SMS channel |
 
 ---
 

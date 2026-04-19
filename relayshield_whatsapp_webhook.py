@@ -817,14 +817,10 @@ def msg_vishing_call() -> str:
     )
 
 
-def msg_unexpected_otp() -> str:
+def msg_unexpected_otp_part1() -> str:
     """
-    Response when user reports receiving an OTP they did not request.
-    This is a strong signal of an active account takeover attempt or
-    credential stuffing in progress. May also be a SIM swap precursor
-    if the OTP is carrier-related.
-    Includes WhatsApp-specific OTP guidance — WhatsApp OTP theft enables
-    full account takeover and exploitation of the victim's entire contact list.
+    Part 1 of 2: Unexpected OTP — immediate actions (Steps 1–3).
+    Kept under 1600 chars to comply with Twilio WhatsApp message limit.
     """
     return (
         "🚨 *Unexpected OTP — an account takeover attempt may be in progress.*\n\n"
@@ -839,13 +835,19 @@ def msg_unexpected_otp() -> str:
         "Go directly to that service by typing the URL — do not click any link in the text.\n\n"
         "⚠️ *If the OTP is a WhatsApp verification code — act immediately.*\n"
         "A stolen WhatsApp OTP gives an attacker full control of your account. "
-        "They are logged in as you and can:\n"
-        "→ Read your entire message and contact history\n"
-        "→ Message every contact impersonating you — requesting money, sharing malicious links\n"
-        "→ Take over any WhatsApp groups you administer\n"
-        "→ Use your identity to steal OTPs from your contacts, spreading the attack\n"
-        "Do NOT share the code. Open WhatsApp Settings → Account → "
-        "enable Two-Step Verification immediately if you have not already.\n\n"
+        "They can read your messages, impersonate you to every contact, take over your groups, "
+        "and use your identity to steal OTPs from people you know.\n"
+        "Do NOT share the code. Enable Two-Step Verification: "
+        "WhatsApp Settings → Account → Two-Step Verification."
+    )
+
+
+def msg_unexpected_otp_part2() -> str:
+    """
+    Part 2 of 2: Unexpected OTP — lock down and sweep (Steps 3–4).
+    Kept under 1600 chars to comply with Twilio WhatsApp message limit.
+    """
+    return (
         "*Step 3 — Lock the account immediately.*\n"
         "→ Change your password for that account now\n"
         "→ Check for active sessions you don't recognise — reply *SESSIONS* for a guided walkthrough\n"
@@ -859,17 +861,14 @@ def msg_unexpected_otp() -> str:
     )
 
 
-def msg_wascam() -> str:
+def msg_wascam_part1() -> str:
     """
-    Response when user reports a suspicious WhatsApp message.
-    Covers financial fraud vectors first (bank, carrier impersonation),
-    then family impersonation (Hi Mum/Dad), then disappearing message tactics.
-    Includes verification steps and cross-references to OTP command.
+    Part 1 of 2: Suspicious WhatsApp message — financial and carrier fraud vectors.
+    Covers bank impersonation, carrier impersonation, and family/friend scams.
+    Kept under 1600 chars to comply with Twilio WhatsApp message limit.
     """
     return (
         "🚨 *Suspicious WhatsApp message — fraud pattern detected.*\n\n"
-        "WhatsApp is increasingly used to impersonate banks, carriers, and family members. "
-        "Attackers often enable disappearing messages to destroy evidence. "
         "Match your situation below and act immediately.\n\n"
 
         "*🏦 Bank or financial institution impersonation*\n"
@@ -894,11 +893,20 @@ def msg_wascam() -> str:
         "→ Do not send money — this is one of the fastest-growing WhatsApp scams\n"
         "→ Call the family member directly on their known number to verify\n"
         "→ The real person will not be offended that you checked\n"
-        "→ Screenshot the message before it disappears — you will need it to report\n\n"
+        "→ Screenshot the message before it disappears\n\n"
+        "(continued...)"
+    )
 
+
+def msg_wascam_part2() -> str:
+    """
+    Part 2 of 2: Suspicious WhatsApp message — disappearing messages, verification, reporting.
+    Kept under 1600 chars to comply with Twilio WhatsApp message limit.
+    """
+    return (
         "*⏱ Disappearing messages + urgency*\n"
         "If the sender has enabled disappearing messages, it is almost always deliberate — "
-        "they are destroying the evidence of the scam.\n"
+        "they are destroying evidence.\n"
         "→ Screenshot everything immediately before it disappears\n"
         "→ Urgency is the weapon — any message demanding you act within minutes is an attack\n"
         "→ Slow down, verify through a separate channel, then act\n\n"
@@ -1311,12 +1319,14 @@ def handle_active_message(
 
     # --- OTP (user received an unexpected OTP they did not request) ---
     if body == "OTP":
-        send_whatsapp(to_number, msg_unexpected_otp(), account_sid, auth_token, from_number)
+        send_whatsapp(to_number, msg_unexpected_otp_part1(), account_sid, auth_token, from_number)
+        send_whatsapp(to_number, msg_unexpected_otp_part2(), account_sid, auth_token, from_number)
         return "unexpected_otp_reported"
 
     # --- WASCAM (user received a suspicious WhatsApp message) ---
     if body == "WASCAM":
-        send_whatsapp(to_number, msg_wascam(), account_sid, auth_token, from_number)
+        send_whatsapp(to_number, msg_wascam_part1(), account_sid, auth_token, from_number)
+        send_whatsapp(to_number, msg_wascam_part2(), account_sid, auth_token, from_number)
         return "wascam_reported"
 
     # --- SMS with no content — prompt user to include the message ---

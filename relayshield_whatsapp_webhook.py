@@ -292,7 +292,7 @@ def build_sms_analysis_response(
         url_list = "\n".join(f"⛔ {u}" for u in flagged_urls)
         return (
             "🚨 *MALICIOUS LINK DETECTED*\n\n"
-            f"Google Safe Browsing flagged {len(flagged_urls)} of the "
+            f"RelayShield flagged {len(flagged_urls)} of the "
             f"{len(urls)} link(s) in that text as a confirmed threat "
             "(malware, phishing, or social engineering):\n\n"
             f"{url_list}\n\n"
@@ -310,7 +310,7 @@ def build_sms_analysis_response(
     url_list = "\n".join(f"✅ {u}" for u in urls)
     return (
         "📨 *Suspicious text analysed — no known threats detected.*\n\n"
-        f"Google Safe Browsing checked {len(urls)} link(s) and found no "
+        f"RelayShield checked {len(urls)} link(s) and found no "
         "confirmed malware or phishing:\n\n"
         f"{url_list}\n\n"
         "⚠️ *A clean result does not guarantee the link is safe.* "

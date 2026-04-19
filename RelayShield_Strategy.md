@@ -1724,15 +1724,93 @@ When email is compromised and SMS is under attack, WhatsApp alerts remain intact
 
 ---
 
-## 9. Telegram Agentic Workflows (Phase 2 Roadmap)
+## 9. Delivery Channel Strategy
 
-- **Autonomous Breach Patrol Bot** — proactively messages users when new breach data detected
-- **Scheduled Risk Briefings** — weekly identity risk score summary
-- **Interactive Remediation Flows** — rich inline buttons for step-by-step recovery
-- **Team Alert Routing** — SMB admins get Telegram notifications, employees get WhatsApp
-- **Agentic Identity Audit** — user triggers full scan via Telegram command
-- **Threat Intelligence Briefings** — daily/weekly digest of emerging breach campaigns
-- **Exfiltration Alert Routing** — secret exposure and dark web sale alerts via Telegram for SMB admins
+### Channel Priority Framework
+
+RelayShield's core product advantage — two-way conversational AI remediation — only works in channels that support real-time, bidirectional messaging. Channel selection is not a preference question; it is a product architecture decision.
+
+| Priority | Channel | Role | Phase |
+|---|---|---|---|
+| 1 | **WhatsApp** | Primary delivery — 1:1 conversational AI remediation | ✅ Live |
+| 2 | **Telegram** | Secondary delivery — privacy-focused and security-aware users | Phase 2 |
+| 3 | **Email** | Supplementary only — fallback alerts, monthly digest, never conversation | Phase 2 |
+| 4 | **Discord** | Community and marketing channel only — no personal breach data | Phase 2/3 |
+| 5 | **Native app** | Dashboard layer — breach history, exposure score, team status | Phase 3 |
+| 6 | **RCS** | Watch — no business API yet; likely US SMS replacement long-term | Watch |
+
+---
+
+### WhatsApp — Primary Channel
+
+WhatsApp remains the primary delivery channel for all tiers. The structural advantage in the context of active breaches and smishing attacks is documented in Section 10 (Smishing Defense Engine). 90%+ open rates, E2E encryption for personal chats, and a conversational interface that supports the full remediation flow.
+
+**Important caveat:** WhatsApp Business API (the channel RelayShield uses) routes through Meta's servers — messages are not E2E encrypted between RelayShield's Lambda and the end user. This is consistent with every WhatsApp Business API product. Mitigation: minimize PII in message content; use breach severity labels and action prompts rather than full credential details.
+
+---
+
+### Telegram — Phase 2 Delivery Channel
+
+Telegram targets the security-aware, privacy-focused user segment that distrusts Meta. This is a high-value segment for RelayShield — users who have already self-selected for security consciousness are more likely to act on breach alerts and complete remediation steps.
+
+**The encryption constraint — critical technical reality:**
+Telegram Secret Chats use true E2E encryption but **Telegram bots cannot operate in Secret Chats**. This is an architectural limitation of the Telegram Bot API — bots only function in regular chats, which use MTProto encryption (encrypted in transit and at rest on Telegram's servers, but not E2E client-to-client). There is no workaround.
+
+This means requiring Secret Chat encryption as a product prerequisite is not technically feasible. However, the privacy posture is equivalent to WhatsApp Business API — both route through their respective corporate servers. Telegram's privacy reputation is stronger despite this, and MTProto is a well-regarded encryption protocol.
+
+**Mitigation — data minimisation as the policy:**
+Telegram alerts contain the minimum data needed to act — severity level, breach name, action prompt. Full breach details, email addresses, and remediation steps are delivered in WhatsApp (primary) or accessible via authenticated link. Personal breach data is never transmitted in full through the Telegram channel.
+
+**Telegram delivery capabilities (Phase 2):**
+- Autonomous breach patrol bot — proactively alerts when new breach data detected
+- Scheduled risk briefings — weekly identity risk score summary
+- Interactive remediation flows — rich inline buttons for step-by-step recovery
+- Team alert routing — SMB admins receive Telegram notifications, employees receive WhatsApp
+- Agentic identity audit — full scan triggered via Telegram command
+- Threat intelligence briefings — weekly digest of emerging breach campaigns
+- Exfiltration alert routing — stealer log and dark web sale alerts for SMB admins
+- Smishing campaign alerts — Telegram threat channel detections routed back via Telegram (the threat intel closed loop)
+
+**The threat intel closed loop:**
+RelayShield Phase 2 monitors Telegram channels where stolen credentials and smishing target lists are sold. A product that monitors Telegram for threat intelligence AND delivers alerts via Telegram creates a unique closed loop no competitor can replicate: *"We watch the channel where your stolen credentials are being sold and alert you through it — in plain language, with a remediation plan."*
+
+---
+
+### Email — Supplementary Only
+
+Email is out-of-band from SMS but is itself a primary breach target. Sending a breach alert to a potentially compromised inbox creates a circular risk — the attacker who planted a forwarding rule in the breached inbox will intercept the alert. Email is never the primary conversation channel.
+
+**Legitimate email roles:**
+- Fallback alert when WhatsApp delivery fails (no 24-hour window, undelivered message)
+- Monthly security digest — breach summary, remediation status, one security tip
+- Onboarding confirmation and receipt
+- Annual billing and renewal notices
+
+---
+
+### Discord — Community and Marketing Channel Only
+
+Discord has strong US penetration among 18–34 tech-savvy users, developers, and crypto communities — a valuable acquisition channel. However, Discord has no E2E encryption, messages are stored on Discord's servers, and the platform has a history of cooperation with law enforcement subpoenas. Personal breach data must never be transmitted via Discord.
+
+**Legitimate Discord roles:**
+- RelayShield community server — security tips, threat intelligence briefings (public, no personal data)
+- Developer and security community engagement
+- Customer support channel (general questions, not account-specific)
+- Feature announcement and changelog
+- Content distribution to US tech demographics
+
+---
+
+### Native App — Phase 3 Dashboard Layer
+
+A native app is not a conversation replacement — it is a status and history layer. RelayShield's value proposition is that it comes to the user; users do not open a security app proactively. Push notifications route through WhatsApp and Telegram. The app answers "show me my current state" without replacing the conversational AI.
+
+**App scope (Phase 3):**
+- Breach history and remediation status per monitored email
+- Identity exposure score (0–100)
+- SMB team seat status and aggregate risk
+- Onboarding and account management
+- Not: breach alerts, remediation conversations, or real-time notifications
 
 ---
 

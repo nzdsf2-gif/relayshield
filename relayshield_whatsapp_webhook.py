@@ -16,6 +16,7 @@ Reply commands (ACTIVE users):
   MANAGER  — Bitwarden setup guide
   PHONE    — Carrier hardening steps (SIM swap + smishing defence)
   OTP      — User received an unexpected OTP they did not request
+  WASCAM   — User received a suspicious WhatsApp message (bank/carrier/family impersonation)
   SMS <text> — User forwards a suspicious text for analysis
   SESSIONS — Revoke active sessions and OAuth tokens (Google, Microsoft, social media)
   SAFE     — Vishing warning acknowledged
@@ -596,7 +597,18 @@ def msg_onboarding_complete(email_limit: int, is_business: bool) -> str:
         "🛡️ *You're all set.*\n\n"
         "Your first breach scan runs within the hour. If I find anything, "
         "I'll alert you here with a severity score and walk you through exactly what to do.\n\n"
-        f"Reply *HELP* any time to see available commands.{business_note}"
+        "⚠️ *One thing to know before you go:*\n"
+        "Attackers increasingly use WhatsApp to impersonate banks, carriers, and "
+        "family members — often enabling disappearing messages to destroy evidence. "
+        "Three rules that will protect you:\n"
+        "→ RelayShield will never ask for an OTP, PIN, or password — ever\n"
+        "→ Screenshot any WhatsApp message asking for money or a verification code "
+        "before you do anything else\n"
+        "→ If a message feels urgent, that urgency is the attack — slow down and verify "
+        "through a separate channel\n\n"
+        "Reply *WASCAM* if you receive a suspicious WhatsApp message, "
+        "*OTP* if you receive an unexpected verification code, "
+        f"or *HELP* any time to see all available commands.{business_note}"
     )
 
 
@@ -610,6 +622,7 @@ def msg_help(is_business: bool, is_employee: bool = False) -> str:
         "• *MANAGER* — Get a free Bitwarden password manager setup guide\n"
         "• *PHONE* — Carrier hardening steps to protect your number from SIM swap and smishing\n"
         "• *OTP* — You received an unexpected verification code — get immediate steps\n"
+        "• *WASCAM* — You received a suspicious WhatsApp message (bank, carrier, or family impersonation)\n"
         "• *SMS* — Forward a suspicious text for analysis (reply SMS followed by the message)\n"
         "• *SAFE* — Confirm you have read a vishing or session hijacking warning\n"
         "• *CALL* — You received a suspicious call — get immediate steps\n"
@@ -810,6 +823,8 @@ def msg_unexpected_otp() -> str:
     This is a strong signal of an active account takeover attempt or
     credential stuffing in progress. May also be a SIM swap precursor
     if the OTP is carrier-related.
+    Includes WhatsApp-specific OTP guidance — WhatsApp OTP theft enables
+    full account takeover and exploitation of the victim's entire contact list.
     """
     return (
         "🚨 *Unexpected OTP — an account takeover attempt may be in progress.*\n\n"
@@ -819,9 +834,18 @@ def msg_unexpected_otp() -> str:
         "No legitimate company — not your bank, not your carrier, not any tech support — "
         "will ever call or text asking you to read back an OTP. "
         "If anyone contacts you asking for this code, that contact is the attack.\n\n"
-        "*Step 2 — Identify which account sent the OTP.*\n"
+        "*Step 2 — Identify which service sent the OTP.*\n"
         "The sender name or message content will indicate the service. "
         "Go directly to that service by typing the URL — do not click any link in the text.\n\n"
+        "⚠️ *If the OTP is a WhatsApp verification code — act immediately.*\n"
+        "A stolen WhatsApp OTP gives an attacker full control of your account. "
+        "They are logged in as you and can:\n"
+        "→ Read your entire message and contact history\n"
+        "→ Message every contact impersonating you — requesting money, sharing malicious links\n"
+        "→ Take over any WhatsApp groups you administer\n"
+        "→ Use your identity to steal OTPs from your contacts, spreading the attack\n"
+        "Do NOT share the code. Open WhatsApp Settings → Account → "
+        "enable Two-Step Verification immediately if you have not already.\n\n"
         "*Step 3 — Lock the account immediately.*\n"
         "→ Change your password for that account now\n"
         "→ Check for active sessions you don't recognise — reply *SESSIONS* for a guided walkthrough\n"
@@ -831,6 +855,66 @@ def msg_unexpected_otp() -> str:
         "If an attacker has your credentials, they may also have inbox access. "
         "Reply *SWEEP* to check for forwarding rules and backdoors.\n\n"
         "Reply *CALL* if you also received a suspicious phone call alongside this OTP.\n\n"
+        "— RelayShield"
+    )
+
+
+def msg_wascam() -> str:
+    """
+    Response when user reports a suspicious WhatsApp message.
+    Covers financial fraud vectors first (bank, carrier impersonation),
+    then family impersonation (Hi Mum/Dad), then disappearing message tactics.
+    Includes verification steps and cross-references to OTP command.
+    """
+    return (
+        "🚨 *Suspicious WhatsApp message — fraud pattern detected.*\n\n"
+        "WhatsApp is increasingly used to impersonate banks, carriers, and family members. "
+        "Attackers often enable disappearing messages to destroy evidence. "
+        "Match your situation below and act immediately.\n\n"
+
+        "*🏦 Bank or financial institution impersonation*\n"
+        "Signs: urgent message about a frozen account, suspicious transaction, or payment needed. "
+        "Asks you to click a link, call a number, or share a verification code.\n"
+        "→ Do not click any link — your bank will never contact you this way\n"
+        "→ Do not call any number provided in the message\n"
+        "→ Call your bank directly using the number on the back of your card\n"
+        "→ Forward any link to RelayShield for analysis — reply *SMS* followed by the link\n\n"
+
+        "*📡 Mobile carrier impersonation*\n"
+        "Signs: message claiming your account is suspended, a SIM change was requested, "
+        "or you need to verify your identity to avoid service interruption.\n"
+        "→ This is a SIM swap setup — do not respond or click any link\n"
+        "→ Call your carrier directly from the number on your bill\n"
+        "→ Ask them to confirm no changes were requested on your account\n"
+        "→ Reply *PHONE* for carrier PIN hardening steps to block this attack\n\n"
+
+        "*👨‍👩‍👦 Family or friend impersonation (Hi Mum / Hi Dad)*\n"
+        "Signs: message from an unknown number claiming to be a family member — "
+        "'I lost my phone, this is my new number, I need money urgently.'\n"
+        "→ Do not send money — this is one of the fastest-growing WhatsApp scams\n"
+        "→ Call the family member directly on their known number to verify\n"
+        "→ The real person will not be offended that you checked\n"
+        "→ Screenshot the message before it disappears — you will need it to report\n\n"
+
+        "*⏱ Disappearing messages + urgency*\n"
+        "If the sender has enabled disappearing messages, it is almost always deliberate — "
+        "they are destroying the evidence of the scam.\n"
+        "→ Screenshot everything immediately before it disappears\n"
+        "→ Urgency is the weapon — any message demanding you act within minutes is an attack\n"
+        "→ Slow down, verify through a separate channel, then act\n\n"
+
+        "*✅ How to verify any suspicious WhatsApp message*\n"
+        "→ Call the person or organisation directly using a number you already have — "
+        "not one provided in the message\n"
+        "→ Check the sender's number — legitimate banks and carriers do not use personal "
+        "WhatsApp numbers\n"
+        "→ If a verification code arrived alongside the message, reply *OTP* immediately\n\n"
+
+        "*📋 Report the scam*\n"
+        "→ Screenshot the conversation before it disappears\n"
+        "→ Report to WhatsApp: open the chat → tap the contact name → Report\n"
+        "→ Report to the FTC (US): reportfraud.ftc.gov\n\n"
+
         "— RelayShield"
     )
 
@@ -1229,6 +1313,11 @@ def handle_active_message(
     if body == "OTP":
         send_whatsapp(to_number, msg_unexpected_otp(), account_sid, auth_token, from_number)
         return "unexpected_otp_reported"
+
+    # --- WASCAM (user received a suspicious WhatsApp message) ---
+    if body == "WASCAM":
+        send_whatsapp(to_number, msg_wascam(), account_sid, auth_token, from_number)
+        return "wascam_reported"
 
     # --- SMS with no content — prompt user to include the message ---
     if body == "SMS":

@@ -1116,12 +1116,15 @@ RelayShield is not a super app. It is a specialist. Every feature decision, ever
 - A specialist that goes deeper on one problem than any generalist can
 
 **What RelayShield is not and will never be:**
-- A VPN (recommend Mullvad/ProtonVPN)
-- A password manager (recommend 1Password/Bitwarden)
+- A VPN (out of lane — recommend Mullvad/ProtonVPN)
+- A password manager (out of lane — recommend 1Password/Bitwarden)
 - An antivirus (out of lane entirely)
-- A data broker removal service (partner with Incogni/DeleteMe — don't build it)
 - A credit monitoring service (requires bureau partnerships — Phase 3 via partner only)
 - A feature bundle that competes on spec count
+
+**What RelayShield will add via partnership, not by building:**
+- Data broker removal — partner with Incogni/DeleteMe API (Phase 2). Directly reduces attack surface by removing personal data from circulation. Fits the breach response philosophy.
+- Credit monitoring — underwriting partnership only if it becomes table stakes (Phase 3)
 
 The bundlers — IDwatchdog, Aura, LifeLock, and now Cloaked — sacrifice depth for breadth. A customer who cares deeply about any single capability already has a better standalone tool. RelayShield wins by being the product those customers reach for when the thing they care about fails.
 

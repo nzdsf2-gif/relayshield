@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely.*
+*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives.*
 
 ---
 
@@ -1620,6 +1620,107 @@ Employee 3 (stylist):  71 — Medium — password found in breach corpus
 - Phase 2: Score delivered in WhatsApp weekly summary message
 - Phase 3: Score displayed in SMB team dashboard (web UI)
 - Future: Score embedded in Stripe customer portal or dedicated RelayShield app
+
+---
+
+## 10. Smishing Defense Engine
+
+### Why Smishing, Why Now
+
+Smishing (SMS phishing) campaigns are growing faster than vishing and generate higher aggregate fraud losses — though loss per incident is lower. The attack surface overlaps directly with RelayShield's existing capabilities: phone number exposure in breaches, SIM swap detection, Telegram monitoring, and the WhatsApp delivery channel.
+
+Every existing smishing defense is **reactive** — carrier spam filters, iOS/Android link warnings, call screening apps. They wait for the attack and try to block it. RelayShield already monitors the upstream signals that predict smishing campaigns before they launch: breach databases that expose phone numbers, stealer logs where phone numbers are harvested, and Telegram channels where smishing target lists and kits are actively sold.
+
+### The WhatsApp Structural Advantage — Precise Framing
+
+WhatsApp is not simply "out-of-band from SMS." Email is also out-of-band from SMS — a competitor using email could make the same surface claim. The precise advantage is this:
+
+**WhatsApp remains secure when both SMS and email are compromised simultaneously.**
+
+The scenario where out-of-band matters most is an active breach. In that scenario:
+- The victim's email may already be compromised — a breach alert sent to a hacked inbox can be silently deleted by an attacker who planted a forwarding rule (the exact backdoor RelayShield's Email Security Sweep detects)
+- The victim's SMS channel is under active smishing attack
+- An email-based competitor's alert is delivered to the exact account that may be under attack
+
+RelayShield alerts arrive via WhatsApp — end-to-end encrypted, 90%+ open rate, and structurally intact even when email access has been compromised. **"When your email is breached and your SMS is under attack, your WhatsApp still works."**
+
+---
+
+### Tier 1 — Phase 1 Implementation (All Tiers)
+
+**Capability 1 — Phone Number Breach Detection with Smishing Escalation**
+HIBP DataClasses already flag phone number exposure in breach records. Today RelayShield treats this like any other data class. Enhancement: when "Phone numbers" appears in DataClasses, escalate breach severity and append a smishing warning to the WhatsApp alert.
+
+> *"Your phone number was exposed in [breach name]. Smishing campaigns — fraudulent texts impersonating banks, carriers, and delivery services — frequently follow phone number exposure in breaches. Here's what to watch for and what to never reply to."*
+
+Implementation: ~1–2 hours. DataClass detection already exists — this is a message template addition.
+
+**Capability 2 — Carrier PIN Hardening as Smishing Defense**
+During onboarding and on every phone number breach alert, include carrier PIN hardening steps — set a strong PIN, enable number lock/port freeze — explicitly framed as smishing and SIM swap defense. Smishing attackers target carrier PINs to authorize port-outs. This step exists implicitly in the SIM swap flow; make it explicit and proactive.
+
+Implementation: ~1–2 hours. Content addition to existing flows.
+
+**Capability 3 — OTP Warning Flow**
+User receives an unexpected OTP they didn't request and messages RelayShield. Intent detected via Claude. RelayShield immediately:
+- Identifies this as a credential stuffing or account takeover attempt in progress
+- Guides through locking the targeted account
+- Flags as SIM swap precursor if OTP is carrier-related
+- Advises never sharing OTP with anyone, including callers claiming to be the carrier
+
+Implementation: ~2–3 hours. New intent + pre-written response flow in webhook.
+
+**Capability 4 — Suspicious SMS Analysis**
+User forwards a suspicious text to the RelayShield WhatsApp number. RelayShield extracts any URLs, checks domain reputation via Google Safe Browsing API (free, fast, no rate limit concern at current scale), and returns a clear verdict: safe / suspicious / confirmed malicious. If malicious, triggers a mini-remediation flow: don't click, don't reply, block sender, report to carrier.
+
+Implementation: ~4–6 hours. URL extraction + Google Safe Browsing API integration + response formatting. Upgrade to VirusTotal when volume justifies.
+
+---
+
+### Tier 2 — Phase 2 (Business Basic and Higher)
+
+**Capability 5 — Predictive Smishing Campaign Monitoring (Flare API)**
+Telegram channels actively package and sell phone number target lists for smishing campaigns. Flare monitors 57,000+ Telegram channels. When a monitored phone number appears in a Telegram smishing target list, fire a CRITICAL WhatsApp alert before the campaign reaches the user.
+
+> *"⚠️ Your phone number has been identified in an active smishing target list on a Telegram threat channel. A fraudulent text campaign may be incoming. Do not click any links in unexpected texts this week. Full guidance below."*
+
+This is the predictive moat no competitor offers. Delivered via the same Flare API add-on already planned for stealer log monitoring — one integration, multiple differentiators.
+
+**Capability 6 — Team Smishing Propagation Alert (Business Basic+)**
+Smishing campaigns often sweep entire company directories. If one monitored employee number appears in a Telegram smishing target list, alert the team admin: "One of your team members' numbers has appeared in an active smishing campaign list. Alert your team not to click unexpected SMS links."
+
+---
+
+### Tier 3 — Phase 2 (Business Shield and Pro Only)
+
+**Capability 7 — Smishing-to-SIM-Swap Correlation Alert**
+Smishing is a known SIM swap enabler — attackers smish to steal carrier PINs or OTPs needed to authorize port-outs. When RelayShield detects a SIM swap event on a monitored number, check if a suspicious SMS analysis was submitted in the prior 48–72 hours. If yes, escalate to CRITICAL and frame as a coordinated attack chain in progress.
+
+---
+
+### Feature Tier Matrix
+
+| Feature | Personal | Business Starter | Business Basic | Business Shield | BS Pro |
+|---|---|---|---|---|---|
+| Phone number breach → smishing escalation | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Carrier PIN hardening (smishing framing) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| OTP warning flow | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Suspicious SMS analysis (forward to WhatsApp) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Predictive smishing campaign monitoring (Flare) | ❌ | ❌ | ✅ add-on | ✅ add-on | ✅ bundled |
+| Team smishing propagation alert | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Smishing-to-SIM-swap correlation | ❌ | ❌ | ❌ | ✅ | ✅ |
+
+---
+
+### How This Deepens the Competitive Moat
+
+**1. Upstream detection advantage — no new infrastructure cost**
+The Flare API integration already planned for stealer log monitoring covers Telegram smishing target list detection. Same API subscription, same Phase 2 build — smishing campaign monitoring is an additional output from existing infrastructure.
+
+**2. Attack chain ownership**
+Smishing → OTP theft → SIM swap → account takeover is a documented attack chain. RelayShield is the only product monitoring every link: phone number exposure in breaches (HIBP), Telegram smishing target lists (Flare API), OTP anomaly reports (webhook), SIM swap detection (Twilio Verify), and downstream account takeover remediation (Email Security Sweep + SESSIONS command). No competitor sees the full chain.
+
+**3. The delivery channel advantage is structural, not marketing**
+When email is compromised and SMS is under attack, WhatsApp alerts remain intact. This is not a claim — it is a consequence of the architecture. An email-based competitor cannot make this argument because their alert channel is itself a breach target.
 
 ---
 

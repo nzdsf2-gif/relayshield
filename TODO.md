@@ -65,6 +65,10 @@
 | 6 | **Consumer vishing alert** — Append vishing warning to WhatsApp alert when breach exposes phone/address/carrier/account numbers | ⬜ Pending |
 | 7 | **Personal verification protocol** — Onboarding WhatsApp flow: callback rule, OTP rule, family safe word, wire transfer rule | ⬜ Pending |
 | 8 | **SSN/passport/DL vishing escalation** — CRITICAL severity when these data classes detected | ⬜ Pending |
+| 9 | **Smishing — phone number breach escalation** — Detect "Phone numbers" in HIBP DataClasses → append smishing warning to existing breach alert. ~1–2 hrs. All tiers. | ⬜ Pending |
+| 10 | **Smishing — carrier PIN hardening messaging** — Add carrier PIN / number lock steps to onboarding flow and phone number breach alert. Framed as smishing + SIM swap defense. ~1–2 hrs. All tiers. | ⬜ Pending |
+| 11 | **Smishing — OTP warning flow** — New intent detection: user reports unexpected OTP. Claude identifies as account takeover attempt in progress. Guides account lockdown + SIM swap precursor warning. ~2–3 hrs. All tiers. | ⬜ Pending |
+| 12 | **Smishing — suspicious SMS analysis** — User forwards suspicious text to RelayShield WhatsApp. Extract URL, check via Google Safe Browsing API (free), return verdict + remediation flow. ~4–6 hrs. All tiers. Upgrade to VirusTotal at scale. | ⬜ Pending |
 
 ---
 
@@ -155,7 +159,10 @@
 | 8 | **Seat expansion upsell** — Auto-prompt to upgrade tier when seat limit reached | 🔮 Phase 2 |
 | 9 | **Dedicated SMB Carrd page** — /business sub-page when SMB revenue justifies it | 🔮 Phase 2 |
 | 10 | **Business Basic+ differentiation** — Develop additional capabilities exclusive to Business Basic and higher to drive upsell from Business Starter. Candidates: priority incident response SLA, aggregate team risk dashboard, organisational OAuth audit, Google Workspace / M365 monitoring, compliance reporting add-on | 🔮 Phase 2 |
-| 11 | **SIM/IMEI anomaly detection via carrier APIs** — Phase 3 research item. Extends Phase 2 SIM swap monitor to detect anomalous carrier traffic patterns (unexpected APN routing, traffic volume spikes, AT command abuse on IoT cellular devices). Targets Business Shield and Pro tiers with IoT-connected operations. Leverages 25-year telecom expertise as moat — no competitor has attempted this. | 🔮 Phase 3 |
+| 11 | **Smishing — predictive campaign monitoring (Flare API)** — Extends Flare add-on: monitor Telegram channels for smishing target lists containing monitored phone numbers. Fire CRITICAL alert before campaign reaches user. BB add-on, BS add-on, BS Pro bundled. No additional API cost — same Flare subscription. | 🔮 Phase 2 |
+| 12 | **Smishing — team propagation alert** — When one employee number appears in Telegram smishing list, alert team admin. Business Basic and higher. | 🔮 Phase 2 |
+| 13 | **Smishing — SIM swap correlation alert** — When SIM swap detected, check if suspicious SMS analysis submitted in prior 48–72 hrs. If yes, escalate to CRITICAL coordinated attack chain alert. Business Shield and Pro only. | 🔮 Phase 2 |
+| 14 | **SIM/IMEI anomaly detection via carrier APIs** — Phase 3 research item. Extends Phase 2 SIM swap monitor to detect anomalous carrier traffic patterns (unexpected APN routing, traffic volume spikes, AT command abuse on IoT cellular devices). Targets Business Shield and Pro tiers with IoT-connected operations. Leverages 25-year telecom expertise as moat — no competitor has attempted this. | 🔮 Phase 3 |
 
 ---
 

@@ -1230,6 +1230,17 @@ def handle_active_message(
         send_whatsapp(to_number, msg_unexpected_otp(), account_sid, auth_token, from_number)
         return "unexpected_otp_reported"
 
+    # --- SMS with no content — prompt user to include the message ---
+    if body == "SMS":
+        send_whatsapp(
+            to_number,
+            "📨 *To analyse a suspicious text, reply with SMS followed by the message.*\n\n"
+            "Example: *SMS https://suspicious-link.com* or paste the full text of the message.\n\n"
+            "RelayShield will check any links for malware and phishing.",
+            account_sid, auth_token, from_number,
+        )
+        return "sms_prompt_sent"
+
     # --- SMS (user forwards a suspicious text for analysis) ---
     # Extracts URLs from the forwarded text, checks via Google Safe Browsing
     # API v4, and returns a verdict: malicious / clean / no URLs found.

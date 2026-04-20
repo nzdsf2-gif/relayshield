@@ -53,15 +53,16 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **Auto-send Claude analysis on first reply** — When ACTIVE user messages after breach and no freeform was sent (63016), webhook auto-sends full Claude analysis before handling their command | ⬜ Pending |
+| 1 | **Auto-send Claude analysis on first reply** — When ACTIVE user messages after breach and no freeform was sent (63016), webhook auto-sends full Claude analysis before handling their command. REMOVE used to clear pending_analysis field; early return prevents unknown-command message from firing. | ✅ Complete — deployed April 2026 |
 | 2 | **Fix empty breach_date field in DynamoDB** | ✅ Complete — code already handles via BreachDate→AddedDate fallback. Empty values are legacy beta test records only. |
-| 3 | **Password breach checking** — Pwned Passwords API integration | ⬜ Pending |
+| 3 | **Password breach checking** — Pwned Passwords API (k-anonymity) integration. Detect when a monitored user's password appears in breach corpus. Append to existing breach alert. | 🔄 Next |
 | 4 | **Cross-account password risk detection** | ⬜ Pending |
-| 5 | **Business Starter webhook code update** — Add TIER_STARTER constant, EMAIL_LIMITS entry (3 emails), phone hardening parity with business tiers | ⬜ Pending (post-beta) |
-| 5a | **Business Starter — 1 contractor seat** — Add TIER_STARTER to BUSINESS_TIERS, set SEAT_LIMIT of 1. Enables ADD command for one employee/contractor. Upsell path to Business Basic (5 seats). | ⬜ Pending (post-beta) |
-| 5b | **Business Starter+ — Quarterly proactive sweep reminder** — EventBridge scheduled rule per Business Starter, Basic, Shield, Pro subscriber. WhatsApp message every 90 days: "Time for your quarterly security sweep — no breach needed. Reply SWEEP to start." Differentiates all business tiers from Personal Shield reactive-only model. | ⬜ Pending (post-beta) |
-| 5c | **Business Starter+ — Monthly WhatsApp Security Digest** — EventBridge monthly trigger for all business tiers. Lambda queries DynamoDB for breach history, open remediation items. Sends formatted summary: breach count, all-clear confirmation, one rotating business-specific security tip. Send one digest to beta testers before conversion ask. | ⬜ Pending (post-beta) |
+| 5 | **Business Starter webhook code update** — TIER_STARTER constant, EMAIL_LIMITS (3 emails = owner + 2 slots), SEAT_LIMITS (2 ADD slots = owner + 2 people covered), BUSINESS_TIERS membership, phone hardening at Starter/Basic level. | ✅ Complete — deployed April 2026 |
+| 5a | **Business Starter — 2 contractor/employee seats via ADD** — Owner can ADD up to 2 people (employees or contractors) via ADD command. Seat limit enforced at 2. Clear upsell to Business Basic (5 seats). | ✅ Complete — deployed April 2026 |
+| 5b | **All tiers — Quarterly proactive sweep reminder** — EventBridge scheduled rule per active subscriber. WhatsApp template every 90 days: "Time for your quarterly security sweep — no breach needed. Reply SWEEP to start." All tiers including Personal Shield. Business tiers include team prompt. | ⬜ Pending |
+| 5c | **All tiers — Monthly WhatsApp Security Digest** — EventBridge monthly trigger for ALL active subscribers (Personal Shield included — reduces churn). Lambda queries DynamoDB for scan count, breach history. Sends formatted digest: scans run, all-clear or breach summary, current threat intel, top command prompt (SWEEP). Business tiers add team coverage line. Personal Shield digest reduces churn by proving ongoing value when no breach fires. Requires new Meta-approved template `relayshield_monthly_digest`. Update landing page pricing table to show "Monthly Security Digest ✓" for all tiers. | ⬜ Pending |
 | 5d | **Welcome message — all tiers** — WhatsApp template `relayshield_welcome` approved by Meta April 2026. Stripe webhook updated to send via Twilio Content API (HX45e6bac7d790f79414f7b067e1a3edd9). Manual DynamoDB onboarding (beta) uses ad-hoc WhatsApp contact — no automated send needed for beta path. | ✅ Complete — production path done |
+| 5e | **Day 3 onboarding follow-up template** — Highest-churn window is first week. Template fires 72 hrs after user record created. Encourages top 3 commands, varies by tier. Personal Shield: SWEEP (top beta command) + REUSE + SESSIONS. Business tiers: SWEEP + PHONE + ADD. Requires new Meta-approved template `relayshield_day3`. EventBridge per-user trigger set at onboarding. | ⬜ Pending |
 | 6 | **Consumer vishing alert** — Append vishing warning to WhatsApp alert when breach exposes phone/address/carrier/account numbers | ✅ Complete — in Claude system prompt |
 | 9a | **Disappearing WhatsApp message awareness** — Added to onboarding completion message. Three rules: RelayShield never asks for OTP/PIN, screenshot urgent messages, urgency is the attack. Introduces WASCAM and OTP commands. | ✅ Complete |
 | 9b | **OTP command — WhatsApp-specific guidance** — Extended OTP response to cover WhatsApp OTP takeover consequences: full account takeover, contact list exploitation, chain attacks. Two-Step Verification prompt added. | ✅ Complete |
@@ -124,6 +125,9 @@
 | 3 | Set up AWS GuardDuty (~$1–3/month) | ⬜ Pending |
 | 4 | Confirm PII minimization across DynamoDB tables | ⬜ Pending |
 | 5 | Implement DynamoDB TTL on relayshield_breach_alerts (2-year auto-delete) | ⬜ Pending |
+| 6 | **Field-level KMS encryption for email addresses** — Encrypt email fields at application layer before writing to DynamoDB. Even raw table access yields ciphertext. Lambda encrypts on write, decrypts on read for HIBP calls. Use KMS key alias `relayshield-data-key`. ~$1/month. Directly addresses top customer concern (April 2026): "credentials stolen from database." Must be live before OAuth tokens are stored in Phase 2. | ⬜ Pending — priority before Phase 2 |
+| 7 | **Secrets Manager for OAuth tokens (Phase 2 prerequisite)** — Never store OAuth tokens in DynamoDB. When Phase 2 OAuth monitoring ships, each token stored in Secrets Manager under `relayshield/oauth/{user_id}/{provider}`. DynamoDB stores only the ARN reference — useless to an attacker without separate IAM access to Secrets Manager. Build this architecture before first OAuth token is collected. | ⬜ Pending — required before Phase 2 OAuth |
+| 8 | **Customer Managed KMS Key (CMK) for DynamoDB table encryption** — Replace AWS-managed key with CMK. Every table decryption event logged in CloudTrail. Enables "RelayShield staff cannot read your data without an audit trail" as a verifiable positioning claim. | ⬜ Pending — Phase 2 |
 
 ---
 

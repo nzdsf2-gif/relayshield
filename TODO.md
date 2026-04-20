@@ -54,7 +54,7 @@
 | # | Item | Status |
 |---|---|---|
 | 1 | **Auto-send Claude analysis on first reply** — When ACTIVE user messages after breach and no freeform was sent (63016), webhook auto-sends full Claude analysis before handling their command | ⬜ Pending |
-| 2 | **Fix empty breach_date field in DynamoDB** | ⬜ Pending |
+| 2 | **Fix empty breach_date field in DynamoDB** | ✅ Complete — code already handles via BreachDate→AddedDate fallback. Empty values are legacy beta test records only. |
 | 3 | **Password breach checking** — Pwned Passwords API integration | ⬜ Pending |
 | 4 | **Cross-account password risk detection** | ⬜ Pending |
 | 5 | **Business Starter webhook code update** — Add TIER_STARTER constant, EMAIL_LIMITS entry (3 emails), phone hardening parity with business tiers | ⬜ Pending (post-beta) |
@@ -62,12 +62,12 @@
 | 5b | **Business Starter+ — Quarterly proactive sweep reminder** — EventBridge scheduled rule per Business Starter, Basic, Shield, Pro subscriber. WhatsApp message every 90 days: "Time for your quarterly security sweep — no breach needed. Reply SWEEP to start." Differentiates all business tiers from Personal Shield reactive-only model. | ⬜ Pending (post-beta) |
 | 5c | **Business Starter+ — Monthly WhatsApp Security Digest** — EventBridge monthly trigger for all business tiers. Lambda queries DynamoDB for breach history, open remediation items. Sends formatted summary: breach count, all-clear confirmation, one rotating business-specific security tip. Send one digest to beta testers before conversion ask. | ⬜ Pending (post-beta) |
 | 5d | **Welcome message — all tiers** — WhatsApp template `relayshield_welcome` submitted to Meta for approval April 2026. Template uses {{1}}=tier name, {{2}}=email limit. Code update: replace `build_welcome_message()` free-form send with approved template send via Twilio Content API. Covers both Stripe webhook (paying customers) and manual DynamoDB onboarding (beta). | ⬜ Pending (post-beta) — template awaiting Meta approval |
-| 6 | **Consumer vishing alert** — Append vishing warning to WhatsApp alert when breach exposes phone/address/carrier/account numbers | ⬜ Pending |
+| 6 | **Consumer vishing alert** — Append vishing warning to WhatsApp alert when breach exposes phone/address/carrier/account numbers | ✅ Complete — in Claude system prompt |
 | 9a | **Disappearing WhatsApp message awareness** — Added to onboarding completion message. Three rules: RelayShield never asks for OTP/PIN, screenshot urgent messages, urgency is the attack. Introduces WASCAM and OTP commands. | ✅ Complete |
 | 9b | **OTP command — WhatsApp-specific guidance** — Extended OTP response to cover WhatsApp OTP takeover consequences: full account takeover, contact list exploitation, chain attacks. Two-Step Verification prompt added. | ✅ Complete |
 | 9c | **WASCAM command** — New command for suspicious WhatsApp messages. Leads with bank/financial fraud, carrier impersonation, then Hi Mum/Dad family scam, disappearing message tactics, verification steps. Added to HELP menu. | ✅ Complete |
 | 7 | **Personal verification protocol** — Onboarding WhatsApp flow: callback rule, OTP rule, family safe word, wire transfer rule | ⬜ Pending |
-| 8 | **SSN/passport/DL vishing escalation** — CRITICAL severity when these data classes detected | ⬜ Pending |
+| 8 | **SSN/passport/DL vishing escalation** — CRITICAL severity when these data classes detected | ✅ Complete — in Claude system prompt |
 | 9 | **Smishing — phone number breach escalation** — Detect "Phone numbers" in HIBP DataClasses → append smishing warning to existing breach alert. ~1–2 hrs. All tiers. | ✅ Complete |
 | 10 | **Smishing — carrier PIN hardening messaging** — `msg_phone_hardening()` updated with smishing context. Carriers never text/call asking for PIN framing added. All tiers. | ✅ Complete |
 | 11 | **Smishing — OTP warning flow** — `OTP` command added. `msg_unexpected_otp()` function built. HELP menu updated. Account lockdown + SIM swap precursor guidance. All tiers. | ✅ Complete |

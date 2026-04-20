@@ -1258,6 +1258,16 @@ def handle_active_message(
     is_employee = bool(user.get("admin_user_id"))
     body = message_body.strip().upper()
 
+    # --- Pending Claude analysis delivery ---
+    # If the breach monitor stored an analysis that couldn't be sent due to
+    # Twilio 63016 (no active session at alert time), deliver it now before
+    # routing the user's command. The user's reply opens the session window.
+    pending_analysis = user.get("pending_analysis", "")
+    if pending_analysis:
+        send_whatsapp(to_number, pending_analysis, account_sid, auth_token, from_number)
+        update_user(user_id, {"pending_analysis": ""})
+        logger.info("Delivered pending Claude analysis to user_id=%s.", user_id)
+
     # --- SWEEP ---
     if body == "SWEEP":
         send_whatsapp(to_number, msg_sweep(), account_sid, auth_token, from_number)

@@ -336,6 +336,21 @@ def scan_monitored_emails() -> list[dict]:
     return items
 
 
+def store_pending_analysis(user_id: str, analysis_text: str) -> None:
+    """
+    Store a Claude analysis that could not be delivered due to Twilio 63016
+    (no active WhatsApp session). The WhatsApp webhook will send this on
+    the user's next inbound message before routing their command.
+    """
+    table = dynamodb.Table(USERS_TABLE)
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET pending_analysis = :a",
+        ExpressionAttributeValues={":a": analysis_text},
+    )
+    logger.info("Stored pending_analysis for user_id=%s (%d chars).", user_id, len(analysis_text))
+
+
 def get_user_record(user_id: str) -> dict | None:
     """
     Return the full user record from relayshield_users.
@@ -1152,8 +1167,9 @@ def process_email(
             elif twilio_code == TWILIO_ERROR_OUTSIDE_WINDOW:
                 logger.info(
                     "Freeform follow-up skipped — no active session (63016). "
-                    "Template delivered. Detailed analysis sent on next user reply."
+                    "Template delivered. Storing analysis for delivery on next user reply."
                 )
+                store_pending_analysis(user_id, detailed_alert)
             else:
                 logger.warning(
                     "Freeform follow-up failed (code=%s) for email_id=%s.",

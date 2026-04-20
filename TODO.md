@@ -132,7 +132,7 @@
 | # | Item | Status |
 |---|---|---|
 | 1 | **Reddit marketing blitz** — u/BothFan5617 warmed up, posts ready for r/smallbusiness, r/Entrepreneur, r/freelance, r/msp, r/digitalnomad, r/banking | ⬜ Backburned |
-| 2 | **Tycoon 2FA blog post** — Draft exists, pending publication to relayshield.net | ⬜ Backburned |
+| 2 | **Tycoon 2FA blog post** — Published to RelayShield LinkedIn April 19 2026. Pending publication to relayshield.net | ✅ LinkedIn live |
 | 3 | **Salon owner conversion** — Send Business Starter payment link when beta period ends | ⬜ Pending |
 | 4 | **Facebook Business verification follow-up** — Monitor Meta approval (submitted April 2026) | 🔄 In progress |
 | 5 | **IoT cellular backdoor blog post** — Write plain-language breakdown of CPU-to-modem interface attack (Rapid7 research). Audience: r/smallbusiness, r/msp. Establishes telecom expertise authority. No product to build — purely a content play. | ⬜ Backburned |

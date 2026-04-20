@@ -84,15 +84,17 @@ GSB_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 # ---------------------------------------------------------------------------
 
 TIER_PERSONAL = "personal_shield"
+TIER_STARTER = "business_starter"
 TIER_BASIC = "business_basic"
 TIER_SHIELD = "business_shield"
 TIER_PRO = "business_shield_pro"
 
-BUSINESS_TIERS = {TIER_BASIC, TIER_SHIELD, TIER_PRO}
+BUSINESS_TIERS = {TIER_STARTER, TIER_BASIC, TIER_SHIELD, TIER_PRO}
 
 # Max emails per subscriber (personal) or per employee (business)
 EMAIL_LIMITS = {
     TIER_PERSONAL: 3,
+    TIER_STARTER: 3,
     TIER_BASIC: 2,
     TIER_SHIELD: 2,
     TIER_PRO: 2,
@@ -100,6 +102,7 @@ EMAIL_LIMITS = {
 
 # Max employee seats per business tier
 SEAT_LIMITS = {
+    TIER_STARTER: 3,
     TIER_BASIC: 5,
     TIER_SHIELD: 10,
     TIER_PRO: 25,
@@ -742,7 +745,8 @@ def msg_phone_hardening(subscription_tier: str) -> str:
         "⚠️ *Your carrier will never text or call asking for your PIN. "
         "Any message asking for it is an attack.*\n\n"
     )
-    if subscription_tier in BUSINESS_TIERS:
+    if subscription_tier in (TIER_SHIELD, TIER_PRO):
+        # Shield and Pro: full carrier-specific steps including eSIM audit guidance
         carrier_steps = (
             "*AT&T*\n"
             "→ Enable Wireless Account Lock: att.com/accountlock\n"
@@ -760,7 +764,26 @@ def msg_phone_hardening(subscription_tier: str) -> str:
             "→ Never give out your account PIN on a phone call — carriers will never ask\n"
             "→ Set a unique carrier PIN not used anywhere else\n"
         )
+    elif subscription_tier in (TIER_STARTER, TIER_BASIC):
+        # Starter and Basic: carrier-specific lock steps, no eSIM audit guidance
+        carrier_steps = (
+            "*AT&T*\n"
+            "→ Enable Wireless Account Lock: att.com/accountlock\n"
+            "→ Add a passcode to your account\n\n"
+            "*T-Mobile*\n"
+            "→ Enable SIM Protection: account.t-mobile.com → Profile → SIM Protection\n"
+            "→ Set a PIN/passcode on your account\n\n"
+            "*Verizon*\n"
+            "→ Enable Number Lock: verizon.com/myverizon → Account → Number Lock\n"
+            "→ Set a PIN/passcode on your account\n\n"
+            "*All carriers*\n"
+            "→ Never give out your account PIN on a phone call — carriers will never ask\n"
+            "→ Set a unique carrier PIN not used anywhere else\n\n"
+            "💡 Business Shield plans include eSIM profile audit guidance "
+            "to detect silent backdoor SIM cloning."
+        )
     else:
+        # Personal: concise guidance with upsell note
         carrier_steps = (
             "*Lock your carrier account:*\n"
             "• AT&T: att.com/accountlock\n"

@@ -1650,7 +1650,7 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
   - **Vendor security advisories + RSS monitoring** — BleepingComputer, Krebs on Security, The Hacker News. Manual process near-term; automated via feed polling in Phase 2.
 
 ### Phase 3 — Monetise the Moat (Months 9-18)
-*Focus: data products, carrier partnerships, platform licensing. Still not credit monitoring or fraud insurance — those are Aura's battlefield, not ours.*
+*Focus: data products, carrier partnerships, platform licensing, agentic identity protection. Still not credit monitoring or fraud insurance — those are Aura's battlefield, not ours.*
 
 - Cloud account anomaly detection (Google Workspace + Microsoft 365 audit logs)
 - Predictive breach risk scoring — proprietary model from Phase 1-2 dataset
@@ -1660,7 +1660,38 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 - Dataset licensing — anonymised risk benchmarks to research partners
 - Carrier partnership programme — RelayShield embedded in telco security bundles
 - Data broker scan integration — partner with Incogni or DeleteMe API, resell as RelayShield add-on rather than build from scratch
-- **SIM/IMEI anomaly detection via carrier APIs** — Natural extension of Phase 2 SIM swap monitor. Uses carrier API signals to detect anomalous traffic patterns from a device's SIM/IMEI (unexpected data routing, new APN connections, traffic volume spikes). Distinct from SIM swap detection — this addresses IoT cellular backdoor exploitation (CPU-to-modem interface attacks, AT command abuse) where an attacker uses a device's trusted SIM/IMEI to route their own traffic. Leverages 25-year telecom carrier expertise as moat. No identity protection competitor has attempted this. Target: Business Shield and Pro tiers with IoT-connected operations.
+- **SIM/IMEI anomaly detection via carrier APIs**
+
+- **Agentic Identity Protection Engine (Phase 3):**
+
+  *Informed by a16z crypto research (April 2026): "Agents Are Starting to Operate Real Systems." As AI agents become autonomous economic actors holding credentials, making payments, and accessing infrastructure on behalf of users, the identity attack surface expands dramatically. Non-human identities already outnumber human employees 100:1 in finance. RelayShield's Phase 2 OAuth supply chain monitoring is the foundation — Phase 3 extends from human credentials to agent credentials.*
+
+  **The emerging attack surface:**
+  ```
+  Phase 1-2 (now):   Human credentials breached → attacker impersonates human
+  Phase 2 bridge:    AI tool (proto-agent) breached → OAuth token stolen → human account accessed
+  Phase 3 (coming):  Autonomous AI agent credentials breached → attacker controls agent
+                     → agent acts on behalf of victim without their knowledge
+                     → blast radius = everything the agent was authorised to do
+  ```
+
+  **Why this is a natural RelayShield extension and not a pivot:**
+  - RelayShield already monitors credential exposure (HIBP) — extending to agent credentials uses the same engine
+  - Phase 2 OAuth supply chain monitoring already covers proto-agents (AI tools with OAuth access)
+  - The response layer (revoke → sweep → audit) maps directly to agent credential compromise
+  - No identity protection competitor is building at this layer — the category does not yet exist at SMB price point
+
+  **Architecture note:** a16z proposes blockchain/wallet-based agent identity (KYA — Know Your Agent). RelayShield does not need to adopt blockchain infrastructure to compete here. The monitoring and response layer (detect compromise → alert human principal → guide revocation) is stack-agnostic and achievable on existing AWS/Twilio infrastructure.
+
+  **Phase 3 build items:**
+
+  | Capability | Description | Tier | Notes |
+  |---|---|---|---|
+  | **Agent credential monitoring** | Monitor API keys, OAuth tokens, and service account credentials used by AI tools on behalf of users. Alert human principal when agent credentials appear in breach data. Same HIBP engine extended to non-human credential types. | All tiers | Extends Phase 2 OAuth watchlist |
+  | **Principal-agent breach alert** | When a deployed AI agent is itself breached (Context.ai scenario at scale), fire targeted WhatsApp alert to human principal: "Your AI assistant [name] was compromised — revoke its access immediately." Includes specific revocation steps per platform. | All tiers | Builds on Phase 2 supply chain alerts |
+  | **Agentic OAuth scope auditing** | Periodic audit of OAuth scopes granted to AI agents. Flag over-scoped agents (write access when read-only would suffice). WhatsApp alert: "Your AI tool [name] has broader access than it needs — reply OAUTH to review and tighten its permissions." | Business Basic+ | Extends monthly OAuth audit |
+  | **Prompt injection awareness** | For Business Shield Pro customers using AI agents in operations — guidance on prompt injection attacks, the social engineering equivalent for autonomous AI systems. Alert when monitored domain is associated with prompt injection campaigns. | BS Pro | Phase 3 intelligence layer |
+  | **Service account credential monitoring** | SMBs increasingly run automated systems (bots, scheduled jobs, integrations) that hold long-lived API keys. Monitor these service credentials for exposure. Targets the 100:1 non-human to human identity ratio in business environments. | Business Shield+ | B2B differentiation | — Natural extension of Phase 2 SIM swap monitor. Uses carrier API signals to detect anomalous traffic patterns from a device's SIM/IMEI (unexpected data routing, new APN connections, traffic volume spikes). Distinct from SIM swap detection — this addresses IoT cellular backdoor exploitation (CPU-to-modem interface attacks, AT command abuse) where an attacker uses a device's trusted SIM/IMEI to route their own traffic. Leverages 25-year telecom carrier expertise as moat. No identity protection competitor has attempted this. Target: Business Shield and Pro tiers with IoT-connected operations.
 
 ### Identity Exposure Score (Phase 2 → Phase 3)
 

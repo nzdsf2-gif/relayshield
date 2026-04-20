@@ -102,7 +102,7 @@ EMAIL_LIMITS = {
 
 # Max employee seats per business tier
 SEAT_LIMITS = {
-    TIER_STARTER: 3,
+    TIER_STARTER: 2,
     TIER_BASIC: 5,
     TIER_SHIELD: 10,
     TIER_PRO: 25,

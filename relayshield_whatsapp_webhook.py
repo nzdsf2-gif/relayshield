@@ -1260,13 +1260,24 @@ def handle_active_message(
 
     # --- Pending Claude analysis delivery ---
     # If the breach monitor stored an analysis that couldn't be sent due to
-    # Twilio 63016 (no active session at alert time), deliver it now before
-    # routing the user's command. The user's reply opens the session window.
+    # Twilio 63016 (no active session at alert time), deliver it now.
+    # The user's reply opens the session window. We return immediately after
+    # delivery so command routing doesn't fire on the triggering message.
+    # REMOVE is used instead of SET "" because DynamoDB may silently reject
+    # empty string writes depending on the SDK version in the Lambda runtime.
     pending_analysis = user.get("pending_analysis", "")
     if pending_analysis:
         send_whatsapp(to_number, pending_analysis, account_sid, auth_token, from_number)
-        update_user(user_id, {"pending_analysis": ""})
+        _table = dynamodb.Table(USERS_TABLE)
+        _table.update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="REMOVE pending_analysis SET updated_at = :t",
+            ExpressionAttributeValues={
+                ":t": datetime.now(timezone.utc).isoformat()
+            },
+        )
         logger.info("Delivered pending Claude analysis to user_id=%s.", user_id)
+        return "pending_analysis_delivered"
 
     # --- SWEEP ---
     if body == "SWEEP":

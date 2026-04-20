@@ -1618,6 +1618,37 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
   - Concurrent session anomaly alerting — CRITICAL WhatsApp alert when simultaneous logins detected from geographically separated IPs
   - Stealer log session token detection via Flare API — extend Flare integration to flag stolen session cookies specifically; short exploitation window requires near-real-time alerting
 
+- **OAuth Supply Chain Attack Detection Engine (Phase 2):**
+
+  *Triggered by the Vercel/Context.ai breach (April 2026): attackers breached a third-party AI tool (Context.ai), stole its stored OAuth tokens, pivoted into a Vercel employee's Google Workspace, and escalated into production environments. The employee's credentials were never exposed. HIBP never fired. No existing identity protection service detected or prevented this.*
+
+  **The attack chain:**
+  ```
+  Third-party SaaS app breached → attacker steals stored OAuth tokens
+  → accesses victim's Google/Microsoft account using the token
+  → no credential exposure, no HIBP alert, no password to change
+  → pivots into corporate infrastructure via trusted Google identity
+  ```
+
+  **What makes this uniquely dangerous:** The user did nothing wrong. Their password was never leaked. Their MFA was never bypassed. The attack entered through a trusted app they had legitimately authorised — and that authorisation persisted silently in the app's database.
+
+  **Phase 2 build items:**
+
+  | Capability | Description | Tier | Method |
+  |---|---|---|---|
+  | **SaaS app breach watchlist** | Maintain a curated list of high-risk OAuth-capable apps (Slack, Notion, GitHub, Zapier, Linear, Vercel, Loom, HubSpot, AI tools). Poll HIBP `/api/v3/breaches` daily. Fire alert to all users when a watched app is newly indexed. | All tiers | HIBP Breaches API — no additional cost |
+  | **OAuth grant inventory at onboarding** | During SWEEP, prompt user to run a one-time OAuth audit and self-report connected apps. Stored in DynamoDB. Cross-referenced when a watched app is breached. | All tiers | Self-reported during onboarding |
+  | **Proactive monthly OAuth audit** | EventBridge monthly trigger — WhatsApp message to all business tier subscribers: "Monthly security check: review your connected apps at myaccount.google.com/permissions. Reply OAUTH for a guided walkthrough." | Business Basic+ | EventBridge + existing WhatsApp stack |
+  | **Supply chain breach alert** | When a watched SaaS app is newly breached: fire targeted WhatsApp alert to users who have self-reported that app as connected — "Revoke this OAuth grant immediately." | All tiers | Phase 2 — requires OAuth inventory |
+  | **Environment variable / secrets exposure** | Second stage of the Vercel attack — production environment variables read via compromised Google identity. Extends Secret Sentinel add-on: monitor for API key / secrets exposure in CI/CD pipelines. | BS Pro | Phase 3 — GitGuardian / truffleHog |
+
+  **Near-term (Phase 1.5 — already implemented):** Claude system prompt updated to detect SaaS/productivity/developer tool breaches and append OAuth revocation guidance targeting myaccount.google.com/permissions and myapps.microsoft.com. Fires on any HIBP breach where the source matches a SaaS profile.
+
+  **Intelligence sources for SaaS breach detection:**
+  - **HIBP Breaches API** (`/api/v3/breaches`) — free with existing key, updated when Troy Hunt indexes a new breach. Primary near-term source.
+  - **Flare API (Phase 2)** — dark web and Telegram monitoring picks up SaaS breaches before HIBP indexing. Same Flare subscription as stealer log add-on — no incremental cost.
+  - **Vendor security advisories + RSS monitoring** — BleepingComputer, Krebs on Security, The Hacker News. Manual process near-term; automated via feed polling in Phase 2.
+
 ### Phase 3 — Monetise the Moat (Months 9-18)
 *Focus: data products, carrier partnerships, platform licensing. Still not credit monitoring or fraud insurance — those are Aura's battlefield, not ours.*
 

@@ -260,6 +260,16 @@ Deliver a concise Bitwarden setup guide:
 → Generate and save new unique passwords for your highest-risk accounts first
 "Bitwarden is free, open source, and independently audited. It is the recommended password manager for RelayShield users."
 
+SAAS/PRODUCTIVITY/DEVELOPER TOOL BREACH — add when the breach source is a SaaS application, productivity tool, developer tool, AI assistant, or business application (not a consumer retail, gaming, or social site):
+Examples: Slack, Notion, GitHub, Zapier, Linear, Vercel, Loom, Asana, Trello, HubSpot, Salesforce, any AI assistant or context tool.
+This is a supply chain OAuth risk — these apps frequently hold OAuth access tokens for Google or Microsoft accounts. An attacker who breaches the app's database may have your token without ever touching your credentials. Add this block after the main severity guidance:
+"🔗 *Third-party app OAuth risk.*
+[Breached service] often connects to Google or Microsoft accounts via OAuth — a permanent access grant that is NOT tied to your password and survives password resets.
+→ Go to myaccount.google.com/permissions — remove [breached service] if listed
+→ Go to myapps.microsoft.com — remove [breached service] if listed
+An attacker with a stolen OAuth token from [breached service] can access your email and files without ever knowing your password.
+Reply *SESSIONS* for a full guided OAuth revocation walkthrough."
+
 ALWAYS END WITH:
 "Before resetting your password, reply *SWEEP* for a 5-minute Email Security Sweep — closes inbox backdoors that survive password resets.
 

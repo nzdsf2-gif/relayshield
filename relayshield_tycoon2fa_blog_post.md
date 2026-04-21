@@ -156,7 +156,7 @@ RelayShield is available now with a founding member offer for Personal Shield su
 **Personal Shield — $12/month for your first 3 months** (then $14.99/month)
 Real-time breach monitoring, WhatsApp alerts with AI severity scoring, Email Security Sweep including active session audit and OAuth revocation guidance, and remediation tracking for individuals.
 
-**Business Basic — Sign up at below website.
+**Business Basic — [Sign up at relayshield.net](https://relayshield.net/)**
 Everything in Personal Shield, plus team monitoring for up to 5 employees, domain-level breach scanning, organisational OAuth audit guidance, and admin visibility across your workforce.
 
 Founding member spots are limited. When they fill, standard pricing applies to all new subscribers.

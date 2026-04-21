@@ -1,0 +1,253 @@
+<!-- RelayShield Pricing Table — Carrd HTML Embed -->
+<!-- Paste into a Carrd Embed block. Works on dark purple background. -->
+
+<style>
+  .rs-wrap {
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+    font-family: inherit;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .rs-table {
+    width: 100%;
+    min-width: 600px;
+    border-collapse: collapse;
+    color: #ffffff;
+  }
+
+  /* ── Tier header row ── */
+  .rs-table thead tr.tier-row th {
+    padding: 20px 14px 6px;
+    text-align: center;
+    vertical-align: bottom;
+  }
+
+  .rs-table thead tr.tier-row th.feature-col {
+    text-align: left;
+  }
+
+  .tier-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #00d4b4;
+    margin-bottom: 4px;
+  }
+
+  .tier-who {
+    display: block;
+    font-size: 10px;
+    color: rgba(255,255,255,0.45);
+    font-style: italic;
+    line-height: 1.3;
+  }
+
+  /* ── Section divider row ── */
+  .rs-table tr.section-header td {
+    padding: 10px 14px 4px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: rgba(0,212,180,0.6);
+    border-top: 1px solid rgba(0,212,180,0.15);
+  }
+
+  /* ── Feature rows ── */
+  .rs-table tbody tr.feature-row td {
+    padding: 10px 14px;
+    font-size: 13px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .rs-table tbody tr.feature-row td.feature-label {
+    text-align: left;
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+  }
+
+  .rs-table tbody tr.feature-row:hover td {
+    background: rgba(255,255,255,0.03);
+  }
+
+  /* ── Highlighted column (Business Starter) ── */
+  .rs-table .highlight-col {
+    background: rgba(0,212,180,0.07);
+    border-left: 1px solid rgba(0,212,180,0.2);
+    border-right: 1px solid rgba(0,212,180,0.2);
+  }
+
+  .rs-table thead tr.tier-row th.highlight-col {
+    border-top: 2px solid #00d4b4;
+    border-radius: 0;
+  }
+
+  /* ── Check / dash / seat values ── */
+  .check {
+    color: #00d4b4;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .dash {
+    color: rgba(255,255,255,0.2);
+    font-size: 16px;
+  }
+
+  .seat-count {
+    color: #00d4b4;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 640px) {
+    .tier-price { font-size: 20px; }
+    .tier-label { font-size: 10px; }
+    .rs-table tbody tr.feature-row td { padding: 8px 8px; font-size: 12px; }
+    .rs-table tbody tr.feature-row td.feature-label { font-size: 12px; }
+  }
+</style>
+
+<div class="rs-wrap">
+  <table class="rs-table">
+    <thead>
+      <tr class="tier-row">
+        <th class="feature-col"></th>
+
+        <!-- Personal Shield -->
+        <th>
+          <span class="tier-label">Personal Shield</span>
+          <span class="tier-who">Individuals &amp; families</span>
+        </th>
+
+        <!-- Business Starter — highlighted -->
+        <th class="highlight-col">
+          <span class="tier-label">Business Starter</span>
+          <span class="tier-who">Sole proprietors &amp; freelancers</span>
+        </th>
+
+        <!-- Business Basic -->
+        <th>
+          <span class="tier-label">Business Basic</span>
+          <span class="tier-who">Teams up to 5</span>
+        </th>
+
+        <!-- Business Shield -->
+        <th>
+          <span class="tier-label">Business Shield</span>
+          <span class="tier-who">Teams up to 10</span>
+        </th>
+      </tr>
+    </thead>
+
+    <tbody>
+
+      <!-- SECTION: Core Protection -->
+      <tr class="section-header">
+        <td colspan="5">Core Protection</td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">Breach monitoring</td>
+        <td><span class="check">✓</span></td>
+        <td class="highlight-col"><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">WhatsApp alerts</td>
+        <td><span class="check">✓</span></td>
+        <td class="highlight-col"><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">AI remediation guidance</td>
+        <td><span class="check">✓</span></td>
+        <td class="highlight-col"><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">SIM swap monitoring</td>
+        <td><span class="check">✓</span></td>
+        <td class="highlight-col"><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">Session hijacking alerts</td>
+        <td><span class="check">✓</span></td>
+        <td class="highlight-col"><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">Vishing preparedness</td>
+        <td><span class="check">✓</span></td>
+        <td class="highlight-col"><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <!-- SECTION: Business Features -->
+      <tr class="section-header">
+        <td colspan="5">Business Features</td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">Quarterly sweep reminder</td>
+        <td><span class="dash">—</span></td>
+        <td class="highlight-col"><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">Monthly security digest</td>
+        <td><span class="dash">—</span></td>
+        <td class="highlight-col"><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">Contractor / employee seats</td>
+        <td><span class="dash">—</span></td>
+        <td class="highlight-col"><span class="seat-count">1 seat</span></td>
+        <td><span class="seat-count">5 seats</span></td>
+        <td><span class="seat-count">10 seats</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">Team seat management</td>
+        <td><span class="dash">—</span></td>
+        <td class="highlight-col"><span class="dash">—</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+      <tr class="feature-row">
+        <td class="feature-label">Domain monitoring</td>
+        <td><span class="dash">—</span></td>
+        <td class="highlight-col"><span class="dash">—</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+
+    </tbody>
+  </table>
+</div>

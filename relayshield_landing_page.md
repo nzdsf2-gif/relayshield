@@ -159,7 +159,9 @@ RelayShield follows up until you are actually protected. Day 3: did you complete
 | **SIM swap monitoring** | ✅ | ✅ | ✅ | ✅ |
 | **Session hijacking alerts** | ✅ | ✅ | ✅ | ✅ |
 | **Vishing preparedness** | ✅ | ✅ | ✅ | ✅ |
-| **Professional + personal identity** | — | ✅ | ✅ | ✅ |
+| **Contractor / employee seats** | — | 2 seats | 5 seats | 10 seats |
+| **Quarterly sweep reminder** | — | ✅ | ✅ | ✅ |
+| **Monthly security digest** | ✅ | ✅ | ✅ | ✅ |
 | **Team seat management** | — | — | ✅ | ✅ |
 | **Domain monitoring *** | — | — | ✅ | ✅ |
 

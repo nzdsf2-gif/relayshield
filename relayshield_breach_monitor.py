@@ -17,6 +17,7 @@ users to submit passwords. Detection is not our lane — response is.
 """
 
 import base64
+import hashlib
 import json
 import logging
 import time
@@ -42,6 +43,9 @@ logger.setLevel(logging.INFO)
 
 secrets_client = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
+kms_client = boto3.client("kms")
+
+KMS_EMAIL_KEY_ALIAS = "alias/relayshield-data-key"
 
 MONITORED_EMAILS_TABLE = "relayshield_monitored_emails"
 BREACH_ALERTS_TABLE = "relayshield_breach_alerts"
@@ -317,6 +321,34 @@ def get_anthropic_api_key() -> str:
 # DynamoDB helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# KMS email encryption helpers
+# ---------------------------------------------------------------------------
+
+def hash_email(email: str) -> str:
+    """SHA-256 of normalised email — deterministic, safe to use in DynamoDB filters."""
+    return hashlib.sha256(email.strip().lower().encode()).hexdigest()
+
+
+def encrypt_email(email: str) -> str:
+    """Encrypt a normalised email via KMS. Returns base64-encoded ciphertext."""
+    response = kms_client.encrypt(
+        KeyId=KMS_EMAIL_KEY_ALIAS,
+        Plaintext=email.strip().lower().encode(),
+    )
+    return base64.b64encode(response["CiphertextBlob"]).decode()
+
+
+def decrypt_email(ciphertext_b64: str) -> str:
+    """Decrypt a KMS-encrypted email ciphertext (base64). Returns plaintext string."""
+    response = kms_client.decrypt(
+        CiphertextBlob=base64.b64decode(ciphertext_b64),
+    )
+    return response["Plaintext"].decode()
+
+
+# ---------------------------------------------------------------------------
+
 def scan_monitored_emails() -> list[dict]:
     """Return all records from relayshield_monitored_emails."""
     table = dynamodb.Table(MONITORED_EMAILS_TABLE)
@@ -379,13 +411,16 @@ def get_whatsapp_number_from_record(user_record: dict) -> str | None:
     return number
 
 
-def get_existing_breach_names(user_id: str, email_address: str) -> set[str]:
-    """Return breach names already recorded for this user/email pair."""
+def get_existing_breach_names(user_id: str, email_hash: str) -> set[str]:
+    """
+    Return breach names already recorded for this user/email pair.
+    Uses email_hash for the filter — ciphertext is non-deterministic.
+    """
     table = dynamodb.Table(BREACH_ALERTS_TABLE)
     items: list[dict] = []
     kwargs: dict = {
         "FilterExpression": (
-            Attr("user_id").eq(user_id) & Attr("email_address").eq(email_address)
+            Attr("user_id").eq(user_id) & Attr("email_hash").eq(email_hash)
         ),
     }
 
@@ -399,28 +434,34 @@ def get_existing_breach_names(user_id: str, email_address: str) -> set[str]:
 
     existing = {item["breach_name"] for item in items}
     logger.debug(
-        "User %s / %s already has %d recorded breach(es).",
-        user_id, email_address, len(existing),
+        "User %s already has %d recorded breach(es) for this email.",
+        user_id, len(existing),
     )
     return existing
 
 
 def write_breach_alert(
     user_id: str,
-    email_address: str,
+    email_encrypted: str,
+    email_hash: str,
     breach_name: str,
     breach_date: str,
     data_types_exposed: list[str],
     alert_sent_at: str,
     passwords_exposed: bool = False,
 ) -> str:
-    """Write a new breach alert record and return its alert_id."""
+    """
+    Write a new breach alert record and return its alert_id.
+    Stores email_encrypted (KMS ciphertext) and email_hash (SHA-256) —
+    plaintext email address is never persisted in breach alert records.
+    """
     table = dynamodb.Table(BREACH_ALERTS_TABLE)
     alert_id = str(uuid.uuid4())
     item = {
         "alert_id": alert_id,
         "user_id": user_id,
-        "email_address": email_address,
+        "email_encrypted": email_encrypted,
+        "email_hash": email_hash,
         "breach_name": breach_name,
         "breach_date": breach_date,
         "data_types_exposed": data_types_exposed,
@@ -1003,11 +1044,34 @@ def process_email(
     """
     email_id = monitored_record["email_id"]
     user_id = monitored_record["user_id"]
-    email_address = monitored_record["email_address"]
     now = datetime.now(timezone.utc).isoformat()
 
+    # Decrypt email address for HIBP API call.
+    # Legacy records (pre-KMS migration) may still carry plaintext email_address.
+    if "email_encrypted" in monitored_record:
+        try:
+            email_address = decrypt_email(monitored_record["email_encrypted"])
+        except Exception as exc:
+            logger.exception(
+                "KMS decrypt failed for email_id=%s user_id=%s: %s — skipping.",
+                email_id, user_id, exc,
+            )
+            return []
+        email_hash = monitored_record.get("email_hash") or hash_email(email_address)
+    else:
+        # Legacy plaintext fallback — remove once migration is complete
+        email_address = monitored_record.get("email_address", "")
+        email_hash = hash_email(email_address)
+        logger.warning(
+            "email_id=%s is a legacy plaintext record — run KMS migration.", email_id
+        )
+
+    if not email_address:
+        logger.error("email_id=%s has no resolvable email address — skipping.", email_id)
+        return []
+
     logger.info(
-        "Processing email_id=%s (%s) for user_id=%s", email_id, email_address, user_id
+        "Processing email_id=%s for user_id=%s", email_id, user_id
     )
 
     breaches = call_hibp(email_address, api_key)
@@ -1037,7 +1101,7 @@ def process_email(
     else:
         logger.warning("No user record for user_id=%s", user_id)
 
-    existing_breach_names = get_existing_breach_names(user_id, email_address)
+    existing_breach_names = get_existing_breach_names(user_id, email_hash)
 
     # new_breaches    — all newly seen breaches; written to DynamoDB for deduplication
     # alertable       — subset that passes recency + high-value filters; triggers WhatsApp
@@ -1062,7 +1126,8 @@ def process_email(
         # Always write to DynamoDB so we never re-evaluate this breach
         alert_id = write_breach_alert(
             user_id=user_id,
-            email_address=email_address,
+            email_encrypted=encrypt_email(email_address),
+            email_hash=email_hash,
             breach_name=breach_name,
             breach_date=breach_date,
             data_types_exposed=data_types_exposed,

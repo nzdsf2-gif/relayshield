@@ -20,9 +20,9 @@
 |---|---|---|
 | 1 | **Salon owner (Rebecca) onboarded** — Active. HELP confirmed. | ✅ Active |
 | 2 | **Tester 2 onboarded** — Cybersecurity background (Equifax). Active. HELP confirmed. Email Security Sweep completed ✅ | ✅ Active |
-| 3 | **Additional beta testers** — 1 confirmed ready to onboard, potentially more in the works. Target: 4–5 total. | 🔄 In progress |
-| 4 | **Beta feedback form** — Built and published. Link: https://docs.google.com/forms/d/e/1FAIpQLSeZ8G7Bj_gfrTybnFk8R8AQyxRXGi6kQo_7V7CnqASF1Kg6rw/viewform?usp=publish-editor — Send via WhatsApp to all testers at end of beta. | 🔄 Ready to send |
-| 5 | **Collect beta feedback** — Send form link via WhatsApp to all testers. Target signal: value perception at price point, sweep completion rate, differentiation validation from tester 2 (Equifax background). | ⬜ Pending |
+| 3 | **Additional beta testers** — Tester 3 (brother) onboarded April 2026. HELP confirmed. 3 active beta testers total. | ✅ Active |
+| 4 | **Beta feedback form** — Built and published. Link: https://docs.google.com/forms/d/e/1FAIpQLSeZ8G7Bj_gfrTybnFk8R8AQyxRXGi6kQo_7V7CnqASF1Kg6rw/viewform?usp=publish-editor — Sent via WhatsApp to all 3 active testers April 2026. Responses land in relayshieldadmin@gmail.com Google Forms. | ✅ Sent — awaiting responses |
+| 5 | **Collect beta feedback** — Form sent to all 3 active testers April 2026. Monitor relayshieldadmin@gmail.com Google Forms Responses tab. Target signal: value perception at price point, sweep completion rate, differentiation validation from tester 2 (Equifax background). | 🔄 Awaiting responses |
 | 6 | **Referral program** — Post-launch Phase 2 item. Validate organic advocacy first (Q9 of feedback form). If strong, build referral incentive mechanic (e.g. one free month per converted referral). | 🔮 Phase 2 |
 
 ---
@@ -60,9 +60,9 @@
 | 5 | **Business Starter webhook code update** — TIER_STARTER constant, EMAIL_LIMITS (3 emails = owner + 2 slots), SEAT_LIMITS (2 ADD slots = owner + 2 people covered), BUSINESS_TIERS membership, phone hardening at Starter/Basic level. | ✅ Complete — deployed April 2026 |
 | 5a | **Business Starter — 2 contractor/employee seats via ADD** — Owner can ADD up to 2 people (employees or contractors) via ADD command. Seat limit enforced at 2. Clear upsell to Business Basic (5 seats). | ✅ Complete — deployed April 2026 |
 | 5b | **All tiers — Quarterly proactive sweep reminder** — EventBridge scheduled rule per active subscriber. WhatsApp template every 90 days: "Time for your quarterly security sweep — no breach needed. Reply SWEEP to start." All tiers including Personal Shield. Business tiers include team prompt. | ⬜ Pending |
-| 5c | **All tiers — Monthly WhatsApp Security Digest** — Lambda `relayshield-digest-sender` built and deployed April 2026. EventBridge trigger `relayshield-monthly-digest` wired (cron 0 9 1 * ? *). Template `relayshield_monthly_digest` submitted to Meta — recategorised UTILITY→MARKETING, review requested April 2026. **Remaining:** (1) Await Meta review result, (2) update DIGEST_TEMPLATE_SID constant in code with approved SID, (3) redeploy Lambda, (4) update landing page pricing table to show "Monthly Security Digest ✓" for all tiers. | 🔄 Awaiting Meta template approval |
+| 5c | **All tiers — Monthly WhatsApp Security Digest** — Lambda deployed. EventBridge trigger wired. Template approved UTILITY. SID `HX58cb69a1f9de4793ae225015d186c8e6` in code. `test_user_id` parameter added for safe founder-only testing. Single-user test confirmed April 2026: `sent=1 skipped=0 failed=0`, delivered to +19785013199 status `queued`. `relayshield-digest-scan` IAM inline policy added to `relayshield-breach-check-role-1sapnwdl` (Scan on all 3 tables). | ✅ Complete — April 2026 |
 | 5d | **Welcome message — all tiers** — WhatsApp template `relayshield_welcome` approved by Meta April 2026. Stripe webhook updated to send via Twilio Content API (HX45e6bac7d790f79414f7b067e1a3edd9). Manual DynamoDB onboarding (beta) uses ad-hoc WhatsApp contact — no automated send needed for beta path. | ✅ Complete — production path done |
-| 5e | **Day 3 onboarding follow-up template** — Highest-churn window is first week. Template fires 72 hrs after user record created. Encourages top 3 commands, varies by tier. Personal Shield: SWEEP (top beta command) + REUSE + SESSIONS. Business tiers: SWEEP + PHONE + ADD. Requires new Meta-approved template `relayshield_day3`. EventBridge per-user trigger set at onboarding. | ⬜ Pending |
+| 5e | **Day 3 onboarding follow-up template** — Template `relayshield_day3` approved by Meta as UTILITY April 2026. SID `HXb8e3c80de422dae90addf0bd6561b2b4` in code. Lambda `relayshield-day3-sender` deployed. IAM role `relayshield-scheduler-invoke-day3` created (trust: scheduler.amazonaws.com, inline policy: lambda:InvokeFunction). `scheduler:CreateSchedule` added to stripe-webhook IAM policy. Env vars `DAY3_LAMBDA_ARN` + `DAY3_SCHEDULER_ROLE_ARN` set on stripe-webhook Lambda. `relayshield-day3-dynamodb` inline policy added to `relayshield-breach-check-role-1sapnwdl`. Single-user test confirmed April 2026 — WhatsApp delivery to founder verified. | ✅ Complete — April 2026 |
 | 6 | **Consumer vishing alert** — Append vishing warning to WhatsApp alert when breach exposes phone/address/carrier/account numbers | ✅ Complete — in Claude system prompt |
 | 9a | **Disappearing WhatsApp message awareness** — Added to onboarding completion message. Three rules: RelayShield never asks for OTP/PIN, screenshot urgent messages, urgency is the attack. Introduces WASCAM and OTP commands. | ✅ Complete |
 | 9b | **OTP command — WhatsApp-specific guidance** — Extended OTP response to cover WhatsApp OTP takeover consequences: full account takeover, contact list exploitation, chain attacks. Two-Step Verification prompt added. | ✅ Complete |
@@ -116,6 +116,18 @@
 
 ---
 
+## 🔐 Security Hardening — Phase 1 Active Build
+
+*Build now — competitive differentiator and direct response to customer concern about PII storage.*
+
+| # | Item | Status |
+|---|---|---|
+| 1 | **Field-level KMS encryption for email addresses** — KMS key `relayshield-data-key` (`arn:aws:kms:us-east-1:239677749008:key/1479c3fa-88e9-4096-a736-32968ba5812f`) created and enabled. IAM policy `relayshield-kms-field-encryption` on all 3 Lambda roles. breach-monitor + whatsapp-webhook Lambdas deployed April 2026. Migration Lambda ran successfully — 13 beta records migrated, 0 failed, 0 plaintext records remaining (confirmed by dry-run). Migration Lambda and temp IAM policy deleted post-migration. All future records encrypted at creation. | ✅ Complete — April 2026 |
+| 2 | **Customer Managed KMS Key (CMK) for DynamoDB table encryption** — All 3 tables (`relayshield_users`, `relayshield_monitored_emails`, `relayshield_breach_alerts`) confirmed using CMK `relayshield-dynamodb-key` (`arn:aws:kms:us-east-1:239677749008:key/2ece080e-0cb0-499e-b2d1-6a496bbb4a1a`). `smartasst-dev-us-east-2-lambdaRole` removed as unauthorised key administrator. | ✅ Complete — April 2026 |
+| 3 | **Field-level KMS encryption for phone numbers + token-based hash lookup** — Extend email encryption pattern to `whatsapp_number` and `phone_number` fields in `relayshield_users`. Store `phone_encrypted` (KMS) + `phone_hash` (SHA-256) alongside or replacing plaintext fields. **Key dependency:** WhatsApp webhook's `get_user_by_whatsapp()` currently does a full table scan filtered on plaintext `whatsapp_number` — must be replaced with GSI lookup on `phone_hash` for correctness and performance. **Build steps:** (1) Create GSI `phone_hash-index` on `relayshield_users`. (2) Add `encrypt_phone()`, `decrypt_phone()`, `hash_phone()` helpers to whatsapp_webhook + stripe_webhook. (3) Update `create_user_record()` to write `phone_encrypted` + `phone_hash`. (4) Update `get_user_by_whatsapp()` to hash incoming number and query GSI. (5) Update all `user["whatsapp_number"]` reads to `decrypt_phone(user["phone_encrypted"])`. (6) Write + run migration Lambda for existing beta records. (7) Deploy all Lambdas. | ⚡ Build next |
+
+---
+
 ## 🔐 Security Hardening — Tier 2 (Within First Month of Paid Subscribers)
 
 | # | Item | Status |
@@ -125,9 +137,7 @@
 | 3 | Set up AWS GuardDuty (~$1–3/month) | ⬜ Pending |
 | 4 | Confirm PII minimization across DynamoDB tables | ⬜ Pending |
 | 5 | Implement DynamoDB TTL on relayshield_breach_alerts (2-year auto-delete) | ⬜ Pending |
-| 6 | **Field-level KMS encryption for email addresses** — Encrypt email fields at application layer before writing to DynamoDB. Even raw table access yields ciphertext. Lambda encrypts on write, decrypts on read for HIBP calls. Use KMS key alias `relayshield-data-key`. ~$1/month. Directly addresses top customer concern (April 2026): "credentials stolen from database." Must be live before OAuth tokens are stored in Phase 2. | ⬜ Pending — priority before Phase 2 |
-| 7 | **Secrets Manager for OAuth tokens (Phase 2 prerequisite)** — Never store OAuth tokens in DynamoDB. When Phase 2 OAuth monitoring ships, each token stored in Secrets Manager under `relayshield/oauth/{user_id}/{provider}`. DynamoDB stores only the ARN reference — useless to an attacker without separate IAM access to Secrets Manager. Build this architecture before first OAuth token is collected. | ⬜ Pending — required before Phase 2 OAuth |
-| 8 | **Customer Managed KMS Key (CMK) for DynamoDB table encryption** — Replace AWS-managed key with CMK. Every table decryption event logged in CloudTrail. Enables "RelayShield staff cannot read your data without an audit trail" as a verifiable positioning claim. | ⬜ Pending — Phase 2 |
+| 6 | **Secrets Manager for OAuth tokens (Phase 2 prerequisite)** — Never store OAuth tokens in DynamoDB. When Phase 2 OAuth monitoring ships, each token stored in Secrets Manager under `relayshield/oauth/{user_id}/{provider}`. DynamoDB stores only the ARN reference — useless to an attacker without separate IAM access to Secrets Manager. Build this architecture before first OAuth token is collected. | ⬜ Pending — required before Phase 2 OAuth |
 
 ---
 

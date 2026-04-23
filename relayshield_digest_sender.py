@@ -76,7 +76,7 @@ TWILIO_MESSAGES_URL = (
 #   {{2}} = Scan summary line     e.g. "3 email addresses monitored — 90 scans completed"
 #   {{3}} = Breach status line    e.g. "✅ All clear — no breaches detected this month."
 #   {{4}} = Monthly security tip  (full tip text from MONTHLY_TIPS)
-DIGEST_TEMPLATE_SID = "PENDING_META_APPROVAL"
+DIGEST_TEMPLATE_SID = "HX58cb69a1f9de4793ae225015d186c8e6"
 
 # ---------------------------------------------------------------------------
 # Eligible states
@@ -339,7 +339,13 @@ def lambda_handler(event, context):
     """
     Entry point for EventBridge monthly trigger.
     Sends security digest to all eligible active subscribers.
+
+    Optional test parameter:
+      {"test_user_id": "your-user-id"}  — restricts send to a single user.
+      Use to verify end-to-end delivery without messaging all subscribers.
     """
+    test_user_id = event.get("test_user_id") if isinstance(event, dict) else None
+
     if DIGEST_TEMPLATE_SID == "PENDING_META_APPROVAL":
         logger.error(
             "Digest template SID not configured — Meta approval still pending. "
@@ -386,6 +392,18 @@ def lambda_handler(event, context):
         }
 
     logger.info("Found %d active users eligible for digest.", len(users))
+
+    if test_user_id:
+        users = [u for u in users if u.get("user_id") == test_user_id]
+        logger.info(
+            "TEST MODE — restricted to user_id=%s (%d user found).",
+            test_user_id, len(users),
+        )
+        if not users:
+            return {
+                "statusCode": 404,
+                "body": json.dumps({"error": f"test_user_id={test_user_id} not found or not active"}),
+            }
 
     sent = 0
     skipped = 0

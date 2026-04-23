@@ -23,12 +23,13 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import boto3
 
@@ -45,8 +46,16 @@ logger.setLevel(logging.INFO)
 
 secrets_client = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
+scheduler_client = boto3.client("scheduler")
+kms_client = boto3.client("kms")
 
 USERS_TABLE = "relayshield_users"
+
+# KMS key alias for field-level phone encryption
+KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
+
+# GSI name for phone number hash lookup
+PHONE_HASH_INDEX = "phone_hash-index"
 
 # ---------------------------------------------------------------------------
 # Secrets
@@ -125,6 +134,18 @@ EMAIL_LIMITS = {
 
 # Stripe signature tolerance — reject webhooks older than this
 SIGNATURE_TOLERANCE_SECONDS = 300  # 5 minutes
+
+# ---------------------------------------------------------------------------
+# Day 3 follow-up scheduler config (set as Lambda environment variables)
+# ---------------------------------------------------------------------------
+
+# ARN of the relayshield-day3-sender Lambda
+DAY3_LAMBDA_ARN = os.environ.get("DAY3_LAMBDA_ARN", "")
+
+# ARN of the IAM role allowing EventBridge Scheduler to invoke the Day 3 Lambda
+# Trust policy: scheduler.amazonaws.com
+# Permission: lambda:InvokeFunction on DAY3_LAMBDA_ARN
+DAY3_SCHEDULER_ROLE_ARN = os.environ.get("DAY3_SCHEDULER_ROLE_ARN", "")
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +281,26 @@ def to_whatsapp_number(phone: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# KMS phone encryption helpers
+# ---------------------------------------------------------------------------
+
+def hash_phone(phone: str) -> str:
+    """SHA-256 of normalised E.164 phone — deterministic GSI lookup key."""
+    normalised = phone.strip().replace("whatsapp:", "")
+    return hashlib.sha256(normalised.encode()).hexdigest()
+
+
+def encrypt_phone(phone: str) -> str:
+    """Encrypt normalised E.164 phone via KMS. Returns base64-encoded ciphertext."""
+    normalised = phone.strip().replace("whatsapp:", "")
+    response = kms_client.encrypt(
+        KeyId=KMS_PHONE_KEY_ALIAS,
+        Plaintext=normalised.encode(),
+    )
+    return base64.b64encode(response["CiphertextBlob"]).decode()
+
+
+# ---------------------------------------------------------------------------
 # DynamoDB
 # ---------------------------------------------------------------------------
 
@@ -267,9 +308,22 @@ def user_exists_for_phone(phone_number: str) -> bool:
     """
     Check if a user record already exists for this phone number.
     Prevents duplicate onboarding if Stripe fires the webhook twice.
+    Primary path: GSI query on phone_hash (encrypted records).
+    Fallback: scan on plaintext phone_number (pre-migration records).
     """
     table = dynamodb.Table(USERS_TABLE)
-    # Scan is acceptable here — this only runs at onboarding, not in a hot loop
+    ph = hash_phone(phone_number)
+
+    # Primary: GSI lookup on phone_hash
+    response = table.query(
+        IndexName=PHONE_HASH_INDEX,
+        KeyConditionExpression=boto3.dynamodb.conditions.Key("phone_hash").eq(ph),
+        Select="COUNT",
+    )
+    if response.get("Count", 0) > 0:
+        return True
+
+    # Fallback: scan for legacy plaintext records (pre-migration)
     response = table.scan(
         FilterExpression=boto3.dynamodb.conditions.Attr("phone_number").eq(phone_number),
         ProjectionExpression="user_id",
@@ -290,13 +344,12 @@ def create_user_record(
     """
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    whatsapp_number = to_whatsapp_number(phone_number)
 
     table = dynamodb.Table(USERS_TABLE)
     table.put_item(Item={
         "user_id": user_id,
-        "whatsapp_number": whatsapp_number,
-        "phone_number": phone_number,
+        "phone_encrypted": encrypt_phone(phone_number),
+        "phone_hash": hash_phone(phone_number),
         "subscription_tier": subscription_tier,
         "stripe_customer_id": stripe_customer_id,
         "stripe_subscription_id": stripe_subscription_id,
@@ -310,8 +363,8 @@ def create_user_record(
     })
 
     logger.info(
-        "User record created — user_id=%s tier=%s whatsapp=%s",
-        user_id, subscription_tier, whatsapp_number,
+        "User record created — user_id=%s tier=%s (phone encrypted)",
+        user_id, subscription_tier,
     )
     return user_id
 
@@ -421,6 +474,62 @@ def send_whatsapp_template(
     except Exception as exc:
         logger.exception("Twilio template send failed for %s: %s", to_number, exc)
         return False
+
+
+# ---------------------------------------------------------------------------
+# Day 3 follow-up scheduler
+# ---------------------------------------------------------------------------
+
+def schedule_day3_followup(user_id: str, subscription_tier: str) -> None:
+    """
+    Create a one-time EventBridge Scheduler rule to fire the Day 3 follow-up
+    Lambda exactly 72 hours from now. The schedule self-deletes after firing
+    (ActionAfterCompletion=DELETE).
+
+    Silently skipped if DAY3_LAMBDA_ARN or DAY3_SCHEDULER_ROLE_ARN are not
+    configured — prevents blocking onboarding during initial deployment before
+    the Day 3 Lambda exists.
+    """
+    if not DAY3_LAMBDA_ARN or not DAY3_SCHEDULER_ROLE_ARN:
+        logger.warning(
+            "DAY3_LAMBDA_ARN or DAY3_SCHEDULER_ROLE_ARN not set — "
+            "skipping Day 3 schedule for user_id=%s.", user_id,
+        )
+        return
+
+    fire_time = (
+        datetime.now(timezone.utc) + timedelta(hours=72)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
+
+    # EventBridge Scheduler names: alphanumeric + hyphens, max 64 chars.
+    # UUID is 36 chars; prefix is 17 chars → 53 chars total, within limit.
+    schedule_name = f"relayshield-day3-{user_id}"
+
+    try:
+        scheduler_client.create_schedule(
+            Name=schedule_name,
+            ScheduleExpression=f"at({fire_time})",
+            ScheduleExpressionTimezone="UTC",
+            FlexibleTimeWindow={"Mode": "OFF"},
+            Target={
+                "Arn": DAY3_LAMBDA_ARN,
+                "RoleArn": DAY3_SCHEDULER_ROLE_ARN,
+                "Input": json.dumps({
+                    "user_id": user_id,
+                    "tier": subscription_tier,
+                }),
+            },
+            ActionAfterCompletion="DELETE",
+        )
+        logger.info(
+            "Day 3 follow-up scheduled — user_id=%s fires at %s UTC",
+            user_id, fire_time,
+        )
+    except Exception as exc:
+        # Non-fatal: log and continue — onboarding must not fail over this
+        logger.exception(
+            "Failed to schedule Day 3 follow-up for user_id=%s: %s", user_id, exc
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -644,7 +753,10 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "DynamoDB write failed"}),
         }
 
-    # --- 8. Retrieve Twilio credentials ---
+    # --- 8. Schedule Day 3 follow-up (72 hrs from now, self-deleting) ---
+    schedule_day3_followup(user_id, subscription_tier)
+
+    # --- 9. Retrieve Twilio credentials ---
     try:
         account_sid, auth_token, from_number = get_twilio_credentials()
     except Exception as exc:
@@ -654,7 +766,7 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "Twilio credentials retrieval failed"}),
         }
 
-    # --- 9. Send welcome WhatsApp message via approved Meta template ---
+    # --- 10. Send welcome WhatsApp message via approved Meta template ---
     # Template send works outside the 24-hour window (business-initiated).
     # Falls back to free-form send if template delivery fails.
     tier_name = TIER_DISPLAY_NAMES.get(subscription_tier, "RelayShield")

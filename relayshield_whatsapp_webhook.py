@@ -44,7 +44,7 @@ import uuid
 from datetime import datetime, timezone
 
 import boto3
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -59,6 +59,15 @@ logger.setLevel(logging.INFO)
 
 secrets_client = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
+kms_client = boto3.client("kms")
+
+# KMS key alias for field-level encryption (email + phone).
+# Key must exist in the same region as the Lambda.
+KMS_EMAIL_KEY_ALIAS = "alias/relayshield-data-key"
+KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
+
+# GSI name for phone number hash lookup
+PHONE_HASH_INDEX = "phone_hash-index"
 
 USERS_TABLE = "relayshield_users"
 MONITORED_EMAILS_TABLE = "relayshield_monitored_emails"
@@ -391,12 +400,94 @@ def is_valid_phone(phone: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# KMS email encryption helpers
+# ---------------------------------------------------------------------------
+
+def hash_email(email: str) -> str:
+    """SHA-256 of normalised email — deterministic, safe to use in DynamoDB filters."""
+    return hashlib.sha256(email.strip().lower().encode()).hexdigest()
+
+
+def encrypt_email(email: str) -> str:
+    """Encrypt a normalised email via KMS. Returns base64-encoded ciphertext."""
+    response = kms_client.encrypt(
+        KeyId=KMS_EMAIL_KEY_ALIAS,
+        Plaintext=email.strip().lower().encode(),
+    )
+    return base64.b64encode(response["CiphertextBlob"]).decode()
+
+
+def decrypt_email(ciphertext_b64: str) -> str:
+    """Decrypt a KMS-encrypted email ciphertext (base64). Returns plaintext string."""
+    response = kms_client.decrypt(
+        CiphertextBlob=base64.b64decode(ciphertext_b64),
+    )
+    return response["Plaintext"].decode()
+
+
+# ---------------------------------------------------------------------------
+# KMS phone encryption helpers
+# ---------------------------------------------------------------------------
+
+def hash_phone(phone: str) -> str:
+    """SHA-256 of normalised E.164 phone — deterministic GSI lookup key."""
+    normalised = phone.strip().replace("whatsapp:", "")
+    return hashlib.sha256(normalised.encode()).hexdigest()
+
+
+def encrypt_phone(phone: str) -> str:
+    """Encrypt normalised E.164 phone via KMS. Returns base64-encoded ciphertext."""
+    normalised = phone.strip().replace("whatsapp:", "")
+    response = kms_client.encrypt(
+        KeyId=KMS_PHONE_KEY_ALIAS,
+        Plaintext=normalised.encode(),
+    )
+    return base64.b64encode(response["CiphertextBlob"]).decode()
+
+
+def decrypt_phone(ciphertext_b64: str) -> str:
+    """Decrypt KMS-encrypted phone ciphertext (base64). Returns E.164 string."""
+    response = kms_client.decrypt(
+        CiphertextBlob=base64.b64decode(ciphertext_b64),
+    )
+    return response["Plaintext"].decode()
+
+
+def get_user_whatsapp_number(user: dict) -> str:
+    """
+    Return the whatsapp:-prefixed number for outbound sends.
+    Decrypts from KMS for new encrypted records.
+    Falls back to legacy plaintext whatsapp_number for pre-migration records.
+    """
+    if "phone_encrypted" in user:
+        return to_whatsapp_number(decrypt_phone(user["phone_encrypted"]))
+    return user.get("whatsapp_number", "")
+
+
+# ---------------------------------------------------------------------------
 # DynamoDB helpers
 # ---------------------------------------------------------------------------
 
 def get_user_by_whatsapp(whatsapp_number: str) -> dict | None:
-    """Look up a user record by their WhatsApp number."""
+    """
+    Look up a user record by their WhatsApp number.
+    Primary path: GSI query on phone_hash (encrypted records).
+    Fallback: full table scan on plaintext whatsapp_number (pre-migration records).
+    """
     table = dynamodb.Table(USERS_TABLE)
+    normalised = normalise_phone(whatsapp_number).replace("whatsapp:", "")
+    ph = hash_phone(normalised)
+
+    # Primary: GSI lookup — O(1), works for all encrypted records
+    response = table.query(
+        IndexName=PHONE_HASH_INDEX,
+        KeyConditionExpression=Key("phone_hash").eq(ph),
+    )
+    items = response.get("Items", [])
+    if items:
+        return items[0]
+
+    # Fallback: scan for legacy plaintext records (removed once migration complete)
     wa = to_whatsapp_number(normalise_phone(whatsapp_number))
     response = table.scan(
         FilterExpression=Attr("whatsapp_number").eq(wa),
@@ -433,20 +524,24 @@ def update_user(user_id: str, updates: dict) -> None:
 def add_monitored_email(user_id: str, email_address: str) -> str:
     """
     Add an email to relayshield_monitored_emails.
+    The plaintext email address is never written to DynamoDB — only the
+    KMS ciphertext (email_encrypted) and its SHA-256 hash (email_hash).
     Returns the new email_id.
     """
     email_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    normalised = email_address.strip().lower()
     table = dynamodb.Table(MONITORED_EMAILS_TABLE)
     table.put_item(Item={
         "email_id": email_id,
         "user_id": user_id,
-        "email_address": email_address.strip().lower(),
+        "email_encrypted": encrypt_email(normalised),
+        "email_hash": hash_email(normalised),
         "created_at": now,
         "last_checked": None,
         "active": True,
     })
-    logger.info("Monitored email added — user_id=%s email=%s", user_id, email_address)
+    logger.info("Monitored email added — user_id=%s hash=%s", user_id, hash_email(normalised)[:8])
     return email_id
 
 
@@ -461,12 +556,17 @@ def count_monitored_emails(user_id: str) -> int:
 
 
 def email_already_monitored(user_id: str, email_address: str) -> bool:
-    """Check if this email is already being monitored for this user."""
+    """
+    Check if this email is already being monitored for this user.
+    Uses the SHA-256 hash for the DynamoDB filter — KMS ciphertext is
+    non-deterministic and cannot be used for equality comparisons.
+    """
     table = dynamodb.Table(MONITORED_EMAILS_TABLE)
+    eh = hash_email(email_address)
     response = table.scan(
         FilterExpression=(
             Attr("user_id").eq(user_id)
-            & Attr("email_address").eq(email_address.strip().lower())
+            & Attr("email_hash").eq(eh)
             & Attr("active").eq(True)
         ),
         Limit=1,
@@ -501,8 +601,8 @@ def create_employee_record(
     table = dynamodb.Table(USERS_TABLE)
     table.put_item(Item={
         "user_id": user_id,
-        "whatsapp_number": to_whatsapp_number(phone_number),
-        "phone_number": phone_number,
+        "phone_encrypted": encrypt_phone(phone_number),
+        "phone_hash": hash_phone(phone_number),
         "subscription_tier": subscription_tier,
         "admin_user_id": admin_user_id,
         "onboarding_state": STATE_EMP_EMAIL_1,
@@ -514,8 +614,8 @@ def create_employee_record(
         "updated_at": now,
     })
     logger.info(
-        "Employee record created — user_id=%s admin=%s phone=%s",
-        user_id, admin_user_id, phone_number,
+        "Employee record created — user_id=%s admin=%s (phone encrypted)",
+        user_id, admin_user_id,
     )
     return user_id
 
@@ -1006,7 +1106,7 @@ def handle_awaiting_email_1(
     user_id = user["user_id"]
     tier = user.get("subscription_tier", TIER_PERSONAL)
     email_limit = EMAIL_LIMITS.get(tier, 3)
-    to_number = user["whatsapp_number"]
+    to_number = get_user_whatsapp_number(user)
     email = message_body.strip().lower()
 
     if not is_valid_email(email):
@@ -1050,7 +1150,7 @@ def handle_awaiting_more_emails(
     tier = user.get("subscription_tier", TIER_PERSONAL)
     email_limit = EMAIL_LIMITS.get(tier, 3)
     emails_added = int(user.get("emails_added", 1))
-    to_number = user["whatsapp_number"]
+    to_number = get_user_whatsapp_number(user)
     body = message_body.strip()
 
     if body.upper() == "DONE":
@@ -1111,7 +1211,7 @@ def handle_awaiting_password_manager(
     account_sid, auth_token, from_number = twilio_creds
     user_id = user["user_id"]
     tier = user.get("subscription_tier", TIER_PERSONAL)
-    to_number = user["whatsapp_number"]
+    to_number = get_user_whatsapp_number(user)
     body = message_body.strip().upper()
 
     if body not in ("YES", "NO"):
@@ -1161,7 +1261,7 @@ def handle_employee_email_1(
     admin_user_id = user.get("admin_user_id", "")
     tier = user.get("subscription_tier", TIER_BASIC)
     email_limit = EMAIL_LIMITS.get(tier, 2)
-    to_number = user["whatsapp_number"]
+    to_number = get_user_whatsapp_number(user)
     email = message_body.strip().lower()
 
     if not is_valid_email(email):
@@ -1208,7 +1308,7 @@ def handle_employee_more_emails(
     tier = user.get("subscription_tier", TIER_BASIC)
     email_limit = EMAIL_LIMITS.get(tier, 2)
     emails_added = int(user.get("emails_added", 1))
-    to_number = user["whatsapp_number"]
+    to_number = get_user_whatsapp_number(user)
     body = message_body.strip()
 
     if body.upper() == "DONE":
@@ -1276,7 +1376,7 @@ def handle_active_message(
     account_sid, auth_token, from_number = twilio_creds
     user_id = user["user_id"]
     tier = user.get("subscription_tier", TIER_PERSONAL)
-    to_number = user["whatsapp_number"]
+    to_number = get_user_whatsapp_number(user)
     is_business = tier in BUSINESS_TIERS
     is_employee = bool(user.get("admin_user_id"))
     body = message_body.strip().upper()

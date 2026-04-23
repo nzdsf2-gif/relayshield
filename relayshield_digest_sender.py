@@ -49,8 +49,11 @@ logger.setLevel(logging.INFO)
 
 secrets_client = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
+kms_client = boto3.client("kms")
 
 USERS_TABLE = "relayshield_users"
+
+KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
 MONITORED_EMAILS_TABLE = "relayshield_monitored_emails"
 BREACH_ALERTS_TABLE = "relayshield_breach_alerts"
 
@@ -243,11 +246,31 @@ def count_recent_breaches(user_id: str, days: int = 30) -> int:
 # Twilio template sender
 # ---------------------------------------------------------------------------
 
+def decrypt_phone(ciphertext_b64: str) -> str:
+    """Decrypt KMS-encrypted phone ciphertext (base64). Returns E.164 string."""
+    response = kms_client.decrypt(
+        CiphertextBlob=base64.b64decode(ciphertext_b64),
+    )
+    return response["Plaintext"].decode()
+
+
 def to_whatsapp_number(phone: str) -> str:
     """Prefix E.164 number with whatsapp: for Twilio (idempotent)."""
     if phone.startswith("whatsapp:"):
         return phone
     return f"whatsapp:{phone}"
+
+
+def get_user_whatsapp_number(user: dict) -> str:
+    """
+    Return the whatsapp:-prefixed number for outbound sends.
+    Primary: KMS decrypt of phone_encrypted (post-migration records).
+    Fallback: legacy plaintext whatsapp_number (pre-migration records).
+    """
+    if "phone_encrypted" in user:
+        return to_whatsapp_number(decrypt_phone(user["phone_encrypted"]))
+    legacy = user.get("whatsapp_number", "")
+    return to_whatsapp_number(legacy) if legacy else ""
 
 
 def send_whatsapp_template(
@@ -411,10 +434,17 @@ def lambda_handler(event, context):
 
     for user in users:
         user_id = user.get("user_id", "unknown")
-        to_number = user.get("whatsapp_number", "")
+        try:
+            to_number = get_user_whatsapp_number(user)
+        except Exception as exc:
+            logger.error(
+                "Failed to resolve phone for user_id=%s: %s — skipping.", user_id, exc
+            )
+            skipped += 1
+            continue
 
         if not to_number:
-            logger.warning("Skipping user_id=%s — no whatsapp_number.", user_id)
+            logger.warning("Skipping user_id=%s — no phone number resolved.", user_id)
             skipped += 1
             continue
 

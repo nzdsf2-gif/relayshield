@@ -63,8 +63,11 @@ logger.setLevel(logging.INFO)
 
 secrets_client = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
+kms_client = boto3.client("kms")
 
 USERS_TABLE = "relayshield_users"
+
+KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
 
 # ---------------------------------------------------------------------------
 # Secrets
@@ -203,10 +206,30 @@ def get_user(user_id: str) -> dict | None:
 # Twilio
 # ---------------------------------------------------------------------------
 
+def decrypt_phone(ciphertext_b64: str) -> str:
+    """Decrypt KMS-encrypted phone ciphertext (base64). Returns E.164 string."""
+    response = kms_client.decrypt(
+        CiphertextBlob=base64.b64decode(ciphertext_b64),
+    )
+    return response["Plaintext"].decode()
+
+
 def to_whatsapp_number(phone: str) -> str:
     if phone.startswith("whatsapp:"):
         return phone
     return f"whatsapp:{phone}"
+
+
+def get_user_whatsapp_number(user: dict) -> str:
+    """
+    Return the whatsapp:-prefixed number for outbound sends.
+    Primary: KMS decrypt of phone_encrypted (post-migration records).
+    Fallback: legacy plaintext whatsapp_number (pre-migration records).
+    """
+    if "phone_encrypted" in user:
+        return to_whatsapp_number(decrypt_phone(user["phone_encrypted"]))
+    legacy = user.get("whatsapp_number", "")
+    return to_whatsapp_number(legacy) if legacy else ""
 
 
 def send_whatsapp_template(
@@ -305,9 +328,14 @@ def lambda_handler(event, context):
         )
         return {"statusCode": 200, "body": f"State {onboarding_state!r} — suppressed"}
 
-    to_number = user.get("whatsapp_number") or user.get("phone_number", "")
+    try:
+        to_number = get_user_whatsapp_number(user)
+    except Exception as exc:
+        logger.exception("Failed to resolve phone for user_id=%s: %s", user_id, exc)
+        return {"statusCode": 200, "body": "Phone resolution failed — suppressed"}
+
     if not to_number:
-        logger.error("user_id=%s has no whatsapp_number — cannot send Day 3.", user_id)
+        logger.error("user_id=%s has no phone number — cannot send Day 3.", user_id)
         return {"statusCode": 200, "body": "No number — suppressed"}
 
     # Use tier from DynamoDB (source of truth) rather than event payload

@@ -335,6 +335,86 @@ def build_sms_analysis_response(
     )
 
 
+def build_email_analysis_response(
+    urls: list[str],
+    gsb_result: dict,
+) -> str:
+    """
+    Build the WhatsApp response for the EMAIL command based on URL analysis results.
+    Same three outcomes as build_sms_analysis_response() but with email-specific
+    framing: attachment warning, phishing report steps, no SMS carrier reporting.
+    """
+    immediate_steps = (
+        "→ Do not click any links in the email\n"
+        "→ Do not open any attachments — even PDFs can execute malicious code when opened\n"
+        "→ Do not reply to the sender\n"
+        "→ Report as phishing in your email client:\n"
+        "   Gmail: three-dot menu → *Report phishing*\n"
+        "   Outlook: three-dot menu → *Report* → *Report phishing*\n"
+        "→ Report to the FTC: reportfraud.ftc.gov\n"
+    )
+
+    if not urls:
+        return (
+            "📧 *Suspicious email received — no URLs detected in the text you sent.*\n\n"
+            "No links were found to analyse. If the email contains an attachment, "
+            "do not open it. To check an attachment safely:\n"
+            "→ In Gmail: right-click the attachment → *Copy link address* → "
+            "paste that URL at virustotal.com (no download needed)\n"
+            "→ Do not download the file to open it — opening is when malware executes\n\n"
+            + immediate_steps
+            + "\nReply *SWEEP* to check your email accounts for backdoors, "
+            "or *SESSIONS* if you clicked anything.\n\n"
+            "— RelayShield"
+        )
+
+    if gsb_result["error"]:
+        logger.warning("GSB analysis skipped due to error: %s", gsb_result["error"])
+        return (
+            "📧 *Suspicious email received.*\n\n"
+            f"Found {len(urls)} link(s) — automated analysis temporarily unavailable. "
+            "Treat all links and attachments as unsafe until verified.\n\n"
+            + immediate_steps
+            + "\nReply *SWEEP* to check your email accounts for backdoors.\n\n"
+            "— RelayShield"
+        )
+
+    matches = gsb_result["matches"]
+    flagged_urls = {m["threat"]["url"] for m in matches}
+
+    if flagged_urls:
+        url_list = "\n".join(f"⛔ {u}" for u in flagged_urls)
+        return (
+            "🚨 *MALICIOUS LINK DETECTED IN EMAIL*\n\n"
+            f"RelayShield flagged {len(flagged_urls)} of the "
+            f"{len(urls)} link(s) as a confirmed threat "
+            "(malware, phishing, or social engineering):\n\n"
+            f"{url_list}\n\n"
+            "*Do NOT click these links or open any attachments in this email.*\n\n"
+            + immediate_steps
+            + "\nIf you already clicked a link or opened an attachment:\n"
+            "→ Do not enter any information on any page that opened\n"
+            "→ Close all browser tabs immediately\n"
+            "→ Reply *SWEEP* to check your email accounts for backdoors\n"
+            "→ Reply *SESSIONS* to revoke active sessions on your accounts\n\n"
+            "— RelayShield"
+        )
+
+    url_list = "\n".join(f"✅ {u}" for u in urls)
+    return (
+        "📧 *Suspicious email analysed — no known threats detected in links.*\n\n"
+        f"RelayShield checked {len(urls)} link(s) and found no confirmed "
+        "malware or phishing:\n\n"
+        f"{url_list}\n\n"
+        "⚠️ *A clean link result does not make the email safe.* "
+        "New phishing sites can take hours to appear in threat databases. "
+        "If the email was unexpected, came from an unfamiliar sender, or contains "
+        "an attachment — treat it with caution regardless.\n\n"
+        + immediate_steps
+        + "\n— RelayShield"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Twilio signature verification
 # ---------------------------------------------------------------------------
@@ -727,6 +807,7 @@ def msg_help(is_business: bool, is_employee: bool = False) -> str:
         "• *OTP* — You received an unexpected verification code — get immediate steps\n"
         "• *WASCAM* — You received a suspicious WhatsApp message (bank, carrier, or family impersonation)\n"
         "• *SMS* — Forward a suspicious text for analysis (reply SMS followed by the message)\n"
+        "• *EMAIL* — Paste a suspicious email body for link analysis (reply EMAIL followed by the text)\n"
         "• *SAFE* — Confirm you have read a vishing or session hijacking warning\n"
         "• *CALL* — You received a suspicious call — get immediate steps\n"
     )
@@ -1511,6 +1592,47 @@ def handle_active_message(
             gsb_result.get("error"),
         )
         return "suspicious_sms_analysed"
+
+    # --- EMAIL with no content — prompt user to include the email body ---
+    if body == "EMAIL":
+        send_whatsapp(
+            to_number,
+            "📧 *To analyse a suspicious email, reply with EMAIL followed by the email body text.*\n\n"
+            "Paste the text of the email (including any links). "
+            "RelayShield will check all links for malware and phishing.\n\n"
+            "Example: *EMAIL Your account has been suspended. Click here: https://example.com*\n\n"
+            "⚠️ Do not open any attachments in the email before sending.",
+            account_sid, auth_token, from_number,
+        )
+        return "email_prompt_sent"
+
+    # --- EMAIL (user pastes suspicious email body for analysis) ---
+    # Extracts URLs from the email body text, checks via Google Safe Browsing
+    # API v4, returns email-specific verdict and remediation guidance.
+    # Reuses the same URL extraction and GSB pipeline as the SMS command.
+    if body.startswith("EMAIL "):
+        email_text = message_body.strip()[6:].strip()
+        urls = extract_urls(email_text)
+
+        if urls:
+            try:
+                gsb_api_key = get_gsb_api_key()
+                gsb_result = check_urls_safe_browsing(urls, gsb_api_key)
+            except Exception as e:
+                logger.error("Failed to retrieve GSB API key or run analysis: %s", e)
+                gsb_result = {"matches": [], "error": str(e)}
+        else:
+            gsb_result = {"matches": [], "error": None}
+
+        response_text = build_email_analysis_response(urls, gsb_result)
+        send_whatsapp(to_number, response_text, account_sid, auth_token, from_number)
+        logger.info(
+            "EMAIL analysis complete — urls_found=%d threats=%d error=%s",
+            len(urls),
+            len(gsb_result.get("matches", [])),
+            gsb_result.get("error"),
+        )
+        return "suspicious_email_analysed"
 
     # --- HELP ---
     if body == "HELP":

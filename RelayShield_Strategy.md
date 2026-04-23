@@ -89,6 +89,7 @@
 - [10b. Revenue Expansion and Monetization Roadmap](#10b-revenue-expansion-and-monetization-roadmap)
   - [Layer 1 — Subscription Enhancements (Phase 1-2)](#layer-1--subscription-enhancements-phase-1-2)
   - [Layer 2 — B2B Channel Partnerships (Phase 2-3)](#layer-2--b2b-channel-partnerships-phase-2-3)
+    - [MDR + Identity Protection Bundle — Carrier and MSP Gap](#mdr--identity-protection-bundle--carrier-and-msp-gap-phase-3)
   - [Layer 3 — Data and Intelligence Products (Phase 2-3)](#layer-3--data-and-intelligence-products-phase-2-3)
   - [Layer 4 — Premium Service Tiers (Phase 2-3)](#layer-4--premium-service-tiers-phase-2-3)
   - [Combined Revenue Potential (Phase 3 Scenario)](#combined-revenue-potential-phase-3-scenario)
@@ -2192,6 +2193,32 @@ Beyond core subscriptions, RelayShield has multiple compounding revenue streams 
 - Model: carrier white-labels RelayShield under their brand, pays per-subscriber fee (~$3-5/month/subscriber)
 - Volume play — even 10,000 subscribers at $4/month = $40,000 MRR from one carrier deal
 - Founder's 25-year telecom background = credibility and warm intro potential
+
+**MDR + Identity Protection Bundle — Carrier and MSP Gap (Phase 3)**
+
+*Triggered by: Vodafone + Google $1B MDR partnership targeting European SMBs, April 2026.*
+
+Managed Detection and Response (MDR) services — including the Vodafone/Google Security Operations offering — monitor network traffic and endpoints. They do not cover the personal identity layer:
+
+| MDR covers | RelayShield covers |
+|---|---|
+| Network intrusion detection | Personal email breach monitoring |
+| Endpoint threat response | SIM swap detection and carrier hardening |
+| Cloud infrastructure anomalies | Social engineering (WhatsApp, vishing, smishing) |
+| Corporate device monitoring | Personal session token hijacking |
+| SIEM/SOAR alerting | Human-layer ordered remediation |
+
+Any carrier or MSP selling MDR to SMBs has a visible gap: the business owner's *personal* phone, email, and identity are completely outside MDR's scope — and that's exactly where most SMB breaches start. RelayShield fills that gap as a complementary layer, not a competing product.
+
+**Channel pitch:** *"Your MDR secures the network. RelayShield secures the humans on it."*
+
+**Target partners:**
+- US carriers offering MDR or managed security bundles (AT&T Cybersecurity, Verizon Business, T-Mobile for Business)
+- MSPs already selling endpoint MDR via ConnectWise, Datto, IT Glue ecosystems
+- European expansion: Vodafone Business, BT Security — both actively selling MDR to SMBs
+
+**Why the founder is uniquely positioned for this conversation:**
+25 years in telecom security means carrier procurement, partner programme, and wholesale pricing conversations are familiar terrain. No other identity protection startup at this price point has a founder who can speak carrier language credibly.
 
 ---
 

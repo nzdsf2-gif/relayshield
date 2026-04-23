@@ -457,6 +457,8 @@ def write_breach_alert(
     """
     table = dynamodb.Table(BREACH_ALERTS_TABLE)
     alert_id = str(uuid.uuid4())
+    two_years_seconds = 2 * 365 * 24 * 3600
+    expires_at = int(datetime.now(timezone.utc).timestamp()) + two_years_seconds
     item = {
         "alert_id": alert_id,
         "user_id": user_id,
@@ -468,6 +470,7 @@ def write_breach_alert(
         "alert_sent_at": alert_sent_at,
         "remediation_status": "pending",
         "passwords_exposed": passwords_exposed,
+        "expires_at": expires_at,
     }
     table.put_item(Item=item)
     logger.info(

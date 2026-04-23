@@ -2229,11 +2229,13 @@ Beyond core subscriptions, RelayShield has multiple compounding revenue streams 
 - Pricing: $299 one-time incident fee, or included in Business Shield Pro
 - Target: SMB owner whose employee credentials are being actively exploited
 
-**Compliance Reporting Add-on**
-- Automated GDPR/HIPAA/CCPA breach notification documentation
-- Generates audit-ready incident reports from breach detection events
+**Compliance Reporting Add-on — Auditability Engine**
+- Full evidence trail per incident: **signal** (breach detected + source) → **decision** (severity scored, attack vector mapped, tier-appropriate response selected) → **action** (remediation steps delivered via WhatsApp, timestamp recorded) → **outcome** (user confirmation received or escalation triggered)
+- Surfaced as GDPR/HIPAA/CCPA-ready incident report document, auto-generated per breach event
+- Foundation data already exists: CloudWatch logs capture every alert and delivery; DynamoDB records user state transitions and remediation progress — build is a report generation and delivery layer on top of existing infrastructure
 - Pricing: +$29.99/month (SMB add-on)
 - Target: SMBs in healthcare, legal, finance that have regulatory notification obligations
+- Competitive note: no consumer or SMB identity protection service today produces a machine-readable audit trail linking breach detection to remediation outcome — this closes a compliance gap that enterprise tools charge 10–50× to fill
 
 ---
 

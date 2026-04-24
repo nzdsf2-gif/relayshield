@@ -87,7 +87,7 @@ TWILIO_MESSAGES_URL = (
 #
 #   Reply HELP for all available commands.
 #   — RelayShield
-QUARTERLY_TEMPLATE_SID = "PENDING_META_APPROVAL"
+QUARTERLY_TEMPLATE_SID = "HX2ec6e31204006775cb86fb5dbc1739d3"
 
 # ---------------------------------------------------------------------------
 # Tier constants

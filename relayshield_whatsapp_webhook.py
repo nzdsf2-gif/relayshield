@@ -96,8 +96,8 @@ VT_BASE_URL = "https://www.virustotal.com/api/v3"
 # URL scans typically complete in 10–20 s; file scans up to 40 s.
 # Lambda timeout must be set to 60 s to accommodate worst-case file scans.
 VT_POLL_INTERVAL = 3   # seconds between status checks
-VT_URL_MAX_WAIT  = 20  # max seconds to wait for URL analysis
-VT_FILE_MAX_WAIT = 35  # max seconds to wait for file analysis
+VT_URL_MAX_WAIT  = 30  # max seconds to wait for URL analysis (increased for cold-start headroom)
+VT_FILE_MAX_WAIT = 45  # max seconds to wait for file analysis
 
 # Twilio media content-type → safe filename mapping
 VT_FILENAME_MAP = {
@@ -564,10 +564,10 @@ def build_vt_verdict_response(stats: dict | None, target_label: str) -> str:
     """
     if stats is None:
         return (
-            "🔍 *VirusTotal scan — result not available.*\n\n"
+            "🔍 *RelayShield scan — result not available.*\n\n"
             f"Analysis of {target_label} took longer than expected or could not complete. "
-            "Check the result directly at *virustotal.com* by pasting the URL or uploading the file.\n\n"
             "Treat it as potentially unsafe until verified.\n\n"
+            "💡 You can also check manually at *virustotal.com* by pasting the URL or uploading the file directly.\n\n"
             "— RelayShield"
         )
 
@@ -1695,7 +1695,7 @@ def handle_active_message(
 
         send_whatsapp(
             to_number,
-            "📎 File received — scanning with VirusTotal. This may take up to 30 seconds...",
+            "📎 *RelayShield is scanning that file...* This may take up to 30 seconds.",
             account_sid, auth_token, from_number,
         )
         try:
@@ -1903,7 +1903,7 @@ def handle_active_message(
 
         send_whatsapp(
             to_number,
-            "🔍 Scanning with VirusTotal — this may take up to 20 seconds...",
+            "🔍 *RelayShield is scanning that link...* This may take up to 30 seconds.",
             account_sid, auth_token, from_number,
         )
 

@@ -1005,7 +1005,7 @@ def msg_help(is_business: bool, is_employee: bool = False) -> str:
         "• *WASCAM* — You received a suspicious WhatsApp message (bank, carrier, or family impersonation)\n"
         "• *SMS* — Forward a suspicious text for analysis (reply SMS followed by the message)\n"
         "• *EMAIL* — Paste a suspicious email body for link analysis (reply EMAIL followed by the text)\n"
-        "• *ATTACH* — Scan a suspicious file or URL with VirusTotal (reply ATTACH followed by URL, or send the file directly)\n"
+        "• *ATTACH* — Scan a suspicious file or URL (reply ATTACH followed by URL, or send the file directly)\n"
         "• *SAFE* — Confirm you have read a vishing or session hijacking warning\n"
         "• *CALL* — You received a suspicious call — get immediate steps\n"
     )

@@ -86,10 +86,10 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **`REMOVE` command — employee offboarding** — Admin sends `REMOVE +16175551234` to deactivate an employee record (set `active=False`, clear monitored emails). Without this, no real business with staff turnover will stay subscribed. Hardest blocker for both tiers. ~1 hr. | ⬜ Pending — High Priority |
-| 2 | **`STATUS` command — WhatsApp-native admin dashboard** — Admin sends `STATUS` to see: seats used vs. available, each employee's onboarding completion state, breach count per employee, last scan timestamp. Replaces need for a web portal at MVP stage. Business admin only (not employees). ~2 hrs. | ⬜ Pending — High Priority |
-| 3 | **Admin breach co-notification** — When employee breach fires, send a second WhatsApp alert to the admin (account owner) alongside the employee alert. Include employee identifier (phone last 4 or name if stored) and breach severity. Business Basic+. Admin buys the plan — they need to know when their team is exposed. ~1 hr. | ⬜ Pending — High Priority |
-| 4 | **Employee name on `ADD` command** — Extend `ADD +16175551234 John Smith` to store `employee_name` field on the user record. Allows `STATUS` command and admin notifications to identify employees by name rather than phone number. Required before `STATUS` is useful. ~30 min. | ⬜ Pending — High Priority |
+| 1 | **`REMOVE` command — employee offboarding** — `REMOVE +16175551234`: finds employee by phone hash + admin ownership check, sets `active=False`, deactivates all monitored emails. Confirms to admin with name + email count. Deployed April 2026. | ✅ Complete — April 2026 |
+| 2 | **`STATUS` command — WhatsApp-native admin dashboard** — `STATUS`: returns seat usage (X of Y), per-employee onboarding state (✅ Active / ⏳ Onboarding), emails monitored count, ADD/REMOVE instructions. Business admin only. Deployed April 2026. | ✅ Complete — April 2026 |
+| 3 | **Admin breach co-notification** — When employee breach fires and alert is successfully delivered, second WhatsApp alert sent to admin with employee name (if stored), breach names, and severity label. Cached admin record lookup. `get_whatsapp_number_from_record()` fixed to use KMS `phone_encrypted` primary path + legacy fallback. Deployed April 2026. | ✅ Complete — April 2026 |
+| 4 | **Employee name on `ADD` command** — `ADD +16175551234 John Smith` stores `employee_name` on the record. Admin confirmation and STATUS display use name. Backward-compatible (ADD without name still works). Deployed April 2026. | ✅ Complete — April 2026 |
 
 ---
 

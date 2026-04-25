@@ -599,7 +599,7 @@ def build_vt_verdict_response(stats: dict | None, target_label: str) -> str:
     if suspicious > 0:
         return (
             f"⚠️ *SUSPICIOUS — {suspicious} of {total} engines flagged as suspicious*\n\n"
-            f"VirusTotal found low-confidence threat signals on {target_label}. "
+            f"RelayShield detected low-confidence threat signals on {target_label}. "
             "This may be a false positive — treat it with caution.\n\n"
             "→ Do not open the file or enter any information on the page\n"
             "→ If this arrived in an unexpected email, report the email as phishing\n"
@@ -873,15 +873,17 @@ def create_employee_record(
     phone_number: str,
     admin_user_id: str,
     subscription_tier: str,
+    employee_name: str = "",
 ) -> str:
     """
     Create an employee user record linked to the admin's account.
+    Optionally stores employee_name if provided via ADD +1XXXXXXXXXX Name.
     Returns the new user_id.
     """
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     table = dynamodb.Table(USERS_TABLE)
-    table.put_item(Item={
+    item = {
         "user_id": user_id,
         "phone_encrypted": encrypt_phone(phone_number),
         "phone_hash": hash_phone(phone_number),
@@ -894,12 +896,65 @@ def create_employee_record(
         "active": True,
         "created_at": now,
         "updated_at": now,
-    })
+    }
+    if employee_name:
+        item["employee_name"] = employee_name.strip()
+    table.put_item(Item=item)
     logger.info(
-        "Employee record created — user_id=%s admin=%s (phone encrypted)",
-        user_id, admin_user_id,
+        "Employee record created — user_id=%s admin=%s name=%r (phone encrypted)",
+        user_id, admin_user_id, employee_name or "(none)",
     )
     return user_id
+
+
+def get_employee_by_phone_and_admin(phone: str, admin_user_id: str) -> dict | None:
+    """
+    Find an active employee record by phone hash that belongs to this admin.
+    Used by REMOVE command to verify ownership before deactivating.
+    """
+    table = dynamodb.Table(USERS_TABLE)
+    ph = hash_phone(phone)
+    response = table.query(
+        IndexName=PHONE_HASH_INDEX,
+        KeyConditionExpression=Key("phone_hash").eq(ph),
+    )
+    for item in response.get("Items", []):
+        if item.get("admin_user_id") == admin_user_id and item.get("active", False):
+            return item
+    return None
+
+
+def get_employees_for_admin(admin_user_id: str) -> list[dict]:
+    """Return all active employee records linked to this admin."""
+    table = dynamodb.Table(USERS_TABLE)
+    response = table.scan(
+        FilterExpression=(
+            Attr("admin_user_id").eq(admin_user_id)
+            & Attr("active").eq(True)
+        ),
+    )
+    return response.get("Items", [])
+
+
+def deactivate_employee_emails(user_id: str) -> int:
+    """
+    Set active=False on all monitored emails for this employee.
+    Called on REMOVE to stop monitoring deactivated team members.
+    Returns count of emails deactivated.
+    """
+    table = dynamodb.Table(MONITORED_EMAILS_TABLE)
+    response = table.scan(
+        FilterExpression=Attr("user_id").eq(user_id) & Attr("active").eq(True),
+    )
+    items = response.get("Items", [])
+    now = datetime.now(timezone.utc).isoformat()
+    for item in items:
+        table.update_item(
+            Key={"email_id": item["email_id"]},
+            UpdateExpression="SET active = :f, updated_at = :t",
+            ExpressionAttributeValues={":f": False, ":t": now},
+        )
+    return len(items)
 
 
 # ---------------------------------------------------------------------------
@@ -1015,7 +1070,9 @@ def msg_help(is_business: bool, is_employee: bool = False) -> str:
         "• *CALL* — You received a suspicious call — get immediate steps\n"
     )
     if is_business and not is_employee:
-        commands += "• *ADD +1XXXXXXXXXX* — Add a team member for monitoring\n"
+        commands += "• *ADD +1XXXXXXXXXX Name* — Add a team member for monitoring\n"
+        commands += "• *REMOVE +1XXXXXXXXXX* — Remove a team member and deactivate their monitoring\n"
+        commands += "• *STATUS* — View your team's onboarding and monitoring status\n"
     commands += "\nReply any command to get started."
     return commands
 
@@ -1878,7 +1935,7 @@ def handle_active_message(
     if body == "ATTACH":
         send_whatsapp(
             to_number,
-            "📎 *To scan a suspicious file or link with VirusTotal:*\n\n"
+            "📎 *To scan a suspicious file or link:*\n\n"
             "*Option 1 — Paste the URL:*\n"
             "Reply *ATTACH* followed by the direct link.\n"
             "Example: *ATTACH https://example.com/invoice.pdf*\n\n"
@@ -1936,15 +1993,19 @@ def handle_active_message(
         return "help_sent"
 
     # --- ADD (Business tier admin only) ---
+    # Syntax: ADD +16175551234 [Optional Name]
     if body.startswith("ADD ") and is_business and not is_employee:
-        raw_phone = message_body.strip()[4:].strip()
+        add_args = message_body.strip()[4:].strip()
+        parts = add_args.split(None, 1)  # split on first whitespace only
+        raw_phone = parts[0]
+        employee_name = parts[1].strip() if len(parts) > 1 else ""
         phone = normalise_phone(raw_phone)
 
         if not is_valid_phone(phone):
             send_whatsapp(
                 to_number,
                 "Please provide a valid phone number in international format.\n"
-                "Example: *ADD +16175551234*",
+                "Example: *ADD +16175551234 Jane Smith*",
                 account_sid, auth_token, from_number,
             )
             return "invalid_employee_phone"
@@ -1962,12 +2023,14 @@ def handle_active_message(
             return "seat_limit_reached"
 
         # Create employee record
-        employee_id = create_employee_record(phone, user_id, tier)
+        employee_id = create_employee_record(phone, user_id, tier, employee_name)
+        display = f"*{employee_name}* ({phone})" if employee_name else f"*{phone}*"
 
         # Confirm to admin
         send_whatsapp(
             to_number,
-            f"✅ Team member added. They'll receive an onboarding message at {phone} shortly.",
+            f"✅ {display} added. They'll receive an onboarding message shortly.\n\n"
+            "Reply *STATUS* to see your full team.",
             account_sid, auth_token, from_number,
         )
 
@@ -1979,10 +2042,102 @@ def handle_active_message(
         )
 
         logger.info(
-            "Employee added — admin_user_id=%s employee_user_id=%s phone=%s",
-            user_id, employee_id, phone,
+            "Employee added — admin_user_id=%s employee_user_id=%s phone=%s name=%r",
+            user_id, employee_id, phone, employee_name or "(none)",
         )
         return "employee_added"
+
+    # --- REMOVE (Business tier admin only) ---
+    # Syntax: REMOVE +16175551234
+    if body.startswith("REMOVE ") and is_business and not is_employee:
+        raw_phone = message_body.strip()[7:].strip()
+        phone = normalise_phone(raw_phone)
+
+        if not is_valid_phone(phone):
+            send_whatsapp(
+                to_number,
+                "Please provide a valid phone number.\n"
+                "Example: *REMOVE +16175551234*",
+                account_sid, auth_token, from_number,
+            )
+            return "invalid_remove_phone"
+
+        employee = get_employee_by_phone_and_admin(phone, user_id)
+        if not employee:
+            send_whatsapp(
+                to_number,
+                f"No active team member found with number {phone}.\n\n"
+                "Reply *STATUS* to see your current team.",
+                account_sid, auth_token, from_number,
+            )
+            return "employee_not_found"
+
+        emp_user_id = employee["user_id"]
+        emp_name = employee.get("employee_name", "")
+        display = f"*{emp_name}* ({phone})" if emp_name else f"*{phone}*"
+
+        # Deactivate employee record and monitored emails
+        update_user(emp_user_id, {"active": False})
+        emails_removed = deactivate_employee_emails(emp_user_id)
+
+        send_whatsapp(
+            to_number,
+            f"✅ {display} has been removed from your RelayShield account.\n\n"
+            f"{emails_removed} monitored email{'s' if emails_removed != 1 else ''} deactivated.\n\n"
+            "Reply *STATUS* to see your updated team.",
+            account_sid, auth_token, from_number,
+        )
+        logger.info(
+            "Employee removed — admin_user_id=%s employee_user_id=%s phone=%s emails_deactivated=%d",
+            user_id, emp_user_id, phone, emails_removed,
+        )
+        return "employee_removed"
+
+    # --- STATUS (Business tier admin only) ---
+    if body == "STATUS" and is_business and not is_employee:
+        employees = get_employees_for_admin(user_id)
+        seat_limit = SEAT_LIMITS.get(tier, 5)
+        seat_count = len(employees)
+
+        if not employees:
+            send_whatsapp(
+                to_number,
+                f"📊 *Team Status — {seat_count} of {seat_limit} seats in use*\n\n"
+                "No team members added yet.\n\n"
+                "Reply *ADD +1XXXXXXXXXX Name* to add your first team member.",
+                account_sid, auth_token, from_number,
+            )
+            return "status_empty"
+
+        lines = []
+        for i, emp in enumerate(employees, 1):
+            name = emp.get("employee_name", "")
+            state = emp.get("onboarding_state", "")
+            emails = int(emp.get("emails_added", 0))
+
+            if state in (STATE_EMP_ACTIVE, STATE_ACTIVE):
+                icon, label = "✅", "Active"
+            elif state in (STATE_EMP_EMAIL_1, STATE_EMP_MORE_EMAILS):
+                icon, label = "⏳", "Onboarding"
+            else:
+                icon, label = "❓", "Pending"
+
+            display = f"*{name}*" if name else f"*Member {i}*"
+            lines.append(
+                f"{icon} {display} — {label} · "
+                f"{emails} email{'s' if emails != 1 else ''} monitored"
+            )
+
+        team_list = "\n".join(lines)
+        send_whatsapp(
+            to_number,
+            f"📊 *Team Status — {seat_count} of {seat_limit} seats in use*\n\n"
+            f"{team_list}\n\n"
+            "Reply *ADD +1XXXXXXXXXX Name* to add a team member, "
+            "or *REMOVE +1XXXXXXXXXX* to offboard one.",
+            account_sid, auth_token, from_number,
+        )
+        return "status_sent"
 
     # --- Unknown ---
     send_whatsapp(

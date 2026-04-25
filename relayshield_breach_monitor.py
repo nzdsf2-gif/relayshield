@@ -46,6 +46,7 @@ dynamodb = boto3.resource("dynamodb")
 kms_client = boto3.client("kms")
 
 KMS_EMAIL_KEY_ALIAS = "alias/relayshield-data-key"
+KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
 
 MONITORED_EMAILS_TABLE = "relayshield_monitored_emails"
 BREACH_ALERTS_TABLE = "relayshield_breach_alerts"
@@ -347,6 +348,14 @@ def decrypt_email(ciphertext_b64: str) -> str:
     return response["Plaintext"].decode()
 
 
+def decrypt_phone(ciphertext_b64: str) -> str:
+    """Decrypt KMS-encrypted phone ciphertext (base64). Returns E.164 string."""
+    response = kms_client.decrypt(
+        CiphertextBlob=base64.b64decode(ciphertext_b64),
+    )
+    return response["Plaintext"].decode()
+
+
 # ---------------------------------------------------------------------------
 
 def scan_monitored_emails() -> list[dict]:
@@ -399,13 +408,28 @@ def get_user_record(user_id: str) -> dict | None:
 
 
 def get_whatsapp_number_from_record(user_record: dict) -> str | None:
-    """Extract and normalise the WhatsApp number from a user record."""
-    number = user_record.get("whatsapp_number")
-    if not number:
-        logger.warning(
-            "user_id=%s has no whatsapp_number field.", user_record.get("user_id")
-        )
-        return None
+    """
+    Extract and normalise the WhatsApp number from a user record.
+    Primary: KMS decrypt of phone_encrypted (post-migration records).
+    Fallback: legacy plaintext whatsapp_number (pre-migration records).
+    """
+    if "phone_encrypted" in user_record:
+        try:
+            number = decrypt_phone(user_record["phone_encrypted"])
+        except Exception as exc:
+            logger.error(
+                "Failed to decrypt phone for user_id=%s: %s",
+                user_record.get("user_id"), exc,
+            )
+            return None
+    else:
+        number = user_record.get("whatsapp_number")
+        if not number:
+            logger.warning(
+                "user_id=%s has no phone_encrypted or whatsapp_number field.",
+                user_record.get("user_id"),
+            )
+            return None
     if not number.startswith("whatsapp:"):
         number = f"whatsapp:{number}"
     return number
@@ -1249,6 +1273,59 @@ def process_email(
             "No WhatsApp number for user_id=%s — %d breach(es) recorded but not sent.",
             user_id, len(new_breaches),
         )
+
+    # --- Admin co-notification (Business tiers) ---
+    # If this user is an employee (has admin_user_id), send a second alert to
+    # the account admin so they are aware a team member's credentials were exposed.
+    # Sent only when the employee alert was successfully delivered (whatsapp_sent=True)
+    # and only for alertable breaches.
+    if whatsapp_sent and alertable and user_record:
+        admin_user_id = user_record.get("admin_user_id")
+        if admin_user_id:
+            if admin_user_id not in user_cache:
+                user_cache[admin_user_id] = get_user_record(admin_user_id)
+            admin_record = user_cache[admin_user_id]
+
+            if admin_record:
+                admin_number = get_whatsapp_number_from_record(admin_record)
+                emp_name = user_record.get("employee_name", "")
+                emp_display = f"*{emp_name}*" if emp_name else "a team member"
+
+                breach_names = ", ".join(b["breach_name"] for b in alertable)
+                severity_label = (
+                    "CRITICAL" if any(b.get("passwords_exposed") for b in alertable)
+                    else "HIGH"
+                )
+
+                admin_msg = (
+                    f"🚨 *Team Security Alert — {emp_display} has been affected*\n\n"
+                    f"RelayShield detected {len(alertable)} new breach(es) "
+                    f"involving {emp_display}'s credentials:\n"
+                    f"*{breach_names}*\n\n"
+                    f"Severity: *{severity_label}*\n\n"
+                    f"{emp_display} has been notified and is receiving guided remediation steps.\n\n"
+                    "Reply *STATUS* to see your full team's security status.\n\n"
+                    "— RelayShield"
+                )
+
+                if admin_number:
+                    account_sid, auth_token, from_number = twilio_creds
+                    admin_sent, _ = send_whatsapp_alert(
+                        account_sid=account_sid,
+                        auth_token=auth_token,
+                        from_number=from_number,
+                        to_number=admin_number,
+                        message_body=admin_msg,
+                    )
+                    logger.info(
+                        "Admin co-notification — admin_user_id=%s employee_user_id=%s sent=%s",
+                        admin_user_id, user_id, admin_sent,
+                    )
+                else:
+                    logger.warning(
+                        "Admin co-notification skipped — no phone for admin_user_id=%s",
+                        admin_user_id,
+                    )
 
     for b in new_breaches:
         b["whatsapp_sent"] = whatsapp_sent if b in alertable else False

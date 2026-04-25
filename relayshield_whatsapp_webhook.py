@@ -580,14 +580,19 @@ def build_vt_verdict_response(stats: dict | None, target_label: str) -> str:
     if malicious > 0:
         return (
             f"🚨 *MALICIOUS — {malicious} of {total} security engines confirmed a threat*\n\n"
-            f"VirusTotal flagged {target_label} as malicious "
+            f"RelayShield detected {target_label} as malicious "
             "(malware, phishing, or trojan).\n\n"
-            "*Do NOT open this file or visit this URL.*\n\n"
-            "If you already opened it:\n"
+            "*If you have NOT opened the file:*\n"
+            "→ Delete it immediately — do not open, forward, or share it\n"
+            "→ Report the email or message it arrived in as phishing\n"
+            "→ Block the sender\n\n"
+            "*If you already opened it:*\n"
             "→ Disconnect from Wi-Fi immediately\n"
-            "→ Reply *SESSIONS* to revoke active account sessions\n"
-            "→ Reply *SWEEP* to check your email for backdoors\n"
-            "→ Call your bank's fraud line if any financial accounts were open\n\n"
+            "→ Run a free device scan: download *Malwarebytes* at malwarebytes.com\n"
+            "→ Reply *SESSIONS* to revoke active account sessions before an attacker uses them\n"
+            "→ Reply *SWEEP* to check your email for backdoors planted by the malware\n"
+            "→ Call your bank's fraud line if any financial accounts were open at the time\n"
+            "→ If this is a work device — notify your IT contact immediately\n\n"
             "— RelayShield"
         )
 

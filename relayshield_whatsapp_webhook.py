@@ -37,6 +37,7 @@ import hmac
 import json
 import logging
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -82,11 +83,35 @@ TWILIO_FROM_SECRET = "relayshield/twilio_whatsapp_number"
 TWILIO_AUTH_TOKEN_SECRET = "relayshield/twilio_auth_token"
 GSB_SECRET_NAME = "relayshield/google_safe_browsing"
 GSB_SECRET_KEY = "google_safe_browsing_api_key"
+VT_SECRET_NAME = "relayshield/virustotal_api_key"
+VT_SECRET_KEY = "virustotal_api_key"
 
 TWILIO_MESSAGES_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 )
 GSB_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
+VT_BASE_URL = "https://www.virustotal.com/api/v3"
+
+# VirusTotal polling config
+# URL scans typically complete in 10–20 s; file scans up to 40 s.
+# Lambda timeout must be set to 60 s to accommodate worst-case file scans.
+VT_POLL_INTERVAL = 3   # seconds between status checks
+VT_URL_MAX_WAIT  = 20  # max seconds to wait for URL analysis
+VT_FILE_MAX_WAIT = 35  # max seconds to wait for file analysis
+
+# Twilio media content-type → safe filename mapping
+VT_FILENAME_MAP = {
+    "application/pdf":      "attachment.pdf",
+    "application/zip":      "attachment.zip",
+    "application/x-zip-compressed": "attachment.zip",
+    "application/msword":   "attachment.doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "attachment.docx",
+    "application/vnd.ms-excel": "attachment.xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "attachment.xlsx",
+    "image/jpeg": "attachment.jpg",
+    "image/png":  "attachment.png",
+    "text/plain": "attachment.txt",
+}
 
 # ---------------------------------------------------------------------------
 # Tier constants
@@ -171,6 +196,11 @@ def get_twilio_credentials() -> tuple[str, str, str]:
 def get_gsb_api_key() -> str:
     """Retrieve Google Safe Browsing API key from Secrets Manager."""
     return get_secret_json(GSB_SECRET_NAME, GSB_SECRET_KEY)
+
+
+def get_vt_api_key() -> str:
+    """Retrieve VirusTotal API key from Secrets Manager."""
+    return get_secret_json(VT_SECRET_NAME, VT_SECRET_KEY)
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +442,173 @@ def build_email_analysis_response(
         "an attachment — treat it with caution regardless.\n\n"
         + immediate_steps
         + "\n— RelayShield"
+    )
+
+
+# ---------------------------------------------------------------------------
+# VirusTotal scanning helpers
+# ---------------------------------------------------------------------------
+
+def submit_url_to_vt(url: str, api_key: str) -> str | None:
+    """
+    Submit a URL to VirusTotal for analysis.
+    POST /urls with form-encoded url= parameter.
+    Returns the analysis ID string, or None on failure.
+    """
+    payload = urllib.parse.urlencode({"url": url}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{VT_BASE_URL}/urls",
+        data=payload,
+        headers={
+            "x-apikey": api_key,
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return data.get("data", {}).get("id")
+    except Exception as exc:
+        logger.error("VT URL submission failed for %s: %s", url, exc)
+        return None
+
+
+def download_twilio_media(media_url: str, account_sid: str, auth_token: str) -> bytes | None:
+    """
+    Download a Twilio media attachment using Basic auth.
+    Returns raw bytes or None on failure.
+    """
+    credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+    req = urllib.request.Request(
+        media_url,
+        headers={"Authorization": f"Basic {credentials}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return resp.read()
+    except Exception as exc:
+        logger.error("Failed to download Twilio media from %s: %s", media_url, exc)
+        return None
+
+
+def submit_file_to_vt(
+    file_bytes: bytes,
+    filename: str,
+    content_type: str,
+    api_key: str,
+) -> str | None:
+    """
+    Submit a file binary to VirusTotal via multipart/form-data POST to /files.
+    Returns the analysis ID string, or None on failure.
+    """
+    boundary = uuid.uuid4().hex
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f"Content-Type: {content_type}\r\n"
+        "\r\n"
+    ).encode() + file_bytes + f"\r\n--{boundary}--\r\n".encode()
+
+    req = urllib.request.Request(
+        f"{VT_BASE_URL}/files",
+        data=body,
+        headers={
+            "x-apikey": api_key,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            return data.get("data", {}).get("id")
+    except Exception as exc:
+        logger.error("VT file submission failed: %s", exc)
+        return None
+
+
+def poll_vt_analysis(analysis_id: str, api_key: str, max_wait: int = VT_URL_MAX_WAIT) -> dict | None:
+    """
+    Poll GET /analyses/{id} until status is 'completed' or max_wait exceeded.
+    Returns the stats dict (malicious/suspicious/harmless/undetected keys) or None.
+    """
+    req = urllib.request.Request(
+        f"{VT_BASE_URL}/analyses/{analysis_id}",
+        headers={"x-apikey": api_key},
+        method="GET",
+    )
+    waited = 0
+    while waited <= max_wait:
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+                attrs = data.get("data", {}).get("attributes", {})
+                if attrs.get("status") == "completed":
+                    return attrs.get("stats", {})
+        except Exception as exc:
+            logger.error("VT poll error for analysis %s: %s", analysis_id, exc)
+            return None
+        time.sleep(VT_POLL_INTERVAL)
+        waited += VT_POLL_INTERVAL
+    logger.warning("VT analysis %s did not complete within %ds.", analysis_id, max_wait)
+    return None
+
+
+def build_vt_verdict_response(stats: dict | None, target_label: str) -> str:
+    """
+    Build WhatsApp response from VirusTotal analysis stats.
+    Four outcomes: malicious, suspicious, clean, or timed out / unavailable.
+    target_label: short description e.g. "that URL" or "that file".
+    """
+    if stats is None:
+        return (
+            "🔍 *VirusTotal scan — result not available.*\n\n"
+            f"Analysis of {target_label} took longer than expected or could not complete. "
+            "Check the result directly at *virustotal.com* by pasting the URL or uploading the file.\n\n"
+            "Treat it as potentially unsafe until verified.\n\n"
+            "— RelayShield"
+        )
+
+    malicious  = stats.get("malicious", 0)
+    suspicious = stats.get("suspicious", 0)
+    harmless   = stats.get("harmless", 0)
+    undetected = stats.get("undetected", 0)
+    total      = malicious + suspicious + harmless + undetected
+
+    if malicious > 0:
+        return (
+            f"🚨 *MALICIOUS — {malicious} of {total} security engines confirmed a threat*\n\n"
+            f"VirusTotal flagged {target_label} as malicious "
+            "(malware, phishing, or trojan).\n\n"
+            "*Do NOT open this file or visit this URL.*\n\n"
+            "If you already opened it:\n"
+            "→ Disconnect from Wi-Fi immediately\n"
+            "→ Reply *SESSIONS* to revoke active account sessions\n"
+            "→ Reply *SWEEP* to check your email for backdoors\n"
+            "→ Call your bank's fraud line if any financial accounts were open\n\n"
+            "— RelayShield"
+        )
+
+    if suspicious > 0:
+        return (
+            f"⚠️ *SUSPICIOUS — {suspicious} of {total} engines flagged as suspicious*\n\n"
+            f"VirusTotal found low-confidence threat signals on {target_label}. "
+            "This may be a false positive — treat it with caution.\n\n"
+            "→ Do not open the file or enter any information on the page\n"
+            "→ If this arrived in an unexpected email, report the email as phishing\n"
+            "→ Reply *SWEEP* if you already interacted with it\n\n"
+            "— RelayShield"
+        )
+
+    return (
+        f"✅ *No threats detected — {harmless + undetected} of {total} "
+        f"engines found {target_label} clean.*\n\n"
+        "⚠️ A clean result does not guarantee safety. "
+        "Zero-day threats and newly created malicious files may not yet appear "
+        "in threat databases. If this arrived unexpectedly, treat it with caution regardless.\n\n"
+        "— RelayShield"
     )
 
 
@@ -808,6 +1005,7 @@ def msg_help(is_business: bool, is_employee: bool = False) -> str:
         "• *WASCAM* — You received a suspicious WhatsApp message (bank, carrier, or family impersonation)\n"
         "• *SMS* — Forward a suspicious text for analysis (reply SMS followed by the message)\n"
         "• *EMAIL* — Paste a suspicious email body for link analysis (reply EMAIL followed by the text)\n"
+        "• *ATTACH* — Scan a suspicious file or URL with VirusTotal (reply ATTACH followed by URL, or send the file directly)\n"
         "• *SAFE* — Confirm you have read a vishing or session hijacking warning\n"
         "• *CALL* — You received a suspicious call — get immediate steps\n"
     )
@@ -1452,6 +1650,7 @@ def handle_active_message(
     user: dict,
     message_body: str,
     twilio_creds: tuple,
+    media_info: dict | None = None,
 ) -> str:
     """Route commands for fully onboarded users."""
     account_sid, auth_token, from_number = twilio_creds
@@ -1461,6 +1660,8 @@ def handle_active_message(
     is_business = tier in BUSINESS_TIERS
     is_employee = bool(user.get("admin_user_id"))
     body = message_body.strip().upper()
+    media_info = media_info or {}
+    num_media = int(media_info.get("num_media", 0))
 
     # --- Pending Claude analysis delivery ---
     # If the breach monitor stored an analysis that couldn't be sent due to
@@ -1482,6 +1683,40 @@ def handle_active_message(
         )
         logger.info("Delivered pending Claude analysis to user_id=%s.", user_id)
         return "pending_analysis_delivered"
+
+    # --- WhatsApp file attachment — VirusTotal file scan ---
+    # Triggered when user sends a file (PDF, zip, doc, image) directly via WhatsApp.
+    # Twilio populates NumMedia + MediaUrl0 + MediaContentType0 in the POST body.
+    # Lambda timeout must be 60 s to accommodate worst-case VT file analysis.
+    if num_media > 0:
+        media_url = media_info.get("media_url", "")
+        media_content_type = media_info.get("media_content_type", "application/octet-stream")
+        filename = VT_FILENAME_MAP.get(media_content_type, "attachment.bin")
+
+        send_whatsapp(
+            to_number,
+            "📎 File received — scanning with VirusTotal. This may take up to 30 seconds...",
+            account_sid, auth_token, from_number,
+        )
+        try:
+            vt_api_key = get_vt_api_key()
+            file_bytes = download_twilio_media(media_url, account_sid, auth_token)
+            if file_bytes:
+                analysis_id = submit_file_to_vt(file_bytes, filename, media_content_type, vt_api_key)
+                stats = poll_vt_analysis(analysis_id, vt_api_key, max_wait=VT_FILE_MAX_WAIT) if analysis_id else None
+            else:
+                stats = None
+        except Exception as exc:
+            logger.error("VT file scan pipeline failed: %s", exc)
+            stats = None
+
+        verdict = build_vt_verdict_response(stats, "that file")
+        send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)
+        logger.info(
+            "VT file scan complete — content_type=%s stats=%s",
+            media_content_type, stats,
+        )
+        return "vt_file_scanned"
 
     # --- SWEEP ---
     if body == "SWEEP":
@@ -1634,6 +1869,60 @@ def handle_active_message(
         )
         return "suspicious_email_analysed"
 
+    # --- ATTACH with no content — safe guidance + usage instructions ---
+    if body == "ATTACH":
+        send_whatsapp(
+            to_number,
+            "📎 *To scan a suspicious file or link with VirusTotal:*\n\n"
+            "*Option 1 — Paste the URL:*\n"
+            "Reply *ATTACH* followed by the direct link.\n"
+            "Example: *ATTACH https://example.com/invoice.pdf*\n\n"
+            "*Option 2 — Send the file:*\n"
+            "Send the file directly as a WhatsApp attachment — "
+            "RelayShield will scan it automatically.\n\n"
+            "💡 *Before downloading from email:* In Gmail, right-click the attachment "
+            "→ *Copy link address* and use Option 1. No download needed.",
+            account_sid, auth_token, from_number,
+        )
+        return "attach_prompt_sent"
+
+    # --- ATTACH <url> — VirusTotal URL scan ---
+    # User pastes a direct link to a file or a suspicious URL.
+    # Synchronous with VT_URL_MAX_WAIT polling window.
+    if body.startswith("ATTACH "):
+        attach_url = message_body.strip()[7:].strip()
+
+        if not attach_url.startswith(("http://", "https://")):
+            send_whatsapp(
+                to_number,
+                "Please include the full URL starting with https://\n\n"
+                "Example: *ATTACH https://example.com/invoice.pdf*",
+                account_sid, auth_token, from_number,
+            )
+            return "attach_invalid_url"
+
+        send_whatsapp(
+            to_number,
+            "🔍 Scanning with VirusTotal — this may take up to 20 seconds...",
+            account_sid, auth_token, from_number,
+        )
+
+        try:
+            vt_api_key = get_vt_api_key()
+            analysis_id = submit_url_to_vt(attach_url, vt_api_key)
+            stats = poll_vt_analysis(analysis_id, vt_api_key, max_wait=VT_URL_MAX_WAIT) if analysis_id else None
+        except Exception as exc:
+            logger.error("VT URL scan failed for %s: %s", attach_url, exc)
+            stats = None
+
+        verdict = build_vt_verdict_response(stats, "that URL")
+        send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)
+        logger.info(
+            "VT URL scan complete — url=%s stats=%s",
+            attach_url, stats,
+        )
+        return "vt_url_scanned"
+
     # --- HELP ---
     if body == "HELP":
         send_whatsapp(
@@ -1718,8 +2007,14 @@ def handler(event, context):
     params = dict(urllib.parse.parse_qsl(raw_body))
     from_number = params.get("From", "")
     message_body = params.get("Body", "").strip()
+    num_media = int(params.get("NumMedia", "0"))
+    media_url = params.get("MediaUrl0", "")
+    media_content_type = params.get("MediaContentType0", "")
 
-    logger.info("Inbound WhatsApp from=%s body_len=%d", from_number, len(message_body))
+    logger.info(
+        "Inbound WhatsApp from=%s body_len=%d num_media=%d",
+        from_number, len(message_body), num_media,
+    )
 
     if not from_number:
         logger.warning("No From number in webhook payload.")
@@ -1784,7 +2079,14 @@ def handler(event, context):
         result = handle_employee_more_emails(user, message_body, twilio_creds)
 
     elif onboarding_state in (STATE_ACTIVE, STATE_EMP_ACTIVE):
-        result = handle_active_message(user, message_body, twilio_creds)
+        result = handle_active_message(
+            user, message_body, twilio_creds,
+            media_info={
+                "num_media": num_media,
+                "media_url": media_url,
+                "media_content_type": media_content_type,
+            },
+        )
 
     else:
         logger.warning(

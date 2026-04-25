@@ -1306,9 +1306,21 @@ RelayShield is not a super app. It is a specialist. Every feature decision, ever
 **What RelayShield is not and will never be:**
 - A VPN (out of lane — recommend Mullvad/ProtonVPN)
 - A password manager (out of lane — recommend 1Password/Bitwarden)
-- An antivirus (out of lane entirely)
+- An antivirus or EDR (out of lane — see EDR boundary note below)
 - A credit monitoring service (requires bureau partnerships — Phase 3 via partner only)
 - A feature bundle that competes on spec count
+
+**EDR / Antivirus — Strategic Boundary Note**
+
+EDR (Endpoint Detection and Response) vendors like CrowdStrike, SentinelOne, and Microsoft Defender operate at the device and network layer — requiring agents on managed endpoints. RelayShield operates at the personal identity and human layer, which EDR fundamentally cannot reach (personal email, WhatsApp, carrier account, third-party breach databases).
+
+These are complementary layers, not competing products. EDR/MDR vendors are **channel partners**, not competitors — an MSP selling CrowdStrike + RelayShield covers both the device layer and the human layer.
+
+Adding antivirus or device scanning to RelayShield would move us toward EDR head-on competition — a market dominated by well-funded incumbents with agent-based moats we cannot replicate. That's not the direction.
+
+**What we will build instead — malware consequence detection:**
+- Phase 2 Flare infostealer log monitoring detects when a user's credentials appeared in stealer logs — a direct signal their device was likely infected. This is malware-consequence detection, not malware prevention, and it drives engagement without crossing into EDR territory.
+- Positioning: *"We don't scan your device. We monitor the dark web for proof it was already compromised."* That's a stronger, more differentiated statement than "we also have antivirus."
 
 **What RelayShield will add via partnership, not by building:**
 - Data broker removal — partner with Incogni/DeleteMe API (Phase 2). Directly reduces attack surface by removing personal data from circulation. Fits the breach response philosophy.

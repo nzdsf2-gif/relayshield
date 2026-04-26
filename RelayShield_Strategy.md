@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives.*
+*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented.*
 
 ---
 
@@ -1764,9 +1764,11 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
   - Concurrent session anomaly alerting — CRITICAL WhatsApp alert when simultaneous logins detected from geographically separated IPs
   - Stealer log session token detection via Flare API — extend Flare integration to flag stolen session cookies specifically; short exploitation window requires near-real-time alerting
 
-- **OAuth Supply Chain Attack Detection Engine (Phase 2):**
+- **OAuth Supply Chain Attack Detection Engine — ✅ LIVE April 2026:**
 
   *Triggered by the Vercel/Context.ai breach (April 2026): attackers breached a third-party AI tool (Context.ai), stole its stored OAuth tokens, pivoted into a Vercel employee's Google Workspace, and escalated into production environments. The employee's credentials were never exposed. HIBP never fired. No existing identity protection service detected or prevented this.*
+
+  *RelayShield is now the only consumer/SMB identity protection product that monitors the OAuth supply chain layer. LinkedIn article published April 26, 2026 — "The Vercel Hack Wasn't About a Stolen Password" — establishing thought leadership the same day the feature shipped.*
 
   **The attack chain:**
   ```
@@ -1778,22 +1780,30 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 
   **What makes this uniquely dangerous:** The user did nothing wrong. Their password was never leaked. Their MFA was never bypassed. The attack entered through a trusted app they had legitimately authorised — and that authorisation persisted silently in the app's database.
 
-  **Phase 2 build items:**
+  **Why this makes Personal Shield defensible:** HIBP notifies for free when a user's email appears in a breach. RelayShield fires when a SaaS app the user *might have connected* to Google is breached — with exact revocation steps — before attackers exploit the stored OAuth tokens. No free tool does this. That's the $9.99/month justification that HIBP cannot match.
+
+  **What is live now:**
+
+  | Capability | Status | Tier | Notes |
+  |---|---|---|---|
+  | **OAUTH command** — guided Google + Microsoft OAuth audit walkthrough | ✅ Live April 2026 | All tiers | Business Basic+ admins get team + Workspace admin steps |
+  | **SaaS breach watchlist monitor** — `relayshield-oauth-watchlist-monitor` Lambda, 40-app watchlist, daily HIBP poll, WhatsApp alert to all active users when watched app breached | ✅ Live April 2026 | All tiers | EventBridge rate(1 day). Dry-run and force-test modes available. |
+  | **Monthly OAuth audit reminder** — `relayshield-monthly-oauth-reminder` Lambda, proactive monthly WhatsApp prompt for Business Basic+ subscribers | ✅ Built April 2026 | Business Basic+ | Awaiting Meta approval for `relayshield_oauth_reminder` template. Deploy on approval. |
+  | **Claude SaaS breach detection** — system prompt flags SaaS/developer/AI tool breaches and appends OAuth revocation guidance | ✅ Live April 2026 | All tiers | Fires on breach alert when source matches SaaS profile |
+
+  **Phase 2 remaining items:**
 
   | Capability | Description | Tier | Method |
   |---|---|---|---|
-  | **SaaS app breach watchlist** | Maintain a curated list of high-risk OAuth-capable apps (Slack, Notion, GitHub, Zapier, Linear, Vercel, Loom, HubSpot, AI tools). Poll HIBP `/api/v3/breaches` daily. Fire alert to all users when a watched app is newly indexed. | All tiers | HIBP Breaches API — no additional cost |
-  | **OAuth grant inventory at onboarding** | During SWEEP, prompt user to run a one-time OAuth audit and self-report connected apps. Stored in DynamoDB. Cross-referenced when a watched app is breached. | All tiers | Self-reported during onboarding |
-  | **Proactive monthly OAuth audit** | EventBridge monthly trigger — WhatsApp message to all business tier subscribers: "Monthly security check: review your connected apps at myaccount.google.com/permissions. Reply OAUTH for a guided walkthrough." | Business Basic+ | EventBridge + existing WhatsApp stack |
-  | **Supply chain breach alert** | When a watched SaaS app is newly breached: fire targeted WhatsApp alert to users who have self-reported that app as connected — "Revoke this OAuth grant immediately." | All tiers | Phase 2 — requires OAuth inventory |
-  | **Environment variable / secrets exposure** | Second stage of the Vercel attack — production environment variables read via compromised Google identity. Extends Secret Sentinel add-on: monitor for API key / secrets exposure in CI/CD pipelines. | BS Pro | Phase 3 — GitGuardian / truffleHog |
-
-  **Near-term (Phase 1.5 — already implemented):** Claude system prompt updated to detect SaaS/productivity/developer tool breaches and append OAuth revocation guidance targeting myaccount.google.com/permissions and myapps.microsoft.com. Fires on any HIBP breach where the source matches a SaaS profile.
+  | **OAuth grant inventory at onboarding** | During SWEEP, prompt user to run a one-time OAuth audit and self-report connected apps. Stored in DynamoDB. Cross-referenced when a watched app is breached for targeted alerts. | All tiers | Self-reported during onboarding |
+  | **Targeted supply chain alert** | When a watched SaaS app is newly breached: fire targeted alert only to users who have self-reported that app as connected — reduces alert fatigue vs. current broadcast model. | All tiers | Requires OAuth inventory above |
+  | **RSS feed polling** | Supplement HIBP with BleepingComputer, Krebs on Security, The Hacker News RSS feeds — catches breaches before HIBP indexes them. | All tiers | Phase 2 — build alongside watchlist |
+  | **Environment variable / secrets exposure** | Second stage of the Vercel attack — production environment variables read via compromised Google identity. Extends Secret Sentinel add-on. | BS Pro | Phase 3 — GitGuardian / truffleHog |
 
   **Intelligence sources for SaaS breach detection:**
-  - **HIBP Breaches API** (`/api/v3/breaches`) — free with existing key, updated when Troy Hunt indexes a new breach. Primary near-term source.
+  - **HIBP Breaches API** (`/api/v3/breaches`) — free with existing key. Primary current source.
   - **Flare API (Phase 2)** — dark web and Telegram monitoring picks up SaaS breaches before HIBP indexing. Same Flare subscription as stealer log add-on — no incremental cost.
-  - **Vendor security advisories + RSS monitoring** — BleepingComputer, Krebs on Security, The Hacker News. Manual process near-term; automated via feed polling in Phase 2.
+  - **RSS monitoring (Phase 2)** — BleepingComputer, Krebs on Security, The Hacker News. Automated feed polling.
 
 ### Phase 3 — Monetise the Moat (Months 9-18)
 *Focus: data products, carrier partnerships, platform licensing, agentic identity protection. Still not credit monitoring or fraud insurance — those are Aura's battlefield, not ours.*
@@ -2092,6 +2102,12 @@ WhatsApp remains the primary delivery channel for all tiers. The structural adva
 
 Telegram targets the security-aware, privacy-focused user segment that distrusts Meta. This is a high-value segment for RelayShield — users who have already self-selected for security consciousness are more likely to act on breach alerts and complete remediation steps.
 
+**Signal vs Telegram — decision rationale (evaluated April 2026):**
+
+Signal is the privacy gold standard and the aspirational channel for this persona. However, Signal has no official bot API. The only integration path is `signal-cli` — an unofficial, community-maintained Java binary requiring a dedicated EC2 instance (not Lambda-compatible), a registered phone number, and ongoing maintenance of an unsupported runtime. Signal Foundation has shown no interest in opening a business messaging API. Using signal-cli in production would mean staking customer SLA commitments on an unofficial tool with no support path. Signal is a Phase 3 watch item — if an official API ships, evaluate immediately.
+
+Telegram is the practical choice: official Bot API with first-class webhook support, free (no per-message cost), 950M+ monthly active users, inline keyboards and rich formatting, and strong penetration in the r/msp, developer, and privacy-conscious SMB segments that are high-value for RelayShield. The Bot API architecture mirrors the Twilio WhatsApp webhook — same Lambda, same pattern, minimal new infrastructure.
+
 **The encryption constraint — critical technical reality:**
 Telegram Secret Chats use true E2E encryption but **Telegram bots cannot operate in Secret Chats**. This is an architectural limitation of the Telegram Bot API — bots only function in regular chats, which use MTProto encryption (encrypted in transit and at rest on Telegram's servers, but not E2E client-to-client). There is no workaround.
 
@@ -2099,6 +2115,25 @@ This means requiring Secret Chat encryption as a product prerequisite is not tec
 
 **Mitigation — data minimisation as the policy:**
 Telegram alerts contain the minimum data needed to act — severity level, breach name, action prompt. Full breach details, email addresses, and remediation steps are delivered in WhatsApp (primary) or accessible via authenticated link. Personal breach data is never transmitted in full through the Telegram channel.
+
+**Tiered delivery model — pricing decision:**
+
+Telegram Bot API is free (no per-message cost). Adding a surcharge for channel choice creates signup friction on a feature with zero marginal cost, and it frames RelayShield around delivery mechanics rather than protection value. The channel is not the product; the protection is.
+
+| Tier | Delivery model |
+|---|---|
+| Personal Shield | WhatsApp **or** Telegram — user's choice at onboarding |
+| Business Starter | WhatsApp **or** Telegram — user's choice at onboarding |
+| Business Basic+ | WhatsApp **and** Telegram simultaneously — dual delivery included |
+
+**Why dual delivery is a Business Basic+ exclusive:**
+If an attacker SIM swaps an employee and hijacks their WhatsApp account, a standard single-channel product goes silent. With dual delivery, the Telegram channel — on separate credentials and a different device session — still fires. This is channel redundancy against account takeover, not a convenience feature. It is a legitimate security differentiator and a credible upsell line from Business Starter: *"Business Basic delivers every alert to both channels simultaneously — so a compromised WhatsApp account never silences a breach notification."*
+
+No additional pricing tier or add-on fee is needed. Dual delivery is included in Business Basic+ as part of the tier's value proposition.
+
+**New DynamoDB fields required (`relayshield_users`):**
+- `telegram_chat_id` — String — captured when user sends `/start` to the RelayShield Telegram bot; stored on user record
+- `preferred_channel` — String — `whatsapp` | `telegram` | `both` (default: `whatsapp`; `both` only available to Business Basic+)
 
 **Telegram delivery capabilities (Phase 2):**
 - Autonomous breach patrol bot — proactively alerts when new breach data detected
@@ -2329,6 +2364,8 @@ The $2,500/month target is a 6-week milestone. The platform architecture being b
 - `sim_swap_monitoring` Boolean — True to enable monitoring for this user (default False)
 - `phone_number` String — E.164 format (+1XXXXXXXXXX); falls back to whatsapp_number if absent
 - `subscription_tier` String — personal_shield | business_basic | business_shield | business_shield_pro
+- `telegram_chat_id` String — captured when user sends `/start` to the RelayShield Telegram bot; stored on user record. Required for Telegram delivery.
+- `preferred_channel` String — `whatsapp` | `telegram` | `both`. Default: `whatsapp`. Value `both` (dual delivery) only available to Business Basic and higher. Set during onboarding or via account management command.
 
 ### Monthly Running Costs
 

@@ -93,16 +93,34 @@
 
 ---
 
+## 🌐 Domain Monitoring — Business Basic / Shield / Shield Pro
+
+| # | Item | Status |
+|---|---|---|
+| 1 | **`relayshield_domain_monitor.py` Lambda built** — Daily EventBridge scan for all Business Basic+ admins with registered domains. Three checks per domain: typosquat/lookalike (custom permutation + parallel socket DNS, no library deps), MX record change (Cloudflare DoH), expiry risk (RDAP API — 30/14/7 day thresholds). Admin co-notification pattern applied. Template-gated: alerts fire once SIDs are filled. | ✅ Code complete — deploy pending |
+| 2 | **`DOMAIN` command added to webhook** — DOMAIN (status), DOMAIN SCAN (on-demand full check, freeform), DOMAIN REGISTER, DOMAIN REMOVE. Tier-gated to DOMAIN_TIERS. Employees get read-only access (status + scan against admin's domains). Auto-extraction at onboarding: first email with a business domain auto-registers — free providers (Gmail etc.) skipped. | ✅ Complete — April 2026 |
+| 3 | **HELP menu updated** — DOMAIN + DOMAIN SCAN added for all Business tiers. DOMAIN REGISTER shown for admins only. | ✅ Complete — April 2026 |
+| 4 | **Deploy whatsapp webhook** — zip + upload updated `relayshield_whatsapp_webhook.py` (adds DOMAIN command, auto-extraction hook, domain helpers). MX language updated to customer-friendly "email configuration" framing — confirmed working April 2026. | ✅ Complete — April 2026 |
+| 5 | **Deploy domain monitor Lambda** — Upload `relayshield_domain_monitor.py` as `relayshield-domain-monitor`. Handler: `relayshield_domain_monitor.lambda_handler`. Timeout: 300 s. Memory: 256 MB. IAM: DynamoDB Scan+GetItem+UpdateItem on `relayshield_users`, Secrets Manager GetSecretValue for Twilio creds, KMS Decrypt on `alias/relayshield-data-key`. | ⬜ Pending |
+| 6 | **EventBridge schedule — rate(1 day)** — Create after Lambda deployed. | ⬜ Pending deploy |
+| 7 | **Force-test domain monitor** — `{ "test_user_id": "your-admin-user-id" }` — runs all 3 checks, sends freeform alerts (bypasses template gate so you can verify before Meta approval). First register a domain via DOMAIN REGISTER command, then fire test. | ⬜ Pending |
+| 8 | **Submit 3 Meta templates for proactive scheduled alerts** — Required for daily Lambda alerts (outside 24hr window). Submit after force-test confirms logic is correct. Templates: `relayshield_domain_lookalike` (vars: domain, lookalike, count), `relayshield_domain_mx_change` (vars: domain, new-MX-summary), `relayshield_domain_expiry` (vars: domain, days, urgency). Once approved: fill `DOMAIN_LOOKALIKE_TEMPLATE_SID`, `DOMAIN_MX_CHANGE_TEMPLATE_SID`, `DOMAIN_EXPIRY_TEMPLATE_SID` in `relayshield_domain_monitor.py` and redeploy. | ⬜ Pending — after force-test passes |
+| 9 | **Register existing Business Basic+ admin domains via DOMAIN REGISTER** — For any existing paying Business Basic+ admins at launch, manually send DOMAIN REGISTER via admin WhatsApp session OR update DynamoDB directly to set `monitored_domains`. | ⬜ Pending — at customer acquisition |
+
+---
+
 ## 📱 SIM Swap Monitor — Phase 1
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Build `monitor_sim_swap()` Lambda — Twilio Verify SIM Swap API, covers physical SIM + eSIM | ⬜ Pending |
-| 2 | Personal Shield alert on SIM swap detection | ⬜ Pending |
-| 3 | Store phone numbers in relayshield_users for all tiers | ⬜ Pending |
-| 4 | EventBridge hourly schedule for SIM swap monitor | ⬜ Pending |
-| 5 | Carrier-specific hardening steps on detection (Business Basic+) | ⬜ Pending |
-| 6 | Port-out fraud detection — flag as CRITICAL | ⬜ Pending |
+| 1 | **`relayshield_sim_swap_monitor.py` Lambda built** — Twilio Lookup v2, covers physical SIM + eSIM (IMSI change). Tiered alerts: Personal (carrier numbers), Business Basic/Shield (carrier-specific hardening + eSIM audit), Business Shield Pro (+ eSIM disable + FCC complaint). Port-out detection via carrier tracking. Admin co-notification for business-tier employees. KMS phone decryption. Force-test mode. | ✅ Code complete — deploy pending |
+| 2 | **Personal Shield alert on SIM swap detection** — Included in Lambda. Carrier callback numbers + SWEEP/PHONE reply prompts. | ✅ Complete (in Lambda) |
+| 3 | **Phone numbers in relayshield_users** — All records have `phone_encrypted` (KMS) + `phone_hash`. Lambda uses KMS primary path + legacy fallback. | ✅ Complete |
+| 4 | **EventBridge schedule — rate(4 hours)** — `relayshield-hourly-sim-swap-check` enabled. | ✅ Complete — April 2026 |
+| 5 | **Carrier-specific hardening steps (Business Basic+)** — AT&T, T-Mobile, Verizon specific steps in Lambda. Falls back to generic multi-carrier block for unknown carriers. | ✅ Complete (in Lambda) |
+| 6 | **Port-out fraud detection — CRITICAL** — Carrier name change between checks triggers CRITICAL alert. `last_known_carrier` tracked on user record. Bypass dedup window (always fires). | ✅ Complete (in Lambda) |
+| 7 | **Deploy `relayshield-sim-swap-monitor` Lambda** — Upload zip, set handler `relayshield_sim_swap_monitor.lambda_handler`, 300s timeout, 128MB. IAM: DynamoDB Scan+GetItem+UpdateItem on `relayshield_users`, Secrets Manager GetSecretValue for Twilio creds, KMS Decrypt on `alias/relayshield-data-key`. | ✅ Complete — April 2026 |
+| 8 | **Submit `relayshield_sim_swap` template to Meta** — Template `relayshield_sim_swap_alert` approved UTILITY April 9 2026. SID `HX9df8877e110384af8835931dfeeff954` wired into deployed Lambda. | ✅ Complete — April 2026 |
 
 ---
 
@@ -127,8 +145,8 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **Move relayshield-stripe-webhook behind API Gateway** — Currently using direct Lambda URL with Stripe signature verification as protection. Move to API Gateway + delete Lambda function URL before scaling beyond beta. | ⬜ Pending |
-| 2 | **Delete relayshield-whatsapp-webhook Lambda function URL** — ⚠️ Twilio is currently pointing directly at the Lambda URL (confirmed April 2026). Must move behind API Gateway and update Twilio webhook URL first, then delete Lambda URL. Do not delete until Twilio is updated. | ⬜ Blocked — do API Gateway first |
+| 1 | **Move relayshield-stripe-webhook behind API Gateway** — Currently using direct Lambda URL with Stripe signature verification as protection. Move to API Gateway + delete Lambda function URL before scaling beyond beta. | ✅ Complete |
+| 2 | **Delete relayshield-whatsapp-webhook Lambda function URL** — ⚠️ Twilio is currently pointing directly at the Lambda URL (confirmed April 2026). Must move behind API Gateway and update Twilio webhook URL first, then delete Lambda URL. Do not delete until Twilio is updated. | ✅ Complete |
 
 ---
 
@@ -161,9 +179,9 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **Reddit marketing blitz** — u/BothFan5617 warmed up, posts ready for r/smallbusiness, r/Entrepreneur, r/freelance, r/msp, r/digitalnomad, r/banking | ⬜ Backburned |
+| 1 | **Reddit marketing blitz** — u/BothFan5617 warmed up. Draft posts written for r/smallbusiness, r/Entrepreneur, r/freelance, r/msp, r/digitalnomad, r/banking — see `reddit_marketing_drafts.md` (created this session). Andrew posts manually. | 🔄 Drafts written — pending manual post |
 | 2 | **Tycoon 2FA blog post** — Published to RelayShield LinkedIn April 19 2026. Pending publication to relayshield.net | ✅ LinkedIn live |
-| 6 | **OAuth supply chain LinkedIn post** — `relayshield_oauth_supply_chain_linkedin.md` ready to post. Scheduled: April 26 2026. Title: "The Vercel Hack Wasn't About a Stolen Password." Covers Context.ai OAuth token theft → Vercel production breach. Establishes OAuth supply chain attack vector narrative ahead of Phase 2 OAuth monitoring feature. | ⬜ Post April 26 |
+| 6 | **OAuth supply chain LinkedIn post** — Published April 26 2026. Title: "The Vercel Hack Wasn't About a Stolen Password." Feature shipped same day as article. | ✅ Published |
 | 3 | **Salon owner conversion** — Send Business Starter payment link when beta period ends | ⬜ Pending |
 | 4 | **Facebook Business verification follow-up** — Monitor Meta approval (submitted April 2026) | 🔄 In progress |
 | 5 | **IoT cellular backdoor blog post** — Write plain-language breakdown of CPU-to-modem interface attack (Rapid7 research). Audience: r/smallbusiness, r/msp. Establishes telecom expertise authority. No product to build — purely a content play. | ⬜ Backburned |
@@ -199,15 +217,16 @@
 | 13 | **Smishing — SIM swap correlation alert** — When SIM swap detected, check if suspicious SMS analysis submitted in prior 48–72 hrs. If yes, escalate to CRITICAL coordinated attack chain alert. Business Shield and Pro only. | 🔮 Phase 2 |
 | 14 | **SIM/IMEI anomaly detection via carrier APIs** — Phase 3 research item. Extends Phase 2 SIM swap monitor to detect anomalous carrier traffic patterns (unexpected APN routing, traffic volume spikes, AT command abuse on IoT cellular devices). Targets Business Shield and Pro tiers with IoT-connected operations. Leverages 25-year telecom expertise as moat — no competitor has attempted this. | 🔮 Phase 3 |
 | 15 | **Family Shield / Senior Medicare protection** — Two prerequisites: (1) vishing engine built out with Medicare-specific guidance (CMS never calls unsolicited, free equipment = fraud, never give MBI over phone); (2) SMS delivery channel live. Then: Family Shield positioning on landing page targeting adult children buying for senior parents. Medicare number breach escalation to CRITICAL. Medicare-specific CALL and WASCAM response variants. See strategy doc Section 3b. | 🔮 Phase 2 — after vishing engine + SMS channel |
-| 16 | **OAuth supply chain attack detection — SaaS breach watchlist** — Poll HIBP `/api/v3/breaches` daily for new breaches. Cross-reference against internal watchlist of high-risk OAuth-capable apps (Slack, Notion, GitHub, Zapier, Linear, Vercel, Loom, HubSpot, AI tools). When watched app newly indexed, fire WhatsApp alert to affected users. Triggered by Vercel/Context.ai breach April 2026 — attacker stole OAuth tokens from breached SaaS, pivoted into Google Workspace without ever touching user credentials. See strategy doc Phase 2 OAuth Supply Chain section. | 🔮 Phase 2 |
+| 16 | **OAuth supply chain attack detection — SaaS breach watchlist** — Poll HIBP `/api/v3/breaches` daily for new breaches. Cross-reference against internal watchlist of high-risk OAuth-capable apps (Slack, Notion, GitHub, Zapier, Linear, Vercel, Loom, HubSpot, AI tools). When watched app newly indexed, fire WhatsApp alert to affected users. Triggered by Vercel/Context.ai breach April 2026 — attacker stole OAuth tokens from breached SaaS, pivoted into Google Workspace without ever touching user credentials. See strategy doc Phase 2 OAuth Supply Chain section. | ✅ Live April 2026 |
 | 17 | **OAuth grant inventory at onboarding** — During SWEEP, prompt user to run one-time OAuth audit at myaccount.google.com/permissions and self-report connected apps. Store in DynamoDB user record. Cross-reference against breach watchlist when SaaS app is compromised. Foundation for supply chain breach alerts. | 🔮 Phase 2 |
-| 18 | **Proactive monthly OAuth audit reminder** — EventBridge monthly trigger for Business Basic+ subscribers. WhatsApp message: "Monthly security check — review your connected apps at myaccount.google.com/permissions. Reply OAUTH for a guided walkthrough." Differentiates business tiers from Personal Shield reactive-only model. | 🔮 Phase 2 |
+| 18 | **Proactive monthly OAuth audit reminder** — EventBridge monthly trigger for Business Basic+ subscribers. WhatsApp message: "Monthly security check — review your connected apps at myaccount.google.com/permissions. Reply OAUTH for a guided walkthrough." Differentiates business tiers from Personal Shield reactive-only model. | 🔄 Lambda deployed — awaiting Meta template approval (`relayshield_oauth_reminder`) |
 | 19 | **Claude system prompt — SaaS/productivity tool breach detection** — ✅ Implemented April 2026. When breach source matches SaaS/productivity/developer/AI tool profile, Claude appends OAuth revocation guidance: myaccount.google.com/permissions + myapps.microsoft.com. Directly addresses supply chain OAuth attack vector. | ✅ Complete |
 | 21 | **Agentic Identity Protection — agent credential monitoring** — Phase 3. Extend HIBP breach monitoring to cover API keys, OAuth tokens, and service account credentials used by AI tools and automated systems on behalf of users. Alert human principal when agent credentials appear in breach data. Same engine as human credential monitoring — new credential type inputs. Foundation: Phase 2 OAuth supply chain watchlist. Informed by a16z agentic economy research April 2026. See strategy doc Phase 3 Agentic Identity Protection Engine. | 🔮 Phase 3 |
 | 22 | **Agentic Identity Protection — principal-agent breach alert** — Phase 3. When a deployed AI agent/tool is itself breached (Context.ai at scale), fire targeted WhatsApp alert to human principal with specific credential revocation steps. Extends Phase 2 supply chain breach alerts to cover autonomous agents, not just SaaS tools. | 🔮 Phase 3 |
 | 23 | **Agentic Identity Protection — agentic OAuth scope auditing** — Phase 3. Periodic audit of OAuth scopes granted to AI agents. Flag over-scoped agents. WhatsApp alert with tightening guidance. Business Basic+. Extends Phase 2 monthly OAuth audit to cover agent grants specifically. | 🔮 Phase 3 |
 | 24 | **Agentic Identity Protection — service account credential monitoring** — Phase 3. SMBs run automated systems (bots, scheduled jobs, integrations) holding long-lived API keys. Monitor these service credentials for exposure in breach data. Targets the non-human identity attack surface. Business Shield+. | 🔮 Phase 3 |
 | 20 | **RSS feed polling for SaaS breach intelligence** — Implement alongside Phase 2 OAuth audit engine. Lambda polls RSS feeds from BleepingComputer, Krebs on Security, and The Hacker News on a daily EventBridge schedule. Parser extracts breach announcements and cross-references against internal SaaS OAuth app watchlist. When a match is found, fires WhatsApp alert to affected users to revoke OAuth grant immediately. Supplements HIBP Breaches API polling — catches breaches before HIBP indexes them. Feeds: bleepingcomputer.com/feed, krebsonsecurity.com/feed, feeds.feedburner.com/TheHackersNews | 🔮 Phase 2 — build alongside OAuth supply chain watchlist (TODO item 16) |
+| 25 | **Telegram — Phase 2 second delivery channel** — Signal evaluated and ruled out April 2026 (no official bot API; signal-cli is an unofficial Java binary, not Lambda-compatible, no support path — production reliability risk). Telegram is the Phase 2 choice: official Bot API with webhook support, free (no per-message cost), 950M+ users, strong penetration in r/msp / developer / privacy-conscious SMB segments. **Pricing model:** No extra charge. All tiers get WhatsApp OR Telegram (user's choice at onboarding). Business Basic+ gets dual delivery (both channels simultaneously) as a tier differentiator — channel redundancy against account takeover. If attacker SIM swaps user and hijacks WhatsApp, Telegram still fires (separate credentials, different device session). Signal remains a Phase 3 watch item pending an official API. **Build requirements:** (1) Register bot via @BotFather, set webhook to API Gateway; (2) Add `telegram_chat_id` + `preferred_channel` fields to `relayshield_users`; (3) Update webhook Lambda to route outbound alerts to Telegram Bot API when `preferred_channel` is `telegram` or `both`; (4) Update Carrd onboarding with Telegram bot link; (5) Update Stripe webhook to capture `preferred_channel` at signup. See Strategy doc Section 9 for full tiered delivery model and encryption rationale. | 🔮 Phase 2 |
 
 ---
 

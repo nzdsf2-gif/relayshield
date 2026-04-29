@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented.*
+*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually.*
 
 ---
 
@@ -582,8 +582,9 @@ SS7 (Signalling System No. 7) is the 1970s-era protocol routing calls and SMS be
 | Tier | Target | Seats | Monthly | Per Seat | Key Differentiator |
 |---|---|---|---|---|---|
 | **Personal Shield** | Consumers | 1 | $14.99 | $14.99 | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved + SIM/eSIM swap detection alert. Monitor up to **3 email addresses**. |
-| **Business Starter** | Sole proprietors, single-owner businesses | 1 | $19.99 | $19.99 | All Personal Shield features + business-framed alert language + 3 monitored email addresses (personal + business + backup). Designed for owners whose business and personal identity are the same attack surface. No seat management. |
-| **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM/eSIM swap detection + carrier hardening steps + account management dashboard + domain monitoring. Monitor up to **2 email addresses per seat**. |
+| **Business Starter** | Sole proprietors, single-owner businesses | 1 | $19.99 | $19.99 | All Personal Shield features + business-framed alert language + 3 monitored email addresses (personal + business + backup). Designed for owners whose business and personal identity are the same attack surface. No seat management. No domain monitoring. |
+| **Business Starter + Domain Monitoring** | Sole proprietors with a business website | 1 (solo) | $24.99 | $24.99 | All Business Starter features + typosquat domain monitoring for 1 domain. For owner-operators whose business website is an active attack surface. No team seats — upgrade to Business Basic to add staff. |
+| **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM/eSIM swap detection + carrier hardening steps + account management dashboard + domain monitoring (2 domains). Monitor up to **2 email addresses per seat**. |
 | **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-seat SIM/eSIM monitoring + authenticator migration flow + aggregate risk visibility + priority alerts. Monitor up to **2 email addresses per seat**. |
 | **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + SIM lock onboarding flow + eSIM profile audit + priority support + compliance reporting. Monitor up to **2 email addresses per seat**. |
 
@@ -600,6 +601,7 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 |---|---|---|---|---|
 | **Personal Shield** | $14.99 | $13.49/month | $161.88/year | $18/year |
 | **Business Starter** | $19.99 | $17.99/month | $215.88/year | $24/year |
+| **Business Starter + Domain** | $24.99 | $22.49/month | $269.99/year | $30/year |
 | **Business Basic** | $89.99 | $80.99/month | $971.88/year | $108/year |
 | **Business Shield** | $139.99 | $125.99/month | $1,511.88/year | $168/year |
 | **Business Shield Pro** | $299.99 | $269.99/month | $3,239.88/year | $360/year |
@@ -622,6 +624,7 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 |---|---|---|---|
 | Personal Shield | $14.99/month | https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00 | ✅ Active |
 | Business Starter | $19.99/month | https://buy.stripe.com/fZucN6ceGglv3qs9830Ny0a | ✅ Active |
+| Business Starter + Domain | $24.99/month | https://buy.stripe.com/28EdRa2E61qB2mo3NJ0Ny0c | ✅ Active |
 | Business Basic | $89.99/month | https://buy.stripe.com/aFa8wQ3Iab1b8KM9830Ny03 | ✅ Active |
 | Business Shield | $139.99/month | https://buy.stripe.com/8x24gA6Um2uF2mo9830Ny04 | ✅ Active |
 | Business Shield Pro | $299.99/month | https://buy.stripe.com/3cIeVeceG8T3f9a4RN0Ny05 | ✅ Active |
@@ -631,6 +634,7 @@ Customers who pay upfront for a full year receive a **10% discount** on the mont
 |---|---|---|---|
 | Personal Shield — Annual | $161.88/year | https://buy.stripe.com/eVqbJ26Um1qBbWY3NJ0Ny06 | ✅ Active |
 | Business Starter — Annual | $215.88/year | https://buy.stripe.com/fZubJ2emO0mx9OQ9830Ny0b | ✅ Active |
+| Business Starter + Domain — Annual | $269.99/year | https://buy.stripe.com/bJe28s1A2b1b8KM83Z0Ny0d | ✅ Active |
 | Business Basic — Annual | $971.88/year | https://buy.stripe.com/eVqfZifqSd9j1ikfwr0Ny07 | ✅ Active |
 | Business Shield — Annual | $1,511.88/year | https://buy.stripe.com/cNiaEY0vYednaSUfwr0Ny08 | ✅ Active |
 | Business Shield Pro — Annual | $3,239.88/year | https://buy.stripe.com/6oU5kE0vY5GR4uwbgb0Ny09 | ✅ Active |
@@ -685,6 +689,7 @@ Business pricing is justified on value delivered per seat, not just headcount:
 |---|---|---|---|---|
 | Personal Shield | $14.99/mo | 1 | $14.99 | Baseline consumer |
 | Business Starter | $19.99/mo | 1 | $19.99 | Sole proprietor premium — business identity protection for owners whose personal and business exposure are the same attack surface |
+| Business Starter + Domain | $24.99/mo | 1 (solo) | $24.99 | $5/month incremental over Starter — captures sole proprietors with a website who won't pay $89.99 for team seats they don't need |
 | Business Basic | $89.99/mo | Up to 5 | **$18.00** | Below 1Password Business ($7.99) + breach monitoring + AI remediation + SIM swap — all in one |
 | Business Shield | $139.99/mo | Up to 10 | **$14.00** | Per-seat cost drops to Personal Shield level — team protection at individual pricing |
 | Business Shield Pro | $299.99/mo | Up to 25 | **$12.00** | Volume discount — below Microsoft 365 Business Standard per seat with full security stack included |
@@ -2144,6 +2149,67 @@ No additional pricing tier or add-on fee is needed. Dual delivery is included in
 - Threat intelligence briefings — weekly digest of emerging breach campaigns
 - Exfiltration alert routing — stealer log and dark web sale alerts for SMB admins
 - Smishing campaign alerts — Telegram threat channel detections routed back via Telegram (the threat intel closed loop)
+
+**Agentic Breach Response Engine — Phase 2 (Telegram + Google/Microsoft API)**
+
+The core insight from observing Cloaked's AI breach agent: the gap is not detection or guidance — it is autonomous execution. RelayShield already detects and guides. Phase 2 adds a confirmation-gated action layer: the agent proposes, the user taps confirm, the Lambda executes on their behalf. No app required. No dashboard to open. The action happens inside the conversation.
+
+Telegram is the right channel for agentic flows because inline keyboards (tap-to-confirm buttons) are natively supported. WhatsApp does not support interactive confirmation buttons in the same way.
+
+**Prerequisite:** OAuth token storage (Phase 2 — tokens stored in Secrets Manager per `relayshield/oauth/{user_id}/{provider}`, DynamoDB stores only the ARN reference).
+
+**Agentic workflow sequence on breach detection:**
+
+```
+1. Breach detected (HIBP / stealer log)
+      ↓
+2. Claude scores severity + maps attack vectors
+      ↓
+3. Telegram bot fires alert with inline confirmation:
+   "🚨 Your Slack credentials appeared in a breach.
+    I can take the following actions on your behalf:"
+      ↓
+   [✅ Revoke Slack's Google access]
+   [✅ Sign out all active Google sessions]
+   [✅ Audit email forwarding rules]
+   [❌ I'll handle it manually]
+      ↓
+4. User taps each confirmation → Lambda executes via API
+      ↓
+5. Bot confirms each completed action with timestamp
+```
+
+**Supported agentic workflows — priority order:**
+
+| # | Workflow | API | Trigger | Value |
+|---|---|---|---|---|
+| 1 | **OAuth token revocation** | Google People API / Microsoft Graph | Breach of connected SaaS app | Eliminates persistent OAuth access without password reset |
+| 2 | **Active session revocation** | Google Account API (`accounts.google.com/b/0/SmsAuthSettings`) | Any HIGH/CRITICAL breach | Signs out all unknown sessions across all devices simultaneously |
+| 3 | **Email forwarding rule audit and removal** | Gmail API (`users.settings.forwardingAddresses`) | Any breach of primary email | Finds and deletes attacker-planted forwarding rules — the #1 invisible backdoor in the SWEEP |
+| 4 | **Inbox filter audit and removal** | Gmail API (`users.settings.filters`) | Any breach of primary email | Deletes filters that silently hide security alerts and bank notifications |
+| 5 | **Recovery contact verification** | Google Account Settings API | Any breach | Checks recovery email/phone, alerts if unexpected contact is registered |
+| 6 | **Active device session audit** | Google Device Activity API | SIM swap detected | Lists connected devices, prompts sign-out of unrecognised sessions |
+| 7 | **Microsoft equivalent** | Microsoft Graph API (`/me/revokeSignInSessions`) | M365 users — any HIGH breach | Same as 1–6 for Microsoft account holders |
+
+**Why email forwarding rule removal (workflow 3) is the highest-value agentic action:**
+
+This is the attack vector RelayShield already teaches in SWEEP Step 1 — and currently it requires the user to manually find and delete rules in Gmail settings. An agent that automatically audits and removes attacker-planted forwarding rules on breach detection closes the most dangerous backdoor faster than any human response. No competitor currently automates this. It is the feature that most directly demonstrates the "RelayShield fixes it" positioning versus every other product that just alerts.
+
+**Build sequence:**
+1. Telegram Bot API webhook (mirrors WhatsApp webhook pattern — same Lambda, different routing)
+2. OAuth token collection at onboarding (`/start` command captures `telegram_chat_id`)
+3. Gmail API integration with forwarding rule + filter read/delete scope
+4. Google session revocation API
+5. Microsoft Graph equivalent
+6. Inline keyboard confirmation UX
+
+**Native Stripe payments via Telegram Payments API:**
+
+Telegram's Payments 2.0 API supports Stripe as a payment provider natively within the bot conversation. When Phase 2 Telegram channel ships, new subscribers can complete the full signup flow — plan selection, payment, onboarding — without ever leaving Telegram or visiting relayshield.net. The bot sends a native invoice message; the user taps Pay and completes card entry (or Apple Pay / Google Pay) in Telegram's built-in UI; Stripe processes the payment; the existing Stripe webhook fires and creates the DynamoDB record exactly as today. No landing page redirect, no browser switch, no abandonment risk.
+
+Telegram does not take a commission — only standard Stripe processing fees apply (same as current).
+
+This is particularly valuable for users who discover RelayShield through a Telegram bot link, MSP recommendation, or community share — they can convert in a single conversation without context-switching. Build alongside the core Telegram bot registration in Phase 2.
 
 **The threat intel closed loop:**
 RelayShield Phase 2 monitors Telegram channels where stolen credentials and smishing target lists are sold. A product that monitors Telegram for threat intelligence AND delivers alerts via Telegram creates a unique closed loop no competitor can replicate: *"We watch the channel where your stolen credentials are being sold and alert you through it — in plain language, with a remediation plan."*

@@ -21,6 +21,8 @@ Reply commands (ACTIVE users):
   SESSIONS — Revoke active sessions and OAuth tokens (Google, Microsoft, social media)
   SAFE     — Vishing warning acknowledged
   CALL     — User received a suspicious call
+  VERIFY   — Personal Verification Protocol: four rules to set before an attack (callback rule,
+             OTP rule, family safe word, wire transfer rule)
   HELP     — List all available commands
   ADD +1XXXXXXXXXX — Business tier: add employee phone number (admin only)
 
@@ -32,11 +34,13 @@ Employee onboarding (Business tiers):
 """
 
 import base64
+import concurrent.futures
 import hashlib
 import hmac
 import json
 import logging
 import re
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -117,29 +121,58 @@ VT_FILENAME_MAP = {
 # Tier constants
 # ---------------------------------------------------------------------------
 
-TIER_PERSONAL = "personal_shield"
-TIER_STARTER = "business_starter"
-TIER_BASIC = "business_basic"
-TIER_SHIELD = "business_shield"
-TIER_PRO = "business_shield_pro"
+TIER_PERSONAL        = "personal_shield"
+TIER_STARTER         = "business_starter"
+TIER_STARTER_DOMAIN  = "starter_domain"
+TIER_BASIC           = "business_basic"
+TIER_SHIELD          = "business_shield"
+TIER_PRO             = "business_shield_pro"
 
-BUSINESS_TIERS = {TIER_STARTER, TIER_BASIC, TIER_SHIELD, TIER_PRO}
+BUSINESS_TIERS = {TIER_STARTER, TIER_STARTER_DOMAIN, TIER_BASIC, TIER_SHIELD, TIER_PRO}
 
 # Max emails per subscriber (personal) or per employee (business)
 EMAIL_LIMITS = {
-    TIER_PERSONAL: 3,
-    TIER_STARTER: 3,
-    TIER_BASIC: 2,
-    TIER_SHIELD: 2,
-    TIER_PRO: 2,
+    TIER_PERSONAL:       3,
+    TIER_STARTER:        3,
+    TIER_STARTER_DOMAIN: 3,
+    TIER_BASIC:          2,
+    TIER_SHIELD:         2,
+    TIER_PRO:            2,
 }
 
-# Max employee seats per business tier
+# Max employee seats per business tier (starter_domain is solo-only — no seats)
 SEAT_LIMITS = {
     TIER_STARTER: 2,
-    TIER_BASIC: 5,
-    TIER_SHIELD: 10,
-    TIER_PRO: 25,
+    TIER_BASIC:   5,
+    TIER_SHIELD:  10,
+    TIER_PRO:     25,
+}
+
+# Domain monitoring — eligible tiers and per-tier domain limits
+DOMAIN_TIERS = {TIER_STARTER_DOMAIN, TIER_BASIC, TIER_SHIELD, TIER_PRO}
+DOMAIN_LIMITS = {
+    TIER_STARTER_DOMAIN: 1,
+    TIER_BASIC:          2,
+    TIER_SHIELD:         2,
+    TIER_PRO:            2,
+}
+
+# Free email providers — domain cannot be extracted as a business domain
+FREE_EMAIL_PROVIDERS = {
+    "gmail.com", "googlemail.com",
+    "yahoo.com", "yahoo.co.uk", "yahoo.ca", "yahoo.com.au",
+    "hotmail.com", "hotmail.co.uk", "hotmail.fr",
+    "outlook.com", "outlook.co.uk",
+    "live.com", "live.co.uk",
+    "icloud.com", "me.com", "mac.com",
+    "aol.com", "aol.co.uk",
+    "protonmail.com", "proton.me", "pm.me",
+    "mail.com", "gmx.com", "gmx.net",
+    "yandex.com", "yandex.ru",
+    "zoho.com",
+    "msn.com",
+    "comcast.net", "verizon.net", "att.net", "sbcglobal.net",
+    "bellsouth.net", "cox.net",
 }
 
 # Onboarding states
@@ -856,6 +889,242 @@ def email_already_monitored(user_id: str, email_address: str) -> bool:
     return len(response.get("Items", [])) > 0
 
 
+# ---------------------------------------------------------------------------
+# Domain monitoring helpers
+# ---------------------------------------------------------------------------
+
+def extract_business_domain(email: str) -> str | None:
+    """
+    Extract the domain portion from an email address.
+    Returns None if the address is from a known free email provider,
+    or if the email is malformed. Gmail addresses (and similar) are not
+    business domains and should not be auto-registered for monitoring.
+    """
+    email = email.strip().lower()
+    if "@" not in email:
+        return None
+    domain = email.split("@", 1)[1]
+    if domain in FREE_EMAIL_PROVIDERS:
+        return None
+    return domain
+
+
+def is_valid_domain(domain: str) -> bool:
+    """Basic format validation for a domain string."""
+    pattern = r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+    return bool(re.match(pattern, domain)) and len(domain) <= 253
+
+
+def load_domain_state(user: dict) -> dict:
+    raw = user.get("domain_monitor_state", "")
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def save_domain_state(user_id: str, state: dict) -> None:
+    table = dynamodb.Table(USERS_TABLE)
+    now   = datetime.now(timezone.utc).isoformat()
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET domain_monitor_state = :s, updated_at = :t",
+        ExpressionAttributeValues={":s": json.dumps(state), ":t": now},
+    )
+
+
+def auto_register_domain(user_id: str, email: str, tier: str) -> str | None:
+    """
+    If the email has a business domain and the user has no monitored domains yet,
+    auto-register that domain. Returns the domain string, or None if skipped.
+    Called during onboarding when the admin provides their first email.
+    """
+    if tier not in DOMAIN_TIERS:
+        return None
+    domain = extract_business_domain(email)
+    if not domain:
+        return None
+    # Only auto-register if no domains exist yet (don't overwrite manual registrations)
+    table    = dynamodb.Table(USERS_TABLE)
+    response = table.get_item(Key={"user_id": user_id})
+    user     = response.get("Item", {})
+    if user.get("monitored_domains"):
+        return None
+    # Store as a list for DynamoDB
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET monitored_domains = :d, updated_at = :t",
+        ExpressionAttributeValues={
+            ":d": [domain],
+            ":t": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    logger.info("Auto-registered domain=%s for user_id=%s tier=%s", domain, user_id, tier)
+    return domain
+
+
+def _doh_mx_fingerprint(domain: str) -> str | None:
+    """Quick MX check via Cloudflare DoH. Returns sorted fingerprint string or None."""
+    url = f"https://cloudflare-dns.com/dns-query?name={urllib.parse.quote(domain)}&type=MX"
+    req = urllib.request.Request(url, headers={"Accept": "application/dns-json"}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data    = json.loads(resp.read())
+            answers = [a["data"].strip().lower() for a in data.get("Answer", [])]
+            return ",".join(sorted(answers)) if answers else ""
+    except Exception as exc:
+        logger.warning("DoH MX check failed for %s: %s", domain, exc)
+        return None
+
+
+def _rdap_days_until_expiry(domain: str) -> int | None:
+    """RDAP expiry lookup. Returns days until expiry or None if unavailable."""
+    url = f"https://rdap.org/domain/{urllib.parse.quote(domain)}"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read())
+        for event in data.get("events", []):
+            if event.get("eventAction") == "expiration":
+                expiry_str = event.get("eventDate", "")
+                if expiry_str:
+                    expiry_dt = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+                    return (expiry_dt - datetime.now(timezone.utc)).days
+    except Exception as exc:
+        logger.warning("RDAP check failed for %s: %s", domain, exc)
+    return None
+
+
+def _dns_resolves(domain: str, dns_timeout: float = 2.5) -> bool:
+    old = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(dns_timeout)
+        socket.gethostbyname(domain)
+        return True
+    except (socket.gaierror, OSError):
+        return False
+    finally:
+        socket.setdefaulttimeout(old)
+
+
+def _quick_typosquat_check(domain: str, known: list[str], budget_seconds: float = 25.0) -> list[str]:
+    """
+    Lightweight inline typosquat check for on-demand DOMAIN SCAN.
+    Generates permutations and DNS-resolves in parallel.
+    Returns newly active lookalikes not in known list.
+    """
+    if "." not in domain:
+        return []
+    dot_pos = domain.rfind(".")
+    name    = domain[:dot_pos]
+    tld     = domain[dot_pos:]
+
+    candidates: set[str] = set()
+    # Character omission
+    for i in range(len(name)):
+        c = name[:i] + name[i + 1:]
+        if c:
+            candidates.add(c + tld)
+    # Character repetition
+    for i, ch in enumerate(name):
+        candidates.add(name[:i] + ch + ch + name[i + 1:] + tld)
+    # Transposition
+    for i in range(len(name) - 1):
+        t = list(name); t[i], t[i + 1] = t[i + 1], t[i]
+        candidates.add("".join(t) + tld)
+    # Common homoglyphs
+    for i, ch in enumerate(name):
+        if ch == "o":   candidates.add(name[:i] + "0" + name[i + 1:] + tld)
+        elif ch == "l": candidates.add(name[:i] + "1" + name[i + 1:] + tld)
+        elif ch == "i": candidates.add(name[:i] + "1" + name[i + 1:] + tld)
+    # TLD swaps
+    for alt in [".net", ".org", ".co", ".io", ".biz"]:
+        if alt != tld:
+            candidates.add(name + alt)
+    # Phishing prefixes/suffixes
+    for pfx in ["secure-", "login-", "my-"]:
+        candidates.add(pfx + name + tld)
+    for sfx in ["-secure", "-login", "-online"]:
+        candidates.add(name + sfx + tld)
+    # www-typo
+    candidates.add("www" + domain)
+    candidates.discard(domain)
+
+    known_set  = set(known)
+    to_check   = [d for d in candidates if d not in known_set]
+
+    registered: list[str] = []
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+            fm = {ex.submit(_dns_resolves, d): d for d in to_check}
+            for f in concurrent.futures.as_completed(fm, timeout=budget_seconds):
+                d = fm[f]
+                try:
+                    if f.result():
+                        registered.append(d)
+                except Exception:
+                    pass
+    except concurrent.futures.TimeoutError:
+        logger.warning("Quick typosquat DNS budget exceeded for domain=%s", domain)
+
+    return sorted(registered)
+
+
+def msg_domain_status(domains: list[str], domain_state: dict, tier: str) -> str:
+    """Return the DOMAIN command status message."""
+    limit = DOMAIN_LIMITS.get(tier, 1)
+    if not domains:
+        cmd = "DOMAIN REGISTER yourdomain.com"
+        return (
+            "🌐 *Domain Security Monitoring*\n\n"
+            "No business domain registered.\n\n"
+            f"Reply *{cmd}* to start monitoring your business domain.\n\n"
+            f"Domain monitoring checks for:\n"
+            "• Lookalike/typosquat domains used for phishing\n"
+            "• Email configuration (MX) changes\n"
+            "• Domain expiry risk\n\n"
+            f"Your plan supports up to *{limit}* domain{'s' if limit > 1 else ''}.\n\n"
+            "🛡️ RelayShield"
+        )
+
+    lines = []
+    for d in domains:
+        entry        = domain_state.get(d, {})
+        last_scanned = entry.get("last_scanned")
+        scan_label   = "Never scanned" if not last_scanned else (
+            datetime.fromisoformat(last_scanned).strftime("%-d %b %Y") if last_scanned else "Unknown"
+        )
+        lookalikes   = entry.get("known_lookalikes") or []
+        mx_set       = entry.get("mx_fingerprint") is not None
+        expiry_alerted = entry.get("expiry_days_alerted")
+
+        lookalike_line = f"⚠️ {len(lookalikes)} lookalike(s) on record" if lookalikes else "✅ No lookalikes detected"
+        mx_line        = "✅ Email configuration baseline recorded" if mx_set else "⏳ Email configuration baseline pending (next scan)"
+        expiry_line    = (
+            f"⚠️ Expiry alert sent ({expiry_alerted}d threshold)" if expiry_alerted else "✅ No expiry warning"
+        )
+        lines.append(
+            f"*{d}*\n"
+            f"  Last scan: {scan_label}\n"
+            f"  {lookalike_line}\n"
+            f"  {mx_line}\n"
+            f"  {expiry_line}"
+        )
+
+    domain_block = "\n\n".join(lines)
+    usage        = f"{len(domains)} of {limit} domain{'s' if limit > 1 else ''} in use"
+    return (
+        f"🌐 *Domain Security Status* — {usage}\n\n"
+        f"{domain_block}\n\n"
+        f"Reply *DOMAIN SCAN* to run a fresh check now.\n"
+        f"Reply *DOMAIN REGISTER domain.com* to add a domain.\n\n"
+        "🛡️ RelayShield"
+    )
+
+
 def count_employees(admin_user_id: str) -> int:
     """Count active employee accounts linked to an admin."""
     table = dynamodb.Table(USERS_TABLE)
@@ -1046,18 +1315,20 @@ def msg_onboarding_complete(email_limit: int, is_business: bool) -> str:
         "before you do anything else\n"
         "→ If a message feels urgent, that urgency is the attack — slow down and verify "
         "through a separate channel\n\n"
-        "Reply *WASCAM* if you receive a suspicious WhatsApp message, "
+        "Reply *VERIFY* to get your personal verification protocol (four rules to share "
+        "with your family now), *WASCAM* if you receive a suspicious WhatsApp message, "
         "*OTP* if you receive an unexpected verification code, "
         f"or *HELP* any time to see all available commands.{business_note}"
     )
 
 
-def msg_help(is_business: bool, is_employee: bool = False) -> str:
+def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool = False, has_seats: bool = True) -> str:
     commands = (
         "*Available commands:*\n\n"
         "• *SWEEP* — 5-minute Email Security Sweep (closes backdoors that survive password resets)\n"
         "• *RESET* — Strong password guide (run after completing your Email Security Sweep)\n"
         "• *SESSIONS* — Revoke active sessions and OAuth tokens across Google, Microsoft, and social media\n"
+        "• *OAUTH* — Audit third-party apps connected to your Google and Microsoft accounts\n"
         "• *REUSE* — Check cross-account password reuse step by step\n"
         "• *MANAGER* — Get a free Bitwarden password manager setup guide\n"
         "• *PHONE* — Carrier hardening steps to protect your number from SIM swap and smishing\n"
@@ -1068,13 +1339,62 @@ def msg_help(is_business: bool, is_employee: bool = False) -> str:
         "• *ATTACH* — Scan a suspicious file or URL (reply ATTACH followed by URL, or send the file directly)\n"
         "• *SAFE* — Confirm you have read a vishing or session hijacking warning\n"
         "• *CALL* — You received a suspicious call — get immediate steps\n"
+        "• *VERIFY* — Your personal verification protocol (callback rule, OTP rule, safe word, wire transfer rule)\n"
     )
-    if is_business and not is_employee:
+    if is_business and not is_employee and has_seats:
         commands += "• *ADD +1XXXXXXXXXX Name* — Add a team member for monitoring\n"
         commands += "• *REMOVE +1XXXXXXXXXX* — Remove a team member and deactivate their monitoring\n"
         commands += "• *STATUS* — View your team's onboarding and monitoring status\n"
+    if is_domain_tier:
+        commands += "• *DOMAIN* — View your business domain security status\n"
+        commands += "• *DOMAIN SCAN* — Run a full domain scan (lookalikes, MX, expiry)\n"
+        if not is_employee:
+            commands += "• *DOMAIN REGISTER domain.com* — Add a domain to monitor\n"
     commands += "\nReply any command to get started."
     return commands
+
+
+def msg_oauth(is_business: bool = False, is_employee: bool = False) -> str:
+    """
+    OAUTH command — guided OAuth grant audit for Google and Microsoft.
+    Tiered: Personal Shield gets individual guidance; Business Basic+ admins
+    get additional team and Google Workspace admin steps.
+    """
+    base = (
+        "🔐 *OAuth Security Audit — Connected Apps*\n\n"
+        "Third-party apps with access to your Google or Microsoft account can be used "
+        "to breach you even without your password. An attacker who compromises a connected "
+        "app inherits its OAuth access to your account — no credentials needed.\n\n"
+        "*Step 1 — Audit Google OAuth grants*\n"
+        "→ Go to: myaccount.google.com/permissions\n"
+        "→ Remove anything you don't recognise, no longer actively use, or that has "
+        "broader access than it needs\n\n"
+        "*Step 2 — Audit Microsoft OAuth grants*\n"
+        "→ Go to: myapps.microsoft.com\n"
+        "→ Same process — remove unrecognised or unnecessary apps\n\n"
+        "*What to remove immediately:*\n"
+        "→ AI tools and productivity apps you no longer use\n"
+        "→ Any app requesting *Read all mail* or *Read all files* you don't actively rely on\n"
+        "→ Developer tools, integrations, and bots with broad scopes\n"
+        "→ Apps you haven't used in 6+ months\n\n"
+        "*Rule:* If you don't recognise it or don't need it — revoke it now.\n\n"
+        "Run this audit every 90 days. Reply *SWEEP* to also close email backdoors.\n\n"
+        "🛡️ RelayShield"
+    )
+
+    if is_business and not is_employee:
+        team_block = (
+            "\n\n*For your team (admin):*\n"
+            "→ Each team member should run this same audit on their work accounts\n"
+            "→ Google Workspace admins: review org-wide OAuth grants at "
+            "admin.google.com → Security → API controls → Manage third-party app access\n"
+            "→ AI tools with broad OAuth access are the highest-risk grants — "
+            "review these first\n"
+            "→ Reply *STATUS* to see which team members have completed onboarding"
+        )
+        return base + team_block
+
+    return base
 
 
 def msg_sweep() -> str:
@@ -1091,10 +1411,9 @@ def msg_sweep() -> str:
         "Yahoo: account.yahoo.com/security\n"
         "→ Remove any recovery contact you do not recognise.\n\n"
         "*Step 3 — Check inbox filters*\n"
-        "Attackers create rules that silently delete security alerts, password reset "
-        "emails, and bank notifications — so you never see warnings about suspicious activity.\n"
+        "Silent rules that hide breach warnings and delete bank alerts.\n"
         "Gmail: Settings → Filters and Blocked Addresses\n"
-        "→ Delete any filter that deletes, skips inbox, or forwards emails you did not create.\n"
+        "→ Delete any filter you did not create.\n"
         "Outlook: Settings → Rules → delete unknown rules.\n\n"
         "*Step 4 — Review connected apps*\n"
         "Gmail: myaccount.google.com/permissions\n"
@@ -1105,8 +1424,14 @@ def msg_sweep() -> str:
         "Yahoo: account.yahoo.com/security/recent-activity\n"
         "→ Sign out of all unknown sessions.\n\n"
         "✅ *Sweep complete. All 5 checks done.*\n\n"
-        "Reply *RESET* for a strong password guide — the next step after closing every backdoor.\n"
-        "Reply *MANAGER* for a free Bitwarden password manager setup guide."
+        "*Going forward — use a masked email alias*\n"
+        "Your real address is a breach risk every time you share it. "
+        "A masked alias forwards to your inbox — if it leaks, delete it.\n"
+        "→ *SimpleLogin* — free, open source (simplelogin.io)\n"
+        "→ *Apple Hide My Email* — built into iCloud\n"
+        "→ *Gmail* — youraddress+sitename@gmail.com as a free workaround\n\n"
+        "Reply *RESET* for a strong password guide.\n"
+        "Reply *MANAGER* for a free Bitwarden setup guide."
     )
 
 
@@ -1133,15 +1458,26 @@ def msg_reset() -> str:
     )
 
 
-def msg_reuse_step(step_index: int) -> str:
+def msg_reuse_step(step_index: int, flagged: list[str] | None = None) -> str:
     """Return the cross-account reuse check for a given step index."""
     if step_index >= len(CROSS_ACCOUNT_SERVICES):
+        flagged = flagged or []
+        if not flagged:
+            return (
+                "✅ *Cross-account check complete.*\n\n"
+                "No reused passwords flagged — good discipline.\n\n"
+                "Reply *MANAGER* to set up Bitwarden so every account "
+                "gets a unique password automatically."
+            )
+        flagged_list = "\n".join(f"→ {svc}" for svc in flagged)
         return (
-            "✅ *Cross-account check complete.*\n\n"
-            "Change passwords on any accounts you replied YES to — "
-            "use a unique password for each one.\n\n"
-            "Reply *MANAGER* to get a free Bitwarden setup guide "
-            "so you never have to remember them."
+            "⚠️ *Cross-account check complete.*\n\n"
+            f"You flagged {len(flagged)} account(s) using the same password:\n\n"
+            f"{flagged_list}\n\n"
+            "*Change each of these now* — go directly to the service website, "
+            "not via any email link. Use a unique password for each one.\n\n"
+            "Reply *MANAGER* to set up Bitwarden — it generates and remembers "
+            "strong unique passwords for every account so this never happens again."
         )
     service, risk = CROSS_ACCOUNT_SERVICES[step_index]
     return (
@@ -1258,6 +1594,39 @@ def msg_vishing_safe() -> str:
         "→ Hang up and call back on the official number\n"
         "→ Urgency is the attack — slow down\n\n"
         "Reply *SWEEP* to run your Email Security Sweep, or *HELP* to see all commands."
+    )
+
+
+def msg_verify() -> str:
+    """
+    VERIFY command — Personal Verification Protocol.
+    Four rules to establish before an attack, not after.
+    All tiers. Share with family.
+    """
+    return (
+        "🔐 *Personal Verification Protocol — RelayShield*\n\n"
+        "Set these four rules with your family *before* an attack — "
+        "not after. Attackers are trained to bypass your instincts in the moment.\n\n"
+        "*Rule 1 — Callback Rule*\n"
+        "If anyone calls claiming to be your bank, carrier, or the IRS: hang up. "
+        "Call the official number on the back of your card or their website. "
+        "Never call back a number they give you.\n\n"
+        "*Rule 2 — OTP Rule*\n"
+        "No legitimate organisation will ever ask you to read an OTP back to them. "
+        "If anyone asks — hang up immediately. You are being socially engineered.\n\n"
+        "*Rule 3 — Family Safe Word*\n"
+        "Choose a word only your family knows. If anyone calls claiming to be a "
+        "family member in distress, they must say the word — or you hang up. "
+        "Discuss and agree on this word with your family today.\n\n"
+        "*Rule 4 — Wire Transfer Rule*\n"
+        "No legitimate contact will ever ask you to redirect a wire transfer or "
+        "change bank details by phone or email alone. Always verify by calling "
+        "a known number directly — never one they provide.\n\n"
+        "📲 *Forward this message to your family now* — these rules only work "
+        "if everyone knows them before the call comes.\n\n"
+        "Reply *CALL* if you received a suspicious call.\n"
+        "Reply *WASCAM* if you received a suspicious WhatsApp message.\n\n"
+        "🛡️ RelayShield"
     )
 
 
@@ -1459,6 +1828,13 @@ def handle_awaiting_email_1(
         return "invalid_email"
 
     add_monitored_email(user_id, email)
+
+    # Auto-register business domain from first email for domain-monitoring tiers.
+    # Free provider addresses (gmail.com etc.) are skipped automatically.
+    if not bool(user.get("admin_user_id")):   # admin accounts only
+        domain = auto_register_domain(user_id, email, tier)
+        if domain:
+            logger.info("Domain auto-registered at onboarding: domain=%s user_id=%s", domain, user_id)
 
     if email_limit == 1:
         # Edge case: move straight to password manager question
@@ -1803,11 +2179,28 @@ def handle_active_message(
     if body in ("YES", "NO"):
         reuse_step = int(user.get("reuse_step", 0))
         if reuse_step > 0:
-            next_step = reuse_step
-            update_user(user_id, {"reuse_step": next_step + 1})
+            # Load existing flagged list
+            try:
+                flagged = json.loads(user.get("reuse_flagged") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                flagged = []
+
+            # The step the user just answered is reuse_step - 1
+            answered_index = reuse_step - 1
+            if body == "YES" and answered_index < len(CROSS_ACCOUNT_SERVICES):
+                flagged.append(CROSS_ACCOUNT_SERVICES[answered_index][0])
+
+            next_step = reuse_step  # next step to display (0-based index)
+            at_end = next_step >= len(CROSS_ACCOUNT_SERVICES)
+
+            updates = {
+                "reuse_step": 0 if at_end else next_step + 1,
+                "reuse_flagged": json.dumps(flagged),
+            }
+            update_user(user_id, updates)
             send_whatsapp(
                 to_number,
-                msg_reuse_step(next_step),
+                msg_reuse_step(next_step, flagged),
                 account_sid, auth_token, from_number,
             )
             return f"reuse_step_{next_step}_answered"
@@ -1829,6 +2222,15 @@ def handle_active_message(
         send_whatsapp(to_number, msg_sessions(), account_sid, auth_token, from_number)
         return "sessions_audit_sent"
 
+    # --- OAUTH (OAuth grant audit — Google + Microsoft connected apps) ---
+    if body == "OAUTH":
+        send_whatsapp(
+            to_number,
+            msg_oauth(is_business=is_business, is_employee=is_employee),
+            account_sid, auth_token, from_number,
+        )
+        return "oauth_audit_sent"
+
     # --- SAFE (vishing warning acknowledged) ---
     if body == "SAFE":
         send_whatsapp(to_number, msg_vishing_safe(), account_sid, auth_token, from_number)
@@ -1838,6 +2240,11 @@ def handle_active_message(
     if body == "CALL":
         send_whatsapp(to_number, msg_vishing_call(), account_sid, auth_token, from_number)
         return "vishing_call_reported"
+
+    # --- VERIFY (personal verification protocol — four rules to set before an attack) ---
+    if body == "VERIFY":
+        send_whatsapp(to_number, msg_verify(), account_sid, auth_token, from_number)
+        return "verify_protocol_sent"
 
     # --- OTP (user received an unexpected OTP they did not request) ---
     if body == "OTP":
@@ -1988,12 +2395,23 @@ def handle_active_message(
     # --- HELP ---
     if body == "HELP":
         send_whatsapp(
-            to_number, msg_help(is_business, is_employee), account_sid, auth_token, from_number
+            to_number, msg_help(is_business, is_employee, is_domain_tier=tier in DOMAIN_TIERS, has_seats=tier in SEAT_LIMITS), account_sid, auth_token, from_number
         )
         return "help_sent"
 
     # --- ADD (Business tier admin only) ---
     # Syntax: ADD +16175551234 [Optional Name]
+    if body.startswith("ADD ") and tier == TIER_STARTER_DOMAIN and not is_employee:
+        send_whatsapp(
+            to_number,
+            "The Domain Monitoring add-on is a solo licence — team seats are not included.\n\n"
+            "To add team members, upgrade to *Business Basic* which includes up to 5 seats "
+            "and domain monitoring.\n\n"
+            "Reply *HELP* to see your current plan commands.",
+            account_sid, auth_token, from_number,
+        )
+        return "starter_domain_no_seats"
+
     if body.startswith("ADD ") and is_business and not is_employee:
         add_args = message_body.strip()[4:].strip()
         parts = add_args.split(None, 1)  # split on first whitespace only
@@ -2138,6 +2556,255 @@ def handle_active_message(
             account_sid, auth_token, from_number,
         )
         return "status_sent"
+
+    # --- DOMAIN (Business Basic / Shield / Shield Pro only) ---
+    # Employees see status and can run scans. Only admins can register/remove.
+    if body == "DOMAIN" or body.startswith("DOMAIN "):
+        # Gate: domain monitoring is not available on Personal Shield or Business Starter
+        if tier not in DOMAIN_TIERS:
+            send_whatsapp(
+                to_number,
+                "🌐 *Domain Monitoring* is available on Business Basic and higher plans.\n\n"
+                "Contact us to upgrade.",
+                account_sid, auth_token, from_number,
+            )
+            return "domain_tier_gate"
+
+        # For employee accounts, look up the admin's monitored_domains
+        if is_employee:
+            admin_id   = user.get("admin_user_id")
+            admin_rec  = dynamodb.Table(USERS_TABLE).get_item(Key={"user_id": admin_id}).get("Item", {})
+            domains      = admin_rec.get("monitored_domains") or []
+            domain_state = load_domain_state(admin_rec)
+            state_owner_id = admin_id
+        else:
+            domains      = user.get("monitored_domains") or []
+            domain_state = load_domain_state(user)
+            state_owner_id = user_id
+
+        domain_limit = DOMAIN_LIMITS.get(tier, 1)
+
+        # ── DOMAIN (status) ───────────────────────────────────────────────
+        if body == "DOMAIN":
+            send_whatsapp(
+                to_number,
+                msg_domain_status(domains, domain_state, tier),
+                account_sid, auth_token, from_number,
+            )
+            return "domain_status_sent"
+
+        # ── DOMAIN REGISTER <domain> (admin only) ─────────────────────────
+        if body.startswith("DOMAIN REGISTER ") and not is_employee:
+            raw_domain = message_body.strip()[16:].strip().lower()
+
+            if not is_valid_domain(raw_domain):
+                send_whatsapp(
+                    to_number,
+                    "That doesn't look like a valid domain. Please use the format:\n\n"
+                    "*DOMAIN REGISTER yourdomain.com*",
+                    account_sid, auth_token, from_number,
+                )
+                return "domain_invalid"
+
+            if raw_domain in domains:
+                send_whatsapp(
+                    to_number,
+                    f"*{raw_domain}* is already registered for monitoring.\n\n"
+                    "Reply *DOMAIN* to see your full status.",
+                    account_sid, auth_token, from_number,
+                )
+                return "domain_already_registered"
+
+            if len(domains) >= domain_limit:
+                send_whatsapp(
+                    to_number,
+                    f"You've reached your {domain_limit}-domain limit for your plan.\n\n"
+                    "Reply *DOMAIN REMOVE old-domain.com* to remove one first,\n"
+                    "or contact us to discuss your options.",
+                    account_sid, auth_token, from_number,
+                )
+                return "domain_limit_reached"
+
+            # Add domain and initialise state
+            new_domains = domains + [raw_domain]
+            table = dynamodb.Table(USERS_TABLE)
+            table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="SET monitored_domains = :d, updated_at = :t",
+                ExpressionAttributeValues={
+                    ":d": new_domains,
+                    ":t": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            domain_state[raw_domain] = {
+                "registered_at":     datetime.now(timezone.utc).isoformat(),
+                "last_scanned":      None,
+                "known_lookalikes":  [],
+                "mx_fingerprint":    None,
+                "expiry_days_alerted": None,
+            }
+            save_domain_state(user_id, domain_state)
+
+            send_whatsapp(
+                to_number,
+                f"✅ *{raw_domain}* registered for domain monitoring.\n\n"
+                f"RelayShield will check daily for:\n"
+                f"• Lookalike/typosquat domains\n"
+                f"• Email configuration (MX) changes\n"
+                f"• Domain expiry risk\n\n"
+                f"Reply *DOMAIN SCAN* to run the first check now.\n\n"
+                f"🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
+            logger.info("Domain registered — user_id=%s domain=%s", user_id, raw_domain)
+            return "domain_registered"
+
+        # ── DOMAIN REMOVE <domain> (admin only) ───────────────────────────
+        if body.startswith("DOMAIN REMOVE ") and not is_employee:
+            raw_domain = message_body.strip()[14:].strip().lower()
+
+            if raw_domain not in domains:
+                send_whatsapp(
+                    to_number,
+                    f"*{raw_domain}* is not in your monitored domains.\n\n"
+                    "Reply *DOMAIN* to see what's registered.",
+                    account_sid, auth_token, from_number,
+                )
+                return "domain_not_found"
+
+            new_domains = [d for d in domains if d != raw_domain]
+            table = dynamodb.Table(USERS_TABLE)
+            table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="SET monitored_domains = :d, updated_at = :t",
+                ExpressionAttributeValues={
+                    ":d": new_domains,
+                    ":t": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            domain_state.pop(raw_domain, None)
+            save_domain_state(user_id, domain_state)
+
+            send_whatsapp(
+                to_number,
+                f"✅ *{raw_domain}* removed from domain monitoring.",
+                account_sid, auth_token, from_number,
+            )
+            logger.info("Domain removed — user_id=%s domain=%s", user_id, raw_domain)
+            return "domain_removed"
+
+        # ── DOMAIN SCAN (admin + employee) ────────────────────────────────
+        if body == "DOMAIN SCAN":
+            if not domains:
+                send_whatsapp(
+                    to_number,
+                    "No domains registered.\n\n"
+                    "Reply *DOMAIN REGISTER yourdomain.com* to add one.",
+                    account_sid, auth_token, from_number,
+                )
+                return "domain_scan_no_domains"
+
+            send_whatsapp(
+                to_number,
+                f"🔍 *Scanning {len(domains)} domain{'s' if len(domains) > 1 else ''}...* "
+                "This may take up to 30 seconds.",
+                account_sid, auth_token, from_number,
+            )
+
+            findings: list[str] = []
+            for domain in domains:
+                entry = domain_state.get(domain) or {
+                    "registered_at": datetime.now(timezone.utc).isoformat(),
+                    "last_scanned": None,
+                    "known_lookalikes": [],
+                    "mx_fingerprint": None,
+                    "expiry_days_alerted": None,
+                }
+                known = entry.get("known_lookalikes") or []
+
+                # Typosquat (inline, time-boxed)
+                new_lookalikes = _quick_typosquat_check(domain, known)
+                if new_lookalikes:
+                    entry["known_lookalikes"] = list(set(known) | set(new_lookalikes))
+                    count = len(new_lookalikes)
+                    listing = ", ".join(f"*{d}*" for d in new_lookalikes[:3])
+                    more    = f" (+{count - 3} more)" if count > 3 else ""
+                    findings.append(
+                        f"⚠️ *Lookalike domains registered for {domain}:*\n"
+                        f"{listing}{more}\n"
+                        "→ Attackers use these to send phishing email that appears to come from you.\n"
+                        "→ Report to registrar abuse team; consider registering yourself."
+                    )
+
+                # MX check
+                current_mx = _doh_mx_fingerprint(domain)
+                stored_mx  = entry.get("mx_fingerprint")
+                if current_mx is None:
+                    findings.append(f"⚠️ Email configuration check unavailable for *{domain}* — retry later.")
+                elif stored_mx is None:
+                    entry["mx_fingerprint"] = current_mx
+                    findings.append(f"✅ *{domain}* email configuration baseline recorded.")
+                elif current_mx != stored_mx:
+                    entry["mx_fingerprint"] = current_mx
+                    findings.append(
+                        f"🔴 *Email configuration change detected on {domain}!*\n"
+                        "→ Log into your registrar NOW and verify your DNS settings.\n"
+                        "→ Unexpected email configuration changes may indicate DNS hijacking.\n"
+                        "→ Change your registrar password and enable 2FA immediately."
+                    )
+                else:
+                    findings.append(f"✅ *{domain}* email configuration unchanged.")
+
+                # Expiry check
+                days = _rdap_days_until_expiry(domain)
+                if days is None:
+                    findings.append(f"ℹ️ Expiry data unavailable for *{domain}* (ccTLD or RDAP unsupported).")
+                elif days <= 7:
+                    findings.append(
+                        f"🔴 *CRITICAL — {domain} expires in {days} day{'s' if days != 1 else ''}!*\n"
+                        "→ Renew immediately at your registrar."
+                    )
+                elif days <= 14:
+                    findings.append(
+                        f"🟠 *{domain} expires in {days} days.*\n"
+                        "→ Renew within 24 hours."
+                    )
+                elif days <= 30:
+                    findings.append(
+                        f"⚠️ *{domain} expires in {days} days.*\n"
+                        "→ Renew now and enable auto-renew."
+                    )
+                else:
+                    findings.append(f"✅ *{domain}* expiry: {days} days away.")
+
+                entry["last_scanned"] = datetime.now(timezone.utc).isoformat()
+                domain_state[domain] = entry
+
+            # Persist updated state
+            save_domain_state(state_owner_id, domain_state)
+
+            body_text = "\n\n".join(findings) if findings else "✅ No issues detected."
+            send_whatsapp(
+                to_number,
+                f"🌐 *Domain Scan Complete*\n\n{body_text}\n\n"
+                "Reply *DOMAIN* for full status.\n\n🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
+            logger.info("DOMAIN SCAN complete — user_id=%s domains=%s", user_id, domains)
+            return "domain_scan_complete"
+
+        # Unrecognised DOMAIN sub-command — show usage
+        send_whatsapp(
+            to_number,
+            "🌐 *Domain Monitoring — Available commands:*\n\n"
+            "• *DOMAIN* — View registered domains and security status\n"
+            "• *DOMAIN SCAN* — Run a full security scan now\n"
+            "• *DOMAIN REGISTER yourdomain.com* — Add a domain to monitor\n"
+            "• *DOMAIN REMOVE yourdomain.com* — Remove a monitored domain\n\n"
+            "🛡️ RelayShield",
+            account_sid, auth_token, from_number,
+        )
+        return "domain_usage_sent"
 
     # --- Unknown ---
     send_whatsapp(

@@ -873,7 +873,7 @@ def build_static_fallback_message(
             f"{vishing_block}"
             f"{aitm_block}"
             f"{password_block}\n"
-            f"Before resetting your password, reply *SWEEP* for a 5-minute Email Security Sweep.\n\n"
+            f"Reply *SWEEP* to close email backdoors, then *REUSE* to check other accounts at risk.\n\n"
             f"— RelayShield"
         )
     else:
@@ -887,7 +887,7 @@ def build_static_fallback_message(
             f"{vishing_block}"
             f"{aitm_block}"
             f"{password_block}\n"
-            f"Before resetting any passwords, reply *SWEEP* for a 5-minute Email Security Sweep.\n\n"
+            f"Reply *SWEEP* to close email backdoors, then *REUSE* to check other accounts at risk.\n\n"
             f"— RelayShield"
         )
 

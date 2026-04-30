@@ -1,0 +1,9 @@
+version: 2
+
+# Twilio Content API template SIDs (HX + 32 hex chars) are public identifiers
+# assigned by Meta/Twilio to approved WhatsApp message templates.
+# They carry no credentials or permissions — not secrets.
+secret:
+  ignored-matches:
+    - name: "Twilio Content API template SID"
+      match: "HX[a-f0-9]{32}"

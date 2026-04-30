@@ -167,7 +167,7 @@
 | # | Item | Status |
 |---|---|---|
 | 1 | Self-directed pen test — Lambda/DynamoDB surface | ⬜ Pending |
-| 2 | Set up GitHub Actions CI with Bandit + Safety + open-source secret scanner | ⬜ Pending |
+| 2 | Set up GitHub Actions CI with Bandit + Safety + open-source secret scanner | ✅ Complete — `.github/workflows/security_audit.yml` runs Bandit (HIGH severity gate), Safety (CVE check), and Gitleaks (secret scan) on every push to main |
 | 3 | Set up AWS GuardDuty (~$1–3/month) | ⬜ Pending |
 | 4 | Confirm PII minimization across DynamoDB tables | ⬜ Pending |
 | 5 | **Implement DynamoDB TTL on relayshield_breach_alerts** — `expires_at` epoch field added to `write_breach_alert()` in breach monitor (now + 2 years). Enable on table: `aws dynamodb update-time-to-live --table-name relayshield_breach_alerts --time-to-live-specification "Enabled=true, AttributeName=expires_at" --region us-east-1` — run once then done. Legacy beta records without the field are unaffected. | ✅ Complete — April 2026 |

@@ -952,6 +952,17 @@ def lambda_handler(event, context):
             logger.info(
                 "TEST alert — user_id=%s carrier=%s sent=%s", user_id, test_carrier, sent
             )
+            if sent:
+                try:
+                    signals = record_signal(user_id, "sim_swap", {"carrier": test_carrier})
+                    check_and_fire_correlation(
+                        user_id, signals,
+                        to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Coordinated attack check failed user_id=%s: %s", user_id, exc
+                    )
 
     else:
         # ── Production mode ───────────────────────────────────────────────

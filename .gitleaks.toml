@@ -1,0 +1,11 @@
+title = "RelayShield"
+
+# Twilio Content API template SIDs (HX...) are public identifiers assigned by
+# Meta/Twilio to approved WhatsApp message templates. They carry no credentials
+# or permissions — committing them is safe and intentional.
+[allowlist]
+description = "Allow Twilio Content API template SIDs"
+regexTarget = "secret"
+regexes = [
+  '''HX[a-f0-9]{32}'''
+]

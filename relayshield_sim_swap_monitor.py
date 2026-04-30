@@ -76,7 +76,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from boto3.dynamodb.conditions import Attr
@@ -265,6 +265,160 @@ def update_user_swap_state(
         UpdateExpression=update_expr,
         ExpressionAttributeValues=expr_values,
     )
+
+
+# ---------------------------------------------------------------------------
+# Coordinated attack detection — signal recording and correlation
+# ---------------------------------------------------------------------------
+
+CORRELATION_WINDOW_HOURS = 72   # rolling window for signal matching
+CORRELATION_DEDUP_HOURS  = 48   # suppress repeat composite alerts per user
+
+ATTACK_CHAINS = [
+    {
+        "chain":    "smishing_to_sim_swap",
+        "signals":  {"suspicious_sms", "sim_swap"},
+        "severity": "CRITICAL",
+        "label":    "Smishing → SIM Swap",
+        "what": (
+            "Attackers typically send a phishing link first to capture credentials, "
+            "then swap or port your SIM to intercept 2FA codes. This is a known "
+            "two-stage attack chain."
+        ),
+    },
+    {
+        "chain":    "breach_sim_swap",
+        "signals":  {"breach_alert", "sim_swap"},
+        "severity": "CRITICAL",
+        "label":    "Credential Breach + SIM Swap",
+        "what": (
+            "Your credentials were found in a breach and your SIM was swapped or ported "
+            "within the same attack window. Attackers may hold both your password and "
+            "control of your phone number — all SMS 2FA is compromised."
+        ),
+    },
+    {
+        "chain":    "breach_otp_intercept",
+        "signals":  {"breach_alert", "otp_warning"},
+        "severity": "HIGH",
+        "label":    "Credential Breach + OTP Interception",
+        "what": (
+            "Your credentials were recently found in a breach and you received an "
+            "unexpected OTP. This pattern suggests an active account takeover attempt — "
+            "an attacker may be logging into your accounts right now."
+        ),
+    },
+]
+
+
+def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
+    """
+    Append a timestamped security signal to recent_signals on the user record.
+    Prunes entries older than CORRELATION_WINDOW_HOURS in the same write.
+    Returns the updated signal list.
+    """
+    table  = dynamodb.Table(USERS_TABLE)
+    now    = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=CORRELATION_WINDOW_HOURS)).isoformat()
+
+    existing = table.get_item(Key={"user_id": user_id}).get("Item", {}).get("recent_signals", [])
+    pruned   = [s for s in existing if isinstance(s, dict) and s.get("ts", "") > cutoff]
+    pruned.append({"type": signal_type, "ts": now.isoformat(), "meta": metadata or {}})
+
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET recent_signals = :s",
+        ExpressionAttributeValues={":s": pruned},
+    )
+    logger.info("Signal recorded — user_id=%s type=%s", user_id, signal_type)
+    return pruned
+
+
+def _send_coordinated(
+    to_number: str, body: str, account_sid: str, auth_token: str, from_number: str,
+) -> bool:
+    return send_whatsapp(to_number, body, account_sid, auth_token, from_number)
+
+
+def _build_coordinated_alert(chain: dict, signals: list) -> str:
+    lines = []
+    for sig in sorted(signals, key=lambda s: s.get("ts", "")):
+        if not isinstance(sig, dict):
+            continue
+        try:
+            tsl = datetime.fromisoformat(sig["ts"].replace("Z", "+00:00")).strftime("%-d %b %H:%M UTC")
+        except Exception:
+            tsl = "recently"
+        lines.append(f"→ {sig['type'].replace('_', ' ').title()} — {tsl}")
+
+    icon          = "🚨" if chain["severity"] == "CRITICAL" else "⚠️"
+    signals_block = "\n".join(lines) if lines else "→ Multiple signals detected"
+    return (
+        f"{icon} *{chain['severity']} — Coordinated Attack Detected*\n\n"
+        f"RelayShield has identified a *{chain['label']}* attack pattern "
+        f"targeting your identity.\n\n"
+        f"*Signals detected:*\n{signals_block}\n\n"
+        f"*What this means:*\n{chain['what']}\n\n"
+        f"*Act immediately — in this order:*\n"
+        f"1️⃣ Reply *SESSIONS* — revoke all active sessions before changing passwords\n"
+        f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
+        f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
+        f"4️⃣ Do not enter any one-time codes you receive\n\n"
+        f"🛡️ RelayShield — Coordinated Attack Detection"
+    )
+
+
+def check_and_fire_correlation(
+    user_id: str,
+    signals: list,
+    to_number: str,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+) -> bool:
+    """
+    Evaluate the current signal set against known attack chains.
+    Sends a composite alert and stamps dedup timestamp if a chain is matched.
+    Returns True if a composite alert was fired.
+    """
+    table        = dynamodb.Table(USERS_TABLE)
+    signal_types = {s["type"] for s in signals if isinstance(s, dict)}
+
+    for chain in ATTACK_CHAINS:
+        if not chain["signals"].issubset(signal_types):
+            continue
+
+        last_ts = table.get_item(Key={"user_id": user_id}).get("Item", {}).get(
+            "last_coordinated_alert_at", ""
+        )
+        if last_ts:
+            try:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(
+                    last_ts.replace("Z", "+00:00")
+                )).total_seconds()
+                if age < CORRELATION_DEDUP_HOURS * 3600:
+                    logger.info(
+                        "Coordinated alert suppressed (dedup) — user_id=%s chain=%s",
+                        user_id, chain["chain"],
+                    )
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+        sent = _send_coordinated(to_number, _build_coordinated_alert(chain, signals),
+                                 account_sid, auth_token, from_number)
+        if sent:
+            table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="SET last_coordinated_alert_at = :t",
+                ExpressionAttributeValues={":t": datetime.now(timezone.utc).isoformat()},
+            )
+            logger.warning("COORDINATED ALERT SENT — user_id=%s chain=%s", user_id, chain["chain"])
+        else:
+            logger.error("Coordinated alert FAILED — user_id=%s chain=%s", user_id, chain["chain"])
+        return sent
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +815,16 @@ def process_user(
             "Alert sent — user_id=%s alert_type=%s carrier=%s",
             user_id, alert_type, carrier_name,
         )
+
+        # Record signal and check for coordinated attack chain
+        try:
+            signals = record_signal(user_id, alert_type, {"carrier": carrier_name})
+            check_and_fire_correlation(
+                user_id, signals,
+                to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
+            )
+        except Exception as exc:
+            logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
 
         # Admin co-notification for business-tier employee records
         is_employee = bool(user.get("admin_user_id"))

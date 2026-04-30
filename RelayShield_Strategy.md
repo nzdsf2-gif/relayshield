@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: April 2026 — Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually.*
+*Generated: March 2026 | Last Updated: April 2026 — Coordinated Attack Detection Engine added (Section 10c) ✅ LIVE: temporal signal correlation across breach monitor, SIM swap monitor, and WhatsApp webhook — detects smishing→SIM swap, breach+SIM swap, and breach+OTP interception chains in real time; foundation for threat intelligence API dataset and monetisation. Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually.*
 
 ---
 
@@ -2251,6 +2251,36 @@ A native app is not a conversation replacement — it is a status and history la
 - SMB team seat status and aggregate risk
 - Onboarding and account management
 - Not: breach alerts, remediation conversations, or real-time notifications
+
+---
+
+## 10c. Coordinated Attack Detection Engine ✅ LIVE — April 2026
+**The only identity protection product that detects multi-vector attacks in real time by correlating signals across independent threat channels.**
+
+**The core insight no competitor has acted on:** Individual breach alerts, SIM swap notifications, and suspicious SMS analysis each have value in isolation. The far larger insight is that sophisticated attackers do not use a single vector — they run coordinated campaigns. A smishing link arrives first. The user's credentials are captured. The attacker then ports the victim's number to intercept 2FA codes. No existing product connects these signals. RelayShield now does.
+
+**How it works:** Every alert-generating event — breach detection, SIM swap, suspicious SMS forwarded by the user, unexpected OTP received — is recorded as a timestamped signal on the user's record in a 72-hour rolling event window. When two signals matching a known attack chain co-occur within that window, RelayShield fires a separate composite CRITICAL or HIGH alert identifying the correlated pattern, naming the attack chain, and delivering a unified cross-signal remediation sequence.
+
+**Three attack chains detected at launch:**
+
+| Chain | Trigger | Severity | What it means |
+|---|---|---|---|
+| Smishing → SIM Swap | Suspicious SMS forwarded + SIM swap within 72 hrs | CRITICAL | Attacker captured credentials via phishing link, then swapped SIM to intercept 2FA |
+| Breach + SIM Swap | Breach alert fired + SIM swap within 72 hrs | CRITICAL | Attacker holds both password and phone control — all SMS 2FA compromised |
+| Breach + OTP Interception | Breach alert fired + user reports unexpected OTP | HIGH | Active credential stuffing attempt in progress right now |
+
+**Why this is a durable moat:**
+
+- **Data advantage compounds over time.** Every user interaction — breach alerts received, suspicious SMS forwarded, OTP warnings, SIM swap events — contributes to a per-user signal dataset. No new subscriber can reproduce this history. The longer a user is on RelayShield, the richer their signal record and the more precisely the correlation engine can fire.
+- **No competitor has this architecture.** Aura, LifeLock, and HIBP each monitor a single channel. None record cross-channel signals. None correlate across breach data, carrier telemetry, and user-reported events simultaneously. Building this requires integrating the breach detection layer, the carrier lookup layer, and the conversational interface — all three of which RelayShield already owns.
+- **Foundation for API monetisation.** The `recent_signals` dataset is the raw material for a future threat intelligence API — anonymised, aggregated attack chain frequency and timing data sold to MSSPs, insurers, and carriers. No competitor is building this dataset. See Section 10b Revenue Expansion.
+- **Patentable.** The coordinated attack detection method is documented in the provisional patent draft (`relayshield_provisional_patent_overview.md`, Component 3) as a distinct novel claim: temporal signal correlation across independent identity threat detection subsystems to identify coordinated multi-vector attacks.
+
+**Implementation details:**
+- `recent_signals` list attribute on `relayshield_users` — self-pruning, entries older than 72 hrs discarded on every write
+- `last_coordinated_alert_at` field — 48-hr dedup prevents repeat composite alerts for the same user
+- Signal hooks wrapped in try/except — correlation engine failure never affects primary alert delivery
+- Deployed across `relayshield-breach-check`, `relayshield-sim-swap-monitor`, `relayshield-whatsapp-webhook`
 
 ---
 

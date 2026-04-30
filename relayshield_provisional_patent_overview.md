@@ -109,25 +109,33 @@ The system maintains a registry of breach data classes (drawn from breach intell
 
 ### Component 3 — Coordinated Attack Detection Engine
 
-The system maintains a per-user event window — a time-bounded record (default: 48–72 hours) of security signals observed for a monitored identity. Signal types include:
+The system maintains a per-user signal record — a self-pruning list of timestamped security events stored persistently in the user record under the attribute `recent_signals`. Each entry records the signal type, an ISO 8601 UTC timestamp, and a metadata payload. On every write, entries older than 72 hours are pruned, bounding the list to a rolling 72-hour event window without requiring a separate cleanup process.
 
-- Breach alert fired for this identity
-- Suspicious SMS analysis submitted by the user (forwarded smishing attempt)
-- OTP warning command invoked (user received unexpected one-time passcode)
-- SIM swap event detected via carrier lookup
-- Vishing warning command invoked
-- Domain lookalike detected for this user's registered domain
+**Signal types recorded:**
 
-When two or more signals co-occur within the event window, the system evaluates the combination against a correlation matrix:
-
-| Signal Combination | Coordinated Attack Classification |
+| Signal Type | Source |
 |---|---|
-| SIM swap detected + suspicious SMS submitted (prior 48 hrs) | CRITICAL: Coordinated smishing-to-SIM-swap attack chain |
-| Breach alert fired + OTP warning invoked (same session) | HIGH: Credential stuffing with real-time account takeover attempt |
-| Domain lookalike detected + breach alert fired | HIGH: Phishing infrastructure deployment coincident with credential exposure |
-| Breach alert fired + SIM swap detected (same user, 24 hrs) | CRITICAL: Multi-vector coordinated identity attack |
+| `breach_alert` | Breach detection Lambda — recorded when a breach alert is successfully delivered to the user |
+| `sim_swap` | SIM/eSIM swap monitor Lambda — recorded when a SIM swap event is confirmed and alert sent |
+| `port_out` | SIM/eSIM swap monitor Lambda — recorded when port-out fraud is detected and alert sent |
+| `suspicious_sms` | WhatsApp webhook — recorded when user forwards a suspicious SMS for analysis |
+| `otp_warning` | WhatsApp webhook — recorded when user invokes the OTP warning command |
 
-When a coordinated attack is detected, the system fires a separate composite alert that: (a) identifies the correlated signals, (b) assigns a composite severity level, (c) provides an integrated remediation path addressing all detected vectors simultaneously, and (d) for business-tier subscribers, notifies the account administrator.
+**Attack chain correlation:** The system evaluates the current signal set against a predefined correlation matrix of named attack chains. Each chain defines the required signal combination and the composite severity. The system checks whether the required signals are present as a subset of the current 72-hour window:
+
+| Chain Name | Required Signals | Composite Severity | Attack Description |
+|---|---|---|---|
+| `smishing_to_sim_swap` | `suspicious_sms` + `sim_swap` | CRITICAL | Attacker delivers phishing link to capture credentials, then swaps or ports victim's SIM to intercept 2FA codes |
+| `breach_sim_swap` | `breach_alert` + `sim_swap` | CRITICAL | Credential breach and SIM swap co-occur within the attack window — attacker holds both password and phone number control |
+| `breach_otp_intercept` | `breach_alert` + `otp_warning` | HIGH | Active credential stuffing attempt: credentials exposed in breach, attacker attempting live account takeover triggering an OTP |
+
+**Composite alert delivery:** When a chain is matched, the system fires a separate composite alert distinct from the individual signal alerts already delivered. The composite alert: (a) names the detected attack chain, (b) lists the correlated signals with timestamps, (c) explains the multi-vector attack method in plain language, and (d) delivers a unified cross-signal remediation sequence prioritised by the combined threat posture — specifically ordering session revocation before password reset when the chain involves credential exposure.
+
+**Deduplication:** The user record stores a `last_coordinated_alert_at` ISO 8601 timestamp. If this timestamp is within 48 hours of the current evaluation, composite alert delivery is suppressed for that chain to prevent alert fatigue from repeated triggering of the same active attack window.
+
+**Fault isolation:** Signal recording and correlation evaluation are executed within a try/except block in each Lambda. A failure in the coordination layer does not affect primary alert delivery — the individual breach, SIM swap, or command response is sent regardless of whether the correlation check succeeds.
+
+**Working implementation:** All components described above are deployed in production as AWS Lambda functions (`relayshield-breach-check`, `relayshield-sim-swap-monitor`, `relayshield-whatsapp-webhook`) with DynamoDB state persistence on the `relayshield_users` table. The `recent_signals` and `last_coordinated_alert_at` fields are live schema additions as of April 2026.
 
 ---
 

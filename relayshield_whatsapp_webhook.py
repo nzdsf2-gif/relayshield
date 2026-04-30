@@ -1267,7 +1267,35 @@ ATTACK_CHAINS = [
             "an attacker may be logging into your accounts right now."
         ),
     },
+    {
+        "chain":    "domain_phishing_breach",
+        "signals":  {"domain_lookalike", "breach_alert"},
+        "severity": "CRITICAL",
+        "label":    "Phishing Domain + Credential Breach",
+        "what": (
+            "A domain impersonating your business was registered while your credentials "
+            "are actively exposed in a breach. Attackers stand up fake login pages on "
+            "lookalike domains after obtaining credentials — your employees and customers "
+            "may already be targeted with phishing emails from this domain."
+        ),
+    },
 ]
+
+_SESSIONS_INLINE = (
+    "🔐 *Revoke sessions now — before changing passwords:*\n"
+    "→ Google devices: myaccount.google.com/device-activity\n"
+    "→ Google apps: myaccount.google.com/permissions\n"
+    "→ Microsoft: account.microsoft.com/privacy/activity\n"
+    "→ Facebook/Instagram: Settings → Security → Login Activity\n"
+    "Sign out of every device and session you don't recognise."
+)
+
+
+def _fmt_delta(seconds: float) -> str:
+    """Format elapsed seconds as 'Xh Ym ago'."""
+    m = int(seconds // 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m ago" if h else f"{m}m ago"
 
 
 def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
@@ -1300,29 +1328,83 @@ def _send_coordinated(
 
 
 def _build_coordinated_alert(chain: dict, signals: list) -> str:
+    now           = datetime.now(timezone.utc)
+    chain_signals = chain["signals"]
+    relevant      = sorted(
+        [s for s in signals if isinstance(s, dict) and s.get("type") in chain_signals],
+        key=lambda s: s.get("ts", ""),
+    )
+
     lines = []
-    for sig in sorted(signals, key=lambda s: s.get("ts", "")):
-        if not isinstance(sig, dict):
-            continue
+    for sig in relevant:
         try:
-            tsl = datetime.fromisoformat(sig["ts"].replace("Z", "+00:00")).strftime("%-d %b %H:%M UTC")
+            ts  = datetime.fromisoformat(sig["ts"].replace("Z", "+00:00"))
+            tsl = ts.strftime("%-d %b %H:%M UTC")
+            age = _fmt_delta((now - ts).total_seconds())
         except Exception:
-            tsl = "recently"
-        lines.append(f"→ {sig['type'].replace('_', ' ').title()} — {tsl}")
+            tsl, age = "recently", ""
+        label = sig["type"].replace("_", " ").title()
+        lines.append(f"→ {label} — {tsl} ({age})" if age else f"→ {label} — {tsl}")
+
+    # Inter-signal timeline for smishing_to_sim_swap
+    timeline = ""
+    if chain["chain"] == "smishing_to_sim_swap" and len(relevant) >= 2:
+        try:
+            t0     = datetime.fromisoformat(relevant[0]["ts"].replace("Z", "+00:00"))
+            t1     = datetime.fromisoformat(relevant[1]["ts"].replace("Z", "+00:00"))
+            gap_m  = int((t1 - t0).total_seconds() / 60)
+            gap_h, gap_m = divmod(gap_m, 60)
+            gap_str = f"{gap_h}h {gap_m}m" if gap_h else f"{gap_m}m"
+            timeline = (
+                f"\n*Attack timeline:* Smishing link sent {gap_str} before SIM swap "
+                f"— confirming a two-stage attack sequence.\n"
+            )
+        except Exception:
+            pass
+
+    # Attacker URLs for smishing_to_sim_swap
+    url_block = ""
+    if chain["chain"] == "smishing_to_sim_swap":
+        for sig in relevant:
+            if sig.get("type") == "suspicious_sms":
+                urls = sig.get("meta", {}).get("urls", [])
+                if urls:
+                    url_lines = "\n".join(f"  • {u}" for u in urls[:5])
+                    url_block = (
+                        f"\n*Attacker link(s) from the phishing SMS:*\n{url_lines}\n"
+                        f"Do not click these links.\n"
+                    )
+                break
 
     icon          = "🚨" if chain["severity"] == "CRITICAL" else "⚠️"
     signals_block = "\n".join(lines) if lines else "→ Multiple signals detected"
+
+    if chain["severity"] == "CRITICAL":
+        action_block = (
+            f"*Act immediately — in this order:*\n"
+            f"{_SESSIONS_INLINE}\n\n"
+            f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
+            f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
+            f"4️⃣ Do not enter any one-time codes you receive"
+        )
+    else:
+        action_block = (
+            f"*Act immediately — in this order:*\n"
+            f"1️⃣ Reply *SESSIONS* — revoke all active sessions before changing passwords\n"
+            f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
+            f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
+            f"4️⃣ Do not enter any one-time codes you receive"
+        )
+
     return (
         f"{icon} *{chain['severity']} — Coordinated Attack Detected*\n\n"
         f"RelayShield has identified a *{chain['label']}* attack pattern "
         f"targeting your identity.\n\n"
-        f"*Signals detected:*\n{signals_block}\n\n"
+        f"*Signals detected:*\n{signals_block}\n"
+        f"{timeline}"
+        f"{url_block}\n"
         f"*What this means:*\n{chain['what']}\n\n"
-        f"*Act immediately — in this order:*\n"
-        f"1️⃣ Reply *SESSIONS* — revoke all active sessions before changing passwords\n"
-        f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
-        f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
-        f"4️⃣ Do not enter any one-time codes you receive\n\n"
+        f"{action_block}\n\n"
         f"🛡️ RelayShield — Coordinated Attack Detection"
     )
 
@@ -2455,7 +2537,7 @@ def handle_active_message(
             gsb_result.get("error"),
         )
         try:
-            signals = record_signal(user_id, "suspicious_sms", {"urls_found": len(urls)})
+            signals = record_signal(user_id, "suspicious_sms", {"urls_found": len(urls), "urls": urls[:5]})
             check_and_fire_correlation(user_id, signals, to_number, account_sid, auth_token, from_number)
         except Exception as exc:
             logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
@@ -2957,6 +3039,76 @@ def handle_active_message(
             logger.info("DOMAIN SCAN complete — user_id=%s domains=%s", user_id, domains)
             return "domain_scan_complete"
 
+        # ── DOMAIN WARN <domain> (admin only) — broadcast warning to all employees ──
+        if body.startswith("DOMAIN WARN ") and not is_employee:
+            warn_domain = body[12:].strip().lower()
+
+            if tier == TIER_STARTER_DOMAIN:
+                # Starter-domain: solo plan, no employee seats — give direct action steps
+                send_whatsapp(
+                    to_number,
+                    f"⚠️ *Domain Warning: {warn_domain}*\n\n"
+                    f"Your plan doesn't include employee seats, so there's no team to broadcast to.\n\n"
+                    f"*What you can do right now:*\n"
+                    f"→ Report to the registrar's abuse team: look up the registrar at "
+                    f"lookup.icann.org then file an abuse report\n"
+                    f"→ Defensively register *{warn_domain}* yourself to prevent it being weaponised\n"
+                    f"→ If you have a business website, post a notice warning visitors about the fake domain\n"
+                    f"→ Upgrade to Business Basic to add employee seats and enable team broadcasts\n\n"
+                    f"🛡️ RelayShield",
+                    account_sid, auth_token, from_number,
+                )
+                return "domain_warn_no_employees"
+
+            # Business tier: scan for active employees linked to this admin
+            emp_resp  = dynamodb.Table(USERS_TABLE).scan(
+                FilterExpression=Attr("admin_user_id").eq(user_id) & Attr("active").eq(True)
+            )
+            employees = emp_resp.get("Items", [])
+
+            if not employees:
+                send_whatsapp(
+                    to_number,
+                    f"⚠️ *{warn_domain}* — no active employees found to notify.\n\n"
+                    f"Add employees first with *ADD +1XXXXXXXXXX*.\n\n"
+                    f"🛡️ RelayShield",
+                    account_sid, auth_token, from_number,
+                )
+                return "domain_warn_no_employees"
+
+            warn_body = (
+                f"⚠️ *Security Alert from your admin*\n\n"
+                f"Do not click any links or open attachments from *{warn_domain}*.\n\n"
+                f"This domain is impersonating your company and may be used to send "
+                f"phishing emails or fake login pages.\n\n"
+                f"If you receive any message from this domain:\n"
+                f"→ Do not click any links\n"
+                f"→ Do not enter any credentials\n"
+                f"→ Forward it to your admin immediately\n\n"
+                f"🛡️ RelayShield"
+            )
+            sent_count = 0
+            for emp in employees:
+                try:
+                    emp_num = get_user_whatsapp_number(emp)
+                    if emp_num and send_whatsapp(emp_num, warn_body, account_sid, auth_token, from_number):
+                        sent_count += 1
+                except Exception as exc:
+                    logger.exception("DOMAIN WARN failed for employee user_id=%s: %s", emp.get("user_id"), exc)
+
+            send_whatsapp(
+                to_number,
+                f"✅ *Domain warning broadcast sent.*\n\n"
+                f"Warning about *{warn_domain}* sent to {sent_count} of {len(employees)} employee(s).\n\n"
+                f"🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
+            logger.info(
+                "DOMAIN WARN sent — user_id=%s domain=%s employees=%d sent=%d",
+                user_id, warn_domain, len(employees), sent_count,
+            )
+            return "domain_warn_sent"
+
         # Unrecognised DOMAIN sub-command — show usage
         send_whatsapp(
             to_number,
@@ -2964,7 +3116,8 @@ def handle_active_message(
             "• *DOMAIN* — View registered domains and security status\n"
             "• *DOMAIN SCAN* — Run a full security scan now\n"
             "• *DOMAIN REGISTER yourdomain.com* — Add a domain to monitor\n"
-            "• *DOMAIN REMOVE yourdomain.com* — Remove a monitored domain\n\n"
+            "• *DOMAIN REMOVE yourdomain.com* — Remove a monitored domain\n"
+            "• *DOMAIN WARN lookalike.com* — Broadcast a phishing warning to all employees\n\n"
             "🛡️ RelayShield",
             account_sid, auth_token, from_number,
         )

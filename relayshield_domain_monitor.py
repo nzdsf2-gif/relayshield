@@ -44,11 +44,12 @@ import base64
 import concurrent.futures
 import json
 import logging
+import re
 import socket
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from boto3.dynamodb.conditions import Attr
@@ -82,6 +83,12 @@ TWILIO_FROM_SECRET  = "relayshield/twilio_whatsapp_number"
 TWILIO_MESSAGES_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 )
+
+GSB_SECRET_NAME = "relayshield/google_safe_browsing"
+GSB_SECRET_KEY  = "google_safe_browsing_api_key"
+GSB_URL         = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
+
+CRT_SH_URL = "https://crt.sh/?q={domain}&output=json"
 
 # ---------------------------------------------------------------------------
 # Meta-approved template SIDs
@@ -119,6 +126,298 @@ ELIGIBLE_STATES = {"ACTIVE", "EMPLOYEE_ACTIVE", "AWAITING_EMAIL_1", "AWAITING_MO
 # ---------------------------------------------------------------------------
 
 EXPIRY_THRESHOLDS = [7, 14, 30]   # ascending severity — alert at first match
+
+# ---------------------------------------------------------------------------
+# GSB / Certificate Transparency / RDAP enrichment for lookalike domains
+# ---------------------------------------------------------------------------
+
+def get_gsb_api_key() -> str:
+    raw = secrets_client.get_secret_value(SecretId=GSB_SECRET_NAME)["SecretString"].strip()
+    try:
+        return json.loads(raw)[GSB_SECRET_KEY]
+    except (json.JSONDecodeError, KeyError):
+        return raw
+
+
+def check_domain_safe_browsing(domain: str, api_key: str) -> bool:
+    """Return True if GSB flags this domain as malicious."""
+    urls = [f"http://{domain}/", f"https://{domain}/"]
+    payload = json.dumps({
+        "client": {"clientId": "relayshield", "clientVersion": "1.0"},
+        "threatInfo": {
+            "threatTypes":      ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE"],
+            "platformTypes":    ["ANY_PLATFORM"],
+            "threatEntryTypes": ["URL"],
+            "threatEntries":    [{"url": u} for u in urls],
+        },
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GSB_URL}?key={api_key}",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return bool(json.loads(resp.read()).get("matches"))
+    except Exception as exc:
+        logger.warning("GSB check failed for %s: %s", domain, exc)
+        return False
+
+
+def check_certificate_transparency(domain: str) -> dict:
+    """
+    Query crt.sh for TLS certificates issued for this domain.
+    Returns {cert_count, recent, latest_issued, days_old}.
+    recent=True means a cert was issued within the last 30 days (live HTTPS infra).
+    """
+    url = CRT_SH_URL.format(domain=urllib.parse.quote(domain))
+    req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            certs = json.loads(resp.read())
+        if not certs:
+            return {"cert_count": 0, "recent": False, "latest_issued": None, "days_old": None}
+        now   = datetime.now(timezone.utc)
+        dates = []
+        for cert in certs:
+            raw = cert.get("not_before") or cert.get("entry_timestamp", "")
+            if raw:
+                try:
+                    dt = datetime.fromisoformat(raw.replace("Z", "+00:00").split(".")[0])
+                    if not dt.tzinfo:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    dates.append(dt)
+                except Exception:
+                    pass
+        if not dates:
+            return {"cert_count": len(certs), "recent": False, "latest_issued": None, "days_old": None}
+        latest   = max(dates)
+        days_old = (now - latest).days
+        return {
+            "cert_count":    len(certs),
+            "recent":        days_old <= 30,
+            "latest_issued": latest.strftime("%-d %b %Y"),
+            "days_old":      days_old,
+        }
+    except Exception as exc:
+        logger.warning("CT check failed for %s: %s", domain, exc)
+        return {"cert_count": 0, "recent": False, "latest_issued": None, "days_old": None}
+
+
+def get_rdap_registrar(domain: str) -> dict:
+    """
+    Query rdap.org for registrar name and abuse contact email.
+    Returns {registrar, abuse_email}.
+    """
+    url = RDAP_URL.format(domain=urllib.parse.quote(domain))
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Accept", "application/json")
+    result = {"registrar": "", "abuse_email": ""}
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        for entity in data.get("entities", []):
+            if "registrar" in entity.get("roles", []):
+                vcard = entity.get("vcardArray", [])
+                if vcard and len(vcard) > 1:
+                    for entry in vcard[1]:
+                        if entry[0] == "fn":
+                            result["registrar"] = entry[3]
+                # Abuse contact in nested entities or remarks
+                for sub in entity.get("entities", []):
+                    if "abuse" in sub.get("roles", []):
+                        for sv in (sub.get("vcardArray") or [[], []])[1]:
+                            if sv[0] == "email":
+                                result["abuse_email"] = sv[3]
+                break
+        # Fallback: scan remarks for abuse email
+        if not result["abuse_email"]:
+            for remark in data.get("remarks", []):
+                desc = " ".join(remark.get("description", []))
+                emails = re.findall(r"[\w.+-]+@[\w.-]+\.\w+", desc)
+                if emails:
+                    result["abuse_email"] = emails[0]
+                    break
+    except Exception as exc:
+        logger.debug("RDAP registrar lookup failed for %s: %s", domain, exc)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Coordinated attack detection — signal recording and correlation
+# ---------------------------------------------------------------------------
+
+CORRELATION_WINDOW_HOURS = 72
+CORRELATION_DEDUP_HOURS  = 48
+
+ATTACK_CHAINS = [
+    {
+        "chain":    "smishing_to_sim_swap",
+        "signals":  {"suspicious_sms", "sim_swap"},
+        "severity": "CRITICAL",
+        "label":    "Smishing → SIM Swap",
+        "what": (
+            "Attackers typically send a phishing link first to capture credentials, "
+            "then swap or port your SIM to intercept 2FA codes. This is a known "
+            "two-stage attack chain."
+        ),
+    },
+    {
+        "chain":    "breach_sim_swap",
+        "signals":  {"breach_alert", "sim_swap"},
+        "severity": "CRITICAL",
+        "label":    "Credential Breach + SIM Swap",
+        "what": (
+            "Your credentials were found in a breach and your SIM was swapped or ported "
+            "within the same attack window. Attackers may hold both your password and "
+            "control of your phone number — all SMS 2FA is compromised."
+        ),
+    },
+    {
+        "chain":    "breach_otp_intercept",
+        "signals":  {"breach_alert", "otp_warning"},
+        "severity": "HIGH",
+        "label":    "Credential Breach + OTP Interception",
+        "what": (
+            "Your credentials were recently found in a breach and you received an "
+            "unexpected OTP. This pattern suggests an active account takeover attempt — "
+            "an attacker may be logging into your accounts right now."
+        ),
+    },
+    {
+        "chain":    "domain_phishing_breach",
+        "signals":  {"domain_lookalike", "breach_alert"},
+        "severity": "CRITICAL",
+        "label":    "Phishing Domain + Credential Breach",
+        "what": (
+            "A domain impersonating your business was registered while your credentials "
+            "are actively exposed in a breach. Attackers stand up fake login pages on "
+            "lookalike domains after obtaining credentials — your employees and customers "
+            "may already be targeted with phishing emails from this domain."
+        ),
+    },
+]
+
+_SESSIONS_INLINE = (
+    "🔐 *Revoke sessions now — before changing passwords:*\n"
+    "→ Google devices: myaccount.google.com/device-activity\n"
+    "→ Google apps: myaccount.google.com/permissions\n"
+    "→ Microsoft: account.microsoft.com/privacy/activity\n"
+    "→ Facebook/Instagram: Settings → Security → Login Activity\n"
+    "Sign out of every device and session you don't recognise."
+)
+
+
+def _fmt_delta(seconds: float) -> str:
+    m = int(seconds // 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m ago" if h else f"{m}m ago"
+
+
+def _build_coordinated_alert(chain: dict, signals: list) -> str:
+    now           = datetime.now(timezone.utc)
+    chain_signals = chain["signals"]
+    relevant      = sorted(
+        [s for s in signals if isinstance(s, dict) and s.get("type") in chain_signals],
+        key=lambda s: s.get("ts", ""),
+    )
+    lines = []
+    for sig in relevant:
+        try:
+            ts  = datetime.fromisoformat(sig["ts"].replace("Z", "+00:00"))
+            tsl = ts.strftime("%-d %b %H:%M UTC")
+            age = _fmt_delta((now - ts).total_seconds())
+        except Exception:
+            tsl, age = "recently", ""
+        label = sig["type"].replace("_", " ").title()
+        lines.append(f"→ {label} — {tsl} ({age})" if age else f"→ {label} — {tsl}")
+
+    icon          = "🚨" if chain["severity"] == "CRITICAL" else "⚠️"
+    signals_block = "\n".join(lines) if lines else "→ Multiple signals detected"
+    action_block  = (
+        f"*Act immediately — in this order:*\n"
+        f"{_SESSIONS_INLINE}\n\n"
+        f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
+        f"3️⃣ Reply *DOMAIN WARN {'{lookalike}'}* — broadcast a warning to your team\n"
+        f"4️⃣ Report the lookalike domain to the registrar's abuse team"
+    ) if chain["chain"] == "domain_phishing_breach" else (
+        f"*Act immediately — in this order:*\n"
+        f"{_SESSIONS_INLINE}\n\n"
+        f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
+        f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
+        f"4️⃣ Do not enter any one-time codes you receive"
+    ) if chain["severity"] == "CRITICAL" else (
+        f"*Act immediately — in this order:*\n"
+        f"1️⃣ Reply *SESSIONS* — revoke all active sessions before changing passwords\n"
+        f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
+        f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
+        f"4️⃣ Do not enter any one-time codes you receive"
+    )
+
+    return (
+        f"{icon} *{chain['severity']} — Coordinated Attack Detected*\n\n"
+        f"RelayShield has identified a *{chain['label']}* attack pattern "
+        f"targeting your identity.\n\n"
+        f"*Signals detected:*\n{signals_block}\n\n"
+        f"*What this means:*\n{chain['what']}\n\n"
+        f"{action_block}\n\n"
+        f"🛡️ RelayShield — Coordinated Attack Detection"
+    )
+
+
+def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
+    table  = dynamodb.Table(USERS_TABLE)
+    now    = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=CORRELATION_WINDOW_HOURS)).isoformat()
+    existing = table.get_item(Key={"user_id": user_id}).get("Item", {}).get("recent_signals", [])
+    pruned   = [s for s in existing if isinstance(s, dict) and s.get("ts", "") > cutoff]
+    pruned.append({"type": signal_type, "ts": now.isoformat(), "meta": metadata or {}})
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET recent_signals = :s",
+        ExpressionAttributeValues={":s": pruned},
+    )
+    logger.info("Signal recorded — user_id=%s type=%s", user_id, signal_type)
+    return pruned
+
+
+def check_and_fire_correlation(
+    user_id: str, signals: list, to_number: str,
+    account_sid: str, auth_token: str, from_number: str,
+) -> bool:
+    table        = dynamodb.Table(USERS_TABLE)
+    signal_types = {s["type"] for s in signals if isinstance(s, dict)}
+    for chain in ATTACK_CHAINS:
+        if not chain["signals"].issubset(signal_types):
+            continue
+        last_ts = table.get_item(Key={"user_id": user_id}).get("Item", {}).get(
+            "last_coordinated_alert_at", ""
+        )
+        if last_ts:
+            try:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(
+                    last_ts.replace("Z", "+00:00")
+                )).total_seconds()
+                if age < CORRELATION_DEDUP_HOURS * 3600:
+                    logger.info("Coordinated alert suppressed (dedup) — user_id=%s chain=%s", user_id, chain["chain"])
+                    continue
+            except (ValueError, TypeError):
+                pass
+        sent = send_whatsapp(to_number, _build_coordinated_alert(chain, signals),
+                             account_sid, auth_token, from_number)
+        if sent:
+            table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="SET last_coordinated_alert_at = :t",
+                ExpressionAttributeValues={":t": datetime.now(timezone.utc).isoformat()},
+            )
+            logger.warning("COORDINATED ALERT SENT — user_id=%s chain=%s", user_id, chain["chain"])
+        else:
+            logger.error("Coordinated alert FAILED — user_id=%s chain=%s", user_id, chain["chain"])
+        return sent
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Typosquat permutation — TLD variants to check
@@ -564,22 +863,73 @@ def send_whatsapp_template(
 # Alert message builders (freeform — used for test_user_id mode)
 # ---------------------------------------------------------------------------
 
-def build_lookalike_alert(domain: str, new_lookalikes: list[str]) -> str:
-    count   = len(new_lookalikes)
-    listing = "\n".join(f"→ *{d}*" for d in new_lookalikes[:5])
-    more    = f"\n(and {count - 5} more)" if count > 5 else ""
+def build_lookalike_alert(
+    domain: str,
+    new_lookalikes: list[str],
+    enrichment: dict | None = None,
+    subscription_tier: str = "",
+) -> str:
+    """
+    enrichment: {lookalike: {gsb_flagged, ct_recent, ct_date, registrar, abuse_email}}
+    """
+    enrichment   = enrichment or {}
+    count        = len(new_lookalikes)
+    has_employees = subscription_tier not in (TIER_STARTER_DOMAIN, "")
+
+    # Build per-domain status lines
+    domain_lines = []
+    critical_domain = None
+    best_abuse_email = ""
+    best_registrar   = ""
+    for d in new_lookalikes[:5]:
+        enc = enrichment.get(d, {})
+        gsb = enc.get("gsb_flagged", False)
+        ct  = enc.get("ct_recent",   False)
+        ct_date = enc.get("ct_date", "")
+        if not best_abuse_email and enc.get("abuse_email"):
+            best_abuse_email = enc["abuse_email"]
+            best_registrar   = enc.get("registrar", "")
+        if gsb:
+            status = "🔴 *ACTIVE — flagged as malicious by Google Safe Browsing*"
+            critical_domain = d
+        elif ct:
+            status = f"🟠 *ACTIVE — TLS certificate issued {ct_date}* (live HTTPS infrastructure)"
+            if critical_domain is None:
+                critical_domain = d
+        else:
+            status = "⚠️ Registered — activity unknown (may be parked or building)"
+        domain_lines.append(f"→ *{d}*\n   {status}")
+    more = f"\n(and {count - 5} more)" if count > 5 else ""
+
+    severity_icon  = "🚨" if critical_domain else "⚠️"
+    severity_label = "CRITICAL — Active Phishing Infrastructure" if critical_domain else "Domain Alert — Lookalike Detected"
+    listing        = "\n\n".join(domain_lines) + more
+
+    abuse_block = ""
+    if best_abuse_email:
+        registrar_name = f" ({best_registrar})" if best_registrar else ""
+        abuse_block = f"\n*Report abuse:* {best_abuse_email}{registrar_name}\n"
+
+    if has_employees:
+        team_step = "3. Reply *DOMAIN WARN {lookalike}* — broadcast a warning to all employees immediately\n"
+    else:
+        team_step = (
+            "3. Post a warning on your business website and social media if you use this domain publicly\n"
+            "4. Consider defensively registering the lookalike to prevent it being weaponised\n"
+        )
+
     return (
-        f"⚠️ *Domain Alert — Lookalike Detected*\n\n"
+        f"{severity_icon} *{severity_label}*\n\n"
         f"{count} domain{'s' if count > 1 else ''} impersonating *{domain}* "
-        f"{'are' if count > 1 else 'is'} registered and active:\n\n"
-        f"{listing}{more}\n\n"
-        f"Lookalike domains are commonly used to send phishing emails that appear "
-        f"to come from your business — targeting customers, employees, and vendors.\n\n"
+        f"{'are' if count > 1 else 'is'} registered:\n\n"
+        f"{listing}\n\n"
+        f"Lookalike domains are used to send phishing emails that appear to come from your "
+        f"business — targeting customers, {'employees, ' if has_employees else ''}and vendors.\n\n"
         f"*Immediate steps:*\n"
-        f"1. Check if it's actively hosting a site (paste into browser)\n"
-        f"2. If live — report to the registrar's abuse team\n"
-        f"3. Alert your team not to trust emails from these domains\n"
-        f"4. Consider defensively registering the closest lookalikes\n\n"
+        f"1. Do not visit the domain — paste it into Google's Safe Browsing checker if needed\n"
+        f"2. Report to the registrar's abuse team{' — email below' if best_abuse_email else ''}\n"
+        f"{team_step}"
+        f"{abuse_block}\n"
         f"Reply *DOMAIN* to see your full domain security status.\n\n"
         f"🛡️ RelayShield"
     )
@@ -636,10 +986,51 @@ def build_expiry_alert(domain: str, days: int) -> str:
 # Per-domain scan logic
 # ---------------------------------------------------------------------------
 
+def _enrich_lookalikes(new_lookalikes: list[str], account_sid: str) -> dict:
+    """
+    Run GSB, CT, and RDAP enrichment for each new lookalike domain.
+    Returns {lookalike: {gsb_flagged, ct_recent, ct_date, registrar, abuse_email}}.
+    Falls back gracefully on any per-domain failure.
+    """
+    enrichment = {}
+    try:
+        gsb_key = get_gsb_api_key()
+    except Exception as exc:
+        logger.warning("GSB key unavailable — skipping GSB checks: %s", exc)
+        gsb_key = None
+
+    for d in new_lookalikes:
+        enc = {"gsb_flagged": False, "ct_recent": False, "ct_date": "", "registrar": "", "abuse_email": ""}
+        try:
+            if gsb_key:
+                enc["gsb_flagged"] = check_domain_safe_browsing(d, gsb_key)
+        except Exception as exc:
+            logger.debug("GSB enrichment failed for %s: %s", d, exc)
+        try:
+            ct = check_certificate_transparency(d)
+            enc["ct_recent"] = ct.get("recent", False)
+            enc["ct_date"]   = ct.get("latest_issued", "") or ""
+        except Exception as exc:
+            logger.debug("CT enrichment failed for %s: %s", d, exc)
+        try:
+            rdap = get_rdap_registrar(d)
+            enc["registrar"]   = rdap.get("registrar", "")
+            enc["abuse_email"] = rdap.get("abuse_email", "")
+        except Exception as exc:
+            logger.debug("RDAP enrichment failed for %s: %s", d, exc)
+        enrichment[d] = enc
+        logger.info(
+            "Lookalike enrichment — %s gsb=%s ct_recent=%s registrar=%s",
+            d, enc["gsb_flagged"], enc["ct_recent"], enc["registrar"],
+        )
+    return enrichment
+
+
 def scan_domain(
     domain: str,
     entry: dict,
     user_id: str,
+    subscription_tier: str,
     to_number: str,
     account_sid: str,
     auth_token: str,
@@ -663,9 +1054,14 @@ def scan_domain(
         logger.warning(
             "LOOKALIKE HIT — domain=%s new=%s", domain, new_lookalikes,
         )
+        # Run GSB + CT + RDAP enrichment on new lookalikes
+        enrichment = {}
+        if not dry_run:
+            enrichment = _enrich_lookalikes(new_lookalikes, account_sid)
+
         if not dry_run:
             if force_freeform:
-                body = build_lookalike_alert(domain, new_lookalikes)
+                body = build_lookalike_alert(domain, new_lookalikes, enrichment, subscription_tier)
                 send_whatsapp(to_number, body, account_sid, auth_token, from_number)
             else:
                 count = len(new_lookalikes)
@@ -675,6 +1071,18 @@ def scan_domain(
                     {"1": domain, "2": new_lookalikes[0], "3": str(count)},
                     account_sid, auth_token, from_number,
                 )
+            # Record domain_lookalike signal and check coordinated attack chains
+            try:
+                gsb_hit = any(e.get("gsb_flagged") for e in enrichment.values())
+                ct_hit  = any(e.get("ct_recent")   for e in enrichment.values())
+                signals = record_signal(
+                    user_id, "domain_lookalike",
+                    {"domain": domain, "count": len(new_lookalikes), "gsb_flagged": gsb_hit, "ct_active": ct_hit},
+                )
+                check_and_fire_correlation(user_id, signals, to_number, account_sid, auth_token, from_number)
+            except Exception as exc:
+                logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
+
         # Always update known_lookalikes so we don't re-alert next run
         entry["known_lookalikes"] = list(set(known) | set(new_lookalikes))
     else:
@@ -794,12 +1202,14 @@ def lambda_handler(event, context):
         to_number    = get_whatsapp_number(user)
         domain_state = load_domain_state(user)
 
+        tier = user.get("subscription_tier", TIER_STARTER_DOMAIN)
         for domain in domains:
             entry = domain_state.get(domain) or blank_domain_entry()
             entry = scan_domain(
                 domain=domain,
                 entry=entry,
                 user_id=test_user_id,
+                subscription_tier=tier,
                 to_number=to_number,
                 account_sid=account_sid,
                 auth_token=auth_token,
@@ -857,6 +1267,7 @@ def lambda_handler(event, context):
                     domain=domain,
                     entry=entry,
                     user_id=user_id,
+                    subscription_tier=tier,
                     to_number=to_number,
                     account_sid=account_sid,
                     auth_token=auth_token,

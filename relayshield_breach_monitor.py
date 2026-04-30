@@ -933,7 +933,35 @@ ATTACK_CHAINS = [
             "an attacker may be logging into your accounts right now."
         ),
     },
+    {
+        "chain":    "domain_phishing_breach",
+        "signals":  {"domain_lookalike", "breach_alert"},
+        "severity": "CRITICAL",
+        "label":    "Phishing Domain + Credential Breach",
+        "what": (
+            "A domain impersonating your business was registered while your credentials "
+            "are actively exposed in a breach. Attackers stand up fake login pages on "
+            "lookalike domains after obtaining credentials — your employees and customers "
+            "may already be targeted with phishing emails from this domain."
+        ),
+    },
 ]
+
+_SESSIONS_INLINE = (
+    "🔐 *Revoke sessions now — before changing passwords:*\n"
+    "→ Google devices: myaccount.google.com/device-activity\n"
+    "→ Google apps: myaccount.google.com/permissions\n"
+    "→ Microsoft: account.microsoft.com/privacy/activity\n"
+    "→ Facebook/Instagram: Settings → Security → Login Activity\n"
+    "Sign out of every device and session you don't recognise."
+)
+
+
+def _fmt_delta(seconds: float) -> str:
+    """Format elapsed seconds as 'Xh Ym ago'."""
+    m = int(seconds // 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m ago" if h else f"{m}m ago"
 
 
 def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
@@ -967,29 +995,83 @@ def _send_coordinated(
 
 
 def _build_coordinated_alert(chain: dict, signals: list) -> str:
+    now           = datetime.now(timezone.utc)
+    chain_signals = chain["signals"]
+    relevant      = sorted(
+        [s for s in signals if isinstance(s, dict) and s.get("type") in chain_signals],
+        key=lambda s: s.get("ts", ""),
+    )
+
     lines = []
-    for sig in sorted(signals, key=lambda s: s.get("ts", "")):
-        if not isinstance(sig, dict):
-            continue
+    for sig in relevant:
         try:
-            tsl = datetime.fromisoformat(sig["ts"].replace("Z", "+00:00")).strftime("%-d %b %H:%M UTC")
+            ts  = datetime.fromisoformat(sig["ts"].replace("Z", "+00:00"))
+            tsl = ts.strftime("%-d %b %H:%M UTC")
+            age = _fmt_delta((now - ts).total_seconds())
         except Exception:
-            tsl = "recently"
-        lines.append(f"→ {sig['type'].replace('_', ' ').title()} — {tsl}")
+            tsl, age = "recently", ""
+        label = sig["type"].replace("_", " ").title()
+        lines.append(f"→ {label} — {tsl} ({age})" if age else f"→ {label} — {tsl}")
+
+    # Inter-signal timeline for smishing_to_sim_swap
+    timeline = ""
+    if chain["chain"] == "smishing_to_sim_swap" and len(relevant) >= 2:
+        try:
+            t0     = datetime.fromisoformat(relevant[0]["ts"].replace("Z", "+00:00"))
+            t1     = datetime.fromisoformat(relevant[1]["ts"].replace("Z", "+00:00"))
+            gap_m  = int((t1 - t0).total_seconds() / 60)
+            gap_h, gap_m = divmod(gap_m, 60)
+            gap_str = f"{gap_h}h {gap_m}m" if gap_h else f"{gap_m}m"
+            timeline = (
+                f"\n*Attack timeline:* Smishing link sent {gap_str} before SIM swap "
+                f"— confirming a two-stage attack sequence.\n"
+            )
+        except Exception:
+            pass
+
+    # Attacker URLs for smishing_to_sim_swap
+    url_block = ""
+    if chain["chain"] == "smishing_to_sim_swap":
+        for sig in relevant:
+            if sig.get("type") == "suspicious_sms":
+                urls = sig.get("meta", {}).get("urls", [])
+                if urls:
+                    url_lines = "\n".join(f"  • {u}" for u in urls[:5])
+                    url_block = (
+                        f"\n*Attacker link(s) from the phishing SMS:*\n{url_lines}\n"
+                        f"Do not click these links.\n"
+                    )
+                break
 
     icon          = "🚨" if chain["severity"] == "CRITICAL" else "⚠️"
     signals_block = "\n".join(lines) if lines else "→ Multiple signals detected"
+
+    if chain["severity"] == "CRITICAL":
+        action_block = (
+            f"*Act immediately — in this order:*\n"
+            f"{_SESSIONS_INLINE}\n\n"
+            f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
+            f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
+            f"4️⃣ Do not enter any one-time codes you receive"
+        )
+    else:
+        action_block = (
+            f"*Act immediately — in this order:*\n"
+            f"1️⃣ Reply *SESSIONS* — revoke all active sessions before changing passwords\n"
+            f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
+            f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
+            f"4️⃣ Do not enter any one-time codes you receive"
+        )
+
     return (
         f"{icon} *{chain['severity']} — Coordinated Attack Detected*\n\n"
         f"RelayShield has identified a *{chain['label']}* attack pattern "
         f"targeting your identity.\n\n"
-        f"*Signals detected:*\n{signals_block}\n\n"
+        f"*Signals detected:*\n{signals_block}\n"
+        f"{timeline}"
+        f"{url_block}\n"
         f"*What this means:*\n{chain['what']}\n\n"
-        f"*Act immediately — in this order:*\n"
-        f"1️⃣ Reply *SESSIONS* — revoke all active sessions before changing passwords\n"
-        f"2️⃣ Reply *SWEEP* — close email backdoors the attacker may have planted\n"
-        f"3️⃣ Reply *PHONE* — lock your SIM against further swaps or ports\n"
-        f"4️⃣ Do not enter any one-time codes you receive\n\n"
+        f"{action_block}\n\n"
         f"🛡️ RelayShield — Coordinated Attack Detection"
     )
 

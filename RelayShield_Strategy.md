@@ -5,7 +5,6 @@
 
 ## Table of Contents
 
-- [18. Partner Distribution Model](#18-partner-distribution-model)
 - [1. Product Overview](#1-product-overview)
   - [Core Positioning Statement](#core-positioning-statement)
   - [Supporting Taglines](#supporting-taglines)
@@ -132,6 +131,7 @@
   - [Week 2 — WhatsApp Alert Delivery](#week-2--whatsapp-alert-delivery-)
   - [Week 3 — AI Remediation + Email Security Sweep](#week-3--ai-remediation--email-security-sweep-)
 - [17. Secrets Manager Keys](#17-secrets-manager-keys)
+- [18. Partner Distribution Model](#18-partner-distribution-model)
 
 ---
 

@@ -5,6 +5,7 @@
 
 ## Table of Contents
 
+- [18. Partner Distribution Model](#18-partner-distribution-model)
 - [1. Product Overview](#1-product-overview)
   - [Core Positioning Statement](#core-positioning-statement)
   - [Supporting Taglines](#supporting-taglines)
@@ -2261,13 +2262,14 @@ A native app is not a conversation replacement — it is a status and history la
 
 **How it works:** Every alert-generating event — breach detection, SIM swap, suspicious SMS forwarded by the user, unexpected OTP received — is recorded as a timestamped signal on the user's record in a 72-hour rolling event window. When two signals matching a known attack chain co-occur within that window, RelayShield fires a separate composite CRITICAL or HIGH alert identifying the correlated pattern, naming the attack chain, and delivering a unified cross-signal remediation sequence.
 
-**Three attack chains detected at launch:**
+**Four attack chains detected at launch:**
 
 | Chain | Trigger | Severity | What it means |
 |---|---|---|---|
 | Smishing → SIM Swap | Suspicious SMS forwarded + SIM swap within 72 hrs | CRITICAL | Attacker captured credentials via phishing link, then swapped SIM to intercept 2FA |
 | Breach + SIM Swap | Breach alert fired + SIM swap within 72 hrs | CRITICAL | Attacker holds both password and phone control — all SMS 2FA compromised |
 | Breach + OTP Interception | Breach alert fired + user reports unexpected OTP | HIGH | Active credential stuffing attempt in progress right now |
+| Domain Phishing → Breach | Lookalike domain detected + breach alert within 72 hrs | CRITICAL | Attacker registered impersonation domain and has already exfiltrated credentials — likely phishing campaign in progress targeting customers or employees |
 
 **Why this is a durable moat:**
 
@@ -2280,7 +2282,21 @@ A native app is not a conversation replacement — it is a status and history la
 - `recent_signals` list attribute on `relayshield_users` — self-pruning, entries older than 72 hrs discarded on every write
 - `last_coordinated_alert_at` field — 48-hr dedup prevents repeat composite alerts for the same user
 - Signal hooks wrapped in try/except — correlation engine failure never affects primary alert delivery
-- Deployed across `relayshield-breach-check`, `relayshield-sim-swap-monitor`, `relayshield-whatsapp-webhook`
+- Deployed across `relayshield-breach-check`, `relayshield-sim-swap-monitor`, `relayshield-whatsapp-webhook`, `relayshield-domain-monitor`
+
+**Near-term evolution: Predictive Alerts**
+
+The correlation engine currently fires after a chain completes — two signals have already arrived. The natural next step is inverting this logic to fire pre-chain warnings the moment the first signal arrives, before the second signal completes the attack.
+
+*Example:* When a `breach_alert` is recorded, immediately append: *"Credential breaches are frequently followed by SIM swap attempts within 72 hours — consider locking your SIM now before an attacker can use your exposed password to social-engineer your carrier."*
+
+This requires zero new infrastructure — the `ATTACK_CHAINS` table already encodes which signals co-occur. Inverting it is a lightweight addition to each Lambda's alert delivery path. Estimated build: 1–2 hours. Impact: users receive actionable warnings before the attack chain completes rather than after.
+
+**Long-term evolution: Third-Party API Monetization**
+
+The `recent_signals` dataset — breach events, SIM swap detections, suspicious SMS submissions, domain lookalike detections — becomes a proprietary threat intelligence asset at scale. Aggregated and anonymized across thousands of users, this data reveals attack campaign timing, co-occurrence patterns, and regional threat clustering that no individual organization can observe alone.
+
+Target buyers: MSSPs, cyber insurers pricing risk, carriers detecting campaign-level SIM swap fraud, compliance platforms. Model: per-call API pricing ($0.01–0.05/call) or monthly subscription ($299–999/month). Requires explicit user consent architecture and aggregation thresholds to prevent re-identification before any data is exposed. Scale prerequisite: meaningful statistical signal requires 5,000+ active users before the dataset has commercial value. See Section 10b Layer 3 for pricing detail.
 
 ---
 
@@ -2377,9 +2393,11 @@ Any carrier or MSP selling MDR to SMBs has a visible gap: the business owner's *
 
 **Threat Intelligence API**
 - Expose anonymized breach pattern data and remediation outcome data via REST API
-- Target: SIEMs, security platforms (Splunk, Datadog), insurance actuaries, compliance tools
+- Target: SIEMs, security platforms (Splunk, Datadog), insurance actuaries, compliance tools, MSSPs, carriers detecting campaign-level SIM swap fraud
 - Model: $0.01-0.05 per API call, or $299-999/month subscription tier
-- Unique data asset: no other provider has breach detection + remediation outcome + telecom signal combined
+- Unique data asset: no other provider has breach detection + remediation outcome + telecom signal + domain lookalike correlation combined
+- **Prerequisites before building:** (1) Explicit user consent at onboarding for anonymized data use; (2) Aggregation thresholds preventing re-identification (cohort-level only, minimum group size); (3) Separate data processing agreements for B2B API customers (GDPR/CCPA); (4) Scale gate — dataset has commercial value at ~5,000+ active users; this is a Series A conversation, not an MVP feature
+- Foundation data already collected from Day 1 via `recent_signals` — see Section 10c for dataset architecture
 
 **Anonymized Risk Benchmarks**
 - Sell aggregated risk scoring data to research institutions, regulators, insurance actuaries
@@ -3060,6 +3078,68 @@ When SMB revenue justifies a separate buyer journey:
 - ✅ Cross-account password risk detection
 - ✅ SSN, passport, driver's licence breach field detection via HIBP DataClasses
 - ✅ relayshield/anthropic_api_key (Secrets Manager)
+
+---
+
+## 18. Partner Distribution Model
+
+*Added May 2026 — channel strategy for MSP, consultant, and affiliate partners.*
+
+### Bounty & Revenue Share Model
+
+Three tiers scaled by partner commitment and volume.
+
+---
+
+### Tier 1 — Referral Agent (individual, low commitment)
+
+- **Model:** Flat bounty per converted subscriber
+- **Monthly subscriber:** $25 per conversion
+- **Annual subscriber:** $75 per conversion
+- **No ongoing revenue share** — simple, easy to explain, zero accounting complexity
+- **Best for:** Square/Toast consultants, bookkeepers, SCORE mentors, individual IT freelancers
+
+---
+
+### Tier 2 — Affiliate Partner (active, ongoing)
+
+- **Model:** 20% recurring commission for 12 months on every subscriber referred
+- **Business Starter + Domain ($24.99/mo):** $5/month per subscriber × 12 months = **$60/customer**
+- **Business Basic ($89.99/mo):** $18/month per subscriber × 12 months = **$216/customer**
+- **Best for:** Accountants, consultants, small MSPs who want passive recurring income
+
+---
+
+### Tier 3 — Reseller / MSP (white-glove, volume)
+
+**Option A — Cost-plus model:**
+- MSP pays 30% below retail, sells at their own margin
+- Example: Business Basic costs MSP $63/mo, sells at $89.99, keeps $27/seat/month
+- MSP owns the customer relationship
+
+**Option B — Commission model:**
+- 40% recurring commission with co-branded onboarding materials
+- RelayShield owns the billing relationship
+
+**Best for:** Established MSPs wanting to own the customer relationship and bundle into managed security stack
+
+---
+
+### Launch Sequence
+
+**Phase 1 — Tier 1 only (launch now, zero infrastructure)**
+- Issue a UTM-tracked Stripe payment link per partner
+- Manual payout via Venmo / Zelle / Stripe
+- No commission tracking software needed
+- Target: Square/Toast consultants, bookkeepers, SCORE mentors
+
+**Phase 2 — Graduate top performers to Tier 2**
+- Once 3–5 active referrers generating consistent volume
+- Implement lightweight affiliate tracking (e.g. Rewardful, $49/mo)
+
+**Phase 3 — Tier 3 MSP programme**
+- After first 2–3 Tier 2 partners validated
+- Co-branded materials, MSP pricing sheet, partner portal
 
 ---
 

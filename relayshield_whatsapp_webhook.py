@@ -23,6 +23,8 @@ Reply commands (ACTIVE users):
   CALL     — User received a suspicious call
   VERIFY   — Personal Verification Protocol: four rules to set before an attack (callback rule,
              OTP rule, family safe word, wire transfer rule)
+  RESOLVED — User confirms remediation complete after a breach incident — clears breach_alert
+             signals from recent_signals to prevent re-triggering coordinated attack alerts
   HELP     — List all available commands
   ADD +1XXXXXXXXXX — Business tier: add employee phone number (admin only)
 
@@ -1298,6 +1300,94 @@ def _fmt_delta(seconds: float) -> str:
     return f"{h}h {m}m ago" if h else f"{m}m ago"
 
 
+PREDICTIVE_WARNINGS = {
+    "breach_sim_swap": {
+        "breach_alert": (
+            "⚠️ *Heads up:* Credential breaches are frequently followed by SIM swap attempts "
+            "within 72 hours. Attackers use stolen credentials to pass carrier identity checks.\n\n"
+            "Contact your carrier now and request a *SIM lock / port freeze* on your account."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* SIM swap activity has been detected on your line. Attackers who "
+            "already hold breached credentials sometimes trigger a SIM swap to intercept your "
+            "2FA codes and complete account takeovers.\n\n"
+            "Check your email and banking apps for unauthorised login attempts immediately."
+        ),
+    },
+    "smishing_to_sim_swap": {
+        "suspicious_sms": (
+            "⚠️ *Heads up:* Smishing campaigns are sometimes the first step in a SIM swap attack. "
+            "Attackers harvest personal details from victims who click links, then use that "
+            "information to impersonate you with your carrier.\n\n"
+            "Do not click any links in unexpected texts, and consider placing a *SIM lock* on "
+            "your account as a precaution."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap attempt has been detected. If you recently received "
+            "suspicious texts, the two events may be connected — attackers often use smishing "
+            "to collect the personal details needed to pass carrier security checks.\n\n"
+            "Report the suspicious text to your carrier immediately."
+        ),
+    },
+    "breach_otp_intercept": {
+        "breach_alert": (
+            "⚠️ *Heads up:* After a credential breach, attackers sometimes trigger unexpected "
+            "OTP codes to test which accounts they can access. If you receive any login codes "
+            "you did not request, reply *OTP* immediately."
+        ),
+        "otp_warning": (
+            "⚠️ *Heads up:* To trigger this OTP, someone already has your username and password "
+            "for that account. They are now trying to get past your 2FA.\n\n"
+            "→ Change the password for that account immediately — before they try again\n"
+            "→ If you reuse that password elsewhere, change it on those accounts too — reply *REUSE* for a guided check\n"
+            "→ Switch that account's 2FA from SMS codes to an authenticator app if possible"
+        ),
+    },
+    "domain_phishing_breach": {
+        "domain_lookalike": (
+            "⚠️ *Heads up:* A lookalike domain has been registered near your business. "
+            "Attackers who set up phishing domains often pair them with credential breach "
+            "campaigns — your customers or employees may receive convincing phishing emails "
+            "from this domain within the next 24–72 hours.\n\n"
+            "Warn your team not to click unexpected login links."
+        ),
+        "breach_alert": (
+            "⚠️ *Heads up:* A credential breach has been detected while a lookalike domain "
+            "is active near your business. Attackers may direct breach victims to the fake "
+            "domain to harvest additional credentials.\n\n"
+            "Ensure all staff have changed passwords and enabled MFA."
+        ),
+    },
+}
+
+
+def check_and_warn_predictive(
+    user_id: str,
+    new_signal_type: str,
+    signals: list,
+    to_number: str,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    max_warnings: int | None = None,
+) -> None:
+    signal_types = {s.get("type") for s in signals if isinstance(s, dict)}
+    sent = 0
+    for chain in ATTACK_CHAINS:
+        if max_warnings is not None and sent >= max_warnings:
+            break
+        required = set(chain["signals"])
+        if new_signal_type not in required:
+            continue
+        present = required & signal_types
+        if len(present) != 1:
+            continue
+        warning = PREDICTIVE_WARNINGS.get(chain["chain"], {}).get(new_signal_type)
+        if warning:
+            send_whatsapp(to_number, warning, account_sid, auth_token, from_number)
+            sent += 1
+
+
 def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
     """
     Append a timestamped security signal to recent_signals on the user record.
@@ -1362,6 +1452,21 @@ def _build_coordinated_alert(chain: dict, signals: list) -> str:
         except Exception:
             pass
 
+    # Lookalike domains for domain_phishing_breach
+    lookalike_block = ""
+    if chain["chain"] == "domain_phishing_breach":
+        for sig in relevant:
+            if sig.get("type") == "domain_lookalike":
+                lookalikes = sig.get("meta", {}).get("lookalikes", [])
+                if lookalikes:
+                    domain_lines = "\n".join(f"  • *{d}*" for d in lookalikes[:5])
+                    lookalike_block = (
+                        f"\n*Impersonating domain(s) detected:*\n{domain_lines}\n"
+                        f"These domains may already be sending phishing emails "
+                        f"to your employees and customers.\n"
+                    )
+                break
+
     # Attacker URLs for smishing_to_sim_swap
     url_block = ""
     if chain["chain"] == "smishing_to_sim_swap":
@@ -1402,9 +1507,11 @@ def _build_coordinated_alert(chain: dict, signals: list) -> str:
         f"targeting your identity.\n\n"
         f"*Signals detected:*\n{signals_block}\n"
         f"{timeline}"
+        f"{lookalike_block}"
         f"{url_block}\n"
         f"*What this means:*\n{chain['what']}\n\n"
         f"{action_block}\n\n"
+        f"Reply *RESOLVED* once you have completed the steps above to clear this alert.\n\n"
         f"🛡️ RelayShield — Coordinated Attack Detection"
     )
 
@@ -1560,32 +1667,51 @@ def msg_onboarding_complete(email_limit: int, is_business: bool) -> str:
 
 def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool = False, has_seats: bool = True) -> str:
     commands = (
-        "*Available commands:*\n\n"
-        "• *SWEEP* — 5-minute Email Security Sweep (closes backdoors that survive password resets)\n"
-        "• *RESET* — Strong password guide (run after completing your Email Security Sweep)\n"
-        "• *SESSIONS* — Revoke active sessions and OAuth tokens across Google, Microsoft, and social media\n"
-        "• *OAUTH* — Audit third-party apps connected to your Google and Microsoft accounts\n"
-        "• *REUSE* — Check cross-account password reuse step by step\n"
-        "• *MANAGER* — Get a free Bitwarden password manager setup guide\n"
-        "• *PHONE* — Carrier hardening steps to protect your number from SIM swap and smishing\n"
-        "• *OTP* — You received an unexpected verification code — get immediate steps\n"
-        "• *WASCAM* — You received a suspicious WhatsApp message (bank, carrier, or family impersonation)\n"
-        "• *SMS* — Forward a suspicious text for analysis (reply SMS followed by the message)\n"
-        "• *EMAIL* — Paste a suspicious email body for link analysis (reply EMAIL followed by the text)\n"
-        "• *ATTACH* — Scan a suspicious file or URL (reply ATTACH followed by URL, or send the file directly)\n"
-        "• *SAFE* — Confirm you have read a vishing or session hijacking warning\n"
-        "• *CALL* — You received a suspicious call — get immediate steps\n"
-        "• *VERIFY* — Your personal verification protocol (callback rule, OTP rule, safe word, wire transfer rule)\n"
+        "*🛡️ RelayShield — Commands*\n\n"
+
+        "*🔐 Breach Response*\n"
+        "• *SWEEP* — Close email backdoors (forwarding rules, filters, sessions)\n"
+        "• *SESSIONS* — Revoke active sessions across Google, Microsoft, social media\n"
+        "• *OAUTH* — Audit third-party app access\n"
+        "• *RESET* — Strong password guide\n"
+        "• *REUSE* — Check cross-account password reuse\n"
+        "• *MANAGER* — Free password manager setup guide\n"
+        "• *RESOLVED* — Mark an incident as resolved\n\n"
+
+        "*🚨 Threat Analysis*\n"
+        "• *SMS* <text> — Analyse a suspicious text message\n"
+        "• *EMAIL* <text> — Analyse a suspicious email\n"
+        "• *ATTACH* <url> — Scan a suspicious file or URL\n"
+        "• *OTP* — You received an unexpected verification code\n"
+        "• *WASCAM* — Suspicious WhatsApp, call, or browser scam\n"
+        "• *CALL* — You received a suspicious phone call\n"
+        "• *VERIFY* — Callback rule, OTP rule, safe word, wire transfer protocol\n"
+        "• *SAFE* — Confirm you have read a security warning\n\n"
+
+        "*📡 Phone Protection*\n"
+        "• *PHONE* — Carrier hardening against SIM swap and smishing\n"
     )
+
     if is_business and not is_employee and has_seats:
-        commands += "• *ADD +1XXXXXXXXXX Name* — Add a team member for monitoring\n"
-        commands += "• *REMOVE +1XXXXXXXXXX* — Remove a team member and deactivate their monitoring\n"
-        commands += "• *STATUS* — View your team's onboarding and monitoring status\n"
+        commands += (
+            "\n*🏢 Team Management*\n"
+            "• *ADD +1XXXXXXXXXX Name* — Add a team member\n"
+            "• *REMOVE +1XXXXXXXXXX* — Remove a team member\n"
+            "• *STATUS* — View team onboarding and monitoring status\n"
+        )
+
     if is_domain_tier:
-        commands += "• *DOMAIN* — View your business domain security status\n"
-        commands += "• *DOMAIN SCAN* — Run a full domain scan (lookalikes, MX, expiry)\n"
+        commands += (
+            "\n*🌐 Domain Security*\n"
+            "• *DOMAIN* — Your domain security status\n"
+            "• *DOMAIN SCAN* — Run a full scan (lookalikes, MX records, expiry)\n"
+        )
         if not is_employee:
-            commands += "• *DOMAIN REGISTER domain.com* — Add a domain to monitor\n"
+            commands += (
+                "• *DOMAIN REGISTER domain.com* — Add a domain to monitor\n"
+                "• *DOMAIN WARN lookalike.com* — Broadcast a phishing domain warning\n"
+            )
+
     commands += "\nReply any command to get started."
     return commands
 
@@ -1833,6 +1959,24 @@ def msg_vishing_safe() -> str:
     )
 
 
+def msg_resolved() -> str:
+    """
+    RESOLVED command — user confirms they have completed remediation steps.
+    Clears breach_alert signals from recent_signals to prevent re-triggering
+    coordinated attack alerts for the same incident.
+    """
+    return (
+        "✅ *Incident marked as resolved.*\n\n"
+        "Your breach alert signals have been cleared. RelayShield will continue "
+        "monitoring your accounts and will alert you if new threats are detected.\n\n"
+        "*Stay protected:*\n"
+        "→ Run *SWEEP* any time to re-check for email backdoors\n"
+        "→ Run *REUSE* to verify no other accounts are at risk\n"
+        "→ Run *OAUTH* to audit connected apps\n\n"
+        "🛡️ RelayShield"
+    )
+
+
 def msg_verify() -> str:
     """
     VERIFY command — Personal Verification Protocol.
@@ -1917,12 +2061,12 @@ def msg_unexpected_otp_part2() -> str:
     Kept under 1600 chars to comply with Twilio WhatsApp message limit.
     """
     return (
-        "*Step 3 — Lock the account immediately.*\n"
+        "*🔒 Lock the account immediately*\n"
         "→ Change your password for that account now\n"
         "→ Check for active sessions you don't recognise — reply *SESSIONS* for a guided walkthrough\n"
         "→ If it's your bank — call the fraud line on the back of your card\n"
         "→ If it's your mobile carrier — call them immediately; this may be a SIM swap attempt\n\n"
-        "*Step 4 — Run your Email Security Sweep.*\n"
+        "*📧 Run your Email Security Sweep*\n"
         "If an attacker has your credentials, they may also have inbox access. "
         "Reply *SWEEP* to check for forwarding rules and backdoors.\n\n"
         "Reply *CALL* if you also received a suspicious phone call alongside this OTP.\n\n"
@@ -1992,6 +2136,43 @@ def msg_wascam_part2() -> str:
         "→ Report to WhatsApp: open the chat → tap the contact name → Report\n"
         "→ Report to the FTC (US): reportfraud.ftc.gov\n\n"
 
+        "— RelayShield"
+    )
+
+
+def msg_wascam_part3() -> str:
+    """
+    Part 3 of 3: Browser-based social engineering patterns.
+    Covers fake CAPTCHAs (SMS charge fraud), fake browser security alerts, and ClickFix.
+    Kept under 1600 chars to comply with Twilio WhatsApp message limit.
+    """
+    return (
+        "*🌐 Browser scams — when a webpage tries to manipulate you*\n\n"
+        "These attacks happen in your browser, not WhatsApp. "
+        "The pattern is the same: manufactured urgency to make you act before you think.\n\n"
+
+        "*📱 Fake CAPTCHA — SMS charge fraud*\n"
+        "A webpage asks you to 'prove you're human' by sending a text message. "
+        "Tapping the button opens your SMS app pre-filled with international numbers. "
+        "Each 'confirmation step' sends another text — victims can be charged up to $30 "
+        "in international SMS fees before the bill arrives weeks later.\n"
+        "→ Legitimate CAPTCHAs never ask you to send a text message\n"
+        "→ Close the page immediately\n\n"
+
+        "*🖥️ Fake browser security alert*\n"
+        "A full-screen pop-up claims your computer is infected and displays a phone number "
+        "to call 'immediately'. The number connects to a scam call centre.\n"
+        "→ Legitimate browsers and Microsoft never display phone numbers in security alerts\n"
+        "→ Close the tab — if the page blocks closing, force-quit the browser\n\n"
+
+        "*💻 ClickFix — paste-and-run attack*\n"
+        "A page instructs you to open your terminal or Windows Run dialog and paste a "
+        "command 'to fix a problem' or 'verify your identity'. The command installs malware.\n"
+        "→ No legitimate website will ever ask you to run a command on your computer\n"
+        "→ Close the page immediately and do not paste anything\n\n"
+
+        "The rule across all three: *legitimate services never ask you to send a text, "
+        "run a command, or call a number to prove you are human.*\n\n"
         "— RelayShield"
     )
 
@@ -2482,12 +2663,30 @@ def handle_active_message(
         send_whatsapp(to_number, msg_verify(), account_sid, auth_token, from_number)
         return "verify_protocol_sent"
 
+    # --- RESOLVED (user confirms remediation complete — clears breach signals) ---
+    if body == "RESOLVED":
+        try:
+            table    = dynamodb.Table(USERS_TABLE)
+            existing = table.get_item(Key={"user_id": user_id}).get("Item", {}).get("recent_signals", [])
+            cleared  = [s for s in existing if isinstance(s, dict) and s.get("type") != "breach_alert"]
+            table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="SET recent_signals = :s",
+                ExpressionAttributeValues={":s": cleared},
+            )
+            logger.info("Breach signals cleared — user_id=%s remaining_signals=%d", user_id, len(cleared))
+        except Exception as exc:
+            logger.exception("Failed to clear breach signals user_id=%s: %s", user_id, exc)
+        send_whatsapp(to_number, msg_resolved(), account_sid, auth_token, from_number)
+        return "incident_resolved"
+
     # --- OTP (user received an unexpected OTP they did not request) ---
     if body == "OTP":
         send_whatsapp(to_number, msg_unexpected_otp_part1(), account_sid, auth_token, from_number)
         send_whatsapp(to_number, msg_unexpected_otp_part2(), account_sid, auth_token, from_number)
         try:
             signals = record_signal(user_id, "otp_warning")
+            check_and_warn_predictive(user_id, "otp_warning", signals, to_number, account_sid, auth_token, from_number)
             check_and_fire_correlation(user_id, signals, to_number, account_sid, auth_token, from_number)
         except Exception as exc:
             logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
@@ -2497,6 +2696,7 @@ def handle_active_message(
     if body == "WASCAM":
         send_whatsapp(to_number, msg_wascam_part1(), account_sid, auth_token, from_number)
         send_whatsapp(to_number, msg_wascam_part2(), account_sid, auth_token, from_number)
+        send_whatsapp(to_number, msg_wascam_part3(), account_sid, auth_token, from_number)
         return "wascam_reported"
 
     # --- SMS with no content — prompt user to include the message ---
@@ -2538,6 +2738,7 @@ def handle_active_message(
         )
         try:
             signals = record_signal(user_id, "suspicious_sms", {"urls_found": len(urls), "urls": urls[:5]})
+            check_and_warn_predictive(user_id, "suspicious_sms", signals, to_number, account_sid, auth_token, from_number)
             check_and_fire_correlation(user_id, signals, to_number, account_sid, auth_token, from_number)
         except Exception as exc:
             logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
@@ -3205,6 +3406,16 @@ def handler(event, context):
         return {"statusCode": 200, "body": "No user found"}
 
     onboarding_state = user.get("onboarding_state", STATE_ACTIVE)
+
+    # --- Clear SMS fallback flag — inbound message proves WhatsApp session is active ---
+    if user.get("pending_sms_fallback"):
+        try:
+            dynamodb.Table(USERS_TABLE).update_item(
+                Key={"user_id": user["user_id"]},
+                UpdateExpression="REMOVE pending_sms_fallback, pending_sms_fallback_at",
+            )
+        except Exception as exc:
+            logger.warning("Failed to clear pending_sms_fallback: %s", exc)
 
     # --- Route by state ---
     if onboarding_state == STATE_EMAIL_1:

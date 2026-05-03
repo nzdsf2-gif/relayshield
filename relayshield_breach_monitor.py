@@ -964,6 +964,95 @@ def _fmt_delta(seconds: float) -> str:
     return f"{h}h {m}m ago" if h else f"{m}m ago"
 
 
+PREDICTIVE_WARNINGS = {
+    "breach_sim_swap": {
+        "breach_alert": (
+            "⚠️ *Heads up:* Credential breaches are frequently followed by SIM swap attempts "
+            "within 72 hours — attackers use stolen passwords to social-engineer your carrier.\n"
+            "Consider locking your SIM now as a precaution. Reply *PHONE* for carrier steps."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap alongside a recent breach alert is a known coordinated "
+            "attack pattern. Reply *SWEEP* immediately to close email backdoors."
+        ),
+    },
+    "smishing_to_sim_swap": {
+        "suspicious_sms": (
+            "⚠️ *Heads up:* Phishing links are frequently used to capture credentials before "
+            "a SIM swap attempt. Consider locking your SIM as a precaution. Reply *PHONE* for carrier steps."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap following a suspicious message is a known attack chain. "
+            "Reply *SWEEP* immediately and check for unauthorised account access."
+        ),
+    },
+    "breach_otp_intercept": {
+        "breach_alert": (
+            "⚠️ *Heads up:* If you receive an unexpected verification code in the next 72 hours, "
+            "reply *OTP* immediately — it may indicate an active account takeover attempt."
+        ),
+        "otp_warning": (
+            "⚠️ *Heads up:* To trigger this OTP, someone already has your username and password "
+            "for that account. They are now trying to get past your 2FA.\n\n"
+            "→ Change the password for that account immediately — before they try again\n"
+            "→ If you reuse that password elsewhere, change it on those accounts too — reply *REUSE* for a guided check\n"
+            "→ Switch that account's 2FA from SMS codes to an authenticator app if possible"
+        ),
+    },
+    "domain_phishing_breach": {
+        "domain_lookalike": (
+            "⚠️ *Heads up:* Lookalike domains are used to send phishing emails that steal "
+            "credentials. Forward any suspicious emails with *EMAIL* and reply *SWEEP* to "
+            "ensure your email backdoors are closed."
+        ),
+        "breach_alert": (
+            "⚠️ *Heads up:* A credential breach alongside an active lookalike domain is a "
+            "high-risk combination — the domain may be actively targeting your accounts. "
+            "Reply *SWEEP* immediately."
+        ),
+    },
+}
+
+
+def check_and_warn_predictive(
+    user_id: str,
+    new_signal_type: str,
+    signals: list,
+    to_number: str,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    max_warnings: int | None = None,
+) -> None:
+    """
+    After recording a new signal, check if it is the first signal in any known
+    attack chain. If so, send a short predictive warning before the chain completes.
+    Only fires when exactly one of the required chain signals is present — the
+    full coordinated alert fires when both signals are present via check_and_fire_correlation.
+    max_warnings caps the number of warnings sent per call (used for breach_alert
+    which can match multiple chains simultaneously).
+    """
+    signal_types = {s.get("type") for s in signals if isinstance(s, dict)}
+    sent = 0
+    for chain in ATTACK_CHAINS:
+        if max_warnings is not None and sent >= max_warnings:
+            break
+        required = set(chain["signals"])
+        if new_signal_type not in required:
+            continue
+        present = required & signal_types
+        if len(present) != 1:
+            continue
+        warning = PREDICTIVE_WARNINGS.get(chain["chain"], {}).get(new_signal_type)
+        if warning:
+            send_whatsapp_alert(account_sid, auth_token, from_number, to_number, warning)
+            logger.info(
+                "Predictive warning sent — user_id=%s chain=%s trigger=%s",
+                user_id, chain["chain"], new_signal_type,
+            )
+            sent += 1
+
+
 def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
     """
     Append a timestamped security signal to recent_signals on the user record.
@@ -1504,11 +1593,16 @@ def process_email(
                     "Freeform follow-up failed (code=%s) for email_id=%s.",
                     twilio_code, email_id,
                 )
-        # Record breach_alert signal and check for coordinated attack chain
+        # Record breach_alert signal, fire predictive warning, check for coordinated chain
         if sent:
             try:
                 signals = record_signal(
                     user_id, "breach_alert", {"breach_count": len(alertable)},
+                )
+                check_and_warn_predictive(
+                    user_id, "breach_alert", signals,
+                    to_number, account_sid, auth_token, from_number,
+                    max_warnings=2,
                 )
                 check_and_fire_correlation(
                     user_id, signals, to_number, account_sid, auth_token, from_number,

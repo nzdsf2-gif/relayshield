@@ -1,7 +1,7 @@
 """
 RelayShield Domain Monitor Lambda
 
-Daily EventBridge schedule — scans Business Basic / Shield / Shield Pro domains for:
+Daily EventBridge schedule — scans Starter+Domain / Business Basic / Shield / Shield Pro domains for:
   1. Typosquat/lookalike domain registrations (custom permutation + parallel socket DNS)
   2. MX record changes (Cloudflare DNS-over-HTTPS)
   3. Domain expiry risk (RDAP API — alerts at 30, 14, 7 days)
@@ -364,6 +364,94 @@ def _build_coordinated_alert(chain: dict, signals: list) -> str:
         f"{action_block}\n\n"
         f"🛡️ RelayShield — Coordinated Attack Detection"
     )
+
+
+PREDICTIVE_WARNINGS = {
+    "breach_sim_swap": {
+        "breach_alert": (
+            "⚠️ *Heads up:* Credential breaches are frequently followed by SIM swap attempts "
+            "within 72 hours. Attackers use stolen credentials to pass carrier identity checks.\n\n"
+            "Contact your carrier now and request a *SIM lock / port freeze* on your account."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* SIM swap activity has been detected on your line. Attackers who "
+            "already hold breached credentials sometimes trigger a SIM swap to intercept your "
+            "2FA codes and complete account takeovers.\n\n"
+            "Check your email and banking apps for unauthorised login attempts immediately."
+        ),
+    },
+    "smishing_to_sim_swap": {
+        "suspicious_sms": (
+            "⚠️ *Heads up:* Smishing campaigns are sometimes the first step in a SIM swap attack. "
+            "Attackers harvest personal details from victims who click links, then use that "
+            "information to impersonate you with your carrier.\n\n"
+            "Do not click any links in unexpected texts, and consider placing a *SIM lock* on "
+            "your account as a precaution."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap attempt has been detected. If you recently received "
+            "suspicious texts, the two events may be connected — attackers often use smishing "
+            "to collect the personal details needed to pass carrier security checks.\n\n"
+            "Report the suspicious text to your carrier immediately."
+        ),
+    },
+    "breach_otp_intercept": {
+        "breach_alert": (
+            "⚠️ *Heads up:* After a credential breach, attackers sometimes trigger unexpected "
+            "OTP codes to test which accounts they can access. If you receive any login codes "
+            "you did not request, reply *OTP* immediately."
+        ),
+        "otp_warning": (
+            "⚠️ *Heads up:* To trigger this OTP, someone already has your username and password "
+            "for that account. They are now trying to get past your 2FA.\n\n"
+            "→ Change the password for that account immediately — before they try again\n"
+            "→ If you reuse that password elsewhere, change it on those accounts too — reply *REUSE* for a guided check\n"
+            "→ Switch that account's 2FA from SMS codes to an authenticator app if possible"
+        ),
+    },
+    "domain_phishing_breach": {
+        "domain_lookalike": (
+            "⚠️ *Heads up:* A lookalike domain has been registered near your business. "
+            "Attackers who set up phishing domains often pair them with credential breach "
+            "campaigns — your customers or employees may receive convincing phishing emails "
+            "from this domain within the next 24–72 hours.\n\n"
+            "Warn your team not to click unexpected login links."
+        ),
+        "breach_alert": (
+            "⚠️ *Heads up:* A credential breach has been detected while a lookalike domain "
+            "is active near your business. Attackers may direct breach victims to the fake "
+            "domain to harvest additional credentials.\n\n"
+            "Ensure all staff have changed passwords and enabled MFA."
+        ),
+    },
+}
+
+
+def check_and_warn_predictive(
+    user_id: str,
+    new_signal_type: str,
+    signals: list,
+    to_number: str,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    max_warnings: int | None = None,
+) -> None:
+    signal_types = {s.get("type") for s in signals if isinstance(s, dict)}
+    sent = 0
+    for chain in ATTACK_CHAINS:
+        if max_warnings is not None and sent >= max_warnings:
+            break
+        required = set(chain["signals"])
+        if new_signal_type not in required:
+            continue
+        present = required & signal_types
+        if len(present) != 1:
+            continue
+        warning = PREDICTIVE_WARNINGS.get(chain["chain"], {}).get(new_signal_type)
+        if warning:
+            send_whatsapp(to_number, warning, account_sid, auth_token, from_number)
+            sent += 1
 
 
 def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
@@ -890,7 +978,7 @@ def build_lookalike_alert(
             best_abuse_email = enc["abuse_email"]
             best_registrar   = enc.get("registrar", "")
         if gsb:
-            status = "🔴 *ACTIVE — flagged as malicious by Google Safe Browsing*"
+            status = "🔴 *ACTIVE — flagged as malicious by RelayShield threat intelligence*"
             critical_domain = d
         elif ct:
             status = f"🟠 *ACTIVE — TLS certificate issued {ct_date}* (live HTTPS infrastructure)"
@@ -926,7 +1014,7 @@ def build_lookalike_alert(
         f"Lookalike domains are used to send phishing emails that appear to come from your "
         f"business — targeting customers, {'employees, ' if has_employees else ''}and vendors.\n\n"
         f"*Immediate steps:*\n"
-        f"1. Do not visit the domain — paste it into Google's Safe Browsing checker if needed\n"
+        f"1. Do not visit the domain — RelayShield has already checked it for active threats\n"
         f"2. Report to the registrar's abuse team{' — email below' if best_abuse_email else ''}\n"
         f"{team_step}"
         f"{abuse_block}\n"
@@ -1077,8 +1165,9 @@ def scan_domain(
                 ct_hit  = any(e.get("ct_recent")   for e in enrichment.values())
                 signals = record_signal(
                     user_id, "domain_lookalike",
-                    {"domain": domain, "count": len(new_lookalikes), "gsb_flagged": gsb_hit, "ct_active": ct_hit},
+                    {"domain": domain, "count": len(new_lookalikes), "lookalikes": new_lookalikes[:5], "gsb_flagged": gsb_hit, "ct_active": ct_hit},
                 )
+                check_and_warn_predictive(user_id, "domain_lookalike", signals, to_number, account_sid, auth_token, from_number)
                 check_and_fire_correlation(user_id, signals, to_number, account_sid, auth_token, from_number)
             except Exception as exc:
                 logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)

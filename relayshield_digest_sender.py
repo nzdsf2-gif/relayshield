@@ -32,6 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 import boto3
 from boto3.dynamodb.conditions import Attr
@@ -68,6 +69,14 @@ TWILIO_FROM_SECRET = "relayshield/twilio_whatsapp_number"
 TWILIO_MESSAGES_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 )
+
+# ---------------------------------------------------------------------------
+# Anthropic
+# ---------------------------------------------------------------------------
+
+ANTHROPIC_SECRET_NAME = "relayshield/anthropic_api_key"
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 # ---------------------------------------------------------------------------
 # Template
@@ -176,6 +185,58 @@ def get_twilio_credentials() -> tuple[str, str, str]:
     auth_token = get_secret_json(TWILIO_TOKEN_SECRET, "TWILIO_AUTH_TOKEN")
     from_number = get_secret_json(TWILIO_FROM_SECRET, "TWILIO_WHATSAPP_NUMBER")
     return account_sid, auth_token, from_number
+
+
+def generate_security_tip(month_name: str, year: int, fallback_month: int) -> str:
+    """
+    Call Claude Haiku to generate a fresh, current security tip for the digest.
+    Prompt is grounded in the current month so tips stay topical.
+    Falls back to the hardcoded MONTHLY_TIPS rotation on any failure.
+    Called once per digest run — not per user.
+    """
+    try:
+        api_key = get_secret(ANTHROPIC_SECRET_NAME)
+        prompt = (
+            f"Generate ONE concise, actionable security tip for a monthly security digest "
+            f"sent to SMB owners and individual users. Current month: {month_name} {year}.\n\n"
+            "Requirements:\n"
+            "- Focus on a specific, real attack vector relevant right now — choose from: "
+            "credential stuffing, SIM swap fraud, phishing, session hijacking, OAuth token abuse, "
+            "infostealer malware, business email compromise, fake invoice fraud, or similar\n"
+            "- Include ONE specific action the user can take immediately\n"
+            "- Where appropriate, end with one RelayShield command the user can reply with: "
+            "SWEEP, SESSIONS, REUSE, PHONE, OTP, OAUTH, ATTACH, or SMS\n"
+            "- Maximum 220 characters total\n"
+            "- Plain language, no bullet points, no jargon\n"
+            "- Do not start with 'Tip:' or any label — go straight to the content"
+        )
+
+        payload = json.dumps({
+            "model": ANTHROPIC_MODEL,
+            "max_tokens": 120,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode()
+
+        req = urllib.request.Request(
+            ANTHROPIC_API_URL,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            tip = data["content"][0]["text"].strip()
+            logger.info("Claude security tip generated for %s %d: %s", month_name, year, tip[:80])
+            return tip
+
+    except Exception as exc:
+        logger.warning("Claude tip generation failed — falling back to MONTHLY_TIPS: %s", exc)
+        return MONTHLY_TIPS.get(fallback_month, MONTHLY_TIPS[1])
 
 
 # ---------------------------------------------------------------------------
@@ -331,26 +392,25 @@ def send_whatsapp_template(
 # Digest content builders
 # ---------------------------------------------------------------------------
 
-def build_scan_summary(email_count: int, days_in_month: int) -> str:
+def build_scan_summary(email_count: int, days_in_month: int, month_name: str) -> str:
     """Build the scan summary line for the digest template."""
     scan_count = email_count * days_in_month
     word = "address" if email_count == 1 else "addresses"
-    return f"{email_count} email {word} monitored — {scan_count} scans completed"
+    return f"{email_count} email {word} monitored — {scan_count} scans completed in {month_name}"
 
 
-def build_status_line(breach_count: int) -> str:
+def build_status_line(breach_count: int, month_name: str) -> str:
     """Build the breach status line for the digest template."""
     if breach_count == 0:
-        return "✅ All clear — no breaches detected this month."
+        return f"✅ All clear — no new breaches detected in {month_name}."
     elif breach_count == 1:
         return (
-            "⚠️ 1 breach detected this month — remediation steps were sent "
-            "when it was found."
+            "⚠️ 1 known breach on record — remediation steps sent for all new detections."
         )
     else:
         return (
-            f"⚠️ {breach_count} breaches detected this month — remediation "
-            "steps were sent for each."
+            f"⚠️ {breach_count} known breaches on record — remediation steps sent "
+            "for all new detections."
         )
 
 
@@ -380,11 +440,16 @@ def lambda_handler(event, context):
         }
 
     now = datetime.now(timezone.utc)
-    month_name = now.strftime("%B")
-    year = now.year
-    month_num = now.month
-    days_in_month = calendar.monthrange(year, month_num)[1]
-    month_year = f"{month_name} {year}"
+    # Digest fires on the 1st — report on the previous (completed) month
+    if now.month == 1:
+        prev_month_num = 12
+        prev_year = now.year - 1
+    else:
+        prev_month_num = now.month - 1
+        prev_year = now.year
+    month_name     = datetime(prev_year, prev_month_num, 1).strftime("%B")
+    days_in_month  = calendar.monthrange(prev_year, prev_month_num)[1]
+    month_year     = f"{month_name} {prev_year}"
 
     logger.info(
         "Monthly digest starting — month=%s days_in_month=%d",
@@ -401,8 +466,8 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "Credential retrieval failed"}),
         }
 
-    # Get rotating tip for this month
-    monthly_tip = MONTHLY_TIPS.get(month_num, MONTHLY_TIPS[1])
+    # Generate security tip via Claude — falls back to MONTHLY_TIPS rotation on failure
+    monthly_tip = generate_security_tip(month_name, prev_year, prev_month_num)
 
     # Fetch all eligible users
     try:
@@ -462,8 +527,8 @@ def lambda_handler(event, context):
             breach_count = count_recent_breaches(user_id, days=30)
 
             # Build template variable values
-            scan_summary = build_scan_summary(email_count, days_in_month)
-            status_line = build_status_line(breach_count)
+            scan_summary = build_scan_summary(email_count, days_in_month, month_name)
+            status_line = build_status_line(breach_count, month_name)
 
             success = send_whatsapp_template(
                 to_number=to_number,

@@ -339,6 +339,95 @@ def _fmt_delta(seconds: float) -> str:
     return f"{h}h {m}m ago" if h else f"{m}m ago"
 
 
+PREDICTIVE_WARNINGS = {
+    "breach_sim_swap": {
+        "breach_alert": (
+            "⚠️ *Heads up:* Credential breaches are frequently followed by SIM swap attempts "
+            "within 72 hours — attackers use stolen passwords to social-engineer your carrier.\n"
+            "Consider locking your SIM now as a precaution. Reply *PHONE* for carrier steps."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap alongside a recent breach alert is a known coordinated "
+            "attack pattern. Reply *SWEEP* immediately to close email backdoors."
+        ),
+    },
+    "smishing_to_sim_swap": {
+        "suspicious_sms": (
+            "⚠️ *Heads up:* Phishing links are frequently used to capture credentials before "
+            "a SIM swap attempt. Consider locking your SIM as a precaution. Reply *PHONE* for carrier steps."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap following a suspicious message is a known attack chain. "
+            "Reply *SWEEP* immediately and check for unauthorised account access."
+        ),
+    },
+    "breach_otp_intercept": {
+        "breach_alert": (
+            "⚠️ *Heads up:* If you receive an unexpected verification code in the next 72 hours, "
+            "reply *OTP* immediately — it may indicate an active account takeover attempt."
+        ),
+        "otp_warning": (
+            "⚠️ *Heads up:* To trigger this OTP, someone already has your username and password "
+            "for that account. They are now trying to get past your 2FA.\n\n"
+            "→ Change the password for that account immediately — before they try again\n"
+            "→ If you reuse that password elsewhere, change it on those accounts too — reply *REUSE* for a guided check\n"
+            "→ Switch that account's 2FA from SMS codes to an authenticator app if possible"
+        ),
+    },
+    "domain_phishing_breach": {
+        "domain_lookalike": (
+            "⚠️ *Heads up:* Lookalike domains are used to send phishing emails that steal "
+            "credentials. Forward any suspicious emails with *EMAIL* and reply *SWEEP* to "
+            "ensure your email backdoors are closed."
+        ),
+        "breach_alert": (
+            "⚠️ *Heads up:* A credential breach alongside an active lookalike domain is a "
+            "high-risk combination — the domain may be actively targeting your accounts. "
+            "Reply *SWEEP* immediately."
+        ),
+    },
+}
+
+
+def check_and_warn_predictive(
+    user_id: str,
+    new_signal_type: str,
+    signals: list,
+    to_number: str,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    max_warnings: int | None = None,
+) -> None:
+    """
+    After recording a new signal, check if it is the first signal in any known
+    attack chain. If so, send a short predictive warning before the chain completes.
+    Only fires when exactly one of the required chain signals is present — the
+    full coordinated alert fires when both signals are present via check_and_fire_correlation.
+    max_warnings caps the number of warnings sent per call (used for breach_alert
+    which can match multiple chains simultaneously).
+    """
+    signal_types = {s.get("type") for s in signals if isinstance(s, dict)}
+    sent = 0
+    for chain in ATTACK_CHAINS:
+        if max_warnings is not None and sent >= max_warnings:
+            break
+        required = set(chain["signals"])
+        if new_signal_type not in required:
+            continue
+        present = required & signal_types
+        if len(present) != 1:
+            continue
+        warning = PREDICTIVE_WARNINGS.get(chain["chain"], {}).get(new_signal_type)
+        if warning:
+            send_whatsapp(to_number, warning, account_sid, auth_token, from_number)
+            logger.info(
+                "Predictive warning sent — user_id=%s chain=%s trigger=%s",
+                user_id, chain["chain"], new_signal_type,
+            )
+            sent += 1
+
+
 def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
     """
     Append a timestamped security signal to recent_signals on the user record.
@@ -487,8 +576,8 @@ def check_and_fire_correlation(
             except (ValueError, TypeError):
                 pass
 
-        sent = _send_coordinated(to_number, _build_coordinated_alert(chain, signals),
-                                 account_sid, auth_token, from_number)
+        alert_body = _build_coordinated_alert(chain, signals)
+        sent = _send_coordinated(to_number, alert_body, account_sid, auth_token, from_number)
         if sent:
             table.update_item(
                 Key={"user_id": user_id},
@@ -496,6 +585,19 @@ def check_and_fire_correlation(
                 ExpressionAttributeValues={":t": datetime.now(timezone.utc).isoformat()},
             )
             logger.warning("COORDINATED ALERT SENT — user_id=%s chain=%s", user_id, chain["chain"])
+            # Coordinated alerts are freeform — store SMS fallback in case no WhatsApp session.
+            severity = chain.get("severity", "HIGH")
+            fallback_summary = (
+                f"🚨 RelayShield {severity} ALERT: A coordinated identity attack was "
+                f"detected on your account ({chain['chain'].replace('_', ' ')}). "
+                f"Open WhatsApp and reply SWEEP for immediate steps, or visit relayshield.net."
+            )
+            try:
+                store_pending_sms_fallback(user_id, fallback_summary)
+            except Exception as exc:
+                logger.exception(
+                    "SMS fallback store failed user_id=%s: %s", user_id, exc
+                )
         else:
             logger.error("Coordinated alert FAILED — user_id=%s chain=%s", user_id, chain["chain"])
         return sent
@@ -816,6 +918,96 @@ def send_whatsapp(
         return False
 
 
+def send_whatsapp_template(
+    to_number: str,
+    phone_e164: str,
+    carrier_name: str,
+    swap_ts: str,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+) -> bool:
+    """
+    Send the pre-approved SIM swap WhatsApp template.
+    Templates bypass the 24-hour session window (63016) — always delivered.
+
+    Template variables:
+        {{1}} = phone number (E.164)
+        {{2}} = detection timestamp
+        {{3}} = carrier name
+    """
+    url         = TWILIO_MESSAGES_URL.format(account_sid=account_sid)
+    credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+
+    ts_display = swap_ts or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    content_variables = json.dumps({
+        "1": phone_e164,
+        "2": ts_display,
+        "3": carrier_name or "unknown",
+    })
+
+    payload = urllib.parse.urlencode({
+        "From":             to_whatsapp_number(from_number),
+        "To":               to_whatsapp_number(to_number),
+        "ContentSid":       SIM_SWAP_TEMPLATE_SID,
+        "ContentVariables": content_variables,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type":  "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            logger.info(
+                "SIM swap template sent to %s SID: %s", to_number, result.get("sid")
+            )
+            return True
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        logger.error(
+            "Twilio HTTP %d sending SIM swap template to %s: %s",
+            exc.code, to_number, error_body,
+        )
+        return False
+    except Exception as exc:
+        logger.exception("SIM swap template send failed to %s: %s", to_number, exc)
+        return False
+
+
+def store_pending_sms_fallback(user_id: str, alert_summary: str) -> None:
+    """
+    Store a short alert summary for SMS fallback delivery.
+    The sms-fallback Lambda sends this via plain SMS after 4 hours if the
+    user has not sent any WhatsApp message (confirming active session).
+    """
+    table = dynamodb.Table(USERS_TABLE)
+    try:
+        table.update_item(
+            Key={"user_id": user_id},
+            UpdateExpression=(
+                "SET pending_sms_fallback = :t, pending_sms_fallback_at = :ts"
+            ),
+            ExpressionAttributeValues={
+                ":t":  alert_summary,
+                ":ts": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        logger.info("Stored pending_sms_fallback for user_id=%s.", user_id)
+    except Exception as exc:
+        logger.exception(
+            "Failed to store pending_sms_fallback user_id=%s: %s", user_id, exc
+        )
+
+
 # ---------------------------------------------------------------------------
 # Per-user processing
 # ---------------------------------------------------------------------------
@@ -876,7 +1068,7 @@ def process_user(
     alert_type        = "port_out" if port_out_suspected else "sim_swap"
     subscription_tier = user.get("subscription_tier", TIER_PERSONAL)
 
-    # Build user alert body
+    # Build freeform alert body (tiered content, carrier-specific steps)
     if alert_type == "port_out":
         body = build_port_out_alert_message(
             phone_e164, last_known_carrier, carrier_name, subscription_tier
@@ -886,10 +1078,44 @@ def process_user(
             phone_e164, subscription_tier, carrier_name, swap_ts
         )
 
-    # Send to user
-    sent = send_whatsapp(
-        to_whatsapp_number(phone_e164), body, account_sid, auth_token, from_number
-    )
+    to_number = to_whatsapp_number(phone_e164)
+
+    # Step 1 — Send pre-approved template (bypasses 63016 session window, always delivered).
+    # Port-out uses freeform-only as primary since it's a CRITICAL distinct event; template
+    # covers the swap case. Both paths fall through to the freeform enrichment step.
+    if alert_type == "sim_swap":
+        template_sent = send_whatsapp_template(
+            to_number, phone_e164, carrier_name, swap_ts,
+            account_sid, auth_token, from_number,
+        )
+        if not template_sent:
+            logger.warning(
+                "SIM swap template failed for user_id=%s — attempting freeform.", user_id
+            )
+        sent = template_sent
+    else:
+        # Port-out: freeform is primary (no separate port-out template)
+        sent = send_whatsapp(to_number, body, account_sid, auth_token, from_number)
+
+    # Step 2 — Freeform enrichment with tiered carrier-specific steps.
+    # Sent immediately after template. Works when user has an active WhatsApp session.
+    # Silently skipped on 63016 — template already delivered the core notification.
+    if sent and alert_type == "sim_swap":
+        send_whatsapp(to_number, body, account_sid, auth_token, from_number)
+
+    # For port-out (freeform primary, CRITICAL), store SMS fallback in case no session.
+    # SMS fallback Lambda fires after 4 hours if user has not messaged RelayShield.
+    if alert_type == "port_out" and sent:
+        fallback_summary = (
+            f"🚨 RelayShield CRITICAL: Your phone number {phone_e164} appears to have "
+            f"been ported to {carrier_name}. This means ALL SMS two-factor authentication "
+            f"is compromised. Call your original carrier immediately to request a port-back. "
+            f"Reply to this message or open WhatsApp to see full instructions."
+        )
+        try:
+            store_pending_sms_fallback(user_id, fallback_summary)
+        except Exception as exc:
+            logger.exception("SMS fallback store failed user_id=%s: %s", user_id, exc)
 
     if sent:
         update_user_swap_state(user_id, carrier_name, alert_fired=True)
@@ -898,9 +1124,13 @@ def process_user(
             user_id, alert_type, carrier_name,
         )
 
-        # Record signal and check for coordinated attack chain
+        # Record signal, fire predictive warning, check for coordinated attack chain
         try:
             signals = record_signal(user_id, alert_type, {"carrier": carrier_name})
+            check_and_warn_predictive(
+                user_id, alert_type, signals,
+                to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
+            )
             check_and_fire_correlation(
                 user_id, signals,
                 to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
@@ -1037,6 +1267,10 @@ def lambda_handler(event, context):
             if sent:
                 try:
                     signals = record_signal(user_id, "sim_swap", {"carrier": test_carrier})
+                    check_and_warn_predictive(
+                        user_id, "sim_swap", signals,
+                        to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
+                    )
                     check_and_fire_correlation(
                         user_id, signals,
                         to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,

@@ -1,0 +1,514 @@
+openapi: "3.0.1"
+info:
+  title: RelayShield Security Intelligence API
+  description: |
+    Real-time identity and infrastructure threat detection for AI agents and developers.
+
+    **Capabilities:**
+    - Email breach detection (HIBP — 13B+ compromised accounts)
+    - URL malware analysis (VirusTotal — 70+ security engines)
+    - File/binary malware analysis (VirusTotal — full engine scan)
+    - SIM/eSIM swap detection (Twilio Lookup v2 — live carrier data)
+    - Lookalike domain detection (DNS + Certificate Transparency + Google Safe Browsing)
+
+    **Authentication:** Pass your API key in the `x-api-key` header.
+
+    **Rate limits:** See your plan dashboard.
+
+    **All endpoints:** POST with JSON body, JSON response.
+
+    **Response envelope:**
+    ```json
+    { "ok": true, "data": { ... } }
+    { "ok": false, "error": "description" }
+    ```
+  version: "1.0"
+  contact:
+    name: RelayShield Support
+    email: support@relayshield.io
+  x-rapidapi-tags:
+    - Security
+    - Identity Protection
+    - Threat Intelligence
+    - AI Agents
+
+servers:
+  - url: https://{api_id}.execute-api.us-east-1.amazonaws.com/prod
+    description: Production
+    variables:
+      api_id:
+        default: "REPLACE_WITH_YOUR_API_ID"
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /v1/breach:
+    post:
+      operationId: checkBreach
+      summary: Check email address for data breaches
+      description: |
+        Queries Have I Been Pwned (HIBP) to determine whether an email address
+        appears in known data breaches. Returns a list of breach records including
+        the breach name, date, and exposed data classes (passwords, credit cards, etc.).
+
+        **Use this when:** an AI agent needs to verify whether a user's credentials
+        may be compromised before allowing high-risk actions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BreachRequest"
+            examples:
+              basic:
+                summary: Check an email
+                value:
+                  email: "user@example.com"
+      responses:
+        "200":
+          description: Breach check completed (may be zero breaches)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BreachResponse"
+              examples:
+                breached:
+                  summary: Email found in breaches
+                  value:
+                    ok: true
+                    data:
+                      email: "user@example.com"
+                      breach_count: 2
+                      breaches:
+                        - name: "Adobe"
+                          domain: "adobe.com"
+                          breach_date: "2013-10-04"
+                          data_classes: ["Email addresses", "Passwords", "Usernames"]
+                          is_verified: true
+                        - name: "LinkedIn"
+                          domain: "linkedin.com"
+                          breach_date: "2016-05-05"
+                          data_classes: ["Email addresses", "Passwords"]
+                          is_verified: true
+                clean:
+                  summary: No breaches found
+                  value:
+                    ok: true
+                    data:
+                      email: "clean@example.com"
+                      breach_count: 0
+                      breaches: []
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+
+  /v1/scan-url:
+    post:
+      operationId: scanUrl
+      summary: Scan a URL for malware and phishing
+      description: |
+        Submits a URL to VirusTotal for analysis across 70+ security engines.
+        Waits for the analysis to complete (up to 30 seconds) and returns the verdict.
+
+        **Verdicts:** `malicious` | `suspicious` | `clean` | `timeout`
+
+        **Use this when:** a user forwards a link they received by email or text,
+        or an agent encounters an unfamiliar URL before navigating to it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScanUrlRequest"
+            examples:
+              basic:
+                summary: Scan a URL
+                value:
+                  url: "https://suspicious-link.example.com/offer"
+      responses:
+        "200":
+          description: Scan completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResponse"
+              examples:
+                malicious:
+                  summary: Malicious URL detected
+                  value:
+                    ok: true
+                    data:
+                      target: "https://phishing.example.com/bank"
+                      analysis_id: "u-abc123"
+                      verdict: "malicious"
+                      malicious: 12
+                      suspicious: 3
+                      harmless: 55
+                      undetected: 2
+                      total_engines: 72
+                clean:
+                  summary: Clean URL
+                  value:
+                    ok: true
+                    data:
+                      target: "https://google.com"
+                      analysis_id: "u-def456"
+                      verdict: "clean"
+                      malicious: 0
+                      suspicious: 0
+                      harmless: 70
+                      undetected: 2
+                      total_engines: 72
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+
+  /v1/scan-file:
+    post:
+      operationId: scanFile
+      summary: Scan a file for malware (download from URL)
+      description: |
+        Downloads a file from `file_url` and submits it to VirusTotal for
+        binary analysis across 70+ AV engines. Waits up to 45 seconds for results.
+
+        The caller provides a URL — RelayShield handles the download and submission.
+        No need to forward raw bytes.
+
+        **Verdicts:** `malicious` | `suspicious` | `clean` | `timeout`
+
+        **Use this when:** a user receives an email attachment and forwards the
+        attachment download link, or an agent encounters a file download link.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScanFileRequest"
+            examples:
+              basic:
+                summary: Scan a PDF attachment
+                value:
+                  file_url: "https://cdn.example.com/invoice_march.pdf"
+                  filename: "invoice_march.pdf"
+      responses:
+        "200":
+          description: Scan completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanFileResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+
+  /v1/sim-swap:
+    post:
+      operationId: checkSimSwap
+      summary: Detect SIM/eSIM swap on a phone number
+      description: |
+        Queries Twilio Lookup v2 to determine whether a SIM swap or eSIM
+        provisioning event has occurred on the given phone number in the last 24 hours.
+
+        **Returns:** whether a swap was detected, the swap timestamp, and current carrier.
+
+        **Use this when:** a user reports losing mobile service unexpectedly, or an
+        agent wants to verify phone ownership before completing a high-risk action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SimSwapRequest"
+            examples:
+              basic:
+                summary: Check a US number
+                value:
+                  phone: "+14155551234"
+      responses:
+        "200":
+          description: SIM swap check completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimSwapResponse"
+              examples:
+                swapped:
+                  summary: SIM swap detected
+                  value:
+                    ok: true
+                    data:
+                      phone: "+14155551234"
+                      swapped: true
+                      swap_timestamp: "2026-04-30T14:23:00Z"
+                      carrier: "T-Mobile"
+                      checked_at: "2026-05-01T09:00:00Z"
+                clean:
+                  summary: No swap detected
+                  value:
+                    ok: true
+                    data:
+                      phone: "+14155551234"
+                      swapped: false
+                      swap_timestamp: ""
+                      carrier: "Verizon"
+                      checked_at: "2026-05-01T09:00:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+
+  /v1/domain:
+    post:
+      operationId: checkDomain
+      summary: Detect lookalike / typosquat domains
+      description: |
+        Generates hundreds of typosquat permutations of the input domain, resolves
+        them in parallel via DNS, and enriches live results with:
+        - Google Safe Browsing (malware/phishing flag)
+        - Certificate Transparency (cert count, whether a cert was issued in the last 30 days)
+
+        Returns all lookalike domains that are currently registered and resolving.
+
+        **Use this when:** a business wants to know if attackers have registered
+        domains impersonating their brand, or before an employee clicks a link
+        that looks like a company domain.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DomainRequest"
+            examples:
+              basic:
+                summary: Scan a domain
+                value:
+                  domain: "acme.com"
+      responses:
+        "200":
+          description: Domain scan completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DomainResponse"
+              examples:
+                found:
+                  summary: Lookalikes detected
+                  value:
+                    ok: true
+                    data:
+                      domain: "acme.com"
+                      lookalikes_found: 2
+                      lookalikes:
+                        - domain: "acme.net"
+                          gsb_flagged: false
+                          cert_count: 3
+                          cert_recent: true
+                          latest_cert_issued: "2 Apr 2026"
+                        - domain: "acme-secure.com"
+                          gsb_flagged: true
+                          cert_count: 1
+                          cert_recent: true
+                          latest_cert_issued: "28 Apr 2026"
+                      candidates_checked: 187
+                      checked_at: "2026-05-01T09:00:00Z"
+                clean:
+                  summary: No lookalikes found
+                  value:
+                    ok: true
+                    data:
+                      domain: "acme.com"
+                      lookalikes_found: 0
+                      lookalikes: []
+                      candidates_checked: 187
+                      checked_at: "2026-05-01T09:00:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "502":
+          $ref: "#/components/responses/UpstreamError"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+
+  schemas:
+    BreachRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email address to check against HIBP
+
+    BreachResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        data:
+          type: object
+          properties:
+            email:
+              type: string
+            breach_count:
+              type: integer
+            breaches:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:         { type: string }
+                  domain:       { type: string }
+                  breach_date:  { type: string, format: date }
+                  data_classes: { type: array, items: { type: string } }
+                  is_verified:  { type: boolean }
+
+    ScanUrlRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Full URL to scan (must start with http:// or https://)
+
+    ScanResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        data:
+          type: object
+          properties:
+            target:        { type: string }
+            analysis_id:   { type: string }
+            verdict:
+              type: string
+              enum: [malicious, suspicious, clean, timeout]
+            malicious:     { type: integer }
+            suspicious:    { type: integer }
+            harmless:      { type: integer }
+            undetected:    { type: integer }
+            total_engines: { type: integer }
+
+    ScanFileRequest:
+      type: object
+      required: [file_url]
+      properties:
+        file_url:
+          type: string
+          format: uri
+          description: Publicly accessible URL to download the file from
+        filename:
+          type: string
+          description: Optional filename hint (used by VirusTotal for context)
+
+    ScanFileResponse:
+      allOf:
+        - $ref: "#/components/schemas/ScanResponse"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                filename: { type: string }
+
+    SimSwapRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+          description: Phone number in E.164 format (e.g. +14155551234)
+          pattern: "^\\+[1-9]\\d{6,14}$"
+
+    SimSwapResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        data:
+          type: object
+          properties:
+            phone:           { type: string }
+            swapped:         { type: boolean }
+            swap_timestamp:  { type: string }
+            carrier:         { type: string }
+            checked_at:      { type: string, format: date-time }
+
+    DomainRequest:
+      type: object
+      required: [domain]
+      properties:
+        domain:
+          type: string
+          description: Root domain to scan (e.g. acme.com — no scheme or path needed)
+
+    DomainResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        data:
+          type: object
+          properties:
+            domain:
+              type: string
+            lookalikes_found:
+              type: integer
+            lookalikes:
+              type: array
+              items:
+                type: object
+                properties:
+                  domain:             { type: string }
+                  gsb_flagged:        { type: boolean }
+                  cert_count:         { type: integer }
+                  cert_recent:        { type: boolean }
+                  latest_cert_issued: { type: string }
+            candidates_checked:
+              type: integer
+            checked_at:
+              type: string
+              format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: false
+        error:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Missing or invalid request parameter
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            ok: false
+            error: "email is required and must be a valid address"
+    RateLimited:
+      description: Upstream rate limit reached — retry after a few seconds
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamError:
+      description: Upstream service (HIBP / VirusTotal / Twilio) returned an error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: April 2026 — Coordinated Attack Detection Engine added (Section 10c) ✅ LIVE: temporal signal correlation across breach monitor, SIM swap monitor, and WhatsApp webhook — detects smishing→SIM swap, breach+SIM swap, and breach+OTP interception chains in real time; foundation for threat intelligence API dataset and monetisation. Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually.*
+*Generated: March 2026 | Last Updated: May 2026 — B2A API ✅ LIVE May 2026: relayshield-api Lambda deployed behind AWS API Gateway REST API with 6 endpoints (breach, sim-swap, domain, scan-url, scan-file, result poll); API key + usage plan active; RapidAPI listing in progress — launching with 3 endpoints (breach, sim-swap, domain); scan-url and scan-file endpoints held pending VirusTotal commercial API terms resolution; flat-rate subscription pricing unchanged ($299–599/month); source attribution omitted from all developer-facing marketing. Proactive Telegram group link scanning added (Section 9) with tier-gated scan quotas; B2A agent distribution model added (Section 9 + Layer 3): MCP server as primary agent discovery mechanism, per-call and subscription API pricing for MSP agent consumers; Mid-Market Expansion section added (Section 7c): 8 enterprise feature gaps identified, conditions for pursuing 50–200 employee segment. Predictive Attack Chain Alerts added (Section 10c) ✅ LIVE: pre-chain warning engine fires when the first signal in a known attack chain is recorded, warning users of likely next steps before the attack completes — 8 distinct predictive warnings across 4 chains, deployed across all 4 Lambdas; novel IP claim added to provisional patent scope. Coordinated Attack Detection Engine added (Section 10c) ✅ LIVE: temporal signal correlation across breach monitor, SIM swap monitor, and WhatsApp webhook — detects smishing→SIM swap, breach+SIM swap, and breach+OTP interception chains in real time; foundation for threat intelligence API dataset and monetisation. Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually.*
 
 ---
 
@@ -736,6 +736,8 @@ RelayShield does not compete on detection. Detection is commoditised — Google,
 - Two-way: users reply, ask questions, confirm steps — not a one-way broadcast
 - Available 24/7 with no hold time, no upselling, no friction
 - Competitors send one-directional alerts and assume users know what to do next
+
+**Frictionless onboarding is an underrated competitive advantage.** Norton and LifeLock onboarding involves app download, account creation, payment, identity verification, browser extension installation, and help desk involvement for support — creating dropout at every step and a substantial ongoing support cost embedded in their pricing. RelayShield onboarding is: message a WhatsApp number. Done. No app, no account portal, no installation, no hold queue. A user is fully protected within 60 seconds of their first message. This is not just a UX win — it structurally eliminates the help desk cost that forces competitors to charge more and deliver less. For SMBs, this also means an owner can onboard their entire team by forwarding a single WhatsApp number — no IT involvement required.
 
 ### 3. Remediation Status Tracking ✅ LIVE
 **Every other service measures alerts sent. RelayShield measures people actually protected.**
@@ -1688,6 +1690,49 @@ Foretrace catches this. RelayShield Phase 1 does not — yet.
 
 ---
 
+## 7c. Mid-Market Expansion Strategy — 50–200 Employee Companies
+
+### The Opportunity
+The conversation with the 100-person company prospect surfaced a clear segment gap between the SMB sweet spot (10–50 employees, no IT staff, owner-operator decision maker) and enterprise (200+ employees, dedicated security team, existing toolstack). Mid-market companies at 50–200 employees often have a single IT manager or operations lead who owns security decisions, limited budget for enterprise-grade tools, and exactly the attack surface RelayShield monitors — credential breaches across a distributed employee base, SIM swap risk on company-owned numbers, domain impersonation targeting their brand.
+
+### Why the Current Product Wins on Onboarding, Not Features
+RelayShield's WhatsApp-native delivery is a genuine advantage at this segment: no enterprise software to deploy, no agent to install, no IT project required. An IT manager can protect 100 employees by sharing a WhatsApp number — onboarding in minutes, not weeks. Norton and LifeLock enterprise onboarding involves procurement, IT deployment, and ongoing help desk cost. RelayShield eliminates all three.
+
+However, a 100-person company IT manager will expect capabilities the current product does not yet have. These are not reasons to avoid the meeting — they are the Phase 2 feature roadmap for this segment.
+
+### Eight Features Required to Compete at Mid-Market
+
+| Feature | Why it matters | Current status |
+|---|---|---|
+| **Web-based admin dashboard** | IT managers need centralised visibility — which employees are protected, which alerts have fired, remediation status across the team. WhatsApp commands are not scalable for 100+ seats. | ❌ Not built — Phase 2 |
+| **SSO / directory integration** | Azure AD and Google Workspace sync for automatic provisioning and deprovisioning as employees join and leave. Without this, managing 100 seats manually is untenable. | ❌ Not built — Phase 2 |
+| **Bulk user provisioning** | CSV import or API to onboard all employees at once rather than one-by-one WhatsApp registration. | ❌ Not built — Phase 2 |
+| **Audit logs and compliance reporting** | IT managers need exportable records of all alerts, remediations, and security events for compliance reviews, cyber insurance audits, and board reporting. | ❌ Not built — Phase 2 |
+| **SIEM integration / API webhooks** | Mid-market companies with a security stack want RelayShield signals flowing into their SIEM (Splunk, Sentinel, etc.) or triggering workflows via webhook. | ❌ Not built — Phase 3 |
+| **Defined SLA and named support** | Enterprise buyers expect a contractual response time and a named contact, not just a WhatsApp number to message. | ❌ Not built — needs commercial structure |
+| **Multiple monitored domains** | A 100-person company likely has multiple domains, subdomains, and brand variants to monitor. Current domain tier monitors one domain per subscription. | ❌ Not built — Phase 2 |
+| **Annual invoicing with PO** | Mid-market procurement requires invoice-based billing with a purchase order, not a credit card on Stripe. | ❌ Not built — needs finance process |
+
+### Recommended Approach for the 100-Person Company Meeting
+Go as a researcher, not a salesperson. The goal is to answer three questions:
+
+1. **What are they currently using** for identity and credential protection across their employee base? (Likely nothing systematic — or a tool that only covers endpoints, not identity.)
+2. **What would they actually pay** for the problem RelayShield solves, and who approves that budget?
+3. **Which of the 8 features above are blockers** versus nice-to-haves? Audit logs and SSO integration are almost always blockers. SIEM and PO billing vary.
+
+If the answer is "we'd pay $500/month with an admin dashboard and Google Workspace sync," that is a clear Phase 2 build signal — and potentially a design partner relationship worth more than the revenue.
+
+### Conditions for Pursuing Mid-Market Actively
+Do not over-rotate toward this segment before these milestones are met:
+
+1. **2–3 paying SMB customers (10–50 seats)** — proves the core product and gives you a reference story
+2. **Web admin dashboard built** — without this, mid-market conversations stall at the same objection every time
+3. **Annual billing and invoicing available** — most mid-market procurement requires it
+
+The 50–200 employee segment is the right Phase 2 revenue target. It commands $299–999/month per account, has a single decision maker, and has enough pain that WhatsApp-native remediation genuinely solves a real gap. Build the SMB base first, then expand upmarket with the dashboard as the unlock.
+
+---
+
 ## 8. Product Roadmap
 
 ### Phase 1 — Validate (Months 1-3) ✅ COMPLETE
@@ -2217,6 +2262,60 @@ RelayShield Phase 2 monitors Telegram channels where stolen credentials and smis
 
 ---
 
+**Proactive Link Scanning — Phase 2 (Telegram Group Bot)**
+
+The WhatsApp model requires a conscious user action: type `SMS <link>` to trigger analysis. The failure point is the user who sees a suspicious link, isn't sure, doesn't bother to forward it, and gets phished. Telegram eliminates this gap.
+
+When a RelayShield bot is added to a company's Telegram group, it reads all messages in real time and automatically scans every URL that appears — no user action required. If a link is flagged, the bot replies in-thread before anyone has clicked. This is passive group monitoring, not reactive forwarding.
+
+**Why this matters for SMBs:** An owner adds RelayShield to the company Telegram group once. From that point, every link any employee shares is silently checked. A staff member receives a phishing link via Telegram and shares it asking "is this real?" — RelayShield has already flagged it before anyone opens it.
+
+**Tier gating and scan quotas:**
+
+Proactive scanning is a business feature — personal group monitoring is out of scope for individual tiers and creates unbounded volume risk. It is bundled into Business tiers at no additional charge, with monthly scan quotas aligned to team size.
+
+| Tier | Proactive Group Scanning |
+|---|---|
+| Personal Shield | ❌ Not available |
+| Business Starter + Domain | ❌ Not available |
+| Business Basic | ✅ 1 Telegram group, 500 scans/month included |
+| Business Shield | ✅ 3 Telegram groups, 2,000 scans/month included |
+| Business Shield Pro | ✅ Unlimited groups, unlimited scans |
+
+Overage pricing if needed at scale: $0.005/scan above quota. Not required before first paying customers — revisit when consumption data is available.
+
+**No separate channel charge:** Consistent with the dual-delivery pricing decision, proactive scanning is included in the tier price. The scan quota is the control mechanism, not per-feature billing.
+
+---
+
+**B2A Distribution — RelayShield as an Agent-Callable Service**
+
+As MSPs increasingly run Claude-powered and LLM-based automation agents, RelayShield's threat intelligence capabilities become callable services rather than just user-facing commands. An MSP agent that manages 50 client accounts can query RelayShield directly — "has this email been breached?", "is this link safe?", "has this number been SIM-swapped?" — and surface the result inside its own workflow without a human intermediary.
+
+**How MSP agents discover RelayShield:**
+
+*Near-term (Phase 2) — traditional API discovery:*
+- **RapidAPI / AWS Marketplace listing** — discoverable by developers and MSP tooling teams searching for security APIs
+- **Developer portal with OpenAPI spec** — published documentation for manual integration into MSP automation stacks
+- **Partner program** (Section 18) — the human layer that bootstraps machine-layer adoption; MSP relationship managers introduce RelayShield, engineers wire up the API
+
+*Medium-term (Phase 2–3) — Model Context Protocol (MCP):*
+Publishing a RelayShield MCP server is the highest-leverage Phase 2 investment for B2A discovery. MCP is Anthropic's open protocol for agents to discover and invoke external tools. If RelayShield publishes an MCP server, any Claude-powered MSP agent can call RelayShield functions natively — no custom integration, no API key procurement workflow, no human step required. The MSP agent asks "is this link safe?" and RelayShield is a registered tool it invokes directly.
+
+This matters because MSP automation tooling is rapidly moving to Claude-powered agents. Being MCP-native positions RelayShield as security infrastructure within that ecosystem — not just another SaaS API to evaluate. An MCP server is a lightweight wrapper around existing Lambda functions: link scanning, breach lookup, SIM swap status, domain lookalike check. Build effort is low; strategic leverage is high. No competitor is building this.
+
+*Long-term (Phase 3) — agent registries:*
+Dedicated agent discovery registries are emerging (analogous to early app stores). Listing RelayShield as a security intelligence service becomes standard practice as the ecosystem matures. Publish when registries have meaningful adoption.
+
+**Recommended build sequence:**
+1. Phase 2: OpenAPI spec + RapidAPI listing (works today, low effort)
+2. Phase 2: MCP server wrapping breach lookup, link scanning, SIM swap check, domain lookalike
+3. Phase 3: Agent registry listings as ecosystem matures
+
+**B2A pricing:** API interactions are billed separately from seat subscriptions — machine queries are not user seats. See Layer 3 in Section 10b for pricing detail.
+
+---
+
 ### Email — Supplementary Only
 
 Email is out-of-band from SMS but is itself a primary breach target. Sending a breach alert to a potentially compromised inbox creates a circular risk — the attacker who planted a forwarding rule in the breached inbox will intercept the alert. Email is never the primary conversation channel.
@@ -2284,13 +2383,32 @@ A native app is not a conversation replacement — it is a status and history la
 - Signal hooks wrapped in try/except — correlation engine failure never affects primary alert delivery
 - Deployed across `relayshield-breach-check`, `relayshield-sim-swap-monitor`, `relayshield-whatsapp-webhook`, `relayshield-domain-monitor`
 
-**Near-term evolution: Predictive Alerts**
+**Predictive Attack Chain Alerts ✅ LIVE — May 2026**
 
-The correlation engine currently fires after a chain completes — two signals have already arrived. The natural next step is inverting this logic to fire pre-chain warnings the moment the first signal arrives, before the second signal completes the attack.
+The correlation engine fires two classes of alert:
 
-*Example:* When a `breach_alert` is recorded, immediately append: *"Credential breaches are frequently followed by SIM swap attempts within 72 hours — consider locking your SIM now before an attacker can use your exposed password to social-engineer your carrier."*
+1. **Coordinated attack alert (both signals present):** fires when a second signal completes a known chain within the 72-hour window. CRITICAL or HIGH severity. Delivered as a composite alert naming the chain and providing unified remediation.
 
-This requires zero new infrastructure — the `ATTACK_CHAINS` table already encodes which signals co-occur. Inverting it is a lightweight addition to each Lambda's alert delivery path. Estimated build: 1–2 hours. Impact: users receive actionable warnings before the attack chain completes rather than after.
+2. **Predictive warning (first signal only):** fires the moment the first signal in any known chain is recorded — before the attack chain completes. The user receives a short, action-oriented heads-up naming the likely next attack step and a single preventive action they can take immediately.
+
+**How predictive warnings work:** Each Lambda's `check_and_warn_predictive()` function evaluates every inbound signal against the `ATTACK_CHAINS` table. If the new signal is the *only* signal present in a known chain's required set (i.e. exactly one of two expected signals has arrived), a chain-specific predictive warning fires before the full coordinated alert could trigger. If both signals are already present, only the coordinated alert fires — the predictive warning is suppressed as redundant.
+
+**Eight predictive warnings across four chains:**
+
+| Chain | First signal received | Predictive warning sent |
+|---|---|---|
+| Breach + SIM Swap | Breach alert | SIM swap often follows within 72 hrs — lock your SIM now |
+| Breach + SIM Swap | SIM swap detected | Check email/banking for credential-based takeover attempts |
+| Smishing → SIM Swap | Suspicious SMS forwarded | Smishing is a known SIM swap precursor — consider a SIM lock |
+| Smishing → SIM Swap | SIM swap detected | Prior suspicious SMS may be connected — report to carrier |
+| Breach + OTP Interception | Breach alert | Unexpected OTPs may follow — watch for unsolicited codes |
+| Breach + OTP Interception | Unexpected OTP reported | OTP anomaly may indicate credential stuffing using breached data |
+| Domain Phishing → Breach | Lookalike domain detected | Domain impersonation often precedes credential harvest — warn your team |
+| Domain Phishing → Breach | Breach alert | Active lookalike domain + breach — phishing campaign likely in progress |
+
+**Why this matters for users:** Attackers execute multi-step campaigns over hours, not seconds. A user who receives a breach alert at 9am and a predictive warning at 9:01am has a meaningful window to lock their SIM, change passwords, or warn colleagues before the second attack vector lands. No competitor delivers pre-chain guidance — they alert after the damage is done.
+
+**Patentable — should be added to provisional.** The coordinated attack detection claim covers signal co-occurrence after both signals are present. Predictive alerts introduce a distinct novel sub-claim: *partial chain matching as a trigger for pre-completion predictive guidance*. This is a different technical contribution — the system identifies that a chain is in-progress (not yet complete) and delivers proactive warnings calibrated to the specific missing attack step. This sub-claim should be added to the existing provisional patent (`relayshield_provisional_patent_overview.md`) before any public disclosure of this capability.
 
 **Long-term evolution: Third-Party API Monetization**
 
@@ -2398,6 +2516,51 @@ Any carrier or MSP selling MDR to SMBs has a visible gap: the business owner's *
 - Unique data asset: no other provider has breach detection + remediation outcome + telecom signal + domain lookalike correlation combined
 - **Prerequisites before building:** (1) Explicit user consent at onboarding for anonymized data use; (2) Aggregation thresholds preventing re-identification (cohort-level only, minimum group size); (3) Separate data processing agreements for B2B API customers (GDPR/CCPA); (4) Scale gate — dataset has commercial value at ~5,000+ active users; this is a Series A conversation, not an MVP feature
 - Foundation data already collected from Day 1 via `recent_signals` — see Section 10c for dataset architecture
+
+**B2A (Business-to-Agent) API — Phase 2**
+
+As MSP automation shifts to LLM-powered agents, RelayShield's core capabilities — breach lookup, link scanning, SIM swap status, domain lookalike detection — become callable services for machine consumers. B2A API is priced separately from seat subscriptions: machine queries are not user seats and should not be conflated with per-user billing.
+
+*Fastest TTM path — API Gateway direct ✅ LIVE May 2026:*
+AWS API Gateway REST API deployed in front of a dedicated `relayshield-api` Lambda. API keys and usage plan active. OpenAPI spec (`relayshield_api_openapi.yaml`) generated. RapidAPI listing in progress. All 6 endpoints tested and confirmed working end-to-end.
+
+*Pricing model:*
+
+Per-function pricing reflects the upstream cost difference — file and URL scans hit the VirusTotal API (per-call cost, up to 30 seconds polling) while breach lookups and domain checks are cheaper to serve:
+
+| Function | Per-call price | Notes |
+|---|---|---|
+| `check_breach(email)` | $0.01/call | HIBP API, fast |
+| `scan_url(url)` | $0.03/call | VirusTotal — 70+ engine URL analysis |
+| `scan_file(url)` | $0.05/call | VirusTotal — binary download + multi-engine scan |
+| `check_sim_swap(phone)` | $0.02/call | Twilio Verify lookup |
+| `check_domain_lookalike(domain)` | $0.02/call | DNS + CT log + GSB |
+
+- **Flat API subscription:** $299–599/month for a bundled call allowance — appropriate for MSPs embedding RelayShield in their own tooling at predictable cost
+- **AWS Marketplace pricing:** Add ~25% to per-call rates to account for marketplace commission; flat subscription model preferred on Marketplace since commission % is more predictable than micro-transaction volume
+- API key issued per MSP partner account, billed independently of their own seat subscription
+
+*Discovery path — how MSP agents find RelayShield:*
+- **✅ LIVE May 2026:** API Gateway + RapidAPI listing + OpenAPI spec — breach, sim-swap, domain endpoints live; scan-url and scan-file pending VT commercial terms
+- **Phase 2:** **MCP server** — publishes RelayShield as a callable tool in Anthropic's Model Context Protocol ecosystem; any Claude-powered MSP agent can discover and invoke RelayShield functions without a custom integration. Highest-leverage Phase 2 build for agent-native discovery. Wrapper around existing Lambda functions — low build effort, high strategic value.
+- **Phase 2:** AWS Marketplace listing — once API demand is proven via direct sales, worth the commission and setup overhead for distribution reach
+- **Phase 3:** Agent registry listings as dedicated agent discovery directories mature
+
+*What the MCP server exposes:*
+
+| Function | Backend | What it does |
+|---|---|---|
+| `check_breach(email)` | HIBP API | Breach lookup for a given email address — returns breach names, data classes, severity score |
+| `scan_url(url)` | VirusTotal API v3 (70+ AV engines) | URL/link analysis — returns malicious verdict, threat categories, engine hit count |
+| `scan_file(url)` | VirusTotal API v3 (70+ AV engines) | Downloads file from provided URL and submits binary to VirusTotal — returns malware verdict across all engines |
+| `check_sim_swap(phone)` | Twilio Verify | SIM swap / port-out status for a monitored number |
+| `check_domain_lookalike(domain)` | DNS + CT log + GSB | Typosquat and lookalike domain scan — returns registered lookalikes, cert activity, threat flags |
+
+Note: `scan_url` and `scan_file` use VirusTotal's multi-engine analysis (70+ AV engines) — meaningfully deeper than single-engine or GSB-only checks. For an MSP agent triaging a suspicious invoice attachment or a link in a phishing email, this is the same infrastructure RelayShield's own ATTACH command uses in production today.
+
+*API pricing note for file and URL scans:* File and URL scans are priced at the higher end ($0.03–0.05/call) to account for upstream scanning cost and Lambda execution time. Breach lookups and domain checks are cheaper to serve ($0.01–0.02/call). Scan-url and scan-file endpoints are built and tested but held from the RapidAPI listing pending commercial resale terms with the underlying scanning provider — no impact to flat-rate subscription pricing. Source attribution is intentionally omitted from all developer-facing marketing materials.
+
+*Why MCP matters competitively:* No identity protection competitor is building MCP-native capabilities. Being listed as a security tool in the MCP ecosystem positions RelayShield as infrastructure for the agent layer rather than a consumer SaaS product — a meaningfully different competitive position that Aura, LifeLock, and HIBP cannot easily replicate.
 
 **Anonymized Risk Benchmarks**
 - Sell aggregated risk scoring data to research institutions, regulators, insurance actuaries

@@ -2560,6 +2560,26 @@ Note: `scan_url` and `scan_file` use VirusTotal's multi-engine analysis (70+ AV 
 
 *API pricing note for file and URL scans:* File and URL scans are priced at the higher end ($0.03–0.05/call) to account for upstream scanning cost and Lambda execution time. Breach lookups and domain checks are cheaper to serve ($0.01–0.02/call). Scan-url and scan-file endpoints are built and tested but held from the RapidAPI listing pending commercial resale terms with the underlying scanning provider — no impact to flat-rate subscription pricing. Source attribution is intentionally omitted from all developer-facing marketing materials.
 
+*Scan endpoint break-even analysis (planning basis):*
+
+Typical MSP scan volume estimates:
+
+| MSP size | URL/file scans/month | Assumption |
+|---|---|---|
+| Small (1–50 clients) | 200–500 | 1–2 suspicious items/client/month |
+| Mid (50–200 clients) | 1,000–3,000 | Same ratio |
+| Developer/integrator | 500–2,000 | Testing + production mix |
+
+Planning cost for commercial scanning tier: **$300/month** (actual quote pending — not yet published by provider).
+
+| Price per scan | Scans to cover $300/month | Customers at 500 scans/month each |
+|---|---|---|
+| $0.03 (URL) | 10,000 | 20 customers |
+| $0.05 (file) | 6,000 | 12 customers |
+| $0.04 blended | 7,500 | **~15 customers** |
+
+**Decision trigger:** Contact scanning provider for commercial resale quote once RapidAPI shows meaningful B2A customer uptake (target: 5+ active API customers or 2,000+ scans/month across breach/sim-swap/domain endpoints). Use actual RapidAPI usage data to anchor the volume estimate in the quote conversation.
+
 *Why MCP matters competitively:* No identity protection competitor is building MCP-native capabilities. Being listed as a security tool in the MCP ecosystem positions RelayShield as infrastructure for the agent layer rather than a consumer SaaS product — a meaningfully different competitive position that Aura, LifeLock, and HIBP cannot easily replicate.
 
 **Anonymized Risk Benchmarks**
@@ -3102,6 +3122,16 @@ Post on r/personalfinance and r/privacy:
 ---
 
 ## 15. 6-Week MVP Build Plan
+
+### B2A API — Pending Actions
+
+| # | Item | Trigger |
+|---|---|---|
+| B2A-1 | **Contact scanning provider for commercial resale quote** — Request pricing for commercial API tier permitting resale. Use RapidAPI usage data to anchor volume estimate. Frame as: "building a security API product, usage TBD based on early customer data." | After 5+ active RapidAPI API customers OR 2,000+ scans/month across live endpoints |
+| B2A-2 | **Enable scan-url and scan-file on RapidAPI listing** — endpoints are built, tested, and deployed; held only pending commercial terms resolution. Update RapidAPI listing description to remove "coming soon" once terms confirmed. | After B2A-1 resolved |
+| B2A-3 | **Review VT break-even** — Revisit $300/month planning cost against actual quote; confirm per-call pricing covers cost at expected volume before enabling endpoints. | Concurrent with B2A-1 |
+
+---
 
 ### 🚨 Launch Showstoppers — Must Complete Before First Paying Customer
 

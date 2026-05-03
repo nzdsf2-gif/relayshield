@@ -2186,6 +2186,64 @@ No additional pricing tier or add-on fee is needed. Dual delivery is included in
 - `telegram_chat_id` — String — captured when user sends `/start` to the RelayShield Telegram bot; stored on user record
 - `preferred_channel` — String — `whatsapp` | `telegram` | `both` (default: `whatsapp`; `both` only available to Business Basic+)
 
+**Existing WhatsApp user — adding Telegram as a second channel:**
+
+The strategy doc previously only covered new user onboarding via Telegram. Existing WhatsApp subscribers need a separate migration flow triggered from within WhatsApp.
+
+*Trigger:* User sends **TELEGRAM** to RelayShield on WhatsApp.
+
+*Flow:*
+```
+1. User sends TELEGRAM via WhatsApp
+      ↓
+2. RelayShield replies on WhatsApp:
+   "To add Telegram as your alert channel, open the RelayShield 
+    bot on Telegram and send the verification code below.
+    Your code: 847291 (expires in 10 minutes)"
+      ↓
+3. RelayShield stores {user_id, code, expiry} in DynamoDB
+      ↓
+4. User opens Telegram → finds RelayShield bot → sends /start
+      ↓
+5. Bot prompts: "Enter your 6-digit verification code"
+      ↓
+6. User sends: 847291
+      ↓
+7. Lambda validates code against DynamoDB (checks expiry, marks used)
+      ↓
+8. Lambda writes telegram_chat_id to relayshield_users record
+      ↓
+9. Lambda sets preferred_channel:
+   - Personal Shield / Starter: "telegram" (replaces WhatsApp)
+   - Business Basic+: "both" (dual delivery enabled)
+      ↓
+10. Confirmation sent on BOTH channels simultaneously:
+    WhatsApp: "✅ Telegram linked. Alerts will now be delivered 
+               to both channels."
+    Telegram: "✅ RelayShield connected. You will now receive 
+               security alerts here."
+```
+
+*Security design:*
+- 6-digit code expires after 10 minutes — prevents stale link attacks
+- Code is single-use — deleted from DynamoDB on first successful validation
+- Code is delivered via WhatsApp (existing authenticated channel) — proves the requester controls the WhatsApp account before linking Telegram
+- No email or SMS fallback — verification must flow through the authenticated channel
+
+*DynamoDB additions for this flow:*
+- `telegram_link_code` — String — temporary verification code (deleted after use)
+- `telegram_link_expiry` — String — ISO timestamp of code expiry
+
+*New WhatsApp command to add to HELP menu:*
+- **TELEGRAM** — Add Telegram as your second alert channel
+
+*Tier behaviour on linking:*
+| Tier | Result after linking |
+|---|---|
+| Personal Shield | Switches to Telegram-only (WhatsApp OR Telegram) |
+| Business Starter | Switches to Telegram-only (WhatsApp OR Telegram) |
+| Business Basic+ | Enables dual delivery (WhatsApp AND Telegram simultaneously) |
+
 **Telegram delivery capabilities (Phase 2):**
 - Autonomous breach patrol bot — proactively alerts when new breach data detected
 - Scheduled risk briefings — weekly identity risk score summary

@@ -3336,6 +3336,44 @@ Three tiers scaled by partner commitment and volume.
 
 ---
 
+## 19. Domain Registry Partnership Roadmap
+
+*Added May 2026 — evaluated Namecheap as a partnership candidate; ruled out as a direct competitor on domain monitoring. Identified two higher-value partnership tracks below.*
+
+### Near-Term: GoDaddy Technology Partner Program
+
+GoDaddy is the largest domain registrar with a predominantly SMB customer base — exactly RelayShield's target buyer. An SMB that registers a domain on GoDaddy and opts into a "domain protection" add-on is a natural RelayShield customer.
+
+**Opportunity:** Bundle domain lookalike monitoring alerts as a GoDaddy add-on or list in their technology partner marketplace.
+
+**Prerequisites before approaching:**
+- 10+ paying customers as proof of traction
+- Documented domain monitoring accuracy metrics (lookalikes detected, false positive rate)
+- Completed Tech E&O insurance (already in progress)
+
+**Action:** Research GoDaddy's formal technology partner program once traction is established. Lead with SMB domain protection use case, not the B2A API angle.
+
+---
+
+### Phase 2 Moat: ICANN Zone File Access / Registrar Feed Integration
+
+Current domain monitoring detects lookalikes after DNS propagation — typically hours after registration. Direct access to registration feeds would enable detection at the moment of registration, before DNS propagates. This is a significant detection advantage no competitor at RelayShield's price point currently offers.
+
+**Two paths to early registration data:**
+
+| Path | How | Effort |
+|---|---|---|
+| **ICANN zone file access** | Apply for ICANN Centralized Zone Data Service (CZDS) — free, requires application and stated purpose | Low effort, weeks to approval |
+| **Registrar partnership** | Direct data-sharing agreement with an ICANN-accredited registrar | Medium effort, requires traction |
+
+**CZDS application:** czds.icann.org — apply stating purpose as "domain abuse and lookalike detection for identity protection." Covers .com, .net, .org and most gTLDs. Data delivered as daily zone file snapshots — not real-time but significantly earlier than DNS polling.
+
+**Strategic value:** Being able to market "detects lookalike domains within hours of registration" vs "detects after DNS propagation" is a meaningful differentiator for Business Shield and Shield Pro tiers. Add to patent provisional as a detection method claim.
+
+**Action trigger:** Pursue CZDS access in Phase 2 after first 5 paying domain-tier customers.
+
+---
+
 ## 17. Secrets Manager Keys
 
 | Secret Name | Status |

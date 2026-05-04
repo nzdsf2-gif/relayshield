@@ -59,7 +59,7 @@ Open (or create) `~/Library/Application Support/Claude/claude_desktop_config.jso
 {
   "mcpServers": {
     "relayshield": {
-      "command": "python3",
+      "command": "/Users/andrewgibbs/anaconda3/bin/python3",
       "args": ["/Users/andrewgibbs/Side SaaS Hustle/relayshield_mcp_server.py"],
       "env": {
         "RELAYSHIELD_API_URL": "https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod",

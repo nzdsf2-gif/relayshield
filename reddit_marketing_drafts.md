@@ -6,6 +6,80 @@ Andrew posts manually and engages in comments.
 
 ---
 
+## r/netsec — PyPI Supply Chain (post Wednesday May 6 2026)
+
+**Title:** TeamPCP compromised LiteLLM, Telnyx, and PyTorch Lightning via a single misconfigured GitHub Actions workflow — here's the full chain
+
+**Body:**
+Been tracking the TeamPCP supply chain campaign that ran through March and April. The attack chain is worth understanding because it started in a place most teams aren't watching.
+
+**How it started:**
+TeamPCP identified a misconfigured `pull_request_target` workflow in Trivy — a widely-used open source security scanner. That trigger runs with elevated repository permissions and, when misconfigured, exposes secrets to pull requests from forks. They used it to exfiltrate a personal access token.
+
+**What they did with it:**
+- Pushed malicious commits to 76 of 77 Trivy GitHub Action version tags
+- Used the compromised Trivy action as a foothold to steal maintainer credentials downstream
+- Published malicious versions of LiteLLM (1.82.7, 1.82.8 — March 24), Telnyx (4.87.1, 4.87.2 — March 27), and PyTorch Lightning (2.6.2, 2.6.3 — April 30)
+
+**What the malicious versions harvested:**
+Environment variables, SSH keys, AWS/GCP/Azure credentials, Kubernetes configs, Docker configs, shell history, database credentials, CI/CD pipeline secrets, and wallet files — all exfiltrated on install.
+
+LiteLLM alone runs at ~3.4 million downloads per day. The blast radius during even a 24-hour window is significant.
+
+**The AI stack targeting is deliberate:**
+LiteLLM routes calls to Anthropic, OpenAI, Google, etc. Developers running it typically have high-value API keys in their environment. Targeting AI infrastructure packages maximises credential value per compromised machine.
+
+**Three mitigations worth prioritising:**
+
+1. Audit any workflow using `pull_request_target` — it should not have access to secrets unless you explicitly need it and have scoped it carefully
+2. Pin dependencies in CI — `pip install litellm==1.82.6` instead of latest. Review upgrades before applying
+3. PyPI Trusted Publishing — eliminates stored API tokens by using short-lived OIDC tokens tied to your GitHub repo. No token to steal
+
+If you ran LiteLLM, Telnyx, or Lightning in the affected version windows and haven't rotated credentials yet, assume exfiltration occurred.
+
+Happy to go deeper on the GitHub Actions misconfiguration vector — it's underappreciated as an initial access technique.
+
+---
+
+*[Comment, not in post body]* For teams wanting programmatic breach and supply chain monitoring, I built a B2A API and MCP server for this — relayshield-mcp on PyPI, API on RapidAPI. Not the point of this post but happy to share if useful.
+
+---
+
+## r/Python — PyPI Supply Chain (post Wednesday May 6 2026)
+
+**Title:** If you ran LiteLLM, Telnyx, or PyTorch Lightning between March 24 and May 1 — rotate your credentials
+
+**Body:**
+Not trying to be alarmist but this one is worth knowing about if you haven't seen it.
+
+Between March and April 2026, attackers compromised multiple popular Python packages and used them to harvest developer credentials on install. The affected packages and windows:
+
+- **LiteLLM 1.82.7 and 1.82.8** — March 24–25
+- **Telnyx 4.87.1 and 4.87.2** — March 27–28
+- **PyTorch Lightning 2.6.2 and 2.6.3** — April 30–May 1
+
+The malicious code ran silently on `pip install` and exfiltrated environment variables, SSH keys, cloud credentials, and CI/CD pipeline secrets to attacker-controlled infrastructure.
+
+The attack started with a misconfigured `pull_request_target` GitHub Actions workflow in Trivy that leaked a maintainer token — which was then used to push directly to PyPI without going through normal code review.
+
+**If you installed any of these in the affected windows:**
+- Rotate your AWS/GCP/Azure credentials
+- Rotate any API keys in your environment (OpenAI, Anthropic, etc.)
+- Rotate SSH keys
+- Check for any new CI/CD pipeline secrets that were active during that period
+
+**Three things worth doing going forward:**
+
+1. **Pin your dependencies** — `pip freeze > requirements.txt` and review upgrades before applying them in production
+2. **Use project-scoped PyPI tokens** if you publish packages — account-wide tokens are too broad
+3. **Enable PyPI Trusted Publishing** — it removes stored API tokens from the equation entirely by using OIDC. Setup takes about 20 minutes and is worth it
+
+The supply chain attack surface for Python packages is real and the AI ecosystem is being targeted specifically because of the high-value credentials developers in that space carry.
+
+Happy to answer questions about the attack chain or the mitigations.
+
+---
+
 ## r/smallbusiness
 
 **Title:** After my vendor got breached, I realized changing my password wasn't enough — here's what actually protects you

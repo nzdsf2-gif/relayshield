@@ -2952,6 +2952,23 @@ def handle_active_message(
             "Reply *STATUS* to see your updated team.",
             account_sid, auth_token, from_number,
         )
+
+        # Second message: post-offboarding security checklist
+        name_str = emp_name if emp_name else phone
+        send_whatsapp(
+            to_number,
+            f"🔐 *Post-Offboarding Security Checklist — {name_str}*\n\n"
+            "Complete these steps to close access fully:\n\n"
+            "1️⃣ *Deactivate company email* — suspend or delete their account in Google Workspace or M365 admin panel\n\n"
+            "2️⃣ *Remove from shared accounts* — review any shared logins (social media, tools, portals) they had access to\n\n"
+            "3️⃣ *Rotate shared credentials* — change any passwords they knew, especially shared admin accounts\n\n"
+            "4️⃣ *Revoke OAuth access* — go to myaccount.google.com/permissions and remove any apps they authorised on company accounts\n\n"
+            "5️⃣ *Audit SaaS admin rights* — check Slack, Notion, GitHub, Zapier, and any other tools for lingering admin or member access\n\n"
+            "6️⃣ *Recover company devices* — confirm any company laptop, phone, or token has been returned or wiped\n\n"
+            "Reply *STATUS* to confirm your updated seat count.",
+            account_sid, auth_token, from_number,
+        )
+
         logger.info(
             "Employee removed — admin_user_id=%s employee_user_id=%s phone=%s emails_deactivated=%d",
             user_id, emp_user_id, phone, emails_removed,

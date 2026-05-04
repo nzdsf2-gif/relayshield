@@ -1,0 +1,96 @@
+name: Deploy Changed Lambdas to AWS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'relayshield_breach_monitor.py'
+      - 'relayshield_whatsapp_webhook.py'
+      - 'relayshield_stripe_webhook.py'
+      - 'relayshield_domain_monitor.py'
+      - 'relayshield_sim_swap_monitor.py'
+      - 'relayshield_api.py'
+      - 'relayshield_digest_sender.py'
+      - 'relayshield_day3_sender.py'
+      - 'relayshield_oauth_watchlist_monitor.py'
+      - 'relayshield_monthly_oauth_reminder.py'
+      - 'relayshield_quarterly_sweep_sender.py'
+      - 'relayshield_sms_fallback_sender.py'
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Deploy to AWS Lambda
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for OIDC
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit to detect changes
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::239677749008:role/relayshield-github-deploy
+          aws-region: us-east-1
+          # No access keys needed — OIDC issues a short-lived token
+
+      - name: Detect changed Lambda files
+        id: changes
+        run: |
+          # Get list of changed .py files vs previous commit
+          CHANGED=$(git diff --name-only HEAD~1 HEAD | grep '^relayshield_.*\.py$' || true)
+          echo "Changed files: $CHANGED"
+          echo "files=$CHANGED" >> $GITHUB_OUTPUT
+
+      - name: Deploy changed Lambdas
+        if: steps.changes.outputs.files != ''
+        run: |
+          # Map source file → Lambda function name
+          declare -A LAMBDA_MAP=(
+            ["relayshield_breach_monitor.py"]="relayshield-breach-check"
+            ["relayshield_whatsapp_webhook.py"]="relayshield-whatsapp-webhook"
+            ["relayshield_stripe_webhook.py"]="relayshield-stripe-webhook"
+            ["relayshield_domain_monitor.py"]="relayshield-domain-monitor"
+            ["relayshield_sim_swap_monitor.py"]="relayshield-sim-swap-monitor"
+            ["relayshield_api.py"]="relayshield-api"
+            ["relayshield_digest_sender.py"]="relayshield-digest-sender"
+            ["relayshield_day3_sender.py"]="relayshield-day3-sender"
+            ["relayshield_oauth_watchlist_monitor.py"]="relayshield-oauth-watchlist-monitor"
+            ["relayshield_monthly_oauth_reminder.py"]="relayshield-monthly-oauth-reminder"
+            ["relayshield_quarterly_sweep_sender.py"]="relayshield-quarterly-sweep-sender"
+            ["relayshield_sms_fallback_sender.py"]="relayshield-sms-fallback-sender"
+          )
+
+          for FILE in ${{ steps.changes.outputs.files }}; do
+            FUNC="${LAMBDA_MAP[$FILE]}"
+            if [ -z "$FUNC" ]; then
+              echo "No Lambda mapping for $FILE — skipping"
+              continue
+            fi
+
+            echo "→ Packaging $FILE → $FUNC"
+            zip -j deploy.zip "$FILE"
+
+            echo "→ Deploying to $FUNC"
+            aws lambda update-function-code \
+              --function-name "$FUNC" \
+              --zip-file fileb://deploy.zip \
+              --region us-east-1
+
+            # Wait for update to complete before next deploy
+            aws lambda wait function-updated \
+              --function-name "$FUNC" \
+              --region us-east-1
+
+            echo "✅ $FUNC deployed"
+            rm deploy.zip
+          done
+
+      - name: No Lambda changes detected
+        if: steps.changes.outputs.files == ''
+        run: echo "No Lambda source files changed — nothing to deploy"

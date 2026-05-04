@@ -9,7 +9,7 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **Tech E&O insurance** — Embroker application submitted April 2026 — slow to respond. Agent sourcing second quote from **Coalition** (checking now). ⚠️ Standalone cyber (~$2K/yr available) is NOT sufficient — Tech E&O covers customer claims for service failure; Cyber covers own incident response. Need Tech E&O. Coalition, CNA, Hartford, Chubb all offer combined Tech E&O + Cyber. Sign policy before first paying customer. | 🔄 Second source — Coalition quote pending |
+| 1 | **Tech E&O + Cyber insurance** — Embroker application submitted April 2026 — slow to respond. Coalition rejected May 2026 (misclassified as MSP — rebuttal sent). **Next: At-Bay application** — strongest fit for SaaS/API companies, tech-savvy underwriting. Security posture: IRP ✅, FileVault ✅, DynamoDB PITR ✅ (all 4 tables confirmed On), Secrets Manager ✅, OIDC ✅, SAST CI ✅. GuardDuty pending billing fix. No EDR — disclose honestly, not disqualifying at this revenue level. | 🔄 Apply At-Bay next |
 | 2 | **Facebook Business verification** — Submitted as sole proprietor. Monitoring for Meta approval. | 🔄 Submitted — awaiting Meta |
 
 ---
@@ -94,7 +94,7 @@
 | # | Item | Status |
 |---|---|---|
 | 1 | **`REMOVE` command — employee offboarding** — `REMOVE +16175551234`: finds employee by phone hash + admin ownership check, sets `active=False`, deactivates all monitored emails. Confirms to admin with name + email count. Second message sends 6-step post-offboarding security checklist (deactivate email, shared accounts, rotate credentials, revoke OAuth, audit SaaS admin rights, recover devices). Deployed and tested May 4 2026. | ✅ Complete — May 2026 |
-| 1a | **AWS OIDC IAM role setup** — Create OIDC identity provider in AWS IAM for `token.actions.githubusercontent.com`. Create role `relayshield-github-deploy` (account 239677749008) with trust policy scoped to repo `nzdsf2-gif/relayshield`. Attach inline policy: `lambda:UpdateFunctionCode` + `lambda:GetFunctionConfiguration` + `lambda:WaitForFunctionUpdated` on all relayshield Lambda ARNs. GitHub Actions `deploy_lambdas.yml` workflow already in repo — role is the only missing piece before auto-deploy on push is live. | ⬜ Pending — AWS console setup required |
+| 1a | **AWS OIDC IAM role setup** — OIDC provider `token.actions.githubusercontent.com` created. Role `relayshield-github-deploy` created with trust policy scoped to `nzdsf2-gif/relayshield`. Policy `relayshield-lambda-deploy` attached. GitHub Actions `deploy_lambdas.yml` live — workflow passed in 16 seconds May 2026. | ✅ Complete — May 2026 |
 | 2 | **`STATUS` command — WhatsApp-native admin dashboard** — `STATUS`: returns seat usage (X of Y), per-employee onboarding state (✅ Active / ⏳ Onboarding), emails monitored count, ADD/REMOVE instructions. Business admin only. Deployed April 2026. | ✅ Complete — April 2026 |
 | 3 | **Admin breach co-notification** — When employee breach fires and alert is successfully delivered, second WhatsApp alert sent to admin with employee name (if stored), breach names, and severity label. Cached admin record lookup. `get_whatsapp_number_from_record()` fixed to use KMS `phone_encrypted` primary path + legacy fallback. Deployed April 2026. | ✅ Complete — April 2026 |
 | 4 | **Employee name on `ADD` command** — `ADD +16175551234 John Smith` stores `employee_name` on the record. Admin confirmation and STATUS display use name. Backward-compatible (ADD without name still works). Deployed April 2026. | ✅ Complete — April 2026 |
@@ -176,7 +176,7 @@
 |---|---|---|
 | 1 | Self-directed pen test — Lambda/DynamoDB surface | ⬜ Pending |
 | 2 | Set up GitHub Actions CI with Bandit + Safety + open-source secret scanner | ✅ Complete — `.github/workflows/security_audit.yml` runs Bandit (HIGH severity gate), Safety (CVE check), and Gitleaks (secret scan) on every push to main |
-| 3 | Set up AWS GuardDuty (~$1–3/month) | ⬜ Pending |
+| 3 | **Set up AWS GuardDuty (~$1–3/month)** — Navigate to GuardDuty in AWS console → Get Started → Enable GuardDuty. **Blocked:** account 239677749008 billing setup incomplete (free plan limitation). Complete AWS registration / verify payment method first, then one-click enable. Update IRP Section 4 detection sources once live. | 🔄 Blocked — complete AWS billing setup first |
 | 4 | Confirm PII minimization across DynamoDB tables | ⬜ Pending |
 | 5 | **Implement DynamoDB TTL on relayshield_breach_alerts** — `expires_at` epoch field added to `write_breach_alert()` in breach monitor (now + 2 years). Enable on table: `aws dynamodb update-time-to-live --table-name relayshield_breach_alerts --time-to-live-specification "Enabled=true, AttributeName=expires_at" --region us-east-1` — run once then done. Legacy beta records without the field are unaffected. | ✅ Complete — April 2026 |
 | 6 | **Secrets Manager for OAuth tokens (Phase 2 prerequisite)** — Never store OAuth tokens in DynamoDB. When Phase 2 OAuth monitoring ships, each token stored in Secrets Manager under `relayshield/oauth/{user_id}/{provider}`. DynamoDB stores only the ARN reference — useless to an attacker without separate IAM access to Secrets Manager. Build this architecture before first OAuth token is collected. | ⬜ Pending — required before Phase 2 OAuth |

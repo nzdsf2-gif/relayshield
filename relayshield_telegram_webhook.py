@@ -523,7 +523,7 @@ def handle_plan_callback(chat_id: int, tier: str, callback_query_id: str,
             chat_id,
             "📞 *Contact us for Business Shield Pro*\n\n"
             "📧 relayshieldadmin@gmail.com\n"
-            "📱 +1 (339) 298-7368\n\n"
+            "📱 RelayShield Support: +1 339 298-7368\n\n"
             "We'll get back to you within 24 hours.",
         )
         return

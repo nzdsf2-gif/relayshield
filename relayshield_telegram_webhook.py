@@ -371,7 +371,7 @@ PLAN_FEATURE_CARDS = {
     ),
     TIER_STARTER_DOMAIN: (
         "🛡️ *Starter + Domain — $24.99/mo*\n\n"
-        "👥 2 seats (1 admin + 1 contractor)\n"
+        "👥 2 seats (owner + contractor)\n"
         "📧 Up to 3 emails monitored per seat\n"
         "🌐 1 domain monitored for lookalikes + cert transparency\n"
         "📱 SIM/eSIM swap detection\n"

@@ -306,9 +306,9 @@ def intent_keyboard() -> dict:
 def personal_plan_keyboard() -> dict:
     return {
         "inline_keyboard": [
-            [{"text": "Personal Shield — $14.99/mo | 1 user", "callback_data": f"planinfo_{TIER_PERSONAL}"}],
+            [{"text": "Personal Shield — $14.99/mo | 1 seat", "callback_data": f"planinfo_{TIER_PERSONAL}"}],
             [{"text": "Business Starter — $19.99/mo | 2 seats", "callback_data": f"planinfo_{TIER_STARTER}"}],
-            [{"text": "Starter + Domain — $24.99/mo | 1 user + domain", "callback_data": f"planinfo_{TIER_STARTER_DOMAIN}"}],
+            [{"text": "Starter + Domain — $24.99/mo | 2 seats + domain", "callback_data": f"planinfo_{TIER_STARTER_DOMAIN}"}],
         ]
     }
 
@@ -317,7 +317,7 @@ def business_plan_keyboard() -> dict:
     return {
         "inline_keyboard": [
             [{"text": "Business Starter — $19.99/mo | 2 seats", "callback_data": f"planinfo_{TIER_STARTER}"}],
-            [{"text": "Starter + Domain — $24.99/mo | 1 user + domain", "callback_data": f"planinfo_{TIER_STARTER_DOMAIN}"}],
+            [{"text": "Starter + Domain — $24.99/mo | 2 seats + domain", "callback_data": f"planinfo_{TIER_STARTER_DOMAIN}"}],
             [{"text": "Business Basic — $89.99/mo | up to 5 seats", "callback_data": f"planinfo_{TIER_BASIC}"}],
             [{"text": "Business Shield — $139.99/mo | up to 10 seats", "callback_data": f"planinfo_{TIER_SHIELD}"}],
             [{"text": "📞 Contact us for Business Shield Pro", "callback_data": "plan_contact"}],
@@ -350,7 +350,7 @@ def plan_confirm_keyboard(tier: str, intent: str) -> dict:
 PLAN_FEATURE_CARDS = {
     TIER_PERSONAL: (
         "🛡️ *Personal Shield — $14.99/mo*\n\n"
-        "👤 1 user\n"
+        "👤 1 seat\n"
         "📧 Up to 3 email addresses monitored\n"
         "📱 SIM swap + eSIM detection\n"
         "🔍 Breach alerts with AI-powered remediation\n"
@@ -371,8 +371,8 @@ PLAN_FEATURE_CARDS = {
     ),
     TIER_STARTER_DOMAIN: (
         "🛡️ *Starter + Domain — $24.99/mo*\n\n"
-        "👤 1 user\n"
-        "📧 Up to 3 emails monitored\n"
+        "👥 2 seats (owner + 1 employee)\n"
+        "📧 Up to 3 emails monitored per seat\n"
         "🌐 1 domain monitored for lookalikes + cert transparency\n"
         "📱 SIM swap + eSIM detection\n"
         "🔍 Breach alerts with AI-powered remediation\n"

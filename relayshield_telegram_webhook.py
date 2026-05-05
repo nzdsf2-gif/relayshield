@@ -306,9 +306,9 @@ def intent_keyboard() -> dict:
 def personal_plan_keyboard() -> dict:
     return {
         "inline_keyboard": [
-            [{"text": "Personal Shield — $14.99/mo", "callback_data": f"plan_{TIER_PERSONAL}"}],
-            [{"text": "Business Starter — $19.99/mo", "callback_data": f"plan_{TIER_STARTER}"}],
-            [{"text": "Starter + Domain — $24.99/mo", "callback_data": f"plan_{TIER_STARTER_DOMAIN}"}],
+            [{"text": "Personal Shield — $14.99/mo | 1 user", "callback_data": f"planinfo_{TIER_PERSONAL}"}],
+            [{"text": "Business Starter — $19.99/mo | 2 seats", "callback_data": f"planinfo_{TIER_STARTER}"}],
+            [{"text": "Starter + Domain — $24.99/mo | 1 user + domain", "callback_data": f"planinfo_{TIER_STARTER_DOMAIN}"}],
         ]
     }
 
@@ -316,13 +316,95 @@ def personal_plan_keyboard() -> dict:
 def business_plan_keyboard() -> dict:
     return {
         "inline_keyboard": [
-            [{"text": "Business Starter — $19.99/mo", "callback_data": f"plan_{TIER_STARTER}"}],
-            [{"text": "Starter + Domain — $24.99/mo", "callback_data": f"plan_{TIER_STARTER_DOMAIN}"}],
-            [{"text": "Business Basic — $89.99/mo (up to 5 seats)", "callback_data": f"plan_{TIER_BASIC}"}],
-            [{"text": "Business Shield — $139.99/mo (up to 10 seats)", "callback_data": f"plan_{TIER_SHIELD}"}],
+            [{"text": "Business Starter — $19.99/mo | 2 seats", "callback_data": f"planinfo_{TIER_STARTER}"}],
+            [{"text": "Starter + Domain — $24.99/mo | 1 user + domain", "callback_data": f"planinfo_{TIER_STARTER_DOMAIN}"}],
+            [{"text": "Business Basic — $89.99/mo | up to 5 seats", "callback_data": f"planinfo_{TIER_BASIC}"}],
+            [{"text": "Business Shield — $139.99/mo | up to 10 seats", "callback_data": f"planinfo_{TIER_SHIELD}"}],
             [{"text": "📞 Contact us for Business Shield Pro", "callback_data": "plan_contact"}],
         ]
     }
+
+
+def see_all_plans_keyboard(intent: str) -> dict:
+    """Back button to return to plan list after viewing a feature card."""
+    return {
+        "inline_keyboard": [
+            [{"text": "◀️ See all plans", "callback_data": f"back_plans_{intent}"}],
+        ]
+    }
+
+
+def plan_confirm_keyboard(tier: str, intent: str) -> dict:
+    return {
+        "inline_keyboard": [
+            [{"text": "✅ Choose this plan", "callback_data": f"plan_{tier}"}],
+            [{"text": "◀️ See all plans", "callback_data": f"back_plans_{intent}"}],
+        ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# Plan feature cards
+# ---------------------------------------------------------------------------
+
+PLAN_FEATURE_CARDS = {
+    TIER_PERSONAL: (
+        "🛡️ *Personal Shield — $14.99/mo*\n\n"
+        "👤 1 user\n"
+        "📧 Up to 3 email addresses monitored\n"
+        "📱 SIM swap + eSIM detection\n"
+        "🔍 Breach alerts with AI-powered remediation\n"
+        "🔗 Phishing URL + attachment analysis\n"
+        "📊 Monthly security digest\n"
+        "💬 Telegram or WhatsApp delivery"
+    ),
+    TIER_STARTER: (
+        "🛡️ *Business Starter — $19.99/mo*\n\n"
+        "👥 2 seats (owner + 1 employee)\n"
+        "📧 Up to 3 emails monitored per person\n"
+        "📱 SIM swap + eSIM detection\n"
+        "🔍 Breach alerts with AI-powered remediation\n"
+        "🔔 Admin notified when employee has a breach\n"
+        "👥 /status dashboard for seat management\n"
+        "📊 Monthly security digest\n"
+        "💬 Telegram or WhatsApp delivery"
+    ),
+    TIER_STARTER_DOMAIN: (
+        "🛡️ *Starter + Domain — $24.99/mo*\n\n"
+        "👤 1 user\n"
+        "📧 Up to 3 emails monitored\n"
+        "🌐 1 domain monitored for lookalikes + cert transparency\n"
+        "📱 SIM swap + eSIM detection\n"
+        "🔍 Breach alerts with AI-powered remediation\n"
+        "📊 Monthly security digest\n"
+        "💬 Telegram or WhatsApp delivery"
+    ),
+    TIER_BASIC: (
+        "🛡️ *Business Basic — $89.99/mo*\n\n"
+        "👥 Up to 5 seats\n"
+        "📧 2 emails monitored per person\n"
+        "🌐 2 domains monitored for lookalikes\n"
+        "📱 SIM swap + eSIM detection\n"
+        "🔍 Breach alerts with AI-powered remediation\n"
+        "🔔 Admin co-notification on all employee breaches\n"
+        "📲 *Dual delivery: WhatsApp + Telegram simultaneously*\n"
+        "🔐 Monthly OAuth connected-app audit\n"
+        "📊 Monthly security digest"
+    ),
+    TIER_SHIELD: (
+        "🛡️ *Business Shield — $139.99/mo*\n\n"
+        "👥 Up to 10 seats\n"
+        "📧 2 emails monitored per person\n"
+        "🌐 2 domains monitored for lookalikes\n"
+        "📱 SIM swap + eSIM detection + disable guidance\n"
+        "🔍 Breach alerts with AI-powered remediation\n"
+        "🔔 Admin co-notification on all employee breaches\n"
+        "📲 *Dual delivery: WhatsApp + Telegram simultaneously*\n"
+        "🔐 Monthly OAuth connected-app audit\n"
+        "⚡ Enhanced SIM swap response + FCC complaint guidance\n"
+        "📊 Monthly security digest"
+    ),
+}
 
 
 def confirm_phone_keyboard() -> dict:
@@ -408,31 +490,45 @@ def handle_intent_callback(chat_id: int, intent: str, callback_query_id: str,
     if intent == "personal":
         send_message(
             chat_id,
-            "Choose your plan:",
+            "Tap a plan to see what's included:",
             reply_markup=personal_plan_keyboard(),
         )
     elif intent in ("business", "msp"):
         send_message(
             chat_id,
-            "Choose your plan:",
+            "Tap a plan to see what's included:",
             reply_markup=business_plan_keyboard(),
         )
 
 
+def handle_planinfo_callback(chat_id: int, tier: str, callback_query_id: str,
+                             intent: str) -> None:
+    """User tapped a plan — show feature card with confirm/back buttons."""
+    answer_callback(callback_query_id)
+    card = PLAN_FEATURE_CARDS.get(tier, "Plan details coming soon.")
+    send_message(
+        chat_id,
+        card,
+        reply_markup=plan_confirm_keyboard(tier, intent),
+    )
+
+
 def handle_plan_callback(chat_id: int, tier: str, callback_query_id: str,
                          first_name: str) -> None:
-    """User selected a plan — initiate payment (Phase 2: Telegram Payments)."""
+    """User confirmed plan selection — initiate payment."""
     answer_callback(callback_query_id)
 
     if tier == "contact":
         send_message(
             chat_id,
-            "For Business Shield Pro pricing, contact us at relayshieldadmin@gmail.com "
-            "and we'll set you up directly.",
+            "📞 *Contact us for Business Shield Pro*\n\n"
+            "📧 relayshieldadmin@gmail.com\n"
+            "📱 +1 (339) 298-7368\n\n"
+            "We'll get back to you within 24 hours.",
         )
         return
 
-    # TODO Phase 2: Send Telegram Payments invoice here.
+    # TODO Phase 2: Send Telegram Payments 2.0 invoice here.
     # For now, direct to Stripe payment link on relayshield.net
     plan = PLAN_PRICES.get(tier, {})
     label = plan.get("label", tier)
@@ -440,9 +536,9 @@ def handle_plan_callback(chat_id: int, tier: str, callback_query_id: str,
 
     send_message(
         chat_id,
-        f"You selected *{label}* (${amount_dollars:.2f}/mo).\n\n"
+        f"✅ Great choice — *{label}* (${amount_dollars:.2f}/mo).\n\n"
         f"Complete your subscription at relayshield.net — then return here "
-        f"and send your email address to begin monitoring.",
+        f"and I'll finish setting up your protection.",
     )
 
 
@@ -787,6 +883,22 @@ def handle_callback_query(update: dict) -> None:
     if data.startswith("intent_"):
         intent = data.replace("intent_", "")
         handle_intent_callback(chat_id, intent, cq_id, first_name)
+
+    elif data.startswith("planinfo_"):
+        # Tap on plan button → show feature card
+        tier = data.replace("planinfo_", "")
+        # Determine intent from context (default personal for routing back)
+        intent = "personal" if tier in (TIER_PERSONAL, TIER_STARTER, TIER_STARTER_DOMAIN) else "business"
+        handle_planinfo_callback(chat_id, tier, cq_id, intent)
+
+    elif data.startswith("back_plans_"):
+        # Back button from feature card → re-show plan keyboard
+        answer_callback(cq_id)
+        intent = data.replace("back_plans_", "")
+        if intent == "personal":
+            send_message(chat_id, "Tap a plan to see what's included:", reply_markup=personal_plan_keyboard())
+        else:
+            send_message(chat_id, "Tap a plan to see what's included:", reply_markup=business_plan_keyboard())
 
     elif data.startswith("plan_"):
         tier = data.replace("plan_", "")

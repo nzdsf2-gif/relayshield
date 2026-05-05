@@ -16,6 +16,7 @@ on:
       - 'relayshield_monthly_oauth_reminder.py'
       - 'relayshield_quarterly_sweep_sender.py'
       - 'relayshield_sms_fallback_sender.py'
+      - 'relayshield_telegram_webhook.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
@@ -67,6 +68,7 @@ jobs:
             ["relayshield_monthly_oauth_reminder.py"]="relayshield-monthly-oauth-reminder"
             ["relayshield_quarterly_sweep_sender.py"]="relayshield-quarterly-sweep-sender"
             ["relayshield_sms_fallback_sender.py"]="relayshield-sms-fallback-sender"
+            ["relayshield_telegram_webhook.py"]="relayshield-telegram-webhook"
           )
 
           for FILE in ${{ steps.changes.outputs.files }}; do

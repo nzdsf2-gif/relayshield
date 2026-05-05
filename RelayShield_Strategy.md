@@ -2183,8 +2183,55 @@ If an attacker SIM swaps an employee and hijacks their WhatsApp account, a stand
 No additional pricing tier or add-on fee is needed. Dual delivery is included in Business Basic+ as part of the tier's value proposition.
 
 **New DynamoDB fields required (`relayshield_users`):**
-- `telegram_chat_id` — String — captured when user sends `/start` to the RelayShield Telegram bot; stored on user record
+- `telegram_chat_id` — String — captured at onboarding when user completes phone number sharing; stored on user record
 - `preferred_channel` — String — `whatsapp` | `telegram` | `both` (default: `whatsapp`; `both` only available to Business Basic+)
+- `delivery_channels` — List — e.g. `["whatsapp"]`, `["telegram"]`, `["whatsapp", "telegram"]`
+- `deep_link_token` — String — temporary token for WA→Telegram linking via deep link (expires 24hrs)
+- `deep_link_expires_at` — String — ISO timestamp of deep link expiry
+- `telegram_link_code` — String — 6-digit code for WA→Telegram verification (deleted after use)
+- `telegram_link_expiry` — String — ISO timestamp of 6-digit code expiry
+
+**New customer onboarding — Telegram-first (Telegram Payments 2.0):**
+
+New customers who discover RelayShield via Telegram (bot link, MSP referral, community share) complete the full signup without leaving Telegram. This is a cleaner onboarding than WhatsApp because `telegram_chat_id` is present in every bot update — no phone number matching issues.
+
+*Critical difference from WhatsApp:* Telegram does not expose the user's phone number to bots automatically. Phone number must be explicitly requested via the `request_contact` keyboard button. Email addresses must also be collected explicitly during onboarding.
+
+```
+1. User finds @relayshield_bot (or taps referral deep link)
+      ↓
+2. /start → bot sends welcome message + plan selection
+   (inline keyboard: Personal Shield | Business Starter | Business Basic | ...)
+      ↓
+3. User selects plan → bot sends native Stripe invoice
+   (Telegram Payments 2.0 — Apple Pay / Google Pay / card, no redirect)
+      ↓
+4. Payment confirmed → Telegram fires successful_payment update to webhook
+   Lambda receives telegram_chat_id automatically — creates DynamoDB record
+      ↓
+5. Bot sends: "To enable SIM swap monitoring, please share your phone number."
+   + [Share Phone Number] button (request_contact: true)
+   User taps → Telegram prompts permission → user approves
+      ↓
+6. Lambda receives contact update with phone number
+   Confirm: "We'll monitor +1XXXXXXXXXX for SIM swap activity — correct?"
+   [✅ Yes] [❌ Use a different number]
+      ↓
+7. Phone confirmed → Lambda encrypts with KMS (same path as WhatsApp)
+   Stores phone_encrypted + phone_hash on DynamoDB record
+      ↓
+8. Bot: "Now let's monitor your email addresses for breaches.
+         Send your first email address:"
+   User sends email → Lambda stores, runs initial HIBP breach check
+   Repeat up to tier email limit (Personal: 1, Starter: 3, Basic: 5...)
+      ↓
+9. Onboarding complete → bot sends welcome summary:
+   - SIM swap monitoring active ✅
+   - Breach monitoring active for N email(s) ✅
+   - Commands: HELP | SWEEP | STATUS | ...
+```
+
+*Security note on phone confirmation step:* User may have a different Telegram-registered number than the SIM they want monitored (e.g. work vs personal). Always confirm before writing — do not assume the shared number is the one to monitor.
 
 **Existing WhatsApp user — adding Telegram as a second channel:**
 

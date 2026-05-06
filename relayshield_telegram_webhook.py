@@ -929,7 +929,13 @@ def handle_message(update: dict) -> None:
 
     state = user.get("onboarding_state", "ACTIVE")
 
-    if state == "AWAITING_EMAIL_1":
+    if state == "AWAITING_PHONE":
+        # Re-send the contact keyboard — user may have missed it or typed instead
+        request_contact(
+            chat_id,
+            "Please share your phone number so I can monitor for SIM/eSIM swap attacks:",
+        )
+    elif state == "AWAITING_EMAIL_1":
         handle_email_input(chat_id, text, user)
     elif state == "AWAITING_MORE_EMAILS":
         handle_email_input(chat_id, text, user)

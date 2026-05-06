@@ -590,28 +590,27 @@ def advance_telegram_record(
 
 def send_telegram_phone_request(chat_id: str, token: str, tier_name: str) -> bool:
     """
-    Send payment confirmation + request_contact keyboard to Telegram user.
-    Called immediately after Stripe payment is confirmed.
+    Send payment confirmation to Telegram user.
+    The Telegram webhook handles the request_contact keyboard when the user
+    next sends any message (AWAITING_PHONE state handler).
     """
     text = (
         f"✅ *Payment confirmed! Welcome to RelayShield — {tier_name} is now active.*\n\n"
-        f"Let's finish setting up your protection.\n\n"
-        f"Tap the button below to share your phone number — "
-        f"I'll use it to monitor for SIM/eSIM swap attacks."
+        f"One last step: tap the button below 👇 to share your phone number so I can "
+        f"monitor for SIM/eSIM swap attacks."
     )
-    keyboard = {
-        "keyboard": [[{
-            "text": "📱 Share my phone number",
-            "request_contact": True,
-        }]],
-        "one_time_keyboard": True,
-        "resize_keyboard": True,
-    }
     payload = json.dumps({
-        "chat_id": chat_id,
+        "chat_id": int(chat_id),
         "text": text,
         "parse_mode": "Markdown",
-        "reply_markup": keyboard,
+        "reply_markup": {
+            "keyboard": [[{
+                "text": "📱 Share my phone number",
+                "request_contact": True,
+            }]],
+            "one_time_keyboard": True,
+            "resize_keyboard": True,
+        },
     }).encode()
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"

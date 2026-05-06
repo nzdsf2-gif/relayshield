@@ -688,30 +688,37 @@ def lambda_handler(event, context):
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     sig_header = headers.get("stripe-signature", "")
 
-    if not sig_header:
-        logger.warning("Request missing Stripe-Signature header.")
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Missing Stripe-Signature header"}),
-        }
+    # --- TEST MODE BYPASS (Lambda console testing only) ---
+    # Remove this block before going to production with real traffic.
+    # Only bypasses signature check when X-Test-Mode: true header is present.
+    test_mode = headers.get("x-test-mode", "").lower() == "true"
+    if test_mode:
+        logger.warning("TEST MODE ACTIVE — Stripe signature verification bypassed.")
+    else:
+        if not sig_header:
+            logger.warning("Request missing Stripe-Signature header.")
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Missing Stripe-Signature header"}),
+            }
 
-    # --- 1. Retrieve webhook secret ---
-    try:
-        webhook_secret = get_secret(STRIPE_WEBHOOK_SECRET_NAME)
-    except Exception as exc:
-        logger.exception("Failed to retrieve Stripe webhook secret: %s", exc)
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": "Secret retrieval failed"}),
-        }
+        # --- 1. Retrieve webhook secret ---
+        try:
+            webhook_secret = get_secret(STRIPE_WEBHOOK_SECRET_NAME)
+        except Exception as exc:
+            logger.exception("Failed to retrieve Stripe webhook secret: %s", exc)
+            return {
+                "statusCode": 500,
+                "body": json.dumps({"error": "Secret retrieval failed"}),
+            }
 
-    # --- 2. Verify Stripe signature ---
-    if not verify_stripe_signature(raw_body_bytes, sig_header, webhook_secret):
-        logger.warning("Stripe signature verification failed — request rejected.")
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Invalid Stripe signature"}),
-        }
+        # --- 2. Verify Stripe signature ---
+        if not verify_stripe_signature(raw_body_bytes, sig_header, webhook_secret):
+            logger.warning("Stripe signature verification failed — request rejected.")
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Invalid Stripe signature"}),
+            }
 
     # --- 3. Parse Stripe event ---
     try:

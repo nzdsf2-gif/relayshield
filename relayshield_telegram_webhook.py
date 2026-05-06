@@ -107,14 +107,18 @@ SEAT_LIMITS = {
 
 DOMAIN_TIERS = {TIER_STARTER_DOMAIN, TIER_BASIC, TIER_SHIELD, TIER_PRO}
 
-# Stripe price IDs for Telegram Payments (monthly) — populate after creating
-# Telegram payment invoices for each plan
+# Plan metadata + direct Stripe monthly checkout links
 PLAN_PRICES = {
-    TIER_PERSONAL:       {"label": "Personal Shield",      "amount": 1499, "currency": "usd"},
-    TIER_STARTER:        {"label": "Business Starter",     "amount": 1999, "currency": "usd"},
-    TIER_STARTER_DOMAIN: {"label": "Starter + Domain",     "amount": 2499, "currency": "usd"},
-    TIER_BASIC:          {"label": "Business Basic",        "amount": 8999, "currency": "usd"},
-    TIER_SHIELD:         {"label": "Business Shield",       "amount": 13999, "currency": "usd"},
+    TIER_PERSONAL:       {"label": "Personal Shield",  "amount": 1499,  "currency": "usd",
+                          "stripe_url": "https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00"},
+    TIER_STARTER:        {"label": "Business Starter", "amount": 1999,  "currency": "usd",
+                          "stripe_url": "https://buy.stripe.com/fZucN6ceGglv3qs9830Ny0a"},
+    TIER_STARTER_DOMAIN: {"label": "Starter + Domain", "amount": 2499,  "currency": "usd",
+                          "stripe_url": "https://buy.stripe.com/28EdRa2E61qB2mo3NJ0Ny0c"},
+    TIER_BASIC:          {"label": "Business Basic",   "amount": 8999,  "currency": "usd",
+                          "stripe_url": "https://buy.stripe.com/aFa8wQ3Iab1b8KM9830Ny03"},
+    TIER_SHIELD:         {"label": "Business Shield",  "amount": 13999, "currency": "usd",
+                          "stripe_url": "https://buy.stripe.com/8x24gA6Um2uF2mo9830Ny04"},
 }
 
 # ---------------------------------------------------------------------------
@@ -528,17 +532,17 @@ def handle_plan_callback(chat_id: int, tier: str, callback_query_id: str,
         )
         return
 
-    # TODO Phase 2: Send Telegram Payments 2.0 invoice here.
-    # For now, direct to Stripe payment link on relayshield.net
     plan = PLAN_PRICES.get(tier, {})
     label = plan.get("label", tier)
     amount_dollars = plan.get("amount", 0) / 100
+    stripe_url = plan.get("stripe_url", "https://relayshield.net")
 
     send_message(
         chat_id,
-        f"✅ Great choice — *{label}* (${amount_dollars:.2f}/mo).\n\n"
-        f"Complete your subscription at relayshield.net — then return here "
-        f"and I'll finish setting up your protection.",
+        f"✅ Great choice — *{label}* (${amount_dollars:.2f}/mo)\n\n"
+        f"👉 [Subscribe now]({stripe_url})\n\n"
+        f"Once payment is complete, return here and I'll finish setting up your protection.\n\n"
+        f"_Prefer annual billing? Contact us at relayshieldadmin@gmail.com for a discounted annual plan._",
     )
 
 

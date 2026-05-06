@@ -66,7 +66,7 @@ STRIPE_SECRET_KEY_NAME = "relayshield/stripe_secret_key"
 TWILIO_SID_SECRET = "relayshield/twilio_account_sid"
 TWILIO_TOKEN_SECRET = "relayshield/twilio_auth_token"
 TWILIO_FROM_SECRET = "relayshield/twilio_whatsapp_number"
-TELEGRAM_BOT_TOKEN_SECRET_NAME = "relayshield/telegram-bot-token"
+TELEGRAM_BOT_TOKEN_SECRET_NAME = "relayshield/telegram_bot_token"
 
 TWILIO_MESSAGES_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"

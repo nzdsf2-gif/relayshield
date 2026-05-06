@@ -542,7 +542,6 @@ def msg_help(tier: str) -> str:
 
     text += (
         "\n• /breach — Check breach status\n"
-        "• /verifybot — Confirm this is the official RelayShield bot\n"
         "• /help — This menu\n\n"
         "Tap any command to get started."
     )
@@ -859,8 +858,7 @@ def handle_verify_bot(chat_id: int) -> None:
         "*How to confirm independently:*\n"
         "1. Visit *relayshield.net* — the official bot username is listed there\n"
         "2. The official username is *@RelayShield\\_bot* — verify it matches exactly "
-        "(watch for 0 vs O, l vs I, rn vs m)\n"
-        "3. Source code: *github.com/nzdsf2-gif/relayshield*\n\n"
+        "(watch for 0 vs O, l vs I, rn vs m)\n\n"
         "*What RelayShield will never ask for:*\n"
         "• Your password or PIN\n"
         "• Your Telegram login code\n"

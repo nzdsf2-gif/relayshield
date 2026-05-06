@@ -929,6 +929,11 @@ def handle_message(update: dict) -> None:
         )
         return
 
+    # Persist first_name if not already stored (Stripe-initiated users skip /start)
+    if first_name and first_name != "there" and not user.get("first_name"):
+        update_user(user["user_id"], {"first_name": first_name})
+        user["first_name"] = first_name
+
     state = user.get("onboarding_state", "ACTIVE")
 
     if state == "AWAITING_PHONE":
@@ -965,6 +970,11 @@ def handle_callback_query(update: dict) -> None:
         return
 
     user = get_user_by_chat_id(chat_id)
+
+    # Persist first_name if not already stored (Stripe-initiated users skip /start)
+    if user and first_name and first_name != "there" and not user.get("first_name"):
+        update_user(user["user_id"], {"first_name": first_name})
+        user["first_name"] = first_name
 
     if data.startswith("intent_"):
         intent = data.replace("intent_", "")

@@ -30,7 +30,7 @@ Commands (ACTIVE users):
   /wascam   — suspicious message guidance
   /tgsecurity — Telegram account hardening guide
   /botcheck @username — typosquat + red flag analysis for any bot/channel
-  /legit    — confirm this is the official RelayShield bot
+  /verifybot — confirm this is the official RelayShield bot
   /scan <url> — scan a URL or link for malware/phishing
   /analyse <text> — social engineering analysis of a suspicious message
   LINK      — link existing WhatsApp account via 6-digit code
@@ -525,7 +525,7 @@ def msg_help(tier: str) -> str:
         "*🤖 Telegram Security*\n"
         "• /tgsecurity — Harden your Telegram account against takeover\n"
         "• /botcheck @username — Analyse a bot or channel for typosquatting and red flags\n"
-        "• /legit — Confirm this is the official RelayShield bot\n"
+        "• /verifybot — Confirm this is the official RelayShield bot\n"
     )
 
     if is_business:
@@ -542,7 +542,7 @@ def msg_help(tier: str) -> str:
 
     text += (
         "\n• /breach — Check breach status\n"
-        "• /legit — Confirm this is the official RelayShield bot\n"
+        "• /verifybot — Confirm this is the official RelayShield bot\n"
         "• /help — This menu\n\n"
         "Tap any command to get started."
     )
@@ -1007,7 +1007,7 @@ def handle_botcheck(chat_id: int, username: str | None = None) -> None:
         "→ Legitimate bots never ask you to send crypto 'to verify your wallet'\n"
         "→ Telegram admins cannot DM you first — anyone who does is an impersonator\n"
         "→ Official channels have a blue ✓ — verify it links to the real company\n\n"
-        "Use /legit to confirm this bot is the official RelayShield.",
+        "Use /verifybot to confirm this bot is the official RelayShield.",
         parse_mode="Markdown",
     )
 
@@ -1159,6 +1159,163 @@ def handle_status(chat_id: int, user: dict) -> None:
     )
 
 
+def handle_sim_status(chat_id: int, user: dict) -> None:
+    """Show SIM swap monitoring status for this account."""
+    phone_enc = user.get("phone_encrypted")
+    sim_active = bool(phone_enc)
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+
+    if sim_active:
+        send_message(
+            chat_id,
+            "📡 *SIM Swap Monitoring — Active*\n\n"
+            "✅ Your phone number is enrolled and being monitored 24/7.\n\n"
+            "We alert you immediately if your carrier shows signs of a SIM or eSIM swap — "
+            "before an attacker can use your number to access your accounts.\n\n"
+            "*What we detect:*\n"
+            "• Unexpected SIM/eSIM changes at your carrier\n"
+            "• Port-out fraud attempts\n"
+            "• Number re-assignment activity\n\n"
+            "If you receive a SIM swap alert, reply immediately — time is critical.\n\n"
+            "🛡️ RelayShield",
+            parse_mode="Markdown",
+        )
+    else:
+        send_message(
+            chat_id,
+            "📡 *SIM Swap Monitoring — Not Active*\n\n"
+            "Your phone number has not been enrolled.\n\n"
+            "To activate monitoring, restart setup with /start or contact support at "
+            "relayshieldadmin@gmail.com.\n\n"
+            "🛡️ RelayShield",
+            parse_mode="Markdown",
+        )
+
+
+def handle_breach_status(chat_id: int, user: dict) -> None:
+    """Show breach monitoring status — list monitored emails and alert count."""
+    user_id = user.get("user_id")
+    me_table = dynamodb.Table(MONITORED_EMAILS_TABLE)
+
+    try:
+        response = me_table.query(
+            IndexName="user_id-index",
+            KeyConditionExpression=Key("user_id").eq(user_id),
+        )
+        emails = response.get("Items", [])
+    except Exception:
+        emails = []
+
+    if not emails:
+        send_message(
+            chat_id,
+            "🔍 *Breach Monitoring — No emails enrolled*\n\n"
+            "Add an email address to start monitoring.\n\n"
+            "Type your email address now to enrol it.",
+            parse_mode="Markdown",
+        )
+        return
+
+    lines = []
+    for item in emails:
+        active = item.get("active", True)
+        label = "✅ Active" if active else "⏸ Paused"
+        # Email is encrypted — show partial info only
+        lines.append(f"• {label} (enrolled {item.get('created_at', '')[:10]})")
+
+    email_block = "\n".join(lines)
+    count = len(emails)
+    send_message(
+        chat_id,
+        f"🔍 *Breach Monitoring — {count} email{'s' if count != 1 else ''} enrolled*\n\n"
+        f"{email_block}\n\n"
+        "You'll receive an alert here the moment any monitored address appears in a new breach.\n\n"
+        "🛡️ RelayShield",
+        parse_mode="Markdown",
+    )
+
+
+def handle_domain_status(chat_id: int, user: dict) -> None:
+    """Show domain monitoring status — Business Basic+ only."""
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+
+    if tier not in DOMAIN_TIERS:
+        send_message(
+            chat_id,
+            "🌐 *Domain Monitoring* is available on Business Basic and higher plans.\n\n"
+            "Upgrade at relayshield.net to protect your domain against lookalike/typosquat attacks.",
+            parse_mode="Markdown",
+        )
+        return
+
+    domains = user.get("monitored_domains") or []
+    domain_limit = DOMAIN_LIMITS.get(tier, 1)
+
+    if not domains:
+        send_message(
+            chat_id,
+            f"🌐 *Domain Security Monitoring*\n\n"
+            "No business domain registered yet.\n\n"
+            "Domain monitoring checks for:\n"
+            "• Lookalike/typosquat domains used to phish your customers\n"
+            "• Email configuration (MX) changes\n"
+            "• Domain expiry risk\n\n"
+            f"Your plan supports up to *{domain_limit}* domain{'s' if domain_limit > 1 else ''}.\n\n"
+            "Contact relayshieldadmin@gmail.com to register your domain.\n\n"
+            "🛡️ RelayShield",
+            parse_mode="Markdown",
+        )
+        return
+
+    domain_state = user.get("domain_state") or {}
+    lines = []
+    for d in domains:
+        entry = domain_state.get(d, {})
+        last_scanned = entry.get("last_scanned")
+        scan_label = "Never scanned" if not last_scanned else last_scanned[:10]
+        lookalikes = entry.get("known_lookalikes") or []
+        lookalike_line = f"⚠️ {len(lookalikes)} lookalike(s) on record" if lookalikes else "✅ No lookalikes detected"
+        lines.append(f"*{d}*\n  Last scan: {scan_label}\n  {lookalike_line}")
+
+    usage = f"{len(domains)} of {domain_limit} domain{'s' if domain_limit > 1 else ''} in use"
+    send_message(
+        chat_id,
+        f"🌐 *Domain Security Status* — {usage}\n\n"
+        + "\n\n".join(lines)
+        + "\n\n🛡️ RelayShield",
+        parse_mode="Markdown",
+    )
+
+
+def handle_reuse(chat_id: int) -> None:
+    """Cross-account password reuse walkthrough."""
+    send_message(
+        chat_id,
+        "🔑 *Cross-Account Password Reuse Check*\n\n"
+        "Reusing a password across accounts means one breach exposes all of them. "
+        "Work through this checklist now.\n\n"
+        "*High priority — change immediately if shared with any other account:*\n"
+        "• Email (Gmail, Outlook, iCloud) — your master key to everything\n"
+        "• Banking and investment accounts\n"
+        "• Work accounts and SSO (Okta, Google Workspace)\n"
+        "• Password manager (if you use one)\n\n"
+        "*Also review:*\n"
+        "• Social media (Facebook, Instagram, LinkedIn, Twitter/X)\n"
+        "• Crypto exchanges and wallets\n"
+        "• Shopping accounts with saved payment cards\n"
+        "• Any account where you receive 2FA codes\n\n"
+        "*Rules for new passwords:*\n"
+        "→ Unique password for every account — no reuse\n"
+        "→ Minimum 16 characters; use a passphrase if easier\n"
+        "→ Use a password manager (Bitwarden is free and open source)\n\n"
+        "*After changing:*\n"
+        "→ Revoke all active sessions on changed accounts\n"
+        "→ Check /sweep to close email backdoors\n\n"
+        "🛡️ RelayShield",
+        parse_mode="Markdown",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main router
 # ---------------------------------------------------------------------------
@@ -1175,6 +1332,14 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_otp(chat_id)
     elif cmd == "sweep":
         handle_sweep(chat_id)
+    elif cmd == "sim":
+        handle_sim_status(chat_id, user)
+    elif cmd == "breach":
+        handle_breach_status(chat_id, user)
+    elif cmd == "domain":
+        handle_domain_status(chat_id, user)
+    elif cmd == "reuse":
+        handle_reuse(chat_id)
     elif cmd == "phone":
         handle_phone_hardening(chat_id)
     elif cmd in ("wascam", "scam"):
@@ -1187,7 +1352,7 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         parts = text.strip().split(None, 1)
         username = parts[1].lstrip("@") if len(parts) > 1 else None
         handle_botcheck(chat_id, username)
-    elif cmd in ("legit", "relayshield"):
+    elif cmd in ("verifybot", "legit", "relayshield"):
         handle_verify_bot(chat_id)
     elif cmd.startswith("scan"):
         parts = text.strip().split(None, 1)

@@ -506,12 +506,16 @@ def msg_help(tier: str) -> str:
 
         "*🚨 Threat Analysis*\n"
         "• /otp — Unexpected OTP guidance\n"
-        "• /wascam — Suspicious message or call guidance\n"
+        "• /scam — Suspicious message, bot, or call guidance\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"
         "• /sim — SIM swap monitoring status\n"
-        "• /phone — Carrier hardening against SIM swap and smishing\n"
+        "• /phone — Carrier hardening against SIM swap and smishing\n\n"
+
+        "*🤖 Telegram Security*\n"
+        "• /tgsecurity — Harden your Telegram account against takeover\n"
+        "• /botcheck — Verify whether a bot or channel is legitimate\n"
     )
 
     if is_business:
@@ -834,6 +838,63 @@ def handle_phone_hardening(chat_id: int) -> None:
     )
 
 
+def handle_tgsecurity(chat_id: int) -> None:
+    send_message(
+        chat_id,
+        "🔐 *Telegram Account Hardening*\n\n"
+        "Telegram accounts are phone-number based — a SIM swap gives an attacker full access. "
+        "These steps close the most common takeover paths.\n\n"
+        "*Step 1 — Enable Two-Step Verification (2SV)*\n"
+        "Settings → Privacy and Security → Two-Step Verification\n"
+        "→ Set a strong password *different* from all other accounts\n"
+        "→ This blocks takeover even if your SIM is swapped\n\n"
+        "*Step 2 — Review active sessions*\n"
+        "Settings → Privacy and Security → Active Sessions\n"
+        "→ Terminate any session you don't recognise\n"
+        "→ Do this immediately if you suspect compromise\n\n"
+        "*Step 3 — Lock down your phone number visibility*\n"
+        "Settings → Privacy and Security → Phone Number\n"
+        "→ Set 'Who can see my phone number' to *Nobody*\n"
+        "→ Set 'Who can find me by my phone number' to *My Contacts*\n\n"
+        "*Step 4 — Control who can add you to groups*\n"
+        "Settings → Privacy and Security → Groups & Channels\n"
+        "→ Set to *My Contacts* to block scam group adds\n\n"
+        "*Step 5 — Never share your login code*\n"
+        "Telegram will never ask for your SMS login code\n"
+        "→ Any bot or person asking for it is an attacker\n"
+        "→ Report and block immediately\n\n"
+        "RelayShield monitors your phone number for SIM swap activity — "
+        "if your carrier is compromised, you'll be alerted before your Telegram is taken over.",
+    )
+
+
+def handle_botcheck(chat_id: int) -> None:
+    send_message(
+        chat_id,
+        "🤖 *How to Verify a Telegram Bot or Channel*\n\n"
+        "Telegram has no vetting process for bots — anyone can create one with any name. "
+        "Before trusting a bot with sensitive actions:\n\n"
+        "*Step 1 — Verify the username exactly*\n"
+        "→ Check for typosquatting: rn vs m, 0 vs o, l vs I\n"
+        "→ Legitimate bots are listed on the official website of the service\n"
+        "→ Never trust a bot linked to you by a stranger\n\n"
+        "*Step 2 — Check what the bot requests*\n"
+        "→ Legitimate bots never ask for passwords, seed phrases, or login codes\n"
+        "→ Legitimate bots never ask you to send crypto 'to verify your wallet'\n"
+        "→ Any urgency or time pressure is a red flag\n\n"
+        "*Step 3 — Verify official channels*\n"
+        "→ Official channels have a blue verification checkmark ✓\n"
+        "→ No checkmark = not verified by Telegram\n"
+        "→ Cross-check the channel username on the company's official website\n\n"
+        "*Step 4 — Check for common Telegram scam patterns*\n"
+        "→ 'Admin' DMing you after you joined a group — Telegram admins cannot DM first\n"
+        "→ 'Giveaway' or 'airdrop' bots requiring wallet connection\n"
+        "→ Fake exchange or crypto support bots\n"
+        "→ Investment bots promising guaranteed returns\n\n"
+        "*If you received a suspicious message from a bot*, use /scam for next steps.",
+    )
+
+
 def handle_wascam(chat_id: int) -> None:
     send_message(
         chat_id,
@@ -901,6 +962,10 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_phone_hardening(chat_id)
     elif cmd in ("wascam", "scam"):
         handle_wascam(chat_id)
+    elif cmd == "tgsecurity":
+        handle_tgsecurity(chat_id)
+    elif cmd == "botcheck":
+        handle_botcheck(chat_id)
     elif cmd == "sessions":
         handle_sessions(chat_id)
     elif cmd in ("status", "account"):

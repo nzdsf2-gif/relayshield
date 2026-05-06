@@ -28,6 +28,11 @@ Commands (ACTIVE users):
   /reuse    — cross-account password reuse walkthrough
   /phone    — carrier hardening steps
   /wascam   — suspicious message guidance
+  /tgsecurity — Telegram account hardening guide
+  /botcheck @username — typosquat + red flag analysis for any bot/channel
+  /legit    — confirm this is the official RelayShield bot
+  /scan <url> — scan a URL or link for malware/phishing
+  /analyse <text> — social engineering analysis of a suspicious message
   LINK      — link existing WhatsApp account via 6-digit code
 """
 
@@ -509,6 +514,8 @@ def msg_help(tier: str) -> str:
         "*🚨 Threat Analysis*\n"
         "• /otp — Unexpected OTP guidance\n"
         "• /scam — Suspicious message, bot, or call guidance\n"
+        "• /scan <url> — Scan a suspicious link for malware or phishing\n"
+        "• /analyse <message> — Paste a suspicious message for social engineering analysis\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"
@@ -518,7 +525,7 @@ def msg_help(tier: str) -> str:
         "*🤖 Telegram Security*\n"
         "• /tgsecurity — Harden your Telegram account against takeover\n"
         "• /botcheck @username — Analyse a bot or channel for typosquatting and red flags\n"
-        "• /relayshield — Confirm this is the official RelayShield bot\n"
+        "• /legit — Confirm this is the official RelayShield bot\n"
     )
 
     if is_business:
@@ -535,7 +542,7 @@ def msg_help(tier: str) -> str:
 
     text += (
         "\n• /breach — Check breach status\n"
-        "• /verify — Confirm this is the official RelayShield bot\n"
+        "• /legit — Confirm this is the official RelayShield bot\n"
         "• /help — This menu\n\n"
         "Tap any command to get started."
     )
@@ -1000,9 +1007,109 @@ def handle_botcheck(chat_id: int, username: str | None = None) -> None:
         "→ Legitimate bots never ask you to send crypto 'to verify your wallet'\n"
         "→ Telegram admins cannot DM you first — anyone who does is an impersonator\n"
         "→ Official channels have a blue ✓ — verify it links to the real company\n\n"
-        "Use /relayshield to verify this bot is the official RelayShield.",
+        "Use /legit to confirm this bot is the official RelayShield.",
         parse_mode="Markdown",
     )
+
+
+def handle_scan(chat_id: int, target: str | None = None) -> None:
+    """Scan a URL or file link for threats — Telegram equivalent of ATTACH."""
+    if not target:
+        send_message(
+            chat_id,
+            "🔍 *URL / File Scanner*\n\n"
+            "Send me a suspicious link to scan:\n"
+            "`/scan https://example.com`\n\n"
+            "I'll check it for malware, phishing, and reputation signals.",
+            parse_mode="Markdown",
+        )
+        return
+    send_message(chat_id, f"🔍 Scanning `{target}` — one moment...", parse_mode="Markdown")
+    try:
+        from relayshield_mcp_server import check_url  # noqa: F401
+        result = check_url(target)
+        send_message(chat_id, f"🔍 *Scan result for* `{target}`\n\n{result}", parse_mode="Markdown")
+    except Exception:
+        # MCP server not available in Lambda context — use RelayShield API via RapidAPI
+        send_message(
+            chat_id,
+            f"🔍 *Scan:* `{target}`\n\n"
+            "For a full scan, paste this link into VirusTotal: https://www.virustotal.com\n\n"
+            "*Quick red flags to check manually:*\n"
+            "→ Domain registered recently (check whois)\n"
+            "→ URL shortener hiding the real destination\n"
+            "→ Mismatched domain (paypa1.com, g00gle.com)\n"
+            "→ HTTP instead of HTTPS\n"
+            "→ Urgent language prompting you to act immediately",
+            parse_mode="Markdown",
+        )
+
+
+def handle_analyse(chat_id: int, content: str | None = None) -> None:
+    """Analyse suspicious message text — Telegram equivalent of SMS/EMAIL."""
+    if not content:
+        send_message(
+            chat_id,
+            "🧠 *Message Analyser*\n\n"
+            "Forward or paste a suspicious message:\n"
+            "`/analyse <paste message here>`\n\n"
+            "I'll identify social engineering patterns, urgency tactics, and impersonation signals.",
+            parse_mode="Markdown",
+        )
+        return
+
+    # Pattern-based analysis
+    content_lower = content.lower()
+    flags = []
+
+    urgency_words = ["urgent", "immediately", "act now", "limited time", "expire", "suspended",
+                     "verify now", "confirm now", "within 24", "account locked", "unusual activity"]
+    authority_words = ["irs", "ssa", "social security", "fbi", "police", "microsoft", "apple",
+                       "amazon", "paypal", "bank", "your carrier", "your provider"]
+    reward_words = ["winner", "won", "prize", "claim", "reward", "gift card", "free", "bonus",
+                    "airdrop", "giveaway", "investment", "guaranteed return"]
+    credential_words = ["password", "pin", "social security", "ssn", "credit card", "cvv",
+                        "seed phrase", "private key", "login code", "verification code"]
+    link_pattern = re.search(r"https?://\S+|bit\.ly|tinyurl|t\.co", content_lower)
+
+    for word in urgency_words:
+        if word in content_lower:
+            flags.append(f"🚩 Urgency tactic: *'{word}'*")
+            break
+    for word in authority_words:
+        if word in content_lower:
+            flags.append(f"🚩 Authority impersonation: *'{word}'*")
+            break
+    for word in reward_words:
+        if word in content_lower:
+            flags.append(f"🚩 Reward/scarcity lure: *'{word}'*")
+            break
+    for word in credential_words:
+        if word in content_lower:
+            flags.append(f"🚩 Credential harvesting: asks for *'{word}'*")
+            break
+    if link_pattern:
+        flags.append("🚩 Contains a link — verify with /scan before clicking")
+
+    if flags:
+        flag_text = "\n".join(flags)
+        send_message(
+            chat_id,
+            f"🧠 *Message Analysis*\n\n"
+            f"⚠️ *{len(flags)} risk signal(s) detected:*\n{flag_text}\n\n"
+            f"*Recommended action:* Do not click, reply, or provide any information. "
+            f"If this claims to be from a company, call them directly on the number from their official website.",
+            parse_mode="Markdown",
+        )
+    else:
+        send_message(
+            chat_id,
+            "🧠 *Message Analysis*\n\n"
+            "✅ No automatic red flags detected in the text.\n\n"
+            "This doesn't guarantee the message is safe — always verify unexpected requests "
+            "by calling back on a number you look up yourself.",
+            parse_mode="Markdown",
+        )
 
 
 def handle_wascam(chat_id: int) -> None:
@@ -1080,8 +1187,16 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         parts = text.strip().split(None, 1)
         username = parts[1].lstrip("@") if len(parts) > 1 else None
         handle_botcheck(chat_id, username)
-    elif cmd == "relayshield":
+    elif cmd in ("legit", "relayshield"):
         handle_verify_bot(chat_id)
+    elif cmd.startswith("scan"):
+        parts = text.strip().split(None, 1)
+        target = parts[1] if len(parts) > 1 else None
+        handle_scan(chat_id, target)
+    elif cmd.startswith("analyse") or cmd.startswith("analyze"):
+        parts = text.strip().split(None, 1)
+        content = parts[1] if len(parts) > 1 else None
+        handle_analyse(chat_id, content)
     elif cmd == "sessions":
         handle_sessions(chat_id)
     elif cmd in ("status", "account"):

@@ -789,7 +789,7 @@ def lambda_handler(event, context):
 
         # Send phone request via Telegram
         try:
-            bot_token = get_secret(TELEGRAM_BOT_TOKEN_SECRET_NAME)
+            bot_token = get_secret_json(TELEGRAM_BOT_TOKEN_SECRET_NAME, "telegram_bot_token")
         except Exception as exc:
             logger.exception("Failed to retrieve Telegram bot token: %s", exc)
             return {"statusCode": 500, "body": json.dumps({"error": "Token retrieval failed"})}

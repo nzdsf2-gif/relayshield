@@ -489,6 +489,8 @@ def msg_welcome() -> str:
         "🛡️ *Welcome to RelayShield*\n\n"
         "I monitor your identity 24/7 — breach alerts, SIM swap detection, "
         "domain lookalike scanning, and phishing analysis.\n\n"
+        "✅ *You can verify this is the official bot* at relayshield.net "
+        "or type /verify at any time.\n\n"
         "Who are you protecting?"
     )
 
@@ -532,6 +534,7 @@ def msg_help(tier: str) -> str:
 
     text += (
         "\n• /breach — Check breach status\n"
+        "• /verify — Confirm this is the official RelayShield bot\n"
         "• /help — This menu\n\n"
         "Tap any command to get started."
     )
@@ -838,6 +841,26 @@ def handle_phone_hardening(chat_id: int) -> None:
     )
 
 
+def handle_verify_bot(chat_id: int) -> None:
+    send_message(
+        chat_id,
+        "✅ *Verifying RelayShield Bot Authenticity*\n\n"
+        "You are talking to the official RelayShield bot.\n\n"
+        "*How to confirm independently:*\n"
+        "1. Visit *relayshield.net* — the official bot username is listed there\n"
+        "2. The official username is *@RelayShield\\_bot* — verify it matches exactly "
+        "(watch for 0 vs O, l vs I, rn vs m)\n"
+        "3. Source code: *github.com/nzdsf2-gif/relayshield*\n\n"
+        "*What RelayShield will never ask for:*\n"
+        "• Your password or PIN\n"
+        "• Your Telegram login code\n"
+        "• Seed phrases or private keys\n"
+        "• Payment outside of the official Stripe checkout link\n\n"
+        "If you received a suspicious message from a bot claiming to be RelayShield, "
+        "report it immediately at relayshieldadmin@gmail.com.",
+    )
+
+
 def handle_tgsecurity(chat_id: int) -> None:
     send_message(
         chat_id,
@@ -966,6 +989,8 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_tgsecurity(chat_id)
     elif cmd == "botcheck":
         handle_botcheck(chat_id)
+    elif cmd == "verify":
+        handle_verify_bot(chat_id)
     elif cmd == "sessions":
         handle_sessions(chat_id)
     elif cmd in ("status", "account"):

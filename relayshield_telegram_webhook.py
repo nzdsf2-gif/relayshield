@@ -495,23 +495,44 @@ def msg_welcome() -> str:
 
 def msg_help(tier: str) -> str:
     is_business = tier in BUSINESS_TIERS
-    cmds = [
-        "/sweep — Email security sweep",
-        "/breach — Check breach status",
-        "/sim — SIM swap monitoring status",
-        "/verify — Personal verification protocol",
-        "/otp — Unexpected OTP guidance",
-        "/phone — Carrier hardening steps",
-        "/wascam — Suspicious message guidance",
-        "/sessions — Session revocation guidance",
-        "/reuse — Cross-account password reuse check",
-        "/help — This menu",
-    ]
+
+    text = (
+        "🛡️ *RelayShield — Commands*\n\n"
+
+        "*🔐 Breach Response*\n"
+        "• /sweep — Close email backdoors (forwarding rules, filters, sessions)\n"
+        "• /sessions — Revoke active sessions across Google, Microsoft, social media\n"
+        "• /reuse — Cross-account password reuse check\n\n"
+
+        "*🚨 Threat Analysis*\n"
+        "• /otp — Unexpected OTP guidance\n"
+        "• /wascam — Suspicious message or call guidance\n"
+        "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
+
+        "*📡 Phone Protection*\n"
+        "• /sim — SIM swap monitoring status\n"
+        "• /phone — Carrier hardening against SIM swap and smishing\n"
+    )
+
     if is_business:
-        cmds.insert(0, "/status — Account & seat status (admin)")
+        text += (
+            "\n*🏢 Team Management*\n"
+            "• /status — Account & seat status (admin)\n"
+        )
+
     if tier in DOMAIN_TIERS:
-        cmds.append("/domain — Domain monitoring status")
-    return "🛡️ *RelayShield Commands*\n\n" + "\n".join(cmds)
+        text += (
+            "\n*🌐 Domain Security*\n"
+            "• /domain — Domain monitoring status\n"
+        )
+
+    text += (
+        "\n• /breach — Check breach status\n"
+        "• /help — This menu\n\n"
+        "Tap any command to get started."
+    )
+
+    return text
 
 
 def msg_onboarding_complete(first_name: str, email_count: int, tier: str) -> str:

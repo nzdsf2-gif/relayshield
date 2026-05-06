@@ -773,18 +773,26 @@ def handle_sweep(chat_id: int) -> None:
     send_message(
         chat_id,
         "🔍 *Email Security Sweep — 5 Steps*\n\n"
-        "*Step 1:* Check email forwarding rules\n"
-        "Gmail: Settings → See all settings → Forwarding\n"
-        "Delete any rules you didn't create.\n\n"
-        "*Step 2:* Check inbox filters\n"
-        "Settings → Filters and Blocked Addresses\n"
-        "Delete filters hiding security emails.\n\n"
-        "*Step 3:* Review account recovery settings\n"
-        "Check recovery email and phone are still yours.\n\n"
-        "*Step 4:* Review active sessions\n"
-        "Sign out all sessions except your current device.\n\n"
-        "*Step 5:* Review connected apps\n"
-        "myaccount.google.com/permissions — revoke anything suspicious.",
+        "*Step 1 — Check email forwarding rules*\n"
+        "Attackers plant a forwarding address so every email is silently copied to them — it survives password resets\\.\n"
+        "Gmail: Settings → See all settings → Forwarding and POP/IMAP\n"
+        "Outlook: Settings → Mail → Forwarding\n"
+        "Yahoo: Settings → Mailboxes → your address → Forwarding\n"
+        "✅ Safe state: no forwarding addresses listed\\.\n"
+        "⚠️ If you see an address you didn't add: disable forwarding → tap X to remove → Save\\.\n"
+        "Also check: Settings → Filters and Blocked Addresses for rules that auto\\-delete, mark as read, or forward emails from banks — delete any you didn't create\\.\n\n"
+        "*Step 2 — Check recovery email and phone*\n"
+        "Gmail: myaccount\\.google\\.com/security\n"
+        "→ Remove any recovery contact you don't recognise\\.\n\n"
+        "*Step 3 — Check inbox filters*\n"
+        "Gmail: Settings → Filters and Blocked Addresses\n"
+        "→ Delete any filter you didn't create\\.\n\n"
+        "*Step 4 — Review connected apps*\n"
+        "Gmail: myaccount\\.google\\.com/permissions\n"
+        "→ Revoke anything unrecognised\\.\n\n"
+        "*Step 5 — Check active sessions*\n"
+        "Gmail: myaccount\\.google\\.com/device\\-activity\n"
+        "→ Sign out of all unknown sessions\\.",
     )
 
 

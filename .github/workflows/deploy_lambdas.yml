@@ -46,8 +46,8 @@ jobs:
       - name: Detect changed Lambda files
         id: changes
         run: |
-          # Get list of changed .py files vs previous commit
-          CHANGED=$(git diff --name-only HEAD~1 HEAD | grep '^relayshield_.*\.py$' || true)
+          # Get list of changed .py files vs previous commit (space-separated for GITHUB_OUTPUT)
+          CHANGED=$(git diff --name-only HEAD~1 HEAD | grep '^relayshield_.*\.py$' | tr '\n' ' ' | sed 's/ $//' || true)
           echo "Changed files: $CHANGED"
           echo "files=$CHANGED" >> $GITHUB_OUTPUT
 

@@ -66,6 +66,7 @@ STRIPE_SECRET_KEY_NAME = "relayshield/stripe_secret_key"
 TWILIO_SID_SECRET = "relayshield/twilio_account_sid"
 TWILIO_TOKEN_SECRET = "relayshield/twilio_auth_token"
 TWILIO_FROM_SECRET = "relayshield/twilio_whatsapp_number"
+TELEGRAM_BOT_TOKEN_SECRET_NAME = "relayshield/telegram-bot-token"
 
 TWILIO_MESSAGES_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
@@ -533,6 +534,107 @@ def schedule_day3_followup(user_id: str, subscription_tier: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Telegram helpers (Telegram-first payment flow)
+# ---------------------------------------------------------------------------
+
+def get_pre_payment_record(telegram_chat_id: str) -> dict | None:
+    """
+    Find a pre-payment DynamoDB record by Telegram chat_id.
+    Created by the Telegram webhook when user taps 'Choose this plan'.
+    """
+    table = dynamodb.Table(USERS_TABLE)
+    resp = table.scan(
+        FilterExpression=(
+            boto3.dynamodb.conditions.Attr("telegram_chat_id").eq(telegram_chat_id)
+            & boto3.dynamodb.conditions.Attr("onboarding_state").eq("AWAITING_PAYMENT")
+        )
+    )
+    items = resp.get("Items", [])
+    return items[0] if items else None
+
+
+def advance_telegram_record(
+    user_id: str,
+    stripe_customer_id: str,
+    stripe_subscription_id: str,
+    subscription_tier: str,
+) -> None:
+    """Advance pre-payment record to AWAITING_PHONE after confirmed Stripe payment."""
+    table = dynamodb.Table(USERS_TABLE)
+    now = datetime.now(timezone.utc).isoformat()
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression=(
+            "SET onboarding_state = :state, "
+            "stripe_customer_id = :cid, "
+            "stripe_subscription_id = :sid, "
+            "subscription_tier = :tier, "
+            "#act = :active, "
+            "updated_at = :now"
+        ),
+        ExpressionAttributeNames={"#act": "active"},
+        ExpressionAttributeValues={
+            ":state": "AWAITING_PHONE",
+            ":cid": stripe_customer_id,
+            ":sid": stripe_subscription_id,
+            ":tier": subscription_tier,
+            ":active": True,
+            ":now": now,
+        },
+    )
+    logger.info(
+        "Telegram record advanced to AWAITING_PHONE — user_id=%s tier=%s",
+        user_id, subscription_tier,
+    )
+
+
+def send_telegram_phone_request(chat_id: str, token: str, tier_name: str) -> bool:
+    """
+    Send payment confirmation + request_contact keyboard to Telegram user.
+    Called immediately after Stripe payment is confirmed.
+    """
+    text = (
+        f"✅ *Payment confirmed\\! Welcome to RelayShield — {tier_name} is now active\\.*\n\n"
+        f"Let's finish setting up your protection\\.\n\n"
+        f"Tap the button below to share your phone number — "
+        f"I'll use it to monitor for SIM/eSIM swap attacks\\."
+    )
+    keyboard = {
+        "keyboard": [[{
+            "text": "📱 Share my phone number",
+            "request_contact": True,
+        }]],
+        "one_time_keyboard": True,
+        "resize_keyboard": True,
+    }
+    payload = json.dumps({
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "MarkdownV2",
+        "reply_markup": json.dumps(keyboard),
+    }).encode()
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                logger.info("Telegram phone request sent to chat_id=%s", chat_id)
+                return True
+            logger.error("Telegram API error for chat_id=%s: %s", chat_id, result)
+            return False
+    except Exception as exc:
+        logger.exception("Failed to send Telegram message to chat_id=%s: %s", chat_id, exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Welcome message
 # ---------------------------------------------------------------------------
 
@@ -636,11 +738,77 @@ def lambda_handler(event, context):
     session_id = session.get("id", "unknown")
     logger.info("Processing checkout.session.completed — session_id=%s", session_id)
 
-    # --- 4. Extract phone number ---
+    stripe_customer_id = session.get("customer") or ""
+    stripe_subscription_id = session.get("subscription") or ""
+
+    # --- 4. Telegram-first flow (client_reference_id = telegram chat_id) ---
+    # Check this BEFORE phone extraction — Telegram users have no phone in session
+    client_ref = session.get("client_reference_id", "")
+    if client_ref:
+        logger.info("Telegram payment flow detected — client_reference_id=%s", client_ref)
+        pre_payment = get_pre_payment_record(client_ref)
+
+        if not pre_payment:
+            logger.error(
+                "No pre-payment record found for telegram_chat_id=%s session=%s",
+                client_ref, session_id,
+            )
+            return {
+                "statusCode": 200,
+                "body": json.dumps({
+                    "error": "No pre-payment Telegram record found",
+                    "telegram_chat_id": client_ref,
+                }),
+            }
+
+        user_id = pre_payment["user_id"]
+
+        # Idempotency: skip if already advanced
+        if pre_payment.get("onboarding_state") != "AWAITING_PAYMENT":
+            logger.warning(
+                "Telegram record user_id=%s already at state=%s — skipping duplicate webhook",
+                user_id, pre_payment.get("onboarding_state"),
+            )
+            return {"statusCode": 200, "body": json.dumps({"message": "Already processed"})}
+
+        # Use tier from pre-payment record (set when user selected plan in bot)
+        resolved_tier = pre_payment.get("subscription_tier") or subscription_tier
+
+        # Advance record to AWAITING_PHONE
+        advance_telegram_record(user_id, stripe_customer_id, stripe_subscription_id, resolved_tier)
+
+        # Schedule Day 3 follow-up
+        schedule_day3_followup(user_id, resolved_tier)
+
+        # Send phone request via Telegram
+        try:
+            bot_token = get_secret(TELEGRAM_BOT_TOKEN_SECRET_NAME)
+        except Exception as exc:
+            logger.exception("Failed to retrieve Telegram bot token: %s", exc)
+            return {"statusCode": 500, "body": json.dumps({"error": "Token retrieval failed"})}
+
+        tier_name = TIER_DISPLAY_NAMES.get(resolved_tier, "RelayShield")
+        tg_sent = send_telegram_phone_request(client_ref, bot_token, tier_name)
+
+        logger.info(
+            "Telegram onboarding triggered — user_id=%s tier=%s telegram_sent=%s",
+            user_id, resolved_tier, tg_sent,
+        )
+        return {
+            "statusCode": 200,
+            "body": json.dumps({
+                "user_id": user_id,
+                "subscription_tier": resolved_tier,
+                "onboarding_state": "AWAITING_PHONE",
+                "channel": "telegram",
+                "telegram_sent": tg_sent,
+            }),
+        }
+
+    # --- 5. WhatsApp flow — extract phone number from Stripe session ---
     # Primary: Stripe built-in phone collection → customer_details.phone
     # Fallback: custom_fields with key "phone_number"
     phone: str | None = None
-
     customer_details = session.get("customer_details") or {}
     phone = customer_details.get("phone")
 
@@ -658,7 +826,6 @@ def lambda_handler(event, context):
             "No valid phone number found in session %s — cannot initiate onboarding.",
             session_id,
         )
-        # Return 200 so Stripe does not keep retrying — this needs manual follow-up
         return {
             "statusCode": 200,
             "body": json.dumps({
@@ -668,8 +835,7 @@ def lambda_handler(event, context):
             }),
         }
 
-    # --- 5. Extract subscription tier (three methods, in priority order) ---
-
+    # --- 6. Extract subscription tier (three methods, in priority order) ---
     subscription_tier = None
 
     # Method 1: payment_link field (standard Payment Link checkout)
@@ -717,10 +883,7 @@ def lambda_handler(event, context):
             }),
         }
 
-    stripe_customer_id = session.get("customer") or ""
-    stripe_subscription_id = session.get("subscription") or ""
-
-    # --- 6. Idempotency check — prevent duplicate onboarding ---
+    # --- 7. Idempotency check — prevent duplicate onboarding ---
     try:
         if user_exists_for_phone(phone):
             logger.warning(
@@ -738,7 +901,7 @@ def lambda_handler(event, context):
         logger.exception("Idempotency check failed: %s", exc)
         # Non-fatal — proceed with creation (safer than blocking a real subscriber)
 
-    # --- 7. Create user record ---
+    # --- 9. Create user record ---
     try:
         user_id = create_user_record(
             phone_number=phone,
@@ -753,10 +916,10 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "DynamoDB write failed"}),
         }
 
-    # --- 8. Schedule Day 3 follow-up (72 hrs from now, self-deleting) ---
+    # --- 10. Schedule Day 3 follow-up (72 hrs from now, self-deleting) ---
     schedule_day3_followup(user_id, subscription_tier)
 
-    # --- 9. Retrieve Twilio credentials ---
+    # --- 11. Retrieve Twilio credentials ---
     try:
         account_sid, auth_token, from_number = get_twilio_credentials()
     except Exception as exc:

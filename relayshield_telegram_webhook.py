@@ -244,12 +244,64 @@ def remove_keyboard(chat_id: int, text: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def get_user_by_chat_id(chat_id: int) -> dict | None:
+    """Return active user record for this Telegram chat_id."""
     table = dynamodb.Table(USERS_TABLE)
     resp = table.scan(
         FilterExpression=Attr("telegram_chat_id").eq(str(chat_id)) & Attr("active").eq(True)
     )
     items = resp.get("Items", [])
     return items[0] if items else None
+
+
+def get_any_user_by_chat_id(chat_id: int) -> dict | None:
+    """Return any record (active or pre-payment) for this Telegram chat_id."""
+    table = dynamodb.Table(USERS_TABLE)
+    resp = table.scan(
+        FilterExpression=Attr("telegram_chat_id").eq(str(chat_id))
+    )
+    items = resp.get("Items", [])
+    return items[0] if items else None
+
+
+def save_pre_payment_record(chat_id: int, tier: str) -> None:
+    """
+    Create or update a pre-payment placeholder record when user taps
+    'Choose this plan'. The Stripe webhook finds this record via
+    client_reference_id and advances state to AWAITING_PHONE.
+    """
+    existing = get_any_user_by_chat_id(chat_id)
+    if existing:
+        state = existing.get("onboarding_state", "")
+        # Don't overwrite records that have progressed past payment
+        if state in ("AWAITING_PHONE", "AWAITING_PHONE_CONFIRM",
+                     "AWAITING_EMAIL_1", "AWAITING_MORE_EMAILS", "ACTIVE"):
+            return
+        # Update tier if user changed their plan selection
+        update_user(existing["user_id"], {
+            "subscription_tier": tier,
+            "tier": tier,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return
+
+    # No record yet — create pre-payment placeholder
+    user_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    table = dynamodb.Table(USERS_TABLE)
+    table.put_item(Item={
+        "user_id": user_id,
+        "telegram_chat_id": str(chat_id),
+        "subscription_tier": tier,
+        "tier": tier,
+        "onboarding_state": "AWAITING_PAYMENT",
+        "preferred_channel": "telegram",
+        "delivery_channels": ["telegram"],
+        "active": False,
+        "monitored_emails": [],
+        "recent_signals": [],
+        "created_at": now,
+        "updated_at": now,
+    })
 
 
 def create_telegram_user(chat_id: int, tier: str, first_name: str) -> dict:
@@ -535,7 +587,14 @@ def handle_plan_callback(chat_id: int, tier: str, callback_query_id: str,
     plan = PLAN_PRICES.get(tier, {})
     label = plan.get("label", tier)
     amount_dollars = plan.get("amount", 0) / 100
-    stripe_url = plan.get("stripe_url", "https://relayshield.net")
+    base_stripe_url = plan.get("stripe_url", "https://relayshield.net")
+
+    # Save pre-payment record so Stripe webhook can link payment to this chat
+    save_pre_payment_record(chat_id, tier)
+
+    # Append chat_id as client_reference_id — Stripe passes this back on
+    # checkout.session.completed so the webhook can find and advance this record
+    stripe_url = f"{base_stripe_url}?client_reference_id={chat_id}"
 
     send_message(
         chat_id,

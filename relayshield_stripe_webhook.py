@@ -594,10 +594,10 @@ def send_telegram_phone_request(chat_id: str, token: str, tier_name: str) -> boo
     Called immediately after Stripe payment is confirmed.
     """
     text = (
-        f"✅ *Payment confirmed\\! Welcome to RelayShield — {tier_name} is now active\\.*\n\n"
-        f"Let's finish setting up your protection\\.\n\n"
+        f"✅ *Payment confirmed! Welcome to RelayShield — {tier_name} is now active.*\n\n"
+        f"Let's finish setting up your protection.\n\n"
         f"Tap the button below to share your phone number — "
-        f"I'll use it to monitor for SIM/eSIM swap attacks\\."
+        f"I'll use it to monitor for SIM/eSIM swap attacks."
     )
     keyboard = {
         "keyboard": [[{
@@ -610,7 +610,7 @@ def send_telegram_phone_request(chat_id: str, token: str, tier_name: str) -> boo
     payload = json.dumps({
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "MarkdownV2",
+        "parse_mode": "Markdown",
         "reply_markup": keyboard,
     }).encode()
 

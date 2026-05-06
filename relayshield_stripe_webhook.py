@@ -611,7 +611,7 @@ def send_telegram_phone_request(chat_id: str, token: str, tier_name: str) -> boo
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "MarkdownV2",
-        "reply_markup": json.dumps(keyboard),
+        "reply_markup": keyboard,
     }).encode()
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"

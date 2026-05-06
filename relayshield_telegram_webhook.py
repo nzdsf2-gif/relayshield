@@ -658,9 +658,10 @@ def handle_phone_contact(chat_id: int, phone_number: str, user: dict) -> None:
 def handle_phone_confirm(chat_id: int, confirmed: bool, user: dict) -> None:
     """User confirmed or rejected the phone number."""
     if not confirmed:
-        request_contact(
+        send_message(
             chat_id,
-            "No problem — please share the number you'd like monitored:",
+            "No problem — please type the number you'd like monitored.\n\nExample: `+1 555 123 4567`",
+            parse_mode="Markdown",
         )
         return
 
@@ -705,9 +706,10 @@ def handle_email_input(chat_id: int, email: str, user: dict) -> None:
     me_table = dynamodb.Table(MONITORED_EMAILS_TABLE)
     email_enc = encrypt_field(email)
     me_table.put_item(Item={
-        "email_hash": email_hash,
+        "email_id": str(uuid.uuid4()),
         "user_id": user["user_id"],
         "email_encrypted": email_enc,
+        "email_hash": email_hash,
         "tier": tier,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "active": True,
@@ -930,11 +932,18 @@ def handle_message(update: dict) -> None:
     state = user.get("onboarding_state", "ACTIVE")
 
     if state == "AWAITING_PHONE":
-        # Re-send the contact keyboard — user may have missed it or typed instead
-        request_contact(
-            chat_id,
-            "Please share your phone number so I can monitor for SIM/eSIM swap attacks:",
-        )
+        # Accept typed phone number (e.g. +1 555 123 4567)
+        digits = re.sub(r"[\s\-\(\)]", "", text)
+        if re.match(r"^\+?[\d]{7,15}$", digits):
+            phone = digits if digits.startswith("+") else "+" + digits
+            handle_phone_contact(chat_id, phone, user)
+        else:
+            send_message(
+                chat_id,
+                "Please type your mobile phone number to enable SIM swap monitoring.\n\n"
+                "Example: `+1 555 123 4567`",
+                parse_mode="Markdown",
+            )
     elif state == "AWAITING_EMAIL_1":
         handle_email_input(chat_id, text, user)
     elif state == "AWAITING_MORE_EMAILS":

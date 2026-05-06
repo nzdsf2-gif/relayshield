@@ -517,7 +517,8 @@ def msg_help(tier: str) -> str:
 
         "*🤖 Telegram Security*\n"
         "• /tgsecurity — Harden your Telegram account against takeover\n"
-        "• /botcheck — Verify whether a bot or channel is legitimate\n"
+        "• /botcheck @username — Analyse a bot or channel for typosquatting and red flags\n"
+        "• /relayshield — Confirm this is the official RelayShield bot\n"
     )
 
     if is_business:
@@ -652,7 +653,7 @@ def handle_link_code(chat_id: int, code: str, first_name: str) -> None:
             send_message(chat_id, "⏱️ That code has expired. Please request a new one via WhatsApp.")
             return
 
-    tier = user.get("tier", TIER_PERSONAL)
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
     is_business_plus = tier in {TIER_BASIC, TIER_SHIELD, TIER_PRO}
     new_channel = "both" if is_business_plus else "telegram"
     new_channels = (["whatsapp", "telegram"] if is_business_plus else ["telegram"])
@@ -719,7 +720,7 @@ def handle_email_input(chat_id: int, email: str, user: dict) -> None:
         send_message(chat_id, "That doesn't look like a valid email address. Please try again:")
         return
 
-    tier = user.get("tier", TIER_PERSONAL)
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
     limit = EMAIL_LIMITS.get(tier, 3)
     monitored = user.get("monitored_emails", [])
 
@@ -761,7 +762,8 @@ def handle_email_input(chat_id: int, email: str, user: dict) -> None:
 def _complete_onboarding(chat_id: int, user: dict, emails: list) -> None:
     update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
     first_name = user.get("first_name", "there")
-    send_message(chat_id, msg_onboarding_complete(first_name, len(emails), user.get("tier")))
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    send_message(chat_id, msg_onboarding_complete(first_name, len(emails), tier))
 
 
 # ---------------------------------------------------------------------------
@@ -769,7 +771,8 @@ def _complete_onboarding(chat_id: int, user: dict, emails: list) -> None:
 # ---------------------------------------------------------------------------
 
 def handle_help(chat_id: int, user: dict) -> None:
-    send_message(chat_id, msg_help(user.get("tier", TIER_PERSONAL)))
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    send_message(chat_id, msg_help(tier))
 
 
 def handle_verify(chat_id: int) -> None:
@@ -891,30 +894,114 @@ def handle_tgsecurity(chat_id: int) -> None:
     )
 
 
-def handle_botcheck(chat_id: int) -> None:
+def _botcheck_analyse(username: str) -> str:
+    """
+    Analyse a Telegram username for typosquatting and red flag patterns.
+    Returns a formatted risk summary string.
+    """
+    u = username.lower().strip().lstrip("@")
+
+    # Known legitimate bot usernames (canonical lowercase, no @)
+    KNOWN_BOTS = [
+        "relayshield_bot", "botfather", "storebot", "gif", "pic",
+        "ifttt", "pollbot", "vote", "shieldsiobot", "controllerbot",
+        "coinbase_bot", "binance_bot", "kraken_bot", "ledger_bot",
+        "paypal_bot", "cashapp_bot", "venmo_bot", "wise_bot",
+    ]
+
+    # Common typosquat substitutions
+    SUBSTITUTIONS = [
+        ("rn", "m"), ("0", "o"), ("1", "l"), ("1", "i"),
+        ("vv", "w"), ("ii", "u"), ("nn", "m"), ("cl", "d"),
+    ]
+
+    # Red flag keywords in usernames
+    RED_FLAG_WORDS = [
+        "support", "help", "official", "admin", "verify", "secure",
+        "wallet", "crypto", "airdrop", "giveaway", "free", "bonus",
+        "reward", "claim", "recovery", "refund", "urgent", "alert",
+        "service", "care", "assist",
+    ]
+
+    flags = []
+    warnings = []
+
+    # Check red flag keywords
+    for word in RED_FLAG_WORDS:
+        if word in u:
+            flags.append(f"contains '{word}' — common in scam/impersonator usernames")
+
+    # Check for numeric substitutions (0 for o, 1 for l/i)
+    if re.search(r"[0-9]", u):
+        flags.append("contains numbers — check for 0→o or 1→l substitutions")
+
+    # Check lookalike similarity against known bots
+    lookalikes = []
+    for known in KNOWN_BOTS:
+        normalised_u = u
+        normalised_k = known
+        # Apply substitutions to compare
+        for fake, real in SUBSTITUTIONS:
+            normalised_u = normalised_u.replace(fake, real)
+            normalised_k = normalised_k.replace(fake, real)
+        # Simple Levenshtein-lite: check if within 2 edits via common prefix/suffix
+        if normalised_u != normalised_k:
+            shorter = min(len(normalised_u), len(normalised_k))
+            longer = max(len(normalised_u), len(normalised_k))
+            common = sum(a == b for a, b in zip(normalised_u, normalised_k))
+            similarity = common / longer if longer > 0 else 0
+            if similarity > 0.80 and shorter >= 4:
+                lookalikes.append(f"@{known}")
+
+    if lookalikes:
+        warnings.append(f"⚠️ Similar to known bot(s): {', '.join(lookalikes)}")
+
+    # Build result
+    if not flags and not warnings:
+        result = (
+            f"🤖 *Botcheck: @{username}*\n\n"
+            f"✅ No automatic red flags detected.\n\n"
+            f"*Manual checks still recommended:*\n"
+            f"→ Verify this username on the company's official website\n"
+            f"→ Confirm the bot doesn't ask for passwords, codes, or crypto\n"
+            f"→ Check for a blue verification checkmark on associated channels"
+        )
+    else:
+        flag_lines = "\n".join(f"🚩 {f}" for f in flags)
+        warn_lines = "\n".join(warnings)
+        result = (
+            f"🤖 *Botcheck: @{username}*\n\n"
+            f"⚠️ *Risk signals detected:*\n"
+            f"{warn_lines}\n{flag_lines}\n\n"
+            f"*Recommended actions:*\n"
+            f"→ Do not share any credentials, codes, or payment with this bot\n"
+            f"→ Verify the username character-by-character against the official website\n"
+            f"→ If you've already interacted, use /sweep and /sessions immediately"
+        )
+    return result
+
+
+def handle_botcheck(chat_id: int, username: str | None = None) -> None:
+    if username:
+        send_message(chat_id, _botcheck_analyse(username))
+        return
+
     send_message(
         chat_id,
-        "🤖 *How to Verify a Telegram Bot or Channel*\n\n"
-        "Telegram has no vetting process for bots — anyone can create one with any name. "
-        "Before trusting a bot with sensitive actions:\n\n"
-        "*Step 1 — Verify the username exactly*\n"
-        "→ Check for typosquatting: rn vs m, 0 vs o, l vs I\n"
-        "→ Legitimate bots are listed on the official website of the service\n"
-        "→ Never trust a bot linked to you by a stranger\n\n"
-        "*Step 2 — Check what the bot requests*\n"
+        "🤖 *Bot Verification*\n\n"
+        "To analyse a specific bot or channel, type:\n"
+        "`/botcheck @username`\n\n"
+        "I'll check for typosquatting, red flag keywords, and similarity "
+        "to known legitimate bots.\n\n"
+        "*General rules before trusting any bot:*\n"
+        "→ Find it from the official website — never from a link sent by a stranger\n"
+        "→ Verify the username character by character (rn vs m, 0 vs o, l vs I)\n"
         "→ Legitimate bots never ask for passwords, seed phrases, or login codes\n"
         "→ Legitimate bots never ask you to send crypto 'to verify your wallet'\n"
-        "→ Any urgency or time pressure is a red flag\n\n"
-        "*Step 3 — Verify official channels*\n"
-        "→ Official channels have a blue verification checkmark ✓\n"
-        "→ No checkmark = not verified by Telegram\n"
-        "→ Cross-check the channel username on the company's official website\n\n"
-        "*Step 4 — Check for common Telegram scam patterns*\n"
-        "→ 'Admin' DMing you after you joined a group — Telegram admins cannot DM first\n"
-        "→ 'Giveaway' or 'airdrop' bots requiring wallet connection\n"
-        "→ Fake exchange or crypto support bots\n"
-        "→ Investment bots promising guaranteed returns\n\n"
-        "*If you received a suspicious message from a bot*, use /scam for next steps.",
+        "→ Telegram admins cannot DM you first — anyone who does is an impersonator\n"
+        "→ Official channels have a blue ✓ — verify it links to the real company\n\n"
+        "Use /relayshield to verify this bot is the official RelayShield.",
+        parse_mode="Markdown",
     )
 
 
@@ -949,7 +1036,7 @@ def handle_sessions(chat_id: int) -> None:
 
 
 def handle_status(chat_id: int, user: dict) -> None:
-    tier = user.get("tier", TIER_PERSONAL)
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
     emails = user.get("monitored_emails", [])
     state = user.get("onboarding_state", "UNKNOWN")
     channels = user.get("delivery_channels", ["telegram"])
@@ -987,9 +1074,13 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_wascam(chat_id)
     elif cmd == "tgsecurity":
         handle_tgsecurity(chat_id)
-    elif cmd == "botcheck":
-        handle_botcheck(chat_id)
-    elif cmd == "verify":
+    elif cmd.startswith("botcheck"):
+        # /botcheck          → general guidance
+        # /botcheck @somebot → typosquat + red flag analysis
+        parts = text.strip().split(None, 1)
+        username = parts[1].lstrip("@") if len(parts) > 1 else None
+        handle_botcheck(chat_id, username)
+    elif cmd == "relayshield":
         handle_verify_bot(chat_id)
     elif cmd == "sessions":
         handle_sessions(chat_id)

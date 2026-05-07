@@ -545,7 +545,8 @@ def msg_help(tier: str) -> str:
     if tier in DOMAIN_TIERS:
         text += (
             "\n*🌐 Domain Security*\n"
-            "• /domain — Domain monitoring status\n"
+            "• /domain — Domain monitoring status and enrolled domains\n"
+        "• /domain add <domain> — Enrol a new domain for monitoring\n"
         )
 
     text += (
@@ -1327,6 +1328,68 @@ def handle_breach_status(chat_id: int, user: dict) -> None:
     )
 
 
+def handle_domain_add(chat_id: int, domain_raw: str, user: dict) -> None:
+    """Add a new domain to monitoring for an active domain-tier user."""
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+
+    if tier not in DOMAIN_TIERS:
+        send_message(
+            chat_id,
+            "🌐 Domain monitoring is available on Business Basic and higher plans.\n\n"
+            "Upgrade at relayshield.net.",
+            parse_mode="Markdown",
+        )
+        return
+
+    # Normalise — strip protocol, www, path
+    domain = domain_raw.strip().lower()
+    domain = re.sub(r"^https?://", "", domain)
+    domain = re.sub(r"^www\.", "", domain)
+    domain = domain.split("/")[0]
+
+    if not re.match(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z]{2,})+$", domain):
+        send_message(
+            chat_id,
+            "That doesn't look like a valid domain. Please send just the domain name, e.g. `acme.com`:",
+            parse_mode="Markdown",
+        )
+        return
+
+    domain_limit = DOMAIN_LIMITS.get(tier, 1)
+    monitored_domains = user.get("monitored_domains") or []
+
+    if domain in monitored_domains:
+        send_message(
+            chat_id,
+            f"✅ `{domain}` is already enrolled for monitoring.",
+            parse_mode="Markdown",
+        )
+        return
+
+    if len(monitored_domains) >= domain_limit:
+        send_message(
+            chat_id,
+            f"🌐 You've reached your domain limit ({domain_limit} domain{'s' if domain_limit > 1 else ''} "
+            f"on your current plan).\n\n"
+            "To monitor additional domains, upgrade your plan at relayshield.net or contact "
+            "relayshieldadmin@gmail.com.",
+            parse_mode="Markdown",
+        )
+        return
+
+    monitored_domains.append(domain)
+    update_user(user["user_id"], {"monitored_domains": monitored_domains})
+
+    send_message(
+        chat_id,
+        f"✅ *{domain}* enrolled for domain monitoring.\n\n"
+        f"*{len(monitored_domains)} of {domain_limit}* domain slot{'s' if domain_limit > 1 else ''} in use.\n\n"
+        "We'll alert you if lookalike or typosquat domains are registered against it.\n\n"
+        "🛡️ RelayShield",
+        parse_mode="Markdown",
+    )
+
+
 def handle_domain_status(chat_id: int, user: dict) -> None:
     """Show domain monitoring status — Business Basic+ only."""
     tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
@@ -1428,8 +1491,16 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_sim_status(chat_id, user)
     elif cmd == "breach":
         handle_breach_status(chat_id, user)
-    elif cmd == "domain":
-        handle_domain_status(chat_id, user)
+    elif cmd.startswith("domain"):
+        parts = text.strip().split(None, 2)
+        # /domain add <domainname>
+        if len(parts) >= 3 and parts[1].lower() == "add":
+            handle_domain_add(chat_id, parts[2], user)
+        elif len(parts) == 2 and parts[1].lower() != "add":
+            # /domain <domainname> shorthand (no 'add' keyword)
+            handle_domain_add(chat_id, parts[1], user)
+        else:
+            handle_domain_status(chat_id, user)
     elif cmd == "reuse":
         handle_reuse(chat_id)
     elif cmd == "phone":

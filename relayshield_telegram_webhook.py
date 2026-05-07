@@ -776,6 +776,16 @@ def _complete_onboarding(chat_id: int, user: dict, emails: list) -> None:
 # Active user command handlers
 # ---------------------------------------------------------------------------
 
+def handle_myid(chat_id: int) -> None:
+    """Return the user's Telegram chat ID — useful for account linking and support."""
+    send_message(
+        chat_id,
+        f"🪪 *Your Telegram Chat ID*\n\n`{chat_id}`\n\n"
+        "Use this to link your account or when contacting RelayShield support.",
+        parse_mode="Markdown",
+    )
+
+
 def handle_help(chat_id: int, user: dict) -> None:
     tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
     send_message(chat_id, msg_help(tier))
@@ -1398,6 +1408,11 @@ def handle_message(update: dict) -> None:
     # Handle /start
     if text.lower() in ("/start", "/start@relayshield_bot"):
         handle_start(chat_id, first_name)
+        return
+
+    # Handle /myid — works at any onboarding state, no user record needed
+    if text.lower().lstrip("/") == "myid":
+        handle_myid(chat_id)
         return
 
     # Existing user routing

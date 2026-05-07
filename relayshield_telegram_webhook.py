@@ -546,7 +546,7 @@ def msg_help(tier: str) -> str:
         text += (
             "\n*🌐 Domain Security*\n"
             "• /domain — Domain monitoring status and enrolled domains\n"
-        "• /domain add <domain> — Enroll a new domain for monitoring\n"
+        "• /domainadd — Enroll a new domain for monitoring\n"
         )
 
     text += (
@@ -1390,6 +1390,38 @@ def handle_domain_add(chat_id: int, domain_raw: str, user: dict) -> None:
     )
 
 
+def handle_domainadd_prompt(chat_id: int, user: dict) -> None:
+    """Tap /domainadd — set state and ask for domain name conversationally."""
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    if tier not in DOMAIN_TIERS:
+        send_message(
+            chat_id,
+            "🌐 Domain monitoring is available on Business Basic and higher plans.\n\n"
+            "Upgrade at relayshield.net.",
+            parse_mode="Markdown",
+        )
+        return
+    domain_limit = DOMAIN_LIMITS.get(tier, 1)
+    monitored_domains = user.get("monitored_domains") or []
+    if len(monitored_domains) >= domain_limit:
+        send_message(
+            chat_id,
+            f"🌐 You've reached your domain limit ({domain_limit} domain{'s' if domain_limit > 1 else ''} "
+            f"on your current plan).\n\n"
+            "To monitor additional domains, upgrade at relayshield.net.",
+            parse_mode="Markdown",
+        )
+        return
+    update_user(user["user_id"], {"onboarding_state": "AWAITING_DOMAIN_ADD"})
+    send_message(
+        chat_id,
+        f"🌐 *Enroll a Domain*\n\n"
+        f"Send your business domain name (e.g. `relayshield.net`):\n\n"
+        f"_Type_ `done` _to cancel._",
+        parse_mode="Markdown",
+    )
+
+
 def handle_domain_status(chat_id: int, user: dict) -> None:
     """Show domain monitoring status — Business Basic+ only."""
     tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
@@ -1416,8 +1448,7 @@ def handle_domain_status(chat_id: int, user: dict) -> None:
             "• Email configuration (MX) changes\n"
             "• Domain expiry risk\n\n"
             f"Your plan supports up to *{domain_limit}* domain{'s' if domain_limit > 1 else ''}.\n\n"
-            "To add your domain, type:\n"
-            "`/domain add yourdomain.com`\n\n"
+            "Tap /domainadd to enroll your first domain.\n\n"
             "🛡️ RelayShield",
             parse_mode="Markdown",
         )
@@ -1492,13 +1523,14 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_sim_status(chat_id, user)
     elif cmd == "breach":
         handle_breach_status(chat_id, user)
+    elif cmd == "domainadd":
+        handle_domainadd_prompt(chat_id, user)
     elif cmd.startswith("domain"):
         parts = text.strip().split(None, 2)
-        # /domain add <domainname>
+        # /domain add <domainname> — power-user shorthand still works
         if len(parts) >= 3 and parts[1].lower() == "add":
             handle_domain_add(chat_id, parts[2], user)
         elif len(parts) == 2 and parts[1].lower() != "add":
-            # /domain <domainname> shorthand (no 'add' keyword)
             handle_domain_add(chat_id, parts[1], user)
         else:
             handle_domain_status(chat_id, user)
@@ -1604,6 +1636,17 @@ def handle_message(update: dict) -> None:
         handle_email_input(chat_id, text, user)
     elif state == "AWAITING_MORE_EMAILS":
         handle_email_input(chat_id, text, user)
+    elif state == "AWAITING_DOMAIN_ADD":
+        if text.strip().lower() == "done":
+            update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+            send_message(chat_id, "Cancelled. Type /domainadd any time to enroll a domain.")
+        else:
+            handle_domain_input(chat_id, text, user)
+            # Return to ACTIVE after handling (handle_domain_input sets ACTIVE when limit reached,
+            # but we need to reset here for mid-limit adds too)
+            updated_user = get_user_by_chat_id(chat_id)
+            if updated_user and updated_user.get("onboarding_state") == "AWAITING_DOMAIN_ADD":
+                update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
     elif state == "AWAITING_DOMAIN":
         if text.strip().lower() == "done":
             # User skipped remaining domain slots — complete onboarding

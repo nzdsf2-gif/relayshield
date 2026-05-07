@@ -1416,7 +1416,7 @@ def handle_domainadd_prompt(chat_id: int, user: dict) -> None:
     send_message(
         chat_id,
         f"🌐 *Enroll a Domain*\n\n"
-        f"Send your business domain name (e.g. `relayshield.net`):\n\n"
+        f"Send your business domain name (e.g. `acme.com`):\n\n"
         f"_Type_ `done` _to cancel._",
         parse_mode="Markdown",
     )
@@ -1639,13 +1639,17 @@ def handle_message(update: dict) -> None:
     elif state == "AWAITING_DOMAIN_ADD":
         if text.strip().lower() == "done":
             update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
-            send_message(chat_id, "Cancelled. Type /domainadd any time to enroll a domain.")
+            send_message(chat_id, "✅ Done. Type /domain to see your enrolled domains.")
         else:
-            handle_domain_input(chat_id, text, user)
-            # Return to ACTIVE after handling (handle_domain_input sets ACTIVE when limit reached,
-            # but we need to reset here for mid-limit adds too)
+            # Validate and add the domain
+            tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+            domain_limit = DOMAIN_LIMITS.get(tier, 1)
+            monitored_domains = user.get("monitored_domains") or []
+            handle_domain_add(chat_id, text, user)
+            # If limit now reached, return to ACTIVE; otherwise stay in AWAITING_DOMAIN_ADD
             updated_user = get_user_by_chat_id(chat_id)
-            if updated_user and updated_user.get("onboarding_state") == "AWAITING_DOMAIN_ADD":
+            updated_domains = (updated_user or {}).get("monitored_domains") or []
+            if len(updated_domains) >= domain_limit:
                 update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
     elif state == "AWAITING_DOMAIN":
         if text.strip().lower() == "done":

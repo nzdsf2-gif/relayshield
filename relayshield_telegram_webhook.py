@@ -542,6 +542,7 @@ def msg_help(tier: str) -> str:
 
     text += (
         "\n• /breach — Check breach status\n"
+        "• /myid — Show your Telegram chat ID (for account linking & support)\n"
         "• /help — This menu\n\n"
         "Tap any command to get started."
     )

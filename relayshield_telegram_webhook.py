@@ -507,6 +507,7 @@ def msg_help(tier: str) -> str:
         "🛡️ *RelayShield — Commands*\n\n"
 
         "*🔐 Breach Response*\n"
+        "• /breach — Breach monitoring status\n"
         "• /sweep — Close email backdoors (forwarding rules, filters, sessions)\n"
         "• /sessions — Revoke active sessions across Google, Microsoft, social media\n"
         "• /reuse — Cross-account password reuse check\n\n"
@@ -531,7 +532,7 @@ def msg_help(tier: str) -> str:
     if is_business:
         text += (
             "\n*🏢 Team Management*\n"
-            "• /status — Account & seat status (admin)\n"
+            "• /status — Seat usage and team overview (admin)\n"
         )
 
     if tier in DOMAIN_TIERS:
@@ -541,8 +542,8 @@ def msg_help(tier: str) -> str:
         )
 
     text += (
-        "\n• /breach — Check breach status\n"
-        "• /myid — Show your Telegram chat ID (for account linking & support)\n"
+        "\n*⚙️ Admin*\n"
+        "• /myid — Your Telegram chat ID (account linking & support)\n"
         "• /help — This menu\n\n"
         "Tap any command to get started."
     )

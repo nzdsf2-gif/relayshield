@@ -545,8 +545,8 @@ def msg_help(tier: str) -> str:
     if tier in DOMAIN_TIERS:
         text += (
             "\n*🌐 Domain Security*\n"
-            "• /domain — Domain monitoring status and enrollled domains\n"
-        "• /domain add <domain> — Enrol a new domain for monitoring\n"
+            "• /domain — Domain monitoring status and enrolled domains\n"
+        "• /domain add <domain> — Enroll a new domain for monitoring\n"
         )
 
     text += (
@@ -1262,7 +1262,7 @@ def handle_sim_status(chat_id: int, user: dict) -> None:
         send_message(
             chat_id,
             "📡 *SIM Swap Monitoring — Active*\n\n"
-            "✅ Your phone number is enrollled and being monitored 24/7.\n\n"
+            "✅ Your phone number is enrolled and being monitored 24/7.\n\n"
             "We alert you immediately if your carrier shows signs of a SIM or eSIM swap — "
             "before an attacker can use your number to access your accounts.\n\n"
             "*What we detect:*\n"
@@ -1277,7 +1277,7 @@ def handle_sim_status(chat_id: int, user: dict) -> None:
         send_message(
             chat_id,
             "📡 *SIM Swap Monitoring — Not Active*\n\n"
-            "Your phone number has not been enrollled.\n\n"
+            "Your phone number has not been enrolled.\n\n"
             "To activate monitoring, restart setup with /start or contact support at "
             "relayshieldadmin@gmail.com.\n\n"
             "🛡️ RelayShield",
@@ -1302,7 +1302,7 @@ def handle_breach_status(chat_id: int, user: dict) -> None:
     if not emails:
         send_message(
             chat_id,
-            "🔍 *Breach Monitoring — No emails enrollled*\n\n"
+            "🔍 *Breach Monitoring — No emails enrolled*\n\n"
             "Add an email address to start monitoring.\n\n"
             "Type your email address now to enroll it.",
             parse_mode="Markdown",
@@ -1314,13 +1314,13 @@ def handle_breach_status(chat_id: int, user: dict) -> None:
         active = item.get("active", True)
         label = "✅ Active" if active else "⏸ Paused"
         # Email is encrypted — show partial info only
-        lines.append(f"• {label} (enrollled {item.get('created_at', '')[:10]})")
+        lines.append(f"• {label} (enrolled {item.get('created_at', '')[:10]})")
 
     email_block = "\n".join(lines)
     count = len(emails)
     send_message(
         chat_id,
-        f"🔍 *Breach Monitoring — {count} email{'s' if count != 1 else ''} enrollled*\n\n"
+        f"🔍 *Breach Monitoring — {count} email{'s' if count != 1 else ''} enrolled*\n\n"
         f"{email_block}\n\n"
         "You'll receive an alert here the moment any monitored address appears in a new breach.\n\n"
         "🛡️ RelayShield",
@@ -1361,7 +1361,7 @@ def handle_domain_add(chat_id: int, domain_raw: str, user: dict) -> None:
     if domain in monitored_domains:
         send_message(
             chat_id,
-            f"✅ `{domain}` is already enrollled for monitoring.",
+            f"✅ `{domain}` is already enrolled for monitoring.",
             parse_mode="Markdown",
         )
         return
@@ -1382,7 +1382,7 @@ def handle_domain_add(chat_id: int, domain_raw: str, user: dict) -> None:
 
     send_message(
         chat_id,
-        f"✅ *{domain}* enrollled for domain monitoring.\n\n"
+        f"✅ *{domain}* enrolled for domain monitoring.\n\n"
         f"*{len(monitored_domains)} of {domain_limit}* domain slot{'s' if domain_limit > 1 else ''} in use.\n\n"
         "We'll alert you if lookalike or typosquat domains are registered against it.\n\n"
         "🛡️ RelayShield",
@@ -1410,13 +1410,14 @@ def handle_domain_status(chat_id: int, user: dict) -> None:
         send_message(
             chat_id,
             f"🌐 *Domain Security Monitoring*\n\n"
-            "No business domain registered yet.\n\n"
+            "No business domain enrolled yet.\n\n"
             "Domain monitoring checks for:\n"
             "• Lookalike/typosquat domains used to phish your customers\n"
             "• Email configuration (MX) changes\n"
             "• Domain expiry risk\n\n"
             f"Your plan supports up to *{domain_limit}* domain{'s' if domain_limit > 1 else ''}.\n\n"
-            "Contact relayshieldadmin@gmail.com to register your domain.\n\n"
+            "To add your domain, type:\n"
+            "`/domain add yourdomain.com`\n\n"
             "🛡️ RelayShield",
             parse_mode="Markdown",
         )

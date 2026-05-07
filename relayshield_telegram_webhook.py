@@ -1812,6 +1812,18 @@ def handle_message(update: dict) -> None:
         handle_email_input(chat_id, text, user)
     elif state == "AWAITING_MORE_EMAILS":
         handle_email_input(chat_id, text, user)
+    elif state in ("AWAITING_REMOVE_SELECT", "AWAITING_DOMAIN_ADD") and text.startswith("/"):
+        # Slash command received mid-flow — cancel current operation and route normally
+        update_user(user["user_id"], {
+            "onboarding_state": "ACTIVE",
+            "pending_remove_list": None,
+        })
+        user["onboarding_state"] = "ACTIVE"
+        send_message(
+            chat_id,
+            "↩️ Previous operation cancelled.",
+        )
+        route_active_command(chat_id, text, user)
     elif state == "AWAITING_REMOVE_SELECT":
         if text.strip().lower() == "cancel":
             update_user(user["user_id"], {"onboarding_state": "ACTIVE"})

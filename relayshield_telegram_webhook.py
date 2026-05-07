@@ -1378,7 +1378,7 @@ def handle_removemember(chat_id: int, user: dict) -> None:
         chat_id,
         f"👥 *Remove a Team Member*\n\n"
         + "\n".join(lines)
-        + "\n\nReply with the *number* of the member to remove, or type `cancel`:",
+        + "\n\nType the *list number* to remove that member (e.g. `1`), or type `cancel` to go back:",
         parse_mode="Markdown",
     )
 

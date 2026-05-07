@@ -359,12 +359,14 @@ def decrypt_phone(ciphertext_b64: str) -> str:
 # ---------------------------------------------------------------------------
 
 def scan_monitored_emails() -> list[dict]:
-    """Return all records from relayshield_monitored_emails."""
+    """Return only active records from relayshield_monitored_emails."""
     table = dynamodb.Table(MONITORED_EMAILS_TABLE)
     items: list[dict] = []
-    kwargs: dict = {}
+    kwargs: dict = {
+        "FilterExpression": Attr("active").eq(True),
+    }
 
-    logger.info("Scanning table: %s", MONITORED_EMAILS_TABLE)
+    logger.info("Scanning table: %s (active=True only)", MONITORED_EMAILS_TABLE)
     while True:
         response = table.scan(**kwargs)
         items.extend(response.get("Items", []))
@@ -373,7 +375,7 @@ def scan_monitored_emails() -> list[dict]:
             break
         kwargs["ExclusiveStartKey"] = last_key
 
-    logger.info("Found %d monitored email record(s).", len(items))
+    logger.info("Found %d active monitored email record(s).", len(items))
     return items
 
 

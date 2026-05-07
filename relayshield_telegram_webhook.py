@@ -775,10 +775,73 @@ def handle_email_input(chat_id: int, email: str, user: dict) -> None:
 
 
 def _complete_onboarding(chat_id: int, user: dict, emails: list) -> None:
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+
+    # Domain tier users: collect business domain before finishing
+    if tier in DOMAIN_TIERS and not user.get("monitored_domains"):
+        update_user(user["user_id"], {"onboarding_state": "AWAITING_DOMAIN"})
+        domain_limit = DOMAIN_LIMITS.get(tier, 1)
+        send_message(
+            chat_id,
+            f"✅ Email monitoring activated.\n\n"
+            f"🌐 *Domain Security Setup*\n\n"
+            f"Your plan includes monitoring up to *{domain_limit}* business domain{'s' if domain_limit > 1 else ''} "
+            f"for lookalike/typosquat attacks.\n\n"
+            f"Send your business domain now (e.g. `acme.com`):",
+            parse_mode="Markdown",
+        )
+        return
+
     update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
     first_name = user.get("first_name", "there")
-    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
     send_message(chat_id, msg_onboarding_complete(first_name, len(emails), tier))
+
+
+def handle_domain_input(chat_id: int, text: str, user: dict) -> None:
+    """Validate and store a business domain during onboarding (AWAITING_DOMAIN state)."""
+    domain = text.strip().lower()
+
+    # Strip protocol/www if user pastes a full URL
+    domain = re.sub(r"^https?://", "", domain)
+    domain = re.sub(r"^www\.", "", domain)
+    domain = domain.split("/")[0]  # strip any path
+
+    # Basic domain validation
+    if not re.match(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z]{2,})+$", domain):
+        send_message(
+            chat_id,
+            "That doesn't look like a valid domain. Please send just the domain name, e.g. `acme.com`:",
+            parse_mode="Markdown",
+        )
+        return
+
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    domain_limit = DOMAIN_LIMITS.get(tier, 1)
+    monitored_domains = user.get("monitored_domains") or []
+
+    if domain in monitored_domains:
+        send_message(chat_id, f"`{domain}` is already being monitored.", parse_mode="Markdown")
+    else:
+        monitored_domains.append(domain)
+        update_user(user["user_id"], {"monitored_domains": monitored_domains})
+
+    emails = user.get("monitored_emails", [])
+    first_name = user.get("first_name", "there")
+
+    if len(monitored_domains) < domain_limit:
+        send_message(
+            chat_id,
+            f"✅ *{domain}* added ({len(monitored_domains)}/{domain_limit}).\n\n"
+            f"Send another domain, or type `done` to finish:",
+            parse_mode="Markdown",
+        )
+    else:
+        update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+        send_message(
+            chat_id,
+            f"✅ *{domain}* added.\n\n" + msg_onboarding_complete(first_name, len(emails), tier),
+            parse_mode="Markdown",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1456,6 +1519,16 @@ def handle_message(update: dict) -> None:
         handle_email_input(chat_id, text, user)
     elif state == "AWAITING_MORE_EMAILS":
         handle_email_input(chat_id, text, user)
+    elif state == "AWAITING_DOMAIN":
+        if text.strip().lower() == "done":
+            # User skipped remaining domain slots — complete onboarding
+            emails = user.get("monitored_emails", [])
+            first_name = user.get("first_name", "there")
+            tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+            update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+            send_message(chat_id, msg_onboarding_complete(first_name, len(emails), tier))
+        else:
+            handle_domain_input(chat_id, text, user)
     elif state == "ACTIVE":
         route_active_command(chat_id, text, user)
     else:

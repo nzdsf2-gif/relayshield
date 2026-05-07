@@ -112,6 +112,13 @@ SEAT_LIMITS = {
 
 DOMAIN_TIERS = {TIER_STARTER_DOMAIN, TIER_BASIC, TIER_SHIELD, TIER_PRO}
 
+DOMAIN_LIMITS = {
+    TIER_STARTER_DOMAIN: 1,
+    TIER_BASIC:          2,
+    TIER_SHIELD:         2,
+    TIER_PRO:            5,
+}
+
 # Plan metadata + direct Stripe monthly checkout links
 PLAN_PRICES = {
     TIER_PERSONAL:       {"label": "Personal Shield",  "amount": 1499,  "currency": "usd",
@@ -1040,17 +1047,16 @@ def handle_scan(chat_id: int, target: str | None = None) -> None:
         result = check_url(target)
         send_message(chat_id, f"🔍 *Scan result for* `{target}`\n\n{result}", parse_mode="Markdown")
     except Exception:
-        # MCP server not available in Lambda context — use RelayShield API via RapidAPI
         send_message(
             chat_id,
             f"🔍 *Scan:* `{target}`\n\n"
-            "For a full scan, paste this link into VirusTotal: https://www.virustotal.com\n\n"
-            "*Quick red flags to check manually:*\n"
+            "*Red flags to check manually:*\n"
             "→ Domain registered recently (check whois)\n"
             "→ URL shortener hiding the real destination\n"
             "→ Mismatched domain (paypa1.com, g00gle.com)\n"
             "→ HTTP instead of HTTPS\n"
-            "→ Urgent language prompting you to act immediately",
+            "→ Urgent language prompting you to act immediately\n\n"
+            "If in doubt, do not click the link.",
             parse_mode="Markdown",
         )
 

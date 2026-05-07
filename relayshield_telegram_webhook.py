@@ -801,6 +801,19 @@ def handle_domain_input(chat_id: int, text: str, user: dict) -> None:
     """Validate and store a business domain during onboarding (AWAITING_DOMAIN state)."""
     domain = text.strip().lower()
 
+    # Handle /domain relayshield.net syntax — strip the command prefix
+    if domain.startswith("/domain"):
+        parts = domain.split(None, 1)
+        if len(parts) > 1:
+            domain = parts[1].strip()
+        else:
+            send_message(
+                chat_id,
+                "Please send your business domain name, e.g. `relayshield.net`:",
+                parse_mode="Markdown",
+            )
+            return
+
     # Strip protocol/www if user pastes a full URL
     domain = re.sub(r"^https?://", "", domain)
     domain = re.sub(r"^www\.", "", domain)

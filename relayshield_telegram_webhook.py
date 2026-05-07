@@ -255,6 +255,34 @@ def remove_keyboard(chat_id: int, text: str) -> dict:
 # DynamoDB helpers
 # ---------------------------------------------------------------------------
 
+def generate_invite_code() -> str:
+    """Generate an 8-character alphanumeric invite code for team member onboarding."""
+    import random
+    import string
+    chars = string.ascii_uppercase + string.digits
+    # Ensure at least one letter so it never collides with 6-digit WA link codes
+    return ''.join(random.choices(chars, k=8))
+
+
+def get_team_members(admin_user_id: str) -> list[dict]:
+    """Return all active team members belonging to this admin's team."""
+    table = dynamodb.Table(USERS_TABLE)
+    resp = table.scan(
+        FilterExpression=Attr("team_id").eq(admin_user_id) & Attr("active").eq(True)
+    )
+    return resp.get("Items", [])
+
+
+def find_invite_code(code: str) -> dict | None:
+    """Find an admin user record with this pending invite code."""
+    table = dynamodb.Table(USERS_TABLE)
+    resp = table.scan(
+        FilterExpression=Attr("pending_invite_code").eq(code)
+    )
+    items = resp.get("Items", [])
+    return items[0] if items else None
+
+
 def get_user_by_chat_id(chat_id: int) -> dict | None:
     """Return active user record for this Telegram chat_id."""
     table = dynamodb.Table(USERS_TABLE)
@@ -539,7 +567,9 @@ def msg_help(tier: str) -> str:
     if is_business:
         text += (
             "\n*🏢 Team Management*\n"
-            "• /status — Seat usage and team overview (admin)\n"
+            "• /status — Seat usage and team overview\n"
+            "• /addmember — Generate an invite code for a new team member\n"
+            "• /removemember — Remove a team member from your account\n"
         )
 
     if tier in DOMAIN_TIERS:
@@ -1238,17 +1268,118 @@ def handle_sessions(chat_id: int) -> None:
 def handle_status(chat_id: int, user: dict) -> None:
     tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
     emails = user.get("monitored_emails", [])
-    state = user.get("onboarding_state", "UNKNOWN")
     channels = user.get("delivery_channels", ["telegram"])
+    is_business = tier in BUSINESS_TIERS
+    seat_limit = SEAT_LIMITS.get(tier, 1)
+
+    text = (
+        f"📊 *Account Status*\n\n"
+        f"*Plan:* {tier.replace('_', ' ').title()}\n"
+        f"*SIM monitoring:* {'✅ Active' if user.get('phone_encrypted') else '⚠️ Pending setup'}\n"
+        f"*Emails monitored:* {len(emails)}\n"
+        f"*Delivery:* {', '.join(channels)}\n"
+    )
+
+    if is_business:
+        is_admin = user.get("is_team_admin", False)
+        team_id = user.get("team_id")
+
+        if is_admin:
+            members = get_team_members(user["user_id"])
+            seats_used = len(members) + 1  # +1 for admin
+            text += f"\n*👥 Team Seats:* {seats_used} of {seat_limit} used\n"
+            if members:
+                text += "\n*Team Members:*\n"
+                for m in members:
+                    name = m.get("first_name", "Unknown")
+                    sim = "✅" if m.get("phone_encrypted") else "⚠️"
+                    breach = "✅" if m.get("monitored_emails") else "⚠️"
+                    text += f"• {name} — SIM {sim} Breach {breach}\n"
+            text += "\nUse /addmember to invite a new member or /removemember to remove one."
+        elif team_id:
+            text += f"\n*Role:* Team Member\n"
+
+    send_message(chat_id, text, parse_mode="Markdown")
+
+
+def handle_addmember(chat_id: int, user: dict) -> None:
+    """Generate a one-time invite code for a new team member."""
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    if tier not in BUSINESS_TIERS:
+        send_message(chat_id, "Team management is available on Business plans. Upgrade at relayshield.net.")
+        return
+
+    seat_limit = SEAT_LIMITS.get(tier, 1)
+    members = get_team_members(user["user_id"])
+    seats_used = len(members) + 1  # +1 for admin
+
+    if seats_used >= seat_limit:
+        send_message(
+            chat_id,
+            f"👥 You've reached your seat limit ({seat_limit} seats on your current plan).\n\n"
+            "To add more members, upgrade your plan at relayshield.net or contact relayshieldadmin@gmail.com.",
+            parse_mode="Markdown",
+        )
+        return
+
+    code = generate_invite_code()
+    expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+
+    update_user(user["user_id"], {
+        "is_team_admin": True,
+        "team_id": user["user_id"],
+        "pending_invite_code": code,
+        "pending_invite_expiry": expiry,
+    })
 
     send_message(
         chat_id,
-        f"📊 *Account Status*\n\n"
-        f"*Plan:* {tier.replace('_', ' ').title()}\n"
-        f"*Emails monitored:* {len(emails)}\n"
-        f"*State:* {state}\n"
-        f"*Channels:* {', '.join(channels)}\n"
-        f"*SIM monitoring:* {'Active' if user.get('phone_encrypted') else 'Pending setup'}",
+        f"✅ *Team Invite Code*\n\n"
+        f"`{code}`\n\n"
+        f"Share this code with your new team member. They should open @RelayShield\\_bot, "
+        f"type /start, and enter this code when prompted.\n\n"
+        f"*Expires in:* 7 days\n"
+        f"*Seats:* {seats_used} of {seat_limit} used\n\n"
+        f"_Generate a new code at any time with /addmember._",
+        parse_mode="Markdown",
+    )
+
+
+def handle_removemember(chat_id: int, user: dict) -> None:
+    """List team members for removal selection."""
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    if tier not in BUSINESS_TIERS:
+        send_message(chat_id, "Team management is available on Business plans.")
+        return
+
+    if not user.get("is_team_admin"):
+        send_message(chat_id, "Only the account admin can remove team members.")
+        return
+
+    members = get_team_members(user["user_id"])
+    if not members:
+        send_message(chat_id, "No team members enrolled yet. Use /addmember to invite someone.")
+        return
+
+    lines = []
+    member_ids = []
+    for i, m in enumerate(members, 1):
+        name = m.get("first_name", "Unknown")
+        sim = "✅ SIM" if m.get("phone_encrypted") else "⚠️ SIM"
+        lines.append(f"{i}. {name} — {sim}")
+        member_ids.append(m["user_id"])
+
+    update_user(user["user_id"], {
+        "onboarding_state": "AWAITING_REMOVE_SELECT",
+        "pending_remove_list": member_ids,
+    })
+
+    send_message(
+        chat_id,
+        f"👥 *Remove a Team Member*\n\n"
+        + "\n".join(lines)
+        + "\n\nReply with the *number* of the member to remove, or type `cancel`:",
+        parse_mode="Markdown",
     )
 
 
@@ -1562,6 +1693,10 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_sessions(chat_id)
     elif cmd in ("status", "account"):
         handle_status(chat_id, user)
+    elif cmd == "addmember":
+        handle_addmember(chat_id, user)
+    elif cmd == "removemember":
+        handle_removemember(chat_id, user)
     else:
         send_message(
             chat_id,
@@ -1592,6 +1727,47 @@ def handle_message(update: dict) -> None:
         if not user:
             handle_link_code(chat_id, text, first_name)
             return
+
+    # Handle 8-character team invite code (alphanumeric, at least one letter)
+    if re.match(r"^[A-Z0-9]{8}$", text) and not re.match(r"^\d{8}$", text):
+        existing = get_user_by_chat_id(chat_id)
+        if not existing:
+            admin = find_invite_code(text)
+            if admin:
+                expiry_str = admin.get("pending_invite_expiry", "")
+                if expiry_str and datetime.fromisoformat(expiry_str) > datetime.now(timezone.utc):
+                    # Valid invite — create member record and begin onboarding
+                    tier = admin.get("tier") or admin.get("subscription_tier", TIER_PERSONAL)
+                    member = create_telegram_user(chat_id, tier, first_name)
+                    update_user(member["user_id"], {
+                        "team_id": admin["user_id"],
+                        "is_team_admin": False,
+                    })
+                    # Clear the used invite code
+                    update_user(admin["user_id"], {
+                        "pending_invite_code": None,
+                        "pending_invite_expiry": None,
+                    })
+                    # Notify admin
+                    admin_chat_id = admin.get("telegram_chat_id")
+                    if admin_chat_id:
+                        send_message(
+                            int(admin_chat_id),
+                            f"✅ *New team member joined:* {first_name}\n\n"
+                            "They are now completing their security setup.",
+                            parse_mode="Markdown",
+                        )
+                    request_contact(
+                        chat_id,
+                        f"✅ *Welcome to RelayShield, {first_name}!*\n\n"
+                        "You've been added to your team's account.\n\n"
+                        "Let's set up your personal protection. Please share your phone number to enable SIM swap monitoring:",
+                    )
+                    return
+                else:
+                    send_message(chat_id, "⏱️ That invite code has expired. Ask your admin to generate a new one with /addmember.")
+                    return
+            # Not an invite code — fall through to normal routing
 
     # Handle /start
     if text.lower() in ("/start", "/start@relayshield_bot"):
@@ -1636,6 +1812,45 @@ def handle_message(update: dict) -> None:
         handle_email_input(chat_id, text, user)
     elif state == "AWAITING_MORE_EMAILS":
         handle_email_input(chat_id, text, user)
+    elif state == "AWAITING_REMOVE_SELECT":
+        if text.strip().lower() == "cancel":
+            update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+            send_message(chat_id, "Cancelled. No members were removed.")
+        elif text.strip().isdigit():
+            idx = int(text.strip()) - 1
+            member_ids = user.get("pending_remove_list", [])
+            if 0 <= idx < len(member_ids):
+                member_id = member_ids[idx]
+                # Deactivate member record
+                table = dynamodb.Table(USERS_TABLE)
+                resp = table.get_item(Key={"user_id": member_id})
+                member = resp.get("Item", {})
+                update_user(member_id, {"active": False, "team_id": None})
+                # Notify removed member via Telegram if linked
+                member_chat_id = member.get("telegram_chat_id")
+                member_name = member.get("first_name", "Team member")
+                if member_chat_id:
+                    send_message(
+                        int(member_chat_id),
+                        "🔔 *RelayShield Account Update*\n\n"
+                        "You have been removed from your team's RelayShield account by the admin.\n\n"
+                        "Your monitoring has been deactivated. Contact your admin or visit relayshield.net to set up an individual account.",
+                        parse_mode="Markdown",
+                    )
+                update_user(user["user_id"], {
+                    "onboarding_state": "ACTIVE",
+                    "pending_remove_list": None,
+                })
+                send_message(
+                    chat_id,
+                    f"✅ *{member_name}* has been removed from your team and notified.\n\n"
+                    "Use /status to see your updated seat usage.",
+                    parse_mode="Markdown",
+                )
+            else:
+                send_message(chat_id, "Invalid selection. Please reply with a number from the list, or type `cancel`:")
+        else:
+            send_message(chat_id, "Please reply with a number from the list, or type `cancel`:")
     elif state == "AWAITING_DOMAIN_ADD":
         if text.strip().lower() == "done":
             update_user(user["user_id"], {"onboarding_state": "ACTIVE"})

@@ -1431,11 +1431,12 @@ def handle_breach_status(chat_id: int, user: dict) -> None:
         emails = []
 
     if not emails:
+        update_user(user["user_id"], {"onboarding_state": "AWAITING_BREACH_EMAIL"})
         send_message(
             chat_id,
             "🔍 *Breach Monitoring — No emails enrolled*\n\n"
-            "Add an email address to start monitoring.\n\n"
-            "Type your email address now to enroll it.",
+            "Send an email address to start monitoring (e.g. `you@example.com`):\n\n"
+            "_Type_ `cancel` _to go back._",
             parse_mode="Markdown",
         )
         return
@@ -1812,7 +1813,7 @@ def handle_message(update: dict) -> None:
         handle_email_input(chat_id, text, user)
     elif state == "AWAITING_MORE_EMAILS":
         handle_email_input(chat_id, text, user)
-    elif state in ("AWAITING_REMOVE_SELECT", "AWAITING_DOMAIN_ADD") and text.startswith("/"):
+    elif state in ("AWAITING_REMOVE_SELECT", "AWAITING_DOMAIN_ADD", "AWAITING_BREACH_EMAIL") and text.startswith("/"):
         # Slash command received mid-flow — cancel current operation and route normally
         update_user(user["user_id"], {
             "onboarding_state": "ACTIVE",
@@ -1863,6 +1864,51 @@ def handle_message(update: dict) -> None:
                 send_message(chat_id, "Invalid selection. Please reply with a number from the list, or type `cancel`:")
         else:
             send_message(chat_id, "Please reply with a number from the list, or type `cancel`:")
+    elif state == "AWAITING_BREACH_EMAIL":
+        if text.strip().lower() == "cancel":
+            update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+            send_message(chat_id, "Cancelled. Type /breach any time to check your monitoring status.")
+        else:
+            email = text.strip().lower()
+            if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
+                send_message(chat_id, "That doesn't look like a valid email address. Please try again or type `cancel`:", parse_mode="Markdown")
+            else:
+                tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+                limit = EMAIL_LIMITS.get(tier, 3)
+                monitored = user.get("monitored_emails", [])
+                email_hash = hash_email(email)
+                if email_hash in [hash_email(e) for e in monitored]:
+                    send_message(chat_id, f"`{email}` is already being monitored.", parse_mode="Markdown")
+                    update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+                elif len(monitored) >= limit:
+                    send_message(chat_id, f"You've reached your email limit ({limit} on your plan). Contact relayshieldadmin@gmail.com to upgrade.")
+                    update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+                else:
+                    monitored.append(email)
+                    me_table = dynamodb.Table(MONITORED_EMAILS_TABLE)
+                    email_enc = encrypt_field(email)
+                    me_table.put_item(Item={
+                        "email_id": str(uuid.uuid4()),
+                        "user_id": user["user_id"],
+                        "email_encrypted": email_enc,
+                        "email_hash": email_hash,
+                        "tier": tier,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "active": True,
+                    })
+                    update_user(user["user_id"], {
+                        "monitored_emails": monitored,
+                        "onboarding_state": "ACTIVE",
+                    })
+                    remaining = limit - len(monitored)
+                    send_message(
+                        chat_id,
+                        f"✅ *{email}* enrolled for breach monitoring.\n\n"
+                        f"{len(monitored)} of {limit} email slot{'s' if limit > 1 else ''} used.\n\n"
+                        f"{'You can add ' + str(remaining) + ' more. Use /breach to add another.' if remaining > 0 else 'You have reached your email limit.'}\n\n"
+                        "🛡️ RelayShield",
+                        parse_mode="Markdown",
+                    )
     elif state == "AWAITING_DOMAIN_ADD":
         if text.strip().lower() == "done":
             update_user(user["user_id"], {"onboarding_state": "ACTIVE"})

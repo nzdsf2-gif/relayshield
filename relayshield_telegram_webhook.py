@@ -1299,11 +1299,11 @@ def handle_sweep(chat_id: int) -> None:
     send_message(
         chat_id,
         "🔍 *Email Security Sweep — 5 Steps*\n\n"
-        "📌 *Run this sweep on a computer\\.* The Gmail app cannot access "
-        "forwarding rules, filters, or connected apps\\. "
-        "Open mail\\.google\\.com on a desktop or laptop\\.\n\n"
+        "📌 *Run this sweep on a computer.* The Gmail app cannot access "
+        "forwarding rules, filters, or connected apps. "
+        "Open mail.google.com on a desktop or laptop.\n\n"
         "*Step 1 — Check email forwarding rules*\n"
-        "Attackers plant a forwarding address so every email is silently copied to them — it survives password resets\\.\n"
+        "Attackers plant a forwarding address so every email is silently copied to them — it survives password resets.\n"
         "Gmail: Settings → See all settings → Forwarding and POP/IMAP\n"
         "Outlook: Settings → Mail → Forwarding\n"
         "Yahoo: Settings → Mailboxes → your address → Forwarding\n"
@@ -1325,22 +1325,22 @@ def handle_sweep(chat_id: int) -> None:
     )
     send_message(
         chat_id,
-        "📱 *Email Sweep — Mobile Device Users \\(Phone & Tablet\\)*\n\n"
-        "The Gmail native app cannot check forwarding or filters\\. "
-        "Use your phone's browser — Chrome or Safari — instead\\.\n\n"
+        "📱 *Email Sweep — Mobile Device Users (Phone & Tablet)*\n\n"
+        "The Gmail native app cannot check forwarding or filters. "
+        "Use your phone's browser — Chrome or Safari — instead.\n\n"
         "*Step 1: Enable desktop view in your browser*\n"
-        "Required only for Steps 1 & 3 \\(forwarding and filters\\)\\.\n\n"
-        "🍎 *iOS Safari:* Go to mail\\.google\\.com → tap the 🖥 page icon in the "
-        "address bar → tap *\\.\\.\\.* → Request Desktop Website\n"
-        "🍎 *iOS Chrome:* Go to mail\\.google\\.com → tap *\\.\\.\\.* at the bottom\\-right "
+        "Required only for Steps 1 & 3 (forwarding and filters).\n\n"
+        "🍎 *iOS Safari:* Go to mail.google.com → tap the 🖥 page icon in the "
+        "address bar → tap *...* → Request Desktop Website\n"
+        "🍎 *iOS Chrome:* Go to mail.google.com → tap *...* at the bottom-right "
         "→ scroll down → Request Desktop Site\n"
-        "🤖 *Android Chrome:* Tap *⋮* at the top\\-right "
+        "🤖 *Android Chrome:* Tap *⋮* at the top-right "
         "→ Request Desktop Site\n"
         "🤖 *Android Firefox:* Tap *⋮* "
         "→ Request Desktop Site\n\n"
         "*Step 2: Run the checks in your browser*\n"
-        "Steps 1 & 3 → mail\\.google\\.com → Settings → See all settings\n"
-        "Steps 2, 4 & 5 → myaccount\\.google\\.com \\(no special view needed\\)",
+        "Steps 1 & 3 → mail.google.com → Settings → See all settings\n"
+        "Steps 2, 4 & 5 → myaccount.google.com (no special view needed)",
     )
 
 

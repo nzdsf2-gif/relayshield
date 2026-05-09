@@ -2515,6 +2515,76 @@ The correlation engine fires two classes of alert:
 
 **Patentable — should be added to provisional.** The coordinated attack detection claim covers signal co-occurrence after both signals are present. Predictive alerts introduce a distinct novel sub-claim: *partial chain matching as a trigger for pre-completion predictive guidance*. This is a different technical contribution — the system identifies that a chain is in-progress (not yet complete) and delivers proactive warnings calibrated to the specific missing attack step. This sub-claim should be added to the existing provisional patent (`relayshield_provisional_patent_overview.md`) before any public disclosure of this capability.
 
+**Two additional OAuth supply chain attack chains added — May 2026 ✅ LIVE**
+
+The original four chains (smishing→SIM swap, breach+SIM swap, breach+OTP interception, domain phishing→breach) cover credential and carrier attacks. Two new chains specifically address the OAuth supply chain attack surface introduced by the SaaS breach watchlist monitor:
+
+| Chain | Trigger signals | Severity | Real-world scenario |
+|---|---|---|---|
+| OAuth Breach + Credential Harvesting | `oauth_app_breach` + (`suspicious_url` OR `otp_warning`) within 72 hrs | HIGH | Slack is breached — attacker exfiltrates OAuth tokens. Hours later, attacker sends a phishing link via a compromised Slack workspace. User reports the URL or receives an unexpected OTP. RelayShield correlates: the app breach created the opening; the phishing/OTP is the attacker using it. Alert: "A SaaS app you've granted OAuth access to was breached AND you've encountered a suspicious link or unexpected OTP — credential harvesting following an OAuth breach is in progress." |
+| OAuth Breach + SIM Swap | `oauth_app_breach` + `sim_swap` within 72 hrs | CRITICAL | GitHub is breached — attacker obtains OAuth tokens linked to the victim's account. The same attacker then ports the victim's SIM to intercept any 2FA challenges. With both OAuth tokens AND phone control, they can authenticate to every service the victim connected to GitHub (Vercel, Linear, Netlify, etc.) without touching the victim's password. Alert: "A SaaS app you've granted OAuth access to was breached AND your SIM was swapped. The attacker holds your OAuth tokens AND controls your phone number — they can bypass 2FA on every connected service. Revoke all OAuth grants immediately." |
+
+**Why these chains matter:** OAuth tokens are long-lived credentials that survive password resets. A SaaS breach that exposes OAuth tokens is far more dangerous than a password breach — the attacker gains persistent access to every downstream service the victim connected, without needing to re-authenticate. Combining this with SIM swap control creates a scenario where the victim has no remaining authentication factor the attacker cannot intercept. No competitor monitors the OAuth layer at all; combining it with SIM swap correlation is unique to RelayShield.
+
+**Predictive warnings for OAuth chains:**
+
+| Chain | First signal received | Predictive warning sent |
+|---|---|---|
+| OAuth Breach + Credential Harvesting | `oauth_app_breach` | "A SaaS app connected to your accounts was breached. Watch for phishing links or unexpected login codes in the next 72 hours — attackers use OAuth breaches to launch targeted phishing." |
+| OAuth Breach + Credential Harvesting | `suspicious_url` or `otp_warning` | "You've reported a suspicious link or unexpected OTP. If any of your SaaS apps (Slack, GitHub, Notion, etc.) were recently breached, your OAuth tokens may be the attack vector." |
+| OAuth Breach + SIM Swap | `oauth_app_breach` | "A SaaS app you've granted OAuth access to was breached. Consider locking your SIM now — attackers combine OAuth breaches with SIM swaps to bypass all remaining 2FA." |
+| OAuth Breach + SIM Swap | `sim_swap` | "Your SIM was swapped. If any of your SaaS apps were recently breached, the attacker may already hold OAuth tokens — revoke all connected app permissions immediately." |
+
+**Deployed across:** `relayshield-oauth-watchlist-monitor` (fires `oauth_app_breach` signal to all active users when a watched app is breached), `relayshield-telegram-webhook`, `relayshield-whatsapp-webhook` (both contain the updated `ATTACK_CHAINS` and `PREDICTIVE_WARNINGS` tables).
+
+---
+
+## 10d. MSP Multi-Tenancy Architecture — Designed May 2026
+
+**Status:** Architecture specified. Not yet built. **Trigger:** First MSP or Business Shield Pro prospect with a concrete requirement.
+
+**The gap:** The current team model (admin → members via `team_id`) is flat. An MSP managing 5 enterprise customers has no way to create isolated tenant namespaces — all users share the same DynamoDB table with no enterprise-level separation. A dedicated admin for Enterprise A could theoretically access Enterprise B's data.
+
+**UUID-based tenant isolation model:**
+
+Every enterprise is assigned a UUID (`org_id`) at creation time — completely independent of any user's identity. This is the key distinction from the current flat model where `team_id = admin_user_id`.
+
+```
+MSP Admin
+  is_msp_admin: True
+  managed_orgs: ["uuid-org-1", "uuid-org-2", "uuid-org-3"]
+
+Enterprise 1 Admin
+  org_id: "uuid-org-1"
+  is_team_admin: True
+  parent_msp_id: msp_user_id
+
+Enterprise 1 Employee
+  org_id: "uuid-org-1"
+  team_id: ent1_admin_user_id
+
+Enterprise 2 Admin
+  org_id: "uuid-org-2"
+  is_team_admin: True
+  parent_msp_id: msp_user_id
+
+Enterprise 2 Employee
+  org_id: "uuid-org-2"
+  team_id: ent2_admin_user_id
+```
+
+**Isolation enforcement:** All DynamoDB queries that retrieve team members filter on BOTH `org_id` AND `team_id`. Enterprise admins cannot see users outside their `org_id`. MSP admin sees aggregate data for all orgs in their `managed_orgs` list but cannot read individual user signals across enterprise boundaries without explicit per-org delegation.
+
+**New commands:**
+- `/addenterprise` (MSP admin only) — generates enterprise UUID, issues an enterprise-admin invite code. MSP admin names the enterprise (e.g. "Acme Corp"). UUID stored as `org_id` on both the admin and all future members.
+- `/enterprises` (MSP admin only) — lists all managed orgs with seat usage, active members, and last alert timestamp per org.
+- `/removeenterprise <org_name>` (MSP admin only) — sets `active: False` on enterprise admin and all members; removes org from `managed_orgs`.
+- WA equivalents: `ADDENTERPRISE`, `ENTERPRISES`, `REMOVEENTERPRISE`.
+
+**Architecture constraint — DM-only:** All breach alerts, SIM swap notifications, and coordinated attack alerts are delivered via private DM to individual `telegram_chat_id` values. Shared Telegram groups are explicitly excluded — group messages are visible to all members, which would expose Enterprise A's breach alert to Enterprise B's employees. The MSP value proposition is the management layer (one login, multiple enterprise views), not group communication.
+
+**Billing model (to be designed):** MSP billing likely aggregates across managed orgs under a single subscription, with per-org seat limits. Enterprise admins do not manage their own billing — the MSP admin controls all payment. Per-enterprise usage reporting exposed via `/enterprises` command.
+
 **Long-term evolution: Third-Party API Monetization**
 
 The `recent_signals` dataset — breach events, SIM swap detections, suspicious SMS submissions, domain lookalike detections — becomes a proprietary threat intelligence asset at scale. Aggregated and anonymized across thousands of users, this data reveals attack campaign timing, co-occurrence patterns, and regional threat clustering that no individual organization can observe alone.

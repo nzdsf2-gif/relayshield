@@ -56,7 +56,7 @@ jobs:
         run: |
           # Map source file → Lambda function name
           declare -A LAMBDA_MAP=(
-            ["relayshield_breach_monitor.py"]="relayshield-breach-check"
+            ["relayshield_breach_monitor.py"]="relayshield-breach-monitor"
             ["relayshield_whatsapp_webhook.py"]="relayshield-whatsapp-webhook"
             ["relayshield_stripe_webhook.py"]="relayshield-stripe-webhook"
             ["relayshield_domain_monitor.py"]="relayshield-domain-monitor"

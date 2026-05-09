@@ -4,44 +4,45 @@ RelayShield B2A API Lambda
 Exposes RelayShield security intelligence as REST endpoints for
 Business-to-Agent (B2A) and third-party developer consumption.
 
-Endpoints (all POST, JSON body, Lambda proxy integration):
-  POST /v1/breach       — HIBP email breach check
-  POST /v1/scan-url     — VirusTotal URL malware analysis
-  POST /v1/scan-file    — VirusTotal binary/file analysis (download from URL + submit)
-  POST /v1/sim-swap     — Twilio Lookup v2 SIM/eSIM swap detection
-  POST /v1/domain       — Typosquat/lookalike domain scan (DNS + CT + GSB)
+Subscription endpoints (API key required — enforced by API Gateway usage plan):
+  POST /v1/breach                   — HIBP email breach check
+  POST /v1/scan-url                 — VirusTotal URL malware analysis (coming soon on PAYG)
+  POST /v1/scan-file                — VirusTotal binary/file analysis (coming soon on PAYG)
+  POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
+  POST /v1/domain                   — Typosquat/lookalike domain scan (DNS + CT + GSB)
+  GET  /v1/result/{analysis_id}     — Poll VT scan result
 
-Authentication: API key via x-api-key header — enforced by API Gateway usage plan,
-NOT inside this Lambda. Lambda trusts all requests that reach it.
+Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
+  POST /v1/payg/breach              — $0.10 USDC
+  POST /v1/payg/sim-swap            — $0.25 USDC
+  POST /v1/payg/domain              — $0.50 USDC
+  POST /v1/payg/oauth-watchlist     — $0.15 USDC
+  GET  /v1/payg/result/{id}         — $0.00 (free — poll a paid scan)
 
-Request/Response format:
-  All requests: Content-Type: application/json
-  All responses: { "ok": bool, "data": {...}, "error": "..." }
-  HTTP status: 200 (success), 400 (bad request), 500 (backend failure)
+x402 payment flow:
+  1. Call PAYG endpoint with no X-PAYMENT header → receive 402 + PAYMENT-REQUIRED header
+  2. Pay USDC on Base to the address in PAYMENT-REQUIRED
+  3. Retry with X-PAYMENT header containing payment proof
+  4. Lambda verifies proof via Coinbase x402 facilitator → executes and returns result
 
-Deployment:
-  Lambda name:   relayshield-api
-  Handler:       relayshield_api.lambda_handler
-  Runtime:       Python 3.12
-  Timeout:       60 seconds (VT polling can take up to 45s)
-  Memory:        256 MB
-  Trigger:       API Gateway REST API (Lambda proxy integration)
-  IAM requires:
-    Secrets Manager GetSecretValue for all relayshield/* secrets
-    No DynamoDB access required — this Lambda is stateless
+Authentication: Subscription routes — API key enforced by API Gateway usage plan.
+               PAYG routes — no API key; x402 payment verified inside this Lambda.
 
-Secrets used (all already exist in Secrets Manager):
-  relayshield/hibp_api_key              — HIBP v3 API key
-  relayshield/virustotal_api_key        — VirusTotal API key
-  relayshield/twilio_account_sid        — Twilio Account SID
-  relayshield/twilio_auth_token         — Twilio Auth Token
-  relayshield/google_safe_browsing      — Google Safe Browsing API key
+Environment variables (set on Lambda):
+  RELAYSHIELD_X402_WALLET — Coinbase Exchange USDC deposit address (x402 payTo)
+
+Secrets used (all in Secrets Manager):
+  relayshield/hibp_api_key
+  relayshield/virustotal_api_key
+  relayshield/twilio_account_sid / twilio_auth_token
+  relayshield/google_safe_browsing
 """
 
 import base64
 import concurrent.futures
 import json
 import logging
+import os
 import socket
 import time
 import urllib.error
@@ -68,6 +69,42 @@ secrets_client = boto3.client("secretsmanager")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+# x402 PAYG configuration
+X402_PAYTO_ADDRESS   = os.environ.get("RELAYSHIELD_X402_WALLET", "")
+X402_FACILITATOR_URL = "https://x402.org/facilitator/verify"
+USDC_BASE_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"  # USDC on Base
+BASE_CHAIN_ID        = "eip155:8453"
+
+# PAYG pricing in USDC base units (6 decimals): $0.10 = 100000
+PAYG_PRICE_UNITS: dict[str, int] = {
+    "/v1/payg/breach":           100000,
+    "/v1/payg/sim-swap":         250000,
+    "/v1/payg/domain":           500000,
+    "/v1/payg/oauth-watchlist":  150000,
+}
+
+# OAuth supply chain watchlist — high-risk OAuth-capable SaaS apps
+OAUTH_WATCHLIST = {
+    "slack", "notion", "github", "zapier", "linear", "vercel", "loom",
+    "hubspot", "okta", "salesforce", "dropbox", "box", "atlassian", "jira",
+    "confluence", "asana", "monday", "clickup", "figma", "miro",
+    "zoom", "webex", "intercom", "zendesk", "freshdesk",
+    "openai", "anthropic", "canva", "jasper", "grammarly", "copy.ai",
+}
+
+OAUTH_REVOCATION_URLS: dict[str, str] = {
+    "GitHub":     "https://github.com/settings/applications",
+    "Slack":      "https://slack.com/apps/manage",
+    "Notion":     "https://www.notion.so/my-integrations",
+    "Vercel":     "https://vercel.com/account/tokens",
+    "Zapier":     "https://zapier.com/app/connections",
+    "Linear":     "https://linear.app/settings/api",
+    "HubSpot":    "https://app.hubspot.com/integrations-settings",
+    "Dropbox":    "https://www.dropbox.com/account/connected_apps",
+    "Atlassian":  "https://id.atlassian.com/manage-profile/apps",
+    "Salesforce": "https://help.salesforce.com/s/articleView?id=sf.remoteaccess_revoke_token.htm",
+}
 
 HIBP_SECRET_NAME  = "relayshield/hibp_api_key"
 VT_SECRET_NAME    = "relayshield/virustotal_api_key"
@@ -654,16 +691,211 @@ def handle_result(analysis_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Endpoint: POST /v1/payg/oauth-watchlist  (also callable from subscription path)
+# ---------------------------------------------------------------------------
+# Request:  { "email": "user@example.com" }
+# Response: { "email": "...", "matched_count": N, "matched_apps": [...],
+#             "recommendation": "...", "checked_at": "..." }
+#
+# Checks HIBP breaches for the email and cross-references against the
+# OAuth watchlist. Matched apps may have issued tokens granting access
+# to Google Workspace / M365 without touching the user's password.
+
+def handle_oauth_watchlist(params: dict) -> dict:
+    email = (params.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return _err("email is required and must be a valid address")
+
+    api_key = _hibp_api_key()
+    url     = f"{HIBP_BASE_URL}{urllib.parse.quote(email)}?truncateResponse=false"
+    req     = urllib.request.Request(
+        url,
+        headers={"hibp-api-key": api_key, "user-agent": "RelayShield-API"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            breaches = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            breaches = []
+        elif exc.code == 429:
+            return _err("HIBP rate limit reached — retry in a few seconds", 429)
+        else:
+            logger.error("HIBP HTTP %d for oauth-watchlist %s", exc.code, email)
+            return _err(f"HIBP returned HTTP {exc.code}", 502)
+    except Exception as exc:
+        logger.exception("oauth-watchlist HIBP call failed for %s: %s", email, exc)
+        return _err("oauth watchlist check failed — upstream error", 502)
+
+    matched = []
+    for b in breaches:
+        name  = (b.get("Name")   or "").lower()
+        domain = (b.get("Domain") or "").lower()
+        title  = (b.get("Title")  or "").lower()
+        for app in OAUTH_WATCHLIST:
+            if app in name or app in domain or app in title:
+                app_name = b.get("Name", "")
+                matched.append({
+                    "app":           app_name,
+                    "breach_date":   b.get("BreachDate"),
+                    "data_classes":  b.get("DataClasses", []),
+                    "revoke_url":    OAUTH_REVOCATION_URLS.get(
+                                         app_name, "https://myaccount.google.com/permissions"
+                                     ),
+                })
+                break
+
+    logger.info("oauth-watchlist — email=%s matched=%d total_breaches=%d",
+                email, len(matched), len(breaches))
+    return _ok({
+        "email":         email,
+        "matched_count": len(matched),
+        "matched_apps":  matched,
+        "recommendation": (
+            "Revoke OAuth access for matched apps immediately using the revoke_url for each. "
+            "Also audit all connected apps at myaccount.google.com/permissions and myapps.microsoft.com."
+            if matched else
+            "No breached OAuth-capable apps detected for this email."
+        ),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# x402 PAYG — payment requirements, verification, 402 response
+# ---------------------------------------------------------------------------
+
+def _build_payment_requirements(path: str, price_units: int) -> dict:
+    api_base = "https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod"
+    return {
+        "x402Version": 1,
+        "accepts": [{
+            "scheme":             "exact",
+            "network":            BASE_CHAIN_ID,
+            "maxAmountRequired":  str(price_units),
+            "resource":           f"{api_base}{path}",
+            "description":        f"RelayShield {path.split('/')[-1].replace('-', ' ')} check",
+            "mimeType":           "application/json",
+            "payTo":              X402_PAYTO_ADDRESS,
+            "maxTimeoutSeconds":  300,
+            "asset":              USDC_BASE_ADDRESS,
+            "extra":              {"name": "USDC", "version": "2"},
+        }],
+    }
+
+
+def _x402_payment_required(path: str) -> dict:
+    price_units  = PAYG_PRICE_UNITS.get(path, 250000)
+    requirements = _build_payment_requirements(path, price_units)
+    encoded      = base64.b64encode(json.dumps(requirements).encode()).decode()
+    price_usd    = f"${price_units / 1_000_000:.2f}"
+    return {
+        "statusCode": 402,
+        "headers": {
+            "Content-Type":                "application/json",
+            "PAYMENT-REQUIRED":            encoded,
+            "Access-Control-Expose-Headers": "PAYMENT-REQUIRED",
+        },
+        "body": json.dumps({
+            "ok":    False,
+            "error": "Payment required",
+            "price": f"{price_usd} USDC on Base",
+            "x402":  requirements,
+            "subscribe_url": "https://rapidapi.com/relayshield/relayshield-security-intelligence",
+            "subscribe_note": f"Subscribe for 96%+ lower per-check cost vs {price_usd} PAYG rate.",
+        }),
+    }
+
+
+def _verify_x402_payment(x_payment: str, path: str) -> bool:
+    if not X402_PAYTO_ADDRESS:
+        logger.error("RELAYSHIELD_X402_WALLET env var not set — cannot verify x402 payment")
+        return False
+    price_units  = PAYG_PRICE_UNITS.get(path, 0)
+    requirements = _build_payment_requirements(path, price_units)
+    payload      = json.dumps({
+        "x402Version":  1,
+        "payload":      x_payment,
+        "requirements": requirements,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        X402_FACILITATOR_URL,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            valid  = result.get("isValid", False)
+            if not valid:
+                logger.warning("x402 payment invalid — reason: %s path=%s",
+                               result.get("invalidReason"), path)
+            return valid
+    except Exception as exc:
+        logger.error("x402 facilitator call failed for %s: %s", path, exc)
+        return False
+
+
+def handle_payg_request(path: str, method: str, event: dict) -> dict:
+    headers   = event.get("headers") or {}
+    x_payment = headers.get("X-PAYMENT") or headers.get("x-payment", "")
+
+    # Free poll endpoint — no payment needed
+    if method == "GET" and path.startswith("/v1/payg/result/"):
+        analysis_id = path[len("/v1/payg/result/"):]
+        return handle_result(analysis_id)
+
+    if method != "POST":
+        return _err(f"{path} only accepts POST requests", 405)
+
+    # Require payment proof
+    if not x_payment:
+        return _x402_payment_required(path)
+
+    if not _verify_x402_payment(x_payment, path):
+        return {
+            "statusCode": 402,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "ok":    False,
+                "error": "Invalid or expired payment proof — pay again and retry.",
+            }),
+        }
+
+    payg_routes = {
+        "/v1/payg/breach":          handle_breach,
+        "/v1/payg/sim-swap":        handle_sim_swap,
+        "/v1/payg/domain":          handle_domain,
+        "/v1/payg/oauth-watchlist": handle_oauth_watchlist,
+    }
+    handler = payg_routes.get(path)
+    if not handler:
+        return _err(f"unknown PAYG endpoint: {path}", 404)
+
+    params = _body(event)
+    try:
+        return handler(params)
+    except Exception as exc:
+        logger.exception("Unhandled error in PAYG %s: %s", path, exc)
+        return _err("internal server error", 500)
+
+
+# ---------------------------------------------------------------------------
 # Router / Lambda handler
 # ---------------------------------------------------------------------------
 
 ROUTES = {
-    "/v1/breach":    handle_breach,
-    "/v1/scan-url":  handle_scan_url,
-    "/v1/scan-file": handle_scan_file,
-    "/v1/sim-swap":  handle_sim_swap,
-    "/v1/domain":    handle_domain,
+    "/v1/breach":           handle_breach,
+    "/v1/scan-url":         handle_scan_url,
+    "/v1/scan-file":        handle_scan_file,
+    "/v1/sim-swap":         handle_sim_swap,
+    "/v1/domain":           handle_domain,
+    "/v1/oauth-watchlist":  handle_oauth_watchlist,
 }
+
+PAYG_PATHS = set(PAYG_PRICE_UNITS.keys()) | {"/v1/payg/result/"}
 
 
 def lambda_handler(event: dict, context) -> dict:
@@ -672,21 +904,29 @@ def lambda_handler(event: dict, context) -> dict:
 
     logger.info("API request — method=%s path=%s", method, path)
 
+    # Discovery
     if method == "GET" and path in ("/", "/v1", "/v1/"):
         return _ok({
-            "service":   "RelayShield B2A API",
-            "version":   "1.0",
-            "endpoints": list(ROUTES.keys()) + ["GET /v1/result/{analysis_id}"],
+            "service":  "RelayShield B2A API",
+            "version":  "1.0",
+            "subscription_endpoints": list(ROUTES.keys()) + ["GET /v1/result/{analysis_id}"],
+            "payg_endpoints": list(PAYG_PRICE_UNITS.keys()) + ["GET /v1/payg/result/{analysis_id}"],
+            "payg_note": "x402 payment required — USDC on Base. No API key needed.",
         })
 
-    # GET /v1/result/{analysis_id}
+    # PAYG routes (x402 payment verified inside Lambda)
+    if path.startswith("/v1/payg/"):
+        return handle_payg_request(path, method, event)
+
+    # Subscription: GET /v1/result/{analysis_id}
     if method == "GET" and path.startswith("/v1/result/"):
         analysis_id = path[len("/v1/result/"):]
         return handle_result(analysis_id)
 
+    # Subscription routes (API key enforced by API Gateway)
     handler = ROUTES.get(path)
     if not handler:
-        return _err(f"unknown endpoint: {path} — valid endpoints: {list(ROUTES.keys())}", 404)
+        return _err(f"unknown endpoint: {path}", 404)
 
     if method != "POST":
         return _err(f"{path} only accepts POST requests", 405)

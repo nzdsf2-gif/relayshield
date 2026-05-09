@@ -20,6 +20,7 @@ import base64
 import hashlib
 import json
 import logging
+import os
 import time
 import urllib.error
 import urllib.parse
@@ -42,8 +43,12 @@ logger.setLevel(logging.INFO)
 # ---------------------------------------------------------------------------
 
 secrets_client = boto3.client("secretsmanager")
-dynamodb = boto3.resource("dynamodb")
-kms_client = boto3.client("kms")
+dynamodb       = boto3.resource("dynamodb")
+kms_client     = boto3.client("kms")
+lambda_client  = boto3.client("lambda")
+
+# Lambda function name for Telegram webhook — set as env var TG_WEBHOOK_LAMBDA
+TG_WEBHOOK_LAMBDA = os.environ.get("TG_WEBHOOK_LAMBDA", "")
 
 KMS_EMAIL_KEY_ALIAS = "alias/relayshield-data-key"
 KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
@@ -1078,6 +1083,32 @@ def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) 
     return pruned
 
 
+def _push_tg_signal(user_id: str, signal_type: str, tg_chat_id: int) -> None:
+    """
+    Invoke the Telegram webhook Lambda with the signal payload so it can run
+    Telegram-specific predictive warnings and coordinated attack alerts.
+    The signal has already been recorded in DynamoDB by record_signal().
+    No-ops silently if TG_WEBHOOK_LAMBDA env var is not set.
+    """
+    if not TG_WEBHOOK_LAMBDA:
+        return
+    try:
+        payload = json.dumps({
+            "source":           "relayshield_internal",
+            "user_id":          user_id,
+            "signal_type":      signal_type,
+            "telegram_chat_id": tg_chat_id,
+        }).encode()
+        lambda_client.invoke(
+            FunctionName=TG_WEBHOOK_LAMBDA,
+            InvocationType="Event",   # async — fire and forget
+            Payload=payload,
+        )
+        logger.info("TG signal pushed — user_id=%s type=%s chat_id=%s", user_id, signal_type, tg_chat_id)
+    except Exception as exc:
+        logger.exception("_push_tg_signal failed user_id=%s: %s", user_id, exc)
+
+
 def _send_coordinated(
     to_number: str, body: str, account_sid: str, auth_token: str, from_number: str,
 ) -> bool:
@@ -1611,6 +1642,13 @@ def process_email(
                 )
             except Exception as exc:
                 logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
+
+            # Telegram correlation — push signal to TG webhook if user has Telegram delivery
+            if user_record:
+                tg_chat_id  = user_record.get("telegram_chat_id")
+                tg_channels = user_record.get("delivery_channels", [])
+                if tg_chat_id and "telegram" in tg_channels:
+                    _push_tg_signal(user_id, "breach_alert", int(tg_chat_id))
     else:
         whatsapp_sent = False
         logger.warning(

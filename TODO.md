@@ -32,6 +32,7 @@
 | # | Item | Status |
 |---|---|---|
 | 0c | **Contact VirusTotal re: commercial licensing for B2A** — Free VT API ToS prohibits reselling/redistributing scan results through a commercial API. B2A `/scan_url` and `/scan_file` endpoints must stay "coming soon" on RapidAPI until a commercial license is confirmed. Contact VT via virustotal.com/gui/contact-us → "I have a commercial inquiry" → ask about startup/commercial licensing for a SaaS security platform redistributing scan results via REST API. B2C WhatsApp usage (users scanning their own content) is defensible on free tier — add per-user 5 scans/day rate limit to Lambda as cost control. **Deferred — contact only when first B2A prospect specifically requests scan features.** | 🔮 Deferred — trigger: first B2A prospect asks for scan features |
+| 0d | **Post relayshield-mcp to r/ClaudeAI** — HN Show HN blocked for new accounts (needs karma first). Post same content to r/ClaudeAI today as alternative. Title: "I built an MCP server for real-time identity threat detection (breach, SIM swap, phishing)" — body same as HN draft. Drop RapidAPI link in first comment. | ⬜ Pending — today May 5 |
 | 0a | **Publish Show HN post — relayshield-mcp** — Post to news.ycombinator.com. Title: "Show HN: RelayShield MCP – identity threat detection tools for Claude and AI agents." Body covers 6 tools (check_breach, check_sim_swap, check_domain_lookalikes, scan_url, scan_file, check_scan_result), install (`pip install relayshield-mcp`), RapidAPI link for REST, solo founder on AWS Lambda + API Gateway. Schedule: **Tuesday May 5 2026 morning** (peak HN traffic). | ⬜ Pending — tomorrow morning |
 | 0b | **AWS Marketplace listing — RelayShield Security Intelligence API** — Register and publish RelayShield B2A REST API on AWS Marketplace. Puts RelayShield in front of enterprise AWS customers. Highest B2A revenue path. **Blocked:** Partner Central registration requires paid AWS account in good standing — same billing propagation issue as GuardDuty. Identity ✅ + Business ✅ verification both complete. Resume at `console.aws.amazon.com/partnercentral/verification/status` → Continue registration once account converts. GuardDuty enable at same time. | 🔄 Blocked — awaiting AWS paid account conversion |
 | 1 | **Update landing page markdown in Git** — Sync relayshield_landing_page.md with all Carrd changes made today (pricing table, Business Starter button, benefit tagline, ToS links) | ✅ Complete |
@@ -210,6 +211,22 @@
 | 1 | **Provisional patent — ordered remediation sequence** — Claude to draft provisional patent overview covering the core method: breach detection → session revocation before password reset → ordered 5-layer sweep → follow-up until confirmed. Take to patent attorney for review and filing. | 🔄 Draft complete — `relayshield_provisional_patent_overview.md` — take to attorney |
 | 2 | **Consult patent attorney** — Seek attorney specialising in software/fintech patents. Present provisional overview. Evaluate cost/benefit of full utility patent vs. provisional only. Budget: $1,500–$3,000 for provisional filing. | ⬜ Pending |
 | 3 | **Attack chain correlation engine** — Secondary patent candidate: method of mapping specific breach data classes to downstream attack vectors and triggering corresponding remediation paths. Include in attorney consultation. | ⬜ Pending |
+
+---
+
+## ⚡ Next Sprint — Telegram Feature Completion + Account Delegation
+
+*Added May 8 2026*
+
+| # | Item | Notes |
+|---|---|---|
+| TG-1 | **Monthly digest — add Telegram delivery path** — `relayshield-digest-sender` Lambda currently WA-only. Add Telegram `send_message()` branch: if `delivery_channels` includes `telegram` and `telegram_chat_id` set, send digest via Bot API. No new template needed — Telegram is freeform. | Deferred from May 2026 session |
+| TG-2 | **Day 3 sender — add Telegram delivery path** — `relayshield-day3-sender` Lambda WA-only. Same pattern as TG-1. Fix IAM PassRole permission on Stripe Lambda at same time (currently blocking Day 3 scheduler). | IAM PassRole bug — fix together |
+| TG-3 | **Quarterly sweep sender — add Telegram delivery path** — `relayshield-quarterly-sweep-sender` currently WA-only. Same delivery branch pattern. | Deferred from May 2026 session |
+| DEL-1 | **Account delegation — WhatsApp** — `DELEGATE +1XXXXXXXXXX` grants deputy admin access (addmember, removemember, status). `REVOKE` removes it. Stored as `delegated_admin_ids: [user_id]`. Trigger: first Business Shield customer requests it. | Trigger-based |
+| DEL-2 | **Account delegation — Telegram** — Mirror of DEL-1. `/delegate` and `/revoke` commands for Business tier admins. | Trigger-based |
+| MSP-1 | **MSP multi-tenancy layer** — UUID-based tenant isolation. `org_id = uuid.uuid4()` at enterprise creation (fully independent of any user ID). MSP admin: `is_msp_admin: True`, `managed_orgs: [uuid-list]`. Enterprise admin: `org_id: uuid`, `is_team_admin: True`, `parent_msp_id: msp_user_id`. Employees: `org_id: uuid`, `team_id: ent_admin_user_id`. All DynamoDB team queries filter BOTH `org_id` AND `team_id`. New commands: `/addenterprise`, `/enterprises`, `/removeenterprise` (TG); `ADDENTERPRISE`, `ENTERPRISES` (WA). All alerts DM-based only. Trigger: first MSP / Business Shield Pro prospect. | Architecture spec in project_relayshield.md |
+| TEST-1 | **Verify Android SWEEP instructions on real device** — Android Chrome (`⋮` top-right → Request Desktop Site) and Android Firefox (`⋮` → Request Desktop Site). iOS instructions live-tested May 8 2026. | Needs Android device |
 
 ---
 

@@ -59,6 +59,7 @@ Test payload (force a specific app alert to your number only):
 import base64
 import json
 import logging
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -81,9 +82,12 @@ logger.setLevel(logging.INFO)
 secrets_client = boto3.client("secretsmanager")
 dynamodb       = boto3.resource("dynamodb")
 kms_client     = boto3.client("kms")
+lambda_client  = boto3.client("lambda")
 
-USERS_TABLE         = "relayshield_users"
-KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
+USERS_TABLE              = "relayshield_users"
+KMS_PHONE_KEY_ALIAS      = "alias/relayshield-data-key"
+TG_WEBHOOK_LAMBDA        = os.environ.get("TG_WEBHOOK_LAMBDA", "")
+CORRELATION_WINDOW_HOURS = 72
 
 # ---------------------------------------------------------------------------
 # Secrets
@@ -481,6 +485,55 @@ def send_whatsapp(
 # Alert dispatch
 # ---------------------------------------------------------------------------
 
+def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
+    """
+    Append a timestamped security signal to recent_signals on the user record.
+    Prunes entries older than CORRELATION_WINDOW_HOURS in the same write.
+    Returns the updated signal list.
+    """
+    table  = dynamodb.Table(USERS_TABLE)
+    now    = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=CORRELATION_WINDOW_HOURS)).isoformat()
+
+    existing = table.get_item(Key={"user_id": user_id}).get("Item", {}).get("recent_signals", [])
+    pruned   = [s for s in existing if isinstance(s, dict) and s.get("ts", "") > cutoff]
+    pruned.append({"type": signal_type, "ts": now.isoformat(), "meta": metadata or {}})
+
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET recent_signals = :s",
+        ExpressionAttributeValues={":s": pruned},
+    )
+    logger.info("Signal recorded — user_id=%s type=%s", user_id, signal_type)
+    return pruned
+
+
+def _push_tg_signal(user_id: str, signal_type: str, tg_chat_id: int) -> None:
+    """
+    Invoke the Telegram webhook Lambda so it can run Telegram-specific
+    predictive warnings and coordinated attack alerts.
+    Signal has already been recorded in DynamoDB — do NOT re-record.
+    No-ops silently if TG_WEBHOOK_LAMBDA env var is not set.
+    """
+    if not TG_WEBHOOK_LAMBDA:
+        return
+    try:
+        payload = json.dumps({
+            "source":           "relayshield_internal",
+            "user_id":          user_id,
+            "signal_type":      signal_type,
+            "telegram_chat_id": tg_chat_id,
+        }).encode()
+        lambda_client.invoke(
+            FunctionName=TG_WEBHOOK_LAMBDA,
+            InvocationType="Event",
+            Payload=payload,
+        )
+        logger.info("TG signal pushed — user_id=%s type=%s chat_id=%s", user_id, signal_type, tg_chat_id)
+    except Exception as exc:
+        logger.exception("_push_tg_signal failed user_id=%s: %s", user_id, exc)
+
+
 def alert_all_users(
     app_name: str,
     breach_date: str,
@@ -516,6 +569,19 @@ def alert_all_users(
 
         sent = send_whatsapp(to_number, body, account_sid, auth_token, from_number)
         counters["sent" if sent else "failed"] += 1
+
+        if sent:
+            # Record per-user signal for cross-monitor correlation
+            try:
+                record_signal(user_id, "oauth_app_breach", {"app_name": app_name})
+            except Exception as exc:
+                logger.exception("record_signal failed user_id=%s: %s", user_id, exc)
+
+            # Push to Telegram correlation engine if user has TG delivery
+            tg_chat_id  = user.get("telegram_chat_id")
+            tg_channels = user.get("delivery_channels", [])
+            if tg_chat_id and "telegram" in tg_channels:
+                _push_tg_signal(user_id, "oauth_app_breach", int(tg_chat_id))
 
     return counters
 

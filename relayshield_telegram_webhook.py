@@ -134,6 +134,362 @@ PLAN_PRICES = {
 }
 
 # ---------------------------------------------------------------------------
+# Attack correlation engine
+# ---------------------------------------------------------------------------
+
+CORRELATION_WINDOW_HOURS = 72   # signals older than this are pruned
+CORRELATION_DEDUP_HOURS  = 48   # suppress repeat alerts within this window
+
+ATTACK_CHAINS = [
+    {
+        "chain":    "smishing_to_sim_swap",
+        "signals":  {"suspicious_url", "sim_swap"},
+        "severity": "CRITICAL",
+        "label":    "Phishing Link → SIM Swap",
+        "what": (
+            "Attackers typically send a phishing link first to capture credentials, "
+            "then swap or port your SIM to intercept 2FA codes. This is a known "
+            "two-stage attack chain."
+        ),
+    },
+    {
+        "chain":    "breach_sim_swap",
+        "signals":  {"breach_alert", "sim_swap"},
+        "severity": "CRITICAL",
+        "label":    "Credential Breach + SIM Swap",
+        "what": (
+            "Your credentials were found in a breach and your SIM was swapped or ported "
+            "within the same attack window. Attackers may hold both your password and "
+            "control of your phone number — all SMS 2FA is compromised."
+        ),
+    },
+    {
+        "chain":    "breach_otp_intercept",
+        "signals":  {"breach_alert", "otp_warning"},
+        "severity": "HIGH",
+        "label":    "Credential Breach + OTP Interception",
+        "what": (
+            "Your credentials were recently found in a breach and you reported an "
+            "unexpected OTP. This pattern suggests an active account takeover attempt — "
+            "an attacker may be logging into your accounts right now."
+        ),
+    },
+    {
+        "chain":    "domain_phishing_breach",
+        "signals":  {"domain_lookalike", "breach_alert"},
+        "severity": "CRITICAL",
+        "label":    "Phishing Domain + Credential Breach",
+        "what": (
+            "A domain impersonating your business was registered while your credentials "
+            "are actively exposed in a breach. Attackers stand up fake login pages on "
+            "lookalike domains after obtaining credentials — your employees and customers "
+            "may already be targeted with phishing emails from this domain."
+        ),
+    },
+    {
+        "chain":    "oauth_breach_plus_credentials",
+        "signals":  {"oauth_app_breach", "breach_alert"},
+        "severity": "HIGH",
+        "label":    "OAuth App Breach + Credential Exposure",
+        "what": (
+            "A SaaS app you may use for OAuth single sign-on was breached at the same "
+            "time your credentials are exposed. Attackers who hold both your password "
+            "and a compromised OAuth token can bypass 2FA entirely — they authenticate "
+            "as the app, not as you. Revoke OAuth grants immediately and rotate passwords "
+            "on all accounts connected to the breached app."
+        ),
+    },
+    {
+        "chain":    "oauth_breach_plus_sim_swap",
+        "signals":  {"oauth_app_breach", "sim_swap"},
+        "severity": "CRITICAL",
+        "label":    "OAuth App Breach + SIM Swap",
+        "what": (
+            "A SIM swap was detected on your account in the same window as a breach of "
+            "a major OAuth provider. If you use SMS-based 2FA on apps connected to that "
+            "provider, both authentication factors are potentially in attacker hands. "
+            "Revoke all OAuth grants, lock your SIM, and sign out of all active sessions."
+        ),
+    },
+]
+
+PREDICTIVE_WARNINGS = {
+    "breach_sim_swap": {
+        "breach_alert": (
+            "⚠️ *Heads up:* Credential breaches are frequently followed by SIM swap attempts "
+            "within 72 hours. Attackers use stolen credentials to pass carrier identity checks.\n\n"
+            "Contact your carrier now and request a SIM lock or port freeze on your account. "
+            "Use /phone for carrier-specific steps."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* SIM swap activity has been detected on your line. Attackers who "
+            "already hold breached credentials sometimes trigger a SIM swap to intercept your "
+            "2FA codes and complete account takeovers.\n\n"
+            "Check your email and banking apps for unauthorised login attempts immediately."
+        ),
+    },
+    "smishing_to_sim_swap": {
+        "suspicious_url": (
+            "⚠️ *Heads up:* Phishing links are sometimes the first step in a SIM swap attack. "
+            "Attackers harvest personal details from victims who click links, then use that "
+            "information to impersonate you with your carrier.\n\n"
+            "Do not click the link, and consider placing a SIM lock on your account as a precaution. "
+            "Use /phone for steps."
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap attempt has been detected. If you recently scanned a "
+            "suspicious link, the two events may be connected — attackers often use phishing "
+            "to collect the personal details needed to pass carrier security checks.\n\n"
+            "Report the suspicious link to your carrier immediately."
+        ),
+    },
+    "breach_otp_intercept": {
+        "breach_alert": (
+            "⚠️ *Heads up:* After a credential breach, attackers sometimes trigger unexpected "
+            "OTP codes to test which accounts they can access. If you receive any login codes "
+            "you did not request, run /otp immediately."
+        ),
+        "otp_warning": (
+            "⚠️ *Heads up:* To trigger this OTP, someone already has your username and password "
+            "for that account. They are now trying to get past your 2FA.\n\n"
+            "→ Change the password for that account immediately\n"
+            "→ Run /reuse to check if that password is shared with other accounts\n"
+            "→ Switch that account's 2FA from SMS to an authenticator app if possible"
+        ),
+    },
+    "domain_phishing_breach": {
+        "domain_lookalike": (
+            "⚠️ *Heads up:* A lookalike domain has been registered near your business. "
+            "Attackers who set up phishing domains often pair them with credential breach "
+            "campaigns — your customers or employees may receive convincing phishing emails "
+            "from this domain within the next 24–72 hours.\n\n"
+            "Warn your team not to click unexpected login links."
+        ),
+        "breach_alert": (
+            "⚠️ *Heads up:* A credential breach has been detected while a lookalike domain "
+            "is active near your business. Attackers may direct breach victims to the fake "
+            "domain to harvest additional credentials.\n\n"
+            "Ensure all staff have changed passwords and enabled MFA."
+        ),
+    },
+    "oauth_breach_plus_credentials": {
+        "oauth_app_breach": (
+            "⚠️ *Heads up:* A SaaS app used for OAuth login was just breached. Your credentials "
+            "are also currently exposed. If you use this app for single sign-on, an attacker may "
+            "be able to access your accounts without needing your password.\n\n"
+            "→ Run /sessions to revoke all active sessions now\n"
+            "→ Revoke OAuth grants: myaccount.google.com/permissions"
+        ),
+        "breach_alert": (
+            "⚠️ *Heads up:* Your credentials are exposed in a breach. A major OAuth provider "
+            "was recently breached in the same window. If you use OAuth/SSO to log in to apps, "
+            "those sessions may be accessible to attackers without your password.\n\n"
+            "Revoke OAuth grants on any breached app immediately."
+        ),
+    },
+    "oauth_breach_plus_sim_swap": {
+        "oauth_app_breach": (
+            "⚠️ *Heads up:* A major OAuth provider was just breached. A SIM swap was also "
+            "detected on your account recently. If you use SMS-based 2FA on apps connected to "
+            "this provider, both your authentication factors may be compromised.\n\n"
+            "→ Run /phone for SIM lock steps\n"
+            "→ Revoke OAuth grants: myaccount.google.com/permissions"
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap was detected on your line. A major OAuth provider was "
+            "also recently breached. Together these create a high-risk window — attackers with "
+            "your SIM can intercept 2FA codes for any OAuth-connected app.\n\n"
+            "Lock your SIM immediately and audit all OAuth grants."
+        ),
+    },
+}
+
+_SESSIONS_INLINE = (
+    "1️⃣ *Revoke sessions now — before changing passwords:*\n"
+    "→ Google: myaccount.google.com/device-activity\n"
+    "→ Microsoft: mysignins.microsoft.com\n"
+    "→ Facebook/Instagram: Settings → Security → Login Activity\n"
+    "Sign out of every device and session you don't recognise."
+)
+
+
+def _fmt_delta(seconds: float) -> str:
+    """Format elapsed seconds as 'Xh Ym ago'."""
+    m = int(seconds // 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m ago" if h else f"{m}m ago"
+
+
+def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) -> list:
+    """
+    Append a timestamped security signal to recent_signals on the user record.
+    Prunes entries older than CORRELATION_WINDOW_HOURS in the same write.
+    Returns the updated signal list.
+    """
+    table  = dynamodb.Table(USERS_TABLE)
+    now    = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=CORRELATION_WINDOW_HOURS)).isoformat()
+
+    existing = table.get_item(Key={"user_id": user_id}).get("Item", {}).get("recent_signals", [])
+    pruned   = [s for s in existing if isinstance(s, dict) and s.get("ts", "") > cutoff]
+    pruned.append({"type": signal_type, "ts": now.isoformat(), "meta": metadata or {}})
+
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET recent_signals = :s",
+        ExpressionAttributeValues={":s": pruned},
+    )
+    logger.info("Signal recorded — user_id=%s type=%s", user_id, signal_type)
+    return pruned
+
+
+def check_and_warn_predictive(user_id: str, new_signal_type: str, signals: list, chat_id: int) -> None:
+    """
+    If the new signal is the first leg of a known attack chain, send a
+    forward-looking warning about what may follow.
+    """
+    signal_types = {s.get("type") for s in signals if isinstance(s, dict)}
+    for chain in ATTACK_CHAINS:
+        required = set(chain["signals"])
+        if new_signal_type not in required:
+            continue
+        present = required & signal_types
+        # Only warn when this is the first signal in the chain (not a completion)
+        if len(present) != 1:
+            continue
+        warning = PREDICTIVE_WARNINGS.get(chain["chain"], {}).get(new_signal_type)
+        if warning:
+            send_message(chat_id, warning)
+
+
+def _build_coordinated_alert_tg(chain: dict, signals: list) -> str:
+    now           = datetime.now(timezone.utc)
+    chain_signals = chain["signals"]
+    relevant      = sorted(
+        [s for s in signals if isinstance(s, dict) and s.get("type") in chain_signals],
+        key=lambda s: s.get("ts", ""),
+    )
+
+    lines = []
+    for sig in relevant:
+        try:
+            ts  = datetime.fromisoformat(sig["ts"].replace("Z", "+00:00"))
+            tsl = ts.strftime("%-d %b %H:%M UTC")
+            age = _fmt_delta((now - ts).total_seconds())
+        except Exception:
+            tsl, age = "recently", ""
+        label = sig["type"].replace("_", " ").title()
+        lines.append(f"→ {label} — {tsl} ({age})" if age else f"→ {label} — {tsl}")
+
+    # Timeline annotation for phishing→SIM swap chain
+    timeline = ""
+    if chain["chain"] == "smishing_to_sim_swap" and len(relevant) >= 2:
+        try:
+            t0    = datetime.fromisoformat(relevant[0]["ts"].replace("Z", "+00:00"))
+            t1    = datetime.fromisoformat(relevant[1]["ts"].replace("Z", "+00:00"))
+            gap_m = int((t1 - t0).total_seconds() / 60)
+            gap_h, gap_m = divmod(gap_m, 60)
+            gap_str = f"{gap_h}h {gap_m}m" if gap_h else f"{gap_m}m"
+            timeline = (
+                f"\n*Attack timeline:* Phishing link detected {gap_str} before SIM swap "
+                f"— confirming a two-stage attack sequence.\n"
+            )
+        except Exception:
+            pass
+
+    # Lookalike domain block
+    lookalike_block = ""
+    if chain["chain"] == "domain_phishing_breach":
+        for sig in relevant:
+            if sig.get("type") == "domain_lookalike":
+                lookalikes = sig.get("meta", {}).get("lookalikes", [])
+                if lookalikes:
+                    domain_lines = "\n".join(f"  • *{d}*" for d in lookalikes[:5])
+                    lookalike_block = (
+                        f"\n*Impersonating domain(s) detected:*\n{domain_lines}\n"
+                        f"These domains may already be sending phishing emails "
+                        f"to your employees and customers.\n"
+                    )
+                break
+
+    icon          = "🚨" if chain["severity"] == "CRITICAL" else "⚠️"
+    signals_block = "\n".join(lines) if lines else "→ Multiple signals detected"
+
+    if chain["severity"] == "CRITICAL":
+        action_block = (
+            f"*Act immediately — in this order:*\n"
+            f"{_SESSIONS_INLINE}\n\n"
+            f"2️⃣ Run /sweep — close email backdoors the attacker may have planted\n"
+            f"3️⃣ Run /phone — lock your SIM against further swaps or ports\n"
+            f"4️⃣ Do not enter any one-time codes you receive"
+        )
+    else:
+        action_block = (
+            f"*Act immediately — in this order:*\n"
+            f"1️⃣ Run /sessions — revoke all active sessions before changing passwords\n"
+            f"2️⃣ Run /sweep — close email backdoors the attacker may have planted\n"
+            f"3️⃣ Run /phone — lock your SIM against further swaps or ports\n"
+            f"4️⃣ Do not enter any one-time codes you receive"
+        )
+
+    return (
+        f"{icon} *{chain['severity']} — Coordinated Attack Detected*\n\n"
+        f"RelayShield has identified a *{chain['label']}* attack pattern "
+        f"targeting your identity.\n\n"
+        f"*Signals detected:*\n{signals_block}\n"
+        f"{timeline}"
+        f"{lookalike_block}\n"
+        f"*What this means:*\n{chain['what']}\n\n"
+        f"{action_block}\n\n"
+        f"🛡️ RelayShield — Coordinated Attack Detection"
+    )
+
+
+def check_and_fire_correlation(user_id: str, signals: list, chat_id: int) -> bool:
+    """
+    Evaluate the current signal set against known attack chains.
+    Sends a composite Telegram alert and stamps dedup timestamp if a chain fires.
+    Returns True if a composite alert was sent.
+    """
+    table        = dynamodb.Table(USERS_TABLE)
+    signal_types = {s["type"] for s in signals if isinstance(s, dict)}
+
+    for chain in ATTACK_CHAINS:
+        if not chain["signals"].issubset(signal_types):
+            continue
+
+        # Dedup — suppress if already alerted within CORRELATION_DEDUP_HOURS
+        last_ts = table.get_item(Key={"user_id": user_id}).get("Item", {}).get(
+            "last_coordinated_alert_at", ""
+        )
+        if last_ts:
+            try:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(
+                    last_ts.replace("Z", "+00:00")
+                )).total_seconds()
+                if age < CORRELATION_DEDUP_HOURS * 3600:
+                    logger.info(
+                        "Coordinated alert suppressed (dedup) — user_id=%s chain=%s",
+                        user_id, chain["chain"],
+                    )
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+        alert_text = _build_coordinated_alert_tg(chain, signals)
+        send_message(chat_id, alert_text)
+        table.update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="SET last_coordinated_alert_at = :t",
+            ExpressionAttributeValues={":t": datetime.now(timezone.utc).isoformat()},
+        )
+        logger.warning("COORDINATED ALERT SENT — user_id=%s chain=%s", user_id, chain["chain"])
+        return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Secret cache (warm Lambda reuse)
 # ---------------------------------------------------------------------------
 
@@ -556,7 +912,8 @@ def msg_help(tier: str) -> str:
 
         "*📡 Phone Protection*\n"
         "• /sim — SIM swap monitoring status\n"
-        "• /phone — Carrier hardening against SIM swap and smishing\n\n"
+        "• /phone — Carrier hardening against SIM swap and smishing\n"
+        "• /vishing — Voice phishing: how to recognise and respond to phone-based attacks\n\n"
 
         "*🤖 Telegram Security*\n"
         "• /tgsecurity — Harden your Telegram account against takeover\n"
@@ -919,7 +1276,7 @@ def handle_verify(chat_id: int) -> None:
     )
 
 
-def handle_otp(chat_id: int) -> None:
+def handle_otp(chat_id: int, user: dict | None = None) -> None:
     send_message(
         chat_id,
         "🚨 *Unexpected OTP — Act Now*\n\n"
@@ -932,32 +1289,96 @@ def handle_otp(chat_id: int) -> None:
         "5. If your phone number was involved, contact your carrier immediately\n\n"
         "This may be a SIM swap attempt in progress.",
     )
+    if user:
+        signals = record_signal(user["user_id"], "otp_warning")
+        check_and_warn_predictive(user["user_id"], "otp_warning", signals, chat_id)
+        check_and_fire_correlation(user["user_id"], signals, chat_id)
 
 
 def handle_sweep(chat_id: int) -> None:
     send_message(
         chat_id,
         "🔍 *Email Security Sweep — 5 Steps*\n\n"
+        "📌 *Run this sweep on a computer\\.* The Gmail app cannot access "
+        "forwarding rules, filters, or connected apps\\. "
+        "Open mail\\.google\\.com on a desktop or laptop\\.\n\n"
         "*Step 1 — Check email forwarding rules*\n"
         "Attackers plant a forwarding address so every email is silently copied to them — it survives password resets\\.\n"
         "Gmail: Settings → See all settings → Forwarding and POP/IMAP\n"
         "Outlook: Settings → Mail → Forwarding\n"
         "Yahoo: Settings → Mailboxes → your address → Forwarding\n"
-        "✅ Safe state: no forwarding addresses listed\\.\n"
-        "⚠️ If you see an address you didn't add: disable forwarding → tap X to remove → Save\\.\n"
-        "Also check: Settings → Filters and Blocked Addresses for rules that auto\\-delete, mark as read, or forward emails from banks — delete any you didn't create\\.\n\n"
+        "✅ Safe state: no forwarding addresses listed.\n"
+        "⚠️ If you see an address you didn't add: disable forwarding → tap X to remove → Save.\n"
+        "Also check: Settings → Filters and Blocked Addresses for rules that auto-delete, mark as read, or forward emails from banks — delete any you didn't create.\n\n"
         "*Step 2 — Check recovery email and phone*\n"
-        "Gmail: myaccount\\.google\\.com/security\n"
-        "→ Remove any recovery contact you don't recognise\\.\n\n"
+        "Gmail: myaccount.google.com/security\n"
+        "→ Remove any recovery contact you don't recognise.\n\n"
         "*Step 3 — Check inbox filters*\n"
         "Gmail: Settings → Filters and Blocked Addresses\n"
-        "→ Delete any filter you didn't create\\.\n\n"
+        "→ Delete any filter you didn't create.\n\n"
         "*Step 4 — Review connected apps*\n"
-        "Gmail: myaccount\\.google\\.com/permissions\n"
-        "→ Revoke anything unrecognised\\.\n\n"
+        "Gmail: myaccount.google.com/permissions\n"
+        "→ Revoke anything unrecognised.\n\n"
         "*Step 5 — Check active sessions*\n"
-        "Gmail: myaccount\\.google\\.com/device\\-activity\n"
-        "→ Sign out of all unknown sessions\\.",
+        "Gmail: myaccount.google.com/device-activity\n"
+        "→ Sign out of all unknown sessions.",
+    )
+    send_message(
+        chat_id,
+        "📱 *Email Sweep — Mobile Device Users \\(Phone & Tablet\\)*\n\n"
+        "The Gmail native app cannot check forwarding or filters\\. "
+        "Use your phone's browser — Chrome or Safari — instead\\.\n\n"
+        "*Step 1: Enable desktop view in your browser*\n"
+        "Required only for Steps 1 & 3 \\(forwarding and filters\\)\\.\n\n"
+        "🍎 *iOS Safari:* Go to mail\\.google\\.com → tap the 🖥 page icon in the "
+        "address bar → tap *\\.\\.\\.* → Request Desktop Website\n"
+        "🍎 *iOS Chrome:* Go to mail\\.google\\.com → tap *\\.\\.\\.* at the bottom\\-right "
+        "→ scroll down → Request Desktop Site\n"
+        "🤖 *Android Chrome:* Tap *⋮* at the top\\-right "
+        "→ Request Desktop Site\n"
+        "🤖 *Android Firefox:* Tap *⋮* "
+        "→ Request Desktop Site\n\n"
+        "*Step 2: Run the checks in your browser*\n"
+        "Steps 1 & 3 → mail\\.google\\.com → Settings → See all settings\n"
+        "Steps 2, 4 & 5 → myaccount\\.google\\.com \\(no special view needed\\)",
+    )
+
+
+def handle_vishing(chat_id: int) -> None:
+    send_message(
+        chat_id,
+        "📞 *Vishing — Voice Phishing Defence*\n\n"
+        "Vishing is fraud conducted over the phone. The caller impersonates a trusted "
+        "authority — a bank, government agency, carrier, tech company, or professional service. "
+        "The goal is always the same: pressure you into acting before you think.\n\n"
+        "*How to recognise an attack in progress:*\n"
+        "• Unsolicited call, often urgent or threatening — your account is suspended, "
+        "you owe an overdue payment, action required within 24 hours\n"
+        "• Caller already knows some of your details (name, address, last 4 digits) "
+        "and uses them to build false trust\n"
+        "• Request to confirm identity by reading back a code you just received — "
+        "this is the attacker triggering the code themselves\n"
+        "• Pressure to stay on the line, not hang up, or keep the call confidential\n"
+        "• Asked to pay via gift card, wire transfer, cryptocurrency, or a 'secure account'\n"
+        "• Transferred to a 'supervisor' or 'fraud specialist' who increases the pressure\n\n"
+        "*✅ Do:*\n"
+        "→ Hang up and call back on the official number from the company's website or "
+        "the back of your card — never redial a number the caller gives you\n"
+        "→ Tell someone else about the call before taking any action\n"
+        "→ Check your accounts independently after any unsolicited call\n"
+        "→ Report the call: FTC reportfraud.ftc.gov / FCC fcc.gov/consumers\n\n"
+        "*🚫 Don't:*\n"
+        "→ Read back any OTP or verification code — no legitimate company needs this\n"
+        "→ Allow remote access to your device under any circumstances\n"
+        "→ Confirm, correct, or add to personal details the caller already seems to know\n"
+        "→ Stay on the line because they told you not to hang up\n"
+        "→ Act within any time limit they set — urgency is the weapon, not the deadline\n\n"
+        "*After a suspected vishing call:*\n"
+        "→ Run /sweep — vishing often runs alongside inbox takeover\n"
+        "→ Run /sessions — sign out of all active sessions\n"
+        "→ Run /verify — review your personal verification protocol\n\n"
+        "Use /verify to set up your Callback Rule, OTP Rule, and Family Safe Word "
+        "before an attack — not after.",
     )
 
 
@@ -1025,6 +1446,19 @@ def handle_tgsecurity(chat_id: int) -> None:
     )
 
 
+def _levenshtein(a: str, b: str) -> int:
+    """Compute edit distance between two strings."""
+    if len(a) < len(b):
+        a, b = b, a
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            curr.append(min(prev[j + 1] + 1, curr[j] + 1, prev[j] + (ca != cb)))
+        prev = curr
+    return prev[-1]
+
+
 def _botcheck_analyse(username: str) -> str:
     """
     Analyse a Telegram username for typosquatting and red flag patterns.
@@ -1033,17 +1467,30 @@ def _botcheck_analyse(username: str) -> str:
     u = username.lower().strip().lstrip("@")
 
     # Known legitimate bot usernames (canonical lowercase, no @)
+    # Covers common impersonation targets: Telegram official, crypto exchanges,
+    # payment apps, utility bots, and RelayShield itself.
     KNOWN_BOTS = [
-        "relayshield_bot", "botfather", "storebot", "gif", "pic",
-        "ifttt", "pollbot", "vote", "shieldsiobot", "controllerbot",
+        # Telegram official
+        "botfather", "telegram", "telegramtips", "storebot", "pollbot",
+        "gif", "pic", "vote", "ifttt",
+        # Utility / info bots
+        "userinfobot", "getidsbot", "rose", "combot", "shieldsiobot",
+        "controllerbot", "grouphelpbot",
+        # Crypto exchanges
         "coinbase_bot", "binance_bot", "kraken_bot", "ledger_bot",
+        "bybit_bot", "kucoin_bot", "okx_bot", "gemini_bot",
+        # Payment / fintech
         "paypal_bot", "cashapp_bot", "venmo_bot", "wise_bot",
+        "revolut_bot", "stripe_bot",
+        # RelayShield
+        "relayshield_bot",
     ]
 
-    # Common typosquat substitutions
+    # Common visual substitutions used in typosquatting
     SUBSTITUTIONS = [
         ("rn", "m"), ("0", "o"), ("1", "l"), ("1", "i"),
         ("vv", "w"), ("ii", "u"), ("nn", "m"), ("cl", "d"),
+        ("_", ""), ("-", ""),
     ]
 
     # Red flag keywords in usernames
@@ -1051,7 +1498,8 @@ def _botcheck_analyse(username: str) -> str:
         "support", "help", "official", "admin", "verify", "secure",
         "wallet", "crypto", "airdrop", "giveaway", "free", "bonus",
         "reward", "claim", "recovery", "refund", "urgent", "alert",
-        "service", "care", "assist",
+        "service", "care", "assist", "info", "real", "legit", "true",
+        "original", "authentic", "safe", "trust", "login", "signin",
     ]
 
     flags = []
@@ -1062,52 +1510,64 @@ def _botcheck_analyse(username: str) -> str:
         if word in u:
             flags.append(f"contains '{word}' — common in scam/impersonator usernames")
 
-    # Check for numeric substitutions (0 for o, 1 for l/i)
-    if re.search(r"[0-9]", u):
-        flags.append("contains numbers — check for 0→o or 1→l substitutions")
+    # Check for trailing numbers (e.g. relayshield_bot2, telegrambot123)
+    if re.search(r"_?\d+$", u):
+        flags.append("ends with numbers — impersonators often append digits to clone a taken username")
 
-    # Check lookalike similarity against known bots
+    # Check for double underscores or excessive underscores
+    if "__" in u:
+        flags.append("contains double underscore — unusual for legitimate bots")
+
+    # Check for numeric character substitutions mid-name (0 for o, 1 for l/i)
+    if re.search(r"[0-9]", u) and not re.search(r"_?\d+$", u):
+        flags.append("contains numbers mid-name — check for 0→o or 1→l substitutions")
+
+    # Lookalike similarity against known bots using proper edit distance
     lookalikes = []
     for known in KNOWN_BOTS:
+        if u == known:
+            # Exact match — this IS the known bot, not a lookalike
+            continue
+        # Normalise both strings with visual substitutions before comparing
         normalised_u = u
         normalised_k = known
-        # Apply substitutions to compare
         for fake, real in SUBSTITUTIONS:
             normalised_u = normalised_u.replace(fake, real)
             normalised_k = normalised_k.replace(fake, real)
-        # Simple Levenshtein-lite: check if within 2 edits via common prefix/suffix
-        if normalised_u != normalised_k:
-            shorter = min(len(normalised_u), len(normalised_k))
-            longer = max(len(normalised_u), len(normalised_k))
-            common = sum(a == b for a, b in zip(normalised_u, normalised_k))
-            similarity = common / longer if longer > 0 else 0
-            if similarity > 0.80 and shorter >= 4:
-                lookalikes.append(f"@{known}")
+        # Allow up to 2 edits for short names, 3 for longer ones
+        dist = _levenshtein(normalised_u, normalised_k)
+        threshold = 2 if len(normalised_k) <= 10 else 3
+        if dist <= threshold and dist > 0:
+            lookalikes.append(f"@{known} (edit distance: {dist})")
 
     if lookalikes:
-        warnings.append(f"⚠️ Similar to known bot(s): {', '.join(lookalikes)}")
+        warnings.append(f"Similar to known bot(s): {', '.join(lookalikes)}")
 
     # Build result
     if not flags and not warnings:
         result = (
             f"🤖 *Botcheck: @{username}*\n\n"
-            f"✅ No automatic red flags detected.\n\n"
-            f"*Manual checks still recommended:*\n"
-            f"→ Verify this username on the company's official website\n"
+            f"No automatic red flags detected.\n\n"
+            f"⚠️ *This check has limits* — it catches known patterns only. "
+            f"It cannot confirm a bot is safe or verify who operates it.\n\n"
+            f"*Always check manually:*\n"
+            f"→ Verify this exact username on the company's official website\n"
             f"→ Confirm the bot doesn't ask for passwords, codes, or crypto\n"
-            f"→ Check for a blue verification checkmark on associated channels"
+            f"→ Check for a blue verification checkmark on associated channels\n"
+            f"→ Official channels have a blue ✓ — verify it links to the real company"
         )
     else:
         flag_lines = "\n".join(f"🚩 {f}" for f in flags)
-        warn_lines = "\n".join(warnings)
+        warn_lines = "\n".join(f"⚠️ {w}" for w in warnings)
+        combined = "\n".join(filter(None, [warn_lines, flag_lines]))
         result = (
             f"🤖 *Botcheck: @{username}*\n\n"
             f"⚠️ *Risk signals detected:*\n"
-            f"{warn_lines}\n{flag_lines}\n\n"
+            f"{combined}\n\n"
             f"*Recommended actions:*\n"
-            f"→ Do not share any credentials, codes, or payment with this bot\n"
+            f"→ Do not share credentials, codes, or payment with this bot\n"
             f"→ Verify the username character-by-character against the official website\n"
-            f"→ If you've already interacted, use /sweep and /sessions immediately"
+            f"→ If you've already interacted, run /sweep and /sessions immediately"
         )
     return result
 
@@ -1136,7 +1596,7 @@ def handle_botcheck(chat_id: int, username: str | None = None) -> None:
     )
 
 
-def handle_scan(chat_id: int, target: str | None = None) -> None:
+def handle_scan(chat_id: int, target: str | None = None, user: dict | None = None) -> None:
     """Scan a URL or file link for threats — Telegram equivalent of ATTACH."""
     if not target:
         send_message(
@@ -1166,6 +1626,11 @@ def handle_scan(chat_id: int, target: str | None = None) -> None:
             "If in doubt, do not click the link.",
             parse_mode="Markdown",
         )
+    # Record signal regardless of scan outcome — the user encountered a suspicious URL
+    if user:
+        signals = record_signal(user["user_id"], "suspicious_url", {"url": target})
+        check_and_warn_predictive(user["user_id"], "suspicious_url", signals, chat_id)
+        check_and_fire_correlation(user["user_id"], signals, chat_id)
 
 
 def handle_analyse(chat_id: int, content: str | None = None) -> None:
@@ -1185,43 +1650,92 @@ def handle_analyse(chat_id: int, content: str | None = None) -> None:
     content_lower = content.lower()
     flags = []
 
-    urgency_words = ["urgent", "immediately", "act now", "limited time", "expire", "suspended",
-                     "verify now", "confirm now", "within 24", "account locked", "unusual activity"]
-    authority_words = ["irs", "ssa", "social security", "fbi", "police", "microsoft", "apple",
-                       "amazon", "paypal", "bank", "your carrier", "your provider"]
-    reward_words = ["winner", "won", "prize", "claim", "reward", "gift card", "free", "bonus",
-                    "airdrop", "giveaway", "investment", "guaranteed return"]
-    credential_words = ["password", "pin", "social security", "ssn", "credit card", "cvv",
-                        "seed phrase", "private key", "login code", "verification code"]
-    link_pattern = re.search(r"https?://\S+|bit\.ly|tinyurl|t\.co", content_lower)
+    # Brand / authority impersonation
+    BRANDS = [
+        ("crypto.com", "Crypto.com"), ("coinbase", "Coinbase"), ("binance", "Binance"),
+        ("paypal", "PayPal"), ("cash app", "Cash App"), ("venmo", "Venmo"),
+        ("zelle", "Zelle"), ("bank of america", "Bank of America"), ("chase", "Chase"),
+        ("wells fargo", "Wells Fargo"), ("citibank", "Citibank"), ("capital one", "Capital One"),
+        ("at&t", "AT&T"), ("t-mobile", "T-Mobile"), ("verizon", "Verizon"),
+        ("apple", "Apple"), ("google", "Google"), ("microsoft", "Microsoft"),
+        ("amazon", "Amazon"), ("netflix", "Netflix"), ("irs", "IRS"),
+        ("social security", "Social Security"), ("medicare", "Medicare"),
+        ("usps", "USPS"), ("fedex", "FedEx"), ("ups", "UPS"),
+        ("metamask", "MetaMask"), ("ledger", "Ledger"), ("kraken", "Kraken"),
+    ]
+    matched_brands = [display for kw, display in BRANDS if kw in content_lower]
+    if matched_brands:
+        flags.append(f"🚩 Brand impersonation: *{', '.join(matched_brands)}*")
 
+    # Callback phone number — biggest red flag in link-free smishing
+    phone_matches = re.findall(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}", content)
+    if phone_matches:
+        numbers_str = ", ".join(phone_matches)
+        flags.append(
+            f"🚩 Callback number: *{numbers_str}* — legitimate companies never ask you "
+            f"to call a number in an unsolicited text"
+        )
+
+    # Account security pretense
+    ACCOUNT_PRETENSE = [
+        "new device", "unauthorized", "unusual activity", "suspicious login",
+        "account suspended", "account locked", "security alert", "security notice",
+        "verify your account", "confirm your identity", "unrecognized device",
+        "prevent unauthorized", "secure your account",
+    ]
+    for phrase in ACCOUNT_PRETENSE:
+        if phrase in content_lower:
+            flags.append(f"🚩 Account security pretense: *'{phrase}'*")
+            break
+
+    # Urgency / threat language
+    urgency_words = ["urgent", "immediately", "act now", "limited time", "expire", "suspended",
+                     "verify now", "confirm now", "within 24", "account locked", "failure to",
+                     "will be terminated", "right away"]
     for word in urgency_words:
         if word in content_lower:
             flags.append(f"🚩 Urgency tactic: *'{word}'*")
             break
-    for word in authority_words:
-        if word in content_lower:
-            flags.append(f"🚩 Authority impersonation: *'{word}'*")
-            break
+
+    # Reward / prize bait
+    reward_words = ["winner", "won", "prize", "claim", "reward", "gift card", "free", "bonus",
+                    "airdrop", "giveaway", "investment", "guaranteed return"]
     for word in reward_words:
         if word in content_lower:
             flags.append(f"🚩 Reward/scarcity lure: *'{word}'*")
             break
+
+    # Credential harvesting
+    credential_words = ["password", "social security", "ssn", "credit card", "cvv",
+                        "seed phrase", "private key", "login code", "verification code"]
     for word in credential_words:
         if word in content_lower:
             flags.append(f"🚩 Credential harvesting: asks for *'{word}'*")
             break
-    if link_pattern:
+
+    # Suspicious link
+    if re.search(r"https?://\S+|bit\.ly|tinyurl|t\.co", content_lower):
         flags.append("🚩 Contains a link — verify with /scan before clicking")
+
+    severity = "HIGH" if len(flags) >= 3 else "MEDIUM" if flags else "LOW"
+    icon = "🚨" if severity == "HIGH" else "⚠️" if severity == "MEDIUM" else "✅"
 
     if flags:
         flag_text = "\n".join(flags)
+        callback_warn = ""
+        if phone_matches:
+            callback_warn = (
+                "\n*Do NOT call these numbers.* Look up the real company's number "
+                "on their official website independently.\n"
+            )
         send_message(
             chat_id,
-            f"🧠 *Message Analysis*\n\n"
-            f"⚠️ *{len(flags)} risk signal(s) detected:*\n{flag_text}\n\n"
-            f"*Recommended action:* Do not click, reply, or provide any information. "
-            f"If this claims to be from a company, call them directly on the number from their official website.",
+            f"🧠 *Message Analysis — {severity} RISK*\n\n"
+            f"{icon} *{len(flags)} social engineering signal(s) detected:*\n{flag_text}\n"
+            f"{callback_warn}\n"
+            f"*Recommended action:* Do not click, reply, or call any number in this message. "
+            f"If this claims to be from a company, contact them directly via their official website.\n\n"
+            f"Reply /vishing for a full guide on phone-based scam tactics.",
             parse_mode="Markdown",
         )
     else:
@@ -1245,6 +1759,15 @@ def handle_wascam(chat_id: int) -> None:
         "Carriers never ask for your PIN or account number unsolicited.\n\n"
         "*Family emergency scam (Hi Mum/Dad):*\n"
         "Call your family member directly on their known number.\n\n"
+        "*Government impersonation:*\n"
+        "IRS, Social Security, HMRC, CRA, Medicare — they all contact you by postal mail first. "
+        "No government agency demands immediate payment by gift card, wire transfer, or cryptocurrency. "
+        "No government agency threatens arrest unless you pay right now. "
+        "No government agency asks you to keep the call secret.\n"
+        "• IRS: irs.gov/payments or call 1-800-829-1040\n"
+        "• Social Security: ssa.gov or call 1-800-772-1213\n"
+        "• Medicare: medicare.gov or call 1-800-633-4227\n"
+        "• Report SSA/IRS scam calls: reportfraud.ftc.gov\n\n"
         "*Verify any request:*\n"
         "• No legitimate org sends urgent payment requests via text\n"
         "• No legitimate org asks you to run a command or click a link to prove you're human\n"
@@ -1648,7 +2171,7 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
     elif cmd == "verify":
         handle_verify(chat_id)
     elif cmd == "otp":
-        handle_otp(chat_id)
+        handle_otp(chat_id, user)
     elif cmd == "sweep":
         handle_sweep(chat_id)
     elif cmd == "sim":
@@ -1670,6 +2193,8 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_reuse(chat_id)
     elif cmd == "phone":
         handle_phone_hardening(chat_id)
+    elif cmd == "vishing":
+        handle_vishing(chat_id)
     elif cmd in ("wascam", "scam"):
         handle_wascam(chat_id)
     elif cmd == "tgsecurity":
@@ -1685,7 +2210,7 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
     elif cmd.startswith("scan"):
         parts = text.strip().split(None, 1)
         target = parts[1] if len(parts) > 1 else None
-        handle_scan(chat_id, target)
+        handle_scan(chat_id, target, user)
     elif cmd.startswith("analyse") or cmd.startswith("analyze"):
         parts = text.strip().split(None, 1)
         content = parts[1] if len(parts) > 1 else None
@@ -2034,10 +2559,62 @@ def handle_successful_payment(update: dict) -> None:
 # Lambda handler
 # ---------------------------------------------------------------------------
 
+def handle_inbound_signal(body: dict) -> str:
+    """
+    Internal signal injection path — called by external monitors (SIM swap,
+    breach, domain) via Lambda invoke after they have already recorded the
+    signal in DynamoDB.
+
+    The monitor has already called record_signal() — this function reads the
+    current recent_signals from DynamoDB and runs Telegram-specific predictive
+    warnings and correlation checks WITHOUT recording the signal again.
+
+    Expected body shape:
+        {
+            "source":           "relayshield_internal",
+            "user_id":          "<DynamoDB user_id>",
+            "signal_type":      "sim_swap" | "breach_alert" | "domain_lookalike" | ...,
+            "telegram_chat_id": <int>   # must be supplied by the monitor
+        }
+    """
+    user_id     = body.get("user_id")
+    signal_type = body.get("signal_type")
+    chat_id     = body.get("telegram_chat_id")
+
+    if not user_id or not signal_type:
+        logger.warning("handle_inbound_signal: missing user_id or signal_type — %s", body)
+        return "bad_signal_payload"
+
+    if not chat_id:
+        logger.info("handle_inbound_signal: no telegram_chat_id — skipping TG delivery user_id=%s", user_id)
+        return "no_chat_id"
+
+    # Read signals already written by the monitor — do NOT record again
+    table   = dynamodb.Table(USERS_TABLE)
+    now     = datetime.now(timezone.utc)
+    cutoff  = (now - timedelta(hours=CORRELATION_WINDOW_HOURS)).isoformat()
+    signals = [
+        s for s in
+        table.get_item(Key={"user_id": user_id}).get("Item", {}).get("recent_signals", [])
+        if isinstance(s, dict) and s.get("ts", "") > cutoff
+    ]
+
+    chat_id = int(chat_id)
+    check_and_warn_predictive(user_id, signal_type, signals, chat_id)
+    check_and_fire_correlation(user_id, signals, chat_id)
+    logger.info("Inbound signal handled — user_id=%s type=%s chat_id=%s", user_id, signal_type, chat_id)
+    return "signal_handled"
+
+
 def lambda_handler(event, context):
     try:
         body = json.loads(event.get("body", "{}"))
         logger.info("Telegram update: %s", json.dumps(body)[:500])
+
+        # Internal signal injection from monitors (SIM swap, breach, domain)
+        if body.get("source") == "relayshield_internal":
+            result = handle_inbound_signal(body)
+            return {"statusCode": 200, "body": result}
 
         if "message" in body:
             msg = body["message"]

@@ -316,17 +316,133 @@ def check_urls_safe_browsing(urls: list[str], api_key: str) -> dict:
         return {"matches": [], "error": str(e)}
 
 
+def _analyse_sms_text(text: str) -> dict:
+    """
+    Pattern-based social engineering analysis of SMS message body.
+    Returns a dict with keys:
+      flags       — list of detected pattern descriptions
+      callback_numbers — list of phone numbers found in the text
+      brands      — list of impersonated brand names detected
+      severity    — "HIGH" | "MEDIUM" | "LOW"
+    """
+    import re as _re
+    t = text.lower()
+
+    flags = []
+    brands = []
+    callback_numbers = []
+
+    # --- Brand / authority impersonation ---
+    BRAND_PATTERNS = [
+        # Financial
+        ("crypto.com", "Crypto.com"), ("coinbase", "Coinbase"), ("binance", "Binance"),
+        ("paypal", "PayPal"), ("cash app", "Cash App"), ("venmo", "Venmo"),
+        ("zelle", "Zelle"), ("wise", "Wise"), ("stripe", "Stripe"),
+        # Banks
+        ("bank of america", "Bank of America"), ("chase", "Chase"),
+        ("wells fargo", "Wells Fargo"), ("citibank", "Citibank"),
+        ("td bank", "TD Bank"), ("capital one", "Capital One"),
+        # Carriers
+        ("at&t", "AT&T"), ("t-mobile", "T-Mobile"), ("verizon", "Verizon"),
+        ("xfinity", "Xfinity"), ("spectrum", "Spectrum"),
+        # Big tech
+        ("apple", "Apple"), ("google", "Google"), ("microsoft", "Microsoft"),
+        ("amazon", "Amazon"), ("netflix", "Netflix"), ("meta", "Meta"),
+        # Government
+        ("irs", "IRS"), ("social security", "Social Security"),
+        ("medicare", "Medicare"), ("usps", "USPS"), ("fedex", "FedEx"),
+        ("ups", "UPS"), ("dhl", "DHL"),
+        # Crypto / Web3
+        ("metamask", "MetaMask"), ("ledger", "Ledger"), ("trezor", "Trezor"),
+        ("blockchain", "Blockchain.com"), ("kraken", "Kraken"),
+    ]
+    for keyword, display in BRAND_PATTERNS:
+        if keyword in t:
+            brands.append(display)
+
+    if brands:
+        flags.append(f"impersonates a known brand: {', '.join(brands)}")
+
+    # --- Callback phone number (vishing escalation) ---
+    phone_matches = _re.findall(
+        r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}", text
+    )
+    if phone_matches:
+        callback_numbers = phone_matches
+        flags.append(
+            f"contains a callback number ({', '.join(phone_matches)}) — "
+            "legitimate companies never ask you to call a number in an unsolicited text"
+        )
+
+    # --- Account security pretense ---
+    ACCOUNT_PRETENSE = [
+        "new device", "unauthorized", "unusual activity", "suspicious login",
+        "account suspended", "account locked", "account compromised",
+        "security alert", "security notice", "verify your account",
+        "confirm your identity", "your account has been", "access your account",
+        "unauthorized login", "unrecognized device",
+    ]
+    for phrase in ACCOUNT_PRETENSE:
+        if phrase in t:
+            flags.append(f"uses account security pretense ('{phrase}')")
+            break
+
+    # --- Urgency / threat language ---
+    URGENCY_PHRASES = [
+        "immediately", "urgent", "act now", "within 24 hours", "right away",
+        "as soon as possible", "limited time", "expires soon", "last chance",
+        "failure to", "will be suspended", "will be terminated",
+        "prevent unauthorized", "secure your account",
+    ]
+    urgency_hits = [p for p in URGENCY_PHRASES if p in t]
+    if urgency_hits:
+        flags.append(f"urgency/threat language: '{urgency_hits[0]}'")
+
+    # --- Credential / personal info request ---
+    CREDENTIAL_PHRASES = [
+        "enter your pin", "confirm your pin", "social security",
+        "credit card", "bank account", "routing number", "password",
+        "login code", "verification code", "seed phrase", "private key",
+    ]
+    for phrase in CREDENTIAL_PHRASES:
+        if phrase in t:
+            flags.append(f"requests sensitive information ('{phrase}')")
+            break
+
+    # --- Reward / gift / prize bait ---
+    REWARD_PHRASES = [
+        "you have won", "congratulations", "selected", "prize", "gift card",
+        "free", "claim your", "reward", "airdrop", "giveaway",
+    ]
+    for phrase in REWARD_PHRASES:
+        if phrase in t:
+            flags.append(f"reward/prize bait ('{phrase}')")
+            break
+
+    # Severity rating
+    n = len(flags)
+    severity = "HIGH" if n >= 3 else "MEDIUM" if n >= 1 else "LOW"
+
+    return {
+        "flags": flags,
+        "callback_numbers": callback_numbers,
+        "brands": brands,
+        "severity": severity,
+    }
+
+
 def build_sms_analysis_response(
     forwarded_text: str,
     urls: list[str],
     gsb_result: dict,
 ) -> str:
     """
-    Build the WhatsApp response for the SMS command based on URL analysis results.
-    Three outcomes:
-      1. No URLs found — guidance only
+    Build the WhatsApp response for the SMS command.
+    Four outcomes:
+      1. No URLs — full text pattern analysis (smishing signals, callback numbers, brands)
       2. URLs found, all clean — low-risk guidance
       3. URLs found, threats detected — CRITICAL warning
+      4. GSB error — guidance without verdict
     Always falls back gracefully if GSB errored.
     """
     immediate_steps = (
@@ -339,14 +455,54 @@ def build_sms_analysis_response(
     )
 
     if not urls:
+        analysis = _analyse_sms_text(forwarded_text)
+        flags    = analysis["flags"]
+        severity = analysis["severity"]
+        brands   = analysis["brands"]
+        numbers  = analysis["callback_numbers"]
+
+        if severity == "LOW" or not flags:
+            return (
+                "📨 *Suspicious text received — no URLs detected.*\n\n"
+                "No links or known smishing patterns were found. "
+                "If the message asked you to call a number or share personal details, "
+                "still treat it as a smishing attempt.\n\n"
+                + immediate_steps
+                + "\nReply *OTP* if you received a verification code, "
+                "or *CALL* if you also received a suspicious call.\n\n"
+                "— RelayShield"
+            )
+
+        icon   = "🚨" if severity == "HIGH" else "⚠️"
+        label  = "HIGH CONFIDENCE SMISHING" if severity == "HIGH" else "SUSPICIOUS TEXT"
+        flag_lines = "\n".join(f"🚩 {f}" for f in flags)
+
+        callback_block = ""
+        if numbers:
+            callback_block = (
+                f"\n*Do NOT call these numbers:*\n"
+                + "\n".join(f"⛔ {n}" for n in numbers)
+                + "\nIf you need to contact the real company, look up their number "
+                "on their official website — never use a number from an unsolicited text.\n"
+            )
+
+        brand_block = ""
+        if brands:
+            brand_block = (
+                f"\n*Impersonated brand(s):* {', '.join(brands)}\n"
+                "Verify any account concern by logging in directly to the official app or website.\n"
+            )
+
         return (
-            "📨 *Suspicious text received — no URLs detected.*\n\n"
-            "No links were found in the forwarded text to analyse. "
-            "If the message asked you to call a number or reply with personal details, "
-            "treat it as a smishing attempt.\n\n"
+            f"{icon} *{label} DETECTED*\n\n"
+            f"RelayShield analysed the text and found *{len(flags)} social engineering signal(s):*\n\n"
+            f"{flag_lines}\n"
+            f"{brand_block}"
+            f"{callback_block}\n"
+            "*What to do:*\n"
             + immediate_steps
-            + "\nReply *OTP* if you received a verification code, "
-            "or *CALL* if you also received a suspicious call.\n\n"
+            + "\nReply *CALL* if you already called the number in this message.\n"
+            "Reply *OTP* if you received a verification code from this sender.\n\n"
             "— RelayShield"
         )
 
@@ -1281,6 +1437,30 @@ ATTACK_CHAINS = [
             "may already be targeted with phishing emails from this domain."
         ),
     },
+    {
+        "chain":    "oauth_breach_plus_credentials",
+        "signals":  {"oauth_app_breach", "breach_alert"},
+        "severity": "HIGH",
+        "label":    "OAuth App Breach + Credential Exposure",
+        "what": (
+            "A SaaS app you may use for OAuth single sign-on was breached at the same "
+            "time your credentials are exposed. Attackers who hold both your password "
+            "and a compromised OAuth token can bypass 2FA entirely. Revoke OAuth grants "
+            "immediately and rotate passwords on all accounts connected to the breached app."
+        ),
+    },
+    {
+        "chain":    "oauth_breach_plus_sim_swap",
+        "signals":  {"oauth_app_breach", "sim_swap"},
+        "severity": "CRITICAL",
+        "label":    "OAuth App Breach + SIM Swap",
+        "what": (
+            "A SIM swap was detected on your account in the same window as a breach of "
+            "a major OAuth provider. If you use SMS-based 2FA on apps connected to that "
+            "provider, both authentication factors are potentially in attacker hands. "
+            "Revoke all OAuth grants, lock your SIM, and sign out of all active sessions."
+        ),
+    },
 ]
 
 _SESSIONS_INLINE = (
@@ -1356,6 +1536,36 @@ PREDICTIVE_WARNINGS = {
             "is active near your business. Attackers may direct breach victims to the fake "
             "domain to harvest additional credentials.\n\n"
             "Ensure all staff have changed passwords and enabled MFA."
+        ),
+    },
+    "oauth_breach_plus_credentials": {
+        "oauth_app_breach": (
+            "⚠️ *Heads up:* A SaaS app used for OAuth login was just breached. Your credentials "
+            "are also currently exposed. If you use this app for single sign-on, an attacker may "
+            "be able to access your accounts without needing your password.\n\n"
+            "Reply *SESSIONS* to revoke all active sessions now.\n"
+            "Revoke OAuth grants: myaccount.google.com/permissions"
+        ),
+        "breach_alert": (
+            "⚠️ *Heads up:* Your credentials are exposed in a breach. A major OAuth provider "
+            "was recently breached in the same window. If you use OAuth/SSO to log in to apps, "
+            "those sessions may be accessible to attackers without your password.\n\n"
+            "Revoke OAuth grants on any breached app immediately. Reply *OAUTH* for steps."
+        ),
+    },
+    "oauth_breach_plus_sim_swap": {
+        "oauth_app_breach": (
+            "⚠️ *Heads up:* A major OAuth provider was just breached. A SIM swap was also "
+            "detected on your account recently. If you use SMS-based 2FA on apps connected to "
+            "this provider, both your authentication factors may be compromised.\n\n"
+            "Reply *PHONE* for SIM lock steps.\n"
+            "Revoke OAuth grants: myaccount.google.com/permissions"
+        ),
+        "sim_swap": (
+            "⚠️ *Heads up:* A SIM swap was detected on your line. A major OAuth provider was "
+            "also recently breached. Together these create a high-risk window — attackers with "
+            "your SIM can intercept 2FA codes for any OAuth-connected app.\n\n"
+            "Lock your SIM immediately and reply *OAUTH* to audit all OAuth grants."
         ),
     },
 }
@@ -1690,6 +1900,7 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
 
         "*📡 Phone Protection*\n"
         "• *PHONE* — Carrier hardening against SIM swap and smishing\n"
+        "• *VISHING* — Voice phishing: how to recognise and respond to phone-based attacks\n"
     )
 
     if is_business and not is_employee and has_seats:
@@ -1759,27 +1970,37 @@ def msg_oauth(is_business: bool = False, is_employee: bool = False) -> str:
     return base
 
 
-def msg_sweep() -> str:
+def msg_sweep_part1() -> str:
     return (
-        "🔍 *Email Security Sweep — 5 minutes to close the backdoors*\n\n"
-        "Attackers plant these after a breach. They survive password resets.\n\n"
+        "🔍 *Email Security Sweep — Steps 1–3 of 5*\n\n"
+        "Attackers plant backdoors after a breach. They survive password resets.\n\n"
+        "📌 *Run this sweep on a computer.* The Gmail app cannot access "
+        "forwarding rules, filters, or connected apps. "
+        "Open mail.google.com on a desktop or laptop.\n\n"
         "*Step 1 — Check email forwarding rules*\n"
-        "Attackers plant a forwarding address so every email you receive is silently copied to them — it survives password resets.\n"
-        "Gmail: Settings → See all settings → Forwarding and POP/IMAP → Forwarding section\n"
+        "Attackers plant a forwarding address so every email is silently copied to them.\n"
+        "Gmail: Settings → See all settings → Forwarding and POP/IMAP\n"
         "Outlook: Settings → Mail → Forwarding\n"
         "Yahoo: Settings → Mailboxes → your address → Forwarding\n"
-        "✅ Safe state: no forwarding addresses listed.\n"
-        "⚠️ If you see an address you did not add: disable forwarding → click X to remove it → Save.\n"
-        "Also check: Settings → Filters and Blocked Addresses for rules that auto-delete, mark as read, or forward emails from banks or your email provider — delete any you did not create.\n\n"
+        "✅ Safe: no forwarding addresses listed.\n"
+        "⚠️ If you see an unknown address: disable forwarding → click X → Save.\n"
+        "Also check Filters and Blocked Addresses for rules that auto-delete or forward emails from banks.\n\n"
         "*Step 2 — Check recovery email and phone*\n"
         "Gmail: myaccount.google.com/security\n"
         "Yahoo: account.yahoo.com/security\n"
         "→ Remove any recovery contact you do not recognise.\n\n"
         "*Step 3 — Check inbox filters*\n"
-        "Silent rules that hide breach warnings and delete bank alerts.\n"
+        "Silent rules can hide breach warnings and delete bank alerts.\n"
         "Gmail: Settings → Filters and Blocked Addresses\n"
         "→ Delete any filter you did not create.\n"
         "Outlook: Settings → Rules → delete unknown rules.\n\n"
+        "_(Steps 4–5 follow in the next message)_"
+    )
+
+
+def msg_sweep_part2() -> str:
+    return (
+        "🔍 *Email Security Sweep — Steps 4–5 of 5*\n\n"
         "*Step 4 — Review connected apps*\n"
         "Gmail: myaccount.google.com/permissions\n"
         "Yahoo: account.yahoo.com/security/connected-apps\n"
@@ -1791,13 +2012,40 @@ def msg_sweep() -> str:
         "✅ *Sweep complete. All 5 checks done.*\n\n"
         "*Going forward — use a masked email alias*\n"
         "Your real address is a breach risk every time you share it. "
-        "A masked alias forwards to your inbox — if it leaks, delete it.\n"
+        "A masked alias forwards to your inbox — delete it if it leaks.\n"
         "→ *SimpleLogin* — free, open source (simplelogin.io)\n"
         "→ *Apple Hide My Email* — built into iCloud\n"
-        "→ *Gmail* — youraddress+sitename@gmail.com as a free workaround\n\n"
+        "→ *Gmail* — youraddress+sitename@gmail.com as a workaround\n\n"
+        "📱 *On a phone or tablet?* See the next message for mobile instructions.\n\n"
         "Reply *RESET* for a strong password guide.\n"
         "Reply *MANAGER* for a free Bitwarden setup guide."
     )
+
+
+def msg_sweep_part3() -> str:
+    return (
+        "📱 *Email Sweep — Mobile Device Users (Phone & Tablet)*\n\n"
+        "The Gmail native app cannot check forwarding or filters. "
+        "Use your phone's browser — Chrome or Safari — instead.\n\n"
+        "*Step 1: Enable desktop view in your browser*\n"
+        "Required only for Steps 1 & 3 (forwarding and filters).\n\n"
+        "🍎 *iOS Safari:* Go to mail.google.com → tap the 🖥 page icon in the "
+        "address bar → tap *...* → Request Desktop Website\n"
+        "🍎 *iOS Chrome:* Go to mail.google.com → tap *...* at the bottom-right "
+        "→ scroll down → Request Desktop Site\n"
+        "🤖 *Android Chrome:* Tap *⋮* at the top-right "
+        "→ Request Desktop Site\n"
+        "🤖 *Android Firefox:* Tap *⋮* "
+        "→ Request Desktop Site\n\n"
+        "*Step 2: Run the checks in your browser*\n"
+        "Steps 1 & 3 → mail.google.com → Settings → See all settings\n"
+        "Steps 2, 4 & 5 → myaccount.google.com (no special view needed)"
+    )
+
+
+def msg_sweep() -> str:
+    """Retained for any internal references — returns part 1 only. Use send_sweep() for full delivery."""
+    return msg_sweep_part1()
 
 
 def msg_reset() -> str:
@@ -2009,6 +2257,37 @@ def msg_verify() -> str:
         "if everyone knows them before the call comes.\n\n"
         "Reply *CALL* if you received a suspicious call.\n"
         "Reply *WASCAM* if you received a suspicious WhatsApp message.\n\n"
+        "🛡️ RelayShield"
+    )
+
+
+def msg_vishing() -> str:
+    return (
+        "📞 *Vishing — Voice Phishing Defence*\n\n"
+        "Vishing is fraud conducted over the phone. The caller impersonates a trusted "
+        "authority — a bank, government agency, carrier, tech company, or professional service. "
+        "The goal is always the same: pressure you into acting before you think.\n\n"
+        "*How to recognise an attack in progress:*\n"
+        "• Unsolicited call, urgent or threatening — account suspended, overdue payment, "
+        "action required within 24 hours\n"
+        "• Caller already knows some of your details and uses them to build false trust\n"
+        "• Request to read back a code you just received — the attacker triggered it\n"
+        "• Pressure to stay on the line or keep the call confidential\n"
+        "• Asked to pay by gift card, wire transfer, or cryptocurrency\n"
+        "• Transferred to a 'supervisor' who increases the pressure\n\n"
+        "*✅ Do:*\n"
+        "→ Hang up and call back on the official number from the company's website\n"
+        "→ Tell someone else about the call before taking any action\n"
+        "→ Report: FTC reportfraud.ftc.gov / FCC fcc.gov/consumers\n\n"
+        "*🚫 Don't:*\n"
+        "→ Read back any OTP or verification code\n"
+        "→ Allow remote access to your device\n"
+        "→ Confirm personal details the caller seems to already know\n"
+        "→ Act within any time limit they set — urgency is the weapon\n\n"
+        "After a suspected call:\n"
+        "→ Reply *CALL* — step-by-step recovery actions\n"
+        "→ Reply *SWEEP* — check for inbox backdoors\n"
+        "→ Reply *VERIFY* — set up your Callback Rule and Safe Word\n\n"
         "🛡️ RelayShield"
     )
 
@@ -2578,7 +2857,9 @@ def handle_active_message(
 
     # --- SWEEP ---
     if body == "SWEEP":
-        send_whatsapp(to_number, msg_sweep(), account_sid, auth_token, from_number)
+        send_whatsapp(to_number, msg_sweep_part1(), account_sid, auth_token, from_number)
+        send_whatsapp(to_number, msg_sweep_part2(), account_sid, auth_token, from_number)
+        send_whatsapp(to_number, msg_sweep_part3(), account_sid, auth_token, from_number)
         return "sweep_sent"
 
     # --- RESET ---
@@ -2655,6 +2936,11 @@ def handle_active_message(
     if body == "SAFE":
         send_whatsapp(to_number, msg_vishing_safe(), account_sid, auth_token, from_number)
         return "vishing_safe_ack"
+
+    # --- VISHING (voice phishing education — proactive hardening) ---
+    if body == "VISHING":
+        send_whatsapp(to_number, msg_vishing(), account_sid, auth_token, from_number)
+        return "vishing_guide_sent"
 
     # --- CALL (user received a suspicious call) ---
     if body == "CALL":

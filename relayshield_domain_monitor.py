@@ -44,6 +44,7 @@ import base64
 import concurrent.futures
 import json
 import logging
+import os
 import re
 import socket
 import urllib.error
@@ -68,8 +69,12 @@ logger.setLevel(logging.INFO)
 secrets_client = boto3.client("secretsmanager")
 dynamodb       = boto3.resource("dynamodb")
 kms_client     = boto3.client("kms")
+lambda_client  = boto3.client("lambda")
 
 USERS_TABLE         = "relayshield_users"
+
+# Lambda function name for Telegram webhook — set as env var TG_WEBHOOK_LAMBDA
+TG_WEBHOOK_LAMBDA = os.environ.get("TG_WEBHOOK_LAMBDA", "")
 KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
 
 # ---------------------------------------------------------------------------
@@ -468,6 +473,32 @@ def record_signal(user_id: str, signal_type: str, metadata: dict | None = None) 
     )
     logger.info("Signal recorded — user_id=%s type=%s", user_id, signal_type)
     return pruned
+
+
+def _push_tg_signal(user_id: str, signal_type: str, tg_chat_id: int) -> None:
+    """
+    Invoke the Telegram webhook Lambda with the signal payload so it can run
+    Telegram-specific predictive warnings and coordinated attack alerts.
+    The signal has already been recorded in DynamoDB by record_signal().
+    No-ops silently if TG_WEBHOOK_LAMBDA env var is not set.
+    """
+    if not TG_WEBHOOK_LAMBDA:
+        return
+    try:
+        payload = json.dumps({
+            "source":           "relayshield_internal",
+            "user_id":          user_id,
+            "signal_type":      signal_type,
+            "telegram_chat_id": tg_chat_id,
+        }).encode()
+        lambda_client.invoke(
+            FunctionName=TG_WEBHOOK_LAMBDA,
+            InvocationType="Event",   # async — fire and forget
+            Payload=payload,
+        )
+        logger.info("TG signal pushed — user_id=%s type=%s chat_id=%s", user_id, signal_type, tg_chat_id)
+    except Exception as exc:
+        logger.exception("_push_tg_signal failed user_id=%s: %s", user_id, exc)
 
 
 def check_and_fire_correlation(
@@ -1125,6 +1156,7 @@ def scan_domain(
     from_number: str,
     dry_run: bool,
     force_freeform: bool,
+    tg_chat_id: int | None = None,
 ) -> dict:
     """
     Run all three checks for a single domain. Updates `entry` in place.
@@ -1171,6 +1203,10 @@ def scan_domain(
                 check_and_fire_correlation(user_id, signals, to_number, account_sid, auth_token, from_number)
             except Exception as exc:
                 logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
+
+            # Telegram correlation — push signal to TG webhook if user has Telegram delivery
+            if tg_chat_id:
+                _push_tg_signal(user_id, "domain_lookalike", tg_chat_id)
 
         # Always update known_lookalikes so we don't re-alert next run
         entry["known_lookalikes"] = list(set(known) | set(new_lookalikes))
@@ -1351,6 +1387,15 @@ def lambda_handler(event, context):
             pre_mx         = entry.get("mx_fingerprint")
             pre_expiry     = entry.get("expiry_days_alerted")
 
+            tg_chat_id_user = None
+            if "telegram" in user.get("delivery_channels", []):
+                raw_tg = user.get("telegram_chat_id")
+                if raw_tg:
+                    try:
+                        tg_chat_id_user = int(raw_tg)
+                    except (ValueError, TypeError):
+                        pass
+
             try:
                 entry = scan_domain(
                     domain=domain,
@@ -1363,6 +1408,7 @@ def lambda_handler(event, context):
                     from_number=from_number,
                     dry_run=dry_run,
                     force_freeform=False,
+                    tg_chat_id=tg_chat_id_user,
                 )
             except Exception as exc:
                 logger.exception(

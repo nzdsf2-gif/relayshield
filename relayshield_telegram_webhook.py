@@ -2173,8 +2173,15 @@ def handle_reuse(chat_id: int) -> None:
 # Main router
 # ---------------------------------------------------------------------------
 
-def _is_valid_evm_address(addr: str) -> bool:
-    return bool(re.match(r"^0x[0-9a-fA-F]{40}$", addr))
+def _is_valid_wallet_address(addr: str) -> bool:
+    """Accept EVM (0x...), Bitcoin P2PKH (1...), P2SH (3...), and bech32 (bc1...)."""
+    if re.match(r"^0x[0-9a-fA-F]{40}$", addr):
+        return True
+    if re.match(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$", addr):
+        return True
+    if re.match(r"^bc1[a-z0-9]{6,87}$", addr, re.IGNORECASE):
+        return True
+    return False
 
 
 def _goplus_risk_check(address: str) -> dict:
@@ -2274,11 +2281,13 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
         return
 
     address = address_raw.strip()
-    if not _is_valid_evm_address(address):
+    if not _is_valid_wallet_address(address):
         send_message(
             chat_id,
-            "❌ That doesn't look like a valid EVM address.\n\n"
-            "Format: `0x` followed by 40 hex characters.\n"
+            "❌ That doesn't look like a valid wallet address.\n\n"
+            "Supported formats:\n"
+            "• EVM: `0x` followed by 40 hex characters\n"
+            "• Bitcoin: starts with `1`, `3`, or `bc1`\n\n"
             "Example: `/addwallet 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045`",
             parse_mode="Markdown",
         )
@@ -2300,8 +2309,9 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
 
     send_message(chat_id, f"🔍 Checking `{address}`...", parse_mode="Markdown")
 
-    # GoPlus risk check (best-effort — non-blocking)
-    risk = _goplus_risk_check(address)
+    # GoPlus risk check — EVM only, best-effort non-blocking
+    is_evm = address.startswith("0x")
+    risk = _goplus_risk_check(address) if is_evm else {}
     risk_flags = [k for k, v in risk.items() if v == "1"]
     risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
 

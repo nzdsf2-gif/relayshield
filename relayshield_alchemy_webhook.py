@@ -113,12 +113,27 @@ def _send_telegram(chat_id: int, text: str) -> None:
         logger.error("Telegram send failed chat_id=%s: %s", chat_id, exc)
 
 
+_EXPLORER_MAP = {
+    "ETH_MAINNET":    "https://etherscan.io/tx/{}",
+    "BASE_MAINNET":   "https://basescan.org/tx/{}",
+    "MATIC_MAINNET":  "https://polygonscan.com/tx/{}",
+    "ARB_MAINNET":    "https://arbiscan.io/tx/{}",
+    "OPT_MAINNET":    "https://optimistic.etherscan.io/tx/{}",
+    "SOLANA_MAINNET": "https://solscan.io/tx/{}",
+    "TON_MAINNET":    "https://tonscan.org/tx/{}",
+    "BTC_MAINNET":    "https://mempool.space/tx/{}",
+}
+
+_EVM_NETWORKS = {"ETH_MAINNET", "BASE_MAINNET", "MATIC_MAINNET", "ARB_MAINNET", "OPT_MAINNET"}
+
+
 def _format_alert(activity: dict, monitored_address: str, risk: dict) -> str:
     from_addr = activity.get("fromAddress", "unknown")
     to_addr   = activity.get("toAddress", "unknown")
     value     = activity.get("value", 0)
     asset     = activity.get("asset", "ETH")
-    network   = activity.get("network", "ETH_MAINNET").replace("_", " ").title()
+    raw_net   = activity.get("network", "ETH_MAINNET")
+    network   = raw_net.replace("_", " ").title()
     tx_hash   = activity.get("hash", "")
 
     direction = "📥 IN" if to_addr.lower() == monitored_address.lower() else "📤 OUT"
@@ -130,7 +145,9 @@ def _format_alert(activity: dict, monitored_address: str, risk: dict) -> str:
 
     short_addr  = f"{monitored_address[:6]}...{monitored_address[-4:]}"
     short_other = f"{other[:6]}...{other[-4:]}" if len(other) > 10 else other
-    tx_line     = f"\n🔗 [View tx](https://etherscan.io/tx/{tx_hash})" if tx_hash else ""
+
+    explorer = _EXPLORER_MAP.get(raw_net)
+    tx_line  = f"\n🔗 [View tx]({explorer.format(tx_hash)})" if tx_hash and explorer else ""
 
     return (
         f"🚨 *Wallet Activity Detected*\n\n"
@@ -185,9 +202,11 @@ def lambda_handler(event: dict, context) -> dict:
             logger.info("User %s has no telegram_chat_id", user.get("user_id"))
             continue
 
-        # GoPlus risk check on the counterparty address
+        # GoPlus risk check on the counterparty address (EVM only)
         counterparty = from_addr if to_addr == monitored else to_addr
-        risk = _goplus_risk_check(counterparty) if counterparty else {}
+        network_raw  = (activity.get("network") or "").upper()
+        is_evm       = network_raw in _EVM_NETWORKS
+        risk = _goplus_risk_check(counterparty) if counterparty and is_evm else {}
 
         alert = _format_alert(activity, monitored, risk)
         _send_telegram(int(chat_id), alert)

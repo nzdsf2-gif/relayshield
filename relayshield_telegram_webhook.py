@@ -940,6 +940,14 @@ def msg_help(tier: str) -> str:
             "• /removemember — Remove a team member from your account\n"
         )
 
+    if tier in CRYPTO_TIERS:
+        text += (
+            "\n*🪙 Crypto Shield*\n"
+            "• /addwallet <address> — Add a wallet to monitoring (EVM or Bitcoin)\n"
+            "• /wallets — List your monitored wallets\n"
+            "• /removewallet <address> — Remove a wallet from monitoring\n"
+        )
+
     if tier in DOMAIN_TIERS:
         text += (
             "\n*🌐 Domain Security*\n"

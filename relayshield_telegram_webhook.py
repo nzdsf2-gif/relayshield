@@ -33,6 +33,9 @@ Commands (ACTIVE users):
   /verifybot — confirm this is the official RelayShield bot
   /scan <url> — scan a URL or link for malware/phishing
   /analyse <text> — social engineering analysis of a suspicious message
+  /addwallet <addr> — add EVM wallet to monitoring (Crypto Shield only)
+  /removewallet <addr> — remove wallet from monitoring
+  /wallets  — list monitored wallets with GoPlus risk scores
   LINK      — link existing WhatsApp account via 6-digit code
 """
 
@@ -72,9 +75,15 @@ kms_client = boto3.client("kms")
 KMS_KEY_ALIAS = "alias/relayshield-data-key"
 PHONE_HASH_INDEX = "phone_hash-index"
 
-USERS_TABLE = "relayshield_users"
-MONITORED_EMAILS_TABLE = "relayshield_monitored_emails"
-BREACH_ALERTS_TABLE = "relayshield_breach_alerts"
+USERS_TABLE             = "relayshield_users"
+MONITORED_EMAILS_TABLE  = "relayshield_monitored_emails"
+BREACH_ALERTS_TABLE     = "relayshield_breach_alerts"
+MONITORED_WALLETS_TABLE = "relayshield_monitored_wallets"
+
+ALCHEMY_SECRET_NAME     = "relayshield/alchemy_api_key"
+GOPLUS_BASE_URL         = "https://api.gopluslabs.io/api/v1/address_security"
+ALCHEMY_WEBHOOK_API     = "https://dashboard.alchemy.com/api"
+WALLET_LIMIT_CRYPTO     = 5   # max wallets per Crypto Shield subscriber
 
 TG_SECRET_NAME = "relayshield/telegram_bot_token"
 TG_SECRET_KEY = "telegram_bot_token"
@@ -91,8 +100,10 @@ TIER_STARTER_DOMAIN  = "starter_domain"
 TIER_BASIC           = "business_basic"
 TIER_SHIELD          = "business_shield"
 TIER_PRO             = "business_shield_pro"
+TIER_CRYPTO          = "crypto_shield"
 
 BUSINESS_TIERS = {TIER_STARTER, TIER_STARTER_DOMAIN, TIER_BASIC, TIER_SHIELD, TIER_PRO}
+CRYPTO_TIERS   = {TIER_CRYPTO}
 
 EMAIL_LIMITS = {
     TIER_PERSONAL:       3,
@@ -2162,6 +2173,236 @@ def handle_reuse(chat_id: int) -> None:
 # Main router
 # ---------------------------------------------------------------------------
 
+def _is_valid_evm_address(addr: str) -> bool:
+    return bool(re.match(r"^0x[0-9a-fA-F]{40}$", addr))
+
+
+def _goplus_risk_check(address: str) -> dict:
+    """Query GoPlus address_security. Returns risk dict or {} on failure."""
+    try:
+        url = f"{GOPLUS_BASE_URL}/{address}?chain_id=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+            return data.get("result", {}).get(address.lower(), {})
+    except Exception as exc:
+        logger.warning("GoPlus check failed for %s: %s", address, exc)
+        return {}
+
+
+def _alchemy_add_wallet(address: str) -> bool:
+    """Add address to the global RelayShield Alchemy ADDRESS_ACTIVITY webhook."""
+    try:
+        alchemy_key = _get_secret_json(ALCHEMY_SECRET_NAME, "api_key")
+        webhook_id  = _get_secret_json(ALCHEMY_SECRET_NAME, "webhook_id")
+        url  = f"{ALCHEMY_WEBHOOK_API}/update-webhook-addresses"
+        body = json.dumps({
+            "webhook_id":       webhook_id,
+            "addresses_to_add": [address],
+        }).encode()
+        req = urllib.request.Request(
+            url, data=body, method="PATCH",
+            headers={
+                "Content-Type": "application/json",
+                "X-Alchemy-Token": alchemy_key,
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception as exc:
+        logger.error("Alchemy add wallet failed for %s: %s", address, exc)
+        return False
+
+
+def _alchemy_remove_wallet(address: str) -> bool:
+    """Remove address from the global RelayShield Alchemy webhook."""
+    try:
+        alchemy_key = _get_secret_json(ALCHEMY_SECRET_NAME, "api_key")
+        webhook_id  = _get_secret_json(ALCHEMY_SECRET_NAME, "webhook_id")
+        url  = f"{ALCHEMY_WEBHOOK_API}/update-webhook-addresses"
+        body = json.dumps({
+            "webhook_id":          webhook_id,
+            "addresses_to_remove": [address],
+        }).encode()
+        req = urllib.request.Request(
+            url, data=body, method="PATCH",
+            headers={
+                "Content-Type": "application/json",
+                "X-Alchemy-Token": alchemy_key,
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception as exc:
+        logger.error("Alchemy remove wallet failed for %s: %s", address, exc)
+        return False
+
+
+def _store_wallet_mapping(address: str, user_id: str) -> None:
+    """Write wallet_address → user_id to relayshield_monitored_wallets table."""
+    table = dynamodb.Table(MONITORED_WALLETS_TABLE)
+    table.put_item(Item={
+        "wallet_address": address.lower(),
+        "user_id":        user_id,
+        "added_at":       datetime.now(timezone.utc).isoformat(),
+    })
+
+
+def _remove_wallet_mapping(address: str) -> None:
+    table = dynamodb.Table(MONITORED_WALLETS_TABLE)
+    table.delete_item(Key={"wallet_address": address.lower()})
+
+
+def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
+    tier = user.get("tier") or user.get("subscription_tier", "")
+    if tier not in CRYPTO_TIERS:
+        send_message(
+            chat_id,
+            "🔐 *Crypto Shield required*\n\n"
+            "Wallet monitoring is available on the Crypto Shield plan ($19.99/month).\n\n"
+            "Contact relayshieldadmin@gmail.com to upgrade.",
+            parse_mode="Markdown",
+        )
+        return
+
+    if not address_raw:
+        send_message(
+            chat_id,
+            "Please provide the wallet address:\n\n`/addwallet 0xYourAddressHere`",
+            parse_mode="Markdown",
+        )
+        return
+
+    address = address_raw.strip()
+    if not _is_valid_evm_address(address):
+        send_message(
+            chat_id,
+            "❌ That doesn't look like a valid EVM address.\n\n"
+            "Format: `0x` followed by 40 hex characters.\n"
+            "Example: `/addwallet 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045`",
+            parse_mode="Markdown",
+        )
+        return
+
+    wallets = user.get("monitored_wallets", [])
+    if any(w["address"].lower() == address.lower() for w in wallets):
+        send_message(chat_id, f"✅ `{address}` is already being monitored.", parse_mode="Markdown")
+        return
+
+    if len(wallets) >= WALLET_LIMIT_CRYPTO:
+        send_message(
+            chat_id,
+            f"You've reached the wallet limit ({WALLET_LIMIT_CRYPTO} wallets on Crypto Shield).\n"
+            "Remove a wallet with `/removewallet <address>` to add a new one.",
+            parse_mode="Markdown",
+        )
+        return
+
+    send_message(chat_id, f"🔍 Checking `{address}`...", parse_mode="Markdown")
+
+    # GoPlus risk check (best-effort — non-blocking)
+    risk = _goplus_risk_check(address)
+    risk_flags = [k for k, v in risk.items() if v == "1"]
+    risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+
+    # Register with Alchemy Notify
+    alchemy_ok = _alchemy_add_wallet(address)
+    if not alchemy_ok:
+        send_message(
+            chat_id,
+            "⚠️ Could not register wallet with the monitoring network. "
+            "Please try again in a few minutes.",
+        )
+        return
+
+    # Store in DynamoDB
+    wallet_entry = {
+        "address":    address.lower(),
+        "label":      f"Wallet {len(wallets) + 1}",
+        "added_at":   datetime.now(timezone.utc).isoformat(),
+        "risk_level": risk_level,
+        "risk_flags": risk_flags,
+    }
+    wallets.append(wallet_entry)
+    update_user(user["user_id"], {"monitored_wallets": wallets})
+    _store_wallet_mapping(address, user["user_id"])
+
+    risk_line = ""
+    if risk_flags:
+        risk_line = f"\n⚠️ *GoPlus Risk:* {risk_level} — {', '.join(risk_flags[:3])}"
+
+    send_message(
+        chat_id,
+        f"✅ *Wallet added to monitoring*\n\n"
+        f"`{address}`{risk_line}\n\n"
+        f"You'll receive a Telegram alert for any transfer activity on this address.\n\n"
+        f"Wallets monitored: {len(wallets)}/{WALLET_LIMIT_CRYPTO}",
+        parse_mode="Markdown",
+    )
+
+
+def handle_removewallet(chat_id: int, address_raw: str | None, user: dict) -> None:
+    wallets = user.get("monitored_wallets", [])
+    if not wallets:
+        send_message(chat_id, "You have no wallets being monitored.")
+        return
+
+    if not address_raw:
+        lines = "\n".join(f"• `{w['address']}`" for w in wallets)
+        send_message(
+            chat_id,
+            f"Your monitored wallets:\n\n{lines}\n\n"
+            "To remove one: `/removewallet 0xAddress`",
+            parse_mode="Markdown",
+        )
+        return
+
+    address = address_raw.strip().lower()
+    match = next((w for w in wallets if w["address"].lower() == address), None)
+    if not match:
+        send_message(chat_id, f"❌ `{address}` is not in your monitored wallets.", parse_mode="Markdown")
+        return
+
+    _alchemy_remove_wallet(address)
+    _remove_wallet_mapping(address)
+    wallets = [w for w in wallets if w["address"].lower() != address]
+    update_user(user["user_id"], {"monitored_wallets": wallets})
+    send_message(chat_id, f"✅ `{address}` removed from monitoring.", parse_mode="Markdown")
+
+
+def handle_wallets(chat_id: int, user: dict) -> None:
+    tier = user.get("tier") or user.get("subscription_tier", "")
+    if tier not in CRYPTO_TIERS:
+        send_message(
+            chat_id,
+            "Wallet monitoring is available on the Crypto Shield plan.\n"
+            "Contact relayshieldadmin@gmail.com to upgrade.",
+        )
+        return
+
+    wallets = user.get("monitored_wallets", [])
+    if not wallets:
+        send_message(
+            chat_id,
+            "No wallets monitored yet.\n\nAdd one with:\n`/addwallet 0xYourAddress`",
+            parse_mode="Markdown",
+        )
+        return
+
+    lines = []
+    for w in wallets:
+        risk_tag = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(w.get("risk_level", "LOW"), "⚪")
+        lines.append(f"{risk_tag} `{w['address']}`\n   Added: {w['added_at'][:10]}")
+
+    send_message(
+        chat_id,
+        f"👛 *Monitored Wallets* ({len(wallets)}/{WALLET_LIMIT_CRYPTO})\n\n"
+        + "\n\n".join(lines)
+        + "\n\nTo remove: `/removewallet 0xAddress`",
+        parse_mode="Markdown",
+    )
+
+
 def route_active_command(chat_id: int, text: str, user: dict) -> None:
     """Route commands from ACTIVE users."""
     cmd = text.strip().lower().lstrip("/")
@@ -2223,6 +2464,16 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_addmember(chat_id, user)
     elif cmd == "removemember":
         handle_removemember(chat_id, user)
+    elif cmd.startswith("addwallet"):
+        parts = text.strip().split(None, 1)
+        address = parts[1] if len(parts) > 1 else None
+        handle_addwallet(chat_id, address, user)
+    elif cmd.startswith("removewallet"):
+        parts = text.strip().split(None, 1)
+        address = parts[1] if len(parts) > 1 else None
+        handle_removewallet(chat_id, address, user)
+    elif cmd == "wallets":
+        handle_wallets(chat_id, user)
     else:
         send_message(
             chat_id,

@@ -585,6 +585,7 @@ SS7 (Signalling System No. 7) is the 1970s-era protocol routing calls and SMS be
 | **Personal Shield** | Consumers | 1 | $14.99 | $14.99 | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved + SIM/eSIM swap detection alert. Monitor up to **3 email addresses**. |
 | **Business Starter** | Sole proprietors, single-owner businesses | 1 | $19.99 | $19.99 | All Personal Shield features + business-framed alert language + 3 monitored email addresses (personal + business + backup). Designed for owners whose business and personal identity are the same attack surface. No seat management. No domain monitoring. |
 | **Business Starter + Domain Monitoring** | Sole proprietors with a business website | 1 (solo) | $24.99 | $24.99 | All Business Starter features + typosquat domain monitoring for 1 domain. For owner-operators whose business website is an active attack surface. No team seats — upgrade to Business Basic to add staff. |
+| **Crypto Shield** | Crypto holders, DeFi users, Web3 professionals | 1 | $19.99 | $19.99 | Crypto wallet address monitoring (Alchemy Notify — transfer alerts + balance changes) + GoPlus Security address risk scoring + SIM swap detection + breach monitoring + domain lookalike scanning + OAuth supply chain watchlist. Alerts via Telegram (@RelayShield_bot). Payment via USDC on Base (Coinbase Business, 1% fee). Separate subscriber vertical — onboarding via /addwallet in Telegram bot. |
 | **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM/eSIM swap detection + carrier hardening steps + account management dashboard + domain monitoring (2 domains). Monitor up to **2 email addresses per seat**. |
 | **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-seat SIM/eSIM monitoring + authenticator migration flow + aggregate risk visibility + priority alerts. Monitor up to **2 email addresses per seat**. |
 | **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + SIM lock onboarding flow + eSIM profile audit + priority support + compliance reporting. Monitor up to **2 email addresses per seat**. |
@@ -2717,7 +2718,7 @@ Per-function pricing reflects the upstream cost difference — file and URL scan
 
 *Discovery path — how MSP agents find RelayShield:*
 - **✅ LIVE May 2026:** API Gateway + RapidAPI listing + OpenAPI spec — breach, sim-swap, domain endpoints live; scan-url and scan-file pending VT commercial terms
-- **Phase 2:** **MCP server** — publishes RelayShield as a callable tool in Anthropic's Model Context Protocol ecosystem; any Claude-powered MSP agent can discover and invoke RelayShield functions without a custom integration. Highest-leverage Phase 2 build for agent-native discovery. Wrapper around existing Lambda functions — low build effort, high strategic value.
+- **✅ LIVE May 2026:** **MCP server** (`relayshield-mcp` v0.2.0 on PyPI) — publishes RelayShield as a callable tool in Anthropic's Model Context Protocol ecosystem. Any Claude-powered agent can discover and invoke RelayShield functions without a custom integration. 7 tools: check_breach, check_sim_swap, check_domain_lookalikes, check_oauth_watchlist, scan_url, scan_file, check_scan_result. Subscription (RapidAPI key) and pay-as-you-go (x402 USDC on Base) access modes both live.
 - **Phase 2:** AWS Marketplace listing — once API demand is proven via direct sales, worth the commission and setup overhead for distribution reach
 - **Phase 3:** Agent registry listings as dedicated agent discovery directories mature
 
@@ -2756,6 +2757,40 @@ Planning cost for commercial scanning tier: **$300/month** (actual quote pending
 **Decision trigger:** Contact scanning provider for commercial resale quote once RapidAPI shows meaningful B2A customer uptake (target: 5+ active API customers or 2,000+ scans/month across breach/sim-swap/domain endpoints). Use actual RapidAPI usage data to anchor the volume estimate in the quote conversation.
 
 *Why MCP matters competitively:* No identity protection competitor is building MCP-native capabilities. Being listed as a security tool in the MCP ecosystem positions RelayShield as infrastructure for the agent layer rather than a consumer SaaS product — a meaningfully different competitive position that Aura, LifeLock, and HIBP cannot easily replicate.
+
+---
+
+**x402 Pay-As-You-Go Rail (✅ LIVE May 2026)**
+
+x402 is an open HTTP 402 payment protocol (Linux Foundation governed, Coinbase authored) enabling machine-to-machine micropayments in USDC on Base. RelayShield is one of the first security intelligence APIs to support x402 natively.
+
+*How it works:*
+1. Agent calls a PAYG endpoint with no API key → receives HTTP 402 + base64 `PAYMENT-REQUIRED` header specifying USDC amount and payTo address
+2. Agent pays USDC on Base to RelayShield's Coinbase Exchange deposit address
+3. Agent retries with `X-PAYMENT` header containing payment proof
+4. Lambda verifies proof via Coinbase x402 facilitator (`x402.org/facilitator/verify`) → executes and returns result
+
+*PAYG pricing (USDC on Base):*
+
+| Endpoint | Price | Notes |
+|---|---|---|
+| `POST /v1/payg/breach` | $0.10 USDC | Email breach lookup |
+| `POST /v1/payg/sim-swap` | $0.25 USDC | SIM swap detection |
+| `POST /v1/payg/domain` | $0.50 USDC | Lookalike domain scan |
+| `POST /v1/payg/oauth-watchlist` | $0.15 USDC | OAuth supply chain check |
+| `GET /v1/result/{id}` | Free | Poll scan result |
+| scan-url / scan-file | Coming soon | VT commercial licensing pending |
+
+*Architecture:*
+- PAYG routes (`/v1/payg/*`) use Auth=NONE on API Gateway — no API key required
+- x402 verification executed inside `relayshield-api` Lambda using Coinbase hosted facilitator
+- Receiving address: Coinbase Exchange USDC deposit address (Base network, `eip155:8453`)
+- Funds covered by Coinbase $320M custodial crime policy on receipt — no additional crypto insurance endorsement required
+- MCP server (`relayshield-mcp`) passes `X-PAYMENT` header transparently to API Gateway
+
+*Conversion path:* Every successful PAYG response includes `_advisory` field with subscription URL and per-check cost comparison (96%+ savings on monthly plan). MCP-9 (count-based conversion prompt at check #10) is a planned enhancement.
+
+*Why x402 vs Stripe for PAYG:* Sub-cent Base gas fees make $0.10 viable per-call. Stripe's card processing minimum ($0.30 + 2.9%) makes sub-$1 per-call pricing economically impossible. x402 also eliminates collection risk — funds arrive on-chain before Lambda executes the query.
 
 **Anonymized Risk Benchmarks**
 - Sell aggregated risk scoring data to research institutions, regulators, insurance actuaries

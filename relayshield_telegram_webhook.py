@@ -2213,8 +2213,9 @@ def _alchemy_add_wallet(address: str) -> bool:
         logger.info("Alchemy add wallet: webhook_id=%r key_repr=%r", webhook_id, alchemy_key[:12])
         url  = f"{ALCHEMY_WEBHOOK_API}/update-webhook-addresses"
         body = json.dumps({
-            "webhook_id":       webhook_id,
-            "addresses_to_add": [address],
+            "webhook_id":          webhook_id,
+            "addresses_to_add":    [address],
+            "addresses_to_remove": [],
         }).encode()
         req = urllib.request.Request(
             url, data=body, method="PATCH",

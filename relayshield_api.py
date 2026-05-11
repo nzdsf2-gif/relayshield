@@ -8,6 +8,7 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   POST /v1/breach                   — HIBP email breach check
   POST /v1/scan-url                 — VirusTotal URL malware analysis (coming soon on PAYG)
   POST /v1/scan-file                — VirusTotal binary/file analysis (coming soon on PAYG)
+  POST /v1/scan-wallet              — GoPlus EVM wallet risk scan
   POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
   POST /v1/domain                   — Typosquat/lookalike domain scan (DNS + CT + GSB)
   GET  /v1/result/{analysis_id}     — Poll VT scan result
@@ -17,6 +18,7 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/sim-swap            — $0.25 USDC
   POST /v1/payg/domain              — $0.50 USDC
   POST /v1/payg/oauth-watchlist     — $0.15 USDC
+  POST /v1/payg/scan-wallet         — $0.05 USDC
   GET  /v1/payg/result/{id}         — $0.00 (free — poll a paid scan)
 
 x402 payment flow:
@@ -43,6 +45,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import re
 import socket
 import time
 import urllib.error
@@ -82,7 +85,10 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/sim-swap":         250000,
     "/v1/payg/domain":           500000,
     "/v1/payg/oauth-watchlist":  150000,
+    "/v1/payg/scan-wallet":       50000,
 }
+
+GOPLUS_BASE_URL = "https://api.gopluslabs.io/api/v1/address_security"
 
 # OAuth supply chain watchlist — high-risk OAuth-capable SaaS apps
 OAUTH_WATCHLIST = {
@@ -763,6 +769,46 @@ def handle_oauth_watchlist(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/scan-wallet  (subscription) / POST /v1/payg/scan-wallet (PAYG)
+# ---------------------------------------------------------------------------
+# Request:  { "address": "0x..." }
+# Response: { "address": "...", "chain_id": "1", "risk_level": "LOW|MEDIUM|HIGH",
+#             "risk_flags": [...], "raw": {...} }
+
+def handle_scan_wallet(params: dict) -> dict:
+    address = (params.get("address") or "").strip()
+    if not address:
+        return _err("address is required")
+    if not re.match(r"^0x[0-9a-fA-F]{40}$", address):
+        return _err("address must be a valid EVM address (0x + 40 hex chars)")
+
+    chain_id = (params.get("chain_id") or "1").strip()
+
+    try:
+        url = f"{GOPLUS_BASE_URL}/{address}?chain_id={chain_id}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data     = json.loads(resp.read())
+            raw      = data.get("result", {}).get(address.lower(), {})
+    except Exception as exc:
+        logger.error("GoPlus scan failed for %s: %s", address, exc)
+        return _err("wallet scan failed — upstream error", 502)
+
+    risk_flags = [k for k, v in raw.items() if v == "1"]
+    risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+
+    logger.info("scan-wallet address=%s chain=%s risk=%s flags=%d", address, chain_id, risk_level, len(risk_flags))
+    return _ok({
+        "address":    address.lower(),
+        "chain_id":   chain_id,
+        "risk_level": risk_level,
+        "risk_flags": risk_flags,
+        "raw":        raw,
+    })
+
+
+# ---------------------------------------------------------------------------
 # x402 PAYG — payment requirements, verification, 402 response
 # ---------------------------------------------------------------------------
 
@@ -869,6 +915,7 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/sim-swap":        handle_sim_swap,
         "/v1/payg/domain":          handle_domain,
         "/v1/payg/oauth-watchlist": handle_oauth_watchlist,
+        "/v1/payg/scan-wallet":     handle_scan_wallet,
     }
     handler = payg_routes.get(path)
     if not handler:
@@ -893,6 +940,7 @@ ROUTES = {
     "/v1/sim-swap":         handle_sim_swap,
     "/v1/domain":           handle_domain,
     "/v1/oauth-watchlist":  handle_oauth_watchlist,
+    "/v1/scan-wallet":      handle_scan_wallet,
 }
 
 PAYG_PATHS = set(PAYG_PRICE_UNITS.keys()) | {"/v1/payg/result/"}

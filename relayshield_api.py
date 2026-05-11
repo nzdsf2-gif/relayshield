@@ -18,7 +18,7 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/sim-swap            — $0.25 USDC
   POST /v1/payg/domain              — $0.50 USDC
   POST /v1/payg/oauth-watchlist     — $0.15 USDC
-  POST /v1/payg/scan-wallet         — $0.05 USDC
+  POST /v1/payg/scan-wallet         — $0.10 USDC
   GET  /v1/payg/result/{id}         — $0.00 (free — poll a paid scan)
 
 x402 payment flow:
@@ -85,7 +85,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/sim-swap":         250000,
     "/v1/payg/domain":           500000,
     "/v1/payg/oauth-watchlist":  150000,
-    "/v1/payg/scan-wallet":       50000,
+    "/v1/payg/scan-wallet":      100000,
 }
 
 GOPLUS_BASE_URL = "https://api.gopluslabs.io/api/v1/address_security"

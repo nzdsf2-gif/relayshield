@@ -6,8 +6,8 @@ Business-to-Agent (B2A) and third-party developer consumption.
 
 Subscription endpoints (API key required — enforced by API Gateway usage plan):
   POST /v1/breach                   — HIBP email breach check
-  POST /v1/scan-url                 — VirusTotal URL malware analysis (coming soon on PAYG)
-  POST /v1/scan-file                — VirusTotal binary/file analysis (coming soon on PAYG)
+  POST /v1/scan-url                 — VirusTotal URL malware analysis
+  POST /v1/scan-file                — VirusTotal binary/file analysis
   POST /v1/scan-wallet              — GoPlus EVM wallet risk scan
   POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
   POST /v1/domain                   — Typosquat/lookalike domain scan (DNS + CT + GSB)
@@ -19,6 +19,8 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/domain              — $0.50 USDC
   POST /v1/payg/oauth-watchlist     — $0.15 USDC
   POST /v1/payg/scan-wallet         — $0.10 USDC
+  POST /v1/payg/scan-url            — $0.05 USDC
+  POST /v1/payg/scan-file           — $0.10 USDC
   GET  /v1/payg/result/{id}         — $0.00 (free — poll a paid scan)
 
 x402 payment flow:
@@ -86,6 +88,8 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/domain":           500000,
     "/v1/payg/oauth-watchlist":  150000,
     "/v1/payg/scan-wallet":      100000,
+    "/v1/payg/scan-url":          50000,
+    "/v1/payg/scan-file":        100000,
 }
 
 GOPLUS_BASE_URL = "https://api.gopluslabs.io/api/v1/address_security"
@@ -916,6 +920,8 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/domain":          handle_domain,
         "/v1/payg/oauth-watchlist": handle_oauth_watchlist,
         "/v1/payg/scan-wallet":     handle_scan_wallet,
+        "/v1/payg/scan-url":        handle_scan_url,
+        "/v1/payg/scan-file":       handle_scan_file,
     }
     handler = payg_routes.get(path)
     if not handler:

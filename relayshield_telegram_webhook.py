@@ -2208,9 +2208,9 @@ def _goplus_risk_check(address: str) -> dict:
 def _alchemy_add_wallet(address: str) -> bool:
     """Add address to the global RelayShield Alchemy ADDRESS_ACTIVITY webhook."""
     try:
-        alchemy_key = get_secret(ALCHEMY_SECRET_NAME, "signing_key")
-        webhook_id  = get_secret(ALCHEMY_SECRET_NAME, "webhook_id")
-        logger.info("Alchemy add wallet: webhook_id=%s key_prefix=%s", webhook_id, alchemy_key[:8])
+        alchemy_key = get_secret(ALCHEMY_SECRET_NAME, "signing_key").strip()
+        webhook_id  = get_secret(ALCHEMY_SECRET_NAME, "webhook_id").strip()
+        logger.info("Alchemy add wallet: webhook_id=%r key_repr=%r", webhook_id, alchemy_key[:12])
         url  = f"{ALCHEMY_WEBHOOK_API}/update-webhook-addresses"
         body = json.dumps({
             "webhook_id":       webhook_id,
@@ -2233,8 +2233,8 @@ def _alchemy_add_wallet(address: str) -> bool:
 def _alchemy_remove_wallet(address: str) -> bool:
     """Remove address from the global RelayShield Alchemy webhook."""
     try:
-        alchemy_key = get_secret(ALCHEMY_SECRET_NAME, "signing_key")
-        webhook_id  = get_secret(ALCHEMY_SECRET_NAME, "webhook_id")
+        alchemy_key = get_secret(ALCHEMY_SECRET_NAME, "signing_key").strip()
+        webhook_id  = get_secret(ALCHEMY_SECRET_NAME, "webhook_id").strip()
         url  = f"{ALCHEMY_WEBHOOK_API}/update-webhook-addresses"
         body = json.dumps({
             "webhook_id":          webhook_id,

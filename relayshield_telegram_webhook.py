@@ -2210,7 +2210,6 @@ def _alchemy_add_wallet(address: str) -> bool:
     try:
         alchemy_key = get_secret(ALCHEMY_SECRET_NAME, "signing_key").strip()
         webhook_id  = get_secret(ALCHEMY_SECRET_NAME, "webhook_id").strip()
-        logger.info("Alchemy add wallet: webhook_id=%r key_repr=%r", webhook_id, alchemy_key[:12])
         url  = f"{ALCHEMY_WEBHOOK_API}/update-webhook-addresses"
         body = json.dumps({
             "webhook_id":          webhook_id,

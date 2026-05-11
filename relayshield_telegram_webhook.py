@@ -2221,6 +2221,7 @@ def _alchemy_add_wallet(address: str) -> bool:
             headers={
                 "Content-Type": "application/json",
                 "X-Alchemy-Token": alchemy_key,
+                "User-Agent": "Mozilla/5.0 (compatible; RelayShield/1.0)",
             },
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -2245,6 +2246,7 @@ def _alchemy_remove_wallet(address: str) -> bool:
             headers={
                 "Content-Type": "application/json",
                 "X-Alchemy-Token": alchemy_key,
+                "User-Agent": "Mozilla/5.0 (compatible; RelayShield/1.0)",
             },
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

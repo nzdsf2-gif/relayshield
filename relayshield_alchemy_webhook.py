@@ -172,7 +172,7 @@ def _format_drain_alert(monitored_address: str, tx_count: int, network: str) -> 
         f"*Outbound transactions:* {tx_count} in the last 10 minutes\n\n"
         f"⚠️ *Immediate actions:*\n"
         f"• Move remaining funds to a secure wallet NOW\n"
-        f"• Revoke all token approvals at revoke\\.cash\n"
+        f"• Revoke all token approvals at revoke.cash\n"
         f"• Check for malicious browser extensions\n"
         f"• Do NOT interact with any dApps until secured\n\n"
         f"_RelayShield Crypto Shield_"

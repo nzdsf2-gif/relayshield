@@ -238,7 +238,15 @@ PASSWORD EXPOSURE — add when "Passwords" appears in exposed data types:
 "🔑 *Your password was exposed.* Treat it as compromised regardless of whether you've changed it.
 → Reply *REUSE* to check which other accounts are at risk from password reuse — the most common way one breach becomes five."
 
-AITM PHISHING WARNING — add when "Passwords" appears in exposed data types (append after the password block above, unless SESSION TOKEN ESCALATION already applied):
+INFOSTEALER WARNING — add when "Passwords" appears in exposed data types (insert before the AiTM block below):
+"🦠 *Infostealer malware risk.*
+Credential dumps from breaches are actively used to train infostealers — malware distributed through malicious browser extensions, cracked software, and fake AI tools. Infostealers silently harvest saved passwords, session cookies, and crypto wallet keys from your device.
+→ Check your browser extensions: remove any you don't recognise or haven't used recently
+→ Never install software from unofficial sources, cracked apps, or links in Discord/Telegram
+→ If your device feels slow or behaves unusually, run a malware scan before changing any passwords — changing passwords on a compromised device gives attackers your new credentials immediately
+→ Reply *EXTENSIONS* for a step-by-step browser extension audit guide"
+
+AITM PHISHING WARNING — add when "Passwords" appears in exposed data types (append after the infostealer block above, unless SESSION TOKEN ESCALATION already applied):
 "⚠️ *2FA bypass risk — AiTM phishing (Tycoon 2FA / EvilProxy).*
 Attackers use leaked credentials to create convincing fake login pages that sit between you and the real site. You complete your login including 2FA — the proxy captures your authenticated session token and replays it from the attacker's device. No password needed. No 2FA prompt. Full access.
 → Only log in to accounts via saved bookmarks or by typing the URL directly — never via a link in an email or text
@@ -279,6 +287,16 @@ This is a supply chain OAuth risk — these apps frequently hold OAuth access to
 → Go to myapps.microsoft.com — remove [breached service] if listed
 An attacker with a stolen OAuth token from [breached service] can access your email and files without ever knowing your password.
 Reply *SESSIONS* for a full guided OAuth revocation walkthrough."
+
+EXTENSIONS COMMAND — when user replies EXTENSIONS:
+Deliver a concise browser extension audit guide:
+→ Chrome/Edge: go to chrome://extensions — disable then remove anything you don't recognise
+→ Firefox: go to about:addons — remove unfamiliar extensions
+→ Safari: go to Settings → Extensions — disable unknown items
+→ Legitimate extensions have clear publishers and large install counts — if in doubt, remove it
+→ After auditing extensions, restart your browser and check if behaviour improves
+→ If you suspect active infection, run Malwarebytes Free (malwarebytes.com) before changing any passwords
+"A clean browser is the foundation of account security. Do this audit quarterly."
 
 ALWAYS END WITH:
 "Before resetting your password, reply *SWEEP* for a 5-minute Email Security Sweep — closes inbox backdoors that survive password resets.

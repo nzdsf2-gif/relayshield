@@ -912,6 +912,7 @@ def msg_help(tier: str) -> str:
         "• /breach — Breach monitoring status\n"
         "• /sweep — Close email backdoors (forwarding rules, filters, sessions)\n"
         "• /sessions — Revoke active sessions across Google, Microsoft, social media\n"
+        "• /extensions — Audit browser extensions for infostealer malware\n"
         "• /reuse — Cross-account password reuse check\n\n"
 
         "*🚨 Threat Analysis*\n"
@@ -1794,6 +1795,29 @@ def handle_wascam(chat_id: int) -> None:
     )
 
 
+def handle_extensions(chat_id: int) -> None:
+    send_message(
+        chat_id,
+        "🔍 *Browser Extension Audit*\n\n"
+        "Malicious extensions silently steal passwords, session cookies, and crypto wallet keys. "
+        "Do this audit now:\n\n"
+        "*Chrome / Edge:* chrome://extensions\n"
+        "→ Remove anything you don't recognise or haven't used recently\n\n"
+        "*Firefox:* about:addons\n"
+        "→ Remove unfamiliar extensions\n\n"
+        "*Safari:* Settings → Extensions\n"
+        "→ Disable and remove unknown items\n\n"
+        "*What to look for:*\n"
+        "→ Extensions with vague names like 'PDF Helper', 'Video Downloader', 'AI Assistant'\n"
+        "→ Extensions with broad permissions: 'Read and change all your data on all websites'\n"
+        "→ Extensions you don't remember installing\n\n"
+        "*After the audit:* restart your browser. If behaviour improves, an extension was the cause.\n\n"
+        "If you suspect active infection, run *Malwarebytes Free* (malwarebytes.com) *before* "
+        "changing any passwords — changing passwords on a compromised device gives attackers your new credentials.\n\n"
+        "_RelayShield_",
+    )
+
+
 def handle_sessions(chat_id: int) -> None:
     send_message(
         chat_id,
@@ -2495,6 +2519,8 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_removewallet(chat_id, address, user)
     elif cmd == "wallets":
         handle_wallets(chat_id, user)
+    elif cmd == "extensions":
+        handle_extensions(chat_id)
     else:
         send_message(
             chat_id,
@@ -2872,6 +2898,22 @@ def handle_inbound_signal(body: dict) -> str:
     ]
 
     chat_id = int(chat_id)
+
+    # Infostealer awareness — send on every breach alert
+    if signal_type == "breach_alert":
+        send_message(chat_id, (
+            "🦠 *Infostealer malware risk*\n\n"
+            "Credential breaches are actively used to distribute infostealers — malware "
+            "hidden in malicious browser extensions, cracked software, and fake AI tools "
+            "that silently harvests passwords, session cookies, and crypto wallet keys.\n\n"
+            "→ Check your browser extensions — remove any you don't recognise\n"
+            "→ Never install software from unofficial sources, cracked apps, or links in Discord/Telegram\n"
+            "→ If your device behaves unusually, run a malware scan *before* changing passwords — "
+            "changing passwords on a compromised device hands attackers your new credentials immediately\n\n"
+            "Reply */extensions* for a step\\-by\\-step browser extension audit guide\\.\n\n"
+            "_RelayShield_"
+        ))
+
     check_and_warn_predictive(user_id, signal_type, signals, chat_id)
     check_and_fire_correlation(user_id, signals, chat_id)
     logger.info("Inbound signal handled — user_id=%s type=%s chat_id=%s", user_id, signal_type, chat_id)

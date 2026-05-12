@@ -215,11 +215,11 @@ def _format_alert(activity: dict, monitored_address: str, risk: dict) -> str:
     explorer = _EXPLORER_MAP.get(raw_net)
     tx_line  = f"\n🔗 [View tx]({explorer.format(tx_hash)})" if tx_hash and explorer else ""
 
+    title = f"📤 Outbound Transfer: {value} {asset}" if direction == "📤 OUT" else f"📥 Inbound Transfer: {value} {asset}"
+
     return (
-        f"🚨 *Wallet Activity Detected*\n\n"
+        f"*{title}*\n\n"
         f"*Address:* `{short_addr}`\n"
-        f"*Direction:* {direction}\n"
-        f"*Amount:* {value} {asset}\n"
         f"*Network:* {network}\n"
         f"*Counterparty:* `{short_other}`"
         f"{risk_line}"

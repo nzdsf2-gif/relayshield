@@ -5,6 +5,10 @@ Receives ADDRESS_ACTIVITY webhook callbacks from Alchemy Notify,
 looks up the RelayShield subscriber who owns the address, and sends
 a Telegram alert with transfer details and GoPlus risk context.
 
+Also performs real-time drainer detection: records each outbound
+transaction in relayshield_wallet_activity_log (TTL 1 hour) and fires
+a high-urgency drain alert if 2+ outbound txs are seen within 10 minutes.
+
 Webhook type: ADDRESS_ACTIVITY
 Trigger: any inbound or outbound transfer on a monitored wallet address
 
@@ -23,10 +27,13 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 import urllib.error
 import urllib.request
+from decimal import Decimal
 
 import boto3
+from boto3.dynamodb.conditions import Key, Attr
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -34,12 +41,18 @@ logger.setLevel(logging.INFO)
 secrets_client = boto3.client("secretsmanager")
 dynamodb       = boto3.resource("dynamodb")
 
-MONITORED_WALLETS_TABLE = "relayshield_monitored_wallets"
-USERS_TABLE             = "relayshield_users"
-ALCHEMY_SECRET_NAME     = "relayshield/alchemy_api_key"
-TG_SECRET_NAME          = "relayshield/telegram_bot_token"
-GOPLUS_BASE_URL         = "https://api.gopluslabs.io/api/v1/address_security"
-TELEGRAM_API_BASE       = "https://api.telegram.org/bot{token}/{method}"
+MONITORED_WALLETS_TABLE  = "relayshield_monitored_wallets"
+USERS_TABLE              = "relayshield_users"
+ACTIVITY_LOG_TABLE       = "relayshield_wallet_activity_log"
+ALCHEMY_SECRET_NAME      = "relayshield/alchemy_api_key"
+TG_SECRET_NAME           = "relayshield/telegram_bot_token"
+GOPLUS_BASE_URL          = "https://api.gopluslabs.io/api/v1/address_security"
+TELEGRAM_API_BASE        = "https://api.telegram.org/bot{token}/{method}"
+
+# Drainer detection thresholds
+DRAIN_WINDOW_SECONDS = 600   # 10-minute rolling window
+DRAIN_TX_THRESHOLD   = 2     # number of outbound txs to trigger alert
+ACTIVITY_LOG_TTL     = 3600  # 1 hour TTL on activity log items
 
 _secret_cache: dict[str, str] = {}
 
@@ -111,6 +124,59 @@ def _send_telegram(chat_id: int, text: str) -> None:
         urllib.request.urlopen(req, timeout=10)
     except Exception as exc:
         logger.error("Telegram send failed chat_id=%s: %s", chat_id, exc)
+
+
+def _record_outbound_tx(wallet_address: str, tx_hash: str, value: float, asset: str, network: str) -> None:
+    """Record an outbound transaction in the activity log with a 1-hour TTL."""
+    now = int(time.time())
+    try:
+        dynamodb.Table(ACTIVITY_LOG_TABLE).put_item(Item={
+            "wallet_address": wallet_address,
+            "tx_timestamp":   Decimal(now),
+            "tx_hash":        tx_hash,
+            "value":          Decimal(str(value)),
+            "asset":          asset,
+            "network":        network,
+            "ttl":            Decimal(now + ACTIVITY_LOG_TTL),
+        })
+    except Exception as exc:
+        logger.error("Activity log write failed wallet=%s: %s", wallet_address, exc)
+
+
+def _check_drain_pattern(wallet_address: str) -> int:
+    """
+    Query recent outbound txs in the rolling window.
+    Returns count of outbound txs in the last DRAIN_WINDOW_SECONDS.
+    """
+    window_start = Decimal(int(time.time()) - DRAIN_WINDOW_SECONDS)
+    try:
+        resp = dynamodb.Table(ACTIVITY_LOG_TABLE).query(
+            KeyConditionExpression=(
+                Key("wallet_address").eq(wallet_address) &
+                Key("tx_timestamp").gte(window_start)
+            )
+        )
+        return len(resp.get("Items", []))
+    except Exception as exc:
+        logger.error("Drain pattern query failed wallet=%s: %s", wallet_address, exc)
+        return 0
+
+
+def _format_drain_alert(monitored_address: str, tx_count: int, network: str) -> str:
+    short_addr   = f"{monitored_address[:6]}...{monitored_address[-4:]}"
+    network_name = network.replace("_", " ").title()
+    return (
+        f"🚨🚨 *POSSIBLE WALLET DRAIN IN PROGRESS* 🚨🚨\n\n"
+        f"*Address:* `{short_addr}`\n"
+        f"*Network:* {network_name}\n"
+        f"*Outbound transactions:* {tx_count} in the last 10 minutes\n\n"
+        f"⚠️ *Immediate actions:*\n"
+        f"• Move remaining funds to a secure wallet NOW\n"
+        f"• Revoke all token approvals at revoke\\.cash\n"
+        f"• Check for malicious browser extensions\n"
+        f"• Do NOT interact with any dApps until secured\n\n"
+        f"_RelayShield Crypto Shield_"
+    )
 
 
 _EXPLORER_MAP = {
@@ -211,5 +277,19 @@ def lambda_handler(event: dict, context) -> dict:
         alert = _format_alert(activity, monitored, risk)
         _send_telegram(int(chat_id), alert)
         logger.info("Wallet alert sent — user=%s address=%s", user.get("user_id"), monitored)
+
+        # Drainer detection — track outbound txs and alert on rapid drain pattern
+        is_outbound = from_addr == monitored
+        if is_outbound:
+            value = activity.get("value", 0)
+            asset = activity.get("asset", "ETH")
+            tx_hash = activity.get("hash", "")
+            _record_outbound_tx(monitored, tx_hash, value, asset, network_raw)
+            tx_count = _check_drain_pattern(monitored)
+            if tx_count >= DRAIN_TX_THRESHOLD:
+                drain_alert = _format_drain_alert(monitored, tx_count, network_raw)
+                _send_telegram(int(chat_id), drain_alert)
+                logger.warning("Drain alert sent — user=%s address=%s tx_count=%d",
+                               user.get("user_id"), monitored, tx_count)
 
     return {"statusCode": 200, "body": "ok"}

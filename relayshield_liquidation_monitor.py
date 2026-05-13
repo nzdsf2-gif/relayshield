@@ -46,7 +46,7 @@ GET_USER_ACCOUNT_DATA_SELECTOR = "0xbf92857c"
 # Health factor is returned in ray units (1e27 = 1.0)
 RAY = 10 ** 27
 
-HF_WARNING  = 99999  # TEST ONLY — revert to 1.5 after testing
+HF_WARNING  = 1.5
 HF_CRITICAL = 1.2
 
 _secret_cache: dict[str, str] = {}

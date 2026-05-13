@@ -2458,7 +2458,7 @@ def _goplus_token_security(address: str, chain_id: int = 1) -> dict:
             data = json.loads(resp.read())
         return data.get("result", {}).get(address.lower(), {})
     except Exception as exc:
-        logger.error("GoPlus token security failed addr=%s: %s", address, exc)
+        logger.error("Token security check failed addr=%s: %s", address, exc)
         return {}
 
 
@@ -2468,14 +2468,15 @@ def _goplus_nft_security(address: str, chain_id: int = 1) -> dict:
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read())
-        return data.get("result", {}).get(address.lower(), {})
+        # NFT security API returns result as a flat object, not keyed by address
+        return data.get("result", {})
     except Exception as exc:
-        logger.error("GoPlus NFT security failed addr=%s: %s", address, exc)
+        logger.error("NFT security check failed addr=%s: %s", address, exc)
         return {}
 
 
 def _format_token_risk(address: str, info: dict) -> str:
-    short = f"{address[:6]}...{address[-4:]}"
+    short  = f"{address[:6]}...{address[-4:]}"
     name   = info.get("token_name", "Unknown Token")
     symbol = info.get("token_symbol", "?")
 
@@ -2489,29 +2490,32 @@ def _format_token_risk(address: str, info: dict) -> str:
     if info.get("owner_change_balance") == "1":
         critical_flags.append("🚨 Owner can change any holder's balance")
     if info.get("selfdestruct") == "1":
-        critical_flags.append("🚨 Contract can self-destruct (funds destroyed)")
-    buy_tax = float(info.get("buy_tax") or 0)
+        critical_flags.append("🚨 Contract can self-destruct, destroying all funds")
+    buy_tax  = float(info.get("buy_tax")  or 0)
     sell_tax = float(info.get("sell_tax") or 0)
     if sell_tax >= 0.5:
         critical_flags.append(f"🚨 Sell tax: {sell_tax*100:.0f}% — effectively unsellable")
     elif sell_tax >= 0.1:
-        warning_flags.append(f"⚠️ Sell tax: {sell_tax*100:.0f}%")
+        warning_flags.append(f"⚠️ Sell tax: {sell_tax*100:.0f}% — verify before buying")
     if buy_tax >= 0.1:
         warning_flags.append(f"⚠️ Buy tax: {buy_tax*100:.0f}%")
     if info.get("is_mintable") == "1":
-        warning_flags.append("⚠️ Mintable — owner can create unlimited supply")
+        warning_flags.append("⚠️ Mintable — owner can create unlimited supply, diluting your holdings")
     if info.get("hidden_owner") == "1":
-        warning_flags.append("⚠️ Hidden owner — true controller not visible")
+        warning_flags.append("⚠️ Hidden owner — true controller is not publicly visible")
     if info.get("can_take_back_ownership") == "1":
-        warning_flags.append("⚠️ Ownership can be reclaimed after renouncing")
+        warning_flags.append("⚠️ Ownership can be silently reclaimed after appearing renounced")
     if info.get("transfer_pausable") == "1":
-        warning_flags.append("⚠️ Transfers can be paused by owner")
+        warning_flags.append("⚠️ Transfers can be paused — owner can freeze your funds")
     if info.get("is_open_source") == "0":
-        warning_flags.append("⚠️ Contract not open source — unverifiable")
+        warning_flags.append("⚠️ Contract not open source — code is unverifiable")
     if info.get("is_proxy") == "1":
-        warning_flags.append("⚠️ Proxy contract — logic can be changed")
+        warning_flags.append(
+            "⚠️ Proxy contract — logic can be upgraded by the owner. "
+            "Only hold if issued by a verified, reputable team."
+        )
     if info.get("is_blacklisted") == "1":
-        warning_flags.append("⚠️ Blacklist function — owner can block wallets from selling")
+        warning_flags.append("⚠️ Blacklist function — owner can block any wallet from selling")
 
     if critical_flags:
         risk_badge = "🔴 *CRITICAL RISK*"
@@ -2523,7 +2527,7 @@ def _format_token_risk(address: str, info: dict) -> str:
         risk_badge = "🟢 *LOW RISK*"
 
     lines = [
-        f"🔍 *Token Risk Check*\n",
+        "🔍 *Token Risk Check*\n",
         f"*Token:* {name} ({symbol})",
         f"*Address:* `{short}`",
         f"*Risk Level:* {risk_badge}\n",
@@ -2540,31 +2544,31 @@ def _format_token_risk(address: str, info: dict) -> str:
 
 def _format_nft_risk(address: str, info: dict) -> str:
     short = f"{address[:6]}...{address[-4:]}"
-    name  = info.get("nft_name", "Unknown Collection")
+    name  = info.get("nft_name", info.get("nft_symbol", "Unknown Collection"))
 
     critical_flags = []
     warning_flags  = []
 
-    if info.get("malicious_address") == "1":
+    # Integer fields (0/1)
+    if info.get("malicious_nft_contract") == 1:
         critical_flags.append("🚨 Known malicious contract")
-    if info.get("stolen_nft") == "1":
-        critical_flags.append("🚨 Contains stolen NFTs")
-    if info.get("nft_open_source") == "0":
-        warning_flags.append("⚠️ Contract not open source — unverifiable")
-    if info.get("nft_proxy") == "1":
-        warning_flags.append("⚠️ Proxy contract — logic can be changed")
-    if info.get("nft_mintable") == "1":
-        warning_flags.append("⚠️ Mintable — owner can issue unlimited NFTs")
-    if info.get("privileged_burn") == "1":
-        warning_flags.append("⚠️ Owner can burn your NFTs")
-    if info.get("nft_with_metadata_update") == "1":
-        warning_flags.append("⚠️ Metadata can be changed post-mint")
-    if info.get("restricted_approval") == "1":
-        warning_flags.append("⚠️ Approval is restricted — transferability limited")
-    if info.get("is_transferable") == "0":
-        warning_flags.append("⚠️ Non-transferable (soulbound or locked)")
-    if info.get("no_metadata") == "1":
-        warning_flags.append("⚠️ No on-chain metadata")
+    if info.get("nft_open_source") == 0:
+        warning_flags.append("⚠️ Contract not open source — code is unverifiable")
+    if info.get("nft_proxy") == 1:
+        warning_flags.append(
+            "⚠️ Proxy contract — logic can be upgraded by the owner. "
+            "Only hold if issued by a verified, reputable team."
+        )
+    if info.get("restricted_approval") == 1:
+        warning_flags.append("⚠️ Approval restricted — transferability may be limited")
+
+    # Object fields — value 1 = risky, 0 = safe, -1 = blackhole (owner burned = safe)
+    if (info.get("privileged_burn") or {}).get("value") == 1:
+        warning_flags.append("⚠️ Owner can burn your NFTs without your consent")
+    if (info.get("privileged_minting") or {}).get("value") == 1:
+        warning_flags.append("⚠️ Owner can mint unlimited NFTs, diluting collection value")
+    if (info.get("transfer_without_approval") or {}).get("value") == 1:
+        critical_flags.append("🚨 Owner can transfer your NFTs without your approval")
 
     if critical_flags:
         risk_badge = "🔴 *CRITICAL RISK*"
@@ -2576,7 +2580,7 @@ def _format_nft_risk(address: str, info: dict) -> str:
         risk_badge = "🟢 *LOW RISK*"
 
     lines = [
-        f"🖼 *NFT Collection Risk Check*\n",
+        "🖼 *NFT Collection Risk Check*\n",
         f"*Collection:* {name}",
         f"*Address:* `{short}`",
         f"*Risk Level:* {risk_badge}\n",
@@ -2617,8 +2621,8 @@ def handle_checktoken(chat_id: int, address_raw: str | None, user: dict) -> None
     if not info:
         send_message(
             chat_id,
-            "⚠️ Could not retrieve token data from GoPlus Security.\n"
-            "The contract may not be on Ethereum mainnet, or GoPlus has no data for this address yet.",
+            "⚠️ No data found for this contract address.\n"
+            "It may not be on Ethereum mainnet, or it may be too new to have security data.",
         )
         return
 
@@ -2652,8 +2656,8 @@ def handle_checknft(chat_id: int, address_raw: str | None, user: dict) -> None:
     if not info:
         send_message(
             chat_id,
-            "⚠️ Could not retrieve NFT data from GoPlus Security.\n"
-            "The contract may not be on Ethereum mainnet, or GoPlus has no data for this address yet.",
+            "⚠️ No data found for this contract address.\n"
+            "It may not be on Ethereum mainnet, or it may be too new to have security data.",
         )
         return
 

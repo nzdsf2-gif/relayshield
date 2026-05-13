@@ -19,6 +19,8 @@ on:
       - 'relayshield_telegram_webhook.py'
       - 'relayshield_alchemy_webhook.py'
       - 'relayshield_approval_monitor.py'
+      - 'relayshield_gas_monitor.py'
+      - 'relayshield_liquidation_monitor.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
@@ -50,7 +52,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Manual trigger — deploy all mapped Lambda files
-            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py"
+            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py"
             echo "Manual trigger — deploying all Lambdas"
           else
             # Push trigger — deploy only files changed in this commit
@@ -79,6 +81,8 @@ jobs:
             ["relayshield_telegram_webhook.py"]="relayshield-telegram-webhook"
             ["relayshield_alchemy_webhook.py"]="relayshield-alchemy-webhook"
             ["relayshield_approval_monitor.py"]="relayshield-approval-monitor"
+            ["relayshield_gas_monitor.py"]="relayshield-gas-monitor"
+            ["relayshield_liquidation_monitor.py"]="relayshield-liquidation-monitor"
           )
 
           for FILE in ${{ steps.changes.outputs.files }}; do

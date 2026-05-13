@@ -33,7 +33,7 @@ Commands (ACTIVE users):
   /verifybot — confirm this is the official RelayShield bot
   /scan <url> — scan a URL or link for malware/phishing
   /analyse <text> — social engineering analysis of a suspicious message
-  /addwallet <addr> — add EVM wallet to monitoring (Crypto Shield only)
+  /addwallet <addr> — add EVM, Solana, or TON wallet to monitoring (Crypto Shield only)
   /removewallet <addr> — remove wallet from monitoring
   /wallets  — list monitored wallets with GoPlus risk scores
   LINK      — link existing WhatsApp account via 6-digit code
@@ -944,7 +944,7 @@ def msg_help(tier: str) -> str:
     if tier in CRYPTO_TIERS:
         text += (
             "\n*🪙 Crypto Shield*\n"
-            "• /addwallet <address> — Add a wallet to monitoring (EVM or Bitcoin)\n"
+            "• /addwallet <address> — Add a wallet to monitoring (EVM, Solana, TON, Bitcoin)\n"
             "• /wallets — List your monitored wallets\n"
             "• /removewallet <address> — Remove a wallet from monitoring\n"
             "• /riskcheck — Risk score for all your monitored wallets\n"
@@ -2210,20 +2210,55 @@ def handle_reuse(chat_id: int) -> None:
 # ---------------------------------------------------------------------------
 
 def _is_valid_wallet_address(addr: str) -> bool:
-    """Accept EVM (0x...), Bitcoin P2PKH (1...), P2SH (3...), and bech32 (bc1...)."""
+    """Accept EVM (0x...), Solana (base58 32-44 chars), TON (EQ.../UQ...),
+    Bitcoin P2PKH (1...), P2SH (3...), and bech32 (bc1...)."""
     if re.match(r"^0x[0-9a-fA-F]{40}$", addr):
-        return True
+        return True  # EVM
+    if re.match(r"^[EUeu][Qq][A-Za-z0-9_\-]{46}$", addr):
+        return True  # TON user-friendly (EQ.../UQ..., 48 chars)
     if re.match(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$", addr):
-        return True
+        return True  # Bitcoin P2PKH / P2SH
     if re.match(r"^bc1[a-z0-9]{6,87}$", addr, re.IGNORECASE):
-        return True
+        return True  # Bitcoin bech32
+    if re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", addr):
+        return True  # Solana base58 (checked last — most permissive)
     return False
 
 
-def _goplus_risk_check(address: str) -> dict:
-    """Query GoPlus address_security. Returns risk dict or {} on failure."""
+def _detect_chain(addr: str) -> str:
+    """Detect blockchain from address format.
+    Returns 'evm', 'solana', 'ton', 'bitcoin', or 'unknown'."""
+    if re.match(r"^0x[0-9a-fA-F]{40}$", addr):
+        return "evm"
+    if re.match(r"^[EUeu][Qq][A-Za-z0-9_\-]{46}$", addr):
+        return "ton"
+    if re.match(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$", addr) or \
+       re.match(r"^bc1[a-z0-9]{6,87}$", addr, re.IGNORECASE):
+        return "bitcoin"
+    if re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", addr):
+        return "solana"
+    return "unknown"
+
+
+_CHAIN_LABELS = {
+    "evm":     "Ethereum/EVM",
+    "solana":  "Solana",
+    "ton":     "TON",
+    "bitcoin": "Bitcoin",
+}
+
+# GoPlus chain IDs for address security checks
+_GOPLUS_CHAIN_IDS = {
+    "evm":    1,    # Ethereum mainnet default; overridden per-network when known
+    "solana": 101,
+}
+
+
+def _goplus_risk_check(address: str, chain_id: int = 1) -> dict:
+    """Query GoPlus address_security. Returns risk dict or {} on failure.
+    chain_id: 1=Ethereum, 101=Solana."""
     try:
-        url = f"{GOPLUS_BASE_URL}/{address}?chain_id=1"
+        url = f"{GOPLUS_BASE_URL}/{address}?chain_id={chain_id}"
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read())
@@ -2328,19 +2363,28 @@ def _alchemy_remove_wallet(address: str) -> bool:
         return False
 
 
-def _store_wallet_mapping(address: str, user_id: str) -> None:
-    """Write wallet_address → user_id to relayshield_monitored_wallets table."""
+def _canonical_address(address: str, chain_type: str) -> str:
+    """Return the canonical storage form of an address.
+    EVM: lowercase hex. Solana/TON/Bitcoin: original case, stripped."""
+    if chain_type == "evm":
+        return address.lower()
+    return address.strip()
+
+
+def _store_wallet_mapping(address: str, user_id: str, chain_type: str = "evm") -> None:
+    """Write wallet_address → user_id (+chain_type) to relayshield_monitored_wallets table."""
     table = dynamodb.Table(MONITORED_WALLETS_TABLE)
     table.put_item(Item={
-        "wallet_address": address.lower(),
+        "wallet_address": _canonical_address(address, chain_type),
         "user_id":        user_id,
+        "chain_type":     chain_type,
         "added_at":       datetime.now(timezone.utc).isoformat(),
     })
 
 
-def _remove_wallet_mapping(address: str) -> None:
+def _remove_wallet_mapping(address: str, chain_type: str = "evm") -> None:
     table = dynamodb.Table(MONITORED_WALLETS_TABLE)
-    table.delete_item(Key={"wallet_address": address.lower()})
+    table.delete_item(Key={"wallet_address": _canonical_address(address, chain_type)})
 
 
 def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
@@ -2358,7 +2402,10 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
     if not address_raw:
         send_message(
             chat_id,
-            "Please provide the wallet address:\n\n`/addwallet 0xYourAddressHere`",
+            "Please provide the wallet address:\n\n"
+            "`/addwallet 0xYourEVMAddress`\n"
+            "`/addwallet YourSolanaAddress`\n"
+            "`/addwallet EQYourTONAddress`",
             parse_mode="Markdown",
         )
         return
@@ -2368,17 +2415,29 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
         send_message(
             chat_id,
             "❌ That doesn't look like a valid wallet address.\n\n"
-            "Supported formats:\n"
-            "• EVM: `0x` followed by 40 hex characters\n"
-            "• Bitcoin: starts with `1`, `3`, or `bc1`\n\n"
-            "Example: `/addwallet 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045`",
+            "Supported networks:\n"
+            "• *Ethereum/EVM:* `0x` followed by 40 hex characters\n"
+            "• *Solana:* base58 address (32–44 characters)\n"
+            "• *TON:* starts with `EQ` or `UQ` (48 characters)\n"
+            "• *Bitcoin:* starts with `1`, `3`, or `bc1`\n\n"
+            "Example EVM: `/addwallet 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045`",
             parse_mode="Markdown",
         )
         return
 
+    chain_type  = _detect_chain(address)
+    chain_label = _CHAIN_LABELS.get(chain_type, chain_type.upper())
+    canonical   = _canonical_address(address, chain_type)
+
     wallets = user.get("monitored_wallets", [])
-    if any(w["address"].lower() == address.lower() for w in wallets):
-        send_message(chat_id, f"✅ `{address}` is already being monitored.", parse_mode="Markdown")
+    # Duplicate check — case-insensitive for EVM, exact for others
+    already = any(
+        w["address"].lower() == canonical.lower() if chain_type == "evm"
+        else w["address"] == canonical
+        for w in wallets
+    )
+    if already:
+        send_message(chat_id, f"✅ `{canonical}` is already being monitored.", parse_mode="Markdown")
         return
 
     if len(wallets) >= WALLET_LIMIT_CRYPTO:
@@ -2390,27 +2449,29 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
         )
         return
 
-    send_message(chat_id, f"🔍 Checking `{address}`...", parse_mode="Markdown")
+    send_message(chat_id, f"🔍 Checking `{canonical}` ({chain_label})...", parse_mode="Markdown")
 
-    # GoPlus risk check — EVM only, best-effort non-blocking
-    is_evm = address.startswith("0x")
-    risk = _goplus_risk_check(address) if is_evm else {}
+    # GoPlus risk check — EVM and Solana supported; TON/Bitcoin skipped
+    goplus_chain_id = _GOPLUS_CHAIN_IDS.get(chain_type)
+    risk = _goplus_risk_check(canonical, goplus_chain_id) if goplus_chain_id else {}
     risk_flags = [k for k, v in risk.items() if v == "1"]
     risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
 
-    # Register with Alchemy Notify
-    alchemy_ok = _alchemy_add_wallet(address)
-    if not alchemy_ok:
-        send_message(
-            chat_id,
-            "⚠️ Could not register wallet with the monitoring network. "
-            "Please try again in a few minutes.",
-        )
-        return
+    # Register with Alchemy Notify — EVM only (Solana/TON/Bitcoin use polling monitors)
+    if chain_type == "evm":
+        alchemy_ok = _alchemy_add_wallet(canonical)
+        if not alchemy_ok:
+            send_message(
+                chat_id,
+                "⚠️ Could not register wallet with the monitoring network. "
+                "Please try again in a few minutes.",
+            )
+            return
 
-    # Store in DynamoDB
+    # Store in DynamoDB user record + wallet mapping
     wallet_entry = {
-        "address":    address.lower(),
+        "address":    canonical,
+        "chain_type": chain_type,
         "label":      f"Wallet {len(wallets) + 1}",
         "added_at":   datetime.now(timezone.utc).isoformat(),
         "risk_level": risk_level,
@@ -2418,17 +2479,34 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
     }
     wallets.append(wallet_entry)
     update_user(user["user_id"], {"monitored_wallets": wallets})
-    _store_wallet_mapping(address, user["user_id"])
+    _store_wallet_mapping(canonical, user["user_id"], chain_type)
 
     risk_line = ""
     if risk_flags:
-        risk_line = f"\n⚠️ *GoPlus Risk:* {risk_level} — {', '.join(risk_flags[:3])}"
+        risk_line = f"\n⚠️ *Risk flags:* {risk_level} — {', '.join(risk_flags[:3])}"
+
+    # Alert cadence note differs by chain
+    if chain_type == "evm":
+        alert_note = "You'll receive a Telegram alert for any transfer activity on this address."
+    elif chain_type == "solana":
+        alert_note = (
+            "Your Solana wallet is monitored every 15 minutes. "
+            "You'll receive an alert for new transaction activity."
+        )
+    elif chain_type == "ton":
+        alert_note = (
+            "Your TON wallet is monitored every 15 minutes. "
+            "You'll receive an alert for new transaction activity."
+        )
+    else:
+        alert_note = "Wallet stored. Activity monitoring will check periodically."
 
     send_message(
         chat_id,
         f"✅ *Wallet added to monitoring*\n\n"
-        f"`{address}`{risk_line}\n\n"
-        f"You'll receive a Telegram alert for any transfer activity on this address.\n\n"
+        f"*Address:* `{canonical}`\n"
+        f"*Network:* {chain_label}{risk_line}\n\n"
+        f"{alert_note}\n\n"
         f"Wallets monitored: {len(wallets)}/{WALLET_LIMIT_CRYPTO}",
         parse_mode="Markdown",
     )
@@ -2441,24 +2519,38 @@ def handle_removewallet(chat_id: int, address_raw: str | None, user: dict) -> No
         return
 
     if not address_raw:
-        lines = "\n".join(f"• `{w['address']}`" for w in wallets)
+        lines = "\n".join(
+            f"• `{w['address']}` ({_CHAIN_LABELS.get(w.get('chain_type', 'evm'), 'EVM')})"
+            for w in wallets
+        )
         send_message(
             chat_id,
             f"Your monitored wallets:\n\n{lines}\n\n"
-            "To remove one: `/removewallet 0xAddress`",
+            "To remove one: `/removewallet <address>`",
             parse_mode="Markdown",
         )
         return
 
-    address = address_raw.strip().lower()
-    match = next((w for w in wallets if w["address"].lower() == address), None)
+    query = address_raw.strip()
+    # Case-insensitive for EVM, case-sensitive for others
+    match = next(
+        (w for w in wallets
+         if (w.get("chain_type", "evm") == "evm" and w["address"].lower() == query.lower())
+         or (w.get("chain_type", "evm") != "evm" and w["address"] == query)),
+        None,
+    )
     if not match:
-        send_message(chat_id, f"❌ `{address}` is not in your monitored wallets.", parse_mode="Markdown")
+        send_message(chat_id, f"❌ `{query}` is not in your monitored wallets.", parse_mode="Markdown")
         return
 
-    _alchemy_remove_wallet(address)
-    _remove_wallet_mapping(address)
-    wallets = [w for w in wallets if w["address"].lower() != address]
+    stored_address = match["address"]
+    chain_type     = match.get("chain_type", "evm")
+
+    # Only Alchemy Notify needs a removal call for EVM wallets
+    if chain_type == "evm":
+        _alchemy_remove_wallet(stored_address)
+    _remove_wallet_mapping(stored_address, chain_type)
+    wallets = [w for w in wallets if w["address"] != stored_address]
     update_user(user["user_id"], {"monitored_wallets": wallets})
     send_message(chat_id, f"✅ `{address}` removed from monitoring.", parse_mode="Markdown")
 
@@ -2484,14 +2576,17 @@ def handle_wallets(chat_id: int, user: dict) -> None:
 
     lines = []
     for w in wallets:
-        risk_tag = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(w.get("risk_level", "LOW"), "⚪")
-        lines.append(f"{risk_tag} `{w['address']}`\n   Added: {w['added_at'][:10]}")
+        risk_tag    = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(w.get("risk_level", "LOW"), "⚪")
+        chain_label = _CHAIN_LABELS.get(w.get("chain_type", "evm"), "EVM")
+        addr        = w["address"]
+        short       = f"{addr[:6]}...{addr[-4:]}" if len(addr) > 12 else addr
+        lines.append(f"{risk_tag} `{addr}`\n   *Network:* {chain_label} | Added: {w['added_at'][:10]}")
 
     send_message(
         chat_id,
         f"👛 *Monitored Wallets* ({len(wallets)}/{WALLET_LIMIT_CRYPTO})\n\n"
         + "\n\n".join(lines)
-        + "\n\nTo remove: `/removewallet 0xAddress`",
+        + "\n\nTo remove: `/removewallet <address>`",
         parse_mode="Markdown",
     )
 
@@ -2510,47 +2605,57 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
     if not wallets:
         send_message(
             chat_id,
-            "No wallets monitored yet. Add one with `/addwallet 0xYourAddress` first.",
+            "No wallets monitored yet. Add one with `/addwallet <address>` first.\n\n"
+            "Supported: EVM (`0x...`), Solana, TON (`EQ...`/`UQ...`), Bitcoin.",
             parse_mode="Markdown",
         )
         return
 
     send_message(chat_id, f"🔍 Running risk check on {len(wallets)} wallet(s)...", parse_mode="Markdown")
 
-    for wallet in wallets:
-        address = wallet.get("address", "")
-        if not address.startswith("0x"):
-            continue
+    _malicious_fields = {
+        "phishing_activities":  "linked to phishing activity",
+        "blacklist_doubt":      "on security blacklists",
+        "darkweb_transactions": "linked to dark web activity",
+        "stealing_attack":      "linked to stealing attacks",
+        "cybercrime":           "linked to cybercrime",
+    }
 
-        short = f"{address[:6]}...{address[-4:]}"
-        critical = []
-        warnings = []
+    for wallet in wallets:
+        address    = wallet.get("address", "")
+        chain_type = wallet.get("chain_type", "evm")
+        chain_label = _CHAIN_LABELS.get(chain_type, chain_type.upper())
+        short      = f"{address[:6]}...{address[-4:]}" if len(address) > 12 else address
+        critical   = []
+        warnings   = []
         info_lines = []
 
-        # Address-level security flags
-        addr_risk = _goplus_risk_check(address)
-        malicious_fields = {
-            "phishing_activities": "linked to phishing activity",
-            "blacklist_doubt":     "on security blacklists",
-            "darkweb_transactions": "linked to dark web activity",
-            "stealing_attack":     "linked to stealing attacks",
-            "cybercrime":          "linked to cybercrime",
-        }
-        for field, label in malicious_fields.items():
-            if addr_risk.get(field) == "1":
-                critical.append(f"🚨 Address {label}")
+        if chain_type in ("evm", "solana"):
+            # GoPlus address-level security flags
+            goplus_chain_id = _GOPLUS_CHAIN_IDS.get(chain_type, 1)
+            addr_risk = _goplus_risk_check(address, goplus_chain_id)
+            for field, label in _malicious_fields.items():
+                if addr_risk.get(field) == "1":
+                    critical.append(f"🚨 Address {label}")
 
-        # Aave V3 health factor
-        hf = _aave_health_factor(address)
-        if hf is not None:
-            if hf < 1.2:
-                critical.append(f"🚨 Aave health factor: {hf:.3f} — liquidation imminent")
-            elif hf < 1.5:
-                warnings.append(f"⚠️ Aave health factor: {hf:.3f} — approaching liquidation threshold")
+        if chain_type == "evm":
+            # Aave V3 health factor — EVM only
+            hf = _aave_health_factor(address)
+            if hf is not None:
+                if hf < 1.2:
+                    critical.append(f"🚨 Aave health factor: {hf:.3f} — liquidation imminent")
+                elif hf < 1.5:
+                    warnings.append(f"⚠️ Aave health factor: {hf:.3f} — approaching liquidation threshold")
+                else:
+                    info_lines.append(f"✅ Aave health factor: {hf:.3f} — safe")
             else:
-                info_lines.append(f"✅ Aave health factor: {hf:.3f} — safe")
-        else:
-            info_lines.append("ℹ️ No active Aave V3 position detected")
+                info_lines.append("ℹ️ No active Aave V3 position detected")
+        elif chain_type == "solana":
+            info_lines.append("ℹ️ DeFi position monitoring (Solana) — coming soon")
+        elif chain_type == "ton":
+            info_lines.append("ℹ️ TON wallet monitored via 15-minute polling")
+        elif chain_type == "bitcoin":
+            info_lines.append("ℹ️ Bitcoin wallet stored — activity alerts via periodic check")
 
         if critical:
             risk_badge = "🔴 *CRITICAL*"
@@ -2562,6 +2667,7 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
         lines = [
             f"🛡 *Wallet Risk Check*\n",
             f"*Address:* `{short}`",
+            f"*Network:* {chain_label}",
             f"*Risk Level:* {risk_badge}\n",
         ]
         lines.extend(critical)
@@ -2572,7 +2678,7 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
         lines.append("\n_RelayShield Crypto Shield_")
 
         send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
-        logger.info("riskcheck — chat_id=%s address=%s", chat_id, address)
+        logger.info("riskcheck — chat_id=%s address=%s chain=%s", chat_id, address, chain_type)
 
 
 def handle_checkvault(chat_id: int, url_raw: str | None, user: dict) -> None:

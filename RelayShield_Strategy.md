@@ -3584,6 +3584,108 @@ Current domain monitoring detects lookalikes after DNS propagation — typically
 
 ---
 
+## 20. Crypto Shield — Product Awareness Strategy
+
+*Added May 2026 — to be activated once Crypto Shield has token approval alerts and drainer detection live. Current feature depth (wallet monitoring + transaction alerts) is table stakes. Awareness investment before feature depth is established will yield poor conversion.*
+
+### Activation Condition
+
+Pursue awareness channels below once Crypto Shield has at least 3 of 5 planned features live:
+1. Token approval alerts
+2. Drainer wallet detection
+3. Liquidation warnings
+4. Gas spike alerts
+5. Scam contract detection
+
+### Channel Priority — Crypto Shield
+
+| Channel | Why | Tactic |
+|---|---|---|
+| **Crypto Twitter / X** | Primary discovery channel for DeFi and Web3 users — highest signal/noise for this audience | Post a real wallet drainer being caught in real time; thread on token approval risks |
+| **Farcaster** | Web3-native social graph, early adopters, high credibility signal | Short demo post with on-chain proof; engage security-focused casts |
+| **Telegram groups** | Crypto trading and DeFi groups are where the target audience already communicates | Organic demos in relevant groups; bot demo links |
+| **Discord** | DeFi protocol servers (Aave, Uniswap, Compound) have dedicated security channels | Contribute to security discussions; link to Telegram bot demo |
+| **Mirror.xyz** | Web3 content platform — posts indexed in crypto circles, builds credibility | One post on wallet drainer attack patterns and detection |
+| **Reddit** | r/CryptoCurrency, r/ethfinance, r/defi — large audience, high skepticism | Educational posts with real data, not promotional; link in comments when relevant |
+| **LinkedIn** | Relevant for B2B/MSP angle, not primary for Crypto Shield consumer tier | Cross-post only |
+
+### Viral Hook
+
+The single highest-leverage awareness moment: a live demonstration showing RelayShield catching a real wallet drainer or unlimited token approval — ideally with a TX hash verifiable on-chain. This is the "show, don't tell" moment that crypto audiences respond to.
+
+### Channels to Avoid Until Traction
+
+- Paid ads — premature before product-market fit signals
+- Influencer/KOL outreach — cost exceeds return at current stage
+- App store / product listing sites — Telegram-native product doesn't fit that discovery model
+
+---
+
+## 21. Crypto Shield — Risk Intelligence Positioning
+
+*Added May 2026*
+
+### The Competitive Landscape
+
+**Webacy** and **De.fi Shield** are the two direct Crypto Shield competitors. Both are web dashboards — Webacy targets professional DeFi traders with wallet risk scores, token risk analysis, vault exposure, and stablecoin de-peg monitoring. De.fi is a portfolio tracker first, with a Shield layer that scores tokens, NFTs, and smart contracts. Both have browser extensions and web UIs as their primary surface. Neither has a Telegram or WhatsApp presence.
+
+**Portfolio tracking is not RelayShield territory.** Charts, historical balances, and portfolio composition require a visual interface. Building a portfolio tracker to compete with De.fi would require a web UI and take RelayShield off its core messaging-first motion. The correct answer is to ignore that feature entirely — users who need portfolio tracking use Zapper or De.fi. RelayShield's job is to tell them whether what they're doing or holding is dangerous.
+
+### The Messaging Superpower
+
+Webacy and De.fi require users to visit a dashboard they rarely open. RelayShield lives inside Telegram and WhatsApp — apps users open 30–50 times a day. That changes the threat response window from hours to seconds, and it changes the user's relationship with security from active vigilance to passive protection.
+
+The positioning statement: *Webacy and De.fi are dashboards you have to go check. RelayShield is a guardian that finds you.*
+
+This isn't a distribution advantage. It's a product architecture advantage that competitors cannot easily replicate — their dashboards, business models, and brand identity are all built around the web UI paradigm.
+
+### Risk Intelligence as the Right Competitive Direction
+
+Rather than building approval inventories or portfolio charts (which belong on a web UI), RelayShield should pursue **on-demand risk intelligence** delivered natively in messaging. This matches the bot interaction model perfectly:
+
+- *"Is this token safe before I buy?"* → `/checktoken 0x...` → score + risk flags in seconds
+- *"What's my overall exposure?"* → `/riskcheck` → wallet risk score + top 3 issues
+- *"Is this protocol safe to deposit into?"* → `/checkvault 0x...` → protocol risk score
+- *"Is this NFT collection legitimate?"* → `/checknft 0x...` → collection risk score
+
+Each of these is a **point-in-time answer to a question** — the ideal bot interaction. None require a visual UI. All are immediately actionable without leaving Telegram.
+
+GoPlus Security already powers RelayShield's counterparty screening (address_security API). GoPlus has additional APIs that cover this entire roadmap:
+- **Token Security API** — rug pull flags, mint authority, trading restrictions, honeypot, buy/sell taxes
+- **NFT Security API** — fake collections, malicious contracts, counterfeit NFTs
+- **dApp/contract Security** — protocol risk scoring, audit status, proxy contract flags
+- **Approval Security API** — risk-rank outstanding approvals without building an inventory UI
+
+This means the risk intelligence build is largely GoPlus API integration + Telegram command handlers — no new external data contracts, no web UI, no fundamental architecture change.
+
+### Why Risk Intelligence Before Lifecycle Messages
+
+The Telegram lifecycle messages (Day 3, monthly digest, quarterly sweep) are planned but not yet enriched. Building them now — without intelligence — produces messages that say "here's what happened" rather than "here's what's dangerous right now." That's a missed opportunity.
+
+Building the risk intelligence layer first means:
+
+- **Day 3**: baseline wallet risk snapshot on the monitored wallet(s) — sets the expectation that RelayShield knows your wallet
+- **Monthly digest**: risk changes over the month — new high-risk approvals, flagged inbound tokens, Aave health factor trend
+- **Quarterly sweep**: full wallet audit — GoPlus token security on every token held, unlimited approval flags, protocol exposure score
+
+The lifecycle messages don't get built until the intelligence layer exists. They get built *using* it.
+
+### Build Sequence
+
+| # | Feature | API | Priority |
+|---|---|---|---|
+| RISK-1 | `/checktoken 0x...` — token risk on demand | GoPlus Token Security | ⚡ Build now |
+| RISK-2 | `/checknft 0x...` — NFT collection risk on demand | GoPlus NFT Security | ⚡ Build now |
+| RISK-3 | `/riskcheck` — aggregate wallet risk score | GoPlus multi-API | ⚡ After RISK-1/2 |
+| RISK-4 | Passive inbound token risk — auto-flag on transfer | GoPlus Token Security | ⚡ After RISK-3 |
+| TG-1/2/3 | Lifecycle messages enriched with intelligence | Internal | Build after RISK-1–4 |
+
+### Long-Term Moat
+
+Once the risk intelligence layer is live, RelayShield has a feature set that **Webacy and De.fi cannot replicate without abandoning their dashboard model**. Every risk check, every alert, every digest becomes a native messaging interaction. The moat deepens as more users onboard and the alert history creates a longitudinal risk record per wallet — something no dashboard product can match without the same passive monitoring architecture.
+
+---
+
 ## 17. Secrets Manager Keys
 
 | Secret Name | Status |

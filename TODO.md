@@ -294,6 +294,29 @@
 
 ---
 
+## 🧠 Crypto Shield — Risk Intelligence (build before lifecycle messages)
+
+*Added May 2026. Competitive strategy: Webacy and De.fi are web dashboards users rarely visit. RelayShield's superpower is messaging-first push delivery. Portfolio tracking belongs on a web UI — not in a bot. Risk intelligence (on-demand scores + passive flags) is the right direction: point-in-time answers to specific questions, natively in Telegram, requiring no visual interface. Build this layer first — Day 3, monthly digest, and quarterly sweep are intentionally deferred until risk intelligence exists so they ship enriched, not retrofitted. See Strategy doc Section 21 for full competitive rationale.*
+
+**GoPlus APIs used:** Token Security, NFT Security, dApp/contract security (all free tier)
+
+| # | Item | Status |
+|---|---|---|
+| RISK-1 | **`/checktoken 0x...` — on-demand token risk** — Call GoPlus Token Security API (`/api/v1/token_security/1?contract_addresses={addr}`). Parse key flags: `is_honeypot`, `is_mintable` (unlimited supply risk), `buy_tax` / `sell_tax` (>10% suspicious, >50% critical), `cannot_sell_all` (honeypot variant), `is_blacklisted`, `is_open_source`, `is_proxy`, `owner_change_balance`. Format as Telegram message: overall risk level (Low/Medium/High/Critical) + bulleted flags + "do not interact" warning if critical. Register `/checktoken` in Telegram webhook command dispatcher and `/help` menu. Crypto Shield tier-gated + PAYG fallback. ~2–3 hrs. | ⬜ Pending — next build |
+| RISK-2 | **`/checknft 0x...` — on-demand NFT collection risk** — Call GoPlus NFT Security API (`/api/v1/nft_security/1?contract_addresses={addr}`). Parse flags: `is_transferable` (soulbound/non-transferable), `malicious_contract`, `nft_proxy`, `privileged_burn` (owner can destroy holdings), `stolen_nft` (known stolen), `fake_token` (counterfeit collection). Same Low/Medium/High/Critical format. Register `/checknft` in dispatcher + help. Crypto Shield tier-gated + PAYG fallback. ~2 hrs. | ⬜ Pending — after RISK-1 |
+| RISK-3 | **`/riskcheck` — aggregate wallet risk score** — Run three checks in parallel: (1) GoPlus address_security on the monitored wallet itself; (2) count of active unlimited approvals via Alchemy `alchemy_getAssetTransfers` (filter approve() selector); (3) Aave V3 health factor if wallet has a position. Synthesise into a single risk score (1–10) with top 3 findings. Format: score badge (🟢 Low / 🟡 Medium / 🔴 High) + top issues + recommended actions. Register `/riskcheck` in dispatcher + help. Crypto Shield only. ~4 hrs. | ⬜ Pending — after RISK-1/2 |
+| RISK-4 | **Passive inbound token risk alerts** — On every inbound transfer detected by Alchemy webhook, call GoPlus Token Security API on the token contract address. If `is_honeypot=1` or `buy_tax>50` or `cannot_sell_all=1`, fire a Telegram alert before the user interacts with the token: "⚠️ High-risk token received — do not sell or approve until reviewed." This is the moat feature: Webacy/De.fi require you to check; RelayShield warns you before you act. ~2–3 hrs. | ⬜ Pending — after RISK-3 |
+
+### Lifecycle messages — deferred until risk intelligence layer complete
+
+| # | Item | Notes |
+|---|---|---|
+| TG-1 | **Monthly digest — Telegram delivery + risk intelligence enrichment** — Add Telegram delivery branch (no template needed — freeform). Enrich content: wallet risk score delta, new high-risk approvals detected, flagged inbound tokens received. Deferred from May 2026 — build after RISK-1 through RISK-4 so digest ships enriched. | ⬜ Pending — after RISK-4 |
+| TG-2 | **Day 3 sender — Telegram delivery + baseline risk snapshot** — Add Telegram delivery branch. Enrich with a one-time wallet risk baseline: run `/riskcheck` equivalent at Day 3 and include results in the onboarding follow-up. Fix IAM PassRole permission on Stripe Lambda at same time. Deferred — build after RISK-3. | ⬜ Pending — after RISK-3 |
+| TG-3 | **Quarterly sweep — Telegram delivery + full wallet audit** — Add Telegram delivery branch. Enrich as a full security audit: GoPlus token security on all held tokens, unlimited approval count, Aave health factor, top 3 risks. The "annual security review" framing that justifies the subscription. Deferred — build after RISK-4. | ⬜ Pending — after RISK-4 |
+
+---
+
 ## 🔮 Phase 2 Features
 
 | # | Item | Status |

@@ -39,7 +39,7 @@ CRYPTO_TIERS = {"crypto-shield", "crypto_shield"}
 
 # Gas thresholds in gwei
 GAS_LOW_THRESHOLD  = 10   # below this → good time to transact
-GAS_HIGH_THRESHOLD = 1    # TEST ONLY — revert to 80 after testing
+GAS_HIGH_THRESHOLD = 80   # above this → avoid non-urgent transactions
 
 _secret_cache: dict[str, str] = {}
 
@@ -121,7 +121,7 @@ def _set_last_state(network: str, state: str) -> None:
 def _get_crypto_shield_users() -> list[dict]:
     table  = dynamodb.Table(USERS_TABLE)
     items  = []
-    kwargs: dict = {"FilterExpression": Attr("tier").is_in(list(CRYPTO_TIERS))}
+    kwargs: dict = {"FilterExpression": Attr("subscription_tier").is_in(list(CRYPTO_TIERS))}
     while True:
         resp = table.scan(**kwargs)
         items.extend(resp.get("Items", []))

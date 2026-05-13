@@ -47,6 +47,7 @@ ACTIVITY_LOG_TABLE       = "relayshield_wallet_activity_log"
 ALCHEMY_SECRET_NAME      = "relayshield/alchemy_api_key"
 TG_SECRET_NAME           = "relayshield/telegram_bot_token"
 GOPLUS_BASE_URL          = "https://api.gopluslabs.io/api/v1/address_security"
+GOPLUS_TOKEN_URL         = "https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
 TELEGRAM_API_BASE        = "https://api.telegram.org/bot{token}/{method}"
 
 # Drainer detection thresholds
@@ -113,6 +114,66 @@ def _goplus_risk_check(address: str) -> dict:
             return data.get("result", {})
     except Exception:
         return {}
+
+
+def _goplus_token_security(contract_address: str, chain_id: int) -> dict:
+    """Check GoPlus Token Security for a token contract. Returns token info or {}."""
+    try:
+        url = GOPLUS_TOKEN_URL.format(chain_id=chain_id) + f"?contract_addresses={contract_address}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        result = data.get("result", {})
+        # Token security result is keyed by lowercase contract address
+        return result.get(contract_address.lower(), {})
+    except Exception as exc:
+        logger.warning("GoPlus token security failed contract=%s: %s", contract_address, exc)
+        return {}
+
+
+def _format_token_risk_line(token_info: dict) -> str:
+    """Return a formatted risk warning for a token, or empty string if safe."""
+    if not token_info:
+        return ""
+
+    critical = []
+    warnings = []
+
+    if token_info.get("is_honeypot") == "1":
+        critical.append("honeypot — you cannot sell this token")
+    if token_info.get("is_airdrop_scam") == "1":
+        critical.append("known airdrop scam")
+    if token_info.get("fake_token") == "1":
+        critical.append("fake token impersonating a real project")
+
+    try:
+        sell_tax = float(token_info.get("sell_tax") or 0)
+        if sell_tax >= 50:
+            critical.append(f"sell tax {sell_tax:.0f}% — effectively unsellable")
+        elif sell_tax >= 10:
+            warnings.append(f"high sell tax ({sell_tax:.0f}%)")
+    except (ValueError, TypeError):
+        pass
+
+    if token_info.get("transfer_pausable") == "1":
+        warnings.append("transfers can be paused by owner")
+    if token_info.get("hidden_owner") == "1":
+        warnings.append("hidden owner — contract can be taken over")
+    if token_info.get("can_take_back_ownership") == "1":
+        warnings.append("ownership can be reclaimed")
+
+    if critical:
+        return (
+            "\n\n🚨 *DANGEROUS TOKEN RECEIVED*\n"
+            + "\n".join(f"• {c}" for c in critical)
+            + "\n⛔ Do NOT swap, approve, or visit any links referencing this token"
+        )
+    if warnings:
+        return (
+            "\n\n⚠️ *Token Risk Flags*\n"
+            + "\n".join(f"• {w}" for w in warnings)
+        )
+    return ""
 
 
 def _send_telegram(chat_id: int, text: str) -> None:
@@ -192,8 +253,20 @@ _EXPLORER_MAP = {
 
 _EVM_NETWORKS = {"ETH_MAINNET", "BASE_MAINNET", "MATIC_MAINNET", "ARB_MAINNET", "OPT_MAINNET"}
 
+# GoPlus chain IDs for token security checks
+_NETWORK_CHAIN_IDS = {
+    "ETH_MAINNET":   1,
+    "BASE_MAINNET":  8453,
+    "MATIC_MAINNET": 137,
+    "ARB_MAINNET":   42161,
+    "OPT_MAINNET":   10,
+}
 
-def _format_alert(activity: dict, monitored_address: str, risk: dict) -> str:
+# Zero address — native ETH transfers use this as the "contract", skip token check
+_ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+
+def _format_alert(activity: dict, monitored_address: str, risk: dict, token_risk_line: str = "") -> str:
     from_addr = activity.get("fromAddress", "unknown")
     to_addr   = activity.get("toAddress", "unknown")
     value     = activity.get("value", 0)
@@ -241,7 +314,8 @@ def _format_alert(activity: dict, monitored_address: str, risk: dict) -> str:
         f"*Network:* {network}\n"
         f"*Counterparty:* `{short_other}`"
         f"{risk_line}"
-        f"{tx_line}\n\n"
+        f"{tx_line}"
+        f"{token_risk_line}\n\n"
         f"_RelayShield Crypto Shield_"
     )
 
@@ -295,7 +369,24 @@ def lambda_handler(event: dict, context) -> dict:
         is_evm       = network_raw in _EVM_NETWORKS
         risk = _goplus_risk_check(counterparty) if counterparty and is_evm else {}
 
-        alert = _format_alert(activity, monitored, risk)
+        # RISK-4: Token security check on inbound ERC-20 transfers
+        token_risk_line = ""
+        is_inbound = to_addr == monitored
+        if is_inbound and is_evm:
+            raw_contract  = activity.get("rawContract") or {}
+            token_address = (raw_contract.get("address") or "").lower()
+            if token_address and token_address != _ZERO_ADDRESS:
+                chain_id = _NETWORK_CHAIN_IDS.get(network_raw)
+                if chain_id:
+                    token_info     = _goplus_token_security(token_address, chain_id)
+                    token_risk_line = _format_token_risk_line(token_info)
+                    if token_risk_line:
+                        logger.info(
+                            "Token risk detected — contract=%s network=%s",
+                            token_address, network_raw,
+                        )
+
+        alert = _format_alert(activity, monitored, risk, token_risk_line)
         _send_telegram(int(chat_id), alert)
         logger.info("Wallet alert sent — user=%s address=%s", user.get("user_id"), monitored)
 

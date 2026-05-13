@@ -947,6 +947,8 @@ def msg_help(tier: str) -> str:
             "• /addwallet <address> — Add a wallet to monitoring (EVM or Bitcoin)\n"
             "• /wallets — List your monitored wallets\n"
             "• /removewallet <address> — Remove a wallet from monitoring\n"
+            "• /riskcheck — Risk score for all your monitored wallets\n"
+            "• /checkvault <url> — Check a DeFi protocol for audit and contract risks\n"
             "• /checktoken <address> — Check a token contract for rug pull and honeypot risks\n"
             "• /checknft <address> — Check an NFT collection contract for risks\n"
         )
@@ -2225,9 +2227,53 @@ def _goplus_risk_check(address: str) -> dict:
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read())
-            return data.get("result", {}).get(address.lower(), {})
+            return data.get("result", {})
     except Exception as exc:
         logger.warning("GoPlus check failed for %s: %s", address, exc)
+        return {}
+
+
+_AAVE_V3_POOL             = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
+_GET_USER_ACCOUNT_DATA    = "0xbf92857c"
+_RAY                      = 10 ** 27
+
+
+def _aave_health_factor(wallet: str) -> float | None:
+    """Return Aave V3 health factor for wallet, or None if no position."""
+    try:
+        api_key  = get_secret(ALCHEMY_SECRET_NAME, "api_key")
+        url      = f"https://eth-mainnet.g.alchemy.com/v2/{api_key}"
+        calldata = _GET_USER_ACCOUNT_DATA + wallet.lower().replace("0x", "").zfill(64)
+        body     = json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "eth_call",
+            "params": [{"to": _AAVE_V3_POOL, "data": calldata}, "latest"],
+        }).encode()
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            result = json.loads(resp.read()).get("result", "0x").replace("0x", "")
+        if len(result) < 6 * 64:
+            return None
+        raw = int(result[5 * 64: 6 * 64], 16)
+        if raw == 0 or raw >= 2 ** 128:
+            return None
+        return raw / _RAY
+    except Exception:
+        return None
+
+
+def _goplus_dapp_security(url_input: str) -> dict:
+    """Query GoPlus dApp security by URL. Returns result dict or {} on failure."""
+    try:
+        if not url_input.startswith("http"):
+            url_input = "https://" + url_input
+        import urllib.parse
+        api_url = "https://api.gopluslabs.io/api/v1/dapp_security?url=" + urllib.parse.quote(url_input, safe="")
+        req = urllib.request.Request(api_url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        return data.get("result", {})
+    except Exception as exc:
+        logger.warning("dApp security check failed url=%s: %s", url_input, exc)
         return {}
 
 
@@ -2448,6 +2494,171 @@ def handle_wallets(chat_id: int, user: dict) -> None:
         + "\n\nTo remove: `/removewallet 0xAddress`",
         parse_mode="Markdown",
     )
+
+
+def handle_riskcheck(chat_id: int, user: dict) -> None:
+    tier = user.get("tier") or user.get("subscription_tier", "")
+    if tier not in CRYPTO_TIERS:
+        send_message(
+            chat_id,
+            "Wallet risk checks are available on the Crypto Shield plan.\n"
+            "Contact relayshieldadmin@gmail.com to upgrade.",
+        )
+        return
+
+    wallets = user.get("monitored_wallets", [])
+    if not wallets:
+        send_message(
+            chat_id,
+            "No wallets monitored yet. Add one with `/addwallet 0xYourAddress` first.",
+            parse_mode="Markdown",
+        )
+        return
+
+    send_message(chat_id, f"🔍 Running risk check on {len(wallets)} wallet(s)...", parse_mode="Markdown")
+
+    for wallet in wallets:
+        address = wallet.get("address", "")
+        if not address.startswith("0x"):
+            continue
+
+        short = f"{address[:6]}...{address[-4:]}"
+        critical = []
+        warnings = []
+        info_lines = []
+
+        # Address-level security flags
+        addr_risk = _goplus_risk_check(address)
+        malicious_fields = {
+            "phishing_activities": "linked to phishing activity",
+            "blacklist_doubt":     "on security blacklists",
+            "darkweb_transactions": "linked to dark web activity",
+            "stealing_attack":     "linked to stealing attacks",
+            "cybercrime":          "linked to cybercrime",
+        }
+        for field, label in malicious_fields.items():
+            if addr_risk.get(field) == "1":
+                critical.append(f"🚨 Address {label}")
+
+        # Aave V3 health factor
+        hf = _aave_health_factor(address)
+        if hf is not None:
+            if hf < 1.2:
+                critical.append(f"🚨 Aave health factor: {hf:.3f} — liquidation imminent")
+            elif hf < 1.5:
+                warnings.append(f"⚠️ Aave health factor: {hf:.3f} — approaching liquidation threshold")
+            else:
+                info_lines.append(f"✅ Aave health factor: {hf:.3f} — safe")
+        else:
+            info_lines.append("ℹ️ No active Aave V3 position detected")
+
+        if critical:
+            risk_badge = "🔴 *CRITICAL*"
+        elif warnings:
+            risk_badge = "🟡 *MEDIUM RISK*"
+        else:
+            risk_badge = "🟢 *LOW RISK*"
+
+        lines = [
+            f"🛡 *Wallet Risk Check*\n",
+            f"*Address:* `{short}`",
+            f"*Risk Level:* {risk_badge}\n",
+        ]
+        lines.extend(critical)
+        lines.extend(warnings)
+        lines.extend(info_lines)
+        if not critical and not warnings:
+            lines.append("✅ No active risk flags on this wallet.")
+        lines.append("\n_RelayShield Crypto Shield_")
+
+        send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+        logger.info("riskcheck — chat_id=%s address=%s", chat_id, address)
+
+
+def handle_checkvault(chat_id: int, url_raw: str | None, user: dict) -> None:
+    tier = user.get("tier") or user.get("subscription_tier", "")
+    if tier not in CRYPTO_TIERS:
+        send_message(
+            chat_id,
+            "Vault risk checks are available on the Crypto Shield plan.\n"
+            "Contact relayshieldadmin@gmail.com to upgrade.",
+        )
+        return
+
+    if not url_raw:
+        send_message(
+            chat_id,
+            "Please provide the DeFi protocol URL:\n\n"
+            "`/checkvault app.aave.com`\n"
+            "`/checkvault app.uniswap.org`\n"
+            "`/checkvault curve.fi`",
+            parse_mode="Markdown",
+        )
+        return
+
+    send_message(chat_id, f"🔍 Checking vault: `{url_raw}`...", parse_mode="Markdown")
+
+    info = _goplus_dapp_security(url_raw)
+    if not info:
+        send_message(
+            chat_id,
+            "⚠️ No security data found for that URL.\n"
+            "Only major DeFi protocols with tracked contracts are supported.",
+        )
+        return
+
+    project   = info.get("project_name", url_raw)
+    is_audit  = info.get("is_audit", 0)
+    trust     = info.get("trust_list", 0)
+    audits    = info.get("audit_info", [])
+    contracts = []
+    for chain in info.get("contracts_security", []):
+        contracts.extend(chain.get("contracts", []))
+
+    critical = []
+    warnings = []
+    good     = []
+
+    malicious_contracts = [c for c in contracts if c.get("malicious_contract") == 1]
+    malicious_creators  = [c for c in contracts if c.get("malicious_creator") == 1]
+    unverified          = [c for c in contracts if c.get("is_open_source") == 0]
+
+    if malicious_contracts:
+        critical.append(f"🚨 {len(malicious_contracts)} malicious contract(s) detected")
+    if malicious_creators:
+        critical.append(f"🚨 {len(malicious_creators)} contract(s) deployed by a malicious creator")
+    if not is_audit:
+        warnings.append("⚠️ No security audit on record — unaudited protocol")
+    if unverified:
+        warnings.append(f"⚠️ {len(unverified)} unverified (closed-source) contract(s)")
+
+    if is_audit and audits:
+        firms = ", ".join(a.get("audit_firm", "") for a in audits if a.get("audit_firm"))
+        good.append(f"✅ Audited by: {firms}")
+    if trust:
+        good.append("✅ On verified protocol trust list")
+    if not critical and not warnings:
+        good.append("✅ No contract risk flags detected")
+
+    if critical:
+        risk_badge = "🔴 *CRITICAL RISK*"
+    elif warnings:
+        risk_badge = "🟡 *MEDIUM RISK*"
+    else:
+        risk_badge = "🟢 *LOW RISK*"
+
+    lines = [
+        "🏦 *Vault / Protocol Risk Check*\n",
+        f"*Protocol:* {project}",
+        f"*Risk Level:* {risk_badge}\n",
+    ]
+    lines.extend(critical)
+    lines.extend(warnings)
+    lines.extend(good)
+    lines.append("\n_RelayShield Crypto Shield_")
+
+    send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+    logger.info("checkvault — chat_id=%s url=%s", chat_id, url_raw)
 
 
 def _goplus_token_security(address: str, chain_id: int = 1) -> dict:
@@ -2726,6 +2937,11 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_addmember(chat_id, user)
     elif cmd == "removemember":
         handle_removemember(chat_id, user)
+    elif cmd == "riskcheck":
+        handle_riskcheck(chat_id, user)
+    elif cmd.startswith("checkvault"):
+        arg = text.split(maxsplit=1)[1].strip() if len(text.split()) > 1 else None
+        handle_checkvault(chat_id, arg, user)
     elif cmd.startswith("checktoken"):
         address = text.split(maxsplit=1)[1].strip() if len(text.split()) > 1 else None
         handle_checktoken(chat_id, address, user)

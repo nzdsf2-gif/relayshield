@@ -3683,6 +3683,22 @@ The lifecycle messages don't get built until the intelligence layer exists. They
 
 **RISK-5 justification:** Completes the full DeFi interaction lifecycle — check the vault before depositing (`/checkvault`) then monitor the position after (liquidation alerts + `/riskcheck`). No competitor offers this pre-deposit + post-deposit protection arc in a single product. GoPlus dApp Security API covers audit status, auditor names, admin function risk, and known malicious flags — same API pattern as RISK-1/2, minimal additional build effort.
 
+### Phase 3: Risk Posture Dashboard (Not a Portfolio Tracker)
+
+After lifecycle messages are enriched with risk intelligence, users will accumulate a longitudinal risk record — breach history, wallet risk scores over time, approval activity, health factor trends. At that point a web dashboard becomes justified, but only as a **risk posture dashboard**, not a wealth tracker.
+
+**What it is NOT:** Portfolio value, asset allocation, price charts. Those belong in Zapper or De.fi.
+
+**What it IS:**
+- Historical risk score timeline per wallet and per identity (breach + crypto combined)
+- AI-driven remediation queue — ordered actions ranked by risk reduction impact, same as the breach remediation sequence but across the full threat surface
+- Evidence trail for compliance (GDPR/HIPAA incident report export)
+- Team risk posture for business admins — aggregate risk score across all monitored employees
+
+This positions RelayShield as a **security posture tool** in the same category as Tenable or Qualys, but priced and designed for individuals and SMBs. No competitor at this price point combines identity security (breach/SIM/domain) with crypto security (wallet/token/NFT/vault) into a single risk score with AI remediation paths.
+
+**Build trigger:** When monthly digest data shows users have 3+ months of risk history. Not before — the dashboard needs data to be meaningful, and users need the bot first to generate that data.
+
 ### Long-Term Moat
 
 Once the risk intelligence layer is live, RelayShield has a feature set that **Webacy and De.fi cannot replicate without abandoning their dashboard model**. Every risk check, every alert, every digest becomes a native messaging interaction. The moat deepens as more users onboard and the alert history creates a longitudinal risk record per wallet — something no dashboard product can match without the same passive monitoring architecture.

@@ -947,6 +947,8 @@ def msg_help(tier: str) -> str:
             "• /addwallet <address> — Add a wallet to monitoring (EVM or Bitcoin)\n"
             "• /wallets — List your monitored wallets\n"
             "• /removewallet <address> — Remove a wallet from monitoring\n"
+            "• /checktoken <address> — Check a token contract for rug pull and honeypot risks\n"
+            "• /checknft <address> — Check an NFT collection contract for risks\n"
         )
 
     if tier in DOMAIN_TIERS:
@@ -2448,6 +2450,217 @@ def handle_wallets(chat_id: int, user: dict) -> None:
     )
 
 
+def _goplus_token_security(address: str, chain_id: int = 1) -> dict:
+    try:
+        url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}?contract_addresses={address.lower()}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        return data.get("result", {}).get(address.lower(), {})
+    except Exception as exc:
+        logger.error("GoPlus token security failed addr=%s: %s", address, exc)
+        return {}
+
+
+def _goplus_nft_security(address: str, chain_id: int = 1) -> dict:
+    try:
+        url = f"https://api.gopluslabs.io/api/v1/nft_security/{chain_id}?contract_addresses={address.lower()}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        return data.get("result", {}).get(address.lower(), {})
+    except Exception as exc:
+        logger.error("GoPlus NFT security failed addr=%s: %s", address, exc)
+        return {}
+
+
+def _format_token_risk(address: str, info: dict) -> str:
+    short = f"{address[:6]}...{address[-4:]}"
+    name   = info.get("token_name", "Unknown Token")
+    symbol = info.get("token_symbol", "?")
+
+    critical_flags = []
+    warning_flags  = []
+
+    if info.get("is_honeypot") == "1":
+        critical_flags.append("🚨 Honeypot — you cannot sell this token")
+    if info.get("cannot_sell_all") == "1":
+        critical_flags.append("🚨 Cannot sell all tokens — honeypot variant")
+    if info.get("owner_change_balance") == "1":
+        critical_flags.append("🚨 Owner can change any holder's balance")
+    if info.get("selfdestruct") == "1":
+        critical_flags.append("🚨 Contract can self-destruct (funds destroyed)")
+    buy_tax = float(info.get("buy_tax") or 0)
+    sell_tax = float(info.get("sell_tax") or 0)
+    if sell_tax >= 0.5:
+        critical_flags.append(f"🚨 Sell tax: {sell_tax*100:.0f}% — effectively unsellable")
+    elif sell_tax >= 0.1:
+        warning_flags.append(f"⚠️ Sell tax: {sell_tax*100:.0f}%")
+    if buy_tax >= 0.1:
+        warning_flags.append(f"⚠️ Buy tax: {buy_tax*100:.0f}%")
+    if info.get("is_mintable") == "1":
+        warning_flags.append("⚠️ Mintable — owner can create unlimited supply")
+    if info.get("hidden_owner") == "1":
+        warning_flags.append("⚠️ Hidden owner — true controller not visible")
+    if info.get("can_take_back_ownership") == "1":
+        warning_flags.append("⚠️ Ownership can be reclaimed after renouncing")
+    if info.get("transfer_pausable") == "1":
+        warning_flags.append("⚠️ Transfers can be paused by owner")
+    if info.get("is_open_source") == "0":
+        warning_flags.append("⚠️ Contract not open source — unverifiable")
+    if info.get("is_proxy") == "1":
+        warning_flags.append("⚠️ Proxy contract — logic can be changed")
+    if info.get("is_blacklisted") == "1":
+        warning_flags.append("⚠️ Blacklist function — owner can block wallets from selling")
+
+    if critical_flags:
+        risk_badge = "🔴 *CRITICAL RISK*"
+    elif len(warning_flags) >= 3:
+        risk_badge = "🟡 *HIGH RISK*"
+    elif warning_flags:
+        risk_badge = "🟡 *MEDIUM RISK*"
+    else:
+        risk_badge = "🟢 *LOW RISK*"
+
+    lines = [
+        f"🔍 *Token Risk Check*\n",
+        f"*Token:* {name} ({symbol})",
+        f"*Address:* `{short}`",
+        f"*Risk Level:* {risk_badge}\n",
+    ]
+    if critical_flags:
+        lines.append("\n".join(critical_flags))
+    if warning_flags:
+        lines.append("\n".join(warning_flags))
+    if not critical_flags and not warning_flags:
+        lines.append("✅ No major risk flags detected.")
+    lines.append("\n_RelayShield Crypto Shield_")
+    return "\n".join(lines)
+
+
+def _format_nft_risk(address: str, info: dict) -> str:
+    short = f"{address[:6]}...{address[-4:]}"
+    name  = info.get("nft_name", "Unknown Collection")
+
+    critical_flags = []
+    warning_flags  = []
+
+    if info.get("malicious_address") == "1":
+        critical_flags.append("🚨 Known malicious contract")
+    if info.get("stolen_nft") == "1":
+        critical_flags.append("🚨 Contains stolen NFTs")
+    if info.get("nft_open_source") == "0":
+        warning_flags.append("⚠️ Contract not open source — unverifiable")
+    if info.get("nft_proxy") == "1":
+        warning_flags.append("⚠️ Proxy contract — logic can be changed")
+    if info.get("nft_mintable") == "1":
+        warning_flags.append("⚠️ Mintable — owner can issue unlimited NFTs")
+    if info.get("privileged_burn") == "1":
+        warning_flags.append("⚠️ Owner can burn your NFTs")
+    if info.get("nft_with_metadata_update") == "1":
+        warning_flags.append("⚠️ Metadata can be changed post-mint")
+    if info.get("restricted_approval") == "1":
+        warning_flags.append("⚠️ Approval is restricted — transferability limited")
+    if info.get("is_transferable") == "0":
+        warning_flags.append("⚠️ Non-transferable (soulbound or locked)")
+    if info.get("no_metadata") == "1":
+        warning_flags.append("⚠️ No on-chain metadata")
+
+    if critical_flags:
+        risk_badge = "🔴 *CRITICAL RISK*"
+    elif len(warning_flags) >= 3:
+        risk_badge = "🟡 *HIGH RISK*"
+    elif warning_flags:
+        risk_badge = "🟡 *MEDIUM RISK*"
+    else:
+        risk_badge = "🟢 *LOW RISK*"
+
+    lines = [
+        f"🖼 *NFT Collection Risk Check*\n",
+        f"*Collection:* {name}",
+        f"*Address:* `{short}`",
+        f"*Risk Level:* {risk_badge}\n",
+    ]
+    if critical_flags:
+        lines.append("\n".join(critical_flags))
+    if warning_flags:
+        lines.append("\n".join(warning_flags))
+    if not critical_flags and not warning_flags:
+        lines.append("✅ No major risk flags detected.")
+    lines.append("\n_RelayShield Crypto Shield_")
+    return "\n".join(lines)
+
+
+def handle_checktoken(chat_id: int, address_raw: str | None, user: dict) -> None:
+    tier = user.get("tier") or user.get("subscription_tier", "")
+    if tier not in CRYPTO_TIERS:
+        send_message(
+            chat_id,
+            "Token risk checks are available on the Crypto Shield plan.\n"
+            "Contact relayshieldadmin@gmail.com to upgrade.",
+        )
+        return
+
+    if not address_raw or not address_raw.startswith("0x") or len(address_raw) < 10:
+        send_message(
+            chat_id,
+            "Please provide a token contract address:\n\n"
+            "`/checktoken 0xTokenContractAddress`",
+            parse_mode="Markdown",
+        )
+        return
+
+    address = address_raw.strip().lower()
+    send_message(chat_id, f"🔍 Checking token `{address[:6]}...{address[-4:]}`...", parse_mode="Markdown")
+
+    info = _goplus_token_security(address)
+    if not info:
+        send_message(
+            chat_id,
+            "⚠️ Could not retrieve token data from GoPlus Security.\n"
+            "The contract may not be on Ethereum mainnet, or GoPlus has no data for this address yet.",
+        )
+        return
+
+    send_message(chat_id, _format_token_risk(address, info), parse_mode="Markdown")
+    logger.info("checktoken — chat_id=%s address=%s", chat_id, address)
+
+
+def handle_checknft(chat_id: int, address_raw: str | None, user: dict) -> None:
+    tier = user.get("tier") or user.get("subscription_tier", "")
+    if tier not in CRYPTO_TIERS:
+        send_message(
+            chat_id,
+            "NFT risk checks are available on the Crypto Shield plan.\n"
+            "Contact relayshieldadmin@gmail.com to upgrade.",
+        )
+        return
+
+    if not address_raw or not address_raw.startswith("0x") or len(address_raw) < 10:
+        send_message(
+            chat_id,
+            "Please provide an NFT contract address:\n\n"
+            "`/checknft 0xNFTContractAddress`",
+            parse_mode="Markdown",
+        )
+        return
+
+    address = address_raw.strip().lower()
+    send_message(chat_id, f"🔍 Checking NFT collection `{address[:6]}...{address[-4:]}`...", parse_mode="Markdown")
+
+    info = _goplus_nft_security(address)
+    if not info:
+        send_message(
+            chat_id,
+            "⚠️ Could not retrieve NFT data from GoPlus Security.\n"
+            "The contract may not be on Ethereum mainnet, or GoPlus has no data for this address yet.",
+        )
+        return
+
+    send_message(chat_id, _format_nft_risk(address, info), parse_mode="Markdown")
+    logger.info("checknft — chat_id=%s address=%s", chat_id, address)
+
+
 def route_active_command(chat_id: int, text: str, user: dict) -> None:
     """Route commands from ACTIVE users."""
     cmd = text.strip().lower().lstrip("/")
@@ -2509,6 +2722,12 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_addmember(chat_id, user)
     elif cmd == "removemember":
         handle_removemember(chat_id, user)
+    elif cmd.startswith("checktoken"):
+        address = text.split(maxsplit=1)[1].strip() if len(text.split()) > 1 else None
+        handle_checktoken(chat_id, address, user)
+    elif cmd.startswith("checknft"):
+        address = text.split(maxsplit=1)[1].strip() if len(text.split()) > 1 else None
+        handle_checknft(chat_id, address, user)
     elif cmd.startswith("addwallet"):
         parts = text.strip().split(None, 1)
         address = parts[1] if len(parts) > 1 else None

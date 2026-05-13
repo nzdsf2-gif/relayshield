@@ -3678,7 +3678,10 @@ The lifecycle messages don't get built until the intelligence layer exists. They
 | RISK-2 | `/checknft 0x...` — NFT collection risk on demand | GoPlus NFT Security | ⚡ Build now |
 | RISK-3 | `/riskcheck` — aggregate wallet risk score | GoPlus multi-API | ⚡ After RISK-1/2 |
 | RISK-4 | Passive inbound token risk — auto-flag on transfer | GoPlus Token Security | ⚡ After RISK-3 |
-| TG-1/2/3 | Lifecycle messages enriched with intelligence | Internal | Build after RISK-1–4 |
+| RISK-5 | `/checkvault 0x...` — DeFi protocol/vault risk on demand | GoPlus dApp Security | ⚡ After RISK-4 |
+| TG-1/2/3 | Lifecycle messages enriched with intelligence | Internal | Build after RISK-1–5 |
+
+**RISK-5 justification:** Completes the full DeFi interaction lifecycle — check the vault before depositing (`/checkvault`) then monitor the position after (liquidation alerts + `/riskcheck`). No competitor offers this pre-deposit + post-deposit protection arc in a single product. GoPlus dApp Security API covers audit status, auditor names, admin function risk, and known malicious flags — same API pattern as RISK-1/2, minimal additional build effort.
 
 ### Long-Term Moat
 

@@ -39,7 +39,7 @@ CRYPTO_TIERS = {"crypto-shield", "crypto_shield"}
 
 # Gas thresholds in gwei
 GAS_LOW_THRESHOLD  = 10   # below this → good time to transact
-GAS_HIGH_THRESHOLD = 80   # above this → avoid non-urgent transactions
+GAS_HIGH_THRESHOLD = 1    # TEST ONLY — revert to 80 after testing
 
 _secret_cache: dict[str, str] = {}
 

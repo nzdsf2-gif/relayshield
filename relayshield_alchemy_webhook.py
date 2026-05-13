@@ -110,7 +110,7 @@ def _goplus_risk_check(address: str) -> dict:
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=6) as resp:
             data = json.loads(resp.read())
-            return data.get("result", {}).get(address.lower(), {})
+            return data.get("result", {})
     except Exception:
         return {}
 

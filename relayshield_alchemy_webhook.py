@@ -209,19 +209,23 @@ def _format_alert(activity: dict, monitored_address: str, risk: dict) -> str:
     risk_level = "HIGH 🔴" if len(risk_flags) >= 2 else "MEDIUM 🟡" if risk_flags else "LOW 🟢"
     risk_line  = f"\n⚠️ *Counterparty Risk:* {risk_level}" if risk_flags else ""
 
-    # Scam contract flags — highest priority, shown separately from generic risk level
-    scam_flags = {"is_phishing_activities", "is_honeypot", "is_blacklisted", "is_fake_token", "is_airdrop_scam"}
+    # Scam/malicious address flags from GoPlus address_security API
+    scam_flags = {
+        "phishing_activities", "honeypot_related_address", "blacklist_doubt",
+        "darkweb_transactions", "stealing_attack", "cybercrime",
+    }
     active_scam = scam_flags & set(risk_flags)
     if active_scam:
         scam_labels = {
-            "is_phishing_activities": "phishing site",
-            "is_honeypot":            "honeypot contract",
-            "is_blacklisted":         "blacklisted address",
-            "is_fake_token":          "fake token contract",
-            "is_airdrop_scam":        "airdrop scam",
+            "phishing_activities":    "phishing site",
+            "honeypot_related_address": "honeypot-related address",
+            "blacklist_doubt":        "blacklisted address",
+            "darkweb_transactions":   "dark web activity",
+            "stealing_attack":        "stealing attack",
+            "cybercrime":             "cybercrime",
         }
         scam_desc = ", ".join(scam_labels.get(f, f) for f in active_scam)
-        risk_line = f"\n🚨 *SCAM CONTRACT DETECTED:* {scam_desc}\n⛔ Do NOT approve any further transactions with this address"
+        risk_line = f"\n🚨 *MALICIOUS ADDRESS DETECTED:* {scam_desc}\n⛔ Do NOT approve any further transactions with this address"
 
     short_addr  = f"{monitored_address[:6]}...{monitored_address[-4:]}"
     short_other = f"{other[:6]}...{other[-4:]}" if len(other) > 10 else other

@@ -188,19 +188,46 @@
 
 ---
 
-## 📣 Marketing — Backburned Until Beta Ends
+## 📣 Marketing — Focus Shifted (May 2026 beta learning)
 
+*Beta confirmed: consumer identity protection faces category resistance — consumers lump new entrants with VPNs/password managers/credit monitoring regardless of differentiation. Primary acquisition investment redirected to SMB B2B, Crypto Shield, and B2A. Consumer Personal Shield served on organic inbound only — no dedicated acquisition spend.*
+
+### ✅ Completed
 | # | Item | Status |
 |---|---|---|
-| 1 | **Reddit marketing blitz** — u/BothFan5617 warmed up. Draft posts written for r/smallbusiness, r/Entrepreneur, r/freelance, r/msp, r/digitalnomad, r/banking — see `reddit_marketing_drafts.md` (created this session). Andrew posts manually. | 🔄 Drafts written — pending manual post |
-| 2 | **Tycoon 2FA blog post** — Published to RelayShield LinkedIn April 19 2026. Pending publication to relayshield.net | ✅ Complete |
-| 6 | **OAuth supply chain LinkedIn post** — Published April 26 2026. Title: "The Vercel Hack Wasn't About a Stolen Password." Feature shipped same day as article. | ✅ Published |
-| 7 | **Aura LinkedIn article** — Published May 1 2026. Title: "The Identity Protection Industry Has a Structural Flaw. Here's What It Is." Covers ordered remediation sequence, session token blindness, SMB gap. | ✅ Published |
-| 8 | **PyPI supply chain blog — publish to LinkedIn** — Title: "Your AI Stack Just Became a Credential Harvester." Draft: `relayshield_pypi_supply_chain_blog.md`. Posted to LinkedIn + r/netsec + r/Python. RapidAPI link in first comment. | ✅ Complete — May 2026 |
-| 9 | **PyPI token rotation — relayshield-mcp-v1** — Token scoped to relayshield-mcp, stored in AWS Secrets Manager `relayshield/pypi_api_token`. Rotate by **August 2 2026**: create new scoped token on PyPI, update Secrets Manager, delete old token. | ⬜ Pending — due August 2 2026 |
-| 3 | **Salon owner conversion** — Send Business Starter payment link when beta period ends | ⬜ Pending |
-| 4 | **Facebook Business verification follow-up** — Monitor Meta approval (submitted April 2026) | 🔄 In progress |
-| 5 | **IoT cellular backdoor blog post** — Write plain-language breakdown of CPU-to-modem interface attack (Rapid7 research). Audience: r/smallbusiness, r/msp. Establishes telecom expertise authority. No product to build — purely a content play. | ⬜ Backburned |
+| 2 | **Tycoon 2FA blog post** — Published to RelayShield LinkedIn April 19 2026 | ✅ Published |
+| 6 | **OAuth supply chain LinkedIn post** — "The Vercel Hack Wasn't About a Stolen Password." April 26 2026 | ✅ Published |
+| 7 | **Aura LinkedIn article** — "The Identity Protection Industry Has a Structural Flaw." May 1 2026 | ✅ Published |
+| 8 | **PyPI supply chain blog** — Posted LinkedIn + r/netsec + r/Python May 2026 | ✅ Published |
+
+### 🏢 SMB Acquisition Channels (primary)
+| # | Item | Status |
+|---|---|---|
+| SMB-1 | **Reddit SMB posts** — r/smallbusiness, r/Entrepreneur, r/freelance, r/msp. Drafts in `reddit_marketing_drafts.md`. Focus on domain hijack and employee breach scenarios, not generic identity protection. | 🔄 Drafts ready — post manually |
+| SMB-2 | **Salon owner (Rebecca) conversion** — Send Business Starter payment link when beta ends | ⬜ Pending |
+| SMB-3 | **IoT cellular backdoor blog** — r/smallbusiness, r/msp. Establishes telecom authority. No product to build. | ⬜ Pending |
+| SMB-4 | **LinkedIn SMB content cadence** — Frame content around employee breach liability, domain lookalike attacks on SMBs, SIM swap as business continuity risk. Avoid generic "identity protection" framing entirely. | ⬜ Pending |
+| SMB-5 | **Facebook Business verification** — Monitor Meta approval (submitted April 2026) | 🔄 In progress |
+
+### 🪙 Crypto Shield Acquisition Channels (primary)
+| # | Item | Status |
+|---|---|---|
+| CS-1 | **Activation condition** — 3 of 5 crypto features live ✅ (all 6 now live). Begin crypto channel outreach. | ✅ Activated |
+| CS-2 | **X/Twitter thread** — Real wallet drainer caught in real time. TX hash verifiable on-chain. This is the viral hook. | ⬜ Pending — need real incident or staged demo |
+| CS-3 | **Telegram DeFi/trading groups** — Organic demo in relevant groups. Focus on drainer detection and SIM swap prevention, not generic "security". | ⬜ Pending |
+| CS-4 | **Farcaster post** — Short demo with on-chain proof. Web3-native credibility signal. | ⬜ Pending |
+| CS-5 | **Mirror.xyz post** — "How wallet drainers actually work and how to detect them in real time." One post, evergreen. | ⬜ Pending |
+
+### 🔧 B2A / Developer Channels (primary)
+| # | Item | Status |
+|---|---|---|
+| BA-1 | **Show HN post** — relayshield-mcp. Pending karma threshold or post to r/ClaudeAI as alternative. | ⬜ Pending |
+| BA-2 | **MCP registries** — mcp.so (submitted, in review), glama.ai, mcphub.net, Anthropic directory. Post after x402 confirmed end-to-end. | ⬜ Pending — see MCP sprint items |
+
+### 🔑 Maintenance
+| # | Item | Status |
+|---|---|---|
+| M-1 | **PyPI token rotation** — Rotate `relayshield/pypi_api_token` by **August 2 2026** | ⬜ Due August 2 2026 |
 
 ---
 

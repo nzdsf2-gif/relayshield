@@ -144,12 +144,21 @@
 ### Core Positioning Statement
 > *"Every security service tells you when you've been breached. RelayShield is the only one that fixes it."*
 
-### Supporting Taglines
+### Market-Specific Positioning (validated May 2026)
+
+**SMB B2B:**
+> *"Your employees are the most targeted surface in your business. RelayShield monitors every credential, phone number, and domain — and tells your team exactly what to do the moment something goes wrong."*
+
+**Crypto Shield:**
+> *"Most crypto thefts start with a SIM swap, not a smart contract exploit. RelayShield monitors your wallet, your phone number, and your credentials — and alerts you in Telegram before the attacker gets in."*
+
+**B2A / Developer:**
+> *"Add breach detection, SIM swap monitoring, and domain threat intelligence to any AI agent or application. Pay per call in USDC with no account required, or subscribe on RapidAPI."*
+
+### Supporting Taglines (consumer — secondary)
 > *"Changing your password after a breach is not enough. Attackers leave backdoors that survive a password reset. RelayShield finds them first — in your WhatsApp, step by step."*
 
 > *"Already using Aura or Incogni? They told you about the breach. We close it."*
-
-> *"Built by a 25-year telecom security professional. Priced for people who want protection, not a product bundle they will never use."*
 
 ---
 
@@ -166,10 +175,30 @@
 
 ## 3. Target Market
 
+### Beta Learning — Market Focus (May 2026)
+
+Beta testing confirmed a critical go-to-market signal: **consumer identity protection faces high category resistance.** Consumers lump new entrants into the commodity segment alongside VPNs, password managers, and credit bureau monitoring — regardless of actual differentiation. Aura, LifeLock, and Identity Guard have spent hundreds of millions establishing that mental model. Overcoming it at RelayShield's current stage requires disproportionate education spend with uncertain conversion.
+
+**Primary acquisition focus going forward: SMB B2B, B2A API, Crypto Shield.**
+
+Personal Shield remains a valid product and beta testers are served, but it is not the primary acquisition investment target. Marketing spend, feature development, and channel development are directed at the three primary markets below.
+
+**Why Crypto Shield escapes the consumer resistance problem:**  
+Crypto holders are self-selected threat-aware buyers. They have been personally affected by rug pulls, drainers, SIM swaps, or exchange hacks — or know people who have. They do not need category education. They already understand that a SIM swap can drain a wallet. $19.99/month is trivially small relative to their holdings. This audience seeks *specialised* security tools and actively distrusts generic identity protection products — which is exactly why RelayShield's specificity is an asset with them rather than a liability.
+
 ### Primary Segments
-- **SMBs** (Small/Medium Businesses) — recurring B2B contracts, self-serve onboarding
-- **Privacy-conscious consumers** — volume play, $12/month for first 3 months / $14.99 standard thereafter
-- **Senior / Medicare beneficiaries (Phase 2)** — Family Shield tier, adult children as buyer, senior as protected party. See Section 3b.
+
+| Segment | Product | ACV | Acquisition channel |
+|---|---|---|---|
+| **SMB — sole proprietor / domain owner** | Business Starter | ~$300/yr | Bookkeeper networks, SCORE, LinkedIn |
+| **SMB — small team (2–10 employees)** | Business Basic / Shield | ~$1,100–$1,700/yr | IT consultant channel, LinkedIn, referral |
+| **Crypto holders (individual)** | Crypto Shield | ~$240/yr | Telegram groups, Farcaster, Discord, X |
+| **Developers / AI builders** | B2A API (RapidAPI + x402) | Variable PAYG or $299–599/mo | HN, PyPI, MCP registries, AI agent stacks |
+| **MSP / multi-tenant (Phase 2)** | Business Shield Pro | ~$5,000+/yr | MSP partner programme |
+
+### Secondary Segment (existing users only — no new acquisition investment)
+- **Privacy-conscious consumers** — Personal Shield ($14.99/month). Serve existing beta users and organic inbound well. Do not invest in paid acquisition or dedicated consumer marketing content. If conversion happens organically, capture it. If a consumer finds RelayShield via SMB or crypto content and subscribes, great — but do not build campaigns targeting this segment.
+- **Senior / Medicare beneficiaries (Phase 2)** — Family Shield tier. See Section 3b. Deferred until SMS channel and vishing engine are both complete.
 
 ---
 

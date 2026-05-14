@@ -383,6 +383,29 @@ def _build_business_digest(user: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def lambda_handler(event: dict, context) -> dict:
+    # TEST MODE: pass {"_test_chat_id": "123456", "_test_tier": "crypto_shield"}
+    # to force a digest to a specific Telegram chat ID without DynamoDB scan.
+    test_chat_id = event.get("_test_chat_id")
+    if test_chat_id:
+        test_tier = event.get("_test_tier", "crypto_shield")
+        test_user = {
+            "user_id":          "test",
+            "telegram_chat_id": str(test_chat_id),
+            "subscription_tier": test_tier,
+            "tier":             test_tier,
+            "first_name":       event.get("_test_name", "there"),
+            "monitored_wallets": event.get("_test_wallets", []),
+            "monitored_emails":  event.get("_test_emails", []),
+            "monitored_domains": event.get("_test_domains", []),
+        }
+        if test_tier in CRYPTO_TIERS:
+            message = _build_crypto_digest(test_user)
+        else:
+            message = _build_business_digest(test_user)
+        _send_telegram(int(test_chat_id), message)
+        logger.info("Day 3 digest TEST sent — chat_id=%s tier=%s", test_chat_id, test_tier)
+        return {"statusCode": 200, "body": "test_sent=1"}
+
     users = _get_eligible_users()
     logger.info("Day 3 digest — %d eligible users", len(users))
 

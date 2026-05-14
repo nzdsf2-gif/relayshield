@@ -421,7 +421,7 @@ def _build_business_digest(user: dict) -> str:
     tier            = user.get("subscription_tier") or user.get("tier", "")
     emails          = user.get("monitored_emails", [])
     domains         = user.get("monitored_domains", [])
-    phone           = user.get("monitored_phone") or user.get("phone_number", "")
+    has_phone       = bool(user.get("phone_hash") or user.get("phone_encrypted"))
     breach_alerts   = _get_recent_breach_alerts(user["user_id"], days=3)
 
     tier_labels = {
@@ -457,12 +457,11 @@ def _build_business_digest(user: dict) -> str:
     elif tier in {"starter_domain", "business_basic", "business_shield", "business_shield_pro"}:
         lines.append("\n🌐 No domains added yet — use `/domain` to add one")
 
-    # Phone coverage
-    if phone:
-        short_phone = f"...{phone[-4:]}" if len(phone) > 4 else phone
-        lines.append(f"\n📱 SIM swap monitoring active for `{short_phone}`")
+    # Phone coverage — phone stored encrypted, check for hash as proof of registration
+    if has_phone:
+        lines.append("\n📱 *SIM swap monitoring:* ✅ Active")
     else:
-        lines.append("\n📱 SIM swap monitoring — no phone number registered yet")
+        lines.append("\n📱 *SIM swap monitoring:* Not activated — contact support to register your number")
 
     # Breach detections in first 3 days
     lines.append("\n*🔍 Detections in your first 3 days:*\n")

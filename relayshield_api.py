@@ -8,7 +8,10 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   POST /v1/breach                   — HIBP email breach check
   POST /v1/scan-url                 — VirusTotal URL malware analysis
   POST /v1/scan-file                — VirusTotal binary/file analysis
-  POST /v1/scan-wallet              — GoPlus EVM wallet risk scan
+  POST /v1/scan-wallet              — GoPlus EVM wallet risk scan (legacy)
+  POST /v1/wallet-risk              — Multi-chain wallet risk: EVM/Solana/TON (auto-detect)
+  POST /v1/token-security           — GoPlus token risk: honeypot, tax, ownership flags
+  POST /v1/nft-security             — GoPlus NFT contract risk scan
   POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
   POST /v1/domain                   — Typosquat/lookalike domain scan (DNS + CT + GSB)
   GET  /v1/result/{analysis_id}     — Poll VT scan result
@@ -18,9 +21,13 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/sim-swap            — $0.25 USDC
   POST /v1/payg/domain              — $0.50 USDC
   POST /v1/payg/oauth-watchlist     — $0.15 USDC
-  POST /v1/payg/scan-wallet         — $0.10 USDC
+  POST /v1/payg/scan-wallet         — $0.10 USDC (legacy EVM-only)
   POST /v1/payg/scan-url            — $0.05 USDC
   POST /v1/payg/scan-file           — $0.10 USDC
+  POST /v1/payg/wallet-risk         — $0.15 USDC — multi-chain EVM/Solana/TON
+  POST /v1/payg/token-security      — $0.10 USDC — token honeypot + tax analysis
+  POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
+  POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
   GET  /v1/payg/result/{id}         — $0.00 (free — poll a paid scan)
 
 x402 payment flow:
@@ -83,16 +90,24 @@ BASE_CHAIN_ID        = "eip155:8453"
 
 # PAYG pricing in USDC base units (6 decimals): $0.10 = 100000
 PAYG_PRICE_UNITS: dict[str, int] = {
-    "/v1/payg/breach":           100000,
-    "/v1/payg/sim-swap":         250000,
-    "/v1/payg/domain":           500000,
-    "/v1/payg/oauth-watchlist":  150000,
-    "/v1/payg/scan-wallet":      100000,
-    "/v1/payg/scan-url":          50000,
-    "/v1/payg/scan-file":        100000,
+    "/v1/payg/breach":                100000,
+    "/v1/payg/sim-swap":              250000,
+    "/v1/payg/domain":                500000,
+    "/v1/payg/oauth-watchlist":       150000,
+    "/v1/payg/scan-wallet":           100000,   # legacy — EVM only
+    "/v1/payg/scan-url":               50000,
+    "/v1/payg/scan-file":             100000,
+    # Crypto Shield intelligence endpoints
+    "/v1/payg/wallet-risk":           150000,   # $0.15 — multi-chain EVM/Solana/TON
+    "/v1/payg/token-security":        100000,   # $0.10 — GoPlus token risk
+    "/v1/payg/nft-security":          100000,   # $0.10 — GoPlus NFT risk
+    "/v1/payg/wallet-screen-batch":   500000,   # $0.50 — up to 10 addresses
 }
 
-GOPLUS_BASE_URL = "https://api.gopluslabs.io/api/v1/address_security"
+GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
+GOPLUS_TOKEN_URL       = "https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
+GOPLUS_NFT_URL         = "https://api.gopluslabs.io/api/v1/nft_security"
+TONAPI_ACCOUNTS_URL    = "https://tonapi.io/v2/accounts/{address}"
 
 # OAuth supply chain watchlist — high-risk OAuth-capable SaaS apps
 OAUTH_WATCHLIST = {
@@ -813,6 +828,257 @@ def handle_scan_wallet(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Endpoint: POST /v1/token-security  (subscription) / POST /v1/payg/token-security (PAYG)
+# ---------------------------------------------------------------------------
+# Request:  { "contract_address": "0x...", "chain_id": "1" }
+# Response: { "contract_address": "...", "chain_id": "...", "risk_level": "LOW|MEDIUM|HIGH",
+#             "critical_flags": [...], "warning_flags": [...], "raw": {...} }
+#
+# Supports any GoPlus chain: 1=ETH, 56=BSC, 137=Polygon, 8453=Base, etc.
+
+def handle_token_security(params: dict) -> dict:
+    contract = (params.get("contract_address") or "").strip().lower()
+    if not contract:
+        return _err("contract_address is required")
+    if not re.match(r"^0x[0-9a-fA-F]{40}$", contract):
+        return _err("contract_address must be a valid EVM address (0x + 40 hex chars)")
+
+    chain_id = str(params.get("chain_id") or "1").strip()
+
+    try:
+        url = GOPLUS_TOKEN_URL.format(chain_id=chain_id) + f"?contract_addresses={contract}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        raw = (data.get("result") or {}).get(contract, {})
+    except Exception as exc:
+        logger.error("GoPlus token security failed contract=%s: %s", contract, exc)
+        return _err("token security check failed — upstream error", 502)
+
+    _CRITICAL = {
+        "is_honeypot":     "honeypot",
+        "is_airdrop_scam": "airdrop scam",
+        "fake_token":      "fake token",
+    }
+    _WARNINGS = {
+        "transfer_pausable":       "transfers can be paused",
+        "hidden_owner":            "hidden owner",
+        "can_take_back_ownership": "owner can reclaim contract",
+        "is_mintable":             "mintable supply",
+        "external_call":           "external call risk",
+    }
+
+    critical_flags = [label for k, label in _CRITICAL.items() if str(raw.get(k, "0")) == "1"]
+    warning_flags  = [label for k, label in _WARNINGS.items() if str(raw.get(k, "0")) == "1"]
+
+    # Sell tax — critical if >=50%, warning if >=10%
+    try:
+        sell_tax = float(raw.get("sell_tax", 0))
+        if sell_tax >= 0.5:
+            critical_flags.append(f"sell tax {sell_tax*100:.0f}%")
+        elif sell_tax >= 0.1:
+            warning_flags.append(f"sell tax {sell_tax*100:.0f}%")
+    except (TypeError, ValueError):
+        pass
+
+    risk_level = "HIGH" if critical_flags else "MEDIUM" if warning_flags else "LOW"
+
+    logger.info("token-security contract=%s chain=%s risk=%s", contract, chain_id, risk_level)
+    return _ok({
+        "contract_address": contract,
+        "chain_id":         chain_id,
+        "risk_level":       risk_level,
+        "critical_flags":   critical_flags,
+        "warning_flags":    warning_flags,
+        "token_name":       raw.get("token_name", ""),
+        "token_symbol":     raw.get("token_symbol", ""),
+        "holder_count":     raw.get("holder_count"),
+        "raw":              raw,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/nft-security  (subscription) / POST /v1/payg/nft-security (PAYG)
+# ---------------------------------------------------------------------------
+# Request:  { "contract_address": "0x...", "chain_id": "1" }
+# Response: { "contract_address": "...", "risk_level": "LOW|MEDIUM|HIGH",
+#             "risk_flags": [...], "raw": {...} }
+
+def handle_nft_security(params: dict) -> dict:
+    contract = (params.get("contract_address") or "").strip().lower()
+    if not contract:
+        return _err("contract_address is required")
+    if not re.match(r"^0x[0-9a-fA-F]{40}$", contract):
+        return _err("contract_address must be a valid EVM address (0x + 40 hex chars)")
+
+    chain_id = str(params.get("chain_id") or "1").strip()
+
+    try:
+        url = f"{GOPLUS_NFT_URL}?chain_id={chain_id}&contract_addresses={contract}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        raw = (data.get("result") or {}).get(contract, {})
+    except Exception as exc:
+        logger.error("GoPlus NFT security failed contract=%s: %s", contract, exc)
+        return _err("NFT security check failed — upstream error", 502)
+
+    _NFT_FLAGS = {
+        "malicious_contract": "malicious contract",
+        "privileged_burn":    "owner can burn tokens",
+        "can_freeze_transfer": "transfers can be frozen",
+        "transfer_without_approval": "transfer without approval",
+        "fake_token":         "fake/counterfeit collection",
+    }
+    risk_flags = [label for k, label in _NFT_FLAGS.items() if str(raw.get(k, "0")) == "1"]
+    risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+
+    logger.info("nft-security contract=%s chain=%s risk=%s", contract, chain_id, risk_level)
+    return _ok({
+        "contract_address": contract,
+        "chain_id":         chain_id,
+        "risk_level":       risk_level,
+        "risk_flags":       risk_flags,
+        "nft_name":         raw.get("nft_name", ""),
+        "nft_symbol":       raw.get("nft_symbol", ""),
+        "raw":              raw,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/wallet-risk  (subscription) / POST /v1/payg/wallet-risk (PAYG)
+# ---------------------------------------------------------------------------
+# Multi-chain wallet risk: EVM and Solana via GoPlus, TON via TONAPI v2.
+# Chain is auto-detected from address format.
+#
+# Request:  { "address": "0x...|SolanaAddr|EQTonAddr" }
+# Response: { "address": "...", "chain": "evm|solana|ton|bitcoin",
+#             "risk_level": "LOW|MEDIUM|HIGH", "risk_flags": [...],
+#             "metadata": {...} }
+
+_GOPLUS_CHAIN_IDS = {"evm": 1, "solana": 101}
+
+def _detect_chain_api(address: str) -> str:
+    if re.match(r"^0x[0-9a-fA-F]{40}$", address):
+        return "evm"
+    if re.match(r"^[EUeu][Qq][A-Za-z0-9_\-]{46}$", address):
+        return "ton"
+    if re.match(r"^(bc1|[13])[a-zA-HJ-NP-Z0-9]{6,87}$", address):
+        return "bitcoin"
+    if re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", address):
+        return "solana"
+    return "unknown"
+
+
+def handle_wallet_risk(params: dict) -> dict:
+    address = (params.get("address") or "").strip()
+    if not address:
+        return _err("address is required")
+
+    chain = _detect_chain_api(address)
+    if chain == "unknown":
+        return _err("unrecognised address format — supported: EVM (0x), Solana, TON (EQ.../UQ...), Bitcoin")
+    if chain == "bitcoin":
+        return _ok({
+            "address":    address,
+            "chain":      "bitcoin",
+            "risk_level": "UNKNOWN",
+            "risk_flags": [],
+            "metadata":   {"note": "Bitcoin address risk screening not yet supported"},
+        })
+
+    risk_flags = []
+    metadata   = {}
+
+    if chain in ("evm", "solana"):
+        goplus_chain_id = _GOPLUS_CHAIN_IDS[chain]
+        try:
+            url = f"{GOPLUS_BASE_URL}/{address}?chain_id={goplus_chain_id}"
+            req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read())
+            raw = data.get("result", {})
+            _MALICIOUS = {
+                "phishing_activities":  "linked to phishing",
+                "blacklist_doubt":      "security blacklisted",
+                "darkweb_transactions": "dark web activity",
+                "stealing_attack":      "stealing attacks",
+                "cybercrime":           "cybercrime",
+            }
+            risk_flags = [label for k, label in _MALICIOUS.items() if raw.get(k) == "1"]
+        except Exception as exc:
+            logger.error("GoPlus wallet-risk failed address=%s: %s", address, exc)
+            metadata["goplus_error"] = "upstream unavailable"
+
+    elif chain == "ton":
+        try:
+            ton_url = TONAPI_ACCOUNTS_URL.format(
+                address=urllib.parse.quote(address, safe="-_=")
+            )
+            req = urllib.request.Request(ton_url, headers={"User-Agent": "RelayShield/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                ton_data = json.loads(resp.read())
+            if ton_data.get("is_scam"):
+                risk_flags.append("flagged as scam in TON community database")
+            metadata["contract_type"]  = ton_data.get("interfaces", [])
+            metadata["account_status"] = ton_data.get("status", "")
+        except Exception as exc:
+            logger.error("TONAPI wallet-risk failed address=%s: %s", address, exc)
+            metadata["tonapi_error"] = "upstream unavailable"
+
+    risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+    logger.info("wallet-risk address=%s chain=%s risk=%s flags=%d", address, chain, risk_level, len(risk_flags))
+    return _ok({
+        "address":    address.lower() if chain == "evm" else address,
+        "chain":      chain,
+        "risk_level": risk_level,
+        "risk_flags": risk_flags,
+        "metadata":   metadata,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/payg/wallet-screen-batch  (PAYG only — $0.50 for up to 10)
+# ---------------------------------------------------------------------------
+# Screens up to 10 addresses in parallel. Mixed chains supported.
+#
+# Request:  { "addresses": ["0x...", "SolAddr", "EQTonAddr"] }
+# Response: { "results": [ { "address": "...", "chain": "...",
+#                             "risk_level": "...", "risk_flags": [...] }, ... ] }
+
+def handle_wallet_screen_batch(params: dict) -> dict:
+    addresses = params.get("addresses") or []
+    if not isinstance(addresses, list) or not addresses:
+        return _err("addresses must be a non-empty list")
+    if len(addresses) > 10:
+        return _err("maximum 10 addresses per batch request")
+    addresses = [str(a).strip() for a in addresses if str(a).strip()]
+
+    def _screen_one(addr: str) -> dict:
+        result = handle_wallet_risk({"address": addr})
+        body   = json.loads(result.get("body", "{}"))
+        data   = body.get("data", {})
+        return {
+            "address":    data.get("address", addr),
+            "chain":      data.get("chain", "unknown"),
+            "risk_level": data.get("risk_level", "UNKNOWN"),
+            "risk_flags": data.get("risk_flags", []),
+            "error":      body.get("error") if not body.get("ok") else None,
+        }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(_screen_one, addresses))
+
+    high_count = sum(1 for r in results if r["risk_level"] == "HIGH")
+    logger.info("wallet-screen-batch count=%d high_risk=%d", len(addresses), high_count)
+    return _ok({
+        "screened":   len(results),
+        "high_risk":  high_count,
+        "results":    results,
+    })
+
+
+# ---------------------------------------------------------------------------
 # x402 PAYG — payment requirements, verification, 402 response
 # ---------------------------------------------------------------------------
 
@@ -915,13 +1181,17 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         }
 
     payg_routes = {
-        "/v1/payg/breach":          handle_breach,
-        "/v1/payg/sim-swap":        handle_sim_swap,
-        "/v1/payg/domain":          handle_domain,
-        "/v1/payg/oauth-watchlist": handle_oauth_watchlist,
-        "/v1/payg/scan-wallet":     handle_scan_wallet,
-        "/v1/payg/scan-url":        handle_scan_url,
-        "/v1/payg/scan-file":       handle_scan_file,
+        "/v1/payg/breach":                handle_breach,
+        "/v1/payg/sim-swap":              handle_sim_swap,
+        "/v1/payg/domain":                handle_domain,
+        "/v1/payg/oauth-watchlist":       handle_oauth_watchlist,
+        "/v1/payg/scan-wallet":           handle_scan_wallet,       # legacy EVM-only
+        "/v1/payg/scan-url":              handle_scan_url,
+        "/v1/payg/scan-file":             handle_scan_file,
+        "/v1/payg/wallet-risk":           handle_wallet_risk,
+        "/v1/payg/token-security":        handle_token_security,
+        "/v1/payg/nft-security":          handle_nft_security,
+        "/v1/payg/wallet-screen-batch":   handle_wallet_screen_batch,
     }
     handler = payg_routes.get(path)
     if not handler:
@@ -946,7 +1216,10 @@ ROUTES = {
     "/v1/sim-swap":         handle_sim_swap,
     "/v1/domain":           handle_domain,
     "/v1/oauth-watchlist":  handle_oauth_watchlist,
-    "/v1/scan-wallet":      handle_scan_wallet,
+    "/v1/scan-wallet":      handle_scan_wallet,       # legacy EVM-only
+    "/v1/wallet-risk":      handle_wallet_risk,       # multi-chain EVM/Solana/TON
+    "/v1/token-security":   handle_token_security,
+    "/v1/nft-security":     handle_nft_security,
 }
 
 PAYG_PATHS = set(PAYG_PRICE_UNITS.keys()) | {"/v1/payg/result/"}

@@ -76,7 +76,7 @@ $19.99/month.
 Built by a 25-year telecom security professional who spent two decades watching carriers get exploited.
 
 If you hold anything worth protecting:
-👉 [LANDING PAGE URL]
+👉 https://crypto.relayshield.net
 
 All alerts via Telegram. Start in 2 minutes.
 
@@ -103,7 +103,7 @@ RelayShield Crypto Shield monitors both:
 
 $19.99/month, all alerts on Telegram.
 
-👉 [LANDING PAGE URL]
+👉 https://crypto.relayshield.net
 
 ---
 
@@ -119,7 +119,7 @@ Single Telegram bot that monitors:
 
 $19.99/mo. No app. Just Telegram alerts.
 
-[LANDING PAGE URL]
+https://crypto.relayshield.net
 
 ---
 
@@ -130,7 +130,7 @@ RelayShield Crypto Shield — SIM swap + on-chain monitoring in one Telegram bot
 Inbound tokens screened for honeypots automatically. Liquidation warnings. Risk intelligence commands.
 EVM + Solana + TON. $19.99/mo.
 
-👉 [LANDING PAGE URL]
+👉 https://crypto.relayshield.net
 
 ---
 
@@ -144,12 +144,12 @@ Built Crypto Shield to monitor both layers simultaneously — carrier + chain �
 
 EVM / Solana / TON wallets. Inbound token risk screening. Liquidation warnings. $19.99/mo.
 
-[LANDING PAGE URL]
+https://crypto.relayshield.net
 
 ---
 
 ## Notes
-- Replace [LANDING PAGE URL] with the live Carrd /crypto-shield URL before posting
+- Replace https://crypto.relayshield.net with the live Carrd /crypto-shield URL before posting
 - Post Version A in security-focused groups (crypto security, DeFi safety)
 - Post Version B in DeFi/trading groups where builders are present
 - Post Version C only when relevant to an active thread — don't cold-drop in busy chats

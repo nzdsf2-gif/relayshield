@@ -49,6 +49,7 @@ TG_SECRET_NAME       = "relayshield/telegram_bot_token"
 TELEGRAM_API_BASE    = "https://api.telegram.org/bot{token}/{method}"
 GOPLUS_ADDR_URL      = "https://api.gopluslabs.io/api/v1/address_security"
 GOPLUS_TOKEN_URL     = "https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
+CHAINABUSE_URL       = "https://www.chainabuse.com/api/reports/addresses/{address}"
 
 # Tiers
 CRYPTO_TIERS   = {"crypto_shield", "crypto-shield"}
@@ -163,6 +164,52 @@ def _aave_health_factor(wallet: str) -> float | None:
 
 
 # ---------------------------------------------------------------------------
+# Chainabuse — TON (and cross-chain) scam address check
+# ---------------------------------------------------------------------------
+
+def _chainabuse_risk(address: str) -> dict:
+    """Check Chainabuse for community-reported scam activity on an address.
+    Returns {'count': N, 'categories': [...]} or {} on failure."""
+    try:
+        url = CHAINABUSE_URL.format(address=address)
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        reports = data.get("reports", []) if isinstance(data, dict) else data
+        if not reports:
+            return {"count": 0, "categories": []}
+        categories = list({r.get("category", "") for r in reports if r.get("category")})
+        return {"count": len(reports), "categories": categories}
+    except Exception as exc:
+        logger.warning("Chainabuse check failed address=%s: %s", address, exc)
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Gas baseline — ETH + Base current prices
+# ---------------------------------------------------------------------------
+
+def _get_gas_gwei(network: str) -> float | None:
+    """Fetch current gas price in gwei for a given Alchemy network slug."""
+    try:
+        api_key = _get_secret_json(ALCHEMY_SECRET_NAME, "api_key")
+        url     = f"https://{network}.g.alchemy.com/v2/{api_key}"
+        body    = json.dumps({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "eth_gasPrice", "params": [],
+        }).encode()
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        wei = int(data["result"], 16)
+        return round(wei / 1e9, 1)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # DynamoDB helpers
 # ---------------------------------------------------------------------------
 
@@ -227,7 +274,15 @@ def _get_wallets_for_user(user_id: str) -> list[dict]:
             if not last:
                 break
             kwargs["ExclusiveStartKey"] = last
-        return items
+        # Deduplicate by normalised address (EVM lowercase, others as-is)
+        seen = set()
+        deduped = []
+        for item in items:
+            addr = (item.get("wallet_address") or "").lower()
+            if addr and addr not in seen:
+                seen.add(addr)
+                deduped.append(item)
+        return deduped
     except Exception as exc:
         logger.warning("Wallet lookup failed for user_id=%s: %s", user_id, exc)
         return []
@@ -262,6 +317,26 @@ def _build_crypto_digest(user: dict) -> str:
         "Here's your *baseline risk snapshot* — we'll compare against this in your monthly digest.\n",
     ]
 
+    # ── SIM swap monitoring status ──────────────────────────────────────────
+    phone = user.get("monitored_phone") or user.get("phone_number", "")
+    if phone:
+        short_phone = f"...{str(phone)[-4:]}"
+        lines.append(f"📱 *SIM swap monitoring:* Active for `{short_phone}`\n")
+    else:
+        lines.append("📱 *SIM swap monitoring:* No phone number registered — contact support to activate\n")
+
+    # ── Gas baseline ─────────────────────────────────────────────────────────
+    eth_gas  = _get_gas_gwei("eth-mainnet")
+    base_gas = _get_gas_gwei("base-mainnet")
+    gas_parts = []
+    if eth_gas is not None:
+        gas_parts.append(f"ETH: *{eth_gas} gwei*")
+    if base_gas is not None:
+        gas_parts.append(f"Base: *{base_gas} gwei*")
+    if gas_parts:
+        lines.append(f"⛽ *Gas baseline:* {' | '.join(gas_parts)}\n")
+
+    # ── Wallet risk scans ────────────────────────────────────────────────────
     if not wallets:
         lines.append(
             "📭 *No wallets monitored yet.*\n\n"
@@ -285,12 +360,20 @@ def _build_crypto_digest(user: dict) -> str:
             # GoPlus address risk (EVM + Solana)
             goplus_chain_id = _GOPLUS_CHAIN_IDS.get(chain_type)
             if goplus_chain_id:
-                risk      = _goplus_address_risk(address, goplus_chain_id)
-                flags     = [_MALICIOUS_FLAGS[k] for k in _MALICIOUS_FLAGS if risk.get(k) == "1"]
+                risk  = _goplus_address_risk(address, goplus_chain_id)
+                flags = [_MALICIOUS_FLAGS[k] for k in _MALICIOUS_FLAGS if risk.get(k) == "1"]
                 if flags:
                     wallet_lines.append(f"🚨 Risk flags: {', '.join(flags)}")
                 else:
                     wallet_lines.append("✅ No malicious flags detected")
+            elif chain_type == "ton":
+                # TON — use Chainabuse cross-chain scam database
+                cb = _chainabuse_risk(address)
+                if cb.get("count", 0) > 0:
+                    cats = ", ".join(cb["categories"][:3]) if cb.get("categories") else "scam activity"
+                    wallet_lines.append(f"🚨 Chainabuse reports: {cb['count']} — {cats}")
+                else:
+                    wallet_lines.append("✅ No scam reports found (Chainabuse)")
             else:
                 wallet_lines.append("ℹ️ Address risk screening not available for this chain")
 
@@ -309,8 +392,18 @@ def _build_crypto_digest(user: dict) -> str:
 
             lines.extend(wallet_lines)
 
+    # ── DeFi vault prompt ────────────────────────────────────────────────────
     lines.append(
-        "\n\n*Risk Intelligence commands:*\n"
+        "\n\n🏦 *Using DeFi protocols?*\n"
+        "Audit any protocol before depositing:\n"
+        "`/checkvault app.aave.com`\n"
+        "`/checkvault app.uniswap.org`\n"
+        "`/checkvault curve.fi`\n"
+    )
+
+    # ── Command reminders ────────────────────────────────────────────────────
+    lines.append(
+        "*Risk Intelligence commands:*\n"
         "• `/riskcheck` — re-run risk score anytime\n"
         "• `/checktoken <address>` — screen any token before buying\n"
         "• `/checkvault <url>` — audit a DeFi protocol\n"

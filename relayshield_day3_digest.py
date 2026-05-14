@@ -49,7 +49,7 @@ TG_SECRET_NAME       = "relayshield/telegram_bot_token"
 TELEGRAM_API_BASE    = "https://api.telegram.org/bot{token}/{method}"
 GOPLUS_ADDR_URL      = "https://api.gopluslabs.io/api/v1/address_security"
 GOPLUS_TOKEN_URL     = "https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
-CHAINABUSE_URL       = "https://www.chainabuse.com/api/reports/addresses/{address}"
+TONAPI_ACCOUNTS_URL  = "https://tonapi.io/v2/accounts/{address}"
 
 # Tiers
 CRYPTO_TIERS   = {"crypto_shield", "crypto-shield"}
@@ -167,24 +167,26 @@ def _aave_health_factor(wallet: str) -> float | None:
 # Chainabuse — TON (and cross-chain) scam address check
 # ---------------------------------------------------------------------------
 
-def _chainabuse_risk(address: str) -> dict:
-    """Check Chainabuse for community-reported scam activity on an address.
-    Returns {'count': N, 'categories': [...]} or {} on failure."""
+def _tonapi_risk(address: str) -> dict:
+    """Check TONAPI v2 for TON address risk intelligence.
+    Returns dict with keys: is_scam, interfaces, status, ok."""
     try:
-        url = CHAINABUSE_URL.format(address=address)
+        import urllib.parse as _up
+        url = f"https://tonapi.io/v2/accounts/{_up.quote(address, safe='')}"
         req = urllib.request.Request(
             url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=6) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read())
-        reports = data.get("reports", []) if isinstance(data, dict) else data
-        if not reports:
-            return {"count": 0, "categories": []}
-        categories = list({r.get("category", "") for r in reports if r.get("category")})
-        return {"count": len(reports), "categories": categories}
+        return {
+            "ok":         True,
+            "is_scam":    data.get("is_scam", False),
+            "interfaces": data.get("interfaces", []),
+            "status":     data.get("status", ""),
+        }
     except Exception as exc:
-        logger.warning("Chainabuse check failed address=%s: %s", address, exc)
-        return {}
+        logger.warning("TONAPI risk check failed address=%s: %s", address, exc)
+        return {"ok": False}
 
 
 # ---------------------------------------------------------------------------
@@ -366,13 +368,18 @@ def _build_crypto_digest(user: dict) -> str:
                 else:
                     wallet_lines.append("✅ No malicious flags detected")
             elif chain_type == "ton":
-                # TON — cross-chain scam database check
-                cb = _chainabuse_risk(address)
-                if cb.get("count", 0) > 0:
-                    cats = ", ".join(cb["categories"][:3]) if cb.get("categories") else "scam activity"
-                    wallet_lines.append(f"🚨 {cb['count']} scam report(s) found — {cats}")
+                # TON — native risk intelligence via TONAPI v2
+                ton_risk = _tonapi_risk(address)
+                if ton_risk.get("ok"):
+                    if ton_risk.get("is_scam"):
+                        wallet_lines.append("🚨 Flagged as scam address in TON community database")
+                    else:
+                        wallet_lines.append("✅ No scam flags in TON community database")
+                    ifaces = ton_risk.get("interfaces", [])
+                    if ifaces:
+                        wallet_lines.append(f"ℹ️ Contract type: {', '.join(ifaces[:3])}")
                 else:
-                    wallet_lines.append("✅ No scam reports found")
+                    wallet_lines.append("ℹ️ TON risk data temporarily unavailable")
             else:
                 wallet_lines.append("ℹ️ Address risk screening not available for this chain")
 

@@ -2289,6 +2289,29 @@ def _chainabuse_risk(address: str) -> dict:
         return {}
 
 
+def _tonapi_risk(address: str) -> dict:
+    """Check TONAPI v2 for TON address risk intelligence.
+    Returns dict with keys: is_scam, is_sanctioned, name, interfaces, ok.
+    Uses the TON community scam/sanction database natively."""
+    try:
+        url = f"https://tonapi.io/v2/accounts/{urllib.parse.quote(address, safe='')}"
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        return {
+            "ok":           True,
+            "is_scam":      data.get("is_scam", False),
+            "name":         data.get("name") or data.get("memo_required") or "",
+            "interfaces":   data.get("interfaces", []),
+            "status":       data.get("status", ""),
+        }
+    except Exception as exc:
+        logger.warning("TONAPI risk check failed address=%s: %s", address, exc)
+        return {"ok": False}
+
+
 def _get_user_wallets(user_id: str, user: dict) -> list[dict]:
     """Return monitored wallets for a user, preferring the relayshield_monitored_wallets
     table (source of truth for all chains). Falls back to user record's monitored_wallets
@@ -2710,15 +2733,21 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
         elif chain_type == "solana":
             info_lines.append("ℹ️ DeFi position monitoring (Solana) — coming soon")
         elif chain_type == "ton":
-            # TON — cross-chain scam database check
-            cb = _chainabuse_risk(address)
-            if cb.get("count", 0) > 0:
-                cats = ", ".join(cb["categories"][:3]) if cb.get("categories") else "scam activity"
-                critical.append(f"🚨 {cb['count']} scam report(s) found — {cats}")
-            elif "count" in cb:
-                info_lines.append("✅ No scam reports found for this TON address")
+            # TON — native risk intelligence via TONAPI v2
+            ton_risk = _tonapi_risk(address)
+            if ton_risk.get("ok"):
+                if ton_risk.get("is_scam"):
+                    critical.append("🚨 Flagged as scam address in TON community database")
+                else:
+                    info_lines.append("✅ No scam flags found in TON community database")
+                ifaces = ton_risk.get("interfaces", [])
+                if ifaces:
+                    info_lines.append(f"ℹ️ Contract type: {', '.join(ifaces[:3])}")
+                status = ton_risk.get("status", "")
+                if status and status != "active":
+                    warnings.append(f"⚠️ Account status: {status}")
             else:
-                info_lines.append("ℹ️ TON scam check temporarily unavailable")
+                info_lines.append("ℹ️ TON risk data temporarily unavailable")
             info_lines.append("ℹ️ Wallet activity monitored via 15-minute polling")
         elif chain_type == "bitcoin":
             info_lines.append("ℹ️ Bitcoin wallet stored — activity alerts via periodic check")

@@ -2703,6 +2703,7 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
     }
 
     for wallet in wallets:
+      try:
         address    = wallet.get("address") or wallet.get("wallet_address", "")
         chain_type = wallet.get("chain_type", "evm")
         chain_label = _CHAIN_LABELS.get(chain_type, chain_type.upper())
@@ -2710,6 +2711,7 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
         critical   = []
         warnings   = []
         info_lines = []
+        logger.info("riskcheck processing — chain=%s address=%s", chain_type, address[:12])
 
         if chain_type in ("evm", "solana"):
             # GoPlus address-level security flags
@@ -2775,6 +2777,9 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
 
         send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
         logger.info("riskcheck — chat_id=%s address=%s chain=%s", chat_id, address, chain_type)
+      except Exception as exc:
+        logger.error("riskcheck wallet error — chain=%s address=%s: %s", chain_type, address[:12] if address else "?", exc)
+        send_message(chat_id, f"⚠️ Risk check error for {chain_type.upper()} wallet — please try again.")
 
 
 def handle_checkvault(chat_id: int, url_raw: str | None, user: dict) -> None:

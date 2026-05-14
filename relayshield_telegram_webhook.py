@@ -82,6 +82,7 @@ MONITORED_WALLETS_TABLE = "relayshield_monitored_wallets"
 
 ALCHEMY_SECRET_NAME     = "relayshield/alchemy_api_key"
 GOPLUS_BASE_URL         = "https://api.gopluslabs.io/api/v1/address_security"
+CHAINABUSE_URL          = "https://www.chainabuse.com/api/reports/addresses/{address}"
 ALCHEMY_WEBHOOK_API     = "https://dashboard.alchemy.com/api"
 WALLET_LIMIT_CRYPTO     = 5   # max wallets per Crypto Shield subscriber
 
@@ -2268,6 +2269,61 @@ def _goplus_risk_check(address: str, chain_id: int = 1) -> dict:
         return {}
 
 
+def _chainabuse_risk(address: str) -> dict:
+    """Check cross-chain scam database for community-reported activity on an address.
+    Returns {'count': N, 'categories': [...]} or {} on failure."""
+    try:
+        url = CHAINABUSE_URL.format(address=address)
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        reports = data.get("reports", []) if isinstance(data, dict) else data
+        if not reports:
+            return {"count": 0, "categories": []}
+        categories = list({r.get("category", "") for r in reports if r.get("category")})
+        return {"count": len(reports), "categories": categories}
+    except Exception as exc:
+        logger.warning("Chainabuse check failed address=%s: %s", address, exc)
+        return {}
+
+
+def _get_user_wallets(user_id: str, user: dict) -> list[dict]:
+    """Return monitored wallets for a user, preferring the relayshield_monitored_wallets
+    table (source of truth for all chains). Falls back to user record's monitored_wallets
+    list for older accounts that may not have migrated."""
+    try:
+        from boto3.dynamodb.conditions import Attr as _Attr
+        table  = dynamodb.Table(MONITORED_WALLETS_TABLE)
+        items  = []
+        kwargs: dict = {"FilterExpression": _Attr("user_id").eq(user_id)}
+        while True:
+            resp = table.scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            last = resp.get("LastEvaluatedKey")
+            if not last:
+                break
+            kwargs["ExclusiveStartKey"] = last
+        if items:
+            # Deduplicate by normalised address
+            seen, deduped = set(), []
+            for item in items:
+                key = (item.get("wallet_address") or "").lower()
+                if key and key not in seen:
+                    seen.add(key)
+                    # Normalise field name: table uses wallet_address, handlers expect address
+                    if "address" not in item:
+                        item = dict(item)
+                        item["address"] = item.get("wallet_address", "")
+                    deduped.append(item)
+            return deduped
+    except Exception as exc:
+        logger.warning("_get_user_wallets table scan failed user_id=%s: %s", user_id, exc)
+    # Fallback: user record embedded list
+    return user.get("monitored_wallets", [])
+
+
 _AAVE_V3_POOL             = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
 _GET_USER_ACCOUNT_DATA    = "0xbf92857c"
 _RAY                      = 10 ** 27
@@ -2565,7 +2621,7 @@ def handle_wallets(chat_id: int, user: dict) -> None:
         )
         return
 
-    wallets = user.get("monitored_wallets", [])
+    wallets = _get_user_wallets(user.get("user_id", ""), user)
     if not wallets:
         send_message(
             chat_id,
@@ -2578,9 +2634,10 @@ def handle_wallets(chat_id: int, user: dict) -> None:
     for w in wallets:
         risk_tag    = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(w.get("risk_level", "LOW"), "⚪")
         chain_label = _CHAIN_LABELS.get(w.get("chain_type", "evm"), "EVM")
-        addr        = w["address"]
+        addr        = w.get("address") or w.get("wallet_address", "")
         short       = f"{addr[:6]}...{addr[-4:]}" if len(addr) > 12 else addr
-        lines.append(f"{risk_tag} `{addr}`\n   *Network:* {chain_label} | Added: {w['added_at'][:10]}")
+        added       = (w.get("added_at") or "")[:10]
+        lines.append(f"{risk_tag} `{addr}`\n   *Network:* {chain_label} | Added: {added}")
 
     send_message(
         chat_id,
@@ -2601,7 +2658,7 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
         )
         return
 
-    wallets = user.get("monitored_wallets", [])
+    wallets = _get_user_wallets(user.get("user_id", ""), user)
     if not wallets:
         send_message(
             chat_id,
@@ -2622,7 +2679,7 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
     }
 
     for wallet in wallets:
-        address    = wallet.get("address", "")
+        address    = wallet.get("address") or wallet.get("wallet_address", "")
         chain_type = wallet.get("chain_type", "evm")
         chain_label = _CHAIN_LABELS.get(chain_type, chain_type.upper())
         short      = f"{address[:6]}...{address[-4:]}" if len(address) > 12 else address
@@ -2653,7 +2710,16 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
         elif chain_type == "solana":
             info_lines.append("ℹ️ DeFi position monitoring (Solana) — coming soon")
         elif chain_type == "ton":
-            info_lines.append("ℹ️ TON wallet monitored via 15-minute polling")
+            # TON — cross-chain scam database check
+            cb = _chainabuse_risk(address)
+            if cb.get("count", 0) > 0:
+                cats = ", ".join(cb["categories"][:3]) if cb.get("categories") else "scam activity"
+                critical.append(f"🚨 {cb['count']} scam report(s) found — {cats}")
+            elif "count" in cb:
+                info_lines.append("✅ No scam reports found for this TON address")
+            else:
+                info_lines.append("ℹ️ TON scam check temporarily unavailable")
+            info_lines.append("ℹ️ Wallet activity monitored via 15-minute polling")
         elif chain_type == "bitcoin":
             info_lines.append("ℹ️ Bitcoin wallet stored — activity alerts via periodic check")
 

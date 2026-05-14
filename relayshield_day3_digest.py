@@ -318,12 +318,11 @@ def _build_crypto_digest(user: dict) -> str:
     ]
 
     # ── SIM swap monitoring status ──────────────────────────────────────────
-    phone = user.get("monitored_phone") or user.get("phone_number", "")
-    if phone:
-        short_phone = f"...{str(phone)[-4:]}"
-        lines.append(f"📱 *SIM swap monitoring:* Active for `{short_phone}`\n")
+    # Phone is stored encrypted — check for phone_hash as proof of registration
+    if user.get("phone_hash") or user.get("phone_encrypted"):
+        lines.append("📱 *SIM swap monitoring:* ✅ Active\n")
     else:
-        lines.append("📱 *SIM swap monitoring:* No phone number registered — contact support to activate\n")
+        lines.append("📱 *SIM swap monitoring:* Not activated — contact support to register your number\n")
 
     # ── Gas baseline ─────────────────────────────────────────────────────────
     eth_gas  = _get_gas_gwei("eth-mainnet")
@@ -367,13 +366,13 @@ def _build_crypto_digest(user: dict) -> str:
                 else:
                     wallet_lines.append("✅ No malicious flags detected")
             elif chain_type == "ton":
-                # TON — use Chainabuse cross-chain scam database
+                # TON — cross-chain scam database check
                 cb = _chainabuse_risk(address)
                 if cb.get("count", 0) > 0:
                     cats = ", ".join(cb["categories"][:3]) if cb.get("categories") else "scam activity"
-                    wallet_lines.append(f"🚨 Chainabuse reports: {cb['count']} — {cats}")
+                    wallet_lines.append(f"🚨 {cb['count']} scam report(s) found — {cats}")
                 else:
-                    wallet_lines.append("✅ No scam reports found (Chainabuse)")
+                    wallet_lines.append("✅ No scam reports found")
             else:
                 wallet_lines.append("ℹ️ Address risk screening not available for this chain")
 
@@ -503,6 +502,8 @@ def _build_business_digest(user: dict) -> str:
 def lambda_handler(event: dict, context) -> dict:
     # TEST MODE: pass {"_test_chat_id": "123456"} to force a digest using the
     # real DynamoDB user record for that chat ID — no date window check.
+    # Optionally pass "_test_tier": "business_starter" to override the tier
+    # and preview a different digest track without changing the real record.
     test_chat_id = event.get("_test_chat_id")
     if test_chat_id:
         table = dynamodb.Table(USERS_TABLE)
@@ -514,7 +515,12 @@ def lambda_handler(event: dict, context) -> dict:
             logger.error("Test mode — no user found for chat_id=%s", test_chat_id)
             return {"statusCode": 404, "body": "user_not_found"}
         test_user = items[0]
-        tier      = test_user.get("subscription_tier") or test_user.get("tier", "crypto_shield")
+        # Allow tier override for previewing alternate digest tracks
+        tier_override = event.get("_test_tier")
+        if tier_override:
+            test_user = dict(test_user)          # don't mutate the real item
+            test_user["subscription_tier"] = tier_override
+        tier = test_user.get("subscription_tier") or test_user.get("tier", "crypto_shield")
         if tier in CRYPTO_TIERS:
             message = _build_crypto_digest(test_user)
         else:

@@ -2745,10 +2745,11 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
                     info_lines.append("✅ No scam flags found in TON community database")
                 ifaces = ton_risk.get("interfaces", [])
                 if ifaces:
-                    info_lines.append(f"ℹ️ Contract type: {', '.join(ifaces[:3])}")
+                    safe = ", ".join(f"`{i}`" for i in ifaces[:3])
+                    info_lines.append(f"ℹ️ Contract type: {safe}")
                 status = ton_risk.get("status", "")
                 if status and status != "active":
-                    warnings.append(f"⚠️ Account status: {status}")
+                    warnings.append(f"⚠️ Account status: `{status}`")
             else:
                 info_lines.append("ℹ️ TON risk data temporarily unavailable")
             info_lines.append("ℹ️ Wallet activity monitored via 15-minute polling")

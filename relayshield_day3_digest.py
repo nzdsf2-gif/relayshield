@@ -377,7 +377,8 @@ def _build_crypto_digest(user: dict) -> str:
                         wallet_lines.append("✅ No scam flags in TON community database")
                     ifaces = ton_risk.get("interfaces", [])
                     if ifaces:
-                        wallet_lines.append(f"ℹ️ Contract type: {', '.join(ifaces[:3])}")
+                        safe = ", ".join(f"`{i}`" for i in ifaces[:3])
+                        wallet_lines.append(f"ℹ️ Contract type: {safe}")
                 else:
                     wallet_lines.append("ℹ️ TON risk data temporarily unavailable")
             else:

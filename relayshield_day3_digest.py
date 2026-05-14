@@ -41,8 +41,9 @@ logger.setLevel(logging.INFO)
 secrets_client = boto3.client("secretsmanager")
 dynamodb       = boto3.resource("dynamodb")
 
-USERS_TABLE          = "relayshield_users"
-BREACH_ALERTS_TABLE  = "relayshield_breach_alerts"
+USERS_TABLE             = "relayshield_users"
+MONITORED_WALLETS_TABLE = "relayshield_monitored_wallets"
+BREACH_ALERTS_TABLE     = "relayshield_breach_alerts"
 ALCHEMY_SECRET_NAME  = "relayshield/alchemy_api_key"
 TG_SECRET_NAME       = "relayshield/telegram_bot_token"
 TELEGRAM_API_BASE    = "https://api.telegram.org/bot{token}/{method}"
@@ -212,6 +213,26 @@ def _mark_digest_sent(user_id: str) -> None:
         logger.error("Failed to mark day3_digest_sent user_id=%s: %s", user_id, exc)
 
 
+def _get_wallets_for_user(user_id: str) -> list[dict]:
+    """Fetch monitored wallets from relayshield_monitored_wallets table by user_id.
+    Falls back to empty list if none found."""
+    try:
+        table  = dynamodb.Table(MONITORED_WALLETS_TABLE)
+        items  = []
+        kwargs: dict = {"FilterExpression": Attr("user_id").eq(user_id)}
+        while True:
+            resp = table.scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            last = resp.get("LastEvaluatedKey")
+            if not last:
+                break
+            kwargs["ExclusiveStartKey"] = last
+        return items
+    except Exception as exc:
+        logger.warning("Wallet lookup failed for user_id=%s: %s", user_id, exc)
+        return []
+
+
 def _get_recent_breach_alerts(user_id: str, days: int = 3) -> list[dict]:
     """Return breach alerts for this user in the last N days."""
     try:
@@ -231,7 +252,10 @@ def _get_recent_breach_alerts(user_id: str, days: int = 3) -> list[dict]:
 
 def _build_crypto_digest(user: dict) -> str:
     first_name = user.get("first_name", "there")
-    wallets    = user.get("monitored_wallets", [])
+    # Prefer the separate monitored_wallets table — source of truth for all chains
+    wallets = _get_wallets_for_user(user["user_id"])
+    if not wallets:
+        wallets = user.get("monitored_wallets", [])
 
     lines = [
         f"👋 Hey {first_name}, it's been 3 days since you activated *Crypto Shield*.\n",
@@ -249,7 +273,8 @@ def _build_crypto_digest(user: dict) -> str:
     else:
         lines.append(f"🔍 *{len(wallets)} wallet(s) scanned:*\n")
         for w in wallets:
-            address     = w.get("address", "")
+            # relayshield_monitored_wallets uses wallet_address; user record uses address
+            address     = w.get("wallet_address") or w.get("address", "")
             chain_type  = w.get("chain_type", "evm")
             chain_label = {"evm": "EVM", "solana": "Solana", "ton": "TON",
                            "bitcoin": "Bitcoin"}.get(chain_type, chain_type.upper())

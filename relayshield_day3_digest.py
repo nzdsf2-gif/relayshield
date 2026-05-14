@@ -172,7 +172,7 @@ def _tonapi_risk(address: str) -> dict:
     Returns dict with keys: is_scam, interfaces, status, ok."""
     try:
         import urllib.parse as _up
-        url = f"https://tonapi.io/v2/accounts/{_up.quote(address, safe='')}"
+        url = f"https://tonapi.io/v2/accounts/{_up.quote(address, safe='-_=')}"
         req = urllib.request.Request(
             url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"}
         )

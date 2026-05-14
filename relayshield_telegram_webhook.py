@@ -2294,7 +2294,8 @@ def _tonapi_risk(address: str) -> dict:
     Returns dict with keys: is_scam, is_sanctioned, name, interfaces, ok.
     Uses the TON community scam/sanction database natively."""
     try:
-        url = f"https://tonapi.io/v2/accounts/{urllib.parse.quote(address, safe='')}"
+        # TON friendly addresses (EQ.../UQ...) are base64url — safe to use directly in path
+        url = f"https://tonapi.io/v2/accounts/{urllib.parse.quote(address, safe='-_=')}"
         req = urllib.request.Request(
             url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"}
         )

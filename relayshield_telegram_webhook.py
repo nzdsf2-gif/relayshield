@@ -574,6 +574,54 @@ def tg_api(method: str, payload: dict) -> dict:
         return {}
 
 
+def download_telegram_photo(photo_array: list) -> bytes | None:
+    """
+    Download the largest photo from a Telegram message.photo array.
+    Returns raw image bytes or None on failure.
+    """
+    try:
+        token = get_bot_token()
+        # photo_array is sorted smallest→largest; take the last (highest res)
+        file_id = photo_array[-1]["file_id"]
+        # getFile → returns file_path
+        url = TELEGRAM_API_BASE.format(token=token, method="getFile")
+        data = json.dumps({"file_id": file_id}).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+        file_path = result.get("result", {}).get("file_path")
+        if not file_path:
+            return None
+        download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+        with urllib.request.urlopen(download_url, timeout=20) as resp:
+            return resp.read()
+    except Exception as exc:
+        logger.error("Failed to download Telegram photo: %s", exc)
+        return None
+
+
+def run_textract_ocr(image_bytes: bytes) -> str | None:
+    """
+    Run AWS Textract DetectDocumentText on raw image bytes.
+    Returns all LINE blocks joined as a single string, or None on failure.
+    """
+    try:
+        client = boto3.client("textract")
+        response = client.detect_document_text(Document={"Bytes": image_bytes})
+        lines = [
+            b["Text"]
+            for b in response.get("Blocks", [])
+            if b.get("BlockType") == "LINE"
+        ]
+        return " ".join(lines) if lines else None
+    except Exception as exc:
+        logger.error("Textract OCR failed: %s", exc)
+        return None
+
+
 def send_message(chat_id: int, text: str, reply_markup: dict = None,
                  parse_mode: str = "Markdown") -> dict:
     payload = {
@@ -920,8 +968,8 @@ def msg_help(tier: str) -> str:
         "• /otp — Unexpected OTP guidance\n"
         "• /scam — Suspicious message, bot, or call guidance\n"
         "• /scan <url> — Scan a suspicious link for malware or phishing\n"
-        "• /analyse <message> — Paste a suspicious message for social engineering analysis\n"
-        "• /analyse <email body> — Paste a suspicious email to scan for fraud patterns\n"
+        "• /analyse <message> — Paste a suspicious message or email body for fraud analysis\n"
+        "• /analyse (send as photo caption) — Screenshot a suspicious email and send with caption /analyse\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"
@@ -3198,6 +3246,29 @@ def handle_message(update: dict) -> None:
     first_name = message.get("from", {}).get("first_name", "there")
 
     if not chat_id:
+        return
+
+    # --- Photo + /analyse caption → Textract OCR + fraud analysis ---
+    # User sends a screenshot of a suspicious email/message with caption /analyse
+    photo = message.get("photo")
+    caption = message.get("caption", "").strip()
+    if photo and caption.lower().lstrip("/") in ("analyse", "analyze"):
+        send_message(
+            chat_id,
+            "📧 *Scanning your screenshot...* This may take a few seconds.",
+        )
+        image_bytes = download_telegram_photo(photo)
+        extracted_text = run_textract_ocr(image_bytes) if image_bytes else None
+        if extracted_text:
+            handle_analyse(chat_id, extracted_text)
+        else:
+            send_message(
+                chat_id,
+                "⚠️ *Could not read text from that image.*\n\n"
+                "Try a clearer screenshot, or paste the text directly:\n"
+                "`/analyse <paste message text here>`",
+                parse_mode="Markdown",
+            )
         return
 
     # Handle contact share (phone number)

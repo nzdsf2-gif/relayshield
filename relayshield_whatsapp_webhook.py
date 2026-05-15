@@ -702,6 +702,25 @@ def download_twilio_media(media_url: str, account_sid: str, auth_token: str) -> 
         return None
 
 
+def run_textract_ocr(image_bytes: bytes) -> str | None:
+    """
+    Run AWS Textract DetectDocumentText on raw image bytes.
+    Returns all LINE blocks joined as a single string, or None on failure.
+    """
+    try:
+        client = boto3.client("textract")
+        response = client.detect_document_text(Document={"Bytes": image_bytes})
+        lines = [
+            b["Text"]
+            for b in response.get("Blocks", [])
+            if b.get("BlockType") == "LINE"
+        ]
+        return " ".join(lines) if lines else None
+    except Exception as exc:
+        logger.error("Textract OCR failed: %s", exc)
+        return None
+
+
 def submit_file_to_vt(
     file_bytes: bytes,
     filename: str,
@@ -2826,6 +2845,61 @@ def handle_active_message(
         logger.info("Delivered pending Claude analysis to user_id=%s.", user_id)
         return "pending_analysis_delivered"
 
+    # --- EMAILSCAN image — Textract OCR + fraud pattern analysis ---
+    # Triggered when user sends a screenshot of a suspicious email with caption EMAILSCAN.
+    # Downloads the image, extracts text via AWS Textract, then runs _analyse_sms_text().
+    if num_media > 0 and body == "EMAILSCAN":
+        media_url = media_info.get("media_url", "")
+        media_content_type = media_info.get("media_content_type", "")
+        if media_content_type.startswith("image/"):
+            send_whatsapp(
+                to_number,
+                "📧 *Scanning your email screenshot...* This may take a few seconds.",
+                account_sid, auth_token, from_number,
+            )
+            file_bytes = download_twilio_media(media_url, account_sid, auth_token)
+            extracted_text = run_textract_ocr(file_bytes) if file_bytes else None
+            if extracted_text:
+                analysis = _analyse_sms_text(extracted_text)
+                flags = analysis["flags"]
+                severity = analysis["severity"]
+                callback_numbers = analysis["callback_numbers"]
+                if flags:
+                    icon = "🚨" if severity == "HIGH" else "⚠️"
+                    flag_lines = "\n".join(f"🚩 {f}" for f in flags)
+                    callback_warn = ""
+                    if callback_numbers:
+                        callback_warn = (
+                            f"\n*Do NOT call {', '.join(callback_numbers)}.* "
+                            "Look up the real company number on their official website independently.\n"
+                        )
+                    response = (
+                        f"📧 *Email Analysis — {severity} RISK* {icon}\n\n"
+                        f"*{len(flags)} fraud signal(s) detected:*\n{flag_lines}\n"
+                        f"{callback_warn}\n"
+                        "*Recommended actions:*\n"
+                        "→ Do not call any number in this email\n"
+                        "→ Do not click any links — reply *EMAIL* followed by any link to scan it\n"
+                        "→ Verify independently at the company's official website\n"
+                        "→ Report to the FTC: reportfraud.ftc.gov\n"
+                        "→ Mark as spam and delete"
+                    )
+                else:
+                    response = (
+                        "📧 *Email Analysis*\n\n"
+                        "✅ No automatic fraud signals detected in the screenshot.\n\n"
+                        "This doesn't guarantee the email is safe — always verify unexpected "
+                        "requests by going directly to the company's official website."
+                    )
+            else:
+                response = (
+                    "⚠️ *Could not read text from that image.*\n\n"
+                    "Try taking a clearer screenshot, or paste the email text directly:\n"
+                    "*EMAILSCAN* <paste email text here>"
+                )
+            send_whatsapp(to_number, response, account_sid, auth_token, from_number)
+            return "emailscan_image_complete"
+
     # --- WhatsApp file attachment — VirusTotal file scan ---
     # Triggered when user sends a file (PDF, zip, doc, image) directly via WhatsApp.
     # Twilio populates NumMedia + MediaUrl0 + MediaContentType0 in the POST body.
@@ -3078,13 +3152,15 @@ def handle_active_message(
         )
         return "suspicious_email_analysed"
 
-    # --- EMAILSCAN — paste email body for fraud pattern analysis ---
+    # --- EMAILSCAN — paste email body or send screenshot for fraud pattern analysis ---
     if body == "EMAILSCAN":
         send_whatsapp(
             to_number,
             "📧 *Email Fraud Scanner*\n\n"
-            "Paste the full email body after EMAILSCAN:\n\n"
-            "*Example:*\n"
+            "*Option 1 — Screenshot:*\n"
+            "Take a screenshot of the suspicious email, then send it as an attachment "
+            "with *EMAILSCAN* as the caption.\n\n"
+            "*Option 2 — Paste text:*\n"
             "EMAILSCAN Dear customer, your Geek Squad renewal of $649.99...\n\n"
             "I'll scan for brand impersonation, fake order IDs, callback numbers, "
             "urgency tactics, and refund/renewal scam patterns.",

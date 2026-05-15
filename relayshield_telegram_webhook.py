@@ -1324,48 +1324,44 @@ def handle_sweep(chat_id: int) -> None:
     send_message(
         chat_id,
         "🔍 *Email Security Sweep — 5 Steps*\n\n"
-        "📌 *Run this sweep on a computer.* The Gmail app cannot access "
-        "forwarding rules, filters, or connected apps. "
-        "Open mail.google.com on a desktop or laptop.\n\n"
-        "*Step 1 — Check email forwarding rules*\n"
+        "Attackers plant backdoors after a breach. They survive password resets.\n\n"
+        "✅ *Steps 2, 4 and 5 work on any device — phone, tablet, or computer.*\n\n"
+        "*Step 2 — Check recovery email and phone*\n"
+        "Gmail: myaccount.google.com/security\n"
+        "Yahoo: account.yahoo.com/security\n"
+        "→ Remove any recovery contact you don't recognise.\n\n"
+        "*Step 4 — Review connected apps*\n"
+        "Gmail: myaccount.google.com/permissions\n"
+        "Yahoo: account.yahoo.com/security/connected-apps\n"
+        "→ Revoke anything unrecognised.\n\n"
+        "*Step 5 — Check active sessions*\n"
+        "Gmail: myaccount.google.com/device-activity\n"
+        "Yahoo: account.yahoo.com/security/recent-activity\n"
+        "→ Sign out of all unknown sessions.\n\n"
+        "_(Steps 1 & 3 follow in the next message)_",
+    )
+    send_message(
+        chat_id,
+        "📋 *Steps 1 & 3 — Forwarding Rules & Inbox Filters*\n\n"
+        "💻 *On a computer:* Open mail.google.com in any browser — no extra steps needed.\n\n"
+        "📱 *On a phone or tablet:* The Gmail app cannot access these settings. "
+        "Use Chrome or Safari with desktop view enabled:\n"
+        "🍎 *iOS Safari:* mail.google.com → tap aA → Request Desktop Website\n"
+        "🍎 *iOS Chrome:* tap ••• → Request Desktop Site\n"
+        "🤖 *Android Chrome:* tap ⋮ → Request Desktop Site\n\n"
+        "*Step 1 — Forwarding rules*\n"
         "Attackers plant a forwarding address so every email is silently copied to them — it survives password resets.\n"
         "Gmail: Settings → See all settings → Forwarding and POP/IMAP\n"
         "Outlook: Settings → Mail → Forwarding\n"
         "Yahoo: Settings → Mailboxes → your address → Forwarding\n"
-        "✅ Safe state: no forwarding addresses listed.\n"
-        "⚠️ If you see an address you didn't add: disable forwarding → tap X to remove → Save.\n"
-        "Also check: Settings → Filters and Blocked Addresses for rules that auto-delete, mark as read, or forward emails from banks — delete any you didn't create.\n\n"
-        "*Step 2 — Check recovery email and phone*\n"
-        "Gmail: myaccount.google.com/security\n"
-        "→ Remove any recovery contact you don't recognise.\n\n"
-        "*Step 3 — Check inbox filters*\n"
+        "✅ Safe: no forwarding addresses listed.\n"
+        "⚠️ If you see an address you didn't add: disable it → remove → Save.\n\n"
+        "*Step 3 — Inbox filters*\n"
+        "Silent rules can hide breach warnings and delete bank alerts.\n"
         "Gmail: Settings → Filters and Blocked Addresses\n"
+        "Outlook: Settings → Rules → delete unknown rules.\n"
         "→ Delete any filter you didn't create.\n\n"
-        "*Step 4 — Review connected apps*\n"
-        "Gmail: myaccount.google.com/permissions\n"
-        "→ Revoke anything unrecognised.\n\n"
-        "*Step 5 — Check active sessions*\n"
-        "Gmail: myaccount.google.com/device-activity\n"
-        "→ Sign out of all unknown sessions.",
-    )
-    send_message(
-        chat_id,
-        "📱 *Email Sweep — Mobile Device Users (Phone & Tablet)*\n\n"
-        "The Gmail native app cannot check forwarding or filters. "
-        "Use your phone's browser — Chrome or Safari — instead.\n\n"
-        "*Step 1: Enable desktop view in your browser*\n"
-        "Required only for Steps 1 & 3 (forwarding and filters).\n\n"
-        "🍎 *iOS Safari:* Go to mail.google.com → tap the 🖥 page icon in the "
-        "address bar → tap *...* → Request Desktop Website\n"
-        "🍎 *iOS Chrome:* Go to mail.google.com → tap *...* at the bottom-right "
-        "→ scroll down → Request Desktop Site\n"
-        "🤖 *Android Chrome:* Tap *⋮* at the top-right "
-        "→ Request Desktop Site\n"
-        "🤖 *Android Firefox:* Tap *⋮* "
-        "→ Request Desktop Site\n\n"
-        "*Step 2: Run the checks in your browser*\n"
-        "Steps 1 & 3 → mail.google.com → Settings → See all settings\n"
-        "Steps 2, 4 & 5 → myaccount.google.com (no special view needed)",
+        "✅ *Sweep complete. All 5 checks done.*",
     )
 
 

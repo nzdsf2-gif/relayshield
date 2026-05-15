@@ -1972,35 +1972,13 @@ def msg_oauth(is_business: bool = False, is_employee: bool = False) -> str:
 
 def msg_sweep_part1() -> str:
     return (
-        "🔍 *Email Security Sweep — Steps 1–3 of 5*\n\n"
+        "🔍 *Email Security Sweep — 5 Steps*\n\n"
         "Attackers plant backdoors after a breach. They survive password resets.\n\n"
-        "📌 *Run this sweep on a computer.* The Gmail app cannot access "
-        "forwarding rules, filters, or connected apps. "
-        "Open mail.google.com on a desktop or laptop.\n\n"
-        "*Step 1 — Check email forwarding rules*\n"
-        "Attackers plant a forwarding address so every email is silently copied to them.\n"
-        "Gmail: Settings → See all settings → Forwarding and POP/IMAP\n"
-        "Outlook: Settings → Mail → Forwarding\n"
-        "Yahoo: Settings → Mailboxes → your address → Forwarding\n"
-        "✅ Safe: no forwarding addresses listed.\n"
-        "⚠️ If you see an unknown address: disable forwarding → click X → Save.\n"
-        "Also check Filters and Blocked Addresses for rules that auto-delete or forward emails from banks.\n\n"
+        "✅ *Steps 2, 4 and 5 work on any device — phone, tablet, or computer.*\n\n"
         "*Step 2 — Check recovery email and phone*\n"
         "Gmail: myaccount.google.com/security\n"
         "Yahoo: account.yahoo.com/security\n"
         "→ Remove any recovery contact you do not recognise.\n\n"
-        "*Step 3 — Check inbox filters*\n"
-        "Silent rules can hide breach warnings and delete bank alerts.\n"
-        "Gmail: Settings → Filters and Blocked Addresses\n"
-        "→ Delete any filter you did not create.\n"
-        "Outlook: Settings → Rules → delete unknown rules.\n\n"
-        "_(Steps 4–5 follow in the next message)_"
-    )
-
-
-def msg_sweep_part2() -> str:
-    return (
-        "🔍 *Email Security Sweep — Steps 4–5 of 5*\n\n"
         "*Step 4 — Review connected apps*\n"
         "Gmail: myaccount.google.com/permissions\n"
         "Yahoo: account.yahoo.com/security/connected-apps\n"
@@ -2009,6 +1987,31 @@ def msg_sweep_part2() -> str:
         "Gmail: myaccount.google.com/device-activity\n"
         "Yahoo: account.yahoo.com/security/recent-activity\n"
         "→ Sign out of all unknown sessions.\n\n"
+        "_(Steps 1 & 3 follow in the next message)_"
+    )
+
+
+def msg_sweep_part2() -> str:
+    return (
+        "📋 *Steps 1 & 3 — Forwarding Rules & Inbox Filters*\n\n"
+        "💻 *On a computer:* Open mail.google.com in any browser — no extra steps needed.\n\n"
+        "📱 *On a phone or tablet:* The Gmail app cannot access these settings. "
+        "Use Chrome or Safari with desktop view enabled:\n"
+        "🍎 *iOS Safari:* mail.google.com → tap aA → Request Desktop Website\n"
+        "🍎 *iOS Chrome:* tap ••• → Request Desktop Site\n"
+        "🤖 *Android Chrome:* tap ⋮ → Request Desktop Site\n\n"
+        "*Step 1 — Forwarding rules*\n"
+        "Attackers plant a forwarding address so every email is silently copied to them — it survives password resets.\n"
+        "Gmail: Settings → See all settings → Forwarding and POP/IMAP\n"
+        "Outlook: Settings → Mail → Forwarding\n"
+        "Yahoo: Settings → Mailboxes → your address → Forwarding\n"
+        "✅ Safe: no forwarding addresses listed.\n"
+        "⚠️ If you see an address you didn't add: disable it → remove → Save.\n\n"
+        "*Step 3 — Inbox filters*\n"
+        "Silent rules can hide breach warnings and delete bank alerts.\n"
+        "Gmail: Settings → Filters and Blocked Addresses\n"
+        "Outlook: Settings → Rules → delete unknown rules.\n"
+        "→ Delete any filter you did not create.\n\n"
         "✅ *Sweep complete. All 5 checks done.*\n\n"
         "*Going forward — use a masked email alias*\n"
         "Your real address is a breach risk every time you share it. "
@@ -2016,31 +2019,14 @@ def msg_sweep_part2() -> str:
         "→ *SimpleLogin* — free, open source (simplelogin.io)\n"
         "→ *Apple Hide My Email* — built into iCloud\n"
         "→ *Gmail* — youraddress+sitename@gmail.com as a workaround\n\n"
-        "📱 *On a phone or tablet?* See the next message for mobile instructions.\n\n"
         "Reply *RESET* for a strong password guide.\n"
         "Reply *MANAGER* for a free Bitwarden setup guide."
     )
 
 
 def msg_sweep_part3() -> str:
-    return (
-        "📱 *Email Sweep — Mobile Device Users (Phone & Tablet)*\n\n"
-        "The Gmail native app cannot check forwarding or filters. "
-        "Use your phone's browser — Chrome or Safari — instead.\n\n"
-        "*Step 1: Enable desktop view in your browser*\n"
-        "Required only for Steps 1 & 3 (forwarding and filters).\n\n"
-        "🍎 *iOS Safari:* Go to mail.google.com → tap the 🖥 page icon in the "
-        "address bar → tap *...* → Request Desktop Website\n"
-        "🍎 *iOS Chrome:* Go to mail.google.com → tap *...* at the bottom-right "
-        "→ scroll down → Request Desktop Site\n"
-        "🤖 *Android Chrome:* Tap *⋮* at the top-right "
-        "→ Request Desktop Site\n"
-        "🤖 *Android Firefox:* Tap *⋮* "
-        "→ Request Desktop Site\n\n"
-        "*Step 2: Run the checks in your browser*\n"
-        "Steps 1 & 3 → mail.google.com → Settings → See all settings\n"
-        "Steps 2, 4 & 5 → myaccount.google.com (no special view needed)"
-    )
+    """Retained for backward compatibility — no longer sent by default."""
+    return ""
 
 
 def msg_sweep() -> str:
@@ -2859,7 +2845,6 @@ def handle_active_message(
     if body == "SWEEP":
         send_whatsapp(to_number, msg_sweep_part1(), account_sid, auth_token, from_number)
         send_whatsapp(to_number, msg_sweep_part2(), account_sid, auth_token, from_number)
-        send_whatsapp(to_number, msg_sweep_part3(), account_sid, auth_token, from_number)
         return "sweep_sent"
 
     # --- RESET ---

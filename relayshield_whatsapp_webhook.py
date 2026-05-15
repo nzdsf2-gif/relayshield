@@ -2937,6 +2937,7 @@ def handle_active_message(
     # --- SWEEP ---
     if body == "SWEEP":
         send_whatsapp(to_number, msg_sweep_part1(), account_sid, auth_token, from_number)
+        time.sleep(1)
         send_whatsapp(to_number, msg_sweep_part2(), account_sid, auth_token, from_number)
         return "sweep_sent"
 
@@ -3050,6 +3051,7 @@ def handle_active_message(
     # --- OTP (user received an unexpected OTP they did not request) ---
     if body == "OTP":
         send_whatsapp(to_number, msg_unexpected_otp_part1(), account_sid, auth_token, from_number)
+        time.sleep(1)
         send_whatsapp(to_number, msg_unexpected_otp_part2(), account_sid, auth_token, from_number)
         try:
             signals = record_signal(user_id, "otp_warning")
@@ -3062,7 +3064,9 @@ def handle_active_message(
     # --- WASCAM (user received a suspicious WhatsApp message) ---
     if body == "WASCAM":
         send_whatsapp(to_number, msg_wascam_part1(), account_sid, auth_token, from_number)
+        time.sleep(1)
         send_whatsapp(to_number, msg_wascam_part2(), account_sid, auth_token, from_number)
+        time.sleep(1)
         send_whatsapp(to_number, msg_wascam_part3(), account_sid, auth_token, from_number)
         return "wascam_reported"
 

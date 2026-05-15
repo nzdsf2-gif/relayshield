@@ -605,20 +605,20 @@ def download_telegram_photo(photo_array: list) -> bytes | None:
 
 def run_textract_ocr(image_bytes: bytes) -> str | None:
     """
-    Run AWS Textract DetectDocumentText on raw image bytes.
-    Returns all LINE blocks joined as a single string, or None on failure.
+    Extract text from an image using AWS Rekognition DetectText.
+    Returns all LINE detections joined as a single string, or None on failure.
     """
     try:
-        client = boto3.client("textract")
-        response = client.detect_document_text(Document={"Bytes": image_bytes})
+        client = boto3.client("rekognition")
+        response = client.detect_text(Image={"Bytes": image_bytes})
         lines = [
-            b["Text"]
-            for b in response.get("Blocks", [])
-            if b.get("BlockType") == "LINE"
+            d["DetectedText"]
+            for d in response.get("TextDetections", [])
+            if d.get("Type") == "LINE"
         ]
         return " ".join(lines) if lines else None
     except Exception as exc:
-        logger.error("Textract OCR failed: %s", exc)
+        logger.error("Rekognition OCR failed: %s", exc)
         return None
 
 

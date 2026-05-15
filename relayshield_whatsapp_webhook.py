@@ -355,6 +355,11 @@ def _analyse_sms_text(text: str) -> dict:
         # Crypto / Web3
         ("metamask", "MetaMask"), ("ledger", "Ledger"), ("trezor", "Trezor"),
         ("blockchain", "Blockchain.com"), ("kraken", "Kraken"),
+        # Tech support / security software brands (common refund/renewal scam targets)
+        ("geek squad", "Geek Squad"), ("best buy", "Best Buy"),
+        ("norton", "Norton"), ("mcafee", "McAfee"), ("kaspersky", "Kaspersky"),
+        ("avg", "AVG"), ("avast", "Avast"), ("malwarebytes", "Malwarebytes"),
+        ("pc support", "PC Support"), ("tech support", "Tech Support"),
     ]
     for keyword, display in BRAND_PATTERNS:
         if keyword in t:
@@ -418,6 +423,19 @@ def _analyse_sms_text(text: str) -> dict:
         if phrase in t:
             flags.append(f"reward/prize bait ('{phrase}')")
             break
+
+    # --- Tech support / refund / renewal scam patterns ---
+    TECH_SUPPORT_PHRASES = [
+        "renewal amount", "auto-renew", "auto renewal", "subscription renewing",
+        "order received", "order id", "order date", "subscription id",
+        "call us", "call immediately", "call our", "helpline", "toll-free",
+        "to cancel", "to stop", "cancel your subscription", "cancel this charge",
+        "refund", "we have charged", "you have been charged", "charged to your account",
+        "3 year", "2 year", "annual subscription", "yearly subscription",
+    ]
+    tech_hits = [p for p in TECH_SUPPORT_PHRASES if p in t]
+    if tech_hits:
+        flags.append(f"tech support/refund scam pattern: '{tech_hits[0]}'")
 
     # Severity rating
     n = len(flags)
@@ -1890,7 +1908,8 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
 
         "*🚨 Threat Analysis*\n"
         "• *SMS* <text> — Analyse a suspicious text message\n"
-        "• *EMAIL* <text> — Analyse a suspicious email\n"
+        "• *EMAIL* <text> — Scan links in a suspicious email\n"
+        "• *EMAILSCAN* <text> — Scan email body for fraud patterns (impersonation, fake orders, scam tactics)\n"
         "• *ATTACH* <url> — Scan a suspicious file or URL\n"
         "• *OTP* — You received an unexpected verification code\n"
         "• *WASCAM* — Suspicious WhatsApp, call, or browser scam\n"
@@ -3058,6 +3077,57 @@ def handle_active_message(
             gsb_result.get("error"),
         )
         return "suspicious_email_analysed"
+
+    # --- EMAILSCAN — paste email body for fraud pattern analysis ---
+    if body == "EMAILSCAN":
+        send_whatsapp(
+            to_number,
+            "📧 *Email Fraud Scanner*\n\n"
+            "Paste the full email body after EMAILSCAN:\n\n"
+            "*Example:*\n"
+            "EMAILSCAN Dear customer, your Geek Squad renewal of $649.99...\n\n"
+            "I'll scan for brand impersonation, fake order IDs, callback numbers, "
+            "urgency tactics, and refund/renewal scam patterns.",
+            account_sid, auth_token, from_number,
+        )
+        return "emailscan_prompt_sent"
+
+    if body.startswith("EMAILSCAN "):
+        email_body_text = message_body.strip()[10:].strip()
+        analysis = _analyse_sms_text(email_body_text)
+        flags = analysis["flags"]
+        severity = analysis["severity"]
+        callback_numbers = analysis["callback_numbers"]
+
+        if flags:
+            icon = "🚨" if severity == "HIGH" else "⚠️"
+            flag_lines = "\n".join(f"🚩 {f}" for f in flags)
+            callback_warn = ""
+            if callback_numbers:
+                callback_warn = (
+                    f"\n*Do NOT call {', '.join(callback_numbers)}.* "
+                    "Look up the real company number on their official website independently.\n"
+                )
+            response = (
+                f"📧 *Email Analysis — {severity} RISK* {icon}\n\n"
+                f"*{len(flags)} fraud signal(s) detected:*\n{flag_lines}\n"
+                f"{callback_warn}\n"
+                "*Recommended actions:*\n"
+                "→ Do not call any number in this email\n"
+                "→ Do not click any links — reply *EMAIL* followed by any link to scan it\n"
+                "→ Verify independently at the company's official website\n"
+                "→ Report to the FTC: reportfraud.ftc.gov\n"
+                "→ Mark as spam and delete"
+            )
+        else:
+            response = (
+                "📧 *Email Analysis*\n\n"
+                "✅ No automatic fraud signals detected in the text.\n\n"
+                "This doesn't guarantee the email is safe — always verify unexpected "
+                "requests by going directly to the company's official website."
+            )
+        send_whatsapp(to_number, response, account_sid, auth_token, from_number)
+        return "emailscan_complete"
 
     # --- ATTACH with no content — safe guidance + usage instructions ---
     if body == "ATTACH":

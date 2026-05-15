@@ -921,6 +921,7 @@ def msg_help(tier: str) -> str:
         "• /scam — Suspicious message, bot, or call guidance\n"
         "• /scan <url> — Scan a suspicious link for malware or phishing\n"
         "• /analyse <message> — Paste a suspicious message for social engineering analysis\n"
+        "• /analyse <email body> — Paste a suspicious email to scan for fraud patterns\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"
@@ -1683,6 +1684,11 @@ def handle_analyse(chat_id: int, content: str | None = None) -> None:
         ("social security", "Social Security"), ("medicare", "Medicare"),
         ("usps", "USPS"), ("fedex", "FedEx"), ("ups", "UPS"),
         ("metamask", "MetaMask"), ("ledger", "Ledger"), ("kraken", "Kraken"),
+        # Tech support / security software brands (common refund/renewal scam targets)
+        ("geek squad", "Geek Squad"), ("best buy", "Best Buy"),
+        ("norton", "Norton"), ("mcafee", "McAfee"), ("kaspersky", "Kaspersky"),
+        ("avg", "AVG"), ("avast", "Avast"), ("malwarebytes", "Malwarebytes"),
+        ("pc support", "PC Support"), ("tech support", "Tech Support"),
     ]
     matched_brands = [display for kw, display in BRANDS if kw in content_lower]
     if matched_brands:
@@ -1733,6 +1739,19 @@ def handle_analyse(chat_id: int, content: str | None = None) -> None:
         if word in content_lower:
             flags.append(f"🚩 Credential harvesting: asks for *'{word}'*")
             break
+
+    # Tech support / refund scam patterns
+    TECH_SUPPORT_PHRASES = [
+        "renewal amount", "auto-renew", "auto renewal", "subscription renewing",
+        "order received", "order id", "order date", "subscription id",
+        "call us", "call immediately", "call our", "helpline", "toll-free",
+        "to cancel", "to stop", "cancel your subscription", "cancel this charge",
+        "refund", "we have charged", "you have been charged", "charged to your account",
+        "3 year", "2 year", "annual subscription", "yearly subscription",
+    ]
+    tech_hits = [p for p in TECH_SUPPORT_PHRASES if p in content_lower]
+    if tech_hits:
+        flags.append(f"🚩 Tech support/refund scam pattern: *'{tech_hits[0]}'*")
 
     # Suspicious link
     if re.search(r"https?://\S+|bit\.ly|tinyurl|t\.co", content_lower):

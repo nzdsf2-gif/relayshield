@@ -216,30 +216,25 @@ def _get_defi_security_events() -> list[dict]:
     Each item: {"name": str, "date": str, "amount_m": float, "category": str}
     """
     try:
-        url = "https://defillama.com/api/v2/hacks"
+        # api.llama.fi is the correct endpoint (defillama.com is Cloudflare-protected)
+        url = "https://api.llama.fi/hacks"
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-        # data is a list of hack objects
-        hacks = data if isinstance(data, list) else data.get("events", data.get("hacks", []))
+        # API returns a flat list; each item has date (unix ts), name, amount, classification
+        hacks = data if isinstance(data, list) else []
         cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=30)).timestamp()
         recent = []
         for h in hacks:
-            # DeFiLlama uses "date" as a Unix timestamp (seconds)
-            ts = h.get("date", 0)
-            if isinstance(ts, str):
-                try:
-                    ts = int(ts)
-                except ValueError:
-                    continue
+            ts = h.get("date") or 0
             if ts < cutoff_ts:
                 continue
-            amount = h.get("amount", 0) or 0
+            amount = h.get("amount") or 0
             recent.append({
-                "name":     h.get("name") or h.get("projectName", "Unknown"),
+                "name":     h.get("name", "Unknown"),
                 "date":     datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%b %d"),
                 "amount_m": round(amount / 1_000_000, 1),
-                "category": h.get("category") or h.get("type", ""),
+                "category": h.get("classification", ""),
             })
         recent.sort(key=lambda x: x["amount_m"], reverse=True)
         return recent[:3]

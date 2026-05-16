@@ -209,6 +209,45 @@ def _aave_health_factor(wallet: str) -> float | None:
         return None
 
 
+def _get_defi_security_events() -> list[dict]:
+    """
+    Fetch recent DeFi hacks from DeFiLlama — free, no API key.
+    Returns up to 3 events from the last 30 days, sorted by USD lost descending.
+    Each item: {"name": str, "date": str, "amount_m": float, "category": str}
+    """
+    try:
+        url = "https://defillama.com/api/v2/hacks"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        # data is a list of hack objects
+        hacks = data if isinstance(data, list) else data.get("events", data.get("hacks", []))
+        cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=30)).timestamp()
+        recent = []
+        for h in hacks:
+            # DeFiLlama uses "date" as a Unix timestamp (seconds)
+            ts = h.get("date", 0)
+            if isinstance(ts, str):
+                try:
+                    ts = int(ts)
+                except ValueError:
+                    continue
+            if ts < cutoff_ts:
+                continue
+            amount = h.get("amount", 0) or 0
+            recent.append({
+                "name":     h.get("name") or h.get("projectName", "Unknown"),
+                "date":     datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%b %d"),
+                "amount_m": round(amount / 1_000_000, 1),
+                "category": h.get("category") or h.get("type", ""),
+            })
+        recent.sort(key=lambda x: x["amount_m"], reverse=True)
+        return recent[:3]
+    except Exception as exc:
+        logger.warning("DeFiLlama hacks fetch failed: %s", exc)
+        return []
+
+
 def _get_gas_gwei(network: str) -> float | None:
     try:
         api_key = _get_secret_json(ALCHEMY_SECRET_NAME, "api_key")
@@ -363,7 +402,9 @@ def _build_crypto_digest(user: dict, month_label: str) -> str:
             chain_label = {"evm": "EVM", "solana": "Solana",
                            "ton": "TON", "bitcoin": "Bitcoin"}.get(chain_type, chain_type.upper())
             short = f"{address[:6]}...{address[-4:]}" if len(address) > 12 else address
-            wallet_lines = [f"\n*{chain_label}* `{short}`"]
+            stored_risk = (w.get("risk_level") or "LOW").upper()
+            risk_badge  = {"HIGH": "🔴", "MEDIUM": "🟡"}.get(stored_risk, "🟢")
+            wallet_lines = [f"\n{risk_badge} *{chain_label}* `{short}` — {stored_risk} RISK"]
 
             if chain_type in ("evm", "solana"):
                 goplus_chain_id = _GOPLUS_CHAIN_IDS.get(chain_type)
@@ -408,6 +449,17 @@ def _build_crypto_digest(user: dict, month_label: str) -> str:
                     wallet_lines.append("ℹ️ No active Aave V3 position")
 
             lines.extend(wallet_lines)
+
+    # DeFi security events this month
+    defi_events = _get_defi_security_events()
+    if defi_events:
+        lines.append("\n\n⚠️ *Notable DeFi Security Events This Month:*\n")
+        for ev in defi_events:
+            cat  = f" ({ev['category']})" if ev["category"] else ""
+            lines.append(f"  • *{ev['name']}*{cat} — ${ev['amount_m']}M lost on {ev['date']}")
+        lines.append("_Source: DeFiLlama Hacks Tracker_")
+    else:
+        lines.append("\n\n✅ *No major DeFi exploits reported in the last 30 days.*")
 
     lines.append(
         "\n\n*Commands to run this month:*\n"

@@ -32,7 +32,7 @@ Commands (ACTIVE users):
   /botcheck @username — typosquat + red flag analysis for any bot/channel
   /verifybot — confirm this is the official RelayShield bot
   /scan <url> — scan a URL or link for malware/phishing
-  /analyse <text> — social engineering analysis of a suspicious message
+  /analyze <text> — social engineering analysis of a suspicious message
   /addwallet <addr> — add EVM, Solana, or TON wallet to monitoring (Crypto Shield only)
   /removewallet <addr> — remove wallet from monitoring
   /wallets  — list monitored wallets with GoPlus risk scores
@@ -968,8 +968,8 @@ def msg_help(tier: str) -> str:
         "• /otp — Unexpected OTP guidance\n"
         "• /scam — Suspicious message, bot, or call guidance\n"
         "• /scan <url> — Scan a suspicious link for malware or phishing\n"
-        "• /analyse <message> — Paste a suspicious message or email body for fraud analysis\n"
-        "• /analyse (send as photo caption) — Screenshot a suspicious email and send with caption /analyse\n"
+        "• /analyze <message> — Paste a suspicious message or email body for fraud analysis\n"
+        "• /analyze (send as photo caption) — Screenshot a suspicious email and send with caption /analyze\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"
@@ -1529,7 +1529,7 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
-def _botcheck_analyse(username: str) -> str:
+def _botcheck_analyze(username: str) -> str:
     """
     Analyse a Telegram username for typosquatting and red flag patterns.
     Returns a formatted risk summary string.
@@ -1644,13 +1644,13 @@ def _botcheck_analyse(username: str) -> str:
 
 def handle_botcheck(chat_id: int, username: str | None = None) -> None:
     if username:
-        send_message(chat_id, _botcheck_analyse(username))
+        send_message(chat_id, _botcheck_analyze(username))
         return
 
     send_message(
         chat_id,
         "🤖 *Bot Verification*\n\n"
-        "To analyse a specific bot or channel, type:\n"
+        "To analyze a specific bot or channel, type:\n"
         "`/botcheck @username`\n\n"
         "I'll check for typosquatting, red flag keywords, and similarity "
         "to known legitimate bots.\n\n"
@@ -1703,14 +1703,14 @@ def handle_scan(chat_id: int, target: str | None = None, user: dict | None = Non
         check_and_fire_correlation(user["user_id"], signals, chat_id)
 
 
-def handle_analyse(chat_id: int, content: str | None = None) -> None:
-    """Analyse suspicious message text — Telegram equivalent of SMS/EMAIL."""
+def handle_analyze(chat_id: int, content: str | None = None) -> None:
+    """Analyze suspicious message text — Telegram equivalent of SMS/EMAIL."""
     if not content:
         send_message(
             chat_id,
-            "🧠 *Message Analyser*\n\n"
+            "🧠 *Message Analyzer*\n\n"
             "Forward or paste a suspicious message:\n"
-            "`/analyse <paste message here>`\n\n"
+            "`/analyze <paste message here>`\n\n"
             "I'll identify social engineering patterns, urgency tactics, and impersonation signals.",
             parse_mode="Markdown",
         )
@@ -3289,10 +3289,10 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         parts = text.strip().split(None, 1)
         target = parts[1] if len(parts) > 1 else None
         handle_scan(chat_id, target, user)
-    elif cmd.startswith("analyse") or cmd.startswith("analyze"):
+    elif cmd.startswith("analyze") or cmd.startswith("analyse"):
         parts = text.strip().split(None, 1)
         content = parts[1] if len(parts) > 1 else None
-        handle_analyse(chat_id, content)
+        handle_analyze(chat_id, content)
     elif cmd == "sessions":
         handle_sessions(chat_id)
     elif cmd in ("status", "account"):
@@ -3341,11 +3341,11 @@ def handle_message(update: dict) -> None:
     if not chat_id:
         return
 
-    # --- Photo + /analyse caption → Textract OCR + fraud analysis ---
-    # User sends a screenshot of a suspicious email/message with caption /analyse
+    # --- Photo + /analyze caption → Rekognition OCR + fraud analysis ---
+    # User sends a screenshot of a suspicious email/message with caption /analyze
     photo = message.get("photo")
     caption = message.get("caption", "").strip()
-    if photo and caption.lower().lstrip("/") in ("analyse", "analyze"):
+    if photo and caption.lower().lstrip("/") in ("analyze", "analyse"):
         send_message(
             chat_id,
             "📧 *Scanning your screenshot...* This may take a few seconds.",
@@ -3353,13 +3353,13 @@ def handle_message(update: dict) -> None:
         image_bytes = download_telegram_photo(photo)
         extracted_text = run_textract_ocr(image_bytes) if image_bytes else None
         if extracted_text:
-            handle_analyse(chat_id, extracted_text)
+            handle_analyze(chat_id, extracted_text)
         else:
             send_message(
                 chat_id,
                 "⚠️ *Could not read text from that image.*\n\n"
                 "Try a clearer screenshot, or paste the text directly:\n"
-                "`/analyse <paste message text here>`",
+                "`/analyze <paste message text here>`",
                 parse_mode="Markdown",
             )
         return

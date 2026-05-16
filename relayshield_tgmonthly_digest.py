@@ -544,7 +544,7 @@ def _build_business_digest(user: dict, month_label: str) -> str:
         "• `/sweep` — close email backdoors\n"
         "• `/sim` — SIM swap monitoring status\n"
         "• `/scan <url>` — scan a suspicious link\n"
-        "• `/analyse <text>` — analyse a suspicious message\n\n"
+        "• `/analyze <text>` — analyze a suspicious message\n\n"
         "_RelayShield Security_"
     )
     return "\n".join(lines)

@@ -492,7 +492,7 @@ def _build_business_digest(user: dict) -> str:
         "• `/breach` — check breach status for all monitored emails\n"
         "• `/sim` — SIM swap status\n"
         "• `/scan <url>` — scan a suspicious link\n"
-        "• `/analyse <text>` — analyse a suspicious message\n"
+        "• `/analyze <text>` — analyze a suspicious message\n"
     )
 
     if domains:

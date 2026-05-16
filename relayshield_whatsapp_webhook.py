@@ -316,7 +316,7 @@ def check_urls_safe_browsing(urls: list[str], api_key: str) -> dict:
         return {"matches": [], "error": str(e)}
 
 
-def _analyse_sms_text(text: str) -> dict:
+def _analyze_sms_text(text: str) -> dict:
     """
     Pattern-based social engineering analysis of SMS message body.
     Returns a dict with keys:
@@ -473,7 +473,7 @@ def build_sms_analysis_response(
     )
 
     if not urls:
-        analysis = _analyse_sms_text(forwarded_text)
+        analysis = _analyze_sms_text(forwarded_text)
         flags    = analysis["flags"]
         severity = analysis["severity"]
         brands   = analysis["brands"]
@@ -513,7 +513,7 @@ def build_sms_analysis_response(
 
         return (
             f"{icon} *{label} DETECTED*\n\n"
-            f"RelayShield analysed the text and found *{len(flags)} social engineering signal(s):*\n\n"
+            f"RelayShield analyzed the text and found *{len(flags)} social engineering signal(s):*\n\n"
             f"{flag_lines}\n"
             f"{brand_block}"
             f"{callback_block}\n"
@@ -561,7 +561,7 @@ def build_sms_analysis_response(
     # URLs found, all clean
     url_list = "\n".join(f"✅ {u}" for u in urls)
     return (
-        "📨 *Suspicious text analysed — no known threats detected.*\n\n"
+        "📨 *Suspicious text analyzed — no known threats detected.*\n\n"
         f"RelayShield checked {len(urls)} link(s) and found no "
         "confirmed malware or phishing:\n\n"
         f"{url_list}\n\n"
@@ -596,7 +596,7 @@ def build_email_analysis_response(
     if not urls:
         return (
             "📧 *Suspicious email received — no URLs detected in the text you sent.*\n\n"
-            "No links were found to analyse. If the email contains an attachment, "
+            "No links were found to analyze. If the email contains an attachment, "
             "do not open it. To check an attachment safely:\n"
             "→ In Gmail: right-click the attachment → *Copy link address* → "
             "paste that URL at virustotal.com (no download needed)\n"
@@ -641,7 +641,7 @@ def build_email_analysis_response(
 
     url_list = "\n".join(f"✅ {u}" for u in urls)
     return (
-        "📧 *Suspicious email analysed — no known threats detected in links.*\n\n"
+        "📧 *Suspicious email analyzed — no known threats detected in links.*\n\n"
         f"RelayShield checked {len(urls)} link(s) and found no confirmed "
         "malware or phishing:\n\n"
         f"{url_list}\n\n"
@@ -2847,7 +2847,7 @@ def handle_active_message(
 
     # --- EMAILSCAN image — Textract OCR + fraud pattern analysis ---
     # Triggered when user sends a screenshot of a suspicious email with caption EMAILSCAN.
-    # Downloads the image, extracts text via AWS Textract, then runs _analyse_sms_text().
+    # Downloads the image, extracts text via AWS Textract, then runs _analyze_sms_text().
     if num_media > 0 and body == "EMAILSCAN":
         media_url = media_info.get("media_url", "")
         media_content_type = media_info.get("media_content_type", "")
@@ -2860,7 +2860,7 @@ def handle_active_message(
             file_bytes = download_twilio_media(media_url, account_sid, auth_token)
             extracted_text = run_textract_ocr(file_bytes) if file_bytes else None
             if extracted_text:
-                analysis = _analyse_sms_text(extracted_text)
+                analysis = _analyze_sms_text(extracted_text)
                 flags = analysis["flags"]
                 severity = analysis["severity"]
                 callback_numbers = analysis["callback_numbers"]
@@ -3074,7 +3074,7 @@ def handle_active_message(
     if body == "SMS":
         send_whatsapp(
             to_number,
-            "📨 *To analyse a suspicious text, reply with SMS followed by the message.*\n\n"
+            "📨 *To analyze a suspicious text, reply with SMS followed by the message.*\n\n"
             "Example: *SMS https://suspicious-link.com* or paste the full text of the message.\n\n"
             "RelayShield will check any links for malware and phishing.",
             account_sid, auth_token, from_number,
@@ -3113,13 +3113,13 @@ def handle_active_message(
             check_and_fire_correlation(user_id, signals, to_number, account_sid, auth_token, from_number)
         except Exception as exc:
             logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
-        return "suspicious_sms_analysed"
+        return "suspicious_sms_analyzed"
 
     # --- EMAIL with no content — prompt user to include the email body ---
     if body == "EMAIL":
         send_whatsapp(
             to_number,
-            "📧 *To analyse a suspicious email, reply with EMAIL followed by the email body text.*\n\n"
+            "📧 *To analyze a suspicious email, reply with EMAIL followed by the email body text.*\n\n"
             "Paste the text of the email (including any links). "
             "RelayShield will check all links for malware and phishing.\n\n"
             "Example: *EMAIL Your account has been suspended. Click here: https://example.com*\n\n"
@@ -3154,7 +3154,7 @@ def handle_active_message(
             len(gsb_result.get("matches", [])),
             gsb_result.get("error"),
         )
-        return "suspicious_email_analysed"
+        return "suspicious_email_analyzed"
 
     # --- EMAILSCAN — paste email body or send screenshot for fraud pattern analysis ---
     if body == "EMAILSCAN":
@@ -3174,7 +3174,7 @@ def handle_active_message(
 
     if body.startswith("EMAILSCAN "):
         email_body_text = message_body.strip()[10:].strip()
-        analysis = _analyse_sms_text(email_body_text)
+        analysis = _analyze_sms_text(email_body_text)
         flags = analysis["flags"]
         severity = analysis["severity"]
         callback_numbers = analysis["callback_numbers"]

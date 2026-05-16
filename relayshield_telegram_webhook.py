@@ -2641,6 +2641,11 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
             "Your TON wallet is monitored every 15 minutes. "
             "You'll receive an alert for new transaction activity."
         )
+    elif chain_type == "bitcoin":
+        alert_note = (
+            "Your Bitcoin wallet is monitored every 15 minutes. "
+            "You'll receive an alert with transaction direction and BTC value for any new activity."
+        )
     else:
         alert_note = "Wallet stored. Activity monitoring will check periodically."
 

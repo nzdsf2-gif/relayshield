@@ -2352,6 +2352,59 @@ def _chainabuse_risk(address: str) -> dict:
         return {}
 
 
+def _bitcoin_risk_check(address: str) -> dict:
+    """
+    Heuristic risk scoring for a Bitcoin address using Blockstream API.
+    Returns dict with keys: risk_level, flags, stats, ok.
+    Free — no API key required.
+    """
+    BLOCKSTREAM_API = "https://blockstream.info/api"
+    try:
+        url = f"{BLOCKSTREAM_API}/address/{address}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        logger.warning("Blockstream address check failed address=%s: %s", address, exc)
+        return {"ok": False}
+
+    chain  = data.get("chain_stats", {})
+    mempool = data.get("mempool_stats", {})
+
+    tx_count      = chain.get("tx_count", 0)
+    funded_sum    = chain.get("funded_txo_sum", 0)   # total received (sats)
+    spent_sum     = chain.get("spent_txo_sum", 0)    # total spent (sats)
+    balance_sats  = funded_sum - spent_sum
+    mempool_txs   = mempool.get("tx_count", 0)
+
+    flags = []
+
+    if tx_count == 0:
+        flags.append("never_used")
+    if tx_count > 500:
+        flags.append("high_tx_volume")
+    if balance_sats == 0 and tx_count > 10:
+        flags.append("zero_balance_high_activity")
+    if 0 < balance_sats < 1000:
+        flags.append("dust_balance")
+    if mempool_txs > 0:
+        flags.append("unconfirmed_transactions")
+
+    risk_level = "HIGH" if "zero_balance_high_activity" in flags or "high_tx_volume" in flags \
+        else "MEDIUM" if flags else "LOW"
+
+    return {
+        "ok":         True,
+        "risk_level": risk_level,
+        "flags":      flags,
+        "stats": {
+            "tx_count":     tx_count,
+            "balance_sats": balance_sats,
+            "mempool_txs":  mempool_txs,
+        },
+    }
+
+
 def _tonapi_risk(address: str) -> dict:
     """Check TONAPI v2 for TON address risk intelligence.
     Returns dict with keys: is_scam, is_sanctioned, name, interfaces, ok.
@@ -2594,11 +2647,19 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
 
     send_message(chat_id, f"🔍 Checking `{canonical}` ({chain_label})...", parse_mode="Markdown")
 
-    # GoPlus risk check — EVM and Solana supported; TON/Bitcoin skipped
+    # Risk check — GoPlus for EVM/Solana; Blockstream heuristics for Bitcoin; skipped for TON
     goplus_chain_id = _GOPLUS_CHAIN_IDS.get(chain_type)
-    risk = _goplus_risk_check(canonical, goplus_chain_id) if goplus_chain_id else {}
-    risk_flags = [k for k, v in risk.items() if v == "1"]
-    risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+    if goplus_chain_id:
+        risk = _goplus_risk_check(canonical, goplus_chain_id)
+        risk_flags = [k for k, v in risk.items() if v == "1"]
+        risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+    elif chain_type == "bitcoin":
+        btc_risk   = _bitcoin_risk_check(canonical)
+        risk_flags = btc_risk.get("flags", []) if btc_risk.get("ok") else []
+        risk_level = btc_risk.get("risk_level", "LOW") if btc_risk.get("ok") else "LOW"
+    else:
+        risk_flags = []
+        risk_level = "LOW"
 
     # Register with Alchemy Notify — EVM only (Solana/TON/Bitcoin use polling monitors)
     if chain_type == "evm":
@@ -2822,7 +2883,34 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
                 info_lines.append("ℹ️ TON risk data temporarily unavailable")
             info_lines.append("ℹ️ Wallet activity monitored via 15-minute polling")
         elif chain_type == "bitcoin":
-            info_lines.append("ℹ️ Bitcoin wallet stored — activity alerts via periodic check")
+            btc_risk = _bitcoin_risk_check(address)
+            if btc_risk.get("ok"):
+                stats = btc_risk.get("stats", {})
+                btc_flags = btc_risk.get("flags", [])
+                FLAG_LABELS = {
+                    "never_used":               "⚠️ Address has never been used — verify this is the correct address",
+                    "high_tx_volume":           "⚠️ High transaction volume — may be an exchange or mixing service",
+                    "zero_balance_high_activity": "🚨 Zero balance with high activity — potential tumbler or mixer",
+                    "dust_balance":             "⚠️ Dust balance detected — possible dust attack",
+                    "unconfirmed_transactions": "ℹ️ Unconfirmed transactions pending in mempool",
+                }
+                for flag in btc_flags:
+                    label = FLAG_LABELS.get(flag)
+                    if label:
+                        if label.startswith("🚨"):
+                            critical.append(label)
+                        elif label.startswith("⚠️"):
+                            warnings.append(label)
+                        else:
+                            info_lines.append(label)
+                balance_btc = stats.get("balance_sats", 0) / 100_000_000
+                info_lines.append(f"ℹ️ Balance: {balance_btc:.8f}".rstrip("0").rstrip(".") + " BTC")
+                info_lines.append(f"ℹ️ Total transactions: {stats.get('tx_count', 0)}")
+                if not btc_flags:
+                    info_lines.append("✅ No risk flags detected on this Bitcoin address")
+            else:
+                info_lines.append("ℹ️ Bitcoin risk data temporarily unavailable")
+            info_lines.append("ℹ️ Wallet activity monitored via 15-minute polling")
 
         if critical:
             risk_badge = "🔴 *CRITICAL*"

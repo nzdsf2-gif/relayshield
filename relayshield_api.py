@@ -9,7 +9,7 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   POST /v1/scan-url                 — VirusTotal URL malware analysis
   POST /v1/scan-file                — VirusTotal binary/file analysis
   POST /v1/scan-wallet              — GoPlus EVM wallet risk scan (legacy)
-  POST /v1/wallet-risk              — Multi-chain wallet risk: EVM/Solana/TON (auto-detect)
+  POST /v1/wallet-risk              — Multi-chain wallet risk: EVM/Solana/TON/Bitcoin (auto-detect)
   POST /v1/token-security           — GoPlus token risk: honeypot, tax, ownership flags
   POST /v1/nft-security             — GoPlus NFT contract risk scan
   POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
@@ -24,7 +24,7 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/scan-wallet         — $0.10 USDC (legacy EVM-only)
   POST /v1/payg/scan-url            — $0.05 USDC
   POST /v1/payg/scan-file           — $0.10 USDC
-  POST /v1/payg/wallet-risk         — $0.15 USDC — multi-chain EVM/Solana/TON
+  POST /v1/payg/wallet-risk         — $0.15 USDC — multi-chain EVM/Solana/TON/Bitcoin
   POST /v1/payg/token-security      — $0.10 USDC — token honeypot + tax analysis
   POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
   POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
@@ -948,8 +948,8 @@ def handle_nft_security(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Endpoint: POST /v1/wallet-risk  (subscription) / POST /v1/payg/wallet-risk (PAYG)
 # ---------------------------------------------------------------------------
-# Multi-chain wallet risk: EVM and Solana via GoPlus, TON via TONAPI v2.
-# Chain is auto-detected from address format.
+# Multi-chain wallet risk: EVM and Solana via GoPlus, TON via TONAPI v2,
+# Bitcoin via Blockstream heuristics. Chain is auto-detected from address format.
 #
 # Request:  { "address": "0x...|SolanaAddr|EQTonAddr" }
 # Response: { "address": "...", "chain": "evm|solana|ton|bitcoin",
@@ -978,17 +978,54 @@ def handle_wallet_risk(params: dict) -> dict:
     chain = _detect_chain_api(address)
     if chain == "unknown":
         return _err("unrecognised address format — supported: EVM (0x), Solana, TON (EQ.../UQ...), Bitcoin")
-    if chain == "bitcoin":
-        return _ok({
-            "address":    address,
-            "chain":      "bitcoin",
-            "risk_level": "UNKNOWN",
-            "risk_flags": [],
-            "metadata":   {"note": "Bitcoin address risk screening not yet supported"},
-        })
 
     risk_flags = []
     metadata   = {}
+
+    if chain == "bitcoin":
+        try:
+            btc_url = f"https://blockstream.info/api/address/{address}"
+            req = urllib.request.Request(btc_url, headers={"User-Agent": "RelayShield/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                btc_data = json.loads(resp.read())
+            chain_stats  = btc_data.get("chain_stats", {})
+            mempool_stats = btc_data.get("mempool_stats", {})
+            tx_count     = chain_stats.get("tx_count", 0)
+            funded_sum   = chain_stats.get("funded_txo_sum", 0)
+            spent_sum    = chain_stats.get("spent_txo_sum", 0)
+            balance_sats = funded_sum - spent_sum
+            mempool_txs  = mempool_stats.get("tx_count", 0)
+
+            if tx_count == 0:
+                risk_flags.append("never_used")
+            if tx_count > 500:
+                risk_flags.append("high_tx_volume")
+            if balance_sats == 0 and tx_count > 10:
+                risk_flags.append("zero_balance_high_activity")
+            if 0 < balance_sats < 1000:
+                risk_flags.append("dust_balance")
+            if mempool_txs > 0:
+                risk_flags.append("unconfirmed_transactions")
+
+            metadata["tx_count"]      = tx_count
+            metadata["balance_sats"]  = balance_sats
+            metadata["balance_btc"]   = round(balance_sats / 100_000_000, 8)
+            metadata["mempool_txs"]   = mempool_txs
+            metadata["explorer"]      = f"https://mempool.space/address/{address}"
+        except Exception as exc:
+            logger.error("Blockstream wallet-risk failed address=%s: %s", address, exc)
+            metadata["blockstream_error"] = "upstream unavailable"
+
+        risk_level = "HIGH" if "zero_balance_high_activity" in risk_flags or "high_tx_volume" in risk_flags \
+            else "MEDIUM" if risk_flags else "LOW"
+        logger.info("wallet-risk address=%s chain=bitcoin risk=%s flags=%d", address, risk_level, len(risk_flags))
+        return _ok({
+            "address":    address,
+            "chain":      "bitcoin",
+            "risk_level": risk_level,
+            "risk_flags": risk_flags,
+            "metadata":   metadata,
+        })
 
     if chain in ("evm", "solana"):
         goplus_chain_id = _GOPLUS_CHAIN_IDS[chain]

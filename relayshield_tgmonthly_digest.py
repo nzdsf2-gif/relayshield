@@ -54,6 +54,7 @@ TELEGRAM_API_BASE       = "https://api.telegram.org/bot{token}/{method}"
 GOPLUS_ADDR_URL         = "https://api.gopluslabs.io/api/v1/address_security"
 TONAPI_ACCOUNTS_URL     = "https://tonapi.io/v2/accounts/{address}"
 BLOCKSTREAM_API         = "https://blockstream.info/api"
+DEFILLAMA_HACKS_API     = "https://api.llama.fi/hacks"
 
 CRYPTO_TIERS   = {"crypto_shield", "crypto-shield"}
 BUSINESS_TIERS = {"business_starter", "starter_domain", "business_basic",
@@ -217,7 +218,7 @@ def _get_defi_security_events() -> list[dict]:
     """
     try:
         # api.llama.fi is the correct endpoint (defillama.com is Cloudflare-protected)
-        url = "https://api.llama.fi/hacks"
+        url = DEFILLAMA_HACKS_API
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())

@@ -1,0 +1,164 @@
+openapi: "3.0.0"
+info:
+  title: RelayShield Security Intelligence
+  version: "1.0"
+  description: >
+    RelayShield gives AI agents and developers real-time identity and
+    infrastructure threat detection via a single REST API.
+
+servers:
+  - url: https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod
+
+paths:
+  /v1/result/{analysis_id}:
+    get:
+      operationId: getResult
+      summary: Get scan result
+      description: Retrieve the result of a previously submitted scan by analysis ID.
+      parameters:
+        - name: analysis_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Scan result
+
+  /v1/scan-url:
+    post:
+      operationId: scanUrl
+      summary: Scan a URL
+      description: Submits a URL to VirusTotal for analysis across 70+ security engines.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+      responses:
+        "200":
+          description: Scan result
+
+  /v1/scan-file:
+    post:
+      operationId: scanFile
+      summary: Scan a file hash
+      description: Checks a file hash (MD5/SHA1/SHA256) against VirusTotal threat intelligence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hash]
+              properties:
+                hash:
+                  type: string
+      responses:
+        "200":
+          description: Scan result
+
+  /v1/breach:
+    post:
+      operationId: checkBreach
+      summary: Check email breach
+      description: Check if an email address appears in known data breaches (13B+ records).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+      responses:
+        "200":
+          description: Breach result
+
+  /v1/sim-swap:
+    post:
+      operationId: checkSimSwap
+      summary: Check SIM swap
+      description: Detect SIM swap and port-out events on a phone number via live carrier data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+      responses:
+        "200":
+          description: SIM swap result
+
+  /v1/wallet-risk:
+    post:
+      operationId: checkWalletRisk
+      summary: Check wallet risk
+      description: Returns a risk score and threat indicators for an EVM, Solana, TON, or Bitcoin wallet address. Chain is auto-detected from address format. Bitcoin addresses are scored using Blockstream heuristics — returns balance, tx count, and risk flags such as high_tx_volume and zero_balance_high_activity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address:
+                  type: string
+      responses:
+        "200":
+          description: Wallet risk result
+
+  /v1/token-security:
+    post:
+      operationId: checkTokenSecurity
+      summary: Check token security
+      description: Rug pull, honeypot, and tax analysis for an EVM token contract.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chain_id, contract_address]
+              properties:
+                chain_id:
+                  type: string
+                  description: "EVM chain ID (e.g. 1 for Ethereum, 8453 for Base)"
+                contract_address:
+                  type: string
+      responses:
+        "200":
+          description: Token security result
+
+  /v1/nft-security:
+    post:
+      operationId: checkNftSecurity
+      summary: Check NFT security
+      description: Risk scan for an NFT contract — minting, ownership, and contract verification.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chain_id, contract_address]
+              properties:
+                chain_id:
+                  type: string
+                contract_address:
+                  type: string
+      responses:
+        "200":
+          description: NFT security result

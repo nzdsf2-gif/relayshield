@@ -38,7 +38,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Install security tools
         run: |
-          pip install bandit "safety<3.0.0"
+          pip install bandit pip-audit
 
       # -----------------------------------------------------------------------
       # 4. Bandit — static analysis for Python security issues
@@ -69,13 +69,12 @@ jobs:
           path: bandit-report.txt
 
       # -----------------------------------------------------------------------
-      # 5. Safety — check requirements.txt against known CVE database
+      # 5. pip-audit — check requirements.txt against known CVE database
+      #    PyPA-maintained replacement for safety, no auth or policy file needed
       # -----------------------------------------------------------------------
-      - name: Run Safety (dependency CVE check)
+      - name: Run pip-audit (dependency CVE check)
         run: |
-          safety check \
-            --file requirements.txt \
-            --full-report
+          pip-audit -r requirements.txt
 
       # -----------------------------------------------------------------------
       # 6. Gitleaks — secret scanning (open source, no API key required)

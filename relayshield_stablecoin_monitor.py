@@ -49,19 +49,21 @@ COINGECKO_URL      = (
 
 CRYPTO_TIERS = {"crypto_shield", "crypto-shield"}
 
-# Stablecoin metadata: coingecko_id → display info
+# Stablecoin metadata: coingecko_id → display info + per-coin thresholds
+# warn  — price below this triggers a warning alert
+# crit  — price below this triggers a critical alert
+# repeg — price must recover above this to clear the alert
+#
+# FRAX uses wider thresholds — it is a fractional algorithmic stablecoin
+# that routinely trades 0.3–0.5% off peg under normal market conditions.
 STABLECOINS = {
-    "usd-coin":              {"symbol": "USDC",  "name": "USD Coin"},
-    "tether":                {"symbol": "USDT",  "name": "Tether"},
-    "dai":                   {"symbol": "DAI",   "name": "DAI"},
-    "frax":                  {"symbol": "FRAX",  "name": "Frax"},
-    "liquity-usd":           {"symbol": "LUSD",  "name": "Liquity USD"},
-    "paypal-usd":            {"symbol": "PYUSD", "name": "PayPal USD"},
+    "usd-coin":    {"symbol": "USDC",  "name": "USD Coin",    "warn": 0.997, "crit": 0.990, "repeg": 0.999},
+    "tether":      {"symbol": "USDT",  "name": "Tether",      "warn": 0.997, "crit": 0.990, "repeg": 0.999},
+    "dai":         {"symbol": "DAI",   "name": "DAI",         "warn": 0.997, "crit": 0.990, "repeg": 0.999},
+    "frax":        {"symbol": "FRAX",  "name": "Frax",        "warn": 0.995, "crit": 0.985, "repeg": 0.997},
+    "liquity-usd": {"symbol": "LUSD",  "name": "Liquity USD", "warn": 0.997, "crit": 0.990, "repeg": 0.999},
+    "paypal-usd":  {"symbol": "PYUSD", "name": "PayPal USD",  "warn": 0.997, "crit": 0.990, "repeg": 0.999},
 }
-
-WARN_THRESHOLD     = 0.997   # >0.3% depeg
-CRITICAL_THRESHOLD = 0.990   # >1.0% depeg
-REPEG_THRESHOLD    = 0.999   # clear alert when back above this
 
 _secret_cache: dict = {}
 
@@ -260,8 +262,11 @@ def lambda_handler(event: dict, context) -> dict:
         change_24h = data.get("usd_24h_change")
 
         currently_alerting = coin_id in active_alerts
+        warn_thresh  = meta["warn"]
+        crit_thresh  = meta["crit"]
+        repeg_thresh = meta["repeg"]
 
-        if price < CRITICAL_THRESHOLD:
+        if price < crit_thresh:
             severity = "critical"
             if active_alerts.get(coin_id) != "critical":
                 alerts_to_send.append({
@@ -270,7 +275,7 @@ def lambda_handler(event: dict, context) -> dict:
                 })
                 _set_depeg_alert(coin_id, severity, price)
 
-        elif price < WARN_THRESHOLD:
+        elif price < warn_thresh:
             severity = "warning"
             if not currently_alerting:
                 alerts_to_send.append({
@@ -279,7 +284,7 @@ def lambda_handler(event: dict, context) -> dict:
                 })
                 _set_depeg_alert(coin_id, severity, price)
 
-        elif price >= REPEG_THRESHOLD and currently_alerting:
+        elif price >= repeg_thresh and currently_alerting:
             repeg_to_send.append(coin_id)
             _clear_depeg_alert(coin_id)
 

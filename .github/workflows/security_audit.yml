@@ -38,7 +38,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Install security tools
         run: |
-          pip install bandit safety
+          pip install bandit "safety<3.0.0"
 
       # -----------------------------------------------------------------------
       # 4. Bandit — static analysis for Python security issues

@@ -1926,10 +1926,11 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
         "• *RESOLVED* — Mark an incident as resolved\n\n"
 
         "*🚨 Threat Analysis*\n"
-        "• *SMS* <text> — Analyse a suspicious text message\n"
-        "• *EMAIL* <text> — Scan links in a suspicious email\n"
-        "• *EMAILSCAN* <text> — Scan email body for fraud patterns (impersonation, fake orders, scam tactics)\n"
-        "• *ATTACH* <url> — Scan a suspicious file or URL\n"
+        "• *SMS* <text> — Analyze a suspicious text message\n"
+        "• *EMAILSCAN* — Screenshot a suspicious email and send as attachment, or reply EMAILSCAN followed by the email text\n"
+        "• *EMAIL* <text> — Paste a forwarded email body to scan every link inside it\n"
+        "• *SCAN* <url> — Scan a suspicious link for malware or phishing\n"
+        "• *ATTACH* — Send a suspicious file as a WhatsApp attachment to scan for malware\n"
         "• *OTP* — You received an unexpected verification code\n"
         "• *WASCAM* — Suspicious WhatsApp, call, or browser scam\n"
         "• *CALL* — You received a suspicious phone call\n"
@@ -3210,18 +3211,56 @@ def handle_active_message(
         return "emailscan_complete"
 
     # --- ATTACH with no content — safe guidance + usage instructions ---
+    # --- SCAN <url> — standalone URL scan ---
+    if body == "SCAN":
+        send_whatsapp(
+            to_number,
+            "🔍 *Link Scanner*\n\n"
+            "Reply *SCAN* followed by the URL to check it for malware or phishing.\n\n"
+            "Example: *SCAN https://suspicious-link.com*\n\n"
+            "💡 *To scan a file attachment*, use *ATTACH* and send the file directly.",
+            account_sid, auth_token, from_number,
+        )
+        return "scan_prompt_sent"
+
+    if body.startswith("SCAN "):
+        scan_url = message_body.strip()[5:].strip()
+
+        if not scan_url.startswith(("http://", "https://")):
+            send_whatsapp(
+                to_number,
+                "Please include the full URL starting with https://\n\n"
+                "Example: *SCAN https://suspicious-link.com*",
+                account_sid, auth_token, from_number,
+            )
+            return "scan_invalid_url"
+
+        send_whatsapp(
+            to_number,
+            "🔍 *RelayShield is scanning that link...* This may take up to 30 seconds.",
+            account_sid, auth_token, from_number,
+        )
+
+        try:
+            vt_api_key = get_vt_api_key()
+            analysis_id = submit_url_to_vt(scan_url, vt_api_key)
+            stats = poll_vt_analysis(analysis_id, vt_api_key, max_wait=VT_URL_MAX_WAIT) if analysis_id else None
+        except Exception as exc:
+            logger.error("VT URL scan failed for %s: %s", scan_url, exc)
+            stats = None
+
+        verdict = build_vt_verdict_response(stats, "that URL")
+        send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)
+        logger.info("VT URL scan complete — url=%s stats=%s", scan_url, stats)
+        return "vt_url_scanned"
+
     if body == "ATTACH":
         send_whatsapp(
             to_number,
-            "📎 *To scan a suspicious file or link:*\n\n"
-            "*Option 1 — Paste the URL:*\n"
-            "Reply *ATTACH* followed by the direct link.\n"
-            "Example: *ATTACH https://example.com/invoice.pdf*\n\n"
-            "*Option 2 — Send the file:*\n"
-            "Send the file directly as a WhatsApp attachment — "
-            "RelayShield will scan it automatically.\n\n"
-            "💡 *Before downloading from email:* In Gmail, right-click the attachment "
-            "→ *Copy link address* and use Option 1. No download needed.",
+            "📎 *File Scanner*\n\n"
+            "Send the suspicious file directly as a WhatsApp attachment and RelayShield will scan it for malware.\n\n"
+            "💡 *To scan a link instead*, use:\n"
+            "*SCAN https://example.com*",
             account_sid, auth_token, from_number,
         )
         return "attach_prompt_sent"

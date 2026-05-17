@@ -998,6 +998,7 @@ def msg_help(tier: str) -> str:
             "• /wallets — List your monitored wallets\n"
             "• /removewallet <address> — Remove a wallet from monitoring\n"
             "• /riskcheck — Risk score for all your monitored wallets\n"
+            "• /approvals — Scan your EVM wallets for dangerous token approvals and revoke them\n"
             "• /checkvault <url> — Check a DeFi protocol for audit and contract risks\n"
             "• /checktoken <address> — Check a token contract for rug pull and honeypot risks\n"
             "• /checknft <address> — Check an NFT collection contract for risks\n"
@@ -2801,6 +2802,87 @@ def handle_wallets(chat_id: int, user: dict) -> None:
     )
 
 
+def handle_approvals(chat_id: int, user: dict) -> None:
+    """
+    Scan all EVM wallets for dangerous token approvals via GoPlus.
+    Returns a list of unlimited/high-risk approvals with revoke.cash deep-links.
+    """
+    tier = user.get("subscription_tier") or user.get("tier", "")
+    if tier not in CRYPTO_TIERS:
+        send_message(
+            chat_id,
+            "🔒 *Token Approval Scanner* is a Crypto Shield feature.\n\n"
+            "Upgrade at relayshield.net to monitor wallet approvals.",
+        )
+        return
+
+    wallets = _get_wallets_for_user(user["user_id"])
+    evm_wallets = [w for w in wallets if w.get("chain_type", "evm") == "evm"]
+
+    if not evm_wallets:
+        send_message(
+            chat_id,
+            "📭 *No EVM wallets found.*\n\n"
+            "Add one with `/addwallet <0x...>` to scan for token approvals.",
+        )
+        return
+
+    send_message(chat_id, f"🔍 *Scanning {len(evm_wallets)} EVM wallet(s) for token approvals...*")
+
+    GOPLUS_APPROVAL_URL = "https://api.gopluslabs.io/api/v1/address_security"
+    lines = ["*🔓 Token Approval Report*\n"]
+    any_risk = False
+
+    for w in evm_wallets:
+        address = w.get("wallet_address", "")
+        short   = f"{address[:6]}...{address[-4:]}"
+
+        try:
+            url = f"{GOPLUS_APPROVAL_URL}/{address}?chain_id=1"
+            req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read()).get("result", {})
+
+            # GoPlus flags risky approval state in address security
+            approval_abuse = data.get("approval_abuse", "0")
+            is_contract    = data.get("is_contract", "0")
+
+            if approval_abuse == "1":
+                any_risk = True
+                revoke_link = f"https://revoke.cash/address/{address}"
+                lines.append(
+                    f"🚨 `{short}` — *Dangerous approvals detected*\n"
+                    f"   → [Revoke on revoke.cash]({revoke_link})\n"
+                    f"   → Or search your address on [Etherscan Token Approvals]"
+                    f"(https://etherscan.io/tokenapprovalchecker?search={address})"
+                )
+            else:
+                lines.append(f"✅ `{short}` — No high-risk approvals flagged")
+
+        except Exception as exc:
+            logger.warning("GoPlus approval check failed %s: %s", address, exc)
+            lines.append(f"ℹ️ `{short}` — Could not retrieve approval data")
+
+    if any_risk:
+        lines.append(
+            "\n*What are token approvals?*\n"
+            "When you use a DeFi protocol, you grant it permission to spend your tokens. "
+            "Unlimited approvals let the contract drain your wallet at any time — even after you stop using it. "
+            "Revoking removes that permission without affecting your assets."
+        )
+        lines.append(
+            "\n*To revoke manually:*\n"
+            f"1. Go to [revoke.cash](https://revoke.cash)\n"
+            "2. Connect your wallet\n"
+            "3. Find unlimited approvals and revoke them one by one\n"
+            "4. Each revoke is a small gas transaction (~$0.10–$2.00 on Ethereum)"
+        )
+    else:
+        lines.append("\n✅ *No dangerous approvals found across your EVM wallets.*")
+
+    send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+
+
 def handle_riskcheck(chat_id: int, user: dict) -> None:
     tier = user.get("tier") or user.get("subscription_tier", "")
     if tier not in CRYPTO_TIERS:
@@ -3303,6 +3385,8 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_removemember(chat_id, user)
     elif cmd == "riskcheck":
         handle_riskcheck(chat_id, user)
+    elif cmd == "approvals":
+        handle_approvals(chat_id, user)
     elif cmd.startswith("checkvault"):
         arg = text.split(maxsplit=1)[1].strip() if len(text.split()) > 1 else None
         handle_checkvault(chat_id, arg, user)

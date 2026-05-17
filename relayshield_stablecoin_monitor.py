@@ -60,7 +60,7 @@ STABLECOINS = {
     "usd-coin":    {"symbol": "USDC",  "name": "USD Coin",    "warn": 0.997, "crit": 0.990, "repeg": 0.999},
     "tether":      {"symbol": "USDT",  "name": "Tether",      "warn": 0.997, "crit": 0.990, "repeg": 0.999},
     "dai":         {"symbol": "DAI",   "name": "DAI",         "warn": 0.997, "crit": 0.990, "repeg": 0.999},
-    "frax":        {"symbol": "FRAX",  "name": "Frax",        "warn": 0.995, "crit": 0.985, "repeg": 0.997},
+    "frax":        {"symbol": "FRAX",  "name": "Frax",        "warn": 0.985, "crit": 0.970, "repeg": 0.988},
     "liquity-usd": {"symbol": "LUSD",  "name": "Liquity USD", "warn": 0.997, "crit": 0.990, "repeg": 0.999},
     "paypal-usd":  {"symbol": "PYUSD", "name": "PayPal USD",  "warn": 0.997, "crit": 0.990, "repeg": 0.999},
 }

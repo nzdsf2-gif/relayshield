@@ -968,8 +968,7 @@ def msg_help(tier: str) -> str:
         "• /otp — Unexpected OTP guidance\n"
         "• /scam — Suspicious message, bot, or call guidance\n"
         "• /scan <url> — Scan a suspicious link for malware or phishing\n"
-        "• /analyze <message> — Paste a suspicious message or email body for fraud analysis\n"
-        "• /analyze (send as photo caption) — Screenshot a suspicious email and send with caption /analyze\n"
+        "• /analyze — Screenshot a suspicious email or scam message and send the photo with caption /analyze\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"

@@ -665,6 +665,60 @@ def build_welcome_message(subscription_tier: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# SES email helper
+# ---------------------------------------------------------------------------
+
+_ses_client = None
+
+def _get_ses_client():
+    global _ses_client
+    if _ses_client is None:
+        _ses_client = boto3.client("ses", region_name="us-east-1")
+    return _ses_client
+
+
+def send_welcome_email_ses(to_email: str, subscription_tier: str) -> bool:
+    """Send a transactional welcome email via AWS SES after successful payment."""
+    if not to_email:
+        return False
+    tier_name = TIER_DISPLAY_NAMES.get(subscription_tier, "RelayShield")
+    email_limit = EMAIL_LIMITS.get(subscription_tier, 3)
+    subject = f"Welcome to RelayShield — {tier_name} is active"
+    body_html = f"""
+<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;color:#1a1a1a;">
+  <h2 style="color:#0f172a;">🛡️ Your RelayShield protection is active</h2>
+  <p>Hi,</p>
+  <p>Thank you for subscribing to <strong>{tier_name}</strong>. Your account is now live.</p>
+  <p>I monitor your credentials around the clock and alert you the moment anything is found
+  — step by step guidance, no jargon.</p>
+  <p><strong>Next step:</strong> Open WhatsApp and message <strong>RelayShield</strong> to add
+  the email address(es) you'd like monitored. You can add up to <strong>{email_limit}
+  address(es)</strong> on your plan.</p>
+  <p>Questions? Reply to this email or message us on WhatsApp anytime.</p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0;">
+  <p style="font-size:12px;color:#6b7280;">
+    RelayShield LLC · relayshield.net<br>
+    140 Hidden Road, Andover MA 01810
+  </p>
+</body></html>
+"""
+    try:
+        _get_ses_client().send_email(
+            Source="RelayShield <andrew@relayshield.net>",
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {"Html": {"Data": body_html, "Charset": "UTF-8"}},
+            },
+        )
+        logger.info("Welcome email sent via SES to %s", to_email)
+        return True
+    except Exception as exc:
+        logger.error("SES welcome email failed for %s: %s", to_email, exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Lambda handler
 # ---------------------------------------------------------------------------
 
@@ -805,12 +859,15 @@ def lambda_handler(event, context):
             }),
         }
 
-    # --- 5. WhatsApp flow — extract phone number from Stripe session ---
+    # --- 5. WhatsApp flow — extract phone + email from Stripe session ---
     # Primary: Stripe built-in phone collection → customer_details.phone
     # Fallback: custom_fields with key "phone_number"
     phone: str | None = None
     customer_details = session.get("customer_details") or {}
     phone = customer_details.get("phone")
+    customer_email: str = (
+        customer_details.get("email") or session.get("customer_email") or ""
+    )
 
     if not phone:
         for field in session.get("custom_fields") or []:
@@ -916,10 +973,13 @@ def lambda_handler(event, context):
             "body": json.dumps({"error": "DynamoDB write failed"}),
         }
 
-    # --- 10. Schedule Day 3 follow-up (72 hrs from now, self-deleting) ---
+    # --- 10. Send welcome email via SES ---
+    send_welcome_email_ses(customer_email, subscription_tier)
+
+    # --- 11. Schedule Day 3 follow-up (72 hrs from now, self-deleting) ---
     schedule_day3_followup(user_id, subscription_tier)
 
-    # --- 11. Retrieve Twilio credentials ---
+    # --- 12. Retrieve Twilio credentials ---
     try:
         account_sid, auth_token, from_number = get_twilio_credentials()
     except Exception as exc:

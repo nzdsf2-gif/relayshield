@@ -2835,13 +2835,13 @@ def handle_approvals(chat_id: int, user: dict) -> None:
         )
         return
 
-    # Chains: name, GoPlus chain_id, revoke.cash chainId
+    # Chains: name, GoPlus chain_id, block explorer base URL
     CHAINS = [
-        ("Ethereum", 1,     1),
-        ("Base",     8453,  8453),
-        ("Polygon",  137,   137),
-        ("Arbitrum", 42161, 42161),
-        ("BSC",      56,    56),
+        ("Ethereum", 1,     "https://etherscan.io/address/"),
+        ("Base",     8453,  "https://basescan.org/address/"),
+        ("Polygon",  137,   "https://polygonscan.com/address/"),
+        ("Arbitrum", 42161, "https://arbiscan.io/address/"),
+        ("BSC",      56,    "https://bscscan.com/address/"),
     ]
 
     # GoPlus risk flag keys that indicate active compromise
@@ -2871,20 +2871,19 @@ def handle_approvals(chat_id: int, user: dict) -> None:
             lines.append(
                 "🚨 *GoPlus Risk Flags Detected:*\n" +
                 "\n".join(f"   • {f.replace('_', ' ').title()}" for f in active_flags) +
-                "\n⚠️ This wallet has known threat associations. Revoke all approvals immediately."
+                "\n⚠️ This wallet has known threat associations. Remove all token approvals immediately."
             )
         else:
             lines.append("✅ *No known risk flags on this address (GoPlus)*")
 
-        # Per-chain approval review links
-        lines.append("\n*Review & revoke approvals per chain:*")
-        for chain_name, _, revoke_chain_id in CHAINS:
-            lines.append(
-                f"   • [{chain_name}](https://revoke.cash/address/{address}?chainId={revoke_chain_id})"
-            )
+        # Per-chain block explorer links
+        lines.append("\n*View wallet on each chain:*")
+        for chain_name, _, explorer_base in CHAINS:
+            lines.append(f"   • [{chain_name}]({explorer_base}{address})")
 
         lines.append(
-            "\n_Each revoke is a small gas transaction (~$0.10–$2 on Ethereum, less on L2s)._"
+            "\n_To remove token approvals, connect your wallet on the relevant chain explorer "
+            "and remove any unlimited approvals from DeFi protocols you no longer use._"
         )
 
         send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
@@ -2895,7 +2894,8 @@ def handle_approvals(chat_id: int, user: dict) -> None:
         "When you use a DeFi app, you grant it permission to spend your tokens. "
         "Unlimited approvals let the contract drain your wallet at any time — "
         "even after you stop using the app.\n\n"
-        "*Best practice:* Revoke approvals for any protocol you no longer use.",
+        "*Best practice:* Remove approvals for any protocol you no longer use. "
+        "Each removal is a small on-chain transaction (~$0.10–$2 on Ethereum, less on L2s).",
         parse_mode="Markdown"
     )
 

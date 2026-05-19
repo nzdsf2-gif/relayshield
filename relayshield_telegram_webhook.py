@@ -2876,16 +2876,15 @@ def handle_approvals(chat_id: int, user: dict) -> None:
         else:
             lines.append("✅ *No known risk flags on this address (GoPlus)*")
 
-        # Revoke.cash deep-links per chain
-        lines.append("\n*Review & revoke approvals on each chain:*")
+        # Per-chain approval review links
+        lines.append("\n*Review & revoke approvals per chain:*")
         for chain_name, _, revoke_chain_id in CHAINS:
             lines.append(
                 f"   • [{chain_name}](https://revoke.cash/address/{address}?chainId={revoke_chain_id})"
             )
 
         lines.append(
-            "\n_Revoke.cash shows every active approval and lets you revoke in one click. "
-            "Each revoke is a small gas transaction (~$0.10–$2 on Ethereum, less on L2s)._"
+            "\n_Each revoke is a small gas transaction (~$0.10–$2 on Ethereum, less on L2s)._"
         )
 
         send_message(chat_id, "\n".join(lines), parse_mode="Markdown")

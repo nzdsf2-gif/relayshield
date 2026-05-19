@@ -2863,12 +2863,14 @@ def handle_approvals(chat_id: int, user: dict) -> None:
 
         for chain_name, chain_id, revoke_chain_id in CHAINS:
             try:
-                url = f"{GOPLUS_APPROVAL_URL}/{address}?chain_id={chain_id}"
+                url = f"{GOPLUS_APPROVAL_URL}/{chain_id}?addresses={address}"
                 req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     result = json.loads(resp.read()).get("result", {})
 
-                approved_list = result.get("approved_list", [])
+                # GoPlus returns result keyed by address (lowercase)
+                addr_data     = result.get(address.lower(), {})
+                approved_list = addr_data.get("approved_list", [])
                 if not approved_list:
                     wallet_lines.append(f"✅ *{chain_name}* — No approvals found")
                     continue

@@ -2803,8 +2803,15 @@ def handle_wallets(chat_id: int, user: dict) -> None:
 
 def handle_approvals(chat_id: int, user: dict) -> None:
     """
-    Scan all EVM wallets for dangerous token approvals via GoPlus.
-    Returns a list of unlimited/high-risk approvals with revoke.cash deep-links.
+    Scan all EVM wallets for dangerous token approvals via GoPlus
+    token_approval_security endpoint across multiple chains.
+
+    Chains scanned: Ethereum (1), Base (8453), Polygon (137),
+                    Arbitrum (42161), BSC (56).
+
+    Note: TON and Bitcoin do not use the EVM token approval model
+    (ERC-20 approve/allowance) so they are not applicable here.
+    Their on-chain risk is covered by /riskcheck.
     """
     tier = user.get("subscription_tier") or user.get("tier", "")
     if tier not in CRYPTO_TIERS:
@@ -2822,64 +2829,114 @@ def handle_approvals(chat_id: int, user: dict) -> None:
         send_message(
             chat_id,
             "📭 *No EVM wallets found.*\n\n"
-            "Add one with `/addwallet <0x...>` to scan for token approvals.",
+            "Add one with `/addwallet <0x...>` to scan for token approvals.\n\n"
+            "ℹ️ TON and Bitcoin don't use the EVM approval model — "
+            "use /riskcheck for on-chain risk on those chains.",
         )
         return
 
-    send_message(chat_id, f"🔍 *Scanning {len(evm_wallets)} EVM wallet(s) for token approvals...*")
+    # Chains to scan — name, GoPlus chain_id, revoke.cash chainId param
+    CHAINS = [
+        ("Ethereum",  1,     1),
+        ("Base",      8453,  8453),
+        ("Polygon",   137,   137),
+        ("Arbitrum",  42161, 42161),
+        ("BSC",       56,    56),
+    ]
 
-    GOPLUS_APPROVAL_URL = "https://api.gopluslabs.io/api/v1/address_security"
-    lines = ["*🔓 Token Approval Report*\n"]
-    any_risk = False
+    GOPLUS_APPROVAL_URL = "https://api.gopluslabs.io/api/v1/token_approval_security"
+
+    wallet_count = len(evm_wallets)
+    send_message(
+        chat_id,
+        f"🔍 *Scanning {wallet_count} EVM wallet(s) across 5 chains for token approvals...*\n"
+        "_Ethereum · Base · Polygon · Arbitrum · BSC_"
+    )
+
+    total_risky = 0
 
     for w in evm_wallets:
         address = w.get("wallet_address", "")
         short   = f"{address[:6]}...{address[-4:]}"
+        wallet_lines = [f"*🔓 Token Approvals — `{short}`*\n"]
+        wallet_risky = 0
 
-        try:
-            url = f"{GOPLUS_APPROVAL_URL}/{address}?chain_id=1"
-            req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read()).get("result", {})
+        for chain_name, chain_id, revoke_chain_id in CHAINS:
+            try:
+                url = f"{GOPLUS_APPROVAL_URL}/{address}?chain_id={chain_id}"
+                req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    result = json.loads(resp.read()).get("result", {})
 
-            # GoPlus flags risky approval state in address security
-            approval_abuse = data.get("approval_abuse", "0")
-            is_contract    = data.get("is_contract", "0")
+                approved_list = result.get("approved_list", [])
+                if not approved_list:
+                    wallet_lines.append(f"✅ *{chain_name}* — No approvals found")
+                    continue
 
-            if approval_abuse == "1":
-                any_risk = True
-                revoke_link = f"https://revoke.cash/address/{address}"
-                lines.append(
-                    f"🚨 `{short}` — *Dangerous approvals detected*\n"
-                    f"   → [Revoke on revoke.cash]({revoke_link})\n"
-                    f"   → Or search your address on [Etherscan Token Approvals]"
-                    f"(https://etherscan.io/tokenapprovalchecker?search={address})"
-                )
-            else:
-                lines.append(f"✅ `{short}` — No high-risk approvals flagged")
+                # Filter to risky approvals: unlimited amount or flagged risk
+                risky = []
+                for appr in approved_list:
+                    amount      = str(appr.get("approved_amount", "")).lower()
+                    risk_score  = str(appr.get("risk_score", "")).lower()
+                    is_unlimited = amount in ("unlimited", "infinite", "") or \
+                                   (amount.isdigit() and int(amount) > 10**24)
+                    is_risky    = risk_score in ("high", "medium") or is_unlimited
+                    if is_risky:
+                        risky.append(appr)
 
-        except Exception as exc:
-            logger.warning("GoPlus approval check failed %s: %s", address, exc)
-            lines.append(f"ℹ️ `{short}` — Could not retrieve approval data")
+                if not risky:
+                    wallet_lines.append(f"✅ *{chain_name}* — {len(approved_list)} approval(s), none high-risk")
+                    continue
 
-    if any_risk:
-        lines.append(
-            "\n*What are token approvals?*\n"
+                wallet_risky += len(risky)
+                total_risky  += len(risky)
+                revoke_link   = f"https://revoke.cash/address/{address}?chainId={revoke_chain_id}"
+                wallet_lines.append(f"🚨 *{chain_name}* — {len(risky)} dangerous approval(s)")
+
+                # Show up to 5 risky approvals per chain to stay within TG limits
+                for appr in risky[:5]:
+                    token   = appr.get("token_symbol") or appr.get("token_name") or "Unknown token"
+                    spender = appr.get("approved_spender_address", "")
+                    spender_name = appr.get("spender_name") or f"{spender[:6]}...{spender[-4:]}" if spender else "Unknown"
+                    amount  = appr.get("approved_amount", "unlimited")
+                    wallet_lines.append(
+                        f"   • *{token}* → {spender_name}\n"
+                        f"     Amount: `{amount}`"
+                    )
+                if len(risky) > 5:
+                    wallet_lines.append(f"   _...and {len(risky) - 5} more_")
+
+                wallet_lines.append(f"   → [Revoke on revoke.cash]({revoke_link})")
+
+            except Exception as exc:
+                logger.warning("GoPlus approval check failed %s chain %s: %s", address, chain_name, exc)
+                wallet_lines.append(f"ℹ️ *{chain_name}* — Could not retrieve data")
+
+        if wallet_risky > 0:
+            wallet_lines.append(
+                f"\n⚠️ *{wallet_risky} dangerous approval(s) found.*\n"
+                "Revoking removes the contract's permission without affecting your assets.\n"
+                f"→ [Revoke all on revoke.cash](https://revoke.cash/address/{address})"
+            )
+        else:
+            wallet_lines.append("\n✅ *No dangerous approvals found across all chains.*")
+
+        send_message(chat_id, "\n".join(wallet_lines), parse_mode="Markdown")
+
+    if total_risky > 0:
+        send_message(
+            chat_id,
+            "*What are token approvals?*\n"
             "When you use a DeFi protocol, you grant it permission to spend your tokens. "
-            "Unlimited approvals let the contract drain your wallet at any time — even after you stop using it. "
-            "Revoking removes that permission without affecting your assets."
-        )
-        lines.append(
-            "\n*To revoke manually:*\n"
-            f"1. Go to [revoke.cash](https://revoke.cash)\n"
+            "Unlimited approvals let the contract drain your wallet at any time — "
+            "even after you stop using the app.\n\n"
+            "*To revoke:*\n"
+            "1. Go to [revoke.cash](https://revoke.cash)\n"
             "2. Connect your wallet\n"
-            "3. Find unlimited approvals and revoke them one by one\n"
-            "4. Each revoke is a small gas transaction (~$0.10–$2.00 on Ethereum)"
+            "3. Select the chain and revoke unlimited approvals\n"
+            "4. Each revoke is a small gas transaction (~$0.10–$2 on Ethereum, less on L2s)",
+            parse_mode="Markdown"
         )
-    else:
-        lines.append("\n✅ *No dangerous approvals found across your EVM wallets.*")
-
-    send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
 
 
 def handle_riskcheck(chat_id: int, user: dict) -> None:

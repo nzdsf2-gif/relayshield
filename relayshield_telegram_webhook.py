@@ -2822,7 +2822,7 @@ def handle_approvals(chat_id: int, user: dict) -> None:
         )
         return
 
-    wallets = _get_wallets_for_user(user["user_id"])
+    wallets = _get_user_wallets(user["user_id"], user)
     evm_wallets = [w for w in wallets if w.get("chain_type", "evm") == "evm"]
 
     if not evm_wallets:

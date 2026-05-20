@@ -3369,8 +3369,15 @@ def handle_active_message(
             send_whatsapp(
                 to_number,
                 f"✅ *{stealer_email}* was not found in any infostealer logs.\n\n"
-                "A clean result means no known malware infections were detected for this email. "
-                "Reply *EXTENSIONS* for a browser extension audit as an additional precaution.",
+                "Infostealer malware silently exfiltrates everything a browser holds — "
+                "saved passwords for every site, active session cookies (bypassing 2FA), "
+                "credit card autofill, and crypto wallet keys. A clean result here means "
+                "no known infections were detected for this email.\n\n"
+                "*As a precaution:*\n"
+                "→ Check for suspicious browser extensions: go to chrome://extensions (Chrome) "
+                "or about:addons (Firefox) and remove anything unfamiliar\n"
+                "→ Reply *SESSIONS* to review active login sessions\n"
+                "→ Reply *SWEEP* to check for email backdoors",
                 account_sid, auth_token, from_number,
             )
             logger.info("stealer-check clean — email=%s", stealer_email)

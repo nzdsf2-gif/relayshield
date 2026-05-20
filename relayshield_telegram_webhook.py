@@ -1937,8 +1937,14 @@ def handle_infostealer_check(chat_id: int, email_raw: str | None, user: dict) ->
         send_message(
             chat_id,
             f"✅ *{email}* was not found in any infostealer logs.\n\n"
-            "_A clean result means no known malware infections were detected for this email. "
-            "Run /extensions to audit your browser extensions as an additional precaution._",
+            "Infostealer malware silently exfiltrates everything a browser holds — "
+            "saved passwords for every site, active session cookies (bypassing 2FA), "
+            "credit card autofill, and crypto wallet keys. A clean result here means "
+            "no known infections were detected for this email.\n\n"
+            "*As a precaution:*\n"
+            "→ Audit browser extensions: /extensions\n"
+            "→ Review active sessions: /sessions\n"
+            "→ Check for email backdoors: /sweep",
             parse_mode="Markdown",
         )
         return

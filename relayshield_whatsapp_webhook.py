@@ -26,7 +26,7 @@ Reply commands (ACTIVE users):
   RESOLVED — User confirms remediation complete after a breach incident — clears breach_alert
              signals from recent_signals to prevent re-triggering coordinated attack alerts
   SCAN <url> — Scan a suspicious link for malware or phishing (VirusTotal)
-  STEALER <email> — Check if email was harvested by infostealer malware (Hudson Rock)
+  INFOSTEALER <email> — Check if email was harvested by infostealer malware (Hudson Rock)
   HELP     — List all available commands
   ADD +1XXXXXXXXXX — Business tier: add employee phone number (admin only)
 
@@ -1932,7 +1932,7 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
         "• *EMAILSCAN* — Screenshot a suspicious email and send as attachment, or reply EMAILSCAN followed by the email text\n"
         "• *EMAIL* <text> — Paste a forwarded email body to scan every link inside it\n"
         "• *SCAN* <url> — Scan a suspicious link for malware or phishing\n"
-        "• *STEALER* <email> — Check if an email was stolen by infostealer malware\n"
+        "• *INFOSTEALER* <email> — Check if an email was stolen by infostealer malware\n"
         "• *ATTACH* — Send a suspicious file as a WhatsApp attachment to scan for malware\n"
         "• *OTP* — You received an unexpected verification code\n"
         "• *WASCAM* — Suspicious WhatsApp, call, or browser scam\n"
@@ -3305,21 +3305,21 @@ def handle_active_message(
         )
         return "vt_url_scanned"
 
-    # --- STEALER <email> — Hudson Rock infostealer check ---
-    if body == "STEALER":
+    # --- INFOSTEALER <email> — Hudson Rock infostealer check ---
+    if body == "INFOSTEALER":
         send_whatsapp(
             to_number,
             "🦠 *Infostealer Check*\n\n"
             "Check if an email was stolen by infostealer malware.\n\n"
-            "Reply: *STEALER your@email.com*\n\n"
+            "Reply: *INFOSTEALER your@email.com*\n\n"
             "This searches Hudson Rock's Cavalier database of credentials "
             "harvested from infected devices worldwide.",
             account_sid, auth_token, from_number,
         )
         return "stealer_prompt_sent"
 
-    if body.startswith("STEALER "):
-        stealer_email = message_body.strip()[8:].strip().lower()
+    if body.startswith("INFOSTEALER "):
+        stealer_email = message_body.strip()[12:].strip().lower()
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", stealer_email):
             send_whatsapp(
                 to_number,

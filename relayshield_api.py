@@ -83,10 +83,15 @@ secrets_client = boto3.client("secretsmanager")
 # ---------------------------------------------------------------------------
 
 # x402 PAYG configuration
-X402_PAYTO_ADDRESS   = os.environ.get("RELAYSHIELD_X402_WALLET", "")
-X402_FACILITATOR_URL = "https://x402.org/facilitator/verify"
-USDC_BASE_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"  # USDC on Base
+X402_PAYTO_ADDRESS   = os.environ.get("RELAYSHIELD_X402_WALLET", "")   # EVM (Base) payTo
+SOL_PAYTO_ADDRESS    = os.environ.get("RELAYSHIELD_SOL_WALLET", "")    # Solana payTo
+X402_FACILITATOR_URL = "https://x402.org/facilitator"
+USDC_BASE_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC on Base
+USDC_SOL_ADDRESS     = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # USDC on Solana mainnet
 BASE_CHAIN_ID        = "eip155:8453"
+SOL_CHAIN_ID         = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"       # Solana mainnet CAIP-2
+# CDP Facilitator Solana fee-payer public key (sponsors gas for all SVM x402 transactions)
+SOL_FEE_PAYER        = "EwWqGE4ZFKLofuestmU4LDdK7XM1N4ALgdZccwYugwGd"
 
 # PAYG pricing in USDC base units (6 decimals): $0.10 = 100000
 PAYG_PRICE_UNITS: dict[str, int] = {
@@ -1418,27 +1423,54 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 def _build_payment_requirements(path: str, price_units: int) -> dict:
-    api_base = "https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod"
-    accepts_entry: dict = {
-        "scheme":             "exact",
-        "network":            BASE_CHAIN_ID,
-        "maxAmountRequired":  str(price_units),
-        "resource":           f"{api_base}{path}",
-        "description":        f"RelayShield {path.split('/')[-1].replace('-', ' ')} check",
-        "mimeType":           "application/json",
-        "payTo":              X402_PAYTO_ADDRESS,
-        "maxTimeoutSeconds":  300,
-        "asset":              USDC_BASE_ADDRESS,
-        "extra":              {"name": "USDC", "version": "2"},
+    api_base    = "https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod"
+    resource    = f"{api_base}{path}"
+    description = f"RelayShield {path.split('/')[-1].replace('-', ' ')} check"
+    bazaar_ext  = BAZAAR_EXTENSIONS.get(path)
+
+    # Base (EVM) entry — always included
+    base_entry: dict = {
+        "scheme":            "exact",
+        "network":           BASE_CHAIN_ID,
+        "maxAmountRequired": str(price_units),
+        "resource":          resource,
+        "description":       description,
+        "mimeType":          "application/json",
+        "payTo":             X402_PAYTO_ADDRESS,
+        "maxTimeoutSeconds": 300,
+        "asset":             USDC_BASE_ADDRESS,
+        "extra":             {"name": "USDC", "version": "2"},
     }
-    # Inject Bazaar discovery extension so CDP Facilitator catalogs this
-    # endpoint on settlement — enables auto-indexing on Agentic.Market
-    bazaar_ext = BAZAAR_EXTENSIONS.get(path)
     if bazaar_ext:
-        accepts_entry["extensions"] = bazaar_ext
+        base_entry["extensions"] = bazaar_ext
+
+    accepts = [base_entry]
+
+    # Solana (SVM) entry — added when RELAYSHIELD_SOL_WALLET is configured.
+    # CDP Facilitator sponsors gas; client signs a partial SPL TransferChecked
+    # transaction and sends it base64-encoded in X-PAYMENT.
+    if SOL_PAYTO_ADDRESS:
+        sol_entry: dict = {
+            "scheme":            "exact",
+            "network":           SOL_CHAIN_ID,
+            "maxAmountRequired": str(price_units),
+            "resource":          resource,
+            "description":       description,
+            "mimeType":          "application/json",
+            "payTo":             SOL_PAYTO_ADDRESS,
+            "maxTimeoutSeconds": 60,          # Solana blockhash TTL ~60–90s
+            "asset":             USDC_SOL_ADDRESS,
+            "extra": {
+                "feePayer": SOL_FEE_PAYER,    # CDP Facilitator sponsors transaction gas
+            },
+        }
+        if bazaar_ext:
+            sol_entry["extensions"] = bazaar_ext
+        accepts.append(sol_entry)
+
     return {
         "x402Version": 1,
-        "accepts": [accepts_entry],
+        "accepts":     accepts,
     }
 
 
@@ -1447,51 +1479,91 @@ def _x402_payment_required(path: str) -> dict:
     requirements = _build_payment_requirements(path, price_units)
     encoded      = base64.b64encode(json.dumps(requirements).encode()).decode()
     price_usd    = f"${price_units / 1_000_000:.2f}"
+    chains       = "Base or Solana" if SOL_PAYTO_ADDRESS else "Base"
     return {
         "statusCode": 402,
         "headers": {
-            "Content-Type":                "application/json",
-            "PAYMENT-REQUIRED":            encoded,
+            "Content-Type":                  "application/json",
+            "PAYMENT-REQUIRED":              encoded,
             "Access-Control-Expose-Headers": "PAYMENT-REQUIRED",
         },
         "body": json.dumps({
-            "ok":    False,
-            "error": "Payment required",
-            "price": f"{price_usd} USDC on Base",
-            "x402":  requirements,
-            "subscribe_url": "https://rapidapi.com/relayshield/relayshield-security-intelligence",
+            "ok":             False,
+            "error":          "Payment required",
+            "price":          f"{price_usd} USDC ({chains})",
+            "x402":           requirements,
+            "subscribe_url":  "https://rapidapi.com/relayshield/relayshield-security-intelligence",
             "subscribe_note": f"Subscribe for 96%+ lower per-check cost vs {price_usd} PAYG rate.",
         }),
     }
 
 
+def _detect_payment_chain(x_payment: str) -> str:
+    """Heuristic: Solana payments are base64-encoded binary transactions (no JSON braces).
+    EVM payments are base64-encoded JSON strings that decode to objects starting with '{'.
+    Returns 'solana' or 'evm'.
+    """
+    try:
+        decoded = base64.b64decode(x_payment + "==")  # lenient padding
+        if decoded.lstrip()[:1] == b"{":
+            return "evm"
+        return "solana"
+    except Exception:
+        return "evm"  # default to EVM on decode failure
+
+
 def _verify_x402_payment(x_payment: str, path: str) -> bool:
-    if not X402_PAYTO_ADDRESS:
-        logger.error("RELAYSHIELD_X402_WALLET env var not set — cannot verify x402 payment")
-        return False
     price_units  = PAYG_PRICE_UNITS.get(path, 0)
     requirements = _build_payment_requirements(path, price_units)
-    payload      = json.dumps({
-        "x402Version":  1,
-        "payload":      x_payment,
-        "requirements": requirements,
-    }).encode("utf-8")
+
+    chain = _detect_payment_chain(x_payment)
+    logger.info("x402 payment detected chain=%s path=%s", chain, path)
+
+    if chain == "solana":
+        if not SOL_PAYTO_ADDRESS:
+            logger.error("RELAYSHIELD_SOL_WALLET not set — cannot verify Solana x402 payment")
+            return False
+        # Find the Solana accepts entry to use as requirements for verification
+        sol_requirements = next(
+            (a for a in requirements.get("accepts", []) if a.get("network") == SOL_CHAIN_ID),
+            None,
+        )
+        if not sol_requirements:
+            logger.error("No Solana accepts entry in requirements for path=%s", path)
+            return False
+        verify_payload = json.dumps({
+            "x402Version":  1,
+            "payload":      {"transaction": x_payment},
+            "requirements": sol_requirements,
+        }).encode("utf-8")
+        verify_url = f"{X402_FACILITATOR_URL}/verify"
+    else:
+        if not X402_PAYTO_ADDRESS:
+            logger.error("RELAYSHIELD_X402_WALLET not set — cannot verify EVM x402 payment")
+            return False
+        verify_payload = json.dumps({
+            "x402Version":  1,
+            "payload":      x_payment,
+            "requirements": requirements,
+        }).encode("utf-8")
+        verify_url = f"{X402_FACILITATOR_URL}/verify"
+
     req = urllib.request.Request(
-        X402_FACILITATOR_URL,
-        data=payload,
+        verify_url,
+        data=verify_payload,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
             valid  = result.get("isValid", False)
             if not valid:
-                logger.warning("x402 payment invalid — reason: %s path=%s",
-                               result.get("invalidReason"), path)
+                logger.warning("x402 payment invalid — chain=%s reason=%s path=%s",
+                               chain, result.get("invalidReason"), path)
             return valid
     except Exception as exc:
-        logger.error("x402 facilitator call failed for %s: %s", path, exc)
+        logger.error("x402 facilitator call failed — chain=%s path=%s error=%s", chain, path, exc)
         return False
 
 

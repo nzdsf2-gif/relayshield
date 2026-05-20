@@ -25,6 +25,8 @@ Reply commands (ACTIVE users):
              OTP rule, family safe word, wire transfer rule)
   RESOLVED — User confirms remediation complete after a breach incident — clears breach_alert
              signals from recent_signals to prevent re-triggering coordinated attack alerts
+  SCAN <url> — Scan a suspicious link for malware or phishing (VirusTotal)
+  STEALER <email> — Check if email was harvested by infostealer malware (Hudson Rock)
   HELP     — List all available commands
   ADD +1XXXXXXXXXX — Business tier: add employee phone number (admin only)
 
@@ -1930,6 +1932,7 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
         "• *EMAILSCAN* — Screenshot a suspicious email and send as attachment, or reply EMAILSCAN followed by the email text\n"
         "• *EMAIL* <text> — Paste a forwarded email body to scan every link inside it\n"
         "• *SCAN* <url> — Scan a suspicious link for malware or phishing\n"
+        "• *STEALER* <email> — Check if an email was stolen by infostealer malware\n"
         "• *ATTACH* — Send a suspicious file as a WhatsApp attachment to scan for malware\n"
         "• *OTP* — You received an unexpected verification code\n"
         "• *WASCAM* — Suspicious WhatsApp, call, or browser scam\n"
@@ -3301,6 +3304,103 @@ def handle_active_message(
             attach_url, stats,
         )
         return "vt_url_scanned"
+
+    # --- STEALER <email> — Hudson Rock infostealer check ---
+    if body == "STEALER":
+        send_whatsapp(
+            to_number,
+            "🦠 *Infostealer Check*\n\n"
+            "Check if an email was stolen by infostealer malware.\n\n"
+            "Reply: *STEALER your@email.com*\n\n"
+            "This searches Hudson Rock's Cavalier database of credentials "
+            "harvested from infected devices worldwide.",
+            account_sid, auth_token, from_number,
+        )
+        return "stealer_prompt_sent"
+
+    if body.startswith("STEALER "):
+        stealer_email = message_body.strip()[8:].strip().lower()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", stealer_email):
+            send_whatsapp(
+                to_number,
+                "Please provide a valid email address.\n\n"
+                "Example: *STEALER you@example.com*",
+                account_sid, auth_token, from_number,
+            )
+            return "stealer_invalid_email"
+
+        send_whatsapp(
+            to_number,
+            f"🔍 Checking {stealer_email} for infostealer exposure...",
+            account_sid, auth_token, from_number,
+        )
+
+        encoded = urllib.parse.quote(stealer_email, safe="")
+        url = f"https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-login?email={encoded}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            stealers = data.get("stealers", [])
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                stealers = []
+            else:
+                logger.error("Cavalier API error: %s", exc)
+                send_whatsapp(
+                    to_number,
+                    "⚠️ Infostealer check temporarily unavailable. Please try again later.",
+                    account_sid, auth_token, from_number,
+                )
+                return "stealer_api_error"
+        except Exception as exc:
+            logger.error("Cavalier API error: %s", exc)
+            send_whatsapp(
+                to_number,
+                "⚠️ Infostealer check temporarily unavailable. Please try again later.",
+                account_sid, auth_token, from_number,
+            )
+            return "stealer_api_error"
+
+        if not stealers:
+            send_whatsapp(
+                to_number,
+                f"✅ *{stealer_email}* was not found in any infostealer logs.\n\n"
+                "This checks Hudson Rock's Cavalier database. A clean result here does not "
+                "guarantee the device has never been infected.\n\n"
+                "Reply *EXTENSIONS* for a browser extension audit guide.",
+                account_sid, auth_token, from_number,
+            )
+            logger.info("stealer-check clean — email=%s", stealer_email)
+            return "stealer_clean"
+
+        count = len(stealers)
+        lines = [f"🦠 *{stealer_email}* found in *{count}* infostealer log{'s' if count != 1 else ''}:\n"]
+        for s in stealers[:3]:
+            date  = s.get("date_compromised", "unknown date")
+            os_   = s.get("operating_system", "unknown OS")
+            corp  = s.get("total_corporate_services", 0)
+            user_ = s.get("total_user_services", 0)
+            lines.append(
+                f"• {date} — {os_}\n"
+                f"  {corp} corporate + {user_} personal credentials also stolen"
+            )
+        if count > 3:
+            lines.append(f"…and {count - 3} more.")
+
+        lines.append(
+            "\n*What to do now:*\n"
+            "→ Change all passwords from a *clean device*\n"
+            "→ Enable 2FA everywhere\n"
+            "→ Revoke active sessions: reply *SESSIONS*\n"
+            "→ Check email backdoors: reply *SWEEP*\n\n"
+            "Reply *HELP* to see all commands."
+        )
+
+        send_whatsapp(to_number, "\n".join(lines), account_sid, auth_token, from_number)
+        logger.info("stealer-check hit — email=%s count=%d", stealer_email, count)
+        return "stealer_found"
 
     # --- HELP ---
     if body == "HELP":

@@ -28,6 +28,7 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/token-security      — $0.10 USDC — token honeypot + tax analysis
   POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
   POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
+  POST /v1/payg/infostealer         — $0.15 USDC — Hudson Rock infostealer detection
   GET  /v1/payg/result/{id}         — $0.00 (free — poll a paid scan)
 
 x402 payment flow:
@@ -107,6 +108,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/token-security":        100000,   # $0.10 — GoPlus token risk
     "/v1/payg/nft-security":          100000,   # $0.10 — GoPlus NFT risk
     "/v1/payg/wallet-screen-batch":   500000,   # $0.50 — up to 10 addresses
+    "/v1/payg/infostealer":           150000,   # $0.15 — Hudson Rock infostealer check
 }
 
 GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
@@ -1121,6 +1123,67 @@ def handle_wallet_screen_batch(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Endpoint: POST /v1/payg/infostealer  (PAYG only — $0.15)
+# ---------------------------------------------------------------------------
+# Checks an email address against Hudson Rock Cavalier (free, no API key).
+# Returns whether the email appears in infostealer logs, and summary details
+# about compromised machines.
+#
+# Request:  { "email": "user@example.com" }
+# Response: { "email": "...", "found": true/false, "stealer_count": N,
+#             "stealers": [ { "date_compromised": "...", "computer_name": "...",
+#                             "operating_system": "...", "malware_path": "...",
+#                             "total_corporate_services": N,
+#                             "total_user_services": N } ] }
+
+CAVALIER_URL = "https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-login"
+
+
+def handle_infostealer(params: dict) -> dict:
+    email = (params.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return _err("email is required and must be a valid address")
+
+    encoded_email = urllib.parse.quote(email, safe="")
+    url = f"{CAVALIER_URL}?email={encoded_email}"
+    req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            # Hudson Rock returns 404 when email is not found
+            return _ok({"email": email, "found": False, "stealer_count": 0, "stealers": []})
+        logger.error("Cavalier API HTTP error: %s", exc)
+        return _err(f"infostealer check failed: HTTP {exc.code}", 502)
+    except Exception as exc:
+        logger.error("Cavalier API error: %s", exc)
+        return _err("infostealer check failed: upstream error", 502)
+
+    stealers_raw = raw.get("stealers", [])
+    stealers = []
+    for s in stealers_raw:
+        stealers.append({
+            "date_compromised":         s.get("date_compromised"),
+            "computer_name":            s.get("computer_name"),
+            "operating_system":         s.get("operating_system"),
+            "malware_path":             s.get("malware_path"),
+            "total_corporate_services": s.get("total_corporate_services", 0),
+            "total_user_services":      s.get("total_user_services", 0),
+        })
+
+    found = len(stealers) > 0
+    logger.info("infostealer email=%s found=%s count=%d", email, found, len(stealers))
+    return _ok({
+        "email":         email,
+        "found":         found,
+        "stealer_count": len(stealers),
+        "stealers":      stealers,
+    })
+
+
+# ---------------------------------------------------------------------------
 # x402 Bazaar discovery extensions — per-endpoint metadata for Agentic.Market
 # ---------------------------------------------------------------------------
 # Format follows the x402 BodyDiscoveryExtension schema (POST endpoints).
@@ -1415,6 +1478,23 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
             },
         },
     ),
+    "/v1/payg/infostealer": _bazaar_body_ext(
+        input_example={"email": "user@example.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"email": {"type": "string", "description": "Email address to check for infostealer compromise"}},
+            "required": ["email"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "email":         "user@example.com",
+                "found":         False,
+                "stealer_count": 0,
+                "stealers":      [],
+            },
+        },
+    ),
 }
 
 
@@ -1605,6 +1685,7 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/token-security":        handle_token_security,
         "/v1/payg/nft-security":          handle_nft_security,
         "/v1/payg/wallet-screen-batch":   handle_wallet_screen_batch,
+        "/v1/payg/infostealer":           handle_infostealer,
     }
     handler = payg_routes.get(path)
     if not handler:

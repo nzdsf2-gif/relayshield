@@ -32,6 +32,7 @@ Commands (ACTIVE users):
   /botcheck @username — typosquat + red flag analysis for any bot/channel
   /verifybot — confirm this is the official RelayShield bot
   /scan <url> — scan a URL or link for malware/phishing
+  /infostealer <email> — check if email was harvested by infostealer malware
   /analyze <text> — social engineering analysis of a suspicious message
   /addwallet <addr> — add EVM, Solana, or TON wallet to monitoring (Crypto Shield only)
   /removewallet <addr> — remove wallet from monitoring
@@ -968,6 +969,7 @@ def msg_help(tier: str) -> str:
         "• /otp — Unexpected OTP guidance\n"
         "• /scam — Suspicious message, bot, or call guidance\n"
         "• /scan <url> — Scan a suspicious link for malware or phishing\n"
+        "• /infostealer <email> — Check if an email was stolen by malware\n"
         "• /analyze — Screenshot a suspicious email or scam message and send the photo with caption /analyze\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
@@ -1884,6 +1886,89 @@ def handle_extensions(chat_id: int) -> None:
         "changing any passwords — changing passwords on a compromised device gives attackers your new credentials.\n\n"
         "_RelayShield_",
     )
+
+
+def handle_infostealer_check(chat_id: int, email_raw: str | None, user: dict) -> None:
+    """
+    /infostealer <email> — Check if an email was harvested by infostealer malware.
+    Uses Hudson Rock Cavalier (free, no API key required).
+    Available to all tiers.
+    """
+    email = (email_raw or "").strip().lower()
+    if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        send_message(
+            chat_id,
+            "🦠 *Infostealer Check*\n\n"
+            "Check if an email address was stolen by malware (infostealer infections).\n\n"
+            "Usage:\n"
+            "`/infostealer you@example.com`\n\n"
+            "This checks Hudson Rock's Cavalier database of 13B+ compromised credentials "
+            "harvested from infected computers worldwide.",
+            parse_mode="Markdown",
+        )
+        return
+
+    send_message(chat_id, f"🔍 Checking `{email}` for infostealer exposure...", parse_mode="Markdown")
+
+    encoded = urllib.parse.quote(email, safe="")
+    url = f"https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-login?email={encoded}"
+    req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        stealers = data.get("stealers", [])
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            stealers = []
+        else:
+            logger.error("Cavalier API error: %s", exc)
+            send_message(chat_id, "⚠️ Infostealer check is temporarily unavailable. Please try again later.")
+            return
+    except Exception as exc:
+        logger.error("Cavalier API error: %s", exc)
+        send_message(chat_id, "⚠️ Infostealer check is temporarily unavailable. Please try again later.")
+        return
+
+    if not stealers:
+        send_message(
+            chat_id,
+            f"✅ *{email}* was not found in any infostealer logs.\n\n"
+            "_This checks Hudson Rock's Cavalier database. Not finding an email here does not "
+            "guarantee the device has never been infected — run /extensions to audit your browser._",
+            parse_mode="Markdown",
+        )
+        return
+
+    count = len(stealers)
+    lines = [f"🦠 *{email}* found in *{count}* infostealer log{'s' if count != 1 else ''}:\n"]
+    for s in stealers[:3]:
+        date  = s.get("date_compromised", "unknown date")
+        os_   = s.get("operating_system", "unknown OS")
+        corp  = s.get("total_corporate_services", 0)
+        user_ = s.get("total_user_services", 0)
+        lines.append(
+            f"• *{date}* — {os_}\n"
+            f"  {corp} corporate + {user_} personal credentials also stolen"
+        )
+    if count > 3:
+        lines.append(f"\n…and {count - 3} more infection{'s' if count - 3 != 1 else ''}.")
+
+    lines.append(
+        "\n\n*What this means:*\n"
+        "An infostealer malware infection harvested credentials from this device. "
+        "All passwords, session cookies, and stored logins on that machine are compromised.\n\n"
+        "*Recommended actions:*\n"
+        "→ Change all passwords immediately from a *clean device*\n"
+        "→ Enable 2FA on every account\n"
+        "→ Revoke all active sessions: /sessions\n"
+        "→ Run /sweep to close email backdoors\n"
+        "→ Audit browser extensions: /extensions\n\n"
+        "🛡️ _RelayShield_"
+    )
+
+    send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+    logger.info("infostealer-check — chat_id=%s email=%s count=%d", chat_id, email, count)
 
 
 def handle_sessions(chat_id: int) -> None:
@@ -3425,6 +3510,10 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_wallets(chat_id, user)
     elif cmd == "extensions":
         handle_extensions(chat_id)
+    elif cmd.startswith("infostealer"):
+        parts = text.strip().split(None, 1)
+        email = parts[1].strip() if len(parts) > 1 else None
+        handle_infostealer_check(chat_id, email, user)
     else:
         send_message(
             chat_id,

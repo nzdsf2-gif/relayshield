@@ -21,6 +21,7 @@ x402 PAYG pricing (USDC on Base):
   check_sim_swap          $0.25
   check_domain_lookalikes $0.50
   check_oauth_watchlist   $0.15
+  check_infostealer       $0.15
   check_scan_result       $0.00  (free — poll a paid scan result)
   scan_url / scan_file    coming soon (VT commercial licensing pending)
 """
@@ -47,6 +48,7 @@ PAYG_PRICING: dict[str, str] = {
     "check_sim_swap":          "$0.25 USDC",
     "check_domain_lookalikes": "$0.50 USDC",
     "check_oauth_watchlist":   "$0.15 USDC",
+    "check_infostealer":       "$0.15 USDC",
     "check_scan_result":       "$0.00 USDC (free — poll result of a paid scan)",
     "scan_url":                "coming soon",
     "scan_file":               "coming soon",
@@ -153,6 +155,31 @@ async def list_tools() -> list[types.Tool]:
                         "type": "string",
                         "format": "email",
                         "description": "Email address whose connected OAuth apps to check",
+                    }
+                },
+            },
+        ),
+        types.Tool(
+            name="check_infostealer",
+            description=(
+                "Check whether an email address appears in infostealer malware logs. "
+                "Uses Hudson Rock Cavalier — a database of credentials harvested directly from "
+                "infected computers by infostealer malware (RedLine, Raccoon, Vidar, etc.). "
+                "Returns found (bool), stealer count, and per-infection details: date compromised, "
+                "operating system, malware path, and number of corporate/personal credentials stolen. "
+                "Unlike breach databases (HIBP), infostealer hits mean the device itself was "
+                "compromised — all stored passwords, session cookies, and crypto keys are at risk. "
+                "Pay-as-you-go: $0.15 USDC per check (x402 on Base). "
+                "Subscription: rapidapi.com/relayshield"
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["email"],
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "description": "Email address to check for infostealer compromise",
                     }
                 },
             },
@@ -318,6 +345,13 @@ async def _dispatch(
     if name == "check_oauth_watchlist":
         return await client.post(
             f"{base}/oauth-watchlist",
+            headers=headers,
+            json={"email": arguments["email"]},
+        )
+
+    if name == "check_infostealer":
+        return await client.post(
+            f"{base}/infostealer",
             headers=headers,
             json={"email": arguments["email"]},
         )

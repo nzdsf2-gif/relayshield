@@ -318,30 +318,50 @@ def build_alert(email: str, stealers: list[dict], new_count: int, is_telegram: b
 
     lines.append(
         "\n*What was stolen:*\n"
-        "Infostealer malware exfiltrates everything the browser holds — saved passwords "
-        "for every site, active session cookies (bypassing 2FA), credit card autofill, "
-        "and crypto wallet keys.\n"
+        "Infostealer malware silently exfiltrates everything the browser holds — saved passwords "
+        "for every site, active session cookies (bypassing 2FA without needing a password), "
+        "credit card autofill, and crypto wallet keys.\n"
     )
 
     if is_telegram:
         lines.append(
-            "*Act immediately from a clean device:*\n"
+            "*Step 1 — Isolate the infected device now:*\n"
+            "→ Disconnect it from Wi-Fi and unplug ethernet\n"
+            "→ Do NOT log into any accounts on it until it is cleaned\n\n"
+            "*Step 2 — From a different clean device:*\n"
             "→ Change all passwords — email, banking, social, crypto\n"
             "→ Revoke all active sessions: /sessions\n"
             "→ Close email backdoors: /sweep\n"
-            "→ Enable 2FA on every account\n"
-            "→ Audit browser extensions: /extensions\n\n"
+            "→ Enable 2FA on every account\n\n"
+            "*Step 3 — Clean the infected device:*\n"
+            "→ Download Malwarebytes Free (malwarebytes.com) on a USB from a clean device\n"
+            "→ Run a full scan and remove everything flagged\n"
+            "→ For a severe infection, a full OS reinstall is the safest option\n\n"
+            "*Step 4 — After cleaning:*\n"
+            "→ Update your OS and all software\n"
+            "→ Audit browser extensions: /extensions\n"
+            "→ Reconnect to the internet\n\n"
             "🛡️ _RelayShield_"
         )
     else:
         lines.append(
-            "*Act immediately from a clean device:*\n"
+            "*Step 1 — Isolate the infected device now:*\n"
+            "→ Disconnect it from Wi-Fi and unplug ethernet\n"
+            "→ Do NOT log into any accounts on it until it is cleaned\n\n"
+            "*Step 2 — From a different clean device:*\n"
             "→ Change all passwords — email, banking, social, crypto\n"
-            "→ Revoke all active sessions: reply *SESSIONS*\n"
+            "→ Revoke active sessions: reply *SESSIONS*\n"
             "→ Close email backdoors: reply *SWEEP*\n"
-            "→ Enable 2FA on every account\n"
-            "→ Check for malicious browser extensions: chrome://extensions\n\n"
-            "Reply *HELP* to see all available commands.\n\n"
+            "→ Enable 2FA on every account\n\n"
+            "*Step 3 — Clean the infected device:*\n"
+            "→ Download Malwarebytes Free (malwarebytes.com) on a USB from a clean device\n"
+            "→ Run a full scan and remove everything flagged\n"
+            "→ For a severe infection, a full OS reinstall is the safest option\n\n"
+            "*Step 4 — After cleaning:*\n"
+            "→ Update your OS and all software\n"
+            "→ Remove unfamiliar browser extensions\n"
+            "→ Reconnect to the internet\n\n"
+            "Reply *HELP* to see all commands.\n\n"
             "— RelayShield"
         )
 

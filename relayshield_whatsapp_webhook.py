@@ -3398,15 +3398,26 @@ def handle_active_message(
             lines.append(f"…and {count - 3} more.")
 
         lines.append(
-            "\n*What this means:*\n"
-            "Malware ran on this device and stole every password, session cookie, and stored "
-            "credential the browser held — across all sites, not just email. Active session "
-            "cookies mean attackers may already have live account access without needing a password.\n\n"
-            "*Act from a clean device:*\n"
+            "\n*What was stolen:*\n"
+            "Infostealer malware silently exfiltrates everything the browser holds — saved passwords "
+            "for every site, active session cookies (bypassing 2FA without needing a password), "
+            "credit card autofill, and crypto wallet keys.\n\n"
+            "*Step 1 — Isolate the infected device now:*\n"
+            "→ Disconnect it from Wi-Fi and unplug ethernet\n"
+            "→ Do NOT log into any accounts on it until it is cleaned\n\n"
+            "*Step 2 — From a different clean device:*\n"
             "→ Change all passwords — email, banking, social, crypto\n"
             "→ Revoke active sessions: reply *SESSIONS*\n"
             "→ Close email backdoors: reply *SWEEP*\n"
             "→ Enable 2FA on every account\n\n"
+            "*Step 3 — Clean the infected device:*\n"
+            "→ Download Malwarebytes Free (malwarebytes.com) on a USB from a clean device\n"
+            "→ Run a full scan and remove everything flagged\n"
+            "→ For a severe infection, a full OS reinstall is the safest option\n\n"
+            "*Step 4 — After cleaning:*\n"
+            "→ Update your OS and all software\n"
+            "→ Remove unfamiliar browser extensions\n"
+            "→ Reconnect to the internet\n\n"
             "Reply *HELP* to see all commands."
         )
 

@@ -1116,25 +1116,329 @@ def handle_wallet_screen_batch(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# x402 Bazaar discovery extensions — per-endpoint metadata for Agentic.Market
+# ---------------------------------------------------------------------------
+# Format follows the x402 BodyDiscoveryExtension schema (POST endpoints).
+# These are injected into the `extensions` field of each payment-requirements
+# `accepts` entry so the CDP Facilitator can catalog them on settlement.
+
+def _bazaar_body_ext(input_example: dict, input_schema: dict, output_example: dict) -> dict:
+    """Build a Bazaar BodyDiscoveryExtension dict for a POST endpoint."""
+    return {
+        "bazaar": {
+            "info": {
+                "input": {
+                    "type":     "http",
+                    "bodyType": "json",
+                    "body":     input_example,
+                },
+                "output": {
+                    "type":    "json",
+                    "example": output_example,
+                },
+            },
+            "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type":    "object",
+                "properties": {
+                    "input": {
+                        "type": "object",
+                        "properties": {
+                            "type":     {"type": "string", "const": "http"},
+                            "method":   {"type": "string", "enum": ["POST", "PUT", "PATCH"]},
+                            "bodyType": {"type": "string", "enum": ["json", "form-data", "text"]},
+                            "body":     input_schema,
+                        },
+                        "required":             ["type", "method", "bodyType", "body"],
+                        "additionalProperties": False,
+                    },
+                    "output": {
+                        "type": "object",
+                        "properties": {
+                            "type":    {"type": "string"},
+                            "example": {"type": "object"},
+                        },
+                        "required": ["type"],
+                    },
+                },
+                "required": ["input"],
+            },
+        }
+    }
+
+
+BAZAAR_EXTENSIONS: dict[str, dict] = {
+    "/v1/payg/breach": _bazaar_body_ext(
+        input_example={"email": "user@example.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"email": {"type": "string", "description": "Email address to check"}},
+            "required": ["email"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "email": "user@example.com",
+                "breach_count": 3,
+                "breaches": [
+                    {"name": "ExampleBreach", "domain": "example.com",
+                     "breach_date": "2023-06-01",
+                     "data_classes": ["Passwords", "Email addresses"],
+                     "is_verified": True},
+                ],
+            },
+        },
+    ),
+    "/v1/payg/sim-swap": _bazaar_body_ext(
+        input_example={"phone": "+14155551234"},
+        input_schema={
+            "type": "object",
+            "properties": {"phone": {"type": "string", "description": "Phone number in E.164 format"}},
+            "required": ["phone"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "phone": "+14155551234",
+                "swapped": True,
+                "swap_timestamp": "2026-05-18T14:23:00Z",
+                "carrier": "T-Mobile",
+                "checked_at": "2026-05-19T10:00:00+00:00",
+            },
+        },
+    ),
+    "/v1/payg/domain": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"domain": {"type": "string", "description": "Root domain to scan for lookalikes"}},
+            "required": ["domain"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "domain": "acme.com",
+                "lookalikes_found": 2,
+                "lookalikes": [
+                    {"domain": "acrne.com"},
+                    {"domain": "acme-login.com"},
+                ],
+                "candidates_checked": 30,
+                "checked_at": "2026-05-19T10:00:00+00:00",
+            },
+        },
+    ),
+    "/v1/payg/oauth-watchlist": _bazaar_body_ext(
+        input_example={"email": "user@example.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"email": {"type": "string", "description": "Email address to check for OAuth exposure"}},
+            "required": ["email"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "email": "user@example.com",
+                "matched_count": 1,
+                "matched_apps": [
+                    {"app": "GitHub", "breach_date": "2023-01-15",
+                     "data_classes": ["Usernames", "Email addresses"],
+                     "revoke_url": "https://github.com/settings/applications"},
+                ],
+                "recommendation": "Revoke OAuth access for matched apps immediately.",
+                "checked_at": "2026-05-19T10:00:00+00:00",
+            },
+        },
+    ),
+    "/v1/payg/scan-wallet": _bazaar_body_ext(
+        input_example={"address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "chain_id": "1"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "address":  {"type": "string", "description": "EVM wallet address (0x + 40 hex chars)"},
+                "chain_id": {"type": "string", "description": "EVM chain ID: 1=ETH, 8453=Base, 137=Polygon"},
+            },
+            "required": ["address"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "address": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+                "chain_id": "1",
+                "risk_level": "LOW",
+                "risk_flags": [],
+                "raw": {},
+            },
+        },
+    ),
+    "/v1/payg/scan-url": _bazaar_body_ext(
+        input_example={"url": "https://suspicious-site.example.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"url": {"type": "string", "description": "URL to scan (must start with http:// or https://)"}},
+            "required": ["url"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "status":        "pending",
+                "target":        "https://suspicious-site.example.com",
+                "analysis_id":   "u-abc123def456",
+                "poll_endpoint": "/v1/result/u-abc123def456",
+                "note":          "Poll /v1/result/{analysis_id} every 5s until status is completed",
+            },
+        },
+    ),
+    "/v1/payg/scan-file": _bazaar_body_ext(
+        input_example={"file_url": "https://cdn.example.com/invoice.pdf", "filename": "invoice.pdf"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "file_url": {"type": "string", "description": "Publicly accessible download URL"},
+                "filename": {"type": "string", "description": "Optional filename hint for AV engines"},
+            },
+            "required": ["file_url"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "status":        "pending",
+                "target":        "https://cdn.example.com/invoice.pdf",
+                "filename":      "invoice.pdf",
+                "analysis_id":   "f-abc123def456",
+                "poll_endpoint": "/v1/result/f-abc123def456",
+                "note":          "Poll /v1/result/{analysis_id} every 5s until status is completed",
+            },
+        },
+    ),
+    "/v1/payg/wallet-risk": _bazaar_body_ext(
+        input_example={"address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "Wallet address — EVM (0x), Solana (base58), TON (EQ.../UQ...), or Bitcoin",
+                },
+            },
+            "required": ["address"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "address":    "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+                "chain":      "evm",
+                "risk_level": "LOW",
+                "risk_flags": [],
+                "metadata":   {},
+            },
+        },
+    ),
+    "/v1/payg/token-security": _bazaar_body_ext(
+        input_example={"contract_address": "0x6982508145454ce325ddbe47a25d4ec3d2311933", "chain_id": "1"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "contract_address": {"type": "string", "description": "EVM token contract address"},
+                "chain_id":         {"type": "string", "description": "EVM chain ID (default: 1 for Ethereum)"},
+            },
+            "required": ["contract_address"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "contract_address": "0x6982508145454ce325ddbe47a25d4ec3d2311933",
+                "chain_id":         "1",
+                "risk_level":       "HIGH",
+                "critical_flags":   ["honeypot"],
+                "warning_flags":    ["mintable supply"],
+                "token_name":       "Example Token",
+                "token_symbol":     "EXT",
+                "holder_count":     "12345",
+                "raw":              {},
+            },
+        },
+    ),
+    "/v1/payg/nft-security": _bazaar_body_ext(
+        input_example={"contract_address": "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d", "chain_id": "1"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "contract_address": {"type": "string", "description": "NFT contract address"},
+                "chain_id":         {"type": "string", "description": "EVM chain ID (default: 1 for Ethereum)"},
+            },
+            "required": ["contract_address"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "contract_address": "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d",
+                "chain_id":         "1",
+                "risk_level":       "LOW",
+                "risk_flags":       [],
+                "nft_name":         "Bored Ape Yacht Club",
+                "nft_symbol":       "BAYC",
+                "raw":              {},
+            },
+        },
+    ),
+    "/v1/payg/wallet-screen-batch": _bazaar_body_ext(
+        input_example={"addresses": ["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"]},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "addresses": {
+                    "type":        "array",
+                    "items":       {"type": "string"},
+                    "maxItems":    10,
+                    "description": "Up to 10 wallet addresses (any chain: EVM, Solana, TON, Bitcoin)",
+                },
+            },
+            "required": ["addresses"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "screened":  2,
+                "high_risk": 0,
+                "results": [
+                    {"address": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+                     "chain": "evm", "risk_level": "LOW", "risk_flags": [], "error": None},
+                    {"address": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+                     "chain": "solana", "risk_level": "LOW", "risk_flags": [], "error": None},
+                ],
+            },
+        },
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
 # x402 PAYG — payment requirements, verification, 402 response
 # ---------------------------------------------------------------------------
 
 def _build_payment_requirements(path: str, price_units: int) -> dict:
     api_base = "https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod"
+    accepts_entry: dict = {
+        "scheme":             "exact",
+        "network":            BASE_CHAIN_ID,
+        "maxAmountRequired":  str(price_units),
+        "resource":           f"{api_base}{path}",
+        "description":        f"RelayShield {path.split('/')[-1].replace('-', ' ')} check",
+        "mimeType":           "application/json",
+        "payTo":              X402_PAYTO_ADDRESS,
+        "maxTimeoutSeconds":  300,
+        "asset":              USDC_BASE_ADDRESS,
+        "extra":              {"name": "USDC", "version": "2"},
+    }
+    # Inject Bazaar discovery extension so CDP Facilitator catalogs this
+    # endpoint on settlement — enables auto-indexing on Agentic.Market
+    bazaar_ext = BAZAAR_EXTENSIONS.get(path)
+    if bazaar_ext:
+        accepts_entry["extensions"] = bazaar_ext
     return {
         "x402Version": 1,
-        "accepts": [{
-            "scheme":             "exact",
-            "network":            BASE_CHAIN_ID,
-            "maxAmountRequired":  str(price_units),
-            "resource":           f"{api_base}{path}",
-            "description":        f"RelayShield {path.split('/')[-1].replace('-', ' ')} check",
-            "mimeType":           "application/json",
-            "payTo":              X402_PAYTO_ADDRESS,
-            "maxTimeoutSeconds":  300,
-            "asset":              USDC_BASE_ADDRESS,
-            "extra":              {"name": "USDC", "version": "2"},
-        }],
+        "accepts": [accepts_entry],
     }
 
 

@@ -1890,8 +1890,9 @@ def handle_extensions(chat_id: int) -> None:
 
 def handle_infostealer_check(chat_id: int, email_raw: str | None, user: dict) -> None:
     """
-    /infostealer <email> — Check if an email was harvested by infostealer malware.
-    Uses Hudson Rock Cavalier (free, no API key required).
+    /infostealer <email> — Check if credentials tied to an email were stolen by malware.
+    Checks your own email to see if your device was compromised, or a sender's email
+    to see if their account may have been hijacked.
     Available to all tiers.
     """
     email = (email_raw or "").strip().lower()
@@ -1899,11 +1900,13 @@ def handle_infostealer_check(chat_id: int, email_raw: str | None, user: dict) ->
         send_message(
             chat_id,
             "🦠 *Infostealer Check*\n\n"
-            "Check if an email address was stolen by malware (infostealer infections).\n\n"
+            "Infostealer malware infects a device and silently exfiltrates *everything* the "
+            "browser knows — saved passwords for every site, active session cookies (bypassing 2FA), "
+            "credit card autofill, and crypto wallet keys.\n\n"
+            "Check your own email to see if your device has been compromised, or check a "
+            "suspicious sender's email to see if their account may have been hijacked.\n\n"
             "Usage:\n"
-            "`/infostealer you@example.com`\n\n"
-            "This checks Hudson Rock's Cavalier database of 13B+ compromised credentials "
-            "harvested from infected computers worldwide.",
+            "`/infostealer you@example.com`",
             parse_mode="Markdown",
         )
         return
@@ -1934,8 +1937,8 @@ def handle_infostealer_check(chat_id: int, email_raw: str | None, user: dict) ->
         send_message(
             chat_id,
             f"✅ *{email}* was not found in any infostealer logs.\n\n"
-            "_This checks Hudson Rock's Cavalier database. Not finding an email here does not "
-            "guarantee the device has never been infected — run /extensions to audit your browser._",
+            "_A clean result means no known malware infections were detected for this email. "
+            "Run /extensions to audit your browser extensions as an additional precaution._",
             parse_mode="Markdown",
         )
         return
@@ -1949,20 +1952,22 @@ def handle_infostealer_check(chat_id: int, email_raw: str | None, user: dict) ->
         user_ = s.get("total_user_services", 0)
         lines.append(
             f"• *{date}* — {os_}\n"
-            f"  {corp} corporate + {user_} personal credentials also stolen"
+            f"  {corp} work + {user_} personal site credentials exfiltrated"
         )
     if count > 3:
         lines.append(f"\n…and {count - 3} more infection{'s' if count - 3 != 1 else ''}.")
 
     lines.append(
         "\n\n*What this means:*\n"
-        "An infostealer malware infection harvested credentials from this device. "
-        "All passwords, session cookies, and stored logins on that machine are compromised.\n\n"
-        "*Recommended actions:*\n"
-        "→ Change all passwords immediately from a *clean device*\n"
-        "→ Enable 2FA on every account\n"
+        "Malware ran on this device and silently stole every password, session cookie, "
+        "and stored credential the browser held — across *all* sites, not just email. "
+        "Active session cookies mean attackers may already have live access to accounts "
+        "without needing the password.\n\n"
+        "*Act from a clean device:*\n"
+        "→ Change all passwords — email, banking, social, crypto\n"
         "→ Revoke all active sessions: /sessions\n"
         "→ Run /sweep to close email backdoors\n"
+        "→ Enable 2FA on every account\n"
         "→ Audit browser extensions: /extensions\n\n"
         "🛡️ _RelayShield_"
     )

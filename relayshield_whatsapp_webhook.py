@@ -26,7 +26,7 @@ Reply commands (ACTIVE users):
   RESOLVED — User confirms remediation complete after a breach incident — clears breach_alert
              signals from recent_signals to prevent re-triggering coordinated attack alerts
   SCAN <url> — Scan a suspicious link for malware or phishing (VirusTotal)
-  INFOSTEALER <email> — Check if email was harvested by infostealer malware (Hudson Rock)
+  INFOSTEALER <email> — Check if email credentials were stolen by infostealer malware
   HELP     — List all available commands
   ADD +1XXXXXXXXXX — Business tier: add employee phone number (admin only)
 
@@ -3305,15 +3305,17 @@ def handle_active_message(
         )
         return "vt_url_scanned"
 
-    # --- INFOSTEALER <email> — Hudson Rock infostealer check ---
+    # --- INFOSTEALER <email> — infostealer malware credential check ---
     if body == "INFOSTEALER":
         send_whatsapp(
             to_number,
             "🦠 *Infostealer Check*\n\n"
-            "Check if an email was stolen by infostealer malware.\n\n"
-            "Reply: *INFOSTEALER your@email.com*\n\n"
-            "This searches Hudson Rock's Cavalier database of credentials "
-            "harvested from infected devices worldwide.",
+            "Infostealer malware infects a device and silently exfiltrates everything the "
+            "browser holds — saved passwords for every site, active session cookies "
+            "(bypassing 2FA), credit card autofill, and crypto wallet keys.\n\n"
+            "Check your own email to see if your device was compromised, or check a "
+            "suspicious sender's email to see if their account may have been hijacked.\n\n"
+            "Reply: *INFOSTEALER your@email.com*",
             account_sid, auth_token, from_number,
         )
         return "stealer_prompt_sent"
@@ -3324,7 +3326,7 @@ def handle_active_message(
             send_whatsapp(
                 to_number,
                 "Please provide a valid email address.\n\n"
-                "Example: *STEALER you@example.com*",
+                "Example: *INFOSTEALER you@example.com*",
                 account_sid, auth_token, from_number,
             )
             return "stealer_invalid_email"
@@ -3347,7 +3349,7 @@ def handle_active_message(
             if exc.code == 404:
                 stealers = []
             else:
-                logger.error("Cavalier API error: %s", exc)
+                logger.error("infostealer API error: %s", exc)
                 send_whatsapp(
                     to_number,
                     "⚠️ Infostealer check temporarily unavailable. Please try again later.",
@@ -3355,7 +3357,7 @@ def handle_active_message(
                 )
                 return "stealer_api_error"
         except Exception as exc:
-            logger.error("Cavalier API error: %s", exc)
+            logger.error("infostealer API error: %s", exc)
             send_whatsapp(
                 to_number,
                 "⚠️ Infostealer check temporarily unavailable. Please try again later.",
@@ -3367,9 +3369,8 @@ def handle_active_message(
             send_whatsapp(
                 to_number,
                 f"✅ *{stealer_email}* was not found in any infostealer logs.\n\n"
-                "This checks Hudson Rock's Cavalier database. A clean result here does not "
-                "guarantee the device has never been infected.\n\n"
-                "Reply *EXTENSIONS* for a browser extension audit guide.",
+                "A clean result means no known malware infections were detected for this email. "
+                "Reply *EXTENSIONS* for a browser extension audit as an additional precaution.",
                 account_sid, auth_token, from_number,
             )
             logger.info("stealer-check clean — email=%s", stealer_email)
@@ -3384,17 +3385,21 @@ def handle_active_message(
             user_ = s.get("total_user_services", 0)
             lines.append(
                 f"• {date} — {os_}\n"
-                f"  {corp} corporate + {user_} personal credentials also stolen"
+                f"  {corp} work + {user_} personal site credentials exfiltrated"
             )
         if count > 3:
             lines.append(f"…and {count - 3} more.")
 
         lines.append(
-            "\n*What to do now:*\n"
-            "→ Change all passwords from a *clean device*\n"
-            "→ Enable 2FA everywhere\n"
+            "\n*What this means:*\n"
+            "Malware ran on this device and stole every password, session cookie, and stored "
+            "credential the browser held — across all sites, not just email. Active session "
+            "cookies mean attackers may already have live account access without needing a password.\n\n"
+            "*Act from a clean device:*\n"
+            "→ Change all passwords — email, banking, social, crypto\n"
             "→ Revoke active sessions: reply *SESSIONS*\n"
-            "→ Check email backdoors: reply *SWEEP*\n\n"
+            "→ Close email backdoors: reply *SWEEP*\n"
+            "→ Enable 2FA on every account\n\n"
             "Reply *HELP* to see all commands."
         )
 

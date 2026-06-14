@@ -1,0 +1,118 @@
+name: Monthly INTEL-2 Channel Review
+
+# Runs on the 1st of every month at 09:00 UTC.
+# Pulls hit-rate stats from CloudWatch for each monitored Telegram channel,
+# then opens a GitHub Issue with the report so the channel list can be reviewed.
+
+on:
+  schedule:
+    - cron: '0 9 1 * *'   # 1st of month, 09:00 UTC
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+
+permissions:
+  issues: write
+
+jobs:
+  channel-review:
+    name: Pull intel stats and open review issue
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            us-east-1
+
+      # Pull last 30 days of intel-monitor CloudWatch logs and extract per-channel hit counts
+      - name: Fetch channel stats from CloudWatch
+        id: stats
+        run: |
+          END=$(date -u +%s)000
+          START=$(( END - 30*24*3600*1000 ))
+
+          # Query the log group for channel-level match lines
+          aws logs filter-log-events \
+            --log-group-name /aws/lambda/relayshield-intel-monitor \
+            --start-time $START \
+            --end-time $END \
+            --filter-pattern '"IOC store"' \
+            --profile default \
+            --output text \
+            --query 'events[*].message' 2>/dev/null | head -500 > /tmp/raw_logs.txt || true
+
+          # Also grab the admin digest lines which include channels_checked / iocs_extracted
+          aws logs filter-log-events \
+            --log-group-name /aws/lambda/relayshield-intel-monitor \
+            --start-time $START \
+            --end-time $END \
+            --filter-pattern '"INTEL-2 Monitor Run"' \
+            --profile default \
+            --output text \
+            --query 'events[*].message' 2>/dev/null | tail -20 > /tmp/digests.txt || true
+
+          echo "STATS_READY=true" >> $GITHUB_OUTPUT
+
+      # Invoke the Lambda directly to get the current channel list + last run summary
+      - name: Invoke intel-monitor for dry-run stats
+        id: invoke
+        run: |
+          RESULT=$(aws lambda invoke \
+            --function-name relayshield-intel-monitor \
+            --payload '{"action":"stats_only"}' \
+            --cli-binary-format raw-in-base64-out \
+            /tmp/lambda_out.json \
+            --profile default \
+            --query 'StatusCode' \
+            --output text 2>/dev/null) || RESULT="error"
+
+          if [ -f /tmp/lambda_out.json ]; then
+            cat /tmp/lambda_out.json >> /tmp/digests.txt
+          fi
+
+          echo "INVOKE_STATUS=$RESULT" >> $GITHUB_OUTPUT
+
+      - name: Build issue body
+        id: issue
+        run: |
+          MONTH=$(date -u +"%B %Y")
+          DIGESTS=$(cat /tmp/digests.txt 2>/dev/null | head -80 || echo "No digest data found.")
+
+          BODY="## INTEL-2 Monthly Channel Review — $MONTH
+
+This issue is auto-generated on the 1st of every month. Review channel performance and update \`MONITORED_CHANNELS\` in \`relayshield_intel_monitor.py\` before closing.
+
+### Checklist
+- [ ] Review channels with zero IOC hits last 30 days — consider replacing
+- [ ] Check if any channels went private or were deleted (Telethon join errors in logs)
+- [ ] Search for newly active criminal channels to add (sim swap, credential dumps, infostealers, crypto drainers)
+- [ ] Verify the 4 confirmed-accessible channels are still live: \`@exposed_vc\`, \`@logsmarket\`, \`@cloudsek_alerts\`, \`@vxunderground\`
+- [ ] Update \`MONITORED_CHANNELS\` list if needed, commit, and redeploy
+
+### Last 30-Day Lambda Digest
+\`\`\`
+$DIGESTS
+\`\`\`
+
+### Resources
+- [CloudWatch Logs](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252Frelayshield-intel-monitor)
+- [relayshield_intel_monitor.py](../blob/main/relayshield_intel_monitor.py)
+- [DynamoDB intel_iocs table](https://us-east-1.console.aws.amazon.com/dynamodbv2/home?region=us-east-1#table?name=relayshield_intel_iocs)
+
+_Auto-opened by GitHub Actions · intel_channel_review.yml_"
+
+          # Write to a temp file to avoid shell quoting issues
+          echo "$BODY" > /tmp/issue_body.txt
+          echo "MONTH=$MONTH" >> $GITHUB_OUTPUT
+
+      - name: Open GitHub Issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MONTH=$(date -u +"%B %Y")
+          gh issue create \
+            --title "INTEL-2 Channel Review — $MONTH" \
+            --body-file /tmp/issue_body.txt \
+            --label "intel,monthly-review" \
+            --repo ${{ github.repository }}

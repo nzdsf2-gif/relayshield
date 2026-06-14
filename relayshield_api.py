@@ -14,6 +14,7 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   POST /v1/nft-security             — GoPlus NFT contract risk scan
   POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
   POST /v1/domain                   — Typosquat/lookalike domain scan (DNS + CT + GSB)
+  POST /v1/intel/telegram           — Threat Intelligence API: IOC lookup against live Telegram criminal channel pipeline (intel_access flag required)
   GET  /v1/result/{analysis_id}     — Poll VT scan result
 
 Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
@@ -35,7 +36,7 @@ x402 payment flow:
   1. Call PAYG endpoint with no X-PAYMENT header → receive 402 + PAYMENT-REQUIRED header
   2. Pay USDC on Base to the address in PAYMENT-REQUIRED
   3. Retry with X-PAYMENT header containing payment proof
-  4. Lambda verifies proof via Coinbase x402 facilitator → executes and returns result
+  4. Lambda verifies proof via PayAI x402 facilitator → executes and returns result
 
 Authentication: Subscription routes — API key enforced by API Gateway usage plan.
                PAYG routes — no API key; x402 payment verified inside this Lambda.
@@ -77,7 +78,8 @@ logger.setLevel(logging.INFO)
 # AWS clients
 # ---------------------------------------------------------------------------
 
-secrets_client = boto3.client("secretsmanager")
+secrets_client  = boto3.client("secretsmanager")
+dynamodb        = boto3.resource("dynamodb")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -86,10 +88,11 @@ secrets_client = boto3.client("secretsmanager")
 # x402 PAYG configuration
 X402_PAYTO_ADDRESS   = os.environ.get("RELAYSHIELD_X402_WALLET", "")   # EVM (Base) payTo
 SOL_PAYTO_ADDRESS    = os.environ.get("RELAYSHIELD_SOL_WALLET", "")    # Solana payTo
-X402_FACILITATOR_URL = "https://x402.org/facilitator"
+X402_FACILITATOR_URL = "https://facilitator.payai.network"   # EVM (Base) — PayAI facilitator; auto-listed in Bazaar, free tier 10k/month
+SOL_FACILITATOR_URL  = "https://x402.org/facilitator"         # Solana — CDP Facilitator (manages CDP fee payer EwWqGE4Z...)
 USDC_BASE_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC on Base
 USDC_SOL_ADDRESS     = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # USDC on Solana mainnet
-BASE_CHAIN_ID        = "eip155:8453"
+BASE_CHAIN_ID        = "base"           # V1 named network (eip155:8453 is V2 CAIP-2 format)
 SOL_CHAIN_ID         = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"       # Solana mainnet CAIP-2
 # CDP Facilitator Solana fee-payer public key (sponsors gas for all SVM x402 transactions)
 SOL_FEE_PAYER        = "EwWqGE4ZFKLofuestmU4LDdK7XM1N4ALgdZccwYugwGd"
@@ -136,6 +139,32 @@ OAUTH_REVOCATION_URLS: dict[str, str] = {
     "Dropbox":    "https://www.dropbox.com/account/connected_apps",
     "Atlassian":  "https://id.atlassian.com/manage-profile/apps",
     "Salesforce": "https://help.salesforce.com/s/articleView?id=sf.remoteaccess_revoke_token.htm",
+}
+
+API_KEYS_TABLE   = "relayshield_api_keys"
+INTEL_IOCS_TABLE = "relayshield_intel_iocs"
+STRIPE_SECRET_NAME = "relayshield/stripe_secret_key"
+STRIPE_METER_API   = "https://api.stripe.com/v1/billing/meter_events"
+
+# Stripe Billing Meter event names — one per metered endpoint.
+# These must match the event_name values on the meters created in Stripe Dashboard.
+STRIPE_METER_EVENTS: dict[str, str] = {
+    "/v1/metered/breach":           "relayshield_breach_calls",
+    "/v1/metered/sim-swap":         "relayshield_sim_swap_calls",
+    "/v1/metered/infostealer":      "relayshield_infostealer_calls",
+    "/v1/metered/domain":           "relayshield_domain_calls",
+    "/v1/metered/oauth-watchlist":  "relayshield_oauth_watchlist_calls",
+    "/v1/metered/crypto-intel":     "relayshield_crypto_intel_calls",
+}
+
+# Credits deducted per successful call (1 credit = $0.01)
+METERED_CREDIT_COSTS: dict[str, int] = {
+    "/v1/metered/breach":          10,   # $0.10
+    "/v1/metered/sim-swap":        25,   # $0.25
+    "/v1/metered/infostealer":     50,   # $0.50
+    "/v1/metered/domain":          30,   # $0.30
+    "/v1/metered/oauth-watchlist": 20,   # $0.20
+    "/v1/metered/crypto-intel":    30,   # $0.30
 }
 
 HIBP_SECRET_NAME  = "relayshield/hibp_api_key"
@@ -204,6 +233,149 @@ def _gsb_api_key() -> str:
         return json.loads(raw)["google_safe_browsing_api_key"]
     except (json.JSONDecodeError, KeyError):
         return raw
+
+
+def _stripe_secret_key() -> str:
+    raw = _get_secret(STRIPE_SECRET_NAME)
+    try:
+        return json.loads(raw).get("stripe_secret_key") or json.loads(raw).get("STRIPE_SECRET_KEY") or raw
+    except (json.JSONDecodeError, KeyError):
+        return raw
+
+
+# ---------------------------------------------------------------------------
+# Stripe metered billing helpers
+# ---------------------------------------------------------------------------
+
+def _verify_rs_api_key(api_key_str: str) -> dict | None:
+    """Look up a RelayShield API key in DynamoDB. Returns the record or None."""
+    if not api_key_str or not api_key_str.startswith("rs_live_"):
+        return None
+    try:
+        table  = dynamodb.Table(API_KEYS_TABLE)
+        result = table.get_item(Key={"api_key": api_key_str})
+        item   = result.get("Item")
+        if item and item.get("active"):
+            return item
+        return None
+    except Exception as exc:
+        logger.error("API key lookup failed key=%s error=%s", api_key_str[:16], exc)
+        return None
+
+
+def _record_stripe_meter_event(stripe_customer_id: str, event_name: str) -> None:
+    """Post a usage event to Stripe Billing Meter. Fire-and-forget — never raises."""
+    try:
+        secret_key = _stripe_secret_key()
+        identifier = f"{stripe_customer_id}-{uuid.uuid4().hex}"
+        payload    = urllib.parse.urlencode({
+            "event_name":                  event_name,
+            "payload[value]":              "1",
+            "payload[stripe_customer_id]": stripe_customer_id,
+            "identifier":                  identifier,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            STRIPE_METER_API,
+            data=payload,
+            headers={
+                "Authorization":  f"Bearer {secret_key}",
+                "Content-Type":   "application/x-www-form-urlencoded",
+                "Stripe-Version": "2024-06-20",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            logger.info("stripe meter event recorded customer=%s event=%s status=%d",
+                        stripe_customer_id, event_name, resp.status)
+    except Exception as exc:
+        logger.warning("stripe meter event failed (non-fatal) customer=%s event=%s error=%s",
+                       stripe_customer_id, event_name, exc)
+
+
+def handle_metered_request(path: str, method: str, event: dict) -> dict:
+    """Auth + dispatch for /v1/metered/* routes. Verifies RS API key, runs handler,
+    then records a Stripe Billing Meter event on success."""
+    if method != "POST":
+        return _err(f"{path} only accepts POST requests", 405)
+
+    headers    = event.get("headers") or {}
+    api_key_str = (
+        headers.get("X-RS-API-KEY")
+        or headers.get("x-rs-api-key")
+        or headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    )
+
+    key_record = _verify_rs_api_key(api_key_str)
+    if not key_record:
+        return {
+            "statusCode": 401,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "ok":    False,
+                "error": "Invalid or missing API key. Pass your key as X-RS-API-KEY header.",
+                "docs":  "https://relayshield.net/developers",
+            }),
+        }
+
+    metered_routes = {
+        "/v1/metered/breach":          handle_breach,
+        "/v1/metered/sim-swap":        handle_sim_swap,
+        "/v1/metered/infostealer":     handle_infostealer,
+        "/v1/metered/domain":          handle_domain,
+        "/v1/metered/oauth-watchlist": handle_oauth_watchlist,
+        "/v1/metered/crypto-intel":    handle_crypto_intel,
+    }
+    handler = metered_routes.get(path)
+    if not handler:
+        return _err(f"unknown metered endpoint: {path}", 404)
+
+    # Billing check before executing — must have credits OR active subscription
+    credit_balance     = int(key_record.get("credit_balance") or 0)
+    has_subscription   = bool(key_record.get("stripe_subscription_id"))
+    credit_cost        = METERED_CREDIT_COSTS.get(path, 0)
+    use_credits        = credit_balance >= credit_cost
+
+    if not use_credits and not has_subscription:
+        return {
+            "statusCode": 402,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "ok":      False,
+                "error":   "Insufficient credits and no active subscription.",
+                "topup_url": "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/developer/topup",
+            }),
+        }
+
+    params = _body(event)
+    try:
+        result = handler(params)
+    except Exception as exc:
+        logger.exception("Unhandled error in metered %s: %s", path, exc)
+        return _err("internal server error", 500)
+
+    # Only bill on success
+    if result.get("statusCode", 200) < 300:
+        if use_credits:
+            # Deduct credits atomically
+            try:
+                dynamodb.Table(API_KEYS_TABLE).update_item(
+                    Key={"api_key": api_key_str},
+                    UpdateExpression="SET credit_balance = credit_balance - :cost",
+                    ConditionExpression="credit_balance >= :cost",
+                    ExpressionAttributeValues={":cost": credit_cost},
+                )
+                logger.info("credits deducted key=%s cost=%d remaining=%d",
+                            api_key_str[:16], credit_cost, credit_balance - credit_cost)
+            except Exception as exc:
+                logger.warning("credit deduction failed (non-fatal) key=%s error=%s", api_key_str[:16], exc)
+        else:
+            # Fall back to Stripe meter event
+            event_name         = STRIPE_METER_EVENTS.get(path)
+            stripe_customer_id = key_record.get("stripe_customer_id", "")
+            if event_name and stripe_customer_id:
+                _record_stripe_meter_event(stripe_customer_id, event_name)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -953,6 +1125,147 @@ def handle_nft_security(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/crypto-intel  (Stripe metered — $0.30/call)
+# ---------------------------------------------------------------------------
+# Composite asset-surface intelligence: address risk + optional token risk,
+# synthesised into a single risk object with cross-surface correlation advisories.
+#
+# Request:  { "address": "0x...",            # required — wallet or EOA
+#             "token_address": "0x...",       # optional — token/contract to check
+#             "chain_id": "1" }              # optional — default ETH mainnet
+#
+# Response: { "address": "...", "chain_id": "...",
+#             "composite_risk": "LOW|MEDIUM|HIGH|CRITICAL",
+#             "address_flags": [...], "token_risk": {...},
+#             "correlation_advisories": [...] }
+
+_ADDR_CRITICAL = {"phishing_activities", "blacklist_doubt", "honeypot_related_address",
+                  "cybercrime", "money_laundering", "sanctioned"}
+_ADDR_WARNING  = {"darkweb_transactions", "fake_kyc", "gas_abuse"}
+
+def handle_crypto_intel(params: dict) -> dict:
+    address = (params.get("address") or "").strip()
+    if not address:
+        return _err("address is required")
+    if not re.match(r"^0x[0-9a-fA-F]{40}$", address):
+        return _err("address must be a valid EVM address (0x + 40 hex chars)")
+
+    chain_id      = str(params.get("chain_id") or "1").strip()
+    token_address = (params.get("token_address") or "").strip().lower()
+
+    # --- Address security (GoPlus address_security) ---
+    address_flags    = []
+    address_critical = False
+    try:
+        url = f"{GOPLUS_BASE_URL}/{address}?chain_id={chain_id}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            addr_raw = json.loads(resp.read()).get("result", {}).get(address.lower(), {})
+        for k, v in addr_raw.items():
+            if v == "1":
+                address_flags.append(k)
+                if k in _ADDR_CRITICAL:
+                    address_critical = True
+    except Exception as exc:
+        logger.error("crypto-intel address_security failed address=%s: %s", address, exc)
+        addr_raw = {}
+
+    # --- Token security (GoPlus token_security) — only if token_address supplied ---
+    token_result = None
+    token_critical = False
+    token_high     = False
+    if token_address and re.match(r"^0x[0-9a-fA-F]{40}$", token_address):
+        try:
+            url = GOPLUS_TOKEN_URL.format(chain_id=chain_id) + f"?contract_addresses={token_address}"
+            req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                tok_raw = json.loads(resp.read()).get("result", {}).get(token_address, {})
+
+            tok_critical = []
+            tok_warnings = []
+            for k, label in [("is_honeypot", "honeypot"), ("is_airdrop_scam", "airdrop scam"),
+                              ("fake_token", "fake token")]:
+                if str(tok_raw.get(k, "0")) == "1":
+                    tok_critical.append(label)
+            for k, label in [("transfer_pausable", "transfers pausable"),
+                              ("is_mintable", "mintable supply"),
+                              ("hidden_owner", "hidden owner")]:
+                if str(tok_raw.get(k, "0")) == "1":
+                    tok_warnings.append(label)
+            try:
+                sell_tax = float(tok_raw.get("sell_tax", 0))
+                if sell_tax >= 0.5:
+                    tok_critical.append(f"sell tax {sell_tax*100:.0f}%")
+                elif sell_tax >= 0.1:
+                    tok_warnings.append(f"sell tax {sell_tax*100:.0f}%")
+            except (TypeError, ValueError):
+                pass
+
+            token_critical = bool(tok_critical)
+            token_high     = bool(tok_warnings)
+            token_result   = {
+                "contract_address": token_address,
+                "token_name":       tok_raw.get("token_name", ""),
+                "token_symbol":     tok_raw.get("token_symbol", ""),
+                "critical_flags":   tok_critical,
+                "warning_flags":    tok_warnings,
+            }
+        except Exception as exc:
+            logger.error("crypto-intel token_security failed contract=%s: %s", token_address, exc)
+
+    # --- Composite risk ---
+    if address_critical or token_critical:
+        composite_risk = "CRITICAL"
+    elif address_flags or token_high:
+        composite_risk = "HIGH"
+    elif set(address_flags) & _ADDR_WARNING:
+        composite_risk = "MEDIUM"
+    else:
+        composite_risk = "LOW"
+
+    # --- Cross-surface correlation advisories ---
+    advisories = []
+    if address_critical:
+        advisories.append(
+            "CRITICAL: This address appears in phishing/sanctions/cybercrime databases. "
+            "If the associated account owner has an active SIM swap, call /v1/metered/sim-swap — "
+            "this combination indicates an in-progress coordinated crypto theft chain."
+        )
+    if token_critical:
+        advisories.append(
+            "CRITICAL: Token contract shows honeypot or scam indicators. "
+            "Cross-reference with /v1/metered/infostealer if the wallet owner's email is known — "
+            "device credential theft is a common precursor to honeypot-targeted asset drain."
+        )
+    if address_flags and not advisories:
+        advisories.append(
+            "ELEVATED: Address has risk flags. Recommend also checking "
+            "/v1/metered/breach on the account email and /v1/metered/sim-swap on the associated "
+            "phone number to detect coordinated identity + asset attack chains."
+        )
+    if not advisories:
+        advisories.append(
+            "No risk signals detected on this address. For complete protection, monitor "
+            "the associated email via /v1/metered/breach and phone via /v1/metered/sim-swap."
+        )
+
+    logger.info("crypto-intel address=%s chain=%s risk=%s addr_flags=%d token=%s",
+                address, chain_id, composite_risk, len(address_flags),
+                token_result["token_symbol"] if token_result else "none")
+
+    result = {
+        "address":                address.lower(),
+        "chain_id":               chain_id,
+        "composite_risk":         composite_risk,
+        "address_flags":          address_flags,
+        "correlation_advisories": advisories,
+    }
+    if token_result:
+        result["token_risk"] = token_result
+    return _ok(result)
+
+
+# ---------------------------------------------------------------------------
 # Endpoint: POST /v1/wallet-risk  (subscription) / POST /v1/payg/wallet-risk (PAYG)
 # ---------------------------------------------------------------------------
 # Multi-chain wallet risk: EVM and Solana via GoPlus, TON via TONAPI v2,
@@ -1180,6 +1493,99 @@ def handle_infostealer(params: dict) -> dict:
         "found":         found,
         "stealer_count": len(stealers),
         "stealers":      stealers,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Threat Intelligence API — /v1/intel/telegram
+# ---------------------------------------------------------------------------
+# Subscription endpoint (API key + intel_access flag required).
+# Queries relayshield_intel_iocs — IOCs extracted from INTEL-2 Telegram channel
+# pipeline — 24–72 hours ahead of HIBP and public breach databases.
+#
+# Request: POST /v1/intel/telegram
+#   { "email": "...", "phone": "...", "domain": "...", "wallet": "..." }
+#   At least one field required. Each queried independently; results merged.
+#
+# Response:
+#   { ok: true, matched: bool, hit_count: int, ioc_types: [...],
+#     earliest_seen: ISO, latest_seen: ISO,
+#     hits: [{ ioc_value, ioc_type, channel, category, seen_ts }] }
+# ---------------------------------------------------------------------------
+
+def handle_intel_telegram(params: dict, api_key_record: dict | None = None) -> dict:
+    # Verify caller has intel_access — TI API subscribers get this flag provisioned
+    if api_key_record and not api_key_record.get("intel_access"):
+        return {
+            "statusCode": 403,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "ok":    False,
+                "error": "Threat Intelligence API access required. Upgrade at relayshield.net/developers.",
+            }),
+        }
+
+    # Collect IOC values to query
+    targets: list[tuple[str, str]] = []
+    if params.get("email"):
+        targets.append((params["email"].strip().lower(), "email"))
+    if params.get("phone"):
+        phone = re.sub(r"[^\d+]", "", params["phone"].strip())
+        if phone:
+            targets.append((phone, "phone"))
+    if params.get("domain"):
+        targets.append((params["domain"].strip().lower(), "domain"))
+    if params.get("wallet"):
+        targets.append((params["wallet"].strip().lower(), "wallet"))
+
+    if not targets:
+        return _err("at least one of email, phone, domain, or wallet is required")
+
+    table = dynamodb.Table(INTEL_IOCS_TABLE)
+    all_hits: list[dict] = []
+
+    for ioc_value, _ in targets:
+        try:
+            resp = table.query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(ioc_value),
+                ScanIndexForward=False,  # newest first
+                Limit=50,
+            )
+            all_hits.extend(resp.get("Items", []))
+        except Exception as exc:
+            logger.error("intel_iocs query failed ioc=%s: %s", ioc_value[:20], exc)
+
+    if not all_hits:
+        return _ok({
+            "matched":       False,
+            "hit_count":     0,
+            "ioc_types":     [],
+            "earliest_seen": None,
+            "latest_seen":   None,
+            "hits":          [],
+        })
+
+    timestamps   = [h.get("seen_ts", "") for h in all_hits if h.get("seen_ts")]
+    ioc_types    = sorted({h.get("ioc_type", "") for h in all_hits})
+    safe_hits    = [
+        {
+            "ioc_value": h.get("ioc_value"),
+            "ioc_type":  h.get("ioc_type"),
+            "channel":   h.get("channel"),
+            "category":  h.get("category"),
+            "seen_ts":   h.get("seen_ts"),
+        }
+        for h in all_hits
+    ]
+
+    logger.info("intel_telegram queried=%d hits=%d", len(targets), len(all_hits))
+    return _ok({
+        "matched":       True,
+        "hit_count":     len(all_hits),
+        "ioc_types":     ioc_types,
+        "earliest_seen": min(timestamps) if timestamps else None,
+        "latest_seen":   max(timestamps) if timestamps else None,
+        "hits":          safe_hits,
     })
 
 
@@ -1503,7 +1909,7 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 def _build_payment_requirements(path: str, price_units: int) -> dict:
-    api_base    = "https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod"
+    api_base    = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod"
     resource    = f"{api_base}{path}"
     description = f"RelayShield {path.split('/')[-1].replace('-', ' ')} check"
     bazaar_ext  = BAZAAR_EXTENSIONS.get(path)
@@ -1519,7 +1925,7 @@ def _build_payment_requirements(path: str, price_units: int) -> dict:
         "payTo":             X402_PAYTO_ADDRESS,
         "maxTimeoutSeconds": 300,
         "asset":             USDC_BASE_ADDRESS,
-        "extra":             {"name": "USDC", "version": "2"},
+        "extra":             {"name": "USD Coin", "version": "2"},
     }
     if bazaar_ext:
         base_entry["extensions"] = bazaar_ext
@@ -1579,16 +1985,25 @@ def _x402_payment_required(path: str) -> dict:
 
 
 def _detect_payment_chain(x_payment: str) -> str:
-    """Heuristic: Solana payments are base64-encoded binary transactions (no JSON braces).
-    EVM payments are base64-encoded JSON strings that decode to objects starting with '{'.
+    """Detect chain by parsing the network field from the x402 payment payload.
+    Both EVM and Solana payloads are base64-encoded JSON — check network field.
     Returns 'solana' or 'evm'.
     """
     try:
-        decoded = base64.b64decode(x_payment + "==")  # lenient padding
-        if decoded.lstrip()[:1] == b"{":
-            return "evm"
-        return "solana"
+        decoded = base64.b64decode(x_payment + "==")
+        parsed = json.loads(decoded)
+        network = parsed.get("network", "")
+        if network.startswith("solana"):
+            return "solana"
+        return "evm"
     except Exception:
+        # Try raw JSON (non-base64)
+        try:
+            parsed = json.loads(x_payment)
+            if parsed.get("network", "").startswith("solana"):
+                return "solana"
+        except Exception:
+            pass
         return "evm"  # default to EVM on decode failure
 
 
@@ -1599,11 +2014,20 @@ def _verify_x402_payment(x_payment: str, path: str) -> bool:
     chain = _detect_payment_chain(x_payment)
     logger.info("x402 payment detected chain=%s path=%s", chain, path)
 
+    # Decode x_payment from base64 JSON to dict — PayAI expects decoded object
+    try:
+        payment_payload_dict = json.loads(base64.b64decode(x_payment + "=="))
+    except Exception:
+        try:
+            payment_payload_dict = json.loads(x_payment)
+        except Exception:
+            logger.error("Failed to decode x_payment for path=%s", path)
+            return False
+
     if chain == "solana":
         if not SOL_PAYTO_ADDRESS:
             logger.error("RELAYSHIELD_SOL_WALLET not set — cannot verify Solana x402 payment")
             return False
-        # Find the Solana accepts entry to use as requirements for verification
         sol_requirements = next(
             (a for a in requirements.get("accepts", []) if a.get("network") == SOL_CHAIN_ID),
             None,
@@ -1612,21 +2036,30 @@ def _verify_x402_payment(x_payment: str, path: str) -> bool:
             logger.error("No Solana accepts entry in requirements for path=%s", path)
             return False
         verify_payload = json.dumps({
-            "x402Version":  1,
-            "payload":      {"transaction": x_payment},
-            "requirements": sol_requirements,
+            "x402Version":        1,
+            "paymentPayload":     payment_payload_dict,
+            "paymentRequirements": sol_requirements,
         }).encode("utf-8")
-        verify_url = f"{X402_FACILITATOR_URL}/verify"
     else:
         if not X402_PAYTO_ADDRESS:
             logger.error("RELAYSHIELD_X402_WALLET not set — cannot verify EVM x402 payment")
             return False
+        evm_requirements = next(
+            (a for a in requirements.get("accepts", []) if a.get("network") == BASE_CHAIN_ID),
+            requirements,
+        )
         verify_payload = json.dumps({
-            "x402Version":  1,
-            "payload":      x_payment,
-            "requirements": requirements,
+            "x402Version":        1,
+            "paymentPayload":     payment_payload_dict,
+            "paymentRequirements": evm_requirements,
         }).encode("utf-8")
-        verify_url = f"{X402_FACILITATOR_URL}/verify"
+
+    # Solana → CDP Facilitator (manages the CDP fee payer key)
+    # EVM    → PayAI Facilitator (auto-lists RelayShield in Bazaar)
+    facilitator_base = SOL_FACILITATOR_URL if chain == "solana" else X402_FACILITATOR_URL
+    verify_url = f"{facilitator_base}/verify"
+    logger.info("Sending verify to %s payload_keys=%s", verify_url, list(payment_payload_dict.keys()))
+    logger.info("verify_body_preview=%s", verify_payload.decode("utf-8")[:800])
 
     req = urllib.request.Request(
         verify_url,
@@ -1642,6 +2075,14 @@ def _verify_x402_payment(x_payment: str, path: str) -> bool:
                 logger.warning("x402 payment invalid — chain=%s reason=%s path=%s",
                                chain, result.get("invalidReason"), path)
             return valid
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = "<unreadable>"
+        logger.error("x402 facilitator HTTP %d — chain=%s path=%s body=%s",
+                     exc.code, chain, path, body)
+        return False
     except Exception as exc:
         logger.error("x402 facilitator call failed — chain=%s path=%s error=%s", chain, path, exc)
         return False
@@ -1714,6 +2155,7 @@ ROUTES = {
     "/v1/wallet-risk":      handle_wallet_risk,       # multi-chain EVM/Solana/TON
     "/v1/token-security":   handle_token_security,
     "/v1/nft-security":     handle_nft_security,
+    "/v1/intel/telegram":   handle_intel_telegram,    # TI API — requires intel_access flag
 }
 
 PAYG_PATHS = set(PAYG_PRICE_UNITS.keys()) | {"/v1/payg/result/"}
@@ -1731,9 +2173,15 @@ def lambda_handler(event: dict, context) -> dict:
             "service":  "RelayShield B2A API",
             "version":  "1.0",
             "subscription_endpoints": list(ROUTES.keys()) + ["GET /v1/result/{analysis_id}"],
+            "metered_endpoints": list(STRIPE_METER_EVENTS.keys()),
+            "metered_note": "Stripe card billing — pass RS API key as X-RS-API-KEY header.",
             "payg_endpoints": list(PAYG_PRICE_UNITS.keys()) + ["GET /v1/payg/result/{analysis_id}"],
             "payg_note": "x402 payment required — USDC on Base. No API key needed.",
         })
+
+    # Stripe metered billing routes (RS API key verified inside Lambda)
+    if path.startswith("/v1/metered/"):
+        return handle_metered_request(path, method, event)
 
     # PAYG routes (x402 payment verified inside Lambda)
     if path.startswith("/v1/payg/"):
@@ -1754,6 +2202,12 @@ def lambda_handler(event: dict, context) -> dict:
 
     params = _body(event)
     try:
+        if path == "/v1/intel/telegram":
+            headers    = event.get("headers") or {}
+            api_key    = (headers.get("X-API-Key") or headers.get("x-api-key") or
+                          headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key", ""))
+            key_record = _verify_rs_api_key(api_key) if api_key else None
+            return handler(params, api_key_record=key_record)
         return handler(params)
     except Exception as exc:
         logger.exception("Unhandled error in %s: %s", path, exc)

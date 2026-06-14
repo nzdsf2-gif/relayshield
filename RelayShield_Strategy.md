@@ -1,5 +1,5 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: May 2026 — B2A API ✅ LIVE May 2026: relayshield-api Lambda deployed behind AWS API Gateway REST API with 6 endpoints (breach, sim-swap, domain, scan-url, scan-file, result poll); API key + usage plan active; RapidAPI listing in progress — launching with 3 endpoints (breach, sim-swap, domain); scan-url and scan-file endpoints held pending VirusTotal commercial API terms resolution; flat-rate subscription pricing unchanged ($299–599/month); source attribution omitted from all developer-facing marketing. Proactive Telegram group link scanning added (Section 9) with tier-gated scan quotas; B2A agent distribution model added (Section 9 + Layer 3): MCP server as primary agent discovery mechanism, per-call and subscription API pricing for MSP agent consumers; Mid-Market Expansion section added (Section 7c): 8 enterprise feature gaps identified, conditions for pursuing 50–200 employee segment. Predictive Attack Chain Alerts added (Section 10c) ✅ LIVE: pre-chain warning engine fires when the first signal in a known attack chain is recorded, warning users of likely next steps before the attack completes — 8 distinct predictive warnings across 4 chains, deployed across all 4 Lambdas; novel IP claim added to provisional patent scope. Coordinated Attack Detection Engine added (Section 10c) ✅ LIVE: temporal signal correlation across breach monitor, SIM swap monitor, and WhatsApp webhook — detects smishing→SIM swap, breach+SIM swap, and breach+OTP interception chains in real time; foundation for threat intelligence API dataset and monetisation. Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually. **x402 Pay-As-You-Go rail added May 2026 ✅ LIVE:** HTTP 402 micropayment protocol (USDC on Base, Linux Foundation governed) — PAYG endpoints `/v1/payg/*` live on API Gateway (Auth=NONE); Lambda verifies payment proof via Coinbase x402 facilitator; receiving address is Coinbase Exchange USDC deposit (covered by CB $320M custodial policy); pricing: breach $0.10, sim-swap $0.25, domain $0.50, oauth-watchlist $0.15; every successful response includes subscription conversion advisory. **MCP server v0.2.0 published to PyPI May 2026 ✅ LIVE:** `relayshield-mcp` supports subscription (RapidAPI key) and pay-as-you-go (x402 USDC on Base) access modes; 7 tools including new `check_oauth_watchlist`; VT tools return coming_soon for PAYG pending commercial licensing. **Crypto Shield subscriber tier added May 2026 (design):** $19.99/month vertical for crypto holders — crypto wallet monitoring (Alchemy Notify + GoPlus Security), SIM swap, breach, domain lookalikes, OAuth watchlist; Telegram delivery; USDC on Base payment via Coinbase Business (1%); onboarding via /addwallet Telegram command; build pending VERIFY-1/2/3 + CRYPTO-1/2 tasks.*
+*Generated: March 2026 | Last Updated: May 2026 — B2A API ✅ LIVE May 2026: relayshield-api Lambda deployed behind AWS API Gateway REST API with 6 endpoints (breach, sim-swap, domain, scan-url, scan-file, result poll); API key + usage plan active; RapidAPI listing in progress — launching with 3 endpoints (breach, sim-swap, domain); scan-url and scan-file endpoints held pending VirusTotal commercial API terms resolution; flat-rate subscription pricing unchanged ($299–599/month); source attribution omitted from all developer-facing marketing. Proactive Telegram group link scanning added (Section 9) with tier-gated scan quotas; B2A agent distribution model added (Section 9 + Layer 3): MCP server as primary agent discovery mechanism, per-call and subscription API pricing for MSP agent consumers; Mid-Market Expansion section added (Section 7c): 8 enterprise feature gaps identified, conditions for pursuing 50–200 employee segment. Predictive Attack Chain Alerts added (Section 10c) ✅ LIVE: pre-chain warning engine fires when the first signal in a known attack chain is recorded, warning users of likely next steps before the attack completes — 8 distinct predictive warnings across 4 chains, deployed across all 4 Lambdas; novel IP claim added to provisional patent scope. Coordinated Attack Detection Engine added (Section 10c) ✅ LIVE: temporal signal correlation across breach monitor, SIM swap monitor, and WhatsApp webhook — detects smishing→SIM swap, breach+SIM swap, and breach+OTP interception chains in real time; foundation for threat intelligence API dataset and monetisation. Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually. **x402 Pay-As-You-Go rail added May 2026 ✅ LIVE:** HTTP 402 micropayment protocol (USDC on Base, Linux Foundation governed) — PAYG endpoints `/v1/payg/*` live on API Gateway (Auth=NONE); Lambda verifies payment proof via Coinbase x402 facilitator; receiving address is Coinbase Exchange USDC deposit (covered by CB $320M custodial policy); pricing: breach $0.10, sim-swap $0.25, domain $0.50, oauth-watchlist $0.15; every successful response includes subscription conversion advisory. **MCP server v0.2.0 published to PyPI May 2026 ✅ LIVE:** `relayshield-mcp` supports subscription (RapidAPI key) and pay-as-you-go (x402 USDC on Base) access modes; 7 tools including new `check_oauth_watchlist`; VT tools return coming_soon for PAYG pending commercial licensing. **Crypto Shield subscriber tier added May 2026 (design):** $19.99/month vertical for crypto holders — crypto wallet monitoring (Alchemy Notify + GoPlus Security), SIM swap, breach, domain lookalikes, OAuth watchlist; Telegram delivery; USDC on Base payment via Coinbase Business (1%); onboarding via /addwallet Telegram command; build pending VERIFY-1/2/3 + CRYPTO-1/2 tasks. **Infostealer malware monitoring ✅ LIVE May 2026:** Hudson Rock Cavalier API integration across all surfaces — `/v1/payg/infostealer` REST endpoint, `/infostealer` Telegram command, `INFOSTEALER` WhatsApp command, scheduled Lambda monitor (`relayshield_infostealer_monitor`) polling all monitored emails every 48h and alerting on new infections; 4-step device remediation guidance delivered via WA and TG; near real-time positioning vs HIBP historical breach monitoring; DynamoDB fields `infostealer_count` + `infostealer_last_checked` added to `relayshield_monitored_emails`. **AI Agent Marketplace Distribution ✅ May 2026:** ElizaOS plugin `@relayshield/plugin-relayshield` v0.1.5 published to npm (9 actions including `checkInfostealerAction`); MCP server `relayshield-mcp` v0.2.4 published to PyPI (8 tools including `check_infostealer`); Venice AI skills PR #5 submitted and updated; Virtuals Protocol GAME SDK PR #196 submitted and updated; Circle Agent Marketplace submitted (9 endpoints); x402 Bazaar auto-lists on first paid call; RapidAPI OpenAPI spec updated with all 9 endpoints; BNBAgent SDK (launched May 25 2026) identified as future listing target — check back 4-6 weeks for plugin registry; PayAI Network (Solana x402 facilitator) identified as partnership target — Discord outreach initiated.*
 
 ---
 
@@ -148,6 +148,13 @@
 
 **SMB B2B:**
 > *"Your employees are the most targeted surface in your business. RelayShield monitors every credential, phone number, and domain — and tells your team exactly what to do the moment something goes wrong."*
+
+**The four attacks that cause the most SMB damage — and that RelayShield detects in real time:**
+
+- **SIM swap** — attacker hijacks a phone number, bypasses 2FA, and takes over banking and email accounts
+- **Credential breach** — employee email appears in a data breach; attacker uses it to access company systems before anyone knows
+- **Business email compromise** — lookalike domains fool employees and clients into fraudulent wire transfers
+- **Infostealer malware** — silent malware harvests saved passwords, session cookies, and credentials from an employee's device; stolen data surfaces in underground markets within hours, giving attackers account access weeks before anyone notices
 
 **Crypto Shield:**
 > *"Most crypto thefts start with a SIM swap, not a smart contract exploit. RelayShield monitors your wallet, your phone number, and your credentials — and alerts you in Telegram before the attacker gets in."*
@@ -611,13 +618,13 @@ SS7 (Signalling System No. 7) is the 1970s-era protocol routing calls and SMS be
 
 | Tier | Target | Seats | Monthly | Per Seat | Key Differentiator |
 |---|---|---|---|---|---|
-| **Personal Shield** | Consumers | 1 | $14.99 | $14.99 | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved + SIM/eSIM swap detection alert. Monitor up to **3 email addresses**. |
-| **Business Starter** | Sole proprietors, single-owner businesses | 1 | $19.99 | $19.99 | All Personal Shield features + business-framed alert language + 3 monitored email addresses (personal + business + backup). Designed for owners whose business and personal identity are the same attack surface. No seat management. No domain monitoring. |
+| **Personal Shield** | Consumers | 1 | $14.99 | $14.99 | Breach detection → WhatsApp alert → severity scoring → Email Security Sweep → AI remediation → follow-up until resolved + SIM/eSIM swap detection alert + **infostealer malware credential monitoring** (Hudson Rock Cavalier API — near real-time detection when device credentials appear in stealer logs). Monitor up to **3 email addresses**. |
+| **Business Starter** | Sole proprietors, single-owner businesses | 1 | $19.99 | $19.99 | All Personal Shield features + business-framed alert language + infostealer monitoring + 3 monitored email addresses (personal + business + backup). Designed for owners whose business and personal identity are the same attack surface. No seat management. No domain monitoring. |
 | **Business Starter + Domain Monitoring** | Sole proprietors with a business website | 1 (solo) | $24.99 | $24.99 | All Business Starter features + typosquat domain monitoring for 1 domain. For owner-operators whose business website is an active attack surface. No team seats — upgrade to Business Basic to add staff. |
 | **Crypto Shield** | Crypto holders, DeFi users, Web3 professionals | 1 | $19.99 | $19.99 | Crypto wallet address monitoring (Alchemy Notify — transfer alerts + balance changes) + GoPlus Security address risk scoring + SIM swap detection + breach monitoring + domain lookalike scanning + OAuth supply chain watchlist. Alerts via Telegram (@RelayShield_bot). Payment via USDC on Base (Coinbase Business, 1% fee). Separate subscriber vertical — onboarding via /addwallet in Telegram bot. |
 | **Business Basic** | Micro-SMBs | Up to 5 | $89.99 | $18.00 | All Personal Shield features + SIM/eSIM swap detection + carrier hardening steps + account management dashboard + domain monitoring (2 domains). Monitor up to **2 email addresses per seat**. |
-| **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-seat SIM/eSIM monitoring + authenticator migration flow + aggregate risk visibility + priority alerts. Monitor up to **2 email addresses per seat**. |
-| **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + SIM lock onboarding flow + eSIM profile audit + priority support + compliance reporting. Monitor up to **2 email addresses per seat**. |
+| **Business Shield** | SMBs | Up to 10 | $139.99 | $14.00 | All Business Basic features + per-seat SIM/eSIM monitoring + authenticator migration flow + aggregate risk visibility + priority alerts. Monitor up to **2 email addresses per seat**. Domain monitoring: **2 domains**. |
+| **Business Shield Pro** | Growing SMBs | Up to 25 | $299.99 | $12.00 | All Business Shield features + SIM lock onboarding flow + eSIM profile audit + priority support + compliance reporting. Monitor up to **2 email addresses per seat**. Domain monitoring: **3 domains**. |
 
 > 📧 **Email monitoring limits:** Personal Shield — 3 emails. Business Starter — 3 emails (sole owner, same as personal). Business Basic/Shield/Pro — 2 emails per seat (business address + one personal/backup). Total pool per account: Business Basic 10 (5 seats), Business Shield 20 (10 seats), Business Shield Pro 50 (25 seats). Rationale: 2 per seat covers real-world usage, keeps HIBP API costs predictable at scale, and leaves room for reputation scoring across the full account pool in a future release.
 
@@ -930,6 +937,20 @@ Adversary-in-the-middle proxy sits between victim and legitimate login page. Vic
 
 **2. Info-Stealer Malware (LummaC2, RedLine, Raccoon, Vidar):**
 Malware installed on victim device extracts all browser-saved credentials AND active session cookies simultaneously. Credentials sold on Telegram markets within hours of theft. Credential appears in stealer logs before any public breach database is updated — caught by Flare API (Phase 2), not HIBP.
+
+**How infostealer malware "lands and expands" across all credentials — not just the first site:**
+
+Infostealers do not propagate sequentially from one account to another. They perform a single bulk exfiltration of everything stored on the device at the moment of infection. The mechanism:
+
+1. **Browser credential databases targeted in one pass.** Chrome, Firefox, and Edge store all saved passwords and session cookies in local SQLite files. These are encrypted with Windows DPAPI — but DPAPI decrypts for the currently logged-in user, which is exactly who the malware is running as. The malware decrypts and extracts every credential and every active session cookie for every site the user has visited — email, banking, SaaS tools, accounting software, POS admin portals — simultaneously. Not one site. All of them.
+
+2. **C2 exfiltration within minutes.** All harvested data is packaged into a "log" and sent to a Command and Control server, typically within 15–60 minutes of infection. The log is then listed on darknet markets for $10–$50, usually within 24–72 hours.
+
+3. **The attacker's exploitation phase is where lateral expansion happens — not in the malware itself.** After purchasing the log, the attacker uses the stolen session cookies to replay authenticated sessions across every site simultaneously (no password, no 2FA required). They then use the target's email access to trigger password resets on financial accounts. They add forwarding rules, register rogue OAuth apps, and add recovery addresses — establishing persistence before the user knows anything has happened.
+
+4. **Business owners are the highest-value targets.** A single infected device owned by an SMB operator gives attackers simultaneous access to business banking portals, accounting software (QuickBooks, Xero), payroll platforms, Square or Toast POS admin, Google Workspace or Microsoft 365 — all authenticated, all bypassing 2FA.
+
+**RelayShield's detection window:** The 24–72 hour gap between log publication and attacker exploitation is where our infostealer alert fires. Hudson Rock Cavalier API monitors darknet log markets in near real-time. An alert within hours of log publication — before session replay, before password resets, before the damage — is the only actionable window that exists.
 
 **3. OAuth Token Abuse:**
 Attacker tricks victim into granting OAuth permissions to a malicious app. App retains persistent access via refresh token — survives password resets and 2FA changes. Revocation requires explicit OAuth permissions audit.
@@ -1287,7 +1308,7 @@ Break even at Phase 2: 2 SMB clients at $99 = $198 — covers all costs with mar
 
 ### Stealer Log Intelligence Add-On — Commercial Model
 
-Stealer log and Telegram monitoring (via Flare API or equivalent) is offered as a paid add-on for Business Basic and higher, and bundled into Business Shield Pro. This model recovers API licensing cost and creates a hard capability ceiling that drives upsell from Basic → Shield.
+**Infostealer malware monitoring ✅ LIVE May 2026 — available on all paid tiers.** Hudson Rock Cavalier API integration monitors all registered email addresses for appearance in stealer logs every 48 hours; alerts delivered via WhatsApp and Telegram with 4-step device remediation guidance. `/infostealer` (Telegram) and `INFOSTEALER` (WhatsApp) commands available for on-demand checks. Near real-time detection vs. HIBP's historical breach model — positioning: "HIBP tells you what happened months ago. RelayShield catches stealer infections within hours."
 
 **Add-on pricing structure:**
 
@@ -2567,6 +2588,27 @@ The original four chains (smishing→SIM swap, breach+SIM swap, breach+OTP inter
 
 **Deployed across:** `relayshield-oauth-watchlist-monitor` (fires `oauth_app_breach` signal to all active users when a watched app is breached), `relayshield-telegram-webhook`, `relayshield-whatsapp-webhook` (both contain the updated `ATTACK_CHAINS` and `PREDICTIVE_WARNINGS` tables).
 
+**Three crypto asset surface chains added — June 2026 ✅ LIVE**
+
+The correlation engine now spans both the identity attack surface (breach, SIM swap, port-out, OAuth, infostealer) and the crypto asset attack surface (wallet counterparty risk). When the Alchemy webhook processes an inbound or outbound transaction and GoPlus Security flags the counterparty address with any critical indicator (phishing, blacklist, honeypot association, cybercrime, money laundering, or OFAC sanctions), a `wallet_risk_flag` signal is recorded on the user's `recent_signals` in the same 72-hour rolling window. The engine then checks whether an identity attack signal is already present and fires a composite alert if so.
+
+| Chain | Trigger signals | Severity | Real-world scenario |
+|---|---|---|---|
+| SIM Swap + Flagged Wallet Counterparty | `sim_swap` + `wallet_risk_flag` within 72 hrs | CRITICAL | Phone number hijacked at the same time wallet receives a transaction from a flagged address. Classic crypto theft pattern: SIM swap to defeat exchange SMS 2FA, then drain the wallet or approve malicious transactions. |
+| Credential Breach + Flagged Wallet Counterparty | `breach_alert` + `wallet_risk_flag` within 72 hrs | HIGH | Credentials exposed in a breach while wallet has a flagged counterparty. Indicates coordinated identity + asset attack — attacker may hold exchange login credentials and is positioning to drain via the wallet simultaneously. |
+| Port-Out Fraud + Flagged Wallet Counterparty | `port_out` + `wallet_risk_flag` within 72 hrs | CRITICAL | Phone number ported to attacker-controlled carrier while wallet has flagged transaction counterparty. Port-out gives complete SMS 2FA control across all exchange accounts. Combined with a malicious wallet contact, this is an active dual-vector crypto theft chain. |
+
+**Six additional predictive warnings (two per chain):** Each chain generates a predictive warning the moment either signal fires — before the attacker completes the second vector. A user who receives a SIM swap alert immediately gets a warning that this is the most common crypto exchange takeover precursor, with instructions to disable SMS 2FA and switch to an authenticator app. A user whose wallet flags a high-risk counterparty gets a warning to lock their SIM proactively — because the wallet contact may indicate the attacker is already targeting their phone number next.
+
+**Technical implementation:**
+- `_record_wallet_signal()` in `relayshield-alchemy-webhook` — appends `wallet_risk_flag` to `recent_signals`, prunes entries older than 72 hrs, identical architecture to identity signal recording
+- `_check_wallet_correlation()` in `relayshield-alchemy-webhook` — checks `recent_signals` for `sim_swap`, `breach_alert`, or `port_out`; fires chain-specific Telegram alert if any present
+- GoPlus critical flag set: `phishing_activities`, `blacklist_doubt`, `honeypot_related_address`, `cybercrime`, `money_laundering`, `sanctioned` — any single flag triggers signal recording
+- `ATTACK_CHAINS` and `PREDICTIVE_WARNINGS` tables updated in both `relayshield-telegram-webhook` and `relayshield-whatsapp-webhook`
+- Deployed: June 13 2026 — all three Lambdas (alchemy-webhook, telegram-webhook, whatsapp-webhook)
+
+**Why this is a unique capability:** No identity protection product monitors the wallet layer. No crypto wallet product monitors the carrier or breach layer. RelayShield is the only product that holds both signal streams simultaneously — and now correlates across them. A SIM swap alert from Twilio Lookup and a GoPlus counterparty flag from Alchemy, arriving within 72 hours, produce a CRITICAL composite alert that neither system could generate alone. The architecture scales: every new identity signal type (infostealer log, OAuth app breach) automatically becomes a potential correlator against `wallet_risk_flag` with no additional integration work.
+
 ---
 
 ## 10d. MSP Multi-Tenancy Architecture — Designed May 2026
@@ -3613,6 +3655,93 @@ Current domain monitoring detects lookalikes after DNS propagation — typically
 
 ---
 
+## 19b. Crypto Shield — Product Definition
+
+*Added May 2026. Crypto Shield is RelayShield's dedicated vertical for crypto holders, DeFi users, and Web3 professionals. It is a distinct subscriber tier from Personal Shield and Business Shield — sold separately, priced separately, delivered exclusively via Telegram.*
+
+---
+
+### Positioning
+
+> *"Most crypto thefts start with a SIM swap, not a smart contract exploit. Crypto Shield monitors your wallet, your phone number, and your credentials — and alerts you in Telegram before the attacker gets in."*
+
+Crypto Shield is **not** a portfolio tracker, a price alert tool, or a general identity protection product repurposed for crypto. It is purpose-built for the specific attack chains that drain crypto wallets: SIM swap → exchange takeover, infostealer → credential theft → wallet access, phishing URL → seed phrase harvest. Every feature maps directly to one of these vectors.
+
+---
+
+### Pricing
+
+| Plan | Price | Net (1% CB fee) |
+|---|---|---|
+| Monthly | $19.99/month | $19.79/month |
+| Annual | $214.99/year | $212.84/year (~$17.74/month) |
+
+**Payment rail:** USDC on Base via Coinbase Business (1% fee). Completely separate from the Stripe fiat rail used by Personal Shield and Business Shield tiers.
+
+**Delivery:** Telegram exclusively (@RelayShield_bot). WhatsApp delivery is not offered for Crypto Shield — the target audience lives in Telegram, and crypto security alerts require the lower latency and richer bot interaction of the Telegram platform.
+
+---
+
+### Feature Set (Live + Planned)
+
+| Feature | Status | Description |
+|---|---|---|
+| **SIM swap monitoring** | ✅ Live | Twilio Lookup v2 check every 4 hours. Detects physical SIM swap and eSIM (IMSI change). Carrier-specific hardening steps on alert. |
+| **Credential breach monitoring** | ✅ Live | HIBP check on up to 2 email addresses (exchange login credentials). Real-time alert on new breach indexing. |
+| **Infostealer malware detection** | ✅ Live | Hudson Rock Cavalier API. Near real-time detection of device compromise via RedLine/Raccoon/Vidar logs. Returns infection date, OS, credential counts. |
+| **Domain lookalike monitoring** | ✅ Live | Daily scan for typosquat/lookalike domains targeting monitored addresses. Catches phishing infrastructure before it reaches the user. |
+| **OAuth supply chain watchlist** | ✅ Live | 40-app watchlist monitor. Alerts when a connected SaaS app appears in a new breach — catches supply chain pivots that bypass 2FA. |
+| **DeFi liquidation monitor** | ✅ Live | Aave V3 health factor check every 15 minutes. Warning at <1.5, critical at <1.2. |
+| **Wallet risk monitoring** | ✅ Live | Alchemy Notify webhooks on monitored wallet addresses. GoPlus Security counterparty screening on every transaction. |
+| **Attack chain correlation** | ✅ Live | Temporal signal correlation across breach, SIM swap, and infostealer detections. Fires composite CRITICAL alert when multi-vector chain detected. |
+| **Predictive alerts** | ✅ Live | Pre-chain warning engine: when first signal in a known attack chain recorded, warns user of likely next step before attack completes. |
+| **Token risk checks** (`/checktoken`) | 🔮 RISK-1 | GoPlus Token Security API. Honeypot detection, tax analysis, blacklist check. |
+| **NFT risk checks** (`/checknft`) | 🔮 RISK-2 | GoPlus NFT Security API. Malicious contract, privileged burn, stolen NFT detection. |
+| **Wallet risk score** (`/riskcheck`) | 🔮 RISK-3 | Aggregate score: GoPlus address_security + unlimited approval count + Aave health factor. |
+| **Passive inbound token alerts** | 🔮 RISK-4 | On every inbound transfer, GoPlus checks the token contract. Warns before user interacts with honeypot/high-tax tokens. |
+| **DeFi vault/protocol risk** (`/checkvault`) | 🔮 RISK-5 | GoPlus dApp Security. Audit status, risky admin functions, approval requirements. |
+
+---
+
+### Onboarding Flow (Web — ONBOARD-1, May 2026)
+
+1. User visits `signup.crypto.relayshield.net`
+2. Enters email, selects monthly or annual plan
+3. Browser calls `/signup` Lambda → creates DynamoDB stub with UUID `link_code`
+4. Redirects to Helio payment page (USDC on Base)
+5. Helio processes payment → fires webhook → Lambda advances state to `AWAITING_TELEGRAM_LINK`
+6. Success page shows QR code (encodes `t.me/RelayShield_bot?start=LINK_CODE`) + "Open in Telegram" button
+7. SES email sent as backup with same QR code
+8. User scans or taps → Telegram bot receives `/start LINK_CODE`
+9. Bot links `telegram_chat_id`, activates account, begins wallet setup flow
+10. HIBP breach check fires within 60 seconds (ONBOARD-2, pending)
+
+**Free tier (bot-first):** User opens @RelayShield_bot → /start → bot captures email → creates free account → breach check fires immediately. No web form. No payment required.
+
+---
+
+### Competitive Differentiation
+
+| Competitor | Surface | What they do | What they miss |
+|---|---|---|---|
+| **Webacy** | Web dashboard | Wallet risk scores, token analysis, vault exposure | No SIM swap, no breach monitoring, no push delivery — you have to go check |
+| **De.fi Shield** | Web dashboard + browser extension | Portfolio tracking + token/NFT/smart contract scoring | No identity layer (breach, SIM, infostealer), no push alerts |
+| **Etherscan alerts** | Email | Transaction notifications | No risk scoring, no identity layer, no SIM swap |
+| **Exchange built-ins** | Email/SMS | Price alerts, withdrawal confirmations | SMS 2FA is the attack surface — they can't monitor their own weakness |
+
+**RelayShield's moat:** The only product that combines the identity attack surface (breach + SIM swap + infostealer) with the crypto attack surface (wallet monitoring + counterparty screening + token risk) and delivers it via push notification to Telegram — the platform the target audience already uses for crypto.
+
+---
+
+### Unit Economics
+
+- MRR per monthly subscriber: **$19.79** (after 1% CB fee)
+- MRR per annual subscriber: **$17.74** (after 1% CB fee, amortised monthly)
+- Break-even vs. operating costs: ~3 subscribers covers incremental Alchemy/GoPlus API costs at MVP scale
+- Alchemy webhook ceiling: 100 wallets (Pay as You Go tier). Contact Alchemy sales at ~30 subscribers (~99 wallets monitored)
+
+---
+
 ## 20. Crypto Shield — Product Awareness Strategy
 
 *Added May 2026 — to be activated once Crypto Shield has token approval alerts and drainer detection live. Current feature depth (wallet monitoring + transaction alerts) is table stakes. Awareness investment before feature depth is established will yield poor conversion.*
@@ -3746,3 +3875,653 @@ Once the risk intelligence layer is live, RelayShield has a feature set that **W
 | relayshield/stripe_secret_key | ⬜ Week 4 |
 | relayshield/gitguardian_api_key | ⬜ Phase 2 |
 | relayshield/flare_api_key | ⬜ Phase 2 |
+
+---
+
+## 21. Proprietary Intelligence — Moat Strategy and Monetization Model
+
+*Added May 26 2026. This section documents the strategic rationale, honest constraints, and monetization architecture for RelayShield's proprietary intelligence capabilities (INTEL-1 through INTEL-5). It supersedes the commodity API framing in earlier sections for the B2A product line.*
+
+---
+
+### The Core Problem With Commodity APIs
+
+RelayShield's current B2A product wraps HIBP, VirusTotal, Twilio Lookup, GoPlus, and Google Safe Browsing. Every one of these is publicly accessible. A competitor can replicate the entire API surface in a weekend. This creates a ceiling on B2A pricing — you cannot sustainably charge more than the underlying data sources plus a modest convenience premium.
+
+INTEL-2, INTEL-4, and INTEL-5 break through this ceiling by generating intelligence that does not exist in any public API. The pipeline is natively buildable at zero licensing cost, built on existing infrastructure (Telegram bot, Lambda, Python), and delivers 24-72 hour intelligence lead time over commodity sources.
+
+**Build sequence:** INTEL-2 (Telegram dark web monitoring) → INTEL-4 (ransomware victim early warning, extends INTEL-2) → INTEL-5 (session cookie revocation intelligence, extends INTEL-2). One pipeline, three intelligence layers.
+
+---
+
+### What Each INTEL Item Delivers
+
+**INTEL-2 — Telegram dark web channel monitoring**
+Monitors criminal Telegram channels (credential dump channels, SIM swap service listings, card shop announcements, infostealer log sales) using Telethon (Python). NLP pipeline extracts email addresses, phone numbers, crypto wallet addresses, and domain names. Matches against `relayshield_users` monitored assets. Alerts fire before data appears in public breach databases. Andrew's telecom security background informs prioritization of carrier fraud channels. No licensing required.
+
+**INTEL-3 — Carrier/ISP direct relationship program**
+AT&T, T-Mobile, and Verizon fraud teams share real-time SIM swap webhooks with trusted partners — not polling-based detection. Direct industry relationships provide minutes vs. hours detection lead time. No competitor can replicate without 25 years of telecom security relationships. No code until relationship established. Begin with T-Mobile outreach — most publicly associated with SIM swap fraud, most likely to have a receptive fraud team.
+
+**INTEL-4 — Ransomware victim early warning**
+Major ransomware groups (LockBit, BlackCat/ALPHV, RansomHub, Cl0p) post victim company names on .onion "name and shame" sites 24-72 hours before public disclosure. Open-source project `ransomwatch` (GitHub) maintains an updated list of every active group's .onion URL. Daily Lambda scrape via Tor client (stem + requests/SOCKS5) → parse victim names → cross-reference against customer monitored domains → fire alert before public disclosure. No licensing required. Extends INTEL-2 infrastructure.
+
+**INTEL-5 — OAuth token / session cookie revocation intelligence**
+Infostealer dumps posted on Telegram channels contain raw stolen session cookies (Google, Microsoft, Coinbase, exchange platforms). INTEL-2's NLP pipeline extended to parse cookie formats and match against monitored customer email domains. Alert fires before attacker uses the stolen session → one-tap session revocation instructions. This is a pipeline extension of INTEL-2, not a separate system.
+
+**INTEL-1 — Infostealer log direct sourcing (licensed — deferred)**
+License raw infostealer logs from Flare (~$79/month), Cyberint, or Dehashed Pro. Provides logs that never appear in Telegram channels. Deferred until 30+ paying subscribers or first enterprise B2A prospect requests it. INTEL-2 delivers a meaningful subset of this capability for free in the interim.
+
+---
+
+### Monetization Architecture — Five Licensing Layers
+
+#### Layer 1 — B2C Subscription Enhancement
+
+**Honest constraint on consumer (Personal Shield):** Beta testing confirmed consumers lump identity protection with commodity solutions regardless of differentiation. Attempting to charge Personal Shield subscribers a "Dark Web Intelligence" add-on premium complicates the brand story with buyers who already resist the category. The better use of INTEL-2 data at the Personal Shield tier is to **deliver more accurate and faster alerts within the existing price** — improving retention without a new line item. This strengthens the product silently rather than creating a pricing conversation the consumer buyer is not equipped to have.
+
+**Crypto Shield — Intel is bundled, not add-on priced.** Crypto holders are threat-aware buyers who understand the attack chain. Telegram dark web monitoring and session cookie exposure detection are directly relevant to their primary risk (wallet drain via SIM swap or stolen exchange session). These are included in the $19.99/month price and used as conversion drivers, not upsell hooks.
+
+**Business Basic — honest tension on ransomware add-on pricing:** Ransomware victim early warning at +$15/month for Business Basic faces a willingness-to-pay problem: SMBs don't end up on ransomware victim lists frequently enough for the customer to perceive continuous value. A $15/month add-on for an event that may never occur is a weak sell. Two better options:
+
+- **Bundle it into Business Basic** as a feature (not an add-on), position it as table stakes for the tier, and use it as a Business Basic → Business Shield upsell lever when a ransomware group is detected targeting the customer's industry sector
+- **Use it as a conversion event** — "a ransomware group is actively targeting companies in your sector" fires as a free alert, with the full victim list monitoring and remediation guidance gated behind Business Shield
+
+Business Shield and Business Shield Pro: ransomware early warning is bundled and expected at these price points.
+
+#### Layer 2 — B2A API Tier Extension (RapidAPI)
+
+Intel endpoints added to existing RapidAPI tiers. No price change required — the value proposition of Pro ($99/month) and Ultra ($299/month) materially improves. "Pro includes dark web intelligence" is a sales line. "Pro includes 25,000 HIBP calls" is not.
+
+Intel endpoints available at Pro and Ultra only:
+- `/v1/intel/telegram` — email/domain/phone found in Telegram criminal channels
+- `/v1/intel/ransomware` — company domain on ransomware victim lists
+- `/v1/intel/session-exposure` — session cookie exposure detection
+
+**On PAYG revenue:** Zero PAYG revenue from commodity endpoints to date is a distribution signal, not a product signal. The x402 ecosystem is nascent — AI agents spending USDC on security APIs are not yet at critical mass. Intel endpoints change the PAYG story because the buyer profile shifts: a corporate security team doing one-off domain risk checks will pay $5-10 per query for ransomware victim intelligence they cannot get from any public API. The commodity endpoints ($0.10-0.50) were always too cheap to generate meaningful PAYG revenue. Intel pricing ($2.00-$10.00 per call) targets a different buyer with a different willingness to pay.
+
+**On INTEL-5 differentiation from SESSIONS and OAuth monitoring:**
+These three capabilities address different points on the same attack timeline and must be positioned clearly:
+
+| Capability | What it detects | When it fires | Attack stage |
+|---|---|---|---|
+| **INTEL-5** (session cookie exposure) | Stolen cookie in Telegram infostealer dump | Before attacker uses it | Pre-attack |
+| **SESSIONS command** | AiTM session hijacking in progress | During active attack | Mid-attack |
+| **OAuth monitoring** | App with persistent OAuth grant on breached SaaS | After SaaS breach indexed | Post-breach |
+
+The customer-facing language must never use "session" for INTEL-5. Position it as **"credential theft detection"** — the infostealer stole a session token from the device, and RelayShield detected it in criminal channels before the attacker logged in. This is the same framing SpyCloud uses for their enterprise product and it clearly differentiates from session anomaly detection. In B2A documentation, label the endpoint `/v1/intel/session-exposure` with explicit description: "Detects stolen session tokens in criminal Telegram channels — fires before account takeover, not during."
+
+#### Layer 3 — Intel API Subscription (new, standalone)
+
+A dedicated **Intel API** subscription tier at **$499-$999/month**, targeting MSSPs, corporate SOC teams, and security vendors who need high-volume, reliable Intel endpoint access. This buyer already has HIBP — they're paying for what they can't get elsewhere.
+
+This tier is viable at INTEL-2 + INTEL-4 live. It does not require INTEL-1 (licensed data). The narrative: "proprietary dark web intelligence sourced from criminal Telegram channels and ransomware group sites, delivered via REST API, updated continuously." That is not a commodity pitch.
+
+This layer is realistic at 6-12 months post-INTEL-2 launch, not before. It requires a proven pipeline, reliability track record, and at least one reference customer.
+
+#### Layer 4 — Data Feed License (new, highest value, highest friction)
+
+**What it is:** Monthly bulk data subscription for SOC teams, SIEM vendors, threat intelligence aggregators, and insurance underwriters. Buyers receive a daily/weekly feed of extracted IOCs, victim company names, and session cookie exposure events — not per-call API access. Priced at $500-$5,000/month depending on scope and update frequency.
+
+**Honest constraint on reaching this segment:** This is a high-touch, direct sales motion. The buyers — MSSPs, Splunk/Sentinel integrations, insurance carriers, ThreatConnect/AlienVault — are not inbound RapidAPI signups. Reaching them requires:
+- Direct LinkedIn outreach to CISO, VP Threat Intelligence, and Security Operations leadership
+- Presence in industry forums (ISAC membership — Andrew's telecom background gives natural entry to the Communications ISAC)
+- Partner programs with SIEM vendors (Splunk Marketplace, Microsoft Sentinel content hub, Elastic integration catalog) — list RelayShield as a data source
+- Conference presence at RSA, Black Hat, or sector-specific events (FS-ISAC, H-ISAC)
+
+This is not a Year 1 revenue line. It becomes viable when: (a) INTEL-2 and INTEL-4 are live and reliable, (b) at least one reference B2A customer validates the data quality, and (c) Andrew has bandwidth for a direct sales motion. Flag for **Year 2 activation**.
+
+#### Layer 5 — OEM / White-label Licensing (negotiated)
+
+License the Intel pipeline to embed in another company's product. Target categories: cyber insurance carriers (risk-score policyholders automatically), HR software platforms (add "employee dark web monitoring" as a feature), MSP platforms (ConnectWise, Kaseya — add dark web monitoring to their stack). Revenue share or flat monthly license, negotiated per deal. Each deal is $2K-$20K/month.
+
+This is the highest-value outcome per deal and the longest sales cycle. Not a primary target before $10K MRR.
+
+---
+
+---
+
+### Threat Intel API — Distribution, PAYG Mechanisms, and Developer Channel Strategy
+*Added June 2026. Supersedes/extends the RapidAPI + x402 framing in Layer 2 above based on zero traction observed on RapidAPI to date.*
+
+#### Why RapidAPI Has Not Worked — and Is Unlikely to
+
+RapidAPI's marketplace audience skews heavily toward hobbyist developers and rapid prototypers who want low-friction exploration of commodity APIs. Security APIs on RapidAPI suffer from a structural mismatch: the buyers who have budget and willingness to pay for threat intel — MSSPs, SOC teams, identity security vendors — do not shop on RapidAPI. They evaluate APIs via direct outreach, SIEM marketplace listings, peer recommendations at security conferences, and trusted newsletter coverage. Zero traction to date is a **distribution signal, not a product signal**. The API is not the problem. RapidAPI is simply the wrong channel for this buyer.
+
+**x402 / USDC PAYG:** The x402 rail is correct for crypto-native buyers and AI agent workloads but wrong for the 95% of infostealer intel buyers who are corporate security teams, MSSPs, and SaaS security vendors. These buyers pay with a credit card billed to a cost center. They don't hold USDC. x402 and Stripe metered billing must coexist as parallel rails — one for the crypto/agent segment, one for everyone else.
+
+---
+
+#### PAYG Mechanisms — Full Stack (Not Just x402)
+
+| Mechanism | Best for | Implementation |
+|---|---|---|
+| **Stripe metered billing** | Corporate security teams, MSSPs, SaaS vendors | API key issued at signup; Lambda records usage to Stripe Billing Meter; monthly invoice. Same model as Twilio, SendGrid, Anthropic. This is the primary non-crypto PAYG rail. |
+| **Prepaid credit packs** | Occasional / one-off buyers | $100 / $500 / $1,000 credit packs via Stripe Checkout; credits stored in DynamoDB, drawn down per call. No monthly commitment. Lower friction for buyers who want to evaluate before committing to metered. |
+| **x402 (USDC on Base)** | Crypto-native buyers, AI agent workloads | Already live. Keep as-is. Not the primary revenue mechanism for intel endpoints. |
+| **AWS Marketplace** | Enterprise buyers with AWS committed spend | List RelayShield Intel API as an AWS Marketplace SaaS product. Enterprise procurement teams have AWS budgets they need to draw down — this removes the "get a PO approved" friction. Viable at Year 2 once intel pipeline is reliable. |
+| **RapidAPI** | Hobbyist discovery only | Keep listing for inbound SEO and discovery, but don't expect meaningful revenue. Treat as a top-of-funnel awareness tool, not a revenue channel. |
+
+**Prioritized build order for non-crypto PAYG:**
+1. Stripe metered billing — first (highest-value buyers, most familiar billing model)
+2. Prepaid credit packs — second (evaluation and SMB one-off use cases)
+3. AWS Marketplace — Year 2 (enterprise procurement unlock)
+4. x402 — already live, maintain
+
+---
+
+#### Stripe Metered Billing — ✅ LIVE June 2026
+
+Stripe metered billing is the primary card-based PAYG rail for the B2A REST API. Launched June 2026 alongside the developer signup portal.
+
+**How it works:**
+1. Developer signs up at `/developers` → Stripe Checkout subscription session is created with all 5 metered price IDs (one per endpoint).
+2. Stripe issues a subscription. RelayShield Lambda issues an `rs_live_` API key, stores it in `relayshield_api_keys` DynamoDB with `stripe_customer_id` + `stripe_subscription_id`.
+3. On each API call, Lambda checks `credit_balance` first (credits-first logic). If credit balance is insufficient and a subscription exists, Lambda fires a Stripe Billing Meter event for the appropriate endpoint.
+4. Stripe aggregates meter events and invoices the customer monthly with one line item per endpoint they used.
+
+**Per-endpoint Stripe meter names and pricing:**
+
+| Endpoint | Stripe meter event name | Per-call price |
+|---|---|---|
+| `/v1/metered/breach` | `relayshield_breach_calls` | $0.10 |
+| `/v1/metered/sim-swap` | `relayshield_sim_swap_calls` | $0.25 |
+| `/v1/metered/infostealer` | `relayshield_infostealer_calls` | $0.50 |
+| `/v1/metered/domain` | `relayshield_domain_calls` | $0.30 |
+| `/v1/metered/oauth-watchlist` | `relayshield_oauth_watchlist_calls` | $0.20 |
+
+This is the same per-call pricing as the x402 PAYG rail (with oauth-watchlist updated to $0.20 on both rails), giving developers a consistent cost model regardless of payment method.
+
+**One key, two modes — credits-first billing logic:**
+- Each API key has a `credit_balance` field in DynamoDB (integer, in cents).
+- On every call: if `credit_balance >= endpoint_cost`, deduct atomically (ConditionExpression prevents race conditions) and return result — no Stripe meter event fired.
+- If credits are insufficient but `stripe_subscription_id` exists: fire Stripe meter event → return result.
+- If neither credits nor subscription: return HTTP 402 with `topup_url` pointing to the credit pack purchase page.
+- One key works across both billing modes. Developers start with credits, upgrade to subscription as volume grows, or mix both.
+
+---
+
+#### Threat Intelligence API Subscription — ✅ LIVE June 2026
+
+On-demand IOC lookup against RelayShield's live Telegram-sourced criminal channel intelligence (INTEL-2). Emails, domains, phone numbers, and wallet addresses queried against infostealer log markets, credential dump channels, and SIM swap service listings — 24–72 hours ahead of public breach databases.
+
+**Stripe product:** `prod_Uhi11mxZXXeSB1` — RelayShield Threat Intelligence API
+
+| Tier | Price | Stripe Price ID | Payment Link | Target buyer |
+|---|---|---|---|---|
+| MSP | $499/mo | `price_1TiIcqL2dcjOeFiY2wTZV8Kb` | https://buy.stripe.com/28EcN66Umb1be56bgb0Ny0e | MSPs, SOAR builders, SOC teams |
+| MSSP Volume | $999/mo | `price_1TiIcqL2dcjOeFiYDcuBewo2` | https://buy.stripe.com/4gM3cw1A23yJf9a2JF0Ny0f | MSSPs, multi-tenant platforms |
+
+**API endpoint:** `POST /v1/intel/telegram` — takes `email`, `domain`, `phone`, or `wallet` parameter; returns IOC match status, channel source, first-seen timestamp, and raw context snippet.
+
+**Value proposition shift post-INTEL-2:** Breach and infostealer endpoints are no longer API wrappers — they are backed by RelayShield's own live Telegram channel pipeline. This changes the pitch from "HIBP alternative" to "24–72 hour lead time over HIBP." PAYG pricing ($0.10–$0.50/call) remains unchanged; the intelligence depth is the differentiator.
+
+**Roadmap:** Enterprise feed tier ($1,500–$3,000/mo) — raw IOC stream pushed to customer SIEM via webhook. Build after first Threat Intelligence API subscriber. See TODO `INTEL-FEED-1`.
+
+#### Prepaid Credit Packs — ✅ LIVE June 2026
+
+Credit packs are fixed-price one-time purchases via Stripe Checkout (payment mode, not subscription). Designed for developers who want to evaluate the API or make occasional one-off calls without committing to monthly billing.
+
+**Available packs:**
+
+| Pack | Price | Credits issued | Approx. calls (breach @ $0.10) |
+|---|---|---|---|
+| Starter | $25 | 2,500 credits | 250 breach checks |
+| Growth | $50 | 5,000 credits | 500 breach checks |
+| Pro | $100 | 10,000 credits | 1,000 breach checks |
+
+Credits are stored as an integer in the `credit_balance` DynamoDB field (1 credit = $0.01). Credits are permanent — no expiry. Credits are drawn down before Stripe meter events are recorded, so a developer with a credit balance never receives a monthly Stripe invoice for those calls.
+
+**Top-up flow:**
+1. Developer visits `/developer/topup` → selects pack → enters API key → clicks Buy.
+2. Stripe Checkout session (payment mode) is created with `api_key` and `credits` in session metadata.
+3. On `checkout.session.completed` webhook: Lambda atomically adds credits to DynamoDB balance using `ADD credit_balance :n` with `if_not_exists(credit_balance, 0)` initialization.
+4. Developer is redirected to `/developer/topup-success` showing new balance.
+
+**Why two billing modes coexist:**
+- Metered subscription suits teams with predictable monthly volume — one monthly invoice, no manual top-ups, familiar Twilio/SendGrid model.
+- Credit packs suit individual evaluators, occasional one-off buyers, and teams that want budget certainty (spend exactly what you load).
+- Both modes use the same API key — no migration needed when switching.
+
+---
+
+#### OAuth Watchlist — Monitored App List (31 Apps)
+
+The `/v1/metered/oauth-watchlist` endpoint (and its x402 equivalent `/v1/payg/oauth-watchlist`) checks whether any of the following OAuth-connected applications have appeared in a breach, enabling developers to detect OAuth supply chain exposure before attackers can exploit existing tokens.
+
+**Identity & SSO Providers**
+1. Google (accounts.google.com)
+2. Microsoft / Azure AD (login.microsoftonline.com)
+3. Apple (appleid.apple.com)
+4. Okta
+5. Auth0
+
+**Developer & DevOps Tools**
+6. GitHub
+7. GitLab
+8. Bitbucket
+9. CircleCI
+10. Travis CI
+
+**Productivity Suites**
+11. Slack
+12. Notion
+13. Atlassian (Jira/Confluence)
+14. Dropbox
+15. Box
+
+**Communication & Collaboration**
+16. Zoom
+17. DocuSign
+18. Calendly
+19. HubSpot
+20. Salesforce
+
+**Financial & Payments**
+21. Stripe
+22. PayPal
+23. QuickBooks / Intuit
+24. Plaid
+25. Coinbase
+
+**AI & Agent Platforms**
+26. OpenAI / ChatGPT
+27. Anthropic / Claude
+28. Hugging Face
+29. Zapier
+30. Make (Integromat)
+
+**Security & Monitoring**
+31. 1Password (for Teams)
+
+*Watchlist is checked daily by the `relayshield-oauth-watchlist-monitor` Lambda using the HIBP v3 API. Consumer-facing OAuth alert is delivered via WhatsApp/Telegram to all active subscribers. Developer-facing check is available via the `/v1/metered/oauth-watchlist` and `/v1/payg/oauth-watchlist` REST endpoints.*
+
+---
+
+#### Developer Subscription — Who the Real Buyer Is
+
+"Developer" is too broad. The actual paying buyer for a threat intel subscription is not a solo developer learning the API — it's one of these three profiles:
+
+**Profile 1 — Security engineer at a mid-size company (200–2,000 employees)**
+Building internal tooling: SIEM enrichment queries, SOAR playbook integrations, identity risk scoring for their own SaaS product, or employee credential monitoring automation. Has a $5K–$50K/year security tools budget. Evaluates APIs via Google, GitHub, HN, trusted colleague recommendations. Does NOT shop on RapidAPI. Reach: LinkedIn (job title: Security Engineer, Threat Intelligence, Detection Engineer), Hacker News, SANS community, BSides conferences.
+
+**Profile 2 — MSSP / MDR technical team**
+Has 50–500 client accounts and needs to automate credential exposure detection at scale. Currently paying Hudson Rock or Flare. Will switch for better price/call economics or Telegram-native coverage they can't get elsewhere. Reach: MSP/MSSP Facebook groups, ConnectWise/Kaseya communities, direct LinkedIn outreach to MSSP founders and CTOs, IT Nation conference.
+
+**Profile 3 — Security SaaS builder**
+Building a password manager, HR platform identity feature, fraud detection product, or adjacent security tool. Needs breach/infostealer data as an embedded data source, not a standalone product. Evaluates via GitHub integrations, developer newsletters, and Hacker News. Deal size: $500–$5,000/month once embedded. Reach: "Show HN" posts, tl;dr sec sponsorships, direct GitHub issue/PR engagement on relevant open-source security tools, Dev.to and security-focused substack authors.
+
+---
+
+#### Distribution Channels — Ranked by Fit and Reachability
+
+**Tier 1 — High fit, directly reachable from current position:**
+
+1. **LinkedIn direct outreach** — Identify Security Engineers, Threat Intelligence Analysts, Detection Engineers, and MSSP founders. Message template: "We built a Telegram-native infostealer detection API that catches credential exposure 24–72 hours before HIBP. Would a free API key for evaluation be useful?" Zero ad spend, highly targeted, Andrew's 25-year telecom security background gives credibility.
+
+2. **SOAR / SIEM integration listings** — Publish a RelayShield integration pack for Palo Alto XSOAR, Tines, and Splunk SOAR. These marketplaces are actively browsed by the security engineer profile. A XSOAR integration for infostealer detection that fires a playbook on employee credential exposure is a direct use case. Integration development is moderate effort (1–2 weeks per platform) but generates ongoing inbound.
+
+3. **tl;dr sec newsletter** (Clint Gibler) — Reads like a weekly security engineering briefing. Reaches ~50,000 security practitioners. Sponsored slot or "tool of the week" mention. Cost: ~$2,000–$5,000 per issue. Very high signal-to-noise for this audience.
+
+4. **Hacker News "Show HN"** — One well-written Show HN post at launch of the Intel API tier can generate hundreds of signups in 48 hours. Requires polished docs, clear differentiation statement ("Telegram-native, 24–72h ahead of HIBP"), and a free tier or trial to reduce signup friction. One shot — time it for a Tuesday or Wednesday morning ET.
+
+5. **GitHub engagement** — Find open-source SIEM/SOAR/identity tools with GitHub issues requesting infostealer feed integrations. Open PRs or post substantive issue comments offering the RelayShield API as a solution. Authentic, zero cost, reaches exactly the right technical audience.
+
+**Tier 2 — High fit, requires more runway:**
+
+6. **Microsoft Sentinel content hub** — Publish a RelayShield data connector for Sentinel. Microsoft's security product line has ~85% enterprise penetration. A Sentinel integration surfaces RelayShield to corporate security teams who already have budget and tooling. Medium build effort, high leverage.
+
+7. **Communications ISAC (C-ISAC)** — Andrew's telecom background gives natural entry. ISACs share threat intelligence among member companies and are actively looking for vendor partners with novel detection capabilities. Membership and a presentation on Telegram-native infostealer detection gets RelayShield in front of security teams at carriers, MSPs, and large enterprises simultaneously.
+
+8. **Risky Business podcast** — Patrick Gray's weekly security podcast, ~50,000 engaged security professional listeners. Sponsorship or guest interview (framed as "founder with 25 years telecom security built a Telegram-native threat intel API") is a credibility multiplier. Cost: ~$3,000–$8,000/episode sponsorship.
+
+**Tier 1 — Warm intro, pursue immediately:**
+- **Calix API Marketplace** — Calix is a cloud platform serving broadband ISPs and telcos. They operate an API marketplace for third-party integrations that carrier customers can embed in their service bundles. Arjen Peirce (RelayShield consultant) has a contact at Calix. This is an OEM/Layer 5 licensing opportunity: ISPs bundling RelayShield breach + infostealer monitoring as a value-add to their residential and SMB subscribers. Carrier distribution at scale without direct sales. Action: Andrew asks Arjen for intro → prep a one-pager tailored to ISP customer security bundles (not the MSP brief — carrier audience is different) → intro meeting. Note: Arjen is a consultant, not an MSSP. Treat the Calix intro as a warm enterprise partnership lead, not a reseller relationship.
+
+**Tier 3 — Longer timeline:**
+- AWS Marketplace listing (Year 2)
+- RSA / Black Hat conference presence (Year 2)
+- Direct MSSP platform partnerships: ConnectWise Marketplace, Kaseya IT Complete (Year 2)
+
+---
+
+#### Competitive Landscape and Pricing Anchors
+
+| Company | Product | Price signal | RelayShield position |
+|---|---|---|---|
+| Hudson Rock (Cavalier) | Stealer log monitoring API | ~$30K–$100K+/yr enterprise | Use their API now; become a competitor at INTEL-2 launch |
+| Flare.io | Dark web + Telegram monitoring | $12K–$50K/yr | Same buyer; undercut on price, match on Telegram coverage |
+| SpyCloud | Breach + stealer log enrichment | $50K–$200K+/yr | Enterprise-only; RelayShield fills the SMB/mid-market gap they ignore |
+| Recorded Future | Broad threat intel | $75K–$300K+/yr | Not a near-term competitor; different buyer size |
+| Cybersixgill | Telegram + dark web raw feed | $25K–$100K+/yr | Closest technical analog; RelayShield undercuts on price with Stripe metered |
+
+**The gap all of them leave:** No Telegram-native threat intel at PAYG or SMB-accessible pricing with card-based billing. RelayShield owns that gap at INTEL-2 launch.
+
+---
+
+#### Realistic Revenue Timeline for Intel API
+
+| Phase | What's live | Revenue expectation |
+|---|---|---|
+| **Now (pre-INTEL-2)** | Hudson Rock-backed infostealer endpoint on x402 | Negligible; wrong buyer channel |
+| **Months 1–6 post-INTEL-2** | Proprietary Telegram-native intel, Stripe metered PAYG, prepaid credits | $500–$3K MRR from early developer/MSSP adopters |
+| **Months 6–12** | Intel API subscription tier ($499–$999/mo), SOAR integrations live | $3K–$15K MRR |
+| **Year 2** | AWS Marketplace, SIEM connectors, first enterprise OEM conversations | $15K–$50K MRR from intel product line alone |
+
+**Key constraint throughout:** Data quality and reliability. One week of downtime or false positives at the wrong moment will kill an MSSP relationship. Invest in pipeline monitoring, deduplication, and SLA documentation before going to market with paid Intel API tiers.
+
+---
+
+#### How INTEL-2 Elevates All Four API Endpoints — Before vs. After
+*Added June 2026. The Telethon public Telegram channel monitoring agent (INTEL-2) is not just an infostealer enhancement — it materially upgrades the positioning and defensibility of every existing endpoint.*
+
+| Endpoint | Before INTEL-2 | After INTEL-2 | Impact |
+|---|---|---|---|
+| **Infostealer** | Hudson Rock Cavalier API — good third-party source, 24–72h lead over HIBP | Proprietary Telegram channel pipeline — potentially hours ahead of Hudson Rock | Shifts from "we use a good vendor" to "we have our own moat." Biggest credibility jump for enterprise buyers. |
+| **Breach** | HIBP — historical, commodity, any competitor can wrap it | Telegram channels post fresh credential dumps before HIBP indexes them — turns breach endpoint real-time | Largest single upgrade of the four. Breach goes from the weakest endpoint to a genuine differentiator. |
+| **SIM swap** | Real-time Twilio carrier query — live status, no caching | Telegram SIM swap service listings add upstream pre-attack warning: "your number is being offered for hijack" before the swap executes | Adds a pre-attack layer no competitor offers. Shifts from detection to prevention. |
+| **Domain lookalike** | Active on-demand scan against 500M+ registered domains — reactive | Telegram channels advertise newly registered phishing domains before victims are targeted — proactive warning | Shifts from "we found it" to "we saw it being built." |
+
+**Biggest jump:** Breach (commodity → real-time proprietary)
+**Strongest moat:** Infostealer (third-party source → own pipeline)
+**Most novel:** SIM swap (adds pre-attack Telegram signal no competitor has)
+**Solid uplift:** Domain (reactive detection → proactive warning)
+
+---
+
+#### Post-INTEL-2 Unified Pitch and Pricing Justification
+
+**The pitch — works for Tines, AWS Marketplace, MSSP channel, and Calix equally:**
+
+> *"RelayShield monitors the Telegram channels where stolen credentials, SIM swap services, and phishing domains are sold — and fires alerts before the attack executes. Not historical breach data. Not a third-party API wrapper. Our own intelligence pipeline, delivered via REST API or directly to your security stack."*
+
+**Why this pitch justifies premium pricing:**
+
+Before INTEL-2, RelayShield's B2A product is a well-executed wrapper around HIBP, Twilio, and Hudson Rock. Competent, useful, but replicable. The pricing ceiling for a wrapper product is the convenience premium above the underlying APIs — roughly $99–$299/month before buyers start asking why they shouldn't just call the sources directly.
+
+After INTEL-2, RelayShield has a proprietary intelligence source that no competitor can replicate by calling an API. The Telegram monitoring pipeline is the product. This is what justifies:
+
+| Tier | Price | Justification |
+|---|---|---|
+| **PAYG** | $0.50–$1.00/query (infostealer, SIM, domain) | 2–4× breach pricing reflects proprietary source premium |
+| **Developer subscription** | $499–$999/month | "Proprietary Telegram-sourced intelligence" is a defensible price anchor vs. Hudson Rock ($30K+/yr) |
+| **Mid-market intel feed** | $1,500–$3,000/month | MSSPs replacing Flare ($12K–$50K/yr) — 10× cheaper with equivalent Telegram coverage |
+| **Enterprise OEM** | $8K–$25K/month | Embedded in security vendor product — priced against SpyCloud ($50K–$200K+/yr) |
+
+**The before/after messaging shift in one line:**
+- Before: *"We monitor your credentials, phone number, and domain for threats."*
+- After: *"We watch the channels where attackers buy and sell your credentials — and alert you before they use them."*
+
+The second version sells itself. It is specific, visceral, and describes a capability the buyer cannot get from any incumbent at this price point.
+
+---
+
+#### Interim INTEL-2 Approach — Public Sources First, No Lawyers Required
+*Added June 2026. Addresses the bootstrap constraint: no 6-month build, no legal grey area, no invite-only market access required to start generating proprietary intelligence.*
+
+The full INTEL-2 vision (monitoring invite-only criminal Telegram channels, private stealer log markets) is where legal complexity and build time accumulate. It is NOT required to start. A meaningful, legally clean, and buildable-in-weeks intelligence capability exists using only public sources.
+
+**What "public sources only" means in practice:**
+
+Many of the highest-volume credential dump and infostealer log channels on Telegram are fully public — anyone can join and read them. Monitoring a public Telegram channel via Telethon (the official Telegram MTProto API) is legally equivalent to reading a public Twitter feed. You are not purchasing stolen data. You are not scraping private markets. You are observing what anyone with a Telegram account can observe. This is exactly the starting point Hudson Rock, Flare, and Cybersixgill used before scaling into licensed/private source access.
+
+**Legal defensibility of public channel monitoring:**
+- Telethon uses Telegram's official MTProto API — not web scraping or ToS violation
+- Public channels: content is intentionally public, Telegram API access is explicitly permitted
+- You are recording the existence of credential exposure events, not retaining or distributing the stolen credentials themselves — the same principle HIBP operates on ("we record that a breach happened, not the breach data")
+- No legal counsel required for public channel monitoring. Invite-only channel access (joining private groups to monitor them) is where legal review becomes warranted — defer that entirely until revenue justifies it.
+
+**Three-phase public-source build sequence:**
+
+**Phase 0 — Already live (zero build required):**
+Hudson Rock Cavalier API (already integrated) + HIBP. These two sources combined already cover more ground than most SMB-priced competitors. DeHashed and BreachDirectory are deferred to Phase 2 — do not add licensing cost before first intel API revenue is established.
+
+**Phase 1 — 2–4 weeks, no legal issues:**
+Telethon-based monitor of 5–15 high-volume PUBLIC infostealer/credential dump Telegram channels. NLP pipeline extracts email addresses, phone numbers, and domain names from posted content. Matches against `relayshield_users` monitored assets. Alerts fire before data appears in HIBP (24–72 hour lead time). Architecture: EventBridge-triggered Lambda + Telethon + DynamoDB match + existing WA/TG alert delivery. Requires: one eSIM number for the monitoring Telegram account (separate from @RelayShield_bot). ~$15–20/month for eSIM + Telethon API access. Zero licensing cost.
+
+Pricing at Phase 1: discounted vs. full Intel API — $0.25–$0.50/query PAYG (Stripe metered), developer subscription $199–$299/month. Position honestly: "Telegram-public-source intelligence — faster than HIBP, no private market dependency." Early customers at discounted pricing become the reference accounts that justify Phase 2 pricing.
+
+**Phase 2 — Post first revenue, 3–6 months:**
+Add licensed data sources (Flare ~$79/month, Cyberint, IntelX) covering logs that never surface on public channels. Expand Telegram monitoring to semi-private channels where joining is open but indexing is not automated. Update pricing to full Intel API rates ($0.50–$1.00/query, $499–$999/month subscription). Upgrade early Phase 1 customers or honor their discount as a loyalty gesture.
+
+**Phase 3 — Year 2, with legal review:**
+Invite-only channel access, automated log purchasing pipelines, SIEM/SOAR integration feed licensing to enterprises. Legal counsel warranted at this stage — budget $2–5K one-time for a tech lawyer to review the data collection scope.
+
+---
+
+#### Bridging the SMB-to-Enterprise Gap for the Developer Subscription
+
+The "developer subscription buyer" described above (security engineer at a 200–2,000 employee company) sits above the SMB market but below the enterprise accounts that Hudson Rock, Flare, and SpyCloud target. The gap is real and the bridge requires deliberate sequencing.
+
+**Why the gap exists:** The mid-market security buyer has budget ($5K–$50K/year for security tools) but has enterprise-style procurement expectations: uptime SLAs, documented data provenance, clear ToS, a company to call if something breaks. They will not buy from a one-page Carrd site with an x402 USDC payment button. They will buy from a professional product with Stripe billing, clear documentation, and at least one reference customer they can call.
+
+**The three bridges:**
+
+**Bridge 1 — MSSPs as enterprise proxy (highest leverage, available now)**
+An MSSP with 200 client accounts IS an enterprise buyer by volume. Arjen Peirce is the template. His role as a sales consultant makes him the natural channel: he introduces RelayShield to his clients and earns either a referral fee or a white-label arrangement. One MSSP with 50 clients deploying RelayShield is worth ~$4,500/month at Business Basic pricing. Treat landing one credible MSSP partner as the primary near-term objective. The outbound motion: identify 10 MSSPs via LinkedIn (search "MSSP founder" + "cybersecurity" + geography), cold message offering 3 months free access in exchange for co-developing the MSP program, reference customer status, and a case study. One yes from ten messages is a realistic conversion rate.
+
+**Bridge 2 — Freemium-to-paid on Stripe metered (removes the evaluation barrier)**
+The mid-market security engineer needs to evaluate the API before taking it to procurement. A free tier of 500 queries/month (no credit card, API key issued immediately) lets them prove value internally. Once embedded in a playbook or SOAR workflow, switching cost is high and conversion to paid is near-certain. This is the Twilio / SendGrid playbook. Build Stripe metered billing, offer a free evaluation tier, let the product sell itself. The credit card and PO come after the engineer has already demonstrated value to their manager.
+
+**Bridge 3 — One reference customer at any price (unlocks the next tier)**
+A single credible customer — even one MSSP or security SaaS company using RelayShield for their clients at a steep discount or free — is worth more than all other marketing activities combined. Prioritize landing that first reference customer before spending on channels. Once you can say "used by [company] to monitor credential exposure for 200 client accounts," the next 10 MSSP conversations convert at dramatically higher rates.
+
+---
+
+#### Intel API Prioritized Build Sequence (Bootstrap, June 2026)
+
+Ordered by revenue impact × build speed, constrained by solo founder bandwidth.
+
+**Immediate (no build — after Stripe metered billing is live):**
+1. LinkedIn direct outreach to MSSPs and security engineers — defer until Stripe metered billing provides a non-crypto PAYG purchase path. Outreach without a working payment rail wastes the pipeline.
+2. GitHub OSS engagement — same timing constraint. Post when the product can be evaluated and purchased immediately.
+
+**Sprint 1 — 1–2 weeks (revenue infrastructure before marketing):**
+3. **Stripe metered billing** for API access — issue API keys, Lambda usage recording, monthly invoice. Required before any marketing push or HN post. Without this, non-crypto buyers have no path to pay.
+4. **Prepaid credit pack** ($100/$500/$1K via Stripe Checkout, DynamoDB credit balance) — parallel or immediately after metered billing.
+
+**Sprint 2 — 2–4 weeks (INTEL-2 Phase 1, public sources):**
+5. **eSIM number** (~$15–20/month, e.g. Google Voice or MVNO) for the monitoring Telegram account — separate from @RelayShield_bot.
+6. **Telethon public channel monitor** — Lambda + Telethon, 5–10 public infostealer channels, NLP email/domain extraction, match against `relayshield_users`, fire alerts via existing WA/TG delivery.
+7. **Add `/v1/intel/telegram` endpoint** to API Gateway — returns match result for email/domain against Telegram public channel observations.
+
+**Sprint 3 — after first intel API revenue:**
+8. **Tines SOAR integration** (easier than XSOAR; growing fast with MSSPs) — publish a RelayShield action pack. Inbound from MSSP technical teams.
+9. **Show HN post** — time it for after Stripe metered + INTEL-2 Phase 1 are both live. The story: "Telegram-native infostealer detection API, 24–72h ahead of HIBP, pay by credit card or USDC."
+10. **tl;dr sec newsletter** — pitch Clint Gibler for tool mention or sponsored slot after first paying intel customer.
+
+**Parked until $3K+ MRR from intel:**
+- Microsoft Sentinel content hub integration
+- C-ISAC membership
+- Risky Business sponsorship
+- AWS Marketplace listing
+- Invite-only channel monitoring (Phase 2 of INTEL-2)
+
+---
+
+### MSP Strategy — Honest Product Gap Assessment
+
+*This section directly addresses whether RelayShield's current product is MSP-ready.*
+
+**The honest answer: No. Not for serious MSP targeting.**
+
+MSPs manage multiple client accounts simultaneously. The current product architecture — WhatsApp/Telegram command interface, no cross-account visibility, per-client setup via ADD/REMOVE commands — serves a direct SMB relationship (owner and their team on a single WhatsApp thread). It does not serve an MSP-to-client relationship where the MSP is the intermediary across dozens or hundreds of clients.
+
+What MSPs require that RelayShield does not yet have:
+
+1. **Single pane of glass** — see all client accounts, alert status, and risk posture from one interface
+2. **Multi-tenant onboarding** — add/remove clients without per-client manual setup (MSP-1 architecture, not built)
+3. **White-label reporting** — client-facing incident reports the MSP can brand
+4. **Billing pass-through** — MSP marks up and resells; current Stripe model bills direct-to-customer
+5. **Escalation workflows** — alerts route to MSP first, not directly to end customer
+6. **SLA tracking** — MSPs need to demonstrate response time to their clients
+
+Business Shield Pro's existing team management (ADD, REMOVE, STATUS commands) covers a single SMB admin managing their own team. It does not cover an MSP admin managing 30 client companies.
+
+**What this means for current MSP targeting:**
+
+Stop trying to close MSPs on the current product. It will result in a failed deployment, a refund request, and a negative reference at exactly the moment RelayShield needs credibility in that segment.
+
+**What to do instead:**
+
+- Build relationships with 2-3 MSP decision-makers now as **design partners**, not sales targets. Their input shapes the MSP tier before it's built, not after.
+- The trigger for serious MSP go-to-market is **DASH-1** (web dashboard, Business Shield 10-25 seats) + **MSP-1** (UUID-based multi-tenant architecture). Neither is built.
+- Business Basic can be positioned as a direct SMB product that MSPs happen to recommend to their smallest clients (1-5 employees, owner-run). That is not an MSP sale — it is a referral arrangement. Structured correctly (referral code, co-marketing agreement), this generates MSP-channel revenue without requiring MSP-tier product maturity.
+
+**Practical MSP timeline:**
+- Now: identify 2-3 MSP design partners via GTIA relationship (GTIA-1 outreach already sent)
+- Q3 2026: DASH-1 build (web dashboard, 10-25 seat Business Shield)
+- Q4 2026: MSP-1 build (multi-tenant architecture, org_id isolation, ADDENTERPRISE command)
+- Q1 2027: First MSP commercial pilot with design partner accounts
+
+Attempting to compress this timeline by selling MSPs on today's product is not a shortcut — it is a credibility liability.
+
+---
+
+### Revised Competitive Positioning With Intel
+
+| Competitor | Their price | Their gap | RelayShield advantage |
+|---|---|---|---|
+| Aura / LifeLock | $10-35/month consumer | No crypto, no dark web intel, no Telegram | Crypto Shield specificity, Intel-sourced alerts |
+| Hudson Rock | $500-5K/month B2B | Enterprise-only pricing, no messaging delivery | SMB/MSSP Intel API at 1/10th the price |
+| SpyCloud | $30K+/year enterprise | Priced out of SMB and MSSP market | Session cookie exposure at MSSP-accessible price |
+| Recorded Future | $25K-100K/year | Priced for Fortune 500 only | Intel API at $499-999/month — same intelligence class |
+| Flare | $79-500/month | No ransomware victim early warning natively | INTEL-4 directly addresses this gap |
+
+The SMB and MSSP threat intelligence market has no affordable option between $79/month (Flare — limited) and $25K+/year (Recorded Future). RelayShield's Intel API Subscription at $499-999/month is designed to own that gap.
+
+---
+
+### Summary — What Changes and What Doesn't
+
+**What changes with INTEL-2/4/5:**
+- B2A pricing ceiling removed — Intel endpoints command $2-10/call vs. $0.10-0.50 for commodity
+- RapidAPI Pro/Ultra value proposition materially improves with no price change
+- Crypto Shield retention strengthens (faster, more accurate alerts from Telegram sources)
+- A new buyer category opens: MSSPs and corporate SOC teams who cannot afford enterprise threat intel vendors
+- The B2A narrative shifts from "we wrap HIBP" to "we generate proprietary threat intelligence"
+
+**What doesn't change:**
+- Personal Shield pricing and positioning — Intel improves the product silently, not the price
+- Business Basic add-on strategy — ransomware early warning is bundled as a feature, not sold separately
+- MSP go-to-market — deferred until DASH-1 and MSP-1 are built
+- Build priority — ONBOARD-1 (Crypto Shield rails) ships first, then INTEL-2
+
+---
+
+## Go-To-Market Distribution — Segment Attack Strategies
+
+*Added 2026-06-01*
+
+Six distinct user segments each require a different channel mix, lead message, and CTA. These are not variations of the same motion — they are separate playbooks.
+
+---
+
+### Segment A — B2C Crypto Shield
+**Profile:** Crypto and DeFi traders, self-custodied wallets, active on-chain  
+**Core fears:** Losing funds to SIM swap, wallet drain from infostealer, being scammed by a fake counterparty  
+**Lead message:** "Your SIM card is the weakest link in your crypto security"  
+
+**Channels:**
+- X/Twitter crypto communities — post threat intel threads, engage under high-follower crypto accounts
+- r/CryptoCurrency, r/defi, r/ethfinance — karma-gated; build with genuine answers first
+- Telegram alpha groups and signal channels — organic presence, not spam
+- Crypto YouTube comment sections on security/opsec videos
+
+**CTA:** Free first WhatsApp check (SIM swap or breach lookup) — zero friction, no credit card  
+**Content angle:** Real attack stories, wallet drain postmortems, SIM swap case studies  
+
+---
+
+### Segment B — B2B Novice Sole Proprietors
+**Profile:** 1-person businesses, mobile-first, no IT support, motivated by email breach and SIM swap fear  
+**Core fears:** Business email compromised, phone stolen/ported, customer data leaked  
+**Lead message:** "Your business email in a breach is a $50,000 problem"  
+
+**Channels:**
+- Facebook Groups — small business owner communities, local entrepreneur groups (add FB account)
+- LinkedIn — target job titles: Owner, Founder, Consultant, Freelancer at <5 employee companies
+- Local chamber of commerce networks — sponsorship or guest speaker angle
+- Google/Meta ads targeting small business keywords (future, once revenue supports it)
+
+**Facebook message to send when joining groups:**
+> "Hey everyone — I run a cybersecurity monitoring service for small businesses and I'm trying to understand what security worries keep owners up at night. Not selling anything, genuinely doing research. If your business email showed up in a data breach or your phone number got ported without your knowledge, would you even know? Happy to chat or run a free check for anyone curious."
+
+**CTA:** Free email breach check — results delivered via WhatsApp in 60 seconds  
+**Content angle:** Plain-English explainers, "what happens after a breach," real cost of downtime  
+
+---
+
+### Segment C — B2B Business Starter (Larger Teams)
+**Profile:** 5-25 employee businesses with a domain, mix of mobile and PC users, some IT awareness  
+**Core fears:** Domain spoofing, team credential exposure, infostealer hitting an employee laptop  
+**Lead message:** "You have a domain. Someone is probably spoofing it right now."  
+
+**Channels:**
+- LinkedIn — content marketing targeting ops managers, office managers, small IT leads
+- Direct outreach to decision-makers at 10-50 person companies in high-risk verticals (legal, accounting, real estate)
+- MSP referral arrangements — not a full MSP sale, a referral code arrangement for their smallest clients
+- Industry association newsletters (accountants, lawyers, realtors)
+
+**CTA:** Free domain lookalike scan — high perceived value, no commitment  
+**Content angle:** Domain spoofing demos, "your employees are the attack surface," breach cost calculators  
+
+---
+
+### Segment D — B2A Developers and Agents (x402 PAYG)
+**Profile:** Developers building AI agents, automation workflows, or security tools; want API-first, no commitment  
+**Core fears:** Building on unreliable data sources, complex integrations, overpaying for enterprise tools  
+**Lead message:** "Add breach and infostealer intelligence to your agent in 3 lines of code"  
+
+**Channels:**
+
+- **GitHub:** Create a public relayshield-python and relayshield-js SDK repo with clean README, code examples, and a "Getting Started in 60 seconds" guide. Star-seekers and developers searching for security APIs will find it organically. Open issues, respond fast — reputation is built in comments.
+- **MCP Marketplaces:** RelayShield MCP server is already built. Submit/maintain listings on glama.ai, mcp.so, and the Anthropic MCP directory. Keep the listing description benefit-led ("protect your users from breach exposure") not feature-led.
+- **Dev Newsletters:** Reach out to TLDR Security, Bytes.dev, Console.dev, and Hacker Newsletter for a sponsored slot or an editorial mention. A genuine security tool with a free tier is often featured for free if the pitch is tight.
+- **HackerNews:** Post a "Show HN" when a meaningful new feature ships (Intel tier, x402 PAYG). HN rewards transparency — share real usage numbers, pricing rationale, lessons learned.
+- **OpenRouter:** Contact their team (see outreach note below) about a featured integration. Their developer base is exactly this audience.
+- **Dev Discord servers:** Join AI agent builders, LangChain, and CrewAI community servers. Answer questions, don't pitch.
+
+**CTA:** API key in 60 seconds, first 100 calls free, PAYG after — no contract  
+**Content angle:** Code examples, agent security use cases, "what your agent doesn't know about your users"  
+
+---
+
+### Segment E — Threat Intelligence Solution
+**Profile:** MSSPs, corporate SOC teams, CISOs at mid-market companies priced out of Recorded Future/SpyCloud  
+**Core fears:** Missing a breach before it goes public, blind spots on dark web, ransomware early warning  
+**Lead message:** "Real-time Telegram threat intelligence before the breach goes public — at 1/10th the enterprise price"  
+
+**Channels:**
+- Direct CISO/SOC outreach via LinkedIn — highly targeted, low volume, high personalization
+- GTIA relationship (already active — see GTIA-1 in project notes)
+- Security conference presence (future) — BSides, ISC2 events
+- MSSP-focused publications and newsletters
+
+**CTA:** Demo or 30-day pilot — this is a consultative sale, not self-serve  
+**Content angle:** Intelligence sample reports, case studies, competitive gap analysis vs. enterprise vendors  
+**Note:** Do not attempt to close this segment on current product. Deferred until INTEL-2/4/5 are built.  
+
+---
+
+### Segment F — B2C High-End Security-Conscious Consumers
+**Profile:** Security-aware individuals, executives, journalists, public figures — mobile and laptop users  
+**Core fears:** Personal exposure, stalking, doxing, account takeover  
+**Lead message:** "The tool security professionals use to protect themselves"  
+**Channels:** Purely opportunistic — LinkedIn PR halo, word of mouth, press coverage  
+**CTA:** Waitlist or referral-only positioning — exclusivity is the feature  
+**Priority:** Low — do not build dedicated campaigns. Let organic awareness drive this.  
+
+---
+
+### OpenRouter Outreach
+**Where:** LinkedIn — search "OpenRouter" and message their founding team or head of partnerships directly. Their team is small and responsive.  
+
+**Message:**
+> Hi [Name] — I'm the founder of RelayShield, a threat intelligence API that lets developers add real-time breach detection, infostealer monitoring, and SIM swap alerts to their applications. We've built an MCP server and support x402 PAYG — so it fits natively into agent workflows.
+>
+> Given that OpenRouter routes traffic across LLMs for thousands of developers building agents, I think there's a natural fit — developers on your platform could add identity protection to their user flows with a single API call.
+>
+> Would you be open to a quick call to explore whether a featured integration or listing makes sense? Happy to offer OpenRouter users a free tier to reduce friction.
+
+**Goal:** Featured integration listing + co-marketing mention in their developer docs or newsletter. Not a revenue-share ask at this stage.
+

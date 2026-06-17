@@ -1,0 +1,55 @@
+{
+  "name": "n8n-nodes-relayshield",
+  "version": "0.1.2",
+  "description": "n8n community node for RelayShield — breach detection, SIM swap monitoring, infostealer exposure, domain lookalike scanning, and threat intelligence IOC lookup.",
+  "keywords": [
+    "n8n-community-node-package",
+    "security",
+    "breach",
+    "sim-swap",
+    "infostealer",
+    "threat-intelligence",
+    "identity-protection"
+  ],
+  "license": "MIT",
+  "homepage": "https://api.relayshield.net/developers",
+  "author": {
+    "name": "RelayShield LLC",
+    "email": "support@relayshield.net"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nzdsf2-gif/relayshield.git",
+    "directory": "n8n-nodes-relayshield"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && cp nodes/RelayShield/relayshield.svg dist/nodes/RelayShield/relayshield.svg && cp credentials/relayshield.svg dist/credentials/relayshield.svg",
+    "dev": "tsc --watch",
+    "lint": "n8n-node lint",
+    "release": "n8n-node release",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/RelayShieldApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/RelayShield/RelayShield.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@n8n/node-cli": "^0.35.0",
+    "@types/node": "^20.19.43",
+    "n8n-core": "*",
+    "n8n-workflow": "^2.16.0",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}

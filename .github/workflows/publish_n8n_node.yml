@@ -1,0 +1,57 @@
+# Publishes n8n-nodes-relayshield to npm on every version tag push.
+#
+# Triggers on tags matching *.*.*  (e.g. 0.2.0) pushed from the
+# n8n-nodes-relayshield/ subdirectory of this monorepo.
+#
+# ONE-TIME SETUP (Option A — OIDC Trusted Publishing, no secrets needed):
+#   1. npmjs.com → n8n-nodes-relayshield → Settings → Trusted Publishers
+#   2. Add publisher → GitHub Actions:
+#        Repository owner: nzdsf2-gif
+#        Repository name:  relayshield
+#        Workflow name:    publish_n8n_node.yml
+#        Environment:      (leave blank)
+#   3. No NPM_TOKEN secret needed — GitHub OIDC handles auth.
+#
+# RELEASE PROCESS:
+#   cd n8n-nodes-relayshield && npm run release
+#   (bumps version, commits, tags, pushes → triggers this workflow)
+
+name: Publish n8n Node
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    defaults:
+      run:
+        working-directory: n8n-nodes-relayshield
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+          cache-dependency-path: n8n-nodes-relayshield/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Release
+        run: |
+          [ -n "$NPM_TOKEN" ] && npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+          npm run release
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-relayshield",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "n8n community node for RelayShield — breach detection, SIM swap monitoring, infostealer exposure, domain lookalike scanning, and threat intelligence IOC lookup.",
   "keywords": [
     "n8n-community-node-package",

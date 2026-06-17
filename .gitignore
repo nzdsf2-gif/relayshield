@@ -20,6 +20,7 @@ __pycache__/
 .Python
 *.egg-info/
 dist/
+!n8n-nodes-relayshield/dist/
 build/
 venv/
 .venv/

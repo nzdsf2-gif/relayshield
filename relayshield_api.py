@@ -15,6 +15,8 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
   POST /v1/domain                   — Typosquat/lookalike domain scan (DNS + CT + GSB)
   POST /v1/intel/telegram           — Threat Intelligence API: IOC lookup against live Telegram criminal channel pipeline (intel_access flag required)
+  POST /v1/metered/supply-chain     — Vendor/supply chain risk: breach + infostealer exposure per domain (up to 10 domains)
+  POST /v1/metered/session-risk     — INTEL-5 active session hijack detection from stealer log corpus
   GET  /v1/result/{analysis_id}     — Poll VT scan result
 
 Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
@@ -30,6 +32,8 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
   POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
   POST /v1/payg/infostealer         — $0.15 USDC — Hudson Rock infostealer detection
+  POST /v1/payg/supply-chain        — $0.10 USDC per domain — vendor breach + infostealer risk (up to 10 domains)
+  POST /v1/payg/session-risk        — $0.30 USDC — INTEL-5 active session hijack / AiTM detection
   GET  /v1/payg/result/{id}         — $0.00 (free — poll a paid scan)
 
 x402 payment flow:
@@ -80,6 +84,7 @@ logger.setLevel(logging.INFO)
 
 secrets_client  = boto3.client("secretsmanager")
 dynamodb        = boto3.resource("dynamodb")
+ses             = boto3.client("ses", region_name="us-east-1")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -102,7 +107,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/breach":                100000,
     "/v1/payg/sim-swap":              250000,
     "/v1/payg/domain":                500000,
-    "/v1/payg/oauth-watchlist":       150000,
+    "/v1/payg/oauth-watchlist":       300000,   # $0.30 — combined HIBP watchlist + INTEL-5 stealer corpus (premium positioning vs SpyCloud)
     "/v1/payg/scan-wallet":           100000,   # legacy — EVM only
     "/v1/payg/scan-url":               50000,
     "/v1/payg/scan-file":             100000,
@@ -112,6 +117,9 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/nft-security":          100000,   # $0.10 — GoPlus NFT risk
     "/v1/payg/wallet-screen-batch":   500000,   # $0.50 — up to 10 addresses
     "/v1/payg/infostealer":           150000,   # $0.15 — Hudson Rock infostealer check
+    "/v1/payg/supply-chain":          100000,   # $0.10 per call (up to 10 vendor domains)
+    "/v1/payg/session-risk":          300000,   # $0.30 — INTEL-5 active session hijack / AiTM detection (premium)
+    "/v1/payg/identity-graph":        350000,   # $0.35 — identity correlation: email → linked phones/domains from dumps
 }
 
 GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
@@ -143,8 +151,26 @@ OAUTH_REVOCATION_URLS: dict[str, str] = {
 
 API_KEYS_TABLE   = "relayshield_api_keys"
 INTEL_IOCS_TABLE = "relayshield_intel_iocs"
+INTEL_CVE_TABLE  = "relayshield_intel_cve"
+FROM_EMAIL       = "noreply@relayshield.net"
+
+# Quota warning thresholds for mp_499 (10,000 call/month) TI plan.
+# We fire one email per threshold per billing period; flags are stored on the key record.
+INTEL_WARN_80_CALLS = 8_000   # 80% — nudge to upgrade, still 2K calls left
+INTEL_WARN_95_CALLS = 9_500   # 95% — urgent, 500 calls remaining
 STRIPE_SECRET_NAME = "relayshield/stripe_secret_key"
 STRIPE_METER_API   = "https://api.stripe.com/v1/billing/meter_events"
+
+# Threat Intelligence API subscription tiers — monthly call caps.
+# None = unlimited. Tier is provisioned automatically by relayshield-developer-signup
+# on checkout.session.completed for the $499/$999 Payment Links.
+# Defaults to the $499 cap if intel_plan_tier is unset — fails safe rather than
+# granting unlimited access to an unverified key.
+INTEL_PLAN_LIMITS: dict[str, int | None] = {
+    "mp_499":    10000,   # $499/mo — 10,000 calls
+    "mssp_999":  None,    # $999/mo — unlimited
+}
+INTEL_DEFAULT_TIER = "mp_499"
 
 # Stripe Billing Meter event names — one per metered endpoint.
 # These must match the event_name values on the meters created in Stripe Dashboard.
@@ -153,8 +179,11 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/sim-swap":         "relayshield_sim_swap_calls",
     "/v1/metered/infostealer":      "relayshield_infostealer_calls",
     "/v1/metered/domain":           "relayshield_domain_calls",
-    "/v1/metered/oauth-watchlist":  "relayshield_oauth_watchlist_calls",
+    "/v1/metered/oauth-watchlist":  "relayshield_oauth_watchlist_calls",   # combined HIBP + INTEL-5
     "/v1/metered/crypto-intel":     "relayshield_crypto_intel_calls",
+    "/v1/metered/supply-chain":     "relayshield_supply_chain_calls",
+    "/v1/metered/session-risk":     "relayshield_session_risk_calls",
+    "/v1/metered/identity-graph":   "relayshield_identity_graph_calls",
 }
 
 # Credits deducted per successful call (1 credit = $0.01)
@@ -163,8 +192,11 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/sim-swap":        25,   # $0.25
     "/v1/metered/infostealer":     50,   # $0.50
     "/v1/metered/domain":          30,   # $0.30
-    "/v1/metered/oauth-watchlist": 20,   # $0.20
+    "/v1/metered/oauth-watchlist": 30,   # $0.30 — combined HIBP watchlist + INTEL-5 stealer corpus (premium)
     "/v1/metered/crypto-intel":    30,   # $0.30
+    "/v1/metered/supply-chain":    10,   # $0.10 per call (up to 10 vendor domains)
+    "/v1/metered/session-risk":    30,   # $0.30 — INTEL-5 active session hijack / AiTM detection (premium)
+    "/v1/metered/identity-graph":  35,   # $0.35 — identity correlation
 }
 
 HIBP_SECRET_NAME  = "relayshield/hibp_api_key"
@@ -292,6 +324,183 @@ def _record_stripe_meter_event(stripe_customer_id: str, event_name: str) -> None
                        stripe_customer_id, event_name, exc)
 
 
+def _send_intel_quota_warning(api_key_str: str, key_record: dict, threshold: int, calls_used: int) -> None:
+    """
+    Send a one-time SES email warning when an mp_499 key crosses a quota threshold.
+    Sets a flag on the key record so the email fires exactly once per threshold per period.
+    Non-fatal — never raises; quota enforcement continues even if the email fails.
+    """
+    email = key_record.get("email", "")
+    if not email:
+        logger.warning("intel quota warning: no email on key=%s — skipping send", api_key_str[:16])
+        return
+
+    flag_field  = "intel_quota_warned_80" if threshold == INTEL_WARN_80_CALLS else "intel_quota_warned_95"
+    period      = key_record.get("intel_period_start", datetime.now(timezone.utc).strftime("%Y-%m"))
+    flag_value  = key_record.get(flag_field)
+
+    # Only fire once per billing period
+    if flag_value == period:
+        return
+
+    calls_left  = 10_000 - calls_used
+    pct         = threshold // 100  # 8000 → 80, 9500 → 95
+    is_urgent   = threshold == INTEL_WARN_95_CALLS
+
+    subject = (
+        f"⚠️ Urgent: {calls_left} RelayShield TI calls remaining this month"
+        if is_urgent else
+        f"RelayShield Threat Intelligence: {pct}% of monthly quota used"
+    )
+
+    if is_urgent:
+        body_html = f"""
+<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;color:#1a1a1a;">
+  <h2 style="color:#dc2626;">⚠️ You have {calls_left:,} Threat Intelligence calls left this month</h2>
+  <p>Your RelayShield Threat Intelligence API key has used <strong>{calls_used:,} of 10,000 calls</strong>
+  on your current MSP plan ($499/month). At your current rate you will hit the limit before
+  the month resets.</p>
+  <p>When you reach 10,000 calls, the API returns <code>HTTP 429</code> and all subsequent
+  TI queries will fail until the next billing period begins.</p>
+  <h3 style="margin-top:2rem;">Upgrade to MSSP — $999/month, unlimited calls</h3>
+  <ul>
+    <li><strong>No monthly call cap</strong> — query as often as your pipeline demands</li>
+    <li>Priority support + SLA</li>
+    <li>Same IOC database, same API key — zero integration changes</li>
+  </ul>
+  <p style="margin-top:1.5rem;">
+    <a href="https://buy.stripe.com/4gM3cw1A23yJf9a2JF0Ny0f"
+       style="background:#6c63ff;color:#fff;padding:.65rem 1.4rem;border-radius:8px;
+              text-decoration:none;font-weight:600;display:inline-block;">
+      Upgrade to MSSP — $999/mo →
+    </a>
+  </p>
+  <p style="margin-top:1.5rem;font-size:.85rem;color:#6b7280;">
+    Questions? Reply to this email or contact
+    <a href="mailto:support@relayshield.net">support@relayshield.net</a>.<br>
+    Your billing period resets on the 1st of next month.
+  </p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:2rem 0;">
+  <p style="font-size:.75rem;color:#9ca3af;">RelayShield LLC · relayshield.net · API key: {api_key_str[:16]}...</p>
+</body></html>
+"""
+    else:
+        body_html = f"""
+<html><body style="font-family:sans-serif;max-width:600px;margin:40px auto;color:#1a1a1a;">
+  <h2 style="color:#d97706;">You've used 80% of your monthly Threat Intelligence quota</h2>
+  <p>Your RelayShield Threat Intelligence API key has used <strong>{calls_used:,} of 10,000 calls</strong>
+  on your current MSP plan ($499/month). You have <strong>{calls_left:,} calls remaining</strong>
+  this billing period.</p>
+  <p>This is an early heads-up — no action required yet. If your usage continues at the
+  current rate, you may hit the limit before month end.</p>
+  <h3 style="margin-top:2rem;">Consider upgrading to MSSP — $999/month</h3>
+  <p>For MSSPs running continuous monitoring across multiple client environments,
+  the MSSP tier removes the call cap entirely:</p>
+  <ul>
+    <li><strong>Unlimited calls/month</strong> — no quota, no 429 errors</li>
+    <li>2.5× more value per dollar at scale</li>
+    <li>Priority support + SLA</li>
+    <li>Same API key, zero integration changes</li>
+  </ul>
+  <p style="margin-top:1.5rem;">
+    <a href="https://buy.stripe.com/4gM3cw1A23yJf9a2JF0Ny0f"
+       style="background:#6c63ff;color:#fff;padding:.65rem 1.4rem;border-radius:8px;
+              text-decoration:none;font-weight:600;display:inline-block;">
+      Upgrade to MSSP — $999/mo →
+    </a>
+  </p>
+  <p style="margin-top:1rem;font-size:.85rem;color:#6b7280;">
+    No rush — you still have {calls_left:,} calls this month. We'll send another reminder
+    if you reach 95%.
+  </p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:2rem 0;">
+  <p style="font-size:.75rem;color:#9ca3af;">RelayShield LLC · relayshield.net · API key: {api_key_str[:16]}...</p>
+</body></html>
+"""
+
+    try:
+        ses.send_email(
+            Source=f"RelayShield <{FROM_EMAIL}>",
+            Destination={"ToAddresses": [email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body":    {"Html": {"Data": body_html, "Charset": "UTF-8"}},
+            },
+        )
+        logger.info("intel quota warning sent to=%s threshold=%d key=%s", email, threshold, api_key_str[:16])
+
+        # Mark this threshold as warned for the current period
+        dynamodb.Table(API_KEYS_TABLE).update_item(
+            Key={"api_key": api_key_str},
+            UpdateExpression=f"SET {flag_field} = :p",
+            ExpressionAttributeValues={":p": period},
+        )
+    except Exception as exc:
+        logger.error("intel quota warning email failed key=%s error=%s", api_key_str[:16], exc)
+
+
+def _check_and_increment_intel_quota(api_key_str: str, key_record: dict) -> dict | None:
+    """
+    Enforce the Threat Intelligence API monthly call cap for the api key's
+    intel_plan_tier (default mp_499 — fails safe to the capped tier if unset).
+    Resets the counter on a new calendar month. Returns an error response
+    dict if the key is over quota, or None if the call is allowed (and the
+    counter has already been incremented).
+    """
+    tier  = key_record.get("intel_plan_tier") or INTEL_DEFAULT_TIER
+    limit = INTEL_PLAN_LIMITS.get(tier, INTEL_PLAN_LIMITS[INTEL_DEFAULT_TIER])
+
+    table          = dynamodb.Table(API_KEYS_TABLE)
+    current_period = datetime.now(timezone.utc).strftime("%Y-%m")
+    stored_period  = key_record.get("intel_period_start")
+
+    if stored_period != current_period:
+        # New billing month (or first call ever) — reset counter.
+        try:
+            table.update_item(
+                Key={"api_key": api_key_str},
+                UpdateExpression="SET intel_period_start = :p, intel_period_calls = :z",
+                ExpressionAttributeValues={":p": current_period, ":z": 0},
+            )
+        except Exception as exc:
+            logger.warning("intel quota reset failed key=%s error=%s", api_key_str[:16], exc)
+        period_calls = 0
+    else:
+        period_calls = int(key_record.get("intel_period_calls") or 0)
+
+    if limit is not None and period_calls >= limit:
+        return {
+            "statusCode": 429,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "ok":      False,
+                "error":   f"Monthly call limit ({limit}) reached for the {tier} Threat Intelligence plan.",
+                "upgrade_url": "https://relayshield.net/developers",
+            }),
+        }
+
+    try:
+        table.update_item(
+            Key={"api_key": api_key_str},
+            UpdateExpression="SET intel_period_calls = if_not_exists(intel_period_calls, :z) + :one, "
+                              "intel_period_start = :p",
+            ExpressionAttributeValues={":z": 0, ":one": 1, ":p": current_period},
+        )
+    except Exception as exc:
+        logger.warning("intel quota increment failed (non-fatal) key=%s error=%s", api_key_str[:16], exc)
+
+    # Quota warning emails — only for capped tier (mp_499); mssp_999 has no limit.
+    # Check AFTER incrementing so `period_calls` reflects the call just made.
+    if limit is not None:
+        new_count = period_calls + 1
+        if new_count >= INTEL_WARN_95_CALLS:
+            _send_intel_quota_warning(api_key_str, key_record, INTEL_WARN_95_CALLS, new_count)
+        elif new_count >= INTEL_WARN_80_CALLS:
+            _send_intel_quota_warning(api_key_str, key_record, INTEL_WARN_80_CALLS, new_count)
+
+    return None
+
+
 def handle_metered_request(path: str, method: str, event: dict) -> dict:
     """Auth + dispatch for /v1/metered/* routes. Verifies RS API key, runs handler,
     then records a Stripe Billing Meter event on success."""
@@ -324,6 +533,9 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         "/v1/metered/domain":          handle_domain,
         "/v1/metered/oauth-watchlist": handle_oauth_watchlist,
         "/v1/metered/crypto-intel":    handle_crypto_intel,
+        "/v1/metered/supply-chain":    handle_supply_chain,
+        "/v1/metered/session-risk":    handle_session_risk,
+        "/v1/metered/identity-graph":  handle_identity_graph,
     }
     handler = metered_routes.get(path)
     if not handler:
@@ -895,21 +1107,31 @@ def handle_result(analysis_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Endpoint: POST /v1/payg/oauth-watchlist  (also callable from subscription path)
+# Endpoint: POST /v1/metered/oauth-watchlist  /  POST /v1/payg/oauth-watchlist
 # ---------------------------------------------------------------------------
-# Request:  { "email": "user@example.com" }
-# Response: { "email": "...", "matched_count": N, "matched_apps": [...],
-#             "recommendation": "...", "checked_at": "..." }
+# Combined OAuth / token exposure check — two signal sources:
+#   1. HIBP breach history × 31-app OAuth watchlist (historical risk)
+#   2. INTEL-5 stealer corpus (relayshield_stolen_sessions) — active token theft
+#      from stealer log archives captured from criminal Telegram channels
 #
-# Checks HIBP breaches for the email and cross-references against the
-# OAuth watchlist. Matched apps may have issued tokens granting access
-# to Google Workspace / M365 without touching the user's password.
+# Request:  { "email": "user@example.com" }
+# Response: {
+#   "email": "...",
+#   "matched_count": N,           — HIBP-matched breached OAuth apps
+#   "matched_apps":  [...],       — breach-source app list with revoke URLs
+#   "stolen_token_count": N,      — INTEL-5: credentials found in stealer logs
+#   "stolen_tokens": [...],       — service, severity, category, ingested_at
+#   "highest_severity": "...",    — CRITICAL|HIGH|MEDIUM|LOW|NONE
+#   "recommendation": "...",
+#   "checked_at": "..."
+# }
 
 def handle_oauth_watchlist(params: dict) -> dict:
     email = (params.get("email") or "").strip().lower()
     if not email or "@" not in email:
         return _err("email is required and must be a valid address")
 
+    # --- Signal 1: HIBP breach × OAuth watchlist ---
     api_key = _hibp_api_key()
     url     = f"{HIBP_BASE_URL}{urllib.parse.quote(email)}?truncateResponse=false"
     req     = urllib.request.Request(
@@ -932,37 +1154,97 @@ def handle_oauth_watchlist(params: dict) -> dict:
         logger.exception("oauth-watchlist HIBP call failed for %s: %s", email, exc)
         return _err("oauth watchlist check failed — upstream error", 502)
 
-    matched = []
+    matched_apps = []
     for b in breaches:
-        name  = (b.get("Name")   or "").lower()
+        name   = (b.get("Name")   or "").lower()
         domain = (b.get("Domain") or "").lower()
         title  = (b.get("Title")  or "").lower()
         for app in OAUTH_WATCHLIST:
             if app in name or app in domain or app in title:
                 app_name = b.get("Name", "")
-                matched.append({
-                    "app":           app_name,
-                    "breach_date":   b.get("BreachDate"),
-                    "data_classes":  b.get("DataClasses", []),
-                    "revoke_url":    OAUTH_REVOCATION_URLS.get(
-                                         app_name, "https://myaccount.google.com/permissions"
-                                     ),
+                matched_apps.append({
+                    "app":          app_name,
+                    "source":       "breach_history",
+                    "breach_date":  b.get("BreachDate"),
+                    "data_classes": b.get("DataClasses", []),
+                    "revoke_url":   OAUTH_REVOCATION_URLS.get(
+                                        app_name, "https://myaccount.google.com/permissions"
+                                    ),
                 })
                 break
 
-    logger.info("oauth-watchlist — email=%s matched=%d total_breaches=%d",
-                email, len(matched), len(breaches))
-    return _ok({
-        "email":         email,
-        "matched_count": len(matched),
-        "matched_apps":  matched,
-        "recommendation": (
+    # --- Signal 2: INTEL-5 stealer log corpus ---
+    stolen_tokens: list[dict] = []
+    try:
+        resp  = dynamodb.Table(STOLEN_SESSIONS_TABLE_API).query(
+            IndexName="email-index",
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("matched_email").eq(email),
+            FilterExpression=boto3.dynamodb.conditions.Attr("session_type").eq("credential"),
+        )
+        severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+        raw_tokens = sorted(
+            resp.get("Items", []),
+            key=lambda x: severity_order.get(x.get("severity", "LOW"), 0),
+            reverse=True,
+        )
+        stolen_tokens = [
+            {
+                "domain":           t.get("domain", ""),
+                "source":           "stealer_log",
+                "severity":         t.get("severity", "LOW"),
+                "service_category": t.get("service_category", ""),
+                "channel_source":   t.get("channel_source", ""),
+                "ingested_at":      t.get("ingested_at", ""),
+            }
+            for t in raw_tokens
+        ]
+    except Exception as exc:
+        logger.warning("oauth-watchlist INTEL-5 query failed email=%s: %s", email, exc)
+        # Non-fatal — return HIBP results even if INTEL-5 query fails
+
+    # Derive highest severity across both signals
+    severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "NONE": 0}
+    intel5_highest = max(
+        (severity_order.get(t["severity"], 0) for t in stolen_tokens),
+        default=0,
+    )
+    hibp_severity  = 3 if matched_apps else 0   # HIBP match = HIGH by default
+    combined_score = max(intel5_highest, hibp_severity)
+    highest = {4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW", 0: "NONE"}.get(combined_score, "NONE")
+
+    # Build recommendation from the most severe signal present
+    if stolen_tokens and stolen_tokens[0]["severity"] in ("CRITICAL", "HIGH"):
+        rec = (
+            "URGENT: Stolen credentials for high-value services were found in criminal stealer logs. "
+            "Rotate API keys, revoke OAuth tokens, and invalidate active sessions for all listed services immediately. "
+            "For cloud consoles and code repos, treat this as an active incident."
+        )
+    elif stolen_tokens:
+        rec = (
+            "Stolen credentials detected in stealer logs. Revoke OAuth tokens and rotate passwords "
+            "for all listed services. Check each service's connected-apps or API keys page."
+        )
+    elif matched_apps:
+        rec = (
             "Revoke OAuth access for matched apps immediately using the revoke_url for each. "
             "Also audit all connected apps at myaccount.google.com/permissions and myapps.microsoft.com."
-            if matched else
-            "No breached OAuth-capable apps detected for this email."
-        ),
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        )
+    else:
+        rec = "No OAuth exposure detected via breach history or active stealer log corpus."
+
+    logger.info(
+        "oauth-watchlist email=%s hibp_matched=%d stolen_tokens=%d highest=%s",
+        email, len(matched_apps), len(stolen_tokens), highest,
+    )
+    return _ok({
+        "email":             email,
+        "matched_count":     len(matched_apps),
+        "matched_apps":      matched_apps,
+        "stolen_token_count": len(stolen_tokens),
+        "stolen_tokens":     stolen_tokens,
+        "highest_severity":  highest,
+        "recommendation":    rec,
+        "checked_at":        datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -1449,7 +1731,8 @@ def handle_wallet_screen_batch(params: dict) -> dict:
 #                             "total_corporate_services": N,
 #                             "total_user_services": N } ] }
 
-CAVALIER_URL = "https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-login"
+CAVALIER_URL        = "https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-login"
+CAVALIER_DOMAIN_URL = "https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-domain"
 
 
 def handle_infostealer(params: dict) -> dict:
@@ -1497,6 +1780,549 @@ def handle_infostealer(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/supply-chain  /  POST /v1/payg/supply-chain
+# ---------------------------------------------------------------------------
+# Supply chain / vendor identity risk monitoring.
+# For each vendor domain supplied, checks:
+#   1. HIBP breacheddomain — how many accounts at that domain appeared in breaches
+#   2. Hudson Rock Cavalier — infostealer log hits for that domain
+#
+# Billing: $0.10 per domain checked (PAYG) / 10 credits per domain (metered).
+# For PAYG callers the x402 payment covers up to MAX_VENDOR_DOMAINS domains
+# in one call. Metered callers are billed once per call regardless of domain count
+# (up to the per-call maximum); the credit cost reflects one unit of work.
+#
+# Request:
+#   { "vendor_domains": ["acme.com", "widget.io"] }          — explicit domain list
+#   { "vendor_emails":  ["alice@acme.com", "bob@widget.io"] } — domains extracted
+#   Both keys may be supplied; they are merged and deduplicated.
+#   Maximum MAX_VENDOR_DOMAINS domains per call.
+#
+# Response per domain:
+#   {
+#     "domain":              "acme.com",
+#     "breach_count":        3,
+#     "breached_accounts":   12,         # distinct email prefixes seen across breaches
+#     "breach_names":        ["Adobe", "LinkedIn", ...],
+#     "infostealer_found":   true,
+#     "infostealer_count":   2,          # infected machines linked to this domain
+#     "risk_level":          "HIGH",     # CRITICAL | HIGH | MEDIUM | LOW | CLEAN
+#     "risk_factors":        ["active_stealer_logs", "multiple_breaches"],
+#     "recommendation":      "...",
+#   }
+
+HIBP_DOMAIN_URL   = "https://haveibeenpwned.com/api/v3/breacheddomain/{domain}"
+MAX_VENDOR_DOMAINS = 10
+
+# Risk scoring — both signals contribute independently
+def _supply_chain_risk(breach_count: int, breached_accounts: int, stealer_count: int) -> tuple[str, list[str]]:
+    factors: list[str] = []
+    score = 0
+
+    if stealer_count > 0:
+        factors.append("active_stealer_logs")
+        score += 40 if stealer_count >= 3 else 30
+
+    if breach_count >= 5:
+        factors.append("many_breaches")
+        score += 20
+    elif breach_count >= 2:
+        factors.append("multiple_breaches")
+        score += 10
+    elif breach_count == 1:
+        factors.append("one_breach")
+        score += 5
+
+    if breached_accounts >= 50:
+        factors.append("high_account_exposure")
+        score += 20
+    elif breached_accounts >= 10:
+        factors.append("moderate_account_exposure")
+        score += 10
+
+    if score >= 60:
+        level = "CRITICAL"
+    elif score >= 35:
+        level = "HIGH"
+    elif score >= 15:
+        level = "MEDIUM"
+    elif score > 0:
+        level = "LOW"
+    else:
+        level = "CLEAN"
+
+    return level, factors
+
+
+def _check_vendor_domain(domain: str, hibp_key: str) -> dict:
+    """Run HIBP domain breach check + Cavalier infostealer check for one vendor domain."""
+    # --- HIBP domain breach check ---
+    breach_count      = 0
+    breached_accounts = 0
+    breach_names: list[str] = []
+    try:
+        url = HIBP_DOMAIN_URL.format(domain=urllib.parse.quote(domain, safe=""))
+        req = urllib.request.Request(
+            url,
+            headers={"hibp-api-key": hibp_key, "user-agent": "RelayShield-SupplyChain/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            # HIBP breacheddomain returns { "BreachName": ["email_prefix", ...], ... }
+            domain_data = json.loads(resp.read())
+        breach_count      = len(domain_data)
+        breached_accounts = sum(len(v) for v in domain_data.values())
+        breach_names      = list(domain_data.keys())
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            logger.warning("HIBP domain check failed domain=%s status=%d", domain, exc.code)
+    except Exception as exc:
+        logger.warning("HIBP domain check error domain=%s: %s", domain, exc)
+
+    # --- Cavalier infostealer domain check ---
+    stealer_count = 0
+    stealer_dates: list[str] = []
+    try:
+        url = f"{CAVALIER_DOMAIN_URL}?domain={urllib.parse.quote(domain, safe='')}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield-SupplyChain/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            cav_data      = json.loads(resp.read())
+        stealers      = cav_data.get("stealers", [])
+        stealer_count = len(stealers)
+        stealer_dates = [s.get("date_compromised", "") for s in stealers[:5] if s.get("date_compromised")]
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            logger.warning("Cavalier domain check failed domain=%s status=%d", domain, exc.code)
+    except Exception as exc:
+        logger.warning("Cavalier domain check error domain=%s: %s", domain, exc)
+
+    risk_level, risk_factors = _supply_chain_risk(breach_count, breached_accounts, stealer_count)
+
+    rec_map = {
+        "CRITICAL": (
+            "Immediate action required. Active infostealer infections at this vendor mean credentials "
+            "they hold for your systems may be compromised right now. Rotate any shared secrets, "
+            "revoke API tokens, and request an incident report from this vendor."
+        ),
+        "HIGH": (
+            "High risk. This vendor has significant breach and/or infostealer exposure. "
+            "Audit their access to your systems, enforce MFA on any shared portals, "
+            "and consider reducing their permission scope."
+        ),
+        "MEDIUM": (
+            "Moderate risk. This vendor has some breach history. Review what data and access "
+            "they hold in your environment and confirm they are following credential hygiene practices."
+        ),
+        "LOW": (
+            "Low risk. Minor breach exposure detected. No immediate action required "
+            "but include in your next vendor security review cycle."
+        ),
+        "CLEAN": "No breach or infostealer exposure found for this vendor domain.",
+    }
+
+    result = {
+        "domain":            domain,
+        "breach_count":      breach_count,
+        "breached_accounts": breached_accounts,
+        "breach_names":      breach_names[:10],   # cap list length in response
+        "infostealer_found": stealer_count > 0,
+        "infostealer_count": stealer_count,
+        "risk_level":        risk_level,
+        "risk_factors":      risk_factors,
+        "recommendation":    rec_map[risk_level],
+    }
+    if stealer_dates:
+        result["infostealer_dates"] = stealer_dates
+    return result
+
+
+def handle_supply_chain(params: dict) -> dict:
+    # Collect domains from both input keys
+    raw_domains: list[str] = list(params.get("vendor_domains") or [])
+    raw_emails:  list[str] = list(params.get("vendor_emails")  or [])
+
+    # Extract domain portion from any email addresses supplied
+    for email in raw_emails:
+        email = email.strip().lower()
+        if "@" in email:
+            raw_domains.append(email.split("@", 1)[1])
+
+    # Normalise + deduplicate
+    domains = list({d.strip().lower() for d in raw_domains if d.strip()})
+
+    if not domains:
+        return _err("supply_chain requires at least one entry in vendor_domains or vendor_emails")
+    if len(domains) > MAX_VENDOR_DOMAINS:
+        return _err(f"maximum {MAX_VENDOR_DOMAINS} vendor domains per call; {len(domains)} supplied")
+
+    hibp_key = _hibp_api_key()
+    results  = []
+    for domain in domains:
+        results.append(_check_vendor_domain(domain, hibp_key))
+
+    # Aggregate summary
+    risk_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "CLEAN": 0}
+    highest    = max(results, key=lambda r: risk_order.get(r["risk_level"], 0))
+    critical   = [r["domain"] for r in results if r["risk_level"] == "CRITICAL"]
+    high       = [r["domain"] for r in results if r["risk_level"] == "HIGH"]
+
+    logger.info(
+        "supply-chain domains=%d critical=%d high=%d",
+        len(domains), len(critical), len(high),
+    )
+    return _ok({
+        "domains_checked":   len(domains),
+        "highest_risk":      highest["risk_level"],
+        "critical_vendors":  critical,
+        "high_risk_vendors": high,
+        "results":           results,
+        "checked_at":        datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# INTEL-5 shared data — service severity classification (mirrors intel_monitor)
+# ---------------------------------------------------------------------------
+
+_INTEL5_SEVERITY: list[tuple[str, str, list[str]]] = [
+    ("CRITICAL", "Cloud Infrastructure",       ["console.aws.amazon.com", "console.cloud.google.com", "portal.azure.com", "app.cloudflare.com", "cloudflare.com"]),
+    ("CRITICAL", "Code Repository / CI-CD",    ["github.com", "gitlab.com", "bitbucket.org", "app.circleci.com", "app.travis-ci.com", "argocd"]),
+    ("CRITICAL", "Identity Provider",          ["okta.com", "auth0.com", "login.microsoftonline.com", "admin.google.com", "accounts.google.com"]),
+    ("HIGH",     "Payment Processor",          ["dashboard.stripe.com", "paypal.com", "braintreegateway.com"]),
+    ("HIGH",     "Domain Registrar / DNS",     ["godaddy.com", "namecheap.com", "name.com", "porkbun.com", "domains.google.com", "dnsimple.com"]),
+    ("HIGH",     "Security Tooling",           ["falcon.crowdstrike.com", "app.datadoghq.com", "app.pagerduty.com", "splunk.com", "sentinelone.com"]),
+    ("HIGH",     "Financial / Accounting",     ["quickbooks.intuit.com", "xero.com", "app.gusto.com"]),
+    ("MEDIUM",   "Developer / Infra SaaS",     ["vercel.com", "app.netlify.com", "heroku.com", "render.com", "digitalocean.com"]),
+    ("MEDIUM",   "Productivity / CRM SaaS",    ["slack.com", "notion.so", "app.hubspot.com", "salesforce.com", "linear.app", "atlassian.net", "jira.com"]),
+    ("MEDIUM",   "Communication",              ["zoom.us", "teams.microsoft.com", "discord.com"]),
+    ("LOW",      "Consumer / Social",          ["twitter.com", "x.com", "facebook.com", "instagram.com", "reddit.com", "linkedin.com"]),
+]
+
+
+def _intel5_classify(domain: str) -> tuple[str, str]:
+    domain = domain.lower().lstrip(".")
+    for severity, label, patterns in _INTEL5_SEVERITY:
+        for pat in patterns:
+            if pat in domain:
+                return severity, label
+    return "LOW", "General Web Service"
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/session-risk  /  POST /v1/payg/session-risk
+# ---------------------------------------------------------------------------
+# Queries the INTEL-5 stolen-sessions corpus (relayshield_stolen_sessions)
+# for active session hijack findings linked to the supplied email address.
+# Returns categorized stolen sessions with severity scores.
+#
+# Request:  { "email": "user@example.com" }
+# Response: {
+#   "email": "...",
+#   "found": true/false,
+#   "session_count": N,
+#   "highest_severity": "CRITICAL|HIGH|MEDIUM|LOW",
+#   "sessions": [
+#     { "domain": "github.com", "session_type": "cookie", "cookie_name": "user_session",
+#       "severity": "CRITICAL", "service_category": "Code Repository / CI-CD",
+#       "channel_source": "logsmarket", "ingested_at": "..." }
+#   ]
+# }
+
+STOLEN_SESSIONS_TABLE_API = "relayshield_stolen_sessions"
+
+
+def handle_session_risk(params: dict) -> dict:
+    email = (params.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return _err("email is required and must be a valid address")
+
+    try:
+        table = dynamodb.Table(STOLEN_SESSIONS_TABLE_API)
+        resp  = table.query(
+            IndexName="email-index",
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("matched_email").eq(email),
+        )
+        items = resp.get("Items", [])
+    except Exception as exc:
+        logger.exception("session-risk DynamoDB query failed email=%s: %s", email, exc)
+        return _err("session risk query failed — internal error", 500)
+
+    if not items:
+        return _ok({
+            "email":            email,
+            "found":            False,
+            "session_count":    0,
+            "highest_severity": None,
+            "sessions":         [],
+        })
+
+    severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+    sessions = sorted(items, key=lambda x: severity_order.get(x.get("severity", "LOW"), 0), reverse=True)
+
+    highest = sessions[0].get("severity", "LOW") if sessions else "LOW"
+
+    result_sessions = [
+        {
+            "domain":           s.get("domain", ""),
+            "session_type":     s.get("session_type", ""),
+            "cookie_name":      s.get("cookie_name", ""),
+            "severity":         s.get("severity", "LOW"),
+            "service_category": s.get("service_category", ""),
+            "channel_source":   s.get("channel_source", ""),
+            "ingested_at":      s.get("ingested_at", ""),
+        }
+        for s in sessions
+    ]
+
+    logger.info("session-risk email=%s found=%d highest=%s", email, len(sessions), highest)
+    return _ok({
+        "email":            email,
+        "found":            True,
+        "session_count":    len(sessions),
+        "highest_severity": highest,
+        "sessions":         result_sessions,
+        "action_required":  (
+            "IMMEDIATE: Log out of all listed services from a clean device and revoke active sessions. "
+            "Changing your password alone is insufficient — stolen session cookies bypass 2FA and "
+            "remain valid until explicitly invalidated."
+        ),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/identity-graph  /  POST /v1/payg/identity-graph
+# ---------------------------------------------------------------------------
+# Identity correlation — links an email to associated phones, usernames, and
+# domains seen alongside it in criminal channel dumps. Built from co-occurrence
+# data extracted by the INTEL-2 monitor (relayshield_identity_graph table).
+#
+# Customer value:
+#   • Pivot from one compromised identifier to find all others exposed in same dump
+#   • Correlation engine signal: if linked phone is SIM-swapped, alert email holder
+#   • B2A incident responders: full identity surface from a single compromised email
+#
+# Request:  { "email": "user@example.com" }
+# Response: {
+#   "email": "...", "found": bool, "correlated_identifiers": N,
+#   "correlated_phones": [...], "correlated_domains": [...],
+#   "sources": [...], "checked_at": "..."
+# }
+
+IDENTITY_GRAPH_TABLE_API = "relayshield_identity_graph"
+
+
+def handle_identity_graph(params: dict) -> dict:
+    email = (params.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return _err("email is required and must be a valid address")
+
+    try:
+        resp  = dynamodb.Table(IDENTITY_GRAPH_TABLE_API).query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("anchor").eq(email),
+        )
+        items = resp.get("Items", [])
+    except Exception as exc:
+        logger.exception("identity-graph query failed email=%s: %s", email, exc)
+        return _err("identity graph query failed — internal error", 500)
+
+    if not items:
+        return _ok({
+            "email":                   email,
+            "found":                   False,
+            "correlated_identifiers":  0,
+            "correlated_phones":       [],
+            "correlated_domains":      [],
+            "sources":                 [],
+            "checked_at":              datetime.now(timezone.utc).isoformat(),
+        })
+
+    phones  = list({i["correlated_id"] for i in items if i.get("correlated_type") == "phone"})
+    domains = list({i["correlated_id"] for i in items if i.get("correlated_type") == "domain"})
+    sources = list({i.get("source", "") for i in items if i.get("source")})
+
+    logger.info("identity-graph email=%s phones=%d domains=%d", email, len(phones), len(domains))
+    return _ok({
+        "email":                   email,
+        "found":                   True,
+        "correlated_identifiers":  len(phones) + len(domains),
+        "correlated_phones":       phones,
+        "correlated_domains":      domains,
+        "sources":                 sources,
+        "recommendation": (
+            "All listed identifiers were found alongside this email in criminal channel dumps. "
+            "Treat each as potentially compromised — change passwords and check accounts linked to "
+            "any of the correlated phone numbers or domains."
+        ),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# STIX/TAXII 2.1 — /v1/intel/taxii/*
+# ---------------------------------------------------------------------------
+# TAXII 2.1 compliant feed of RelayShield IOCs as STIX 2.1 Indicator objects.
+# Enterprise SIEMs (Splunk, Sentinel, Elastic, QRadar) can point their built-in
+# TAXII client at this endpoint and pull IOCs on a schedule automatically.
+#
+# Requires TI subscription API key (intel_access flag).
+#
+# TAXII 2.1 endpoints:
+#   GET /v1/intel/taxii/             — server discovery
+#   GET /v1/intel/taxii/collections/ — available collections
+#   GET /v1/intel/taxii/collections/iocs/objects/ — STIX Indicator objects
+#     ?added_after=<ISO8601>          — only IOCs added after this timestamp
+#     ?limit=<N>                      — page size (default 500, max 2000)
+#     ?next=<cursor>                  — pagination cursor
+
+import uuid as _uuid_mod
+
+
+def _ioc_to_stix(item: dict) -> dict | None:
+    """Convert a relayshield_intel_iocs record to a STIX 2.1 Indicator object."""
+    ioc_val  = item.get("ioc_value", "")
+    ioc_type = item.get("ioc_type", "")
+    seen_ts  = item.get("seen_ts", datetime.now(timezone.utc).isoformat())
+    malware  = item.get("malware", "")
+    channel  = item.get("channel", "")
+    category = item.get("category", "")
+
+    pattern_map = {
+        "ip":         f"[ipv4-addr:value = '{ioc_val}']",
+        "domain":     f"[domain-name:value = '{ioc_val}']",
+        "url":        f"[url:value = '{ioc_val}']",
+        "hash_sha256":f"[file:hashes.SHA-256 = '{ioc_val}']",
+        "email":      f"[email-message:from_ref.value = '{ioc_val}']",
+        "phone":      None,    # not a standard STIX observable
+        "wallet_eth": None,
+        "wallet_btc": None,
+        "wallet_sol": None,
+        "wallet_ton": None,
+    }
+    pattern = pattern_map.get(ioc_type)
+    if pattern is None:
+        return None
+
+    indicator_id = f"indicator--{str(_uuid_mod.uuid5(_uuid_mod.NAMESPACE_URL, f'relayshield:{ioc_val}'))}"
+    labels       = ["malicious-activity"]
+    if malware and malware not in ("None", "n/a", ""):
+        labels.append(f"malware:{malware[:50]}")
+
+    return {
+        "type":          "indicator",
+        "spec_version":  "2.1",
+        "id":            indicator_id,
+        "created":       seen_ts,
+        "modified":      seen_ts,
+        "name":          ioc_val,
+        "description":   f"Observed in {channel} ({category})" + (f" — {malware}" if malware and malware not in ("None","n/a","") else ""),
+        "pattern":       pattern,
+        "pattern_type":  "stix",
+        "valid_from":    seen_ts,
+        "labels":        labels,
+        "external_references": [{"source_name": "relayshield", "url": "https://relayshield.net"}],
+    }
+
+
+def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/taxii+json;version=2.1",
+            "Access-Control-Allow-Origin": "*",
+        },
+        "body": json.dumps({
+            "title":       "RelayShield Threat Intelligence",
+            "description": "RelayShield TAXII 2.1 server — 200,000+ IOCs from criminal Telegram channels and 11 authoritative feeds",
+            "contact":     "relayshieldadmin@gmail.com",
+            "api_roots":   ["https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/intel/taxii/"],
+        }),
+    }
+
+
+def handle_taxii_collections(params: dict, api_key_record: dict) -> dict:
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/taxii+json;version=2.1"},
+        "body": json.dumps({
+            "collections": [
+                {
+                    "id":          "relayshield-iocs",
+                    "title":       "RelayShield IOCs",
+                    "description": "Malicious IPs, domains, URLs, and file hashes from 8 criminal Telegram channels and 11 authoritative threat feeds. 450+ malware families tracked.",
+                    "can_read":    True,
+                    "can_write":   False,
+                    "media_types": ["application/stix+json;version=2.1"],
+                }
+            ]
+        }),
+    }
+
+
+def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict) -> dict:
+    added_after = query_params.get("added_after", "")
+    try:
+        limit = min(int(query_params.get("limit", 500)), 2000)
+    except (ValueError, TypeError):
+        limit = 500
+
+    table = dynamodb.Table(INTEL_IOCS_TABLE)
+    scan_kwargs: dict = {
+        "ProjectionExpression":     "ioc_value, ioc_type, seen_ts, malware, channel, category",
+        "FilterExpression":         boto3.dynamodb.conditions.Attr("ioc_type").is_in(
+                                        ["ip", "domain", "url", "hash_sha256", "email"]
+                                    ),
+        "Limit":                    limit * 3,  # over-fetch to account for type filtering
+    }
+    if added_after:
+        scan_kwargs["FilterExpression"] = (
+            scan_kwargs["FilterExpression"] &
+            boto3.dynamodb.conditions.Attr("seen_ts").gte(added_after)
+        )
+    if cursor := query_params.get("next"):
+        try:
+            scan_kwargs["ExclusiveStartKey"] = json.loads(cursor)
+        except Exception:
+            pass
+
+    try:
+        resp  = table.scan(**scan_kwargs)
+        items = resp.get("Items", [])
+        next_key = resp.get("LastEvaluatedKey")
+    except Exception as exc:
+        logger.exception("TAXII objects scan failed: %s", exc)
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/taxii+json;version=2.1"},
+            "body": json.dumps({"title": "Internal Server Error", "description": str(exc)}),
+        }
+
+    indicators = []
+    for item in items:
+        stix_obj = _ioc_to_stix(item)
+        if stix_obj:
+            indicators.append(stix_obj)
+        if len(indicators) >= limit:
+            break
+
+    bundle = {
+        "type":           "bundle",
+        "id":             f"bundle--{str(_uuid_mod.uuid4())}",
+        "spec_version":   "2.1",
+        "objects":        indicators,
+    }
+
+    response_body = {"objects": indicators, "more": bool(next_key)}
+    if next_key:
+        response_body["next"] = json.dumps(next_key)
+
+    logger.info("TAXII objects returned=%d more=%s", len(indicators), bool(next_key))
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/stix+json;version=2.1"},
+        "body": json.dumps(response_body),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Threat Intelligence API — /v1/intel/telegram
 # ---------------------------------------------------------------------------
 # Subscription endpoint (API key + intel_access flag required).
@@ -1515,7 +2341,7 @@ def handle_infostealer(params: dict) -> dict:
 
 def handle_intel_telegram(params: dict, api_key_record: dict | None = None) -> dict:
     # Verify caller has intel_access — TI API subscribers get this flag provisioned
-    if api_key_record and not api_key_record.get("intel_access"):
+    if not api_key_record or not api_key_record.get("intel_access"):
         return {
             "statusCode": 403,
             "headers": {"Content-Type": "application/json"},
@@ -1524,6 +2350,12 @@ def handle_intel_telegram(params: dict, api_key_record: dict | None = None) -> d
                 "error": "Threat Intelligence API access required. Upgrade at relayshield.net/developers.",
             }),
         }
+
+    # Monthly call cap — $499/mo tier capped at 10K, $999/mo unlimited.
+    # Fails safe to the capped tier if intel_plan_tier was never set.
+    quota_error = _check_and_increment_intel_quota(api_key_record["api_key"], api_key_record)
+    if quota_error:
+        return quota_error
 
     # Collect IOC values to query
     targets: list[tuple[str, str]] = []
@@ -2127,6 +2959,9 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/nft-security":          handle_nft_security,
         "/v1/payg/wallet-screen-batch":   handle_wallet_screen_batch,
         "/v1/payg/infostealer":           handle_infostealer,
+        "/v1/payg/supply-chain":          handle_supply_chain,
+        "/v1/payg/session-risk":          handle_session_risk,
+        "/v1/payg/identity-graph":        handle_identity_graph,
     }
     handler = payg_routes.get(path)
     if not handler:
@@ -2138,6 +2973,68 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     except Exception as exc:
         logger.exception("Unhandled error in PAYG %s: %s", path, exc)
         return _err("internal server error", 500)
+
+
+# ---------------------------------------------------------------------------
+# Threat Intelligence API — /v1/intel/cve
+# ---------------------------------------------------------------------------
+# Request: POST /v1/intel/cve
+#   { "cve_id": "CVE-2024-1234" }   — exact CVE ID lookup
+#   { "keyword": "apache" }          — case-insensitive keyword scan across
+#                                      vendor_project, product, vulnerability_name
+#
+# Response:
+#   { ok: true, data: { count: int, results: [...] } }
+# ---------------------------------------------------------------------------
+
+def handle_intel_cve(params: dict, api_key_record: dict | None = None) -> dict:
+    cve_id  = (params.get("cve_id") or "").strip().upper()
+    keyword = (params.get("keyword") or "").strip().lower()
+
+    if not cve_id and not keyword:
+        return _err("cve_id or keyword is required")
+
+    table = dynamodb.Table(INTEL_CVE_TABLE)
+
+    if cve_id:
+        try:
+            resp = table.get_item(Key={"cve_id": cve_id})
+            item = resp.get("Item")
+        except Exception as exc:
+            logger.error("cve lookup failed cve_id=%s: %s", cve_id, exc)
+            return _err("CVE lookup failed", 500)
+
+        if not item:
+            return _ok({"count": 0, "results": []})
+
+        item.pop("ttl", None)
+        return _ok({"count": 1, "results": [item]})
+
+    # Keyword scan — scan table and filter in Python (table is small, <2K rows)
+    try:
+        resp  = table.scan()
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp:
+            resp  = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+            items.extend(resp.get("Items", []))
+    except Exception as exc:
+        logger.error("cve keyword scan failed keyword=%s: %s", keyword, exc)
+        return _err("CVE keyword scan failed", 500)
+
+    matches = []
+    for item in items:
+        haystack = " ".join([
+            item.get("vendor_project", ""),
+            item.get("product", ""),
+            item.get("vulnerability_name", ""),
+            item.get("short_description", ""),
+        ]).lower()
+        if keyword in haystack:
+            item.pop("ttl", None)
+            matches.append(item)
+
+    matches.sort(key=lambda x: x.get("date_added", ""), reverse=True)
+    return _ok({"count": len(matches), "results": matches[:50]})
 
 
 # ---------------------------------------------------------------------------
@@ -2156,6 +3053,7 @@ ROUTES = {
     "/v1/token-security":   handle_token_security,
     "/v1/nft-security":     handle_nft_security,
     "/v1/intel/telegram":   handle_intel_telegram,    # TI API — requires intel_access flag
+    "/v1/intel/cve":        handle_intel_cve,         # CISA KEV lookup by CVE ID or keyword
 }
 
 PAYG_PATHS = set(PAYG_PRICE_UNITS.keys()) | {"/v1/payg/result/"}
@@ -2178,6 +3076,25 @@ def lambda_handler(event: dict, context) -> dict:
             "payg_endpoints": list(PAYG_PRICE_UNITS.keys()) + ["GET /v1/payg/result/{analysis_id}"],
             "payg_note": "x402 payment required — USDC on Base. No API key needed.",
         })
+
+    # TAXII 2.1 endpoints (GET, intel_access required)
+    if path.startswith("/v1/intel/taxii"):
+        headers    = event.get("headers") or {}
+        api_key    = (headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or
+                      headers.get("X-API-Key") or headers.get("x-api-key", ""))
+        key_record = _verify_rs_api_key(api_key) if api_key else None
+        if not key_record or not key_record.get("intel_access"):
+            return {"statusCode": 401, "headers": {"Content-Type": "application/taxii+json;version=2.1"},
+                    "body": json.dumps({"title": "Unauthorized", "description": "TI subscription required. Pass your RS API key as X-RS-API-KEY."})}
+        qp = event.get("queryStringParameters") or {}
+        if path == "/v1/intel/taxii/" or path == "/v1/intel/taxii":
+            return handle_taxii_discovery({}, key_record)
+        if path in ("/v1/intel/taxii/collections/", "/v1/intel/taxii/collections"):
+            return handle_taxii_collections({}, key_record)
+        if path.startswith("/v1/intel/taxii/collections/iocs/objects"):
+            return handle_taxii_objects({}, key_record, qp)
+        return {"statusCode": 404, "headers": {"Content-Type": "application/taxii+json;version=2.1"},
+                "body": json.dumps({"title": "Not Found"})}
 
     # Stripe metered billing routes (RS API key verified inside Lambda)
     if path.startswith("/v1/metered/"):
@@ -2202,7 +3119,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     params = _body(event)
     try:
-        if path == "/v1/intel/telegram":
+        if path in ("/v1/intel/telegram", "/v1/intel/cve"):
             headers    = event.get("headers") or {}
             api_key    = (headers.get("X-API-Key") or headers.get("x-api-key") or
                           headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key", ""))

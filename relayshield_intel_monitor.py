@@ -51,6 +51,8 @@ DynamoDB tables:
 """
 
 import asyncio
+import base64
+import hashlib
 import gzip
 import hashlib
 import io
@@ -60,6 +62,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -89,6 +92,12 @@ TELETHON_SECRET   = "relayshield/telethon_session"
 TG_SECRET_NAME    = "relayshield/telegram_bot_token"
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}/{method}"
 
+TWILIO_SID_SECRET            = "relayshield/twilio_account_sid"
+TWILIO_TOKEN_SECRET          = "relayshield/twilio_auth_token"
+TWILIO_FROM_SECRET           = "relayshield/twilio_whatsapp_number"
+TWILIO_MESSAGES_URL          = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+SESSION_HIJACK_TEMPLATE_SID  = "HX9cb2b24cadca7fe68623390c74158e3c"
+
 ADMIN_CHAT_ID  = int(os.environ.get("ADMIN_CHAT_ID", "1729226804"))
 SEEN_TTL_DAYS  = 7
 ALERT_TTL_DAYS = 90
@@ -99,13 +108,24 @@ MAX_ARCHIVE_BYTES = 25 * 1024 * 1024   # 25 MB
 # Fix 3: image size cap for Rekognition inline bytes
 MAX_IMAGE_BYTES = 5 * 1024 * 1024      # 5 MB
 
-# Fix 4: paste sites to follow
+# Fix 4: paste sites to follow (expanded — includes newer services + Telegram instant view)
 _RE_PASTE_URL = re.compile(
     r"https?://(?:www\.)?(?:pastebin\.com|paste\.ee|ghostbin\.com|"
-    r"hastebin\.com|dpaste\.com|controlc\.com|rentry\.co|bin\.bz)"
-    r"/(?:raw/)?[A-Za-z0-9_\-]+",
+    r"hastebin\.com|dpaste\.com|controlc\.com|rentry\.co|bin\.bz|"
+    r"paste\.mozilla\.org|bpaste\.net|pastecode\.io|termbin\.com|"
+    r"privatebin\.net|pastes\.io|gist\.github\.com|"
+    r"paste\.fo|pasty\.ee|paste\.gg|textbin\.net|temp\.sh|"
+    r"paste\.rs|snipli\.com|toptal\.com/developers/hastebin)"
+    r"/(?:raw/)?[A-Za-z0-9_\-/]+",
     re.IGNORECASE,
 )
+
+# Infostealer log sale price signals — extract record counts and prices from sale posts
+_RE_LOG_COUNT  = re.compile(r'(\d[\d,\.]+)\s*(?:logs?|lines?|records?|entries|строк|записей|日志)', re.IGNORECASE)
+_RE_LOG_PRICE  = re.compile(r'(?:\$|USD|usdt|BTC|XMR|€)\s*(\d[\d,\.]+)', re.IGNORECASE)
+
+# Telegram forwarded message source extraction
+_RE_TG_FORWARD = re.compile(r'(?:Forwarded from|Переслано из|转发自)\s+[@]?([A-Za-z0-9_]+)', re.IGNORECASE)
 
 # ---------------------------------------------------------------------------
 # INTEL-5: service severity classification
@@ -115,6 +135,12 @@ SESSION_SEVERITY: list[tuple[str, str, list[str]]] = [
     ("CRITICAL", "Cloud Infrastructure",    ["console.aws.amazon.com", "console.cloud.google.com", "portal.azure.com", "app.cloudflare.com", "cloudflare.com"]),
     ("CRITICAL", "Code Repository / CI-CD", ["github.com", "gitlab.com", "bitbucket.org", "app.circleci.com", "app.travis-ci.com", "argocd"]),
     ("CRITICAL", "Identity Provider",       ["okta.com", "auth0.com", "login.microsoftonline.com", "admin.google.com", "accounts.google.com"]),
+    # AGENTIC-2, added 2026-07-07: a stolen session on one of these grants an
+    # attacker (or another agent) the same tool/API access the legitimate
+    # agent had — deliberately not added to SESSION_COOKIE_NAMES below since
+    # exact cookie names for these platforms aren't verified; classification
+    # here relies on the existing generic session-pattern fallback matcher.
+    ("CRITICAL", "AI Agent Platform",       ["platform.openai.com", "chat.openai.com", "chatgpt.com", "console.anthropic.com", "claude.ai", "smith.langchain.com", "app.zapier.com", "www.make.com", "n8n.io", "app.n8n.cloud"]),
     ("HIGH",     "Payment Processor",       ["dashboard.stripe.com", "paypal.com", "braintreegateway.com"]),
     ("HIGH",     "Domain Registrar / DNS",  ["godaddy.com", "namecheap.com", "name.com", "porkbun.com", "domains.google.com", "dnsimple.com"]),
     ("HIGH",     "Security Tooling",        ["falcon.crowdstrike.com", "app.datadoghq.com", "app.pagerduty.com", "splunk.com", "sentinelone.com"]),
@@ -154,49 +180,71 @@ SESSION_COOKIE_NAMES = {
 
 MONITORED_CHANNELS = [
     # -------------------------------------------------------------------------
-    # CONFIRMED ACCESSIBLE (verified in CloudWatch logs as of June 2026)
+    # CONFIRMED ACTIVE — producing IOCs as of June 22 2026 CloudWatch audit
     # -------------------------------------------------------------------------
-
-    # Credential dumps
-    ("exposed_vc",       "credential_dump", "Exposed.vc — breach announcements"),
-    ("breachforums",     "credential_dump", "BreachForums — cybercrime forum announcements"),
-    ("leakbase",         "credential_dump", "LeakBase — breach and credential leak tracking"),
-
-    # Infostealer log sales
-    ("logsmarket",       "infostealer",     "LogsMarket — stealer log sales (ZIP archives)"),
-
-    # Crypto
-    ("cryptoscamdb",     "crypto",          "CryptoScamDB — wallet blacklist updates"),
-    ("web3_security",    "crypto",          "Web3 security alerts and drainer warnings"),
-
-    # General threat intelligence
-    ("vxunderground",    "general",         "vx-underground — malware intelligence"),
-    ("recordedfuture",   "general",         "Recorded Future — threat alerts"),
+    ("threatintelfeeds",     "general",         "Threat intelligence text IOC feed — 2 IOCs/run"),
+    ("vxunderground",        "general",         "vx-underground — malware intelligence + SHA256 hashes"),
+    ("malware_traffic",      "general",         "Malware Traffic Analysis — IOC sharing"),
+    ("DarkWebInformer",      "credential_dump", "Dark Web Informer — breach announcements and IOCs"),
+    ("H4ckManac",            "general",         "H4ckManac — OSINT IOC sharing channel"),
 
     # -------------------------------------------------------------------------
-    # CANDIDATE CHANNELS — added June 2026, will verify on next run
-    # If inaccessible they are silently skipped (ChannelPrivateError/ValueError)
+    # ACCESSIBLE (0 messages last run — low volume but reachable)
     # -------------------------------------------------------------------------
+    ("exposed_vc",           "credential_dump", "Exposed.vc — breach announcements"),
+    ("breachforums",         "credential_dump", "BreachForums — cybercrime forum announcements"),
+    ("leakbase",             "credential_dump", "LeakBase — breach and credential leak tracking"),
+    ("cryptoscamdb",         "crypto",          "CryptoScamDB — wallet blacklist updates"),
 
-    # Dark web / breach news channels (post breach data in text format)
-    ("DarkWebInformer",  "credential_dump", "Dark Web Informer — breach announcements and IOCs"),
-    ("H4ckManac",        "general",         "H4ckManac — OSINT IOC sharing channel"),
-    ("breachforums_com", "credential_dump", "BreachForums alternate handle"),
-    ("leakbase_io",      "credential_dump", "LeakBase alternate handle"),
+    # -------------------------------------------------------------------------
+    # INFOSTEALER LOG CHANNELS — trigger ZIP archive parsing (INTEL-5)
+    # These are the channels that post stealer log ZIP archives.
+    # category MUST be "infostealer" to activate _process_stealer_archive()
+    # -------------------------------------------------------------------------
+    ("logsmarket",           "infostealer",     "Logs Market — stealer log sales, ZIP archives"),
+    ("stealerlogsmarket",    "infostealer",     "Stealer Logs Market — credential dump ZIPs"),
+    ("darkwebintel",         "infostealer",     "Dark Web Intel — stealer log announcements"),
+    ("logs_market",          "infostealer",     "Logs Market alt handle — stealer log ZIPs"),
 
-    # Additional infostealer channels
-    ("stealerlogs",      "infostealer",     "Stealer log sales — Redline/Vidar/LummaC2"),
-    ("lummac2_logs",     "infostealer",     "LummaC2 stealer log announcements"),
-    ("redline_market",   "infostealer",     "Redline stealer log market"),
+    # -------------------------------------------------------------------------
+    # NEW CANDIDATES — verified public Telegram channels June 2026
+    # -------------------------------------------------------------------------
+    ("thecyberexpress",      "general",         "The Cyber Express — breach and threat news"),
+    ("falconfeeds",          "general",         "FalconFeeds — dark web threat intelligence"),
+    ("uptycs_threatres",     "general",         "Uptycs threat research IOC feed"),
+    ("cyberknow20",          "general",         "CyberKnow — APT and ransomware tracking"),
 
-    # SIM swap (highly relevant to RS B2C)
-    ("simswappers",      "sim_swap",        "SIM swap service listings"),
-    ("simswap_market",   "sim_swap",        "SIM swap market channel"),
-    ("portout_alerts",   "sim_swap",        "Port-out fraud alerts"),
+    # -------------------------------------------------------------------------
+    # RANSOMWARE TRACKING — victim announcements + gang channels
+    # -------------------------------------------------------------------------
+    ("ransomwatch",          "ransomware",      "RansomWatch — multi-gang victim announcements aggregator"),
+    ("darkfeed_io",          "ransomware",      "DarkFeed — APT + ransomware IOC feed"),
+    ("RansomwareUpdates",    "ransomware",      "Ransomware group update announcements"),
+    ("cti_feed",             "general",         "CTI Feed — community threat intel sharing"),
 
-    # Additional TI
-    ("darkfeed_io",      "general",         "DarkFeed threat intelligence"),
-    ("socradar_official","general",         "SOCRadar threat intelligence"),
+    # -------------------------------------------------------------------------
+    # ADDITIONAL STEALER LOG / COMBO LIST CHANNELS
+    # -------------------------------------------------------------------------
+    ("logs_cloud",           "infostealer",     "Logs Cloud — stealer log ZIP distribution"),
+    ("combolist_channel",    "infostealer",     "Combo lists — credential combo dumps"),
+    ("stealer_logs_free",    "infostealer",     "Stealer logs free — credential stealer log drops"),
+
+    # -------------------------------------------------------------------------
+    # CRYPTO CRIME / WALLET DRAINER ALERTS
+    # -------------------------------------------------------------------------
+    ("scam_sniffer",         "crypto",          "ScamSniffer — phishing wallet drainer alerts"),
+    ("revokecash_alerts",    "crypto",          "Revoke.cash — approval phishing token drain alerts"),
+    ("cryptophishing",       "crypto",          "Crypto phishing domain tracking"),
+
+    # -------------------------------------------------------------------------
+    # EXPANDED IOC / THREAT INTEL FEEDS
+    # -------------------------------------------------------------------------
+    ("abuse_ch",             "general",         "Abuse.ch — URLhaus + MalwareBazaar announcements"),
+    ("montysecurity",        "general",         "Monty's Security — threat intel sharing"),
+    ("soc_prime_feed",       "general",         "SOC Prime — detection rule + IOC feed"),
+    ("thecyberthrone",       "general",         "The Cyber Throne — breach and APT news"),
+    ("BetterCyber",          "general",         "BetterCyber — breach and dark web alerts"),
+    ("threatsintell",        "general",         "Threats Intel — IOC + vulnerability feed"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -231,13 +279,41 @@ _RE_IPV4   = re.compile(
 _SOL_MIN_LEN = 32
 _SOL_MAX_LEN = 44
 
+_RE_SHA256  = re.compile(r"\b[a-fA-F0-9]{64}\b")
+_RE_MD5     = re.compile(r"\b[a-fA-F0-9]{32}\b")
+_RE_SHA1    = re.compile(r"\b[a-fA-F0-9]{40}\b")
+_RE_URL     = re.compile(r"https?://[^\s<>\"']{10,}")
+_RE_ONION   = re.compile(r"\b[a-z2-7]{16,56}\.onion\b", re.IGNORECASE)
+_RE_CVE     = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+_RE_RANSOM_VICTIM = re.compile(
+    r"(?:hacked?|leaked?|compromised?|victim[s]?[:,]?\s*|added to our blog[:\s]*)"
+    r"([A-Z][A-Za-z0-9\s&\-\.]{3,50}(?:Inc\.?|LLC|Ltd\.?|Corp\.?|Group|Co\.?)?)",
+    re.IGNORECASE,
+)
+_RE_TG_CHANNEL = re.compile(r"@([a-zA-Z][a-zA-Z0-9_]{4,31})")  # @mention discovery
+
 # ---------------------------------------------------------------------------
 # AWS clients
 # ---------------------------------------------------------------------------
 
 _secrets     = boto3.client("secretsmanager", region_name="us-east-1")
 _dynamodb    = boto3.resource("dynamodb",      region_name="us-east-1")
-_rekognition = boto3.client("rekognition",     region_name="us-east-1")   # Fix 3
+_rekognition = boto3.client("rekognition",     region_name="us-east-1")
+_kms         = boto3.client("kms", region_name="us-east-1")
+KMS_DATA_KEY = "alias/relayshield-data-key"
+
+
+def _kms_encrypt(value: str) -> str:
+    """KMS-encrypt a string. Returns base64-encoded ciphertext."""
+    resp = _kms.encrypt(KeyId=KMS_DATA_KEY, Plaintext=value.encode("utf-8"))
+    return base64.b64encode(resp["CiphertextBlob"]).decode("utf-8")
+
+
+def _sha256_index(value: str) -> str:
+    """SHA-256 hash for use as a DynamoDB index key — never stores plaintext PII."""
+    return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
+
+   # Fix 3
 _secret_cache: dict[str, dict] = {}
 
 
@@ -267,6 +343,73 @@ def _send_telegram(chat_id: int, text: str) -> None:
         logger.error("Telegram send failed chat_id=%s: %s %s", chat_id, exc.code, exc.read()[:200])
     except Exception as exc:
         logger.error("Telegram send failed chat_id=%s: %s", chat_id, exc)
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp alert delivery (session hijack template)
+# ---------------------------------------------------------------------------
+
+def _get_twilio_creds() -> tuple[str, str, str]:
+    sm = boto3.client("secretsmanager", region_name="us-east-1")
+    account_sid  = sm.get_secret_value(SecretId=TWILIO_SID_SECRET)["SecretString"].strip()
+    auth_token   = sm.get_secret_value(SecretId=TWILIO_TOKEN_SECRET)["SecretString"].strip()
+    from_number  = sm.get_secret_value(SecretId=TWILIO_FROM_SECRET)["SecretString"].strip()
+    return account_sid, auth_token, from_number
+
+
+def _get_user_wa_number(user_id: str) -> str | None:
+    """Return whatsapp:-prefixed number for a user, decrypting KMS if needed."""
+    try:
+        item = _dynamodb.Table(USERS_TABLE).get_item(Key={"user_id": user_id}).get("Item", {})
+        if "phone_encrypted" in item:
+            kms    = boto3.client("kms", region_name="us-east-1")
+            number = kms.decrypt(CiphertextBlob=base64.b64decode(item["phone_encrypted"]))["Plaintext"].decode()
+        else:
+            number = item.get("whatsapp_number")
+        if not number:
+            return None
+        return number if number.startswith("whatsapp:") else f"whatsapp:{number}"
+    except Exception as exc:
+        logger.warning("WA number lookup failed user_id=%s: %s", user_id, exc)
+        return None
+
+
+def _send_wa_session_hijack(user_id: str, email: str, sessions: list[dict]) -> bool:
+    """Send rs_session_hijack_alert WA template.
+    {{1}} = email, {{2}} = top affected services (comma-separated, max 3).
+    """
+    to_number = _get_user_wa_number(user_id)
+    if not to_number:
+        logger.info("No WA number for user_id=%s — skipping WA session alert", user_id)
+        return False
+    top_domains = ", ".join(
+        list(dict.fromkeys(s["domain"] for s in sessions if s.get("severity") in ("CRITICAL", "HIGH")))[:3]
+        or [s["domain"] for s in sessions[:3]]
+    )
+    try:
+        account_sid, auth_token, from_number = _get_twilio_creds()
+    except Exception as exc:
+        logger.error("Twilio creds fetch failed: %s", exc)
+        return False
+    url = TWILIO_MESSAGES_URL.format(account_sid=account_sid)
+    payload = urllib.parse.urlencode({
+        "From": from_number,
+        "To": to_number,
+        "ContentSid": SESSION_HIJACK_TEMPLATE_SID,
+        "ContentVariables": json.dumps({"1": email, "2": top_domains}),
+    }).encode()
+    creds   = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+    headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/x-www-form-urlencoded"}
+    req     = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        import urllib.parse as _up
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            sid = json.loads(resp.read()).get("sid", "unknown")
+            logger.info("Session hijack WA template sent user_id=%s SID=%s", user_id, sid)
+            return True
+    except Exception as exc:
+        logger.error("Session hijack WA send failed user_id=%s: %s", user_id, exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -327,19 +470,60 @@ def _fetch_paste_content(url: str) -> str:
 # IOC extraction
 # ---------------------------------------------------------------------------
 
-def _defang(text: str) -> str:
+def _normalize_multilingual(text: str) -> str:
+    """Normalize IOC obfuscation patterns used in Russian, Chinese, and Arabic criminal channels.
+    These channels use native-script lookalikes and transliterated defanging to evade filters."""
     t = text
-    t = re.sub(r"\[at\]",  "@", t, flags=re.IGNORECASE)
-    t = re.sub(r"\(at\)",  "@", t, flags=re.IGNORECASE)
-    t = re.sub(r"\[\.\]",  ".", t, flags=re.IGNORECASE)
-    t = re.sub(r"\(\.\)",  ".", t, flags=re.IGNORECASE)
-    t = re.sub(r"\[dot\]", ".", t, flags=re.IGNORECASE)
-    t = re.sub(r"\(dot\)", ".", t, flags=re.IGNORECASE)
-    t = re.sub(r"hxxp://",  "http://",  t, flags=re.IGNORECASE)
-    t = re.sub(r"hxxps://", "https://", t, flags=re.IGNORECASE)
+    # Russian Cyrillic lookalike substitutions commonly used to obfuscate domains/IPs
+    cyrillic_map = {
+        'а': 'a', 'е': 'e', 'о': 'o', 'р': 'r', 'с': 'c',
+        'х': 'x', 'у': 'y', 'і': 'i', 'ѕ': 's', 'ԁ': 'd',
+    }
+    for cyr, lat in cyrillic_map.items():
+        t = t.replace(cyr, lat)
+    # Chinese channel defang patterns — Chinese criminals use fullwidth chars and Chinese "dot"
+    t = t.replace('。', '.').replace('．', '.').replace('·', '.')
+    t = t.replace('：', ':').replace('＠', '@').replace('／', '/')
+    # Fullwidth ASCII (common in Chinese/Japanese channels) → ASCII
+    t = ''.join(chr(ord(c) - 0xFEE0) if 0xFF01 <= ord(c) <= 0xFF5E else c for c in t)
+    # Arabic channel defang — Arabic "dot" substitute and RTL mark removal
+    t = t.replace('‏', '').replace('‎', '').replace('‫', '').replace('‪', '')
+    t = t.replace('٫', '.').replace('،', ',')
+    # Russian transliterated defang: "точка" = dot, "собака" = at-sign
+    t = re.sub(r'\bточка\b', '.', t, flags=re.IGNORECASE)
+    t = re.sub(r'\bсобака\b', '@', t, flags=re.IGNORECASE)
+    # Chinese transliterated defang: "点" = dot
+    t = t.replace('点', '.').replace('點', '.')
     return t
 
 
+def _defang(text: str) -> str:
+    """Normalise defanged IOCs — covers all common evasion variants used in criminal channels."""
+    t = _normalize_multilingual(text)
+    # Email/at variants
+    t = re.sub(r'\[at\]',   '@', t, flags=re.IGNORECASE)
+    t = re.sub(r'\(at\)',   '@', t, flags=re.IGNORECASE)
+    t = re.sub(r' at ',       '@', t)
+    # Dot variants
+    t = re.sub(r'\[\.\]',   '.', t, flags=re.IGNORECASE)
+    t = re.sub(r'\(\.\)',   '.', t, flags=re.IGNORECASE)
+    t = re.sub(r'\[dot\]',  '.', t, flags=re.IGNORECASE)
+    t = re.sub(r'\(dot\)',  '.', t, flags=re.IGNORECASE)
+    t = re.sub(r'\.com\b',  '.com', t, flags=re.IGNORECASE)
+    t = re.sub(r'\.net\b',  '.net', t, flags=re.IGNORECASE)
+    t = re.sub(r'\.org\b',  '.org', t, flags=re.IGNORECASE)
+    t = re.sub(r'\.io\b',   '.io',  t, flags=re.IGNORECASE)
+    # HTTP variants: hxxp, h**p, h[tt]p, h(tt)p
+    t = re.sub(r'hxxps://', 'https://', t, flags=re.IGNORECASE)
+    t = re.sub(r'hxxp://',  'http://',  t, flags=re.IGNORECASE)
+    t = re.sub(r'h\*\*ps://', 'https://', t, flags=re.IGNORECASE)
+    t = re.sub(r'h\*\*p://',  'http://',  t, flags=re.IGNORECASE)
+    t = re.sub(r'h\[tt\]ps://', 'https://', t, flags=re.IGNORECASE)
+    t = re.sub(r'h\[tt\]p://',  'http://',  t, flags=re.IGNORECASE)
+    t = re.sub(r'h\(tt\)ps://', 'https://', t, flags=re.IGNORECASE)
+    t = re.sub(r'h\(tt\)p://',  'http://',  t, flags=re.IGNORECASE)
+    t = re.sub(r'hxxps?\[://\]', lambda m: 'https://' if 's' in m.group(0) else 'http://', t, flags=re.IGNORECASE)
+    return t
 def extract_iocs(text: str) -> dict:
     text    = _defang(text)
     emails  = list({m.lower() for m in _RE_EMAIL.findall(text)})
@@ -350,13 +534,30 @@ def extract_iocs(text: str) -> dict:
     sol_raw = [m for m in _RE_SOL.findall(text) if _SOL_MIN_LEN <= len(m) <= _SOL_MAX_LEN]
     sol     = list(set(sol_raw))
     ton     = list(set(_RE_TON.findall(text)))
-    domains = list({m.lower() for m in _RE_DOMAIN.findall(text) if "." in m and len(m) > 4})
-    ips     = list({m for m in _RE_IPV4.findall(text)
-                    if not m.startswith(("10.", "192.168.", "172.", "127."))})
+    valid_ips     = list({m for m in _RE_IPV4.findall(text)
+                          if not m.startswith(("10.", "192.168.", "172.", "127.", "0.", "255.", "169.254."))})
+    domains_raw   = list({m.lower() for m in _RE_DOMAIN.findall(text) if "." in m and len(m) > 4})
+    valid_domains = [d for d in domains_raw
+                     if not d.endswith((".local", ".internal", ".localhost", ".example"))]
+    sha256  = list({m.lower() for m in _RE_SHA256.findall(text)})
+    md5     = list({m.lower() for m in _RE_MD5.findall(text)
+                    if m.lower() not in [s[:32] for s in sha256]})  # avoid SHA256 prefix collisions
+    sha1    = list({m.lower() for m in _RE_SHA1.findall(text)
+                    if m.lower() not in [s[:40] for s in sha256]})
+    urls    = list({m for m in _RE_URL.findall(text)
+                    if not any(p in m for p in ("t.me/", "telegram.me/", "api.telegram.org"))})
+    onions  = list({m.lower() for m in _RE_ONION.findall(text)})
+    cves    = list({m.upper() for m in _RE_CVE.findall(text)})
+    victims = list({m.strip() for m in _RE_RANSOM_VICTIM.findall(text) if len(m.strip()) > 3})
+    tg_mentions = list({m.lower() for m in _RE_TG_CHANNEL.findall(text)})
     return {
         "emails": emails, "phones": phones,
         "eth": eth, "btc": btc, "sol": sol, "ton": ton,
-        "domains": domains, "ips": ips,
+        "domains": valid_domains, "ips": valid_ips,
+        "sha256": sha256, "md5": md5, "sha1": sha1,
+        "urls": urls, "onions": onions, "cves": cves,
+        "ransomware_victims": victims,
+        "tg_mentions": tg_mentions,
     }
 
 
@@ -544,6 +745,56 @@ def _remediation(ioc_type: str, category: str) -> str:
 # IOC storage and alert logging
 # ---------------------------------------------------------------------------
 
+
+_COMMON_EMAIL_DOMAINS = {
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "protonmail.com",
+    "icloud.com", "aol.com", "live.com", "msn.com", "me.com",
+}
+
+
+def _store_identity_correlations(iocs: dict, channel: str) -> None:
+    """Store email+phone/domain co-occurrences from same dump.
+    Powers /v1/metered/identity-graph endpoint."""
+    emails  = iocs.get("emails", [])
+    phones  = iocs.get("phones", [])
+    domains = [d for d in iocs.get("domains", []) if d not in _COMMON_EMAIL_DOMAINS]
+    if not emails or (not phones and not domains):
+        return
+    table = _dynamodb.Table(IDENTITY_GRAPH_TABLE)
+    now   = datetime.now(timezone.utc).isoformat()
+    ttl   = Decimal(int(time.time()) + 365 * 86400)
+    def _write(anchor, anchor_type, corr, corr_type):
+        try:
+            corr_norm = corr if corr_type == "phone" else corr.lower()
+            anchor_hash = _sha256_index(anchor)
+            corr_hash   = _sha256_index(corr_norm)
+            # Enhancement 1: increment source_count for dedup scoring
+            try:
+                table.update_item(
+                    Key={"anchor": anchor_hash, "correlated_id": corr_hash},
+                    UpdateExpression="SET source_count = if_not_exists(source_count, :z) + :one, last_seen = :ts, ttl = :ttl",
+                    ExpressionAttributeValues={":z": 0, ":one": 1, ":ts": now, ":ttl": ttl},
+                )
+                return  # record existed — updated count
+            except Exception:
+                pass  # new record — fall through to put_item
+            table.put_item(Item={
+                "anchor": anchor_hash,
+                "correlated_id": corr_hash,
+                "correlated_encrypted": _kms_encrypt(corr_norm),
+                "anchor_type": anchor_type, "correlated_type": corr_type,
+                "source": channel, "confidence": "HIGH",
+                "source_count": 1,
+                "first_seen": now, "last_seen": now, "ttl": ttl,
+            })
+        except Exception:
+            pass
+    for email in emails[:10]:
+        for phone in phones[:5]:
+            _write(email, "email", phone, "phone")
+        for domain in domains[:5]:
+            _write(email, "email", domain, "domain")
+
 def _store_iocs(iocs: dict, channel: str, category: str) -> None:
     now   = datetime.now(timezone.utc).isoformat()
     ttl   = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
@@ -552,6 +803,7 @@ def _store_iocs(iocs: dict, channel: str, category: str) -> None:
         ("emails", "email"), ("eth", "wallet_eth"), ("btc", "wallet_btc"),
         ("sol", "wallet_sol"), ("ton", "wallet_ton"), ("domains", "domain"),
         ("phones", "phone"), ("ips", "ip"),
+        ("sha256", "hash_sha256"), ("urls", "url"),
     ]
     for field, ioc_type in type_map:
         for value in iocs.get(field, []):
@@ -645,7 +897,7 @@ def _parse_passwords_file(text: str) -> list[dict]:
             continue
         try:
             from urllib.parse import urlparse
-            domain = urlparse(url).netloc.lower().lstrip("www.")
+            domain = urlparse(url).netloc.lower().removeprefix("www.")
         except Exception:
             continue
         if not domain:
@@ -655,6 +907,40 @@ def _parse_passwords_file(text: str) -> list[dict]:
             continue
         results.append({"domain": domain, "severity": severity,
                          "category": category, "type": "credential"})
+    # NHI detection: scan credential values for API key/token patterns.
+    # Kept in sync with NHI_PATTERNS in relayshield_api.py — this is the
+    # ingestion-side copy that populates the data the API-side list queries,
+    # so a gap here means the API can never surface that credential type
+    # even though it "knows" the pattern (found out of sync 2026-07-07).
+    _NHI_PATS = [
+        ("aws_access_key",   r"AKIA[A-Z0-9]{16}", "CRITICAL", "AWS IAM Access Key"),
+        ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}", "CRITICAL", "GitHub PAT"),
+        ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}", "CRITICAL", "GitHub Fine-Grained PAT"),
+        ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}", "CRITICAL", "Stripe Secret Key"),
+        ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Key"),
+        ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+", "HIGH", "Slack Bot Token"),
+        ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+", "HIGH", "Slack User Token"),
+        ("google_api",       r"AIza[0-9A-Za-z\-_]{35}", "HIGH", "Google API Key"),
+        ("openai_key",       r"sk-[a-zA-Z0-9]{48}", "HIGH", "OpenAI API Key"),
+        ("anthropic_key",    r"sk-ant-[a-zA-Z0-9\-]{90,}", "HIGH", "Anthropic API Key"),
+        ("sendgrid_key",     r"SG\.[a-zA-Z0-9\-_.]{22}\.[a-zA-Z0-9\-_.]{43}", "HIGH", "SendGrid API Key"),
+        ("twilio_sid",       r"AC[a-f0-9]{32}", "MEDIUM", "Twilio Account SID"),
+        ("stripe_pub",       r"pk_live_[a-zA-Z0-9]{24,}", "MEDIUM", "Stripe Publishable Key"),
+        ("jwt_token",        r"eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}", "MEDIUM", "JWT Token"),
+        # Agent-framework credentials (AGENTIC-1, added 2026-07-07)
+        ("langsmith_key",    r"lsv2_(?:pt|sk)_[a-f0-9]{32,}", "HIGH", "LangSmith API Key"),
+        ("mcp_token_generic", r"mcp_(?:live|sk|pat)_[a-zA-Z0-9]{20,}", "MEDIUM", "Possible MCP Server Auth Token"),
+    ]
+    for line in text.splitlines():
+        sep   = "\t" if "\t" in line else "|"
+        parts = [p.strip() for p in line.split(sep)]
+        raw   = " ".join(parts[1:] if len(parts) > 1 else parts)
+        dom   = parts[0][:120] if parts else ""
+        for nhi_type, nhi_pat, nhi_sev, nhi_desc in _NHI_PATS:
+            if re.search(nhi_pat, raw):
+                results.append({"domain": dom, "severity": nhi_sev,
+                                 "category": f"NHI:{nhi_desc}", "type": "nhi",
+                                 "nhi_type": nhi_type, "nhi_description": nhi_desc})
     return results
 
 
@@ -679,21 +965,41 @@ def _monitored_email_domains() -> dict[str, list[dict]]:
     return domain_map
 
 
-def _store_stolen_session(session: dict, channel: str, matched_email: str, matched_user_id: str) -> None:
+# AGENTIC-4 (added 2026-07-07) — heuristic keyword classifier over the
+# Telegram POST text describing an archive (not the archive's file contents).
+# This is a v1 heuristic, not a labeled ground-truth classifier — it flags
+# posts whose own description suggests the dump originated from a compromised
+# or injected AI agent, rather than a traditional phishing/malware campaign.
+_AGENTIC_SOURCE_KEYWORDS = (
+    "prompt injection", "system prompt", "ai agent", "llm agent",
+    "autonomous agent", "jailbreak", "agentic", "chatgpt leak",
+    "claude leak", "copilot leak", "ai assistant leak",
+)
+
+
+def _looks_agentic_source(post_text: str) -> bool:
+    low = (post_text or "").lower()
+    return any(kw in low for kw in _AGENTIC_SOURCE_KEYWORDS)
+
+
+def _store_stolen_session(session: dict, channel: str, matched_email: str, matched_user_id: str,
+                           suspected_agentic_source: bool = False) -> None:
     ttl = int(time.time()) + ALERT_TTL_DAYS * 86400
     try:
         _dynamodb.Table(STOLEN_SESSIONS_TABLE).put_item(Item={
-            "session_id":       str(uuid.uuid4()),
-            "domain":           session["domain"],
-            "session_type":     session["type"],
-            "cookie_name":      session.get("cookie_name", ""),
-            "severity":         session["severity"],
-            "service_category": session["category"],
-            "channel_source":   channel,
-            "matched_email":    matched_email,
-            "matched_user_id":  matched_user_id,
-            "ingested_at":      datetime.now(timezone.utc).isoformat(),
-            "ttl":              Decimal(ttl),
+            "session_id":           str(uuid.uuid4()),
+            "domain":               session["domain"],
+            "session_type":         session["type"],
+            "cookie_name":          session.get("cookie_name", ""),
+            "severity":             session["severity"],
+            "service_category":     session["category"],
+            "channel_source":       channel,
+            "matched_email":        _sha256_index(matched_email),   # hash — GSI key, never plaintext
+            "matched_email_enc":    _kms_encrypt(matched_email),    # KMS-encrypted for decryption
+            "matched_user_id":      matched_user_id,
+            "ingested_at":          datetime.now(timezone.utc).isoformat(),
+            "suspected_agentic_source": suspected_agentic_source,
+            "ttl":                  Decimal(ttl),
         })
     except Exception as exc:
         logger.warning("Stolen session write failed domain=%s: %s", session.get("domain"), exc)
@@ -749,10 +1055,25 @@ async def _process_stealer_archive(client, message, channel: str,
     except Exception as exc:
         logger.warning("INTEL-5: archive download failed @%s msg=%d: %s", channel, message.id, exc)
         return
+    # Support both ZIP and RAR archives
+    zf = None
     try:
         zf = zipfile.ZipFile(io.BytesIO(raw_bytes))
     except zipfile.BadZipFile:
-        return
+        pass
+    if zf is None:
+        try:
+            import rarfile
+            rf = rarfile.RarFile(io.BytesIO(raw_bytes))
+            # Wrap rarfile to match zipfile API
+            class _RarWrapper:
+                def __init__(self, r): self._r = r
+                def namelist(self): return self._r.namelist()
+                def read(self, name): return self._r.read(name)
+            zf = _RarWrapper(rf)
+        except Exception:
+            logger.info("INTEL-5: archive @%s is neither ZIP nor RAR — skipping", channel)
+            return
     all_sessions: list[dict] = []
     for name in zf.namelist():
         low_name = name.lower()
@@ -776,6 +1097,25 @@ async def _process_stealer_archive(client, message, channel: str,
             seen_keys.add(key)
             unique_sessions.append(s)
     logger.info("INTEL-5: @%s msg=%d — %d unique sessions parsed", channel, message.id, len(unique_sessions))
+    # Enhancement 2: track this as a full infostealer package
+    try:
+        import hashlib as _hl
+        pkg_id = _hl.sha256(f"{channel}_{message.id}".encode()).hexdigest()[:16]
+        session_types = [s.get("type", "") for s in unique_sessions]
+        _dynamodb.Table(INTEL_PACKAGES_TABLE).put_item(Item={
+            "package_id":           pkg_id,
+            "channel_source":       channel,
+            "message_id":           str(message.id),
+            "ingested_at":          datetime.now(timezone.utc).isoformat(),
+            "session_count":        len(unique_sessions),
+            "cookie_count":         session_types.count("cookie"),
+            "credential_count":     session_types.count("credential"),
+            "nhi_count":            session_types.count("nhi"),
+            "severity_critical":    sum(1 for s in unique_sessions if s.get("severity") == "CRITICAL"),
+            "ttl":                  Decimal(int(time.time()) + 365 * 86400),
+        })
+    except Exception as _exc:
+        logger.warning("Package tracking write failed: %s", _exc)
     session_domains = {s["domain"] for s in unique_sessions}
     matched_users: dict[str, tuple[str, list[dict]]] = {}
     for email_domain, records in email_domain_map.items():
@@ -799,13 +1139,33 @@ async def _process_stealer_archive(client, message, channel: str,
             if k not in seen:
                 seen.add(k)
                 dedup.append(s)
+        agentic_source = _looks_agentic_source(
+            (message.text or "") + " " + (getattr(message, "caption", "") or "")
+        )
         for s in dedup:
-            _store_stolen_session(s, channel, email, user_id)
-        chat_id = _get_user_chat_id(user_id)
-        if chat_id:
-            _send_telegram(chat_id, _format_session_alert(email, dedup, channel))
+            _store_stolen_session(s, channel, email, user_id, suspected_agentic_source=agentic_source)
+        chat_id          = _get_user_chat_id(user_id)
+        nhi_findings     = [s for s in dedup if s.get("type") == "nhi"]
+        session_findings = [s for s in dedup if s.get("type") != "nhi"]
+        if session_findings:
+            if chat_id:
+                _send_telegram(chat_id, _format_session_alert(email, session_findings, channel))
+            _send_wa_session_hijack(user_id, email, session_findings)
             stats["alerts_fired"] += 1
-            logger.info("INTEL-5 session alert fired — user_id=%s sessions=%d", user_id, len(dedup))
+            logger.info("INTEL-5 session alert fired user_id=%s", user_id)
+        if nhi_findings:
+            nhi_msg = (
+                f"\U0001f6a8 *CRITICAL \u2014 API Key / Token Found in Stealer Log*\n\n"
+                f"Non-human credentials linked to *{email}* found in criminal stealer archive:\n\n"
+                + "\n".join(f"  \U0001f534 {f['nhi_description']} detected" for f in nhi_findings[:5])
+                + "\n\n*Rotate these credentials immediately.*\n"
+                "Check IAM/cloud provider logs for unauthorised activity.\n\n"
+                "\U0001f6e1\ufe0f _RelayShield NHI Detection_"
+            )
+            if chat_id:
+                _send_telegram(chat_id, nhi_msg)
+            stats["alerts_fired"] += 1
+            logger.info("INTEL-5 NHI alert fired user_id=%s nhi=%d", user_id, len(nhi_findings))
 
 
 # ---------------------------------------------------------------------------
@@ -879,9 +1239,15 @@ def _send_admin_digest(stats: dict) -> None:
         f"IOCs extracted: {stats['iocs_extracted']}\n"
         f"Images OCR'd: {stats.get('images_ocrd', 0)}\n"
         f"Paste URLs followed: {stats.get('pastes_fetched', 0)}\n"
-        f"ZIP archives parsed: {stats.get('archives_parsed', 0)}\n"
+        f"ZIP/RAR archives parsed: {stats.get('archives_parsed', 0)}\n"
+        f"Identity correlations: {stats.get('correlations_stored', 0)}\n"
         f"User matches: {stats['user_matches']}\n"
-        f"Alerts fired: {stats['alerts_fired']}\n\n"
+        f"Alerts fired: {stats['alerts_fired']}\n"
+        f"Brand mentions detected: {stats.get('brand_alerts', 0)}\n"
+        f"Ransomware victims named: {stats.get('ransomware_victims', 0)}\n"
+        f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
+        f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
+        f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n\n"
         f"_RelayShield INTEL — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_"
     )
     _send_telegram(ADMIN_CHAT_ID, text)
@@ -938,7 +1304,7 @@ async def _poll_channels(stats: dict) -> None:
             msg_count = 0
 
             try:
-                async for message in client.iter_messages(entity, limit=100):
+                async for message in client.iter_messages(entity, limit=300):
                     if message.date and message.date.replace(tzinfo=timezone.utc) < since:
                         break
 
@@ -947,7 +1313,9 @@ async def _poll_channels(stats: dict) -> None:
                         continue
 
                     # --- Build text corpus ---
-                    msg_text = message.text or ""
+                    # Captions on photos/videos are separate from text
+                    msg_text = (message.text or "") + " " + (getattr(message, "caption", "") or "")
+                    msg_text = msg_text.strip()
 
                     # Small text/log file attachments
                     if message.document:
@@ -998,6 +1366,30 @@ async def _poll_channels(stats: dict) -> None:
                     if not msg_text:
                         continue
 
+                    # Enhancement: auto-queue channels found via message forwards
+                    if getattr(message, "forward", None):
+                        fwd = message.forward
+                        try:
+                            fwd_entity = getattr(fwd, "chat", None) or getattr(fwd, "sender", None)
+                            if fwd_entity and hasattr(fwd_entity, "username") and fwd_entity.username:
+                                fwd_username = fwd_entity.username.lower()
+                                known = {ch[0].lower() for ch in channels}
+                                if fwd_username not in known:
+                                    tbl = _dynamodb.Table(INTEL_CHANNELS_TABLE)
+                                    existing = tbl.get_item(Key={"username": fwd_username}).get("Item")
+                                    if not existing:
+                                        tbl.put_item(Item={
+                                            "username":    fwd_username,
+                                            "category":    category,
+                                            "description": f"Auto-discovered via forward from @{username}",
+                                            "first_seen":  datetime.now(timezone.utc).isoformat(),
+                                            "active":      category in ("infostealer", "credential_dump"),
+                                            "auto_joined": True,
+                                        })
+                                        logger.info("Forward-discovered channel @%s from @%s (auto_active=%s)",
+                                                    fwd_username, username, category in ("infostealer", "credential_dump"))
+                        except Exception:
+                            pass
                     _mark_seen(msg_id)
                     msg_count += 1
                     stats["messages_processed"] += 1
@@ -1005,9 +1397,69 @@ async def _poll_channels(stats: dict) -> None:
                     # Channel discovery
                     _extract_invite_links(msg_text, username, category)
 
+                    # Auto-discover channels mentioned in forwarded text (Russian/Chinese/Arabic format)
+                    for fwd_handle in _RE_TG_FORWARD.findall(msg_text):
+                        fwd_handle = fwd_handle.lower().strip()
+                        known = {ch[0].lower() for ch in channels}
+                        if fwd_handle and fwd_handle not in known and len(fwd_handle) > 3:
+                            try:
+                                tbl = _dynamodb.Table(INTEL_CHANNELS_TABLE)
+                                if not tbl.get_item(Key={"username": fwd_handle}).get("Item"):
+                                    tbl.put_item(Item={
+                                        "username":    fwd_handle,
+                                        "category":    category,
+                                        "description": f"Text-forward discovered from @{username}",
+                                        "first_seen":  datetime.now(timezone.utc).isoformat(),
+                                        "active":      False,
+                                        "auto_joined": True,
+                                    })
+                                    logger.info("Text-forward discovered @%s from @%s", fwd_handle, username)
+                            except Exception:
+                                pass
+
+                    # Enhancement 6+8: brand/company name monitoring — domain in plain text
+                    # catches "targeting XYZ corp" mentions in criminal channels
+                    try:
+                        from boto3.dynamodb.conditions import Attr as _Attr
+                        _user_tbl = _dynamodb.Table(USERS_TABLE)
+                        _scan = _user_tbl.scan(
+                            FilterExpression=_Attr("active").eq(True),
+                            ProjectionExpression="user_id, monitored_domain, telegram_chat_id",
+                        )
+                        for _u in _scan.get("Items", []):
+                            _dom = (_u.get("monitored_domain") or "").lower()
+                            if _dom and len(_dom) > 4 and _dom in msg_text.lower():
+                                _cid = int(_u["telegram_chat_id"]) if _u.get("telegram_chat_id") else None
+                                if _cid:
+                                    _brand_msg = (
+                                        f"⚠️ *RelayShield Brand Alert*\n\n"
+                                        f"Your domain *{_dom}* was mentioned in a criminal "
+                                        f"Telegram channel (@{username}).\n\n"
+                                        f"*Category:* {CATEGORY_LABELS.get(category, category)}\n"
+                                        f"*Context:* _{preview}_\n\n"
+                                        f"_RelayShield INTEL — brand monitoring_"
+                                    )
+                                    _send_telegram(_cid, _brand_msg)
+                                    stats["alerts_fired"] += 1
+                                    logger.info("Brand alert fired user_id=%s domain=%s channel=@%s",
+                                                _u["user_id"], _dom, username)
+                    except Exception as _exc:
+                        logger.warning("Brand monitoring scan failed: %s", _exc)
+
                     # IOC extraction
                     iocs       = extract_iocs(msg_text)
                     total_iocs = sum(len(v) for v in iocs.values())
+
+                    # Auto-discover new Telegram channels from @mentions
+                    if iocs.get("tg_mentions"):
+                        discovered = _queue_discovered_channels(iocs["tg_mentions"], username)
+                        stats["channels_discovered"] += discovered
+
+                    # Tally new IOC type stats
+                    stats["ransomware_victims"] += len(iocs.get("ransomware_victims", []))
+                    stats["cves_extracted"]     += len(iocs.get("cves", []))
+                    stats["onions_extracted"]   += len(iocs.get("onions", []))
+
                     if total_iocs == 0:
                         continue
                     stats["iocs_extracted"] += total_iocs
@@ -1040,6 +1492,73 @@ async def _poll_channels(stats: dict) -> None:
 
             logger.info("Channel @%s — processed %d messages", username, msg_count)
 
+            # Enhancement 6: Harvest replies on high-engagement posts (reply_to set)
+            # Scans the last 20 messages for those with reply counts > 0 and reads their replies.
+            # Criminal channels often post IOC-rich content in replies to announcements.
+            try:
+                async for post in client.iter_messages(entity, limit=20):
+                    if post.date and post.date.replace(tzinfo=timezone.utc) < since:
+                        break
+                    reply_count = getattr(getattr(post, 'replies', None), 'replies', 0)
+                    if reply_count and reply_count > 0:
+                        async for reply in client.iter_messages(entity, reply_to=post.id, limit=20):
+                            reply_text = (reply.text or "") + " " + (getattr(reply, "caption", "") or "")
+                            reply_text = reply_text.strip()
+                            if not reply_text:
+                                continue
+                            reply_id = f"{username}_reply_{reply.id}"
+                            if _already_seen(reply_id):
+                                continue
+                            _mark_seen(reply_id)
+                            r_iocs = extract_iocs(reply_text)
+                            r_total = sum(len(v) for v in r_iocs.values())
+                            if r_total > 0:
+                                stats["iocs_extracted"] += r_total
+                                _store_iocs(r_iocs, username, category)
+                                logger.info("Reply IOCs: @%s post=%d reply=%d iocs=%d",
+                                            username, post.id, reply.id, r_total)
+            except Exception as reply_exc:
+                logger.debug("Reply harvest skipped @%s: %s", username, reply_exc)
+
+
+# ---------------------------------------------------------------------------
+# Auto-discovery — queue @mentions from processed messages for review
+# ---------------------------------------------------------------------------
+
+_KNOWN_CHANNELS = {ch[0].lower() for ch in MONITORED_CHANNELS}
+_IGNORED_MENTIONS = {
+    "everyone", "here", "channel", "admin", "bot", "telegram",
+    "relayshield", "relayshieldbot", "support", "help",
+}
+
+def _queue_discovered_channels(mentions: list[str], source_channel: str) -> int:
+    """Write newly seen @mentions to a DynamoDB discovery queue for manual review."""
+    if not mentions:
+        return 0
+    table   = _dynamodb.Table(INTEL_CHANNELS_TABLE)
+    queued  = 0
+    for mention in mentions:
+        m = mention.lower().strip("@")
+        if m in _KNOWN_CHANNELS or m in _IGNORED_MENTIONS or len(m) < 5:
+            continue
+        try:
+            table.put_item(
+                Item={
+                    "username":      m,
+                    "active":        False,          # pending review — not yet monitored
+                    "discovered_from": source_channel,
+                    "discovered_at": datetime.now(timezone.utc).isoformat(),
+                    "category":      "pending_review",
+                    "description":   f"Auto-discovered from @{source_channel}",
+                },
+                ConditionExpression="attribute_not_exists(username)",
+            )
+            queued += 1
+            logger.info("Auto-discovered channel candidate: @%s (from @%s)", m, source_channel)
+        except Exception:
+            pass  # already exists — ignore
+    return queued
+
 
 # ---------------------------------------------------------------------------
 # Lambda handler
@@ -1047,14 +1566,18 @@ async def _poll_channels(stats: dict) -> None:
 
 def lambda_handler(event, context):
     stats = {
-        "channels_checked":   0,
-        "messages_processed": 0,
-        "iocs_extracted":     0,
-        "images_ocrd":        0,
-        "pastes_fetched":     0,
-        "archives_parsed":    0,
-        "user_matches":       0,
-        "alerts_fired":       0,
+        "channels_checked":       0,
+        "messages_processed":     0,
+        "iocs_extracted":         0,
+        "images_ocrd":            0,
+        "pastes_fetched":         0,
+        "archives_parsed":        0,
+        "user_matches":           0,
+        "alerts_fired":           0,
+        "ransomware_victims":     0,
+        "cves_extracted":         0,
+        "onions_extracted":       0,
+        "channels_discovered":    0,
     }
     try:
         loop = asyncio.new_event_loop()

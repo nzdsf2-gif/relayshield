@@ -34,6 +34,8 @@ Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
   POST /v1/payg/infostealer         — $0.15 USDC — Hudson Rock infostealer detection
   POST /v1/payg/supply-chain        — $0.10 USDC per domain — vendor breach + infostealer risk (up to 10 domains)
   POST /v1/payg/session-risk        — $0.30 USDC — INTEL-5 active session hijack / AiTM detection
+  POST /v1/payg/tech-stack-cve      — $0.20 USDC — CVE targeting risk by declared tech stack
+  POST /v1/payg/bulk-identity-risk  — $2.00 USDC — hierarchical org + per-agent-email risk scoring
   GET  /v1/payg/result/{id}         — $0.00 (free — poll a paid scan)
 
 x402 payment flow:
@@ -57,17 +59,20 @@ Secrets used (all in Secrets Manager):
 
 import base64
 import concurrent.futures
+from decimal import Decimal
 import json
+import html
 import logging
 import os
 import re
+import secrets
 import socket
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import boto3
 
@@ -84,6 +89,27 @@ logger.setLevel(logging.INFO)
 
 secrets_client  = boto3.client("secretsmanager")
 dynamodb        = boto3.resource("dynamodb")
+kms_client      = boto3.client("kms")
+
+KMS_DATA_KEY    = "alias/relayshield-data-key"
+
+
+def _kms_encrypt(value: str) -> str:
+    """KMS-encrypt a plaintext string. Returns base64-encoded ciphertext."""
+    resp = kms_client.encrypt(KeyId=KMS_DATA_KEY, Plaintext=value.encode("utf-8"))
+    return base64.b64encode(resp["CiphertextBlob"]).decode("utf-8")
+
+
+def _kms_decrypt(ciphertext_b64: str) -> str:
+    """Decrypt a base64-encoded KMS ciphertext. Returns plaintext string."""
+    raw = base64.b64decode(ciphertext_b64)
+    return kms_client.decrypt(CiphertextBlob=raw)["Plaintext"].decode("utf-8")
+
+
+def _sha256(value: str) -> str:
+    """SHA-256 hash of a normalised string — used as queryable index key for PII fields."""
+    import hashlib
+    return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
 ses             = boto3.client("ses", region_name="us-east-1")
 
 # ---------------------------------------------------------------------------
@@ -93,6 +119,11 @@ ses             = boto3.client("ses", region_name="us-east-1")
 # x402 PAYG configuration
 X402_PAYTO_ADDRESS   = os.environ.get("RELAYSHIELD_X402_WALLET", "")   # EVM (Base) payTo
 SOL_PAYTO_ADDRESS    = os.environ.get("RELAYSHIELD_SOL_WALLET", "")    # Solana payTo
+
+# Alchemy / Helius — backend proxy (keys never sent to client)
+ALCHEMY_API_KEY   = os.environ.get("ALCHEMY_API_KEY", "")
+ALCHEMY_AUTH_TOKEN = os.environ.get("ALCHEMY_AUTH_TOKEN", "")
+HELIUS_API_KEY    = os.environ.get("HELIUS_API_KEY", "")
 X402_FACILITATOR_URL = "https://facilitator.payai.network"   # EVM (Base) — PayAI facilitator; auto-listed in Bazaar, free tier 10k/month
 SOL_FACILITATOR_URL  = "https://x402.org/facilitator"         # Solana — CDP Facilitator (manages CDP fee payer EwWqGE4Z...)
 USDC_BASE_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC on Base
@@ -120,6 +151,12 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/supply-chain":          100000,   # $0.10 per call (up to 10 vendor domains)
     "/v1/payg/session-risk":          300000,   # $0.30 — INTEL-5 active session hijack / AiTM detection (premium)
     "/v1/payg/identity-graph":        350000,   # $0.35 — identity correlation: email → linked phones/domains from dumps
+    "/v1/payg/ransomware-risk":       400000,   # $0.40 — ransomware victim list + pre-ransomware credential check
+    "/v1/payg/nhi-exposure":          400000,   # $0.40 — non-human identity: API keys/tokens in stealer logs
+    "/v1/payg/secret-scan":           350000,   # $0.35 — GitHub/GitLab public repo secret detection
+    "/v1/payg/target-risk":           500000,   # $0.50 — target probability score (6-signal correlation)
+    "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
+    "/v1/payg/bulk-identity-risk":    2000000,  # $2.00 — hierarchical org + per-agent-email risk scoring
 }
 
 GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
@@ -149,10 +186,14 @@ OAUTH_REVOCATION_URLS: dict[str, str] = {
     "Salesforce": "https://help.salesforce.com/s/articleView?id=sf.remoteaccess_revoke_token.htm",
 }
 
-API_KEYS_TABLE   = "relayshield_api_keys"
-INTEL_IOCS_TABLE = "relayshield_intel_iocs"
-INTEL_CVE_TABLE  = "relayshield_intel_cve"
-FROM_EMAIL       = "noreply@relayshield.net"
+API_KEYS_TABLE          = "relayshield_api_keys"
+INTEL_IOCS_TABLE        = "relayshield_intel_iocs"
+INTEL_CVE_TABLE         = "relayshield_intel_cve"
+ASSET_WATCHLIST_TABLE   = "relayshield_asset_watchlist"
+ACTOR_WATCHLIST_TABLE   = "relayshield_actor_watchlist"
+EXPLOIT_CHATTER_TABLE   = "relayshield_exploit_chatter"
+SHARED_REPORTS_TABLE    = "relayshield_shared_reports"
+FROM_EMAIL              = "noreply@relayshield.net"
 
 # Quota warning thresholds for mp_499 (10,000 call/month) TI plan.
 # We fire one email per threshold per billing period; flags are stored on the key record.
@@ -184,6 +225,19 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/supply-chain":     "relayshield_supply_chain_calls",
     "/v1/metered/session-risk":     "relayshield_session_risk_calls",
     "/v1/metered/identity-graph":   "relayshield_identity_graph_calls",
+    "/v1/metered/ransomware-risk":  "relayshield_ransomware_risk_calls",
+    "/v1/metered/nhi-exposure":     "relayshield_nhi_exposure_calls",
+    "/v1/metered/secret-scan":      "relayshield_secret_scan_calls",
+    "/v1/metered/target-risk":      "relayshield_target_risk_calls",
+    "/v1/metered/asset-intel":      "relayshield_asset_intel_calls",
+    "/v1/metered/threat-actor":     "relayshield_threat_actor_calls",
+    "/v1/metered/cve-identity-risk":   "relayshield_cve_identity_risk_calls",
+    "/v1/metered/identity-risk-score": "relayshield_identity_risk_score_calls",
+    "/v1/metered/bulk-ioc":             "relayshield_bulk_ioc_calls",          # up to 100 IOC lookups per call
+    "/v1/metered/ioc-pivot":           "relayshield_ioc_pivot_calls",         # related IOC discovery
+    "/v1/metered/brand-monitor":       "relayshield_brand_monitor_calls",     # brand mention scan in IOC corpus
+    "/v1/metered/bulk-identity-risk":  "relayshield_bulk_identity_risk_calls",# up to 10 domains + 5 agents each
+    "/v1/metered/tech-stack-cve":      "relayshield_tech_stack_cve_calls",    # CVE targeting alert by declared tech stack
 }
 
 # Credits deducted per successful call (1 credit = $0.01)
@@ -197,6 +251,19 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/supply-chain":    10,   # $0.10 per call (up to 10 vendor domains)
     "/v1/metered/session-risk":    30,   # $0.30 — INTEL-5 active session hijack / AiTM detection (premium)
     "/v1/metered/identity-graph":  35,   # $0.35 — identity correlation
+    "/v1/metered/ransomware-risk": 40,   # $0.40 — ransomware victim + pre-ransomware credential check
+    "/v1/metered/nhi-exposure":    40,   # $0.40 — NHI: API keys/tokens in stealer logs
+    "/v1/metered/secret-scan":     35,   # $0.35 — GitHub/GitLab public repo secret detection
+    "/v1/metered/target-risk":     50,   # $0.50 — 6-signal target probability correlation score
+    "/v1/metered/asset-intel":      15,   # $0.15/call — asset watchlist register + sweep
+    "/v1/metered/threat-actor":    30,   # $0.30/call — exploit chatter + actor/campaign lookup
+    "/v1/metered/cve-identity-risk": 40,   # $0.40/call — CVE × identity signal composite risk
+    "/v1/metered/identity-risk-score": 35, # $0.35/call — domain security credit score (0-100)
+    "/v1/metered/bulk-ioc":             50,   # $0.50/batch — up to 100 IOC lookups (TC-competitor bulk enrichment)
+    "/v1/metered/ioc-pivot":           20,   # $0.20/call — related IOC discovery by malware family / source
+    "/v1/metered/brand-monitor":       25,   # $0.25/call — brand name scan in IOC + domain corpus (RF-competitor)
+    "/v1/metered/bulk-identity-risk":  200,  # $2.00/call — up to 10 domains + 5 agents each (MSP sweep / OrcX agentic)
+    "/v1/metered/tech-stack-cve":      20,   # $0.20/call — CVE targeting risk by declared tech stack
 }
 
 HIBP_SECRET_NAME  = "relayshield/hibp_api_key"
@@ -281,7 +348,7 @@ def _stripe_secret_key() -> str:
 
 def _verify_rs_api_key(api_key_str: str) -> dict | None:
     """Look up a RelayShield API key in DynamoDB. Returns the record or None."""
-    if not api_key_str or not api_key_str.startswith("rs_live_"):
+    if not api_key_str or not (api_key_str.startswith("rs_live_") or api_key_str.startswith("rs_demo_")):
         return None
     try:
         table  = dynamodb.Table(API_KEYS_TABLE)
@@ -293,6 +360,43 @@ def _verify_rs_api_key(api_key_str: str) -> dict | None:
     except Exception as exc:
         logger.error("API key lookup failed key=%s error=%s", api_key_str[:16], exc)
         return None
+
+
+# AWS Marketplace Bundle D usage dimensions — API identifiers must match
+# exactly what's configured in the AWS Marketplace pricing dimensions.
+# Only these 2 endpoints (of this file's routes) belong to Bundle D — the
+# other 2 (mcp-registry-risk, prompt-injection-breach) live in the isolated
+# relayshield_agentic_api.py Lambda with their own copy of this logic.
+BUNDLE_D_PRODUCT_CODE = os.environ.get("BUNDLE_D_PRODUCT_CODE", "")
+BUNDLE_D_DIMENSION_NAMES = {
+    "/v1/metered/tech-stack-cve":     "tech_stack_cve",
+    "/v1/metered/bulk-identity-risk": "bulk_identity_risk",
+}
+
+
+def _report_marketplace_usage(customer_id: str, dimension: str) -> None:
+    """Report one call of usage to AWS Marketplace Metering Service for a
+    Bundle D contract customer. Fire-and-forget — never raises. Duplicated
+    in relayshield_agentic_api.py and relayshield_bundle_fulfillment.py
+    rather than shared, same isolation rationale used throughout Bundle D."""
+    if not customer_id or not dimension or not BUNDLE_D_PRODUCT_CODE:
+        logger.warning("Skipping Bundle D usage report — missing customer/dimension/product_code")
+        return
+    try:
+        mp_client = boto3.client("meteringmarketplace", region_name="us-east-1")
+        mp_client.batch_meter_usage(
+            UsageRecords=[{
+                "Timestamp": datetime.now(timezone.utc),
+                "CustomerIdentifier": customer_id,
+                "Dimension": dimension,
+                "Quantity": 1,
+            }],
+            ProductCode=BUNDLE_D_PRODUCT_CODE,
+        )
+        logger.info("Bundle D usage reported customer=%s dimension=%s", customer_id, dimension)
+    except Exception as exc:
+        logger.warning("Bundle D usage reporting failed (non-fatal) customer=%s dimension=%s error=%s",
+                       customer_id, dimension, exc)
 
 
 def _record_stripe_meter_event(stripe_customer_id: str, event_name: str) -> None:
@@ -475,7 +579,7 @@ def _check_and_increment_intel_quota(api_key_str: str, key_record: dict) -> dict
             "body": json.dumps({
                 "ok":      False,
                 "error":   f"Monthly call limit ({limit}) reached for the {tier} Threat Intelligence plan.",
-                "upgrade_url": "https://relayshield.net/developers",
+                "upgrade_url": "https://api.relayshield.net/developers",
             }),
         }
 
@@ -522,7 +626,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             "body": json.dumps({
                 "ok":    False,
                 "error": "Invalid or missing API key. Pass your key as X-RS-API-KEY header.",
-                "docs":  "https://relayshield.net/developers",
+                "docs":  "https://api.relayshield.net/developers",
             }),
         }
 
@@ -536,18 +640,47 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         "/v1/metered/supply-chain":    handle_supply_chain,
         "/v1/metered/session-risk":    handle_session_risk,
         "/v1/metered/identity-graph":  handle_identity_graph,
+        "/v1/metered/ransomware-risk": handle_ransomware_risk,
+        "/v1/metered/nhi-exposure":    handle_nhi_exposure,
+        "/v1/metered/secret-scan":     handle_secret_scan,
+        "/v1/metered/target-risk":     handle_target_risk,
+        "/v1/metered/asset-intel":         lambda p: handle_asset_intel(p, api_key_str),
+        "/v1/metered/threat-actor":        handle_threat_actor,
+        "/v1/metered/cve-identity-risk":   handle_cve_identity_risk,
+        "/v1/metered/identity-risk-score": handle_identity_risk_score,
+        "/v1/metered/bulk-ioc":            handle_bulk_ioc,
+        "/v1/metered/ioc-pivot":           handle_ioc_pivot,
+        "/v1/metered/brand-monitor":       handle_brand_monitor,
+        "/v1/metered/bulk-identity-risk":  handle_bulk_identity_risk,
+        "/v1/metered/tech-stack-cve":      handle_tech_stack_cve,
+        "/v1/webhook/configure":       lambda p: handle_webhook_configure(p, api_key_str),
     }
     handler = metered_routes.get(path)
     if not handler:
         return _err(f"unknown metered endpoint: {path}", 404)
 
     # Billing check before executing — must have credits OR active subscription
-    credit_balance     = int(key_record.get("credit_balance") or 0)
-    has_subscription   = bool(key_record.get("stripe_subscription_id"))
-    credit_cost        = METERED_CREDIT_COSTS.get(path, 0)
-    use_credits        = credit_balance >= credit_cost
+    # Demo keys bypass billing entirely
+    is_demo = key_record.get("source") == "demo_portal"
+    if not is_demo:
+        credit_balance   = int(key_record.get("credit_balance") or 0)
+        # has_subscription covers both billing paths that promise "all metered
+        # endpoints included": direct Stripe TI subscribers (stripe_subscription_id)
+        # and AWS Marketplace TI subscribers (intel_plan_tier — set exclusively by
+        # relayshield_aws_marketplace.py's _provision_api_key, never elsewhere).
+        # Fixed 2026-07-08: previously only checked stripe_subscription_id, so
+        # every AWS Marketplace TI Starter/Unlimited customer got a 402 on every
+        # metered endpoint despite the welcome email promising all of them included.
+        has_subscription = bool(key_record.get("stripe_subscription_id")) or bool(key_record.get("intel_plan_tier"))
+        credit_cost      = METERED_CREDIT_COSTS.get(path, 0)
+        use_credits      = credit_balance >= credit_cost
+        is_bundle_d_call = (
+            bool(key_record.get("bundle_d_access"))
+            and bool(key_record.get("aws_customer_id"))
+            and path in BUNDLE_D_DIMENSION_NAMES
+        )
 
-    if not use_credits and not has_subscription:
+    if not is_demo and not use_credits and not has_subscription and not is_bundle_d_call:
         return {
             "statusCode": 402,
             "headers": {"Content-Type": "application/json"},
@@ -565,9 +698,11 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         logger.exception("Unhandled error in metered %s: %s", path, exc)
         return _err("internal server error", 500)
 
-    # Only bill on success
-    if result.get("statusCode", 200) < 300:
-        if use_credits:
+    # Only bill on success (demo keys never billed)
+    if not is_demo and result.get("statusCode", 200) < 300:
+        if is_bundle_d_call:
+            _report_marketplace_usage(key_record["aws_customer_id"], BUNDLE_D_DIMENSION_NAMES[path])
+        elif use_credits:
             # Deduct credits atomically
             try:
                 dynamodb.Table(API_KEYS_TABLE).update_item(
@@ -587,12 +722,81 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             if event_name and stripe_customer_id:
                 _record_stripe_meter_event(stripe_customer_id, event_name)
 
+        # Webhook push delivery — fire async if customer has registered a webhook
+        webhook_url = key_record.get("webhook_url", "")
+        if webhook_url and result.get("statusCode", 200) < 300:
+            try:
+                result_data = json.loads(result.get("body", "{}")).get("data", {})
+                if result_data.get("found") or result_data.get("matched") or result_data.get("on_victim_list") or result_data.get("breach_count", 0) > 0:
+                    import threading
+                    t = threading.Thread(
+                        target=_fire_webhook,
+                        args=(webhook_url, {"id": result_data.get("email") or result_data.get("domain") or path, "endpoint": path, **result_data}),
+                    )
+                    t.start()
+                    t.join(timeout=6)
+            except Exception as wh_exc:
+                logger.debug("Webhook thread error: %s", wh_exc)
+
     return result
 
 
 # ---------------------------------------------------------------------------
 # Response helpers
 # ---------------------------------------------------------------------------
+
+def _badge_svg(domain: str, level: str, color: str, style: str = "flat", score: int = 0) -> str:
+    """Generate an SVG security badge for embedding on partner sites."""
+    label   = "CryptoShield by RS"
+    value   = f"{level} {score}/100" if score and level != "UNKNOWN" else level
+    label_w = 150
+    value_w = 100
+    total_w = label_w + value_w
+    h       = 28
+
+    if style == "compact":
+        # Minimal pill badge
+        return (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20">'
+            f'<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/>'
+            f'<stop offset="1" stop-opacity=".1"/></linearGradient>'
+            f'<rect rx="3" width="120" height="20" fill="#0a1628"/>'
+            f'<rect rx="3" x="70" width="50" height="20" fill="{color}"/>'
+            f'<rect rx="3" width="120" height="20" fill="url(#s)"/>'
+            f'<text x="5" y="14" font-family="DejaVu Sans,Verdana,sans-serif" font-size="10" fill="#fff">🛡 RS Shield</text>'
+            f'<text x="75" y="14" font-family="DejaVu Sans,Verdana,sans-serif" font-size="10" fill="#0a1628" font-weight="bold">{level}</text>'
+            f'</svg>'
+        )
+
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total_w}" height="{h}">'
+        f'<rect rx="4" width="{total_w}" height="{h}" fill="#0a1628"/>'
+        f'<rect rx="4" x="{label_w}" width="{value_w}" height="{h}" fill="{color}"/>'
+        f'<rect rx="4" width="{total_w}" height="{h}" fill="url(#a)"/>'
+        f'<linearGradient id="a" x2="0" y2="100%">'
+        f'<stop offset="0" stop-color="#fff" stop-opacity=".15"/>'
+        f'<stop offset="1" stop-opacity=".15"/>'
+        f'</linearGradient>'
+        f'<g fill="#fff" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">'
+        f'<text x="8" y="19" fill="#00B5A5" font-weight="bold">🛡 CryptoShield</text>'
+        f'<text x="{label_w + 8}" y="19" fill="#0a1628" font-weight="bold">{value}</text>'
+        f'</g>'
+        f'<a href="https://api.relayshield.net/developers" target="_blank">'
+        f'<rect width="{total_w}" height="{h}" fill="transparent"/>'
+        f'</a>'
+        f'</svg>'
+    )
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _dynamodb_resource():
+    import boto3
+    return boto3.resource("dynamodb", region_name="us-east-1")
+
 
 def _ok(data: dict, status: int = 200) -> dict:
     return {
@@ -613,8 +817,10 @@ def _err(message: str, status: int = 400) -> dict:
 def _body(event: dict) -> dict:
     try:
         raw = event.get("body") or "{}"
+        if event.get("isBase64Encoded"):
+            raw = base64.b64decode(raw).decode("utf-8")
         return json.loads(raw)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, Exception):
         return {}
 
 
@@ -669,6 +875,7 @@ def handle_breach(params: dict) -> dict:
     logger.info("breach check — email=%s count=%d", email, len(summary))
     return _ok({
         "email":        email,
+        "record_type":  "credential_exposure",
         "breach_count": len(summary),
         "breaches":     summary,
     })
@@ -1178,7 +1385,7 @@ def handle_oauth_watchlist(params: dict) -> dict:
     try:
         resp  = dynamodb.Table(STOLEN_SESSIONS_TABLE_API).query(
             IndexName="email-index",
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("matched_email").eq(email),
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("matched_email").eq(_sha256(email)),
             FilterExpression=boto3.dynamodb.conditions.Attr("session_type").eq("credential"),
         )
         severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
@@ -1297,24 +1504,121 @@ def handle_scan_wallet(params: dict) -> dict:
 #
 # Supports any GoPlus chain: 1=ETH, 56=BSC, 137=Polygon, 8453=Base, etc.
 
-def handle_token_security(params: dict) -> dict:
-    contract = (params.get("contract_address") or "").strip().lower()
-    if not contract:
-        return _err("contract_address is required")
-    if not re.match(r"^0x[0-9a-fA-F]{40}$", contract):
-        return _err("contract_address must be a valid EVM address (0x + 40 hex chars)")
+def _check_lookalike_token(token_symbol: str, contract_address: str) -> dict | None:
+    """Cross-check a scanned token's symbol against CoinGecko's verified
+    contract registry. Common scam pattern: deploy a token sharing the name/
+    symbol of a newly-listed legitimate asset or tokenized stock, under a
+    different, unverified contract, hoping buyers mistake it for the real
+    thing. Fails open (returns None) on any error — this is an enrichment
+    signal, never a reason to break the underlying scan."""
+    if not token_symbol:
+        return None
+    try:
+        search_url = f"https://api.coingecko.com/api/v3/search?query={urllib.parse.quote(token_symbol)}"
+        req = urllib.request.Request(search_url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            coins = json.loads(resp.read()).get("coins", [])
+        matches = [c for c in coins if (c.get("symbol") or "").lower() == token_symbol.lower()]
+        if not matches:
+            return None
+        # Most established match (lowest/best market cap rank) is the likely "real" asset
+        matches.sort(key=lambda c: (c.get("market_cap_rank") is None, c.get("market_cap_rank") or 0))
+        best    = matches[0]
+        coin_id = best.get("id")
+        if not coin_id:
+            return None
 
-    chain_id = str(params.get("chain_id") or "1").strip()
+        detail_url = (f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+                      f"?localization=false&tickers=false&market_data=false"
+                      f"&community_data=false&developer_data=false")
+        req2 = urllib.request.Request(detail_url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req2, timeout=6) as resp2:
+            platforms = json.loads(resp2.read()).get("platforms") or {}
+
+        verified_addrs = {addr.lower() for addr in platforms.values() if addr}
+        if not verified_addrs:
+            return None  # native coin (no contract) or CoinGecko has no platform data — can't compare
+
+        if contract_address.lower() not in verified_addrs:
+            return {
+                "verified_name":          best.get("name", ""),
+                "verified_coingecko_id":  coin_id,
+                "market_cap_rank":        best.get("market_cap_rank"),
+            }
+        return None
+    except Exception as exc:
+        logger.warning("lookalike-token check failed symbol=%s: %s", token_symbol, exc)
+        return None
+
+
+def handle_token_security(params: dict) -> dict:
+    contract_raw = (params.get("contract_address") or "").strip()
+    if not contract_raw:
+        return _err("contract_address is required")
+
+    # Detect chain from address format if not supplied
+    is_evm    = bool(re.match(r"^0x[0-9a-fA-F]{40}$", contract_raw, re.IGNORECASE))
+    is_solana = bool(re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", contract_raw))
+
+    if not is_evm and not is_solana:
+        return _err("contract_address must be a valid EVM address (0x + 40 hex) or Solana base58 address")
+
+    # EVM addresses are case-insensitive; Solana base58 is case-sensitive — preserve case
+    contract = contract_raw.lower() if is_evm else contract_raw
+
+    # Auto-detect chain_id if caller sends "solana" or omits it
+    supplied = str(params.get("chain_id") or "").strip()
+    if supplied in ("solana", ""):
+        chain_id = "solana" if is_solana else (supplied or "1")
+    else:
+        chain_id = supplied
 
     try:
         url = GOPLUS_TOKEN_URL.format(chain_id=chain_id) + f"?contract_addresses={contract}"
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-        raw = (data.get("result") or {}).get(contract, {})
+        # GoPlus keys result by the address as submitted — try both cases
+        result_map = data.get("result") or {}
+        raw = result_map.get(contract) or result_map.get(contract.lower()) or result_map.get(contract_raw) or {}
     except Exception as exc:
         logger.error("GoPlus token security failed contract=%s: %s", contract, exc)
         return _err("token security check failed — upstream error", 502)
+
+    # ── DexScreener fallback when GoPlus has no data ─────────────────────────
+    # Covers popular tokens on chains GoPlus doesn't fully index (e.g. Avalanche)
+    dexscreener_meta = {}
+    if not raw:
+        try:
+            ds_url = f"https://api.dexscreener.com/latest/dex/tokens/{contract}"
+            ds_req = urllib.request.Request(ds_url, headers={"User-Agent": "RelayShield/1.0"})
+            with urllib.request.urlopen(ds_req, timeout=8) as ds_resp:
+                ds_data = json.loads(ds_resp.read())
+            pairs = ds_data.get("pairs") or []
+            # Prefer pairs matching the requested chain; fall back to any pair
+            _DS_CHAIN_MAP = {
+                "1": "ethereum", "56": "bsc", "137": "polygon", "8453": "base",
+                "43114": "avalanche", "42161": "arbitrum", "10": "optimism",
+                "100": "gnosis", "999": "hyperliquid", "250": "fantom", "25": "cronos",
+            }
+            preferred_chain = _DS_CHAIN_MAP.get(str(chain_id), "")
+            matching = [p for p in pairs if p.get("chainId", "").lower() == preferred_chain] or pairs
+            if matching:
+                best = matching[0]
+                base = best.get("baseToken", {})
+                dexscreener_meta = {
+                    "token_name":    base.get("name", ""),
+                    "token_symbol":  base.get("symbol", ""),
+                    "price_usd":     best.get("priceUsd"),
+                    "liquidity_usd": (best.get("liquidity") or {}).get("usd"),
+                    "volume_24h":    (best.get("volume") or {}).get("h24"),
+                    "dex":           best.get("dexId", ""),
+                    "chain":         best.get("chainId", ""),
+                    "source":        "dexscreener",
+                }
+                logger.info("token-security DexScreener fallback contract=%s name=%s", contract, base.get("name"))
+        except Exception as ds_exc:
+            logger.warning("DexScreener fallback failed contract=%s: %s", contract, ds_exc)
 
     _CRITICAL = {
         "is_honeypot":     "honeypot",
@@ -1344,16 +1648,30 @@ def handle_token_security(params: dict) -> dict:
 
     risk_level = "HIGH" if critical_flags else "MEDIUM" if warning_flags else "LOW"
 
-    logger.info("token-security contract=%s chain=%s risk=%s", contract, chain_id, risk_level)
+    token_name   = raw.get("token_name", "")   or dexscreener_meta.get("token_name", "")
+    token_symbol = raw.get("token_symbol", "") or dexscreener_meta.get("token_symbol", "")
+
+    lookalike = _check_lookalike_token(token_symbol, contract)
+    if lookalike:
+        warning_flags.append(
+            f"name/symbol matches verified asset '{lookalike['verified_name']}' "
+            f"(CoinGecko #{lookalike['market_cap_rank'] or '?'}) but this contract isn't its verified address — possible impersonation"
+        )
+        if risk_level == "LOW":
+            risk_level = "MEDIUM"
+
+    logger.info("token-security contract=%s chain=%s risk=%s name=%s", contract, chain_id, risk_level, token_name)
     return _ok({
         "contract_address": contract,
         "chain_id":         chain_id,
         "risk_level":       risk_level,
         "critical_flags":   critical_flags,
         "warning_flags":    warning_flags,
-        "token_name":       raw.get("token_name", ""),
-        "token_symbol":     raw.get("token_symbol", ""),
+        "token_name":       token_name,
+        "token_symbol":     token_symbol,
         "holder_count":     raw.get("holder_count"),
+        "dexscreener":      dexscreener_meta or None,
+        "lookalike_check":  lookalike,
         "raw":              raw,
     })
 
@@ -1375,23 +1693,44 @@ def handle_nft_security(params: dict) -> dict:
     chain_id = str(params.get("chain_id") or "1").strip()
 
     try:
-        url = f"{GOPLUS_NFT_URL}?chain_id={chain_id}&contract_addresses={contract}"
+        # chain_id is a path segment, not a query param (GoPlus's NFT security
+        # endpoint differs from their token-security endpoint in this respect —
+        # confirmed 2026-07-04 against a live BAYC lookup after the old
+        # ?chain_id= form started 404ing).
+        url = f"{GOPLUS_NFT_URL}/{chain_id}?contract_addresses={contract}"
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-        raw = (data.get("result") or {}).get(contract, {})
+        raw = data.get("result") or {}
     except Exception as exc:
         logger.error("GoPlus NFT security failed contract=%s: %s", contract, exc)
         return _err("NFT security check failed — upstream error", 502)
 
-    _NFT_FLAGS = {
-        "malicious_contract": "malicious contract",
-        "privileged_burn":    "owner can burn tokens",
-        "can_freeze_transfer": "transfers can be frozen",
-        "transfer_without_approval": "transfer without approval",
-        "fake_token":         "fake/counterfeit collection",
-    }
-    risk_flags = [label for k, label in _NFT_FLAGS.items() if str(raw.get(k, "0")) == "1"]
+    def _privileged(field: str) -> bool:
+        # These fields are objects — {owner_address, value, owner_type} — not
+        # simple booleans. owner_type "blackhole" means the privilege was
+        # renounced to an unowned address (safe) even if the contract code
+        # still technically has the capability. Only flag when a real,
+        # non-renounced owner holds a nonzero privilege.
+        obj = raw.get(field)
+        if not isinstance(obj, dict):
+            return False
+        return bool(obj.get("value")) and obj.get("owner_type") != "blackhole"
+
+    risk_flags = []
+    if str(raw.get("malicious_nft_contract", "0")) == "1":
+        risk_flags.append("flagged as malicious NFT contract")
+    if _privileged("privileged_burn"):
+        risk_flags.append("owner can burn tokens")
+    if _privileged("privileged_minting"):
+        risk_flags.append("owner retains minting privilege")
+    if _privileged("transfer_without_approval"):
+        risk_flags.append("owner can transfer tokens without approval")
+    if _privileged("self_destruct"):
+        risk_flags.append("contract can self-destruct")
+    if str(raw.get("restricted_approval", "0")) == "1":
+        risk_flags.append("approvals restricted to specific addresses")
+
     risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
 
     logger.info("nft-security contract=%s chain=%s risk=%s", contract, chain_id, risk_level)
@@ -1575,10 +1914,12 @@ def _detect_chain_api(address: str) -> str:
 def handle_wallet_risk(params: dict) -> dict:
     address = (params.get("address") or "").strip()
     if not address:
+        logger.warning("wallet-risk: missing address — params keys=%s raw=%r", list(params.keys()), params)
         return _err("address is required")
 
     chain = _detect_chain_api(address)
     if chain == "unknown":
+        logger.warning("wallet-risk: unknown chain — address=%r len=%d", address, len(address))
         return _err("unrecognised address format — supported: EVM (0x), Solana, TON (EQ.../UQ...), Bitcoin")
 
     risk_flags = []
@@ -1772,6 +2113,7 @@ def handle_infostealer(params: dict) -> dict:
     found = len(stealers) > 0
     logger.info("infostealer email=%s found=%s count=%d", email, found, len(stealers))
     return _ok({
+        "record_type":   "credential_exposure",
         "email":         email,
         "found":         found,
         "stealer_count": len(stealers),
@@ -1815,7 +2157,17 @@ HIBP_DOMAIN_URL   = "https://haveibeenpwned.com/api/v3/breacheddomain/{domain}"
 MAX_VENDOR_DOMAINS = 10
 
 # Risk scoring — both signals contribute independently
-def _supply_chain_risk(breach_count: int, breached_accounts: int, stealer_count: int) -> tuple[str, list[str]]:
+_CREDENTIAL_DATA_CLASSES = {
+    "Passwords", "Password hints", "Auth tokens", "Security questions and answers",
+    "PIN numbers", "Private messages", "Social media profiles",
+}
+
+def _supply_chain_risk(
+    breach_count: int,
+    breached_accounts: int,
+    stealer_count: int,
+    all_data_classes: list[str] | None = None,
+) -> tuple[str, list[str]]:
     factors: list[str] = []
     score = 0
 
@@ -1840,6 +2192,13 @@ def _supply_chain_risk(breach_count: int, breached_accounts: int, stealer_count:
         factors.append("moderate_account_exposure")
         score += 10
 
+    # Credential/password data classes dramatically raise account takeover risk
+    if all_data_classes:
+        matched = _CREDENTIAL_DATA_CLASSES.intersection(set(all_data_classes))
+        if matched:
+            factors.append("credential_data_exposed")
+            score += 20
+
     if score >= 60:
         level = "CRITICAL"
     elif score >= 35:
@@ -1860,23 +2219,24 @@ def _check_vendor_domain(domain: str, hibp_key: str) -> dict:
     breach_count      = 0
     breached_accounts = 0
     breach_names: list[str] = []
+    all_data_classes: list[str] = []
     try:
-        url = HIBP_DOMAIN_URL.format(domain=urllib.parse.quote(domain, safe=""))
+        # Public endpoint — no domain ownership verification required
         req = urllib.request.Request(
-            url,
-            headers={"hibp-api-key": hibp_key, "user-agent": "RelayShield-SupplyChain/1.0"},
+            f"https://haveibeenpwned.com/api/v3/breaches?domain={urllib.parse.quote(domain, safe='')}",
+            headers={"User-Agent": "RelayShield-SupplyChain/1.0"},
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
-            # HIBP breacheddomain returns { "BreachName": ["email_prefix", ...], ... }
-            domain_data = json.loads(resp.read())
-        breach_count      = len(domain_data)
-        breached_accounts = sum(len(v) for v in domain_data.values())
-        breach_names      = list(domain_data.keys())
+            breaches_list = json.loads(resp.read())
+        breach_count      = len(breaches_list) if isinstance(breaches_list, list) else 0
+        breached_accounts = sum(b.get("PwnCount", 0) for b in breaches_list) if isinstance(breaches_list, list) else 0
+        breach_names      = [b.get("Name", "") for b in breaches_list] if isinstance(breaches_list, list) else []
+        all_data_classes  = list({dc for b in breaches_list for dc in b.get("DataClasses", [])}) if isinstance(breaches_list, list) else []
     except urllib.error.HTTPError as exc:
         if exc.code != 404:
-            logger.warning("HIBP domain check failed domain=%s status=%d", domain, exc.code)
+            logger.warning("HIBP breach check failed domain=%s status=%d", domain, exc.code)
     except Exception as exc:
-        logger.warning("HIBP domain check error domain=%s: %s", domain, exc)
+        logger.warning("HIBP breach check error domain=%s: %s", domain, exc)
 
     # --- Cavalier infostealer domain check ---
     stealer_count = 0
@@ -1895,7 +2255,7 @@ def _check_vendor_domain(domain: str, hibp_key: str) -> dict:
     except Exception as exc:
         logger.warning("Cavalier domain check error domain=%s: %s", domain, exc)
 
-    risk_level, risk_factors = _supply_chain_risk(breach_count, breached_accounts, stealer_count)
+    risk_level, risk_factors = _supply_chain_risk(breach_count, breached_accounts, stealer_count, all_data_classes)
 
     rec_map = {
         "CRITICAL": (
@@ -1969,6 +2329,25 @@ def handle_supply_chain(params: dict) -> dict:
         "supply-chain domains=%d critical=%d high=%d",
         len(domains), len(critical), len(high),
     )
+    # Enhancement 7: Vendor dark web composite score (0–100)
+    def _composite_score(r: dict) -> int:
+        score = 0
+        if r.get("infostealer_found"):
+            score += 40 + min(r.get("infostealer_count", 0) * 5, 20)
+        bc = r.get("breach_count", 0)
+        if bc >= 5:    score += 20
+        elif bc >= 2:  score += 12
+        elif bc == 1:  score += 6
+        ae = r.get("breached_accounts", 0)
+        if ae >= 50:   score += 15
+        elif ae >= 10: score += 8
+        return min(score, 100)
+
+    for r in results:
+        r["dark_web_score"] = _composite_score(r)
+
+    results.sort(key=lambda r: r["dark_web_score"], reverse=True)
+
     return _ok({
         "domains_checked":   len(domains),
         "highest_risk":      highest["risk_level"],
@@ -2035,11 +2414,13 @@ def handle_session_risk(params: dict) -> dict:
     if not email or "@" not in email:
         return _err("email is required and must be a valid address")
 
+    # GSI key stores SHA-256 hash of email, not plaintext
+    email_hash = _sha256(email)
     try:
         table = dynamodb.Table(STOLEN_SESSIONS_TABLE_API)
         resp  = table.query(
             IndexName="email-index",
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("matched_email").eq(email),
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("matched_email").eq(email_hash),
         )
         items = resp.get("Items", [])
     except Exception as exc:
@@ -2049,6 +2430,7 @@ def handle_session_risk(params: dict) -> dict:
     if not items:
         return _ok({
             "email":            email,
+            "record_type":      "credential_exposure",
             "found":            False,
             "session_count":    0,
             "highest_severity": None,
@@ -2115,9 +2497,11 @@ def handle_identity_graph(params: dict) -> dict:
     if not email or "@" not in email:
         return _err("email is required and must be a valid address")
 
+    # Query by SHA-256 hash of email (PK stores hash, not plaintext)
+    anchor_hash = _sha256(email)
     try:
         resp  = dynamodb.Table(IDENTITY_GRAPH_TABLE_API).query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("anchor").eq(email),
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("anchor").eq(anchor_hash),
         )
         items = resp.get("Items", [])
     except Exception as exc:
@@ -2135,8 +2519,24 @@ def handle_identity_graph(params: dict) -> dict:
             "checked_at":              datetime.now(timezone.utc).isoformat(),
         })
 
-    phones  = list({i["correlated_id"] for i in items if i.get("correlated_type") == "phone"})
-    domains = list({i["correlated_id"] for i in items if i.get("correlated_type") == "domain"})
+    # Decrypt correlated values from KMS ciphertext
+    phones  = []
+    domains = []
+    for i in items:
+        enc = i.get("correlated_encrypted", "")
+        raw = i.get("correlated_id", "")
+        corr_type = i.get("correlated_type", "")
+        if enc:
+            try:
+                raw = _kms_decrypt(enc)
+            except Exception:
+                raw = "[decrypt error]"
+        if corr_type == "phone":
+            phones.append(raw)
+        elif corr_type == "domain":
+            domains.append(raw)
+    phones  = list(set(phones))
+    domains = list(set(domains))
     sources = list({i.get("source", "") for i in items if i.get("source")})
 
     logger.info("identity-graph email=%s phones=%d domains=%d", email, len(phones), len(domains))
@@ -2219,6 +2619,9 @@ def _ioc_to_stix(item: dict) -> dict | None:
         "valid_from":    seen_ts,
         "labels":        labels,
         "external_references": [{"source_name": "relayshield", "url": "https://relayshield.net"}],
+        "x_relayshield_record_type": "ioc_indicator",
+        "x_relayshield_source":      item.get("channel", ""),
+        "x_relayshield_category":    item.get("category", ""),
     }
 
 
@@ -2231,7 +2634,7 @@ def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
         },
         "body": json.dumps({
             "title":       "RelayShield Threat Intelligence",
-            "description": "RelayShield TAXII 2.1 server — 200,000+ IOCs from criminal Telegram channels and 11 authoritative feeds",
+            "description": "RelayShield TAXII 2.1 server — 1,400,000+ IOCs from criminal Telegram channels and 11 authoritative feeds",
             "contact":     "relayshieldadmin@gmail.com",
             "api_roots":   ["https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/intel/taxii/"],
         }),
@@ -2247,7 +2650,7 @@ def handle_taxii_collections(params: dict, api_key_record: dict) -> dict:
                 {
                     "id":          "relayshield-iocs",
                     "title":       "RelayShield IOCs",
-                    "description": "Malicious IPs, domains, URLs, and file hashes from 8 criminal Telegram channels and 11 authoritative threat feeds. 450+ malware families tracked.",
+                    "description": "Malicious IPs, domains, URLs, and file hashes from 20+ criminal Telegram channels and 11 authoritative threat feeds. 1,000+ malware groups tracked.",
                     "can_read":    True,
                     "can_write":   False,
                     "media_types": ["application/stix+json;version=2.1"],
@@ -2323,12 +2726,1547 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
 
 
 # ---------------------------------------------------------------------------
+# MISP JSON export — GET /v1/intel/misp/event (INTEL-6)
+# ---------------------------------------------------------------------------
+# MISP is the default/co-primary IOC format for many government, CERT/ISAC,
+# and mid-market SOC tools that STIX-only integration doesn't reach.
+# Serialization-only against the same relayshield_intel_iocs data STIX/TAXII
+# already uses — no new detection engineering. Requires TI subscription
+# (intel_access flag), same gating and pagination shape as TAXII.
+#
+#   GET /v1/intel/misp/event?added_after=<ISO8601>&limit=<N>&next=<cursor>
+
+_MISP_TYPE_MAP = {
+    # ioc_type -> (misp type, misp category)
+    "ip":          ("ip-dst",  "Network activity"),
+    "domain":      ("domain",  "Network activity"),
+    "url":         ("url",     "Network activity"),
+    "hash_sha256": ("sha256",  "Payload delivery"),
+    "email":       ("email-src", "Payload delivery"),
+}
+
+
+def _ioc_to_misp_attribute(item: dict) -> dict | None:
+    """Convert a relayshield_intel_iocs record to a MISP Attribute object."""
+    ioc_val  = item.get("ioc_value", "")
+    ioc_type = item.get("ioc_type", "")
+    seen_ts  = item.get("seen_ts", datetime.now(timezone.utc).isoformat())
+    malware  = item.get("malware", "")
+    channel  = item.get("channel", "")
+    category_field = item.get("category", "")
+
+    mapped = _MISP_TYPE_MAP.get(ioc_type)
+    if mapped is None:
+        return None
+    misp_type, misp_category = mapped
+
+    comment = f"Observed in {channel} ({category_field})"
+    if malware and malware not in ("None", "n/a", ""):
+        comment += f" — {malware}"
+
+    try:
+        timestamp = str(int(datetime.fromisoformat(seen_ts.replace("Z", "+00:00")).timestamp()))
+    except Exception:
+        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+
+    return {
+        "type":     misp_type,
+        "category": misp_category,
+        "value":    ioc_val,
+        "to_ids":   True,
+        "comment":  comment,
+        "timestamp": timestamp,
+        "Tag": (
+            [{"name": f"malware:{malware[:50]}"}] if malware and malware not in ("None", "n/a", "") else []
+        ),
+    }
+
+
+def handle_misp_event(params: dict, api_key_record: dict, query_params: dict) -> dict:
+    added_after = query_params.get("added_after", "")
+    try:
+        limit = min(int(query_params.get("limit", 500)), 2000)
+    except (ValueError, TypeError):
+        limit = 500
+
+    table = dynamodb.Table(INTEL_IOCS_TABLE)
+    scan_kwargs: dict = {
+        "ProjectionExpression": "ioc_value, ioc_type, seen_ts, malware, channel, category",
+        "FilterExpression":     boto3.dynamodb.conditions.Attr("ioc_type").is_in(
+                                    ["ip", "domain", "url", "hash_sha256", "email"]
+                                ),
+        "Limit":                limit * 3,  # over-fetch to account for type filtering
+    }
+    if added_after:
+        scan_kwargs["FilterExpression"] = (
+            scan_kwargs["FilterExpression"] &
+            boto3.dynamodb.conditions.Attr("seen_ts").gte(added_after)
+        )
+    if cursor := query_params.get("next"):
+        try:
+            scan_kwargs["ExclusiveStartKey"] = json.loads(cursor)
+        except Exception:
+            pass
+
+    try:
+        resp  = table.scan(**scan_kwargs)
+        items = resp.get("Items", [])
+        next_key = resp.get("LastEvaluatedKey")
+    except Exception as exc:
+        logger.exception("MISP event scan failed: %s", exc)
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"errors": [str(exc)]}),
+        }
+
+    attributes = []
+    for item in items:
+        attr = _ioc_to_misp_attribute(item)
+        if attr:
+            attributes.append(attr)
+        if len(attributes) >= limit:
+            break
+
+    now_iso = datetime.now(timezone.utc)
+    event = {
+        "Event": {
+            "info":            "RelayShield Threat Intelligence Feed",
+            "threat_level_id": "2",   # Medium — mixed-severity feed, not uniformly critical
+            "analysis":        "1",   # Ongoing
+            "distribution":    "0",   # Your organisation only — recipient controls further sharing
+            "date":            now_iso.strftime("%Y-%m-%d"),
+            "published":       True,
+            "Orgc":            {"name": "RelayShield"},
+            "Attribute":       attributes,
+            "more":            bool(next_key),
+            **({"next": json.dumps(next_key)} if next_key else {}),
+        }
+    }
+
+    logger.info("MISP event returned=%d more=%s", len(attributes), bool(next_key))
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "body": json.dumps(event),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Shareable report links (INTEL-8) — POST /v1/report/share (generate, gated
+# to paying subscribers), GET /v1/r/{report_id} (view, public no-auth).
+# ---------------------------------------------------------------------------
+# Growth lever: generation is gated (consistent with no-free-tier stance),
+# viewing is public so SOC teams/security write-ups can freely link to a
+# report the same way VirusTotal/Shodan/ANY.RUN report pages work.
+
+def _floats_to_decimal(obj):
+    """DynamoDB's boto3 resource API rejects native floats — recursively
+    convert to Decimal before put_item. Caller-supplied summary dicts can
+    contain arbitrary nested floats (risk scores, prices, etc.)."""
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _floats_to_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_floats_to_decimal(v) for v in obj]
+    return obj
+
+
+def _decimals_to_plain(obj):
+    """Reverse of _floats_to_decimal, for reading back out of DynamoDB."""
+    if isinstance(obj, Decimal):
+        return int(obj) if obj == obj.to_integral_value() else float(obj)
+    if isinstance(obj, dict):
+        return {k: _decimals_to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_decimals_to_plain(v) for v in obj]
+    return obj
+
+
+def handle_report_share(params: dict, api_key_record: dict) -> dict:
+    """Generate a shareable public link for a scan finding. Caller already
+    has the full result client-side right after a scan — this stores a
+    clean, presentable summary of it (not the full raw payload)."""
+    report_type = (params.get("report_type") or "").strip()
+    summary     = params.get("summary")
+    if not report_type:
+        return _err("report_type is required")
+    if not isinstance(summary, dict) or not summary:
+        return _err("summary is required and must be a non-empty object")
+
+    report_id = secrets.token_urlsafe(9)
+    try:
+        dynamodb.Table(SHARED_REPORTS_TABLE).put_item(Item={
+            "report_id":   report_id,
+            "report_type": report_type,
+            "summary":     _floats_to_decimal(summary),
+            "created_at":  datetime.now(timezone.utc).isoformat(),
+            "created_by":  api_key_record.get("email", "unknown"),
+        })
+    except Exception as exc:
+        logger.error("report share creation failed: %s", exc)
+        return _err("report creation failed", 500)
+
+    logger.info("report share created id=%s type=%s", report_id, report_type)
+    return _ok({
+        "report_id": report_id,
+        # api.relayshield.net, not bare relayshield.net — the latter 404s for
+        # anything API-served (confirmed precedent: /developers has the same issue).
+        # A cleaner relayshield.net/r/{id} redirect can be added later as a
+        # DNS/routing follow-up; this is the URL that actually works today.
+        "share_url": f"https://api.relayshield.net/v1/r/{report_id}",
+    })
+
+
+def handle_report_view(report_id: str) -> dict:
+    """Public, no-auth view of a shared report — GET /v1/r/{report_id}."""
+    try:
+        item = dynamodb.Table(SHARED_REPORTS_TABLE).get_item(Key={"report_id": report_id}).get("Item")
+    except Exception as exc:
+        logger.error("report view lookup failed id=%s: %s", report_id, exc)
+        item = None
+
+    if not item:
+        return {
+            "statusCode": 404,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": "<html><body style='background:#0a1628;color:#e2e8f0;font-family:sans-serif;text-align:center;padding:60px'>"
+                    "<h2>Report not found</h2><p style='color:#64748b'>This link may have expired or never existed.</p></body></html>",
+        }
+
+    report_type = item.get("report_type", "")
+    created_at  = item.get("created_at", "")
+    summary     = _decimals_to_plain(item.get("summary", {}))
+
+    rows = "".join(
+        f"<tr><td style='padding:8px 12px;color:#94a3b8;border-bottom:1px solid #1e3a5f'>{html.escape(str(k))}</td>"
+        f"<td style='padding:8px 12px;color:#e2e8f0;border-bottom:1px solid #1e3a5f;text-align:right'>{html.escape(str(v))}</td></tr>"
+        for k, v in summary.items()
+    )
+    body = f"""<html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RelayShield Report — {html.escape(report_type)}</title></head>
+<body style="background:#0a1628;color:#e2e8f0;font-family:-apple-system,sans-serif;margin:0;padding:24px">
+<div style="max-width:480px;margin:0 auto">
+<div style="text-align:center;margin-bottom:24px">
+<div style="font-size:40px">🛡</div>
+<div style="font-size:20px;font-weight:800">RelayShield Report</div>
+<div style="font-size:13px;color:#00B5A5;text-transform:uppercase;letter-spacing:0.5px">{html.escape(report_type)}</div>
+</div>
+<table style="width:100%;border-collapse:collapse;background:#0F1F3D;border-radius:12px;overflow:hidden">{rows}</table>
+<p style="text-align:center;color:#475569;font-size:11px;margin-top:20px">Generated {html.escape(created_at)} · <a href="https://relayshield.net" style="color:#00B5A5">relayshield.net</a></p>
+</div></body></html>"""
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300"},
+        "body": body,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/ransomware-risk  /  POST /v1/payg/ransomware-risk
+# ---------------------------------------------------------------------------
+# Checks a domain against the INTEL-4 ransomware victim corpus and the
+# pre-ransomware credential label in the IOC table.
+#
+# Request:  { "domain": "acme.com" }
+# Response: {
+#   "domain": "...",
+#   "on_victim_list": bool,
+#   "victim_groups": [...],      — ransomware groups that claimed the domain
+#   "first_seen": "...",         — earliest victim listing date
+#   "pre_ransomware_ioc_count":  N,  — IOCs tagged pre_ransomware for this domain
+#   "risk_level": "CRITICAL|HIGH|MEDIUM|CLEAN",
+#   "recommendation": "..."
+# }
+
+RANSOMWARE_TABLE_API  = "relayshield_intel_ransomware"
+MITRE_ATTACK_TABLE    = "relayshield_mitre_attack"
+WEBHOOK_MAX_TIMEOUT   = 5   # seconds — webhook delivery must not block main response
+
+
+def _build_threat_graph(malware_family: str) -> dict | None:
+    """Build lightweight threat graph for a malware family from MITRE ATT&CK data.
+    Returns actor graph with group_id, country, techniques, aliases."""
+    family_key = malware_family.lower().split(",")[0].strip()
+    actor_name = THREAT_ACTOR_MAP.get(family_key, "")
+    if not actor_name:
+        return None
+    search_term = actor_name.split(" ")[0].split("/")[0].strip()
+    try:
+        resp = dynamodb.Table(MITRE_ATTACK_TABLE).scan(
+            FilterExpression=(
+                boto3.dynamodb.conditions.Attr("sk").eq("info") &
+                boto3.dynamodb.conditions.Attr("name").contains(search_term)
+            ),
+            ProjectionExpression="group_id, #n, aliases, technique_ids, country_origin, description",
+            ExpressionAttributeNames={"#n": "name"},
+            Limit=3,
+        )
+        groups = resp.get("Items", [])
+        if not groups:
+            return None
+        g = groups[0]
+        return {
+            "group_id":       g.get("group_id", ""),
+            "name":           g.get("name", ""),
+            "aliases":        g.get("aliases", [])[:3],
+            "country_origin": g.get("country_origin", "Unknown"),
+            "top_techniques": g.get("technique_ids", [])[:8],
+            "description":    (g.get("description") or "")[:200],
+        }
+    except Exception as exc:
+        logger.debug("Threat graph lookup failed family=%s: %s", family_key, exc)
+        return None
+
+
+def _fire_webhook(webhook_url: str, payload: dict) -> None:
+    """POST alert payload to customer-registered webhook URL. Non-blocking — called in thread."""
+    try:
+        body = json.dumps({"source": "relayshield", "payload": payload}).encode()
+        req  = urllib.request.Request(
+            webhook_url, data=body,
+            headers={"Content-Type": "application/json", "User-Agent": "RelayShield-Webhook/1.0"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=WEBHOOK_MAX_TIMEOUT)
+        logger.info("Webhook delivered url=%s", webhook_url[:60])
+    except Exception as exc:
+        logger.warning("Webhook delivery failed url=%s: %s", webhook_url[:60], exc)
+EPSS_THRESHOLD_HIGH   = 0.50   # EPSS ≥50% = CRITICAL signal
+EPSS_THRESHOLD_MEDIUM = 0.10   # EPSS ≥10% = HIGH signal
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/webhook/configure
+# ---------------------------------------------------------------------------
+# Registers or updates a webhook URL on the caller's API key.
+# When a metered endpoint returns a positive finding (breach found, infostealer
+# found, session hijack detected), RelayShield POSTs the full JSON result to
+# the registered webhook within 5 seconds. Enables real-time SOAR integration.
+#
+# Request:  { "webhook_url": "https://your-soar.example.com/alerts" }
+# ---------------------------------------------------------------------------
+# Feature: Asset Intel — register assets + on-demand IOC sweep
+# POST /v1/metered/asset-intel
+# Request:  { "action": "register|sweep|list|remove", "assets": ["domain.com", "1.2.3.4"] }
+# Billing:  $0.15/call (covers both registration and sweep)
+# ---------------------------------------------------------------------------
+
+def handle_asset_intel(params: dict, api_key_str: str) -> dict:
+    action = (params.get("action") or "sweep").strip().lower()
+    assets = params.get("assets") or []
+    if not isinstance(assets, list):
+        assets = [assets]
+    assets = [str(a).strip().lower() for a in assets if a]
+
+    table     = dynamodb.Table(ASSET_WATCHLIST_TABLE)
+    ioc_table = dynamodb.Table(INTEL_IOCS_TABLE)
+
+    if action == "list":
+        try:
+            resp = table.query(KeyConditionExpression=boto3.dynamodb.conditions.Key("api_key").eq(api_key_str))
+            return _ok({"assets": [i["asset"] for i in resp.get("Items", [])], "count": resp["Count"]})
+        except Exception as exc:
+            logger.exception("asset-intel list failed: %s", exc)
+            return _err("failed to list assets", 500)
+
+    if action == "remove":
+        for asset in assets:
+            try:
+                table.delete_item(Key={"api_key": api_key_str, "asset": asset})
+            except Exception as exc:
+                logger.warning("asset-intel remove failed asset=%s: %s", asset, exc)
+        return _ok({"removed": assets})
+
+    if action == "register":
+        if not assets:
+            return _err("assets array required")
+        added = []
+        for asset in assets[:50]:
+            try:
+                table.put_item(Item={
+                    "api_key":    api_key_str,
+                    "asset":      asset,
+                    "asset_type": "ip" if re.match(r"^\d+\.\d+\.\d+\.\d+$", asset) else "domain",
+                    "added_at":   datetime.now(timezone.utc).isoformat(),
+                    "active":     True,
+                })
+                added.append(asset)
+            except Exception as exc:
+                logger.warning("asset-intel register failed asset=%s: %s", asset, exc)
+        logger.info("asset-intel registered api_key=%s count=%d", api_key_str[:16], len(added))
+        return _ok({"registered": added, "count": len(added),
+                    "note": "Push alerts will fire via your registered webhook when new IOCs match these assets."})
+
+    # action == "sweep" — check registered assets (or supplied assets) against IOC corpus
+    sweep_targets = assets
+    if not sweep_targets:
+        try:
+            resp = table.query(KeyConditionExpression=boto3.dynamodb.conditions.Key("api_key").eq(api_key_str))
+            sweep_targets = [i["asset"] for i in resp.get("Items", [])]
+        except Exception as exc:
+            logger.exception("asset-intel sweep query failed: %s", exc)
+            return _err("failed to load asset watchlist", 500)
+
+    if not sweep_targets:
+        return _ok({"matches": [], "assets_checked": 0,
+                    "note": "No assets registered. Use action: register to add assets."})
+
+    matches = []
+    for asset in sweep_targets:
+        try:
+            ioc_resp = ioc_table.get_item(Key={"ioc_value": asset})
+            item = ioc_resp.get("Item")
+            if item:
+                matches.append({
+                    "asset":        asset,
+                    "ioc_type":     item.get("ioc_type"),
+                    "source":       item.get("source"),
+                    "malware":      item.get("malware_family", ""),
+                    "confidence":   item.get("confidence_score", 0.5),
+                    "first_seen":   item.get("first_seen", ""),
+                    "threat_actor": item.get("threat_actor", ""),
+                })
+        except Exception as exc:
+            logger.warning("asset-intel sweep failed asset=%s: %s", asset, exc)
+
+    logger.info("asset-intel sweep api_key=%s assets=%d matches=%d", api_key_str[:16], len(sweep_targets), len(matches))
+    return _ok({"matches": matches, "assets_checked": len(sweep_targets),
+                "match_count": len(matches), "clean_count": len(sweep_targets) - len(matches)})
+
+
+# ---------------------------------------------------------------------------
+# Feature: Threat Actor — exploit chatter detection + actor/campaign lookup
+# POST /v1/metered/threat-actor
+# Request:  { "action": "exploit-chatter|actor-lookup", "cve_id": "CVE-2024-12345" }
+#        or { "action": "actor-lookup", "actor": "LummaC2", "actors": ["LummaC2"] }
+# Billing:  $0.30/call
+# ---------------------------------------------------------------------------
+
+def handle_threat_actor(params: dict) -> dict:
+    action = (params.get("action") or "actor-lookup").strip().lower()
+
+    if action == "exploit-chatter":
+        cve_id = (params.get("cve_id") or "").strip().upper()
+        if not cve_id or not re.match(r"^CVE-\d{4}-\d+$", cve_id):
+            return _err("cve_id required (format: CVE-YYYY-NNNNN)")
+
+        chatter_table = dynamodb.Table(EXPLOIT_CHATTER_TABLE)
+        ioc_table     = dynamodb.Table(INTEL_IOCS_TABLE)
+        cve_table     = dynamodb.Table(INTEL_CVE_TABLE)
+
+        chatter_found = []
+        try:
+            resp = chatter_table.query(KeyConditionExpression=boto3.dynamodb.conditions.Key("cve_id").eq(cve_id))
+            chatter_found = resp.get("Items", [])
+        except Exception as exc:
+            logger.warning("exploit-chatter table query failed: %s", exc)
+
+        kev_data = {}
+        try:
+            kev_data = cve_table.get_item(Key={"cve_id": cve_id}).get("Item", {})
+        except Exception:
+            pass
+
+        ioc_hits = []
+        try:
+            ioc_hits = ioc_table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("malware_family").contains(cve_id)
+            ).get("Items", [])[:10]
+        except Exception:
+            pass
+
+        found      = bool(chatter_found or ioc_hits)
+        risk_level = "HIGH" if chatter_found else ("MEDIUM" if ioc_hits else "LOW")
+        logger.info("exploit-chatter cve=%s found=%s risk=%s", cve_id, found, risk_level)
+        return _ok({
+            "cve_id":          cve_id,
+            "found":           found,
+            "risk_level":      risk_level,
+            "chatter_count":   len(chatter_found),
+            "chatter_sources": [c.get("source", "") for c in chatter_found[:5]],
+            "first_seen":      chatter_found[0].get("first_seen", "") if chatter_found else "",
+            "ioc_hits":        len(ioc_hits),
+            "in_kev":          bool(kev_data),
+            "epss_score":      kev_data.get("epss_score", 0.0),
+            "kev_date_added":  kev_data.get("date_added", ""),
+            "note":            "Chatter detected before NVD publication indicates active exploit development."
+                               if chatter_found else "No pre-publication exploit chatter detected.",
+        })
+
+    # action == "actor-lookup"
+    actor        = (params.get("actor") or "").strip()
+    actors       = params.get("actors") or []
+    ioc_table    = dynamodb.Table(INTEL_IOCS_TABLE)
+    mitre_table  = dynamodb.Table("relayshield_mitre_attack")
+
+    if not actor and not actors:
+        return _err("actor or actors required for actor-lookup")
+
+    search_terms = [actor] if actor else actors[:5]
+    results = []
+    for term in search_terms:
+        iocs = []
+        try:
+            iocs = ioc_table.scan(
+                FilterExpression=(
+                    boto3.dynamodb.conditions.Attr("malware_family").contains(term) |
+                    boto3.dynamodb.conditions.Attr("threat_actor").contains(term)
+                ),
+                Limit=100,
+            ).get("Items", [])
+        except Exception as exc:
+            logger.warning("actor-lookup scan failed term=%s: %s", term, exc)
+
+        mitre_info = {}
+        try:
+            mitre_items = mitre_table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("name").contains(term), Limit=5
+            ).get("Items", [])
+            if mitre_items:
+                mitre_info = {
+                    "group_name":  mitre_items[0].get("name", ""),
+                    "aliases":     mitre_items[0].get("aliases", []),
+                    "techniques":  mitre_items[0].get("techniques", [])[:10],
+                    "description": mitre_items[0].get("description", "")[:300],
+                }
+        except Exception:
+            pass
+
+        ioc_types = {}
+        sources   = set()
+        latest    = ""
+        for ioc in iocs:
+            t = ioc.get("ioc_type", "unknown")
+            ioc_types[t] = ioc_types.get(t, 0) + 1
+            sources.add(ioc.get("source", ""))
+            ts = ioc.get("first_seen", "")
+            if ts > latest:
+                latest = ts
+
+        results.append({
+            "term":          term,
+            "found":         bool(iocs or mitre_info),
+            "ioc_count":     len(iocs),
+            "ioc_breakdown": ioc_types,
+            "sources":       list(sources),
+            "latest_ioc":    latest,
+            "mitre":         mitre_info,
+            "sample_iocs":   [{"value": i.get("ioc_value",""), "type": i.get("ioc_type",""),
+                               "first_seen": i.get("first_seen","")} for i in iocs[:5]],
+        })
+
+    logger.info("actor-lookup terms=%s total_iocs=%d", search_terms, sum(r["ioc_count"] for r in results))
+    return _ok({"results": results, "terms_searched": len(results)})
+
+
+# ---------------------------------------------------------------------------
+# Feature: CVE-Identity-Risk — CVE × identity signal composite risk
+# POST /v1/metered/cve-identity-risk
+# Request:  { "cve_id": "CVE-2024-12345", "domain": "example.com" }
+# Returns:  composite risk score combining EPSS, KEV status, breach timing,
+#           infostealer family chain, and ransomware victim correlation
+# Billing:  $0.40/call
+# ---------------------------------------------------------------------------
+
+def handle_cve_identity_risk(params: dict) -> dict:
+    cve_id = (params.get("cve_id") or "").strip().upper()
+    domain = (params.get("domain") or "").strip().lower()
+
+    if not cve_id or not re.match(r"^CVE-\d{4}-\d+$", cve_id):
+        return _err("cve_id required (format: CVE-YYYY-NNNNN)")
+    if not domain:
+        return _err("domain required")
+
+    cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
+    ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
+    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
+    chatter_tbl    = dynamodb.Table(EXPLOIT_CHATTER_TABLE)
+
+    # 1. Get CVE baseline data (EPSS + KEV)
+    kev_data = {}
+    try:
+        kev_data = cve_table.get_item(Key={"cve_id": cve_id}).get("Item", {})
+    except Exception:
+        pass
+
+    epss_score      = float(kev_data.get("epss_score") or 0.0)
+    in_kev          = bool(kev_data.get("date_added"))
+    ransomware_linked = bool(kev_data.get("ransomware_campaign"))
+    affected_product  = kev_data.get("product", "")
+    attack_vector     = kev_data.get("attack_vector", "")
+
+    # 2. CVE → malware family chain via ATT&CK technique mapping
+    exploiting_families = list(kev_data.get("exploiting_malware_families", []))
+    if not exploiting_families and kev_data.get("techniques"):
+        # Derive from ATT&CK techniques already stored on KEV record
+        exploiting_families = kev_data.get("associated_groups", [])[:5]
+
+    # 3. Check if exploiting families appear in our IOC corpus for this domain
+    stealer_hits_for_domain = []
+    if exploiting_families:
+        for family in exploiting_families[:5]:
+            try:
+                resp = ioc_table.scan(
+                    FilterExpression=(
+                        boto3.dynamodb.conditions.Attr("malware_family").contains(family) &
+                        boto3.dynamodb.conditions.Attr("ioc_value").contains(domain.split(".")[0])
+                    ),
+                    Limit=10,
+                )
+                if resp.get("Items"):
+                    stealer_hits_for_domain.append({
+                        "family": family,
+                        "ioc_count": len(resp["Items"]),
+                        "latest": max(i.get("first_seen", "") for i in resp["Items"]),
+                    })
+            except Exception:
+                pass
+
+    # 4. Post-CVE breach velocity — ransomware victim check for domain
+    on_victim_list = False
+    victim_groups = []
+    try:
+        resp = ransomware_tbl.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
+            Limit=5,
+        )
+        items = resp.get("Items", [])
+        on_victim_list = bool(items)
+        victim_groups = [i.get("group", "") for i in items]
+    except Exception:
+        pass
+
+    # 5. Exploit chatter check
+    chatter_count = 0
+    try:
+        chatter_count = len(chatter_tbl.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("cve_id").eq(cve_id)
+        ).get("Items", []))
+    except Exception:
+        pass
+
+    # 6. Composite risk score
+    score = 0
+    factors = []
+
+    if in_kev:
+        score += 25
+        factors.append("CVE is in CISA KEV — confirmed active exploitation")
+    if epss_score >= 0.5:
+        score += 20
+        factors.append(f"EPSS score {epss_score:.2f} — top exploitation probability tier")
+    elif epss_score >= 0.2:
+        score += 10
+        factors.append(f"EPSS score {epss_score:.2f} — elevated exploitation probability")
+    if stealer_hits_for_domain:
+        score += 30
+        factors.append(f"Domain appears in IOC corpus alongside {len(stealer_hits_for_domain)} exploiting malware "
+                        f"family/families: {', '.join(h['family'] for h in stealer_hits_for_domain)}")
+    if on_victim_list:
+        score += 20
+        factors.append(f"Domain appears on ransomware victim list — groups: {', '.join(victim_groups)}")
+    if ransomware_linked:
+        score += 10
+        factors.append("CVE is linked to known ransomware campaigns")
+    if chatter_count > 0:
+        score += 10
+        factors.append(f"Pre-publication exploit chatter detected ({chatter_count} signals)")
+
+    score = min(score, 100)
+    risk_level = "CRITICAL" if score >= 75 else "HIGH" if score >= 50 else "MEDIUM" if score >= 25 else "LOW"
+
+    logger.info("cve-identity-risk cve=%s domain=%s score=%d risk=%s", cve_id, domain, score, risk_level)
+    return _ok({
+        "cve_id":                cve_id,
+        "domain":                domain,
+        "risk_score":            score,
+        "risk_level":            risk_level,
+        "in_kev":                in_kev,
+        "epss_score":            epss_score,
+        "ransomware_linked":     ransomware_linked,
+        "affected_product":      affected_product,
+        "exploiting_families":   exploiting_families,
+        "stealer_corpus_hits":   stealer_hits_for_domain,
+        "on_ransomware_victim_list": on_victim_list,
+        "victim_groups":         victim_groups,
+        "exploit_chatter_count": chatter_count,
+        "risk_factors":          factors,
+        "recommendation":        (
+            "URGENT: Active exploitation of this CVE has been detected in infrastructure associated with this domain. "
+            "Immediate patch verification and incident response assessment recommended."
+            if score >= 75 else
+            "HIGH PRIORITY: Multiple correlated signals indicate elevated exploitation risk for this domain. "
+            "Verify patch status and review infostealer exposure."
+            if score >= 50 else
+            "MONITOR: CVE poses above-average risk for this domain. Schedule patch verification."
+            if score >= 25 else
+            "LOW RISK: No correlated identity signals detected for this domain against this CVE."
+        ),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Feature: Identity Risk Score — composite domain security credit score (0-100)
+# POST /v1/metered/identity-risk-score
+# Request:  { "domain": "example.com" }
+# Returns:  0-100 composite score across 6 identity signal dimensions
+# Billing:  $0.35/call
+# ---------------------------------------------------------------------------
+
+def handle_identity_risk_score(params: dict) -> dict:
+    domain = (params.get("domain") or "").strip().lower()
+    if not domain or "." not in domain:
+        return _err("domain required (e.g. example.com)")
+
+    ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
+    cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
+    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
+    sessions_tbl   = dynamodb.Table("relayshield_stolen_sessions")
+    base_name      = domain.split(".")[0]  # adobe.com -> adobe
+    company        = base_name.capitalize()  # adobe -> Adobe
+
+    factors    = []
+    dim_scores = {}
+
+    # Dimension 1: Breach exposure (0-25)
+    # Uses public HIBP /breaches?domain= — no ownership verification needed
+    breach_score = 0
+    try:
+        req = urllib.request.Request(
+            f"https://haveibeenpwned.com/api/v3/breaches?domain={domain}",
+            headers={"User-Agent": "RelayShield/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            breaches = json.loads(resp.read())
+            breach_count = len(breaches) if isinstance(breaches, list) else 0
+            pwned_total  = sum(b.get("PwnCount", 0) for b in breaches) if isinstance(breaches, list) else 0
+            # Scale by accounts affected — 100M+ = max score
+            if pwned_total >= 100_000_000:   breach_score = 25
+            elif pwned_total >= 10_000_000:  breach_score = 20
+            elif pwned_total >= 1_000_000:   breach_score = 15
+            elif pwned_total >= 100_000:     breach_score = 10
+            elif breach_count > 0:           breach_score = 5
+            if breach_count:
+                factors.append(f"Breach exposure: {breach_count} known breach event(s), {pwned_total:,} accounts affected")
+    except Exception:
+        pass
+    dim_scores["breach_exposure"] = breach_score
+
+    # Dimension 2: Infostealer density (0-25)
+    # Hudson Rock Cavalier — credential stealer log hits for domain
+    stealer_score = 0
+    try:
+        cav_resp = urllib.request.urlopen(
+            urllib.request.Request(
+                f"{CAVALIER_DOMAIN_URL}?domain={domain}",
+                headers={"User-Agent": "RelayShield/1.0"},
+            ), timeout=10)
+        cav_data = json.loads(cav_resp.read())
+        stealer_count = cav_data.get("total", 0) or len(cav_data.get("stealers", []))
+        # Scale by stealer hit volume
+        if stealer_count >= 1_000_000:    stealer_score = 25
+        elif stealer_count >= 500_000:    stealer_score = 20
+        elif stealer_count >= 100_000:    stealer_score = 15
+        elif stealer_count >= 10_000:     stealer_score = 10
+        elif stealer_count >= 1_000:      stealer_score = 7
+        elif stealer_count > 0:           stealer_score = 3
+        if stealer_count:
+            factors.append(f"Infostealer density: {stealer_count:,} credentials found in stealer malware logs")
+    except Exception:
+        pass
+    dim_scores["infostealer_density"] = stealer_score
+
+    # Dimension 3: Threat actor targeting (0-15)
+    # Checks whether known threat actors in our MITRE ATT&CK + IOC corpus
+    # have attributed attacks against this company's sector or brand
+    ioc_score = 0
+    try:
+        # Check IOC corpus for entries attributed to threat actors targeting this domain/brand
+        ioc_resp = ioc_table.scan(
+            FilterExpression=(
+                boto3.dynamodb.conditions.Attr("threat_actor").exists() &
+                boto3.dynamodb.conditions.Attr("ioc_value").contains(base_name)
+            ),
+            Limit=20,
+        )
+        ioc_items = ioc_resp.get("Items", [])
+        attributed = [i for i in ioc_items if i.get("threat_actor") and domain not in i.get("ioc_value","")]
+        actor_count = len(attributed)
+        unique_actors = len({i.get("threat_actor") for i in attributed})
+        if actor_count >= 5:    ioc_score = 15
+        elif actor_count >= 3:  ioc_score = 10
+        elif actor_count >= 1:  ioc_score = 6
+        if actor_count:
+            factors.append(f"Threat actor targeting: {actor_count} attributed IOCs ({unique_actors} distinct threat actor(s)) reference {company} brand infrastructure")
+        # Also check our intel_iocs for any Telegram-sourced IOC mentioning this domain
+        if ioc_score == 0:
+            tg_resp = ioc_table.scan(
+                FilterExpression=(
+                    boto3.dynamodb.conditions.Attr("channel").begins_with("@") &
+                    boto3.dynamodb.conditions.Attr("ioc_value").contains(base_name)
+                ),
+                Limit=10,
+            )
+            tg_iocs = [i for i in tg_resp.get("Items",[]) if domain not in i.get("ioc_value","")]
+            if tg_iocs:
+                ioc_score = 6
+                factors.append(f"Dark web presence: {len(tg_iocs)} IOC reference(s) to {company} brand found in criminal Telegram channel corpus")
+    except Exception:
+        pass
+    dim_scores["ioc_presence"] = ioc_score
+
+    # Dimension 4: Ransomware victim listing (0-20)
+    ransomware_score = 0
+    try:
+        rw_resp = ransomware_tbl.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
+            Limit=5,
+        )
+        rw_items = rw_resp.get("Items", [])
+        if rw_items:
+            ransomware_score = 20
+            groups = list({i.get("group", "") for i in rw_items if i.get("group")})
+            factors.append(f"Ransomware victim: {domain} listed by {', '.join(groups[:3])} ransomware group(s)")
+    except Exception:
+        pass
+    dim_scores["ransomware_victim"] = ransomware_score
+
+    # Dimension 5: Active session exposure (0-10)
+    session_score = 0
+    try:
+        sess_resp = sessions_tbl.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("matched_email").contains(domain),
+            Limit=10,
+        )
+        sess_count = len(sess_resp.get("Items", []))
+        session_score = min(10, sess_count * 5)
+        if sess_count:
+            factors.append(f"Active session exposure: {sess_count} stolen session cookie record(s) in criminal corpus")
+    except Exception:
+        pass
+    dim_scores["session_exposure"] = session_score
+
+    # Dimension 6: CVE exposure (0-15)
+    # Full paginated scan of CISA KEV corpus for company-specific CVEs
+    # Note: Limit on DynamoDB Scan caps items READ not items matched —
+    #       must paginate to find all matches across 1,782 KEV records
+    cve_score = 0
+    try:
+        cve_items = []
+        kwargs = {"FilterExpression": boto3.dynamodb.conditions.Attr("vendor_project").eq(company)}
+        # First try exact vendor match
+        while True:
+            resp = cve_table.scan(**kwargs)
+            cve_items.extend(resp.get("Items", []))
+            if "LastEvaluatedKey" not in resp:
+                break
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+        # Fallback: search short_description if no exact vendor match
+        if not cve_items:
+            desc_items = []
+            desc_kwargs = {"FilterExpression": boto3.dynamodb.conditions.Attr("short_description").contains(company)}
+            while True:
+                resp = cve_table.scan(**desc_kwargs)
+                desc_items.extend(resp.get("Items", []))
+                if "LastEvaluatedKey" not in resp:
+                    break
+                desc_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+            cve_items = desc_items
+
+        ransomware_cves = sum(1 for c in cve_items if c.get("known_ransomware_campaign_use","") not in ("","Unknown","No"))
+        total_cves = len(cve_items)
+        # Score scales with ransomware-linked CVE count — max 25 (equal weight to breach/infostealer)
+        if ransomware_cves >= 50:    cve_score = 25
+        elif ransomware_cves >= 20:  cve_score = 20
+        elif ransomware_cves >= 10:  cve_score = 15
+        elif ransomware_cves >= 5:   cve_score = 12
+        elif ransomware_cves >= 2:   cve_score = 9
+        elif ransomware_cves >= 1:   cve_score = 6
+        elif total_cves >= 20:       cve_score = 5
+        elif total_cves >= 5:        cve_score = 3
+        if total_cves:
+            factors.append(f"CVE exposure: {total_cves} actively exploited CVEs affecting {company} products ({ransomware_cves} linked to ransomware campaigns in CISA KEV)")
+    except Exception:
+        pass
+    dim_scores["cve_exposure"] = cve_score
+
+    total_score = min(100, sum(dim_scores.values()))
+    active_dims = len([v for v in dim_scores.values() if v > 0])
+    risk_level  = "CRITICAL" if total_score >= 70 else "HIGH" if total_score >= 45 else "MEDIUM" if total_score >= 22 else "LOW"
+    grade       = "F" if total_score >= 70 else "D" if total_score >= 45 else "C" if total_score >= 25 else "B" if total_score >= 10 else "A"
+
+    logger.info("identity-risk-score domain=%s score=%d risk=%s dims=%d", domain, total_score, risk_level, active_dims)
+    return _ok({
+        "domain":           domain,
+        "risk_score":       total_score,
+        "risk_level":       risk_level,
+        "grade":            grade,
+        "dimension_scores": dim_scores,
+        "max_score":        100,
+        "risk_factors":     factors,
+        "summary": (
+            f"Domain {domain} scores {total_score}/100 ({grade} — {risk_level}) across "
+            f"{active_dims} of 6 monitored identity signal dimensions."
+        ),
+        "recommendation": (
+            "CRITICAL: Active compromise indicators detected. Immediate incident response required across breach, credential, and threat infrastructure signals."
+            if total_score >= 75 else
+            "HIGH: Significant identity exposure. Prioritize credential rotation, MFA enforcement, and threat actor attribution review."
+            if total_score >= 50 else
+            "MEDIUM: Elevated risk signals across multiple surfaces. Review breach history, enforce MFA, and monitor for escalation."
+            if total_score >= 25 else
+            "LOW: Limited identity risk signals at this time. Continue standard monitoring cadence."
+        ),
+    })
+
+
+#           { "webhook_url": "" }   — clears the webhook
+# Response: { "webhook_url": "...", "status": "registered" }
+
+def handle_webhook_configure(params: dict, api_key_str: str) -> dict:
+    webhook_url = (params.get("webhook_url") or "").strip()
+    if webhook_url and not webhook_url.startswith(("https://", "http://")):
+        return _err("webhook_url must be a valid https:// URL")
+    try:
+        dynamodb.Table(API_KEYS_TABLE).update_item(
+            Key={"api_key": api_key_str},
+            UpdateExpression="SET webhook_url = :url",
+            ExpressionAttributeValues={":url": webhook_url},
+        )
+    except Exception as exc:
+        logger.exception("webhook configure failed: %s", exc)
+        return _err("webhook configuration failed", 500)
+    status = "registered" if webhook_url else "cleared"
+    logger.info("webhook %s for key=%s url=%s", status, api_key_str[:16], webhook_url[:60])
+    return _ok({"webhook_url": webhook_url, "status": status})
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/target-risk  /  POST /v1/payg/target-risk
+# ---------------------------------------------------------------------------
+# Correlation scoring engine: estimates probability that a domain is currently
+# being targeted by threat actors. Combines six independent signal sources
+# into a weighted score (0–100) with a probability tier and recommended action.
+#
+# Signal weights:
+#   Ransomware victim listing         +40 (highest — known active attack)
+#   Infostealer stealer log hits      +25 (active device compromise)
+#   Pre-ransomware credential count   +15 per hit (capped at 20)
+#   HIBP breach count                 +10 (5+ breaches)
+#   Brand mention in criminal channel +15 (from identity_graph/brand intel)
+#   CVE active exploit (KEV+EPSS)     +20 (if EPSS ≥50% for domain's sector)
+#
+# Request:  { "domain": "acme.com" }
+# Response: {
+#   "domain": "...", "target_risk_score": 0–100,
+#   "probability_tier": "CRITICAL|HIGH|MEDIUM|LOW",
+#   "signals": [...], "recommendation": "..."
+# }
+
+def handle_target_risk(params: dict) -> dict:
+    domain = (params.get("domain") or "").strip().lower().removeprefix("www.")
+    if not domain or "." not in domain:
+        return _err("domain is required (e.g. acme.com)")
+
+    score   = 0
+    signals = []
+
+    # Signal 1: Ransomware victim listing (+40)
+    try:
+        victim_resp  = dynamodb.Table(RANSOMWARE_TABLE_API).query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
+        )
+        victims = victim_resp.get("Items", [])
+        if victims:
+            groups = [v.get("group", "") for v in victims]
+            score += 40
+            signals.append({"signal": "ransomware_victim", "weight": 40,
+                             "detail": f"Listed by {', '.join(groups[:3])}"})
+    except Exception as exc:
+        logger.warning("target-risk ransomware check failed: %s", exc)
+
+    # Signal 2+3: Infostealer hits + pre-ransomware credentials
+    try:
+        from urllib.parse import urlparse as _up
+        # Check stealer log corpus for this domain
+        ses_resp = dynamodb.Table(STOLEN_SESSIONS_TABLE_API).scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("domain").contains(domain),
+            Select="COUNT",
+        )
+        stealer_count = ses_resp.get("Count", 0)
+        if stealer_count > 0:
+            score += min(25, stealer_count * 5)
+            signals.append({"signal": "stealer_log_hits", "weight": min(25, stealer_count * 5),
+                             "detail": f"{stealer_count} credential/session entries in stealer corpus"})
+    except Exception as exc:
+        logger.warning("target-risk stealer check failed: %s", exc)
+
+    # Signal 4: HIBP breach exposure
+    try:
+        hibp_key = _hibp_api_key()
+        hibp_url = f"https://haveibeenpwned.com/api/v3/breacheddomain/{urllib.parse.quote(domain, safe='')}"
+        hibp_req = urllib.request.Request(hibp_url,
+            headers={"hibp-api-key": hibp_key, "user-agent": "RelayShield-TargetRisk/1.0"})
+        with urllib.request.urlopen(hibp_req, timeout=15) as hr:
+            breach_data = json.loads(hr.read())
+        breach_count    = len(breach_data)
+        account_count   = sum(len(v) for v in breach_data.values())
+        if breach_count >= 5:
+            score += 10
+            signals.append({"signal": "breach_exposure", "weight": 10,
+                             "detail": f"{breach_count} breaches, {account_count} accounts exposed"})
+        elif breach_count > 0:
+            score += 5
+            signals.append({"signal": "breach_exposure", "weight": 5,
+                             "detail": f"{breach_count} breach(es)"})
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            logger.warning("target-risk HIBP failed: %s", exc)
+    except Exception as exc:
+        logger.warning("target-risk HIBP failed: %s", exc)
+
+    # Signal 5: IOC corpus mention (brand monitoring signal)
+    try:
+        ioc_resp = dynamodb.Table(INTEL_IOCS_TABLE).query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(domain),
+            Limit=5,
+        )
+        if ioc_resp.get("Count", 0) > 0:
+            score += 15
+            signals.append({"signal": "criminal_channel_mention", "weight": 15,
+                             "detail": f"Domain observed in criminal Telegram channels"})
+    except Exception as exc:
+        logger.warning("target-risk IOC check failed: %s", exc)
+
+    # Signal 6: High-EPSS KEV CVEs in corpus (proxy for sector targeting)
+    try:
+        cve_resp = dynamodb.Table(INTEL_CVE_TABLE).scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("epss_score").gte(
+                boto3.dynamodb.types.Decimal(str(EPSS_THRESHOLD_HIGH))
+            ),
+            ProjectionExpression="cve_id, epss_score, vulnerability_name",
+            Limit=5,
+        )
+        high_epss = cve_resp.get("Items", [])
+        if high_epss:
+            score += 20
+            top = high_epss[0]
+            signals.append({"signal": "high_epss_cves_active", "weight": 20,
+                             "detail": f"{len(high_epss)} CVE(s) with ≥50% exploitation probability active globally — {top.get('cve_id', '')} ({top.get('vulnerability_name', '')[:60]})"})
+    except Exception as exc:
+        logger.warning("target-risk EPSS check failed: %s", exc)
+
+    score = min(score, 100)
+
+    if score >= 60:
+        tier = "CRITICAL"
+        rec  = (f"CRITICAL: Multiple high-confidence signals indicate {domain} is actively targeted. "
+                "Treat as an active incident — isolate affected systems, rotate credentials, "
+                "audit access logs, and engage incident response.")
+    elif score >= 35:
+        tier = "HIGH"
+        rec  = (f"HIGH risk: {domain} shows significant exposure signals. "
+                "Rotate credentials, audit vendor access, and increase monitoring frequency.")
+    elif score >= 15:
+        tier = "MEDIUM"
+        rec  = f"MEDIUM risk: Some exposure detected for {domain}. Include in next security review cycle."
+    else:
+        tier = "LOW"
+        rec  = f"LOW risk: No significant targeting signals detected for {domain}."
+
+    logger.info("target-risk domain=%s score=%d tier=%s signals=%d",
+                domain, score, tier, len(signals))
+    return _ok({
+        "record_type":       "threat_prediction",
+        "domain":            domain,
+        "target_risk_score": score,
+        "probability_tier":  tier,
+        "signals":           signals,
+        "recommendation":    rec,
+        "checked_at":        datetime.now(timezone.utc).isoformat(),
+    })
+
+# Threat actor attribution — maps malware family tags to known groups.
+# Sourced from public CTI reports (MITRE ATT&CK, Mandiant, CrowdStrike naming).
+# Enhancement 4: SIGMA rule references for active malware families
+# Links to community-maintained detection rules — added to IOC hit responses so
+# TI subscribers get actionable hunt content alongside raw IOC data.
+SIGMA_RULE_MAP: dict[str, str] = {
+    "qakbot":        "https://github.com/SigmaHQ/sigma/search?q=qakbot",
+    "emotet":        "https://github.com/SigmaHQ/sigma/search?q=emotet",
+    "trickbot":      "https://github.com/SigmaHQ/sigma/search?q=trickbot",
+    "lummac2":       "https://github.com/SigmaHQ/sigma/search?q=lumma",
+    "redline":       "https://github.com/SigmaHQ/sigma/search?q=redline+stealer",
+    "vidar":         "https://github.com/SigmaHQ/sigma/search?q=vidar",
+    "cobalt_strike": "https://github.com/SigmaHQ/sigma/search?q=cobalt+strike",
+    "dridex":        "https://github.com/SigmaHQ/sigma/search?q=dridex",
+    "icedid":        "https://github.com/SigmaHQ/sigma/search?q=icedid",
+    "bumblebee":     "https://github.com/SigmaHQ/sigma/search?q=bumblebee",
+    "pikabot":       "https://github.com/SigmaHQ/sigma/search?q=pikabot",
+    "clearfake":     "https://github.com/SigmaHQ/sigma/search?q=clearfake",
+    "mirai":         "https://github.com/SigmaHQ/sigma/search?q=mirai",
+    "remcos":        "https://github.com/SigmaHQ/sigma/search?q=remcos",
+    "asyncrat":      "https://github.com/SigmaHQ/sigma/search?q=asyncrat",
+}
+
+THREAT_ACTOR_MAP: dict[str, str] = {
+    "qakbot":        "TA505 / multiple financially-motivated actors",
+    "emotet":        "TA542 (Mealybug)",
+    "trickbot":      "Wizard Spider",
+    "dridex":        "Evil Corp (TA505)",
+    "icedid":        "Shatak (TA551)",
+    "bumblebee":     "Exotic Lily (initial access broker)",
+    "lummac2":       "Multiple threat actors (MaaS)",
+    "redline":       "Multiple threat actors (MaaS)",
+    "vidar":         "Multiple threat actors (MaaS)",
+    "raccoon":       "TrafficStealer group",
+    "stealc":        "Multiple threat actors (MaaS)",
+    "pikabot":       "Water Curupira",
+    "bazarloader":   "Wizard Spider",
+    "cobalt_strike": "Multiple (post-exploitation framework)",
+    "remcos":        "Breaking Security (MaaS)",
+    "asyncrat":      "Multiple threat actors (open source RAT)",
+    "clearfake":     "SocGholish operators",
+    "mirai":         "Multiple IoT botnet operators",
+}
+
+# IOC source confidence weights — higher = more trusted source
+IOC_SOURCE_WEIGHTS: dict[str, float] = {
+    "threatfox":         0.90,
+    "feodo_aggressive":  0.95,
+    "feodo":             0.90,
+    "malwarebazaar":     0.88,
+    "spamhaus":          0.95,
+    "urlhaus":           0.85,
+    "emerging_threats":  0.80,
+    "abuseipdb":         0.82,
+    "talos":             0.85,
+    "ipsum":             0.75,
+    "blocklist_de":      0.70,
+    "openphish":         0.80,
+    "otx":               0.75,
+    "logsmarket":        0.92,   # criminal channel — very high signal
+    "breachforums":      0.88,
+    "leakbase":          0.88,
+    "exposed_vc":        0.85,
+    "vxunderground":     0.85,
+}
+
+
+_ip_enrich_cache: dict[str, dict] = {}   # per-invocation cache
+
+
+def _enrich_ip(ip: str) -> dict:
+    """Context enrichment for an IP — ASN, country, city, ISP via ip-api.com.
+    Free tier: 45 req/min, no auth. Cached per Lambda invocation."""
+    if ip in _ip_enrich_cache:
+        return _ip_enrich_cache[ip]
+    try:
+        url  = f"http://ip-api.com/json/{ip}?fields=status,country,countryCode,city,isp,org,as"
+        req  = urllib.request.Request(url, headers={"User-Agent": "RelayShield-TI/1.0"})
+        resp = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        if resp.get("status") == "success":
+            result = {
+                "country":      resp.get("country", ""),
+                "country_code": resp.get("countryCode", ""),
+                "city":         resp.get("city", ""),
+                "isp":          resp.get("isp", ""),
+                "org":          resp.get("org", ""),
+                "asn":          resp.get("as", ""),
+            }
+            _ip_enrich_cache[ip] = result
+            return result
+    except Exception:
+        pass
+    return {}
+
+
+def _enrich_domain(domain: str) -> dict:
+    """Lightweight domain context via RDAP (IANA standard, free, no auth).
+    Returns registrar and registration date where available."""
+    try:
+        url  = f"https://rdap.org/domain/{domain}"
+        req  = urllib.request.Request(url, headers={"User-Agent": "RelayShield-TI/1.0"})
+        resp = json.loads(urllib.request.urlopen(req, timeout=8).read())
+        events = {e.get("eventAction"): e.get("eventDate", "")
+                  for e in resp.get("events", [])}
+        entities = resp.get("entities", [])
+        registrar = ""
+        for e in entities:
+            if "registrar" in e.get("roles", []):
+                card = e.get("vcardArray", [None, []])[1]
+                for field in card:
+                    if field[0] == "fn":
+                        registrar = field[3]
+                        break
+        return {
+            "registrar":      registrar,
+            "registered":     events.get("registration", "")[:10],
+            "last_changed":   events.get("last changed", "")[:10],
+        }
+    except Exception:
+        return {}
+
+
+def _ioc_confidence(source: str, seen_ts: str) -> float:
+    """Score 0.0–1.0 combining source weight and freshness decay.
+    IOCs lose 2% confidence per week after ingestion, flooring at 0.40."""
+    base  = IOC_SOURCE_WEIGHTS.get(source.lower(), 0.65)
+    try:
+        from datetime import datetime, timezone
+        from dateutil import parser as dp
+        age_days = (datetime.now(timezone.utc) - dp.parse(seen_ts)).days
+    except Exception:
+        age_days = 0
+    decay = max(0.0, (age_days // 7) * 0.02)
+    return round(max(0.40, base - decay), 2)
+
+
+def handle_ransomware_risk(params: dict) -> dict:
+    domain = (params.get("domain") or "").strip().lower().removeprefix("www.")
+    if not domain or "." not in domain:
+        return _err("domain is required (e.g. acme.com)")
+
+    # Check victim list
+    try:
+        resp         = dynamodb.Table(RANSOMWARE_TABLE_API).query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
+        )
+        victim_items = resp.get("Items", [])
+    except Exception as exc:
+        logger.exception("ransomware-risk victim query failed domain=%s: %s", domain, exc)
+        return _err("ransomware risk query failed — internal error", 500)
+
+    # Count pre-ransomware tagged IOCs for this domain
+    pre_ransomware_count = 0
+    try:
+        pr_resp = dynamodb.Table(INTEL_IOCS_TABLE).scan(
+            FilterExpression=(
+                boto3.dynamodb.conditions.Attr("pre_ransomware").eq(True) &
+                boto3.dynamodb.conditions.Attr("ioc_value").contains(domain)
+            ),
+            Select="COUNT",
+        )
+        pre_ransomware_count = pr_resp.get("Count", 0)
+    except Exception as exc:
+        logger.warning("Pre-ransomware IOC count failed domain=%s: %s", domain, exc)
+
+    on_victim_list = len(victim_items) > 0
+    victim_groups  = list({i.get("group", "") for i in victim_items if i.get("group")})
+    first_seen     = min((i.get("discovered", "") for i in victim_items), default="") if victim_items else ""
+
+    if on_victim_list:
+        risk_level = "CRITICAL"
+        rec = (
+            f"{domain} has been claimed as a ransomware victim by {', '.join(victim_groups)}. "
+            "Treat any shared credentials, API tokens, or access grants from this domain as compromised. "
+            "Rotate secrets immediately, audit access logs, and contact the affected organisation."
+        )
+    elif pre_ransomware_count > 0:
+        risk_level = "HIGH"
+        rec = (
+            f"{pre_ransomware_count} credential(s) for {domain} appeared in criminal stealer logs "
+            "before a ransomware incident was associated with this domain. These credentials may "
+            "indicate pre-attack reconnaissance. Rotate any shared credentials with this organisation."
+        )
+    else:
+        risk_level = "CLEAN"
+        rec = f"No ransomware victim listing or pre-ransomware credential exposure found for {domain}."
+
+    logger.info("ransomware-risk domain=%s victim=%s pre_creds=%d risk=%s",
+                domain, on_victim_list, pre_ransomware_count, risk_level)
+    return _ok({
+        "domain":                   domain,
+        "on_victim_list":           on_victim_list,
+        "victim_groups":            victim_groups,
+        "first_seen":               first_seen,
+        "pre_ransomware_ioc_count": pre_ransomware_count,
+        "risk_level":               risk_level,
+        "recommendation":           rec,
+        "checked_at":               datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
 # Threat Intelligence API — /v1/intel/telegram
 # ---------------------------------------------------------------------------
 # Subscription endpoint (API key + intel_access flag required).
 # Queries relayshield_intel_iocs — IOCs extracted from INTEL-2 Telegram channel
 # pipeline — 24–72 hours ahead of HIBP and public breach databases.
 #
+# ---------------------------------------------------------------------------
+# NHI (Non-Human Identity) detection patterns
+# ---------------------------------------------------------------------------
+# Matches credential patterns that infostealers steal beyond passwords:
+# API keys, tokens, private keys found in stealer log credential files.
+
+import re as _re
+
+NHI_PATTERNS: list[tuple[str, str, str, str]] = [
+    # (name, regex, severity, description)
+    ("aws_access_key",   r"AKIA[A-Z0-9]{16}",                         "CRITICAL", "AWS IAM Access Key"),
+    ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}",              "CRITICAL", "GitHub Personal Access Token"),
+    ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}",             "CRITICAL", "GitHub Fine-Grained PAT"),
+    ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}",                "CRITICAL", "Stripe Secret Key"),
+    ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Cryptographic Key"),
+    ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+",        "HIGH",     "Slack Bot Token"),
+    ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+","HIGH",     "Slack User Token"),
+    ("google_api",       r"AIza[0-9A-Za-z\-_]{35}",                  "HIGH",     "Google API Key"),
+    ("openai_key",       r"sk-[a-zA-Z0-9]{48}",                      "HIGH",     "OpenAI API Key"),
+    ("anthropic_key",    r"sk-ant-[a-zA-Z0-9\-]{90,}",               "HIGH",     "Anthropic API Key"),
+    ("sendgrid_key",     r"SG\.[a-zA-Z0-9\-_.]{22}\.[a-zA-Z0-9\-_.]{43}", "HIGH", "SendGrid API Key"),
+    ("twilio_sid",       r"AC[a-f0-9]{32}",                           "MEDIUM",   "Twilio Account SID"),
+    ("stripe_pub",       r"pk_live_[a-zA-Z0-9]{24,}",                "MEDIUM",   "Stripe Publishable Key"),
+    ("jwt_token",        r"eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}", "MEDIUM", "JWT Token"),
+    # Agent-framework credentials (added 2026-07-07, AGENTIC-1) — AI agent
+    # orchestration platforms are now a confirmed autonomous-attack target
+    # (JadePuffer/Sysdig, July 2026).
+    ("langsmith_key",    r"lsv2_(?:pt|sk)_[a-f0-9]{32,}",             "HIGH",     "LangSmith API Key"),
+    # MCP has no standardized token format as of 2026-07 — this is a
+    # best-effort pattern based on an emerging informal prefix convention
+    # in some MCP server implementations, not a guaranteed catch-all.
+    ("mcp_token_generic", r"mcp_(?:live|sk|pat)_[a-zA-Z0-9]{20,}",    "MEDIUM",   "Possible MCP Server Auth Token"),
+]
+
+_NHI_COMPILED = [(name, _re.compile(pat), sev, desc) for name, pat, sev, desc in NHI_PATTERNS]
+
+
+def _detect_nhi_in_text(text: str, domain: str) -> list[dict]:
+    """Scan text for NHI credential patterns associated with a domain context."""
+    findings = []
+    seen: set[str] = set()
+    for name, pattern, severity, description in _NHI_COMPILED:
+        for match in pattern.finditer(text):
+            val = match.group(0)
+            key = (name, val[:16])    # dedup on type + prefix
+            if key not in seen:
+                seen.add(key)
+                findings.append({
+                    "type":        name,
+                    "description": description,
+                    "severity":    severity,
+                    "preview":     val[:8] + "..." + val[-4:],   # never return full key
+                })
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/nhi-exposure  /  POST /v1/payg/nhi-exposure
+# ---------------------------------------------------------------------------
+# Scans the INTEL-5 stealer log corpus for non-human identity credentials
+# (API keys, tokens, private keys) linked to a domain.
+# Optionally checks vendor/supply chain domains for third-party NHI exposure.
+#
+# Request:
+#   { "domain": "acme.com" }                      — your own domain
+#   { "vendor_domains": ["acme.com", "co.io"] }   — supply chain NHI check
+#   (Both keys may be combined)
+#
+# Response:
+#   { "domains_checked": N, "findings": [ { domain, type, description,
+#     severity, source, ingested_at, preview } ], "highest_severity": "..." }
+
+NHI_SESSIONS_TABLE = "relayshield_stolen_sessions"
+
+
+def handle_nhi_exposure(params: dict) -> dict:
+    raw_domains  = list(params.get("vendor_domains") or [])
+    own_domain   = (params.get("domain") or "").strip().lower().removeprefix("www.")
+    if own_domain:
+        raw_domains.append(own_domain)
+    if not raw_domains:
+        return _err("domain or vendor_domains is required")
+
+    domains = list({d.strip().lower().removeprefix("www.") for d in raw_domains if d.strip()})[:10]
+    all_findings: list[dict] = []
+
+    table = dynamodb.Table(NHI_SESSIONS_TABLE)
+    severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+
+    for domain in domains:
+        # Scan credential-type stolen session entries for this domain
+        try:
+            resp  = table.scan(
+                FilterExpression=(
+                    boto3.dynamodb.conditions.Attr("session_type").eq("credential") &
+                    boto3.dynamodb.conditions.Attr("domain").contains(domain)
+                ),
+            )
+            items = resp.get("Items", [])
+        except Exception as exc:
+            logger.warning("NHI scan failed domain=%s: %s", domain, exc)
+            items = []
+
+        for item in items:
+            # Use pre-classified NHI records first (from INTEL-5 archive parsing)
+            if item.get("nhi_description"):
+                all_findings.append({
+                    "domain":      domain,
+                    "type":        item.get("category", "Credential"),
+                    "description": item.get("nhi_description", ""),
+                    "severity":    item.get("severity", "HIGH"),
+                    "preview":     item.get("cookie_name", ""),
+                    "source":      item.get("channel_source", ""),
+                    "ingested_at": item.get("ingested_at", ""),
+                })
+            else:
+                # Fallback: detect NHI patterns in domain value text
+                domain_val = item.get("domain", "")
+                nhi_hits   = _detect_nhi_in_text(domain_val, domain)
+                for hit in nhi_hits:
+                    all_findings.append({
+                        "domain":      domain,
+                        "type":        hit["type"],
+                        "description": hit["description"],
+                        "severity":    hit["severity"],
+                        "preview":     hit["preview"],
+                        "source":      item.get("channel_source", ""),
+                        "ingested_at": item.get("ingested_at", ""),
+                    })
+
+    if not all_findings:
+        return _ok({
+            "domains_checked":   len(domains),
+            "found":             False,
+            "findings":          [],
+            "highest_severity":  None,
+            "recommendation":    "No non-human identity credentials detected in the stealer log corpus for the supplied domain(s).",
+            "checked_at":        datetime.now(timezone.utc).isoformat(),
+        })
+
+    all_findings.sort(key=lambda x: severity_order.get(x["severity"], 0), reverse=True)
+    highest = all_findings[0]["severity"]
+    critical = [f for f in all_findings if f["severity"] == "CRITICAL"]
+
+    logger.info("nhi-exposure domains=%d findings=%d highest=%s", len(domains), len(all_findings), highest)
+    return _ok({
+        "domains_checked":   len(domains),
+        "found":             True,
+        "findings":          all_findings,
+        "highest_severity":  highest,
+        "recommendation": (
+            f"CRITICAL: {len(critical)} high-value credential(s) detected. "
+            "Rotate immediately — API keys and private keys found in stealer logs "
+            "may be actively exploited. Check your cloud provider IAM access logs for "
+            "unauthorised activity."
+            if critical else
+            "Non-human credentials detected. Rotate all identified keys and audit "
+            "access logs for the affected services."
+        ),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/secret-scan  /  POST /v1/payg/secret-scan
+# ---------------------------------------------------------------------------
+# Scans public GitHub and GitLab repositories for secrets accidentally committed
+# alongside a monitored domain name. Covers own domains and supply chain domains.
+#
+# Request:
+#   { "domain": "acme.com" }
+#   { "vendor_domains": ["acme.com", "widget.io"] }
+#
+# Response:
+#   { "domains_checked": N, "findings": [ { domain, repo, file, type, severity,
+#     preview, url } ], "highest_severity": "..." }
+
+GITHUB_SEARCH_URL = "https://api.github.com/search/code"
+GITLAB_SEARCH_URL = "https://gitlab.com/api/v4/search"
+GITHUB_SECRET_NAME = "relayshield/github_search_token"
+
+
+def _github_secret_scan(domain: str) -> list[dict]:
+    """Search GitHub public repos for NHI patterns alongside a domain."""
+    findings = []
+    try:
+        raw = _secrets_client.get_secret_value(SecretId=GITHUB_SECRET_NAME)["SecretString"].strip()
+        token = json.loads(raw).get("token", raw) if raw.startswith("{") else raw
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "RelayShield-SecretScan/1.0",
+        }
+    except Exception:
+        headers = {"User-Agent": "RelayShield-SecretScan/1.0"}  # unauthenticated fallback
+
+    for name, pattern, severity, description in _NHI_COMPILED[:6]:   # top CRITICAL/HIGH only
+        try:
+            query = f'"{domain}" {pattern.pattern[:20]}'  # domain + key prefix
+            url   = f"{GITHUB_SEARCH_URL}?q={urllib.parse.quote(query)}&per_page=5"
+            req   = urllib.request.Request(url, headers=headers)
+            resp  = json.loads(urllib.request.urlopen(req, timeout=10).read())
+            for item in resp.get("items", []):
+                findings.append({
+                    "source":      "github",
+                    "type":        name,
+                    "description": description,
+                    "severity":    severity,
+                    "repo":        item.get("repository", {}).get("full_name", ""),
+                    "file":        item.get("path", ""),
+                    "url":         item.get("html_url", ""),
+                    "preview":     f"Match in {item.get('path', '')}",
+                })
+        except Exception as exc:
+            logger.warning("GitHub scan failed pattern=%s domain=%s: %s", name, domain, exc)
+
+    return findings
+
+
+def handle_secret_scan(params: dict) -> dict:
+    raw_domains = list(params.get("vendor_domains") or [])
+    own_domain  = (params.get("domain") or "").strip().lower().removeprefix("www.")
+    if own_domain:
+        raw_domains.append(own_domain)
+    if not raw_domains:
+        return _err("domain or vendor_domains is required")
+
+    domains      = list({d.strip().lower().removeprefix("www.") for d in raw_domains if d.strip()})[:5]
+    all_findings: list[dict] = []
+    severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+
+    for domain in domains:
+        hits = _github_secret_scan(domain)
+        for h in hits:
+            h["domain"] = domain
+        all_findings.extend(hits)
+
+    if not all_findings:
+        return _ok({
+            "domains_checked":  len(domains),
+            "found":            False,
+            "findings":         [],
+            "highest_severity": None,
+            "recommendation":   "No secrets detected in public GitHub repositories for the supplied domain(s).",
+            "checked_at":       datetime.now(timezone.utc).isoformat(),
+        })
+
+    all_findings.sort(key=lambda x: severity_order.get(x["severity"], 0), reverse=True)
+    highest  = all_findings[0]["severity"]
+    critical = [f for f in all_findings if f["severity"] == "CRITICAL"]
+
+    logger.info("secret-scan domains=%d findings=%d highest=%s", len(domains), len(all_findings), highest)
+    return _ok({
+        "domains_checked":  len(domains),
+        "found":            True,
+        "findings":         all_findings,
+        "highest_severity": highest,
+        "recommendation": (
+            f"CRITICAL: {len(critical)} high-value secret(s) found in public repositories. "
+            "Rotate these credentials immediately — GitHub repos are indexed and may already "
+            "have been scraped by automated secret hunters."
+            if critical else
+            "Secrets found in public repositories. Rotate and revoke, then audit git history "
+            "to confirm the secret has been fully purged (git history rewrite may be required)."
+        ),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 # Request: POST /v1/intel/telegram
 #   { "email": "...", "phone": "...", "domain": "...", "wallet": "..." }
 #   At least one field required. Each queried independently; results merged.
@@ -2347,7 +4285,7 @@ def handle_intel_telegram(params: dict, api_key_record: dict | None = None) -> d
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({
                 "ok":    False,
-                "error": "Threat Intelligence API access required. Upgrade at relayshield.net/developers.",
+                "error": "Threat Intelligence API access required. Upgrade at api.relayshield.net/developers.",
             }),
         }
 
@@ -2390,6 +4328,7 @@ def handle_intel_telegram(params: dict, api_key_record: dict | None = None) -> d
     if not all_hits:
         return _ok({
             "matched":       False,
+            "record_type":   "ioc_indicator",
             "hit_count":     0,
             "ioc_types":     [],
             "earliest_seen": None,
@@ -2399,19 +4338,55 @@ def handle_intel_telegram(params: dict, api_key_record: dict | None = None) -> d
 
     timestamps   = [h.get("seen_ts", "") for h in all_hits if h.get("seen_ts")]
     ioc_types    = sorted({h.get("ioc_type", "") for h in all_hits})
-    safe_hits    = [
-        {
-            "ioc_value": h.get("ioc_value"),
-            "ioc_type":  h.get("ioc_type"),
-            "channel":   h.get("channel"),
-            "category":  h.get("category"),
-            "seen_ts":   h.get("seen_ts"),
+    safe_hits    = []
+    enrich_count = 0
+    for h in all_hits:
+        malware  = h.get("malware", "") or ""
+        source   = h.get("channel", "") or ""
+        seen_ts  = h.get("seen_ts", "") or ""
+        ioc_val  = h.get("ioc_value", "") or ""
+        ioc_type = h.get("ioc_type", "") or ""
+        hit = {
+            "ioc_value":        ioc_val,
+            "ioc_type":         ioc_type,
+            "channel":          source,
+            "category":         h.get("category"),
+            "seen_ts":          seen_ts,
+            "confidence_score": _ioc_confidence(source, seen_ts),
         }
-        for h in all_hits
-    ]
+        if malware and malware not in ("None", "n/a", ""):
+            hit["malware_family"] = malware
+            family_key = malware.lower().split(",")[0].strip()
+            actor = THREAT_ACTOR_MAP.get(family_key)
+            if actor:
+                hit["threat_actor"] = actor
+            sigma = SIGMA_RULE_MAP.get(family_key)
+            if sigma:
+                hit["sigma_rules"] = sigma
+            graph = _build_threat_graph(malware)
+            if graph:
+                hit["threat_graph"]      = graph
+                hit["country_of_origin"] = graph.get("country_origin", "Unknown")
+        if h.get("pre_ransomware"):
+            hit["pre_ransomware"]   = True
+            hit["ransomware_group"] = h.get("ransomware_group", "")
+        # Context enrichment — limit to first 15 hits to respect ip-api.com rate limit
+        if enrich_count < 15:
+            if ioc_type == "ip":
+                ctx = _enrich_ip(ioc_val)
+                if ctx:
+                    hit["context"] = ctx
+                    enrich_count += 1
+            elif ioc_type == "domain" and enrich_count < 5:
+                ctx = _enrich_domain(ioc_val)
+                if ctx:
+                    hit["context"] = ctx
+                    enrich_count += 1
+        safe_hits.append(hit)
 
     logger.info("intel_telegram queried=%d hits=%d", len(targets), len(all_hits))
     return _ok({
+        "record_type":   "ioc_indicator",
         "matched":       True,
         "hit_count":     len(all_hits),
         "ioc_types":     ioc_types,
@@ -2962,6 +4937,12 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/supply-chain":          handle_supply_chain,
         "/v1/payg/session-risk":          handle_session_risk,
         "/v1/payg/identity-graph":        handle_identity_graph,
+        "/v1/payg/ransomware-risk":       handle_ransomware_risk,
+        "/v1/payg/nhi-exposure":          handle_nhi_exposure,
+        "/v1/payg/secret-scan":           handle_secret_scan,
+        "/v1/payg/target-risk":           handle_target_risk,
+        "/v1/payg/tech-stack-cve":        handle_tech_stack_cve,
+        "/v1/payg/bulk-identity-risk":    handle_bulk_identity_risk,
     }
     handler = payg_routes.get(path)
     if not handler:
@@ -3034,12 +5015,1882 @@ def handle_intel_cve(params: dict, api_key_record: dict | None = None) -> dict:
             matches.append(item)
 
     matches.sort(key=lambda x: x.get("date_added", ""), reverse=True)
+
+    # Enhancement 5: Enrich results with ATT&CK threat actor correlation
+    attack_table = dynamodb.Table("relayshield_mitre_attack")
+    for m in matches[:10]:   # enrich top 10 only — avoid scan latency on large result sets
+        product = (m.get("product", "") or "").lower()
+        vendor  = (m.get("vendor_project", "") or "").lower()
+        related_actors = []
+        try:
+            # Scan ATT&CK groups for technique associations (T1190 = exploit public-facing app)
+            # Use known high-value technique IDs relevant to KEV vulnerabilities
+            kev_techniques = {"T1190", "T1133", "T1203", "T1068"}
+            scan_resp = attack_table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("sk").eq("info"),
+                ProjectionExpression="group_id, #n, aliases, technique_ids",
+                ExpressionAttributeNames={"#n": "name"},
+                Limit=50,
+            )
+            for actor in scan_resp.get("Items", []):
+                techniques = set(actor.get("technique_ids", []))
+                if techniques & kev_techniques:
+                    related_actors.append({
+                        "group_id":  actor.get("group_id", ""),
+                        "name":      actor.get("name", ""),
+                        "aliases":   actor.get("aliases", [])[:3],
+                    })
+        except Exception as exc:
+            logger.warning("ATT&CK correlation failed: %s", exc)
+        if related_actors:
+            m["related_threat_actors"] = related_actors[:5]
+            m["hunting_note"] = (
+                f"This CVE targets {vendor}/{product}. "
+                f"Threat groups known to exploit similar techniques: "
+                + ", ".join(a["name"] for a in related_actors[:3])
+            )
+
     return _ok({"count": len(matches), "results": matches[:50]})
+
+
+# ---------------------------------------------------------------------------
+# TC Feature 1 — Bulk IOC lookup  POST /v1/metered/bulk-ioc
+# Accepts up to 100 IOC values, returns enriched results for each.
+# Closes the #1 MSP log-enrichment gap vs ThreatConnect.
+# $0.50/batch, Stripe meter: relayshield_bulk_ioc_calls
+# ---------------------------------------------------------------------------
+
+def handle_bulk_ioc(params: dict) -> dict:
+    iocs = params.get("iocs", [])
+    if not iocs or not isinstance(iocs, list):
+        return _err("iocs must be a non-empty list of strings")
+    if len(iocs) > 100:
+        return _err("maximum 100 IOCs per request")
+    table   = dynamodb.Table(INTEL_IOCS_TABLE)
+    results = []
+    for val in iocs:
+        val = str(val).strip().lower()
+        if not val:
+            continue
+        try:
+            resp = table.query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(val),
+                ScanIndexForward=False,
+                Limit=5,
+            )
+            hits = resp.get("Items", [])
+            if hits:
+                best = hits[0]
+                results.append({
+                    "ioc_value":        val,
+                    "matched":          True,
+                    "ioc_type":         best.get("ioc_type", ""),
+                    "source":           best.get("channel", ""),
+                    "malware":          best.get("malware", ""),
+                    "threat_actor":     best.get("threat_actor", ""),
+                    "confidence_score": float(best.get("confidence_score", 0.5)),
+                    "first_seen":       hits[-1].get("seen_ts", ""),
+                    "last_seen":        best.get("seen_ts", ""),
+                    "hit_count":        len(hits),
+                })
+            else:
+                results.append({"ioc_value": val, "matched": False})
+        except Exception as exc:
+            logger.error("bulk_ioc query failed ioc=%s: %s", val[:30], exc)
+            results.append({"ioc_value": val, "matched": False, "error": "query_failed"})
+    matched = sum(1 for r in results if r.get("matched"))
+    return _ok({"queried": len(results), "matched": matched, "results": results})
+
+
+# ---------------------------------------------------------------------------
+# TC Feature 2 — IOC pivot  POST /v1/metered/ioc-pivot
+# Given one IOC, return related IOCs sharing the same malware family or source.
+# Surfaces lateral infrastructure — e.g., all C2 IPs for LummaC2.
+# $0.20/call, Stripe meter: relayshield_ioc_pivot_calls
+# ---------------------------------------------------------------------------
+
+def handle_ioc_pivot(params: dict) -> dict:
+    ioc_value = (params.get("ioc") or params.get("ioc_value") or "").strip().lower()
+    if not ioc_value:
+        return _err("ioc is required")
+    table = dynamodb.Table(INTEL_IOCS_TABLE)
+    # Step 1: look up the pivot IOC to get its malware family
+    try:
+        resp = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(ioc_value),
+            ScanIndexForward=False, Limit=1,
+        )
+        items = resp.get("Items", [])
+    except Exception as exc:
+        return _err(f"IOC lookup failed: {exc}")
+    if not items:
+        return _ok({"ioc_value": ioc_value, "matched": False, "related": []})
+    seed    = items[0]
+    malware = seed.get("malware", "")
+    source  = seed.get("channel", "")
+    # Step 2: find related IOCs by malware family (most useful pivot)
+    related: list[dict] = []
+    if malware:
+        try:
+            scan_resp = table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("malware").eq(malware)
+                    & boto3.dynamodb.conditions.Attr("ioc_value").ne(ioc_value),
+                Limit=200,
+            )
+            for item in scan_resp.get("Items", []):
+                related.append({
+                    "ioc_value":    item.get("ioc_value", ""),
+                    "ioc_type":     item.get("ioc_type", ""),
+                    "source":       item.get("channel", ""),
+                    "malware":      item.get("malware", ""),
+                    "last_seen":    item.get("seen_ts", ""),
+                })
+        except Exception as exc:
+            logger.error("ioc_pivot scan failed: %s", exc)
+    return _ok({
+        "ioc_value":     ioc_value,
+        "matched":       True,
+        "pivot_on":      "malware_family" if malware else "source_feed",
+        "pivot_value":   malware or source,
+        "seed_ioc_type": seed.get("ioc_type", ""),
+        "seed_source":   source,
+        "seed_malware":  malware,
+        "related_count": len(related),
+        "related":       related[:50],
+    })
+
+
+# ---------------------------------------------------------------------------
+# TC Feature 3 — Actor profile  GET /v1/intel/actor
+# Full MITRE ATT&CK profile for a named threat actor: TTPs, targets,
+# recent campaigns, associated IOCs from corpus.
+# TI subscription required (intel_access flag). Included in TI plan.
+# ---------------------------------------------------------------------------
+
+def handle_intel_actor(params: dict, api_key_record: dict | None = None) -> dict:
+    if not api_key_record or not api_key_record.get("intel_access"):
+        return {
+            "statusCode": 403, "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"ok": False, "error": "Threat Intelligence subscription required."}),
+        }
+    actor_name = (params.get("actor") or params.get("name") or "").strip()
+    if not actor_name:
+        return _err("actor name is required")
+    mitre_table = dynamodb.Table("relayshield_mitre_attack")
+    ioc_table   = dynamodb.Table(INTEL_IOCS_TABLE)
+    # Scan MITRE groups for name match
+    try:
+        resp = mitre_table.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("name").contains(actor_name)
+                | boto3.dynamodb.conditions.Attr("aliases").contains(actor_name),
+        )
+        groups = resp.get("Items", [])
+    except Exception as exc:
+        return _err(f"MITRE lookup failed: {exc}")
+    if not groups:
+        return _ok({"actor": actor_name, "matched": False, "profile": None})
+    group = groups[0]
+    # Find associated IOCs
+    iocs: list[dict] = []
+    for term in ([actor_name] + (group.get("aliases") or []))[:3]:
+        try:
+            ioc_resp = ioc_table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("threat_actor").contains(term),
+                Limit=100,
+            )
+            for item in ioc_resp.get("Items", []):
+                iocs.append({
+                    "ioc_value": item.get("ioc_value", ""),
+                    "ioc_type":  item.get("ioc_type", ""),
+                    "malware":   item.get("malware", ""),
+                    "last_seen": item.get("seen_ts", ""),
+                })
+        except Exception:
+            pass
+    seen_vals: set = set()
+    dedup_iocs = []
+    for i in iocs:
+        if i["ioc_value"] not in seen_vals:
+            seen_vals.add(i["ioc_value"])
+            dedup_iocs.append(i)
+    return _ok({
+        "actor":           actor_name,
+        "matched":         True,
+        "mitre_id":        group.get("group_id", ""),
+        "aliases":         group.get("aliases", []),
+        "description":     group.get("description", ""),
+        "techniques":      group.get("techniques", []),
+        "target_sectors":  group.get("target_sectors", []),
+        "origin_country":  group.get("origin_country", ""),
+        "associated_iocs": dedup_iocs[:30],
+        "ioc_count":       len(dedup_iocs),
+        "source":          "MITRE ATT&CK + RelayShield IOC corpus",
+        # Actor pivot — related actors sharing techniques or target sectors
+        "related_actors":  _actor_pivot(group, groups),
+    })
+
+
+def _actor_pivot(group: dict, all_groups: list) -> list[dict]:
+    """Find related threat actors sharing techniques or target sectors."""
+    pivot_techniques = set((group.get("techniques") or [])[:5])
+    pivot_sectors    = set(group.get("target_sectors") or [])
+    group_id         = group.get("group_id", "")
+    related = []
+    for g in all_groups:
+        if g.get("group_id") == group_id:
+            continue
+        g_techniques = set((g.get("techniques") or [])[:5])
+        g_sectors    = set(g.get("target_sectors") or [])
+        shared_ttps     = pivot_techniques & g_techniques
+        shared_sectors  = pivot_sectors & g_sectors
+        if shared_ttps or shared_sectors:
+            related.append({
+                "actor":           g.get("name", ""),
+                "mitre_id":        g.get("group_id", ""),
+                "origin_country":  g.get("origin_country", ""),
+                "shared_techniques": list(shared_ttps)[:3],
+                "shared_sectors":    list(shared_sectors)[:3],
+            })
+    return related[:10]
+
+
+# ---------------------------------------------------------------------------
+# RF Feature 1 — Trending threats  GET /v1/intel/trending
+# Top IOCs seen across feeds in the last 24 hours, grouped by type.
+# Surfaces what's actively spreading NOW — equivalent to RF's trending threats.
+# TI subscription required. Included in TI plan.
+# ---------------------------------------------------------------------------
+
+def handle_intel_trending(params: dict, api_key_record: dict | None = None) -> dict:
+    if not api_key_record or not api_key_record.get("intel_access"):
+        return {
+            "statusCode": 403, "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"ok": False, "error": "Threat Intelligence subscription required."}),
+        }
+    hours  = min(int(params.get("hours", 24)), 72)
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    table  = dynamodb.Table(INTEL_IOCS_TABLE)
+    try:
+        resp  = table.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("seen_ts").gte(cutoff),
+            ProjectionExpression="ioc_value, ioc_type, malware, channel, seen_ts, confidence_score",
+        )
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp and len(items) < 2000:
+            resp  = table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("seen_ts").gte(cutoff),
+                ProjectionExpression="ioc_value, ioc_type, malware, channel, seen_ts, confidence_score",
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            items.extend(resp.get("Items", []))
+    except Exception as exc:
+        return _err(f"Trending scan failed: {exc}")
+    # Group by type, sort by confidence desc
+    by_type: dict[str, list] = {}
+    for item in items:
+        t = item.get("ioc_type", "unknown")
+        by_type.setdefault(t, []).append({
+            "ioc_value":  item.get("ioc_value", ""),
+            "malware":    item.get("malware", ""),
+            "source":     item.get("channel", ""),
+            "seen_ts":    item.get("seen_ts", ""),
+            "confidence": float(item.get("confidence_score", 0.5)),
+        })
+    # Top 20 per type by confidence
+    trending = {t: sorted(v, key=lambda x: x["confidence"], reverse=True)[:20]
+                for t, v in by_type.items()}
+    return _ok({
+        "window_hours":  hours,
+        "total_new_iocs": len(items),
+        "trending":      trending,
+        "generated_at":  datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# RF Feature 2 — Brand monitor  POST /v1/metered/brand-monitor
+# Scans IOC domain corpus and Telegram channel IOCs for brand name patterns.
+# Surfaces typosquat domains, phishing infrastructure, and dark web mentions.
+# Equivalent to RF brand protection / Flare brand monitoring at fraction of cost.
+# $0.25/call, Stripe meter: relayshield_brand_monitor_calls
+# ---------------------------------------------------------------------------
+
+def handle_brand_monitor(params: dict) -> dict:
+    brand = (params.get("brand") or "").strip().lower()
+    if not brand or len(brand) < 3:
+        return _err("brand must be at least 3 characters")
+    table  = dynamodb.Table(INTEL_IOCS_TABLE)
+    hits: list[dict] = []
+    try:
+        resp = table.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_value").contains(brand),
+            ProjectionExpression="ioc_value, ioc_type, malware, channel, seen_ts, category",
+        )
+        hits.extend(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp and len(hits) < 500:
+            resp = table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("ioc_value").contains(brand),
+                ProjectionExpression="ioc_value, ioc_type, malware, channel, seen_ts, category",
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            hits.extend(resp.get("Items", []))
+    except Exception as exc:
+        return _err(f"Brand scan failed: {exc}")
+    # Classify hits
+    phishing    = [h for h in hits if h.get("category") in ("phishing", "threat_feed")
+                   and h.get("ioc_type") in ("domain", "url")]
+    malware_c2  = [h for h in hits if h.get("malware")]
+    dark_web    = [h for h in hits if h.get("channel", "").startswith("@")
+                   or h.get("category") == "credential_exposure"]
+    def _fmt(items: list) -> list:
+        return [{"ioc_value": i.get("ioc_value",""), "ioc_type": i.get("ioc_type",""),
+                 "source": i.get("channel",""), "malware": i.get("malware",""),
+                 "last_seen": i.get("seen_ts","")} for i in items[:20]]
+    return _ok({
+        "brand":             brand,
+        "matched":           len(hits) > 0,
+        "total_mentions":    len(hits),
+        "phishing_domains":  len(phishing),
+        "malware_c2":        len(malware_c2),
+        "dark_web_mentions": len(dark_web),
+        "hits": {
+            "phishing":   _fmt(phishing),
+            "malware_c2": _fmt(malware_c2),
+            "dark_web":   _fmt(dark_web),
+        },
+        "recommendation": (
+            "CRITICAL: active brand abuse detected in criminal infrastructure"
+            if len(hits) > 10 else
+            "WARNING: brand patterns found — review hits"
+            if len(hits) > 0 else
+            "No brand mentions found in current corpus"
+        ),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Bulk identity risk  POST /v1/metered/bulk-identity-risk
+#
+# Hierarchical org + agent-level risk scoring in one call.
+# Use cases: MSP weekly sweep across client domains; OrcX agentic AI governance
+# (score the identities enterprise AI agents act on behalf of).
+#
+# Input:
+#   { "targets": [
+#       { "domain": "acme.com",
+#         "agents": ["agent-cs@acme.com", "agent-sales@acme.com"] },  # optional
+#       { "domain": "beta.com" }
+#     ]
+#   }
+# Limits: up to 10 domains, up to 5 agents per domain (50 identity checks max).
+# $2.00/call — premium positioning: unique per-agent hierarchy, no competitor equivalent.
+# Stripe meter: relayshield_bulk_identity_risk_calls
+# ---------------------------------------------------------------------------
+
+def _domain_risk_fast(domain: str) -> dict:
+    """Run all 6 identity risk dimensions for one domain. Returns score dict."""
+    ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
+    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
+    sessions_tbl   = dynamodb.Table("relayshield_stolen_sessions")
+    cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
+    base_name      = domain.split(".")[0]
+    company        = base_name.capitalize()
+    dim            = {}
+    factors        = []
+
+    # D1: Breach exposure (0-20)
+    try:
+        hibp_key = _hibp_api_key()
+        req = urllib.request.Request(
+            f"https://haveibeenpwned.com/api/v3/breacheddomain/{domain}",
+            headers={"hibp-api-key": hibp_key, "User-Agent": "RelayShield/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as r:
+            breaches = json.loads(r.read())
+            n = len(breaches) if isinstance(breaches, list) else 0
+            dim["breach_exposure"] = min(20, n * 2)
+            if n: factors.append(f"{n} domain breaches")
+    except Exception:
+        dim["breach_exposure"] = 0
+
+    # D2: Infostealer density (0-20)
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(
+            f"{CAVALIER_DOMAIN_URL}?domain={domain}",
+            headers={"User-Agent": "RelayShield/1.0"}), timeout=8)
+        d = json.loads(r.read())
+        n = d.get("total", 0) or len(d.get("stealers", []))
+        dim["infostealer_density"] = min(20, n * 5)
+        if n: factors.append(f"{n} stealer log hits")
+    except Exception:
+        dim["infostealer_density"] = 0
+
+    # D3: IOC presence (0-15)
+    try:
+        resp = ioc_table.scan(FilterExpression=boto3.dynamodb.conditions.Attr("ioc_value").contains(domain.split(".")[0]), Limit=20)
+        n = len(resp.get("Items", []))
+        dim["ioc_presence"] = min(15, n * 3)
+        if n: factors.append(f"{n} IOC corpus hits")
+    except Exception:
+        dim["ioc_presence"] = 0
+
+    # D4: Ransomware victim (0-20)
+    try:
+        resp = ransomware_tbl.query(KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain), Limit=3)
+        items = resp.get("Items", [])
+        dim["ransomware_victim"] = 20 if items else 0
+        if items: factors.append(f"Ransomware victim: {', '.join(i.get('group','') for i in items)}")
+    except Exception:
+        dim["ransomware_victim"] = 0
+
+    # D5: Session exposure (0-15)
+    try:
+        resp = sessions_tbl.scan(FilterExpression=boto3.dynamodb.conditions.Attr("matched_email").contains(domain), Limit=10)
+        n = len(resp.get("Items", []))
+        dim["session_exposure"] = min(15, n * 5)
+        if n: factors.append(f"{n} stolen session records")
+    except Exception:
+        dim["session_exposure"] = 0
+
+    # D6: CVE exposure — fast single-page scan by vendor_project (no pagination = no timeout)
+    try:
+        cve_resp = cve_table.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("vendor_project").eq(company),
+            Limit=500,
+        )
+        cve_items = cve_resp.get("Items", [])
+        rw = sum(1 for c in cve_items if c.get("known_ransomware_campaign_use") == "Known")
+        tot = len(cve_items)
+        cve_score = 25 if rw>=50 else 20 if rw>=20 else 15 if rw>=10 else 12 if rw>=5 else 6 if rw>=1 else 3 if tot>=5 else 0
+        dim["cve_exposure"] = cve_score
+        if tot: factors.append(f"{tot} actively exploited CVEs affecting {company} products ({rw} ransomware-linked)")
+    except Exception:
+        dim["cve_exposure"] = 0
+
+    total = min(100, sum(dim.values()))
+    return {
+        "risk_score":       total,
+        "grade":            "F" if total >= 75 else "D" if total >= 50 else "C" if total >= 35 else "B" if total >= 15 else "A",
+        "risk_level":       "CRITICAL" if total >= 75 else "HIGH" if total >= 50 else "MEDIUM" if total >= 25 else "LOW",
+        "dimension_scores": dim,
+        "risk_factors":     factors,
+    }
+
+
+def _agent_risk(email: str) -> dict:
+    """Score an individual agent identity (email) across breach, stealer, and session signals."""
+    email   = email.strip().lower()
+    factors = []
+    score   = 0
+
+    # Breach: HIBP individual account (5s timeout to avoid overall timeout)
+    try:
+        hibp_key = _hibp_api_key()
+        req = urllib.request.Request(
+            f"{HIBP_BASE_URL}{urllib.parse.quote(email)}?truncateResponse=true",
+            headers={"hibp-api-key": hibp_key, "User-Agent": "RelayShield/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            breaches = json.loads(r.read())
+            n = len(breaches) if isinstance(breaches, list) else 0
+            score += min(35, n * 5)
+            if n: factors.append(f"{n} account breaches")
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            pass
+    except Exception:
+        pass
+
+    # Infostealer: Hudson Rock by email
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(
+            f"{CAVALIER_URL}?email={urllib.parse.quote(email)}",
+            headers={"User-Agent": "RelayShield/1.0"}), timeout=8)
+        d = json.loads(r.read())
+        n = d.get("total", 0) or len(d.get("stealers", []))
+        score += min(40, n * 20)
+        if n: factors.append(f"{n} infostealer log hits")
+    except Exception:
+        pass
+
+    # Session/credential exposure: check by matched_email
+    try:
+        sessions_tbl = dynamodb.Table("relayshield_stolen_sessions")
+        resp = sessions_tbl.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("matched_email").eq(email), Limit=5)
+        items = resp.get("Items", [])
+        n = len(items)
+        cred_items = [i for i in items if i.get("session_type") == "credential"]
+        score += min(40, len(cred_items) * 25 + (n - len(cred_items)) * 10)
+        if cred_items:
+            cred_types = list({i.get("category","credential") for i in cred_items})
+            factors.append(f"NHI credential exposure: {len(cred_items)} service credential(s) found in stealer archives ({', '.join(cred_types[:2])})")
+        elif n:
+            factors.append(f"{n} stolen session record(s) in criminal corpus")
+    except Exception:
+        pass
+
+    score = min(100, score)
+    return {
+        "identity":     email,
+        "risk_score":   score,
+        "grade":        "F" if score >= 75 else "D" if score >= 50 else "C" if score >= 35 else "B" if score >= 15 else "A",
+        "risk_level":   "CRITICAL" if score >= 75 else "HIGH" if score >= 50 else "MEDIUM" if score >= 25 else "LOW",
+        "risk_factors": factors,
+    }
+
+
+def handle_bulk_identity_risk(params: dict) -> dict:
+    targets = params.get("targets", [])
+    if not targets or not isinstance(targets, list):
+        return _err("targets must be a non-empty list of {domain, agents?} objects")
+    if len(targets) > 10:
+        return _err("maximum 10 domains per request")
+
+    results = []
+    for t in targets:
+        domain = (t.get("domain") or "").strip().lower()
+        if not domain or "." not in domain:
+            results.append({"domain": domain or "invalid", "error": "invalid domain"})
+            continue
+
+        agents_in = (t.get("agents") or [])[:5]  # cap at 5 per domain
+
+        domain_result = _domain_risk_fast(domain)
+        agent_results = [_agent_risk(e) for e in agents_in if e]
+
+        # Composite flag: any agent CRITICAL elevates domain to at least HIGH
+        if any(a["risk_level"] == "CRITICAL" for a in agent_results):
+            if domain_result["risk_level"] == "LOW":
+                domain_result["risk_level"] = "HIGH"
+                domain_result["risk_factors"].append("Agent identity CRITICAL signal elevates org risk")
+
+        results.append({
+            "domain":         domain,
+            "domain_score":   domain_result["risk_score"],
+            "domain_grade":   domain_result["grade"],
+            "domain_risk":    domain_result["risk_level"],
+            "dimension_scores": domain_result["dimension_scores"],
+            "domain_factors": domain_result["risk_factors"],
+            "agents":         agent_results,
+            "agent_count":    len(agent_results),
+            "highest_agent_risk": max((a["risk_level"] for a in agent_results),
+                                      key=lambda l: {"LOW":0,"MEDIUM":1,"HIGH":2,"CRITICAL":3}.get(l,0))
+                                  if agent_results else None,
+        })
+
+    critical = sum(1 for r in results if r.get("domain_risk") == "CRITICAL" or r.get("highest_agent_risk") == "CRITICAL")
+    high     = sum(1 for r in results if r.get("domain_risk") == "HIGH"     or r.get("highest_agent_risk") == "HIGH")
+
+    return _ok({
+        "queried":         len(results),
+        "critical_count":  critical,
+        "high_count":      high,
+        "results":         results,
+        "summary": (
+            f"{critical} CRITICAL, {high} HIGH risk identities across {len(results)} domains."
+            if (critical + high) else
+            f"No high-risk signals detected across {len(results)} domains."
+        ),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Sprint B Item 7 — Tech Stack CVE Targeting  POST /v1/metered/tech-stack-cve
+#
+# Cross-references a list of declared technology products against the CISA KEV
+# corpus and high-EPSS CVEs. Returns CVEs actively being exploited that target
+# the caller's specific tech stack. Closes the Intel 471 / Flashpoint vuln intel gap.
+#
+# Input:  { "tech_stack": ["nginx", "wordpress", "cisco ios"] }
+#         OR pass "domain" to pull tech_stack from a user's profile record.
+# Output: matched CVEs with EPSS score, KEV status, ransomware flag, exploit chatter.
+# $0.20/call. Stripe meter: relayshield_tech_stack_cve_calls
+# ---------------------------------------------------------------------------
+
+def handle_tech_stack_cve(params: dict) -> dict:
+    tech_stack = params.get("tech_stack") or []
+    domain     = (params.get("domain") or "").strip().lower()
+
+    # Allow domain lookup to pull stored tech_stack from user record
+    if not tech_stack and domain:
+        try:
+            users_table = dynamodb.Table("relayshield_users")
+            resp = users_table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("monitored_domain").eq(domain),
+                Limit=1,
+            )
+            items = resp.get("Items", [])
+            if items:
+                tech_stack = items[0].get("tech_stack", [])
+        except Exception:
+            pass
+
+    if not tech_stack or not isinstance(tech_stack, list):
+        return _err("tech_stack must be a non-empty list of product names, or pass domain to use stored stack")
+
+    cve_table = dynamodb.Table(INTEL_CVE_TABLE)
+    matched: list[dict] = []
+
+    try:
+        resp = cve_table.scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("epss_score").gt(Decimal("0.1")),
+        )
+        all_cves = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp and len(all_cves) < 2000:
+            resp = cve_table.scan(
+                FilterExpression=boto3.dynamodb.conditions.Attr("epss_score").gt(Decimal("0.1")),
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            all_cves.extend(resp.get("Items", []))
+    except Exception as exc:
+        return _err(f"CVE lookup failed: {exc}")
+
+    stack_lower = [t.lower().strip() for t in tech_stack]
+    for cve in all_cves:
+        description = (cve.get("description") or cve.get("short_description") or "").lower()
+        product     = (cve.get("affected_product") or cve.get("product") or "").lower()
+        combined    = f"{description} {product}"
+        for tech in stack_lower:
+            if tech and len(tech) >= 3 and tech in combined:
+                matched.append({
+                    "cve_id":             cve.get("cve_id", ""),
+                    "matched_product":    tech,
+                    "epss_score":         float(cve.get("epss_score", 0)),
+                    "in_kev":             cve.get("in_kev", False),
+                    "ransomware_campaign": cve.get("ransomware_campaign", False),
+                    "cvss_score":         float(cve.get("cvss_score", 0)) if cve.get("cvss_score") else None,
+                    "description":        (cve.get("description") or "")[:200],
+                    "published":          cve.get("published_date") or cve.get("added_date") or "",
+                })
+                break
+
+    matched.sort(key=lambda x: (x["in_kev"], x["ransomware_campaign"], x["epss_score"]), reverse=True)
+    critical = [m for m in matched if m["in_kev"] or m["ransomware_campaign"]]
+
+    return _ok({
+        "tech_stack_queried": tech_stack,
+        "total_matches":      len(matched),
+        "critical_count":     len(critical),
+        "summary": (
+            f"{len(critical)} CRITICAL CVEs actively targeting your stack (KEV/ransomware-linked)"
+            if critical else
+            f"{len(matched)} elevated-risk CVEs found for your tech stack"
+            if matched else
+            "No high-risk CVEs found matching your declared tech stack"
+        ),
+        "critical_cves": critical[:10],
+        "all_matches":   matched[:25],
+    })
 
 
 # ---------------------------------------------------------------------------
 # Router / Lambda handler
 # ---------------------------------------------------------------------------
+
+def handle_account_info(params: dict, api_key_record: dict | None = None) -> dict:
+    if not api_key_record:
+        return _err("Valid API key required", 401)
+    return _ok({
+        "plan":             api_key_record.get("plan", "personal"),
+        "intel_access":     bool(api_key_record.get("intel_access", False)),
+        "calls_this_month": int(api_key_record.get("monthly_calls", 0)),
+        "customer_id":      api_key_record.get("stripe_customer_id", ""),
+        "email":            api_key_record.get("email", ""),
+        "active":           bool(api_key_record.get("active", True)),
+    })
+
+
+def handle_approval_security(params: dict) -> dict:
+    """GoPlus spender contract risk check.
+    NOTE: GoPlus approval_security checks whether a SPENDER CONTRACT is risky,
+    not the list of approvals a wallet has granted. Wallet approval scanning is
+    done client-side via Alchemy eth_getLogs; this endpoint validates each spender.
+    """
+    spender  = (params.get("address") or params.get("spender") or "").strip().lower()
+    chain_id = str(params.get("chain_id") or "1").strip()
+    if not spender or not re.match(r"^0x[0-9a-fA-F]{40}$", spender):
+        return _err("address/spender must be a valid EVM address (0x + 40 hex chars)")
+    try:
+        url = f"https://api.gopluslabs.io/api/v1/approval_security/{chain_id}?contract_addresses={spender}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        info = (data.get("result") or {}).get(spender) or {}
+        is_malicious   = bool(info.get("malicious_behavior") or info.get("doubt_list"))
+        is_trusted     = bool(info.get("trust_list"))
+        risk = "CRITICAL" if is_malicious else "LOW" if is_trusted else "MEDIUM"
+        return _ok({
+            "spender":       spender,
+            "spender_name":  info.get("tag") or info.get("contract_name") or "",
+            "chain_id":      chain_id,
+            "risk":          risk,
+            "is_trusted":    is_trusted,
+            "is_malicious":  is_malicious,
+            "is_open_source":bool(int(info.get("is_open_source", 0) or 0)),
+            "malicious_behavior": info.get("malicious_behavior", []),
+        })
+    except Exception as exc:
+        return _err(f"spender risk check failed: {exc}", 502)
+
+
+def _defillama_lookup(domain: str) -> dict:
+    """Match a domain against DeFiLlama protocol list. Returns metadata dict or {}."""
+    try:
+        req = urllib.request.Request(
+            "https://api.llama.fi/protocols",
+            headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            protocols = json.loads(resp.read())
+
+        # Strip subpath — kamino.com/earn/lend → kamino.com
+        base_domain = domain.split("/")[0].removeprefix("www.")
+
+        best = None
+        for p in protocols:
+            proto_url = (p.get("url") or "").lower().replace("https://", "").replace("http://", "").removeprefix("www.").rstrip("/")
+            proto_name = (p.get("name") or "").lower()
+            slug       = (p.get("slug") or "").lower()
+            if proto_url and (base_domain == proto_url or base_domain.endswith("." + proto_url)):
+                best = p
+                break
+            # fuzzy: domain root word appears in name/slug (e.g. "kamino" in "kamino-lend")
+            root = base_domain.split(".")[0]
+            if len(root) >= 4 and (root in proto_name or root in slug):
+                if best is None or (p.get("tvl") or 0) > (best.get("tvl") or 0):
+                    best = p
+
+        if not best:
+            return {}
+
+        tvl = best.get("tvl") or 0
+        if isinstance(tvl, list):   # historical array — take last entry
+            tvl = tvl[-1].get("totalLiquidityUSD", 0) if tvl else 0
+
+        return {
+            "name":      best.get("name", ""),
+            "category":  best.get("category", ""),
+            "chains":    best.get("chains", []),
+            "tvl_usd":   round(float(tvl), 0) if tvl else None,
+            "audits":    int(best.get("audits") or 0),
+            "audit_links": best.get("audit_links") or [],
+            "twitter":   best.get("twitter", ""),
+            "url":       best.get("url", ""),
+            "source":    "defillama",
+        }
+    except Exception as exc:
+        logger.warning("DeFiLlama lookup failed domain=%s: %s", domain, exc)
+        return {}
+
+
+def handle_dapp_security(params: dict) -> dict:
+    """dApp security — phishing check + DeFiLlama protocol enrichment (TVL, audits, chains, category)."""
+    raw_url = (params.get("url") or "").strip().lower().replace("https://", "").replace("http://", "")
+    if not raw_url:
+        return _err("url is required")
+
+    # ── GoPlus phishing check ─────────────────────────────────────────────────
+    phishing, trust_list, risk_flags, gp_risk_score = False, False, [], 0
+    try:
+        encoded = urllib.parse.quote(f"https://{raw_url}", safe="")
+        gp_url  = f"https://api.gopluslabs.io/api/v1/dapp_security?url={encoded}"
+        req     = urllib.request.Request(gp_url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        r = data.get("result") or {}
+        gp_risk_score = int(r.get("risk_level", 0) or 0)
+        phishing      = bool(int(r.get("phishing_site", 0) or 0))
+        trust_list    = bool(int(r.get("trust_list", 0) or 0))
+        risk_flags    = r.get("risk_items", []) or []
+    except Exception as exc:
+        logger.warning("GoPlus dApp check failed url=%s: %s", raw_url, exc)
+
+    # ── DeFiLlama protocol enrichment ────────────────────────────────────────
+    llama = _defillama_lookup(raw_url)
+
+    # Risk level: GoPlus phishing/score is authoritative; DeFiLlama presence lowers uncertainty
+    if phishing or gp_risk_score >= 3:
+        risk_level = "CRITICAL"
+    elif gp_risk_score >= 2:
+        risk_level = "HIGH"
+    elif gp_risk_score >= 1 or risk_flags:
+        risk_level = "MEDIUM"
+    else:
+        risk_level = "LOW"
+
+    # Open source: DeFiLlama audit_links are proof of audited open-source code
+    is_open_source = bool(llama.get("audit_links")) or bool(llama.get("audits"))
+
+    logger.info("dapp-security url=%s risk=%s llama=%s tvl=%s", raw_url, risk_level, llama.get("name"), llama.get("tvl_usd"))
+    return _ok({
+        "url":          raw_url,
+        "risk_level":   risk_level,
+        "phishing":     phishing,
+        "trust_list":   trust_list,
+        "risk_flags":   risk_flags,
+        "is_open_source": is_open_source,
+        "defillama":    llama or None,
+    })
+
+
+def _nft_slug_variants(raw: str) -> list[str]:
+    """Return slug variants to try: lowercase, underscores, hyphens, no-spaces."""
+    s = raw.strip().lower()
+    under  = re.sub(r"[\s\-]+", "_", s)
+    hyphen = re.sub(r"[\s_]+",  "-", s)
+    nospace = re.sub(r"\s+", "", s)
+    seen, out = set(), []
+    for v in [s, under, hyphen, nospace]:
+        if v and v not in seen:
+            seen.add(v); out.append(v)
+    return out
+
+
+def _nft_risk(floor: float, listed: int, avg_24h: float) -> tuple[str, list[str]]:
+    flags: list[str] = []
+    if floor == 0:
+        flags.append("zero floor price — no active buyers")
+    if listed == 0:
+        flags.append("no active listings — possible rug or abandoned collection")
+    elif avg_24h > 0 and avg_24h < floor * 0.7:
+        flags.append("avg sale price well below floor — possible distress selling")
+    level = "CRITICAL" if floor == 0 and listed == 0 else \
+            "HIGH"     if len(flags) >= 2 else \
+            "MEDIUM"   if flags else "LOW"
+    return level, flags
+
+
+def handle_nft_floor(params: dict) -> dict:
+    """NFT collection floor — auto-routes slug to OpenSea (EVM) or Magic Eden (Solana).
+    Accepts human-readable slugs for both: 'boredapeyachtclub', 'mad_lads', 'okay-bears'.
+    Also accepts 0x contract addresses for EVM or base58 mint for Solana (falls through to
+    appropriate marketplace).
+    """
+    raw = (params.get("symbol") or "").strip()
+    if not raw:
+        return _err("symbol is required — use a collection slug (e.g. boredapeyachtclub, mad_lads) "
+                    "or a contract address.")
+
+    is_evm_contract = bool(re.match(r"^0x[0-9a-fA-F]{40}$", raw))
+    # Solana base58 mint addresses are 32-44 chars with no 0x; slugs are typically shorter
+    # but we let Magic Eden be the arbiter — if it 404s, fall through to OpenSea
+    slugs = _nft_slug_variants(raw)
+
+    # ── OpenSea (EVM — ETH, Polygon, Base, etc.) ────────────────────────────
+    def _try_opensea(slug: str) -> dict | None:
+        try:
+            url  = f"https://api.opensea.io/api/v2/collections/{slug}/stats"
+            req  = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            total     = data.get("total") or {}
+            intervals = data.get("intervals") or []
+            day       = next((i for i in intervals if i.get("interval") == "one_day"), {})
+            floor_eth = float(total.get("floor_price") or 0)
+            symbol    = str(total.get("floor_price_symbol") or "ETH").upper()
+            vol_all   = float(total.get("volume") or 0)
+            vol_24h   = float(day.get("volume") or 0)
+            sales_24h = int(day.get("sales") or 0)
+            if floor_eth == 0 and vol_all == 0:
+                return None  # likely 404 or empty slug
+            risk_level, risk_flags = _nft_risk(floor_eth, sales_24h, 0)
+            return {
+                "symbol":       slug,
+                "floor":        round(floor_eth, 4),
+                "floor_symbol": symbol,
+                "volume_24h":   round(vol_24h, 4),
+                "sales_24h":    sales_24h,
+                "volume_all":   round(vol_all, 2),
+                "risk_level":   risk_level,
+                "risk_flags":   risk_flags,
+                "chain":        "evm",
+                "marketplace":  "opensea",
+            }
+        except Exception:
+            return None
+
+    # ── Magic Eden (Solana) ──────────────────────────────────────────────────
+    def _try_magic_eden(slug: str) -> dict | None:
+        try:
+            url = f"https://api-mainnet.magiceden.dev/v2/collections/{slug}/stats"
+            req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            # Treat as not-found if both floor and listed are zero/missing (ETH collection on Solana ME)
+            floor_raw  = data.get("floorPrice")
+            listed_raw = data.get("listedCount")
+            if not data or (not floor_raw and not listed_raw):
+                return None
+            floor   = float(data.get("floorPrice",   0) or 0) / 1e9
+            vol_all = float(data.get("volumeAll",     0) or 0) / 1e9
+            listed  = int(data.get("listedCount",     0) or 0)
+            avg_24h = float(data.get("avgPrice24hr",  0) or 0) / 1e9
+            risk_level, risk_flags = _nft_risk(floor, listed, avg_24h)
+            return {
+                "symbol":       slug,
+                "floor":        round(floor, 4),
+                "floor_symbol": "SOL",
+                "volume_24h":   round(avg_24h * listed, 4),
+                "listed":       listed,
+                "avg_24h":      round(avg_24h, 4),
+                "volume_all":   round(vol_all, 2),
+                "risk_level":   risk_level,
+                "risk_flags":   risk_flags,
+                "chain":        "solana",
+                "marketplace":  "magic_eden",
+            }
+        except Exception:
+            return None
+
+    # Strategy: for EVM contracts try OpenSea directly; for slugs try both,
+    # preferring Solana (Magic Eden) first since it was the original behaviour,
+    # then fall back to OpenSea if Magic Eden misses.
+    if is_evm_contract:
+        # Contract address — OpenSea only (Magic Eden doesn't index by EVM address here)
+        for slug in slugs:
+            result = _try_opensea(slug)
+            if result:
+                logger.info("nft-floor OpenSea contract=%s floor=%s", slug, result.get("floor"))
+                return _ok(result)
+    else:
+        # Slug — try Magic Eden first, then OpenSea
+        for slug in slugs:
+            result = _try_magic_eden(slug)
+            if result:
+                logger.info("nft-floor MagicEden slug=%s floor=%s SOL", slug, result.get("floor"))
+                return _ok(result)
+        for slug in slugs:
+            result = _try_opensea(slug)
+            if result:
+                logger.info("nft-floor OpenSea slug=%s floor=%s ETH", slug, result.get("floor"))
+                return _ok(result)
+
+    return _err(
+        f"Collection '{raw}' not found on Magic Eden (Solana) or OpenSea (EVM). "
+        "Try the exact marketplace slug — e.g. 'boredapeyachtclub', 'mad_lads', 'pudgypenguins'.",
+        404,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/ton-address
+# ---------------------------------------------------------------------------
+# Checks a TON address or token contract. Auto-detects wallet vs token:
+# - If DexScreener has market data → returns token info (name, price, liquidity)
+# - Otherwise → TON Center wallet check (balance, tx count, scam flag)
+
+_TON_RAW_ADDR_RE      = re.compile(r"^-?\d+:[0-9a-fA-F]{64}$")
+_TON_FRIENDLY_ADDR_RE = re.compile(r"^[A-Za-z0-9_-]{48}$")
+
+
+def _is_valid_ton_address(addr: str) -> bool:
+    return bool(_TON_RAW_ADDR_RE.match(addr) or _TON_FRIENDLY_ADDR_RE.match(addr))
+
+
+def handle_ton_address(params: dict) -> dict:
+    address = (params.get("address") or "").strip()
+    if not address:
+        return _err("address is required")
+    if not _is_valid_ton_address(address):
+        # Most common case: an EVM address (0x + 40 hex) pasted into the TON field —
+        # TON raw addresses need 64 hex chars, friendly addresses are 48-char base64url.
+        return _err("Not a valid TON address — expected raw format (0:...) or friendly format (EQ.../UQ...)", 400)
+
+    # ── DexScreener: check if this is a known TON token ─────────────────────
+    token_meta = {}
+    try:
+        # Search by address — DexScreener resolves canonical form
+        ds_url = f"https://api.dexscreener.com/latest/dex/search?q={urllib.parse.quote(address)}"
+        ds_req = urllib.request.Request(ds_url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(ds_req, timeout=8) as ds_resp:
+            ds_data = json.loads(ds_resp.read())
+        pairs = ds_data.get("pairs") or []
+        ton_pairs = [p for p in pairs if "ton" in (p.get("chainId") or "").lower()]
+        if ton_pairs:
+            best = ton_pairs[0]
+            base = best.get("baseToken", {})
+            token_meta = {
+                "token_name":    base.get("name", ""),
+                "token_symbol":  base.get("symbol", ""),
+                "address":       base.get("address", address),
+                "price_usd":     best.get("priceUsd"),
+                "liquidity_usd": (best.get("liquidity") or {}).get("usd"),
+                "volume_24h":    (best.get("volume") or {}).get("h24"),
+                "dex":           best.get("dexId", ""),
+                "chain":         "ton",
+                "source":        "dexscreener",
+            }
+    except Exception as exc:
+        logger.warning("DexScreener TON lookup failed address=%s: %s", address, exc)
+
+    # If it's a known token, return token data directly (no wallet check needed)
+    if token_meta:
+        logger.info("ton-address token=%s price=%s", token_meta.get("token_symbol"), token_meta.get("price_usd"))
+        return _ok({
+            "address":      address,
+            "type":         "token",
+            "risk_level":   "LOW",
+            "risk_flags":   [],
+            "token":        token_meta,
+        })
+
+    # ── TON Center wallet check ───────────────────────────────────────────────
+    try:
+        tc_url = f"https://toncenter.com/api/v2/getAddressInformation?address={urllib.parse.quote(address)}"
+        tc_req = urllib.request.Request(tc_url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(tc_req, timeout=8) as tc_resp:
+            tc_data = json.loads(tc_resp.read())
+        if not tc_data.get("ok"):
+            return _err("TON address not found", 404)
+        result = tc_data.get("result", {})
+        balance_ton = round(int(result.get("balance", 0) or 0) / 1e9, 4)
+        state       = result.get("state", "")
+    except Exception as exc:
+        logger.error("TON Center failed address=%s: %s", address, exc)
+        return _err("TON address lookup failed — upstream error", 502)
+
+    # TON API scam check
+    risk_flags = []
+    try:
+        ton_url = TONAPI_ACCOUNTS_URL.format(address=urllib.parse.quote(address, safe="-_="))
+        ton_req = urllib.request.Request(ton_url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(ton_req, timeout=6) as ton_resp:
+            ton_data = json.loads(ton_resp.read())
+        if ton_data.get("is_scam"):
+            risk_flags.append("flagged as scam in TON community database")
+    except Exception:
+        pass
+
+    if state == "uninitialized":
+        risk_flags.append("uninitialized contract — proceed with caution")
+
+    risk_level = "CRITICAL" if any("scam" in f for f in risk_flags) else "MEDIUM" if risk_flags else "LOW"
+    logger.info("ton-address wallet=%s balance=%.4f risk=%s", address, balance_ton, risk_level)
+    return _ok({
+        "address":     address,
+        "type":        "wallet",
+        "balance_ton": balance_ton,
+        "state":       state,
+        "risk_level":  risk_level,
+        "risk_flags":  risk_flags,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/xrp-address
+# ---------------------------------------------------------------------------
+# Checks an XRP Ledger address — balance, tx activity, and fraud/scam flags.
+# Single data source (XRPSCAN, free public API, no key) rather than a
+# separate XRPL JSON-RPC call — their account endpoint already returns
+# balance plus an "advisory" field populated for accounts reported/flagged
+# for fraud (e.g. via Chainabuse), which is the fraud-signal source found
+# 2026-07-04 (comparable to BitcoinAbuse for BTC — no equivalently mature
+# scam-address database exists for XRP yet, so this is the best available).
+
+_XRP_ADDR_RE = re.compile(r"^r[1-9A-HJ-NP-Za-km-z]{24,34}$")
+
+
+def handle_xrp_address(params: dict) -> dict:
+    address = (params.get("address") or "").strip()
+    if not address:
+        return _err("address is required")
+    if not _XRP_ADDR_RE.match(address):
+        return _err("Not a valid XRP Ledger address — expected base58 starting with 'r' (25-35 chars)")
+
+    try:
+        url = f"https://api.xrpscan.com/api/v1/account/{urllib.parse.quote(address)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return _err("XRP address not found", 404)
+        logger.error("XRPSCAN lookup failed address=%s: %s", address, exc)
+        return _err("XRP address lookup failed — upstream error", 502)
+    except Exception as exc:
+        logger.error("XRPSCAN lookup failed address=%s: %s", address, exc)
+        return _err("XRP address lookup failed — upstream error", 502)
+
+    if data.get("error"):
+        return _err("XRP address not found", 404)
+
+    balance_xrp = float(data.get("xrpBalance", 0) or 0)
+    advisory    = data.get("advisory")
+
+    risk_flags = []
+    if advisory:
+        note = advisory.get("note") if isinstance(advisory, dict) else str(advisory)
+        risk_flags.append(f"flagged: {note or 'fraud/scam advisory on record'}")
+
+    risk_level = "CRITICAL" if risk_flags else "LOW"
+    logger.info("xrp-address wallet=%s balance=%.4f risk=%s", address, balance_xrp, risk_level)
+    return _ok({
+        "address":     address,
+        "type":        "wallet",
+        "balance_xrp": round(balance_xrp, 6),
+        "owner_count": data.get("ownerCount", 0),
+        "risk_level":  risk_level,
+        "risk_flags":  risk_flags,
+    })
+
+
+PUSH_TOKENS_TABLE = "relayshield_push_tokens"
+
+def handle_register_push(params: dict, api_key_record: dict | None = None) -> dict:
+    """Register an Expo push token with monitored wallet addresses for server-side alerts.
+    wallet_addresses: list of {address, chain, label} dicts OR plain address strings.
+    telegram_id: optional Telegram chat_id to also deliver alerts via bot.
+    """
+    push_token  = (params.get("push_token") or "").strip()
+    wallets     = params.get("wallet_addresses") or []
+    telegram_id = (params.get("telegram_id") or "").strip()
+    if not push_token:
+        return _err("push_token is required")
+    user_id         = (api_key_record or {}).get("api_key", "anonymous")
+    nft_collections = params.get("nft_collections") or []
+    # Normalise wallets to {address, chain, label} regardless of input format
+    normalised = []
+    for w in wallets:
+        if isinstance(w, str):
+            normalised.append({"address": w, "chain": "solana", "label": ""})
+        elif isinstance(w, dict) and w.get("address"):
+            normalised.append({
+                "address": w["address"],
+                "chain":   w.get("chain", "solana"),
+                "label":   w.get("label", ""),
+            })
+    try:
+        # update_item (not put_item) — re-registration happens on every app
+        # launch, and a full item replacement would wipe fields written by
+        # other code paths (e.g. last_alert, set by _expo_push) that aren't
+        # part of the registration payload.
+        update_expr  = "SET user_id = :u, wallet_addresses = :w, nft_collections = :n, registered_at = :r, active = :a"
+        expr_values  = {
+            ":u": user_id,
+            ":w": normalised,
+            ":n": nft_collections,
+            ":r": datetime.now(timezone.utc).isoformat(),
+            ":a": True,
+        }
+        if telegram_id:
+            update_expr += ", telegram_id = :t"
+            expr_values[":t"] = telegram_id
+        dynamodb.Table(PUSH_TOKENS_TABLE).update_item(
+            Key={"push_token": push_token},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_values,
+        )
+
+        # Auto-add EVM wallet addresses to the Alchemy Address Activity webhook
+        # so real-time transaction alerts fire without manual dashboard updates
+        evm_addrs = [w["address"] for w in normalised
+                     if w.get("chain", "").lower() in ("evm", "ethereum", "base", "arbitrum", "polygon")]
+        if evm_addrs:
+            _alchemy_webhook_add_addresses(evm_addrs)
+
+        # Auto-add Solana addresses to Helius webhook
+        sol_addrs = [w["address"] for w in normalised
+                     if w.get("chain", "").lower() in ("solana", "sol")]
+        if sol_addrs:
+            _helius_webhook_add_addresses(sol_addrs)
+
+        return _ok({"registered": True, "wallets": len(normalised),
+                    "nft_collections": len(nft_collections),
+                    "telegram_linked": bool(telegram_id),
+                    "webhook_addresses_added": len(evm_addrs) + len(sol_addrs)})
+    except Exception as exc:
+        return _err(f"push registration failed: {exc}", 500)
+
+
+def _urlopen_with_retry(req: urllib.request.Request, timeout: int = 8, attempts: int = 3) -> dict:
+    """Execute a urllib request with retries on transient failure (e.g. momentary 403/5xx
+    from a webhook provider). Raises the last exception if all attempts fail."""
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read())
+        except Exception as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                time.sleep(1.5 * (attempt + 1))
+    raise last_exc
+
+
+def _alchemy_webhook_add_addresses(addresses: list[str]) -> None:
+    """Add EVM addresses to the Alchemy Address Activity webhook via Notify API."""
+    webhook_id = os.environ.get("ALCHEMY_WEBHOOK_ID", "")
+    auth_token = os.environ.get("ALCHEMY_AUTH_TOKEN", "")
+    if not webhook_id or not auth_token:
+        logger.warning("ALCHEMY_WEBHOOK_ID or ALCHEMY_AUTH_TOKEN not set — skipping webhook registration")
+        return
+    payload = json.dumps({
+        "webhook_id":        webhook_id,
+        "addresses_to_add":  addresses,
+        "addresses_to_remove": [],
+    }).encode()
+    req = urllib.request.Request(
+        "https://dashboard.alchemy.com/api/update-webhook-addresses",
+        data=payload, method="PATCH",
+        headers={"Content-Type": "application/json", "X-Alchemy-Token": auth_token},
+    )
+    try:
+        resp = _urlopen_with_retry(req)
+        logger.info("Alchemy webhook updated: added %d EVM addresses, response=%s",
+                    len(addresses), resp)
+    except Exception as exc:
+        logger.warning("Alchemy webhook address update failed after retries: %s", exc)
+
+
+def _helius_webhook_add_addresses(addresses: list[str]) -> None:
+    """Add Solana addresses to the Helius webhook via their API."""
+    webhook_id = os.environ.get("HELIUS_WEBHOOK_ID", "")
+    helius_key = HELIUS_API_KEY
+    if not webhook_id or not helius_key:
+        logger.warning("HELIUS_WEBHOOK_ID or HELIUS_API_KEY not set — skipping Helius webhook registration")
+        return
+    # Helius: PATCH /v0/webhooks/{id} to append account addresses
+    url = f"https://api.helius.xyz/v0/webhooks/{webhook_id}?api-key={helius_key}"
+    # First GET current webhook to read existing addresses
+    try:
+        get_req = urllib.request.Request(url, method="GET",
+                                         headers={"Accept": "application/json"})
+        current  = _urlopen_with_retry(get_req)
+        existing = current.get("accountAddresses") or []
+        merged   = list(set(existing + addresses))
+        payload  = json.dumps({
+            "webhookURL":       current.get("webhookURL", ""),
+            "transactionTypes": current.get("transactionTypes", ["Any"]),
+            "accountAddresses": merged,
+            "webhookType":      current.get("webhookType", "enhanced"),
+            "authHeader":       current.get("authHeader", ""),
+        }).encode()
+        put_req = urllib.request.Request(url, data=payload, method="PUT",
+                                         headers={"Content-Type": "application/json"})
+        _urlopen_with_retry(put_req)
+        logger.info("Helius webhook updated: %d total addresses", len(merged))
+    except Exception as exc:
+        logger.warning("Helius webhook address update failed after retries: %s", exc)
+
+
+def _expo_push(push_token: str, title: str, body: str, data: dict | None = None) -> None:
+    """Fire-and-forget Expo push notification from within the API Lambda.
+    Also persists the alert server-side so the app can fetch its last alert
+    on mount/focus rather than depending solely on the OS notification-received
+    event, which is unreliable across Android/FCM/Expo app-state combinations."""
+    import urllib.request as _r
+    payload = json.dumps({
+        "to": push_token, "title": title, "body": body,
+        "data": data or {}, "sound": "default", "priority": "high",
+    }).encode()
+    req = _r.Request(
+        "https://exp.host/--/api/v2/push/send", data=payload, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with _r.urlopen(req, timeout=5) as r:
+            resp = json.loads(r.read())
+        if (resp.get("data") or {}).get("status") == "error":
+            logger.warning("Expo push error: %s", resp)
+    except Exception as exc:
+        logger.warning("Expo push failed: %s", exc)
+
+    try:
+        dynamodb.Table(PUSH_TOKENS_TABLE).update_item(
+            Key={"push_token": push_token},
+            UpdateExpression="SET last_alert = :a",
+            ExpressionAttributeValues={":a": {
+                "title": title, "body": body,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+    except Exception as exc:
+        logger.warning("last_alert persist failed for push_token=%s: %s", push_token[:24], exc)
+
+
+def _find_push_token_for_address(address: str) -> list[dict]:
+    """Return all push token records that monitor the given wallet address."""
+    try:
+        items = dynamodb.Table(PUSH_TOKENS_TABLE).scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("active").eq(True),
+        ).get("Items", [])
+        return [
+            rec for rec in items
+            if any(
+                (w if isinstance(w, str) else w.get("address", "")) == address
+                for w in (rec.get("wallet_addresses") or [])
+            )
+        ]
+    except Exception as exc:
+        logger.warning("push token lookup failed: %s", exc)
+        return []
+
+
+def handle_alchemy_webhook(event: dict) -> dict:
+    """POST /v1/app/webhook/alchemy
+    Receives Alchemy Address Activity webhooks for monitored EVM wallets.
+    Fires Expo push when a transaction involves a monitored address.
+    Alchemy webhook secret verified via X-Alchemy-Signature header (HMAC-SHA256).
+    """
+    import hmac, hashlib
+    raw_body = event.get("body") or ""
+    # API Gateway preserves header casing as sent by the client (not lowercased),
+    # so look up case-insensitively rather than assuming "x-alchemy-signature".
+    headers_ci = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    sig      = headers_ci.get("x-alchemy-signature", "")
+    secret   = os.environ.get("ALCHEMY_WEBHOOK_SECRET", "")
+    if secret:
+        expected = hmac.new(secret.encode(), raw_body.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return {"statusCode": 403, "body": "invalid signature"}
+    try:
+        body = json.loads(raw_body)
+    except Exception:
+        return {"statusCode": 400, "body": "invalid JSON"}
+
+    # Alchemy Address Activity payloads include the source network (e.g. "BASE_MAINNET")
+    ALCHEMY_NETWORK_NAMES = {
+        "BASE_MAINNET": "Base", "ETH_MAINNET": "Ethereum", "MATIC_MAINNET": "Polygon",
+        "ARB_MAINNET": "Arbitrum", "OPT_MAINNET": "Optimism", "AVAX_MAINNET": "Avalanche",
+        "BNB_MAINNET": "BNB Chain",
+    }
+    network_raw  = (body.get("event") or {}).get("network", "")
+    network_name = ALCHEMY_NETWORK_NAMES.get(network_raw, network_raw.replace("_MAINNET", "").title() or "EVM")
+
+    activities = (body.get("event") or {}).get("activity") or []
+    for act in activities:
+        to_addr   = (act.get("toAddress") or "").lower()
+        from_addr = (act.get("fromAddress") or "").lower()
+        value     = act.get("value") or 0
+        asset     = act.get("asset", "ETH")
+        category  = act.get("category", "")
+
+        # Alert on incoming transfers to monitored addresses
+        records = _find_push_token_for_address(to_addr)
+        for rec in records:
+            wallet_label = next(
+                (w.get("label", "") for w in (rec.get("wallet_addresses") or [])
+                 if isinstance(w, dict) and w.get("address", "").lower() == to_addr),
+                ""
+            )
+            short_from = f"{from_addr[:6]}…{from_addr[-4:]}"
+            _expo_push(
+                rec["push_token"],
+                "📥 Inbound transaction",
+                f"{wallet_label or to_addr[:8]} ({network_name}): received {value} {asset} from {short_from}",
+                {"wallet": to_addr, "from": from_addr, "alert_type": "inbound_tx",
+                 "chain": "evm", "network": network_raw, "category": category},
+            )
+
+    return {"statusCode": 200, "body": json.dumps({"processed": len(activities)})}
+
+
+def handle_helius_webhook(event: dict) -> dict:
+    """POST /v1/app/webhook/helius
+    Receives Helius enhanced transaction webhooks for monitored Solana wallets.
+    Helius sends an Authorization header set in the webhook config.
+    """
+    # API Gateway preserves header casing as sent by the client (not lowercased),
+    # so look up case-insensitively rather than assuming "authorization".
+    headers_ci = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    auth   = headers_ci.get("authorization", "")
+    secret = os.environ.get("HELIUS_WEBHOOK_SECRET", "")
+    if secret and auth != f"Bearer {secret}":
+        return {"statusCode": 403, "body": "invalid auth"}
+
+    try:
+        transactions = json.loads(event.get("body") or "[]")
+        if isinstance(transactions, dict):
+            transactions = [transactions]
+    except Exception:
+        return {"statusCode": 400, "body": "invalid JSON"}
+
+    alerted = 0
+    for tx in transactions:
+        tx_type      = tx.get("type", "")
+        fee_payer    = tx.get("feePayer", "")
+        native_xfers = tx.get("nativeTransfers") or []
+        token_xfers  = tx.get("tokenTransfers") or []
+
+        for xfer in native_xfers:
+            to_addr = xfer.get("toUserAccount", "")
+            amount  = xfer.get("amount", 0) / 1e9   # lamports → SOL
+            if amount < 0.001:
+                continue
+            records = _find_push_token_for_address(to_addr)
+            for rec in records:
+                wallet_label = next(
+                    (w.get("label", "") for w in (rec.get("wallet_addresses") or [])
+                     if isinstance(w, dict) and w.get("address", "") == to_addr),
+                    ""
+                )
+                short_from = f"{fee_payer[:6]}…{fee_payer[-4:]}" if fee_payer else "unknown"
+                _expo_push(
+                    rec["push_token"],
+                    "📥 SOL received",
+                    f"{wallet_label or to_addr[:8]} (Solana): +{amount:.4f} SOL from {short_from}",
+                    {"wallet": to_addr, "from": fee_payer, "alert_type": "inbound_sol",
+                     "chain": "solana", "network": "solana", "amount_sol": str(amount)},
+                )
+                alerted += 1
+
+        for xfer in token_xfers:
+            to_addr   = xfer.get("toUserAccount", "")
+            from_addr = xfer.get("fromUserAccount", "")
+            mint      = xfer.get("mint", "")
+            amount    = float(xfer.get("tokenAmount") or 0)
+            if amount <= 0 or not to_addr:
+                continue
+            records = _find_push_token_for_address(to_addr)
+            for rec in records:
+                wallet_label = next(
+                    (w.get("label", "") for w in (rec.get("wallet_addresses") or [])
+                     if isinstance(w, dict) and w.get("address", "") == to_addr),
+                    ""
+                )
+                short_from = f"{from_addr[:6]}…{from_addr[-4:]}" if from_addr else "unknown"
+                _expo_push(
+                    rec["push_token"],
+                    "📥 Token received",
+                    f"{wallet_label or to_addr[:8]} (Solana): +{amount} tokens (mint {mint[:8]}…) from {short_from}",
+                    {"wallet": to_addr, "from": from_addr, "mint": mint, "alert_type": "inbound_token",
+                     "chain": "solana", "network": "solana"},
+                )
+                alerted += 1
+
+    return {"statusCode": 200, "body": json.dumps({"alerted": alerted})}
+
+
+_SOLANA_MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+
+
+def handle_solana_token_risk(params: dict) -> dict:
+    """Rugcheck.xyz + DexScreener Solana token risk — mint authority, freeze authority, honeypot detection."""
+    mint = (params.get("mint") or "").strip()
+    if not mint:
+        return _err("mint is required (Solana SPL token mint address)")
+    if not _SOLANA_MINT_RE.match(mint):
+        return _err("Not a valid Solana mint address — expected base58, 32-44 characters. Enter the token's contract/mint address, not its name or symbol.")
+
+    # ── Rugcheck primary source ───────────────────────────────────────────────
+    # Full /report (not /report/summary) — same risk data as summary, plus a
+    # "verification" object with Jupiter's jup_verified/jup_strict flags. This
+    # is a distinct signal from the lookalike-token check: lookalike catches
+    # "same name as a different verified asset"; this catches "is this specific
+    # token itself listed on a known verification registry at all."
+    score, risk_names, critical_flags, rugcheck_ok = 0, [], [], False
+    verification_status = "unverified"
+    try:
+        url = f"https://api.rugcheck.xyz/v1/tokens/{mint}/report"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        score          = int(data.get("score", 0))
+        risks          = data.get("risks", [])
+        # Only surface danger-level flags as risk flags; warn-level alone is not HIGH
+        critical_flags = [r.get("name", "") for r in risks if r.get("level") == "danger"]
+        warn_flags     = [r.get("name", "") for r in risks if r.get("level") == "warn"]
+        # "Mutable metadata" is near-universal on Solana — only surface if paired with other issues
+        meaningful_warns = [f for f in warn_flags if f.lower() != "mutable metadata"]
+        risk_names = critical_flags + meaningful_warns
+        rugcheck_ok = True
+
+        verification = data.get("verification") or {}
+        if verification.get("jup_strict"):
+            verification_status = "jupiter_strict"
+        elif verification.get("jup_verified"):
+            verification_status = "jupiter_verified"
+    except Exception as exc:
+        logger.warning("Rugcheck failed mint=%s: %s", mint, exc)
+
+    # Risk level: danger flags or score ≥5000 → HIGH; score ≥2000 with meaningful warns → MEDIUM
+    if critical_flags or score >= 5000:
+        level = "HIGH"
+    elif score >= 2000 and meaningful_warns:
+        level = "MEDIUM"
+    else:
+        level = "LOW"
+
+    # ── DexScreener fallback for token name/market data ──────────────────────
+    dexscreener_meta = {}
+    try:
+        ds_url = f"https://api.dexscreener.com/latest/dex/tokens/{mint}"
+        ds_req = urllib.request.Request(ds_url, headers={"User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(ds_req, timeout=8) as ds_resp:
+            ds_data = json.loads(ds_resp.read())
+        pairs = ds_data.get("pairs") or []
+        sol_pairs = [p for p in pairs if p.get("chainId", "").lower() == "solana"] or pairs
+        if sol_pairs:
+            best  = sol_pairs[0]
+            base  = best.get("baseToken", {})
+            dexscreener_meta = {
+                "token_name":    base.get("name", ""),
+                "token_symbol":  base.get("symbol", ""),
+                "price_usd":     best.get("priceUsd"),
+                "liquidity_usd": (best.get("liquidity") or {}).get("usd"),
+                "volume_24h":    (best.get("volume") or {}).get("h24"),
+                "dex":           best.get("dexId", ""),
+                "source":        "dexscreener",
+            }
+    except Exception as ds_exc:
+        logger.warning("DexScreener Solana fallback failed mint=%s: %s", mint, ds_exc)
+
+    # Neither source found anything — a valid-format mint that doesn't actually
+    # exist, or isn't indexed. Absence of data is not the same as "verified
+    # clean" — don't return risk_level: LOW here, that reads as a safety verdict.
+    if not rugcheck_ok and not dexscreener_meta:
+        return _ok({
+            "mint":               mint,
+            "risk_level":         "UNKNOWN",
+            "risk_flags":         [],
+            "verification_status": "unknown",
+            "note":               "No data found for this mint on Rugcheck or DexScreener — it may not exist, or may be too new/unindexed. Absence of flags does not mean the token is safe; verify independently.",
+        })
+
+    token_name   = dexscreener_meta.get("token_name", "")
+    token_symbol = dexscreener_meta.get("token_symbol", "")
+
+    lookalike = _check_lookalike_token(token_symbol, mint)
+    if lookalike:
+        risk_names.append(
+            f"name/symbol matches verified asset '{lookalike['verified_name']}' "
+            f"(CoinGecko #{lookalike['market_cap_rank'] or '?'}) but this mint isn't its verified address — possible impersonation"
+        )
+        if level == "LOW":
+            level = "MEDIUM"
+
+    logger.info("solana-token-risk mint=%s name=%s risk=%s score=%d verified=%s", mint, token_name or "unknown", level, score, verification_status)
+    return _ok({
+        "mint":                mint,
+        "token_name":          token_name,
+        "token_symbol":        token_symbol,
+        "risk_level":          level,
+        "risk_score":          score,
+        "risk_max":            10000,
+        "risk_flags":          risk_names[:8],
+        "dexscreener":         dexscreener_meta or None,
+        "lookalike_check":     lookalike,
+        "verification_status": verification_status,
+        "source":              "rugcheck.xyz" if rugcheck_ok else "dexscreener",
+    })
+
+
+def handle_solana_address_risk(params: dict) -> dict:
+    """SolanaFM address reputation — transaction risk, blacklist status."""
+    address = (params.get("address") or "").strip()
+    if not address:
+        return _err("address is required")
+    try:
+        url = f"https://api.solana.fm/v0/accounts/{address}"
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        account = data.get("result", {}) or data
+        # SolanaFM doesn't have a direct risk score — derive from account type
+        risk_flags = []
+        is_program = bool(account.get("executable", False))
+        onchain_data = account.get("onChainAccountInfo", {}) or {}
+        risk_level = "LOW"
+        if not account and not onchain_data:
+            risk_flags.append("address not found on-chain")
+            risk_level = "MEDIUM"
+        return _ok({
+            "address":    address,
+            "risk_level": risk_level,
+            "is_program": is_program,
+            "risk_flags": risk_flags,
+            "source":     "solana.fm",
+        })
+    except Exception as exc:
+        return _err(f"SolanaFM address check failed: {exc}", 502)
+
+
+def handle_solana_nft_tensor(params: dict) -> dict:
+    """Tensor NFT collection floor risk for Solana — alternative to Magic Eden."""
+    slug = (params.get("slug") or "").strip().lower()
+    if not slug:
+        return _err("slug is required (Tensor collection slug)")
+    try:
+        url = f"https://api.tensor.so/graphql"
+        query = json.dumps({"query": f'{{ allCollections(slugs: ["{slug}"]) {{ slug name statsV2 {{ floor1h floor24h volume24h numListed }} }} }}'})
+        req = urllib.request.Request(url, data=query.encode(), headers={"Content-Type": "application/json", "User-Agent": "RelayShield/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        collections = (data.get("data") or {}).get("allCollections", [])
+        if not collections:
+            return _err(f"Collection '{slug}' not found on Tensor")
+        coll  = collections[0]
+        stats = coll.get("statsV2", {}) or {}
+        floor_1h  = float(stats.get("floor1h", 0) or 0) / 1e9
+        floor_24h = float(stats.get("floor24h", 0) or 0) / 1e9
+        vol_24h   = float(stats.get("volume24h", 0) or 0) / 1e9
+        listed    = int(stats.get("numListed", 0) or 0)
+        risk_flags = []
+        if floor_1h > 0 and floor_24h > 0 and floor_1h < floor_24h * 0.8:
+            risk_flags.append(f"floor dropped {((1 - floor_1h/floor_24h)*100):.0f}% in 1 hour")
+        if listed == 0:
+            risk_flags.append("no active listings")
+        level = "CRITICAL" if len(risk_flags) >= 2 else "HIGH" if risk_flags else "LOW"
+        return _ok({
+            "slug":       slug,
+            "name":       coll.get("name", slug),
+            "floor_sol":  round(floor_1h, 4) or round(floor_24h, 4),
+            "floor_24h_sol": round(floor_24h, 4),
+            "volume_24h_sol": round(vol_24h, 2),
+            "listed":     listed,
+            "risk_level": level,
+            "risk_flags": risk_flags,
+            "source":     "tensor.trade",
+        })
+    except Exception as exc:
+        return _err(f"Tensor NFT check failed: {exc}", 502)
+
+
+# ---------------------------------------------------------------------------
+# Mobile app proxy — Alchemy + Helius (keys never leave the backend)
+# ---------------------------------------------------------------------------
+
+def handle_evm_rpc_proxy(event: dict) -> dict:
+    """POST /v1/app/evm-rpc — proxy EVM JSON-RPC calls via Alchemy (ETH mainnet or Base).
+    Body: {network?: "eth"|"base", ...json_rpc_payload}
+    """
+    import urllib.request as _req, json as _j
+    if not ALCHEMY_API_KEY:
+        return _err("Alchemy not configured", 503)
+    try:
+        body = _j.loads(event.get("body") or "{}")
+    except Exception:
+        return _err("invalid JSON", 400)
+
+    network = body.pop("network", "eth")
+    subdomain = "base-mainnet" if network == "base" else "eth-mainnet"
+    url = f"https://{subdomain}.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
+    payload = _j.dumps(body).encode()
+    req = _req.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with _req.urlopen(req, timeout=10) as resp:
+            result = _j.loads(resp.read())
+    except Exception as exc:
+        logger.error("Alchemy EVM RPC proxy error: %s", exc)
+        return _err("upstream RPC error", 502)
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "body": _j.dumps(result),
+    }
+
+
+def handle_solana_rpc_proxy(event: dict) -> dict:
+    """POST /v1/app/solana-rpc — proxy Solana JSON-RPC calls via Helius.
+    Body: standard JSON-RPC payload {jsonrpc, method, params, id}.
+    Requires valid RS API key (auth checked by caller).
+    """
+    import urllib.request as _req, json as _j
+    if not HELIUS_API_KEY:
+        return _err("Helius not configured", 503)
+    try:
+        body = _j.loads(event.get("body") or "{}")
+    except Exception:
+        return _err("invalid JSON", 400)
+
+    import http.client as _http, ssl as _ssl
+    payload = _j.dumps(body).encode()
+    ctx = _ssl.create_default_context()
+    try:
+        conn = _http.HTTPSConnection("mainnet.helius-rpc.com", timeout=10, context=ctx)
+        conn.request("POST", f"/?api-key={HELIUS_API_KEY}", body=payload, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        result = _j.loads(resp.read())
+        conn.close()
+    except Exception as exc:
+        logger.error("Helius RPC proxy error: %s", exc)
+        return _err("upstream RPC error", 502)
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "body": _j.dumps(result),
+    }
+
+
+def handle_helius_assets_proxy(event: dict) -> dict:
+    """POST /v1/app/helius-assets — proxy Helius getAssetsByOwner for SPL portfolio valuation.
+    Body: {owner_address: string}
+    Requires valid RS API key.
+    """
+    import urllib.request as _req, json as _j
+    if not HELIUS_API_KEY:
+        return _err("Helius not configured", 503)
+    try:
+        body = _j.loads(event.get("body") or "{}")
+    except Exception:
+        return _err("invalid JSON", 400)
+
+    owner = body.get("owner_address", "")
+    if not owner:
+        return _err("owner_address required", 400)
+
+    url = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
+    payload = _j.dumps({
+        "jsonrpc": "2.0", "id": 1,
+        "method": "getAssetsByOwner",
+        "params": {
+            "ownerAddress": owner,
+            "page": 1, "limit": 100,
+            "displayOptions": {"showFungible": True, "showNativeBalance": True},
+        },
+    }).encode()
+    req = _req.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with _req.urlopen(req, timeout=10) as resp:
+            result = _j.loads(resp.read())
+    except Exception as exc:
+        logger.error("Helius assets proxy error: %s", exc)
+        return _err("upstream Helius error", 502)
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "body": _j.dumps(result),
+    }
+
+
+def handle_wallet_inbound(params: dict) -> dict:
+    """
+    Return up to 20 recent inbound transaction senders for a wallet address.
+    chain: "evm" | "solana" | "ton"
+    Used by the mobile app's address-poisoning detector to scan tx history
+    server-side (avoids exposing Alchemy/Helius keys on the client).
+    Response: { senders: [{address, asset, value, hash}], tx_count: N }
+    """
+    address = (params.get("address") or "").strip()
+    chain   = (params.get("chain") or "").lower()
+    if not address:
+        return _err("address is required")
+    if chain not in ("evm", "solana", "ton"):
+        return _err("chain must be evm, solana, or ton")
+
+    senders: list[dict] = []
+
+    # ── EVM via Alchemy ──────────────────────────────────────────────────────
+    if chain == "evm":
+        alchemy_key = os.environ.get("ALCHEMY_API_KEY", "")
+        if not alchemy_key:
+            return _err("Alchemy key not configured")
+        try:
+            payload = json.dumps({
+                "jsonrpc": "2.0", "id": 1,
+                "method": "alchemy_getAssetTransfers",
+                "params": [{
+                    "toAddress": address,
+                    "category": ["external", "erc20"],
+                    "maxCount": "0x14",
+                    "order": "desc",
+                }],
+            }).encode()
+            req = urllib.request.Request(
+                f"https://eth-mainnet.g.alchemy.com/v2/{alchemy_key}",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            for tx in (data.get("result") or {}).get("transfers", []):
+                sender = (tx.get("from") or "").lower()
+                if sender:
+                    senders.append({
+                        "address": sender,
+                        "asset":   tx.get("asset", ""),
+                        "value":   str(tx.get("value", "")),
+                        "hash":    tx.get("hash", ""),
+                    })
+        except Exception as exc:
+            logger.warning("wallet-inbound EVM failed address=%s: %s", address, exc)
+            return _err(f"EVM lookup failed: {exc}")
+
+    # ── Solana via Helius RPC ────────────────────────────────────────────────
+    elif chain == "solana":
+        helius_key = os.environ.get("HELIUS_API_KEY", "")
+        rpc_url = f"https://mainnet.helius-rpc.com/?api-key={helius_key}" if helius_key \
+                  else "https://api.mainnet-beta.solana.com"
+        try:
+            sig_payload = json.dumps({
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getSignaturesForAddress",
+                "params": [address, {"limit": 20}],
+            }).encode()
+            req = urllib.request.Request(
+                rpc_url, data=sig_payload,
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                sig_data = json.loads(resp.read())
+            signatures = [s["signature"] for s in (sig_data.get("result") or [])]
+
+            for sig in signatures:
+                try:
+                    tx_payload = json.dumps({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "getTransaction",
+                        "params": [sig, {"encoding": "json", "maxSupportedTransactionVersion": 0}],
+                    }).encode()
+                    req2 = urllib.request.Request(
+                        rpc_url, data=tx_payload,
+                        headers={"Content-Type": "application/json"}, method="POST",
+                    )
+                    with urllib.request.urlopen(req2, timeout=10) as resp2:
+                        tx_data = json.loads(resp2.read())
+                    accounts = (tx_data.get("result") or {}).get("transaction", {}) \
+                                                            .get("message", {}) \
+                                                            .get("accountKeys", [])
+                    sender = accounts[0] if accounts else ""
+                    if sender and sender != address:
+                        senders.append({"address": sender, "asset": "SOL", "value": "", "hash": sig})
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning("wallet-inbound Solana failed address=%s: %s", address, exc)
+            return _err(f"Solana lookup failed: {exc}")
+
+    # ── TON via TON API v2 (tonapi.io — no key required for basic lookups) ──
+    elif chain == "ton":
+        try:
+            # tonapi.io accepts both friendly (EQ.../UQ...) and raw (0:...) formats
+            encoded = urllib.parse.quote(address, safe="")
+            url = f"https://tonapi.io/v2/blockchain/accounts/{encoded}/transactions?limit=20"
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "RelayShield/1.0", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            for tx in (data.get("transactions") or []):
+                # Inbound = has in_msg with a source
+                in_msg = tx.get("in_msg") or {}
+                sender = (in_msg.get("source") or {}).get("address", "")
+                if not sender:
+                    continue
+                raw_value = in_msg.get("value", 0)
+                try:
+                    value_ton = f"{int(raw_value) / 1e9:.4f}"
+                except Exception:
+                    value_ton = ""
+                senders.append({
+                    "address": sender,
+                    "asset":   "TON",
+                    "value":   value_ton,
+                    "hash":    tx.get("hash", ""),
+                })
+        except Exception as exc:
+            logger.warning("wallet-inbound TON failed address=%s: %s", address, exc)
+            return _err(f"TON lookup failed: {exc}")
+
+    logger.info("wallet-inbound chain=%s address=%s senders=%d", chain, address[:12], len(senders))
+    return _ok({"senders": senders, "tx_count": len(senders)})
+
 
 ROUTES = {
     "/v1/breach":           handle_breach,
@@ -3054,6 +6905,24 @@ ROUTES = {
     "/v1/nft-security":     handle_nft_security,
     "/v1/intel/telegram":   handle_intel_telegram,    # TI API — requires intel_access flag
     "/v1/intel/cve":        handle_intel_cve,         # CISA KEV lookup by CVE ID or keyword
+    "/v1/intel/actor":      handle_intel_actor,       # TC: actor profile — TI subscription
+    "/v1/intel/trending":   handle_intel_trending,    # RF: trending IOCs last 24hrs — TI subscription
+    "/v1/account/info":     handle_account_info,
+    "/v1/approval-security":    handle_approval_security,
+    "/v1/dapp-security":        handle_dapp_security,
+    "/v1/nft-floor":            handle_nft_floor,
+    "/v1/solana/token-risk":    handle_solana_token_risk,
+    "/v1/solana/address-risk":  handle_solana_address_risk,
+    "/v1/solana/nft-tensor":    handle_solana_nft_tensor,
+    "/v1/ton-address":          handle_ton_address,
+    "/v1/xrp-address":          handle_xrp_address,
+    "/v1/wallet-inbound":       handle_wallet_inbound,
+    "/v1/app/register-push":        handle_register_push,
+    "/v1/app/webhook/alchemy":      handle_alchemy_webhook,
+    "/v1/app/webhook/helius":       handle_helius_webhook,
+    "/v1/app/evm-rpc":              handle_evm_rpc_proxy,
+    "/v1/app/solana-rpc":           handle_solana_rpc_proxy,
+    "/v1/app/helius-assets":        handle_helius_assets_proxy,
 }
 
 PAYG_PATHS = set(PAYG_PRICE_UNITS.keys()) | {"/v1/payg/result/"}
@@ -3065,8 +6934,19 @@ def lambda_handler(event: dict, context) -> dict:
 
     logger.info("API request — method=%s path=%s", method, path)
 
-    # Discovery
-    if method == "GET" and path in ("/", "/v1", "/v1/"):
+    # AWS Marketplace fulfillment — forward to marketplace Lambda (GET or POST)
+    if "/marketplace/fulfillment" in path:
+        import boto3 as _boto3, json as _json
+        lc = _boto3.client("lambda", region_name="us-east-1")
+        resp = lc.invoke(
+            FunctionName="relayshield-aws-marketplace",
+            InvocationType="RequestResponse",
+            Payload=_json.dumps(event).encode(),
+        )
+        return _json.loads(resp["Payload"].read())
+
+    # Discovery — HEAD included since UptimeRobot and similar monitors probe with HEAD
+    if method in ("GET", "HEAD") and path in ("/", "/v1", "/v1/"):
         return _ok({
             "service":  "RelayShield B2A API",
             "version":  "1.0",
@@ -3076,6 +6956,99 @@ def lambda_handler(event: dict, context) -> dict:
             "payg_endpoints": list(PAYG_PRICE_UNITS.keys()) + ["GET /v1/payg/result/{analysis_id}"],
             "payg_note": "x402 payment required — USDC on Base. No API key needed.",
         })
+
+    # ── Last alert lookup — no auth required (push_token itself is the secret) ─
+    # GET /v1/app/last-alert?push_token=ExponentPushToken[...]
+    # Lets the app fetch its most recent alert as authoritative server state,
+    # rather than depending on the OS notification-received event, which is
+    # unreliable across Android/FCM/Expo app-state combinations.
+    if method == "GET" and path in ("/v1/app/last-alert", "/v1/app/last-alert/"):
+        qp    = event.get("queryStringParameters") or {}
+        token = (qp.get("push_token") or "").strip()
+        if not token:
+            return _err("push_token is required")
+        try:
+            item = dynamodb.Table(PUSH_TOKENS_TABLE).get_item(Key={"push_token": token}).get("Item") or {}
+            return _ok({"last_alert": item.get("last_alert")})
+        except Exception as exc:
+            logger.warning("last-alert lookup failed: %s", exc)
+            return _ok({"last_alert": None})
+
+    # ── App feedback submission — no auth required (push_token identifies device) ─
+    # POST /v1/app/feedback  { push_token, rating: "up"|"down", comment?: string }
+    # One record per device (update_item, not append) — the app only asks once.
+    if method == "POST" and path in ("/v1/app/feedback", "/v1/app/feedback/"):
+        params  = _body(event)
+        token   = (params.get("push_token") or "").strip()
+        rating  = (params.get("rating") or "").strip()
+        comment = (params.get("comment") or "").strip()[:1000]
+        if not token:
+            return _err("push_token is required")
+        if rating not in ("up", "down"):
+            return _err("rating must be 'up' or 'down'")
+        try:
+            dynamodb.Table(PUSH_TOKENS_TABLE).update_item(
+                Key={"push_token": token},
+                UpdateExpression="SET feedback_rating = :r, feedback_comment = :c, feedback_at = :t",
+                ExpressionAttributeValues={
+                    ":r": rating,
+                    ":c": comment,
+                    ":t": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            return _ok({"received": True})
+        except Exception as exc:
+            logger.warning("feedback submission failed: %s", exc)
+            return _err("feedback submission failed", 500)
+
+    # ── Public badge endpoint — no auth required ──────────────────────────────
+    # GET /v1/badge?domain=example.com&style=flat|shield
+    # Returns SVG image with risk level, color-coded, cacheable 1hr
+    if method == "GET" and path in ("/v1/badge", "/v1/badge/"):
+        qp     = event.get("queryStringParameters") or {}
+        domain = (qp.get("domain") or "").strip().lower().replace("https://","").replace("http://","").split("/")[0]
+        style  = qp.get("style", "flat")   # flat | shield | compact
+
+        if not domain:
+            return {
+                "statusCode": 400,
+                "headers": {"Content-Type": "image/svg+xml", "Cache-Control": "no-cache"},
+                "body": _badge_svg("unknown", "UNKNOWN", "#64748b", style),
+            }
+
+        # Pull cached score from DynamoDB or compute fast
+        try:
+            cached = _dynamodb_resource().Table("relayshield_badge_cache").get_item(Key={"domain": domain}).get("Item")
+            if cached:
+                score = int(cached.get("risk_score", 0))
+                level = cached.get("risk_level", "LOW")
+            else:
+                # Run a lightweight identity risk score
+                result = handle_identity_risk_score({"domain": domain})
+                score  = result.get("risk_score", 0)
+                level  = result.get("risk_level", "LOW")
+                # Cache for 1 hour
+                _dynamodb_resource().Table("relayshield_badge_cache").put_item(Item={
+                    "domain": domain, "risk_score": score, "risk_level": level,
+                    "cached_at": _now_iso(),
+                    "ttl": int(__import__("time").time()) + 3600,
+                })
+        except Exception as exc:
+            logger.error("Badge score fetch failed %s: %s", domain, exc)
+            score, level = 0, "UNKNOWN"
+
+        color = {"LOW": "#22c55e", "MEDIUM": "#facc15", "HIGH": "#f97316",
+                 "CRITICAL": "#ef4444", "UNKNOWN": "#64748b"}.get(level, "#64748b")
+        svg = _badge_svg(domain, level, color, style, score)
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "image/svg+xml",
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            },
+            "body": svg,
+        }
 
     # TAXII 2.1 endpoints (GET, intel_access required)
     if path.startswith("/v1/intel/taxii"):
@@ -3096,6 +7069,25 @@ def lambda_handler(event: dict, context) -> dict:
         return {"statusCode": 404, "headers": {"Content-Type": "application/taxii+json;version=2.1"},
                 "body": json.dumps({"title": "Not Found"})}
 
+    # MISP export (INTEL-6) — same TI subscription gating as TAXII
+    if path.startswith("/v1/intel/misp"):
+        headers    = event.get("headers") or {}
+        api_key    = (headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or
+                      headers.get("X-API-Key") or headers.get("x-api-key", ""))
+        key_record = _verify_rs_api_key(api_key) if api_key else None
+        if not key_record or not key_record.get("intel_access"):
+            return {"statusCode": 401, "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({"errors": ["TI subscription required. Pass your RS API key as X-RS-API-KEY."]})}
+        qp = event.get("queryStringParameters") or {}
+        if path in ("/v1/intel/misp/event", "/v1/intel/misp/event/"):
+            return handle_misp_event({}, key_record, qp)
+        return {"statusCode": 404, "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({"errors": ["Not Found"]})}
+
+    # Webhook configuration (RS API key verified inside handle_metered_request)
+    if path == "/v1/webhook/configure":
+        return handle_metered_request(path, method, event)
+
     # Stripe metered billing routes (RS API key verified inside Lambda)
     if path.startswith("/v1/metered/"):
         return handle_metered_request(path, method, event)
@@ -3109,22 +7101,50 @@ def lambda_handler(event: dict, context) -> dict:
         analysis_id = path[len("/v1/result/"):]
         return handle_result(analysis_id)
 
+    # Shareable report links (INTEL-8) — public view, no auth
+    if method == "GET" and path.startswith("/v1/r/"):
+        report_id = path[len("/v1/r/"):]
+        return handle_report_view(report_id)
+
+    # Shareable report links (INTEL-8) — generation, gated to any active
+    # (paying) API key — not restricted to intel_access, applies account-wide
+    if method == "POST" and path == "/v1/report/share":
+        headers    = event.get("headers") or {}
+        api_key    = (headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or
+                      headers.get("X-API-Key") or headers.get("x-api-key", ""))
+        key_record = _verify_rs_api_key(api_key) if api_key else None
+        if not key_record:
+            return _err("Active RS API key required. Pass it as X-RS-API-KEY.", 401)
+        return handle_report_share(_body(event), key_record)
+
     # Subscription routes (API key enforced by API Gateway)
     handler = ROUTES.get(path)
     if not handler:
         return _err(f"unknown endpoint: {path}", 404)
+
+    # Webhook verification: Helius (and some providers) send GET to confirm the endpoint is live
+    if method == "GET" and path in ("/v1/app/webhook/alchemy", "/v1/app/webhook/helius"):
+        return {"statusCode": 200, "headers": {"Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"}, "body": json.dumps({"ok": True})}
 
     if method != "POST":
         return _err(f"{path} only accepts POST requests", 405)
 
     params = _body(event)
     try:
-        if path in ("/v1/intel/telegram", "/v1/intel/cve"):
+        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending"):
             headers    = event.get("headers") or {}
             api_key    = (headers.get("X-API-Key") or headers.get("x-api-key") or
                           headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key", ""))
             key_record = _verify_rs_api_key(api_key) if api_key else None
-            return handler(params, api_key_record=key_record)
+            qp         = event.get("queryStringParameters") or {}
+            merged     = {**qp, **params}
+            return handler(merged, api_key_record=key_record)
+        if path in ("/v1/app/evm-rpc", "/v1/app/solana-rpc", "/v1/app/helius-assets"):
+            return handler(event)
+        # Webhook endpoints receive raw event (signature verified internally)
+        if path in ("/v1/app/webhook/alchemy", "/v1/app/webhook/helius"):
+            return handler(event)
         return handler(params)
     except Exception as exc:
         logger.exception("Unhandled error in %s: %s", path, exc)

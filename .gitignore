@@ -66,3 +66,6 @@ coverage/
 *.jpg
 *.jpeg
 *.pdf
+
+# EAS build needs these tracked to bundle the mobile app icon/splash
+!crypto-shield-app/assets/*.png

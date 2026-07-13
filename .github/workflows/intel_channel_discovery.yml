@@ -28,6 +28,7 @@ jobs:
             --function-name relayshield-intel-discovery \
             --payload '{"source": "github-actions"}' \
             --cli-binary-format raw-in-base64-out \
+            --cli-read-timeout 300 \
             --log-type Tail \
             /tmp/discovery_response.json \
             --query 'LogResult' \

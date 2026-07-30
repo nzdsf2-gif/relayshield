@@ -70,6 +70,9 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
 import boto3
+from botocore.exceptions import ClientError
+
+import relayshield_siem_connector as siem_connector
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -79,6 +82,9 @@ logger.setLevel(logging.INFO)
 # ---------------------------------------------------------------------------
 
 INTEL_SEEN_TABLE      = "relayshield_intel_seen"
+LOCK_TABLE            = "relayshield_intel_monitor_lock"
+LOCK_ID               = "singleton"
+LOCK_TTL_SECONDS      = 280  # just under the 300s Lambda timeout
 INTEL_ALERTS_TABLE    = "relayshield_intel_alerts"
 INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
 INTEL_CHANNELS_TABLE  = "relayshield_intel_channels"
@@ -87,6 +93,7 @@ IDENTITY_GRAPH_TABLE   = "relayshield_identity_graph"
 USERS_TABLE           = "relayshield_users"
 EMAILS_TABLE          = "relayshield_monitored_emails"
 WALLETS_TABLE         = "relayshield_monitored_wallets"
+STOLEN_CARDS_TABLE    = "relayshield_stolen_cards"
 
 TELETHON_SECRET   = "relayshield/telethon_session"
 TG_SECRET_NAME    = "relayshield/telegram_bot_token"
@@ -662,6 +669,37 @@ def _mark_seen(message_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Single-flight lock — prevents two invocations (overlapping schedule, CLI
+# retry-on-timeout, manual re-invoke) from ever sharing the Telethon session
+# concurrently. Telegram permanently revokes a session's auth key if it sees
+# simultaneous use from two IPs, so this has to block before any connection
+# is made, not just rate-limit within one.
+# ---------------------------------------------------------------------------
+
+def _acquire_lock() -> bool:
+    now = int(time.time())
+    try:
+        _dynamodb.Table(LOCK_TABLE).put_item(
+            Item={"lock_id": LOCK_ID, "ttl": Decimal(now + LOCK_TTL_SECONDS), "acquired_at": now},
+            ConditionExpression="attribute_not_exists(lock_id) OR #ttl < :now",
+            ExpressionAttributeNames={"#ttl": "ttl"},
+            ExpressionAttributeValues={":now": now},
+        )
+        return True
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def _release_lock() -> None:
+    try:
+        _dynamodb.Table(LOCK_TABLE).delete_item(Key={"lock_id": LOCK_ID})
+    except Exception:
+        logger.warning("Failed to release intel-monitor lock", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
 # Alert formatting
 # ---------------------------------------------------------------------------
 
@@ -795,7 +833,92 @@ def _store_identity_correlations(iocs: dict, channel: str) -> None:
         for domain in domains[:5]:
             _write(email, "email", domain, "domain")
 
-def _store_iocs(iocs: dict, channel: str, category: str) -> None:
+# ---------------------------------------------------------------------------
+# Malware family attribution (added 2026-07-28)
+# ---------------------------------------------------------------------------
+# Until now _store_iocs never wrote the "malware" attribute at all, so every
+# IOC harvested from Telegram was untagged and the malware-index GSI on
+# relayshield_intel_iocs was populated *only* by the ThreatFox path in
+# relayshield_intel_feed.py. That gave away the pipeline's main structural
+# advantage: MaaS families are advertised and sold on these channels before
+# their infrastructure reaches abuse.ch, so tagging at ingest lets a family be
+# queryable here ahead of the public feeds.
+#
+# Two tiers, because false attribution is worse than no attribution:
+#   DISTINCTIVE -- coined names that effectively never occur as ordinary words,
+#                  matched on the name alone.
+#   AMBIGUOUS   -- real English words also used as family names (atomic,
+#                  aurora, meduza, phantom). These require a malware-context
+#                  qualifier within ~40 chars, or they would tag every message
+#                  containing the word "atomic".
+#
+# Canonical names follow the convention already in the corpus: lowercase and
+# compressed (remusstealer, qakbot, zigclipper, purehvnc). Multiple families in
+# one message are stored comma-joined, matching existing rows like
+# "botnetdomain,mirai" and "payload,PureHVNC".
+_MALWARE_CONTEXT = r"(?:stealer|logs?|malware|rat\b|loader|botnet|c2|panel|builder|crypt|hvnc|grabber)"
+
+_MALWARE_DISTINCTIVE: list[tuple[str, str]] = [
+    ("dolphinx",       r"dolphin\s?x\b"),
+    ("medusahvnc",     r"medusa\s?hvnc\b"),
+    ("purehvnc",       r"pure\s?hvnc\b"),
+    ("lummastealer",   r"\blumma(?:c2|\s?stealer)?\b"),
+    ("redlinestealer", r"\bredline\b"),
+    ("vidarstealer",   r"\bvidar\b"),
+    ("stealc",         r"\bstealc\b"),
+    ("rhadamanthys",   r"\brhadamanthys\b"),
+    ("raccoonstealer", r"\braccoon\s?(?:stealer|v2)\b"),
+    ("risepro",        r"\brisepro\b"),
+    ("metastealer",    r"\bmeta\s?stealer\b"),
+    ("phemedrone",     r"\bphemedrone\b"),
+    ("acrstealer",     r"\bacr\s?stealer\b"),
+    ("braodostealer",  r"\bbraodo\b"),
+    ("remusstealer",   r"\bremus\s?stealer\b"),
+    ("qakbot",         r"\bqakbot\b|\bqbot\b"),
+    ("zigclipper",     r"\bzigclipper\b"),
+]
+
+# name -> alias regex; a _MALWARE_CONTEXT word must appear near the match
+_MALWARE_AMBIGUOUS: list[tuple[str, str]] = [
+    ("atomicstealer",  r"\batomic\b|\bamos\b"),
+    ("aurorastealer",  r"\baurora\b"),
+    ("meduzastealer",  r"\bmeduza\b"),
+    ("phantomstealer", r"\bphantom\b"),
+]
+
+_MALWARE_DISTINCTIVE_RE = [(n, re.compile(p, re.I)) for n, p in _MALWARE_DISTINCTIVE]
+_MALWARE_AMBIGUOUS_RE   = [(n, re.compile(p, re.I)) for n, p in _MALWARE_AMBIGUOUS]
+_MALWARE_CONTEXT_RE     = re.compile(_MALWARE_CONTEXT, re.I)
+
+
+def detect_malware_families(text: str) -> str:
+    """Return a comma-joined list of malware families named in `text`.
+
+    Empty string when nothing matches -- callers must not write an empty
+    "malware" attribute, since it is the malware-index GSI hash key and an
+    empty value would index every untagged IOC (same trap documented in
+    relayshield_intel_feed._write_ioc).
+    """
+    if not text:
+        return ""
+    found: list[str] = []
+    for name, rx in _MALWARE_DISTINCTIVE_RE:
+        if rx.search(text) and name not in found:
+            found.append(name)
+    for name, rx in _MALWARE_AMBIGUOUS_RE:
+        if name in found:
+            continue
+        m = rx.search(text)
+        if not m:
+            continue
+        # require malware context within ~40 chars either side of the alias
+        lo, hi = max(0, m.start() - 40), min(len(text), m.end() + 40)
+        if _MALWARE_CONTEXT_RE.search(text[lo:hi]):
+            found.append(name)
+    return ",".join(sorted(found))
+
+
+def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> None:
     now   = datetime.now(timezone.utc).isoformat()
     ttl   = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
     table = _dynamodb.Table(INTEL_IOCS_TABLE)
@@ -804,17 +927,31 @@ def _store_iocs(iocs: dict, channel: str, category: str) -> None:
         ("sol", "wallet_sol"), ("ton", "wallet_ton"), ("domains", "domain"),
         ("phones", "phone"), ("ips", "ip"),
         ("sha256", "hash_sha256"), ("urls", "url"),
+        # "cves" added 2026-07-24 -- real gap found while scoping the CVE
+        # actor-discussion-heat score: extract_iocs() has extracted CVE IDs
+        # from every monitored message all along (stats["cves_extracted"]
+        # counts them), but this type_map never included them, so not one
+        # was ever actually persisted. The heat score needs exactly this
+        # history (which CVEs, how often, which channels, over time) --
+        # it starts accumulating from this deploy forward, not backfilled,
+        # since the raw past messages were never stored.
+        ("cves", "cve"),
     ]
     for field, ioc_type in type_map:
         for value in iocs.get(field, []):
             if not value:
                 continue
             try:
-                table.put_item(Item={
+                item = {
                     "ioc_value": value.lower(), "seen_ts": now,
                     "ioc_type": ioc_type, "channel": channel,
                     "category": category, "ttl": ttl,
-                })
+                }
+                # Only set when non-empty -- "malware" is the malware-index GSI
+                # hash key, and writing "" would index every untagged IOC.
+                if malware:
+                    item["malware"] = malware
+                table.put_item(Item=item)
             except Exception as exc:
                 logger.warning("IOC store failed value=%s: %s", value[:20], exc)
 
@@ -912,36 +1049,134 @@ def _parse_passwords_file(text: str) -> list[dict]:
     # ingestion-side copy that populates the data the API-side list queries,
     # so a gap here means the API can never surface that credential type
     # even though it "knows" the pattern (found out of sync 2026-07-07).
+    def _ctx(vendors, key_re):
+        """Context-anchored regex; secret must be the single capturing group."""
+        return (r"(?i)(?:%s)[\w.\-]{0,20}[\s'\"]{0,3}(?:=|:|=>|:=|\|\|)[\s'\"`]{0,5}(%s)"
+                % (vendors, key_re))
+
+    # (type, regex, severity, description, llm_provider)
     _NHI_PATS = [
-        ("aws_access_key",   r"AKIA[A-Z0-9]{16}", "CRITICAL", "AWS IAM Access Key"),
-        ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}", "CRITICAL", "GitHub PAT"),
-        ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}", "CRITICAL", "GitHub Fine-Grained PAT"),
-        ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}", "CRITICAL", "Stripe Secret Key"),
-        ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Key"),
-        ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+", "HIGH", "Slack Bot Token"),
-        ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+", "HIGH", "Slack User Token"),
-        ("google_api",       r"AIza[0-9A-Za-z\-_]{35}", "HIGH", "Google API Key"),
-        ("openai_key",       r"sk-[a-zA-Z0-9]{48}", "HIGH", "OpenAI API Key"),
-        ("anthropic_key",    r"sk-ant-[a-zA-Z0-9\-]{90,}", "HIGH", "Anthropic API Key"),
-        ("sendgrid_key",     r"SG\.[a-zA-Z0-9\-_.]{22}\.[a-zA-Z0-9\-_.]{43}", "HIGH", "SendGrid API Key"),
-        ("twilio_sid",       r"AC[a-f0-9]{32}", "MEDIUM", "Twilio Account SID"),
-        ("stripe_pub",       r"pk_live_[a-zA-Z0-9]{24,}", "MEDIUM", "Stripe Publishable Key"),
-        ("jwt_token",        r"eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}", "MEDIUM", "JWT Token"),
-        # Agent-framework credentials (AGENTIC-1, added 2026-07-07)
-        ("langsmith_key",    r"lsv2_(?:pt|sk)_[a-f0-9]{32,}", "HIGH", "LangSmith API Key"),
-        ("mcp_token_generic", r"mcp_(?:live|sk|pat)_[a-zA-Z0-9]{20,}", "MEDIUM", "Possible MCP Server Auth Token"),
+        ("aws_access_key",   r"AKIA[A-Z0-9]{16}", "CRITICAL", "AWS IAM Access Key", None),
+        ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}", "CRITICAL", "GitHub PAT", None),
+        ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}", "CRITICAL", "GitHub Fine-Grained PAT", None),
+        ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}", "CRITICAL", "Stripe Secret Key", None),
+        ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Key", None),
+        ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+", "HIGH", "Slack Bot Token", None),
+        ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+", "HIGH", "Slack User Token", None),
+        # --- LLM/AI provider keys (llm_provider set) ---
+        ("google_api",       r"AIza[0-9A-Za-z\-_]{35}", "CRITICAL", "Google AI (Gemini) API Key", "google"),
+        ("openai_key",       r"sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_\-]{74}|[A-Za-z0-9_\-]{58})T3BlbkFJ(?:[A-Za-z0-9_\-]{74}|[A-Za-z0-9_\-]{58})", "CRITICAL", "OpenAI API Key", "openai"),
+        ("openai_key_v1",    r"sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}", "CRITICAL", "OpenAI API Key (v1 format)", "openai"),
+        ("openai_key_legacy", _ctx(r"openai|OPENAI_API_KEY", r"sk-[a-zA-Z0-9]{48}"), "CRITICAL", "OpenAI API Key (legacy format)", "openai"),
+        ("anthropic_key",    r"sk-ant-[a-zA-Z0-9_\-]{90,}", "CRITICAL", "Anthropic API Key", "anthropic"),
+        ("groq_key",         r"gsk_[a-zA-Z0-9]{52}", "CRITICAL", "Groq API Key", "groq"),
+        ("xai_key",          r"xai-[a-zA-Z0-9]{80}", "CRITICAL", "xAI (Grok) API Key", "xai"),
+        ("replicate_key",    r"r8_[a-zA-Z0-9]{37}", "CRITICAL", "Replicate API Key", "replicate"),
+        ("bedrock_key_long", r"ABSKQmVkcm9ja0FQSUtleS[A-Za-z0-9+/]{80,250}={0,2}", "CRITICAL", "Amazon Bedrock API Key (long-lived)", "bedrock"),
+        ("bedrock_key_short", r"bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t[A-Za-z0-9+/=]*", "CRITICAL", "Amazon Bedrock API Key (short-lived)", "bedrock"),
+        ("huggingface_token", r"hf_[a-zA-Z]{34}", "CRITICAL", "Hugging Face User Access Token", "huggingface"),
+        ("huggingface_org",  r"api_org_[a-zA-Z]{34}", "CRITICAL", "Hugging Face Organization Token", "huggingface"),
+        ("alibaba_access_key_id", r"LTAI[a-zA-Z0-9]{20}", "HIGH", "Alibaba Cloud AccessKey ID (Qwen/Model Studio)", "alibaba"),
+        ("nvidia_nim_key",   r"nvapi-[A-Za-z0-9_\-]{40,}", "CRITICAL", "NVIDIA NIM API Key", "nvidia"),
+        ("deepseek_key",     _ctx(r"deepseek|DEEPSEEK_API_KEY", r"sk-[a-zA-Z0-9]{20,64}"), "CRITICAL", "DeepSeek API Key", "deepseek"),
+        ("moonshot_key",     _ctx(r"moonshot|kimi|MOONSHOT_API_KEY", r"sk-[a-zA-Z0-9]{20,64}"), "CRITICAL", "Moonshot (Kimi) API Key", "moonshot"),
+        ("qwen_key",         _ctx(r"dashscope|qwen|DASHSCOPE_API_KEY", r"sk-[a-zA-Z0-9]{20,64}"), "CRITICAL", "Alibaba DashScope (Qwen) API Key", "qwen"),
+        ("langsmith_key",    r"lsv2_(?:pt|sk)_[a-f0-9]{32,}", "HIGH", "LangSmith API Key", "langsmith"),
+        # --- non-LLM ---
+        ("sendgrid_key",     r"SG\.[a-zA-Z0-9\-_.]{22}\.[a-zA-Z0-9\-_.]{43}", "HIGH", "SendGrid API Key", None),
+        ("twilio_sid",       r"AC[a-f0-9]{32}", "MEDIUM", "Twilio Account SID", None),
+        ("stripe_pub",       r"pk_live_[a-zA-Z0-9]{24,}", "MEDIUM", "Stripe Publishable Key", None),
+        ("jwt_token",        r"eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}", "MEDIUM", "JWT Token", None),
+        ("mcp_token_generic", r"mcp_(?:live|sk|pat)_[a-zA-Z0-9]{20,}", "MEDIUM", "Possible MCP Server Auth Token", None),
+        # Unattributed OpenAI-compatible catch-all -- MUST stay last.
+        ("llm_key_generic_sk", r"sk-[a-zA-Z0-9]{32,64}", "HIGH", "OpenAI-compatible LLM API Key (provider unattributed)", "unknown_openai_compatible"),
     ]
     for line in text.splitlines():
         sep   = "\t" if "\t" in line else "|"
         parts = [p.strip() for p in line.split(sep)]
         raw   = " ".join(parts[1:] if len(parts) > 1 else parts)
         dom   = parts[0][:120] if parts else ""
-        for nhi_type, nhi_pat, nhi_sev, nhi_desc in _NHI_PATS:
-            if re.search(nhi_pat, raw):
-                results.append({"domain": dom, "severity": nhi_sev,
-                                 "category": f"NHI:{nhi_desc}", "type": "nhi",
-                                 "nhi_type": nhi_type, "nhi_description": nhi_desc})
+        _attributed: set = set()
+        for nhi_type, nhi_pat, nhi_sev, nhi_desc, nhi_prov in _NHI_PATS:
+            m = re.search(nhi_pat, raw)
+            if not m:
+                continue
+            # context-anchored patterns capture the secret in group(1)
+            val = m.group(1) if m.re.groups else m.group(0)
+            if nhi_prov == "unknown_openai_compatible":
+                if val in _attributed:
+                    continue
+            elif nhi_prov:
+                _attributed.add(val)
+            entry = {"domain": dom, "severity": nhi_sev,
+                     "category": f"NHI:{nhi_desc}", "type": "nhi",
+                     "nhi_type": nhi_type, "nhi_description": nhi_desc}
+            # llm_provider is what handle_llm_credential_exposure reads back --
+            # without persisting it the LLMjacking endpoint can never return a
+            # finding, since the stored record holds no raw key material to
+            # re-scan at query time.
+            if nhi_prov:
+                entry["llm_provider"] = nhi_prov
+            results.append(entry)
     return results
+
+
+def _luhn_valid(digits: str) -> bool:
+    """Standard Luhn checksum -- used only to filter card-shaped digit
+    sequences down to ones that are actually valid card numbers, not random
+    13-19 digit runs (phone numbers, IDs, timestamps) in autofill dumps."""
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+_RE_CARD_CANDIDATE = re.compile(r"(?<!\d)(?:\d[ \-]?){13,19}(?!\d)")
+
+
+def _parse_card_data(text: str, channel: str) -> int:
+    """Extracts card numbers from stealer-log Autofill/CreditCards files.
+
+    Deliberately does NOT return card numbers to the caller or include them
+    in any returned dict -- unlike the other _parse_*_file functions, whose
+    output eventually reaches _store_stolen_session()/user-facing alerts,
+    a card number is materially more sensitive than a session cookie or a
+    plaintext password and gets a narrower blast radius: hashed and written
+    directly to relayshield_stolen_cards here, nothing else ever sees the
+    raw digits, and this function returns only a count for logging.
+    """
+    import hashlib as _hl
+    table = _dynamodb.Table(STOLEN_CARDS_TABLE)
+    now = datetime.now(timezone.utc).isoformat()
+    ttl = Decimal(int(time.time()) + 365 * 86400)
+    seen_hashes: set[str] = set()
+    stored = 0
+    for m in _RE_CARD_CANDIDATE.finditer(text):
+        digits = re.sub(r"[ \-]", "", m.group(0))
+        if not (13 <= len(digits) <= 19) or not _luhn_valid(digits):
+            continue
+        pan_hash = _hl.sha256(digits.encode()).hexdigest()
+        if pan_hash in seen_hashes:
+            continue
+        seen_hashes.add(pan_hash)
+        try:
+            table.put_item(Item={
+                "pan_hash":       pan_hash,
+                "bin":            digits[:6],
+                "last4":          digits[-4:],
+                "channel_source": channel,
+                "seen_ts":        now,
+                "ttl":            ttl,
+            })
+            stored += 1
+        except Exception as exc:
+            logger.warning("Card store failed (hash only, no PAN logged): %s", exc)
+    return stored
 
 
 def _monitored_email_domains() -> dict[str, list[dict]]:
@@ -991,6 +1226,7 @@ def _store_stolen_session(session: dict, channel: str, matched_email: str, match
             "domain":               session["domain"],
             "session_type":         session["type"],
             "cookie_name":          session.get("cookie_name", ""),
+            **({"llm_provider": session["llm_provider"]} if session.get("llm_provider") else {}),
             "severity":             session["severity"],
             "service_category":     session["category"],
             "channel_source":       channel,
@@ -1070,11 +1306,14 @@ async def _process_stealer_archive(client, message, channel: str,
                 def __init__(self, r): self._r = r
                 def namelist(self): return self._r.namelist()
                 def read(self, name): return self._r.read(name)
+                def getinfo(self, name): return self._r.getinfo(name)  # RarInfo.file_size mirrors ZipInfo.file_size
             zf = _RarWrapper(rf)
         except Exception:
             logger.info("INTEL-5: archive @%s is neither ZIP nor RAR — skipping", channel)
             return
     all_sessions: list[dict] = []
+    discovered_channels = 0
+    cards_stored = 0
     for name in zf.namelist():
         low_name = name.lower()
         try:
@@ -1085,8 +1324,40 @@ async def _process_stealer_archive(client, message, channel: str,
                 if low_name.endswith((".txt", ".csv", ".log", "")):
                     raw = zf.read(name).decode("utf-8", errors="ignore")
                     all_sessions.extend(_parse_passwords_file(raw))
+            elif any(kw in low_name for kw in ("autofill", "card", "cc_", "creditcard")):
+                # BIN/stolen-card monitoring, added 2026-07-24. Real stealer
+                # log packages commonly include an Autofill/CreditCards file
+                # alongside Cookies/Passwords -- never parsed before. See
+                # _parse_card_data's docstring for why this stores directly
+                # (hashed) rather than returning raw digits like the other
+                # parsers do.
+                if low_name.endswith((".txt", ".csv", ".log", "")):
+                    raw = zf.read(name).decode("utf-8", errors="ignore")
+                    cards_stored += _parse_card_data(raw, channel)
+            elif low_name.endswith((".txt", ".log", "")) and zf.getinfo(name).file_size < 20_000:
+                # Channel-discovery pass, added 2026-07-24: resold/repackaged
+                # stealer archives on Telegram often carry a reseller-added
+                # README/notice/contact file (branding, support contact,
+                # "more logs at @channel") that the cookie/password parsing
+                # above never reads at all -- this data is already
+                # downloaded, just previously discarded. A README that
+                # doesn't happen to follow this pattern just yields nothing;
+                # no harm either way. Size-capped to skip anything that's
+                # clearly a real data file misnamed with a .txt/.log
+                # extension, not a small notice file.
+                raw = zf.read(name).decode("utf-8", errors="ignore")
+                _extract_invite_links(raw, channel, "infostealer")
+                mentions = _RE_TG_CHANNEL.findall(raw)
+                if mentions:
+                    discovered_channels += _queue_discovered_channels(mentions, channel)
         except Exception as exc:
             logger.warning("INTEL-5: parse error file=%s: %s", name[:60], exc)
+    if discovered_channels:
+        logger.info("INTEL-5: @%s msg=%d — %d channel candidate(s) discovered from archive text",
+                     channel, message.id, discovered_channels)
+    if cards_stored:
+        logger.info("INTEL-5: @%s msg=%d — %d card record(s) stored (hashed, no PAN logged)",
+                     channel, message.id, cards_stored)
     if not all_sessions:
         return
     seen_keys: set[tuple] = set()
@@ -1176,6 +1447,13 @@ _RE_TG_INVITE = re.compile(
     r"(?:https?://)?t\.me/(?:\+[a-zA-Z0-9_\-]{16,}|joinchat/[a-zA-Z0-9_\-]+|([a-zA-Z][a-zA-Z0-9_]{3,}))",
     re.IGNORECASE,
 )
+# Discord invite codes — cross-platform discovery only (OSINT Sprint 2 Part 2),
+# not IOC storage. Matches discord.gg/<code>, discord.com/invite/<code>, and
+# the legacy discordapp.com/invite/<code> host.
+_RE_DISCORD_INVITE = re.compile(
+    r"(?:discord\.gg|discord(?:app)?\.com/invite)/([A-Za-z0-9\-]{2,32})",
+    re.IGNORECASE,
+)
 
 
 def _extract_invite_links(text: str, source_channel: str, category: str) -> None:
@@ -1209,20 +1487,110 @@ def _extract_invite_links(text: str, source_channel: str, category: str) -> None
             logger.warning("Failed to store invite link %s: %s", full_url[:50], exc)
 
 
-def _load_channels() -> list[tuple[str, str, str]]:
-    """Return active channel list from DynamoDB; fall back to hardcoded list."""
+DISCORD_CHANNELS_TABLE = "relayshield_intel_discord_channels"
+
+
+def _queue_discovered_discord_invites(text: str, source_channel: str, category: str) -> int:
+    """OSINT Sprint 2 Part 2 — cross-platform discovery. Scans Telegram message
+    text already being processed for Discord invite links, resolves each via
+    Discord's public unauthenticated invite endpoint (no bot token needed —
+    same metadata the Discord client shows on an invite preview), and queues
+    the result into relayshield_intel_discord_channels for manual review.
+
+    Writes with active=False always — a resolved channel_id/guild_id does NOT
+    mean the bot can read it. The bot still needs a server admin's OAuth
+    authorization to be added; this only produces a lead list."""
+    if not text:
+        return 0
+    codes = {m.group(1) for m in _RE_DISCORD_INVITE.finditer(text)}
+    if not codes:
+        return 0
+
+    table   = _dynamodb.Table(DISCORD_CHANNELS_TABLE)
+    now_ts  = datetime.now(timezone.utc).isoformat()
+    queued  = 0
+
+    for code in codes:
+        req = urllib.request.Request(
+            f"https://discord.com/api/v10/invites/{code}?with_counts=true",
+            headers={"User-Agent": "RelayShield-INTEL (https://relayshield.net, 1.0)"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                invite = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                logger.warning("Discord invite resolve failed code=%s: HTTP %s", code, exc.code)
+            continue
+        except Exception as exc:
+            logger.warning("Discord invite resolve failed code=%s: %s", code, exc)
+            continue
+
+        channel = invite.get("channel") or {}
+        guild   = invite.get("guild") or {}
+        channel_id = channel.get("id")
+        if not channel_id:
+            continue
+
+        try:
+            table.put_item(
+                Item={
+                    "channel_id":        channel_id,
+                    "guild_id":          guild.get("id", ""),
+                    "guild_name":        guild.get("name", ""),
+                    "channel_name":      channel.get("name", ""),
+                    "category":          category,
+                    "active":            False,
+                    "invite_code":       code,
+                    "member_count":      invite.get("approximate_member_count", 0),
+                    "discovery_method":  "telegram_cross_promotion",
+                    "found_via":         source_channel,
+                    "first_seen":        now_ts,
+                    "last_verified":     now_ts,
+                },
+                ConditionExpression="attribute_not_exists(channel_id)",
+            )
+            queued += 1
+            logger.info(
+                "Discord channel discovered via @%s: guild=%s channel=%s (%s members, invite=%s)",
+                source_channel, guild.get("name"), channel.get("name"),
+                invite.get("approximate_member_count", "?"), code,
+            )
+        except Exception:
+            pass  # already known — not an error, just a repeat mention
+
+    return queued
+
+
+def _load_channels() -> list[tuple[str, str, str, int | None, int | None]]:
+    """Return active channel list from DynamoDB; fall back to hardcoded list.
+
+    channel_id/access_hash are a cached Telegram peer, written back by
+    _poll_channels() after the first successful username resolve. When
+    present, the caller can skip get_entity(username) entirely (a
+    ResolveUsernameRequest) in favor of a local InputPeerChannel — avoiding
+    the per-session flood-wait that call is subject to."""
     try:
         table = _dynamodb.Table(INTEL_CHANNELS_TABLE)
         resp  = table.scan(
             FilterExpression=boto3.dynamodb.conditions.Attr("active").eq(True),
-            ProjectionExpression="username, category, description",
+            ProjectionExpression="username, category, description, channel_id, access_hash",
         )
         items = resp.get("Items", [])
         if items:
-            return [(i["username"], i["category"], i.get("description", "")) for i in items]
+            return [
+                (
+                    i["username"],
+                    i["category"],
+                    i.get("description", ""),
+                    int(i["channel_id"]) if "channel_id" in i else None,
+                    int(i["access_hash"]) if "access_hash" in i else None,
+                )
+                for i in items
+            ]
     except Exception as exc:
         logger.warning("Could not load channels from DynamoDB, using fallback: %s", exc)
-    return MONITORED_CHANNELS
+    return [(u, c, d, None, None) for u, c, d in MONITORED_CHANNELS]
 
 
 # ---------------------------------------------------------------------------
@@ -1230,10 +1598,24 @@ def _load_channels() -> list[tuple[str, str, str]]:
 # ---------------------------------------------------------------------------
 
 def _send_admin_digest(stats: dict) -> None:
-    if not stats["channels_checked"]:
+    # Suppress only when there was genuinely nothing to check (e.g. the
+    # Telethon-not-configured path, which already sends its own message).
+    # channels_checked==0 with channels_attempted>0 means every resolve
+    # failed this run (e.g. a Telegram flood-wait) -- that's exactly the
+    # case that must NOT go silent, since it's the one time something is
+    # actually wrong. A prior version of this guard checked channels_checked
+    # instead of channels_attempted, which silently swallowed the digest
+    # (and all visibility into the problem) on every such run.
+    if not stats.get("channels_attempted"):
         return
+    warning = ""
+    if not stats["channels_checked"]:
+        warning = "⚠️ *0 of {} channels resolved this run* — likely a Telegram flood-wait or session issue. No IOCs were processed.\n\n".format(
+            stats["channels_attempted"]
+        )
     text = (
         f"🔍 *INTEL-2/5 Monitor Run*\n\n"
+        f"{warning}"
         f"Channels checked: {stats['channels_checked']}\n"
         f"Messages processed: {stats['messages_processed']}\n"
         f"IOCs extracted: {stats['iocs_extracted']}\n"
@@ -1247,10 +1629,66 @@ def _send_admin_digest(stats: dict) -> None:
         f"Ransomware victims named: {stats.get('ransomware_victims', 0)}\n"
         f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
         f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
-        f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n\n"
+        f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n"
+        f"Discord channels discovered: {stats.get('discord_channels_discovered', 0)}\n\n"
         f"_RelayShield INTEL — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_"
     )
     _send_telegram(ADMIN_CHAT_ID, text)
+
+
+# ---------------------------------------------------------------------------
+# One-time targeted message fetch (added 2026-07-24)
+#
+# _poll_channels() only looks at messages *since the last check* -- correct
+# for ongoing monitoring, but useless for pulling a specific, already-known
+# high-value message (e.g. a pinned "menu" post referenced by a credible
+# external source) that predates when RelayShield started tracking the
+# channel. This fetches specific message IDs directly instead, via the same
+# Telethon session/connection setup _poll_channels uses -- invoked through
+# the same lambda_handler lock so it can never race a scheduled poll.
+#
+# Not wired into the scheduled cron. Invoke manually with:
+#   {"action": "fetch_specific", "targets": [{"channel": "gqdh", "msg_id": 582},
+#                                             {"channel": "yewucidian", "msg_id": 16}]}
+# ---------------------------------------------------------------------------
+
+async def _fetch_specific_messages(targets: list[dict]) -> list[dict]:
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+
+    secret      = _get_secret(TELETHON_SECRET)
+    api_id      = int(secret["api_id"])
+    api_hash    = secret["api_hash"]
+    session_str = secret["session_string"]
+    client = TelegramClient(StringSession(session_str), api_id, api_hash)
+
+    results = []
+    async with client:
+        for t in targets:
+            channel = t["channel"]
+            msg_id  = int(t["msg_id"])
+            try:
+                entity  = await client.get_entity(channel)
+                message = await client.get_messages(entity, ids=msg_id)
+                if message is None:
+                    results.append({"channel": channel, "msg_id": msg_id, "error": "message not found (deleted or never existed)"})
+                    continue
+                text = (message.text or "") + " " + (getattr(message, "caption", "") or "")
+                text = text.strip()
+                if not text and message.document:
+                    text = await _extract_image_text(client, message)
+                results.append({
+                    "channel": channel,
+                    "msg_id":  msg_id,
+                    "date":    message.date.isoformat() if message.date else None,
+                    "views":   getattr(message, "views", None),
+                    "text":    text,
+                })
+            except Exception as exc:
+                logger.warning("Targeted fetch failed @%s msg=%s: %s", channel, msg_id, exc)
+                results.append({"channel": channel, "msg_id": msg_id, "error": str(exc)})
+            await asyncio.sleep(1.5)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -1261,7 +1699,8 @@ async def _poll_channels(stats: dict) -> None:
     try:
         from telethon import TelegramClient
         from telethon.sessions import StringSession
-        from telethon.errors import FloodWaitError, ChannelPrivateError
+        from telethon.errors import FloodWaitError, ChannelPrivateError, ChannelInvalidError
+        from telethon.tl.types import InputPeerChannel
     except ImportError:
         logger.error("Telethon not installed — add to Lambda layer")
         return
@@ -1286,19 +1725,46 @@ async def _poll_channels(stats: dict) -> None:
 
     async with client:
         logger.info("Telethon client connected")
-        since    = datetime.now(timezone.utc) - timedelta(hours=6, minutes=10)
-        channels = _load_channels()
+        since          = datetime.now(timezone.utc) - timedelta(hours=6, minutes=10)
+        channels       = _load_channels()
+        channels_table = _dynamodb.Table(INTEL_CHANNELS_TABLE)
+        stats["channels_attempted"] = len(channels)
         logger.info("Polling %d channels", len(channels))
 
-        for username, category, desc in channels:
-            try:
-                entity = await client.get_entity(username)
-            except (ValueError, ChannelPrivateError) as exc:
-                logger.warning("Cannot access channel @%s: %s", username, exc)
-                continue
-            except Exception as exc:
-                logger.warning("Entity lookup failed @%s: %s", username, exc)
-                continue
+        for username, category, desc, channel_id, access_hash in channels:
+            if channel_id is not None and access_hash is not None:
+                # Cached peer — skip get_entity(username) (a ResolveUsernameRequest)
+                # entirely. This is what makes the run scale past a handful of
+                # channels: ResolveUsernameRequest has a tight per-session flood
+                # limit that a 122-channel resolve burst trips almost immediately,
+                # while InputPeerChannel makes zero Telegram calls to construct.
+                entity = InputPeerChannel(channel_id, access_hash)
+            else:
+                try:
+                    entity = await client.get_entity(username)
+                except (ValueError, ChannelPrivateError) as exc:
+                    logger.warning("Cannot access channel @%s: %s", username, exc)
+                    continue
+                except Exception as exc:
+                    logger.warning("Entity lookup failed @%s: %s", username, exc)
+                    continue
+
+                # Cache the resolved peer so future runs use the fast path above.
+                # Only Channel/supergroup entities carry access_hash.
+                resolved_hash = getattr(entity, "access_hash", None)
+                if resolved_hash is not None:
+                    try:
+                        channels_table.update_item(
+                            Key={"username": username},
+                            UpdateExpression="SET channel_id = :cid, access_hash = :ah",
+                            ExpressionAttributeValues={":cid": entity.id, ":ah": resolved_hash},
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to cache resolved peer for @%s: %s", username, exc)
+
+                # Pace fresh resolves only — the cached path above makes no
+                # Telegram call at all, so it doesn't need pacing.
+                await asyncio.sleep(1.5)
 
             stats["channels_checked"] += 1
             msg_count = 0
@@ -1330,12 +1796,46 @@ async def _poll_channels(stats: dict) -> None:
                             except Exception as dl_exc:
                                 logger.warning("File download failed @%s msg=%d: %s", username, message.id, dl_exc)
 
-                    # Fix 3: OCR image attachments
-                    if message.document and not msg_text.strip():
+                    # Fix 3: OCR image attachments. Real gap found and fixed
+                    # 2026-07-24: this only ran when the photo had NO caption
+                    # at all (`not msg_text.strip()`) -- a phishing screenshot
+                    # posted with even a one-word caption skipped OCR
+                    # entirely, despite _extract_image_text already
+                    # self-guarding on mime type (returns "" instantly for
+                    # non-image documents, so calling it unconditionally on
+                    # every message.document costs nothing extra for ZIPs/
+                    # text files already handled above). Runs on every image
+                    # now, appending to whatever caption already exists
+                    # rather than requiring an empty one.
+                    if message.document:
                         ocr_text = await _extract_image_text(client, message)
                         if ocr_text:
-                            msg_text += "\n" + ocr_text
+                            msg_text = (msg_text + "\n" + ocr_text).strip()
                             stats["images_ocrd"] = stats.get("images_ocrd", 0) + 1
+                            # Image/logo brand monitoring (competitive
+                            # benchmark roadmap item, added 2026-07-24):
+                            # OCR'd text was already feeding the live
+                            # per-message brand-alert check below, but was
+                            # never persisted anywhere -- so the paid
+                            # brand-monitor endpoint (a separate, on-demand
+                            # lookup a customer can call any time, not just
+                            # at the moment a message is first polled) had
+                            # no way to search past image-derived content.
+                            # Reuses the exact same relayshield_intel_iocs
+                            # table + ioc_value substring-scan mechanism
+                            # handle_brand_monitor() already uses -- no new
+                            # table or endpoint needed for this part.
+                            try:
+                                _dynamodb.Table(INTEL_IOCS_TABLE).put_item(Item={
+                                    "ioc_value": ocr_text[:2000].lower(),
+                                    "seen_ts":   datetime.now(timezone.utc).isoformat(),
+                                    "ioc_type":  "image_text",
+                                    "channel":   username,
+                                    "category":  category,
+                                    "ttl":       Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400),
+                                })
+                            except Exception as exc:
+                                logger.warning("OCR text store failed msg=%d: %s", message.id, exc)
 
                     # Fix 4: Follow paste site URLs in message text
                     if msg_text:
@@ -1396,6 +1896,7 @@ async def _poll_channels(stats: dict) -> None:
 
                     # Channel discovery
                     _extract_invite_links(msg_text, username, category)
+                    stats["discord_channels_discovered"] += _queue_discovered_discord_invites(msg_text, username, category)
 
                     # Auto-discover channels mentioned in forwarded text (Russian/Chinese/Arabic format)
                     for fwd_handle in _RE_TG_FORWARD.findall(msg_text):
@@ -1463,7 +1964,10 @@ async def _poll_channels(stats: dict) -> None:
                     if total_iocs == 0:
                         continue
                     stats["iocs_extracted"] += total_iocs
-                    _store_iocs(iocs, username, category)
+                    _fam = detect_malware_families(msg_text)
+                    if _fam:
+                        stats["malware_tagged"] = stats.get("malware_tagged", 0) + total_iocs
+                    _store_iocs(iocs, username, category, _fam)
 
                     # User asset matching + alerts
                     matches = find_matches(iocs)
@@ -1483,10 +1987,43 @@ async def _poll_channels(stats: dict) -> None:
                         stats["alerts_fired"] += 1
                         logger.info("INTEL alert fired — user_id=%s type=%s channel=@%s",
                                     user_id, match["type"], username)
+                        # SIEM/SOAR forwarding — no-ops cleanly if no destination configured.
+                        try:
+                            user_rec = _dynamodb.Table(USERS_TABLE).get_item(Key={"user_id": user_id}).get("Item") or {}
+                            siem_email = user_rec.get("email", "")
+                            if siem_email:
+                                siem_connector.dispatch_finding(_dynamodb, {
+                                    "alert_type":  "dark_channel_match",
+                                    "severity":    "HIGH",
+                                    "customer_id": siem_email,
+                                    "summary":     f"Criminal Telegram channel match: {match.get('type', 'unknown')} found in @{username}",
+                                    "details": {
+                                        "match_type": match.get("type", ""),
+                                        "channel":    username,
+                                        "category":   category,
+                                        "preview":    preview,
+                                    },
+                                    "detected_at": datetime.now(timezone.utc).isoformat(),
+                                })
+                        except Exception as exc:
+                            logger.warning("SIEM dispatch failed (non-fatal) for user_id=%s: %s", user_id, exc)
 
             except FloodWaitError as exc:
                 logger.warning("Telegram flood wait @%s — sleeping %ds", username, exc.seconds)
                 await asyncio.sleep(min(exc.seconds, 30))
+            except ChannelInvalidError:
+                # The cached channel_id/access_hash Telegram's server itself
+                # rejects — not a transient error. Clear it so the fallback
+                # get_entity() path on the next run re-resolves and re-caches
+                # a fresh, valid peer instead of failing on this channel forever.
+                logger.warning("Cached peer for @%s rejected by Telegram — clearing cache to force re-resolve next run", username)
+                try:
+                    channels_table.update_item(
+                        Key={"username": username},
+                        UpdateExpression="REMOVE channel_id, access_hash",
+                    )
+                except Exception as exc2:
+                    logger.warning("Failed to clear bad cached peer for @%s: %s", username, exc2)
             except Exception as exc:
                 logger.error("Error processing channel @%s: %s", username, exc)
 
@@ -1514,7 +2051,10 @@ async def _poll_channels(stats: dict) -> None:
                             r_total = sum(len(v) for v in r_iocs.values())
                             if r_total > 0:
                                 stats["iocs_extracted"] += r_total
-                                _store_iocs(r_iocs, username, category)
+                                _rfam = detect_malware_families(reply_text)
+                                if _rfam:
+                                    stats["malware_tagged"] = stats.get("malware_tagged", 0) + r_total
+                                _store_iocs(r_iocs, username, category, _rfam)
                                 logger.info("Reply IOCs: @%s post=%d reply=%d iocs=%d",
                                             username, post.id, reply.id, r_total)
             except Exception as reply_exc:
@@ -1567,6 +2107,7 @@ def _queue_discovered_channels(mentions: list[str], source_channel: str) -> int:
 def lambda_handler(event, context):
     stats = {
         "channels_checked":       0,
+        "channels_attempted":     0,
         "messages_processed":     0,
         "iocs_extracted":         0,
         "images_ocrd":            0,
@@ -1578,19 +2119,38 @@ def lambda_handler(event, context):
         "cves_extracted":         0,
         "onions_extracted":       0,
         "channels_discovered":    0,
+        "discord_channels_discovered": 0,
     }
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_poll_channels(stats))
-    except Exception as exc:
-        logger.exception("INTEL-2/5 monitor failed: %s", exc)
-        _send_telegram(ADMIN_CHAT_ID, f"🚨 *INTEL-2/5 monitor error*\n\n`{str(exc)[:300]}`")
-    finally:
+    if not _acquire_lock():
+        logger.warning("Another invocation already holds the lock — exiting without touching the Telegram session")
+        return {"statusCode": 200, "body": json.dumps({"skipped": "lock_held"})}
+
+    if (event or {}).get("action") == "fetch_specific":
         try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            results = loop.run_until_complete(_fetch_specific_messages(event["targets"]))
             loop.close()
-        except Exception:
-            pass
-    _send_admin_digest(stats)
-    logger.info("INTEL-2 run complete — stats=%s", stats)
-    return {"statusCode": 200, "body": json.dumps(stats)}
+            logger.info("Targeted fetch complete: %s", json.dumps(results, default=str))
+            return {"statusCode": 200, "body": json.dumps(results, default=str)}
+        finally:
+            _release_lock()
+
+    try:
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(_poll_channels(stats))
+        except Exception as exc:
+            logger.exception("INTEL-2/5 monitor failed: %s", exc)
+            _send_telegram(ADMIN_CHAT_ID, f"🚨 *INTEL-2/5 monitor error*\n\n`{str(exc)[:300]}`")
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+        _send_admin_digest(stats)
+        logger.info("INTEL-2 run complete — stats=%s", stats)
+        return {"statusCode": 200, "body": json.dumps(stats)}
+    finally:
+        _release_lock()

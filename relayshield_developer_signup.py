@@ -1891,6 +1891,26 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "and an MCP server. Every one of them talks to the same REST API documented below, so you can drop to raw "
             "HTTP whenever the wrapper is in the way.")),
     ),
+    # Readers arriving from the LLMjacking / Bundle D launch post. Added
+    # 2026-07-30 after the published post was found linking to ?src=blog, which
+    # was never a registered key and therefore rendered no banner at all. The
+    # aliases below exist because the post is syndicated to Medium, LinkedIn and
+    # Telegram, and each of those will carry whatever src the copy was written
+    # with. Give them all the same landing rather than relying on one string.
+    "llmjacking": (
+        ("blog.relayshield.net", "medium.com"),
+        _banner("Arriving from the LLMjacking post", _p(
+            "Run the check on your own domain. No API key, no signup, shared free tier:"
+            '<pre style="background:var(--bg);border:1px solid var(--border);border-radius:8px;'
+            'padding:.9rem 1rem;overflow-x:auto;margin:.8rem 0 0;font-size:.82rem;line-height:1.55">'
+            "<code>curl -X POST https://api.relayshield.net/v1/payg/llm-credential-exposure \\\n"
+            '  -H "Content-Type: application/json" \\\n'
+            "  -d '{\"domain\": \"yourcompany.com\"}'</code></pre>"
+            '<span style="display:block;margin-top:.7rem">We match 19 LLM credential formats across 14 '
+            "providers against 4.6M+ indicators from 83 criminal Telegram channels. A clean result means "
+            "nothing was found in the sources we queried, which is not the same as proof your keys are safe."
+            "</span>")),
+    ),
     "huggingface": (
         ("huggingface.co", "hf.space"),
         _banner("Arriving from Hugging Face", _p(
@@ -1901,9 +1921,27 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
 }
 
 
+# Extra ?src= spellings that should resolve to an existing variant. Cheaper than
+# discovering after publication that a link in a live post matches nothing, which
+# is exactly what happened with ?src=blog on the Bundle D launch post.
+_SOURCE_ALIASES = {
+    "blog": "llmjacking",
+    "medium": "llmjacking",
+    "linkedin": "llmjacking",
+    "telegram": "llmjacking",
+    "post": "llmjacking",
+    "hn": "github",
+    "reddit": "github",
+    "opencti": "xsoar",
+    "awsmarketplace": "aws",
+    "marketplace": "aws",
+}
+
+
 def _banner_for(referer: str, query_params: dict) -> str:
     """Pick the landing variant from an explicit ?src= or the Referer host."""
     src = (query_params.get("src") or "").strip().lower()
+    src = _SOURCE_ALIASES.get(src, src)
     if src in _SOURCE_BANNERS:
         return _SOURCE_BANNERS[src][1]
     host = (referer or "").lower()

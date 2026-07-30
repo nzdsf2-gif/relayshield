@@ -40,34 +40,121 @@ sees nothing" is a story. The bundle is the last line, not the first.
 
 ### Now: owned channels
 
-**Paste-ready copy lives in `bundle_d_launch_posts/` as plain `.txt` files.**
-
-Do not copy the text out of this document. Everything below is a description of what to post; the
-actual copy is in those files, as plain ASCII with no Markdown, no `>` quote markers and no smart
-punctuation, so a straight paste gives you exactly what should appear in the box.
-
-Safest way to load one, which also avoids the shell mangling UTF-8:
+The copy is reproduced below so you can read it in one place. **Do not copy it out of this file.**
+Markdown mangles a paste. Use the matching plain-ASCII file in `bundle_d_launch_posts/`, loaded
+straight onto the clipboard:
 
 ```bash
 LC_CTYPE=UTF-8 pbcopy < bundle_d_launch_posts/linkedin.txt
 ```
 
-| File | Channel | Notes |
-|---|---|---|
-| `linkedin.txt` | LinkedIn | Body only. Hashtags included at the end. |
-| `linkedin-comment.txt` | LinkedIn | The canonical URL, posted as the **first comment**. LinkedIn suppresses reach on posts with an outbound link in the body. |
-| `x-thread.txt` | X / Mastodon / Farcaster | Four parts, split on the `[n/4]` markers. Do not paste the markers. All four verified under 280 characters with X's 23-character URL allowance. |
-| `telegram.txt` | Telegram | Link inline, no separate comment needed. |
+The `LC_CTYPE=UTF-8` matters: this shell has no locale set and a bare `pbcopy` corrupts non-ASCII.
 
-**The link to use everywhere is the bare canonical post URL:**
+---
+
+### LinkedIn: TWO separate pastes
+
+LinkedIn suppresses reach on posts carrying an outbound link in the body, so the links go in the
+first comment. That means two actions, in this order:
+
+**Paste 1 of 2 — the post body** (`linkedin.txt`). Note it references the AWS bundle in text but
+carries no URL, which is the point.
 
 ```
+Your EDR would see nothing. Your SIEM would see nothing. Your cloud posture tool would see nothing.
+
+If one of your AI agents leaked its Anthropic or OpenAI key tomorrow, the first signal you would get is the bill.
+
+Sysdig measured $46,000 a day from compromised Bedrock credentials. A single leaked Gemini key ran $82,000 in 48 hours. Stolen LLM keys sell for about $30.
+
+That gap is not a tooling failure. Every one of those controls is working correctly. They are watching for data leaving the building, and nothing is leaving the building. The stolen thing is compute, and it is being spent on someone else's behalf.
+
+We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels.
+
+This shipped today as Agentic Attack Surface, our new bundle on AWS Marketplace: LLM credential exposure, MCP registry risk, prompt injection breach detection, agent framework CVE monitoring and per-agent identity risk scoring. $299/mo, billed through your existing AWS account, no separate payment method.
+
+There is also a free check that needs no API key at all. Both links in the comments.
+
+#LLMjacking #AIsecurity #ThreatIntelligence
+```
+
+**Paste 2 of 2 — post this as the FIRST COMMENT immediately after publishing** (`linkedin-comment.txt`):
+
+```
+Full write-up, including the free no-key check:
 https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+
+Agentic Attack Surface on AWS Marketplace:
+https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
 ```
 
-No `?src=` on it. The blog ignores that parameter entirely (verified), and the post's own call to
-action already carries `?src=llmjacking` through to the developers page. `?src=` belongs only on
-links that point directly at `/developers`, which is mainly the practitioner-community case.
+### X / Mastodon / Farcaster: five parts
+
+Split on the `[n/5]` markers. **Do not paste the markers themselves.** All five verified under 280
+characters using X's 23-character URL allowance, longest is 266.
+
+```
+[1/5]
+A stolen LLM API key is not a door into your systems. It IS the thing being stolen. It converts directly into compute that you pay for and someone else uses.
+
+[2/5]
+Sysdig: $46,000/day from compromised Bedrock creds. One leaked Gemini key: $82,000 in 48 hours. Operation Bizarre Bazaar: 35,000+ sessions in 40 days, $100K+/day. Stolen keys sell for ~$30.
+
+[3/5]
+Here is what makes it nasty. No endpoint compromised, so EDR sees nothing. No anomalous login, so the SIEM sees nothing. No data exfiltrated, so DLP sees nothing. Your first signal is the invoice.
+
+[4/5]
+We match 19 LLM key formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels. Free check, no key required:
+
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+
+[5/5]
+Shipped today as Agentic Attack Surface on AWS Marketplace. LLM credential exposure, MCP registry risk, prompt injection breaches, agent framework CVEs, per-agent identity risk. $299/mo via your AWS account:
+
+https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
+
+#LLMjacking #infosec #AIsecurity
+```
+
+### Telegram: one paste
+
+Existing subscribers are already warm, so both links go inline and there is no comment step.
+
+```
+Your EDR would see nothing. Your SIEM would see nothing. Your cloud posture tool would see nothing.
+
+If one of your AI agents leaked its Anthropic or OpenAI key tomorrow, the first signal you would get is the bill.
+
+Sysdig measured $46,000 a day from compromised Bedrock credentials. A single leaked Gemini key ran $82,000 in 48 hours. Stolen LLM keys sell for about $30.
+
+That gap is not a tooling failure. Every one of those controls is working correctly. They are watching for data leaving the building, and nothing is leaving the building. The stolen thing is compute, and it is being spent on someone else's behalf.
+
+We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels.
+
+This shipped today as Agentic Attack Surface, our new bundle on AWS Marketplace. $299/mo, billed through your existing AWS account. There is also a free check that needs no API key.
+
+Full write-up:
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+
+On AWS Marketplace:
+https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
+```
+
+### The two links
+
+Every post carries one or both of these. Never a search link, never with `?src=` on the blog URL.
+
+```
+Blog post (canonical):
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+
+AWS Marketplace (Bundle D product page):
+https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
+```
+
+The blog ignores `?src=` entirely (verified), and the post's own call to action already carries
+`?src=llmjacking` through to the developers page. `?src=` belongs only on links pointing directly at
+`/developers`.
 
 ### +1 day: Medium
 

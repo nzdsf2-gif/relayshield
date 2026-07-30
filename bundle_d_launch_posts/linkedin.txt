@@ -6,6 +6,10 @@ Sysdig measured $46,000 a day from compromised Bedrock credentials. A single lea
 
 That gap is not a tooling failure. Every one of those controls is working correctly. They are watching for data leaving the building, and nothing is leaving the building. The stolen thing is compute, and it is being spent on someone else's behalf.
 
-We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels. Free check, no API key, link in comments.
+We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels.
+
+This shipped today as Agentic Attack Surface, our new bundle on AWS Marketplace: LLM credential exposure, MCP registry risk, prompt injection breach detection, agent framework CVE monitoring and per-agent identity risk scoring. $299/mo, billed through your existing AWS account, no separate payment method.
+
+There is also a free check that needs no API key at all. Both links in the comments.
 
 #LLMjacking #AIsecurity #ThreatIntelligence

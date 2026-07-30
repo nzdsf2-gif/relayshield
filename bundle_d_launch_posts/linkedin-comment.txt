@@ -1,1 +1,5 @@
+Full write-up, including the free no-key check:
 https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+
+Agentic Attack Surface on AWS Marketplace:
+https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq

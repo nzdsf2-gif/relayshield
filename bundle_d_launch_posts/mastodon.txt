@@ -1,0 +1,12 @@
+If one of your AI agents leaked its LLM API key tomorrow, the first signal you'd get is the bill.
+
+No endpoint compromised, so EDR sees nothing. No anomalous login, so the SIEM sees nothing. No data left, so DLP sees nothing.
+
+Sysdig measured $46,000/day from compromised Bedrock creds.
+
+We match 19 key formats across 14 providers, including DeepSeek, Qwen and Moonshot, which most scanners miss entirely.
+
+Free check, no API key:
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+
+#LLMjacking

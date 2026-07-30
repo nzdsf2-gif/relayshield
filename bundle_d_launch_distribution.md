@@ -50,6 +50,18 @@ LC_CTYPE=UTF-8 pbcopy < bundle_d_launch_posts/linkedin.txt
 
 The `LC_CTYPE=UTF-8` matters: this shell has no locale set and a bare `pbcopy` corrupts non-ASCII.
 
+| File | Channel | Limit | This post |
+|---|---|---|---|
+| `linkedin.txt` | LinkedIn | 3,000 | 1,911 |
+| `linkedin-comment.txt` | LinkedIn, first comment | — | both links |
+| `mastodon.txt` | Mastodon | 500 (URLs count 23) | 468 |
+| `farcaster.txt` | Farcaster | ~1,024 bytes | 857 |
+| `telegram.txt` | Telegram | 4,096 | 1,396 |
+| `PARKED-x-thread.txt` | X | **suspended, do not use** | n/a |
+
+Every one of these is a **single post**. Only X needed a thread, and X is not a channel for this
+launch.
+
 ---
 
 ### LinkedIn: TWO separate pastes
@@ -94,35 +106,54 @@ Agentic Attack Surface on AWS Marketplace:
 https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
 ```
 
-### X / Mastodon / Farcaster: five parts
+### X / Twitter: NOT A CHANNEL FOR THIS LAUNCH
 
-Split on the `[n/6]` markers. **Do not paste the markers themselves.** All six verified under 280
-characters using X's 23-character URL allowance, longest is 249.
+**@RelayShieldHQ is suspended.** Suspended twice for "inauthentic behavior" despite no automation:
+restored 2026-05-28, suspended again 2026-07-02, appeal denied the same day with a generic automated
+response. Standing guidance in memory is explicit: *do not block a launch on X being restored;
+LinkedIn, Telegram and Mastodon carry primary distribution while X is down.*
+
+A six-part thread was drafted for X before this was checked. It is parked at
+`PARKED-x-thread.txt` and should only be used if the account is ever restored. **Do not adapt it for
+other platforms** — the thread format only exists because of X's 280 character limit, and nothing
+else we post to has that constraint.
+
+### Mastodon: one paste
+
+**500 character limit** (default instance setting), with URLs counted as 23 characters regardless of
+length. This version measures 468. Not a thread.
 
 ```
-[1/6]
-A stolen LLM API key is not a door into your systems. It IS the thing being stolen. It converts directly into compute that you pay for and someone else uses.
+If one of your AI agents leaked its LLM API key tomorrow, the first signal you'd get is the bill.
 
-[2/6]
-Sysdig: $46,000/day from compromised Bedrock creds. One leaked Gemini key: $82,000 in 48 hours. Operation Bizarre Bazaar: 35,000+ sessions in 40 days, $100K+/day. Stolen keys sell for ~$30.
+No endpoint compromised, so EDR sees nothing. No anomalous login, so the SIEM sees nothing. No data left, so DLP sees nothing.
 
-[3/6]
-Here is what makes it nasty. No endpoint compromised, so EDR sees nothing. No anomalous login, so the SIEM sees nothing. No data exfiltrated, so DLP sees nothing. Your first signal is the invoice.
+Sysdig measured $46,000/day from compromised Bedrock creds.
 
-[4/6]
-We match 19 key formats across 14 providers: OpenAI (3 formats), Anthropic, Gemini, Bedrock, xAI Grok, Groq, NVIDIA NIM, Replicate, Hugging Face, LangSmith. Plus DeepSeek, Moonshot Kimi, Qwen and Alibaba Cloud.
+We match 19 key formats across 14 providers, including DeepSeek, Qwen and Moonshot, which most scanners miss entirely.
 
-[5/6]
-Most tooling misses that last group. DeepSeek and Qwen keys land in cheap prototypes nobody reviewed. A US-formats-only scanner returns clean on a leaked DeepSeek key: it never looked for that string shape. A confident all clear is the worst result.
-
-[6/6]
-Shipped today as Agentic Attack Surface on AWS Marketplace. $299/mo via your AWS account. Free check, no key required:
-
+Free check, no API key:
 https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
 
-https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
+#LLMjacking
+```
 
-#LLMjacking #infosec #AIsecurity
+### Farcaster: one paste
+
+**~1024 byte limit** for a standard cast. This version is 857 bytes. Not a thread.
+
+```
+A stolen LLM API key isn't a door into your systems. It IS the thing being stolen. It converts straight into compute you pay for and someone else uses.
+
+Sysdig: $46,000/day from compromised Bedrock creds. One leaked Gemini key: $82,000 in 48 hours. Stolen keys sell for ~$30.
+
+What makes it nasty: no endpoint compromised, so EDR sees nothing. No anomalous login, so the SIEM sees nothing. No data exfiltrated, so DLP sees nothing. Your first signal is the invoice.
+
+We match 19 LLM key formats across 14 providers, including DeepSeek, Moonshot Kimi, Qwen and Alibaba Cloud. Most scanners only match US formats and return a confident all clear on a leaked DeepSeek key.
+
+Shipped today as Agentic Attack Surface on AWS Marketplace. Free check, no key required:
+
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
 ```
 
 ### Telegram: one paste

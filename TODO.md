@@ -18,6 +18,31 @@ rather than guessing a slug, and swap it for the direct product-page URL once it
 the AWS Marketplace Management Portal. A guessed slug that 404s is the exact credibility problem
 that caused the card to be pulled in the first place.
 
+## 🔗 DISTRIB-FILIGRAN-1: post to the Filigran community Slack, GATED on OpenCTI-1 completion
+
+Added 2026-07-30. **Do not post before the OpenCTI integration guide is finished and verified.**
+
+`filigran-community.slack.com`, roughly 6,500 members: Filigran is the company behind **OpenCTI** and
+OpenBAS/OpenAEV, and this is where their operators ask setup and use-case questions.
+
+**Founder asked whether to announce Bundle D there. Answer: no, and the reason is the cost, not
+etiquette.** Bundle D is an AWS Marketplace SKU aimed at agent deployments; OpenCTI operators run a
+TIP. A launch post reads as vendor spam in a support community, and you get one first impression.
+OpenCTI is **#2 on the founder-approved platform order** in
+[[project-platform-integration-order]], so burning that introduction on an irrelevant paid bundle
+costs the launch that actually matters.
+
+**What to post instead, once OPENCTI-1 ships:** the connector/config guide. OpenCTI natively consumes
+TAXII 2.1, and as of 2026-07-30 the feed is genuinely conformant, verified with the OASIS reference
+client (it previously failed, see [[project-taxii-conformance-verified]]). "How to ingest a 4.6M
+indicator feed into OpenCTI" is exactly what that channel is for.
+
+**Same rule for every practitioner community** (Blue Team Village **Discord**, 8,300+ members, not
+Slack; r/msp Discord; MSPGeek): these are not broadcast channels. The thing that earns standing is
+the free zero-key `llm-credential-exposure` check offered when somebody asks about leaked keys. A
+better BTV path than any post is their **CFP**, where "LLMjacking: the credential theft your SIEM
+structurally cannot see" is a real defender-audience talk we have the data to give.
+
 ## 👀 WATCHLIST-BUZZ-1: Buzz (Block/Jack Dorsey) — revisit at the Bundle B launch
 
 Added 2026-07-30. **Deliberately deferred, not dismissed.** Founder decision: join when the timing is

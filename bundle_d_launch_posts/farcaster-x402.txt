@@ -1,0 +1,13 @@
+Your agent can now check whether its own LLM provider keys have leaked, and pay for the check itself. No account, no API key, no human.
+
+POST https://api.relayshield.net/v1/payg/llm-credential-exposure
+
+Returns 402 with x402 payment requirements. $0.40 USDC on Base or Solana. Pay, retry, get the answer.
+
+Why it matters: a stolen LLM key isn't a door into your systems, it IS the thing being stolen. It converts straight into compute you pay for. Sysdig measured $46,000/day from compromised Bedrock creds. Stolen keys go for ~$30.
+
+We match 19 key formats across 14 providers, including DeepSeek, Moonshot Kimi, Qwen and Alibaba Cloud, which most scanners miss entirely.
+
+4.6M indicators from 83 criminal Telegram channels.
+
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them

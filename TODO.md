@@ -1,5 +1,66 @@
 # RelayShield — Open Items
 
+## 🟥 TOP PRIORITY 2026-07-30 — SOLANA-4c: dApp Store answers received, decision needed
+
+The Solana Discord mod replied and **answered both blocking questions**. Item 4c is unblocked; what
+remains is one decision only the founder can make, then a sequence.
+
+**What they said:**
+1. The team can delete the existing app record completely, and the original package name **can** be
+   reused.
+2. To keep the same package name, the **old record must be deleted first**, before the new
+   submission. If the package name does not matter, they can process the new submission, get it
+   **live first**, then unpublish and delete the old one.
+3. The publisher account carries over. Only the app identity is new.
+4. **Nothing carries over to the new app** — reviews, ratings and install base are all lost either way.
+
+**The decision: keep `net.relayshield.cryptoshield`, or take a new package name?**
+
+| | Keep the name | New name |
+|---|---|---|
+| Availability gap | **Yes.** Old record deleted *before* the new one is reviewed, so the app is off the store for the whole review period | **None.** New goes live first, old removed after |
+| Firebase | No change | New Android app in the Firebase project + fresh `google-services.json` (currently bound to `net.relayshield.cryptoshield`) |
+| `assetlinks.json` | **Must still change** | Must change |
+| Reviews / installs | Lost | Lost |
+| Existing installs | Manual delete and reinstall | Manual delete and reinstall |
+
+**The two things that make this less balanced than it looks:**
+
+- **Keeping the package name does NOT avoid the `assetlinks.json` update.** The live file on the
+  landing-page Worker still carries the *old* debug cert fingerprint
+  `17:5D:AA:BC:...:74:51`, and v1.5.0 is signed with the new release keystore
+  (`5F:72:93:7B:...:D4:E8`). The fingerprint has to change regardless, or Phantom regresses to
+  "identity could not be verified". Verified in `cloudflare_worker_cryptoshield_landing.js:203`.
+- **Nothing carries over either way**, so package-name continuity buys no retained reviews, ratings
+  or installs. Its only real value is not having to redo Firebase and not updating scattered
+  references.
+
+**Recommendation: new package name, submit-new-first.** The founder's own framing is that this gates
+real business, and that points at the availability gap. The old listing (v1.3.0) is live and working
+today; the keep-the-name path deliberately takes it down and leaves it down for an unknown review
+period, on a store whose review timing we cannot predict. The cost of the new-name path is bounded
+and known: register a second Android app in Firebase, pull a new `google-services.json`, rebuild, and
+update the references below. That is founder console work plus a rebuild, not days of lost
+availability.
+
+**Files to update if the package name changes** (verified by grep):
+`crypto-shield-app/app.json`, `crypto-shield-app/google-services.json`,
+`crypto-shield-app/android/app/google-services.json`, `crypto-shield-app/src/components/UpdateNudge.tsx`,
+`crypto-shield-app/store-assets/dapp-store-metadata.md`, `cloudflare_worker_cryptoshield_landing.js`
+(both `ASSET_LINKS` entries).
+
+**Sequence once the founder decides:**
+1. Update `ASSET_LINKS` with the new cert fingerprint (and new package name if changing), deploy the
+   Worker, and confirm `/.well-known/assetlinks.json` serves it before the app goes live.
+2. Submit the new app record.
+3. Only after it is live and verified, ask the mod to unpublish and delete the old record.
+4. User comms: existing installs must delete and reinstall. Nothing migrates. Draft this **before**
+   step 3, not after.
+
+**Do not re-upload the rejected APK under the old record.** It will be rejected identically and burns
+a submission. Seeker Dev Wizard also allows only one open Discord ticket at a time, so keep the
+current thread alive until this is finished.
+
 ## 🎉 2026-07-30 — AWS Bundle D IS PUBLIC
 
 Change set `ay8fm6495woznjrxrdd290kz3` **SUCCEEDED** at 2026-07-30T12:35:09Z. Entity

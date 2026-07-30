@@ -156,6 +156,40 @@ Shipped today as Agentic Attack Surface on AWS Marketplace. Free check, no key r
 https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
 ```
 
+### Farcaster, x402 variant (recommended over the generic one)
+
+Farcaster's audience is crypto native, so the agent-pays-per-call angle is far more on-thesis there
+than SOC framing. This is a real capability, not a stretch: verified live 2026-07-30, the endpoint
+returns HTTP 402 with x402 payment requirements for **$0.40 USDC on Base or Solana**, no API key.
+
+Use `farcaster-x402.txt` instead of `farcaster.txt` unless you specifically want the security framing.
+
+```
+Your agent can now check whether its own LLM provider keys have leaked, and pay for the check itself. No account, no API key, no human.
+
+POST https://api.relayshield.net/v1/payg/llm-credential-exposure
+
+Returns 402 with x402 payment requirements. $0.40 USDC on Base or Solana. Pay, retry, get the answer.
+
+Why it matters: a stolen LLM key isn't a door into your systems, it IS the thing being stolen. It converts straight into compute you pay for. Sysdig measured $46,000/day from compromised Bedrock creds. Stolen keys go for ~$30.
+
+We match 19 key formats across 14 providers, including DeepSeek, Moonshot Kimi, Qwen and Alibaba Cloud, which most scanners miss entirely.
+
+4.6M indicators from 83 criminal Telegram channels.
+
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+```
+
+**Channels: pick these in-app, do not trust a list.** Farcaster channel activity moves fast and I
+could not verify current membership from here. The only channel confirmed from official docs is
+`/fc-devs`, which is protocol developers rather than our buyer. Farcaster shows follower counts in
+the app, so check before posting.
+
+Given the x402 framing, the channels worth checking are the **agent and onchain-builder** ones rather
+than the security ones used previously: look for `/ai-agents`, `/agents`, `/base`, `/x402` and
+`/founders`. Post to the one or two largest that actually fit. A cast in a dead channel is worse than
+no cast, because it looks like nobody engaged.
+
 ### Telegram: one paste
 
 Existing subscribers are already warm, so both links go inline and there is no comment step.
@@ -200,10 +234,24 @@ The blog ignores `?src=` entirely (verified), and the post's own call to action 
 `?src=llmjacking` through to the developers page. `?src=` belongs only on links pointing directly at
 `/developers`.
 
-### +1 day: Medium
+### Now: Medium
 
 **Import a story**, do not paste. Paste has zero Markdown support and mangles the formatting; import
-sets the canonical link back to the blog in the same step. Source URL is the canonical above.
+sets the canonical link back to the blog in the same step.
+
+**No reason to delay this.** The usual argument for holding syndication back is letting Google index
+your canonical first, but Medium's import sets `rel=canonical` automatically, which is what actually
+protects you. Post it at the same time as everything else.
+
+Import URL:
+
+```
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+```
+
+**Verify after import:** view source on the Medium post and confirm `rel="canonical"` points back at
+blog.relayshield.net. Medium normally sets it, but if it did not, a high-authority domain would be
+outranking you for your own content.
 
 ### +2 days: Hacker News
 

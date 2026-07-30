@@ -792,6 +792,36 @@ def _lambda_health_html(h: dict) -> str:
 
 
 def lambda_handler(event, context):
+    # Health-only mode, added 2026-07-30. The fleet health digest wants a DAILY
+    # cadence -- a weekly one would have taken up to 7 days to surface the
+    # intel-monitor outage, and that ran 2 days before a human noticed. But the
+    # full metrics email carries Stripe MRR, subscriber counts and revenue,
+    # which nobody wants daily. So the same Lambda serves two schedules: a daily
+    # health-only email, and the existing Monday full report which still
+    # includes the health section inline.
+    if (event or {}).get("mode") == "health_only":
+        logger.info("Daily Lambda health digest starting")
+        health = _scheduled_lambda_health()
+        problems = len(health.get("errored", [])) + len(health.get("silent", []))
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        subject = (f"RelayShield Lambda health - {problems} need attention - {today}"
+                   if problems else f"RelayShield Lambda health - all clear - {today}")
+        body = f"""<html><body style="font-family: -apple-system, sans-serif;">
+<h2 style="color: #1a1a2e;">RelayShield Lambda Health - {today}</h2>
+{_lambda_health_html(health)}
+<p style="color: #888; font-size: 12px;">Daily digest. The full metrics report still runs Mondays
+and includes this same section.</p>
+</body></html>"""
+        ses.send_email(
+            Source=FROM_EMAIL,
+            Destination={"ToAddresses": [REPORT_TO]},
+            Message={"Subject": {"Data": subject},
+                     "Body": {"Html": {"Data": body}}},
+        )
+        logger.info("Daily health digest sent: %d problems across %d scheduled functions",
+                    problems, health.get("total", 0))
+        return {"ok": True, "mode": "health_only", "problems": problems, "health": health}
+
     logger.info("Weekly metrics report starting")
 
     stripe_key = _get_stripe_key()

@@ -64,6 +64,7 @@ import json
 import html
 import logging
 import os
+import random
 import re
 import secrets
 import socket
@@ -124,14 +125,97 @@ SOL_PAYTO_ADDRESS    = os.environ.get("RELAYSHIELD_SOL_WALLET", "")    # Solana 
 ALCHEMY_API_KEY   = os.environ.get("ALCHEMY_API_KEY", "")
 ALCHEMY_AUTH_TOKEN = os.environ.get("ALCHEMY_AUTH_TOKEN", "")
 HELIUS_API_KEY    = os.environ.get("HELIUS_API_KEY", "")
+CS_MOBILE_APP_NFT = "FNg9dzf1JjJ9D8G1i7o1L7KL6ztpLADVQAeonwT5KaDo"  # Crypto Shield App NFT (Solana dApp Store) -- release NFTs group under this via getAssetsByGroup
 X402_FACILITATOR_URL = "https://facilitator.payai.network"   # EVM (Base) — PayAI facilitator; auto-listed in Bazaar, free tier 10k/month
-SOL_FACILITATOR_URL  = "https://x402.org/facilitator"         # Solana — CDP Facilitator (manages CDP fee payer EwWqGE4Z...)
+SOL_FACILITATOR_URL  = "https://facilitator.payai.network"    # Solana — PayAI (same facilitator as Base; x402.org was a testnet facilitator with no Bazaar support, confirmed 2026-07-10)
+
+# CDP (Coinbase Developer Platform) facilitator — preferred over PayAI when
+# configured. Added 2026-07-11: CDP's own Bazaar is the discovery registry
+# AWS surfaces through Bedrock AgentCore's gateway, so routing settlements
+# through CDP is what actually makes these endpoints reachable by any
+# AgentCore-built agent, not just a nice-to-have second facilitator.
+CDP_API_KEY_ID       = os.environ.get("CDP_API_KEY_ID", "")
+CDP_API_KEY_SECRET   = os.environ.get("CDP_API_KEY_SECRET", "")
+CDP_FACILITATOR_HOST = "api.cdp.coinbase.com"
+CDP_FACILITATOR_URL  = f"https://{CDP_FACILITATOR_HOST}/platform/v2/x402"
+
 USDC_BASE_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC on Base
 USDC_SOL_ADDRESS     = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # USDC on Solana mainnet
-BASE_CHAIN_ID        = "base"           # V1 named network (eip155:8453 is V2 CAIP-2 format)
-SOL_CHAIN_ID         = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"       # Solana mainnet CAIP-2
+BASE_CHAIN_ID        = "base"           # V1 named network
+BASE_CHAIN_ID_V2     = "eip155:8453"     # V2 CAIP-2 format — Base mainnet
+SOL_CHAIN_ID         = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"       # Solana mainnet CAIP-2 — same value in V1 and V2
 # CDP Facilitator Solana fee-payer public key (sponsors gas for all SVM x402 transactions)
 SOL_FEE_PAYER        = "EwWqGE4ZFKLofuestmU4LDdK7XM1N4ALgdZccwYugwGd"
+
+# x402 V2 staged migration (TODO.md item 50) — empty by default, everything
+# stays on V1. Add paths in small batches (3-4 at a time) as each batch is
+# funded, settled, and confirmed re-indexed in CDP's Bazaar before the next.
+# Batch 1 (2026-07-14): breach/domain/sim-swap TEMPORARILY REVERTED to V1
+# 2026-07-14 — their Bazaar entries stayed stale/V1-shaped after real V2
+# settlements (confirmed via CDP's discovery search + an isolated solo-
+# settlement test that ruled out batching/debounce as the cause), meaning any
+# real agent trusting Bazaar's cached data right now would build a payment
+# against the wrong shape. Reverting closes that exposure until the stale-
+# indexing cause is understood. supply-chain stays on V2 — its Bazaar entry
+# is confirmed correctly updated.
+#
+# domain: second attempt at a fix, 2026-07-16 — corrected paymentPayload
+# .resource shape (proper ResourceInfo object, confirmed against the real
+# x402 SDK schema, not the broken bare-string first attempt) settled
+# successfully end-to-end (real tx 0x092f86d5b82dc1c8a5cca2c63d847f4ac8ce
+# 47bb0474960849aaf874dde31799, payer 0xa26054A..., confirmed on Base).
+# Checked CDP's Bazaar discovery search immediately after: domain's
+# quality.lastCalledAt is STILL frozen at 2026-07-12T14:03:38.196Z,
+# completely unchanged, and the entry is still indexed under the old V1
+# shape (x402Version: 1). This rules out Ethan Oroshiba's "missing
+# paymentPayload.resource" diagnosis (x402-foundation/x402#2814) as the
+# actual fix — it's schema-correct and settles fine, but CDP's own
+# tracking for this specific resource genuinely does not move. Matches
+# the original investigation's conclusion better: a CDP-side stuck
+# record, not a payload-shape problem. Reverted back to V1 — V2 gives no
+# benefit here and only adds a real vs-indexed shape mismatch.
+X402_V2_ENABLED_PATHS: set[str] = {
+    "/v1/payg/supply-chain",
+    # Batch B (CDPX-7), added 2026-07-17 — no prior V2 attempt/failure history.
+    # Froze at pre-migration lastCalledAt for ~1 day, then self-resolved with
+    # no CDP-side fix — treating that lag as expected, not a permanent break.
+    "/v1/payg/target-risk",
+    "/v1/payg/wallet-screen-batch",
+    "/v1/payg/oauth-watchlist",
+    "/v1/payg/tech-stack-cve",
+    # Batch C (CDPX-7), added 2026-07-18.
+    "/v1/payg/identity-risk-score",
+    "/v1/payg/secret-scan",
+    "/v1/payg/session-risk",
+    "/v1/payg/nhi-exposure",
+    # LLMjacking (added 2026-07-26) — dedicated LLM/AI provider credential
+    # exposure check, filtered subset of nhi-exposure's detection.
+    "/v1/payg/llm-credential-exposure",
+    # Batch A (CDPX-7), added 2026-07-19 — held pending Batch C resolution,
+    # resumed once both of Batch C's open patterns cleared.
+    "/v1/payg/bulk-identity-risk",
+    # Batch E (CDPX-7), added 2026-07-20 — no prior V2 attempt/failure history.
+    "/v1/payg/identity-graph",
+    "/v1/payg/ransomware-risk",
+    # Batch D (CDPX-7), added 2026-07-20 — no prior V2 attempt/failure history.
+    "/v1/payg/wallet-risk",
+    "/v1/payg/token-security",
+    "/v1/payg/scan-url",
+    "/v1/payg/nft-security",
+    "/v1/payg/scan-file",
+    "/v1/payg/scan-wallet",
+    "/v1/payg/infostealer",
+    # Roadmap additions (competitive benchmark, CDPX-7 era), added 2026-07-21.
+    "/v1/payg/cert-expiry",
+    "/v1/payg/ip-intel",
+    # Phase 2 trio (CDPX-7), added 2026-07-21 — held back since 2026-07-15
+    # after 2 prior failed real-money cataloging attempts on `domain`
+    # specifically. Every other batch (A/B/C/D/E) has since resolved cleanly
+    # within ~11-24hrs, so retrying now with that established precedent.
+    "/v1/payg/domain",
+    "/v1/payg/breach",
+    "/v1/payg/sim-swap",
+}
 
 # PAYG pricing in USDC base units (6 decimals): $0.10 = 100000
 PAYG_PRICE_UNITS: dict[str, int] = {
@@ -143,8 +227,8 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/scan-url":               50000,
     "/v1/payg/scan-file":             100000,
     # Crypto Shield intelligence endpoints
-    "/v1/payg/wallet-risk":           150000,   # $0.15 — multi-chain EVM/Solana/TON
-    "/v1/payg/token-security":        100000,   # $0.10 — GoPlus token risk
+    "/v1/payg/wallet-risk":           50000,    # $0.05 — multi-chain EVM/Solana/TON (teaser price, CDPX-3)
+    "/v1/payg/token-security":        50000,    # $0.05 — GoPlus token risk (teaser price, CDPX-3)
     "/v1/payg/nft-security":          100000,   # $0.10 — GoPlus NFT risk
     "/v1/payg/wallet-screen-batch":   500000,   # $0.50 — up to 10 addresses
     "/v1/payg/infostealer":           150000,   # $0.15 — Hudson Rock infostealer check
@@ -153,10 +237,14 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/identity-graph":        350000,   # $0.35 — identity correlation: email → linked phones/domains from dumps
     "/v1/payg/ransomware-risk":       400000,   # $0.40 — ransomware victim list + pre-ransomware credential check
     "/v1/payg/nhi-exposure":          400000,   # $0.40 — non-human identity: API keys/tokens in stealer logs
+    "/v1/payg/llm-credential-exposure": 400000,  # $0.40 — LLMjacking: exposed LLM/AI provider API keys
     "/v1/payg/secret-scan":           350000,   # $0.35 — GitHub/GitLab public repo secret detection
     "/v1/payg/target-risk":           500000,   # $0.50 — target probability score (6-signal correlation)
     "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
     "/v1/payg/bulk-identity-risk":    2000000,  # $2.00 — hierarchical org + per-agent-email risk scoring
+    "/v1/payg/identity-risk-score":   350000,   # $0.35 — domain security credit score (0-100), 6 dimensions
+    "/v1/payg/cert-expiry":            50000,   # $0.05 — TLS cert expiry/renewal risk for your own domain (crt.sh, free source)
+    "/v1/payg/ip-intel":              100000,   # $0.10 — passive DNS + IP reputation via VirusTotal
 }
 
 GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
@@ -189,6 +277,7 @@ OAUTH_REVOCATION_URLS: dict[str, str] = {
 API_KEYS_TABLE          = "relayshield_api_keys"
 INTEL_IOCS_TABLE        = "relayshield_intel_iocs"
 INTEL_CVE_TABLE         = "relayshield_intel_cve"
+STOLEN_CARDS_TABLE      = "relayshield_stolen_cards"
 ASSET_WATCHLIST_TABLE   = "relayshield_asset_watchlist"
 ACTOR_WATCHLIST_TABLE   = "relayshield_actor_watchlist"
 EXPLOIT_CHATTER_TABLE   = "relayshield_exploit_chatter"
@@ -227,6 +316,7 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/identity-graph":   "relayshield_identity_graph_calls",
     "/v1/metered/ransomware-risk":  "relayshield_ransomware_risk_calls",
     "/v1/metered/nhi-exposure":     "relayshield_nhi_exposure_calls",
+    "/v1/metered/llm-credential-exposure": "relayshield_llm_credential_exposure_calls",
     "/v1/metered/secret-scan":      "relayshield_secret_scan_calls",
     "/v1/metered/target-risk":      "relayshield_target_risk_calls",
     "/v1/metered/asset-intel":      "relayshield_asset_intel_calls",
@@ -238,6 +328,9 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/brand-monitor":       "relayshield_brand_monitor_calls",     # brand mention scan in IOC corpus
     "/v1/metered/bulk-identity-risk":  "relayshield_bulk_identity_risk_calls",# up to 10 domains + 5 agents each
     "/v1/metered/tech-stack-cve":      "relayshield_tech_stack_cve_calls",    # CVE targeting alert by declared tech stack
+    "/v1/metered/cert-expiry":         "relayshield_cert_expiry_calls",       # TLS cert expiry/renewal risk (crt.sh)
+    "/v1/metered/ip-intel":            "relayshield_ip_intel_calls",          # passive DNS + IP reputation (VirusTotal)
+    "/v1/metered/card-exposure":       "relayshield_card_exposure_calls",     # BIN/stolen-card monitoring — CREATE METER IN DASHBOARD
 }
 
 # Credits deducted per successful call (1 credit = $0.01)
@@ -253,6 +346,7 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/identity-graph":  35,   # $0.35 — identity correlation
     "/v1/metered/ransomware-risk": 40,   # $0.40 — ransomware victim + pre-ransomware credential check
     "/v1/metered/nhi-exposure":    40,   # $0.40 — NHI: API keys/tokens in stealer logs
+    "/v1/metered/llm-credential-exposure": 40,   # $0.40 — LLMjacking: exposed LLM/AI provider API keys
     "/v1/metered/secret-scan":     35,   # $0.35 — GitHub/GitLab public repo secret detection
     "/v1/metered/target-risk":     50,   # $0.50 — 6-signal target probability correlation score
     "/v1/metered/asset-intel":      15,   # $0.15/call — asset watchlist register + sweep
@@ -261,9 +355,12 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/identity-risk-score": 35, # $0.35/call — domain security credit score (0-100)
     "/v1/metered/bulk-ioc":             50,   # $0.50/batch — up to 100 IOC lookups (TC-competitor bulk enrichment)
     "/v1/metered/ioc-pivot":           20,   # $0.20/call — related IOC discovery by malware family / source
-    "/v1/metered/brand-monitor":       25,   # $0.25/call — brand name scan in IOC + domain corpus (RF-competitor)
+    "/v1/metered/brand-monitor":       35,   # $0.35/call — raised from $0.25 2026-07-24: now covers image/logo mentions too (text + domain + image corpus, RF/Intel471-competitor)
     "/v1/metered/bulk-identity-risk":  200,  # $2.00/call — up to 10 domains + 5 agents each (MSP sweep / OrcX agentic)
     "/v1/metered/tech-stack-cve":      20,   # $0.20/call — CVE targeting risk by declared tech stack
+    "/v1/metered/cert-expiry":         5,    # $0.05/call — mirrors PAYG price, new endpoint 2026-07-21
+    "/v1/metered/ip-intel":            10,   # $0.10/call — mirrors PAYG price, new endpoint 2026-07-21
+    "/v1/metered/card-exposure":       30,   # $0.30/call — compromised-card lookup (Flashpoint/SOCRadar-competitor), new endpoint 2026-07-24
 }
 
 HIBP_SECRET_NAME  = "relayshield/hibp_api_key"
@@ -347,12 +444,21 @@ def _stripe_secret_key() -> str:
 # ---------------------------------------------------------------------------
 
 def _verify_rs_api_key(api_key_str: str) -> dict | None:
-    """Look up a RelayShield API key in DynamoDB. Returns the record or None."""
+    """Look up a RelayShield API key in DynamoDB. Returns the record or None.
+
+    ConsistentRead=True (added 2026-07-17) — this gates a billing decision
+    (credits/subscription check right after), so it must never see a stale
+    pre-write copy of the record. Diagnosed live: a key record edited via
+    the AWS CLI kept intermittently showing its pre-edit state (missing
+    `source`/`active`) on the very next real request, then the correct
+    state again moments later on a fresh read — classic default
+    eventually-consistent GetItem staleness, not a second process
+    overwriting the record."""
     if not api_key_str or not (api_key_str.startswith("rs_live_") or api_key_str.startswith("rs_demo_")):
         return None
     try:
         table  = dynamodb.Table(API_KEYS_TABLE)
-        result = table.get_item(Key={"api_key": api_key_str})
+        result = table.get_item(Key={"api_key": api_key_str}, ConsistentRead=True)
         item   = result.get("Item")
         if item and item.get("active"):
             return item
@@ -362,41 +468,113 @@ def _verify_rs_api_key(api_key_str: str) -> dict | None:
         return None
 
 
+# Daily call caps for shared demo keys embedded in public source (e.g. a pip
+# package or public HF Space file). Unlike a server-side-only key such as
+# "demo_portal" (used exclusively by the Cloudflare Worker TI demo, never
+# visible to a browser), a key inside a published Python file is scrapable
+# within hours of release — so it must be both rate-limited and low-privilege
+# from the start, never reused from an existing unlimited demo key.
+DEMO_QUOTA_TABLE   = "relayshield_demo_key_usage"
+DEMO_QUOTA_SOURCES = {"hf_smolagents_demo": 20, "mcp_space_demo": 20}  # source -> shared daily cap, all callers combined
+
+def _check_demo_quota(key_record: dict) -> bool:
+    """Atomically increments today's call count for a quota-capped demo key
+    and returns whether it's still under cap. Fails open on a DynamoDB error —
+    this is a cost/abuse guardrail, not a security control, so an infra blip
+    should not break the demo experience for a legitimate visitor."""
+    cap = DEMO_QUOTA_SOURCES.get(key_record.get("source"))
+    if cap is None:
+        return True
+    usage_key = f"{key_record.get('api_key', '')}#{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+    try:
+        table = dynamodb.Table(DEMO_QUOTA_TABLE)
+        resp  = table.update_item(
+            Key={"usage_key": usage_key},
+            UpdateExpression="ADD call_count :one SET expires_at = if_not_exists(expires_at, :ttl)",
+            ExpressionAttributeValues={":one": 1, ":ttl": int(time.time()) + 3 * 86400},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(resp["Attributes"]["call_count"]) <= cap
+    except Exception as exc:
+        logger.error("demo quota check failed key=%s error=%s", key_record.get("api_key", "")[:16], exc)
+        return True
+
+
 # AWS Marketplace Bundle D usage dimensions — API identifiers must match
 # exactly what's configured in the AWS Marketplace pricing dimensions.
-# Only these 2 endpoints (of this file's routes) belong to Bundle D — the
+# Only these 3 endpoints (of this file's routes) belong to Bundle D — the
 # other 2 (mcp-registry-risk, prompt-injection-breach) live in the isolated
 # relayshield_agentic_api.py Lambda with their own copy of this logic.
+# llm_credential_exposure added 2026-07-27 while the changeset was back in
+# limited visibility for the Usage Instructions fix — bundled into the same
+# resubmission rather than a separate pricing-terms change-set later.
 BUNDLE_D_PRODUCT_CODE = os.environ.get("BUNDLE_D_PRODUCT_CODE", "")
 BUNDLE_D_DIMENSION_NAMES = {
-    "/v1/metered/tech-stack-cve":     "tech_stack_cve",
-    "/v1/metered/bulk-identity-risk": "bulk_identity_risk",
+    "/v1/metered/tech-stack-cve":          "tech_stack_cve",
+    "/v1/metered/bulk-identity-risk":      "bulk_identity_risk",
+    "/v1/metered/llm-credential-exposure": "llm_credential_exposure",
 }
 
+# Bundle A ("Core Identity Exposure", $150/mo min) — same AWS Marketplace
+# product entity as Bundle D ("RelayShield - Consumption Security API
+# Bundles", prod-kkvurtspreofy), just a different contract dimension —
+# hence reusing BUNDLE_D_PRODUCT_CODE's value rather than a separate env var.
+# Verified zero path/dimension-key/gate-flag overlap with Bundle D 2026-07-13.
+BUNDLE_A_DIMENSION_NAMES = {
+    "/v1/metered/breach":          "breach_calls",
+    "/v1/metered/sim-swap":        "sim_swap_calls",
+    "/v1/metered/infostealer":     "infostealer_calls",
+    "/v1/metered/domain":          "domain_calls",
+    "/v1/metered/oauth-watchlist": "oauth_watchlist_calls",
+    "/v1/metered/crypto-intel":    "crypto_intel_calls",
+}
 
-def _report_marketplace_usage(customer_id: str, dimension: str) -> None:
+# Crypto Shield Mobile ($10.99/mo or $105.99/yr) — the exact set of metered
+# endpoints the app calls (crypto-shield-app/src/api/relayshield.ts), and
+# nothing more. Deliberately excludes bulk-identity-risk even though it's
+# defined in the app's API client — that's a $2.00/call enterprise endpoint
+# (dead code in the app, never actually called from any screen, confirmed
+# 2026-07-11) and must never be free just because a user pays for the mobile
+# app. Keeping this as an explicit allowlist rather than reusing has_subscription
+# is the whole point — see is_cs_mobile_call below.
+CS_MOBILE_ALLOWED_ENDPOINTS = frozenset({
+    "/v1/metered/identity-risk-score",
+    "/v1/metered/infostealer",
+    "/v1/metered/breach",
+    "/v1/metered/nhi-exposure",
+    "/v1/metered/supply-chain",
+    "/v1/metered/sim-swap",
+})
+
+
+def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: str) -> None:
     """Report one call of usage to AWS Marketplace Metering Service for a
     Bundle D contract customer. Fire-and-forget — never raises. Duplicated
     in relayshield_agentic_api.py and relayshield_bundle_fulfillment.py
-    rather than shared, same isolation rationale used throughout Bundle D."""
-    if not customer_id or not dimension or not BUNDLE_D_PRODUCT_CODE:
-        logger.warning("Skipping Bundle D usage report — missing customer/dimension/product_code")
+    rather than shared, same isolation rationale used throughout Bundle D.
+
+    Uses CustomerAWSAccountId + LicenseArn, not the older CustomerIdentifier
+    + ProductCode-only pattern — AWS's Concurrent Agreements model (rolled
+    out 2026-06-01) rejects the old pattern for products created after that
+    date with InvalidLicenseException, confirmed 2026-07-10."""
+    if not aws_account_id or not license_arn or not dimension or not BUNDLE_D_PRODUCT_CODE:
+        logger.warning("Skipping Bundle D usage report — missing account/license_arn/dimension/product_code")
         return
     try:
         mp_client = boto3.client("meteringmarketplace", region_name="us-east-1")
         mp_client.batch_meter_usage(
             UsageRecords=[{
                 "Timestamp": datetime.now(timezone.utc),
-                "CustomerIdentifier": customer_id,
+                "CustomerAWSAccountId": aws_account_id,
+                "LicenseArn": license_arn,
                 "Dimension": dimension,
                 "Quantity": 1,
             }],
-            ProductCode=BUNDLE_D_PRODUCT_CODE,
         )
-        logger.info("Bundle D usage reported customer=%s dimension=%s", customer_id, dimension)
+        logger.info("Bundle D usage reported account=%s dimension=%s", aws_account_id, dimension)
     except Exception as exc:
-        logger.warning("Bundle D usage reporting failed (non-fatal) customer=%s dimension=%s error=%s",
-                       customer_id, dimension, exc)
+        logger.warning("Bundle D usage reporting failed (non-fatal) account=%s dimension=%s error=%s",
+                       aws_account_id, dimension, exc)
 
 
 def _record_stripe_meter_event(stripe_customer_id: str, event_name: str) -> None:
@@ -642,6 +820,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         "/v1/metered/identity-graph":  handle_identity_graph,
         "/v1/metered/ransomware-risk": handle_ransomware_risk,
         "/v1/metered/nhi-exposure":    handle_nhi_exposure,
+        "/v1/metered/llm-credential-exposure": handle_llm_credential_exposure,
         "/v1/metered/secret-scan":     handle_secret_scan,
         "/v1/metered/target-risk":     handle_target_risk,
         "/v1/metered/asset-intel":         lambda p: handle_asset_intel(p, api_key_str),
@@ -653,15 +832,26 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         "/v1/metered/brand-monitor":       handle_brand_monitor,
         "/v1/metered/bulk-identity-risk":  handle_bulk_identity_risk,
         "/v1/metered/tech-stack-cve":      handle_tech_stack_cve,
+        "/v1/metered/cert-expiry":         handle_cert_expiry,
+        "/v1/metered/ip-intel":            handle_ip_intel,
+        "/v1/metered/card-exposure":       handle_card_exposure,
         "/v1/webhook/configure":       lambda p: handle_webhook_configure(p, api_key_str),
+        "/v1/siem/configure":          lambda p: handle_siem_configure(p, api_key_str),
     }
     handler = metered_routes.get(path)
     if not handler:
         return _err(f"unknown metered endpoint: {path}", 404)
 
     # Billing check before executing — must have credits OR active subscription
-    # Demo keys bypass billing entirely
-    is_demo = key_record.get("source") == "demo_portal"
+    # Demo keys bypass billing entirely. "hf_smolagents_demo" is a separate,
+    # quota-capped key (see _check_demo_quota below) embedded in the public
+    # relayshield_smolagents_tool.py package — kept distinct from
+    # "demo_portal" (the unlimited, server-side-only TI demo key) so the two
+    # can be rate-limited and reported on independently. "mcp_space_demo"
+    # (added 2026-07-26) is the same pattern for the HF MCP Space's own
+    # zero-key free tier -- a shared, capped demo key baked into the Space
+    # itself so a caller can try one tool with no signup at all.
+    is_demo = key_record.get("source") in ("demo_portal", "hf_smolagents_demo", "mcp_space_demo")
     if not is_demo:
         credit_balance   = int(key_record.get("credit_balance") or 0)
         # has_subscription covers both billing paths that promise "all metered
@@ -671,7 +861,15 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # Fixed 2026-07-08: previously only checked stripe_subscription_id, so
         # every AWS Marketplace TI Starter/Unlimited customer got a 402 on every
         # metered endpoint despite the welcome email promising all of them included.
-        has_subscription = bool(key_record.get("stripe_subscription_id")) or bool(key_record.get("intel_plan_tier"))
+        # Explicitly excludes source=="cs_mobile" (added 2026-07-11) — those keys
+        # also carry stripe_subscription_id (needed for cancellation lookups) but
+        # must NOT get the blanket "all endpoints included" grant, since CS Mobile
+        # is a $10.99/mo consumer subscription, not a $499-999/mo TI plan. Their
+        # access is scoped separately below via is_cs_mobile_call.
+        has_subscription = (
+            (bool(key_record.get("stripe_subscription_id")) and key_record.get("source") != "cs_mobile")
+            or bool(key_record.get("intel_plan_tier"))
+        )
         credit_cost      = METERED_CREDIT_COSTS.get(path, 0)
         use_credits      = credit_balance >= credit_cost
         is_bundle_d_call = (
@@ -679,8 +877,36 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             and bool(key_record.get("aws_customer_id"))
             and path in BUNDLE_D_DIMENSION_NAMES
         )
+        is_bundle_a_call = (
+            bool(key_record.get("bundle_a_access"))
+            and bool(key_record.get("aws_customer_id"))
+            and path in BUNDLE_A_DIMENSION_NAMES
+        )
+        # Crypto Shield Mobile — scoped bypass for the small set of endpoints the
+        # app actually calls (see CS_MOBILE_ALLOWED_ENDPOINTS), not the full catalog.
+        is_cs_mobile_call = bool(key_record.get("cs_mobile_access")) and path in CS_MOBILE_ALLOWED_ENDPOINTS
+        # LLMjacking Detection License ($39/mo or $399/yr, added 2026-07-26) —
+        # scoped bypass for exactly one endpoint, same shape as is_cs_mobile_call.
+        # llm_access must never grant the rest of the metered catalog.
+        is_llm_license_call = bool(key_record.get("llm_access")) and path == "/v1/metered/llm-credential-exposure"
 
-    if not is_demo and not use_credits and not has_subscription and not is_bundle_d_call:
+    if key_record.get("source") in DEMO_QUOTA_SOURCES and not _check_demo_quota(key_record):
+        return {
+            "statusCode": 429,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({
+                "ok":    False,
+                "error": "Shared demo key's daily call quota reached. Get your own free-tier key: "
+                         "https://api.relayshield.net/developers?source=hf-smolagents",
+                "docs":  "https://api.relayshield.net/developers",
+            }),
+        }
+
+    if not is_demo and not use_credits and not has_subscription and not is_bundle_d_call and not is_bundle_a_call and not is_cs_mobile_call and not is_llm_license_call:
+        logger.warning(
+            "402 insufficient credits — path=%s key=%s credit_balance=%s source=%s",
+            path, api_key_str[:24], credit_balance, key_record.get("source"),
+        )
         return {
             "statusCode": 402,
             "headers": {"Content-Type": "application/json"},
@@ -701,7 +927,13 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
     # Only bill on success (demo keys never billed)
     if not is_demo and result.get("statusCode", 200) < 300:
         if is_bundle_d_call:
-            _report_marketplace_usage(key_record["aws_customer_id"], BUNDLE_D_DIMENSION_NAMES[path])
+            _report_marketplace_usage(
+                key_record.get("aws_account_id", ""), key_record.get("aws_license_arn", ""), BUNDLE_D_DIMENSION_NAMES[path]
+            )
+        elif is_bundle_a_call:
+            _report_marketplace_usage(
+                key_record.get("aws_account_id", ""), key_record.get("aws_license_arn", ""), BUNDLE_A_DIMENSION_NAMES[path]
+            )
         elif use_credits:
             # Deduct credits atomically
             try:
@@ -715,12 +947,24 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
                             api_key_str[:16], credit_cost, credit_balance - credit_cost)
             except Exception as exc:
                 logger.warning("credit deduction failed (non-fatal) key=%s error=%s", api_key_str[:16], exc)
+        elif is_cs_mobile_call:
+            # Included in the $10.99/mo subscription — no credits, no Stripe
+            # meter event. Nothing to bill or track here by design.
+            pass
+        elif is_llm_license_call:
+            # Included in the $39/mo or $399/yr LLMjacking license — no
+            # credits, no Stripe meter event.
+            pass
         else:
             # Fall back to Stripe meter event
             event_name         = STRIPE_METER_EVENTS.get(path)
             stripe_customer_id = key_record.get("stripe_customer_id", "")
             if event_name and stripe_customer_id:
                 _record_stripe_meter_event(stripe_customer_id, event_name)
+
+        source = headers.get("X-RS-Source") or headers.get("x-rs-source")
+        if source == "hf-mcp-space":
+            _log_hf_mcp_call(path, METERED_CREDIT_COSTS.get(path, 0))
 
         # Webhook push delivery — fire async if customer has registered a webhook
         webhook_url = key_record.get("webhook_url", "")
@@ -747,7 +991,6 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
 
 def _badge_svg(domain: str, level: str, color: str, style: str = "flat", score: int = 0) -> str:
     """Generate an SVG security badge for embedding on partner sites."""
-    label   = "CryptoShield by RS"
     value   = f"{level} {score}/100" if score and level != "UNKNOWN" else level
     label_w = 150
     value_w = 100
@@ -778,7 +1021,7 @@ def _badge_svg(domain: str, level: str, color: str, style: str = "flat", score: 
         f'<stop offset="1" stop-opacity=".15"/>'
         f'</linearGradient>'
         f'<g fill="#fff" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">'
-        f'<text x="8" y="19" fill="#00B5A5" font-weight="bold">🛡 CryptoShield</text>'
+        f'<text x="8" y="19" fill="#00B5A5" font-weight="bold">🛡 RelayShield</text>'
         f'<text x="{label_w + 8}" y="19" fill="#0a1628" font-weight="bold">{value}</text>'
         f'</g>'
         f'<a href="https://api.relayshield.net/developers" target="_blank">'
@@ -916,13 +1159,24 @@ def handle_scan_url(params: dict) -> dict:
     if not analysis_id:
         return _err("VirusTotal did not return an analysis ID", 502)
 
-    logger.info("scan-url submitted — url=%s analysis_id=%s", url, analysis_id)
+    # Immediate heuristic signal — added 2026-07-16 to unify this endpoint
+    # with Telegram's /scan and WhatsApp's SCAN/ATTACH, which already
+    # combine VT with RelayShield's IOC corpus + Google Safe Browsing +
+    # RDAP domain-age. VT's own submit-then-poll model means the definitive
+    # verdict isn't available in this response, but a caller shouldn't have
+    # to wait on that poll to learn about a domain that's already a known
+    # red flag right now.
+    heuristics = _heuristic_url_check(url)
+
+    logger.info("scan-url submitted — url=%s analysis_id=%s heuristics=%s", url, analysis_id, heuristics)
     return _ok({
-        "status":        "pending",
-        "target":        url,
-        "analysis_id":   analysis_id,
-        "poll_endpoint": f"/v1/result/{analysis_id}",
-        "note":          "Poll /v1/result/{analysis_id} every 5s until status is completed",
+        "status":               "pending",
+        "target":               url,
+        "analysis_id":          analysis_id,
+        "poll_endpoint":        f"/v1/result/{analysis_id}",
+        "immediate_signal":     "flagged" if heuristics["flagged"] else "no_immediate_red_flags",
+        "immediate_reasons":    heuristics["reasons"],
+        "note":                 "Poll /v1/result/{analysis_id} every 5s until status is completed",
     })
 
 
@@ -1052,6 +1306,232 @@ def _vt_response(target: str, analysis_id: str, stats: dict | None) -> dict:
     })
 
 
+def _vt_get(path: str, api_key: str) -> dict | None:
+    req = urllib.request.Request(f"{VT_BASE_URL}{path}", headers={"x-apikey": api_key}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+IP_INTEL_CACHE_TABLE   = "relayshield_ip_intel_cache"
+IP_INTEL_CACHE_SECONDS = 6 * 3600  # reputation doesn't change minute-to-minute; this is the
+                                    # main lever for staying under VT's rate limit on repeat/popular queries
+
+def _ip_intel_cache_get(queried: str) -> dict | None:
+    try:
+        item = dynamodb.Table(IP_INTEL_CACHE_TABLE).get_item(Key={"queried": queried}).get("Item")
+        return _decimals_to_plain(dict(item["result"])) if item else None
+    except Exception as exc:
+        logger.warning("ip-intel cache read failed for %s: %s", queried, exc)
+        return None
+
+
+def _ip_intel_cache_put(queried: str, result: dict) -> None:
+    try:
+        dynamodb.Table(IP_INTEL_CACHE_TABLE).put_item(Item={
+            "queried": queried,
+            "result": result,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "ttl": int(time.time()) + IP_INTEL_CACHE_SECONDS,
+        })
+    except Exception as exc:
+        logger.warning("ip-intel cache write failed for %s: %s", queried, exc)
+
+
+def handle_ip_intel(params: dict) -> dict:
+    domain = (params.get("domain") or "").strip().lower().removeprefix("www.")
+    ip     = (params.get("ip") or "").strip()
+    if not domain and not ip:
+        return _err("domain or ip is required")
+
+    query_type = "ip" if ip else "domain"
+    queried    = ip or domain
+
+    cached = _ip_intel_cache_get(queried)
+    if cached is not None:
+        logger.info("ip-intel cache hit query_type=%s queried=%s", query_type, queried)
+        return _ok(cached)
+
+    # Check RelayShield's own IOC corpus first — free, fast, no VT call needed,
+    # and a confirmed hit here is a stronger signal than a VT vote count (this
+    # is RelayShield's own criminal-marketplace/breach pipeline, not a
+    # third-party vote). Only calls VT if nothing is already known internally.
+    try:
+        corpus_table = dynamodb.Table(INTEL_IOCS_TABLE)
+        corpus_resp = corpus_table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(queried),
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").is_in(["ip", "domain"] if query_type == "ip" else ["domain", "url"]),
+            Limit=5,
+        )
+        corpus_hits = corpus_resp.get("Items", [])
+    except Exception as exc:
+        logger.warning("ip-intel own-corpus lookup failed for %s: %s", queried, exc)
+        corpus_hits = []
+
+    if corpus_hits:
+        corpus_result = {
+            "queried":          queried,
+            "query_type":       query_type,
+            "found":            True,
+            "reputation":       None,
+            "malicious_votes":  len(corpus_hits),
+            "suspicious_votes": 0,
+            "source":           "relayshield_ioc_corpus",
+            "resolutions":      [],
+            "checked_at":       datetime.now(timezone.utc).isoformat(),
+        }
+        logger.info("ip-intel own-corpus hit query_type=%s queried=%s hits=%d — skipping VT", query_type, queried, len(corpus_hits))
+        _ip_intel_cache_put(queried, corpus_result)
+        return _ok(corpus_result)
+
+    api_key = _vt_api_key()
+
+    try:
+        if query_type == "ip":
+            report      = _vt_get(f"/ip_addresses/{urllib.parse.quote(ip)}", api_key)
+            resolutions = _vt_get(f"/ip_addresses/{urllib.parse.quote(ip)}/resolutions?limit=10", api_key)
+        else:
+            report      = _vt_get(f"/domains/{urllib.parse.quote(domain)}", api_key)
+            resolutions = _vt_get(f"/domains/{urllib.parse.quote(domain)}/resolutions?limit=10", api_key)
+    except Exception as exc:
+        logger.error("ip-intel VT lookup failed for %s: %s", queried, exc)
+        return _err("intel lookup failed — upstream error", 502)
+
+    if report is None:
+        not_found_result = {
+            "queried":          queried,
+            "query_type":       query_type,
+            "found":            False,
+            "reputation":       None,
+            "malicious_votes":  None,
+            "suspicious_votes": None,
+            "resolutions":      [],
+            "checked_at":       datetime.now(timezone.utc).isoformat(),
+        }
+        _ip_intel_cache_put(queried, not_found_result)
+        return _ok(not_found_result)
+
+    attrs = report.get("data", {}).get("attributes", {})
+    stats = attrs.get("last_analysis_stats", {})
+
+    resolution_list = []
+    for item in (resolutions or {}).get("data", [])[:10]:
+        r_attrs = item.get("attributes", {})
+        raw_date = r_attrs.get("date")
+        date_iso = None
+        if isinstance(raw_date, (int, float)):
+            date_iso = datetime.fromtimestamp(raw_date, tz=timezone.utc).isoformat()
+        entry = {"date": date_iso}
+        if query_type == "ip":
+            entry["hostname"] = r_attrs.get("host_name", "")
+        else:
+            entry["ip_address"] = r_attrs.get("ip_address", "")
+        resolution_list.append(entry)
+
+    result = {
+        "queried":          queried,
+        "query_type":       query_type,
+        "found":            True,
+        "reputation":       attrs.get("reputation", 0),
+        "malicious_votes":  stats.get("malicious", 0),
+        "suspicious_votes": stats.get("suspicious", 0),
+        "resolutions":      resolution_list,
+        "checked_at":       datetime.now(timezone.utc).isoformat(),
+    }
+    if query_type == "ip":
+        result["as_owner"] = attrs.get("as_owner", "")
+        result["country"]  = attrs.get("country", "")
+
+    logger.info("ip-intel query_type=%s queried=%s reputation=%s malicious=%s",
+                query_type, queried, result["reputation"], result["malicious_votes"])
+    _ip_intel_cache_put(queried, result)
+    return _ok(result)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/card-exposure
+#
+# BIN/stolen-card monitoring (competitive benchmark roadmap item, added
+# 2026-07-24). Data source: relayshield_stolen_cards, populated by
+# _parse_card_data() in relayshield_intel_monitor.py from stealer-log
+# Autofill/CreditCards archive files.
+#
+# Deliberately does NOT accept a raw card number as input, by design, not
+# by oversight -- unlike a domain or email, RelayShield receiving a live PAN
+# even transiently carries real PCI-adjacent exposure for no real benefit.
+# Instead:
+#   { "pan_hash": "<sha256 hex of the digit-only card number, client-computed>" }
+#     -> exact match: is THIS specific card in the corpus (k-anonymity-style,
+#        same shape as HaveIBeenPwned's password-hash-prefix pattern -- the
+#        client hashes locally, RelayShield never sees the raw number)
+#   { "bin": "411111" }
+#     -> aggregate only: how many distinct cards with this BIN have leaked,
+#        and when most recently -- no per-card details returned, since a
+#        bulk BIN query isn't a specific-cardholder lookup
+# Both may be supplied together. At least one is required.
+# ---------------------------------------------------------------------------
+
+_RE_SHA256_HEX = re.compile(r"^[a-f0-9]{64}$")
+
+
+def handle_card_exposure(params: dict) -> dict:
+    pan_hash = (params.get("pan_hash") or "").strip().lower()
+    bin_     = (params.get("bin") or "").strip()
+
+    if not pan_hash and not bin_:
+        return _err("pan_hash or bin is required")
+    if pan_hash and not _RE_SHA256_HEX.match(pan_hash):
+        # Never log the rejected value itself -- if a caller mistakenly (or
+        # otherwise) sends a raw card number here, that string does not
+        # belong in CloudWatch either.
+        return _err("pan_hash must be a 64-character SHA-256 hex digest of the digit-only card number, not a raw card number")
+    if bin_ and not re.match(r"^\d{6,8}$", bin_):
+        return _err("bin must be 6-8 digits")
+
+    result: dict = {}
+    table = dynamodb.Table(STOLEN_CARDS_TABLE)
+
+    if pan_hash:
+        try:
+            item = table.get_item(Key={"pan_hash": pan_hash}).get("Item")
+        except Exception as exc:
+            logger.error("card-exposure pan_hash lookup failed: %s", exc)
+            return _err("Card exposure lookup failed", 500)
+        result["card_exposed"] = bool(item)
+        if item:
+            result["last4"]      = item.get("last4", "")
+            result["first_seen"] = item.get("seen_ts", "")
+
+    if bin_:
+        try:
+            resp = table.query(
+                IndexName="bin-index",
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("bin").eq(bin_),
+                ProjectionExpression="seen_ts",
+            )
+            items = resp.get("Items", [])
+            while "LastEvaluatedKey" in resp:
+                resp = table.query(
+                    IndexName="bin-index",
+                    KeyConditionExpression=boto3.dynamodb.conditions.Key("bin").eq(bin_),
+                    ProjectionExpression="seen_ts",
+                    ExclusiveStartKey=resp["LastEvaluatedKey"],
+                )
+                items.extend(resp.get("Items", []))
+        except Exception as exc:
+            logger.error("card-exposure bin lookup failed: %s", exc)
+            return _err("Card exposure lookup failed", 500)
+        result["bin_exposed_card_count"] = len(items)
+        result["bin_last_seen"] = max((i["seen_ts"] for i in items if i.get("seen_ts")), default=None)
+
+    logger.info("card-exposure query bin_present=%s pan_hash_present=%s", bool(bin_), bool(pan_hash))
+    return _ok(result)
+
+
 # ---------------------------------------------------------------------------
 # Endpoint: POST /v1/sim-swap
 # ---------------------------------------------------------------------------
@@ -1105,6 +1585,7 @@ def handle_sim_swap(params: dict) -> dict:
 # Request:  { "domain": "acme.com" }
 # Response: { "domain": "...", "lookalikes_found": N,
 #             "lookalikes": [{ "domain": "...", "gsb_flagged": bool,
+#                              "registration_age_days": N | null,
 #                              "cert_count": N, "cert_recent": bool,
 #                              "latest_cert_issued": "..." }],
 #             "candidates_checked": N, "checked_at": "..." }
@@ -1122,7 +1603,7 @@ def handle_domain(params: dict) -> dict:
     prioritised = _prioritise_candidates(domain, candidates)
     active      = _find_active_lookalikes(prioritised)
 
-    lookalikes = [{"domain": d} for d in active]
+    lookalikes = _enrich_lookalikes(active, _gsb_api_key())
 
     logger.info("domain scan — domain=%s candidates=%d active=%d",
                 domain, len(prioritised), len(active))
@@ -1214,15 +1695,85 @@ def _dns_resolves(domain: str, timeout: float = 1.0) -> bool:
 
 
 def _find_active_lookalikes(candidates: list[str], max_workers: int = 50,
-                             overall_timeout: float = 12.0) -> list[str]:
+                             overall_timeout: float = 8.0) -> list[str]:
     active = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = {ex.submit(_dns_resolves, d): d for d in candidates}
         done, _ = concurrent.futures.wait(futures, timeout=overall_timeout)
         for fut in done:
             if fut.result():
                 active.append(futures[fut])
+    finally:
+        # wait=False + cancel_futures: don't let this function's total time
+        # exceed overall_timeout waiting for stragglers — a plain `with`
+        # block's implicit shutdown(wait=True) blocks until every submitted
+        # task finishes regardless of the wait() timeout above, which is
+        # exactly what pushed a real request past API Gateway's hard 29s
+        # ceiling (see _enrich_lookalikes for the incident this fixed).
+        ex.shutdown(wait=False, cancel_futures=True)
     return sorted(active)
+
+
+def _assess_lookalike_intent(domain: str, gsb_api_key: str) -> dict:
+    """Per-domain intent signal for a confirmed-active lookalike: GSB verdict
+    (active phishing/malware flag), RDAP registration age (recent = opportunistic
+    squat, old = plausibly the brand's own defensive registration), and
+    Certificate Transparency data (a fresh cert suggests a live hosted site,
+    not a parked domain)."""
+    gsb_flagged = _check_gsb(domain, gsb_api_key)
+    age_days    = _rdap_registration_age_days(domain)
+    ct          = _check_ct(domain)
+    return {
+        "domain":                 domain,
+        "gsb_flagged":            gsb_flagged,
+        "registration_age_days":  age_days,
+        "cert_count":             ct["cert_count"],
+        "cert_recent":            ct["recent"],
+        "latest_cert_issued":     ct["latest_issued"],
+    }
+
+
+def _enrich_lookalikes(domains: list[str], gsb_api_key: str, max_workers: int = 8,
+                        overall_timeout: float = 15.0) -> list[dict]:
+    """Runs _assess_lookalike_intent for each active lookalike in parallel.
+    Domains whose enrichment doesn't finish within overall_timeout fall back
+    to None/unknown fields rather than blocking the whole response.
+
+    max_workers is deliberately modest (8, not 50) — crt.sh starts returning
+    429 Too Many Requests once too many CT lookups hit it in parallel from
+    one Lambda, and that's worse for total latency than mild serialization.
+
+    Incident 2026-07-18: with a 28s overall_timeout and a plain `with`-block
+    ThreadPoolExecutor, one real request (uniswap.org) still took 32.6s
+    total and API Gateway's hard 29s integration timeout killed the response
+    after the x402 payment had already settled — the caller was charged for
+    a check that completed successfully server-side but was never delivered.
+    Root cause: `with ThreadPoolExecutor() as ex:` calls shutdown(wait=True)
+    on exit, which blocks for every submitted task to finish regardless of
+    the wait(timeout=...) call above already having "timed out" and moved
+    on. Explicit shutdown(wait=False, cancel_futures=True) below is what
+    actually bounds this function's wall-clock time."""
+    results: dict[str, dict] = {}
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        futures = {ex.submit(_assess_lookalike_intent, d, gsb_api_key): d for d in domains}
+        done, _ = concurrent.futures.wait(futures, timeout=overall_timeout)
+        for fut in done:
+            d = futures[fut]
+            try:
+                results[d] = fut.result()
+            except Exception as exc:
+                logger.warning("Lookalike intent assessment failed for %s: %s", d, exc)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    for d in domains:
+        if d not in results:
+            results[d] = {
+                "domain": d, "gsb_flagged": None, "registration_age_days": None,
+                "cert_count": None, "cert_recent": None, "latest_cert_issued": None,
+            }
+    return [results[d] for d in domains]
 
 
 def _check_gsb(domain: str, api_key: str) -> bool:
@@ -1243,18 +1794,82 @@ def _check_gsb(domain: str, api_key: str) -> bool:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             return bool(json.loads(resp.read()).get("matches"))
     except Exception as exc:
         logger.warning("GSB check failed for %s: %s", domain, exc)
         return False
 
 
+def _rdap_registration_age_days(domain: str) -> int | None:
+    """Mirrors relayshield_agentic_api.py's / relayshield_telegram_webhook.py's
+    helper of the same name."""
+    url = f"https://rdap.org/domain/{urllib.parse.quote(domain)}"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read())
+        for event in data.get("events", []):
+            if event.get("eventAction") == "registration":
+                reg_str = event.get("eventDate", "")
+                if reg_str:
+                    reg_dt = datetime.fromisoformat(reg_str.replace("Z", "+00:00"))
+                    return (datetime.now(timezone.utc) - reg_dt).days
+    except Exception as exc:
+        logger.warning("RDAP lookup failed for %s: %s", domain, exc)
+    return None
+
+
+def _heuristic_url_check(url: str) -> dict:
+    """Fast, VT-independent red-flag check — unifies /v1/scan-url with the
+    same three signals Telegram's /scan and WhatsApp's SCAN/ATTACH already
+    use: RelayShield's own criminal IOC corpus, Google Safe Browsing's
+    real-time blocklist, and very recent domain registration. Added
+    2026-07-16. Not as authoritative as a real multi-engine VT verdict —
+    callers should word a heuristic-only "flagged" result more cautiously
+    than a VT one. Returns {"flagged": bool, "reasons": [str, ...]}."""
+    try:
+        domain = urllib.parse.urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+    except Exception:
+        domain = ""
+
+    reasons: list[str] = []
+    if not domain:
+        return {"flagged": False, "reasons": reasons}
+
+    try:
+        table = dynamodb.Table(INTEL_IOCS_TABLE)
+        resp = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(domain),
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").is_in(["domain", "url"]),
+            Limit=5,
+        )
+        if resp.get("Items"):
+            reasons.append("this domain appears in RelayShield's criminal IOC corpus")
+    except Exception as exc:
+        logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
+
+    try:
+        if _check_gsb(domain, _gsb_api_key()):
+            reasons.append("Google Safe Browsing flags this domain")
+    except Exception as exc:
+        logger.warning("Heuristic GSB check failed for %s: %s", domain, exc)
+
+    age_days = _rdap_registration_age_days(domain)
+    if age_days is not None and age_days < 30:
+        reasons.append(f"the domain was registered only {age_days} day{'s' if age_days != 1 else ''} ago")
+
+    return {"flagged": bool(reasons), "reasons": reasons}
+
+
 def _check_ct(domain: str) -> dict:
     url = CRT_SH_URL.format(domain=urllib.parse.quote(domain))
     req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=6) as resp:
             certs = json.loads(resp.read())
         if not certs:
             return {"cert_count": 0, "recent": False, "latest_issued": None}
@@ -1282,6 +1897,103 @@ def _check_ct(domain: str) -> dict:
     except Exception as exc:
         logger.warning("CT check failed for %s: %s", domain, exc)
         return {"cert_count": 0, "recent": False, "latest_issued": None}
+
+
+def handle_cert_expiry(params: dict) -> dict:
+    domain = (params.get("domain") or "").strip().lower().removeprefix("www.")
+    if not domain or "." not in domain:
+        return _err("domain is required (e.g. acme.com)")
+
+    url = CRT_SH_URL.format(domain=urllib.parse.quote(domain))
+    req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            certs = json.loads(resp.read())
+    except Exception as exc:
+        logger.error("cert-expiry crt.sh lookup failed for %s: %s", domain, exc)
+        return _err("certificate lookup failed — upstream error", 502)
+
+    if not certs:
+        return _ok({
+            "domain":         domain,
+            "cert_found":     False,
+            "expires_at":     None,
+            "days_remaining": None,
+            "risk_level":     None,
+            "issued_at":      None,
+            "recommendation": "No certificates found in Certificate Transparency logs for this domain.",
+            "checked_at":     datetime.now(timezone.utc).isoformat(),
+        })
+
+    # Find the currently-valid cert: among entries that haven't expired yet,
+    # the one with the latest not_before is the one most likely deployed
+    # right now (crt.sh can return many historical/duplicate entries for
+    # the same domain across CAs and pre-certs).
+    now = datetime.now(timezone.utc)
+
+    def _parse(raw: str) -> datetime | None:
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00").split(".")[0])
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    candidates = []
+    for cert in certs:
+        not_before = _parse(cert.get("not_before", ""))
+        not_after  = _parse(cert.get("not_after", ""))
+        if not_before and not_after and not_after > now:
+            candidates.append((not_before, not_after))
+
+    if not candidates:
+        return _ok({
+            "domain":         domain,
+            "cert_found":     True,
+            "expires_at":     None,
+            "days_remaining": None,
+            "risk_level":     "CRITICAL",
+            "issued_at":      None,
+            "recommendation": (
+                f"Found {len(certs)} historical certificate(s) in CT logs, but none are "
+                "currently unexpired — this domain may not have a live, valid certificate right now."
+            ),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    issued_at, expires_at = max(candidates, key=lambda c: c[0])
+    days_remaining = (expires_at - now).days
+
+    if days_remaining <= 7:
+        risk_level = "CRITICAL"
+    elif days_remaining <= 14:
+        risk_level = "HIGH"
+    elif days_remaining <= 30:
+        risk_level = "MEDIUM"
+    else:
+        risk_level = "LOW"
+
+    recommendation = (
+        f"Certificate expires in {days_remaining} day(s) — renew immediately."
+        if risk_level in ("CRITICAL", "HIGH") else
+        f"Certificate renews in {days_remaining} days — no action needed yet, but confirm your "
+        "renewal automation is configured."
+        if risk_level == "MEDIUM" else
+        f"Certificate is healthy, {days_remaining} days remaining."
+    )
+
+    logger.info("cert-expiry domain=%s days_remaining=%d risk=%s", domain, days_remaining, risk_level)
+    return _ok({
+        "domain":         domain,
+        "cert_found":     True,
+        "expires_at":     expires_at.isoformat(),
+        "days_remaining": days_remaining,
+        "risk_level":     risk_level,
+        "issued_at":      issued_at.isoformat(),
+        "recommendation": recommendation,
+        "checked_at":     datetime.now(timezone.utc).isoformat(),
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -2576,6 +3288,75 @@ def handle_identity_graph(params: dict) -> dict:
 import uuid as _uuid_mod
 
 
+def _intel_api_key(headers: dict) -> str:
+    """Extract the RelayShield API key from any accepted header form.
+
+    Added 2026-07-29. Elastic's only generic STIX/TAXII integration is
+    `ti_custom` ("Custom Threat Intelligence"), and it can ONLY authenticate by
+    sending `Authorization: <key_type> <api_key>` -- its `key_type` var sets the
+    scheme inside an Authorization header and there is no field to name a custom
+    header. Accepting X-RS-API-KEY alone therefore made our TAXII feed
+    impossible to consume from Elastic, which is what the published integration
+    guide told customers to do. Note there is no generic "Threat Intel TAXII
+    2.x" package in the Elastic registry at all -- verified across all 14,491
+    package entries in EPR.
+
+    Purely additive: every header that worked before still works.
+    """
+    key = (headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or
+           headers.get("X-API-Key")    or headers.get("x-api-key") or "")
+    if key:
+        return key
+
+    auth = (headers.get("Authorization") or headers.get("authorization") or "").strip()
+    if not auth:
+        return ""
+    parts = auth.split(None, 1)
+    if len(parts) != 2:
+        # A bare "<key>" with no scheme.
+        return parts[0].strip()
+
+    scheme, rest = parts[0].strip(), parts[1].strip()
+
+    # HTTP Basic, added 2026-07-29 to unblock Microsoft Sentinel. Sentinel's
+    # "Threat Intelligence - TAXII" data connector offers only Username and
+    # Password fields -- no API key field, no bearer token, no custom header --
+    # so Basic is the ONLY way it can authenticate. Verified against Microsoft's
+    # connector documentation before building, rather than after publishing a
+    # guide that could not work (see the Elastic ti_custom incident).
+    #
+    # The key is accepted in either field so the guide can tell customers to put
+    # it wherever is convenient: username=<key> with any password, or any
+    # username with password=<key>.
+    if scheme.lower() == "basic":
+        try:
+            decoded = base64.b64decode(rest + "=" * (-len(rest) % 4)).decode("utf-8", "replace")
+        except Exception:
+            return ""
+        user, _, pwd = decoded.partition(":")
+        for candidate in (user.strip(), pwd.strip()):
+            if candidate.startswith("rs_"):
+                return candidate
+        # No RelayShield-looking value; hand back the likelier field so the
+        # caller's own key verification produces the 401 rather than us.
+        return pwd.strip() or user.strip()
+
+    # "Bearer <key>" / "Token <key>" / any other scheme.
+    return rest
+
+
+STIX_VALID_DAYS = 90
+
+
+def _stix_valid_until(seen_ts: str) -> str:
+    """Expiry for a STIX indicator, STIX_VALID_DAYS after the sighting."""
+    try:
+        base = datetime.fromisoformat(str(seen_ts).replace("Z", "+00:00"))
+    except Exception:
+        base = datetime.now(timezone.utc)
+    return (base + timedelta(days=STIX_VALID_DAYS)).isoformat().replace("+00:00", "Z")
+
+
 def _ioc_to_stix(item: dict) -> dict | None:
     """Convert a relayshield_intel_iocs record to a STIX 2.1 Indicator object."""
     ioc_val  = item.get("ioc_value", "")
@@ -2589,7 +3370,17 @@ def _ioc_to_stix(item: dict) -> dict | None:
         "ip":         f"[ipv4-addr:value = '{ioc_val}']",
         "domain":     f"[domain-name:value = '{ioc_val}']",
         "url":        f"[url:value = '{ioc_val}']",
-        "hash_sha256":f"[file:hashes.SHA-256 = '{ioc_val}']",
+        # The hash key MUST be quoted. STIX 2.1 patterning grammar only allows a
+        # bare object-path key made of [a-zA-Z0-9_]; "SHA-256" contains a hyphen,
+        # so the unquoted form is a parse error, confirmed 2026-07-30 with the
+        # OASIS stix2-patterns validator ("no viable alternative at input
+        # 'file:hashes.SHA-256'"). Consumers that parse the pattern to derive the
+        # observable -- Microsoft Sentinel populates ObservableKey/ObservableValue
+        # this way -- silently store the indicator with both fields EMPTY, so
+        # every SHA-256 IOC we have ever published was unusable for detection on
+        # those platforms. Elastic never caught it because ti_custom reads
+        # stix.pattern as an opaque string.
+        "hash_sha256":f"[file:hashes.'SHA-256' = '{ioc_val}']",
         "email":      f"[email-message:from_ref.value = '{ioc_val}']",
         "phone":      None,    # not a standard STIX observable
         "wallet_eth": None,
@@ -2617,6 +3408,16 @@ def _ioc_to_stix(item: dict) -> dict | None:
         "pattern":       pattern,
         "pattern_type":  "stix",
         "valid_from":    seen_ts,
+        # valid_until added 2026-07-29. Elastic's ti_custom ingest pipeline runs a
+        # date processor on an expiration field and ABORTS the whole document if it
+        # is absent -- which meant no threat.indicator.* fields were ever set and an
+        # Indicator Match rule silently matched nothing. The integration can supply
+        # this from its own ioc_expiration_duration setting, but that is a required
+        # field the customer can get wrong; emitting it ourselves makes ingestion
+        # work regardless of how they configure the integration. 90 days from the
+        # sighting, which is a deliberately conservative window for marketplace-
+        # sourced IOCs.
+        "valid_until":   _stix_valid_until(seen_ts),
         "labels":        labels,
         "external_references": [{"source_name": "relayshield", "url": "https://relayshield.net"}],
         "x_relayshield_record_type": "ioc_indicator",
@@ -2634,29 +3435,83 @@ def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
         },
         "body": json.dumps({
             "title":       "RelayShield Threat Intelligence",
-            "description": "RelayShield TAXII 2.1 server — 1,400,000+ IOCs from criminal Telegram channels and 11 authoritative feeds",
-            "contact":     "relayshieldadmin@gmail.com",
-            "api_roots":   ["https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/intel/taxii/"],
+            # Feed count corrected 11 -> 20 on 2026-07-28: counted the ingest
+            # functions actually invoked by relayshield_intel_feed's handler
+            # (22 total, less _ingest_malpedia which loads family taxonomy not
+            # IOCs, and _ingest_github_tool_repos which writes a different
+            # table). The AWS Marketplace listing's "20+ feeds" was correct all
+            # along; this discovery document was the understated one.
+            "description": "RelayShield TAXII 2.1 server — 4,500,000+ IOCs from 83+ criminal Telegram channels and 20 authoritative feeds",
+            "contact":     "support@relayshield.net",
+            # Must be the branded host: a TAXII 2.1 client reads api_roots from
+            # this discovery document and follows it for every subsequent
+            # request, so advertising the raw execute-api hostname would pin
+            # every integrating customer (Elastic, OpenCTI, MISP, Anomali) to
+            # an AWS-internal URL that breaks if the API Gateway ID ever changes.
+            "api_roots":   ["https://api.relayshield.net/v1/intel/taxii/"],
+            "default":     "https://api.relayshield.net/v1/intel/taxii/",
+
+            # --- API Root resource fields (TAXII 2.1 s4.2) ---
+            # This URL is BOTH the Discovery endpoint and the one API Root it
+            # advertises, so it has to satisfy both resource shapes at once.
+            # Until 2026-07-30 it returned Discovery fields only, and the OASIS
+            # reference client (taxii2-client 2.3.0) rejected it outright:
+            #   ValidationError: No 'versions' in API Root
+            # That aborts before any collection or object request, so every
+            # protocol-walking consumer -- Microsoft Sentinel, OpenCTI, Anomali,
+            # anything on cti-taxii-client -- could read exactly nothing. Elastic
+            # was unaffected only because ti_custom is a plain HTTP poller that
+            # hits the objects URL directly and never walks discovery.
+            # Merging the two resources keeps every already-published URL intact;
+            # splitting them would have moved the api root out from under the
+            # configuration in the live Elastic guide.
+            "versions":    ["application/taxii+json;version=2.1"],
+            # 6 MiB: the Lambda synchronous response ceiling, which is the real
+            # limit here. Nominal for a read-only server (no write endpoints).
+            "max_content_length": 6291456,
         }),
     }
+
+
+# The one collection this server exposes. Defined once so the collections list
+# and the single-collection resource can never drift apart.
+TAXII_COLLECTION = {
+    "id":          "iocs",
+    "title":       "RelayShield IOCs",
+    "description": "Malicious IPs, domains, URLs, and file hashes from 83+ criminal Telegram channels and 20 authoritative threat feeds. 3,750+ malware families tracked.",
+    "can_read":    True,
+    "can_write":   False,
+    "media_types": ["application/stix+json;version=2.1"],
+}
 
 
 def handle_taxii_collections(params: dict, api_key_record: dict) -> dict:
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "application/taxii+json;version=2.1"},
-        "body": json.dumps({
-            "collections": [
-                {
-                    "id":          "relayshield-iocs",
-                    "title":       "RelayShield IOCs",
-                    "description": "Malicious IPs, domains, URLs, and file hashes from 20+ criminal Telegram channels and 11 authoritative threat feeds. 1,000+ malware groups tracked.",
-                    "can_read":    True,
-                    "can_write":   False,
-                    "media_types": ["application/stix+json;version=2.1"],
-                }
-            ]
-        }),
+        "body": json.dumps({"collections": [TAXII_COLLECTION]}),
+    }
+
+
+def handle_taxii_collection(params: dict, api_key_record: dict, collection_id: str) -> dict:
+    """GET /{api-root}/collections/{id}/ -- the single Collection resource.
+
+    Required by TAXII 2.1 s5.2 and 404'd until 2026-07-30. taxii2-client (and
+    therefore every client built on it) fetches this resource lazily before it
+    will issue an objects request, so the 404 meant get_objects() failed without
+    ever reaching /objects/ -- the endpoint that has always worked.
+    """
+    if collection_id not in ("iocs", "relayshield-iocs"):
+        return {
+            "statusCode": 404,
+            "headers": {"Content-Type": "application/taxii+json;version=2.1"},
+            "body": json.dumps({"title": "Not Found",
+                                "description": f"No collection with id '{collection_id}'."}),
+        }
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/taxii+json;version=2.1"},
+        "body": json.dumps(TAXII_COLLECTION),
     }
 
 
@@ -2686,10 +3541,62 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
         except Exception:
             pass
 
+    # Deduplication, 2026-07-29. The table is keyed (ioc_value HASH, seen_ts RANGE)
+    # -- one row per *sighting* -- while _ioc_to_stix derives the STIX id from
+    # ioc_value alone. Every sighting of the same IOC therefore emitted an object
+    # with an identical `id`, which is invalid STIX (one bundle, one id, differing
+    # content) as well as wasteful. Measured live 2026-07-28: 25 objects across 5
+    # pages contained only 3 unique indicators, so a polling customer spent ~8x the
+    # calls for the same intelligence and their logs-ti_* index churned on repeats.
+    #
+    # Now: collapse by ioc_value within the response, keeping the most recent
+    # seen_ts so `modified`/`valid_from` reflect the latest sighting rather than an
+    # arbitrary one. `added_after` semantics are unchanged -- the seen_ts filter
+    # still applies, so incremental pulls keep working.
+    #
+    # Because duplicates collapse, a single over-fetched scan can no longer be
+    # relied on to yield `limit` unique indicators, so we scan forward across a
+    # bounded number of pages instead of returning a near-empty response.
+    MAX_SCAN_PAGES = 6
+    unique: dict[str, dict] = {}
+    last_consumed_key = None
+    next_key = None
+    pages = 0
+
     try:
-        resp  = table.scan(**scan_kwargs)
-        items = resp.get("Items", [])
-        next_key = resp.get("LastEvaluatedKey")
+        while pages < MAX_SCAN_PAGES:
+            resp = table.scan(**scan_kwargs)
+            pages += 1
+            items = resp.get("Items", [])
+            next_key = resp.get("LastEvaluatedKey")
+
+            hit_limit = False
+            for item in items:
+                val = item.get("ioc_value", "")
+                prev = unique.get(val)
+                if prev is None:
+                    if len(unique) >= limit:
+                        # This row belongs to the *next* page. Break without
+                        # consuming it so the cursor below does not skip it.
+                        hit_limit = True
+                        break
+                    if _ioc_to_stix(item) is not None:
+                        unique[val] = item
+                elif str(item.get("seen_ts", "")) > str(prev.get("seen_ts", "")):
+                    unique[val] = item
+                last_consumed_key = {"ioc_value": val, "seen_ts": item.get("seen_ts")}
+
+            if hit_limit:
+                # Stopped mid-page: resume from the last row actually CONSUMED, not
+                # the row that tripped the limit (that one has not been sent yet and
+                # must be re-read), and never the scan's LastEvaluatedKey, which sits
+                # past every examined item -- that was the bug fixed on 2026-07-28
+                # which had been silently skipping up to two thirds of the corpus.
+                next_key = last_consumed_key
+                break
+            if not next_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = next_key
     except Exception as exc:
         logger.exception("TAXII objects scan failed: %s", exc)
         return {
@@ -2698,13 +3605,7 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
             "body": json.dumps({"title": "Internal Server Error", "description": str(exc)}),
         }
 
-    indicators = []
-    for item in items:
-        stix_obj = _ioc_to_stix(item)
-        if stix_obj:
-            indicators.append(stix_obj)
-        if len(indicators) >= limit:
-            break
+    indicators = [obj for obj in (_ioc_to_stix(i) for i in unique.values()) if obj]
 
     bundle = {
         "type":           "bundle",
@@ -2720,7 +3621,16 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
     logger.info("TAXII objects returned=%d more=%s", len(indicators), bool(next_key))
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/stix+json;version=2.1"},
+        # The Envelope is a TAXII resource, not a STIX one, so TAXII 2.1 s3.6
+        # makes this application/taxii+json -- the STIX media type belongs on the
+        # collection's `media_types`, describing what the envelope CONTAINS.
+        # taxii2-client checks the response Content-Type against the Accept it
+        # sent (common.py:312) and raises TAXIIServiceException on a mismatch, so
+        # the old value would have failed every conformant client even after the
+        # discovery and collection fixes above. Elastic already sends
+        # `Accept: application/taxii+json;version=2.1`, so this narrows the
+        # mismatch it was tolerating rather than introducing one.
+        "headers": {"Content-Type": "application/taxii+json;version=2.1"},
         "body": json.dumps(response_body),
     }
 
@@ -2779,6 +3689,261 @@ def _ioc_to_misp_attribute(item: dict) -> dict | None:
         "Tag": (
             [{"name": f"malware:{malware[:50]}"}] if malware and malware not in ("None", "n/a", "") else []
         ),
+    }
+
+
+# RelayShield ioc_type -> MISP attribute type. These exact strings are what
+# Elastic's ti_misp ingest pipeline switches on to derive threat.indicator.type
+# (verified 2026-07-29 against ti_misp 1.43.1's default.yml):
+#   ip-dst  -> ipv4-addr      domain -> domain-name    url    -> url
+#   sha256  -> file           email-src -> email-addr
+_MISP_ATTR_TYPE = {
+    "ip":          "ip-dst",
+    "domain":      "domain",
+    "url":         "url",
+    "hash_sha256": "sha256",
+    "email":       "email-src",
+}
+# MISP category is metadata only; the pipeline does not branch on it.
+_MISP_ATTR_CATEGORY = {
+    "ip":          "Network activity",
+    "domain":      "Network activity",
+    "url":         "Network activity",
+    "hash_sha256": "Payload delivery",
+    "email":       "Payload delivery",
+}
+
+
+def _iso_to_unix(value: str) -> int:
+    try:
+        return int(datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return 0
+
+
+def _ioc_to_misp_attribute(item: dict, seq: int) -> dict | None:
+    """Render one IOC as a MISP Attribute object.
+
+    Shape matches what MISP's /attributes/restSearch returns, because Elastic's
+    ti_misp integration splits on `body.response.Attribute` and its pipeline reads
+    misp.attribute.{type,value,timestamp,...}. The `timestamp` field is also the
+    integration's pagination cursor (`[[.last_event.timestamp]]`), so it must be a
+    unix-seconds string on every attribute or incremental polling breaks.
+    """
+    ioc_type = item.get("ioc_type", "")
+    attr_type = _MISP_ATTR_TYPE.get(ioc_type)
+    if not attr_type:
+        return None
+
+    ioc_val = item.get("ioc_value", "")
+    seen_ts = str(item.get("seen_ts", ""))
+    malware = item.get("malware", "")
+    channel = item.get("channel", "")
+    category = item.get("category", "")
+
+    comment = f"Observed in {channel} ({category})"
+    if malware and malware not in ("None", "n/a", ""):
+        comment += f" - {malware}"
+
+    return {
+        "id":                  str(seq),
+        "uuid":                str(_uuid_mod.uuid5(_uuid_mod.NAMESPACE_URL, f"relayshield:{ioc_val}")),
+        "event_id":            "1",
+        "object_id":           "0",
+        "object_relation":     None,
+        "category":            _MISP_ATTR_CATEGORY.get(ioc_type, "Network activity"),
+        "type":                attr_type,
+        "to_ids":              True,
+        "timestamp":           str(_iso_to_unix(seen_ts)),
+        "distribution":        "3",
+        "sharing_group_id":    "0",
+        "comment":             comment,
+        "deleted":             False,
+        "disable_correlation": False,
+        "first_seen":          None,
+        "last_seen":           None,
+        "value":               ioc_val,
+        "Event": {
+            "id":           "1",
+            "uuid":         str(_uuid_mod.uuid5(_uuid_mod.NAMESPACE_URL, "relayshield:feed")),
+            "distribution": "3",
+            "info":         "RelayShield Threat Intelligence",
+            "org_id":       "1",
+            "orgc_id":      "1",
+        },
+    }
+
+
+# MISP instance identity shims.
+#
+# Added 2026-07-30. Elastic's ti_misp integration is a plain HTTP poller, so
+# /attributes/restSearch alone was enough for it. PyMISP is not: its constructor
+# handshakes with the instance before it will issue a single search, and any 404
+# there raises PyMISPError and aborts. That blocked the whole MISP-to-Sentinel
+# path, which runs through misp2sentinel -> PyMISP.
+#
+# The endpoint list below is not from documentation -- it is what PyMISP 2.5.34.1
+# was observed requesting, in order, against the live server until init stopped
+# failing. Values are deliberately minimal and honest: RelayShield is a read-only
+# feed wearing a MISP-shaped API, so sync/sighting permissions are false and the
+# identity is a service account, not a fabricated human user.
+MISP_COMPAT_VERSION = "2.4.190"
+
+
+def _misp_shim(path: str) -> dict | None:
+    """Serve the MISP instance-identity endpoints PyMISP requires at startup."""
+    body: dict
+    if path == "/servers/getVersion":
+        body = {
+            "version":                   MISP_COMPAT_VERSION,
+            "pymisp_recommended_version": MISP_COMPAT_VERSION,
+            "perm_sync":                 False,
+            "perm_sighting":             False,
+            "perm_galaxy_editor":        False,
+            "request_encoding":          [],
+        }
+    elif path == "/servers/getPyMISPVersion.json":
+        body = {"version": MISP_COMPAT_VERSION}
+    elif path == "/users/view/me":
+        body = {
+            "User": {
+                "id":       "1",
+                "org_id":   "1",
+                "email":    "support@relayshield.net",
+                "autoalert": False,
+                "invited_by": "0",
+                "gpgkey":   None,
+                "nids_sid": "0",
+                "termsaccepted": True,
+                "role_id":  "1",
+                "disabled": False,
+            },
+            "Role": {
+                "id":   "1",
+                "name": "Read Only",
+                # Read-only feed: no write, sync, admin or tagging rights.
+                "perm_add": False, "perm_modify": False, "perm_modify_org": False,
+                "perm_publish": False, "perm_sync": False, "perm_admin": False,
+                "perm_site_admin": False, "perm_auth": True, "perm_tagger": False,
+                "perm_sighting": False, "perm_galaxy_editor": False,
+            },
+            "Organisation": {"id": "1", "name": "RelayShield", "uuid":
+                             str(_uuid_mod.uuid5(_uuid_mod.NAMESPACE_URL, "relayshield:org"))},
+            "UserSetting": [],
+        }
+    else:
+        return None
+    return {"statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(body)}
+
+
+def handle_misp_rest_search(api_key_record: dict, body: dict) -> dict:
+    """MISP-compatible POST /attributes/restSearch.
+
+    Built 2026-07-29. The previously published integration guide told customers to
+    point Elastic's "Threat Intel MISP" integration at /v1/intel/misp/, which 404'd
+    -- only /v1/intel/misp/event existed, and that is not a MISP API shape. Elastic's
+    ti_misp integration issues POST {url}/attributes/restSearch with a JSON body and
+    splits the response on body.response.Attribute, so that is what this serves.
+
+    Contract verified against ti_misp 1.43.1's httpjson.yml.hbs:
+      request : POST {url}/attributes/restSearch, header Authorization: <token>
+      body    : page (1-based), limit, returnFormat, timestamp (unix secs, >=),
+                includeDecayScore, order
+      response: {"response": {"Attribute": [...]}} -- an EMPTY array is how the
+                client knows to stop paginating, so never 404 a valid page request.
+      cursor  : [[.last_event.timestamp]] -- see _ioc_to_misp_attribute.
+
+    Deduplicated by ioc_value exactly like the TAXII feed, for the same reason: the
+    table holds one row per sighting, so without this a poller re-ingests the same
+    indicator many times over.
+    """
+    try:
+        page = max(int(body.get("page", 1) or 1), 1)
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        limit = min(max(int(body.get("limit", 500) or 500), 1), 2000)
+    except (ValueError, TypeError):
+        limit = 500
+
+    since_iso = ""
+    raw_ts = body.get("timestamp")
+    if raw_ts not in (None, ""):
+        try:
+            since_iso = datetime.fromtimestamp(int(raw_ts), tz=timezone.utc).isoformat()
+        except (ValueError, TypeError, OSError):
+            since_iso = ""
+
+    table = dynamodb.Table(INTEL_IOCS_TABLE)
+    scan_kwargs: dict = {
+        "ProjectionExpression": "ioc_value, ioc_type, seen_ts, malware, channel, category",
+        "FilterExpression":     boto3.dynamodb.conditions.Attr("ioc_type").is_in(
+                                    ["ip", "domain", "url", "hash_sha256", "email"]
+                                ),
+        # Fixed, page-independent. Sizing the scan from `page` made each request
+        # build a different pool, so consecutive pages overlapped and the client
+        # re-ingested the same indicators (measured: 2 of 5 duplicated between
+        # page 1 and page 2). A constant window makes the ordered pool identical
+        # for every page, so slicing it is stable.
+        "Limit":                2000,
+    }
+    if since_iso:
+        scan_kwargs["FilterExpression"] = (
+            scan_kwargs["FilterExpression"] &
+            boto3.dynamodb.conditions.Attr("seen_ts").gte(since_iso)
+        )
+
+    # DynamoDB has no offset, so page N is served by collecting enough unique
+    # indicators to cover it and slicing. Bounded by MAX_SCAN_PAGES to keep the
+    # read cost of a deep page from running away.
+    # Both bounds are constants so the pool -- and therefore every page sliced from
+    # it -- is identical no matter which page was requested.
+    MAX_SCAN_PAGES = 8
+    POOL_TARGET    = 4000
+    unique: dict[str, dict] = {}
+    pages = 0
+    try:
+        while pages < MAX_SCAN_PAGES:
+            resp = table.scan(**scan_kwargs)
+            pages += 1
+            for item in resp.get("Items", []):
+                val = item.get("ioc_value", "")
+                prev = unique.get(val)
+                if prev is None:
+                    unique[val] = item
+                elif str(item.get("seen_ts", "")) > str(prev.get("seen_ts", "")):
+                    unique[val] = item
+            nxt = resp.get("LastEvaluatedKey")
+            if len(unique) >= POOL_TARGET or not nxt:
+                break
+            scan_kwargs["ExclusiveStartKey"] = nxt
+    except Exception as exc:
+        logger.exception("MISP restSearch scan failed: %s", exc)
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"errors": ["Internal Server Error"]}),
+        }
+
+    # `order: timestamp` is requested by the integration, and the cursor depends on
+    # the last event's timestamp, so ascending seen_ts is the correct ordering.
+    ordered = sorted(unique.values(), key=lambda i: str(i.get("seen_ts", "")))
+    window = ordered[(page - 1) * limit: page * limit]
+
+    attributes = []
+    for offset, item in enumerate(window, start=(page - 1) * limit + 1):
+        attr = _ioc_to_misp_attribute(item, offset)
+        if attr:
+            attributes.append(attr)
+
+    logger.info("MISP restSearch page=%d limit=%d returned=%d unique_pool=%d",
+                page, limit, len(attributes), len(unique))
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({"response": {"Attribute": attributes}}),
     }
 
 
@@ -3197,6 +4362,24 @@ def handle_threat_actor(params: dict) -> dict:
         })
 
     # action == "actor-lookup"
+    #
+    # Fixed 2026-07-16 — this previously never returned a single real IOC for
+    # any actor, for two compounding reasons found while building real
+    # threat-actor -> malware-family -> live-IOC attribution for the TI demo:
+    # (1) it filtered the IOC corpus on `malware_family`/`threat_actor`
+    #     attributes that don't exist on real IOC records (the actual field
+    #     is `malware`, populated with a real lowercase family name like
+    #     "mirai" by relayshield_intel_feed.py's bulk ingestion); (2) it read
+    #     `techniques` off the MITRE group record, but the ingestion writes
+    #     `technique_ids`. Also, relayshield_intel_attack.py's Group->Software
+    #     relationship was never populated at all until today (STIX
+    #     relationship objects have type "relationship" + a separate
+    #     relationship_type field, not type "uses" as the ingestion assumed)
+    #     — so even with correct field names there was no software list to
+    #     cross-reference against. Now: resolve the group's real associated
+    #     malware/tool names via MITRE's own software_ids list, then query
+    #     the IOC corpus's new malware-index GSI for each one (a full table
+    #     scan isn't viable at 3.2M+ items).
     actor        = (params.get("actor") or "").strip()
     actors       = params.get("actors") or []
     ioc_table    = dynamodb.Table(INTEL_IOCS_TABLE)
@@ -3208,32 +4391,48 @@ def handle_threat_actor(params: dict) -> dict:
     search_terms = [actor] if actor else actors[:5]
     results = []
     for term in search_terms:
-        iocs = []
-        try:
-            iocs = ioc_table.scan(
-                FilterExpression=(
-                    boto3.dynamodb.conditions.Attr("malware_family").contains(term) |
-                    boto3.dynamodb.conditions.Attr("threat_actor").contains(term)
-                ),
-                Limit=100,
-            ).get("Items", [])
-        except Exception as exc:
-            logger.warning("actor-lookup scan failed term=%s: %s", term, exc)
-
         mitre_info = {}
+        software_names: list[str] = []
         try:
             mitre_items = mitre_table.scan(
-                FilterExpression=boto3.dynamodb.conditions.Attr("name").contains(term), Limit=5
+                FilterExpression=(
+                    boto3.dynamodb.conditions.Attr("sk").eq("info") &
+                    boto3.dynamodb.conditions.Attr("name").contains(term)
+                ),
+                Limit=200,
             ).get("Items", [])
             if mitre_items:
+                group = mitre_items[0]
                 mitre_info = {
-                    "group_name":  mitre_items[0].get("name", ""),
-                    "aliases":     mitre_items[0].get("aliases", []),
-                    "techniques":  mitre_items[0].get("techniques", [])[:10],
-                    "description": mitre_items[0].get("description", "")[:300],
+                    "group_name":  group.get("name", ""),
+                    "aliases":     group.get("aliases", []),
+                    "techniques":  group.get("technique_ids", [])[:10],
+                    "description": group.get("description", "")[:300],
                 }
-        except Exception:
-            pass
+                for sid in group.get("software_ids", [])[:30]:
+                    sw = mitre_table.get_item(Key={"group_id": sid, "sk": f"software:{sid}"}).get("Item")
+                    if sw:
+                        software_names.append(sw.get("name", ""))
+                        software_names.extend(sw.get("aliases", []))
+        except Exception as exc:
+            logger.warning("actor-lookup MITRE scan failed term=%s: %s", term, exc)
+
+        iocs = []
+        checked_names = set()
+        for name in software_names:
+            key = name.strip().lower()
+            if not key or key in checked_names:
+                continue
+            checked_names.add(key)
+            try:
+                hits = ioc_table.query(
+                    IndexName="malware-index",
+                    KeyConditionExpression=boto3.dynamodb.conditions.Key("malware").eq(key),
+                    Limit=20,
+                ).get("Items", [])
+                iocs.extend(hits)
+            except Exception as exc:
+                logger.warning("actor-lookup IOC query failed malware=%s: %s", key, exc)
 
         ioc_types = {}
         sources   = set()
@@ -3241,21 +4440,22 @@ def handle_threat_actor(params: dict) -> dict:
         for ioc in iocs:
             t = ioc.get("ioc_type", "unknown")
             ioc_types[t] = ioc_types.get(t, 0) + 1
-            sources.add(ioc.get("source", ""))
-            ts = ioc.get("first_seen", "")
+            sources.add(ioc.get("channel", ""))
+            ts = ioc.get("seen_ts", "")
             if ts > latest:
                 latest = ts
 
         results.append({
-            "term":          term,
-            "found":         bool(iocs or mitre_info),
-            "ioc_count":     len(iocs),
-            "ioc_breakdown": ioc_types,
-            "sources":       list(sources),
-            "latest_ioc":    latest,
-            "mitre":         mitre_info,
-            "sample_iocs":   [{"value": i.get("ioc_value",""), "type": i.get("ioc_type",""),
-                               "first_seen": i.get("first_seen","")} for i in iocs[:5]],
+            "term":               term,
+            "found":              bool(iocs or mitre_info),
+            "ioc_count":          len(iocs),
+            "ioc_breakdown":      ioc_types,
+            "sources":            sorted(s for s in sources if s),
+            "latest_ioc":         latest,
+            "mitre":              mitre_info,
+            "associated_malware": sorted(checked_names),
+            "sample_iocs":        [{"value": i.get("ioc_value", ""), "type": i.get("ioc_type", ""),
+                                     "malware": i.get("malware", ""), "seen_ts": i.get("seen_ts", "")} for i in iocs[:5]],
         })
 
     logger.info("actor-lookup terms=%s total_iocs=%d", search_terms, sum(r["ioc_count"] for r in results))
@@ -3646,6 +4846,71 @@ def handle_webhook_configure(params: dict, api_key_str: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Endpoint: POST /v1/siem/configure
+# ---------------------------------------------------------------------------
+# Registers a SIEM/SOAR destination for the calling account, keyed by the
+# account's email (not the API key) — monitor Lambdas (breach_monitor,
+# domain_monitor, etc.) alert off relayshield_users/monitored-email records,
+# not API keys, so lookups at alert time need to resolve by email. See
+# relayshield_siem_connector.py for the format adapters and delivery logic.
+# Request:  { "format": "splunk_hec"|"cef"|"xsoar_webhook", "url": "https://...",
+#             "auth_token": "..." (optional), "enabled": bool (default true) }
+# Response: { "format": "...", "url": "...", "enabled": bool, "status": "..." }
+
+# Table name duplicated here rather than imported from
+# relayshield_siem_connector.py — this Lambda is deployed as a single-file
+# zip (relayshield-deploy skill convention), no local cross-file imports.
+SIEM_DESTINATIONS_TABLE = "relayshield_siem_destinations"
+_SIEM_FORMATS = {"splunk_hec", "cef", "xsoar_webhook"}
+
+
+def handle_siem_configure(params: dict, api_key_str: str) -> dict:
+    key_record = dynamodb.Table(API_KEYS_TABLE).get_item(Key={"api_key": api_key_str}).get("Item") or {}
+    email = (key_record.get("email") or "").strip().lower()
+    if not email:
+        return _err("no account email on file for this API key — cannot register a SIEM destination", 400)
+
+    fmt      = (params.get("format") or "").strip()
+    url      = (params.get("url") or "").strip()
+    enabled  = params.get("enabled", True)
+    auth_tok = (params.get("auth_token") or "").strip()
+
+    if not url and not fmt:
+        # No format/url supplied — treat as a clear/disable request.
+        try:
+            dynamodb.Table(SIEM_DESTINATIONS_TABLE).update_item(
+                Key={"customer_id": email},
+                UpdateExpression="SET enabled = :e",
+                ExpressionAttributeValues={":e": False},
+            )
+        except Exception as exc:
+            logger.exception("siem configure clear failed for %s: %s", email, exc)
+            return _err("SIEM configuration update failed", 500)
+        return _ok({"status": "cleared"})
+
+    if fmt not in _SIEM_FORMATS:
+        return _err(f"format must be one of: {', '.join(sorted(_SIEM_FORMATS))}")
+    if not url.startswith(("https://", "http://")):
+        return _err("url must be a valid https:// URL")
+
+    try:
+        dynamodb.Table(SIEM_DESTINATIONS_TABLE).put_item(Item={
+            "customer_id": email,
+            "format":      fmt,
+            "url":         url,
+            "auth_token":  auth_tok,
+            "enabled":     bool(enabled),
+            "updated_at":  datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        logger.exception("siem configure failed for %s: %s", email, exc)
+        return _err("SIEM configuration update failed", 500)
+
+    logger.info("SIEM destination %s for %s format=%s", "enabled" if enabled else "disabled", email, fmt)
+    return _ok({"format": fmt, "url": url, "enabled": bool(enabled), "status": "registered"})
+
+
+# ---------------------------------------------------------------------------
 # Endpoint: POST /v1/metered/target-risk  /  POST /v1/payg/target-risk
 # ---------------------------------------------------------------------------
 # Correlation scoring engine: estimates probability that a domain is currently
@@ -4006,51 +5271,186 @@ def handle_ransomware_risk(params: dict) -> dict:
 
 import re as _re
 
-NHI_PATTERNS: list[tuple[str, str, str, str]] = [
-    # (name, regex, severity, description)
-    ("aws_access_key",   r"AKIA[A-Z0-9]{16}",                         "CRITICAL", "AWS IAM Access Key"),
-    ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}",              "CRITICAL", "GitHub Personal Access Token"),
-    ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}",             "CRITICAL", "GitHub Fine-Grained PAT"),
-    ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}",                "CRITICAL", "Stripe Secret Key"),
-    ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Cryptographic Key"),
-    ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+",        "HIGH",     "Slack Bot Token"),
-    ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+","HIGH",     "Slack User Token"),
-    ("google_api",       r"AIza[0-9A-Za-z\-_]{35}",                  "HIGH",     "Google API Key"),
-    ("openai_key",       r"sk-[a-zA-Z0-9]{48}",                      "HIGH",     "OpenAI API Key"),
-    ("anthropic_key",    r"sk-ant-[a-zA-Z0-9\-]{90,}",               "HIGH",     "Anthropic API Key"),
-    ("sendgrid_key",     r"SG\.[a-zA-Z0-9\-_.]{22}\.[a-zA-Z0-9\-_.]{43}", "HIGH", "SendGrid API Key"),
-    ("twilio_sid",       r"AC[a-f0-9]{32}",                           "MEDIUM",   "Twilio Account SID"),
-    ("stripe_pub",       r"pk_live_[a-zA-Z0-9]{24,}",                "MEDIUM",   "Stripe Publishable Key"),
-    ("jwt_token",        r"eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}", "MEDIUM", "JWT Token"),
+
+def _ctx_key(vendors: str, key_re: str) -> str:
+    """Build a context-anchored credential regex (gitleaks style).
+
+    Several LLM vendors (DeepSeek, Moonshot/Kimi, Alibaba DashScope/Qwen) issue
+    OpenAI-compatible keys with a bare ``sk-`` prefix and publish no format spec,
+    so the key alone is not attributable to a provider by shape. Requiring the
+    vendor name or its env-var nearby is the only way to attribute one without
+    guessing -- stealer-log dumps generally capture the surrounding ``.env`` line.
+    The secret itself must be the single capturing group; _detect_nhi_in_text
+    reports group(1) so the vendor context never leaks into the preview.
+    """
+    return (
+        rf"(?i)(?:{vendors})[\w.\-]{{0,20}}[\s'\"]{{0,3}}"
+        rf"(?:=|:|=>|:=|\|\|)[\s'\"`]{{0,5}}({key_re})"
+    )
+
+
+NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
+    # (name, regex, severity, description, llm_provider)
+    # llm_provider is None for non-LLM credentials, or a short provider slug
+    # for LLM/AI API keys — used to power the dedicated LLMjacking check
+    # (handle_llm_credential_exposure) without a second detection pass.
+    ("aws_access_key",   r"AKIA[A-Z0-9]{16}",                         "CRITICAL", "AWS IAM Access Key", None),
+    ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}",              "CRITICAL", "GitHub Personal Access Token", None),
+    ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}",             "CRITICAL", "GitHub Fine-Grained PAT", None),
+    ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}",                "CRITICAL", "Stripe Secret Key", None),
+    ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Cryptographic Key", None),
+    ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+",        "HIGH",     "Slack Bot Token", None),
+    ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+","HIGH",     "Slack User Token", None),
+    # LLM/AI provider keys — bumped to CRITICAL 2026-07-26 (LLMjacking):
+    # a leaked key here isn't just data exposure, it's a live, uncapped
+    # billing liability — real incidents range from $46K/day (Sysdig, AWS
+    # Bedrock) to $82K/48hr (leaked Gemini key) to a $500K single-month
+    # bill from one unthrottled account. Underground price for a stolen
+    # LLM key is ~$30 — the asymmetry between theft cost and victim damage
+    # is exactly why this deserves CRITICAL, not the generic HIGH other
+    # SaaS API keys get.
+    ("google_api",       r"AIza[0-9A-Za-z\-_]{35}",                  "CRITICAL", "Google AI (Gemini) API Key", "google"),
+    # OpenAI rebuilt its key format around prefixed keys (sk-proj-/sk-svcacct-/
+    # sk-admin-) that contain hyphens and underscores and run far longer than the
+    # 48-char legacy shape. The previous pattern (sk-[a-zA-Z0-9]{48}) matched ONLY
+    # legacy keys, so every modern key was a silent false negative -- on the most
+    # common LLM provider, in the LLMjacking product. Fixed 2026-07-28.
+    # Both branches anchor on T3BlbkFJ, which is base64("OpenAI") embedded in the
+    # key body (verified locally). That anchor is what makes attribution safe
+    # despite the sk- prefix being shared with DeepSeek/Moonshot/Qwen.
+    ("openai_key",       r"sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_\-]{74}|[A-Za-z0-9_\-]{58})T3BlbkFJ(?:[A-Za-z0-9_\-]{74}|[A-Za-z0-9_\-]{58})",
+                                                                     "CRITICAL", "OpenAI API Key", "openai"),
+    ("openai_key_v1",    r"sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}", "CRITICAL", "OpenAI API Key (v1 format)", "openai"),
+    # Legacy pre-2023 keys carry no T3BlbkFJ anchor, so a bare sk-+48 match cannot
+    # be attributed to OpenAI rather than DeepSeek/Moonshot/Qwen. Context-anchored
+    # instead of guessing -- see _ctx_key.
+    ("openai_key_legacy", _ctx_key(r"openai|OPENAI_API_KEY", r"sk-[a-zA-Z0-9]{48}"),
+                                                                     "CRITICAL", "OpenAI API Key (legacy format)", "openai"),
+    # Underscore added to the body class 2026-07-28: real Anthropic keys contain
+    # "_" as well as "-", and the previous class [a-zA-Z0-9\-] caused the {90,}
+    # quantifier to fail on any key with an underscore in its first 90 body
+    # chars -- a silent false negative of the same class as the OpenAI one above.
+    # Kept looser than gitleaks' sk-ant-api03-...{93}AA so it survives a future
+    # version bump past api03.
+    ("anthropic_key",    r"sk-ant-[a-zA-Z0-9_\-]{90,}",              "CRITICAL", "Anthropic API Key", "anthropic"),
+    ("groq_key",         r"gsk_[a-zA-Z0-9]{52}",                     "CRITICAL", "Groq API Key", "groq"),
+    ("xai_key",          r"xai-[a-zA-Z0-9]{80}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
+    ("replicate_key",    r"r8_[a-zA-Z0-9]{37}",                      "CRITICAL", "Replicate API Key", "replicate"),
+    # --- added 2026-07-28 (TODO item 77) -------------------------------------
+    # Amazon Bedrock now issues dedicated API keys used as bearer tokens via
+    # AWS_BEARER_TOKEN_BEDROCK, distinct from IAM credentials. Because they are
+    # Bedrock-scoped they CAN be tagged with an llm_provider, unlike generic AKIA
+    # keys below. Both anchors verified locally:
+    #   long-lived : ABSK + base64("BedrockAPIKey-") -> ABSKQmVkcm9ja0FQSUtleS...
+    #   short-lived: literal "bedrock-api-key-" + base64("bedrock.amazonaws.com")
+    ("bedrock_key_long",  r"ABSKQmVkcm9ja0FQSUtleS[A-Za-z0-9+/]{80,250}={0,2}",
+                                                                     "CRITICAL", "Amazon Bedrock API Key (long-lived)", "bedrock"),
+    ("bedrock_key_short", r"bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t[A-Za-z0-9+/=]*",
+                                                                     "CRITICAL", "Amazon Bedrock API Key (short-lived)", "bedrock"),
+    # Hugging Face tokens are the highest-leverage LLM credential in this list:
+    # Kimi, DeepSeek, Qwen and NVIDIA models are all reachable through HF
+    # Inference Providers, so a leaked hf_ token bills against those models
+    # without the attacker ever holding a vendor key. Body is letters only.
+    ("huggingface_token", r"hf_[a-zA-Z]{34}",                        "CRITICAL", "Hugging Face User Access Token", "huggingface"),
+    ("huggingface_org",   r"api_org_[a-zA-Z]{34}",                   "CRITICAL", "Hugging Face Organization Token", "huggingface"),
+    # Alibaba Cloud AccessKey ID -- the cloud credential that grants Model Studio
+    # (Qwen) access. Distinct from the DashScope sk- key, and unlike it this one
+    # has a reliable, unambiguous prefix.
+    ("alibaba_access_key_id", r"LTAI[a-zA-Z0-9]{20}",                "HIGH",     "Alibaba Cloud AccessKey ID (Qwen/Model Studio)", "alibaba"),
+    # NVIDIA NIM (build.nvidia.com / integrate.api.nvidia.com). BEST-EFFORT
+    # LENGTH: the "nvapi-" prefix is consistently attested across NVIDIA's own
+    # docs and multiple independent sources, but no source documents the body
+    # length or character set -- and gitleaks ships no NVIDIA rule at all, so
+    # there is no external pattern to borrow. Shipped anyway on the same basis
+    # as mcp_token_generic below: the prefix is distinctive enough to carry
+    # attribution on its own (unlike the sk- family, which is why NVIDIA needs
+    # no context anchor), so an open-ended {40,} risks a stray match rather than
+    # a wrong provider label. Tighten if a real key length is ever confirmed.
+    ("nvidia_nim_key",   r"nvapi-[A-Za-z0-9_\-]{40,}",               "CRITICAL", "NVIDIA NIM API Key", "nvidia"),
+    # OpenAI-compatible vendors with no published key format. Context-anchored
+    # rather than pattern-guessed, so provider attribution is never fabricated.
+    ("deepseek_key",     _ctx_key(r"deepseek|DEEPSEEK_API_KEY", r"sk-[a-zA-Z0-9]{20,64}"),
+                                                                     "CRITICAL", "DeepSeek API Key", "deepseek"),
+    ("moonshot_key",     _ctx_key(r"moonshot|kimi|MOONSHOT_API_KEY", r"sk-[a-zA-Z0-9]{20,64}"),
+                                                                     "CRITICAL", "Moonshot (Kimi) API Key", "moonshot"),
+    ("qwen_key",         _ctx_key(r"dashscope|qwen|DASHSCOPE_API_KEY", r"sk-[a-zA-Z0-9]{20,64}"),
+                                                                     "CRITICAL", "Alibaba DashScope (Qwen) API Key", "qwen"),
+    # Catch-all for a bare OpenAI-compatible key with no vendor context to
+    # attribute it. Deliberately claims NO provider: the sk- prefix is shared by
+    # OpenAI (legacy), DeepSeek, Moonshot/Kimi and DashScope/Qwen, so naming one
+    # would be a fabricated attribution. HIGH rather than CRITICAL only because
+    # a bare sk- string carries some residual false-positive risk from non-LLM
+    # services; the billing liability if it is real is identical.
+    # MUST stay last in this list -- _detect_nhi_in_text suppresses it for any
+    # value an attributed pattern already claimed, so it never double-reports.
+    ("llm_key_generic_sk", r"sk-[a-zA-Z0-9]{32,64}",                 "HIGH",     "OpenAI-compatible LLM API Key (provider unattributed)", "unknown_openai_compatible"),
+    # Cohere and Azure OpenAI keys are opaque tokens with no verifiable
+    # standardized prefix -- deliberately not pattern-matched rather than
+    # shipping a guessed regex that would silently fail to catch real
+    # leaked keys. (Cohere could be covered contextually via _ctx_key if it
+    # ever justifies the noise; not done yet.)
+    #
+    # Corrected 2026-07-28: this block previously said Bedrock had no separate
+    # key format and used plain IAM credentials. AWS has since shipped dedicated
+    # Bedrock API keys -- see bedrock_key_long / bedrock_key_short above.
+    # Generic AKIA IAM keys are still deliberately NOT tagged llm_provider
+    # (most AWS key leaks have nothing to do with Bedrock; tagging every one
+    # would make the dedicated LLM-exposure endpoint noisy) -- that reasoning
+    # stands, it just no longer means Bedrock itself is undetectable.
+    #
+    # Still unshippable for lack of any published format (researched 2026-07-28,
+    # see llmjacking_provider_regex_research.md): NVIDIA NIM (nvapi- prefix is
+    # well attested but its length is documented nowhere) and Meta Muse Spark /
+    # Meta Model API (format undisclosed, waitlisted public preview).
+    ("sendgrid_key",     r"SG\.[a-zA-Z0-9\-_.]{22}\.[a-zA-Z0-9\-_.]{43}", "HIGH", "SendGrid API Key", None),
+    ("twilio_sid",       r"AC[a-f0-9]{32}",                           "MEDIUM",   "Twilio Account SID", None),
+    ("stripe_pub",       r"pk_live_[a-zA-Z0-9]{24,}",                "MEDIUM",   "Stripe Publishable Key", None),
+    ("jwt_token",        r"eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}", "MEDIUM", "JWT Token", None),
     # Agent-framework credentials (added 2026-07-07, AGENTIC-1) — AI agent
     # orchestration platforms are now a confirmed autonomous-attack target
     # (JadePuffer/Sysdig, July 2026).
-    ("langsmith_key",    r"lsv2_(?:pt|sk)_[a-f0-9]{32,}",             "HIGH",     "LangSmith API Key"),
+    ("langsmith_key",    r"lsv2_(?:pt|sk)_[a-f0-9]{32,}",             "HIGH",     "LangSmith API Key", "langsmith"),
     # MCP has no standardized token format as of 2026-07 — this is a
     # best-effort pattern based on an emerging informal prefix convention
     # in some MCP server implementations, not a guaranteed catch-all.
-    ("mcp_token_generic", r"mcp_(?:live|sk|pat)_[a-zA-Z0-9]{20,}",    "MEDIUM",   "Possible MCP Server Auth Token"),
+    ("mcp_token_generic", r"mcp_(?:live|sk|pat)_[a-zA-Z0-9]{20,}",    "MEDIUM",   "Possible MCP Server Auth Token", None),
 ]
 
-_NHI_COMPILED = [(name, _re.compile(pat), sev, desc) for name, pat, sev, desc in NHI_PATTERNS]
+_NHI_COMPILED = [(name, _re.compile(pat), sev, desc, provider) for name, pat, sev, desc, provider in NHI_PATTERNS]
 
 
 def _detect_nhi_in_text(text: str, domain: str) -> list[dict]:
     """Scan text for NHI credential patterns associated with a domain context."""
     findings = []
     seen: set[str] = set()
-    for name, pattern, severity, description in _NHI_COMPILED:
+    # Values already claimed by a provider-attributed pattern. The unattributed
+    # sk- catch-all (llm_key_generic_sk) is suppressed for these so a DeepSeek
+    # key found via context is not also reported as an unknown generic key.
+    attributed: set[str] = set()
+    for name, pattern, severity, description, llm_provider in _NHI_COMPILED:
         for match in pattern.finditer(text):
-            val = match.group(0)
+            # Context-anchored patterns (_ctx_key) wrap the secret in the single
+            # capturing group, so the vendor name / env-var prefix that anchored
+            # the match never reaches the preview or the dedup key. Prefix-based
+            # patterns have no capturing group and fall back to the whole match.
+            val = match.group(1) if pattern.groups else match.group(0)
+            if llm_provider == "unknown_openai_compatible":
+                if val in attributed:
+                    continue
+            elif llm_provider:
+                attributed.add(val)
             key = (name, val[:16])    # dedup on type + prefix
             if key not in seen:
                 seen.add(key)
-                findings.append({
+                finding = {
                     "type":        name,
                     "description": description,
                     "severity":    severity,
                     "preview":     val[:8] + "..." + val[-4:],   # never return full key
-                })
+                }
+                if llm_provider:
+                    finding["llm_provider"] = llm_provider
+                findings.append(finding)
     return findings
 
 
@@ -4156,6 +5556,128 @@ def handle_nhi_exposure(params: dict) -> dict:
             if critical else
             "Non-human credentials detected. Rotate all identified keys and audit "
             "access logs for the affected services."
+        ),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/llm-credential-exposure  /  POST /v1/payg/llm-credential-exposure
+# ---------------------------------------------------------------------------
+# LLMjacking detection — reuses the same INTEL-5 stealer log scan as
+# nhi-exposure, filtered to only LLM/AI provider API keys (llm_provider tag
+# on the matched pattern). Deliberately a separate endpoint rather than just
+# a filter flag on nhi-exposure: LLMjacking is a distinct, fast-growing
+# threat category with its own dollar-impact story (real incidents from
+# $46K/day to a $500K single-month bill from one leaked/unthrottled key) —
+# it deserves its own dedicated messaging, not to be buried inside generic
+# "some API key leaked" language.
+#
+# Request:  { "domain": "acme.com" }  or  { "vendor_domains": [...] }  (same as nhi-exposure)
+# Response: { "domains_checked": N, "found": bool, "findings": [...],
+#             "highest_severity": "...", "providers_affected": [...],
+#             "recommendation": "..." }
+
+def handle_llm_credential_exposure(params: dict) -> dict:
+    raw_domains = list(params.get("vendor_domains") or [])
+    own_domain  = (params.get("domain") or "").strip().lower().removeprefix("www.")
+    if own_domain:
+        raw_domains.append(own_domain)
+    if not raw_domains:
+        return _err("domain or vendor_domains is required")
+
+    domains = list({d.strip().lower().removeprefix("www.") for d in raw_domains if d.strip()})[:10]
+    llm_findings: list[dict] = []
+
+    table = dynamodb.Table(NHI_SESSIONS_TABLE)
+    severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+
+    for domain in domains:
+        try:
+            resp  = table.scan(
+                FilterExpression=(
+                    boto3.dynamodb.conditions.Attr("session_type").eq("credential") &
+                    boto3.dynamodb.conditions.Attr("domain").contains(domain)
+                ),
+            )
+            items = resp.get("Items", [])
+        except Exception as exc:
+            logger.warning("LLM credential scan failed domain=%s: %s", domain, exc)
+            items = []
+
+        for item in items:
+            # Primary path: llm_provider persisted at ingest by the stealer-log
+            # parser. Added 2026-07-28 -- previously this endpoint ONLY regexed
+            # item["domain"], but that attribute holds a bare hostname
+            # ("adobe.com"), never raw key material, so no scan could ever
+            # match and the endpoint could not return a finding for any input.
+            # The detection has to happen where the credential text exists, at
+            # ingest, and be read back here -- mirroring how nhi-exposure reads
+            # the pre-classified nhi_description.
+            if item.get("llm_provider"):
+                llm_findings.append({
+                    "domain":       domain,
+                    "type":         item.get("nhi_type", "llm_credential"),
+                    "llm_provider": item["llm_provider"],
+                    "description":  item.get("nhi_description") or item.get("cookie_name", "LLM provider API key"),
+                    "severity":     item.get("severity", "CRITICAL"),
+                    "preview":      item.get("cookie_name", ""),
+                    "source":       item.get("channel_source", ""),
+                    "ingested_at":  item.get("ingested_at", ""),
+                })
+                continue
+            # Fallback: rescan free text for records that predate the ingest-side
+            # tagging, or any record whose domain field does carry raw log text.
+            domain_val = item.get("domain", "")
+            hits = [h for h in _detect_nhi_in_text(domain_val, domain) if h.get("llm_provider")]
+            for hit in hits:
+                llm_findings.append({
+                    "domain":       domain,
+                    "type":         hit["type"],
+                    "llm_provider": hit["llm_provider"],
+                    "description":  hit["description"],
+                    "severity":     hit["severity"],
+                    "preview":      hit["preview"],
+                    "source":       item.get("channel_source", ""),
+                    "ingested_at":  item.get("ingested_at", ""),
+                })
+
+    if not llm_findings:
+        return _ok({
+            "domains_checked":     len(domains),
+            "found":               False,
+            "findings":            [],
+            "highest_severity":    None,
+            "providers_affected":  [],
+            "recommendation": (
+                "No exposed LLM/AI provider API keys detected in the stealer log corpus for the "
+                "supplied domain(s). Note: an AWS key exposure (see nhi-exposure) can also enable "
+                "LLMjacking if that key has Bedrock access — this check only covers keys with a "
+                "recognizable LLM-provider format, not every possible route to inference access."
+            ),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    llm_findings.sort(key=lambda x: severity_order.get(x["severity"], 0), reverse=True)
+    highest = llm_findings[0]["severity"]
+    providers_affected = sorted({f["llm_provider"] for f in llm_findings})
+
+    logger.info("llm-credential-exposure domains=%d findings=%d providers=%s",
+                len(domains), len(llm_findings), providers_affected)
+    return _ok({
+        "domains_checked":    len(domains),
+        "found":              True,
+        "findings":           llm_findings,
+        "highest_severity":   highest,
+        "providers_affected": providers_affected,
+        "recommendation": (
+            f"CRITICAL: {len(llm_findings)} exposed LLM/AI provider API key(s) detected "
+            f"({', '.join(providers_affected)}). This is a live, uncapped billing liability, not "
+            "just a data exposure — rotate immediately and check your provider's usage dashboard "
+            "for anomalous spend right now, don't wait for the invoice. Real incidents have run "
+            "from tens of thousands of dollars per day to a $500K single-month bill from one "
+            "unthrottled key. If the key belongs to an autonomous agent, also verify it hasn't "
+            "been used to spawn additional API keys or agent sessions."
         ),
         "checked_at": datetime.now(timezone.utc).isoformat(),
     })
@@ -4404,47 +5926,78 @@ def handle_intel_telegram(params: dict, api_key_record: dict | None = None) -> d
 # `accepts` entry so the CDP Facilitator can catalog them on settlement.
 
 def _bazaar_body_ext(input_example: dict, input_schema: dict, output_example: dict) -> dict:
-    """Build a Bazaar BodyDiscoveryExtension dict for a POST endpoint."""
+    """Discovery metadata for a POST endpoint, stored once and rendered into
+    whichever wire shape a given path currently uses (see
+    _v1_output_schema / _v2_bazaar_extension below).
+
+    V1 (Corrected 2026-07-12 to match Coinbase's own V1 reference extraction,
+    x402/extensions/bazaar/v1/facilitator.py, extract_discovery_info_v1):
+    metadata lives in a top-level `outputSchema` field shaped exactly as
+    `{"input": {...}, "output": <example>}`.
+
+    V2 (added 2026-07-14, verified against the actual SDK source —
+    python/x402/extensions/bazaar/types.py): metadata lives in a top-level
+    `extensions.bazaar` field shaped as `{"info": {"input", "output"},
+    "schema": {...}}` — this is where `input_schema` (unused by V1) is
+    actually needed, kept under `_input_schema` so it doesn't leak into the
+    V1 wire shape, which must stay exactly `{input, output}`.
+    """
     return {
-        "bazaar": {
-            "info": {
+        "input": {
+            "type":         "http",
+            "method":       "POST",
+            "discoverable": True,
+            "bodyType":     "json",
+            "body":         input_example,
+        },
+        "output":         output_example,
+        "_input_schema":  input_schema,
+    }
+
+
+def _v1_output_schema(bazaar_ext: dict) -> dict:
+    """Strips the V2-only _input_schema field so V1's outputSchema stays
+    exactly {input, output} on the wire."""
+    return {"input": bazaar_ext["input"], "output": bazaar_ext["output"]}
+
+
+def _v2_bazaar_extension(bazaar_ext: dict) -> dict:
+    """Builds the V2 extensions.bazaar shape from the same stored data used
+    for V1's outputSchema.
+
+    Fixed 2026-07-16 — confirmed against the actual SDK validator
+    (x402/extensions/bazaar/facilitator.py, validate_discovery_extension):
+    it runs jsonschema.validate(instance=info, schema=schema), so `schema`
+    must describe the shape of the whole `info` object ({input, output}),
+    not the shape of the request body directly. The previous version put
+    `_input_schema` (which describes the BODY, e.g. {"domain": "acme.com"})
+    straight under schema.properties.input — that validates info.input
+    ITSELF (the {type, method, bodyType, body} wrapper) against the body's
+    schema, which always fails since the wrapper has no top-level `domain`
+    key. Root-caused via a real CDP facilitator rejection reported on
+    GitHub (x402-foundation/x402#2814): "(root).input: domain is required".
+    `_input_schema` now nests under schema.properties.input.properties.body,
+    matching where the body actually lives in `info.input.body`.
+    """
+    return {
+        "info": {
+            "input":  bazaar_ext["input"],
+            "output": {"type": "json", "example": bazaar_ext["output"]},
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
                 "input": {
-                    "type":     "http",
-                    "bodyType": "json",
-                    "body":     input_example,
-                },
-                "output": {
-                    "type":    "json",
-                    "example": output_example,
-                },
-            },
-            "schema": {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "type":    "object",
-                "properties": {
-                    "input": {
-                        "type": "object",
-                        "properties": {
-                            "type":     {"type": "string", "const": "http"},
-                            "method":   {"type": "string", "enum": ["POST", "PUT", "PATCH"]},
-                            "bodyType": {"type": "string", "enum": ["json", "form-data", "text"]},
-                            "body":     input_schema,
-                        },
-                        "required":             ["type", "method", "bodyType", "body"],
-                        "additionalProperties": False,
+                    "type": "object",
+                    "properties": {
+                        "body": bazaar_ext.get("_input_schema") or {"type": "object"},
                     },
-                    "output": {
-                        "type": "object",
-                        "properties": {
-                            "type":    {"type": "string"},
-                            "example": {"type": "object"},
-                        },
-                        "required": ["type"],
-                    },
+                    "required": ["body"],
                 },
-                "required": ["input"],
+                "output": {"type": "object"},
             },
-        }
+            "required": ["input"],
+        },
     }
 
 
@@ -4708,6 +6261,402 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
             },
         },
     ),
+    "/v1/payg/supply-chain": _bazaar_body_ext(
+        input_example={"vendor_domains": ["acme.com", "vendor2.com"]},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "vendor_domains": {"type": "array", "items": {"type": "string"}, "description": "Up to 10 vendor domains"},
+                "vendor_emails":  {"type": "array", "items": {"type": "string"}, "description": "Alternative: vendor contact emails, domain extracted automatically"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "domains_checked": 1,
+                "highest_risk":    "LOW",
+                "results":         [{"domain": "acme.com", "risk_level": "LOW", "breach_count": 0, "infostealer_found": False}],
+            },
+        },
+    ),
+    "/v1/payg/session-risk": _bazaar_body_ext(
+        input_example={"email": "user@example.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"email": {"type": "string", "description": "Email address to check for active session/AiTM exposure"}},
+            "required": ["email"],
+        },
+        output_example={
+            "ok": True,
+            "data": {"email": "user@example.com", "found": False, "session_count": 0, "highest_severity": None, "sessions": []},
+        },
+    ),
+    "/v1/payg/identity-graph": _bazaar_body_ext(
+        input_example={"email": "user@example.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"email": {"type": "string", "description": "Email address to correlate against the criminal dump corpus"}},
+            "required": ["email"],
+        },
+        output_example={
+            "ok": True,
+            "data": {"email": "user@example.com", "found": False, "correlated_identifiers": 0, "correlated_phones": [], "correlated_domains": [], "sources": []},
+        },
+    ),
+    "/v1/payg/ransomware-risk": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"domain": {"type": "string", "description": "Domain to check against the ransomware victim list"}},
+            "required": ["domain"],
+        },
+        output_example={
+            "ok": True,
+            "data": {"domain": "acme.com", "on_victim_list": False, "pre_ransomware_credential_count": 0},
+        },
+    ),
+    "/v1/payg/nhi-exposure": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "domain":         {"type": "string", "description": "Your own domain"},
+                "vendor_domains": {"type": "array", "items": {"type": "string"}, "description": "Optional: vendor/supply-chain domains, up to 10"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {"domains_checked": 1, "found": False, "findings": [], "highest_severity": None},
+        },
+    ),
+    "/v1/payg/llm-credential-exposure": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "domain":         {"type": "string", "description": "Your own domain"},
+                "vendor_domains": {"type": "array", "items": {"type": "string"}, "description": "Optional: vendor/supply-chain domains, up to 10"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {"domains_checked": 1, "found": False, "findings": [], "highest_severity": None, "providers_affected": []},
+        },
+    ),
+    "/v1/payg/secret-scan": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "domain":         {"type": "string", "description": "Your own domain"},
+                "vendor_domains": {"type": "array", "items": {"type": "string"}, "description": "Optional: vendor domains, up to 5"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {"domains_checked": 1, "found": False, "findings": [], "highest_severity": None},
+        },
+    ),
+    "/v1/payg/target-risk": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"domain": {"type": "string", "description": "Domain to score (e.g. acme.com)"}},
+            "required": ["domain"],
+        },
+        output_example={
+            "ok": True,
+            "data": {"domain": "acme.com", "target_risk_score": 0, "probability_tier": "LOW", "signals": []},
+        },
+    ),
+    "/v1/payg/tech-stack-cve": _bazaar_body_ext(
+        input_example={"tech_stack": ["nginx", "wordpress", "cisco ios"]},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tech_stack": {"type": "array", "items": {"type": "string"}, "description": "Declared technology product names"},
+                "domain":     {"type": "string", "description": "Alternative: pull tech_stack from a stored user profile by domain"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {"tech_stack_queried": ["nginx"], "matched_cves": [], "critical_count": 0},
+        },
+    ),
+    "/v1/payg/bulk-identity-risk": _bazaar_body_ext(
+        input_example={"targets": [{"domain": "acme.com", "agents": ["ceo@acme.com"]}]},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "description": "Up to 10 domains, each with up to 5 agent emails",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "domain": {"type": "string"},
+                            "agents": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["domain"],
+                    },
+                },
+            },
+            "required": ["targets"],
+        },
+        output_example={
+            "ok": True,
+            "data": {"queried": 1, "critical_count": 0, "high_count": 0, "results": [{"domain": "acme.com", "domain_score": 10, "domain_grade": "A", "agent_count": 1}]},
+        },
+    ),
+    "/v1/payg/identity-risk-score": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"domain": {"type": "string", "description": "Root domain to score"}},
+            "required": ["domain"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "domain": "acme.com",
+                "risk_score": 10,
+                "risk_level": "LOW",
+                "grade": "A",
+                "dimension_scores": {
+                    "breach_exposure": 5, "infostealer_density": 0, "threat_actor_targeting": 0,
+                    "ransomware_exposure": 0, "session_exposure": 0, "cve_exposure": 5,
+                },
+                "max_score": 100,
+                "risk_factors": ["Breach exposure: 1 known breach event(s), 50,000 accounts affected"],
+                "summary": "Domain acme.com scores 10/100 (A — LOW) across 2 of 6 monitored identity signal dimensions.",
+            },
+        },
+    ),
+    "/v1/payg/cert-expiry": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {"domain": {"type": "string", "description": "Domain to check TLS certificate expiry for"}},
+            "required": ["domain"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "domain":            "acme.com",
+                "cert_found":        True,
+                "expires_at":        "2026-09-05T00:00:00+00:00",
+                "days_remaining":    46,
+                "risk_level":        "MEDIUM",
+                "issued_at":         "2026-06-07T00:00:00+00:00",
+                "recommendation":    "Certificate renews in 46 days — no action needed yet, but confirm your renewal automation is configured.",
+            },
+        },
+    ),
+    "/v1/payg/ip-intel": _bazaar_body_ext(
+        input_example={"domain": "acme.com"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Domain to look up (returns reputation + passive DNS resolution history)"},
+                "ip":     {"type": "string", "description": "Alternative: IP address to look up (returns reputation + reverse passive DNS)"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "queried":        "acme.com",
+                "query_type":     "domain",
+                "reputation":     0,
+                "malicious_votes": 0,
+                "suspicious_votes": 0,
+                "resolutions": [
+                    {"ip_address": "93.184.216.34", "date": "2026-06-01T00:00:00+00:00"},
+                ],
+            },
+        },
+    ),
+}
+
+# Rich, natural-language descriptions for CDP Bazaar semantic search — added
+# 2026-07-17. Previously every endpoint used a single generic auto-generated
+# one-liner ("RelayShield {path} check", ~25 chars) regardless of path; CDP's
+# own discovery docs confirm ranking is driven by description quality against
+# a 500-char budget, so a bare endpoint-name string was actively hurting
+# discoverability. Each description explains what the check does and when an
+# agent should call it. wallet-risk/token-security/nft-security/scan-wallet/
+# wallet-screen-batch are deliberately framed in DeFi/trading-agent language
+# (screen a counterparty before transacting) rather than generic "security
+# check" language — that's the one demand category the market research
+# (task tracked in TODO.md) found real evidence of agents actually paying for.
+PAYG_DESCRIPTIONS: dict[str, str] = {
+    "/v1/payg/breach": (
+        "Check whether an email address appears in known data breaches. Returns breach count, "
+        "source names, dates, and exposed data types (passwords, emails, etc). Call before "
+        "trusting a new user identity or granting elevated access."
+    ),
+    "/v1/payg/sim-swap": (
+        "Check whether a phone number has had a SIM swap or carrier port in the last 24 hours "
+        "via real-time carrier lookup. A recent swap is a strong signal of an active "
+        "account-takeover attempt targeting SMS-based 2FA. Call before trusting an SMS OTP "
+        "from this number."
+    ),
+    "/v1/payg/domain": (
+        "Scan a domain for phishing lookalikes — typosquats, homoglyphs, and common phishing "
+        "registration patterns. Returns matched lookalike domains found in the wild. Call to "
+        "detect brand-impersonation phishing campaigns targeting a company before they're "
+        "reported elsewhere."
+    ),
+    "/v1/payg/oauth-watchlist": (
+        "Check whether an email address has OAuth-connected app credentials exposed in a known "
+        "SaaS breach (GitHub, Slack, Notion, Zapier, and 30+ other high-risk OAuth-capable "
+        "apps). Returns matched apps and direct revoke-access links. Call to detect "
+        "supply-chain credential exposure via connected apps."
+    ),
+    "/v1/payg/scan-wallet": (
+        "Screen an EVM wallet address for known scam, exploit, or sanctions-list association "
+        "before your agent transacts with it. Returns a risk level and specific risk flags. "
+        "Call before an autonomous agent sends funds to or interacts with an unfamiliar wallet."
+    ),
+    "/v1/payg/scan-url": (
+        "Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, "
+        "RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis. Returns an "
+        "async analysis ID to poll. Call before an agent clicks, fetches, or shares a link from "
+        "an untrusted source."
+    ),
+    "/v1/payg/scan-file": (
+        "Scan a file (via its public download URL) for malware using VirusTotal's multi-engine "
+        "analysis. Returns an async analysis ID to poll. Call before an agent downloads, opens, "
+        "or executes a file attachment from an untrusted source."
+    ),
+    "/v1/payg/wallet-risk": (
+        "Screen a wallet address across EVM, Solana, TON, or Bitcoin for known scam, exploit, "
+        "drainer, or sanctions-list association before your agent transacts with it. Returns a "
+        "risk level and specific risk flags. The recommended first call for any autonomous "
+        "trading or DeFi agent before interacting with a new counterparty wallet."
+    ),
+    "/v1/payg/token-security": (
+        "Screen an ERC-20/BEP-20 token contract for honeypot, mintable-supply, hidden-owner, "
+        "and other rug-pull risk signals before your agent trades it. Returns risk level, "
+        "specific critical/warning flags, and basic token metadata. Call before an autonomous "
+        "trading agent buys or approves spending on an unfamiliar token."
+    ),
+    "/v1/payg/nft-security": (
+        "Screen an NFT contract for known scam, wash-trading, or malicious-approval risk "
+        "signals before your agent buys, bids on, or approves it. Returns risk level and risk "
+        "flags plus basic collection metadata. Call before an autonomous agent interacts with "
+        "an unfamiliar NFT contract."
+    ),
+    "/v1/payg/wallet-screen-batch": (
+        "Screen up to 10 wallet addresses (any chain: EVM, Solana, TON, Bitcoin) for known "
+        "scam or exploit association in a single call. Returns per-address risk level and "
+        "flags. Use for bulk counterparty screening in trading or portfolio-monitoring agent "
+        "workflows."
+    ),
+    "/v1/payg/infostealer": (
+        "Check whether an email address's credentials were harvested by infostealer malware "
+        "and appear in a criminal stealer-log marketplace — detected 24-72 hours ahead of "
+        "public breach databases. Call to catch device-level compromise before stolen session "
+        "cookies or saved passwords are used for account takeover."
+    ),
+    "/v1/payg/supply-chain": (
+        "Check up to 10 vendor domains for combined breach, infostealer, and dark-web risk "
+        "exposure in one call. Returns a composite risk score per vendor. Call to assess "
+        "third-party API/vendor risk before an agent integrates with or continues calling an "
+        "external service."
+    ),
+    "/v1/payg/session-risk": (
+        "Check whether an email address has an active stolen session cookie circulating in a "
+        "criminal archive — a signal of account takeover that bypasses password resets and 2FA "
+        "entirely. Call to detect AiTM/session-hijack attacks before an authenticated agent "
+        "session is trusted."
+    ),
+    "/v1/payg/identity-graph": (
+        "Correlate an email address against the criminal breach/stealer corpus to surface "
+        "linked phone numbers, secondary domains, and other identifiers tied to the same "
+        "compromised identity. Call to map the blast radius of a known compromise across an "
+        "organization."
+    ),
+    "/v1/payg/ransomware-risk": (
+        "Check whether a domain appears on a known ransomware group's victim/leak-site list, "
+        "and whether pre-ransomware credential harvesting was detected beforehand. Call to "
+        "assess active ransomware exposure for a domain, not just historical breach history."
+    ),
+    "/v1/payg/nhi-exposure": (
+        "Check whether API keys or tokens tied to a domain — used by non-human identities like "
+        "AI agents, service accounts, or CI/CD — appear exposed in criminal stealer logs. Call "
+        "to audit whether the credentials an autonomous agent relies on have already been "
+        "compromised upstream."
+    ),
+    "/v1/payg/llm-credential-exposure": (
+        "Check whether a domain's LLM/AI provider API keys (OpenAI, Anthropic, Google, Groq, "
+        "xAI, Replicate) appear exposed in criminal stealer logs — LLMjacking, a fast-growing "
+        "threat where a leaked key becomes a live, uncapped billing liability rather than just "
+        "a data exposure. Call to catch an exposed key before the drain, not after the invoice."
+    ),
+    "/v1/payg/secret-scan": (
+        "Scan public GitHub/GitLab repositories associated with a domain for exposed API keys, "
+        "tokens, and credentials committed in source code. Call to detect a common "
+        "supply-chain exposure vector before it's exploited."
+    ),
+    "/v1/payg/target-risk": (
+        "Score a domain's probability of being an active or upcoming cyberattack target using "
+        "a 6-signal correlation model (breach, infostealer, ransomware, session, CVE, and "
+        "threat-actor targeting history). Call for proactive risk triage, not just "
+        "after-the-fact breach checking."
+    ),
+    "/v1/payg/tech-stack-cve": (
+        "Check a declared technology stack (e.g. nginx, WordPress, Cisco IOS) against "
+        "actively-exploited CVEs (CISA KEV) and high-EPSS-score vulnerabilities. Call before "
+        "deploying or continuing to run a given technology stack in production."
+    ),
+    "/v1/payg/bulk-identity-risk": (
+        "Score up to 10 organizational domains, each with up to 5 associated agent/employee "
+        "emails, for combined breach/infostealer/session/CVE risk in one call. Built for "
+        "enterprise AI-governance platforms scoring many identities per customer in one pass — "
+        "the recommended entry point for agent-governance and identity-posture integrations."
+    ),
+    "/v1/payg/identity-risk-score": (
+        "Return a 0-100 domain security score across 6 identity-risk dimensions (breach "
+        "exposure, infostealer density, ransomware exposure, session exposure, CVE exposure, "
+        "threat-actor targeting) with a letter grade and plain-English risk factors. Call as a "
+        "single-number identity health check before onboarding, financing, or partnering with "
+        "a domain."
+    ),
+    "/v1/payg/cert-expiry": (
+        "Check how many days remain before a domain's TLS certificate expires, via Certificate "
+        "Transparency logs. Call to catch a lapsing certificate before it causes an outage — "
+        "especially relevant as CA/Browser Forum rules shrink standard certificate lifespans "
+        "toward 47 days by 2029."
+    ),
+    "/v1/payg/ip-intel": (
+        "Look up passive DNS resolution history and reputation for a domain or IP address. "
+        "For a domain: which IPs it has resolved to over time. For an IP: which hostnames have "
+        "resolved to it, plus malicious/suspicious vendor detection counts. Call to pivot from "
+        "an indicator to its infrastructure history during an investigation."
+    ),
+}
+
+# SDK discovery tags (CDPX-4a) — up to 5 per endpoint per the bazaar spec,
+# only takes effect on V2-enabled paths (X402_V2_ENABLED_PATHS). Chosen per
+# endpoint's actual subject matter, not blanket-applied — wallet-screen-batch
+# is the one Batch B endpoint that's genuinely DeFi/wallet-screening; the
+# other three get tags matching what they actually check.
+PAYG_TAGS: dict[str, list[str]] = {
+    "/v1/payg/wallet-screen-batch": ["defi", "wallet-screening", "crypto-security"],
+    "/v1/payg/target-risk":         ["identity-risk", "threat-intelligence", "risk-scoring"],
+    "/v1/payg/oauth-watchlist":     ["oauth-security", "saas-security", "supply-chain"],
+    "/v1/payg/tech-stack-cve":      ["cve", "vulnerability-management", "agent-security"],
+    "/v1/payg/cert-expiry":         ["certificate-management", "domain-security", "ops-hygiene"],
+    "/v1/payg/ip-intel":            ["passive-dns", "ip-reputation", "threat-intelligence"],
+    # Added 2026-07-21 — the CDPX-4 "reweight toward wallet/token/NFT" endpoints
+    # had crypto-forward descriptions live but no tags, so they weren't
+    # surfacing in category-based Bazaar discovery.
+    "/v1/payg/wallet-risk":         ["defi", "wallet-screening", "crypto-security"],
+    "/v1/payg/token-security":      ["defi", "token-security", "crypto-security"],
+    "/v1/payg/nft-security":        ["defi", "nft-security", "crypto-security"],
+    "/v1/payg/scan-wallet":         ["defi", "wallet-screening", "crypto-security"],
+    "/v1/payg/scan-url":            ["url-scanning", "malware-detection", "crypto-security"],
+    "/v1/payg/scan-file":           ["file-scanning", "malware-detection", "crypto-security"],
 }
 
 
@@ -4718,10 +6667,56 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
 def _build_payment_requirements(path: str, price_units: int) -> dict:
     api_base    = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod"
     resource    = f"{api_base}{path}"
-    description = f"RelayShield {path.split('/')[-1].replace('-', ' ')} check"
+    description = PAYG_DESCRIPTIONS.get(
+        path, f"RelayShield {path.split('/')[-1].replace('-', ' ')} check"
+    )
     bazaar_ext  = BAZAAR_EXTENSIONS.get(path)
 
-    # Base (EVM) entry — always included
+    if path in X402_V2_ENABLED_PATHS:
+        # V2 shape — verified 2026-07-13 against actual SDK source
+        # (python/x402/schemas/{base,payments}.py): "amount" replaces
+        # "maxAmountRequired", and resource/extensions live once at the top
+        # level of the whole response instead of being duplicated on every
+        # accept entry the way V1's resource/description/mimeType/outputSchema
+        # are today.
+        base_entry: dict = {
+            "scheme":            "exact",
+            "network":           BASE_CHAIN_ID_V2,
+            "amount":            str(price_units),
+            "payTo":             X402_PAYTO_ADDRESS,
+            "maxTimeoutSeconds": 300,
+            "asset":             USDC_BASE_ADDRESS,
+            "extra":             {"name": "USD Coin", "version": "2"},
+        }
+        accepts = [base_entry]
+        if SOL_PAYTO_ADDRESS:
+            accepts.append({
+                "scheme":            "exact",
+                "network":           SOL_CHAIN_ID,
+                "amount":            str(price_units),
+                "payTo":             SOL_PAYTO_ADDRESS,
+                "maxTimeoutSeconds": 60,
+                "asset":             USDC_SOL_ADDRESS,
+                "extra":             {"feePayer": SOL_FEE_PAYER},
+            })
+        resource_info: dict = {
+            "url":         resource,
+            "description": description,
+            "mimeType":    "application/json",
+        }
+        tags = PAYG_TAGS.get(path)
+        if tags:
+            resource_info["tags"] = tags
+        result: dict = {
+            "x402Version": 2,
+            "resource": resource_info,
+            "accepts": accepts,
+        }
+        if bazaar_ext:
+            result["extensions"] = {"bazaar": _v2_bazaar_extension(bazaar_ext)}
+        return result
+
+    # V1 shape (default — unchanged)
     base_entry: dict = {
         "scheme":            "exact",
         "network":           BASE_CHAIN_ID,
@@ -4735,7 +6730,7 @@ def _build_payment_requirements(path: str, price_units: int) -> dict:
         "extra":             {"name": "USD Coin", "version": "2"},
     }
     if bazaar_ext:
-        base_entry["extensions"] = bazaar_ext
+        base_entry["outputSchema"] = _v1_output_schema(bazaar_ext)
 
     accepts = [base_entry]
 
@@ -4758,7 +6753,7 @@ def _build_payment_requirements(path: str, price_units: int) -> dict:
             },
         }
         if bazaar_ext:
-            sol_entry["extensions"] = bazaar_ext
+            sol_entry["outputSchema"] = _v1_output_schema(bazaar_ext)
         accepts.append(sol_entry)
 
     return {
@@ -4791,6 +6786,16 @@ def _x402_payment_required(path: str) -> dict:
     }
 
 
+def _payload_network(parsed: dict) -> str:
+    """V1 payloads carry `network` at the top level. V2 payloads (verified
+    2026-07-14 against python/x402/schemas/payments.py's PaymentPayload)
+    nest it under `accepted.network` instead — top-level `network` doesn't
+    exist on a V2 payload at all."""
+    if parsed.get("network"):
+        return parsed["network"]
+    return (parsed.get("accepted") or {}).get("network", "")
+
+
 def _detect_payment_chain(x_payment: str) -> str:
     """Detect chain by parsing the network field from the x402 payment payload.
     Both EVM and Solana payloads are base64-encoded JSON — check network field.
@@ -4799,22 +6804,112 @@ def _detect_payment_chain(x_payment: str) -> str:
     try:
         decoded = base64.b64decode(x_payment + "==")
         parsed = json.loads(decoded)
-        network = parsed.get("network", "")
-        if network.startswith("solana"):
+        if _payload_network(parsed).startswith("solana"):
             return "solana"
         return "evm"
     except Exception:
         # Try raw JSON (non-base64)
         try:
             parsed = json.loads(x_payment)
-            if parsed.get("network", "").startswith("solana"):
+            if _payload_network(parsed).startswith("solana"):
                 return "solana"
         except Exception:
             pass
         return "evm"  # default to EVM on decode failure
 
 
-def _verify_x402_payment(x_payment: str, path: str) -> bool:
+def _parse_cdp_private_key(key_data: str):
+    """Parses a CDP API key secret in either PEM (EC/ES256) or base64
+    (Ed25519/EdDSA) format. Mirrors coinbase/cdp-sdk's Python
+    _parse_private_key exactly — CDP's key-creation UI defaults to Ed25519
+    but still offers ECDSA, so both formats must be supported."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+
+    if "\\n" in key_data:
+        key_data = key_data.replace("\\n", "\n")
+
+    try:
+        key = serialization.load_pem_private_key(key_data.encode(), password=None)
+        if isinstance(key, ec.EllipticCurvePrivateKey):
+            return key, "ES256"
+    except Exception:
+        pass
+
+    try:
+        decoded = base64.b64decode(key_data)
+        if len(decoded) == 64:
+            return ed25519.Ed25519PrivateKey.from_private_bytes(decoded[:32]), "EdDSA"
+    except Exception:
+        pass
+
+    raise ValueError("CDP_API_KEY_SECRET must be either a PEM EC key or a base64 Ed25519 key")
+
+
+def _cdp_jwt_bearer_token(request_path: str) -> str | None:
+    """Builds a short-lived JWT for CDP's REST API auth (ES256 or EdDSA,
+    auto-detected from CDP_API_KEY_SECRET's format). Mirrors Coinbase's own
+    cdp-sdk (python/cdp/auth/utils/jwt.py generate_jwt) exactly: header
+    {alg, kid, typ, nonce}, claims {sub, iss=cdp, nbf, exp, uris}. Not using
+    the cdp-sdk package itself to keep this Lambda's dependency footprint to
+    just pyjwt + cryptography (bundled via the relayshield-cdp-auth layer).
+    Returns None (triggering PayAI fallback) if creds are missing or invalid."""
+    if not CDP_API_KEY_ID or not CDP_API_KEY_SECRET:
+        return None
+    try:
+        import jwt as pyjwt
+
+        private_key, algorithm = _parse_cdp_private_key(CDP_API_KEY_SECRET)
+        now = int(time.time())
+        header = {
+            "alg":   algorithm,
+            "kid":   CDP_API_KEY_ID,
+            "typ":   "JWT",
+            "nonce": "".join(random.choices("0123456789", k=16)),
+        }
+        claims = {
+            "sub": CDP_API_KEY_ID,
+            "iss": "cdp",
+            "nbf": now,
+            "exp": now + 120,
+            "uris": [f"POST {CDP_FACILITATOR_HOST}{request_path}"],
+        }
+        return pyjwt.encode(claims, private_key, algorithm=algorithm, headers=header)
+    except Exception as exc:
+        logger.error("CDP JWT generation failed, falling back to PayAI — error=%s", exc)
+        return None
+
+
+def _select_facilitator(verify_path: str, settle_path: str, fallback_url: str) -> tuple[str, dict, dict]:
+    """Returns (facilitator_base_url, verify_headers, settle_headers). Prefers
+    CDP when CDP_API_KEY_ID/CDP_API_KEY_SECRET are configured (see note above
+    _cdp_jwt_bearer_token); falls back to the PayAI facilitator otherwise."""
+    if CDP_API_KEY_ID and CDP_API_KEY_SECRET:
+        verify_jwt = _cdp_jwt_bearer_token(verify_path)
+        settle_jwt = _cdp_jwt_bearer_token(settle_path)
+        if verify_jwt and settle_jwt:
+            return (
+                CDP_FACILITATOR_URL,
+                {"Content-Type": "application/json", "Authorization": f"Bearer {verify_jwt}"},
+                {"Content-Type": "application/json", "Authorization": f"Bearer {settle_jwt}"},
+            )
+    plain_headers = {"Content-Type": "application/json"}
+    return fallback_url, plain_headers, plain_headers
+
+
+def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
+    """Verifies AND settles the x402 payment. Returns the settlement
+    response dict on success (encoded into the PAYMENT-RESPONSE header),
+    or None if verification or settlement failed.
+
+    Found 2026-07-10: calling /verify alone does NOT move funds — it only
+    checks the signed payload is well-formed and funded. /settle is the
+    separate call that actually submits the transaction on-chain. This
+    file previously only called /verify, meaning every PAYG call ever
+    delivered the paid service without collecting payment. Confirmed via
+    x402 spec research and PayAI's own facilitator (a bare POST to
+    /settle returns HTTP 400, not 404, confirming the endpoint is real
+    and was never being called)."""
     price_units  = PAYG_PRICE_UNITS.get(path, 0)
     requirements = _build_payment_requirements(path, price_units)
 
@@ -4829,75 +6924,182 @@ def _verify_x402_payment(x_payment: str, path: str) -> bool:
             payment_payload_dict = json.loads(x_payment)
         except Exception:
             logger.error("Failed to decode x_payment for path=%s", path)
-            return False
+            return None
+
+    is_v2 = path in X402_V2_ENABLED_PATHS
+    base_network_id = BASE_CHAIN_ID_V2 if is_v2 else BASE_CHAIN_ID
 
     if chain == "solana":
         if not SOL_PAYTO_ADDRESS:
             logger.error("RELAYSHIELD_SOL_WALLET not set — cannot verify Solana x402 payment")
-            return False
-        sol_requirements = next(
+            return None
+        chain_requirements = next(
             (a for a in requirements.get("accepts", []) if a.get("network") == SOL_CHAIN_ID),
             None,
         )
-        if not sol_requirements:
+        if not chain_requirements:
             logger.error("No Solana accepts entry in requirements for path=%s", path)
-            return False
-        verify_payload = json.dumps({
-            "x402Version":        1,
-            "paymentPayload":     payment_payload_dict,
-            "paymentRequirements": sol_requirements,
-        }).encode("utf-8")
+            return None
     else:
         if not X402_PAYTO_ADDRESS:
             logger.error("RELAYSHIELD_X402_WALLET not set — cannot verify EVM x402 payment")
-            return False
-        evm_requirements = next(
-            (a for a in requirements.get("accepts", []) if a.get("network") == BASE_CHAIN_ID),
+            return None
+        chain_requirements = next(
+            (a for a in requirements.get("accepts", []) if a.get("network") == base_network_id),
             requirements,
         )
-        verify_payload = json.dumps({
-            "x402Version":        1,
-            "paymentPayload":     payment_payload_dict,
-            "paymentRequirements": evm_requirements,
-        }).encode("utf-8")
 
-    # Solana → CDP Facilitator (manages the CDP fee payer key)
-    # EVM    → PayAI Facilitator (auto-lists RelayShield in Bazaar)
-    facilitator_base = SOL_FACILITATOR_URL if chain == "solana" else X402_FACILITATOR_URL
+    # First attempt (2026-07-16) at this fix injected a bare string as
+    # "resource" directly onto payment_payload_dict — broke /verify outright
+    # ("'paymentPayload' is invalid: must match one of [x402V2PaymentPayload,
+    # x402V1PaymentPayload]"), caught before /settle ran so no funds moved,
+    # reverted immediately. Root cause of THAT failure, confirmed against
+    # the actual x402 Python SDK schema source
+    # (x402/schemas/payments.py — not guessed): PaymentPayload.resource is a
+    # real, valid, OPTIONAL field, but it's a structured ResourceInfo object
+    # (url/description/mimeType, camelCase on the wire per
+    # BaseX402Model's to_camel alias generator), not a bare string — and
+    # it's explicitly V2-only (PaymentPayload is documented as "V2 payment
+    # payload structure"; V1 has no equivalent concept, so this must never
+    # touch V1 payloads). Reusing the exact same ResourceInfo-shaped dict
+    # _build_payment_requirements already builds at requirements["resource"]
+    # for V2, rather than constructing a second copy that could drift out
+    # of sync with it.
+    if is_v2 and requirements.get("resource"):
+        payment_payload_dict["resource"] = requirements["resource"]
+
+    # NOTE (2026-07-14): the facilitator's own /verify+/settle HTTP contract
+    # wrapper keys (paymentPayload/paymentRequirements) are kept as-is for V2
+    # too — only x402Version and the nested requirements shape change. This
+    # is inferred from CDP still supporting both versions "for now" rather
+    # than confirmed against the facilitator's own API docs, so the first V2
+    # settlement in each batch is exactly where this gets verified for real.
+
+    request_body = json.dumps({
+        "x402Version":         2 if is_v2 else 1,
+        "paymentPayload":      payment_payload_dict,
+        "paymentRequirements": chain_requirements,
+    }).encode("utf-8")
+
+    fallback_url = SOL_FACILITATOR_URL if chain == "solana" else X402_FACILITATOR_URL
+    facilitator_base, verify_headers, settle_headers = _select_facilitator(
+        "/platform/v2/x402/verify", "/platform/v2/x402/settle", fallback_url,
+    )
+
+    # Step 1: verify — well-formed + funded check only, does not move funds.
     verify_url = f"{facilitator_base}/verify"
     logger.info("Sending verify to %s payload_keys=%s", verify_url, list(payment_payload_dict.keys()))
-    logger.info("verify_body_preview=%s", verify_payload.decode("utf-8")[:800])
 
     req = urllib.request.Request(
-        verify_url,
-        data=verify_payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        verify_url, data=request_body, headers=verify_headers, method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
-            valid  = result.get("isValid", False)
-            if not valid:
+            if not result.get("isValid", False):
                 logger.warning("x402 payment invalid — chain=%s reason=%s path=%s",
                                chain, result.get("invalidReason"), path)
-            return valid
+                return None
     except urllib.error.HTTPError as exc:
         try:
             body = exc.read().decode("utf-8", errors="replace")
         except Exception:
             body = "<unreadable>"
-        logger.error("x402 facilitator HTTP %d — chain=%s path=%s body=%s",
+        logger.error("x402 verify HTTP %d — chain=%s path=%s body=%s",
                      exc.code, chain, path, body)
-        return False
+        return None
     except Exception as exc:
-        logger.error("x402 facilitator call failed — chain=%s path=%s error=%s", chain, path, exc)
-        return False
+        logger.error("x402 verify call failed — chain=%s path=%s error=%s", chain, path, exc)
+        return None
+
+    # Step 2: settle — actually submits the transaction on-chain and moves funds.
+    settle_url = f"{facilitator_base}/settle"
+    req = urllib.request.Request(
+        settle_url, data=request_body, headers=settle_headers, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            settle_result = json.loads(resp.read())
+            if not settle_result.get("success", False):
+                logger.error("x402 settlement failed — chain=%s path=%s result=%s", chain, path, settle_result)
+                return None
+            logger.info("x402 payment settled — chain=%s path=%s tx=%s",
+                        chain, path, settle_result.get("transaction"))
+            return settle_result
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = "<unreadable>"
+        logger.error("x402 settle HTTP %d — chain=%s path=%s body=%s", exc.code, chain, path, body)
+        return None
+    except Exception as exc:
+        logger.error("x402 settle call failed — chain=%s path=%s error=%s", chain, path, exc)
+        return None
+
+
+PAYG_SETTLEMENTS_TABLE = "relayshield_payg_settlements"
+
+
+def _log_payg_settlement(path: str, price_units: int, settlement: dict) -> None:
+    """Records a settled PAYG payment for weekly revenue reporting. Never
+    raises — a logging failure must not break the paid response the
+    customer already funded. Payment settles regardless of what happens
+    to the endpoint's own handler logic afterward (see 2026-07-12 scan-file
+    incident: a real settlement occurred even though the handler itself
+    then failed on an unrelated file-download bug), so this is called
+    right after settlement succeeds, not after the handler returns."""
+    try:
+        table = dynamodb.Table(PAYG_SETTLEMENTS_TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            "settlement_id": str(uuid.uuid4()),
+            "timestamp":     now.isoformat(),
+            "path":          path,
+            "amount_usd":    Decimal(str(price_units / 1_000_000)),
+            "network":       settlement.get("network", "unknown"),
+            "tx_hash":       settlement.get("transaction", ""),
+            "payer":         settlement.get("payer", ""),
+            "ttl":           int(now.timestamp()) + 90 * 86400,
+        })
+    except Exception as exc:
+        logger.warning("Failed to log PAYG settlement for path=%s: %s", path, exc)
+
+
+def _log_hf_mcp_call(path: str, credit_cost: int) -> None:
+    """Tags a successfully-billed metered call as attributable to the
+    relayshield-agentic-attack-surface HF Space, for the weekly metrics
+    report (TODO.md item added 2026-07-15). Shares the PAYG settlements
+    table rather than a new one — only the source/consuming query differs.
+    credit_cost is in METERED_CREDIT_COSTS units (100 = $1.00). Never
+    raises, same rationale as _log_payg_settlement."""
+    try:
+        table = dynamodb.Table(PAYG_SETTLEMENTS_TABLE)
+        now   = datetime.now(timezone.utc)
+        table.put_item(Item={
+            "settlement_id": str(uuid.uuid4()),
+            "timestamp":     now.isoformat(),
+            "path":          path,
+            "amount_usd":    Decimal(str(credit_cost)) / Decimal(100),
+            "source":        "hf-mcp-space",
+            "ttl":           int(now.timestamp()) + 90 * 86400,
+        })
+    except Exception as exc:
+        logger.warning("Failed to log HF MCP call for path=%s: %s", path, exc)
 
 
 def handle_payg_request(path: str, method: str, event: dict) -> dict:
     headers   = event.get("headers") or {}
-    x_payment = headers.get("X-PAYMENT") or headers.get("x-payment", "")
+    # V1 clients send the signed payload as X-PAYMENT; V2 clients send it as
+    # PAYMENT-SIGNATURE instead (verified 2026-07-14 against the actual SDK,
+    # x402/http/x402_http_client_base.py's encode_payment_signature_header).
+    # Missing this for V2 paths meant every payment attempt went unseen by
+    # the server, which always re-issued a fresh 402 — no funds were ever at
+    # risk, but no V2 payment could ever succeed either.
+    x_payment = (
+        headers.get("PAYMENT-SIGNATURE") or headers.get("payment-signature")
+        or headers.get("X-PAYMENT") or headers.get("x-payment", "")
+    )
 
     # Free poll endpoint — no payment needed
     if method == "GET" and path.startswith("/v1/payg/result/"):
@@ -4911,15 +7113,17 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     if not x_payment:
         return _x402_payment_required(path)
 
-    if not _verify_x402_payment(x_payment, path):
+    settlement = _verify_and_settle_x402_payment(x_payment, path)
+    if settlement is None:
         return {
             "statusCode": 402,
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({
                 "ok":    False,
-                "error": "Invalid or expired payment proof — pay again and retry.",
+                "error": "Invalid or expired payment proof, or settlement failed — pay again and retry.",
             }),
         }
+    _log_payg_settlement(path, PAYG_PRICE_UNITS.get(path, 0), settlement)
 
     payg_routes = {
         "/v1/payg/breach":                handle_breach,
@@ -4939,10 +7143,14 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/identity-graph":        handle_identity_graph,
         "/v1/payg/ransomware-risk":       handle_ransomware_risk,
         "/v1/payg/nhi-exposure":          handle_nhi_exposure,
+        "/v1/payg/llm-credential-exposure": handle_llm_credential_exposure,
         "/v1/payg/secret-scan":           handle_secret_scan,
         "/v1/payg/target-risk":           handle_target_risk,
         "/v1/payg/tech-stack-cve":        handle_tech_stack_cve,
         "/v1/payg/bulk-identity-risk":    handle_bulk_identity_risk,
+        "/v1/payg/identity-risk-score":   handle_identity_risk_score,
+        "/v1/payg/cert-expiry":           handle_cert_expiry,
+        "/v1/payg/ip-intel":              handle_ip_intel,
     }
     handler = payg_routes.get(path)
     if not handler:
@@ -4950,10 +7158,19 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
 
     params = _body(event)
     try:
-        return handler(params)
+        result = handler(params)
     except Exception as exc:
         logger.exception("Unhandled error in PAYG %s: %s", path, exc)
         return _err("internal server error", 500)
+
+    # Include the settlement receipt per x402 spec (PAYMENT-RESPONSE header,
+    # base64-encoded JSON) so compliant client libraries get a verifiable
+    # receipt instead of crashing on a missing header.
+    encoded_settlement = base64.b64encode(json.dumps(settlement).encode()).decode()
+    result.setdefault("headers", {})
+    result["headers"]["PAYMENT-RESPONSE"] = encoded_settlement
+    result["headers"]["Access-Control-Expose-Headers"] = "PAYMENT-RESPONSE"
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -4967,6 +7184,67 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
 # Response:
 #   { ok: true, data: { count: int, results: [...] } }
 # ---------------------------------------------------------------------------
+
+def _cve_actor_discussion_heat(cve_id: str) -> dict:
+    """CVE actor-discussion-heat score -- how often this CVE is actually
+    being discussed in monitored criminal-channel chatter, not just its
+    static CVSS/EPSS severity. Derived entirely from relayshield_intel_iocs
+    (ioc_type="cve"), which extract_iocs() has always extracted per-message
+    but _store_iocs() never persisted until 2026-07-24 -- so history here
+    starts accumulating from that deploy forward, not backfilled from past
+    messages that were never stored this way.
+
+    ioc_value is the table's hash key, so this is a real Query (all
+    occurrences of one exact CVE ID), not the substring table.scan()
+    brand-monitor uses -- ioc_value there needs prefix/contains matching,
+    this doesn't.
+    """
+    table = dynamodb.Table(INTEL_IOCS_TABLE)
+    try:
+        resp = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(cve_id.lower()),
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").eq("cve"),
+        )
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp:
+            resp = table.query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(cve_id.lower()),
+                FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").eq("cve"),
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            items.extend(resp.get("Items", []))
+    except Exception as exc:
+        logger.warning("CVE heat query failed cve_id=%s: %s", cve_id, exc)
+        return {"mentions_30d": 0, "distinct_channels_30d": 0, "tier": "unknown", "last_seen": None}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    recent = []
+    for it in items:
+        try:
+            if datetime.fromisoformat(it["seen_ts"]) >= cutoff:
+                recent.append(it)
+        except (KeyError, ValueError):
+            continue
+
+    mentions = len(recent)
+    channels = len({it.get("channel", "") for it in recent})
+    if mentions >= 10 or channels >= 3:
+        tier = "high"
+    elif mentions >= 3:
+        tier = "medium"
+    elif mentions >= 1:
+        tier = "low"
+    else:
+        tier = "none"
+
+    last_seen = max((it["seen_ts"] for it in items if it.get("seen_ts")), default=None)
+    return {
+        "mentions_30d": mentions,
+        "distinct_channels_30d": channels,
+        "tier": tier,
+        "last_seen": last_seen,
+    }
+
 
 def handle_intel_cve(params: dict, api_key_record: dict | None = None) -> dict:
     cve_id  = (params.get("cve_id") or "").strip().upper()
@@ -4989,6 +7267,7 @@ def handle_intel_cve(params: dict, api_key_record: dict | None = None) -> dict:
             return _ok({"count": 0, "results": []})
 
         item.pop("ttl", None)
+        item["actor_discussion_heat"] = _cve_actor_discussion_heat(cve_id)
         return _ok({"count": 1, "results": [item]})
 
     # Keyword scan — scan table and filter in Python (table is small, <2K rows)
@@ -5181,8 +7460,11 @@ def handle_intel_actor(params: dict, api_key_record: dict | None = None) -> dict
     # Scan MITRE groups for name match
     try:
         resp = mitre_table.scan(
-            FilterExpression=boto3.dynamodb.conditions.Attr("name").contains(actor_name)
-                | boto3.dynamodb.conditions.Attr("aliases").contains(actor_name),
+            FilterExpression=(
+                boto3.dynamodb.conditions.Attr("sk").eq("info") &
+                (boto3.dynamodb.conditions.Attr("name").contains(actor_name)
+                 | boto3.dynamodb.conditions.Attr("aliases").contains(actor_name))
+            ),
         )
         groups = resp.get("Items", [])
     except Exception as exc:
@@ -5190,13 +7472,40 @@ def handle_intel_actor(params: dict, api_key_record: dict | None = None) -> dict
     if not groups:
         return _ok({"actor": actor_name, "matched": False, "profile": None})
     group = groups[0]
-    # Find associated IOCs
-    iocs: list[dict] = []
-    for term in ([actor_name] + (group.get("aliases") or []))[:3]:
+
+    # Real threat-actor -> malware-family -> live-IOC attribution, fixed
+    # 2026-07-16. Previously always empty for two reasons: (1) it filtered
+    # the IOC corpus on a `threat_actor` field that doesn't exist on real
+    # IOC records (the real field is `malware`, a lowercase family name);
+    # (2) relayshield_intel_attack.py never actually populated a group's
+    # associated software/malware list at all (its STIX relationship parser
+    # checked for type "uses" directly, but real STIX 2.1 relationship
+    # objects have type "relationship" with the edge name in a separate
+    # relationship_type field — fixed same day). Now: resolve the group's
+    # real associated malware/tool names via its software_ids list, then
+    # query the IOC corpus's malware-index GSI for each one.
+    software_names: list[str] = []
+    for sid in group.get("software_ids", [])[:30]:
         try:
-            ioc_resp = ioc_table.scan(
-                FilterExpression=boto3.dynamodb.conditions.Attr("threat_actor").contains(term),
-                Limit=100,
+            sw = mitre_table.get_item(Key={"group_id": sid, "sk": f"software:{sid}"}).get("Item")
+        except Exception:
+            sw = None
+        if sw:
+            software_names.append(sw.get("name", ""))
+            software_names.extend(sw.get("aliases", []))
+
+    iocs: list[dict] = []
+    checked_names: set = set()
+    for name in software_names:
+        key = name.strip().lower()
+        if not key or key in checked_names:
+            continue
+        checked_names.add(key)
+        try:
+            ioc_resp = ioc_table.query(
+                IndexName="malware-index",
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("malware").eq(key),
+                Limit=20,
             )
             for item in ioc_resp.get("Items", []):
                 iocs.append({
@@ -5205,8 +7514,9 @@ def handle_intel_actor(params: dict, api_key_record: dict | None = None) -> dict
                     "malware":   item.get("malware", ""),
                     "last_seen": item.get("seen_ts", ""),
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("intel-actor IOC query failed malware=%s: %s", key, exc)
+
     seen_vals: set = set()
     dedup_iocs = []
     for i in iocs:
@@ -5214,43 +7524,42 @@ def handle_intel_actor(params: dict, api_key_record: dict | None = None) -> dict
             seen_vals.add(i["ioc_value"])
             dedup_iocs.append(i)
     return _ok({
-        "actor":           actor_name,
-        "matched":         True,
-        "mitre_id":        group.get("group_id", ""),
-        "aliases":         group.get("aliases", []),
-        "description":     group.get("description", ""),
-        "techniques":      group.get("techniques", []),
-        "target_sectors":  group.get("target_sectors", []),
-        "origin_country":  group.get("origin_country", ""),
-        "associated_iocs": dedup_iocs[:30],
-        "ioc_count":       len(dedup_iocs),
-        "source":          "MITRE ATT&CK + RelayShield IOC corpus",
-        # Actor pivot — related actors sharing techniques or target sectors
-        "related_actors":  _actor_pivot(group, groups),
+        "actor":              actor_name,
+        "matched":            True,
+        "mitre_id":           group.get("group_id", ""),
+        "aliases":            group.get("aliases", []),
+        "description":        group.get("description", ""),
+        "techniques":         group.get("technique_ids", []),
+        "associated_malware": sorted(checked_names),
+        "origin_country":     group.get("country_origin", ""),
+        "associated_iocs":    dedup_iocs[:30],
+        "ioc_count":          len(dedup_iocs),
+        "source":             "MITRE ATT&CK + RelayShield IOC corpus",
+        # Actor pivot — related actors sharing techniques
+        "related_actors":     _actor_pivot(group, groups),
     })
 
 
 def _actor_pivot(group: dict, all_groups: list) -> list[dict]:
-    """Find related threat actors sharing techniques or target sectors."""
-    pivot_techniques = set((group.get("techniques") or [])[:5])
-    pivot_sectors    = set(group.get("target_sectors") or [])
+    """Find related threat actors sharing ATT&CK techniques. MITRE's Groups
+    data doesn't include a "target sectors" concept, so this pivots on
+    technique overlap only."""
+    pivot_techniques = set((group.get("technique_ids") or [])[:10])
     group_id         = group.get("group_id", "")
     related = []
     for g in all_groups:
         if g.get("group_id") == group_id:
             continue
-        g_techniques = set((g.get("techniques") or [])[:5])
-        g_sectors    = set(g.get("target_sectors") or [])
-        shared_ttps     = pivot_techniques & g_techniques
-        shared_sectors  = pivot_sectors & g_sectors
-        if shared_ttps or shared_sectors:
+        g_techniques = set((g.get("technique_ids") or [])[:10])
+        shared_ttps = pivot_techniques & g_techniques
+        if shared_ttps:
             related.append({
-                "actor":           g.get("name", ""),
-                "mitre_id":        g.get("group_id", ""),
-                "origin_country":  g.get("origin_country", ""),
-                "shared_techniques": list(shared_ttps)[:3],
-                "shared_sectors":    list(shared_sectors)[:3],
+                "actor":             g.get("name", ""),
+                "mitre_id":          g.get("group_id", ""),
+                "origin_country":    g.get("country_origin", ""),
+                "shared_techniques": sorted(shared_ttps)[:3],
             })
+    related.sort(key=lambda r: len(r["shared_techniques"]), reverse=True)
     return related[:10]
 
 
@@ -5312,7 +7621,17 @@ def handle_intel_trending(params: dict, api_key_record: dict | None = None) -> d
 # Scans IOC domain corpus and Telegram channel IOCs for brand name patterns.
 # Surfaces typosquat domains, phishing infrastructure, and dark web mentions.
 # Equivalent to RF brand protection / Flare brand monitoring at fraction of cost.
-# $0.25/call, Stripe meter: relayshield_brand_monitor_calls
+# $0.35/call (raised from $0.25 2026-07-24 — see image_logo_mentions below),
+# Stripe meter: relayshield_brand_monitor_calls
+#
+# Image/logo brand monitoring folded in 2026-07-24 (competitive benchmark
+# roadmap item, closes the Intel 471 "text, images, and logos" gap) rather
+# than shipped as a separate endpoint, per founder direction — OCR'd image
+# text from monitored channels (relayshield_intel_monitor.py) is now
+# persisted as ioc_type="image_text" in the same relayshield_intel_iocs
+# table this handler already scans, so it's already covered by the existing
+# substring scan below with zero extra query logic; only the classification
+# breakout (image_logo_mentions) and the price change are new here.
 # ---------------------------------------------------------------------------
 
 def handle_brand_monitor(params: dict) -> dict:
@@ -5342,21 +7661,24 @@ def handle_brand_monitor(params: dict) -> dict:
     malware_c2  = [h for h in hits if h.get("malware")]
     dark_web    = [h for h in hits if h.get("channel", "").startswith("@")
                    or h.get("category") == "credential_exposure"]
+    image_logo  = [h for h in hits if h.get("ioc_type") == "image_text"]
     def _fmt(items: list) -> list:
         return [{"ioc_value": i.get("ioc_value",""), "ioc_type": i.get("ioc_type",""),
                  "source": i.get("channel",""), "malware": i.get("malware",""),
                  "last_seen": i.get("seen_ts","")} for i in items[:20]]
     return _ok({
-        "brand":             brand,
-        "matched":           len(hits) > 0,
-        "total_mentions":    len(hits),
-        "phishing_domains":  len(phishing),
-        "malware_c2":        len(malware_c2),
-        "dark_web_mentions": len(dark_web),
+        "brand":                brand,
+        "matched":              len(hits) > 0,
+        "total_mentions":       len(hits),
+        "phishing_domains":     len(phishing),
+        "malware_c2":           len(malware_c2),
+        "dark_web_mentions":    len(dark_web),
+        "image_logo_mentions":  len(image_logo),
         "hits": {
             "phishing":   _fmt(phishing),
             "malware_c2": _fmt(malware_c2),
             "dark_web":   _fmt(dark_web),
+            "image_logo": _fmt(image_logo),
         },
         "recommendation": (
             "CRITICAL: active brand abuse detected in criminal infrastructure"
@@ -5668,6 +7990,18 @@ def handle_tech_stack_cve(params: dict) -> dict:
     matched.sort(key=lambda x: (x["in_kev"], x["ransomware_campaign"], x["epss_score"]), reverse=True)
     critical = [m for m in matched if m["in_kev"] or m["ransomware_campaign"]]
 
+    # PoC/exploit-availability signal (added 2026-07-26) — deliberately
+    # bounded to the top 3 non-KEV matches, not every matched CVE: a CVE
+    # already in KEV means real attackers are already exploiting it in the
+    # wild, a strictly stronger signal than "a GitHub PoC exists" — so KEV
+    # entries don't need this extra lookup. This is meant to catch the case
+    # a CVE hasn't reached KEV yet but is already publicly exploitable,
+    # which changes its real urgency. Bounded to keep this endpoint fast
+    # and within GitHub's rate limit, not an unbounded per-CVE loop.
+    poc_candidates = [m for m in matched if not m["in_kev"]][:3]
+    for m in poc_candidates:
+        m["poc_available"] = _check_github_poc_exists(m["cve_id"])
+
     return _ok({
         "tech_stack_queried": tech_stack,
         "total_matches":      len(matched),
@@ -5682,6 +8016,33 @@ def handle_tech_stack_cve(params: dict) -> dict:
         "critical_cves": critical[:10],
         "all_matches":   matched[:25],
     })
+
+
+def _check_github_poc_exists(cve_id: str) -> bool | None:
+    """Best-effort check for a public PoC/exploit repo on GitHub for a given
+    CVE ID. Returns None (not False) on any lookup failure -- "unknown" is
+    honest, "no PoC found" is a specific claim this shouldn't make if the
+    API call itself didn't succeed."""
+    if not cve_id:
+        return None
+    try:
+        raw = _secrets_client.get_secret_value(SecretId=GITHUB_SECRET_NAME)["SecretString"].strip()
+        token = json.loads(raw).get("token", raw) if raw.startswith("{") else raw
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "RelayShield-PocCheck/1.0",
+        }
+        req = urllib.request.Request(
+            f"{GITHUB_SEARCH_URL}?q={urllib.parse.quote(cve_id)}+exploit+poc&per_page=1",
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            body = json.loads(resp.read())
+        return int(body.get("total_count", 0)) > 0
+    except Exception as exc:
+        logger.warning("GitHub PoC check failed cve=%s: %s", cve_id, exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -6974,6 +9335,44 @@ def lambda_handler(event: dict, context) -> dict:
             logger.warning("last-alert lookup failed: %s", exc)
             return _ok({"last_alert": None})
 
+    # ── CS Mobile latest-version check — no auth required (runs before onboarding) ─
+    # GET /v1/app/cs-mobile-latest-version
+    # Queries the on-chain Release NFT group under CS Mobile's App NFT via
+    # Helius's DAS-compatible RPC to find the latest published version,
+    # parsed from each release's "Crypto Shield vX.Y.Z" name. No caching --
+    # this is a low-frequency, launch-time-only check for a small user base;
+    # add a cache if usage grows enough for the RPC cost to matter.
+    if method == "GET" and path in ("/v1/app/cs-mobile-latest-version", "/v1/app/cs-mobile-latest-version/"):
+        if not HELIUS_API_KEY:
+            return _err("Helius not configured", 503)
+        import re as _re, http.client as _http, ssl as _ssl, json as _j
+        try:
+            ctx = _ssl.create_default_context()
+            conn = _http.HTTPSConnection("mainnet.helius-rpc.com", timeout=10, context=ctx)
+            rpc_body = _j.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "getAssetsByGroup",
+                "params": {"groupKey": "collection", "groupValue": CS_MOBILE_APP_NFT, "page": 1, "limit": 50},
+            }).encode()
+            conn.request("POST", f"/?api-key={HELIUS_API_KEY}", body=rpc_body,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            result = _j.loads(resp.read())
+            conn.close()
+            items = (result.get("result") or {}).get("items") or []
+            versions = []
+            for item in items:
+                name = ((item.get("content") or {}).get("metadata") or {}).get("name") or ""
+                m = _re.search(r"v(\d+)\.(\d+)\.(\d+)", name)
+                if m:
+                    versions.append(tuple(int(x) for x in m.groups()))
+            if not versions:
+                return _err("no releases found", 502)
+            latest = max(versions)
+            return _ok({"latest_version": f"{latest[0]}.{latest[1]}.{latest[2]}"})
+        except Exception as exc:
+            logger.warning("cs-mobile-latest-version lookup failed: %s", exc)
+            return _err("upstream RPC error", 502)
+
     # ── App feedback submission — no auth required (push_token identifies device) ─
     # POST /v1/app/feedback  { push_token, rating: "up"|"down", comment?: string }
     # One record per device (update_item, not append) — the app only asks once.
@@ -7002,9 +9401,12 @@ def lambda_handler(event: dict, context) -> dict:
             return _err("feedback submission failed", 500)
 
     # ── Public badge endpoint — no auth required ──────────────────────────────
-    # GET /v1/badge?domain=example.com&style=flat|shield
+    # GET/HEAD /v1/badge?domain=example.com&style=flat|shield
     # Returns SVG image with risk level, color-coded, cacheable 1hr
-    if method == "GET" and path in ("/v1/badge", "/v1/badge/"):
+    # HEAD must be accepted too -- uptime monitors (e.g. UptimeRobot) default to
+    # HEAD requests, and this route falling through to the generic "unknown
+    # endpoint" 404 for HEAD only is what made this look like a real outage.
+    if method in ("GET", "HEAD") and path in ("/v1/badge", "/v1/badge/"):
         qp     = event.get("queryStringParameters") or {}
         domain = (qp.get("domain") or "").strip().lower().replace("https://","").replace("http://","").split("/")[0]
         style  = qp.get("style", "flat")   # flat | shield | compact
@@ -7053,8 +9455,7 @@ def lambda_handler(event: dict, context) -> dict:
     # TAXII 2.1 endpoints (GET, intel_access required)
     if path.startswith("/v1/intel/taxii"):
         headers    = event.get("headers") or {}
-        api_key    = (headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or
-                      headers.get("X-API-Key") or headers.get("x-api-key", ""))
+        api_key    = _intel_api_key(headers)
         key_record = _verify_rs_api_key(api_key) if api_key else None
         if not key_record or not key_record.get("intel_access"):
             return {"statusCode": 401, "headers": {"Content-Type": "application/taxii+json;version=2.1"},
@@ -7064,23 +9465,58 @@ def lambda_handler(event: dict, context) -> dict:
             return handle_taxii_discovery({}, key_record)
         if path in ("/v1/intel/taxii/collections/", "/v1/intel/taxii/collections"):
             return handle_taxii_collections({}, key_record)
-        if path.startswith("/v1/intel/taxii/collections/iocs/objects"):
+        # Accept both collection ids. The collections endpoint advertised
+        # "relayshield-iocs" while this router only ever matched "iocs", so any
+        # conformant TAXII client (Elastic, OpenCTI, Anomali) that walks
+        # discovery -> collections -> objects requested the advertised id and
+        # got a 404. Fixed 2026-07-28: the advertised id is now "iocs" to match
+        # what has always actually worked, and "relayshield-iocs" stays routed
+        # so anyone who hand-configured the old advertised id keeps working.
+        if (path.startswith("/v1/intel/taxii/collections/iocs/objects") or
+                path.startswith("/v1/intel/taxii/collections/relayshield-iocs/objects")):
             return handle_taxii_objects({}, key_record, qp)
+        # Single Collection resource, TAXII 2.1 s5.2. Must be matched AFTER the
+        # /objects/ prefixes above, since both live under /collections/{id}/.
+        _coll_prefix = "/v1/intel/taxii/collections/"
+        if path.startswith(_coll_prefix):
+            _cid = path[len(_coll_prefix):].strip("/")
+            if _cid and "/" not in _cid:
+                return handle_taxii_collection({}, key_record, _cid)
         return {"statusCode": 404, "headers": {"Content-Type": "application/taxii+json;version=2.1"},
                 "body": json.dumps({"title": "Not Found"})}
 
     # MISP export (INTEL-6) — same TI subscription gating as TAXII
     if path.startswith("/v1/intel/misp"):
         headers    = event.get("headers") or {}
-        api_key    = (headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or
-                      headers.get("X-API-Key") or headers.get("x-api-key", ""))
+        api_key    = _intel_api_key(headers)
         key_record = _verify_rs_api_key(api_key) if api_key else None
         if not key_record or not key_record.get("intel_access"):
             return {"statusCode": 401, "headers": {"Content-Type": "application/json"},
                     "body": json.dumps({"errors": ["TI subscription required. Pass your RS API key as X-RS-API-KEY."]})}
         qp = event.get("queryStringParameters") or {}
+
+        # MISP-compatible REST surface for Elastic's ti_misp integration, which
+        # POSTs a JSON body here. Must accept a trailing slash too: customers
+        # paste base URLs with and without one.
+        if path.rstrip("/") in ("/v1/intel/misp/attributes/restSearch",):
+            try:
+                misp_body = json.loads(event.get("body") or "{}")
+            except Exception:
+                misp_body = {}
+            if not isinstance(misp_body, dict):
+                misp_body = {}
+            return handle_misp_rest_search(key_record, misp_body)
+
         if path in ("/v1/intel/misp/event", "/v1/intel/misp/event/"):
             return handle_misp_event({}, key_record, qp)
+
+        # MISP instance-identity endpoints required by PyMISP's constructor, and
+        # therefore by misp2sentinel. See _misp_shim.
+        _shim = _misp_shim("/" + path[len("/v1/intel/misp/"):].strip("/")) \
+            if path.startswith("/v1/intel/misp/") else None
+        if _shim:
+            return _shim
+
         return {"statusCode": 404, "headers": {"Content-Type": "application/json"},
                 "body": json.dumps({"errors": ["Not Found"]})}
 
@@ -7132,7 +9568,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     params = _body(event)
     try:
-        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending"):
+        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending", "/v1/account/info"):
             headers    = event.get("headers") or {}
             api_key    = (headers.get("X-API-Key") or headers.get("x-api-key") or
                           headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key", ""))

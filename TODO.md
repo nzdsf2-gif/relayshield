@@ -18,6 +18,38 @@ rather than guessing a slug, and swap it for the direct product-page URL once it
 the AWS Marketplace Management Portal. A guessed slug that 404s is the exact credibility problem
 that caused the card to be pulled in the first place.
 
+## 👀 WATCHLIST-BUZZ-1: Buzz (Block/Jack Dorsey) — revisit at the Bundle B launch
+
+Added 2026-07-30. **Deliberately deferred, not dismissed.** Founder decision: join when the timing is
+better, i.e. alongside the Bundle B launch rather than Bundle D's.
+
+**What it is:** a group-chat platform for teams *and their AI agents*, launched 2026-07-21 by Block.
+Built on Nostr, Apache 2.0, self-hostable, and it ships CLI harnesses for **Claude Code, Goose and
+Codex**. Channels, threads, DMs, canvases, audit log, automated workflows and early Git integration.
+Positioned explicitly against Slack + GitHub.
+
+**Why it is on the watchlist rather than the launch plan:** as a *distribution channel* it is worth
+approximately nothing today — the user base is days old. Announcing there reaches nobody.
+
+**Why it is worth watching anyway:** it is the sharpest thesis match we have found. A workspace where
+agents are first-class participants, hold credentials, and act autonomously **is** the Bundle D /
+Bundle B attack surface. Agents in a Buzz workspace will accumulate LLM provider keys, connect to MCP
+servers, and pull from package registries. The play is **being the agent-security integration while
+the integration surface is still empty**, not posting an announcement into an empty room.
+
+**Re-evaluate at the Bundle B launch. Check then:**
+1. Does Buzz have a published integration/app surface (bot API, agent hooks, an app directory)? If it
+   has a public self-serve listing path, it passes part two of the flywheel test in
+   [[project-platform-integration-order]].
+2. Rough active-workspace count. If it is still tiny, defer again — the thesis being right does not
+   make the audience exist.
+3. Whether the Claude Code harness gives a natural hook for the same mandatory-gate pattern already
+   shipped against LangChain (see `project_crewai_mandatory_gate`) — that is the cheapest possible
+   first integration if so.
+
+**Do not build ahead of that check.** The whole reason this is on a watchlist is that the platform is
+too young for its integration surface to be stable.
+
 ## ⚡ 2026-07-30 — BUNDLE-B-1: build AWS Marketplace Bundle B "Attack Surface & Supply Chain"
 
 Now unblocked — AWS serializes change sets per seller account, and Bundle D's is finally clear.

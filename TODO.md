@@ -35,10 +35,24 @@ remains is one decision only the founder can make, then a sequence.
   or installs. Its only real value is not having to redo Firebase and not updating scattered
   references.
 
+**CORRECTION 2026-07-30: the live version is v1.4.0, not v1.3.0.** Founder caught this. v1.4.0/build 4
+has been the published version since 2026-07-11 (confirmed on Seeker Tracker, item 23); v1.3.0 is
+two releases back. v1.5.0 is built but was rejected on the cert mismatch and has never been live.
+
+**THE REVIEWS ARE LOST EITHER WAY. This must not drive the decision.** Founder's concern is the two
+five-star reviews (item 65). Point 4 of the mod's reply, *"nothing carries over to the new app,"*
+applies to **both** paths, because both create a new app record and delete the old one. Certificate
+rotation is not supported, so a new record is mandatory no matter what the package name is. Renaming
+does not cause the loss; the forced new record does. There is no path that preserves them.
+
+**Worth asking the mod before deciding, since it is free and they have been responsive:** can the two
+reviews be migrated or manually reinstated on the new record? If yes, that changes the calculus. Ask
+in the existing `#dev-answers` thread rather than opening a second ticket.
+
 **Recommendation: new package name, submit-new-first.** The founder's own framing is that this gates
-real business, and that points at the availability gap. The old listing (v1.3.0) is live and working
-today; the keep-the-name path deliberately takes it down and leaves it down for an unknown review
-period, on a store whose review timing we cannot predict. The cost of the new-name path is bounded
+real business, and that points at the availability gap. The live v1.4.0 listing works today; the
+keep-the-name path deliberately takes it down and leaves it down for an unknown review period, on a
+store whose review timing we cannot predict. The cost of the new-name path is bounded
 and known: register a second Android app in Firebase, pull a new `google-services.json`, rebuild, and
 update the references below. That is founder console work plus a rebuild, not days of lost
 availability.

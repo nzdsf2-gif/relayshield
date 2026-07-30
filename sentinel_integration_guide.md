@@ -12,8 +12,8 @@ workspace with the **Threat Intelligence** solution installed from Content hub (
 Contributor at the resource group level).
 
 > **Read this first if you have used any earlier Sentinel threat-intel guide.**
-> The `ThreatIntelligenceIndicator` table **stopped receiving data on 31 July 2025 and retired on
-> 31 May 2026**. Every query, analytics rule, workbook and automation must target
+> The `ThreatIntelligenceIndicator` table **stopped receiving data on 31 July 2025 and retired on 31 May 2026**.
+> Every query, analytics rule, workbook and automation must target
 > **`ThreatIntelIndicators`** (and `ThreatIntelObjects` for actors and relationships). A rule still
 > pointing at the legacy table matches nothing and raises no error — the worst failure mode a
 > detection control has.
@@ -211,8 +211,8 @@ guide, by running the OASIS reference TAXII client against production:
    so object polling failed without ever reaching the objects endpoint.
 3. The object envelope was served as `application/stix+json` rather than
    `application/taxii+json;version=2.1`.
-4. SHA-256 patterns were emitted as `[file:hashes.SHA-256 = '...']`, which is **invalid STIX 2.1
-   patterning** — the hash key must be quoted. Sentinel derives `ObservableKey`/`ObservableValue` by
+4. SHA-256 patterns were emitted as `[file:hashes.SHA-256 = '...']`, which is **invalid STIX 2.1 patterning**.
+   The hash key must be quoted. Sentinel derives `ObservableKey`/`ObservableValue` by
    parsing the pattern, so SHA-256 indicators would have arrived with both fields empty.
 
 **If you configured RelayShield in Sentinel before 2026-07-30**, remove and re-add the connector so

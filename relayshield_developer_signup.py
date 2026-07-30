@@ -1059,6 +1059,62 @@ LANDING_PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RelayShield API — Security Intelligence for Developers</title>
+<!--
+  Discoverability block added 2026-07-30. Until then this page had NO meta
+  description, NO Open Graph tags, no canonical and no structured data, while
+  blog.relayshield.net and relayshield.net both had the full set. This is the
+  page every blog post, integration listing and community message points at,
+  so every one of those links rendered as a bare URL with no title card in
+  Slack, Discord, LinkedIn, X and Telegram -- throwing away the click-through
+  at the last inch of a funnel we were paying for everywhere else.
+-->
+<meta name="description" content="Threat intelligence and identity-compromise APIs for developers and AI agents. 4.5M+ IOCs from 83+ criminal Telegram channels and 20 feeds. Breach, infostealer, SIM-swap, LLM credential exposure, MCP registry risk. Pay-as-you-go, no minimum.">
+<link rel="canonical" href="https://api.relayshield.net/developers">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="RelayShield">
+<meta property="og:url" content="https://api.relayshield.net/developers">
+<meta property="og:title" content="RelayShield API — Security Intelligence for Developers &amp; Agents">
+<meta property="og:description" content="4.5M+ IOCs from 83+ criminal Telegram channels and 20 authoritative feeds. Breach, infostealer, SIM-swap, LLM credential exposure and MCP registry risk, over REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
+<meta property="og:image" content="https://blog.relayshield.net/developers-og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="RelayShield API — security intelligence for developers and agents">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="RelayShield API — Security Intelligence for Developers &amp; Agents">
+<meta name="twitter:description" content="4.5M+ IOCs from 83+ criminal Telegram channels and 20 authoritative feeds. REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
+<meta name="twitter:image" content="https://blog.relayshield.net/developers-og.png">
+
+<link rel="alternate" type="application/json" href="https://api.relayshield.net/openapi.json" title="RelayShield OpenAPI specification">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://relayshield.net/#org",
+      "name": "RelayShield",
+      "url": "https://relayshield.net",
+      "email": "support@relayshield.net"
+    },
+    {
+      "@type": "WebAPI",
+      "name": "RelayShield API",
+      "description": "Threat intelligence and identity-compromise APIs for developers and AI agents, covering breach exposure, infostealer logs, SIM-swap, domain lookalikes, LLM credential exposure and MCP registry risk.",
+      "url": "https://api.relayshield.net/developers",
+      "documentation": "https://api.relayshield.net/developers",
+      "provider": {"@id": "https://relayshield.net/#org"},
+      "termsOfService": "https://relayshield.net",
+      "potentialAction": {
+        "@type": "ConsumeAction",
+        "target": "https://api.relayshield.net/openapi.json"
+      }
+    }
+  ]
+}
+</script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -1763,6 +1819,101 @@ agent = create_agent(model, tools=tools, middleware=[gate])</code></pre>
 """
 
 
+def _banner(kicker: str, body_html: str) -> str:
+    return f"""
+<div style="background:var(--surface);border:1px solid var(--accent);border-radius:10px;padding:1.25rem 1.5rem;margin:1.5rem 0 0">
+  <p style="color:var(--accent);font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin:0 0 .5rem">{kicker}</p>
+  {body_html}
+  <p style="color:var(--muted);font-size:.85rem;margin:.9rem 0 0">Need a key? <a href="#get-started" style="color:var(--accent);font-weight:600">Grab one below</a> &mdash; pay per call, no monthly minimum.</p>
+</div>
+"""
+
+
+def _p(text: str) -> str:
+    return f'<p style="color:var(--text);font-size:.95rem;margin:0">{text}</p>'
+
+
+# Per-source landing variants, added 2026-07-30.
+#
+# One generic page was serving LangChain developers, SOC engineers, MSPs and AWS
+# Marketplace buyers identically, so everyone arriving from a specific integration
+# had to re-find the one thing that brought them. The LangChain banner had already
+# shown this works; this generalises it to every channel we actually publish on.
+#
+# Matched on the Referer host, or forced with ?src=<key> so a link we control can
+# select its own framing even when the referrer is stripped (which is what happens
+# with most Slack, Discord and native app clicks).
+_SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
+    "langchain": (("langchain.com",), _LANGCHAIN_BANNER),
+    "n8n": (
+        ("n8n.io", "creators.n8n.io"),
+        _banner("Arriving from n8n", _p(
+            'The <code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">n8n-nodes-relayshield</code> '
+            "community node is verified and installable directly on n8n Cloud &mdash; search for RelayShield on the canvas. "
+            "It exposes breach, infostealer, SIM-swap and domain-lookalike checks as native nodes, so identity risk drops "
+            "into an existing onboarding, offboarding or alert-triage workflow without custom HTTP nodes.")),
+    ),
+    "elastic": (
+        ("elastic.co", "discuss.elastic.co"),
+        _banner("Arriving from Elastic", _p(
+            "RelayShield's IOC corpus ingests into Elastic Security through the <b>Custom Threat Intelligence</b> "
+            "integration (<code>ti_custom</code>) with its TAXII 2.1 mode &mdash; configuration only, no development. "
+            'Field mappings were measured against a live 8.15 stack: see the '
+            '<a href="https://blog.relayshield.net" style="color:var(--accent);font-weight:600">Elastic ingestion guide</a>.')),
+    ),
+    "sentinel": (
+        ("learn.microsoft.com", "portal.azure.com", "security.microsoft.com"),
+        _banner("Arriving from Microsoft Sentinel", _p(
+            "Point Sentinel's <b>Threat Intelligence - TAXII</b> connector at "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">https://api.relayshield.net/v1/intel/taxii/</code> '
+            "with collection ID <code>iocs</code>. Indicators land in <code>ThreatIntelIndicators</code>, ready for "
+            "analytics rules. Note the legacy <code>ThreatIntelligenceIndicator</code> table retired 2026-05-31.")),
+    ),
+    "xsoar": (
+        ("xsoar.pan.dev", "paloaltonetworks.com", "demisto.com"),
+        _banner("Arriving from Cortex XSOAR", _p(
+            "The RelayShield content pack implements the generic <code>domain</code>, <code>ip</code> and "
+            "<code>email</code> reputation commands, so existing enrichment playbooks pick it up as an additional "
+            "source with no playbook changes &mdash; plus MCP registry risk, certificate expiry and supply-chain "
+            "vendor risk commands.")),
+    ),
+    "aws": (
+        ("aws.amazon.com", "console.aws.amazon.com"),
+        _banner("Arriving from AWS Marketplace", _p(
+            "RelayShield is available through AWS Marketplace with billing handled by AWS &mdash; no separate account "
+            "or payment method required. The <b>Agentic Attack Surface</b> bundle covers LLM credential exposure, MCP "
+            "registry risk, prompt-injection breach detection, agent identity risk scoring and framework CVE monitoring.")),
+    ),
+    "github": (
+        ("github.com",),
+        _banner("Arriving from GitHub", _p(
+            "Client libraries and integrations are open source: LangChain, LlamaIndex, OpenAI Agents SDK, n8n, Zapier "
+            "and an MCP server. Every one of them talks to the same REST API documented below, so you can drop to raw "
+            "HTTP whenever the wrapper is in the way.")),
+    ),
+    "huggingface": (
+        ("huggingface.co", "hf.space"),
+        _banner("Arriving from Hugging Face", _p(
+            "The RelayShield MCP server exposes 13 tools over the Model Context Protocol, and "
+            "<code>check_llm_credential_exposure</code> works with no API key at all on a shared demo quota &mdash; "
+            "check whether your own LLM provider keys are circulating in stealer logs before you commit to anything.")),
+    ),
+}
+
+
+def _banner_for(referer: str, query_params: dict) -> str:
+    """Pick the landing variant from an explicit ?src= or the Referer host."""
+    src = (query_params.get("src") or "").strip().lower()
+    if src in _SOURCE_BANNERS:
+        return _SOURCE_BANNERS[src][1]
+    host = (referer or "").lower()
+    if host:
+        for _key, (hosts, html) in _SOURCE_BANNERS.items():
+            if any(h in host for h in hosts):
+                return html
+    return ""
+
+
 def handle_landing_page(query_params: dict | None = None, referer: str = "") -> dict:
     query_params = query_params or {}
     # Email-capture prompt for AWS Marketplace subscribers (added 2026-07-09).
@@ -1785,7 +1936,7 @@ def handle_landing_page(query_params: dict | None = None, referer: str = "") -> 
     # Referrer-aware framing: developers arriving from the LangChain integration
     # tables land on a general API page and have to hunt for the piece that
     # brought them. Swap in a LangChain-specific quickstart above the fold.
-    banner = _LANGCHAIN_BANNER if "langchain.com" in (referer or "").lower() else ""
+    banner = _banner_for(referer, query_params)
     return _html(LANDING_PAGE.replace("<!--REFERRER_BANNER-->", banner))
 
 
@@ -2090,6 +2241,7 @@ def lambda_handler(event: dict, context) -> dict:
     # through here doesn't affect it — see handle_landing_page's gating.
     if method in ("GET", "HEAD") and path in ("/developers", "/developers/"):
         return handle_landing_page(event.get("queryStringParameters") or {}, referer)
+
 
     if method in ("GET", "HEAD") and path in ("/developer/success", "/developer/success/"):
         return handle_success_page()

@@ -9289,6 +9289,300 @@ ROUTES = {
 PAYG_PATHS = set(PAYG_PRICE_UNITS.keys()) | {"/v1/payg/result/"}
 
 
+# ---------------------------------------------------------------------------
+# Machine-readable discovery surfaces — robots.txt, sitemap.xml, llms.txt,
+# openapi.json (added 2026-07-30)
+#
+# All four are generated from the live route tables rather than hand-maintained,
+# so the published surface cannot drift from what the API actually serves. That
+# matters most for openapi.json: a spec that lies about an endpoint is worse for
+# an agent than no spec at all.
+# ---------------------------------------------------------------------------
+
+PUBLIC_BASE_URL = "https://api.relayshield.net"
+
+# Guides that should be indexed in their own right. Each is a real search query
+# with buying intent, which a post buried in a blog feed does not capture.
+_GUIDE_PAGES = [
+    ("/guides/microsoft-sentinel", "Ingest RelayShield threat intelligence into Microsoft Sentinel"),
+    ("/guides/elastic-security",   "Ingest RelayShield threat intelligence into Elastic Security"),
+]
+
+
+def _text_response(body: str, content_type: str, max_age: int = 3600) -> dict:
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": content_type, "Cache-Control": f"public, max-age={max_age}"},
+        "body": body,
+    }
+
+
+def handle_robots_txt() -> dict:
+    body = (
+        "User-agent: *\n"
+        "Allow: /developers\n"
+        "Allow: /guides/\n"
+        "Allow: /llms.txt\n"
+        "Allow: /openapi.json\n"
+        # Authenticated and machine-only surfaces. Disallowing them keeps crawl
+        # budget on the pages that can actually convert, and keeps 401 bodies
+        # out of search results.
+        "Disallow: /v1/\n"
+        "Disallow: /developer/\n"
+        "Disallow: /marketplace/\n"
+        "\n"
+        f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+    )
+    return _text_response(body, "text/plain; charset=utf-8", 86400)
+
+
+def handle_sitemap_xml() -> dict:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    urls = [("/developers", "1.0")] + [(p, "0.8") for p, _t in _GUIDE_PAGES]
+    entries = "".join(
+        f"  <url><loc>{PUBLIC_BASE_URL}{loc}</loc><lastmod>{today}</lastmod>"
+        f"<changefreq>weekly</changefreq><priority>{pri}</priority></url>\n"
+        for loc, pri in urls
+    )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{entries}"
+        "</urlset>\n"
+    )
+    return _text_response(body, "application/xml; charset=utf-8", 86400)
+
+
+def handle_llms_txt() -> dict:
+    """https://llmstxt.org/ — a plain-text entry point for LLMs and coding agents."""
+    lines = [
+        "# RelayShield",
+        "",
+        "> Threat intelligence and identity-compromise APIs for developers and AI agents.",
+        "> Breach exposure, infostealer logs, SIM-swap, domain lookalikes, LLM credential",
+        "> exposure and MCP registry risk, over REST, MCP, STIX/TAXII 2.1, MISP and x402.",
+        "",
+        "Authentication: send your key as the `X-RS-API-KEY` header. Pay-as-you-go with no",
+        "monthly minimum; `/v1/payg/*` endpoints accept x402 USDC payment with no API key.",
+        "Get a key at https://api.relayshield.net/developers",
+        "",
+        "## Machine-readable",
+        "",
+        f"- [OpenAPI specification]({PUBLIC_BASE_URL}/openapi.json): every metered and PAYG endpoint, with prices",
+        f"- [Service discovery]({PUBLIC_BASE_URL}/): endpoint inventory as JSON",
+        "",
+        "## Threat intelligence feeds",
+        "",
+        f"- [STIX/TAXII 2.1]({PUBLIC_BASE_URL}/v1/intel/taxii/): TAXII 2.1 server, collection id `iocs`. Requires a TI subscription.",
+        f"- [MISP REST]({PUBLIC_BASE_URL}/v1/intel/misp/): MISP-compatible `attributes/restSearch`. Requires a TI subscription.",
+        "",
+        "## Integration guides",
+        "",
+    ]
+    lines += [f"- [{title}]({PUBLIC_BASE_URL}{loc})" for loc, title in _GUIDE_PAGES]
+    lines += [
+        "",
+        "## Endpoints",
+        "",
+    ]
+    for path in sorted(PAYG_DESCRIPTIONS):
+        name = path.rsplit("/", 1)[-1]
+        price = PAYG_PRICE_UNITS.get(path)
+        price_s = f" (${price / 1_000_000:.2f}/call)" if price else ""
+        desc = " ".join(PAYG_DESCRIPTIONS[path].split())
+        lines.append(f"- `POST /v1/metered/{name}`{price_s}: {desc}")
+    lines.append("")
+    return _text_response("\n".join(lines), "text/plain; charset=utf-8")
+
+
+def handle_guide_page(slug: str) -> dict:
+    guide = _GUIDE_HTML.get(slug)
+    if not guide:
+        return {"statusCode": 404, "headers": {"Content-Type": "text/html; charset=utf-8"},
+                "body": "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Not found</title></head>"
+                        "<body><p>No such guide. See "
+                        "<a href=\"https://api.relayshield.net/developers\">api.relayshield.net/developers</a>.</p>"
+                        "</body></html>"}
+    url = f"{PUBLIC_BASE_URL}/guides/{slug}"
+    body = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{guide['title']} — RelayShield</title>
+<meta name="description" content="{guide['desc']}">
+<link rel="canonical" href="{url}">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="RelayShield">
+<meta property="og:url" content="{url}">
+<meta property="og:title" content="{guide['title']}">
+<meta property="og:description" content="{guide['desc']}">
+<meta property="og:image" content="https://blog.relayshield.net/developers-og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{guide['title']}">
+<meta name="twitter:description" content="{guide['desc']}">
+<meta name="twitter:image" content="https://blog.relayshield.net/developers-og.png">
+<script type="application/ld+json">
+{{"@context":"https://schema.org","@type":"TechArticle","headline":{json.dumps(guide['title'])},
+"description":{json.dumps(guide['desc'])},"url":{json.dumps(url)},
+"publisher":{{"@type":"Organization","name":"RelayShield","url":"https://relayshield.net"}},
+"mainEntityOfPage":{json.dumps(url)}}}
+</script>
+<style>
+  *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+  :root{{--bg:#0d0f14;--surface:#161a23;--border:#242836;--accent:#6c63ff;--text:#e8eaf0;--muted:#8b91a8}}
+  body{{background:var(--bg);color:var(--text);line-height:1.7;
+       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}}
+  .wrap{{max-width:820px;margin:0 auto;padding:2.5rem 1.5rem 5rem}}
+  nav{{margin-bottom:2.5rem;font-size:.9rem}}
+  nav a{{color:var(--accent);text-decoration:none;font-weight:600}}
+  h1{{font-size:2.1rem;line-height:1.25;margin:0 0 1.5rem;font-weight:800}}
+  h2{{font-size:1.4rem;margin:2.5rem 0 .9rem;font-weight:700}}
+  h3{{font-size:1.1rem;margin:2rem 0 .7rem;font-weight:700}}
+  p,ul,ol{{margin:0 0 1.1rem}} ul,ol{{padding-left:1.4rem}} li{{margin-bottom:.4rem}}
+  a{{color:var(--accent)}}
+  code{{background:var(--surface);border:1px solid var(--border);border-radius:5px;
+        padding:.12rem .38rem;font-size:.88em;word-break:break-word}}
+  pre{{background:var(--surface);border:1px solid var(--border);border-radius:9px;
+       padding:1rem 1.1rem;overflow-x:auto;margin:0 0 1.3rem}}
+  pre code{{background:none;border:none;padding:0;font-size:.85rem;line-height:1.6}}
+  blockquote{{border-left:3px solid var(--accent);padding:.2rem 0 .2rem 1.1rem;
+              margin:0 0 1.1rem;color:var(--muted)}}
+  table{{width:100%;border-collapse:collapse;margin:0 0 1.4rem;font-size:.92rem;display:block;overflow-x:auto}}
+  th,td{{border:1px solid var(--border);padding:.6rem .8rem;text-align:left}}
+  th{{background:var(--surface);font-weight:700}}
+  hr{{border:none;border-top:1px solid var(--border);margin:2.5rem 0}}
+  footer{{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--border);
+          color:var(--muted);font-size:.88rem}}
+  .cta{{background:var(--surface);border:1px solid var(--accent);border-radius:10px;
+        padding:1.3rem 1.5rem;margin:2.5rem 0 0}}
+</style>
+</head>
+<body><div class="wrap">
+<nav><a href="{PUBLIC_BASE_URL}/developers">&larr; RelayShield API</a></nav>
+{guide['html']}
+<div class="cta">
+  <p style="margin:0 0 .5rem;font-weight:700">Need an API key?</p>
+  <p style="margin:0;color:var(--muted)">Pay per call, no monthly minimum &mdash;
+  <a href="{PUBLIC_BASE_URL}/developers">api.relayshield.net/developers</a></p>
+</div>
+<footer>RelayShield LLC &middot; <a href="https://relayshield.net">relayshield.net</a> &middot;
+<a href="mailto:support@relayshield.net">support@relayshield.net</a></footer>
+</div></body></html>"""
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=3600"},
+        "body": body,
+    }
+
+
+def handle_openapi() -> dict:
+    paths: dict = {}
+    for payg_path in sorted(PAYG_DESCRIPTIONS):
+        name = payg_path.rsplit("/", 1)[-1]
+        price = PAYG_PRICE_UNITS.get(payg_path)
+        price_note = f" Price: ${price / 1_000_000:.2f} per call." if price else ""
+        desc = " ".join(PAYG_DESCRIPTIONS[payg_path].split()) + price_note
+        # The request body differs per endpoint and is documented in the
+        # description rather than schema'd here. Publishing a precise schema we
+        # have not verified per endpoint would be worse than publishing none --
+        # an agent would generate calls against it and get 400s.
+        body_schema = {
+            "type": "object",
+            "additionalProperties": True,
+            "description": "Endpoint-specific parameters. See the description and "
+                           "https://api.relayshield.net/developers for the fields each endpoint takes.",
+        }
+        ok = {
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean"},
+                "data": {"type": "object", "additionalProperties": True},
+            },
+        }
+        paths[f"/v1/metered/{name}"] = {
+            "post": {
+                "operationId": f"metered_{name.replace('-', '_')}",
+                "summary": name.replace("-", " ").title(),
+                "description": desc,
+                "security": [{"ApiKeyAuth": []}],
+                "requestBody": {"required": True, "content": {"application/json": {"schema": body_schema}}},
+                "responses": {
+                    "200": {"description": "Success", "content": {"application/json": {"schema": ok}}},
+                    "401": {"description": "Missing or invalid API key."},
+                    "402": {"description": "Payment required: no active subscription or credits."},
+                },
+            }
+        }
+        paths[f"/v1/payg/{name}"] = {
+            "post": {
+                "operationId": f"payg_{name.replace('-', '_')}",
+                "summary": f"{name.replace('-', ' ').title()} (x402 pay-per-call)",
+                "description": desc + " No API key required; responds 402 with x402 payment "
+                                      "requirements, payable in USDC on Base or Solana.",
+                "requestBody": {"required": True, "content": {"application/json": {"schema": body_schema}}},
+                "responses": {
+                    "200": {"description": "Success", "content": {"application/json": {"schema": ok}}},
+                    "402": {"description": "x402 payment required. Retry with an X-PAYMENT header."},
+                },
+            }
+        }
+
+    spec = {
+        "openapi": "3.1.0",
+        "info": {
+            "title": "RelayShield API",
+            "version": "1.0",
+            "summary": "Threat intelligence and identity-compromise APIs for developers and AI agents.",
+            "description": (
+                "RelayShield exposes breach, infostealer, SIM-swap, domain-lookalike, LLM credential "
+                "exposure and MCP registry risk checks over a metered REST API. The same corpus is "
+                "available as a STIX/TAXII 2.1 feed and a MISP-compatible REST surface for SIEM "
+                "ingestion. Get a key at https://api.relayshield.net/developers"
+            ),
+            "contact": {"name": "RelayShield", "email": "support@relayshield.net",
+                        "url": "https://api.relayshield.net/developers"},
+        },
+        "servers": [{"url": PUBLIC_BASE_URL}],
+        "components": {
+            "securitySchemes": {
+                "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-RS-API-KEY"}
+            }
+        },
+        "paths": paths,
+    }
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+        },
+        "body": json.dumps(spec),
+    }
+
+
+# Rendered integration guides, embedded 2026-07-30. Served as their own indexed
+# pages at /guides/<slug> rather than only as blog posts: "ingest threat intel
+# into Sentinel" is a search query with buying intent and evergreen value, which
+# a post buried in a reverse-chronological feed does not capture. Generated from
+# the .md sources with build_blog.py's md_to_html, the same renderer the blog
+# uses. Regenerate from source rather than editing the HTML here.
+_GUIDE_HTML = {
+"elastic-security": {
+"desc": "Configure Elastic's Custom Threat Intelligence integration against RelayShield's TAXII 2.1 feed. Includes measured ECS field mappings and Indicator Match rule setup.",
+"html": "<h1>Ingesting RelayShield Threat Intelligence into Elastic Security</h1>\n<p>RelayShield serves its IOC corpus over <strong>STIX 2.1 / TAXII 2.1</strong> and a <strong>MISP-compatible REST API</strong>.</p>\n<p>Elastic Security ingests both through integrations it already ships, so this is a configuration task,</p>\n<p>not a development one.</p>\n<p><strong>What you get:</strong> 4.5M+ indicators sourced from 83+ criminal Telegram marketplaces and 20</p>\n<p>authoritative feeds, flowing into Elastic's <code>logs-ti_*</code> indices where they enrich alerts and power</p>\n<p>Indicator Match detection rules.</p>\n<p><strong>Requirements:</strong> a RelayShield API key with a Threat Intelligence subscription, and Elastic Stack</p>\n<p>8.x or later (Elastic Cloud or self-managed) with Fleet and an Elastic Agent.</p>\n<blockquote>Every field name, integration name and mapping below was verified against a live Elasticsearch</blockquote>\n<blockquote>8.15 stack ingesting the production RelayShield feed. If you followed an earlier version of this</blockquote>\n<blockquote>guide, see the note at the end \u2014 the integration name and two of the rule mappings have changed.</blockquote>\n<hr>\n<h2>Option A \u2014 STIX/TAXII via Custom Threat Intelligence (recommended)</h2>\n<p>Use the <strong>Custom Threat Intelligence</strong> integration (package <code>ti_custom</code>), which has a built-in</p>\n<p>TAXII 2.1 mode. Elastic does not ship a generic \"TAXII\" integration; this is the one.</p>\n<h3>1. Confirm your key works</h3>\n<pre><code>curl -s https://api.relayshield.net/v1/intel/taxii/ \\\n  -H &quot;Authorization: Bearer YOUR_API_KEY&quot;</code></pre>\n<p>A valid key returns the TAXII discovery document. <code>X-RS-API-KEY: YOUR_API_KEY</code> also works and is</p>\n<p>equivalent \u2014 use whichever your tooling prefers. Without a valid key you get <code>401</code>, which is a useful</p>\n<p>way to confirm the endpoint is reachable before adding credentials.</p>\n<h3>2. Add the integration in Kibana</h3>\n<p><strong>Management \u2192 Integrations \u2192 Custom Threat Intelligence \u2192 Add</strong></p>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>URL</td><td><code>https://api.relayshield.net/v1/intel/taxii/collections/iocs/objects/</code></td></tr><tr><td>Enable TAXII 2.1</td><td><strong>on</strong></td></tr><tr><td>API Key</td><td>your RelayShield API key</td></tr><tr><td>API Key Type</td><td><code>Bearer</code></td></tr><tr><td>Accept header value</td><td>leave default (<code>application/taxii+json;version=2.1</code>)</td></tr><tr><td>Interval</td><td><code>1h</code> to start; tighten only if your use case needs it</td></tr><tr><td>IOC Expiration Duration</td><td>leave default</td></tr></tbody></table>\n<p>The collection is part of the URL \u2014 there is no separate \"Collection ID\" field. The trailing slash is</p>\n<p>optional.</p>\n<p><strong>On API Key Type:</strong> the integration sends your key as <code>Authorization: &lt;API Key Type&gt; &lt;API Key&gt;</code>.</p>\n<p><code>Bearer</code> is the default and works. It cannot send a custom header name, which is why the URL above</p>\n<p>is authenticated with <code>Authorization</code> rather than <code>X-RS-API-KEY</code>.</p>\n<p><strong>On IOC Expiration Duration:</strong> RelayShield emits <code>valid_until</code> on every indicator (90 days from the</p>\n<p>sighting), so expiry is handled for you regardless of what you set here.</p>\n<h3>3. Confirm data is arriving</h3>\n<p>In <strong>Discover</strong>, query the threat intel data stream:</p>\n<pre><code>data_stream.dataset : &quot;ti_custom.indicator&quot;</code></pre>\n<p>Indicators land with <code>threat.indicator.type</code> set to <code>ipv4-addr</code>, <code>domain-name</code>, <code>url</code>, <code>file</code> or</p>\n<p><code>email-addr</code> depending on the IOC.</p>\n<hr>\n<h2>Option B \u2014 MISP-compatible REST API</h2>\n<p>If you already run Elastic's <strong>MISP</strong> integration, RelayShield can be added as an additional source</p>\n<p>rather than replacing your existing one.</p>\n<p><strong>Management \u2192 Integrations \u2192 MISP \u2192 Add</strong>, and enable the <strong>Threat Attributes</strong> data stream:</p>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>URL</td><td><code>https://api.relayshield.net/v1/intel/misp</code></td></tr><tr><td>API Key / token</td><td>your RelayShield API key</td></tr><tr><td>Interval</td><td><code>1h</code></td></tr></tbody></table>\n<p>The integration appends <code>/attributes/restSearch</code> to that base URL and sends your key in the</p>\n<p><code>Authorization</code> header \u2014 both are handled. Confirm ingestion with:</p>\n<pre><code>data_stream.dataset : &quot;ti_misp.threat_attributes&quot;</code></pre>\n<p>Attributes are returned with MISP types <code>ip-dst</code>, <code>domain</code>, <code>url</code>, <code>sha256</code> and <code>email-src</code>, which</p>\n<p>Elastic maps to the same <code>threat.indicator.type</code> values as Option A.</p>\n<hr>\n<h2>Using the data</h2>\n<h3>Enrichment</h3>\n<p>Once indicators are flowing, Elastic's built-in <strong>Threat Intel enrichment</strong> matches them against your</p>\n<p>existing logs automatically. No rule authoring needed \u2014 matches appear on the alert under</p>\n<p><code>threat.enrichments</code>.</p>\n<h3>Indicator Match rule</h3>\n<p>For explicit detection, create a rule under <strong>Security \u2192 Rules \u2192 Create new rule \u2192 Indicator Match</strong>:</p>\n<table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Index patterns</td><td>your source logs (e.g. <code>logs-*</code>, <code>filebeat-*</code>)</td></tr><tr><td>Indicator index</td><td><code>logs-ti_*</code></td></tr><tr><td>Indicator mapping</td><td><code>destination.ip</code> \u2192 <code>threat.indicator.ip</code></td></tr><tr><td></td><td><code>source.ip</code> \u2192 <code>threat.indicator.ip</code></td></tr><tr><td></td><td><code>dns.question.name</code> \u2192 <code>threat.indicator.url.original</code></td></tr><tr><td></td><td><code>url.full</code> \u2192 <code>threat.indicator.url.original</code></td></tr><tr><td></td><td><code>file.hash.sha256</code> \u2192 <code>threat.indicator.file.hash.sha256</code></td></tr></tbody></table>\n<p><strong>Note on domain and URL indicators.</strong> Both land in <code>threat.indicator.url.original</code>. There is no</p>\n<p><code>threat.indicator.url.domain</code> or <code>threat.indicator.url.full</code> field on these documents \u2014 mapping to</p>\n<p>either produces a rule that never matches and raises no error, so it looks configured while doing</p>\n<p>nothing. Values are stored as arrays, which Indicator Match handles natively but is worth knowing if</p>\n<p>you write your own queries.</p>\n<p>Set severity to match your triage process. Because RelayShield's corpus is sourced from criminal</p>\n<p>marketplaces rather than general reputation feeds, a match generally warrants investigation rather</p>\n<p>than informational logging.</p>\n<h3>A note on timing</h3>\n<p>RelayShield's Telegram-sourced indicators typically surface <strong>24 to 72 hours ahead</strong> of public feeds,</p>\n<p>because the pipeline collects from the marketplaces where credentials and infrastructure are sold</p>\n<p>rather than waiting for downstream aggregation. That lead time is the reason to run this alongside,</p>\n<p>not instead of, your existing feeds.</p>\n<hr>\n<h2>Troubleshooting</h2>\n<table><thead><tr><th>Symptom</th><th>Cause</th></tr></thead><tbody><tr><td><code>401 Unauthorized</code></td><td>Key is missing, wrong, or lacks a TI subscription. The TI endpoints require an active TI plan, separate from PAYG API access.</td></tr><tr><td><code>404</code> on <code>/v1/taxii/...</code></td><td>Wrong path \u2014 the prefix is <code>/v1/intel/taxii/</code>, not <code>/v1/taxii/</code>.</td></tr><tr><td>No \"TAXII\" integration in Kibana</td><td>Correct \u2014 Elastic has no generic TAXII integration. Use <strong>Custom Threat Intelligence</strong> and switch on Enable TAXII 2.1.</td></tr><tr><td>Integration added, no documents</td><td>Check the interval has elapsed, then confirm the URL includes the full collection path <code>/collections/iocs/objects/</code>.</td></tr><tr><td>Documents arrive with only <code>threat.indicator.name</code> and no type</td><td>An expiry field was missing and Elastic's pipeline aborted. RelayShield now emits <code>valid_until</code>, so update to the current feed.</td></tr><tr><td>Indicators arrive but the rule never matches</td><td>Almost always the domain/URL mapping. Both must point at <code>threat.indicator.url.original</code>.</td></tr></tbody></table>\n<hr>\n<h2>Changed from earlier versions of this guide</h2>\n<p>An earlier version named a \"Threat Intel TAXII 2.x\" integration, which does not exist in Elastic's</p>\n<p>package registry, and gave two Indicator Match mappings (<code>threat.indicator.url.domain</code> and</p>\n<p><code>threat.indicator.url.full</code>) that match no field. If you configured from it, three changes are needed:</p>\n<p>1. Use <strong>Custom Threat Intelligence</strong> with Enable TAXII 2.1, not \"Threat Intel TAXII 2.x\".</p>\n<p>2. Query <code>ti_custom.indicator</code>, not <code>ti_taxii.indicator</code>.</p>\n<p>3. Point both the domain and URL mappings at <code>threat.indicator.url.original</code>.</p>\n<p>The MISP endpoint is now a real MISP-compatible REST surface at <code>/v1/intel/misp</code>; the earlier</p>\n<p>documented path returned 404.</p>\n<hr>\n<h2>Support</h2>\n<p><code>support@relayshield.net</code> \u2014 include the integration type (Custom Threat Intelligence or MISP) and the</p>\n<p>Kibana or Elastic Agent error text if there is one.</p>",
+"title": "Ingest RelayShield Threat Intelligence into Elastic Security"
+},
+"microsoft-sentinel": {
+"desc": "Configure Sentinel's Threat Intelligence TAXII connector against RelayShield's STIX 2.1 feed. Includes the ThreatIntelIndicators schema, ObservableKey mappings, analytics rules and hunting queries.",
+"html": "<h1>Ingesting RelayShield Threat Intelligence into Microsoft Sentinel</h1>\n<p>RelayShield serves its IOC corpus over <strong>STIX 2.1 / TAXII 2.1</strong> and a <strong>MISP-compatible REST API</strong>.</p>\n<p>Microsoft Sentinel consumes both, so this is a configuration task rather than a development one.</p>\n<p><strong>What you get:</strong> 4.5M+ indicators sourced from 83+ criminal Telegram marketplaces and 20</p>\n<p>authoritative feeds, landing in Sentinel's <code>ThreatIntelIndicators</code> table where they drive analytics</p>\n<p>rules, hunting queries and incident enrichment.</p>\n<p><strong>Requirements:</strong> a RelayShield API key with a Threat Intelligence subscription, and a Sentinel</p>\n<p>workspace with the <strong>Threat Intelligence</strong> solution installed from Content hub (Microsoft Sentinel</p>\n<p>Contributor at the resource group level).</p>\n<blockquote><strong>Read this first if you have used any earlier Sentinel threat-intel guide.</strong></blockquote>\n<blockquote>The <code>ThreatIntelligenceIndicator</code> table <strong>stopped receiving data on 31 July 2025 and retired on 31 May 2026</strong>.</blockquote>\n<blockquote>Every query, analytics rule, workbook and automation must target</blockquote>\n<blockquote><strong><code>ThreatIntelIndicators</code></strong> (and <code>ThreatIntelObjects</code> for actors and relationships). A rule still</blockquote>\n<blockquote>pointing at the legacy table matches nothing and raises no error \u2014 the worst failure mode a</blockquote>\n<blockquote>detection control has.</blockquote>\n<hr>\n<h2>Option A \u2014 STIX/TAXII (recommended)</h2>\n<h3>1. Confirm your key works</h3>\n<pre><code>curl -s -u &quot;YOUR_API_KEY:YOUR_API_KEY&quot; https://api.relayshield.net/v1/intel/taxii/</code></pre>\n<p>A valid key returns the TAXII discovery document. Without one you get <code>401</code>, which is a useful way</p>\n<p>to confirm the endpoint is reachable before adding credentials.</p>\n<blockquote><strong>Put the key in both the username and the password.</strong> Sentinel exposes Username and Password as</blockquote>\n<blockquote>separate optional fields. The OASIS reference TAXII client skips authentication entirely when the</blockquote>\n<blockquote>password is empty (<code>if user and password:</code>), which we confirmed against this feed: key-as-username</blockquote>\n<blockquote>with a blank password returns <code>401</code>, and it looks exactly like a bad key. We have not inspected</blockquote>\n<blockquote>Sentinel's own client, so this may not apply to it \u2014 but RelayShield accepts the key in either</blockquote>\n<blockquote>position, so filling both fields costs nothing and removes the failure mode either way.</blockquote>\n<h3>2. Add the Threat Intelligence - TAXII data connector</h3>\n<p><strong>Microsoft Sentinel \u2192 Data connectors \u2192 Threat Intelligence - TAXII \u2192 Open connector page</strong></p>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Friendly name</td><td><code>RelayShield</code></td></tr><tr><td>API root URL</td><td><code>https://api.relayshield.net/v1/intel/taxii/</code></td></tr><tr><td>Collection ID</td><td><code>iocs</code></td></tr><tr><td>Username</td><td>your RelayShield API key</td></tr><tr><td>Password</td><td>your RelayShield API key</td></tr><tr><td>Import indicators</td><td><strong>All available</strong></td></tr><tr><td>Polling frequency</td><td><strong>Once an hour</strong> to start</td></tr></tbody></table>\n<p>Select <strong>Add</strong>. Indicators begin arriving within a few minutes and appear under</p>\n<p><strong>Threat intelligence</strong> in the Sentinel menu.</p>\n<p>The API root URL is also the discovery endpoint \u2014 RelayShield serves both resources at that one URL,</p>\n<p>so you can paste the same value wherever a provider asks for either.</p>\n<h3>3. Confirm indicators are landing</h3>\n<pre><code>ThreatIntelIndicators\n| where SourceSystem contains &quot;RelayShield&quot; or Data.external_references contains &quot;relayshield&quot;\n| where TimeGenerated &gt; ago(24h)\n| summarize Indicators = count() by ObservableKey\n| order by Indicators desc</code></pre>\n<p>You should see four <code>ObservableKey</code> values. In a representative 1,000-object sample of the live</p>\n<p>feed the split was:</p>\n<table><thead><tr><th>IOC type</th><th><code>ObservableKey</code></th><th>Share of sample</th></tr></thead><tbody><tr><td>IP address</td><td><code>ipv4-addr:value</code></td><td>440</td></tr><tr><td>Domain</td><td><code>domain-name:value</code></td><td>349</td></tr><tr><td>URL</td><td><code>url:value</code></td><td>173</td></tr><tr><td>SHA-256</td><td><code>file:hashes.'SHA-256'</code></td><td>38</td></tr></tbody></table>\n<p>If <code>ObservableKey</code> and <code>ObservableValue</code> come back <strong>empty</strong>, Sentinel could not parse the STIX</p>\n<p>pattern. That is worth reporting to support@relayshield.net \u2014 it should not happen against the</p>\n<p>current feed (see \"Changed from earlier versions\" below).</p>\n<hr>\n<h2>Option B \u2014 MISP via misp2sentinel</h2>\n<p>Sentinel has no first-party MISP connector. The community standard is</p>\n<p><a href=\"https://github.com/cudeso/misp2sentinel\"><code>cudeso/misp2sentinel</code></a>, an Azure Function that reads a</p>\n<p>MISP instance with PyMISP and pushes indicators through Sentinel's Upload Indicators API.</p>\n<p>RelayShield exposes a MISP-compatible surface, so misp2sentinel can point at it directly with no</p>\n<p>MISP server of your own.</p>\n<p>In the misp2sentinel configuration:</p>\n<table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td><code>misp_domain</code></td><td><code>https://api.relayshield.net/v1/intel/misp/</code></td></tr><tr><td><code>misp_key</code></td><td>your RelayShield API key</td></tr><tr><td><code>misp_verifycert</code></td><td><code>True</code></td></tr></tbody></table>\n<blockquote><strong>The trailing slash on <code>misp_domain</code> is required.</strong> PyMISP joins paths with <code>urljoin</code>, which</blockquote>\n<blockquote>replaces the last segment when the base has no trailing slash \u2014 <code>/v1/intel/misp</code> silently becomes</blockquote>\n<blockquote><code>/v1/intel/servers/getVersion</code> and every call 404s.</blockquote>\n<p>Prefer Option A unless you are already running misp2sentinel. TAXII is a first-party connector with</p>\n<p>no function app to host, monitor or pay for.</p>\n<hr>\n<h2>Using the indicators</h2>\n<h3>Analytics rule: match feed IPs against firewall traffic</h3>\n<pre><code>let lookback = 1h;\nlet relayshield_ips =\n    ThreatIntelIndicators\n    | where TimeGenerated &gt; ago(14d)\n    | where ObservableKey == &quot;ipv4-addr:value&quot;\n    | summarize arg_max(TimeGenerated, *) by Id\n    | where IsDeleted == false\n    | project IndicatorValue = ObservableValue, Confidence, ThreatDescription = tostring(Data.description);\nCommonSecurityLog\n| where TimeGenerated &gt; ago(lookback)\n| join kind=inner relayshield_ips on $left.DestinationIP == $right.IndicatorValue\n| project TimeGenerated, SourceIP, DestinationIP, ThreatDescription, Confidence, DeviceVendor</code></pre>\n<p><code>summarize arg_max(TimeGenerated, *) by Id</code> followed by <code>where IsDeleted == false</code> is the pattern</p>\n<p>Microsoft's own examples use, and it matters here: the feed republishes every unexpired indicator on</p>\n<p>a 7\u201310 day cycle, so without it you count the same indicator many times.</p>\n<h3>Analytics rule: match feed domains against DNS</h3>\n<pre><code>let relayshield_domains =\n    ThreatIntelIndicators\n    | where TimeGenerated &gt; ago(14d)\n    | where ObservableKey == &quot;domain-name:value&quot;\n    | summarize arg_max(TimeGenerated, *) by Id\n    | where IsDeleted == false\n    | project IndicatorValue = ObservableValue, ThreatDescription = tostring(Data.description);\nDnsEvents\n| where TimeGenerated &gt; ago(1h)\n| join kind=inner relayshield_domains on $left.Name == $right.IndicatorValue\n| project TimeGenerated, Computer, ClientIP, Name, ThreatDescription</code></pre>\n<h3>Hunting query: which malware families is the feed seeing?</h3>\n<p>RelayShield tags each indicator with the family it was observed alongside, as a <code>malware:&lt;family&gt;</code></p>\n<p>label.</p>\n<pre><code>ThreatIntelIndicators\n| where TimeGenerated &gt; ago(7d)\n| summarize arg_max(TimeGenerated, *) by Id\n| where IsDeleted == false\n| mv-expand Label = Data.labels\n| where tostring(Label) startswith &quot;malware:&quot;\n| extend Family = replace_string(tostring(Label), &quot;malware:&quot;, &quot;&quot;)\n| summarize Indicators = count() by Family\n| top 25 by Indicators</code></pre>\n<h3>Reading the legacy-shaped fields</h3>\n<p>If you are porting rules written against <code>ThreatIntelligenceIndicator</code>, this reconstructs the old</p>\n<p>column names from the new schema:</p>\n<pre><code>ThreatIntelIndicators\n| extend NetworkIP  = iff(ObservableKey == &quot;ipv4-addr:value&quot;,   ObservableValue, &quot;&quot;),\n         DomainName = iff(ObservableKey == &quot;domain-name:value&quot;, ObservableValue, &quot;&quot;),\n         Url        = iff(ObservableKey == &quot;url:value&quot;,         ObservableValue, &quot;&quot;),\n         FileHashValue = iff(ObservableKey has &quot;file:hashes&quot;,   ObservableValue, &quot;&quot;),\n         FileHashType  = iff(ObservableKey has &quot;SHA-256&quot;, &quot;SHA-256&quot;, &quot;&quot;)</code></pre>\n<hr>\n<h2>Cost note</h2>\n<p><code>ThreatIntelIndicators</code> is a billed Log Analytics table, and the feed republishes every unexpired</p>\n<p>indicator every 7\u201310 days. Before importing <strong>All available</strong>, consider whether your detection</p>\n<p>surface needs the full corpus. Two levers:</p>\n<ul>\n<li>Set the connector to import a narrower indicator group.</li>\n<li>Apply a workspace transformation to drop the <code>Data</code> column, which carries the full STIX object:</li>\n</ul>\n<p>```kusto</p>\n<p>source | project-away Data</p>\n<p>```</p>\n<p>The hunting queries above read <code>Data.labels</code> and <code>Data.description</code>, so drop it only if you do not</p>\n<p>need those.</p>\n<hr>\n<h2>Changed from earlier versions</h2>\n<p>Four defects were found and fixed in the RelayShield feed on <strong>2026-07-30</strong>, while preparing this</p>\n<p>guide, by running the OASIS reference TAXII client against production:</p>\n<p>1. The API Root resource omitted the required <code>versions</code> field, so a conformant TAXII client aborted</p>\n<p>before requesting anything.</p>\n<p>2. <code>GET /{api-root}/collections/{id}/</code> returned 404. Clients fetch this before requesting objects,</p>\n<p>so object polling failed without ever reaching the objects endpoint.</p>\n<p>3. The object envelope was served as <code>application/stix+json</code> rather than</p>\n<p><code>application/taxii+json;version=2.1</code>.</p>\n<p>4. SHA-256 patterns were emitted as <code>[file:hashes.SHA-256 = '...']</code>, which is <strong>invalid STIX 2.1 patterning</strong>.</p>\n<p>The hash key must be quoted. Sentinel derives <code>ObservableKey</code>/<code>ObservableValue</code> by</p>\n<p>parsing the pattern, so SHA-256 indicators would have arrived with both fields empty.</p>\n<p><strong>If you configured RelayShield in Sentinel before 2026-07-30</strong>, remove and re-add the connector so</p>\n<p>it re-polls from the start of the collection, and re-check any rule keyed on file hashes.</p>\n<h2>Verification status</h2>\n<p>Stated plainly, because a threat-intel guide that overstates its testing is worse than no guide:</p>\n<p><strong>Verified against live systems.</strong> Every RelayShield-side claim \u2014 the API root and collection URLs,</p>\n<p>the auth behaviour including the blank-password trap, the TAXII protocol walk end to end, the</p>\n<p>validity of every STIX pattern in a 1,000-object live sample, and the PyMISP handshake \u2014 was</p>\n<p>measured against the production feed with the OASIS <code>taxii2-client</code>, <code>stix2-patterns</code> validator, and</p>\n<p>PyMISP.</p>\n<p><strong>Derived, not measured.</strong> The <code>ObservableKey</code> values, table schema and KQL come from Microsoft's</p>\n<p>published <code>ThreatIntelIndicators</code> schema combined with the STIX object paths RelayShield is verified</p>\n<p>to emit. They have <strong>not</strong> been run through a live Sentinel workspace. The mapping is a</p>\n<p>straightforward correspondence and we have no reason to doubt it, but an equivalent assumption in an</p>\n<p>earlier Elastic guide turned out to be wrong in two places, so treat the KQL as needing a first-run</p>\n<p>check in your own workspace rather than as measured fact.</p>\n<hr>\n<p>Questions: <a href=\"mailto:support@relayshield.net\">support@relayshield.net</a> \u00b7</p>\n<p><a href=\"https://api.relayshield.net/developers\">api.relayshield.net/developers</a></p>",
+"title": "Ingest RelayShield Threat Intelligence into Microsoft Sentinel"
+}
+}
+
+
 def lambda_handler(event: dict, context) -> dict:
     path   = event.get("path", "")
     method = event.get("httpMethod", "")
@@ -9305,6 +9599,21 @@ def lambda_handler(event: dict, context) -> dict:
             Payload=_json.dumps(event).encode(),
         )
         return _json.loads(resp["Payload"].read())
+
+    # Machine-discovery surfaces (added 2026-07-30). Nothing here existed, which
+    # meant crawlers had no entry point and coding agents had no spec to read --
+    # awkward for a product whose whole thesis is that agents discover and pay
+    # for it, and whose LangChain placement is driven by install volume.
+    if method in ("GET", "HEAD") and path in ("/robots.txt", "/robots.txt/"):
+        return handle_robots_txt()
+    if method in ("GET", "HEAD") and path in ("/sitemap.xml", "/sitemap.xml/"):
+        return handle_sitemap_xml()
+    if method in ("GET", "HEAD") and path in ("/llms.txt", "/llms.txt/"):
+        return handle_llms_txt()
+    if method in ("GET", "HEAD") and path in ("/openapi.json", "/openapi.json/", "/.well-known/openapi.json"):
+        return handle_openapi()
+    if method in ("GET", "HEAD") and path.startswith("/guides/"):
+        return handle_guide_page(path[len("/guides/"):].strip("/"))
 
     # Discovery — HEAD included since UptimeRobot and similar monitors probe with HEAD
     if method in ("GET", "HEAD") and path in ("/", "/v1", "/v1/"):

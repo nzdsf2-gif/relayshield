@@ -105,8 +105,9 @@ proves absence is selling you certainty that does not exist.
 
 ## Get it
 
-- **AWS Marketplace.** Search "RelayShield" in AWS Marketplace. Billing runs through your existing
-  AWS account, with no separate payment method.
+- **AWS Marketplace.**
+  [Agentic Attack Surface on AWS Marketplace](https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq).
+  Billing runs through your existing AWS account, with no separate payment method.
 - **Direct.** [api.relayshield.net/developers](https://api.relayshield.net/developers?src=blog), pay
   as you go, no monthly minimum.
 - **Agents.** The API is x402 enabled, so an agent can pay per call in USDC without a human ever

@@ -160,8 +160,11 @@ somebody else's measurements, not our marketing.
 
 - Add `?src=` to the links in existing blog posts and integration listings. The variants shipped
   2026-07-30 and are doing nothing on old links.
-- The AWS Marketplace search index had not picked up Bundle D at publish time (visibility flipped
-  ~2h earlier). If a post drives someone to search and they find nothing, that is a bad first
-  impression. Re-check before pushing the AWS-specific angle hard.
-- Once the direct product page URL is available from the Management Portal, swap it into the badge
-  pages (MKTPL-BADGE-1) and into any social post still pointing at a search link.
+- ~~AWS Marketplace search index had not picked up Bundle D.~~ **Resolved 2026-07-30**, it now
+  appears in search. The AWS-specific angle is safe to push.
+- ~~Swap the search placeholder for the direct product page URL.~~ **Done 2026-07-30.** The listing
+  indexed and the direct page is live:
+  https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
+  Verified it resolves to Bundle D with all six prices correct. Updated in the blog post and on all
+  four badge pages. **Use this URL, not a search link, in every social post.** Strip the tracking
+  params (`?sr=`, `?ref_=`, `applicationId=`) that the console appends.

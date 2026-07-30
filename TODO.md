@@ -8,15 +8,21 @@ placeholders): `agentic_bundle_access` $299/mo, `bulk_identity_risk` $2.00,
 `llm_credential_exposure` $0.40, `mcp_registry_risk` $0.35, `prompt_injection_breach` $0.35,
 `tech_stack_cve` $0.20.
 
-**MKTPL-BADGE-1 — restore the Bundle D card on the 4 badge landing pages.** It was removed
-2026-07-18 while the listing was under review (it was showing a public 404) and left as an HTML
-comment in `cloudflare_worker_badge_landing.js`, marking exactly where it goes. Restore it on all
-four verticals (`badge.relayshield.net/{defi,fintech,saas,ai-agents}`).
-**Link caveat:** the card should point at the direct AWS Marketplace product page, but that slug is
-not derivable from the catalog API. Use an AWS Marketplace *search* link as an honest placeholder
-rather than guessing a slug, and swap it for the direct product-page URL once it is copied out of
-the AWS Marketplace Management Portal. A guessed slug that 404s is the exact credibility problem
-that caused the card to be pulled in the first place.
+**MKTPL-BADGE-1 — ✅ DONE 2026-07-30.** The Bundle D card is back on all four verticals
+(`badge.relayshield.net/{defi,fintech,saas,ai-agents}`), pointing at the **direct product page**:
+
+**`https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq`**
+
+The listing indexed in AWS Marketplace search later the same day and the slug became available. It
+was verified before being wired in: the page resolves to "RelayShield - Consumption Security API
+Bundles" with all six prices correct ($299/mo contract plus the five per-call dimensions). The
+search-link placeholder is gone from the badge pages and the launch post; all four verticals
+re-verified live.
+
+**Reusable fact:** the `prodview-` slug is **not** derivable from the Catalog API and does not exist
+until the listing indexes publicly. Never guess it. Use a search link until the real page is live,
+then swap. Strip the console's tracking params (`?sr=`, `?ref_=`, `applicationId=`) before publishing
+the URL anywhere.
 
 ## 🔗 DISTRIB-FILIGRAN-1: post to the Filigran community Slack, GATED on OpenCTI-1 completion
 

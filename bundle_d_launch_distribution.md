@@ -15,13 +15,20 @@ only if the link carries the parameter. Most Slack, Discord and native app click
 so without `?src=` the reader lands on the generic page and has to hunt for the thing that brought
 them. Costs nothing, and it is the difference between a targeted landing and a bounce.
 
-| Channel | Link to use |
+**This applies only when you link `/developers` directly.** When you link the blog post, use the
+bare canonical URL: the blog ignores `?src=`, and the post's own CTA carries it onward.
+
+| Context | Link to use |
 |---|---|
-| LinkedIn / X / Mastodon | `...developers?src=aws` |
-| Hacker News / Reddit | `...developers?src=github` |
-| n8n community | `...developers?src=n8n` |
+| From the launch post, anywhere | `...developers?src=llmjacking` (already in the post) |
 | Any AWS context | `...developers?src=aws` |
+| Hacker News / Reddit | `...developers?src=hn` |
+| n8n community | `...developers?src=n8n` |
 | Hugging Face | `...developers?src=huggingface` |
+
+Aliases resolve, so `blog`, `medium`, `linkedin`, `telegram` and `post` all land on the LLMjacking
+variant, and `hn`/`reddit` land on the GitHub one. An unknown value falls back to the plain page
+rather than erroring.
 
 **2. Lead with LLMjacking, never with the listing.** "We launched an AWS Marketplace bundle" is a
 press release nobody asked for. "A $30 stolen key against a $46,000 a day burn rate, and your SIEM
@@ -33,39 +40,34 @@ sees nothing" is a story. The bundle is the last line, not the first.
 
 ### Now: owned channels
 
-**LinkedIn** (primary, the buyer is here)
+**Paste-ready copy lives in `bundle_d_launch_posts/` as plain `.txt` files.**
 
-> Your EDR would see nothing. Your SIEM would see nothing. Your cloud posture tool would see nothing.
->
-> If one of your AI agents leaked its Anthropic or OpenAI key tomorrow, the first signal you would get
-> is the bill.
->
-> Sysdig measured $46,000 a day from compromised Bedrock credentials. A single leaked Gemini key ran
-> $82,000 in 48 hours. Stolen LLM keys sell for about $30.
->
-> That gap is not a tooling failure. Every one of those controls is working correctly. They are
-> watching for data leaving the building, and nothing is leaving the building. The stolen thing is
-> compute, and it is being spent on someone else's behalf.
->
-> We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal
-> Telegram channels. Free check, no API key, link in comments.
->
-> [canonical URL]
+Do not copy the text out of this document. Everything below is a description of what to post; the
+actual copy is in those files, as plain ASCII with no Markdown, no `>` quote markers and no smart
+punctuation, so a straight paste gives you exactly what should appear in the box.
 
-Put the link in the first comment, not the post body, if you want LinkedIn reach.
+Safest way to load one, which also avoids the shell mangling UTF-8:
 
-**X / Mastodon / Farcaster** (thread, 4 posts)
+```bash
+LC_CTYPE=UTF-8 pbcopy < bundle_d_launch_posts/linkedin.txt
+```
 
-1. A stolen LLM API key is not a door into your systems. It IS the thing being stolen. It converts
-   directly into compute that you pay for and someone else uses.
-2. Sysdig: $46,000/day from compromised Bedrock creds. One leaked Gemini key: $82,000 in 48 hours.
-   Operation Bizarre Bazaar: 35,000+ sessions in 40 days, $100K+/day. Stolen keys sell for ~$30.
-3. Here is what makes it nasty. No endpoint compromised, so EDR sees nothing. No anomalous login, so
-   the SIEM sees nothing. No data exfiltrated, so DLP sees nothing. Your first signal is the invoice.
-4. We match 19 LLM key formats across 14 providers. Free check, no key required: [canonical URL]
+| File | Channel | Notes |
+|---|---|---|
+| `linkedin.txt` | LinkedIn | Body only. Hashtags included at the end. |
+| `linkedin-comment.txt` | LinkedIn | The canonical URL, posted as the **first comment**. LinkedIn suppresses reach on posts with an outbound link in the body. |
+| `x-thread.txt` | X / Mastodon / Farcaster | Four parts, split on the `[n/4]` markers. Do not paste the markers. All four verified under 280 characters with X's 23-character URL allowance. |
+| `telegram.txt` | Telegram | Link inline, no separate comment needed. |
 
-**Telegram channel** — post the LinkedIn body verbatim with the link inline. Existing subscribers are
-already warm; no reframing needed.
+**The link to use everywhere is the bare canonical post URL:**
+
+```
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+```
+
+No `?src=` on it. The blog ignores that parameter entirely (verified), and the post's own call to
+action already carries `?src=llmjacking` through to the developers page. `?src=` belongs only on
+links that point directly at `/developers`, which is mainly the practitioner-community case.
 
 ### +1 day: Medium
 
@@ -77,7 +79,9 @@ sets the canonical link back to the blog in the same step. Source URL is the can
 Submit as **Show HN only if the free tool is the subject**, otherwise a plain link post titled around
 the threat, not the product:
 
-> LLMjacking: the credential theft your SIEM structurally cannot see
+```
+LLMjacking: the credential theft your SIEM structurally cannot see
+```
 
 Do not submit the bundle. Do not mention AWS Marketplace in the title. If it gets traction, answer
 questions in comments and let the product be discovered.

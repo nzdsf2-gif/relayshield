@@ -1,0 +1,15 @@
+[1/4]
+A stolen LLM API key is not a door into your systems. It IS the thing being stolen. It converts directly into compute that you pay for and someone else uses.
+
+[2/4]
+Sysdig: $46,000/day from compromised Bedrock creds. One leaked Gemini key: $82,000 in 48 hours. Operation Bizarre Bazaar: 35,000+ sessions in 40 days, $100K+/day. Stolen keys sell for ~$30.
+
+[3/4]
+Here is what makes it nasty. No endpoint compromised, so EDR sees nothing. No anomalous login, so the SIEM sees nothing. No data exfiltrated, so DLP sees nothing. Your first signal is the invoice.
+
+[4/4]
+We match 19 LLM key formats across 14 providers. Free check, no key required:
+
+https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
+
+#LLMjacking #infosec #AIsecurity

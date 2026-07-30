@@ -4,9 +4,13 @@ If one of your AI agents leaked its Anthropic or OpenAI key tomorrow, the first 
 
 Sysdig measured $46,000 a day from compromised Bedrock credentials. A single leaked Gemini key ran $82,000 in 48 hours. Stolen LLM keys sell for about $30.
 
-That gap is not a tooling failure. Every one of those controls is working correctly. They are watching for data leaving the building, and nothing is leaving the building. The stolen thing is compute, and it is being spent on someone else's behalf.
+We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels:
 
-We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels.
+OpenAI (all three formats), Anthropic, Google Gemini, Amazon Bedrock, xAI Grok, Groq, NVIDIA NIM, Replicate, Hugging Face, LangSmith.
+
+Plus the ones most tooling misses: DeepSeek, Moonshot Kimi, Qwen via Alibaba DashScope, Alibaba Cloud Model Studio.
+
+Teams adopt DeepSeek and Qwen because inference is cheap, so those keys end up in prototypes that never got reviewed. A scanner built only for US formats does not fail loudly on a leaked DeepSeek key. It returns clean, because it was never looking for that shape of string.
 
 This shipped today as Agentic Attack Surface, our new bundle on AWS Marketplace. $299/mo, billed through your existing AWS account. There is also a free check that needs no API key.
 

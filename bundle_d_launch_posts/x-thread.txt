@@ -1,19 +1,22 @@
-[1/5]
+[1/6]
 A stolen LLM API key is not a door into your systems. It IS the thing being stolen. It converts directly into compute that you pay for and someone else uses.
 
-[2/5]
+[2/6]
 Sysdig: $46,000/day from compromised Bedrock creds. One leaked Gemini key: $82,000 in 48 hours. Operation Bizarre Bazaar: 35,000+ sessions in 40 days, $100K+/day. Stolen keys sell for ~$30.
 
-[3/5]
+[3/6]
 Here is what makes it nasty. No endpoint compromised, so EDR sees nothing. No anomalous login, so the SIEM sees nothing. No data exfiltrated, so DLP sees nothing. Your first signal is the invoice.
 
-[4/5]
-We match 19 LLM key formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels. Free check, no key required:
+[4/6]
+We match 19 key formats across 14 providers: OpenAI (3 formats), Anthropic, Gemini, Bedrock, xAI Grok, Groq, NVIDIA NIM, Replicate, Hugging Face, LangSmith. Plus DeepSeek, Moonshot Kimi, Qwen and Alibaba Cloud.
+
+[5/6]
+Most tooling misses that last group. DeepSeek and Qwen keys land in cheap prototypes nobody reviewed. A US-formats-only scanner returns clean on a leaked DeepSeek key: it never looked for that string shape. A confident all clear is the worst result.
+
+[6/6]
+Shipped today as Agentic Attack Surface on AWS Marketplace. $299/mo via your AWS account. Free check, no key required:
 
 https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
-
-[5/5]
-Shipped today as Agentic Attack Surface on AWS Marketplace. LLM credential exposure, MCP registry risk, prompt injection breaches, agent framework CVEs, per-agent identity risk. $299/mo via your AWS account:
 
 https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
 

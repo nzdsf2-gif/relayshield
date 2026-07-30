@@ -69,7 +69,13 @@ Sysdig measured $46,000 a day from compromised Bedrock credentials. A single lea
 
 That gap is not a tooling failure. Every one of those controls is working correctly. They are watching for data leaving the building, and nothing is leaving the building. The stolen thing is compute, and it is being spent on someone else's behalf.
 
-We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels.
+We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels:
+
+OpenAI (all three key formats), Anthropic, Google Gemini, Amazon Bedrock (long and short lived), xAI Grok, Groq, NVIDIA NIM, Replicate, Hugging Face, LangSmith.
+
+And the ones most tooling misses entirely: DeepSeek, Moonshot Kimi, Qwen via Alibaba DashScope, and Alibaba Cloud Model Studio.
+
+That last group matters more than its size suggests. Teams adopt DeepSeek and Qwen because inference is cheap, so those keys land in prototypes and side projects that never got the review a production OpenAI key would get. A scanner built only for US provider formats does not fail loudly on a leaked DeepSeek key. It returns clean, because it was never looking for that shape of string. A confident all clear is worse than a missed alert.
 
 This shipped today as Agentic Attack Surface, our new bundle on AWS Marketplace: LLM credential exposure, MCP registry risk, prompt injection breach detection, agent framework CVE monitoring and per-agent identity risk scoring. $299/mo, billed through your existing AWS account, no separate payment method.
 
@@ -90,26 +96,29 @@ https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
 
 ### X / Mastodon / Farcaster: five parts
 
-Split on the `[n/5]` markers. **Do not paste the markers themselves.** All five verified under 280
-characters using X's 23-character URL allowance, longest is 266.
+Split on the `[n/6]` markers. **Do not paste the markers themselves.** All six verified under 280
+characters using X's 23-character URL allowance, longest is 249.
 
 ```
-[1/5]
+[1/6]
 A stolen LLM API key is not a door into your systems. It IS the thing being stolen. It converts directly into compute that you pay for and someone else uses.
 
-[2/5]
+[2/6]
 Sysdig: $46,000/day from compromised Bedrock creds. One leaked Gemini key: $82,000 in 48 hours. Operation Bizarre Bazaar: 35,000+ sessions in 40 days, $100K+/day. Stolen keys sell for ~$30.
 
-[3/5]
+[3/6]
 Here is what makes it nasty. No endpoint compromised, so EDR sees nothing. No anomalous login, so the SIEM sees nothing. No data exfiltrated, so DLP sees nothing. Your first signal is the invoice.
 
-[4/5]
-We match 19 LLM key formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels. Free check, no key required:
+[4/6]
+We match 19 key formats across 14 providers: OpenAI (3 formats), Anthropic, Gemini, Bedrock, xAI Grok, Groq, NVIDIA NIM, Replicate, Hugging Face, LangSmith. Plus DeepSeek, Moonshot Kimi, Qwen and Alibaba Cloud.
+
+[5/6]
+Most tooling misses that last group. DeepSeek and Qwen keys land in cheap prototypes nobody reviewed. A US-formats-only scanner returns clean on a leaked DeepSeek key: it never looked for that string shape. A confident all clear is the worst result.
+
+[6/6]
+Shipped today as Agentic Attack Surface on AWS Marketplace. $299/mo via your AWS account. Free check, no key required:
 
 https://blog.relayshield.net/your-ai-agents-have-credentials-someone-is-already-looking-for-them
-
-[5/5]
-Shipped today as Agentic Attack Surface on AWS Marketplace. LLM credential exposure, MCP registry risk, prompt injection breaches, agent framework CVEs, per-agent identity risk. $299/mo via your AWS account:
 
 https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq
 
@@ -127,9 +136,13 @@ If one of your AI agents leaked its Anthropic or OpenAI key tomorrow, the first 
 
 Sysdig measured $46,000 a day from compromised Bedrock credentials. A single leaked Gemini key ran $82,000 in 48 hours. Stolen LLM keys sell for about $30.
 
-That gap is not a tooling failure. Every one of those controls is working correctly. They are watching for data leaving the building, and nothing is leaving the building. The stolen thing is compute, and it is being spent on someone else's behalf.
+We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels:
 
-We now match 19 LLM credential formats across 14 providers against 4.6M indicators from 83 criminal Telegram channels.
+OpenAI (all three formats), Anthropic, Google Gemini, Amazon Bedrock, xAI Grok, Groq, NVIDIA NIM, Replicate, Hugging Face, LangSmith.
+
+Plus the ones most tooling misses: DeepSeek, Moonshot Kimi, Qwen via Alibaba DashScope, Alibaba Cloud Model Studio.
+
+Teams adopt DeepSeek and Qwen because inference is cheap, so those keys end up in prototypes that never got reviewed. A scanner built only for US formats does not fail loudly on a leaked DeepSeek key. It returns clean, because it was never looking for that shape of string.
 
 This shipped today as Agentic Attack Surface, our new bundle on AWS Marketplace. $299/mo, billed through your existing AWS account. There is also a free check that needs no API key.
 

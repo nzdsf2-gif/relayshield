@@ -48,10 +48,41 @@ RelayShield already ran the pipeline that catches this. We monitor **83 criminal
 and **20 threat intelligence feeds**, and the corpus currently holds **4.6 million indicators**. What
 was missing was pattern matching for AI provider key formats specifically.
 
-So we added them. Today we match **19 distinct LLM credential formats across 14 named providers**:
-OpenAI, Anthropic, Google, AWS Bedrock, Groq, xAI, Replicate, DeepSeek, Moonshot, Qwen, Alibaba,
-NVIDIA, Hugging Face and LangSmith, plus a generic matcher for the long tail of OpenAI compatible
-endpoints.
+So we added them. Today we match **19 distinct LLM credential formats across 14 named providers**.
+
+**US and EU providers**
+
+- **OpenAI**, all three key formats: current, v1 and legacy
+- **Anthropic**
+- **Google AI (Gemini)**
+- **Amazon Bedrock**, both long lived and short lived keys
+- **xAI (Grok)**
+- **Groq**
+- **NVIDIA NIM**
+- **Replicate**
+- **Hugging Face**, both user access tokens and organization tokens
+- **LangSmith**
+
+**Chinese providers, and this is the part most tooling misses**
+
+- **DeepSeek**
+- **Moonshot (Kimi)**
+- **Qwen**, via Alibaba DashScope
+- **Alibaba Cloud**, the AccessKey ID format used by Model Studio
+
+Plus a generic matcher for OpenAI compatible endpoints, which catches keys from the long tail of
+providers that clone OpenAI's format without a distinctive prefix of their own.
+
+The Chinese providers matter more than their share of the list suggests. Teams adopt DeepSeek and
+Qwen precisely because the inference is cheap, which means the keys end up in side projects,
+prototypes and scripts that never went through the review a production OpenAI key would get. A
+scanner built only against US provider formats does not fail loudly on a leaked DeepSeek key. It
+returns clean, because it was never looking for that shape of string at all. That is the failure
+mode we care about most: not a missed alert, but a confident all clear.
+
+Coverage is also not uniform in severity. Most of these are treated as CRITICAL, because the key
+alone is enough to spend money. Alibaba Cloud AccessKey IDs and LangSmith keys are HIGH rather than
+CRITICAL, because on their own they are less directly monetisable.
 
 ## The bundle
 

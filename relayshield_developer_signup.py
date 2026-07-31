@@ -116,6 +116,13 @@ STRIPE_PRICE_IDS = [
     # initial launch (cert-expiry, ip-intel, card-exposure all have the same
     # gap for pre-existing developers, undocumented until now).
     "price_1TlbFwL2dcjOeFiYNVvkbWJY",  # secret-scan          $0.35/call
+    "price_1TzFdML2dcjOeFiYHmUg2UK8",  # secret-scan-text     $0.05/call — created 2026-07-31
+    # with its own meter (mtr_61V8daayOdgGiVieY41L2dcjOeFiYH16). Priced well below
+    # secret-scan because it runs locally with no external API call and is the
+    # pre-commit path, which fires on every commit — $0.35 there would cost a
+    # 20-commit-a-day developer $7/day and kill hook adoption. Same
+    # no-retroactive-backfill limitation as every other post-launch endpoint:
+    # developers who signed up before today do not get this line item.
     "price_1TlbGxL2dcjOeFiYsROuaYuf",  # target-risk          $0.50/call
     "price_1TlbHeL2dcjOeFiYwoND91TG",  # asset-intel          $0.15/call
     "price_1TlbIUL2dcjOeFiYI9Jfjp6S",  # threat-actor         $0.30/call

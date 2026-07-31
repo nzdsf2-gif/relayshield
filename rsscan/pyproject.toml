@@ -3,14 +3,17 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "relayshield-precommit"
+name = "rsscan"
 version = "0.1.0"
-description = "Pre-commit hook that blocks commits introducing API keys, tokens and other machine credentials"
+description = "Block commits that introduce API keys, tokens and other machine credentials. Pre-commit hook and CI scanner."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "RelayShield", email = "support@relayshield.net" }]
-keywords = ["pre-commit", "secrets", "security", "secret-scanning", "credentials", "devsecops"]
+keywords = [
+  "pre-commit", "secrets", "security", "secret-scanning", "credentials",
+  "devsecops", "sast", "ci", "git-hooks", "api-keys",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
@@ -28,9 +31,10 @@ dependencies = []
 [project.urls]
 Homepage = "https://api.relayshield.net/developers"
 Documentation = "https://api.relayshield.net/developers"
+Source = "https://github.com/RelayShield/rsscan"
 
 [project.scripts]
-relayshield-secret-scan = "relayshield_precommit.scan:main"
+rsscan = "rsscan.scan:main"
 
 [tool.setuptools]
-packages = ["relayshield_precommit"]
+packages = ["rsscan"]

@@ -1,0 +1,83 @@
+name: 'RelayShield Secret Scan'
+description: 'Fail the build when a commit introduces an API key, token or other machine credential.'
+author: 'RelayShield'
+
+branding:
+  icon: 'shield'
+  color: 'purple'
+
+inputs:
+  api-key:
+    description: 'RelayShield API key. Store it as a repository secret and pass ${{ secrets.RELAYSHIELD_API_KEY }}.'
+    required: true
+  fail-on:
+    description: 'Lowest severity that fails the build: LOW, MEDIUM, HIGH or CRITICAL.'
+    required: false
+    default: 'HIGH'
+  rev-range:
+    description: >-
+      Commit range to scan. Defaults to the pushed range on push events and the
+      PR range on pull_request events. Requires fetch-depth: 0 on actions/checkout.
+    required: false
+    default: ''
+  allowlist:
+    description: 'Path to a fingerprint allowlist file.'
+    required: false
+    default: '.relayshield-allowlist'
+  strict:
+    description: >-
+      Fail the build if the scan itself cannot run. Defaults to true in CI,
+      because a gate that silently reports success when it could not run is
+      worse than no gate. Set to "false" to skip instead.
+    required: false
+    default: ''
+
+outputs:
+  findings:
+    description: 'Total findings after allowlisting.'
+    value: ${{ steps.rsscan.outputs.findings }}
+  blocking:
+    description: 'Findings at or above fail-on.'
+    value: ${{ steps.rsscan.outputs.blocking }}
+  highest:
+    description: 'Highest severity found.'
+    value: ${{ steps.rsscan.outputs.highest }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve commit range
+      id: range
+      shell: bash
+      run: |
+        set -euo pipefail
+        RANGE="${{ inputs.rev-range }}"
+        if [ -z "$RANGE" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Three-dot: everything on the head branch since it diverged, which
+            # is what the PR actually proposes to add.
+            RANGE="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && [ -n "${{ github.event.before }}" ]; then
+            RANGE="${{ github.event.before }}..${{ github.sha }}"
+          else
+            # First push of a new branch has no "before" commit. Scanning the
+            # whole history would flag every legacy secret and fail every first
+            # build, so scan the tip commit only.
+            RANGE="${{ github.sha }}~1..${{ github.sha }}"
+          fi
+        fi
+        echo "range=$RANGE" >> "$GITHUB_OUTPUT"
+        echo "Scanning $RANGE"
+
+    - name: Run rsscan
+      id: rsscan
+      shell: bash
+      env:
+        RELAYSHIELD_API_KEY: ${{ inputs.api-key }}
+        RSSCAN_REV_RANGE: ${{ steps.range.outputs.range }}
+        RSSCAN_FAIL_ON: ${{ inputs.fail-on }}
+        RSSCAN_ALLOWLIST: ${{ inputs.allowlist }}
+        RSSCAN_STRICT: ${{ inputs.strict }}
+      run: |
+        python3 -m pip install --quiet --disable-pip-version-check rsscan==0.1.0
+        rsscan

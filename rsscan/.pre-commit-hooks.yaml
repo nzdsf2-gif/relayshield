@@ -1,10 +1,10 @@
-- id: relayshield-secret-scan
-  name: RelayShield secret scan
+- id: rsscan
+  name: rsscan (RelayShield secret scan)
   description: >-
     Block a commit that introduces an API key, token or other machine credential.
     Scans only the lines this commit adds, so pre-existing findings do not make
     the hook unbypassable on a repo with legacy secrets.
-  entry: relayshield-secret-scan
+  entry: rsscan
   language: python
   # pass_filenames is off on purpose: the hook reads the staged diff itself via
   # `git diff --cached -U0`, which is what makes it possible to scan only ADDED

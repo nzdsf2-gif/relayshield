@@ -320,11 +320,14 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/nhi-exposure":     "relayshield_nhi_exposure_calls",
     "/v1/metered/llm-credential-exposure": "relayshield_llm_credential_exposure_calls",
     "/v1/metered/secret-scan":      "relayshield_secret_scan_calls",
-    # Same Stripe billing meter as secret-scan on purpose: same capability, a
-    # different input mode. Reusing the meter means no new Stripe Meter/Price/
-    # STRIPE_PRICE_IDS line item is needed, which is exactly the chain that has
-    # leaked revenue before when a new dict entry shipped without one.
-    "/v1/metered/secret-scan-text": "relayshield_secret_scan_calls",
+    # Its OWN meter, not secret-scan's. Reusing secret-scan's meter looked like
+    # it avoided creating Stripe objects, but _record_stripe_meter_event always
+    # posts value:1 and that meter's only price is $0.35/unit -- so every
+    # secret-scan-text call would have billed a Stripe-subscription developer
+    # $0.35 instead of $0.05, a 7x overcharge. The credits and x402 rails were
+    # correct; only the Stripe rail was wrong. Caught 2026-07-31 before launch.
+    # Meter mtr_61V8daayOdgGiVieY41L2dcjOeFiYH16, price price_1TzFdML2dcjOeFiYHmUg2UK8.
+    "/v1/metered/secret-scan-text": "relayshield_secret_scan_text_calls",
     "/v1/metered/target-risk":      "relayshield_target_risk_calls",
     "/v1/metered/asset-intel":      "relayshield_asset_intel_calls",
     "/v1/metered/threat-actor":     "relayshield_threat_actor_calls",

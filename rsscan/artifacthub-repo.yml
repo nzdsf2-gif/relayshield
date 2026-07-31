@@ -1,0 +1,7 @@
+# Artifact Hub repository metadata. Register the repo at
+# https://artifacthub.io/control-panel/repositories with kind "Container image".
+repositoryID: ""   # filled in by Artifact Hub after the repo is claimed
+owners:
+  - name: RelayShield
+    email: support@relayshield.net
+ignore: []

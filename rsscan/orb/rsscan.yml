@@ -1,0 +1,79 @@
+# CircleCI orb source. Publish with:
+#   circleci orb pack orb/ > orb.yml
+#   circleci orb publish orb.yml relayshield/rsscan@0.1.0
+version: 2.1
+
+description: |
+  Fail the build when a commit introduces an API key, token or other machine
+  credential. Backed by RelayShield's secret-scan API, 31 credential patterns.
+
+display:
+  home_url: "https://api.relayshield.net/developers"
+  source_url: "https://github.com/RelayShield/rsscan"
+
+commands:
+  scan:
+    description: Install rsscan and scan the current commit range.
+    parameters:
+      fail-on:
+        type: enum
+        enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        default: HIGH
+        description: Lowest severity that fails the build.
+      allowlist:
+        type: string
+        default: .relayshield-allowlist
+        description: Path to a fingerprint allowlist file.
+      strict:
+        type: boolean
+        default: true
+        description: >-
+          Fail the build if the scan itself cannot run. Defaults true: a gate
+          that silently reports success when it could not run is worse than none.
+      api-key-var:
+        type: env_var_name
+        default: RELAYSHIELD_API_KEY
+        description: Name of the environment variable holding the API key.
+    steps:
+      - run:
+          name: Install rsscan
+          command: python3 -m pip install --quiet --disable-pip-version-check rsscan==0.1.0
+      - run:
+          name: Scan for secrets
+          command: |
+            set -eu
+            if [ -n "${CIRCLE_PULL_REQUEST:-}" ] && [ -n "${CIRCLE_BRANCH:-}" ]; then
+              BASE=$(git merge-base origin/main "$CIRCLE_BRANCH" 2>/dev/null || echo "")
+              RANGE="${BASE:+$BASE...}$CIRCLE_SHA1"
+            else
+              RANGE="$CIRCLE_SHA1~1..$CIRCLE_SHA1"
+            fi
+            echo "Scanning $RANGE"
+            RELAYSHIELD_API_KEY="${<< parameters.api-key-var >>}" \
+            RSSCAN_REV_RANGE="$RANGE" \
+            RSSCAN_FAIL_ON="<< parameters.fail-on >>" \
+            RSSCAN_ALLOWLIST="<< parameters.allowlist >>" \
+            RSSCAN_STRICT="<< parameters.strict >>" \
+            rsscan
+
+jobs:
+  scan:
+    description: Standalone job that checks out the repo and scans it.
+    parameters:
+      fail-on:
+        type: enum
+        enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        default: HIGH
+      executor:
+        type: executor
+        default: default
+    executor: << parameters.executor >>
+    steps:
+      - checkout
+      - scan:
+          fail-on: << parameters.fail-on >>
+
+executors:
+  default:
+    docker:
+      - image: cimg/python:3.12

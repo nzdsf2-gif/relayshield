@@ -170,9 +170,82 @@ candidate for the next batch, but that is a deliberate rollout step, not a side 
 4. **GitLab CI component** → GitLab's CI/CD catalog.
 5. **A documented `curl` snippet** → Jenkins, CircleCI, Azure DevOps, Bitbucket Pipelines.
 
-Also still to do: publish `relayshield-precommit` to a public GitHub repo + PyPI (the README's
-install block references `github.com/RelayShield/relayshield-precommit` at `rev: v0.1.0`, which does
-not exist yet), and add the endpoint to `/developers` and `/openapi.json`.
+Also still to do: publish `rsscan` to a public GitHub repo + PyPI (the README's install block
+references `github.com/RelayShield/rsscan` at `rev: v0.1.0`, which does not exist yet), and add the
+endpoint to `/developers` and `/openapi.json`. Full runbook in `rsscan/PUBLISHING.md`.
+
+---
+
+## 🟥 BUNDLE-B-3: widen and fix `secret-scan` — SEQUENCED 2026-07-31
+
+Founder-approved ordering. **BB-1 and BB-2 are constrained by a hard limit found 2026-07-31:
+GitHub's code-search API allows 10 requests/minute, authenticated** (measured via `/rate_limit`,
+`code_search.limit=10`). Naive "one query per pattern per domain" is 31 x 5 = 155 queries, or 15+
+minutes for one API call. Every item below has to fit a query budget, not just add coverage.
+
+Also measured: **`OR` grouping does not work.** Parenthesised `(A OR B)` returns
+`ERROR_TYPE_QUERY_PARSING_FATAL`; bare `A OR B` parses but returns *fewer* results than `A` alone
+(654 vs 4,280). Do not build a batching scheme on it.
+
+| ID | Item | Notes |
+|---|---|---|
+| **BB-1** | **Fix query construction** | Sends raw regex as search terms: `"openai.com" AKIA[A-Z0-9]{16}`. GitHub has no regex support. Measured: broken query 119 results, literal `AKIA` **4,280**. `github_pat` is worse - truncated at 20 chars to `gh[pousr]_[a-zA-Z0-9`, cut mid-character-class. Fix is a curated literal-prefix map, not `pattern.pattern[:20]`. **Highest value, no new integrations.** |
+| **BB-2** | **Use more than 6 patterns** | `_NHI_COMPILED[:6]` of 31. Cannot simply raise to 31 - see the rate limit above. Needs a query budget with severity prioritisation, plus running **all 31 regexes against returned `text_matches` fragments** so low-signal patterns are still classified without costing a query. |
+| **BB-3** | **GitLab** | `GITLAB_SEARCH_URL` defined at `relayshield_api.py:5736`, **never called**. Claimed in 8+ customer-facing places incl. the developers page, API docs, strategy pricing table and 3 HF blog posts. **We already charge for this.** |
+| **BB-4** | **npm + PyPI package contents** | Secrets ship in published packages constantly. Distinct surface from repo scanning; GitGuardian's public monitoring is GitHub-centric. |
+| **BB-5** | **Docker Hub image layers** | High signal, badly under-served by competitors. |
+| **BB-6** | **Postman public workspaces** | Known and underrated leak source. |
+| **BB-7** | **Hugging Face repos + Spaces** | On-brand; RelayShield already has HF presence. |
+| **BB-8** | **Developer remediation channels** | The rsscan funnel has no developer-native delivery. Build: **GitHub Checks / PR annotations** (findings inline where the developer already is - highest value), **Slack**, **generic webhook**. WhatsApp/Telegram are the wrong audience for this buyer; `relayshield_siem_connector.py` covers Splunk HEC / CEF / XSOAR only. |
+
+### False positives are a real risk, confirmed
+
+`text_matches` on `"openai.com" AKIA` returned `hq450/fancyss` `rules/gfwlist.txt` - a **domain
+blocklist** that happens to contain both strings. Today every search hit is reported as a finding
+with no verification, so results like that reach the customer as a CRITICAL. BB-2's
+"run the real regexes against the fragments" step is what rejects them, and it is not optional.
+
+---
+
+## 🟧 BUNDLE-B-4: stress-test the SIEM integration
+
+`relayshield_siem_destinations` has **0 rows** - the connector is built but has never been exercised
+by a real customer, so treat it as unproven, not proven. `relayshield_siem_connector.py` supports
+`splunk_hec`, `cef`, `xsoar_webhook`.
+
+Worth doing, roughly in order of value per effort:
+
+1. **Local receiver harness** - stand up an HTTP echo container, register a destination of each
+   format, fire a real finding through each of the 7 monitors that dispatch, and diff the payload
+   against the vendor spec. Catches shape errors without needing a vendor account.
+2. **CEF syntax validation** - CEF has a strict header grammar and pipe/equals escaping rules.
+   Malformed CEF is silently dropped by most collectors, so a unit test over the escaping is high
+   value and cheap.
+3. **Splunk free tier** - a real HEC endpoint end-to-end. Splunk Free allows 500MB/day, enough.
+4. **XSOAR** - PR #45206 is already open with that team; the Generic Webhook incident shape can be
+   verified against their own content pack fixtures.
+5. **Failure behaviour** - what happens when a customer's SIEM is down, slow, or returns 500? Check
+   whether `send_to_siem` retries, drops silently, or blocks the monitor that called it.
+
+---
+
+## 🟨 BUNDLE-B-5: verify the INTEL-5 corpus actually grows
+
+Measured 2026-07-31, and it does not support the commercial claims built on it:
+
+| Table | Rows | Evidence |
+|---|---|---|
+| `relayshield_stolen_sessions` | **9** | Writes span 2026-06-26 to 2026-07-28 - roughly **2 rows/week** |
+| `relayshield_stolen_cards` | **0** | Writer exists (`relayshield_intel_monitor.py:1154`, `:1168`) and has **never produced a row** |
+
+The sessions table is growing, but at ~2/week it is not on a commercial trajectory, and it is the
+sole backing for `session-risk` (a Bundle B dimension) and `nhi-exposure` (Bundle C). The cards
+table has a writer that has never fired, which suggests the extraction path does not match what the
+monitored channels actually post - that is a bug to find, not a corpus to wait on.
+
+**Do this before any pricing or listing copy leans on INTEL-5.** Compare what
+`relayshield_intel_monitor.py` expects to parse against a sample of what the 83 channels actually
+post.
 
 ---
 

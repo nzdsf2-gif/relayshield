@@ -1638,6 +1638,21 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
 </div>
 
 <footer>
+  <!--
+    Blog link added 2026-07-30. The blog was reachable only from two inline
+    mentions deep in the page body; there was no way to browse the archive from
+    here at all. Now that we self-host it, the archive is 17 posts of threat
+    research that nothing on this page pointed at.
+  -->
+  <p style="margin-bottom:.6rem">
+    <a href="https://blog.relayshield.net" style="color:var(--accent);font-weight:600">Threat research blog</a>
+    <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
+    <a href="https://api.relayshield.net/guides/microsoft-sentinel" style="color:var(--accent)">Microsoft Sentinel guide</a>
+    <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
+    <a href="https://api.relayshield.net/guides/elastic-security" style="color:var(--accent)">Elastic Security guide</a>
+    <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
+    <a href="https://blog.relayshield.net/rss.xml" style="color:var(--accent)">RSS</a>
+  </p>
   <p>RelayShield LLC · <a href="https://relayshield.net">relayshield.net</a> · <a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
   <p style="margin-top:.6rem">
     <a href="https://x402-list.com/services/relayshield?utm_source=badge&amp;utm_medium=referral&amp;utm_campaign=embed" target="_blank" rel="noopener">

@@ -9332,6 +9332,8 @@ def handle_robots_txt() -> dict:
         "Disallow: /marketplace/\n"
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+        # Cross-referenced so a crawler that finds either host discovers both.
+        "Sitemap: https://blog.relayshield.net/sitemap.xml\n"
     )
     return _text_response(body, "text/plain; charset=utf-8", 86400)
 
@@ -9380,6 +9382,14 @@ def handle_llms_txt() -> dict:
         "",
     ]
     lines += [f"- [{title}]({PUBLIC_BASE_URL}{loc})" for loc, title in _GUIDE_PAGES]
+    lines += [
+        "",
+        "## Threat research",
+        "",
+        "- [Blog archive](https://blog.relayshield.net): threat research and integration write-ups",
+        "- [RSS feed](https://blog.relayshield.net/rss.xml)",
+        "- [Blog sitemap](https://blog.relayshield.net/sitemap.xml)",
+    ]
     lines += [
         "",
         "## Endpoints",

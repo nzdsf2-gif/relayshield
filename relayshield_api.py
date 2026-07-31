@@ -5741,7 +5741,7 @@ def _github_secret_scan(domain: str) -> list[dict]:
     """Search GitHub public repos for NHI patterns alongside a domain."""
     findings = []
     try:
-        raw = _secrets_client.get_secret_value(SecretId=GITHUB_SECRET_NAME)["SecretString"].strip()
+        raw = secrets_client.get_secret_value(SecretId=GITHUB_SECRET_NAME)["SecretString"].strip()
         token = json.loads(raw).get("token", raw) if raw.startswith("{") else raw
         headers = {
             "Authorization": f"Bearer {token}",
@@ -8280,7 +8280,7 @@ def _check_github_poc_exists(cve_id: str) -> bool | None:
     if not cve_id:
         return None
     try:
-        raw = _secrets_client.get_secret_value(SecretId=GITHUB_SECRET_NAME)["SecretString"].strip()
+        raw = secrets_client.get_secret_value(SecretId=GITHUB_SECRET_NAME)["SecretString"].strip()
         token = json.loads(raw).get("token", raw) if raw.startswith("{") else raw
         headers = {
             "Authorization": f"Bearer {token}",

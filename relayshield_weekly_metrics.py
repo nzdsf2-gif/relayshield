@@ -736,41 +736,60 @@ def _scheduled_lambda_health() -> dict:
         logger.exception("Lambda health: could not enumerate schedules: %s", exc)
         return {"error": str(exc), "errored": [], "silent": [], "total": 0}
 
-    end   = datetime.now(timezone.utc)
-    start = end - timedelta(days=7)
+    end    = datetime.now(timezone.utc)
+    start  = end - timedelta(days=7)
+    recent = end - timedelta(days=2)
     errored, silent = [], []
 
     for fn, schedule in sorted(scheduled.items()):
         try:
-            resp = cw.get_metric_data(
-                MetricDataQueries=[
-                    {"Id": "e", "MetricStat": {
-                        "Metric": {"Namespace": "AWS/Lambda", "MetricName": "Errors",
-                                   "Dimensions": [{"Name": "FunctionName", "Value": fn}]},
-                        "Period": 604800, "Stat": "Sum"}},
-                    {"Id": "i", "MetricStat": {
-                        "Metric": {"Namespace": "AWS/Lambda", "MetricName": "Invocations",
-                                   "Dimensions": [{"Name": "FunctionName", "Value": fn}]},
-                        "Period": 604800, "Stat": "Sum"}},
-                ],
-                StartTime=start, EndTime=end,
-            )
-            vals = {r["Id"]: (r["Values"][0] if r.get("Values") else 0) for r in resp["MetricDataResults"]}
-            errs, invs = int(vals.get("e", 0)), int(vals.get("i", 0))
+            # 7-day totals PLUS a 48h window. Reporting only the weekly sum
+            # cannot tell a resolved incident from a live outage: on 2026-07-30
+            # this flagged relayshield-intel-feed as "17 of 23 failing" when the
+            # errors were all from 7/23-7/24 and it had been clean for five days.
+            # A digest that cries wolf about fixed problems gets ignored, which
+            # is the failure mode the digest exists to prevent.
+            #
+            # Two calls, not one: GetMetricData applies a single StartTime and
+            # EndTime to every query in the request, so per-query time ranges
+            # are silently invalid and blow up the whole call.
+            def _sums(win_start):
+                r = cw.get_metric_data(
+                    MetricDataQueries=[
+                        {"Id": "e", "MetricStat": {
+                            "Metric": {"Namespace": "AWS/Lambda", "MetricName": "Errors",
+                                       "Dimensions": [{"Name": "FunctionName", "Value": fn}]},
+                            "Period": 604800, "Stat": "Sum"}},
+                        {"Id": "i", "MetricStat": {
+                            "Metric": {"Namespace": "AWS/Lambda", "MetricName": "Invocations",
+                                       "Dimensions": [{"Name": "FunctionName", "Value": fn}]},
+                            "Period": 604800, "Stat": "Sum"}},
+                    ],
+                    StartTime=win_start, EndTime=end,
+                )
+                v = {x["Id"]: (sum(x["Values"]) if x.get("Values") else 0) for x in r["MetricDataResults"]}
+                return int(v.get("e", 0)), int(v.get("i", 0))
+
+            errs, invs     = _sums(start)
+            errs48, invs48 = _sums(recent)
         except Exception as exc:
             logger.warning("Lambda health: metric fetch failed for %s: %s", fn, exc)
             continue
 
         if errs:
             errored.append({"fn": fn, "errors": errs, "invocations": invs, "schedule": schedule,
-                            "all_failed": invs > 0 and errs >= invs})
+                            "errors_48h": errs48, "invocations_48h": invs48,
+                            # Still failing right now, as opposed to failed earlier
+                            # in the week and since recovered.
+                            "active": errs48 > 0,
+                            "all_failed": invs48 > 0 and errs48 >= invs48})
         elif invs == 0:
             # A monthly or 30-day schedule legitimately shows zero in a 7-day
             # window, so those are not flagged as silent.
             if not any(t in schedule for t in ("30 days", "rate(30", "1 * ?", "? * ")):
                 silent.append({"fn": fn, "schedule": schedule})
 
-    errored.sort(key=lambda r: (not r["all_failed"], -r["errors"]))
+    errored.sort(key=lambda r: (not r["active"], not r["all_failed"], -r["errors_48h"], -r["errors"]))
     return {"errored": errored, "silent": silent, "total": len(scheduled)}
 
 
@@ -781,11 +800,19 @@ def _lambda_health_html(h: dict) -> str:
 
     rows = ""
     for r in h["errored"]:
-        label = "ALL RUNS FAILED" if r["all_failed"] else f"{r['errors']} error(s)"
-        colour = "#e94560" if r["all_failed"] else "#d98324"
+        if not r.get("active"):
+            label  = f"recovered ({r['errors']} earlier this week)"
+            colour = "#2a9d5c"
+            runs   = f"{r['invocations_48h']} clean run(s) in 48h"
+        elif r["all_failed"]:
+            label, colour = "ALL RUNS FAILED", "#e94560"
+            runs = f"{r['errors_48h']}/{r['invocations_48h']} failed in 48h"
+        else:
+            label, colour = f"{r['errors_48h']} error(s) in 48h", "#d98324"
+            runs = f"{r['invocations_48h']} run(s) in 48h"
         rows += (f'<tr><td><code>{html.escape(r["fn"])}</code></td>'
                  f'<td style="color:{colour};"><b>{label}</b></td>'
-                 f'<td>{r["invocations"]} run(s)</td>'
+                 f'<td>{runs}</td>'
                  f'<td style="color:#888;">{html.escape(r["schedule"])}</td></tr>')
     for r in h["silent"]:
         rows += (f'<tr><td><code>{html.escape(r["fn"])}</code></td>'

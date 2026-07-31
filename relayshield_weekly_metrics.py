@@ -496,18 +496,33 @@ def _hf_mcp_stats() -> dict:
             resp   = table.scan(FilterExpression=Attr("source").eq("hf-mcp-space"), ExclusiveStartKey=resp["LastEvaluatedKey"])
             items += resp.get("Items", [])
 
+        # Only rows that actually took money count as revenue. `billed` and
+        # `rail` were added 2026-07-30; before that the row recorded list price
+        # regardless of whether anyone paid, so a TI subscriber's unlimited call
+        # and an unbilled key both showed up as revenue. The first row this ever
+        # produced was the AWS Marketplace auditor (awsmpsaastest@amazon.com)
+        # during the Bundle D compliance test, reported as $0.35 of "revenue".
+        # Older rows have no flag and are reported as unverified, not counted.
+        def _billed(i):
+            return bool(i.get("billed")) if "billed" in i else None
+
         total_calls   = len(items)
-        total_revenue = sum(float(i.get("amount_usd", 0)) for i in items)
+        total_revenue = sum(float(i.get("amount_usd", 0)) for i in items if _billed(i) is True)
         this_week     = [i for i in items if i.get("timestamp", "") >= cutoff]
         week_calls    = len(this_week)
-        week_revenue  = sum(float(i.get("amount_usd", 0)) for i in this_week)
+        week_revenue  = sum(float(i.get("amount_usd", 0)) for i in this_week if _billed(i) is True)
+        unverified    = sum(1 for i in items if _billed(i) is None)
+        by_rail: dict[str, int] = {}
+        for i in items:
+            by_rail[i.get("rail", "unrecorded")] = by_rail.get(i.get("rail", "unrecorded"), 0) + 1
 
         by_endpoint: dict[str, dict] = {}
         for i in items:
             path = i.get("path", "unknown")
             e = by_endpoint.setdefault(path, {"calls": 0, "revenue": 0.0})
             e["calls"]   += 1
-            e["revenue"] += float(i.get("amount_usd", 0))
+            if _billed(i) is True:
+                e["revenue"] += float(i.get("amount_usd", 0))
         top_endpoints = sorted(by_endpoint.items(), key=lambda x: x[1]["revenue"], reverse=True)
 
         return {
@@ -515,6 +530,8 @@ def _hf_mcp_stats() -> dict:
             "calls_this_week":   week_calls,
             "total_revenue":     round(total_revenue, 2),
             "revenue_this_week": round(week_revenue, 2),
+            "unverified_rows":   unverified,
+            "by_rail":           by_rail,
             "by_endpoint":       [
                 {"path": p, "calls": v["calls"], "revenue": round(v["revenue"], 2)}
                 for p, v in top_endpoints
@@ -525,6 +542,7 @@ def _hf_mcp_stats() -> dict:
         return {
             "total_calls": 0, "calls_this_week": 0,
             "total_revenue": 0, "revenue_this_week": 0, "by_endpoint": [],
+            "unverified_rows": 0, "by_rail": {},
         }
 
 

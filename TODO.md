@@ -1,5 +1,110 @@
 # RelayShield — Open Items
 
+## ☀️ 2026-07-31 PICKUP LIST — start here
+
+Three items, in this order. Detail for each is in its own section below.
+
+1. **BUNDLE-A-1** — reconcile the 6-vs-7 dimension count, audit-proof against Bundle D's three
+   failures, then submit `AddDimensions`. **The change-set queue is clear and AWS serializes per
+   seller account, so this window closes the moment anything else is submitted.**
+2. **LAMBDA-CLEANUP-1** — three scheduled functions are failing every run right now.
+3. **SENTINEL-1** — guide is written and live but its KQL is derived, not measured. Needs a free
+   Azure workspace to verify. Blocked on founder creating the account.
+
+---
+
+## 🟥 BUNDLE-A-1: audit-proof and submit Bundle A (TOP PRIORITY)
+
+Bundle A "Core Identity Exposure", $150/mo minimum. Code shipped 2026-07-13 and is gated in
+`relayshield_api.py` via `BUNDLE_A_DIMENSION_NAMES` + `is_bundle_a_call`. This is a **submission,
+not a build**.
+
+### Step 1 — reconcile the dimension count BEFORE submitting
+
+`BUNDLE_A_DIMENSION_NAMES` in `relayshield_api.py:523` has **6** entries:
+`breach`, `sim-swap`, `infostealer`, `domain`, `oauth-watchlist`, `crypto-intel`.
+
+Item 33 records the original change-set as **7 dimensions**. One of the two is wrong. Resolve it
+against the approved pricing in `RelayShield_Strategy.md` ("AWS Marketplace - Non-TI API Bundle
+Pricing") before building the change set. A dimension mismatch discovered mid-audit costs another
+multi-day cycle.
+
+### Step 2 — walk it against every Bundle D audit failure
+
+Bundle A rides the **same product entity** (`prod-kkvurtspreofy`) and the **same fulfillment
+Lambda**, so all three defects that failed Bundle D can hit it identically:
+
+| Bundle D failure | Check for Bundle A |
+|---|---|
+| Bare `/developers` carried Stripe checkout copy (Tier 1 external-payment violation) | Already fixed globally 2026-07-29. Re-verify the bare page still has zero "secure checkout"/"save a card"/"via Stripe". |
+| `source == "aws_marketplace"` exact match dropped every bundle customer onto the Stripe page | Fixed 2026-07-18 with `startswith`. Verify `source=aws_marketplace_core_identity_exposure` hits the bypass. |
+| Email-capture form posted bundle customers to the **TI product's** endpoint, ending in "Something went wrong" | Fixed 2026-07-30. Verify Bundle A's source routes to `/marketplace/bundle-fulfillment`, not `/marketplace/fulfillment`. |
+
+### Step 3 — prove fulfillment end to end before submitting
+
+Same method that de-risked Bundle D: create a synthetic Bundle A key in `relayshield_api_keys`
+(`aws_bundle: core_identity_exposure`, `bundle_a_access: true`), walk the landing page, submit the
+email form, confirm the key renders and authenticates against a Bundle A endpoint, then **delete the
+synthetic record**. Do not fire it at a real customer record.
+
+### Step 4 — submit
+
+`AddDimensions` first, then pricing terms as a separate change set. Remember pricing rolls back to
+placeholders on any failure, so re-enter all values on every resubmission.
+
+---
+
+## 🟧 LAMBDA-CLEANUP-1: three scheduled functions failing every run
+
+Found by the new daily health digest. Figures are last-48h as of 2026-07-30:
+
+| Function | 48h | Notes |
+|---|---|---|
+| `relayshield_bitcoin_monitor` | **576/576 failing** | Every run, every 15 min. Loudest and longest-running. |
+| `relayshield-push` | **24/24 failing** | Cause already identified: `_goplus_wallet_risk` receives a dict and calls `.startswith` on it (`relayshield_push.py:42`, called from `:201`). Should be a small fix. |
+| `relayshield-intel-ransomware` | **5/6 failing** | Not yet diagnosed. |
+| `relayshield-intel-monitor` | 18/21 | Errors are **pre-fix**; repaired 2026-07-30. **Confirm it is clean over a full day before closing.** |
+| `relayshield-intel-feed` | recovered | 0 errors in 48h. Its 7-day count was a resolved 7/23-7/24 incident. |
+| `relayshield-msp-digest` | recovered | Weekly schedule, no runs in window. |
+
+`relayshield-push` first: known cause, smallest fix. Then bitcoin_monitor for sheer volume.
+
+**Also outstanding:** `relayshield-superfluid-settlement` has reportedly failed every weekly run
+since ~2026-07-10 on an `invalid ELF header` from a pycryptodome layer architecture mismatch. It did
+not surface in the digest because its schedule is `rate(7 days)`. Verify separately.
+
+---
+
+## 🔧 BUNDLE-B-2: the pre-commit scan should NOT be GitHub-only
+
+Answering a founder question 2026-07-30, and it changes MKTPL-17's shape.
+
+**Two separate points worth separating:**
+
+- A **GitHub Action runs after the commit is pushed.** That is CI, not pre-commit. By then the secret
+  is already in git history and must be rotated even if the commit is deleted.
+- A **real pre-commit hook runs locally, before the secret ever enters history.** That is the
+  materially better control, and it is what GitGuardian's `ggshield` actually does.
+
+**The endpoint is platform-agnostic by design.** MKTPL-17's part (a) is "a handler that runs the
+existing `NHI_PATTERNS` against arbitrary submitted diff/text instead of a GitHub search". Nothing
+about that is GitHub-specific — it takes text and returns findings. Every integration is then a thin
+client over the same endpoint.
+
+**Build order:**
+1. **The endpoint** (`/v1/metered/secret-scan-diff` or similar). This is the product.
+2. **A `pre-commit` framework hook.** Highest value and host-agnostic: works with GitHub, GitLab,
+   Bitbucket, self-hosted, anything. The `pre-commit` ecosystem is the de facto standard and has its
+   own discoverable hooks registry.
+3. **GitHub Action** — GitHub Marketplace listing.
+4. **GitLab CI template / component** — GitLab has its own CI catalog.
+5. **A documented `curl` snippet** for Jenkins, CircleCI, Azure DevOps, Bitbucket Pipelines and
+   anything else. No per-platform build needed.
+
+**Why this matters beyond coverage:** each client is a listing in a *different* public catalog, which
+is exactly the flywheel test in [[project-platform-integration-order]]. One endpoint, five discovery
+surfaces.
+
 ## 🟥 TOP PRIORITY 2026-07-30 — SOLANA-4c: dApp Store answers received, decision needed
 
 The Solana Discord mod replied and **answered both blocking questions**. Item 4c is unblocked; what

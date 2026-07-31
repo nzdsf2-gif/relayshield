@@ -2,13 +2,16 @@
 
 ## ☀️ 2026-07-31 PICKUP LIST — start here
 
-Three items, in this order. Detail for each is in its own section below.
+Four items, in this order. Detail for each is in its own section below.
 
 1. **BUNDLE-A-1** — reconcile the 6-vs-7 dimension count, audit-proof against Bundle D's three
    failures, then submit `AddDimensions`. **The change-set queue is clear and AWS serializes per
    seller account, so this window closes the moment anything else is submitted.**
 2. **LAMBDA-CLEANUP-1** — three scheduled functions are failing every run right now.
-3. **SENTINEL-1** — guide is written and live but its KQL is derived, not measured. Needs a free
+3. **BUNDLE-B-2** — build the platform-agnostic secret-scan endpoint and the `pre-commit` framework
+   hook. Founder-prioritised 2026-07-30 for the 5-clients-1-endpoint flywheel. Scope for one day is
+   **the endpoint plus the pre-commit hook only** — the other three clients are thin follow-ons.
+4. **SENTINEL-1** — guide is written and live but its KQL is derived, not measured. Needs a free
    Azure workspace to verify. Blocked on founder creating the account.
 
 ---
@@ -75,7 +78,49 @@ not surface in the digest because its schedule is `rate(7 days)`. Verify separat
 
 ---
 
-## 🔧 BUNDLE-B-2: the pre-commit scan should NOT be GitHub-only
+## 🔧 BUNDLE-B-2: platform-agnostic secret scan + `pre-commit` hook — QUEUED FOR 2026-07-31
+
+**Founder-prioritised 2026-07-30** for the five-clients-one-endpoint flywheel. Day-one scope is
+**steps 1 and 2 only**.
+
+### Starting points already in the codebase
+
+- `NHI_PATTERNS` — `relayshield_api.py:5292`, **31 patterns**, tuples of
+  `(name, regex, severity, description, llm_provider)`.
+- `_NHI_COMPILED` — `relayshield_api.py:5419`, the pre-compiled form to actually scan with.
+- `handle_secret_scan` — `relayshield_api.py:5742`, the **existing** endpoint. Today it does a
+  domain-scoped GitHub code search. The new work is a sibling that takes submitted text instead, so
+  the detection logic is entirely reused at zero marginal cost and **no external API call**.
+
+### Day-one deliverables
+
+1. **The endpoint.** Accepts a diff or arbitrary text, returns findings with severity. Bill it under
+   Bundle B's `secret-scan` dimension. Design notes: cap the payload size, never log or persist the
+   submitted content (it is by definition unreviewed source, possibly containing the very secrets
+   being scanned for), and return byte offsets rather than echoing matched values back.
+2. **The `pre-commit` framework hook.** A small repo with `.pre-commit-hooks.yaml` plus a thin
+   client that reads staged diffs and calls the endpoint. Must fail the commit on a CRITICAL finding
+   and be bypassable with `--no-verify` like every other hook.
+
+### Why the hook, not the Action, is the day-one client
+
+A **GitHub Action runs after the push** — that is CI, and by then the secret is already in git
+history and has to be rotated even if the commit is deleted. A **`pre-commit` hook runs locally,
+before the secret ever enters history.** It is also host-agnostic: the same hook works on GitHub,
+GitLab, Bitbucket and self-hosted. This is the shape GitGuardian's own `ggshield` takes.
+
+### The remaining three clients (follow-ons, not day one)
+
+3. **GitHub Action** → GitHub Marketplace listing.
+4. **GitLab CI component** → GitLab's CI/CD catalog.
+5. **A documented `curl` snippet** → Jenkins, CircleCI, Azure DevOps, Bitbucket Pipelines. No
+   per-platform build needed.
+
+**The strategic point:** each client is a listing in a *different* public catalog, which passes both
+halves of the flywheel test in [[project-platform-integration-order]]. One endpoint, five discovery
+surfaces, and the detection logic is written already.
+
+## Background: why this is not GitHub-only
 
 Answering a founder question 2026-07-30, and it changes MKTPL-17's shape.
 

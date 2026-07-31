@@ -1,0 +1,74 @@
+[
+  {
+    "ChangeType": "AddDimensions",
+    "Entity": {
+      "Type": "SaaSProduct@1.0",
+      "Identifier": "prod-kkvurtspreofy"
+    },
+    "DetailsDocument": [
+      {
+        "Key": "core_identity_bundle_access",
+        "Name": "Core Identity Exposure - Monthly Access",
+        "Description": "Monthly minimum commitment for Core Identity Exposure API access: breach exposure, SIM swap detection, infostealer log checks, domain lookalike detection, OAuth token exposure watchlist, and crypto threat intelligence.",
+        "Unit": "Units",
+        "Types": [
+          "Entitled"
+        ]
+      },
+      {
+        "Key": "breach_calls",
+        "Name": "Breach Exposure Check",
+        "Description": "Checks an email address against an aggregated breach corpus and dark web credential databases.",
+        "Unit": "Units",
+        "Types": [
+          "ExternallyMetered"
+        ]
+      },
+      {
+        "Key": "sim_swap_calls",
+        "Name": "SIM Swap Detection",
+        "Description": "Detects recent SIM swap activity on a phone number, a common account takeover precursor.",
+        "Unit": "Units",
+        "Types": [
+          "ExternallyMetered"
+        ]
+      },
+      {
+        "Key": "infostealer_calls",
+        "Name": "Infostealer Log Check",
+        "Description": "Checks whether credentials for an identity appear in infostealer malware logs.",
+        "Unit": "Units",
+        "Types": [
+          "ExternallyMetered"
+        ]
+      },
+      {
+        "Key": "domain_calls",
+        "Name": "Domain Lookalike Detection",
+        "Description": "Finds typosquatted and lookalike domains registered against your brand.",
+        "Unit": "Units",
+        "Types": [
+          "ExternallyMetered"
+        ]
+      },
+      {
+        "Key": "oauth_watchlist_calls",
+        "Name": "OAuth Token Exposure Watchlist",
+        "Description": "Surfaces exposed OAuth and API tokens across leaked credential sources.",
+        "Unit": "Units",
+        "Types": [
+          "ExternallyMetered"
+        ]
+      },
+      {
+        "Key": "crypto_intel_calls",
+        "Name": "Crypto Intelligence Check",
+        "Description": "Checks wallets and domains against RelayShield's crypto threat intelligence corpus.",
+        "Unit": "Units",
+        "Types": [
+          "ExternallyMetered"
+        ]
+      }
+    ]
+  }
+]

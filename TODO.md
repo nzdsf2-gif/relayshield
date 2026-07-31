@@ -2,58 +2,92 @@
 
 ## ☀️ 2026-07-31 PICKUP LIST — start here
 
-Four items, in this order. Detail for each is in its own section below.
+Reordered 2026-07-31 after Bundle A hit a hard AWS constraint (see below).
 
-1. **BUNDLE-A-1** — reconcile the 6-vs-7 dimension count, audit-proof against Bundle D's three
-   failures, then submit `AddDimensions`. **The change-set queue is clear and AWS serializes per
-   seller account, so this window closes the moment anything else is submitted.**
-2. **LAMBDA-CLEANUP-1** — three scheduled functions are failing every run right now.
-3. **BUNDLE-B-2** — build the platform-agnostic secret-scan endpoint and the `pre-commit` framework
-   hook. Founder-prioritised 2026-07-30 for the 5-clients-1-endpoint flywheel. Scope for one day is
-   **the endpoint plus the pre-commit hook only** — the other three clients are thin follow-ons.
+1. ~~**BUNDLE-B-2**~~ — **day-one scope SHIPPED 2026-07-31.** Endpoint + `pre-commit` hook built,
+   deployed, verified end to end. Three live defects found and fixed on the way. One open pricing
+   decision ($0.05/call) and three follow-on clients remain. Confirmed: zero AWS Marketplace
+   dependency, never was blocked by Bundle A.
+2. **LAMBDA-CLEANUP-1** — three scheduled functions are failing every run right now. **Next up.**
+3. **BUNDLE-A-1** — **PARKED 2026-07-31, awaiting a founder decision, not blocked on work.** All
+   pre-submission verification passed; AWS rejects the submission shape itself. See below.
 4. **SENTINEL-1** — guide is written and live but its KQL is derived, not measured. Needs a free
    Azure workspace to verify. Blocked on founder creating the account.
 
 ---
 
-## 🟥 BUNDLE-A-1: audit-proof and submit Bundle A (TOP PRIORITY)
+## 🟦 BUNDLE-A-1: PARKED 2026-07-31 — all verification passed, blocked on a founder decision
 
-Bundle A "Core Identity Exposure", $150/mo minimum. Code shipped 2026-07-13 and is gated in
-`relayshield_api.py` via `BUNDLE_A_DIMENSION_NAMES` + `is_bundle_a_call`. This is a **submission,
-not a build**.
+Bundle A "Core Identity Exposure", $150/mo minimum. Steps 1-3 below are **done and green**. Step 4
+is impossible as written, which is the whole reason this is parked.
 
-### Step 1 — reconcile the dimension count BEFORE submitting
+### Step 1 — dimension count: RESOLVED, both numbers were right
 
-`BUNDLE_A_DIMENSION_NAMES` in `relayshield_api.py:523` has **6** entries:
-`breach`, `sim-swap`, `infostealer`, `domain`, `oauth-watchlist`, `crypto-intel`.
+Not a discrepancy. `BUNDLE_A_DIMENSION_NAMES` maps **metered endpoint paths → dimension keys**, so
+it can only ever hold `ExternallyMetered` dimensions — that is the 6. AWS additionally needs the
+`Entitled` **contract dimension** `core_identity_bundle_access` carrying the $150/mo minimum, which
+has no endpoint path and so cannot appear in that dict — that is the 7th.
 
-Item 33 records the original change-set as **7 dimensions**. One of the two is wrong. Resolve it
-against the approved pricing in `RelayShield_Strategy.md` ("AWS Marketplace - Non-TI API Bundle
-Pricing") before building the change set. A dimension mismatch discovered mid-audit costs another
-multi-day cycle.
+Verified three ways: (a) live `describe-entity` shows Bundle D as 1 `Entitled` +
+5 `ExternallyMetered` while `BUNDLE_D_DIMENSION_NAMES` holds only 3; (b) the offer prices
+`agentic_bundle_access` in a `ConfigurableUpfrontPricingTerm` and the metered keys in a
+`UsageBasedPricingTerm` — different term types; (c) `BUNDLE_CONFIGS` in
+`relayshield_bundle_fulfillment.py:100` is *already keyed* on `core_identity_bundle_access`.
+**No code change needed.**
 
-### Step 2 — walk it against every Bundle D audit failure
+### Step 2 — all three Bundle D audit failures: VERIFIED CLEAN for Bundle A (live, 2026-07-31)
 
-Bundle A rides the **same product entity** (`prod-kkvurtspreofy`) and the **same fulfillment
-Lambda**, so all three defects that failed Bundle D can hit it identically:
-
-| Bundle D failure | Check for Bundle A |
+| Bundle D failure | Bundle A result |
 |---|---|
-| Bare `/developers` carried Stripe checkout copy (Tier 1 external-payment violation) | Already fixed globally 2026-07-29. Re-verify the bare page still has zero "secure checkout"/"save a card"/"via Stripe". |
-| `source == "aws_marketplace"` exact match dropped every bundle customer onto the Stripe page | Fixed 2026-07-18 with `startswith`. Verify `source=aws_marketplace_core_identity_exposure` hits the bypass. |
-| Email-capture form posted bundle customers to the **TI product's** endpoint, ending in "Something went wrong" | Fixed 2026-07-30. Verify Bundle A's source routes to `/marketplace/bundle-fulfillment`, not `/marketplace/fulfillment`. |
+| Bare `/developers` carried Stripe checkout copy | Clean. The only "Stripe" on the page is product copy about Stripe secrets in stealer logs, not payment collection. |
+| `source == "aws_marketplace"` exact match | Clean. `source=aws_marketplace_core_identity_exposure` + `aws_customer_id` renders the no-payment email-capture bypass. **Note the param is `aws_customer_id`, not `customer_id`** — the wrong name silently falls through to the general landing page. |
+| Email form posted to the TI product's endpoint | Clean. Routes to `/marketplace/bundle-fulfillment`; bare `aws_marketplace` still routes to `/marketplace/fulfillment`, unregressed. |
 
-### Step 3 — prove fulfillment end to end before submitting
+### Step 3 — end-to-end fulfillment: PASSED, synthetic record deleted
 
-Same method that de-risked Bundle D: create a synthetic Bundle A key in `relayshield_api_keys`
-(`aws_bundle: core_identity_exposure`, `bundle_a_access: true`), walk the landing page, submit the
-email form, confirm the key renders and authenticates against a Bundle A endpoint, then **delete the
-synthetic record**. Do not fire it at a real customer record.
+Synthetic key exercised the real flow: page resolved **"Core Identity Exposure (Bundle A)"**, showed
+the key, sent the welcome email. All **6/6** Bundle A endpoints returned 200; all **3/3** Bundle D
+endpoints correctly returned 402 — the per-bundle allowlist (item 39) holds. Record deleted and
+confirmed revoked (401).
 
-### Step 4 — submit
+**Gotcha for whoever redoes this:** both `_find_provisioned_key_for_customer` and
+`_find_api_key_for_customer` filter on `aws_product_code`. A synthetic record without it silently
+resolves to the **Bundle D** fallback config and shows "key being provisioned". Set
+`aws_product_code: 46y72j0d99w7lyqkiqrakpc5k`.
 
-`AddDimensions` first, then pricing terms as a separate change set. Remember pricing rolls back to
-placeholders on any failure, so re-enter all values on every resubmission.
+### Step 4 — BLOCKED: AWS refuses `AddDimensions` without pricing
+
+Change set `9hxvi0lkd62on8uhb1iv3yfbc`, submitted 2026-07-31T10:57:12Z, **FAILED in 3 seconds**:
+
+> `INVALID_INPUT`: When adding dimensions for SaaS products, you must also set pricing for usage dimensions.
+
+This was a `CLIENT_ERROR` validation rejection, **not** an audit rejection — no audit cycle consumed,
+entity never locked. Bundle D verified unchanged afterwards: `Public`, `Active`, 6 dimensions, all
+six prices exact.
+
+**Consequence:** there is no safe half-step. Any Bundle A submission carries pricing, and pricing on
+this shared entity risks putting the day-old public Bundle D listing back through a full audit.
+
+### The decision to make
+
+- **Open question:** the "pricing requires `UpdateVisibility`" rule was recorded while the product
+  was *Limited* and being taken public. It may not apply now that it is already `Public`. There is
+  no dry-run, and the outcomes are asymmetric — if the rule is stale the change set enters
+  `PREPARING` and Bundle D is in audit, which is the exact risk being avoided.
+- **Mitigation available on any path:** Bundle D's pricing previously rolled back to placeholders
+  because the change set *replaced the whole rate card*. Re-stating all 13 dimensions (Bundle D's 6
+  + Bundle A's 7) makes a failure restore real prices instead. Baseline saved at
+  `aws_marketplace/offer_baseline_2026-07-31.json`.
+- **Also unresolved:** the entity's `ShortDescription`, `LongDescription`, `Highlights` and
+  `SearchKeywords` describe **only Bundle D**. A buyer would see an agentic-AI listing offering a
+  "Core Identity Exposure - Monthly Access" option. Listing text has already failed audit here once.
+- **Alternative worth weighing:** give Bundle A its own product entity. Zero risk to Bundle D and
+  fixes the description mismatch by construction, at the cost of a fresh audit cycle.
+
+Change set JSON is committed at `aws_marketplace/bundle_a_add_dimensions.json` (7 dimensions,
+validated: keys match code, no collision with Bundle D, no em-dashes). **Note the shape** —
+`DetailsDocument` for `AddDimensions` is a **bare array** of dimensions, not `{"Dimensions": [...]}`;
+the wrapped form fails validation.
 
 ---
 
@@ -78,7 +112,71 @@ not surface in the digest because its schedule is `rate(7 days)`. Verify separat
 
 ---
 
-## 🔧 BUNDLE-B-2: platform-agnostic secret scan + `pre-commit` hook — QUEUED FOR 2026-07-31
+## ✅ BUNDLE-B-2: platform-agnostic secret scan + `pre-commit` hook — DAY-ONE SCOPE SHIPPED 2026-07-31
+
+Both day-one deliverables are built, deployed and verified end to end. Remaining work is the three
+follow-on clients and one pricing decision.
+
+### Shipped
+
+- **`POST /v1/metered/secret-scan-text`** and **`/v1/payg/secret-scan-text`**
+  (`handle_secret_scan_text`, `relayshield_api.py`). Takes `content` or a unified `diff`, reuses all
+  31 `NHI_PATTERNS`, no external API call. Diff mode scans **only added lines**, so pre-existing
+  secrets never make the hook unbypassable. Content is never logged or persisted; matched values are
+  never echoed — findings carry file, line, byte offset and a truncated SHA-256 fingerprint. 1 MiB
+  cap, **rejected not truncated** (a silent truncation would report "clean" for a file whose secret
+  sat past the cutoff).
+- **`relayshield-precommit/`** — the `pre-commit` framework hook. `.pre-commit-hooks.yaml`, a
+  zero-dependency stdlib client, `--fail-on` threshold (default HIGH), fingerprint allowlist,
+  `--strict`, and fail-open on transport errors. Verified in a real git repo: blocks the commit,
+  `--no-verify` bypasses, allowlist suppresses, pre-existing secrets ignored, empty diff sends no
+  billed call.
+
+### Three live defects found and fixed while building this
+
+1. **`/v1/metered/secret-scan` and `/v1/payg/secret-scan` were 100% broken** — every call returned
+   500. `relayshield_api.py:5719` unpacked 4 values from `_NHI_COMPILED`, but all 31 entries became
+   5-tuples when `llm_provider` was added on 2026-07-26 and this call site was missed. The `for` sits
+   outside the inner `try`, so it raised on the first iteration. **This is the endpoint the whole
+   Bundle B flywheel is built on**, and it had been dead since 2026-07-26.
+2. **Every Python stdlib `urllib` caller got a 401.** Auth did exact-match lookups on
+   `X-RS-API-KEY`/`x-rs-api-key`; urllib normalizes header names with `str.capitalize()`, sending
+   `X-rs-api-key`, which matched neither. `curl` and `requests` preserve case so this was invisible.
+   Replaced with a case-insensitive `_header()` at **six** sites across `relayshield_api.py` and
+   `relayshield_agentic_api.py`, covering API-key auth **and** the x402 `PAYMENT-SIGNATURE`/
+   `X-PAYMENT` path, where the same miss would re-issue a 402 against a real payment.
+3. **HIBP direct attribution** removed from Bundle A's breach description per founder direction.
+
+### Open decision — pricing
+
+Shipped at **$0.05/call** (`METERED_CREDIT_COSTS` + `PAYG_PRICE_UNITS`), deliberately below
+`secret-scan`'s $0.35. Rationale: this is the pre-commit path and fires on every commit, so parity
+pricing costs a 20-commit-a-day developer **$7/day** and kills hook adoption, which is the entire
+point of the endpoint. It also has zero marginal cost (local regex, no external call).
+**Needs founder confirmation before launch.** Billed on the existing
+`relayshield_secret_scan_calls` Stripe meter — no new Meter/Price/`STRIPE_PRICE_IDS` line item
+needed, which is the chain that has leaked revenue before.
+
+### Also deliberately NOT done
+
+`/v1/payg/secret-scan-text` was accidentally added to `X402_V2_ENABLED_PATHS` and **reverted**. That
+set is the staged x402 V2 migration (item 50), which the founder runs in batches of 3-4, each funded,
+settled and confirmed re-indexed in CDP's Bazaar before the next. The new endpoint is a natural
+candidate for the next batch, but that is a deliberate rollout step, not a side effect.
+
+### Remaining: the other three clients
+
+3. **GitHub Action** → GitHub Marketplace listing.
+4. **GitLab CI component** → GitLab's CI/CD catalog.
+5. **A documented `curl` snippet** → Jenkins, CircleCI, Azure DevOps, Bitbucket Pipelines.
+
+Also still to do: publish `relayshield-precommit` to a public GitHub repo + PyPI (the README's
+install block references `github.com/RelayShield/relayshield-precommit` at `rev: v0.1.0`, which does
+not exist yet), and add the endpoint to `/developers` and `/openapi.json`.
+
+---
+
+## 🔧 BUNDLE-B-2 original scope notes (kept for reference)
 
 **Founder-prioritised 2026-07-30** for the five-clients-one-endpoint flywheel. Day-one scope is
 **steps 1 and 2 only**.

@@ -102,7 +102,7 @@ BUNDLE_CONFIGS = {
         "dynamo_flag":  "bundle_a_access",
         "display_name": "Core Identity Exposure (Bundle A)",
         "endpoints_text": (
-            "- Breach Exposure Check (breach) — HIBP + dark web breach database lookup\n"
+            "- Breach Exposure Check (breach) — aggregated breach corpus and dark web database lookup\n"
             "- SIM Swap Detection (sim-swap) — recent SIM swap activity, a classic account-takeover precursor\n"
             "- Infostealer Log Check (infostealer) — credentials found in infostealer malware logs\n"
             "- Domain Lookalike Detection (domain) — typosquatted/lookalike domains against your brand\n"

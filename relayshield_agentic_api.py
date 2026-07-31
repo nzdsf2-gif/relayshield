@@ -136,6 +136,25 @@ def _ok(data: dict, status: int = 200) -> dict:
     }
 
 
+def _header(headers: dict, name: str) -> str:
+    """Case-insensitive header lookup.
+
+    Duplicated from relayshield_api.py rather than imported, same isolation
+    rationale used throughout this Lambda. API Gateway's REST API preserves
+    client header casing, and Python's stdlib urllib normalizes header names
+    with str.capitalize() -- "X-RS-API-KEY" arrives as "X-rs-api-key", which
+    matched none of the spellings previously enumerated here, so every
+    urllib-based caller got a 401. Found 2026-07-31.
+    """
+    if not headers:
+        return ""
+    target = name.lower()
+    for k, v in headers.items():
+        if k.lower() == target:
+            return v or ""
+    return ""
+
+
 def _err(message: str, status: int = 400) -> dict:
     return {
         "statusCode": status,
@@ -990,10 +1009,7 @@ def handle_payg_request(path: str, event: dict) -> dict:
     headers   = event.get("headers") or {}
     # V2 clients send the signed payload as PAYMENT-SIGNATURE, not X-PAYMENT
     # (mirrors the same fix in relayshield_api.py, 2026-07-14).
-    x_payment = (
-        headers.get("PAYMENT-SIGNATURE") or headers.get("payment-signature")
-        or headers.get("X-PAYMENT") or headers.get("x-payment", "")
-    )
+    x_payment = _header(headers, "PAYMENT-SIGNATURE") or _header(headers, "X-PAYMENT")
 
     if not x_payment:
         return _x402_payment_required(path)
@@ -1055,8 +1071,7 @@ def lambda_handler(event: dict, context) -> dict:
         return _err("Not found", 404)
 
     headers = event.get("headers") or {}
-    api_key = (headers.get("X-API-Key") or headers.get("x-api-key") or
-               headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or "")
+    api_key = _header(headers, "X-API-Key") or _header(headers, "X-RS-API-KEY")
     key_record = _verify_rs_api_key(api_key)
     if not key_record:
         return _err("Invalid or missing API key", 401)

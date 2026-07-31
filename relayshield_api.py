@@ -58,6 +58,7 @@ Secrets used (all in Secrets Manager):
 """
 
 import base64
+import bisect as _bisect
 import concurrent.futures
 from decimal import Decimal
 import json
@@ -239,6 +240,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/nhi-exposure":          400000,   # $0.40 — non-human identity: API keys/tokens in stealer logs
     "/v1/payg/llm-credential-exposure": 400000,  # $0.40 — LLMjacking: exposed LLM/AI provider API keys
     "/v1/payg/secret-scan":           350000,   # $0.35 — GitHub/GitLab public repo secret detection
+    "/v1/payg/secret-scan-text":       50000,   # $0.05 — local scan, no external API call (see METERED_CREDIT_COSTS)
     "/v1/payg/target-risk":           500000,   # $0.50 — target probability score (6-signal correlation)
     "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
     "/v1/payg/bulk-identity-risk":    2000000,  # $2.00 — hierarchical org + per-agent-email risk scoring
@@ -318,6 +320,11 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/nhi-exposure":     "relayshield_nhi_exposure_calls",
     "/v1/metered/llm-credential-exposure": "relayshield_llm_credential_exposure_calls",
     "/v1/metered/secret-scan":      "relayshield_secret_scan_calls",
+    # Same Stripe billing meter as secret-scan on purpose: same capability, a
+    # different input mode. Reusing the meter means no new Stripe Meter/Price/
+    # STRIPE_PRICE_IDS line item is needed, which is exactly the chain that has
+    # leaked revenue before when a new dict entry shipped without one.
+    "/v1/metered/secret-scan-text": "relayshield_secret_scan_calls",
     "/v1/metered/target-risk":      "relayshield_target_risk_calls",
     "/v1/metered/asset-intel":      "relayshield_asset_intel_calls",
     "/v1/metered/threat-actor":     "relayshield_threat_actor_calls",
@@ -348,6 +355,12 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/nhi-exposure":    40,   # $0.40 — NHI: API keys/tokens in stealer logs
     "/v1/metered/llm-credential-exposure": 40,   # $0.40 — LLMjacking: exposed LLM/AI provider API keys
     "/v1/metered/secret-scan":     35,   # $0.35 — GitHub/GitLab public repo secret detection
+    "/v1/metered/secret-scan-text": 5,   # $0.05 — local pattern scan, no external API call.
+                                         # Deliberately below secret-scan's $0.35: this is the
+                                         # pre-commit path and fires on every commit, so parity
+                                         # pricing would cost a 20-commit-a-day developer $7/day
+                                         # and kill hook adoption, which is the entire point of
+                                         # the endpoint. Confirm with founder before launch.
     "/v1/metered/target-risk":     50,   # $0.50 — 6-signal target probability correlation score
     "/v1/metered/asset-intel":      15,   # $0.15/call — asset watchlist register + sweep
     "/v1/metered/threat-actor":    30,   # $0.30/call — exploit chatter + actor/campaign lookup
@@ -791,9 +804,8 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
 
     headers    = event.get("headers") or {}
     api_key_str = (
-        headers.get("X-RS-API-KEY")
-        or headers.get("x-rs-api-key")
-        or headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        _header(headers, "X-RS-API-KEY")
+        or _header(headers, "Authorization").removeprefix("Bearer ").strip()
     )
 
     key_record = _verify_rs_api_key(api_key_str)
@@ -822,6 +834,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         "/v1/metered/nhi-exposure":    handle_nhi_exposure,
         "/v1/metered/llm-credential-exposure": handle_llm_credential_exposure,
         "/v1/metered/secret-scan":     handle_secret_scan,
+        "/v1/metered/secret-scan-text": handle_secret_scan_text,
         "/v1/metered/target-risk":     handle_target_risk,
         "/v1/metered/asset-intel":         lambda p: handle_asset_intel(p, api_key_str),
         "/v1/metered/threat-actor":        handle_threat_actor,
@@ -1047,6 +1060,26 @@ def _ok(data: dict, status: int = 200) -> dict:
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps({"ok": True, "data": data}),
     }
+
+
+def _header(headers: dict, name: str) -> str:
+    """Case-insensitive header lookup.
+
+    API Gateway's REST API preserves the case the client sent, so exact-match
+    lookups only catch the spellings someone thought to enumerate. Python's
+    stdlib urllib normalizes header names with str.capitalize(), which turns
+    "X-RS-API-KEY" into "X-rs-api-key" — a spelling that matched neither of the
+    two variants previously checked, so every urllib-based caller got a 401
+    while curl and `requests` worked. Found 2026-07-31 building the pre-commit
+    hook, which is itself urllib-based.
+    """
+    if not headers:
+        return ""
+    target = name.lower()
+    for k, v in headers.items():
+        if k.lower() == target:
+            return v or ""
+    return ""
 
 
 def _err(message: str, status: int = 400) -> dict:
@@ -3303,12 +3336,11 @@ def _intel_api_key(headers: dict) -> str:
 
     Purely additive: every header that worked before still works.
     """
-    key = (headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or
-           headers.get("X-API-Key")    or headers.get("x-api-key") or "")
+    key = _header(headers, "X-RS-API-KEY") or _header(headers, "X-API-Key")
     if key:
         return key
 
-    auth = (headers.get("Authorization") or headers.get("authorization") or "").strip()
+    auth = _header(headers, "Authorization").strip()
     if not auth:
         return ""
     parts = auth.split(None, 1)
@@ -5716,7 +5748,11 @@ def _github_secret_scan(domain: str) -> list[dict]:
     except Exception:
         headers = {"User-Agent": "RelayShield-SecretScan/1.0"}  # unauthenticated fallback
 
-    for name, pattern, severity, description in _NHI_COMPILED[:6]:   # top CRITICAL/HIGH only
+    # 5-tuple unpack: llm_provider was appended to NHI_PATTERNS on 2026-07-26 for
+    # the LLMjacking check and this call site was not updated, so every call to
+    # this endpoint raised ValueError at the for statement (outside the inner
+    # try) and returned 500. Fixed 2026-07-31.
+    for name, pattern, severity, description, _llm_provider in _NHI_COMPILED[:6]:   # top CRITICAL/HIGH only
         try:
             query = f'"{domain}" {pattern.pattern[:20]}'  # domain + key prefix
             url   = f"{GITHUB_SEARCH_URL}?q={urllib.parse.quote(query)}&per_page=5"
@@ -5784,6 +5820,223 @@ def handle_secret_scan(params: dict) -> dict:
             if critical else
             "Secrets found in public repositories. Rotate and revoke, then audit git history "
             "to confirm the secret has been fully purged (git history rewrite may be required)."
+        ),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/secret-scan-text  /  POST /v1/payg/secret-scan-text
+# ---------------------------------------------------------------------------
+# Scans submitted text or a unified diff for the same 31 NHI credential patterns
+# handle_secret_scan uses, with no external API call — the detection is entirely
+# local, so this costs nothing per call beyond compute.
+#
+# Platform-agnostic by design. handle_secret_scan asks "is this domain's secret
+# already public on GitHub", which is CI-shaped and after-the-fact. This asks
+# "does this text contain a secret", which any client can call before a commit
+# ever enters history: the pre-commit hook, a GitHub Action, a GitLab CI
+# component, or a plain curl from Jenkins/CircleCI/Azure DevOps/Bitbucket.
+#
+# Three deliberate constraints, because the submitted content is by definition
+# unreviewed source that may contain the very secrets being scanned for:
+#   1. The content is never logged and never persisted. Only counts and pattern
+#      names reach the log line.
+#   2. Matched values are never echoed back. Callers get a byte offset, a line
+#      number and a truncated SHA-256 fingerprint, which is enough to locate the
+#      secret in a file they already hold and to maintain an allowlist, without
+#      the secret making a second trip over the wire.
+#   3. Payloads are capped, and oversized ones are rejected rather than silently
+#      truncated — a silent truncation would report "clean" for a file whose
+#      secret sat past the cutoff.
+#
+# Request:
+#   { "content": "...", "filename": "src/config.py" }   # arbitrary text
+#   { "diff": "..." }                                    # unified diff
+#
+# When "diff" is supplied only added lines are scanned, and filenames/line
+# numbers are recovered from the +++ and @@ headers, so a hook that sends
+# `git diff --cached` does not re-flag secrets that were already in the file.
+
+SECRET_SCAN_TEXT_MAX_BYTES = 1_048_576   # 1 MiB
+
+
+def _fingerprint_secret(value: str) -> str:
+    """Stable, non-reversible id for a matched secret.
+
+    Lets a caller dedupe findings across runs and maintain an allowlist without
+    us returning, logging or storing the secret itself. Truncated to 16 hex
+    chars: collision-irrelevant at this scale, and short enough to paste into a
+    config file.
+    """
+    import hashlib   # imported locally, matching this file's existing convention
+    return "sha256:" + hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _scan_text_for_secrets(text: str, filename: str = "") -> list[dict]:
+    """Run every NHI pattern over `text`, returning located findings.
+
+    Deliberately does not reuse _detect_nhi_in_text: that one is domain-context
+    aware and returns a `preview` of the matched value, which is exactly what
+    must not cross this boundary.
+    """
+    findings: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    attributed: set[str] = set()
+
+    # Precompute line starts once so offset -> line is a bisect, not a rescan.
+    line_starts = [0]
+    for i, ch in enumerate(text):
+        if ch == "\n":
+            line_starts.append(i + 1)
+
+    for name, pattern, severity, description, llm_provider in _NHI_COMPILED:
+        for match in pattern.finditer(text):
+            # Context-anchored patterns keep the secret in group 1 so the vendor
+            # name that anchored the match is not fingerprinted along with it.
+            val   = match.group(1) if pattern.groups else match.group(0)
+            start = match.start(1) if pattern.groups else match.start(0)
+
+            # Mirror _detect_nhi_in_text's attribution rule: a provider-attributed
+            # key must not also be reported by the unattributed sk- catch-all.
+            if llm_provider == "unknown_openai_compatible":
+                if val in attributed:
+                    continue
+            elif llm_provider:
+                attributed.add(val)
+
+            key = (val, start)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            findings.append({
+                "type":        name,
+                "description": description,
+                "severity":    severity,
+                "line":        _bisect.bisect_right(line_starts, start),
+                "byte_offset": start,
+                "length":      len(val),
+                "fingerprint": _fingerprint_secret(val),
+                "llm_provider": llm_provider,
+                "file":        filename,
+            })
+
+    return findings
+
+
+def _scan_unified_diff(diff: str) -> list[dict]:
+    """Scan only the added lines of a unified diff.
+
+    Existing secrets already in a file are somebody else's problem (and already
+    in history); a pre-commit hook must only block on what this commit adds, or
+    it becomes unbypassable noise on any repo with legacy findings.
+
+    Added lines are reassembled per file and scanned as one block so a pattern
+    is not missed at a line boundary, while a side table maps the reassembled
+    offsets back to real line numbers in the new file.
+    """
+    findings: list[dict] = []
+    current_file = ""
+    new_lineno   = 0
+    buf: list[str] = []
+    line_map: list[int] = []
+
+    def flush() -> None:
+        nonlocal buf, line_map
+        if buf:
+            block = "\n".join(buf)
+            for f in _scan_text_for_secrets(block, current_file):
+                idx = f["line"] - 1
+                f["line"] = line_map[idx] if 0 <= idx < len(line_map) else 0
+                # Offsets are relative to the reassembled added-lines block, not
+                # the file on disk, and would mislead. The line number is the
+                # locator that survives; drop the offset rather than lie.
+                f.pop("byte_offset", None)
+                findings.append(f)
+        buf, line_map = [], []
+
+    for raw in diff.splitlines():
+        if raw.startswith("+++ "):
+            flush()
+            path = raw[4:].strip()
+            if path.startswith("b/"):
+                path = path[2:]
+            current_file = "" if path == "/dev/null" else path
+        elif raw.startswith("@@"):
+            m = _re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", raw)
+            new_lineno = int(m.group(1)) if m else 0
+        elif raw.startswith("+") and not raw.startswith("+++"):
+            buf.append(raw[1:])
+            line_map.append(new_lineno)
+            new_lineno += 1
+        elif raw.startswith("-") and not raw.startswith("---"):
+            pass                      # removed line: not in the new file
+        elif raw.startswith("\\"):
+            pass                      # "\ No newline at end of file"
+        else:
+            new_lineno += 1           # context line
+
+    flush()
+    return findings
+
+
+def handle_secret_scan_text(params: dict) -> dict:
+    diff     = params.get("diff")
+    content  = params.get("content")
+    filename = (params.get("filename") or "").strip()
+
+    if diff is None and content is None:
+        return _err("content or diff is required")
+    if diff is not None and content is not None:
+        return _err("supply either content or diff, not both")
+
+    payload = diff if diff is not None else content
+    if not isinstance(payload, str):
+        return _err("content and diff must be strings")
+
+    size = len(payload.encode("utf-8", "replace"))
+    if size > SECRET_SCAN_TEXT_MAX_BYTES:
+        # Rejected, never truncated — see the module comment above.
+        return _err(
+            f"payload is {size} bytes, over the {SECRET_SCAN_TEXT_MAX_BYTES} byte limit. "
+            "Split the scan into smaller batches.",
+            413,
+        )
+
+    findings = _scan_unified_diff(payload) if diff is not None else _scan_text_for_secrets(payload, filename)
+
+    severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+    findings.sort(key=lambda f: (-severity_order.get(f["severity"], 0), f.get("line", 0)))
+
+    counts = {}
+    for f in findings:
+        counts[f["severity"]] = counts.get(f["severity"], 0) + 1
+
+    highest = findings[0]["severity"] if findings else None
+
+    # Pattern names and counts only. The scanned content never reaches the log.
+    logger.info(
+        "secret-scan-text mode=%s bytes=%d findings=%d highest=%s types=%s",
+        "diff" if diff is not None else "content", size, len(findings), highest,
+        sorted({f["type"] for f in findings}),
+    )
+
+    return _ok({
+        "found":            bool(findings),
+        "bytes_scanned":    size,
+        "findings":         findings,
+        "findings_count":   len(findings),
+        "severity_counts":  counts,
+        "highest_severity": highest,
+        "recommendation": (
+            "CRITICAL secrets detected. Do not commit. Rotate any credential that has "
+            "already left this machine, then remove it from the working tree."
+            if counts.get("CRITICAL") else
+            "Secrets detected. Review each finding and move the value to a secrets manager "
+            "or environment variable before committing."
+            if findings else
+            "No secrets detected."
         ),
         "checked_at": datetime.now(timezone.utc).isoformat(),
     })
@@ -7096,10 +7349,7 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     # Missing this for V2 paths meant every payment attempt went unseen by
     # the server, which always re-issued a fresh 402 — no funds were ever at
     # risk, but no V2 payment could ever succeed either.
-    x_payment = (
-        headers.get("PAYMENT-SIGNATURE") or headers.get("payment-signature")
-        or headers.get("X-PAYMENT") or headers.get("x-payment", "")
-    )
+    x_payment = _header(headers, "PAYMENT-SIGNATURE") or _header(headers, "X-PAYMENT")
 
     # Free poll endpoint — no payment needed
     if method == "GET" and path.startswith("/v1/payg/result/"):
@@ -7145,6 +7395,7 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/nhi-exposure":          handle_nhi_exposure,
         "/v1/payg/llm-credential-exposure": handle_llm_credential_exposure,
         "/v1/payg/secret-scan":           handle_secret_scan,
+        "/v1/payg/secret-scan-text":      handle_secret_scan_text,
         "/v1/payg/target-risk":           handle_target_risk,
         "/v1/payg/tech-stack-cve":        handle_tech_stack_cve,
         "/v1/payg/bulk-identity-risk":    handle_bulk_identity_risk,
@@ -9865,8 +10116,7 @@ def lambda_handler(event: dict, context) -> dict:
     # (paying) API key — not restricted to intel_access, applies account-wide
     if method == "POST" and path == "/v1/report/share":
         headers    = event.get("headers") or {}
-        api_key    = (headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key") or
-                      headers.get("X-API-Key") or headers.get("x-api-key", ""))
+        api_key    = _header(headers, "X-RS-API-KEY") or _header(headers, "X-API-Key")
         key_record = _verify_rs_api_key(api_key) if api_key else None
         if not key_record:
             return _err("Active RS API key required. Pass it as X-RS-API-KEY.", 401)
@@ -9889,8 +10139,7 @@ def lambda_handler(event: dict, context) -> dict:
     try:
         if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending", "/v1/account/info"):
             headers    = event.get("headers") or {}
-            api_key    = (headers.get("X-API-Key") or headers.get("x-api-key") or
-                          headers.get("X-RS-API-KEY") or headers.get("x-rs-api-key", ""))
+            api_key    = _header(headers, "X-API-Key") or _header(headers, "X-RS-API-KEY")
             key_record = _verify_rs_api_key(api_key) if api_key else None
             qp         = event.get("queryStringParameters") or {}
             merged     = {**qp, **params}

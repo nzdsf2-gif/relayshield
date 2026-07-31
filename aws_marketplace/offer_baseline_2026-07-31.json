@@ -1,0 +1,107 @@
+{
+  "EntityType": "Offer@1.0",
+  "EntityIdentifier": "offer-3d5w6tbuis4wu@7",
+  "EntityArn": "arn:aws:aws-marketplace:us-east-1:239677749008:AWSMarketplace/Offer/offer-3d5w6tbuis4wu",
+  "LastModifiedDate": "2026-07-30T12:33:08Z",
+  "Details": "{\"Id\":\"offer-3d5w6tbuis4wu\",\"Name\":\"Offer created on 2026-07-09T11:29:36.575Z\",\"Description\":\"Offer created on 2026-07-09T11:29:36.575Z\",\"ProductId\":\"prod-kkvurtspreofy\",\"Terms\":[{\"Type\":\"UsageBasedPricingTerm\",\"CurrencyCode\":\"USD\",\"RateCards\":[{\"RateCard\":[{\"DimensionKey\":\"bulk_identity_risk\",\"Price\":\"2.000\"},{\"DimensionKey\":\"tech_stack_cve\",\"Price\":\"0.200\"},{\"DimensionKey\":\"mcp_registry_risk\",\"Price\":\"0.350\"},{\"DimensionKey\":\"prompt_injection_breach\",\"Price\":\"0.350\"},{\"DimensionKey\":\"llm_credential_exposure\",\"Price\":\"0.400\"}]}]},{\"Type\":\"ConfigurableUpfrontPricingTerm\",\"CurrencyCode\":\"USD\",\"RateCards\":[{\"Selector\":{\"Type\":\"Duration\",\"Value\":\"P1M\"},\"Constraints\":{\"MultipleDimensionSelection\":\"Allowed\",\"QuantityConfiguration\":\"Allowed\"},\"RateCard\":[{\"DimensionKey\":\"agentic_bundle_access\",\"Price\":\"299\"}]}]},{\"Type\":\"LegalTerm\",\"Documents\":[{\"Type\":\"StandardEula\",\"Version\":\"2022-07-14\",\"Url\":\"<redacted>\"}]},{\"Type\":\"SupportTerm\",\"RefundPolicy\":\"The monthly minimum commitment and metered usage charges are billed in arrears and are generally non-refundable once incurred. RelayShield will issue a full or partial refund for verified billing errors, duplicate charges, or a service outage attributable to RelayShield. To request a refund, contact us at support.relayshield.net within 30 days of the disputed charge.\"},{\"Type\":\"RenewalTerm\"}],\"Rules\":[{\"Type\":\"TargetingRule\",\"PositiveTargeting\":{\"CountryCodes\":[\"AU\",\"CA\",\"DK\",\"FR\",\"DE\",\"MX\",\"NL\",\"NO\",\"SE\",\"CH\",\"GB\",\"US\",\"JP\"]}}],\"State\":\"Released\"}",
+  "DetailsDocument": {
+    "Id": "offer-3d5w6tbuis4wu",
+    "Name": "Offer created on 2026-07-09T11:29:36.575Z",
+    "Description": "Offer created on 2026-07-09T11:29:36.575Z",
+    "ProductId": "prod-kkvurtspreofy",
+    "Terms": [
+      {
+        "Type": "UsageBasedPricingTerm",
+        "CurrencyCode": "USD",
+        "RateCards": [
+          {
+            "RateCard": [
+              {
+                "DimensionKey": "bulk_identity_risk",
+                "Price": "2.000"
+              },
+              {
+                "DimensionKey": "tech_stack_cve",
+                "Price": "0.200"
+              },
+              {
+                "DimensionKey": "mcp_registry_risk",
+                "Price": "0.350"
+              },
+              {
+                "DimensionKey": "prompt_injection_breach",
+                "Price": "0.350"
+              },
+              {
+                "DimensionKey": "llm_credential_exposure",
+                "Price": "0.400"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "Type": "ConfigurableUpfrontPricingTerm",
+        "CurrencyCode": "USD",
+        "RateCards": [
+          {
+            "Selector": {
+              "Type": "Duration",
+              "Value": "P1M"
+            },
+            "Constraints": {
+              "MultipleDimensionSelection": "Allowed",
+              "QuantityConfiguration": "Allowed"
+            },
+            "RateCard": [
+              {
+                "DimensionKey": "agentic_bundle_access",
+                "Price": "299"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "Type": "LegalTerm",
+        "Documents": [
+          {
+            "Type": "StandardEula",
+            "Version": "2022-07-14",
+            "Url": "<presigned EULA url redacted - regenerate with describe-entity>"
+          }
+        ]
+      },
+      {
+        "Type": "SupportTerm",
+        "RefundPolicy": "The monthly minimum commitment and metered usage charges are billed in arrears and are generally non-refundable once incurred. RelayShield will issue a full or partial refund for verified billing errors, duplicate charges, or a service outage attributable to RelayShield. To request a refund, contact us at support.relayshield.net within 30 days of the disputed charge."
+      },
+      {
+        "Type": "RenewalTerm"
+      }
+    ],
+    "Rules": [
+      {
+        "Type": "TargetingRule",
+        "PositiveTargeting": {
+          "CountryCodes": [
+            "AU",
+            "CA",
+            "DK",
+            "FR",
+            "DE",
+            "MX",
+            "NL",
+            "NO",
+            "SE",
+            "CH",
+            "GB",
+            "US",
+            "JP"
+          ]
+        }
+      }
+    ],
+    "State": "Released"
+  }
+}

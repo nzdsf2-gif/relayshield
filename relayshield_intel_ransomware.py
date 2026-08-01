@@ -42,6 +42,7 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -63,6 +64,13 @@ TG_SECRET_NAME    = "relayshield/telegram_bot_token"
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}/{method}"
 
 ADMIN_CHAT_ID     = int(os.environ.get("ADMIN_CHAT_ID", "1729226804"))
+
+# WA template SID for ransomware victim alert (Meta approval pending)
+WA_TEMPLATE_SID   = "HX1e77a6d255976d5cd827e27120cc8c59"
+TWILIO_SID_SECRET = "relayshield/twilio_account_sid"
+TWILIO_TOK_SECRET = "relayshield/twilio_auth_token"
+TWILIO_FROM_SECRET = "relayshield/twilio_whatsapp_number"
+TWILIO_MESSAGES_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
 VICTIM_TTL_DAYS   = 180
 
 # ransomwatch posts.json — maintained by joshhighet, updated continuously
@@ -138,6 +146,29 @@ def _extract_victim_domain(post: dict) -> str | None:
 # DynamoDB operations
 # ---------------------------------------------------------------------------
 
+_WATERMARK_KEY = {"domain": "__state__", "group": "__watermark__"}
+FIRST_RUN_LIMIT = 500
+
+
+def _get_watermark() -> str:
+    """Newest `discovered` value processed by the last successful run."""
+    try:
+        item = _dynamodb.Table(RANSOMWARE_TABLE).get_item(Key=_WATERMARK_KEY).get("Item") or {}
+        return str(item.get("discovered", ""))
+    except Exception as exc:
+        logger.warning("watermark read failed, treating as first run: %s", exc)
+        return ""
+
+
+def _set_watermark(value: str) -> None:
+    """Fire-and-forget. A failed write means the next run reprocesses a small
+    overlap, which _store_victim's conditional put already deduplicates."""
+    try:
+        _dynamodb.Table(RANSOMWARE_TABLE).put_item(Item={**_WATERMARK_KEY, "discovered": value})
+    except Exception as exc:
+        logger.warning("watermark write failed: %s", exc)
+
+
 def _store_victim(domain: str, group: str, post: dict) -> bool:
     """Store victim record. Returns True if new (not previously seen)."""
     ttl = int(time.time()) + VICTIM_TTL_DAYS * 86400
@@ -152,8 +183,8 @@ def _store_victim(domain: str, group: str, post: dict) -> bool:
                 "ingested_at":  datetime.now(timezone.utc).isoformat(),
                 "ttl":          Decimal(ttl),
             },
-            ConditionExpression="attribute_not_exists(domain) AND attribute_not_exists(#g)",
-            ExpressionAttributeNames={"#g": "group"},
+            ConditionExpression="attribute_not_exists(#d) AND attribute_not_exists(#g)",
+            ExpressionAttributeNames={"#d": "domain", "#g": "group"},
         )
         return True
     except _dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
@@ -235,6 +266,44 @@ def _get_user_tg_chat(user: dict) -> int | None:
     return int(chat) if chat else None
 
 
+def _send_wa_ransomware_alert(domain: str, group: str, user: dict) -> bool:
+    """Send ransomware victim alert via WhatsApp template (pending Meta approval)."""
+    try:
+        raw_sid   = _secrets.get_secret_value(SecretId=TWILIO_SID_SECRET)["SecretString"].strip()
+        raw_token = _secrets.get_secret_value(SecretId=TWILIO_TOK_SECRET)["SecretString"].strip()
+        raw_from  = _secrets.get_secret_value(SecretId=TWILIO_FROM_SECRET)["SecretString"].strip()
+        # Decrypt phone
+        phone_enc = user.get("phone_encrypted")
+        if not phone_enc:
+            return False
+        import base64
+        kms = boto3.client("kms", region_name="us-east-1")
+        to_number = kms.decrypt(CiphertextBlob=base64.b64decode(phone_enc))["Plaintext"].decode()
+        if not to_number.startswith("whatsapp:"):
+            to_number = f"whatsapp:{to_number}"
+        from_number = raw_from if raw_from.startswith("whatsapp:") else f"whatsapp:{raw_from}"
+
+        payload = urllib.parse.urlencode({
+            "To":               to_number,
+            "From":             from_number,
+            "ContentSid":       WA_TEMPLATE_SID,
+            "ContentVariables": json.dumps({"1": domain, "2": group}),
+        }).encode()
+        creds = base64.b64encode(f"{raw_sid}:{raw_token}".encode()).decode()
+        req = urllib.request.Request(
+            TWILIO_MESSAGES_URL.format(sid=raw_sid),
+            data=payload,
+            headers={"Authorization": f"Basic {creds}",
+                     "Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=15)
+        return True
+    except Exception as exc:
+        logger.warning("WA ransomware alert failed user_id=%s: %s", user.get("user_id"), exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Lambda handler
 # ---------------------------------------------------------------------------
@@ -248,6 +317,33 @@ def lambda_handler(event, context):
         return {"statusCode": 200, "new_victims": 0, "alerts_fired": 0}
 
     logger.info("ransomwatch: %d posts fetched", len(posts))
+
+    # Only process posts newer than the last successful run.
+    #
+    # ransomwatch's posts.json is the full historical archive and only grows -
+    # 16,072 entries as of 2026-07-31. The loop below does one conditional
+    # put_item per post, so a full pass is 16k sequential DynamoDB round trips
+    # and the function timed out at exactly 120000ms on every run. Raising the
+    # timeout only defers that, since the file keeps growing.
+    #
+    # The high-water mark is stored as a reserved row in the same table
+    # (domain="__state__", group="__watermark__"), which the (domain, group)
+    # key schema makes safe - no real victim domain can collide with it, and
+    # it needs no new table.
+    watermark = _get_watermark()
+    if watermark:
+        before = len(posts)
+        posts = [p for p in posts if str(p.get("discovered", "")) > watermark]
+        logger.info("watermark=%s -> %d of %d posts are new", watermark, len(posts), before)
+    else:
+        # First run after this change: the archive is entirely backfill, and
+        # replaying it would re-alert every monitored user for victims
+        # discovered years ago. Take the newest slice only and set the mark.
+        posts = sorted(posts, key=lambda p: str(p.get("discovered", "")))[-FIRST_RUN_LIMIT:]
+        logger.info("no watermark, seeding from newest %d posts", len(posts))
+
+    if posts:
+        _set_watermark(max(str(p.get("discovered", "")) for p in posts))
 
     new_victims     = 0
     iocs_tagged     = 0
@@ -275,11 +371,15 @@ def lambda_handler(event, context):
         users = _find_monitored_users(domain)
         monitored_hits += len(users)
         for user in users:
+            alert_text = _format_ransomware_alert(domain, group, post)
+            # Telegram delivery
             chat_id = _get_user_tg_chat(user)
             if chat_id:
-                _send_telegram(chat_id, _format_ransomware_alert(domain, group, post))
-                alerts_fired += 1
-                logger.info("Ransomware alert fired user_id=%s domain=%s", user.get("user_id"), domain)
+                _send_telegram(chat_id, alert_text)
+            # WhatsApp delivery via template (activates on Meta approval)
+            _send_wa_ransomware_alert(domain, group, user)
+            alerts_fired += 1
+            logger.info("Ransomware alert fired user_id=%s domain=%s", user.get("user_id"), domain)
 
     # Admin digest
     summary = (

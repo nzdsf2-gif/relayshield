@@ -2,12 +2,18 @@
 
 ## ☀️ 2026-07-31 PICKUP LIST — start here
 
-**Recommended order, updated end of 2026-07-31** once n8n and Zapier landed. Things with a live
-failure or an external party waiting go first; internal build work follows.
+**Recommended order, updated end of 2026-07-31** once n8n, Zapier and the Solana answer landed.
+Things with a live failure or an external party waiting go first; internal build work follows.
 
-1. **LAMBDA-CLEANUP-1** — three scheduled functions failing **every run right now**. Deferred all
-   day 2026-07-31. `bitcoin_monitor` 576/576, `relayshield-push` 24/24 with a known one-line cause.
-   Live breakage outranks new build.
+0. **SOLANA-4c — upload Crypto Shield Mobile v1.5.0. HIGHEST PRIORITY, founder-set 2026-07-31.**
+   The dApp Store answered: **reviews and ratings do NOT transfer**, which closes the 48h hold from
+   2026-07-30 and confirms the standing recommendation (new package name, submit-new-first) since
+   reviews are lost either way and cannot drive the choice. **v1.4.0 has significant live issues and
+   there is no clean upgrade path until v1.5.0 ships.** See [[project-cs-mobile-build-environment]] -
+   `eas build --local` silently mis-signs, use `./gradlew assembleRelease`; the release keystore
+   (new 2026-07-25) must be backed up before this goes out.
+1. ~~**LAMBDA-CLEANUP-1**~~ — **RESOLVED 2026-07-31**, all three fixed and verified by live invoke.
+   See the section below; one of the three turned up a dead upstream feed (INTEL-4-SOURCE).
 2. **ZAPIER-REVIEW** — reviewer came back with **5 items**. An external reviewer holding a list is
    a decaying asset; partner queues reopen slowly once they go cold.
 3. **N8N-ONBOARDING** — Shadow AI template **approved 2026-07-31**. The new-hire onboarding
@@ -107,7 +113,52 @@ the wrapped form fails validation.
 
 ---
 
-## 🟧 LAMBDA-CLEANUP-1: three scheduled functions failing every run
+## 🔴 INTEL-4-SOURCE: the ransomware feed has been dead for 13 months
+
+Found 2026-07-31 while fixing the `relayshield-intel-ransomware` timeout.
+
+`RANSOMWATCH_URL` points at **`joshhighet/ransomwatch`, which is archived**. Its `posts.json` still
+serves 16,072 records, so every fetch "succeeds" - but the newest `discovered` value is
+**2025-06-16**. There are **zero 2026 posts**. Year distribution: 2024 (5,174), 2023 (4,769),
+2022 (2,870), 2021 (1,784), 2025 (1,442), 2020 (33).
+
+**Consequences:** `relayshield_intel_ransomware` (5,234 rows) stopped growing 13 months ago, and
+`ransomware-risk` is a **Bundle C dimension billed at $0.40/call** against it. INTEL-4 alerting has
+had nothing new to fire on for over a year, and the failure is silent - a stale feed looks identical
+to a quiet week.
+
+**Verified live replacement: `https://api.ransomware.live/v2/recentvictims`** returned 100 records
+with the newest timestamped **2026-07-31T23:52** (same day). Migration work: swap the URL, map the
+response fields to `_extract_victim_domain`'s expectations, and keep the new watermark logic - it
+works unchanged and will pick up the backlog incrementally.
+
+**Do this before any Bundle C pricing or listing copy leans on ransomware data.** Related pattern:
+[[project-taxii-conformance-verified]] and the `secret-scan` 401 - a data product that fails by
+returning *nothing* rather than erroring is the hardest kind to notice.
+
+---
+
+## ✅ LAMBDA-CLEANUP-1: RESOLVED 2026-07-31 — all three fixed and verified
+
+| Function | Was | Root cause | Now |
+|---|---|---|---|
+| `relayshield_bitcoin_monitor` | 576/576 failing | **Two faults.** `dynamodb:Scan` was never granted on `relayshield_monitored_wallets`, so it has never worked. And its role's log policy scoped `CreateLogStream`/`PutLogEvents` to `/aws/lambda/relayshield-sim-swap-monitor` only, so it had **no log group at all** and was structurally unable to report why. Timeout was also the 3s default. | 200 OK. Logs widened to `/aws/lambda/relayshield*`, DynamoDB granted, timeout 3s -> 60s. |
+| `relayshield-push` | 24/24 failing | `wallet_addresses` stores dicts (`{chain, address, label}`) but the loop passed each dict straight into `_goplus_wallet_risk`, so `.startswith` blew up every run. | 200 OK, 13 wallets scanned. |
+| `relayshield-intel-ransomware` | 5/6 failing | One conditional `put_item` per post x 16,072 posts = past the 120s timeout on every run. | 200 OK in **5.8s**, second run **1.1s**. |
+
+**Gotcha worth remembering:** after granting the DynamoDB permission, the function *still* returned
+AccessDenied for ~45s across two retries. The policy was correct - the warm execution environment
+held cached role credentials. Forcing a new environment (any `update-function-configuration`) made
+it work immediately. Don't conclude an IAM fix failed without recycling the environment first.
+
+`relayshield-push` also now **skips Bitcoin and TON wallets**, which GoPlus does not cover. Live data
+has `bc1pxuu4z87...` (a Bitcoin address) stored with `chain: "solana"`, so the declared chain is not
+trustworthy and the chain is now detected from the address itself. Previously those would have been
+sent to the Solana endpoint and the meaningless result pushed to the user as a risk change.
+
+---
+
+## 🟧 LAMBDA-CLEANUP-1 original notes (superseded)
 
 Found by the new daily health digest. Figures are last-48h as of 2026-07-30:
 

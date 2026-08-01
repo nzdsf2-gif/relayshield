@@ -2,17 +2,33 @@
 
 ## ☀️ 2026-07-31 PICKUP LIST — start here
 
-Reordered 2026-07-31 after Bundle A hit a hard AWS constraint (see below).
+**Recommended order, updated end of 2026-07-31** once n8n and Zapier landed. Things with a live
+failure or an external party waiting go first; internal build work follows.
 
-1. ~~**BUNDLE-B-2**~~ — **day-one scope SHIPPED 2026-07-31.** Endpoint + `pre-commit` hook built,
-   deployed, verified end to end. Three live defects found and fixed on the way. One open pricing
-   decision ($0.05/call) and three follow-on clients remain. Confirmed: zero AWS Marketplace
-   dependency, never was blocked by Bundle A.
-2. **LAMBDA-CLEANUP-1** — three scheduled functions are failing every run right now. **Next up.**
-3. **BUNDLE-A-1** — **PARKED 2026-07-31, awaiting a founder decision, not blocked on work.** All
+1. **LAMBDA-CLEANUP-1** — three scheduled functions failing **every run right now**. Deferred all
+   day 2026-07-31. `bitcoin_monitor` 576/576, `relayshield-push` 24/24 with a known one-line cause.
+   Live breakage outranks new build.
+2. **ZAPIER-REVIEW** — reviewer came back with **5 items**. An external reviewer holding a list is
+   a decaying asset; partner queues reopen slowly once they go cold.
+3. **N8N-ONBOARDING** — Shadow AI template **approved 2026-07-31**. The new-hire onboarding
+   template is the **last one before the 3-badge tier**. Ride the approval momentum; badges
+   compound distribution. See [[feedback-n8n-sticky-note-layout]] — render on CURRENT n8n before
+   submitting, and [[feedback-reviewer-reply-scope]] — answer only what was raised.
+4. **BB-1** — fix `secret-scan` query construction. 36x more findings, no new integrations, and it
+   is the design every later source (BB-3..BB-7) inherits. Also closes a live false-positive path.
+5. **BUNDLE-B-5** — the `stolen_cards` writer that never fires. A daily pipeline producing zero
+   rows surfaces to customers as a false all-clear.
+6. **BB-2, BB-3** — pattern budget, then GitLab (already sold, never implemented).
+7. **SIEM-2** — cheap, and malformed CEF fails silently. Good filler between larger items.
+8. **BUNDLE-A-1** — **PARKED, awaiting a founder decision, not blocked on work.** All
    pre-submission verification passed; AWS rejects the submission shape itself. See below.
-4. **SENTINEL-1** — guide is written and live but its KQL is derived, not measured. Needs a free
-   Azure workspace to verify. Blocked on founder creating the account.
+9. **BB-4..BB-8, SIEM-1/3/4/5** — real but not urgent: `siem_destinations` has 0 rows, so no
+   customer is currently affected.
+10. **SENTINEL-1** — blocked on founder creating a free Azure workspace.
+
+~~**BUNDLE-B-2**~~ — **day-one scope SHIPPED 2026-07-31.** `secret-scan-text` endpoint + `rsscan`
+pre-commit hook + all CI clients built, deployed, verified end to end. Five live defects found and
+fixed on the way. Publishing runbook in `rsscan/PUBLISHING.md`; needs founder credentials.
 
 ---
 
@@ -213,19 +229,13 @@ with no verification, so results like that reach the customer as a CRITICAL. BB-
 by a real customer, so treat it as unproven, not proven. `relayshield_siem_connector.py` supports
 `splunk_hec`, `cef`, `xsoar_webhook`.
 
-Worth doing, roughly in order of value per effort:
-
-1. **Local receiver harness** - stand up an HTTP echo container, register a destination of each
-   format, fire a real finding through each of the 7 monitors that dispatch, and diff the payload
-   against the vendor spec. Catches shape errors without needing a vendor account.
-2. **CEF syntax validation** - CEF has a strict header grammar and pipe/equals escaping rules.
-   Malformed CEF is silently dropped by most collectors, so a unit test over the escaping is high
-   value and cheap.
-3. **Splunk free tier** - a real HEC endpoint end-to-end. Splunk Free allows 500MB/day, enough.
-4. **XSOAR** - PR #45206 is already open with that team; the Generic Webhook incident shape can be
-   verified against their own content pack fixtures.
-5. **Failure behaviour** - what happens when a customer's SIEM is down, slow, or returns 500? Check
-   whether `send_to_siem` retries, drops silently, or blocks the monitor that called it.
+| ID | Item | Why it matters |
+|---|---|---|
+| **SIEM-1** | **Local receiver harness** - HTTP echo container, one destination per format, fire a real finding through each of the 7 dispatching monitors, diff each payload against the vendor spec. | Catches shape errors with no vendor account. Highest coverage per hour. |
+| **SIEM-2** | **CEF escaping unit test** - CEF has strict header grammar and pipe/equals escaping rules. | **Malformed CEF is silently dropped by most collectors.** Fails invisibly in production. Cheapest item here; good filler work. |
+| **SIEM-3** | **Splunk Free end-to-end** - real HEC endpoint. Splunk Free allows 500MB/day. | Only way to prove HEC actually ingests, not just that we POST. |
+| **SIEM-4** | **XSOAR shape verification** - validate the Generic Webhook incident shape against Palo Alto's own content-pack fixtures. | PR #45206 is already open with that team, so the relationship and the fixtures both exist. |
+| **SIEM-5** | **Failure behaviour** - what does `send_to_siem` do when a customer SIEM is down, slow, or 500s? Retry, silent drop, or block the calling monitor? | **A connector that stalls a monitor is worse than one that drops.** Check before a customer finds out. |
 
 ---
 
@@ -238,14 +248,18 @@ Measured 2026-07-31, and it does not support the commercial claims built on it:
 | `relayshield_stolen_sessions` | **9** | Writes span 2026-06-26 to 2026-07-28 - roughly **2 rows/week** |
 | `relayshield_stolen_cards` | **0** | Writer exists (`relayshield_intel_monitor.py:1154`, `:1168`) and has **never produced a row** |
 
-The sessions table is growing, but at ~2/week it is not on a commercial trajectory, and it is the
-sole backing for `session-risk` (a Bundle B dimension) and `nhi-exposure` (Bundle C). The cards
-table has a writer that has never fired, which suggests the extraction path does not match what the
-monitored channels actually post - that is a bug to find, not a corpus to wait on.
+**Context, added after founder pushback 2026-07-31:** stolen-cards is a **two-week-old feature**, so
+a small corpus is expected and the original framing here was harsher than the evidence warranted.
+The actionable part is narrower: a writer that runs daily and has produced *zero* rows is worth
+checking rather than waiting on. Sessions at ~2/week is a real trajectory question; cards at 0 is
+more likely a parse mismatch.
 
-**Do this before any pricing or listing copy leans on INTEL-5.** Compare what
-`relayshield_intel_monitor.py` expects to parse against a sample of what the 83 channels actually
-post.
+Both are backing for shipped dimensions - `session-risk` (Bundle B) and `nhi-exposure` (Bundle C) -
+so a silent extraction bug shows up to customers as "no findings", the same false-all-clear shape as
+the `secret-scan` 401 bug fixed earlier today.
+
+**Method:** compare what `relayshield_intel_monitor.py` expects to parse against a sample of what
+the 83 monitored channels actually post. Do this before pricing or listing copy leans on INTEL-5.
 
 ---
 

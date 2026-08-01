@@ -1,11 +1,16 @@
 # DRAFT reply to Abraham D. — Zapier Developer Support
 
-**PUSHED 2026-08-01 as version 1.0.4. NOT SENT** - the reply below still needs founder review.
+**SENT 2026-08-01 by founder. Live version is 1.0.5.**
+
+The reply as sent referenced **1.0.5**. The first push had to be 1.0.4 (Zapier requires
+sequential versions and 1.0.4 had never been uploaded), so 1.0.5 was pushed immediately after
+with identical content to make the sent statement accurate. 1.0.4 remains as a harmless
+intermediate. No correction email was needed.
 
 Note the CLI package is `zapier-platform-cli`, not `zapier`:
 `npx --yes zapier-platform-cli@latest push`
 
-Version **1.0.4** (pushed 2026-08-01 02:44 UTC). `zapier validate`: 28 checks passed, 0 failed, 0 publishing warnings, 0 general
+Version **1.0.5** (pushed 2026-08-01 03:06 UTC). `zapier validate`: 28 checks passed, 0 failed, 0 publishing warnings, 0 general
 warnings.
 
 ---
@@ -14,7 +19,7 @@ Hi Abraham,
 
 Thanks for the detailed review — that was genuinely useful, and one of the items pointed at a
 real problem on our side rather than just a convention mismatch. All five are addressed in
-version 1.0.4, which I've pushed.
+version 1.0.5, which I've pushed.
 
 **1 — Application API is documented**
 
@@ -66,7 +71,7 @@ what you'd prefer — just let me know before I do.
 I've also taken the opportunity to correct a stale figure in one action description, which
 advertised an older corpus size than we currently hold.
 
-Everything above is live in 1.0.4. Let me know if anything needs another pass.
+Everything above is live in 1.0.5. Let me know if anything needs another pass.
 
 Best,
 Andrew

@@ -487,7 +487,7 @@ def _normalize_multilingual(text: str) -> str:
     # Fullwidth ASCII (common in Chinese/Japanese channels) → ASCII
     t = ''.join(chr(ord(c) - 0xFEE0) if 0xFF01 <= ord(c) <= 0xFF5E else c for c in t)
     # Arabic channel defang — Arabic "dot" substitute and RTL mark removal
-    t = t.replace('‏', '').replace('‎', '').replace('‫', '').replace('‪', '')
+    t = t.replace('\u200f', '').replace('\u200e', '').replace('\u202b', '').replace('\u202a', '')
     t = t.replace('٫', '.').replace('،', ',')
     # Russian transliterated defang: "точка" = dot, "собака" = at-sign
     t = re.sub(r'\bточка\b', '.', t, flags=re.IGNORECASE)

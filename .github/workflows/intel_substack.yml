@@ -1,0 +1,25 @@
+name: Deploy relayshield-intel-substack
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'relayshield_intel_substack.py'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Zip and deploy
+        run: |
+          zip relayshield-intel-substack.zip relayshield_intel_substack.py
+          aws lambda update-function-code \
+            --function-name relayshield-intel-substack \
+            --zip-file fileb://relayshield-intel-substack.zip

@@ -1,0 +1,4 @@
+name = "relayshield-ti-demo"
+main = "cloudflare_worker_ti_demo.js"
+compatibility_date = "2024-01-01"
+workers_dev = true

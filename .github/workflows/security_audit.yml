@@ -21,7 +21,23 @@ jobs:
           fetch-depth: 0  # full history required by gitleaks for historical secret scanning
 
       # -----------------------------------------------------------------------
-      # 2. Python setup
+      # 2. Gitleaks — secret scanning (open source, no API key required)
+      #    Scans full git history for accidentally committed secrets.
+      #    Uses GITHUB_TOKEN which is automatically available in all workflows.
+      #
+      #    RUNS FIRST, ON PURPOSE. This used to sit last, after bandit. bandit
+      #    exits non-zero on any HIGH finding, which aborts the job, so a single
+      #    lint failure silently meant no secret scan and no CVE scan ran at all
+      #    — on a public repo. Secrets are the highest-consequence check here, so
+      #    nothing gets to pre-empt it. It needs only the checkout, not Python.
+      # -----------------------------------------------------------------------
+      - name: Run gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 3. Python setup
       # -----------------------------------------------------------------------
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -71,17 +87,11 @@ jobs:
       # -----------------------------------------------------------------------
       # 5. pip-audit — check requirements.txt against known CVE database
       #    PyPA-maintained replacement for safety, no auth or policy file needed
+      #
+      #    if: always() so a bandit finding cannot also suppress the CVE report.
+      #    The job still fails if this fails — it just gets to run and say so.
       # -----------------------------------------------------------------------
       - name: Run pip-audit (dependency CVE check)
+        if: always()
         run: |
           pip-audit -r requirements.txt
-
-      # -----------------------------------------------------------------------
-      # 6. Gitleaks — secret scanning (open source, no API key required)
-      #    Scans full git history for accidentally committed secrets.
-      #    Uses GITHUB_TOKEN which is automatically available in all workflows.
-      # -----------------------------------------------------------------------
-      - name: Run gitleaks (secret scan)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

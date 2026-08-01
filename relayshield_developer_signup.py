@@ -1400,6 +1400,31 @@ LANDING_PAGE = """<!DOCTYPE html>
 </div>
 
 <div class="section" style="margin-top:2rem">
+  <div class="section-title">Account &amp; integration endpoints</div>
+  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">Free to call and not metered. These support key validation and webhook delivery, and are the endpoints our published integrations (Zapier, n8n, Make) use to verify a connection and register alert delivery.</p>
+  <div class="price-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr))">
+    <div class="price-card" id="ep-account-info">
+      <div class="endpoint">/v1/account/info</div>
+      <div class="price">Free<span class="per"> / call</span></div>
+      <div class="desc"><strong>POST</strong> — returns the account behind the API key. Send an empty JSON body. Response: <code>plan</code>, <code>intel_access</code>, <code>calls_this_month</code>, <code>customer_id</code>, <code>email</code>, <code>active</code>. Used to confirm a key is live, and by integrations to label a connected account. Returns <code>401</code> if the key is missing, invalid or inactive.</div>
+    </div>
+    <div class="price-card" id="ep-webhook-configure">
+      <div class="endpoint">/v1/webhook/configure</div>
+      <div class="price">Free<span class="per"> / call</span></div>
+      <div class="desc"><strong>POST</strong> — registers a URL to receive findings (breach, infostealer, session hijack, ransomware victim listing) as they are detected, instead of polling. Body: <code>{"webhook_url": "https://..."}</code>. Response: <code>{"webhook_url": "...", "status": "registered"}</code>. Posting an empty <code>webhook_url</code> clears the registration and returns <code>status: "cleared"</code>.</div>
+    </div>
+  </div>
+  <pre style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.82rem;margin-top:1rem"><code>curl -X POST https://api.relayshield.net/v1/account/info \
+  -H "X-RS-API-KEY: rs_live_YOUR_KEY" \
+  -H "Content-Type: application/json" -d '{}'
+
+curl -X POST https://api.relayshield.net/v1/webhook/configure \
+  -H "X-RS-API-KEY: rs_live_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"webhook_url": "https://hooks.example.com/relayshield"}'</code></pre>
+</div>
+
+<div class="section" style="margin-top:2rem">
   <div class="section-title">Threat Intelligence API <span style="background:var(--accent);color:#fff;font-size:.7rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem;vertical-align:middle">NEW</span></div>
   <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">RelayShield&apos;s edge is OSINT threat hunting most vendors can&apos;t reach — our own collection pipeline runs continuous, verified monitoring across <strong>83+ active criminal Telegram channels</strong> (infostealer markets, credential dumps, breach announcements), not a static feed subscription. That&apos;s layered with <strong>4.6M+ indicators</strong> aggregated from <strong>20 authoritative external sources</strong> (abuse.ch, Spamhaus, AbuseIPDB, AlienVault OTX, PhishTank, CISA KEV, MITRE ATT&amp;CK/ATLAS, and more). Emails, domains, IPs, hashes, phone numbers, and wallet addresses — <strong>24–72 hours ahead of public breach databases.</strong></p>
   <p style="color:var(--muted);font-size:.9rem;margin:.5rem 0 1.25rem;background:rgba(108,99,255,.07);border:1px solid rgba(108,99,255,.2);border-radius:8px;padding:.75rem 1rem"><strong style="color:var(--accent)">All 26 metered endpoints included.</strong> Both TI subscription tiers cover unlimited access to all metered API endpoints above — breach, SIM swap, infostealer, domain, OAuth &amp; token exposure, supply chain, session hijack detection, crypto asset surface, asset intel monitoring, threat actor intelligence, CVE × identity risk correlation, domain identity risk scoring, bulk IOC enrichment, IOC pivot, brand monitoring, bulk identity risk, agent framework exploit monitoring, MCP registry risk, prompt-injection breach detection, certificate expiry risk, and passive DNS/IP reputation — in addition to the Threat Intelligence IOC and CVE feeds. No per-endpoint add-ons. One subscription, full access.</p>

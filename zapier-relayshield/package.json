@@ -1,0 +1,23 @@
+{
+  "name": "zapier-relayshield",
+  "version": "1.0.5",
+  "description": "RelayShield is a security intelligence API for breach detection, SIM swap, infostealer exposure, ransomware risk, and supply chain risk.",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --testTimeout=10000"
+  },
+  "dependencies": {
+    "zapier-platform-core": "19.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "keywords": [
+    "zapier",
+    "security",
+    "breach",
+    "sim-swap",
+    "infostealer",
+    "threat-intelligence"
+  ]
+}

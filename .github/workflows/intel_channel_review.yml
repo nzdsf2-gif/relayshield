@@ -38,7 +38,6 @@ jobs:
             --start-time $START \
             --end-time $END \
             --filter-pattern '"IOC store"' \
-            --profile default \
             --output text \
             --query 'events[*].message' 2>/dev/null | head -500 > /tmp/raw_logs.txt || true
 
@@ -48,7 +47,6 @@ jobs:
             --start-time $START \
             --end-time $END \
             --filter-pattern '"INTEL-2 Monitor Run"' \
-            --profile default \
             --output text \
             --query 'events[*].message' 2>/dev/null | tail -20 > /tmp/digests.txt || true
 
@@ -63,7 +61,6 @@ jobs:
             --payload '{"action":"stats_only"}' \
             --cli-binary-format raw-in-base64-out \
             /tmp/lambda_out.json \
-            --profile default \
             --query 'StatusCode' \
             --output text 2>/dev/null) || RESULT="error"
 
@@ -79,31 +76,41 @@ jobs:
           MONTH=$(date -u +"%B %Y")
           DIGESTS=$(cat /tmp/digests.txt 2>/dev/null | head -80 || echo "No digest data found.")
 
-          BODY="## INTEL-2 Monthly Channel Review — $MONTH
+          # Assembled in pieces. The static prose lives in QUOTED heredocs
+          # (<<'MD'), so backticks stay backticks and the %252F escapes in the
+          # CloudWatch URL survive instead of being eaten by the shell. Only
+          # MONTH and DIGESTS are interpolated, via printf.
+          #
+          # Every line below stays indented inside the `run: |` block. The
+          # previous version opened a BODY="..." string and continued it at
+          # column 1, which ended the YAML block scalar early and made this
+          # whole file unparseable -- GitHub could not read it, so the workflow
+          # had never run once. Keep the indentation.
+          {
+            printf '## INTEL-2 Monthly Channel Review — %s\n\n' "$MONTH"
+            cat <<'MD'
+          This issue is auto-generated on the 1st of every month. Review channel performance and update `MONITORED_CHANNELS` in `relayshield_intel_monitor.py` before closing.
 
-This issue is auto-generated on the 1st of every month. Review channel performance and update \`MONITORED_CHANNELS\` in \`relayshield_intel_monitor.py\` before closing.
+          ### Checklist
+          - [ ] Review channels with zero IOC hits last 30 days — consider replacing
+          - [ ] Check if any channels went private or were deleted (Telethon join errors in logs)
+          - [ ] Search for newly active criminal channels to add (sim swap, credential dumps, infostealers, crypto drainers)
+          - [ ] Verify the 4 confirmed-accessible channels are still live: `@exposed_vc`, `@logsmarket`, `@cloudsek_alerts`, `@vxunderground`
+          - [ ] Update `MONITORED_CHANNELS` list if needed, commit, and redeploy
 
-### Checklist
-- [ ] Review channels with zero IOC hits last 30 days — consider replacing
-- [ ] Check if any channels went private or were deleted (Telethon join errors in logs)
-- [ ] Search for newly active criminal channels to add (sim swap, credential dumps, infostealers, crypto drainers)
-- [ ] Verify the 4 confirmed-accessible channels are still live: \`@exposed_vc\`, \`@logsmarket\`, \`@cloudsek_alerts\`, \`@vxunderground\`
-- [ ] Update \`MONITORED_CHANNELS\` list if needed, commit, and redeploy
+          ### Last 30-Day Lambda Digest
+          MD
+            printf '```\n%s\n```\n\n' "$DIGESTS"
+            cat <<'MD'
+          ### Resources
+          - [CloudWatch Logs](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/%252Faws%252Flambda%252Frelayshield-intel-monitor)
+          - [relayshield_intel_monitor.py](../blob/main/relayshield_intel_monitor.py)
+          - [DynamoDB intel_iocs table](https://us-east-1.console.aws.amazon.com/dynamodbv2/home?region=us-east-1#table?name=relayshield_intel_iocs)
 
-### Last 30-Day Lambda Digest
-\`\`\`
-$DIGESTS
-\`\`\`
+          _Auto-opened by GitHub Actions · intel_channel_review.yml_
+          MD
+          } > /tmp/issue_body.txt
 
-### Resources
-- [CloudWatch Logs](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252Frelayshield-intel-monitor)
-- [relayshield_intel_monitor.py](../blob/main/relayshield_intel_monitor.py)
-- [DynamoDB intel_iocs table](https://us-east-1.console.aws.amazon.com/dynamodbv2/home?region=us-east-1#table?name=relayshield_intel_iocs)
-
-_Auto-opened by GitHub Actions · intel_channel_review.yml_"
-
-          # Write to a temp file to avoid shell quoting issues
-          echo "$BODY" > /tmp/issue_body.txt
           echo "MONTH=$MONTH" >> $GITHUB_OUTPUT
 
       - name: Open GitHub Issue
@@ -111,6 +118,18 @@ _Auto-opened by GitHub Actions · intel_channel_review.yml_"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           MONTH=$(date -u +"%B %Y")
+
+          # gh issue create fails outright on a label that does not exist, and
+          # neither of these did -- this workflow had never run, so nothing ever
+          # created them. Provision them here so the job is self-contained.
+          # --force makes it idempotent (creates or updates, never errors).
+          gh label create intel \
+            --description "INTEL pipeline: feeds, channels, IOC corpus" \
+            --color "1d76db" --force --repo ${{ github.repository }}
+          gh label create monthly-review \
+            --description "Recurring review task opened by automation" \
+            --color "5319e7" --force --repo ${{ github.repository }}
+
           gh issue create \
             --title "INTEL-2 Channel Review — $MONTH" \
             --body-file /tmp/issue_body.txt \

@@ -30,10 +30,7 @@ commands:
         description: >-
           Fail the build if the scan itself cannot run. Defaults true: a gate
           that silently reports success when it could not run is worse than none.
-      api-key-var:
-        type: env_var_name
-        default: RELAYSHIELD_API_KEY
-        description: Name of the environment variable holding the API key.
+      # api-key-var removed in 0.2.0 — scanning is local, no credential needed.
     steps:
       - run:
           name: Install rsscan
@@ -49,7 +46,6 @@ commands:
               RANGE="$CIRCLE_SHA1~1..$CIRCLE_SHA1"
             fi
             echo "Scanning $RANGE"
-            RELAYSHIELD_API_KEY="${<< parameters.api-key-var >>}" \
             RSSCAN_REV_RANGE="$RANGE" \
             RSSCAN_FAIL_ON="<< parameters.fail-on >>" \
             RSSCAN_ALLOWLIST="<< parameters.allowlist >>" \

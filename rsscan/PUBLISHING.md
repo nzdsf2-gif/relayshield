@@ -87,7 +87,7 @@ Fill in the Docker Hub description from `README.md`, and link back to the GitHub
 **Verify on an amd64 host:**
 ```bash
 docker run --rm --platform linux/amd64 -v "$PWD:/workspace" \
-  -e RELAYSHIELD_API_KEY -e RSSCAN_REV_RANGE=HEAD~1..HEAD relayshield/rsscan:0.1.0
+  -e RSSCAN_REV_RANGE=HEAD~1..HEAD relayshield/rsscan:0.1.0
 ```
 
 ---

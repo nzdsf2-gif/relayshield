@@ -229,7 +229,7 @@ def build_msp(output_path):
         [_p('Credential breach'), _p('Employee email in a breach database'),
          _p('Within hours — before attackers begin credential stuffing')],
         [_p('Infostealer log exposure'), _p('Device credentials in criminal Telegram markets'),
-         _p('24–72 hrs ahead of HIBP — before attackers replay stolen sessions')],
+         _p('24–72 hrs ahead of public breach databases — before attackers replay stolen sessions')],
         [_p('SIM swap'), _p('Phone number hijacked at carrier level'),
          _p('Real-time carrier query — before 2FA bypass completes')],
         [_p('Domain lookalike'), _p('Typosquat domains impersonating your client'),
@@ -286,6 +286,54 @@ def build_msp(output_path):
 
     story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#D1D9E6'), spaceAfter=2))
 
+    # ── LLMjacking & Shadow AI (added 2026-07-28) ──
+    story.append(Paragraph('LLMjacking & Shadow AI — The Credential Class Your Stack Cannot See', s['h2']))
+    story.append(md_inline(
+        'The same infostealer that harvests browser passwords also harvests AI provider API keys. '
+        'That changes the economics of a single leaked credential.',
+        s['body']))
+    story.append(Spacer(1, 4))
+    story.append(md_inline(
+        'A stolen password gives an attacker access. A stolen LLM API key gives them **your client\'s '
+        'credit card with no spending limit**. Published incidents range from tens of thousands of dollars '
+        'per day to a **$500K single-month bill** from one unthrottled key. The underground price for a '
+        'stolen LLM key is roughly **$30** — $30 to buy, six figures to absorb.',
+        s['body']))
+    story.append(Spacer(1, 4))
+    story.append(md_inline(
+        'The exposure is larger than most MSPs realise, because it is not confined to approved AI tools:',
+        s['body']))
+    for line in [
+        '**Shadow AI** — developers sign up for DeepSeek, Moonshot Kimi and Alibaba Qwen directly, on '
+        'personal accounts, outside procurement. None of it appears in an MSP\'s SaaS inventory.',
+        '**One key, many models** — a single leaked Hugging Face token bills against DeepSeek, Qwen, Kimi '
+        'and NVIDIA models through Inference Providers. The attacker never needs a vendor key.',
+        '**Cloud keys are now AI keys** — Amazon Bedrock issues dedicated long-lived API keys used as '
+        'bearer tokens. They are not IAM credentials, and tooling built to spot AKIA keys does not see them.',
+    ]:
+        story.append(md_inline('• ' + line, s['body']))
+        story.append(Spacer(1, 2))
+    story.append(Spacer(1, 4))
+    story.append(md_inline(
+        '**RelayShield detects exposed API keys across 14 LLM and AI providers** in criminal stealer log '
+        'archives — OpenAI, Anthropic Claude, Google Gemini, xAI Grok, Amazon Bedrock, Groq, Replicate, '
+        'LangSmith, Hugging Face, NVIDIA NIM, DeepSeek, Moonshot Kimi, Alibaba Qwen, and Alibaba Cloud.',
+        s['body']))
+    story.append(Spacer(1, 4))
+    story.append(md_inline(
+        '**Coverage no other tooling provides.** Gitleaks — the most widely deployed open-source secret '
+        'scanner — ships **zero** detection rules for DeepSeek, Moonshot, Qwen or NVIDIA. An MSP relying on '
+        'standard secret scanning is blind to all four. RelayShield is not scanning repositories for keys a '
+        'client might leak; it is scanning the criminal channels where leaked keys are already being sold.',
+        s['body']))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(
+        'The MSP conversation this opens: "Do you know which AI services your developers are using, and '
+        'whether any of those keys are already for sale?"',
+        s['quote']))
+
+    story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#D1D9E6'), spaceAfter=2))
+
     # ── SIM swap carrier surface ──
     story.append(Paragraph('SIM Swap — The Only Cost-Effective Carrier Surface Monitor', s['h2']))
     story.append(md_inline(
@@ -330,6 +378,7 @@ def build_msp(output_path):
         [_pt('Business Shield'), _pt('Growing SMBs up to 10 seats — all Basic + per-seat SIM + priority alerts'), _pt('$139.99/acct'), _pt('25%')],
         [_pt('Business Shield Pro'), _pt('Established SMBs up to 25 seats — full stack + compliance reporting'), _pt('$299.99/acct'), _pt('25%')],
         [_pt('Crypto Shield'), _pt('Crypto-native businesses, DeFi operators, Web3 companies'), _pt('$19.99/seat'), _pt('20%')],
+        [_pt('Multi-Site Shield'), _pt('Multi-location businesses — franchises, retail chains, distributed teams'), _pt('From $45/loc'), _pt('Reseller pricing')],
     ]
     t2 = Table(tier_data, colWidths=[1.5*inch, 3.1*inch, 1.1*inch, 0.9*inch])
     t2.setStyle(table_style())
@@ -352,81 +401,260 @@ def build_msp(output_path):
         'RelayShield intelligence directly into their own tooling, SIEM integrations, and SOAR playbooks.',
         s['body']))
     story.append(Spacer(1, 4))
-    story.append(md_inline('**Transactional API endpoints (PAYG and subscription):**', s['body']))
-    for ep in [
-        'POST /v1/breach — credential breach lookup ($0.10/call)',
-        'POST /v1/sim-swap — real-time carrier SIM swap check ($0.25/call)',
-        'POST /v1/domain — domain lookalike scan ($0.30/call)',
-        'POST /v1/infostealer — infostealer log exposure check ($0.50/call)',
-        'POST /v1/oauth-watchlist — OAuth &amp; token exposure: breach watchlist + live stealer log corpus ($0.30/call)',
-        'POST /v1/crypto-intel — wallet address risk, token honeypot & tax flags, counterparty screening ($0.30/call)',
-        'GET /v1/intel/cve — actively-exploited vulnerability lookup, cross-referenced against CISA KEV ransomware activity',
-    ]:
-        story.append(md_inline('• ' + ep, s['bullet']))
-    story.append(Spacer(1, 4))
+    # ── TI Subscription plans — LEAD ──
+    story.append(Paragraph('Threat Intelligence Subscription — Start Here', s['h2']))
+    story.append(md_inline(
+        'The TI subscription is the primary RelayShield API product for MSPs and MSSPs. It provides '
+        'unlimited access to the full IOC corpus, threat actor intelligence, trending threats, and '
+        'STIX/TAXII or MISP feed — everything your team needs to enrich alerts, run investigations, and brief clients. '
+        '<b>Enterprise TI platforms charge $30K–$300K/year for equivalent coverage. '
+        'RelayShield delivers 4.4M+ queryable indicators at $499/month.</b>',
+        s['body']))
+    story.append(Spacer(1, 6))
 
-    # ── Crypto asset intelligence (after API endpoints) ──
+    # Subscription plan cards
+    TEAL_DARK  = colors.HexColor('#008F82')
+    NAVY_LIGHT = colors.HexColor('#1A3A5C')
+    GREEN_BG   = colors.HexColor('#E6F7F5')
+    BLUE_BG    = colors.HexColor('#EAF0F8')
+
+    def _card_para(text, bold=False, color=BLACK, size=9):
+        sty = ParagraphStyle('cp', fontName='Helvetica-Bold' if bold else 'Helvetica',
+            fontSize=size, textColor=color, leading=13, spaceAfter=2, spaceBefore=2, wordWrap='CJK')
+        return Paragraph(text, sty)
+
+    # Two-column plan cards
+    starter_items = [
+        _card_para('TI STARTER', bold=True, color=WHITE, size=10),
+        _card_para('$499 / month', bold=True, color=WHITE, size=13),
+        _card_para('10,000 API calls/month', color=WHITE),
+        _card_para(' '),
+        _card_para('✓  4.4M+ IOC corpus query', color=WHITE),
+        _card_para('✓  Bulk IOC lookup (100/batch)', color=WHITE),
+        _card_para('✓  IOC pivot & lateral discovery', color=WHITE),
+        _card_para('✓  Early Warning Intelligence', color=WHITE),
+        _card_para('✓  MITRE ATT&CK actor profiles', color=WHITE),
+        _card_para('✓  Trending threats (24hr)', color=WHITE),
+        _card_para('✓  STIX/TAXII 2.1 + MISP feed', color=WHITE),
+        _card_para('✓  Shareable report links', color=WHITE),
+        _card_para('✓  Brand monitor', color=WHITE),
+        _card_para('✓  Third-party risk score', color=WHITE),
+        _card_para('✓  All 26 identity endpoints', color=WHITE),
+        _card_para(' '),
+        _card_para('Best for: MSPs building SIEM/SOAR', color=colors.HexColor('#B0D4D0')),
+    ]
+    unlimited_items = [
+        _card_para('TI UNLIMITED', bold=True, color=WHITE, size=10),
+        _card_para('$999 / month', bold=True, color=WHITE, size=13),
+        _card_para('Unlimited calls — no quota gate', color=WHITE),
+        _card_para(' '),
+        _card_para('✓  Everything in TI Starter', color=WHITE),
+        _card_para('✓  No monthly call cap', color=WHITE),
+        _card_para('✓  Priority SLA', color=WHITE),
+        _card_para('✓  Weekly MSP threat digest email', color=WHITE),
+        _card_para('✓  STIX/TAXII continuous pull', color=WHITE),
+        _card_para('✓  Bulk S3/Kinesis export (coming)', color=WHITE),
+        _card_para(' '),
+        _card_para(' '),
+        _card_para(' '),
+        _card_para(' '),
+        _card_para(' '),
+        _card_para('Best for: MSSPs with high query volume', color=colors.HexColor('#B0C8D4')),
+    ]
+
+    card_table = Table(
+        [[Table([[i] for i in starter_items],
+                colWidths=[3.4*inch],
+                style=TableStyle([
+                    ('BACKGROUND', (0,0), (-1,-1), TEAL_DARK),
+                    ('LEFTPADDING', (0,0), (-1,-1), 10),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 10),
+                    ('TOPPADDING', (0,0), (-1,-1), 3),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+                    ('ROUNDEDCORNERS', [6, 6, 6, 6]),
+                ])),
+         Table([[i] for i in unlimited_items],
+                colWidths=[3.4*inch],
+                style=TableStyle([
+                    ('BACKGROUND', (0,0), (-1,-1), NAVY_LIGHT),
+                    ('LEFTPADDING', (0,0), (-1,-1), 10),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 10),
+                    ('TOPPADDING', (0,0), (-1,-1), 3),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+                    ('ROUNDEDCORNERS', [6, 6, 6, 6]),
+                ]))]],
+        colWidths=[3.55*inch, 3.55*inch],
+        style=TableStyle([
+            ('LEFTPADDING', (0,0), (-1,-1), 4),
+            ('RIGHTPADDING', (0,0), (-1,-1), 4),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ])
+    )
+    story.append(KeepTogether([card_table, Spacer(1, 6)]))
+
+    story.append(md_inline(
+        'Self-serve signup: <b>api.relayshield.net/developers</b> — instant API key, no sales call, cancel anytime. '
+        'Also available on <b>AWS Marketplace</b> for teams that prefer to procure and bill through an existing AWS account.',
+        s['small']))
+    story.append(Spacer(1, 8))
+
+    # ── Capability cards ──
+    story.append(Paragraph('What the TI Subscription Covers', s['h2']))
+
+    CAP_TEAL  = colors.HexColor('#E6F7F5')
+    CAP_BLUE  = colors.HexColor('#EAF0F8')
+    CAP_GOLD  = colors.HexColor('#FDF6E3')
+    CAP_RED   = colors.HexColor('#FEF0EE')
+
+    def _cap_header(text, bg):
+        sty = ParagraphStyle('ch', fontName='Helvetica-Bold', fontSize=9,
+            textColor=NAVY, leading=12, spaceAfter=3, spaceBefore=3)
+        return Table([[Paragraph(text, sty)]],
+            colWidths=[3.4*inch],
+            style=TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), bg),
+                ('LEFTPADDING', (0,0), (-1,-1), 8),
+                ('TOPPADDING', (0,0), (-1,-1), 6),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ]))
+
+    def _cap_body(lines, bg):
+        def _p(t): return Paragraph(t, ParagraphStyle('cb', fontName='Helvetica',
+            fontSize=8.5, textColor=BLACK, leading=12, spaceAfter=1))
+        rows = [[_p('• ' + l)] for l in lines]
+        return Table(rows, colWidths=[3.4*inch],
+            style=TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), WHITE),
+                ('LEFTPADDING', (0,0), (-1,-1), 10),
+                ('RIGHTPADDING', (0,0), (-1,-1), 8),
+                ('TOPPADDING', (0,0), (-1,-1), 3),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+                ('LINEBELOW', (0,-1), (-1,-1), 0.5, colors.HexColor('#D1D9E6')),
+                ('LINEBEFORE', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D9E6')),
+                ('LINEAFTER', (0,0), (-1,-1), 0.5, colors.HexColor('#D1D9E6')),
+            ]))
+
+    cap_rows = [
+        # Row 1
+        [Table([
+            [_cap_header('IOC Corpus & Bulk Enrichment', CAP_TEAL)],
+            [_cap_body([
+                '4.4M+ indicators: domains, IPs, URLs, hashes',
+                '20 live feeds + 83+ criminal Telegram channels',
+                '3,750+ malware families with ATT&CK attribution',
+                'Bulk lookup: 100 IOCs per api call',
+                'IOC pivot: find related C2 infrastructure by malware family',
+                '365-day retention',
+            ], CAP_TEAL)],
+         ], colWidths=[3.4*inch], style=TableStyle([('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0)])),
+         Table([
+            [_cap_header('Early Warning Intelligence', CAP_BLUE)],
+            [_cap_body([
+                'CVE PoC chatter in criminal channels — 24–72hr pre-NVD warning',
+                'CISA KEV: 1,600+ actively-exploited CVEs, daily refresh',
+                'Ransomware-campaign-linked CVEs flagged separately',
+                'Trending threats: top IOCs spreading in last 24 hours',
+                'Threat actor profiles: TTPs, targets, associated IOCs',
+                'MITRE ATT&CK: 189 groups, 858 techniques',
+            ], CAP_BLUE)],
+         ], colWidths=[3.4*inch], style=TableStyle([('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0)]))],
+        # Row 2
+        [Table([
+            [_cap_header('Identity & Credential Intelligence', CAP_GOLD)],
+            [_cap_body([
+                'Breach exposure: 15B+ credential corpus',
+                'Infostealer logs: 3,750+ malware families tracked',
+                'Session hijack detection: stolen cookies in stealer archives',
+                'Identity graph: email → phone/domain correlation from dumps',
+                'NHI exposure: API keys & tokens in stealer logs',
+                'Target risk score: 6-signal composite per domain',
+            ], CAP_GOLD)],
+         ], colWidths=[3.4*inch], style=TableStyle([('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0)])),
+         Table([
+            [_cap_header('Vendor & Brand Protection', CAP_RED)],
+            [_cap_body([
+                'Third-party risk score: vendor breach + stealer + dark web ($0.10)',
+                'Brand monitor: scan 4.4M+ IOC corpus for brand patterns ($0.25)',
+                'Domain lookalike / typosquat scanning ($0.30)',
+                'OAuth supply chain: 31 high-risk SaaS apps monitored ($0.30)',
+                'Secret scan: GitHub public repo secret detection ($0.35)',
+                'STIX/TAXII 2.1 + MISP: direct feed into Splunk, Sentinel, Elastic, or MISP-based SOC tooling',
+                'Shareable report links: persistent, public-view URLs for any scan result',
+            ], CAP_RED)],
+         ], colWidths=[3.4*inch], style=TableStyle([('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0)]))]
+    ]
+    cap_table = Table(cap_rows, colWidths=[3.55*inch, 3.55*inch],
+        style=TableStyle([
+            ('LEFTPADDING', (0,0), (-1,-1), 3),
+            ('RIGHTPADDING', (0,0), (-1,-1), 3),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ]))
+    story.append(KeepTogether([cap_table, Spacer(1, 8)]))
+
+    # ── Crypto asset intelligence ──
     story.append(md_inline('**Crypto Asset Intelligence — Cross-Surface Attack Detection:**', s['body']))
     story.append(md_inline(
         'The /v1/crypto-intel endpoint goes beyond a simple lookup. When it flags a wallet counterparty '
         'as high risk, RelayShield records that signal in the same 72-hour correlation window as identity '
-        'signals. If a SIM swap, credential breach, or port-out fraud event has also fired for the same '
-        'user within that window, RelayShield escalates to a composite CRITICAL alert.',
+        'signals. A SIM swap alert and a flagged wallet transaction arriving within 72 hours is the most common '
+        'crypto exchange drain pattern. <b>No competitor has both signal streams and the correlation layer '
+        'to connect them.</b>',
         s['body']))
-    story.append(Spacer(1, 4))
-    story.append(md_inline(
-        'A SIM swap alert and a flagged wallet transaction arriving within 72 hours is the most common '
-        'crypto exchange drain pattern. **No competitor has both signal streams and the correlation layer '
-        'to connect them.** Callable via REST API, MCP tool, or through the Telegram and WhatsApp bots '
-        'for Crypto Shield subscribers.',
-        s['body']))
-    story.append(Spacer(1, 4))
+    story.append(Spacer(1, 8))
 
-    story.append(md_inline('**Threat Intelligence API — live:**', s['body']))
+    # ── Individual endpoints — ad-hoc note ──
+    story.append(Paragraph('Individual API Endpoints — Ad-Hoc & Low-Volume Testing', s['h2']))
     story.append(md_inline(
-        'MSSPs operating at scale can query RelayShield\'s live IOC database via <b>GET /v1/intel/telegram</b>. '
-        'The feed aggregates <b>200,000+ indicators</b> from two source categories — '
-        '<b>8 verified criminal Telegram channels</b> (infostealer log markets, credential dumps, SIM swap service listings — '
-        'the underground sources that surface threats 24–72 hours before public breach databases); and '
-        '<b>11 authoritative threat intelligence feeds</b>: '
-        '<b>ThreatFox (abuse.ch)</b> — malware IOCs tagged by family (LummaC2, RedLine, Vidar, Stealc, Raccoon, and 14 others); '
-        '<b>URLhaus (abuse.ch)</b> — malicious URLs for active malware distribution; '
-        '<b>Feodo Tracker aggressive (abuse.ch)</b> — ~8,000 active botnet C2 IPs (Emotet, QakBot, Dridex, IcedID, TrickBot); '
-        '<b>MalwareBazaar (abuse.ch)</b> — malware SHA256 hashes tagged by family; '
-        '<b>Spamhaus DROP/EDROP</b> — IP ranges operated by cybercrime networks; '
-        '<b>AbuseIPDB</b> — crowdsourced IP abuse reports (confidence ≥90%); '
-        '<b>Emerging Threats</b> — compromised IP blocklist, updated daily; and '
-        '<b>AlienVault OTX</b> — community threat pulses covering domains, IPs, and file hashes. '
-        'Pass any domain, IP, URL, or SHA256 hash to check for known malware infrastructure association — '
-        'ahead of reputation services that lag by days or weeks. IOC data retained 90 days.',
-        s['body']))
+        '<b>Note: Individual per-call endpoints are intended for low-volume ad-hoc testing and evaluation only. '
+        'Production integrations and MSP workflows should use the TI Starter or TI Unlimited subscription '
+        '— which provides the same endpoints at a predictable monthly cost with no per-call overhead.</b>',
+        ParagraphStyle('note', fontName='Helvetica-Oblique', fontSize=9, textColor=NAVY,
+            leading=13, spaceAfter=6, spaceBefore=4,
+            borderColor=TEAL, borderWidth=1, borderPad=8, backColor=GREEN_BG)))
+    story.append(Spacer(1, 4))
+    story.append(md_inline('Selected endpoints available for testing ($0.10–$0.50/call):', s['body']))
+    for ep in [
+        'POST /v1/metered/breach — credential breach lookup ($0.10)',
+        'POST /v1/metered/sim-swap — real-time SIM swap check ($0.25)',
+        'POST /v1/metered/domain — domain lookalike scan ($0.30)',
+        'POST /v1/metered/infostealer — infostealer log exposure ($0.50)',
+        'POST /v1/metered/supply-chain — vendor third-party risk score ($0.10, up to 10 domains)',
+        'POST /v1/metered/brand-monitor — brand mention scan in IOC corpus ($0.25)',
+        'POST /v1/metered/bulk-ioc — bulk IOC enrichment, up to 100 per call ($0.50/batch)',
+        'POST /v1/metered/bulk-identity-risk — hierarchical org + agent risk: up to 10 domains + 5 agent emails each ($2.00/call)',
+        'GET /v1/intel/cve — CISA KEV lookup by CVE ID or keyword',
+    ]:
+        story.append(md_inline('• ' + ep, s['bullet']))
     story.append(Spacer(1, 4))
     story.append(md_inline(
-        '<b>Price-to-performance:</b> Enterprise threat intelligence platforms start at '
-        '$30K–$300K/year for equivalent IOC coverage. RelayShield delivers <b>200,000+ queryable indicators '
-        'at $499/month</b> — the same enrichment data your clients\' enterprise competitors pay $5K+/month to access.',
-        s['body']))
-    story.append(Spacer(1, 4))
+        'PAYG x402 also available for zero-commitment testing: pay per call in USDC on Base — '
+        'no API key, no signup required. See api.relayshield.net/developers.',
+        s['small']))
+    story.append(Spacer(1, 6))
+
     story.append(md_inline(
-        '<b>Global ransomware CVE intelligence:</b> RelayShield also ingests the full CISA Known Exploited '
-        'Vulnerabilities (KEV) catalog daily — 1,600+ actively-exploited CVEs tracked, with vulnerabilities '
-        'tied to known ransomware campaigns flagged separately. When a vendor/product your clients run appears '
-        'with an actively-exploited, ransomware-linked CVE, you have a concrete, dated reason to open a '
-        'remediation conversation — not a generic "patch your systems" reminder.',
+        '**Mid-market MSSP feed (coming):** A bulk S3/Kinesis export tier ($1,500–$3,000/mo) for MSSPs '
+        'running RelayShield data through their own SIEM/SOAR pipeline at scale across many client tenants. '
+        'Contact us to join early access.',
         s['body']))
-    story.append(Spacer(1, 4))
+    story.append(Spacer(1, 6))
     story.append(md_inline(
-        '**Developer subscription — live today:** $499/mo for 10,000 API calls, $999/mo unlimited. '
-        'Self-serve signup at relayshield.net/developers — covers all metered endpoints above plus the '
-        'threat intelligence feed. Built for security engineers at small-to-mid-size companies building '
-        'internal SIEM/SOAR tooling, and security SaaS vendors embedding breach and infostealer data into '
-        'their own product. No commitment, cancel anytime.',
+        '**Drops into the SIEM your clients already run:** RelayShield\'s IOC corpus is served over '
+        'STIX/TAXII 2.1 and MISP, so it ingests through Elastic Security\'s built-in Threat Intel '
+        'integrations with configuration alone - no connector to build and no professional-services '
+        'engagement. Splunk HEC, CEF/QRadar and Cortex XSOAR are supported as push destinations. For an '
+        'MSSP running a shared SIEM across client tenants, this removes the integration objection entirely.',
         s['body']))
-    story.append(Spacer(1, 4))
+    story.append(Spacer(1, 6))
     story.append(md_inline(
-        '**Mid-market MSSP feed (coming):** A bulk export tier ($1,500–$3,000/mo) for MSSPs running '
-        'this data through their own SIEM/SOAR pipeline at scale across many client tenants, delivered as '
-        'a continuous feed rather than per-query lookups. Contact us to join early access.',
+        '**Live automation, not just an API:** RelayShield\'s employee-offboarding credential check is a '
+        'published, officially-approved template in n8n\'s workflow library (n8n.io/workflows/16694) — an HR '
+        'webhook triggers three parallel identity-risk checks (breach, infostealer, OAuth token exposure) the '
+        'moment someone\'s offboarded, routing findings to Slack, a manager email summary, and a Notion audit '
+        'log automatically. This isn\'t a hypothetical integration path — it\'s live, installable today, built '
+        'on the same API MSPs get direct access to above.',
         s['body']))
 
     story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#D1D9E6'), spaceAfter=2))
@@ -473,7 +701,7 @@ def build_msp(output_path):
         'Infostealer log scan — credentials checked against criminal market exposure',
         'SIM swap monitoring activated on all registered phone numbers',
         'Domain lookalike scan across 500M+ registered domains',
-        'OAuth &amp; token exposure audit — breach watchlist + live stealer log corpus; rogue app detection active',
+        'OAuth & token exposure audit — breach watchlist + live stealer log corpus; rogue app detection active',
         'Predictive attack chain engine active — correlation monitoring begins immediately across 11 chains',
         'Cross-surface correlation live — identity signals correlated against crypto wallet risk signals for clients with digital asset exposure',
         'Step-by-step remediation guidance built into every alert',
@@ -506,6 +734,120 @@ def build_msp(output_path):
 
     doc.build(story, onFirstPage=first_page, onLaterPages=later_pages)
     print(f'✅  {output_path}')
+
+
+# ─── AGENTCORE POC ONE-PAGER ──────────────────────────────────────────────────
+
+def build_agentcore_onepager(output_path):
+    """External leave-behind for AWS partner/channel conversations.
+
+    Deliberately excludes the INTERNAL NOTES block carried in
+    RelayShield_AgentCore_POC_OnePager.md -- that is working context for the
+    founder (stale-stat warnings, the AgentCore Preview-vs-GA correction) and
+    must never reach a recipient.
+    """
+    s = dict(make_styles())
+    # Local overrides: this is a genuine one-pager, so headings and body run
+    # tighter than the multi-page briefs. Copied rather than mutated so the
+    # shared styles stay untouched for the other builders.
+    s['h2'] = ParagraphStyle('h2_oc', parent=s['h2'], fontSize=12, leading=15,
+                             spaceBefore=7, spaceAfter=3)
+    s['body'] = ParagraphStyle('body_oc', parent=s['body'], fontSize=9.3,
+                               leading=12.4, spaceAfter=4, spaceBefore=1)
+    s['bullet'] = ParagraphStyle('bullet_oc', parent=s['bullet'], fontSize=9.3,
+                                 leading=12.4, spaceAfter=2, spaceBefore=0)
+    margins = dict(leftMargin=0.56*inch, rightMargin=0.56*inch,
+                   topMargin=1.16*inch, bottomMargin=0.42*inch)
+
+    HDR_TITLE    = 'Autonomous Agent-to-API Commerce on AWS'
+    HDR_SUBTITLE = 'RelayShield x Amazon Bedrock AgentCore - end-to-end proof of concept'
+
+    def first_page(canvas, doc):
+        header_band(canvas, doc, HDR_TITLE, HDR_SUBTITLE)
+    def later_pages(canvas, doc):
+        page_header_footer(canvas, doc, 'AgentCore Proof of Concept')
+
+    doc = SimpleDocTemplate(output_path, pagesize=letter, **margins)
+    story = []
+
+    story.append(Paragraph('What We Set Out to Prove', s['h2']))
+    story.append(md_inline(
+        'That an autonomous AI agent could **discover, pay for, and consume a live commercial API** with no '
+        'human in the loop, no pre-provisioned API key, and no prior relationship between agent and vendor - '
+        'using real money, on production infrastructure, entirely on AWS-native tooling.',
+        s['body']))
+    story.append(md_inline('**Not a sandbox. Not a testnet. Not a scripted demo.**', s['body']))
+
+    story.append(Paragraph('What We Built', s['h2']))
+    rows = [
+        ['Layer', 'Component'],
+        ['Discovery', 'AgentCore Gateway with the CDP x402 Bazaar as a native MCP server target - zero custom discovery code'],
+        ['Payments', 'AgentCore Payments - credential provider, payment manager, connector and embedded CDP wallet, via boto3'],
+        ['Agent', 'Strands agent on Bedrock (Claude Sonnet) using the AgentCorePaymentsPlugin for automatic HTTP 402 handling'],
+        ['Settlement', 'Real USDC on Base mainnet, signed via CDP delegated signing'],
+        ['Target API', "RelayShield's identity-risk-score endpoint - a live, commercially listed AWS Marketplace product"],
+    ]
+    t = Table([[Paragraph(c, s['small']) for c in r] for r in rows],
+              colWidths=[1.0*inch, 5.85*inch])
+    # compact variant of table_style() -- same look, less vertical padding, so
+    # the whole brief stays on a single page
+    ts = table_style()
+    ts.add('TOPPADDING', (0, 0), (-1, -1), 3)
+    ts.add('BOTTOMPADDING', (0, 0), (-1, -1), 3)
+    t.setStyle(ts)
+    story.append(t)
+    story.append(Spacer(1, 2))
+
+    story.append(Paragraph('What Happened', s['h2']))
+    story.append(md_inline('The agent was given a task and a funded wallet. Unassisted, it:', s['body']))
+    for i, step in enumerate([
+        "Searched the x402 Bazaar and located RelayShield's identity-risk endpoint",
+        'Called it and received an HTTP 402 Payment Required',
+        'Signed and settled the payment on-chain',
+        'Retried, received the real scored result, and summarized it correctly',
+    ], 1):
+        story.append(md_inline(f'{i}.  {step}', s['bullet']))
+    story.append(Spacer(1, 2))
+    story.append(md_inline(
+        '**On-chain proof:** 0xe90d302b5eda6b66545cf9a506c3bd73f273ff9390f309e4f021d3150a388016 - '
+        'Base mainnet, status success, verified via direct RPC. The entire loop, discovery through '
+        'settlement through consumption, ran without human intervention.',
+        s['body']))
+
+    story.append(Paragraph('Why This Matters', s['h2']))
+    for label, text in [
+        ('For AWS.', 'The agentic-commerce loop closing end to end on AWS-native services, against a real '
+                     'Marketplace ISV rather than a reference implementation. Every layer is AWS.'),
+        ('For the telco channel.', 'The pattern generalises to machine-to-machine service consumption: an '
+                     'autonomous system procuring a metered capability on demand and settling per-call, with '
+                     'no contract negotiation or credential provisioning step. That is the shape of network '
+                     'function chaining, roaming settlement and wholesale interconnect, with the procurement '
+                     'friction removed.'),
+        ('For RelayShield.', 'An AWS Marketplace seller since June 2026 - this proves our endpoints are '
+                     'consumable by autonomous agents today, not on a roadmap.'),
+    ]:
+        story.append(md_inline(f'**{label}** {text}', s['body']))
+
+    story.append(Paragraph('About RelayShield', s['h2']))
+    for line in [
+        '**4.5M+ indicators of compromise**, from criminal Telegram marketplaces and 11 authoritative feeds',
+        '**83+ monitored criminal channels** - typically 24-72 hours ahead of public breach databases',
+        '**3,750+ tracked malware families**',
+        '**26 identity endpoints** - breach, infostealer, SIM swap, OAuth and domain exposure, non-human identity, LLM credential exposure',
+        'Live on AWS Marketplace (prod-kb3ftelx44wlk), AWS account 239677749008; STIX/TAXII 2.1 and MISP feeds available',
+    ]:
+        story.append(md_inline('\u2022  ' + line, s['bullet']))
+
+    story.append(Paragraph('What We Are Looking For', s['h2']))
+    story.append(md_inline(
+        'An introduction to the AgentCore product team or the AWS Partner org. We would value being an '
+        'early-adopter reference for agentic commerce, and guidance on our path toward ISV Accelerate '
+        '(Partner Central verification is complete). Happy to walk through the technical detail or demo live.',
+        s['body']))
+    story.append(Paragraph('support@relayshield.net  |  api.relayshield.net/developers', s['contact_name']))
+
+    doc.build(story, onFirstPage=first_page, onLaterPages=later_pages)
+    print(f'\u2705  {output_path}')
 
 
 # ─── EXECUTIVE BRIEFING ───────────────────────────────────────────────────────
@@ -677,7 +1019,123 @@ def build_exec(output_path):
     print(f'✅  {output_path}')
 
 
+# ─── SOLANA MOBILE GRANT PITCH DECK ────────────────────────────────────────────
+
+def build_solana_grant(output_path):
+    s = make_styles()
+    w, h = letter
+    margins = dict(leftMargin=0.6*inch, rightMargin=0.6*inch,
+                   topMargin=1.35*inch, bottomMargin=0.75*inch)
+
+    HDR_TITLE    = 'Crypto Shield Mobile'
+    HDR_SUBTITLE = 'Solana Mobile Grant Application — RelayShield'
+
+    def first_page(canvas, doc):
+        header_band(canvas, doc, HDR_TITLE, HDR_SUBTITLE)
+    def later_pages(canvas, doc):
+        page_header_footer(canvas, doc, 'Solana Mobile Grant Application')
+
+    doc = SimpleDocTemplate(output_path, pagesize=letter, **margins)
+    story = []
+
+    # Mission / hook
+    story.append(Paragraph('The Problem', s['h2']))
+    story.append(Paragraph(
+        'Every competing wallet-security product watches on-chain activity only. '
+        'Most real attacks start off-chain — a leaked password, a phished session, a SIM-swap — '
+        'long before a malicious transaction ever gets signed.',
+        s['quote']))
+    story.append(md_inline(
+        'Wallet drainers, address poisoning, and fake NFT mints get the headlines, but the credential '
+        'layer is where most attacks actually begin. A user\'s email is breached, their session is hijacked, '
+        'or their SIM is swapped — and by the time a malicious transaction reaches the chain, the attacker '
+        'has already done the hard part. Existing wallet security tools have no visibility into any of this.',
+        s['body']))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph('The Solution — Crypto Shield Mobile', s['h2']))
+    story.append(md_inline(
+        'Crypto Shield Mobile is the only consumer product that treats the credential layer and the chain '
+        'layer as one attack surface. It is a **native Android app** — not a wrapped web dashboard — that '
+        'provides **read-only** wallet security monitoring across Solana, EVM (including Base), TON, Bitcoin, '
+        'and XRP. It never requests a seed phrase or private key access; it cannot move funds.',
+        s['body']))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph('Core capabilities:', s['body']))
+    for line in [
+        '<b>Wallet risk scanning</b> — instant risk scoring for wallets, tokens, and NFTs across every supported chain.',
+        '<b>Address poisoning detection</b> — catches look-alike addresses attackers use to trick users into copying the wrong one from transaction history.',
+        '<b>NFT Security scanning</b> — flags malicious or fake NFT contracts, including drainer contracts disguised as reward NFTs.',
+        '<b>Criminal Telegram intelligence</b> — 37+ monitored channels where stolen data and drainer kits are traded, surfacing threats 24-72 hours before public disclosure.',
+        '<b>Mobile Wallet Adapter integration</b> — read-only wallet connect (authorize only, never signing) that auto-populates a monitored Solana address instead of manual entry.',
+        '<b>Signature Guard</b> — approval monitoring, transaction simulation before signing, and session hijack detection.',
+    ]:
+        story.append(md_inline(line, s['bullet']))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph('Platform & Traction', s['h2']))
+    story.append(md_inline(
+        'Crypto Shield Mobile is built on RelayShield, a live threat-intelligence platform with real, '
+        'paying customers on its B2A API today — not a project starting from zero.',
+        s['body']))
+    for line in [
+        '<b>2M+ indicator</b> IOC corpus across 20+ feed sources, 365-day retention.',
+        '<b>37+ monitored criminal Telegram channels</b> — infostealer log markets, credential dump channels, SIM-swap service listings.',
+        'Live B2A REST API with metered and flat-rate subscription tiers, active paying subscribers.',
+        'STIX/TAXII 2.1 and MISP feed export — SOAR/SIEM-ready threat intelligence.',
+        '<b>Solana-native x402 micropayments</b> — all metered API endpoints support pay-per-call access via x402 with USDC on Solana, including a CDP-sponsored fee-payer that covers gas for every SVM transaction, so callers never need a funded Solana wallet.',
+        'Crypto Shield Mobile v1.3.0 submitted to the Solana dApp Store (Mobile Wallet Adapter integration, NFT security scanning, Jupiter token verification, address poisoning detection).',
+    ]:
+        story.append(md_inline(line, s['bullet']))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph('Roadmap', s['h2']))
+    for status, line in [
+        ('Shipped', 'Mobile Wallet Adapter — read-only Connect Wallet, auto-populated Solana address'),
+        ('Next', 'Solana Blinks/Actions security scanning — verify shareable transaction links before signing'),
+        ('Planned', 'Ecosystem integration — token/NFT risk API + embeddable security badges for Solana dApps, DEXs, marketplaces'),
+        ('Later', 'Google Play onboarding — same APK, broader Android distribution'),
+        ('Later', 'iOS App Store release — Solana wallet monitoring continues; native MWA connect is Android-only'),
+    ]:
+        story.append(md_inline(f'<b>[{status}]</b> {line}', s['bullet']))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph('Public Good Commitment', s['h2']))
+    story.append(md_inline(
+        'RelayShield already operates two public-good pieces of infrastructure directly relevant to the '
+        'Solana ecosystem: a free, embeddable color-coded security badge that any Solana dApp, DEX, or NFT '
+        'marketplace can drop into their own site to show a live risk signal for a domain, and a URL/link '
+        'reputation scanner directly applicable to the phishing-link problem endemic to Solana airdrops and '
+        'fake mint pages. As part of this grant, RelayShield commits to offering free API access to both '
+        'capabilities specifically for Solana ecosystem projects, rather than gating them behind standard '
+        'commercial API pricing. Longer-term, RelayShield is exploring extending its existing Solana-native '
+        'x402 payment rail to agentic commerce use cases with other Solana-native projects.',
+        s['body']))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph('Team', s['h2']))
+    story.append(md_inline(
+        'RelayShield is founded and operated by Andrew Gibbs, drawing on 25 years of telecom security '
+        'experience. RelayShield is self-funded and profitable on its core API business, with Crypto Shield '
+        'Mobile extending the same threat-intelligence pipeline into a native wallet-security app.',
+        s['body']))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph('The Ask', s['h2']))
+    story.append(md_inline(
+        'Requesting <b>$10,000-$20,000</b> to fund the Solana Blinks/Actions security scanning feature '
+        '(the next scoped engineering milestone, extending the existing Signature Guard transaction-simulation '
+        'approach to this newer attack surface) and initial ecosystem-integration outreach to Solana DeFi, '
+        'NFT, and RWA platforms for the badge/API distribution described above.',
+        s['body']))
+
+    doc.build(story, onFirstPage=first_page, onLaterPages=later_pages)
+    print(f'✅  {output_path}')
+
+
 if __name__ == '__main__':
     base = '/Users/andrewgibbs/Side SaaS Hustle'
     build_msp(f'{base}/RelayShield_MSP_Solution_Brief.pdf')
     build_exec(f'{base}/RelayShield_Executive_Briefing.pdf')
+    build_solana_grant(f'{base}/crypto-shield-app/RelayShield_Solana_Grant_Pitch_Deck.pdf')
+    build_agentcore_onepager(f'{base}/RelayShield_AgentCore_POC_OnePager.pdf')

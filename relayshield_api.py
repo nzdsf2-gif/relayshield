@@ -126,7 +126,30 @@ SOL_PAYTO_ADDRESS    = os.environ.get("RELAYSHIELD_SOL_WALLET", "")    # Solana 
 ALCHEMY_API_KEY   = os.environ.get("ALCHEMY_API_KEY", "")
 ALCHEMY_AUTH_TOKEN = os.environ.get("ALCHEMY_AUTH_TOKEN", "")
 HELIUS_API_KEY    = os.environ.get("HELIUS_API_KEY", "")
-CS_MOBILE_APP_NFT = "FNg9dzf1JjJ9D8G1i7o1L7KL6ztpLADVQAeonwT5KaDo"  # Crypto Shield App NFT (Solana dApp Store) -- release NFTs group under this via getAssetsByGroup
+# Crypto Shield App NFT (Solana dApp Store). Release NFTs group under this.
+# LEGACY as of 2026-08-01 — kept only as a fallback. See CS_MOBILE_PUBLISHER.
+CS_MOBILE_APP_NFT = "FNg9dzf1JjJ9D8G1i7o1L7KL6ztpLADVQAeonwT5KaDo"
+
+# The publisher's on-chain signing identity — the authority and verified creator
+# of the App NFT and every Release NFT under it.
+#
+# The latest-version lookup keys off THIS rather than off the App NFT, because
+# the App NFT is not stable: certificate rotation is unsupported by the dApp
+# Store, so shipping v1.5.0 required a brand-new app record under a new package
+# name, which mints a brand-new App NFT. Anything pinned to the old App NFT would
+# silently stop seeing new releases the moment that happened — the update nudge
+# would never fire again, which is the exact failure v1.5.0 exists to fix.
+#
+# The publisher account carries over across app records (confirmed by Solana
+# Mobile support 2026-07-30), so this address survives the rename and any future
+# one. Verified live 2026-08-01: getAssetsByAuthority returns the App NFT plus
+# all 5 Release NFTs (v1.2.0, v1.3.0 x2, v1.4.0, v1.5.0).
+CS_MOBILE_PUBLISHER = "E64PiTT7U8ZUWFKdkrBFw1YzdD2bU1gKcuGnBRVqp7M6"
+
+# Release NFTs are named "<app name> vX.Y.Z". Requiring the prefix keeps a future
+# second app by the same publisher from being mistaken for a Crypto Shield release;
+# requiring a version excludes the App NFT itself, which carries no version.
+CS_MOBILE_RELEASE_PREFIX = "Crypto Shield"
 X402_FACILITATOR_URL = "https://facilitator.payai.network"   # EVM (Base) — PayAI facilitator; auto-listed in Bazaar, free tier 10k/month
 SOL_FACILITATOR_URL  = "https://facilitator.payai.network"    # Solana — PayAI (same facilitator as Base; x402.org was a testnet facilitator with no Bazaar support, confirmed 2026-07-10)
 
@@ -239,7 +262,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/ransomware-risk":       400000,   # $0.40 — ransomware victim list + pre-ransomware credential check
     "/v1/payg/nhi-exposure":          400000,   # $0.40 — non-human identity: API keys/tokens in stealer logs
     "/v1/payg/llm-credential-exposure": 400000,  # $0.40 — LLMjacking: exposed LLM/AI provider API keys
-    "/v1/payg/secret-scan":           350000,   # $0.35 — GitHub/GitLab public repo secret detection
+    "/v1/payg/secret-scan":           350000,   # $0.35 — GitHub public repo secret detection
     "/v1/payg/secret-scan-text":       50000,   # $0.05 — local scan, no external API call (see METERED_CREDIT_COSTS)
     "/v1/payg/target-risk":           500000,   # $0.50 — target probability score (6-signal correlation)
     "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
@@ -357,7 +380,7 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/ransomware-risk": 40,   # $0.40 — ransomware victim + pre-ransomware credential check
     "/v1/metered/nhi-exposure":    40,   # $0.40 — NHI: API keys/tokens in stealer logs
     "/v1/metered/llm-credential-exposure": 40,   # $0.40 — LLMjacking: exposed LLM/AI provider API keys
-    "/v1/metered/secret-scan":     35,   # $0.35 — GitHub/GitLab public repo secret detection
+    "/v1/metered/secret-scan":     35,   # $0.35 — GitHub public repo secret detection
     "/v1/metered/secret-scan-text": 5,   # $0.05 — local pattern scan, no external API call.
                                          # Deliberately below secret-scan's $0.35: this is the
                                          # pre-commit path and fires on every commit, so parity
@@ -492,6 +515,65 @@ def _verify_rs_api_key(api_key_str: str) -> dict | None:
 # from the start, never reused from an existing unlimited demo key.
 DEMO_QUOTA_TABLE   = "relayshield_demo_key_usage"
 DEMO_QUOTA_SOURCES = {"hf_smolagents_demo": 20, "mcp_space_demo": 20}  # source -> shared daily cap, all callers combined
+
+# Contract/address-reputation endpoints that accept calls with NO API key.
+#
+# This is deliberate, not an oversight: Crypto Shield Mobile's free tier runs
+# these scans without a subscription (see FREE_SCAN_TYPES in the app), which is
+# what makes a free-tier monitored wallet useful at all. The comment further down
+# claiming "API key enforced by API Gateway" was never true in production —
+# verified 2026-08-01, these returned 200 to completely unauthenticated callers.
+#
+# Every one of them costs money on an upstream account (GoPlus, Rugcheck,
+# DexScreener, Tensor, XRPSCAN), so keyless callers are capped per source IP.
+# Calls carrying a valid key are unaffected and never counted.
+KEYLESS_SCAN_ENDPOINTS = frozenset({
+    "/v1/token-security",
+    "/v1/nft-security",
+    "/v1/dapp-security",
+    "/v1/approval-security",
+    "/v1/nft-floor",
+    "/v1/solana/token-risk",
+    "/v1/solana/address-risk",
+    "/v1/solana/nft-tensor",
+    "/v1/ton-address",
+    "/v1/xrp-address",
+    "/v1/wallet-risk",
+    "/v1/scan-wallet",
+    "/v1/wallet-inbound",
+})
+
+# Deliberately generous. These are MOBILE clients, and carrier-grade NAT puts
+# very large numbers of real users behind one address — a tight per-IP cap would
+# lock out legitimate free-tier users on a mobile network long before it
+# inconvenienced anyone scraping. This stops the endpoints being an unmetered
+# upstream proxy; it is not a substitute for authentication. The durable fix is
+# per-install free-tier keys, which needs a client release.
+KEYLESS_IP_DAILY_CAP = 300
+
+
+def _check_keyless_ip_quota(source_ip: str) -> bool:
+    """Per-IP daily cap for unauthenticated scan calls. Returns True if allowed.
+
+    Fails OPEN on a DynamoDB error, matching _check_demo_quota — this is a cost
+    guardrail, not a security control, and an infra blip must not break scanning
+    for every free-tier user at once."""
+    if not source_ip:
+        return True
+    usage_key = f"ip#{source_ip}#{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+    try:
+        table = dynamodb.Table(DEMO_QUOTA_TABLE)
+        resp  = table.update_item(
+            Key={"usage_key": usage_key},
+            UpdateExpression="ADD call_count :one SET expires_at = if_not_exists(expires_at, :ttl)",
+            ExpressionAttributeValues={":one": 1, ":ttl": int(time.time()) + 3 * 86400},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(resp["Attributes"]["call_count"]) <= KEYLESS_IP_DAILY_CAP
+    except Exception as exc:
+        logger.error("keyless IP quota check failed ip=%s error=%s", source_ip, exc)
+        return True
+
 
 def _check_demo_quota(key_record: dict) -> bool:
     """Atomically increments today's call count for a quota-capped demo key
@@ -5721,7 +5803,7 @@ def handle_llm_credential_exposure(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Endpoint: POST /v1/metered/secret-scan  /  POST /v1/payg/secret-scan
 # ---------------------------------------------------------------------------
-# Scans public GitHub and GitLab repositories for secrets accidentally committed
+# Scans public GitHub repositories for secrets accidentally committed
 # alongside a monitored domain name. Covers own domains and supply chain domains.
 #
 # Request:
@@ -5733,49 +5815,316 @@ def handle_llm_credential_exposure(params: dict) -> dict:
 #     preview, url } ], "highest_severity": "..." }
 
 GITHUB_SEARCH_URL = "https://api.github.com/search/code"
-GITLAB_SEARCH_URL = "https://gitlab.com/api/v4/search"
+# NO GitLab constant here on purpose. GitLab code search (`blobs` scope) is
+# Premium/Ultimate only at BOTH instance and project level, and every /search
+# call 401s unauthenticated -- verified live 2026-08-02. A URL constant sat
+# here unused for months while GitLab was advertised as covered. See BB-3.
 GITHUB_SECRET_NAME = "relayshield/github_search_token"
 
+# Literal, searchable prefixes per NHI pattern (BB-1, 2026-08-02).
+#
+# GitHub code search has NO regex support. The previous implementation sent
+# `pattern.pattern[:20]` -- raw regex -- as a search term, so the engine matched
+# the literal characters of the regex source. Measured against the live API:
+#
+#     "openai.com" AKIA[A-Z0-9]{16}       ->   119 results   (regex, broken)
+#     "openai.com" AKIA                   -> 4,272 results   (literal, 36x)
+#     "openai.com" gh[pousr]_[a-zA-Z0-9   ->   261 results   (truncated mid-class)
+#     "openai.com" ghp_                   -> 3,552 results   (literal, 14x)
+#
+# `pattern.pattern[:20]` was also cutting `gh[pousr]_[a-zA-Z0-9]{36,}` mid
+# character-class, which is why that one was worse than a plain bad query.
+#
+# An empty tuple means "no literal specific enough to search on". Those are the
+# context-anchored `_ctx_key` patterns and the generic sk- catch-all, whose only
+# literal is `sk-` -- far too common to be a useful query and guaranteed to
+# return noise. They are deliberately NOT queried; they are still applied as
+# real regexes to returned code fragments by _verify_github_fragment below, so
+# they cost zero queries while remaining able to classify a hit.
+_GITHUB_SEARCH_LITERALS: dict[str, tuple[str, ...]] = {
+    "aws_access_key":        ("AKIA",),
+    # gh[pousr]_ is five distinct real prefixes; ghp_ (classic PAT) is by far the
+    # most common in public code, and each extra spelling costs a whole query
+    # against a 10-req/min budget.
+    "github_pat":            ("ghp_",),
+    "github_pat_fine":       ("github_pat_",),
+    "stripe_secret":         ("sk_live_",),
+    "private_key":           ("BEGIN RSA PRIVATE KEY",),
+    "slack_bot":             ("xoxb-",),
+    "slack_user":            ("xoxp-",),
+    "google_api":            ("AIza",),
+    # Every modern OpenAI key embeds T3BlbkFJ -- base64("OpenAI") -- which is a
+    # far more selective literal than the shared sk- prefix.
+    "openai_key":            ("T3BlbkFJ",),
+    "openai_key_v1":         ("T3BlbkFJ",),
+    "openai_key_legacy":     (),
+    "anthropic_key":         ("sk-ant-",),
+    "groq_key":              ("gsk_",),
+    "xai_key":               ("xai-",),
+    "replicate_key":         ("r8_",),
+    "bedrock_key_long":      ("ABSKQmVkcm9ja0FQSUtleS",),
+    "bedrock_key_short":     ("bedrock-api-key-",),
+    "huggingface_token":     ("hf_",),
+    "huggingface_org":       ("api_org_",),
+    "alibaba_access_key_id": ("LTAI",),
+    "nvidia_nim_key":        ("nvapi-",),
+    "deepseek_key":          (),
+    "moonshot_key":          (),
+    "qwen_key":              (),
+    "llm_key_generic_sk":    (),
+    "sendgrid_key":          ("SG.",),
+    "twilio_sid":            (),   # "AC" + 32 hex is far too short/common to query
+    "stripe_pub":            ("pk_live_",),
+    "jwt_token":             ("eyJ",),
+    "langsmith_key":         ("lsv2_",),
+    "mcp_token_generic":     ("mcp_live_", "mcp_sk_", "mcp_pat_"),
+}
 
-def _github_secret_scan(domain: str) -> list[dict]:
-    """Search GitHub public repos for NHI patterns alongside a domain."""
+# Max GitHub code-search queries per domain. GitHub allows 10 requests/minute
+# authenticated (measured via /rate_limit, code_search.limit=10) and that budget
+# is shared by EVERY customer, because all scans go through one RelayShield
+# token. At 6 queries/domain, two concurrent single-domain scans already exceed
+# the limit -- which is why the cache below is not an optimisation, it is what
+# makes this endpoint viable at all.
+_GITHUB_QUERY_BUDGET = 6
+
+SECRET_SCAN_CACHE_TABLE   = "relayshield_secret_scan_cache"
+SECRET_SCAN_CACHE_SECONDS = 24 * 3600   # founder-approved 24h TTL
+
+
+def _secret_scan_cache_get(domain: str) -> list[dict] | None:
+    try:
+        item = dynamodb.Table(SECRET_SCAN_CACHE_TABLE).get_item(Key={"domain": domain}).get("Item")
+        if not item:
+            return None
+        return [_decimals_to_plain(dict(f)) for f in item.get("findings", [])]
+    except Exception as exc:
+        logger.warning("secret-scan cache read failed for %s: %s", domain, exc)
+        return None
+
+
+def _secret_scan_cache_put(domain: str, findings: list[dict]) -> None:
+    try:
+        dynamodb.Table(SECRET_SCAN_CACHE_TABLE).put_item(Item={
+            "domain": domain,
+            "findings": findings,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "ttl": int(time.time()) + SECRET_SCAN_CACHE_SECONDS,
+        })
+    except Exception as exc:
+        logger.warning("secret-scan cache write failed for %s: %s", domain, exc)
+
+
+def _classify_github_fragment(pattern_name: str, item: dict) -> list[tuple[str, str, str]]:
+    """Return every credential pattern genuinely present in a hit's code fragment.
+
+    GitHub matched a literal prefix, not the full credential pattern, so a hit is
+    a *candidate*, not a finding. Two jobs, both measured against the live API:
+
+    1. **Reject false positives (BB-1).** 5 of the top 5 hits for
+       `"openai.com" AKIA` were noise -- a docs table listing OPENAI_API_KEY, the
+       literal placeholder `aws_access_key_id=AKIA....`, a README describing which
+       formats it redacts, a link list, and a domain allowlist. All five would
+       have reached the customer as a CRITICAL AWS key exposure.
+
+    2. **Classify for free (BB-2).** Running all 31 compiled regexes over the
+       fragment means low-signal patterns -- and the 6 with no searchable literal
+       at all -- get classified without ever costing one of the 10 queries/minute
+       GitHub allows. A repo surfaced by `AKIA` that actually leaks a `ghp_` is
+       reported as the GitHub token it is, not mislabelled as an AWS key.
+
+    Returns a list of (name, severity, description). An **empty list means
+    reject**. When no fragment is available it degrades open, returning the
+    pattern that was queried, so a missing text-match payload falls back to the
+    old behaviour instead of silently dropping real findings.
+    """
+    fragments = [
+        m.get("fragment", "")
+        for m in (item.get("text_matches") or [])
+        if m.get("fragment")
+    ]
+
+    def _queried() -> list[tuple[str, str, str]]:
+        for name, _pattern, sev, desc, _prov in _NHI_COMPILED:
+            if name == pattern_name:
+                return [(name, sev, desc)]
+        return []
+
+    if not fragments:
+        return _queried()   # degrade open -- never drop a hit for lack of a fragment
+
+    blob = "\n".join(fragments)
+    matched: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for name, pattern, sev, desc, _prov in _NHI_COMPILED:
+        if name not in seen and pattern.search(blob):
+            seen.add(name)
+            matched.append((name, sev, desc))
+    return matched
+
+
+def _github_secret_scan(domain: str) -> tuple[list[dict], bool]:
+    """Search GitHub public repos for NHI patterns alongside a domain.
+
+    Returns (findings, was_cached). The cache is mandatory rather than an
+    optimisation: the 10 req/min code-search budget is per TOKEN and RelayShield
+    uses one token for every customer, so two concurrent uncached single-domain
+    scans already blow the limit. A cache miss on a rate-limited window would
+    otherwise return an empty list -- a silent false all-clear, the same class of
+    defect as BUNDLE-B-5's non-firing writer.
+    """
+    cached = _secret_scan_cache_get(domain)
+    if cached is not None:
+        return cached, True
+
     findings = []
     try:
         raw = secrets_client.get_secret_value(SecretId=GITHUB_SECRET_NAME)["SecretString"].strip()
         token = json.loads(raw).get("token", raw) if raw.startswith("{") else raw
         headers = {
             "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
+            # text-match media type is what makes the API return the matching code
+            # fragment. Without it there is nothing to verify a hit against, so
+            # _verify_github_fragment cannot reject blocklist-style false positives.
+            "Accept": "application/vnd.github.text-match+json",
             "User-Agent": "RelayShield-SecretScan/1.0",
         }
     except Exception:
-        headers = {"User-Agent": "RelayShield-SecretScan/1.0"}  # unauthenticated fallback
+        headers = {
+            "Accept": "application/vnd.github.text-match+json",
+            "User-Agent": "RelayShield-SecretScan/1.0",
+        }  # unauthenticated fallback
 
     # 5-tuple unpack: llm_provider was appended to NHI_PATTERNS on 2026-07-26 for
     # the LLMjacking check and this call site was not updated, so every call to
     # this endpoint raised ValueError at the for statement (outside the inner
     # try) and returned 500. Fixed 2026-07-31.
-    for name, pattern, severity, description, _llm_provider in _NHI_COMPILED[:6]:   # top CRITICAL/HIGH only
+    #
+    # Selection is now literal-aware rather than a blind _NHI_COMPILED[:6]: only
+    # patterns with a searchable literal are queried, highest severity first, so
+    # the budget is never spent on a pattern that cannot produce a usable query.
+    severity_rank = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    queryable = [
+        (name, pattern, severity, description, literal)
+        for name, pattern, severity, description, _llm_provider in _NHI_COMPILED
+        for literal in _GITHUB_SEARCH_LITERALS.get(name, ())
+    ]
+    queryable.sort(key=lambda r: severity_rank.get(r[2], 9))
+    seen_hits: set[tuple[str, str, str]] = set()
+    planned = queryable[:_GITHUB_QUERY_BUDGET]
+    completed = 0
+
+    for name, pattern, severity, description, literal in planned:
         try:
-            query = f'"{domain}" {pattern.pattern[:20]}'  # domain + key prefix
+            query = f'"{domain}" {literal}'   # domain + LITERAL prefix, never regex
             url   = f"{GITHUB_SEARCH_URL}?q={urllib.parse.quote(query)}&per_page=5"
             req   = urllib.request.Request(url, headers=headers)
             resp  = json.loads(urllib.request.urlopen(req, timeout=10).read())
             for item in resp.get("items", []):
-                findings.append({
-                    "source":      "github",
-                    "type":        name,
-                    "description": description,
-                    "severity":    severity,
-                    "repo":        item.get("repository", {}).get("full_name", ""),
-                    "file":        item.get("path", ""),
-                    "url":         item.get("html_url", ""),
-                    "preview":     f"Match in {item.get('path', '')}",
-                })
+                repo = item.get("repository", {}).get("full_name", "")
+                path = item.get("path", "")
+                classified = _classify_github_fragment(name, item)
+                if not classified:
+                    logger.info(
+                        "GitHub hit rejected as false positive pattern=%s repo=%s file=%s",
+                        name, repo, path,
+                    )
+                    continue
+                # One hit can legitimately carry several credential types; emit each
+                # once per repo+file so a single leaky .env is not collapsed to
+                # whichever pattern happened to surface it.
+                for c_name, c_sev, c_desc in classified:
+                    dedup = (repo, path, c_name)
+                    if dedup in seen_hits:
+                        continue
+                    seen_hits.add(dedup)
+                    findings.append({
+                        "source":      "github",
+                        "type":        c_name,
+                        "description": c_desc,
+                        "severity":    c_sev,
+                        "repo":        repo,
+                        "file":        path,
+                        "url":         item.get("html_url", ""),
+                        "preview":     f"Match in {path}",
+                        # Which query surfaced it, when that differs from what was
+                        # actually found -- makes the classify-for-free path visible
+                        # in support tickets instead of looking like a mislabel.
+                        **({"surfaced_by": name} if c_name != name else {}),
+                    })
+            completed += 1
         except Exception as exc:
             logger.warning("GitHub scan failed pattern=%s domain=%s: %s", name, domain, exc)
 
-    return findings
+    # Only cache a COMPLETE scan. A partial run -- typically the shared token
+    # hitting 10 req/min -- must never be written, or a rate-limited moment gets
+    # frozen in as a 24h "all clear" for that domain. Same reasoning as the
+    # silent-false-all-clear defects found on 2026-07-31.
+    if completed == len(planned) and planned:
+        _secret_scan_cache_put(domain, findings)
+    else:
+        logger.warning(
+            "secret-scan incomplete for %s (%d/%d queries) - not cached",
+            domain, completed, len(planned),
+        )
+
+    return findings, False
+
+
+RSSCAN_INSTALLS_TABLE = "relayshield_rsscan_installs"
+
+
+def handle_rsscan_install(params: dict) -> dict:
+    """Record that an rsscan install at some org domain ran a scan.
+
+    Unauthenticated on purpose: requiring a key to report adoption would defeat
+    the point, since the whole funnel premise is that the free tool needs no
+    account. Opt-in on the client (`--org`), off by default.
+
+    **Deliberately stores nothing sensitive.** Org domain, an anonymous
+    per-machine install id, tool version and per-severity counts. No file paths,
+    no fingerprints, no repo names, no source and no secret values -- and if a
+    future caller wants to send those, the answer is no. Anything richer than a
+    count turns an adoption signal into a data-handling liability.
+
+    Aggregation to "how many distinct engineers at this company" is a COUNT over
+    install_id per org, done at read time; nothing here identifies a person.
+    """
+    org = (params.get("org") or "").strip().lower().removeprefix("www.")
+    install_id = (params.get("install_id") or "").strip()
+    if not org or not install_id:
+        return _err("org and install_id are required")
+    # Cheap sanity check -- this is an open endpoint, so don't let it become a
+    # free-text store. A domain has a dot and no whitespace.
+    if len(org) > 253 or "." not in org or any(c.isspace() for c in org):
+        return _err("org must be a domain")
+    if len(install_id) > 64 or not install_id.isalnum():
+        return _err("install_id must be alphanumeric")
+
+    counts = params.get("counts") or {}
+    safe_counts = {
+        k: int(v)
+        for k, v in counts.items()
+        if k in ("CRITICAL", "HIGH", "MEDIUM", "LOW") and isinstance(v, (int, float))
+    } if isinstance(counts, dict) else {}
+
+    try:
+        dynamodb.Table(RSSCAN_INSTALLS_TABLE).put_item(Item={
+            "org":          org,
+            "install_id":   install_id,
+            "version":      str(params.get("version") or "")[:32],
+            "last_seen":    datetime.now(timezone.utc).isoformat(),
+            "last_counts":  safe_counts,
+            # Retention cap: an install that stops reporting ages out rather than
+            # accumulating forever.
+            "ttl":          int(time.time()) + 180 * 86400,
+        })
+    except Exception as exc:
+        # Never surface a storage failure to a developer's commit hook.
+        logger.warning("rsscan install signal write failed org=%s: %s", org, exc)
+
+    logger.info("rsscan install org=%s version=%s counts=%s", org, params.get("version"), safe_counts)
+    return _ok({"recorded": True})
 
 
 def handle_secret_scan(params: dict) -> dict:
@@ -5790,11 +6139,17 @@ def handle_secret_scan(params: dict) -> dict:
     all_findings: list[dict] = []
     severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
 
+    # Per-domain cache state, reported honestly rather than hidden. A caller that
+    # cannot tell a fresh scan from a 24h-old one cannot tell a real all-clear
+    # from a stale one.
+    coverage: list[dict] = []
+
     for domain in domains:
-        hits = _github_secret_scan(domain)
+        hits, was_cached = _github_secret_scan(domain)
         for h in hits:
             h["domain"] = domain
         all_findings.extend(hits)
+        coverage.append({"domain": domain, "cached": was_cached})
 
     if not all_findings:
         return _ok({
@@ -5802,6 +6157,7 @@ def handle_secret_scan(params: dict) -> dict:
             "found":            False,
             "findings":         [],
             "highest_severity": None,
+            "coverage":         coverage,
             "recommendation":   "No secrets detected in public GitHub repositories for the supplied domain(s).",
             "checked_at":       datetime.now(timezone.utc).isoformat(),
         })
@@ -5816,6 +6172,7 @@ def handle_secret_scan(params: dict) -> dict:
         "found":            True,
         "findings":         all_findings,
         "highest_severity": highest,
+        "coverage":         coverage,
         "recommendation": (
             f"CRITICAL: {len(critical)} high-value secret(s) found in public repositories. "
             "Rotate these credentials immediately — GitHub repos are indexed and may already "
@@ -6850,7 +7207,7 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "a data exposure. Call to catch an exposed key before the drain, not after the invoice."
     ),
     "/v1/payg/secret-scan": (
-        "Scan public GitHub/GitLab repositories associated with a domain for exposed API keys, "
+        "Scan public GitHub repositories associated with a domain for exposed API keys, "
         "tokens, and credentials committed in source code. Call to detect a common "
         "supply-chain exposure vector before it's exploited."
     ),
@@ -7711,21 +8068,48 @@ def handle_intel_actor(params: dict, api_key_record: dict | None = None) -> dict
         return _err("actor name is required")
     mitre_table = dynamodb.Table("relayshield_mitre_attack")
     ioc_table   = dynamodb.Table(INTEL_IOCS_TABLE)
-    # Scan MITRE groups for name match
+    # Load all MITRE groups, then match in Python.
+    #
+    # Fixed 2026-08-01. This previously pushed the name match into a DynamoDB
+    # FilterExpression using Attr.contains(), which is case-SENSITIVE — so
+    # "muddywater" and "MANGO SANDSTORM" returned matched:false while
+    # "MuddyWater" worked, and the demo UI renders that as "No threat actor
+    # found", indistinguishable from a genuine miss. The scan was also
+    # unpaginated, so any match past the first 1MB page was silently invisible;
+    # the table is now 593KB and one ATT&CK release away from that being live.
+    # There are only ~191 groups, so filtering client-side is cheap and exact.
     try:
-        resp = mitre_table.scan(
-            FilterExpression=(
-                boto3.dynamodb.conditions.Attr("sk").eq("info") &
-                (boto3.dynamodb.conditions.Attr("name").contains(actor_name)
-                 | boto3.dynamodb.conditions.Attr("aliases").contains(actor_name))
-            ),
-        )
-        groups = resp.get("Items", [])
+        groups: list[dict] = []
+        scan_kwargs: dict = {"FilterExpression": boto3.dynamodb.conditions.Attr("sk").eq("info")}
+        while True:
+            resp = mitre_table.scan(**scan_kwargs)
+            groups.extend(resp.get("Items", []))
+            if "LastEvaluatedKey" not in resp:
+                break
+            scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
     except Exception as exc:
         return _err(f"MITRE lookup failed: {exc}")
-    if not groups:
+
+    needle = " ".join(actor_name.lower().split())
+
+    def _names(g: dict) -> list[str]:
+        return [g.get("name", "")] + list(g.get("aliases") or [])
+
+    def _norm(n: str) -> str:
+        return " ".join((n or "").lower().split())
+
+    # Exact alias match first, substring only as a fallback, so that a query
+    # for "APT3" cannot be captured by a group merely containing that text.
+    matches = [g for g in groups if any(_norm(n) == needle for n in _names(g))]
+    if not matches:
+        matches = [
+            g for g in groups
+            if any(needle and needle in _norm(n) for n in _names(g))
+        ]
+    if not matches:
         return _ok({"actor": actor_name, "matched": False, "profile": None})
-    group = groups[0]
+    groups = matches
+    group  = groups[0]
 
     # Real threat-actor -> malware-family -> live-IOC attribution, fixed
     # 2026-07-16. Previously always empty for two reasons: (1) it filtered
@@ -7777,10 +8161,44 @@ def handle_intel_actor(params: dict, api_key_record: dict | None = None) -> dict
         if i["ioc_value"] not in seen_vals:
             seen_vals.add(i["ioc_value"])
             dedup_iocs.append(i)
+
+    # Recent open-source reporting naming this group, written by the intel
+    # feed ingesters as `sighting:` records under the group's own partition.
+    # Added 2026-08-01 — before this, the actor profile was static MITRE data
+    # only, and nothing the feeds collected reached this surface.
+    recent_reporting: list[dict] = []
+    try:
+        sight_resp = mitre_table.query(
+            KeyConditionExpression=(
+                boto3.dynamodb.conditions.Key("group_id").eq(group.get("group_id", ""))
+                & boto3.dynamodb.conditions.Key("sk").begins_with("sighting:")
+            ),
+            Limit=25,
+        )
+        recent_reporting = sorted(
+            (
+                {
+                    "title":       s.get("title", ""),
+                    "url":         s.get("article_url", ""),
+                    "published":   s.get("published", ""),
+                    "source":      s.get("source", ""),
+                    "matched_as":  s.get("matched_as", []),
+                }
+                for s in sight_resp.get("Items", [])
+            ),
+            key=lambda s: s.get("published", ""),
+            reverse=True,
+        )[:10]
+    except Exception as exc:
+        logger.warning("intel-actor sighting query failed group=%s: %s",
+                       group.get("group_id"), exc)
+
     return _ok({
         "actor":              actor_name,
         "matched":            True,
         "mitre_id":           group.get("group_id", ""),
+        "recent_reporting":   recent_reporting,
+        "reporting_count":    len(recent_reporting),
         "aliases":            group.get("aliases", []),
         "description":        group.get("description", ""),
         "techniques":         group.get("technique_ids", []),
@@ -9919,25 +10337,58 @@ def lambda_handler(event: dict, context) -> dict:
         if not HELIUS_API_KEY:
             return _err("Helius not configured", 503)
         import re as _re, http.client as _http, ssl as _ssl, json as _j
-        try:
-            ctx = _ssl.create_default_context()
+
+        def _rpc(method: str, params: dict) -> dict:
+            ctx  = _ssl.create_default_context()
             conn = _http.HTTPSConnection("mainnet.helius-rpc.com", timeout=10, context=ctx)
-            rpc_body = _j.dumps({
-                "jsonrpc": "2.0", "id": 1, "method": "getAssetsByGroup",
-                "params": {"groupKey": "collection", "groupValue": CS_MOBILE_APP_NFT, "page": 1, "limit": 50},
-            }).encode()
-            conn.request("POST", f"/?api-key={HELIUS_API_KEY}", body=rpc_body,
-                         headers={"Content-Type": "application/json"})
-            resp = conn.getresponse()
-            result = _j.loads(resp.read())
-            conn.close()
-            items = (result.get("result") or {}).get("items") or []
-            versions = []
-            for item in items:
+            try:
+                conn.request(
+                    "POST", f"/?api-key={HELIUS_API_KEY}",
+                    body=_j.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                return _j.loads(conn.getresponse().read())
+            finally:
+                conn.close()
+
+        def _versions_from(items: list) -> list:
+            out = []
+            for item in items or []:
                 name = ((item.get("content") or {}).get("metadata") or {}).get("name") or ""
+                if not name.startswith(CS_MOBILE_RELEASE_PREFIX):
+                    continue
                 m = _re.search(r"v(\d+)\.(\d+)\.(\d+)", name)
                 if m:
-                    versions.append(tuple(int(x) for x in m.groups()))
+                    out.append(tuple(int(x) for x in m.groups()))
+            return out
+
+        try:
+            # Primary: every release ever minted by this publisher, across app
+            # records. Survives the 2026-08-01 package rename and any future one.
+            versions, page = [], 1
+            while page <= 5:  # 5 x 1000 releases is far beyond any real ceiling
+                result = _rpc("getAssetsByAuthority", {
+                    "authorityAddress": CS_MOBILE_PUBLISHER,
+                    "page": page, "limit": 1000,
+                })
+                items = (result.get("result") or {}).get("items") or []
+                versions.extend(_versions_from(items))
+                if len(items) < 1000:
+                    break
+                page += 1
+
+            # Fallback: the legacy App NFT collection group. Only reachable if the
+            # authority lookup returns nothing (RPC shape change, publisher key
+            # rotation) — never silently, since an empty result would otherwise
+            # read to the client as "no update available".
+            if not versions:
+                logger.warning("cs-mobile-latest-version: authority lookup empty, falling back to app-NFT group")
+                result = _rpc("getAssetsByGroup", {
+                    "groupKey": "collection", "groupValue": CS_MOBILE_APP_NFT,
+                    "page": 1, "limit": 1000,
+                })
+                versions = _versions_from((result.get("result") or {}).get("items") or [])
+
             if not versions:
                 return _err("no releases found", 502)
             latest = max(versions)
@@ -10110,6 +10561,12 @@ def lambda_handler(event: dict, context) -> dict:
         analysis_id = path[len("/v1/result/"):]
         return handle_result(analysis_id)
 
+    # rsscan org signal — unauthenticated by design, opt-in from the client.
+    # This is the dev -> security-lead bridge: N distinct install ids at one org
+    # domain is a qualified account, which PyPI download totals can never show.
+    if method == "POST" and path == "/v1/telemetry/rsscan-install":
+        return handle_rsscan_install(_body(event))
+
     # Shareable report links (INTEL-8) — public view, no auth
     if method == "GET" and path.startswith("/v1/r/"):
         report_id = path[len("/v1/r/"):]
@@ -10137,6 +10594,27 @@ def lambda_handler(event: dict, context) -> dict:
 
     if method != "POST":
         return _err(f"{path} only accepts POST requests", 405)
+
+    # Keyless scan calls are rate-limited per source IP. A valid key skips this
+    # entirely, so paying subscribers and the CS Mobile app's linked users are
+    # never counted — only genuinely unauthenticated traffic is.
+    if path in KEYLESS_SCAN_ENDPOINTS:
+        _scan_headers = event.get("headers") or {}
+        _scan_key     = _header(_scan_headers, "X-RS-API-KEY") or _header(_scan_headers, "X-API-Key")
+        if not (_scan_key and _verify_rs_api_key(_scan_key)):
+            _source_ip = ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or ""
+            if not _check_keyless_ip_quota(_source_ip):
+                logger.warning("keyless scan quota exceeded path=%s ip=%s", path, _source_ip)
+                return {
+                    "statusCode": 429,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": json.dumps({
+                        "ok": False,
+                        "error": "Daily limit reached for unauthenticated scans. "
+                                 "Link a Crypto Shield Pro subscription in Settings, or get an API key.",
+                        "docs": "https://api.relayshield.net/developers",
+                    }),
+                }
 
     params = _body(event)
     try:

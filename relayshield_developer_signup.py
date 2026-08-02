@@ -433,7 +433,7 @@ POST {API_BASE_URL}/v1/metered/session-risk    — active session hijack detecti
 POST {API_BASE_URL}/v1/metered/identity-graph  — identity correlation             $0.35/call
 POST {API_BASE_URL}/v1/metered/ransomware-risk — ransomware victim + pre-creds    $0.40/call
 POST {API_BASE_URL}/v1/metered/nhi-exposure    — API key/token NHI detection       $0.40/call
-POST {API_BASE_URL}/v1/metered/secret-scan     — GitHub/GitLab secret scanning      $0.35/call
+POST {API_BASE_URL}/v1/metered/secret-scan     — GitHub secret scanning      $0.35/call
 POST {API_BASE_URL}/v1/metered/target-risk     — 6-signal target probability score  $0.50/call
 POST {API_BASE_URL}/v1/metered/tech-stack-cve          — agent framework exploit monitoring $0.20/call
 POST {API_BASE_URL}/v1/metered/mcp-registry-risk       — MCP server registry reputation     $0.35/call
@@ -744,7 +744,7 @@ subscription any time from Settings -> Manage Subscription.
 One favor: if Crypto Shield Pro is working well for you, a quick rating on
 the Solana dApp Store genuinely helps other people find it -- most apps
 there have zero reviews, and honest ones from real subscribers stand out.
-Takes under a minute: solanadappstore://details?id=net.relayshield.cryptoshield
+Takes under a minute: solanadappstore://details?id=net.relayshield.cryptoshieldmobile
 
 Questions? support@relayshield.net
 """
@@ -1309,7 +1309,7 @@ LANDING_PAGE = """<!DOCTYPE html>
     <div class="price-card">
       <div class="endpoint">/v1/metered/secret-scan</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">GitHub/GitLab public repo secret detection — searches public code repositories for accidentally committed secrets (API keys, tokens, private keys) associated with a domain. Covers own domain and vendor supply chain domains</div>
+      <div class="desc">GitHub public repo secret detection — searches public code repositories for accidentally committed secrets (API keys, tokens, private keys) associated with a domain. Covers own domain and vendor supply chain domains</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/target-risk</div>
@@ -1655,10 +1655,27 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
     </svg>
     <code style="background:var(--bg);border-radius:4px;padding:.1rem .4rem">n8n-nodes-relayshield</code> is verified and available directly on n8n Cloud — search for it on the canvas, no manual install needed.
   </p>
-  <a href="https://creators.n8n.io/workflows/17255" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:.9rem;text-decoration:none;background:rgba(255,109,90,.08);border:1px solid rgba(255,109,90,.25);border-radius:8px;padding:.85rem 1rem;margin-bottom:1rem">
+  <!--
+    Template links must point at n8n.io/workflows/<id>, NOT creators.n8n.io.
+    A creators.n8n.io URL returns HTTP 200 for an unauthenticated visitor but
+    renders n8n's login page, so it passes a link check while being useless to
+    a reader. Only templates that are approved and live in the public gallery
+    belong here - verify with:
+      curl -s "https://api.n8n.io/api/templates/search?search=relayshield&rows=50"
+    The new-hire onboarding template (17255) was demoted to "Implement changes"
+    by the reviewer and is deliberately absent until it is re-approved.
+  -->
+  <a href="https://n8n.io/workflows/16694" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:.9rem;text-decoration:none;background:rgba(255,109,90,.08);border:1px solid rgba(255,109,90,.25);border-radius:8px;padding:.85rem 1rem;margin-bottom:.6rem">
     <div style="flex:1;min-width:0">
       <p style="color:var(--text);font-size:.9rem;font-weight:600;margin:0 0 .2rem">Featured in n8n&apos;s official template gallery</p>
-      <p style="color:var(--muted);font-size:.82rem;margin:0">&ldquo;Check new-hire identity risk and provision Google Workspace accounts with RelayShield&rdquo; — HR webhook → parallel breach/infostealer checks → Google Workspace provisioning → Notion + Slack. creators.n8n.io/workflows/17255</p>
+      <p style="color:var(--muted);font-size:.82rem;margin:0">&ldquo;Check offboarding credential risks with RelayShield, Slack, Notion and Gmail&rdquo; — HR trigger → parallel breach, infostealer and OAuth-token checks → Slack alert, manager email and Notion audit log. n8n.io/workflows/16694</p>
+    </div>
+    <span style="color:var(--accent);font-size:.82rem;font-weight:600;white-space:nowrap">View template &rarr;</span>
+  </a>
+  <a href="https://n8n.io/workflows/17386" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:.9rem;text-decoration:none;background:rgba(255,109,90,.08);border:1px solid rgba(255,109,90,.25);border-radius:8px;padding:.85rem 1rem;margin-bottom:1rem">
+    <div style="flex:1;min-width:0">
+      <p style="color:var(--text);font-size:.9rem;font-weight:600;margin:0 0 .2rem">Shadow AI &amp; vendor approval gate</p>
+      <p style="color:var(--muted);font-size:.82rem;margin:0">&ldquo;Gate SaaS and AI tool approvals with RelayShield, Notion, Slack, and Gmail&rdquo; — a new tool request branches on SaaS vs AI tool, then runs supply-chain, secret-scan, OAuth-watchlist and MCP registry-risk checks before anyone approves it. n8n.io/workflows/17386</p>
     </div>
     <span style="color:var(--accent);font-size:.82rem;font-weight:600;white-space:nowrap">View template &rarr;</span>
   </a>
@@ -1666,7 +1683,7 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
     <p style="color:var(--text);font-size:.95rem;margin:0 0 .4rem">&ldquo;Nice work! You could extend this to trigger when an employee is deactivated in your HR system — run breach + infostealer checks on offboarding, then log to Notion or alert Slack if their credentials are circulating.&rdquo;</p>
     <p style="color:var(--muted);font-size:.82rem;margin:0">— n8n community member, on the RelayShield breach monitoring workflow template</p>
   </div>
-  <p style="color:var(--muted);font-size:.85rem;margin:0">Used in SOAR playbooks, SIEM enrichment pipelines, MSP onboarding/offboarding automations, and incident response triage workflows. <a href="mailto:support@relayshield.net" style="color:var(--accent)">Tell us what you&apos;re building.</a></p>
+  <p style="color:var(--muted);font-size:.85rem;margin:0">Used in SOAR playbooks, SIEM enrichment pipelines, MSP onboarding/offboarding automations, and incident response triage workflows. <a href="https://n8n.io/creators/relayshieldadmin" target="_blank" rel="noopener" style="color:var(--accent)">All our n8n templates</a> &middot; <a href="mailto:support@relayshield.net" style="color:var(--accent)">Tell us what you&apos;re building.</a></p>
 </div>
 
 <footer>
@@ -1982,21 +1999,67 @@ _SOURCE_ALIASES = {
     "opencti": "xsoar",
     "awsmarketplace": "aws",
     "marketplace": "aws",
+    # Already published in the wild and previously matching nothing. The
+    # smolagents PyPI package and both APIs' quota-exceeded messages all send
+    # users to ?source=hf-smolagents; that string was never a registered key.
+    "hf-smolagents": "huggingface",
+    "hf_smolagents": "huggingface",
+    "smolagents": "huggingface",
+    "hf": "huggingface",
+    # n8n template attribution. Each approved template carries its own key so a
+    # signup can be traced to the specific workflow that produced it, which is
+    # the open question blocking the Make.com decision. All render the n8n
+    # banner; they differ only in what gets logged.
+    "n8n-offboarding": "n8n",
+    "n8n-onboarding": "n8n",
+    "n8n-shadow-ai": "n8n",
+    "n8n-template": "n8n",
+    "creators.n8n.io": "n8n",
+    # The creator profile's own links field (n8n.io/creators/relayshieldadmin).
+    # Distinct from the per-template keys so profile traffic -- someone browsing
+    # the author rather than arriving from one specific workflow -- does not get
+    # miscredited to whichever template happens to be linked. Registered 2026-08-02
+    # BEFORE the link went live; an unregistered key logs unmatched: and renders
+    # no banner, which is the failure the ?source=hf-smolagents entry above records.
+    "n8n-profile": "n8n",
+    "zapier": "github",
 }
 
 
-def _banner_for(referer: str, query_params: dict) -> str:
-    """Pick the landing variant from an explicit ?src= or the Referer host."""
-    src = (query_params.get("src") or "").strip().lower()
-    src = _SOURCE_ALIASES.get(src, src)
-    if src in _SOURCE_BANNERS:
-        return _SOURCE_BANNERS[src][1]
+def _resolve_source(referer: str, query_params: dict) -> tuple[str, str]:
+    """Resolve an arrival to (logged_source_key, banner_html).
+
+    Accepts BOTH ?src= and ?source=. Only ?src= was ever read, so every link
+    already published using ?source= -- which is all of the smolagents ones --
+    silently rendered no banner and recorded no attribution. Same failure the
+    ?src=blog comment above describes, so both spellings are honoured now
+    rather than trying to keep every published link in step with the code.
+
+    The raw parameter is returned as the logged key, not the variant it maps
+    to, so that n8n-offboarding and n8n-onboarding stay distinguishable in
+    logs even though both render the same banner.
+    """
+    raw = (query_params.get("src") or query_params.get("source") or "").strip().lower()
+    key = _SOURCE_ALIASES.get(raw, raw)
+    if key in _SOURCE_BANNERS:
+        return (raw or key), _SOURCE_BANNERS[key][1]
+
     host = (referer or "").lower()
     if host:
         for _key, (hosts, html) in _SOURCE_BANNERS.items():
             if any(h in host for h in hosts):
-                return html
-    return ""
+                return f"referer:{_key}", html
+
+    # An unrecognised ?src=/?source= is worth logging loudly: it means a live
+    # link points at a key that does not exist, which is invisible otherwise.
+    if raw:
+        return f"unmatched:{raw}", ""
+    return "", ""
+
+
+def _banner_for(referer: str, query_params: dict) -> str:
+    """Pick the landing variant from an explicit ?src=/?source= or the Referer."""
+    return _resolve_source(referer, query_params)[1]
 
 
 def handle_landing_page(query_params: dict | None = None, referer: str = "") -> dict:
@@ -2106,18 +2169,36 @@ CS_MOBILE_SUCCESS_PAGE = """<!DOCTYPE html>
   <div class="icon">✅</div>
   <h1>You're subscribed to Crypto Shield Pro</h1>
   <p id="msg">Opening the app to finish setup automatically...</p>
-  <a class="btn" id="manual-open" href="net.relayshield.cryptoshield://unlock?session_id={session_id}">
+  <a class="btn" id="manual-open" href="net.relayshield.cryptoshieldmobile://unlock?session_id={session_id}">
     Open Crypto Shield
   </a>
 </div>
 <script>
   (function() {{
-    var url = "net.relayshield.cryptoshield://unlock?session_id={session_id}";
-    window.location.href = url;
+    // The app package was renamed to net.relayshield.cryptoshieldmobile for the
+    // v1.5.0 release (dApp Store certificate rotation forced a new app record).
+    // During the changeover both the new and the old build are in the wild, and
+    // this page sits on the paid-conversion path, so try the new scheme first and
+    // fall back to the legacy one before giving up and showing the manual button.
+    var NEW_URL = "net.relayshield.cryptoshieldmobile://unlock?session_id={session_id}";
+    var OLD_URL = "net.relayshield.cryptoshield://unlock?session_id={session_id}";
+
+    var handedOff = false;
+    document.addEventListener("visibilitychange", function() {{
+      if (document.hidden) handedOff = true;   // the app took over
+    }});
+
+    window.location.href = NEW_URL;
+
     setTimeout(function() {{
+      if (!handedOff) window.location.href = OLD_URL;
+    }}, 1200);
+
+    setTimeout(function() {{
+      if (handedOff) return;
       document.getElementById("msg").textContent =
         "If the app didn't open automatically, tap the button below.";
-    }}, 1500);
+    }}, 2400);
   }})();
 </script>
 </body>
@@ -2316,8 +2397,24 @@ def lambda_handler(event: dict, context) -> dict:
     # Referrer logged so inbound traffic from integration listings (LangChain's
     # docs, PyPI, AWS Marketplace) is attributable. Query with CloudWatch Logs
     # Insights on `referer=`; see TODO ELASTIC/LANGCHAIN notes for the query.
+    #
+    # `source=` added 2026-08-01. Referer alone was never enough: it is stripped
+    # on Slack, Discord and native-app clicks, and n8n's own template gallery is
+    # exactly that kind of click. Since the resolved key is logged even when no
+    # banner renders, an "unmatched:" entry now surfaces a live link pointing at
+    # a key that does not exist -- previously silent, and the reason
+    # ?source=hf-smolagents went unnoticed.
+    #
+    # CloudWatch Logs Insights, arrivals by source over 30 days:
+    #   fields @timestamp, @message
+    #   | filter @message like /developer-signup request/ and source != "-"
+    #   | parse @message "source=*" as src
+    #   | stats count() by src
+    #   | sort by count() desc
+    source_key = _resolve_source(referer, event.get("queryStringParameters") or {})[0]
     logger.info(
-        "developer-signup request method=%s path=%s referer=%s", method, path, referer or "-"
+        "developer-signup request method=%s path=%s referer=%s source=%s",
+        method, path, referer or "-", source_key or "-",
     )
 
     # AWS Marketplace's audit crawler (and other automated link checkers) probe

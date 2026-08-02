@@ -1,5 +1,233 @@
 # RelayShield — Open Items
 
+## 🔗 N8N-LINKS: attribution links + a live 404 on the developers page — added 2026-08-01
+
+Two link edits, both outside the codebase (n8n's creators portal), both blocking the value of the
+verified-creator announcement. **Do these before any badge announcement drives traffic.**
+
+1. ~~**`api.relayshield.net/developers` links to a dead n8n template.**~~ — **FIXED AND DEPLOYED
+   2026-08-02** (`relayshield-developer-signup`, LastModified `2026-08-02T13:58:32Z`).
+
+   **The diagnosis in this item was wrong in a way worth keeping.** The page did not link to
+   `n8n.io/workflows/17255` (404). It linked to **`creators.n8n.io/workflows/17255`, which returns
+   HTTP 200 and renders n8n's login page** (`<title>Login - n8n.io</title>`). A status-code check
+   passes it; only fetching the title shows it is broken. **Rule: `creators.n8n.io` URLs are
+   author-side and login-walled — never link one publicly. Public template URLs are
+   `n8n.io/workflows/<id>`.** The same dead creators URL is still in `n8n_onboarding_announcement.md`
+   (lines 18, 32) — fix before that announcement is ever posted.
+
+   **Recovered while fixing: the Shadow AI template's ID was never written down anywhere.** It is
+   **`n8n.io/workflows/17386`** ("Gate SaaS and AI tool approvals with RelayShield, Notion, Slack,
+   and Gmail"), approved 2026-07-31. The page now links both live templates (16694 offboarding +
+   17386 Shadow AI) plus the creator profile `n8n.io/creators/relayshieldadmin`; onboarding (17255)
+   is deliberately absent until re-approved. All four verified live by title, not status code.
+
+   **Enumerate published templates from n8n's own API rather than trusting this file:**
+   ```
+   curl -s "https://api.n8n.io/api/templates/search?search=relayshield&rows=50"
+   ```
+   Returns only publicly-live templates — 17255 does not appear, which is the authoritative
+   confirmation it is still demoted.
+
+2. **Append the attribution parameter to every published template + the creator profile.**
+   Source tracking shipped and verified live 2026-08-01 (`relayshield_developer_signup.py`):
+   `?source=` now works alongside `?src=`, per-template keys log distinctly, and the resolved key
+   is written to CloudWatch so attribution survives a stripped Referer. **It is inert until the
+   links carry it.** Use:
+   - offboarding (16694) -> `https://api.relayshield.net/developers?source=n8n-offboarding`
+   - onboarding (17255, HOLD until re-approved) -> `...?source=n8n-onboarding`
+   - Shadow AI (17386) -> `https://api.relayshield.net/developers?source=n8n-shadow-ai`
+   - creator profile -> `https://api.relayshield.net/developers?source=n8n-profile`
+
+   **`n8n-profile` did not exist as a key** — this item said "+ the creator profile" without ever
+   assigning one, so the profile link would have logged `unmatched:n8n-profile` and rendered no
+   banner. **Registered and deployed 2026-08-02** (`2026-08-02T14:20:25Z`); all four keys verified
+   live against production, and an unregistered key confirmed to fall through to `unmatched:`.
+
+   **Verified state of each surface 2026-08-02 (via `api.n8n.io`, not assumed):**
+   - **16694 description contains NO relayshield.net link at all** — this is an *add*, not an append.
+   - **17386** has a bare-text `api.relayshield.net/developers` in its `## Requirements` section.
+   - **Creator profile `links`** is `["https://api.relayshield.net/developers"]`, no param.
+   - The npm node's credential `documentationUrl` already carries `?source=n8n` and works; making it
+     `n8n-node` would need an npm republish, so it is deliberately left alone.
+
+   **Sequencing risk:** editing an approved template's description may reopen n8n review. Researched
+   2026-08-02 and **could not be settled either way** — n8n documents nothing about editing an
+   approved template. **Founder decision: do NOT touch the two approved descriptions for now.**
+
+   **That costs almost nothing, because attribution already works without them.** Verified live:
+   a click from a template page logs the **full referer URL including the template ID** —
+   `referer=https://n8n.io/workflows/16694 source=referer:n8n`. Per-template attribution is
+   therefore already being captured. The `?source=` param only adds resilience for browsers that
+   strip Referer. Revisit the description edits only if the Referer data proves too thin to read.
+
+   ✅ **Creator profile updated and saved by founder 2026-08-02** (Custom Link → `?source=n8n-profile`,
+   bio switched to the agent-security positioning). n8n caches profile fields for **up to 12h**, so
+   `api.n8n.io` still served the old bio/links at the time of writing — that is propagation, not
+   failure. **Check tomorrow; if `links` still lacks the param, the edit did not save:**
+   ```
+   curl -s "https://api.n8n.io/api/templates/search?search=relayshield&rows=50" | python3 -c "import sys,json; u=json.load(sys.stdin)['workflows'][0]['user']; print(u['links']); print(u['bio'][:80])"
+   ```
+
+   ✅ **Gravatar set up 2026-08-02** — shield avatar (`relayshield_gravatar_512.png`), username
+   `relayshieldadmin`, GitHub linked, LinkedIn deliberately skipped (its verification is an OAuth
+   flow that binds to the *personal* profile, not the company page), domain upsell declined.
+   **The avatar needed no 12h wait** — n8n hotlinks `gravatar.com/avatar/<sha256(email)>` rather than
+   caching a copy, confirmed by hash match and a live 200/image-png fetch. Only n8n-stored fields
+   (name, bio, links) are subject to the 12h refresh.
+
+   This is what answers the open flywheel question that MKTPL-13 (Make.com) is gated on — whether
+   a published template produces a traceable signup. Without it, a fourth template is a guess.
+
+   Query arrivals:
+   ```
+   fields @timestamp | filter @message like /developer-signup request/
+   | parse @message "source=*" as src | stats count() by src | sort by count() desc
+   ```
+   An `unmatched:<key>` row means a live link points at a key that does not exist.
+
+---
+
+## 🟧 XSOAR-REVIEW: 21 open review threads on PR #45206 — verified live 2026-08-01
+
+[demisto/content#45206](https://github.com/demisto/content/pull/45206) — `OPEN`, `MERGEABLE`,
+**`CHANGES_REQUESTED`** by **MosheEichler** (2026-07-30). 39 inline threads from
+`marketplace-ai-reviewer`; commit `1f9c0c49d` addressed many.
+
+**⚠️ THE ANALYSIS BELOW WAS WRONG — corrected 2026-08-02. All 21 are ALREADY FIXED in code.
+There is no code work left on this PR. See the corrected section directly beneath.**
+
+~~**Verified thread state (GraphQL, not from this file):** 13 resolved+outdated, 5 resolved,
+21 unresolved with the code unchanged since the comment — those are the genuinely open ones.~~
+
+~~All 21 are in `Packs/RelayShield/Integrations/RelayShield/RelayShield.yml`, all mechanical.~~
+
+**Why that inference failed — the trap to avoid next time.** It used `isOutdated: false` as a proxy
+for "not yet fixed". `isOutdated` tracks whether the thread's **anchor line** still matches the diff,
+and every one of these suggestions anchors to a `- contextPath:` / `- name:` line while the actual
+change lands on the **`description:` line directly below it**. Fix the description, and the anchor is
+untouched, so the thread stays `isOutdated: false` forever. **`isOutdated` answers "did the anchor
+move", never "was this addressed."** Only reading the file at `headRefOid` answers that.
+
+Two further errors in the original: the 21 are **not** all in `RelayShield.yml` (18 yml, 2
+`pack_metadata.json`, 1 `RelayShield_description.md`), and there were never 21 open items at all.
+
+**Verified 2026-08-02 against `headRefOid` `ecd5b9f01`, read through GitHub's own contents API (not
+just the local clone): all 21 requested changes are present.** Commit `1f9c0c49d`
+(2026-07-30T12:30:25Z) landed four hours after the review (2026-07-30T08:20:16Z) and applied them —
+`default: true` on all three reputation commands, `The `/period descriptions, comma-separated-list
+wording, `tests: - No tests`, `created` + `githubUser` in `pack_metadata.json`, `relayshield` in
+`keywords`, and a `RelayShield_description.md` rewritten around setup/permissions/troubleshooting.
+
+**The real problem is presentational: nobody ever clicked "Resolve conversation."** Because the
+fixes were pushed as a normal commit rather than via the "Commit suggestion" button, GitHub never
+auto-resolved anything, and **every unresolved thread keeps rendering its original pre-fix hunk.**
+
+That directly caused a live misunderstanding. **Maintainer MosheEichler commented 2026-08-01T22:43Z**
+asking us to push, saying "the first line in the YAML file is still `category` instead of `name` or
+`display`" with a screenshot. **That claim is false at head** — the file is `name` (1), `display` (2),
+`category` (3), confirmed via the contents API. They were reading the stale hunks in the 21
+unresolved threads, four minutes after making their own merge commit.
+
+**DONE 2026-08-02, founder-approved:**
+1. ✅ All 21 threads resolved via `resolveReviewThread` — PR now reads **39 total, 0 unresolved**.
+2. ✅ Replied to MosheEichler: [comment 5158413778](https://github.com/demisto/content/pull/45206#issuecomment-5158413778)
+   — points at `1f9c0c49d`, quotes the actual first three lines, and owns the cause (suggestions
+   applied as a plain commit instead of the "Commit suggestion" button, so nothing auto-resolved).
+   Draft retained at `xsoar_pr45206_reply_to_moshe.md`.
+
+## 🟢 XSOAR-DEMO: code APPROVED, PANW wants a demo — added 2026-08-02, **BLOCKED ON A TENANT**
+
+**MosheEichler, 2026-08-02T14:23:46Z — 23 minutes after the thread-resolution reply went up:**
+"the code looks good! We're ready for a demo." He points at
+[xsoar.pan.dev/docs/contributing/demo-prep](https://xsoar.pan.dev/docs/contributing/demo-prep),
+offers a live session **over the PANW DFIR Slack**, and says **a recording is also acceptable** —
+which removes the scheduling problem entirely.
+
+**The blocker is real and known:** demo-prep requires "a Cortex XSOAR instance with your latest pack
+version," and the demo is performed *on it*. **RelayShield does not run an XSOAR tenant** — that is
+the exact reason XSOAR-1 abandoned the Marketplace UI submission path and went via GitHub PR.
+
+**Unblocker found 2026-08-02: Cortex XSOAR Community Edition is free** — a 30-day full trial that
+drops to a free tier (capped platform requests, community support only). Sign-up:
+`start.paloaltonetworks.lat/sign-up-for-community-edition`, context at
+[xsoar.pan.dev getting-started](https://xsoar.pan.dev/docs/concepts/getting-started-guide).
+**Founder action — it is an account signup.** Worth checking whether item 69's "Technical Partner"
+status would grant a better tenant, since that question was never researched.
+
+**Demo agenda to prepare** (straight from demo-prep, "up to an hour based on PR size"): product
+overview and use cases; the commands implemented; instance configuration **including credential
+retrieval**; **error handling on invalid credentials**; command verification against standards
+(arguments, outputs, descriptions); fetch-incidents / playbooks / layouts **if applicable — none are,
+this pack is reputation commands only**, worth saying explicitly rather than being asked.
+
+**Recommend recording it rather than booking a live call:** it is explicitly allowed, it removes
+timezone coordination with a maintainer who has already been kept waiting, it can be re-shot if a
+command misbehaves, and the artifact is reusable as sales/marketing collateral for the XSOAR listing.
+
+**Prior open item, unchanged:** `check_docs_approved_label_job` still needs a maintainer to add the
+**`docs-approved`** label. Asked for in the reply; the demo will likely settle it.
+
+**Standing lesson for every future external PR:** apply reviewer suggestions with GitHub's **"Commit
+suggestion"** button where possible. It auto-resolves the thread. A plain commit fixes the code but
+leaves the reviewer staring at pre-fix snippets, which is what cost this PR two days.
+
+The fork also sits behind GitHub's first-time-contributor gate — a maintainer must approve workflow
+runs before CI executes, so a green/red result won't appear immediately. Re-check threads with:
+
+```
+gh api graphql -f query='{repository(owner:"demisto",name:"content"){pullRequest(number:45206){reviewThreads(first:100){nodes{isResolved isOutdated path comments(first:1){nodes{body}}}}}}}'
+```
+
+---
+
+## 💸 N8N-AFFILIATE: PartnerStack sign-up — added 2026-08-02, **PARKED by founder**
+
+Founder hit friction on the sign-up and parked it 2026-08-02. Not blocking anything.
+
+**Terms (from n8n's own page, not a third-party tracker):** 30% commission for **12 months** on
+n8n's *net earnings* per subscription, PayPal payouts, **€100 minimum balance**, anyone may apply,
+**paid ad campaigns prohibited**. Third-party sites report a 90-day cookie; n8n does not state one,
+so treat that as unconfirmed. Apply at [n8n.io/affiliates](https://n8n.io/affiliates/), then paste
+the PartnerStack email into the **n8n affiliate account** field in Creator Profile Settings.
+
+**Calibrate the upside before spending more time on it.** Commission comes only from **new n8n Cloud
+subscriptions**, and people browsing n8n's template library are overwhelmingly *already* n8n users —
+so the conversion pool is far narrower than template traffic suggests. n8n's page is explicit that
+templates are a *promotional channel*, not a paid unit. At three templates, clearing €100 is
+unlikely soon. **Do it because it is nearly free, not because it is a revenue line** — and it is
+unrelated to RelayShield revenue, so it should never outrank product work.
+
+---
+
+## ✍️ BLOG-CS15: v1.5.0 launch post — added 2026-08-01, blocked on dApp Store approval
+
+**Subject is the credential-layer argument, not the trial.** A post whose subject is a free trial
+reads as promotion and ages badly. Lead with the thesis that chain-only wallet security watches the
+last step of an attack that began weeks earlier off-chain — breach dump, then infostealer log, then
+SIM-swap, and only then a malicious signature. **The 7 day free trial is the CTA, not the topic.**
+The argument is already written and reviewed: it is the reasoning behind the dApp Store listing copy
+in `crypto-shield-app/store-assets/dapp-store-metadata.md`.
+
+**Three hard gates before publishing:**
+1. **Only after the listing is approved and public.** Pre-announcing a submission that can still be
+   rejected is a known failure here, and a publish is not real until the URL renders in a browser
+   ([[feedback-disconfirming-evidence-explained-away]]).
+2. **Arjen first.** The new record has **zero reviews** — the old listing's 5.0 does not transfer.
+   Driving blog traffic to a zero-review listing wastes it. Get him installed and reviewing first.
+3. **Do not mention the free scans.** Founder's call 2026-08-01: advertising that scans work without
+   a subscription invites probing of endpoints that are still unauthenticated.
+
+**Channels:** self-hosted blog (canonical), Medium (**import, don't paste** — and Medium keeps
+falling off the mix, see [[feedback-medium-dropped-from-distribution]]), LinkedIn, Telegram,
+Farcaster, Mastodon. **Not X — that account is suspended** ([[feedback-check-channel-status-before-planning]]).
+
+**Optional second post, different audience:** the signing-certificate rotation story — losing an
+Android signing key when the app store is a blockchain, and what it costs. Real engineering
+credibility, converts nobody on a consumer trial. Evergreen, not launch material.
+
+---
+
 ## ☀️ 2026-07-31 PICKUP LIST — start here
 
 **Recommended order, updated end of 2026-07-31** once n8n, Zapier and the Solana answer landed.
@@ -35,6 +263,33 @@ Things with a live failure or an external party waiting go first; internal build
 ~~**BUNDLE-B-2**~~ — **day-one scope SHIPPED 2026-07-31.** `secret-scan-text` endpoint + `rsscan`
 pre-commit hook + all CI clients built, deployed, verified end to end. Five live defects found and
 fixed on the way. Publishing runbook in `rsscan/PUBLISHING.md`; needs founder credentials.
+
+---
+
+## 🚀 DEV-FUNNEL: founder-approved 2026-08-02 — see [[project-developer-funnel-strategy]]
+
+**All six decisions approved in full. That memory file is authoritative; read it before touching
+`rsscan`, any BB item, `secret-scan`, or dev-facing pricing.** Ladder: free `rsscan` → Bundle B
+($100/mo external) → **Bundle A** ($150/mo identity, the real differentiator).
+
+**Shipped 2026-08-02:**
+- **`rsscan` scans 100% locally** — all 31 patterns on the developer's machine, **no API key, no
+  network, no size cap**. Kills the "why does our hook POST source to a third party" objection and
+  takes free-tier cost to zero. Verified on a real repo with planted keys (findings correct, exit 1;
+  clean run exits 0; allowlist suppresses; **zero secret values in the report**).
+- **`--report PATH`** writes the forwardable escalation artifact — fingerprints only, no secrets,
+  closing on what the local hook *cannot* see, with a CTA to `?source=rsscan`.
+- **`--org DOMAIN`** (opt-in) → `POST /v1/telemetry/rsscan-install`, unauthenticated by design.
+  Sends **only** org, anonymous install id, version, per-severity counts. Verified live: valid
+  payload 200, bad domain 400, bad install id 400, an injected junk counter key silently stripped.
+  N distinct install ids at one org = the qualified account PyPI downloads can never reveal.
+- **`tools/sync_patterns.py`** generates `rsscan/rsscan/patterns.py` from `relayshield_api.py`;
+  `--check` exits 1 on drift (proven). **Run it before every rsscan release** or a server-side
+  false-negative fix goes stale in the client. Fingerprints byte-identical to the server's.
+- Tables `relayshield_rsscan_installs` (TTL 180d) + IAM `relayshield-rsscan-installs-dynamodb`.
+
+**Next:** BB-3 (GitLab), then BB-4..BB-8. **Before publishing rsscan**, update `rsscan/README.md` —
+it still instructs users to get an API key, which is no longer true for scanning.
 
 ---
 
@@ -256,21 +511,63 @@ Also measured: **`OR` grouping does not work.** Parenthesised `(A OR B)` returns
 
 | ID | Item | Notes |
 |---|---|---|
-| **BB-1** | **Fix query construction** | Sends raw regex as search terms: `"openai.com" AKIA[A-Z0-9]{16}`. GitHub has no regex support. Measured: broken query 119 results, literal `AKIA` **4,280**. `github_pat` is worse - truncated at 20 chars to `gh[pousr]_[a-zA-Z0-9`, cut mid-character-class. Fix is a curated literal-prefix map, not `pattern.pattern[:20]`. **Highest value, no new integrations.** |
-| **BB-2** | **Use more than 6 patterns** | `_NHI_COMPILED[:6]` of 31. Cannot simply raise to 31 - see the rate limit above. Needs a query budget with severity prioritisation, plus running **all 31 regexes against returned `text_matches` fragments** so low-signal patterns are still classified without costing a query. |
-| **BB-3** | **GitLab** | `GITLAB_SEARCH_URL` defined at `relayshield_api.py:5736`, **never called**. Claimed in 8+ customer-facing places incl. the developers page, API docs, strategy pricing table and 3 HF blog posts. **We already charge for this.** |
+| **BB-1** | ✅ **DONE + DEPLOYED 2026-08-02** (`relayshield-api`, `2026-08-02T17:23:52Z`) | Was sending raw regex as search terms. Re-measured live before and after: `"openai.com" AKIA[A-Z0-9]{16}` → **119**, literal `"openai.com" AKIA` → **4,272** (36x); `"openai.com" gh[pousr]_[a-zA-Z0-9` → **261**, literal `ghp_` → **3,552** (14x). Replaced `pattern.pattern[:20]` with `_GITHUB_SEARCH_LITERALS`, a curated map covering **all 31 patterns** (25 queryable; 6 deliberately empty — the `_ctx_key` context-anchored ones and `llm_key_generic_sk`/`twilio_sid`, whose only literal is too generic to query). Selection is now **severity-ranked and literal-aware** instead of a blind `[:6]` slice — which had been spending a query on `slack_bot` (HIGH) while skipping `google_api` (CRITICAL). Budget still capped at 6 queries/domain (`_GITHUB_QUERY_BUDGET`); raising it is BB-2's job. |
+| **BB-2** | ✅ **DONE + DEPLOYED 2026-08-02** (`relayshield-api`, `2026-08-02T17:43:06Z`) | `_verify_github_fragment` (bool) replaced by `_classify_github_fragment`, which returns **every** credential pattern genuinely present in a hit's fragment. **All 31 regexes now run against every fragment at zero query cost**, so the 6 patterns with no searchable literal — and every low-signal one — are classified without ever spending one of the 10 queries/min. A hit surfaced by `AKIA` that actually contains a `ghp_` is now reported as a GitHub token, not mislabelled as an AWS key, and carries `surfaced_by` so the reclassification is visible in support. One leaky `.env` emits a finding per credential type, deduped on `(repo, file, type)`. Query budget stays at 6 and remains **severity-prioritised** (BB-1). Still degrades open when no fragment is returned. **9/9 classifier tests pass**, incl. multi-type emission and all four measured false-positive shapes. |
+| **BB-3** | ❌ **CLOSED — GitLab claim DROPPED, founder decision 2026-08-02.** Effort moves to BB-4. **Copy corrected across every surface and deployed**: live `/developers` page (verified by curl — the claim is gone, "GitHub public repo secret detection" remains), `relayshield_api.py` PAYG/x402 catalogue description + both pricing comments, `relayshield_smolagents_tool.py`, `RelayShield_Strategy.md`, `RelayShield_MSP_Solution_Brief.md`, `generate_pdfs.py`, `relayshield-mcp` (README + server.py), `hf-space-mcp-server` (README + app.py), the n8n node (.ts **and** dist), the Shadow AI workflow JSON, and the self-hosted blog content. The dead `GITLAB_SEARCH_URL` constant is deleted and replaced by a comment recording *why*, so nobody re-adds it. **⚠️ Three published artifacts still carry the old claim until they are re-released — local edits do not reach users:** `relayshield-mcp` on PyPI (needs version bump + publish), `n8n-nodes-relayshield` on npm (needs version bump + publish), and the HF Space (needs a push). Also the two HF blog posts already published on huggingface.co. | Original finding: `GITLAB_SEARCH_URL` was defined at `relayshield_api.py:5818` and **never called**. **Verified live:** `GET /api/v4/search?scope=blobs` returns **401 unauthenticated**, as does `scope=projects`. **Verified in GitLab's docs:** the `blobs` scope "is available only when advanced search or exact code search is enabled" and is **Premium/Ultimate only at BOTH instance and project level** — no free path exists. Unresolved even if paid: GitLab.com global search generally covers projects the user is a *member of*, not all public projects, which would defeat public-exposure discovery at any price. Rejected options: buy Premium (~$29/user/mo for one source, with that risk unresolved) or re-scope to customer-supplied tokens (a different product — internal audit, not public discovery). | `GITLAB_SEARCH_URL` defined at `relayshield_api.py:5818`, **never called** — and it cannot be made to work as designed. **Verified live:** `GET /api/v4/search?scope=blobs` returns **401 unauthenticated**, and so does `scope=projects` — *every* call needs a token. **Verified in GitLab's own API docs:** the `blobs` scope "is available only when advanced search or exact code search is enabled", and blobs is listed **Premium/Ultimate only at BOTH instance and project level**. There is no free path to GitLab code search, with or without a token. **Also unresolved even if paid:** on GitLab.com, global search generally covers projects the user is a *member of*, not all public projects — which would defeat "find this domain's leaked keys anywhere on GitLab" regardless of tier. Must be confirmed before spending anything. **Options: (1)** buy GitLab Premium (~$29/user/mo SaaS list) for one data source, and only if the membership-scope question resolves favourably; **(2)** re-scope to per-project scanning of a customer's *own* GitLab, which is a different product (they'd supply the token) and does not deliver public-exposure discovery; **(3) recommended — drop the GitLab claim**, correct the customer-facing copy, and move the effort to BB-4. **Live accuracy problem either way:** `/v1/metered/secret-scan` is billed at $0.35/call described as "GitHub/GitLab public repo secret detection", and GitLab is claimed in 8+ customer-facing places, while **zero GitLab scanning has ever run**. |
 | **BB-4** | **npm + PyPI package contents** | Secrets ship in published packages constantly. Distinct surface from repo scanning; GitGuardian's public monitoring is GitHub-centric. |
 | **BB-5** | **Docker Hub image layers** | High signal, badly under-served by competitors. |
 | **BB-6** | **Postman public workspaces** | Known and underrated leak source. |
 | **BB-7** | **Hugging Face repos + Spaces** | On-brand; RelayShield already has HF presence. |
 | **BB-8** | **Developer remediation channels** | The rsscan funnel has no developer-native delivery. Build: **GitHub Checks / PR annotations** (findings inline where the developer already is - highest value), **Slack**, **generic webhook**. WhatsApp/Telegram are the wrong audience for this buyer; `relayshield_siem_connector.py` covers Splunk HEC / CEF / XSOAR only. |
 
-### False positives are a real risk, confirmed
+### ✅ BB-1 CACHE — shipped 2026-08-02 after being MISSED on the first pass
 
-`text_matches` on `"openai.com" AKIA` returned `hq450/fancyss` `rules/gfwlist.txt` - a **domain
-blocklist** that happens to contain both strings. Today every search hit is reported as a finding
-with no verification, so results like that reach the customer as a CRITICAL. BB-2's
-"run the real regexes against the fragments" step is what rejects them, and it is not optional.
+The founder-approved BB-1 design (in `project_session_snapshot_2026-07-31`) specified **cache per
+domain, 24h TTL, honest `cached`/`coverage` in the response**. The first BB-1 deploy omitted it
+entirely. That was not cosmetic: the 10 req/min code-search budget is **per token, and RelayShield
+uses one token for every customer**, so at 6 queries/domain two concurrent single-domain scans
+already exceed the limit.
+
+Shipped `2026-08-02T18:01:38Z`: new `relayshield_secret_scan_cache` table (PK `domain`,
+PAY_PER_REQUEST, **TTL enabled on `ttl`** — verified `ENABLED`), `_secret_scan_cache_get/put`
+mirroring the `ip_intel` precedent, plus IAM policy `relayshield-secret-scan-cache-dynamodb` on
+`relayshield-breach-check-role-1sapnwdl` (per-table policies are this role's convention — without it
+the cache would have silently no-op'd through its own `except`, leaving the rate-limit bug in place
+while looking fixed).
+
+**A partial scan is never cached.** If any query fails — typically the shared token hitting the rate
+limit — the result is returned but not written, so a rate-limited moment can't be frozen in as a 24h
+"all clear". That is the BUNDLE-B-5 silent-false-all-clear class of defect and it was the real risk
+in adding a cache at all. Responses now carry `coverage: [{domain, cached}]` so a caller can tell a
+fresh scan from a 24h-old one.
+
+### False positives — ✅ VERIFICATION SHIPPED 2026-08-02, and the risk was far worse than recorded
+
+**Measured, not estimated: 5 out of the top 5 hits for `"openai.com" AKIA` are false positives.**
+Not an occasional blocklist collision — the *dominant* case. The real top-5, with fragments:
+`langwatch/better-agents` (a docs table listing `OPENAI_API_KEY`), `mongodb/kingfisher`
+(`aws_access_key_id=AKIA....`, a literal placeholder), `silentchainai/SILENTCHAIN` (a README
+describing which key formats it redacts), `BAILOOL/DoYouEvenLearn` (a link list), and
+`luckyPipewrench/pipelock` (a domain allowlist containing `"*.openai.com"`). Every one would have
+been reported to a customer as a **CRITICAL AWS key exposure**.
+
+**This is why the verification step was pulled forward from BB-2 into BB-1 rather than deferred.**
+BB-1 multiplies hit volume ~36x; shipping it alone would have multiplied false CRITICALs at the same
+rate. `_verify_github_fragment()` now requests the `application/vnd.github.text-match+json` media
+type (the old code never asked for fragments at all, so it had nothing to verify against) and runs
+the real compiled regexes over the returned fragment. A hit survives only if a genuine credential
+shape is present. It **degrades open** when no fragment is returned, so a missing payload falls back
+to old behaviour instead of silently dropping real findings, and it lets *any* pattern claim a hit so
+a repo leaking a different key type than the one that surfaced it is not lost.
+
+**Control tests: 12/12 pass** (`test_verify.py`) — real AWS/Stripe/Anthropic/private-key material
+kept; placeholders, docs tables, prose and domain allowlists rejected; both degrade-open paths
+confirmed. Verified against **real live API responses**, not only synthetic fixtures.
+
+**Correct the headline framing elsewhere in this file:** BB-1 does not deliver "36x more findings."
+It delivers 36x more *candidates*, most of which are noise. The value is a correct query **plus** the
+filter that turns candidates into findings — quoting the 36x as a findings increase to a customer
+would be wrong.
 
 ---
 
@@ -729,12 +1026,12 @@ Sentinel connector fields: **API root URL**, **Collection ID** (`iocs`), Usernam
 |---|---|---|---|
 | 1 | **MPP (Machine Payments Protocol) early-adopter status** (item 51) — Confirm with Stripe what "early adopter" qualification requires for the Stripe grant/startup program. | Founder explicitly reprioritized this to top-of-list 2026-07-17. | ⬜ Next step: confirm requirements with Stripe |
 | 2 | **AWS Marketplace Bundle A pricing resubmission** (item 33) — Resubmit AddDimensions; reconcile 6-vs-7 dimension discrepancy first. | Confirmed 2026-07-23: blocked while Bundle D's changeset (item 3) is under AWS audit — AWS Marketplace serializes submissions per seller account, not per product, so this can't run in parallel. Actually blocked, not just parallel-safe. | 🔒 Blocked — waiting on Bundle D audit to clear |
-| 3 | **AWS Marketplace Bundle D audit** (AGENTIC-6) — **RESOLVED 2026-07-30.** Change-set `ay8fm6495woznjrxrdd290kz3` ("BundleD-Public-Visibility-2026-07-30", submitted 2026-07-30T11:29:53Z) **SUCCEEDED** at 2026-07-30T12:35:09Z — `UpdateVisibility` to `Public` and `UpdatePricingTerms` ($299/mo `agentic_bundle_access` + per-call rates) both applied with zero errors. Bundle D is now publicly listed on AWS Marketplace. **Badge-page CTA restored same day**: Bundle D card re-added to `cloudflare_worker_badge_landing.js` (shared template, so all 4 pages get it from one edit), deployed, verified live via curl on `badge.relayshield.net/{defi,fintech,saas,ai-agents}`. **Known gap**: the card's "View on AWS Marketplace" link points to `aws.amazon.com/marketplace/search/results?searchTerms=RelayShield` (a verified-working search page) rather than Bundle D's direct `prodview-...` product page — the Catalog API doesn't expose that storefront URL and AWS Marketplace search doesn't show Bundle D yet (likely index lag right after going Public; only the TI product shows as of 2026-07-30). **Swap in the direct link once you grab it from the AWS Marketplace Management Portal** (same blocker noted at TODO.md line ~400 for the TI product's own card). Delete/let-lapse the daily `bundle-d-visibility-changeset-check` scheduled task, no longer needed. See AGENTIC-6c below for the root-cause detail of what got this past the two prior failures. | Directly unblocks Bundle D going public — done. | ✅ DONE 2026-07-30 — public, badge cards live, direct prodview URL still needed |
+| 3 | **AWS Marketplace Bundle D audit** (AGENTIC-6) — **RESOLVED 2026-07-30.** Change-set `ay8fm6495woznjrxrdd290kz3` ("BundleD-Public-Visibility-2026-07-30", submitted 2026-07-30T11:29:53Z) **SUCCEEDED** at 2026-07-30T12:35:09Z — `UpdateVisibility` to `Public` and `UpdatePricingTerms` ($299/mo `agentic_bundle_access` + per-call rates) both applied with zero errors. Bundle D is now publicly listed on AWS Marketplace. **Badge-page CTA restored same day**: Bundle D card re-added to `cloudflare_worker_badge_landing.js` (shared template, so all 4 pages get it from one edit), deployed, verified live via curl on `badge.relayshield.net/{defi,fintech,saas,ai-agents}`. **Known gap**: the card's "View on AWS Marketplace" link points to `aws.amazon.com/marketplace/search/results?searchTerms=RelayShield` (a verified-working search page) rather than Bundle D's direct `prodview-...` product page — the Catalog API doesn't expose that storefront URL and AWS Marketplace search doesn't show Bundle D yet (likely index lag right after going Public; only the TI product shows as of 2026-07-30). **Swap in the direct link once you grab it from the AWS Marketplace Management Portal** (same blocker noted at TODO.md line ~400 for the TI product's own card). The daily `bundle-d-visibility-changeset-check` scheduled task was **deleted 2026-08-02** (its `SKILL.md` is left on disk at `~/.claude/scheduled-tasks/bundle-d-visibility-changeset-check/` if the prompt is ever needed again). See AGENTIC-6c below for the root-cause detail of what got this past the two prior failures. | Directly unblocks Bundle D going public — done. | ✅ DONE 2026-07-30 — public, badge cards live, direct prodview URL still needed |
 | 4 | **CS Mobile: `eas init` + App Store launch prep** (App Store Launch item 1) — Required before any build; then icon, screenshots, Play/App Store submission. | Explicitly flagged "Do first — 5 min," blocks the entire launch sequence. | ⬜ Do first |
 | 5 | **CS Mobile: Solana Mobile Builder Grants application** (item 13, up to $10K) | Sequencing-sensitive — must apply *before* the launch announcement goes out. Application submitted 2026-07-18, no response yet. | 🔄 Submitted — awaiting reply |
 | 6 | **n8n workflow templates — MKTPL-11 (New Hire/Contractor Onboarding) + MKTPL-12 (Shadow IT/Vendor Approval Gate)** — Pure workflow packaging, no new engineering, reuses only existing endpoints. Both are the exact 2 remaining candidates for n8n's verified-creator badge. | **Moved above LangChain 2026-07-19 per founder decision** — bounded near-certain payoff, shaped to match the pattern that already got MKTPL-7b approved, rides current momentum (offboarding template testimonial + this session's n8n dev-site badge). | ⬜ Scoped, not built — build both now |
 | 7 | **LangChain OSS tool adoption push** (item 54 top ranking) — Get `mcp-registry-risk`/`prompt-injection-breach` adopted as default safety-check tools. | Still top of the 3 big-initiative ranking, but sequenced after MKTPL-11/12 (item 6) as of 2026-07-19 — LangChain's own PR-review latency (see DISRUPT-4's CrewAI PR) means going second here costs nothing. | ⬜ Not started |
-| 8 | **Zapier public listing / App Directory visibility (ZAP-2) - GONE DARK, founder flagged 2026-07-29. Push next session.** Originally scheduled for the 2026-07-18/19 weekend and still not moving 11 days later. **First job is diagnosis, not action:** establish whether it is Zapier's review queue that has gone silent or our submission that never fully landed - do not assume. Check (a) whether RelayShield appears in the public Zapier App Directory, (b) the app's state in the Zapier developer platform (draft / submitted / in review / rejected), (c) whether any Zapier Partners email went unanswered, and (d) the last activity date on the 12 registered "Daily ... - RelayShield" test Zaps that satisfy Zapier's live-usage validation requirement. **Context that matters before touching anything:** Zapier account **28014746**; the integration authenticates with the LONG key `[REDACTED Zapier live key - see memory project_zapier_billing_key_fix or the Zapier dashboard]` - **NOT** the shorter lookalike sharing its first 24 characters. A prior session burned a whole debugging cycle fixing the wrong key twice. That record carries `source: "demo_portal"` as an unconditional billing bypass; `credit_balance` is the only field the metered billing check reads. Never truncate a key when searching or comparing. See memory `project_zapier_billing_key_fix`. **Also relevant:** MKTPL-10 (validation-flag root cause, resolved 2026-07-07) and the Zapier halves of MKTPL-11 / MKTPL-12 / item 49, none of which are built - so a stalled listing may simply be waiting on template content. MKTPL-13 (Make.com) is explicitly held until this flywheel is verified, so this blockage is holding a downstream item too. | 🟥 Gone dark - diagnose next session |
+| 8 | **⚠️ "GONE DARK" IS STALE — superseded 2026-07-31.** The five review items from Abraham D. were fixed, v1.0.4/v1.0.5 pushed, and the reply sent (`b1d52ef`, `49e7d85`, `dccc0d7`, `f508585`). The queue is live, not silent. Re-read this row's diagnosis steps only if it goes quiet *again* from 2026-07-31 onward. Original text follows. ~~**Zapier public listing / App Directory visibility (ZAP-2) - GONE DARK, founder flagged 2026-07-29. Push next session.**~~ Originally scheduled for the 2026-07-18/19 weekend and still not moving 11 days later. **First job is diagnosis, not action:** establish whether it is Zapier's review queue that has gone silent or our submission that never fully landed - do not assume. Check (a) whether RelayShield appears in the public Zapier App Directory, (b) the app's state in the Zapier developer platform (draft / submitted / in review / rejected), (c) whether any Zapier Partners email went unanswered, and (d) the last activity date on the 12 registered "Daily ... - RelayShield" test Zaps that satisfy Zapier's live-usage validation requirement. **Context that matters before touching anything:** Zapier account **28014746**; the integration authenticates with the LONG key `[REDACTED Zapier live key - see memory project_zapier_billing_key_fix or the Zapier dashboard]` - **NOT** the shorter lookalike sharing its first 24 characters. A prior session burned a whole debugging cycle fixing the wrong key twice. That record carries `source: "demo_portal"` as an unconditional billing bypass; `credit_balance` is the only field the metered billing check reads. Never truncate a key when searching or comparing. See memory `project_zapier_billing_key_fix`. **Also relevant:** MKTPL-10 (validation-flag root cause, resolved 2026-07-07) and the Zapier halves of MKTPL-11 / MKTPL-12 / item 49, none of which are built - so a stalled listing may simply be waiting on template content. MKTPL-13 (Make.com) is explicitly held until this flywheel is verified, so this blockage is holding a downstream item too. | 🟥 Gone dark - diagnose next session |
 | 9 | **Fix Stripe `allow_promotion_codes` bug** (item 19) — None of the 10 Payment Links have it enabled; CSMOBILE10 cross-sell banner promises a code field the checkout page never shows. | Live, real bug undermining an active cross-sell mechanic. Just needs founder confirmation to flip the flag. | ⬜ Open bug — pending confirmation |
 | 10 | **AWS Marketplace: verify public visibility via incognito browser** (item 24) | Flagged "Do first" — cheap verification step before further Marketplace work. | ⬜ Do first |
 | 11 | **Facebook Business verification** (item 2 / SMB-5) — Submitted as RelayShield LLC, under review by Meta. | Needed to post as RelayShield page in FB SMB groups; not blocking anything else. Relative priority corrected to #10 by founder 2026-07-18 (previously mis-ranked #1). | 🔄 Under review — awaiting Meta |
@@ -1209,7 +1506,7 @@ Each verified the same way: syntax check, then a real module import (not `handle
 | MKTPL-12 | **Shadow AI & Vendor Approval Gate — n8n + Zapier template (added 2026-07-14, repositioned 2026-07-19).** Webhook on new tool request (form or ITSM ticket) → branch on `request_type` (`saas` vs `ai_tool`). SaaS path: `supply_chain` + `secret_scan` + `oauth_watchlist` against the vendor domain, as originally scoped. AI-tool path adds `mcp_registry_risk` (typosquat/IOC-corpus/registration-age check on an MCP server URL or package name) — genuinely different check for a genuinely different request shape, not a rename of the same logic. Either path → Slack alert to security + Notion vendor-risk log + approve/reject email to requester. **Repositioning rationale**: "Shadow IT" is a generic, undifferentiated term; "Shadow AI" (unsanctioned AI browser extensions, AI coding assistants, LLM API keys, MCP-based agent tools) is a hot, high-search-intent term right now, and RelayShield already has purpose-built endpoints (`mcp_registry_risk`, `tech_stack_cve`) for exactly this that the original SaaS-only scoping ignored — this isn't just copy, the check set genuinely changes for the AI-tool case. Tag with `ai`, `shadow-ai`, `ai-governance` (the last one deliberately echoes the language already used for the OrcX partnership, keeping positioning consistent across what's being built elsewhere) alongside the existing security/vendor tags. AWS Marketplace line should frame around enterprise AI governance specifically, not generic enterprise licensing. Diversifies template-library keyword/discovery breadth vs. the employee-lifecycle pair (MKTPL-7b/11). Reuses only existing endpoints, no new engineering beyond the request-type branch. Candidate template #2 toward n8n's verified-creator badge requirement — next in the queue after `MKTPL-11` clears AI/human review. **Built 2026-07-22** as `n8n_workflow_shadow_ai_vendor_gate.json` — single overview sticky note (per `feedback_n8n_sticky_note_layout.md`), 17 nodes. **Real gap found while building**: `secret_scan` and `mcp_registry_risk` aren't in the `n8n-nodes-relayshield` npm package's operation list yet (only breach/simSwap/infostealer/domain/oauthWatchlist/sessionRisk/supplyChain/identityGraph/ransomwareRisk/intelCve/intelTelegram are) — called those two directly via HTTP Request nodes against the same API base the custom node uses, with a separate "Header Auth" credential (`X-RS-API-KEY`), documented in the sticky note as a known interim measure. OAuth watchlist checks the *requester's* email, not the vendor's, since the real risk question at approval time is whether the person about to grant OAuth access already shows exposure — documented in the sticky note. **Also found while building**: the RelayShield API always wraps responses as `{"ok": true, "data": {...}}` (`_ok()` in `relayshield_api.py`), but the custom n8n node returns that wrapper unmodified — this new template correctly references `.item.json.data.<field>`, but the two already-approved templates (MKTPL-7b offboarding, MKTPL-11 onboarding) reference fields one level too shallow (`.item.json.<field>`, missing `.data.`), which likely throws execution errors for real users given both IF nodes use strict type validation. Flagged as a separate task, not fixed here — out of scope for this build. Not yet submitted to n8n. | ✅ Built 2026-07-22 — not yet submitted |
 | MKTPL-16 | **TI demo — added Attack Chain Position to the Agentic Identity Risk tab, fixed 2026-07-15.** `renderIdentityRisk` (Identity Risk tab) already called the shared `renderAttackTimeline(dims, score)` helper; `renderBulkIdentity` (Agentic Identity Risk tab, still internally named after its original bulk-identity-risk role) never did, so the attack-chain visualization was missing there. Added the same call using each result's `dimension_scores`/`domain_score`. Deployed and verified live via Browser tool (adobe.com + support@adobe.com test case) — chain renders correctly, same position as the Identity Risk tab. | ✅ Fixed, deployed, verified live |
 | MKTPL-15 | **CDP Discord "Show and Tell" post — added 2026-07-15, gated on x402 V2 migration completing.** Post RelayShield's x402 PAYG endpoints in CDP's own Discord Show and Tell channel once the stuck-resource-tracking issue (item 50) is resolved and the V2 migration actually completes — don't market listings that might be silently stale. Do this after batch rollout finishes, not before. **Content note added 2026-07-15 evening:** when this post goes up, explicitly reference our actual x402 V2 payload shape (the same one diffed byte-identical against `supply-chain` and `netintel.dev` during the item 50 investigation) as a known-good V2 example — useful credibility given we're already an active, evidenced participant in the CDP Discord thread on this exact topic (#2814), not a cold post. | ⏸️ Held — gated on item 50 (x402 V2 migration) resolving |
-| MKTPL-13 | **Make.com (Integromat) integration — added 2026-07-14, explicitly hold until n8n/Zapier flywheel is verified.** Third major no-code automation platform. Founder direction: do NOT start this until the template-driven flywheel effect (real signups/orders attributable to a published template) is actually confirmed from n8n and/or Zapier — no new channel until the existing two prove the mechanic works. Once verified: same reusable pattern (community app/connector + 1-2 published templates), lowest incremental cost of any candidate since it's pure packaging of existing endpoints. | ⏸️ Held — gated on flywheel verification from n8n/Zapier first |
+| MKTPL-13 | **ON DECK 2026-08-02 — not ruled out, just not the next work item (founder).** Correcting a claim made this session: Zapier has **not** gone dark. The reply to Abraham D.'s five outstanding items was sent 2026-07-31 along with v1.0.5 (commits `b1d52ef`, `49e7d85`, `f508585`), so the ZAP-2 "gone dark" note dated 2026-07-29 was stale and should not be cited as a blocker again. **Make.com (Integromat) integration — added 2026-07-14, originally held until n8n/Zapier flywheel is verified.** Third major no-code automation platform. Founder direction: do NOT start this until the template-driven flywheel effect (real signups/orders attributable to a published template) is actually confirmed from n8n and/or Zapier — no new channel until the existing two prove the mechanic works. Once verified: same reusable pattern (community app/connector + 1-2 published templates), lowest incremental cost of any candidate since it's pure packaging of existing endpoints. | ⏸️ Held — gated on flywheel verification from n8n/Zapier first |
 | ELASTIC-1 | **Document RelayShield -> Elastic Security threat-intel ingestion (no engineering required)** — added 2026-07-28. Elastic Security ships Threat Intel integrations for **MISP** and **TAXII 2.1** alongside AbuseCH/OTX/Anomali, and RelayShield **already exposes both**: `/v1/intel/taxii/`, `/v1/intel/taxii/collections/`, `/v1/intel/misp/`, `/v1/intel/misp/event/` (**paths corrected 2026-07-28** — an earlier note in this item listed them as `/v1/taxii/...` and `/v1/misp/...`, which 404; that came from grepping route strings in source rather than calling them. Verified live: all return 401 with a TAXII/MISP-shaped error body, i.e. reachable and requiring a TI subscription). A customer can point Elastic at RelayShield today and nobody knows, because it is undocumented. **Two real bugs found and fixed while writing the guide 2026-07-28:** (1) the TAXII discovery document advertised `api_roots` pointing at the raw `execute-api` hostname — a TAXII 2.1 client reads `api_roots` from discovery and follows it for every subsequent call, so every integrating customer would have been pinned to an AWS-internal URL that breaks if the API Gateway ID changes; now `https://api.relayshield.net/v1/intel/taxii/`. (2) the discovery description advertised "1,400,000+ IOCs" when the live corpus holds **4,530,716** — understating the product by 3x in the first thing an integrating customer sees. Contact also corrected from a gmail address to `support@relayshield.net`. Deployed 2026-07-28T21:31:44Z. Deliverable: a step-by-step "Ingest RelayShield IOCs into Elastic Security" guide (integration config, collection URL, auth header, field mapping, a sample detection query), published on the blog + linked from the developers page and the MSP solution brief. **Zero new engineering, highest ratio of effort to sales value of the three Elastic items.** | ✅ Guide written 2026-07-28 (`elastic_security_integration_guide.md`); 2 live bugs found and fixed en route — see below. Still to do: publish it and link from the developers page + MSP brief |
 | AGENTIC-6c | **Bundle D resubmitted for Public visibility 2026-07-29T23:04:54Z - change set `7rjip57niylpdl9uo5u3l735k`, status PREPARING.** **Root cause of the 2 prior failures (identified this session):** all three audit errors traced to ONE thing - the bare `api.relayshield.net/developers` page (no query string, which is what an auditor sees) carried Stripe checkout copy. The 2026-07-18 source-param fix only bypassed that page for visitors arriving WITH `aws_customer_id`; the bare page was never changed, which is why 'external payment collection' and 'directs customers to purchase outside' survived two audits while every other error was cleared. Error 3 ("buyers must be able to obtain the API key without having to pay for it since this product is listed as free") was the SAME page from a third angle - it paywalled the key behind a card. **NOT a pricing problem:** founder confirmed from the TI Starter/10K/Unlimited submissions that pricing defaults to placeholders 100% of the time while a product sits in Limited visibility, and every public-visibility submission requires manually re-entering each line item. That is normal, not a defect - an earlier theory about unbundling pricing from visibility was wrong and was dropped. **THE APPROVED TERMINOLOGY (reuse verbatim for Bundles A-C):** the AWS notice on the developers page is word-for-word the sentence AWS already passed in UsageInstructions - "No separate account or payment method is required; all billing is handled by AWS Marketplace." Three edits made: (1) signup CTA reduced to "Enter your email to get started. Your API key arrives by email instantly." - no mention of checkout, cards or Stripe; (2) billing section now reads "Direct customers add a payment method to activate a key and are billed monthly for calls made. Customers who subscribe through AWS Marketplace do not add a payment method - access is provisioned automatically and all billing is handled by AWS."; (3) "Billed monthly via Stripe" -> "Billed monthly". Deployed 2026-07-29T23:03:20Z, verified live: 0 occurrences of 'secure checkout', 'save a card', 'via Stripe'. Regression-verified all 3 landing paths (bundle bypass 1463 bytes, TI bypass 1463 bytes, public page full). Also scanned relayshield.net, the badge pages and the HF Space - no purchase-path language anywhere. **Prices resubmitted in full** (they roll back on every failure): `agentic_bundle_access` $299/mo (ConfigurableUpfrontPricingTerm, P1M, MultipleDimensionSelection+QuantityConfiguration Allowed), `bulk_identity_risk` $2.00, `tech_stack_cve` $0.20, `mcp_registry_risk` $0.35, `prompt_injection_breach` $0.35, `llm_credential_exposure` $0.40, PricingModel Contract. **On pass:** write the terminology above to memory for Bundles A-C, and re-add the Bundle D card to the 4 badge pages (`cloudflare_worker_badge_landing.js`, currently an HTML comment). Prior audits took 17h and 9 days. **RESULT: this change-set (`7rjip57niylpdl9uo5u3l735k`) FAILED at 2026-07-29T... with a new AUDIT_ERROR — "after subscribing to your product, when trying to get the API key, we get an error message 'Something went wrong'. Please ensure that the API is retrievable"** — this was the actual manifestation of the still-broken email-capture flow described above, root-caused fully and fixed (see `project_bundle_d_audit_fail_2026-07-30.md` in memory: the email-capture form was posting every bundle customer to the TI product's endpoint, dumping them on the Stripe signup page whose JS prints "Something went wrong"). Fix deployed, **resubmitted 2026-07-30T11:29:53Z as change-set `ay8fm6495woznjrxrdd290kz3`, which SUCCEEDED at 2026-07-30T12:35:09Z with zero errors.** Bundle D is now publicly visible. | ✅ SUCCEEDED 2026-07-30 |
 | ELASTIC-1a | **DONE 2026-07-29 - but Medium is now the canonical home, NOT Hashnode.** **Medium is LIVE and is the original:** `https://medium.com/@relayshieldadmin/ingesting-relayshield-threat-intelligence-into-elastic-security-bbc49b30b5ed` (browser-verified, all 4 code blocks intact, canonical checkbox **unchecked** so it no longer points at a dead URL). **LinkedIn posted 2026-07-29** using that Medium URL - reply to comments within the first hour. **Developers page redeployed** (`relayshield-developer-signup`, LastModified 2026-07-29T12:36:03Z) to link Medium; live-verified zero remaining references to the dead Hashnode URL. **Remaining nit:** the Medium post still opens with "Originally published on the RelayShield blog" - delete that line, it now points at nothing. **HASHNODE IS BROKEN FOR THIS POST - UNRESOLVED, see ELASTIC-1b.** | ✅ Published (Medium + LinkedIn + developers page) |

@@ -1,0 +1,9 @@
+# rsscan allowlist — fingerprints, never secrets.
+#
+# These are rsscan's OWN test fixtures and pattern literals. A secret scanner
+# necessarily contains strings shaped like secrets; that is not a leak.
+# Each entry was verified by hand before being added.
+
+sha256:743554670c6065b3   # test_verify.py — synthetic AKIA1234567890ABCDEF fixture
+sha256:8bcac7908eb95041   # test_verify.py — "-----BEGIN RSA PRIVATE KEY-----" header fixture
+sha256:522e9347612951b1   # patterns.py — bedrock_key_short regex literal, mirrored from the server

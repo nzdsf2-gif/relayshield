@@ -7,9 +7,9 @@ branding:
   color: 'purple'
 
 inputs:
-  api-key:
-    description: 'RelayShield API key. Store it as a repository secret and pass ${{ secrets.RELAYSHIELD_API_KEY }}.'
-    required: true
+  # api-key was removed in 0.2.0: scanning is entirely local, so the action
+  # needs no credential. Deliberately not kept as an ignored no-op input --
+  # an input that looks required but does nothing is worse than its absence.
   fail-on:
     description: 'Lowest severity that fails the build: LOW, MEDIUM, HIGH or CRITICAL.'
     required: false
@@ -73,7 +73,6 @@ runs:
       id: rsscan
       shell: bash
       env:
-        RELAYSHIELD_API_KEY: ${{ inputs.api-key }}
         RSSCAN_REV_RANGE: ${{ steps.range.outputs.range }}
         RSSCAN_FAIL_ON: ${{ inputs.fail-on }}
         RSSCAN_ALLOWLIST: ${{ inputs.allowlist }}

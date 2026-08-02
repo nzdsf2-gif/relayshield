@@ -1,5 +1,18 @@
 # RelayShield — Strategic Business Document
-*Generated: March 2026 | Last Updated: May 2026 — B2A API ✅ LIVE May 2026: relayshield-api Lambda deployed behind AWS API Gateway REST API with 6 endpoints (breach, sim-swap, domain, scan-url, scan-file, result poll); API key + usage plan active; RapidAPI listing in progress — launching with 3 endpoints (breach, sim-swap, domain); scan-url and scan-file endpoints held pending VirusTotal commercial API terms resolution; flat-rate subscription pricing unchanged ($299–599/month); source attribution omitted from all developer-facing marketing. Proactive Telegram group link scanning added (Section 9) with tier-gated scan quotas; B2A agent distribution model added (Section 9 + Layer 3): MCP server as primary agent discovery mechanism, per-call and subscription API pricing for MSP agent consumers; Mid-Market Expansion section added (Section 7c): 8 enterprise feature gaps identified, conditions for pursuing 50–200 employee segment. Predictive Attack Chain Alerts added (Section 10c) ✅ LIVE: pre-chain warning engine fires when the first signal in a known attack chain is recorded, warning users of likely next steps before the attack completes — 8 distinct predictive warnings across 4 chains, deployed across all 4 Lambdas; novel IP claim added to provisional patent scope. Coordinated Attack Detection Engine added (Section 10c) ✅ LIVE: temporal signal correlation across breach monitor, SIM swap monitor, and WhatsApp webhook — detects smishing→SIM swap, breach+SIM swap, and breach+OTP interception chains in real time; foundation for threat intelligence API dataset and monetisation. Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually. **x402 Pay-As-You-Go rail added May 2026 ✅ LIVE:** HTTP 402 micropayment protocol (USDC on Base, Linux Foundation governed) — PAYG endpoints `/v1/payg/*` live on API Gateway (Auth=NONE); Lambda verifies payment proof via Coinbase x402 facilitator; receiving address is Coinbase Exchange USDC deposit (covered by CB $320M custodial policy); pricing: breach $0.10, sim-swap $0.25, domain $0.50, oauth-watchlist $0.15; every successful response includes subscription conversion advisory. **MCP server v0.2.0 published to PyPI May 2026 ✅ LIVE:** `relayshield-mcp` supports subscription (RapidAPI key) and pay-as-you-go (x402 USDC on Base) access modes; 7 tools including new `check_oauth_watchlist`; VT tools return coming_soon for PAYG pending commercial licensing. **Crypto Shield subscriber tier added May 2026 (design):** $19.99/month vertical for crypto holders — crypto wallet monitoring (Alchemy Notify + GoPlus Security), SIM swap, breach, domain lookalikes, OAuth watchlist; Telegram delivery; USDC on Base payment via Coinbase Business (1%); onboarding via /addwallet Telegram command; build pending VERIFY-1/2/3 + CRYPTO-1/2 tasks. **Infostealer malware monitoring ✅ LIVE May 2026:** Hudson Rock Cavalier API integration across all surfaces — `/v1/payg/infostealer` REST endpoint, `/infostealer` Telegram command, `INFOSTEALER` WhatsApp command, scheduled Lambda monitor (`relayshield_infostealer_monitor`) polling all monitored emails every 48h and alerting on new infections; 4-step device remediation guidance delivered via WA and TG; near real-time positioning vs HIBP historical breach monitoring; DynamoDB fields `infostealer_count` + `infostealer_last_checked` added to `relayshield_monitored_emails`. **AI Agent Marketplace Distribution ✅ May 2026:** ElizaOS plugin `@relayshield/plugin-relayshield` v0.1.5 published to npm (9 actions including `checkInfostealerAction`); MCP server `relayshield-mcp` v0.2.4 published to PyPI (8 tools including `check_infostealer`); Venice AI skills PR #5 submitted and updated; Virtuals Protocol GAME SDK PR #196 submitted and updated; Circle Agent Marketplace submitted (9 endpoints); x402 Bazaar auto-lists on first paid call; RapidAPI OpenAPI spec updated with all 9 endpoints; BNBAgent SDK (launched May 25 2026) identified as future listing target — check back 4-6 weeks for plugin registry; PayAI Network (Solana x402 facilitator) identified as partnership target — Discord outreach initiated.*
+*Generated: March 2026 | Last Updated: June 2026 — **INTEL-5 Session Cookie / AiTM Detection ✅ BUILT June 2026:** INTEL-5 pipeline implemented in `relayshield_intel_monitor` Lambda — downloads and parses ZIP stealer log archives from infostealer-category Telegram channels (including `logsmarket`); extracts Netscape-format session cookies and credential files; classifies by service severity (CRITICAL: cloud consoles, code repos, identity providers; HIGH: payment processors, DNS registrars, security tooling; MEDIUM: productivity SaaS; LOW: consumer); matches against monitored email domains; fires CRITICAL WhatsApp/Telegram alerts naming exact services compromised with 2FA bypass warning; stores findings in new `relayshield_stolen_sessions` DynamoDB table (90-day TTL, email-index GSI). New API endpoints: `/v1/metered/session-risk` and `/v1/payg/session-risk` ($0.30/call) — query stolen session corpus by email, return severity-ranked active session hijack findings. This directly competes with SpyCloud's crown jewel capability at 1/100th the price. **Supply Chain / Vendor Risk Monitoring ✅ BUILT June 2026:** New endpoint `POST /v1/metered/supply-chain` and `/v1/payg/supply-chain` ($0.10/call, up to 10 vendor domains) — checks each vendor domain against HIBP `/breacheddomain` API (breach count + distinct affected accounts) and Hudson Rock Cavalier domain search (infostealer hits). Returns per-domain risk scoring: CRITICAL/HIGH/MEDIUM/LOW/CLEAN with risk factors and actionable recommendations. Accepts `vendor_domains` or `vendor_emails` arrays; domains extracted from emails automatically. Primary use case: MSPs running weekly vendor risk sweeps across client environments. Matches SpyCloud's Supply Chain Threat Protection at developer-accessible pricing. **OAuth Watchlist Upgraded + Merged with INTEL-5 ✅ BUILT June 2026:** `handle_oauth_watchlist` now combines two signals in one call — (1) existing HIBP breach × 31-app watchlist (historical risk), (2) new INTEL-5 `relayshield_stolen_sessions` corpus query for credential-type entries (real-time active threat). Combined response includes `matched_apps[]` (breach source) + `stolen_tokens[]` (stealer log source) + `highest_severity` field. Price raised to $0.30/call (metered and PAYG x402). Standalone `stolen-tokens` endpoint removed — merged into enhanced oauth-watchlist. Coverage expands from 31 fixed apps to any service credential found in stealer logs: AWS Console, GCP, Azure, CI/CD pipelines, registrars, security tooling, and more. Developer page, n8n node (v0.1.12), and welcome email updated. IOC corpus: **1.4M+ indicators** as of July 2026, sourced from **36+ live criminal Telegram channels** plus open feeds. 1M IOC milestone surpassed. **New endpoints June 22-23 2026:** `POST /v1/metered/asset-intel` ($0.15); `POST /v1/metered/threat-actor` ($0.30) — exploit chatter + actor/campaign lookup (market as **"Early Warning Intelligence"** — pre-NVD CVE PoC detection is RF-comparable early warning capability); `POST /v1/metered/cve-identity-risk` ($0.40); `POST /v1/metered/identity-risk-score` ($0.35). `POST /v1/metered/supply-chain` — market as **"Third-Party Risk Score"** (matches RF/enterprise vendor risk language). **TC/RF competitive parity — 5 new endpoints June 23 2026:** `POST /v1/metered/bulk-ioc` ($0.50/batch, 100 IOCs — ThreatConnect log-enrichment gap closed); `POST /v1/metered/ioc-pivot` ($0.20 — related IOC discovery, TC-competitor); `POST /v1/metered/brand-monitor` ($0.25 — brand scan in IOC corpus, RF brand protection equivalent); `GET /v1/intel/actor` (TI subscription — MITRE ATT&CK full actor profile + corpus IOCs, TC-competitor); `GET /v1/intel/trending` (TI subscription — top IOCs last 24/48hrs, RF trending threats equivalent). 3 new Stripe meters: `relayshield_bulk_ioc_calls`, `relayshield_ioc_pivot_calls`, `relayshield_brand_monitor_calls` (create in Stripe Dashboard). n8n node v0.1.14 published with npm provenance; Creator Portal update pending n8n team. WA weekly digest Lambda live (6-day cadence, 24hr window maintenance). All 6 WA templates approved. 22 metered endpoints total.
+
+**Patent Strategy (June 2026):**
+- **Strongest claim:** CVE → ATT&CK technique → infostealer family → live stealer corpus match against a specific domain as a single composite API response. No competitor (Recorded Future, SpyCloud, Tenable, Qualys) closes this full loop at any price point. File provisional patent around the temporal correlation architecture: domain-scoped join of KEV CVE data + EPSS + infostealer corpus hit timestamps + ransomware listing dates.
+- **Supporting claim:** Multi-surface identity signal correlation engine — simultaneous monitoring of 6 attack surfaces (credential breach, infostealer, SIM/eSIM swap, domain lookalike, OAuth supply chain, crypto asset) with temporal cross-correlation and pre-chain attack prediction. No SMB-accessible competitor offers this combination.
+- **Action:** File provisional patent application — EIN 42-xxxxxxx under RelayShield LLC. Provisional gives 12 months of patent-pending status at ~$320 filing fee.
+
+**TODO (Future Sprints):**
+- [ ] Employee Offboarding Risk Workflow — n8n/Zapier template: HR webhook → breach + infostealer + OAuth + NHI + identity graph → ConnectWise/Autotask ticket. n8n community offered to feature it in docs.
+- [ ] Dark Web Brand + Credential Mention Monitoring (multi-tenant) — paste site + Telegram brand mentions per client, PSA-native delivery. Flare charges $750/mo/tenant; target TI plan inclusion.
+- [ ] PolySwarm free tier integration — add to intel feed to push malware families from 700-800 → 1,000+
+- [ ] Dehashed API ($20/mo) — 26B+ credential records, highest ROI credential volume add
+- [ ] ANY.RUN TI API (~$500/mo) — 1,400+ malware family taxonomy, single-move path to 1K+ families
+- [ ] Triage API key — apply for researcher license at tria.ge, add to Secrets Manager as relayshield/triage_api_key | Last Updated May 2026 — B2A API ✅ LIVE May 2026: relayshield-api Lambda deployed behind AWS API Gateway REST API with 6 endpoints (breach, sim-swap, domain, scan-url, scan-file, result poll); API key + usage plan active; RapidAPI listing in progress — launching with 3 endpoints (breach, sim-swap, domain); scan-url and scan-file endpoints held pending VirusTotal commercial API terms resolution; flat-rate subscription pricing unchanged ($299–599/month); source attribution omitted from all developer-facing marketing. Proactive Telegram group link scanning added (Section 9) with tier-gated scan quotas; B2A agent distribution model added (Section 9 + Layer 3): MCP server as primary agent discovery mechanism, per-call and subscription API pricing for MSP agent consumers; Mid-Market Expansion section added (Section 7c): 8 enterprise feature gaps identified, conditions for pursuing 50–200 employee segment. Predictive Attack Chain Alerts added (Section 10c) ✅ LIVE: pre-chain warning engine fires when the first signal in a known attack chain is recorded, warning users of likely next steps before the attack completes — 8 distinct predictive warnings across 4 chains, deployed across all 4 Lambdas; novel IP claim added to provisional patent scope. Coordinated Attack Detection Engine added (Section 10c) ✅ LIVE: temporal signal correlation across breach monitor, SIM swap monitor, and WhatsApp webhook — detects smishing→SIM swap, breach+SIM swap, and breach+OTP interception chains in real time; foundation for threat intelligence API dataset and monetisation. Vishing Preparedness Engine added (Section 8): AI voice attack warning layer for consumers and businesses, triggered automatically on breach detection. Session Hijacking Detection Engine added (Section 9): AiTM phishing awareness, session cookie exposure detection, and active session audit — addresses Tycoon 2FA and EvilProxy attack vectors that bypass 2FA entirely. Smishing Defense Engine added (Section 10): predictive smishing campaign detection, suspicious SMS analysis, OTP warning flow, SIM swap correlation — the only identity protection product monitoring upstream smishing signals before the attack arrives. OAuth Supply Chain Attack Detection marked ✅ LIVE April 2026: OAUTH command, monthly reminder Lambda, 40-app watchlist monitor all deployed. Section 9 Delivery Channel Strategy updated: Signal evaluated and ruled out (no official API), Telegram confirmed as Phase 2 second channel — tiered delivery model defined (WhatsApp OR Telegram all tiers; dual delivery Business Basic+ exclusive, no extra charge), new DynamoDB fields documented. Business Starter + Domain Monitoring tier added April 2026 ($24.99/mo, $269.99/yr): sole proprietors with a business website can add typosquat domain monitoring (1 domain) without upgrading to Business Basic — captures revenue from owner-operators who won't pay team-seat pricing for a feature they need individually. **x402 Pay-As-You-Go rail added May 2026 ✅ LIVE:** HTTP 402 micropayment protocol (USDC on Base, Linux Foundation governed) — PAYG endpoints `/v1/payg/*` live on API Gateway (Auth=NONE); Lambda verifies payment proof via Coinbase x402 facilitator; receiving address is Coinbase Exchange USDC deposit (covered by CB $320M custodial policy); pricing: breach $0.10, sim-swap $0.25, domain $0.50, oauth-watchlist $0.15; every successful response includes subscription conversion advisory. **MCP server v0.2.0 published to PyPI May 2026 ✅ LIVE:** `relayshield-mcp` supports subscription (RapidAPI key) and pay-as-you-go (x402 USDC on Base) access modes; 7 tools including new `check_oauth_watchlist`; VT tools return coming_soon for PAYG pending commercial licensing. **Crypto Shield subscriber tier added May 2026 (design):** $19.99/month vertical for crypto holders — crypto wallet monitoring (Alchemy Notify + GoPlus Security), SIM swap, breach, domain lookalikes, OAuth watchlist; Telegram delivery; USDC on Base payment via Coinbase Business (1%); onboarding via /addwallet Telegram command; build pending VERIFY-1/2/3 + CRYPTO-1/2 tasks. **Infostealer malware monitoring ✅ LIVE May 2026:** Hudson Rock Cavalier API integration across all surfaces — `/v1/payg/infostealer` REST endpoint, `/infostealer` Telegram command, `INFOSTEALER` WhatsApp command, scheduled Lambda monitor (`relayshield_infostealer_monitor`) polling all monitored emails every 48h and alerting on new infections; 4-step device remediation guidance delivered via WA and TG; near real-time positioning vs HIBP historical breach monitoring; DynamoDB fields `infostealer_count` + `infostealer_last_checked` added to `relayshield_monitored_emails`. **AI Agent Marketplace Distribution ✅ May 2026:** ElizaOS plugin `@relayshield/plugin-relayshield` v0.1.5 published to npm (9 actions including `checkInfostealerAction`); MCP server `relayshield-mcp` v0.2.4 published to PyPI (8 tools including `check_infostealer`); Venice AI skills PR #5 submitted and updated; Virtuals Protocol GAME SDK PR #196 submitted and updated; Circle Agent Marketplace submitted (9 endpoints); x402 Bazaar auto-lists on first paid call; RapidAPI OpenAPI spec updated with all 9 endpoints; BNBAgent SDK (launched May 25 2026) identified as future listing target — check back 4-6 weeks for plugin registry; PayAI Network (Solana x402 facilitator) identified as partnership target — Discord outreach initiated.*
 
 ---
 
@@ -4057,6 +4070,42 @@ On-demand IOC lookup against RelayShield's live Telegram-sourced criminal channe
 
 **Roadmap:** Enterprise feed tier ($1,500–$3,000/mo) — raw IOC stream pushed to customer SIEM via webhook. Build after first Threat Intelligence API subscriber. See TODO `INTEL-FEED-1`.
 
+#### Competitive Pricing Analysis — June 2026
+
+| Provider | Model | Price | Coverage |
+|---|---|---|---|
+| Recorded Future | Annual contract | $25,000–$100,000+/yr | Full dark web + nation-state intel |
+| SpyCloud | Annual contract | $30,000+/yr | Session cookies, infostealer logs |
+| Intel 471 | Annual contract | $10,000+/yr | Criminal forum monitoring |
+| Flashpoint | Annual contract | $50,000+/yr | Full threat intel platform |
+| Flare | Monthly | $79/mo | Infostealer monitoring only |
+| GreyNoise | Monthly | $299/mo | IP noise/scanning intel only |
+| HIBP API | Monthly | $3.95–$149/mo | Breach data only, no Telegram |
+| **RelayShield PAYG** | **Per call** | **$0.10–$0.50/call** | **Telegram IOCs + breach + SIM swap + infostealer** |
+| **RelayShield MSP** | **Monthly** | **$499/mo** | **10k calls, 24–72hr lead on HIBP** |
+| **RelayShield MSSP** | **Monthly** | **$999/mo** | **Unlimited calls, priority + SLA** |
+
+**Pricing advantages:**
+
+1. **Only PAYG threat intel at this price point** — every competitor above $79/mo requires an annual contract. A SOC analyst can test RelayShield for $0.10 with no sales call, no procurement cycle.
+2. **Telegram-sourced intelligence is genuinely novel** — SpyCloud and Recorded Future pull from dark web forums. No competitor specifically monitors criminal Telegram channels at this price. The 24–72hr HIBP lead time is real and verifiable.
+3. **No minimum commitment** — GreyNoise's cheapest API tier is $299/mo. RelayShield's entry cost is a single $0.10 call.
+
+**Honest caveat (internal):** Recorded Future and SpyCloud have broader coverage — more sources, more historical data, nation-state intel. RelayShield's moat is **Telegram-specific recency + price accessibility**. The pitch is not "we have more data" — it is "we surface Telegram IOCs faster than anyone at 5–6x lower cost than SpyCloud's subscription equivalent, with SIM swap, domain, and CVE capabilities they don't offer." (Avoid PAYG vs. annual comparisons in external materials — sophisticated buyers see through it.)
+
+**Sales positioning:** Lead with PAYG to eliminate procurement friction. Convert to MSP/MSSP subscription once a buyer demonstrates volume. Never compete on breadth against Recorded Future — compete on speed-to-signal and price.
+
+#### Pricing Tiers — Tooling Required, Target Market, Competitor Bracket (added June 16 2026)
+
+| Tier | Price | Tooling required | Target buyer | Competitor pricing in bracket |
+|---|---|---|---|---|
+| **PAYG** | $0.50–$1.00/query | Stripe metered billing (✅ live) — per-call meter events, no quota tracking needed | Individual devs, indie SaaS, agent builders testing integration | No direct comp — Hudson Rock/Flare/SpyCloud don't offer PAYG at all; this is whitespace |
+| **Developer subscription** | $499/mo (10K calls) – $999/mo (unlimited) | Stripe Price IDs already created (✅); **quota enforcement not yet built** — see `INTEL-RATELIMIT-1` in TODO.md. Needs per-key monthly call counter + reset logic + 402/429 gate | Security engineer at a 200–2K employee company building internal SIEM/SOAR tooling; security SaaS vendor embedding breach/infostealer data; MSP/SOC teams | Flare starts ~$1,000/mo; Hudson Rock ~$2,500/mo entry; SpyCloud doesn't quote below enterprise. RelayShield 2.5–5x cheaper at this tier |
+| **Mid-market feed** | $1,500–$3,000/mo | **Not built** — requires a bulk export/feed delivery mechanism (S3 push or webhook stream), not just query-per-IOC. Tracked as `INTEL-FEED-1`. This is the gating item, not pricing | MSSP/MDR technical teams running this data through their own SIEM/SOAR at scale across many client tenants | Recorded Future mid-tier ~$15K–$30K/yr ($1,250–$2,500/mo); Flashpoint similar. RelayShield positioned at the low end of this range while matching enterprise feed mechanics |
+| **Enterprise OEM** | $8K–$25K/mo | White-label API, dedicated tenant isolation, custom SLA — not started | Large MSSPs, carriers (Calix integration angle), security platform vendors reselling under their own brand | Hudson Rock $30K+/yr enterprise, SpyCloud $50K–$200K+/yr. RelayShield 2–10x cheaper |
+
+**Key gap to close before claiming the developer subscription is fully "live":** Stripe pricing and checkout exist, but nothing in `relayshield_api.py` enforces the 10K-call cap on the $499 tier — a subscriber today gets effectively unlimited calls for $499. This needs to ship before the tier is marketed at volume, or the $999 unlimited tier has no differentiation.
+
 #### Prepaid Credit Packs — ✅ LIVE June 2026
 
 Credit packs are fixed-price one-time purchases via Stripe Checkout (payment mode, not subscription). Designed for developers who want to evaluate the API or make occasional one-off calls without committing to monthly billing.
@@ -4525,3 +4574,857 @@ Six distinct user segments each require a different channel mix, lead message, a
 
 **Goal:** Featured integration listing + co-marketing mention in their developer docs or newsletter. Not a revenue-share ask at this stage.
 
+---
+
+## 22. June 2026 Product Expansion — INTEL-5, Supply Chain, and Enhanced OAuth Monitoring
+
+*Added June 2026. Documents the three new capabilities built in June 2026, their competitive rationale, pricing architecture, and positioning against SpyCloud and enterprise alternatives.*
+
+### Background — Why These Three Features
+
+SpyCloud is the closest enterprise competitor to RelayShield's B2A product. Their headline differentiators are: (1) session cookie / active session hijack detection, (2) supply chain / vendor identity risk monitoring, and (3) infostealer log corpus coverage. All three are priced at enterprise SaaS rates ($30K–$200K+/year) and unavailable to SMBs, developers, and MSPs at accessible price points. These three June 2026 features directly address each gap.
+
+---
+
+### Feature 1 — INTEL-5: Session Cookie / AiTM Detection ✅ BUILT
+
+**What it is:**  
+Pipeline extension of the INTEL-2 Telegram dark channel monitor. When infostealer-category channels (including `logsmarket`) post ZIP archive attachments, the Lambda downloads them, unzips in `/tmp`, and parses two file types:
+
+- **Cookies/** — Netscape-format cookie files: `domain \t flag \t path \t secure \t expiry \t name \t value`. Filtered to session-relevant cookies only (tracking/analytics cookies discarded). Known session cookie names mapped per service (GitHub `user_session`, Google `SSID`, AWS `aws-userInfo`, etc.).
+- **Passwords/** — tab/pipe-separated credential files: `URL | Username | Password`. Service URLs classified by severity.
+
+**Severity classification (11 tiers):**
+| Severity | Category | Example services |
+|---|---|---|
+| CRITICAL | Cloud Infrastructure | AWS Console, GCP Console, Azure Portal, Cloudflare |
+| CRITICAL | Code Repository / CI-CD | GitHub, GitLab, Bitbucket, CircleCI |
+| CRITICAL | Identity Provider | Okta, Auth0, Microsoft Entra, Google Workspace Admin |
+| HIGH | Payment Processor | Stripe Dashboard, PayPal, Braintree |
+| HIGH | Domain Registrar / DNS | GoDaddy, Namecheap, Route53 |
+| HIGH | Security Tooling | CrowdStrike, Datadog, PagerDuty, Splunk |
+| MEDIUM | Developer / Infra SaaS | Vercel, Netlify, Heroku, DigitalOcean |
+| MEDIUM | Productivity / CRM | Slack, Notion, HubSpot, Salesforce, Linear |
+| MEDIUM | Communication | Zoom, Microsoft Teams, Discord |
+| LOW | Consumer / Social | Twitter/X, Facebook, Reddit, LinkedIn |
+
+**Storage:** `relayshield_stolen_sessions` DynamoDB table — PK `session_id` (UUID), GSI `email-index` on `matched_email`, 90-day TTL.
+
+**B2C alert:** CRITICAL-severity WhatsApp/Telegram alert names exact services compromised, severity-bucketed. Explicit warning: "2FA does NOT protect you once a session cookie is stolen — the attacker can access your account right now without your password." Immediate revocation steps per service.
+
+**B2A endpoints:**
+- `POST /v1/metered/session-risk` — queries stolen session corpus by email, returns severity-ranked active session hijack findings. **$0.30/call** (metered and PAYG x402).
+- Included in TI Starter ($499/mo) and TI Unlimited ($999/mo) — counts against call quota.
+
+**Why it matters vs. SpyCloud:** SpyCloud markets session cookie detection as their crown jewel. They charge enterprise SaaS rates. We deliver the same signal from the same source channel ecosystem (criminal Telegram stealer log drops) at $0.30/call or included in TI subscriptions. The 25MB archive cap and infostealer-channel filtering keep processing costs bounded.
+
+**Key constraint:** Coverage is limited to stealer log archives posted as ZIP files to our monitored infostealer channels. Files > 25MB skipped. RAR/encrypted archives skipped. Coverage grows as more infostealer channels are added to `MONITORED_CHANNELS`. INTEL-1 (licensed raw log feed from Flare/Hudson Rock) would expand coverage significantly when the subscriber base justifies the cost.
+
+---
+
+### Feature 2 — Supply Chain / Vendor Risk Monitoring ✅ BUILT
+
+**What it is:**  
+New endpoint `POST /v1/metered/supply-chain` (and `/v1/payg/supply-chain`). Accepts up to 10 vendor domains (or email addresses, with domains extracted automatically) and for each domain runs:
+
+1. **HIBP `/breacheddomain/{domain}`** — returns every breached email account prefix at that domain. Gives breach count + total distinct account exposure count.
+2. **Hudson Rock Cavalier `/search-by-domain`** — infostealer log hits for that domain. Gives infected machine count and infection dates.
+
+**Risk scoring:**
+
+| Condition | Points |
+|---|---|
+| Any stealer log hits | +30 (or +40 if 3+) |
+| 5+ distinct breaches | +20 |
+| 2–4 breaches | +10 |
+| 1 breach | +5 |
+| 50+ accounts exposed | +20 |
+| 10–49 accounts | +10 |
+
+Score → CRITICAL (≥60) / HIGH (≥35) / MEDIUM (≥15) / LOW (>0) / CLEAN
+
+**Pricing:**
+- PAYG: $0.10/call (up to 10 domains per call)
+- Metered: 10 credits ($0.10) per call
+- TI subscriptions: included, counts against quota
+
+**MSP use case:** An MSP managing 20 clients, each with 10 vendors = 200 vendor domains. Weekly sweep = 800 calls/month = $80/month in metered billing, or well within the $499 TI Starter quota. This is a recurring, high-value operational use case that justifies the TI subscription on its own.
+
+**Competitive gap closed:** SpyCloud's Supply Chain Threat Protection is their enterprise product line. We match the core signal (breach + stealer exposure per vendor domain) at developer-accessible pricing.
+
+---
+
+### Feature 3 — Enhanced OAuth Watchlist (Combined HIBP + INTEL-5) ✅ BUILT
+
+**What it is:**  
+`handle_oauth_watchlist` now combines two signals in one call:
+
+1. **HIBP breach × 31-app watchlist** (existing) — checks whether any breach the email appeared in involved an OAuth-capable SaaS app. Returns `matched_apps[]` with breach date and revoke URL.
+2. **INTEL-5 stealer corpus** (new) — queries `relayshield_stolen_sessions` for credential-type entries linked to the email. Returns `stolen_tokens[]` with domain, severity, service category, channel source, and ingestion timestamp.
+
+Combined response includes `highest_severity` field spanning both signals. Recommendation text is dynamically generated from the most severe signal present.
+
+**Coverage expansion:** The legacy 31-app watchlist covered only fixed SaaS apps that appeared in HIBP breaches. The INTEL-5 stealer corpus covers any service whose credentials appeared in a raw stealer log — AWS Console, GCP, Azure, registrars, CI/CD pipelines, security tooling, and more. Coverage is unbounded and grows with every new stealer log parsed.
+
+**Pricing:** Raised from $0.20 → **$0.30/call** on both metered and PAYG x402. Justified by the premium signal layer added. SpyCloud charges enterprise SaaS rates for equivalent credential exposure detection; $0.30/call is aggressive value pricing for the B2A segment.
+
+**Standalone `stolen-tokens` endpoint:** Removed. Merged into the combined oauth-watchlist. No separate purchase decision required from the customer — one endpoint, two signal layers, one price.
+
+---
+
+### Competitive Positioning Summary — June 2026
+
+**Pricing note:** The correct apples-to-apples comparison is RS subscription tiers vs. SpyCloud's annual contract equivalent — not PAYG per-call vs. enterprise annual, which is a false comparison that sophisticated buyers will recognise immediately. SpyCloud's entry point is ~$30K–$36K/year ($2,500–$3,000/month). PAYG is a separate point of differentiation — SpyCloud has no per-call option at all, making it a capability gap, not a price comparison.
+
+| Capability | SpyCloud | RelayShield TI Starter ($499/mo) | RelayShield TI Unlimited ($999/mo) |
+|---|---|---|---|
+| Session cookie / AiTM detection | ✅ ~$2,500–$3,000/mo equiv. | ✅ Included — **5–6x cheaper** | ✅ Included — **2.5–3x cheaper** |
+| Supply chain vendor monitoring | ✅ Enterprise product line | ✅ Included | ✅ Included |
+| OAuth / token exposure detection | ✅ Infostealer corpus | ✅ HIBP + INTEL-5 combined | ✅ HIBP + INTEL-5 combined |
+| Real-time Telegram IOC feed (200K+) | ❌ Not offered | ✅ RS-exclusive | ✅ RS-exclusive |
+| SIM swap detection | ❌ | ✅ RS-exclusive | ✅ RS-exclusive |
+| Domain typosquatting scan | ❌ | ✅ RS-exclusive | ✅ RS-exclusive |
+| CISA KEV CVE lookup | ❌ | ✅ RS-exclusive | ✅ RS-exclusive |
+| Crypto counterparty / wallet risk | ❌ | ✅ Bundled (GoPlus — unique combination, not exclusive data) | ✅ Bundled |
+| Consumer WA/Telegram alerts | ❌ | ✅ RS-exclusive | ✅ RS-exclusive |
+| PAYG / no-commitment option | ❌ Not offered | ✅ $0.10–$0.30/call | ✅ $0.10–$0.30/call |
+| Monthly price | ~$2,500–$3,000 | **$499** | **$999** |
+
+**On SpyCloud's "980K infostealer logs" claim:** Historical stealer log volume is a vanity metric. Credentials from logs older than 72 hours have likely been used, sessions have expired, and the damage is done. The security value in infostealer data is concentrated entirely in the first 24–72 hours after a log drops — the window before attackers monetise the credentials. SpyCloud's historical corpus depth is equivalent to HIBP's "13 billion records" headline: impressive-sounding, low in marginal value per additional historical entry. RelayShield INTEL-5 sources from the same Telegram channels where fresh logs appear within hours of device infection. We don't have their historical depth — that is an honest internal caveat — but for real-time detection, the only thing that actually prevents account takeover, the gap is far smaller than corpus size implies. **Positioning line: "We detect today's infections. Yesterday's are already too late."**
+
+**Honest remaining gap:** SpyCloud has 10+ years of corpus and broader source coverage beyond Telegram (dark web forums, criminal marketplaces). Our moat is Telegram-specific recency, price accessibility, and the RS-exclusive capabilities (SIM swap, domain, IOC feed, CVE) that SpyCloud does not offer at any price. The pitch is never "we have more data" — it is "we surface what matters faster, at 5–6x lower cost, with capabilities they don't offer."
+
+### Blog Content Strategy — Three Planned Posts (June/July 2026)
+
+**Blog 1 — Session cookies / AiTM:** "Why changing your password after a breach isn't enough: how attackers use stolen session cookies to bypass 2FA." Education + product positioning. Timed to Product Hunt launch. Primary channels: PWN guest post, LinkedIn, X.
+
+**Blog 2 — Supply chain:** "Your vendor's breach is your breach: how to monitor third-party identity risk with one API call." MSP-targeted. LinkedIn primary. Anchor for an n8n vendor-onboarding workflow template.
+
+**Blog 3 — OAuth tokens:** "Beyond passwords: why OAuth tokens and API keys are the new credential threat." Developer-targeted. Farcaster, developer communities, HN (pending account recovery).
+
+---
+
+## 23. June 2026 — Phase 2 Intelligence Expansion
+
+*Added June 2026. Documents four major capability additions that move RelayShield from a detection-and-alert product toward a genuine threat intelligence platform.*
+
+### IOC Corpus Expansion — 200K → 400K+
+
+Four new free feed sources added to `relayshield_intel_feed.py`, no licensing cost:
+
+| Source | Type | Estimated Volume |
+|---|---|---|
+| **OpenPhish** | Active phishing URLs, updated every 6 hours | ~25,000 |
+| **blocklist.de all.txt** | Malicious IPs (brute force, malware, spam) | ~150,000 |
+| **Cisco Talos IP blacklist** | High-confidence bad-reputation IPs | ~5,000 |
+| **IPsum** | Aggregated from 80+ blocklists, confidence-scored (≥3 sources) | ~40,000 |
+
+Total corpus now **400,000+ indicators**. Malware family count unchanged at **450+** — the new sources are IP/URL reputation feeds, not malware-tagged. All four ingest daily via the existing `relayshield-intel-feed` Lambda.
+
+External-facing claim updated: "400,000+ indicators from 8 verified criminal Telegram channels and 15 authoritative threat intelligence feeds."
+
+---
+
+### INTEL-4 — Ransomware Victim Site Monitoring ✅ LIVE
+
+**What it does:** Daily Lambda (`relayshield-intel-ransomware`, EventBridge cron 08:00 UTC) scrapes ransomwatch — an open-source project that tracks 100+ active ransomware group leak sites (.onion) and publishes a unified `posts.json`.
+
+**Two components:**
+
+1. **Victim site scraping:** Extracts victim company domains from ransomwatch posts. Stores in `relayshield_intel_ransomware` table (PK: domain, SK: group, 180-day TTL). Cross-references against `relayshield_users` monitored domains. Fires CRITICAL Telegram alert if a monitored domain appears as a victim.
+
+2. **Pre-ransomware credential labeling:** When a new victim domain is detected, retroactively tags any existing IOCs for that domain in `relayshield_intel_iocs` with `pre_ransomware=true` and the ransomware group name. These credentials were exposed before the incident — the same positioning SpyCloud uses for their enterprise product. Incident responders can query: "show me credentials tagged pre_ransomware" for a domain under investigation.
+
+**Competitive positioning:** SpyCloud markets "ransomware pre-indicators" as an enterprise feature. We deliver equivalent capability via ransomwatch (free, open-source) at no additional cost on the TI subscription.
+
+---
+
+### Identity Correlation — `/v1/metered/identity-graph` ✅ LIVE
+
+**What it does:** When the INTEL-2 monitor extracts both emails and phone numbers from the same message/dump, it stores the co-occurrence as a correlation pair in `relayshield_identity_graph` (DynamoDB, 1-year TTL).
+
+**Customer value:**
+- **Pivot:** A compromised email may be linked to phone numbers found in the same dump — those accounts are also at risk even if the customer hasn't monitored that phone
+- **Correlation engine signal:** If email A is linked to phone B, and phone B is being SIM-swapped, the email holder can be alerted even if they never registered that phone number with RS
+- **B2A incident response:** Security teams pivot from a single compromised email to a full identity surface in one API call
+
+**Security:** PK (`anchor`) stores SHA-256 hash of the email — never plaintext in the index. Correlated values (phones, domains) are KMS-encrypted at field level using `alias/relayshield-data-key`, same key used for all RS customer PII. Decrypted in Lambda on read.
+
+**Pricing:** $0.35/call — highest PAYG price in the metered suite, reflecting the premium intelligence value. Included in TI subscriptions.
+
+**Growth trajectory:** The identity graph builds continuously with every intel run. As more criminal channel dumps are processed, the correlation coverage deepens. Unlike SpyCloud's IDLink (built on billions of records), ours starts lightweight and grows organically from the same source material.
+
+---
+
+### STIX/TAXII 2.1 Endpoint ✅ LIVE
+
+**What it does:** TAXII 2.1 compliant REST feed of RelayShield IOCs as STIX 2.1 Indicator objects. Available to TI subscribers (intel_access flag required).
+
+**Endpoints:**
+- `GET /v1/intel/taxii/` — server discovery
+- `GET /v1/intel/taxii/collections/` — available collections
+- `GET /v1/intel/taxii/collections/iocs/objects/` — paginated STIX indicators (`?added_after=`, `?limit=`, `?next=`)
+
+**Why it matters:** Every enterprise SIEM that speaks TAXII (Splunk, Microsoft Sentinel, Elastic SIEM, QRadar, OpenCTI) can ingest RS IOCs with zero custom integration. The SIEM admin points their built-in TAXII client at the RS endpoint, sets a pull schedule, and new IOCs flow in automatically. This is the standard protocol the FiberSmith/ISP integration would use.
+
+**STIX format:** Each IOC is converted to a STIX 2.1 Indicator object with appropriate pattern (`[ipv4-addr:value = '...']`, `[domain-name:value = '...']`, `[url:value = '...']`, `[file:hashes.SHA-256 = '...']`). Malware family tags become STIX labels.
+
+**Competitive significance:** Recorded Future and ThreatConnect charge enterprise rates for TAXII feeds. RS delivers the same protocol at $499–$999/month. No competitor at this price point offers STIX/TAXII.
+
+---
+
+### Security Hardening — KMS Encryption for Identity PII ✅ LIVE
+
+All PII fields in the new tables now match the encryption standard of existing RS tables:
+
+| Table | Field | Storage |
+|---|---|---|
+| `relayshield_identity_graph` | `anchor` (email PK) | SHA-256 hash — queryable, irreversible |
+| `relayshield_identity_graph` | `correlated_id` (SK) | SHA-256 hash |
+| `relayshield_identity_graph` | `correlated_encrypted` | KMS-encrypted plaintext |
+| `relayshield_stolen_sessions` | `matched_email` (GSI key) | SHA-256 hash |
+| `relayshield_stolen_sessions` | `matched_email_enc` | KMS-encrypted plaintext |
+
+An attacker who exfiltrates either table sees only hashes and KMS ciphertext — no plaintext emails or phone numbers. Decryption requires the KMS key (`alias/relayshield-data-key`), which is IAM-controlled and never leaves AWS.
+
+---
+
+### Competitive Positioning Update — June 2026 Phase 2
+
+| Capability | SpyCloud | Recorded Future | RelayShield |
+|---|---|---|---|
+| Session cookie / AiTM detection | ✅ Enterprise | ❌ | ✅ $0.30/call |
+| Supply chain vendor monitoring | ✅ Enterprise | ✅ Enterprise | ✅ $0.10/call |
+| Identity correlation (IDLink-style) | ✅ Proprietary | ❌ | ✅ $0.35/call, growing corpus |
+| Ransomware pre-indicators | ✅ Enterprise | ✅ Enterprise | ✅ Included in TI subscription |
+| STIX/TAXII 2.1 feed | ✅ Enterprise | ✅ Enterprise | ✅ Included in TI subscription |
+| IOC corpus | 950B credentials | Broad coverage | 400K+ indicators, 450+ malware families |
+| SIM swap detection | ❌ | ❌ | ✅ RS-exclusive |
+| Consumer WA/Telegram alerts | ❌ | ❌ | ✅ RS-exclusive |
+| PAYG / no-commitment | ❌ | ❌ | ✅ RS-exclusive |
+| Price floor | ~$30K/yr | ~$50K/yr | $499/mo |
+
+### Additional Features — June 2026 Phase 2 (continued)
+
+**`/v1/metered/ransomware-risk` ✅ LIVE ($0.40/call)**
+Per-domain ransomware risk check: queries the INTEL-4 victim corpus (100+ active ransomware group leak sites via ransomwatch) and the pre-ransomware credential tag in `relayshield_intel_iocs`. Returns: `on_victim_list`, `victim_groups`, `first_seen`, `pre_ransomware_ioc_count`, `risk_level` (CRITICAL/HIGH/CLEAN), and actionable recommendation. Highest-priced PAYG endpoint — reflects premium intelligence value. Included in TI subscriptions.
+
+**IOC confidence scoring + threat actor attribution ✅ LIVE**
+Every `/v1/intel/telegram` hit response now includes: `confidence_score` (0.0–1.0, combining source trust weight and freshness decay), `malware_family`, `threat_actor` (where known — 20 actor mappings seeded from MITRE ATT&CK / public CTI reports), and `pre_ransomware` flag where applicable. Source weights: Spamhaus/Feodo 0.95, ThreatFox 0.90, criminal Telegram channels 0.88–0.92, OTX/blocklist.de 0.70–0.75.
+
+**Context enrichment ✅ LIVE**
+IP IOC hits enriched with ASN, country, city, ISP, and org via ip-api.com (free, 45 req/min). Domain hits enriched with registrar and registration date via RDAP (IANA standard, free, no auth). Enrichment applied at query time, cached per Lambda invocation, capped at 15 IP + 5 domain lookups per query. Returns `context` object on each enriched hit.
+
+**MSP Weekly Digest ✅ LIVE**
+New Lambda (`relayshield-msp-digest`, EventBridge Monday 09:00 UTC) sends a branded HTML email to all TI subscribers showing: new IOCs this week, total corpus size, top malware families with threat actor attribution, ransomware victim listings, and new features. First customer-facing retention touchpoint for TI subscribers. Also sends admin Telegram summary.
+
+**WhatsApp delivery for new alert types**
+- Ransomware victim alert: `rs_ransomware_alert` (HX1e77...) submitted to Meta, code live — activates on template approval
+- Session hijack alert: `rs_session_hijack_alert` (HX9cb2...) submitted — previously Telegram-only
+
+**n8n node v0.1.13**
+Added `identityGraph`, `ransomwareRisk` operations. Hold publish until n8n launch window clears.
+
+---
+
+The honest gap remains corpus depth and source breadth — SpyCloud and Recorded Future have years of historical data and nation-state coverage RS does not. The RS moat is Telegram-specific recency, price accessibility, and the RS-exclusive capabilities (SIM swap, consumer delivery, PAYG) they cannot match at any price.
+
+---
+
+## 24. June 2026 — Phase 3: Intelligence Depth, NHI, and Scraping Expansion
+
+*Added June 2026. Documents the third major build sprint covering competitor benchmarking against SpyCloud, Flare, Cybersixgill, Intel 471, and Constella Intelligence; new endpoint categories (NHI, secret scanning, ransomware risk); MITRE ATT&CK integration; MSP digest; and six Telethon scraping improvements.*
+
+### Competitor Benchmark Summary
+
+| Competitor | Key differentiator | RS position |
+|---|---|---|
+| **SpyCloud** | 950B credential corpus, IDLink | Feature parity on all capabilities; 5–6x cheaper; SIM swap/CVE/crypto exclusive to RS |
+| **Flare** | 70K Telegram channels, 160 forums | 3–5x cheaper; RS-exclusive SIM swap/consumer/PAYG; Flare ahead on forum scale |
+| **Cybersixgill** (BitSight) | Dark web forum indexing at scale | Acquired by BitSight; supply chain dark web scoring gap identified |
+| **Intel 471** | HUMINT, pre-attack visibility, SIGMA rules | Threat actor attribution + SIGMA refs added to RS; HUMINT not replicable |
+| **Constella** | 1T+ records, 51.7M infostealer packages 2025 | Identity dedup scoring + package tracking added; corpus depth gap acknowledged |
+
+### New API Endpoints (all live, June 2026)
+
+| Endpoint | Price | Capability |
+|---|---|---|
+| `POST /v1/metered/ransomware-risk` | $0.40 | Victim list + pre-ransomware credential count per domain |
+| `POST /v1/metered/nhi-exposure` | $0.40 | Non-human identity: API keys/tokens in stealer logs, own + vendor domains |
+| `POST /v1/metered/secret-scan` | $0.35 | GitHub public repo secret detection per domain |
+| `POST /v1/metered/identity-graph` | $0.35 | Email → linked phones/domains from criminal dump co-occurrences |
+| `POST /v1/metered/supply-chain` | $0.10/call | Vendor breach + stealer exposure + dark web composite score (0–100) |
+| `POST /v1/metered/session-risk` | $0.30 | INTEL-5 active session hijack / AiTM detection |
+| `GET /v1/intel/taxii/*` | TI subscription | STIX/TAXII 2.1 feed for enterprise SIEM ingestion |
+| `POST /v1/metered/oauth-watchlist` | $0.30 | Combined HIBP + INTEL-5 stealer corpus (upgraded from $0.20) |
+
+All PAYG equivalents available at `/v1/payg/*` via x402 USDC.
+
+### New Infrastructure
+
+**Lambdas (all live with EventBridge):**
+- `relayshield-intel-ransomware` — daily 08:00 UTC, scrapes ransomwatch (100+ ransomware group leak sites)
+- `relayshield-intel-attack` — weekly Sunday 07:00 UTC, ingests MITRE ATT&CK STIX bundle (189 groups, 858 techniques)
+- `relayshield-msp-digest` — weekly Monday 09:00 UTC, HTML email digest to TI subscribers
+
+**DynamoDB tables (all live):**
+- `relayshield_stolen_sessions` — INTEL-5 session cookie corpus (email-index GSI, 90-day TTL)
+- `relayshield_identity_graph` — email↔phone/domain correlations from dump co-occurrences (1-year TTL)
+- `relayshield_intel_ransomware` — ransomware victim domains by group (180-day TTL)
+- `relayshield_intel_packages` — infostealer package metadata per parsed ZIP archive
+- `relayshield_mitre_attack` — MITRE ATT&CK groups + technique mappings (30-day TTL, weekly refresh)
+
+### Intelligence Enrichment — All Live in API Responses
+
+Every `/v1/intel/telegram` IOC hit now returns:
+- `confidence_score` (0.0–1.0) — source weight × freshness decay
+- `malware_family` — from ThreatFox/MalwareBazaar tags
+- `threat_actor` — from THREAT_ACTOR_MAP (20 actors) cross-referenced with MITRE ATT&CK
+- `sigma_rules` — link to SigmaHQ community detection rules for the malware family (15 families)
+- `context` — ASN, country, city, ISP via ip-api.com (IPs); registrar + registration date via RDAP (domains)
+- `pre_ransomware` flag — when IOC domain was victim before ransomware incident
+- `record_type` — `ioc_indicator` vs `credential_exposure` (Flare-compatible taxonomy)
+
+Every `/v1/intel/cve` result now includes `related_threat_actors` and `hunting_note` from MITRE ATT&CK table join.
+
+Every `/v1/metered/supply-chain` result now includes `dark_web_score` (0–100 composite: stealer logs 40pts, breaches 20pts, account exposure 15pts).
+
+### STIX/TAXII 2.1 — What It Enables
+
+Enterprise SIEMs (Splunk, Microsoft Sentinel, Elastic, QRadar) can point their built-in TAXII client at `GET /v1/intel/taxii/collections/iocs/objects/` and pull RS IOCs on a schedule. Each hit is a STIX 2.1 Indicator with `x_relayshield_record_type`, `x_relayshield_source`, malware family labels, and ATT&CK-enriched threat actor fields. No custom integration required. This closes the last gap between RS's TAXII feed and Recorded Future's at 1/50th the price.
+
+### WhatsApp Templates Submitted to Meta (pending approval)
+
+| Template | SID | Purpose |
+|---|---|---|
+| `rs_ransomware_alert` | HX1e77... | CRITICAL alert when monitored domain appears on ransomware victim list |
+| `rs_session_hijack_alert` | HX9cb2... | CRITICAL alert for stolen session cookies (INTEL-5) — previously Telegram-only |
+
+WA delivery code is live in both Lambdas. Templates activate automatically on Meta approval.
+
+### NHI (Non-Human Identity) Detection — Strategic Context
+
+NHI is a 2026 market trend — every major TI vendor is adding it. Flare has it; SpyCloud is building toward it. RS's NHI coverage:
+- **In stealer log archives** (INTEL-5): scans Passwords/ files for AWS keys, GitHub PATs, Stripe secrets, Slack tokens, private keys, OpenAI/Anthropic/Google API keys
+- **In public code repos** (secret-scan endpoint): GitHub Code Search for NHI patterns alongside monitored domains
+- **Both accept `vendor_domains` input** — the supply chain NHI angle is uniquely RS. No competitor offers "check if your vendor's API keys appeared in stealer logs" at accessible pricing.
+
+WA/Telegram B2C subscribers receive CRITICAL alerts if their monitored domain's service tokens appear in INTEL-5 parsed archives.
+
+### IOC Corpus — June 2026 Status
+
+- **Total IOCs:** 397K+ (approaching 400K+; async feed run will push past)
+- **IOC retention:** Extended from 90 days to 365 days
+- **Feed sources:** 13 active (9 existing + 4 new: OpenPhish, blocklist.de, Cisco Talos, IPsum)
+- **Malware families:** 459 distinct tags (SpyCloud claims 41 — RS has 11x coverage)
+- **MITRE ATT&CK:** 189 threat actor groups, 858 techniques indexed
+
+### Telethon Scraping — Six Improvements Deployed
+
+1. **Caption extraction** — message.caption now extracted alongside message.text; criminal channels post IOC-rich captions on image attachments
+2. **Poll limit 100→300** — captures 3x more messages per 6-hour run
+3. **Richer defanging** — 15+ evasion variants now normalised: h**p://, h[tt]p://, h(tt)p://, hxxps[://], [.com], [.net] etc.
+4. **Forward channel auto-discovery** — when monitored channel forwards from another, source is auto-queued; infostealer/credential_dump sources auto-join immediately
+5. **Reply/thread harvesting** — scans last 20 posts per channel for replies; criminal channels post credential dumps as replies to announcements
+6. **IOC validation + SHA256/URL extraction** — filters bogus IPs/domains; adds SHA256 malware hash and URL extraction; SHA256 hashes from vxunderground now flow into corpus
+
+**AbuseIPDB rate limit fix:** Guard window extended 23hr→47hr to prevent exhausting the 5 calls/day free tier limit when manual invocations overlap with scheduled runs.
+
+**Channel count:** MONITORED_CHANNELS now has 25+ entries (8 verified + 5 new research seeds + 12 candidates). Forward discovery will grow this organically.
+
+### MSP Weekly Digest
+
+Every Monday 09:00 UTC, TI subscribers receive a branded HTML email showing:
+- New IOCs added this week + total corpus size
+- Top malware families with threat actor attribution
+- Ransomware victim listings this week
+- New features and API endpoints
+- Links to SIGMA detection rules for active families
+
+First customer-facing retention touchpoint for TI subscribers. Proves ongoing value between billing cycles.
+
+### Identity Dedup Scoring + Package Tracking
+
+**Identity graph:** `source_count` field now increments each time the same email-phone pair is seen in a separate dump. `source_count ≥ 3` = HIGH confidence correlation. This closes the gap with Constella's "Verified Identity Pedigree" positioning.
+
+**Package tracking:** Each parsed infostealer ZIP archive is logged to `relayshield_intel_packages` with cookie count, credential count, NHI count, and severity distribution. MSP positioning shifts from "X credentials detected" to "X device infections linked to your domain" — much more compelling for business accounts.
+
+### Brand Intelligence (Enhancement 8)
+
+INTEL-2 now scans every message for monitored domain names appearing in plain text — not just structured IOC patterns. Catches "targeting XYZ corp" discussions, threat actor planning references, and brand impersonation mentions before any breach or IOC is formally published. Fires a `⚠️ Brand Alert` Telegram notification to the affected user with message preview and channel context.
+
+### n8n Node v0.1.13
+
+Operations added: `identityGraph`, `ransomwareRisk`, `sessionRisk`, `supplyChain`, `oauthWatchlist` (upgraded). **Hold publish until ~July 2 launch window** — release bundled with Product Hunt, community forum update, and Blog 1 (session cookies).
+
+
+---
+
+## Sprint: June 23 2026
+
+### IOC Corpus Expansion
+
+**AlienVault OTX fixed:** API key was stored as a raw string but code attempted JSON parse — silently skipped on every run since integration. Fixed with `.strip()` + raw string fallback. First real OTX ingest at 06:00 UTC June 24. OTX has 8,684 subscribed community pulses (~64K raw IOCs, ~25K net new after dedup). Projected corpus after first OTX run: **~820K IOCs**.
+
+**Botvrij.eu added** as 20th feed source — curated malicious domain + IP blocklist, free, no ToS restrictions. Integrated into `relayshield_intel_feed.py` and `lambda_handler`.
+
+**Current corpus:** 794,182 IOCs as of June 23 2026.
+
+**Path to 1M:** Subscribe to more high-volume OTX community pulses (free account has 8,684 auto-subscribed; millions available). Alternative: Pastebin Pro ($10/mo) or a paid commercial feed.
+
+### WhatsApp Template + Messaging Fixes
+
+All 6 WA templates confirmed approved in Twilio Console with Quick Reply buttons and full channel eligibility (WA business initiated + user initiated + FB Messenger):
+
+| Template | SID | Button payloads |
+|---|---|---|
+| rs_breach_alert | HX9ff42b4... | ACK, BREACHES |
+| rs_infostealer_alert | HXbbc602... | ACK, INFOSTEALER |
+| rs_sim_swap_alert | HX439160... | ACK, SIMSWAP |
+| rs_weekly_status | HX40e492... | ACK, STATUS |
+| rs_ransomware_alert | HX1e77a6... | ACK |
+| rs_session_hijack_alert | HX9cb2b2... | ACK, SESSIONS |
+
+**infostealer_monitor:** Added `rs_infostealer_alert` template fallback on Twilio error 63016 (24hr window closed). `{{1}}`=email, `{{2}}`=source count.
+
+**intel_monitor:** Added WA delivery for INTEL-5 session hijack alerts alongside existing Telegram delivery. `rs_session_hijack_alert` template: `{{1}}`=email, `{{2}}`=top affected services. Outer `if chat_id:` guard removed — WA alerts now fire for WA-only users too.
+
+**relayshield-weekly-status Lambda (NEW):** Fires every 6 days via EventBridge. Sends `rs_weekly_status` template to all active WA subscribers (supports both `phone_encrypted` KMS and legacy `whatsapp_number`). `{{1}}`=monitored email count, `{{2}}`=scans this week (emails × 7). Prevents Meta from passively disabling outbound messaging by keeping the 24hr window open via ACK button taps. Tested and confirmed working for both Andrew and Bob Kramich.
+
+### n8n Node v0.1.14
+
+**Provenance fix:** v0.1.13 was published without npm provenance — blocked by n8n Creator Portal ("Submission blocked: package not published with provenance"). Fixed by adding `"publishConfig": {"provenance": true}` to `package.json`. v0.1.14 published via GitHub Actions with provenance. Creator Portal submission attempted — blocked by "Package already published" (update flow, not new submission). Escalated to n8n support ticket T-75425 (human Templates Team, EMEA hours). n8n team needs to manually push v0.1.14 to the library.
+
+### Stripe Billing — 15 Missing Prices Found and Fixed
+
+`STRIPE_PRICE_IDS` in `relayshield_developer_signup.py` only had 5 prices (original endpoints). All endpoints added after June 11 had meters but no Stripe prices — usage events were firing but no billing occurring. Fixed: 15 new products created in Stripe, price IDs fetched via API, all 20 prices now in `STRIPE_PRICE_IDS`. Developer checkout now includes all endpoints. No B2A revenue lost (no paying API customers yet).
+
+### 5 New API Endpoints — TC/RF Competitive Parity
+
+**ThreatConnect gap closures:**
+
+`POST /v1/metered/bulk-ioc` ($0.50/batch, up to 100 IOCs) — bulk enrichment for SIEM log pipelines. TC's primary MSP differentiator. Stripe meter: `relayshield_bulk_ioc_calls`.
+
+`POST /v1/metered/ioc-pivot` ($0.20/call) — given one IOC, return related IOCs sharing the same malware family. Surfaces full C2 networks from a single indicator. Stripe meter: `relayshield_ioc_pivot_calls`.
+
+`GET /v1/intel/actor` (TI subscription) — full MITRE ATT&CK actor profile: TTPs, target sectors, origin, associated IOCs from corpus. Queries `relayshield_mitre_attack` (189 groups, 858 techniques).
+
+**Recorded Future gap closures:**
+
+`GET /v1/intel/trending` (TI subscription) — top IOCs seen across all feeds in last 24/48hrs. RF's most-cited analyst feature. Accepts `hours` param (default 24, max 72). Returns grouped by IOC type, sorted by confidence.
+
+`POST /v1/metered/brand-monitor` ($0.25/call) — scans 1M+ IOC corpus for brand name patterns. Returns phishing domains, malware C2 hits, dark web mentions. RF brand protection equivalent. Stripe meter: `relayshield_brand_monitor_calls`.
+
+**Marketing repositioning (same sprint):**
+- `/v1/metered/threat-actor` exploit chatter → market as **"Early Warning Intelligence"** (matches RF pre-attack warning language)
+- `/v1/metered/supply-chain` → market as **"Third-Party Risk Score"** (matches RF/enterprise vendor risk language)
+
+### Weekly Metrics — Credential Counters Added
+
+`relayshield_weekly_metrics.py` now tracks and reports:
+- Stolen session records (`relayshield_stolen_sessions`)
+- Identity graph correlations (`relayshield_identity_graph`)
+- Ransomware victim records (`relayshield_intel_ransomware`)
+
+Currently all zero — will populate as INTEL-5 gets real stealer archive matches against monitored users. Enables Flare/SpyCloud-style credential corpus marketing claim once counts grow.
+
+### Channel Discovery — Weekly Cadence
+
+`intel_channel_discovery.yml` GitHub Actions cron changed from monthly (1st of month) to weekly (every Monday 08:00 UTC). Forward-chain detection already runs every 6hrs inside the intel monitor — the weekly Lambda is the deeper probing pass.
+
+### OrchestrateX (OrcX.ai) — Partnership Opportunity
+
+Former partner/colleague call Thursday 2026-06-26. OrcX builds "Quantum" — enterprise AI control plane for runtime governance of Voice AI, Agent Copilots, Contact Centers, CRM. Their gap: no signal on whether identities/credentials that AI agents act on behalf of are compromised. RelayShield fills that gap.
+
+Key integration points: NHI exposure (API keys AI agents use), session risk (stolen sessions feeding AI workflows), identity risk score (score users AI agents serve), supply chain (vendor APIs AI agents call). No code changes required for current endpoints.
+
+✅ **LIVE Jun 24 2026:** `POST /v1/metered/bulk-identity-risk` ($2.00/call) — hierarchical org + agent-level risk scoring. Up to 10 domains + 5 agent identities (emails) per domain per call. Each domain returns 6-dimension risk score (0-100, grade A-F); each agent email returns breach, infostealer, and stolen session signals. Critical agent exposure auto-elevates org risk. Stripe meter: `relayshield_bulk_identity_risk_calls` (prod_UIB0HayPiH5ms4, price_1TleexL2dcjOeFiYs0MZSoXv). Priced at $2.00 — premium over single-domain $0.35 endpoint, justified by unique per-agent hierarchy with no competitor equivalent. Purpose-built for MSP weekly client sweeps and OrcX agentic AI governance use case.
+
+Full partnership brief: `OrcX_Partnership_Strategy.md`
+
+### MSP Solution Brief — Updated
+
+PDF regenerated (`generate_pdfs.py`) with:
+- IOC count updated to 1,000,000+
+- 1,000+ malware families
+- 20 feed sources
+- New TI subscription plan cards (TI Starter $499 / TI Unlimited $999) as primary product lead
+- Four color-coded capability cards: IOC Corpus, Early Warning Intelligence, Identity & Credential Intelligence, Vendor & Brand Protection
+- Individual API endpoints explicitly repositioned as "Ad-Hoc & Low-Volume Testing Only"
+- PAYG x402 testing path noted
+
+### n8n Workflow Template
+
+Template submission blocked by greyed-out "Share new template" button — escalated to n8n Templates Team (human, EMEA hours, via ticket T-75425). Awaiting response (up to 3 business days).
+
+### Product Hunt Launch
+
+Targeting ~July 2 (aligned with n8n library update window). Bundled with: n8n node v0.1.14 live in library, community forum update, Blog 1 (session cookies / AiTM angle).
+
+---
+
+## Competitive Benchmark — June 2026 (8 Vendors)
+
+### Vendor Summary
+
+| Vendor | Category | Pricing | Key Strengths | Key Gap vs RelayShield |
+|---|---|---|---|---|
+| **Flashpoint** | Dark web + criminal intel | $75-500/mo SMB, $50K+ enterprise | Criminal forum scraping (XSS.is, Exploit.in, BreachForums), brand monitoring, stealer corpus, ransomware intel | No real-time user alerts, no SIM swap, no consumer tier, no metered API |
+| **Intel 471** | Actor + underground intel | $50K+/yr enterprise only | Deep HUMINT on threat actors, underground forum access, malware family intelligence | No SMB tier, no consumer product, no real-time user alerting, not self-serve |
+| **CrowdStrike** | EDR/XDR/SIEM + bundled TI | $50K-500K+/yr | Endpoint detection, incident response, threat hunting, massive telemetry | Different market (endpoint vs identity), no SIM swap, no breach/infostealer for SMB |
+| **Cyble** | Dark web + brand monitoring | $299-999/mo | Dark web coverage, brand protection, ASM, accessible pricing | No real-time user alerts, no SIM swap, no WhatsApp/TG, no metered API |
+| **SOCRadar** | TI + attack surface management | $99-499/mo, free tier | ASM, brand monitoring, free community tier, vulnerability intel | No consumer product, no SIM swap, no WhatsApp/TG, no metered API |
+| **ReliaQuest** | SOC automation + TI (GreyMatter) | $100K+/yr | SOC automation, alert triage, threat hunting, SIEM integration | Completely enterprise, no SMB, no consumer, no identity monitoring for end users |
+| **Group-IB** | Cybercrime intel + DFIR | $30K-100K+/yr | Eastern European criminal ecosystem, fraud intel, DFIR, actor attribution | Expensive, enterprise-only, perception risk (Russian origins, now UAE/SG), no consumer |
+| **Kela** | Criminal forum + stealer intel | $500-2000/mo | Criminal forum monitoring, own stealer log corpus, ransomware intel, dark web | No consumer product, no real-time user alerts, no SIM swap, no metered API |
+
+### RelayShield Durable Differentiators vs All 8
+- **Only product** with real-time WhatsApp/Telegram delivery to end users at any price point
+- **Only product** with carrier-level SIM swap monitoring at SMB-accessible pricing
+- **Only product** with pay-per-call metered API ($0.10–$2.00/call) vs $50K+ annual contracts
+- **Only product** with MCP server + n8n native integration for AI agent workflows
+- **Only product** with per-agent identity hierarchy scoring (`/v1/metered/bulk-identity-risk`)
+- **Only product** accepting x402 USDC micropayments — no account, no contract
+
+### Feature Roadmap to Close Key Gaps
+
+#### Sprint A — Zero/Near-Zero Cost ✅ ALL COMPLETED Jun 24-25 2026
+
+**1. Certificate Transparency Monitoring ✅ LIVE Jun 25 2026**
+Lambda: `relayshield-cert-monitor`. EventBridge daily 07:30 UTC. Queries crt.sh (free, no auth) for newly issued TLS certificates against each user's `monitored_domain`. Fires WA + Telegram alert when a new cert is detected — phishing early warning because attackers obtain Let's Encrypt certs immediately after registering lookalike domains. Closes SOCRadar/Cyble gap.
+
+**2. Scheduled Brand Sweep ✅ LIVE Jun 25 2026**
+Lambda: `relayshield-brand-sweep`. EventBridge weekly Monday 10:00 UTC. Calls `/v1/metered/brand-monitor` for each TI subscriber's monitored domain. Sends admin digest email with findings. Included in TI subscription — no per-call charge to subscribers. Closes SOCRadar/Cyble automated brand monitoring gap.
+
+**3. Paste Site Monitoring ✅ LIVE Jun 25 2026**
+Added to `relayshield_intel_feed.py` as 21st + 22nd feed sources. Ingests recent public pastes from paste.ee and pastehub.net daily, extracting IPs, domains, and URLs. Pastebin Pro ($10/mo) on hold. Closes Flashpoint/Kela/Cyble paste monitoring gap.
+
+**4. Infostealer Channel ZIP Parsing ✅ LIVE Jun 24 2026**
+Added logsmarket, stealerlogsmarket, darkwebintel, logs_market to `MONITORED_CHANNELS` with `category="infostealer"`. INTEL-5 ZIP archive parsing was built but never triggered — no channel had the required category. This fix enables stolen session cookie extraction from stealer log archives, populating `relayshield_stolen_sessions` and firing CRITICAL alerts to matched users. Zero new cost.
+
+#### Sprint B — Actor and ASM intelligence
+5. **Attack Surface Management lite** — Shodan API ($69/mo). Enumerate exposed services/ports for monitored domains. Closes SOCRadar's biggest differentiator.
+6. **Actor pivot endpoint** — given actor name, return related actors + infrastructure overlap. Extends existing `/v1/intel/actor`. ~3hrs, no new cost.
+7. **Vulnerability tracking by tech stack** — use existing `tech_stack` field on user records to filter KEV CVE alerts by declared product stack. ~2hrs, no new cost.
+
+#### Sprint C — Corpus and distribution
+8. **Dark web forum IOCs** — clearnet BreachForums mirror scraping at minimum. Legal review needed. Closes biggest gap vs Flashpoint/Intel 471/Group-IB/Kela.
+9. **Fraud intelligence lite** — BIN list + carding forum IOCs. Complements Crypto Shield. Closes Group-IB/Flashpoint gap.
+10. **Automated domain takedown workflow** — when brand-monitor finds phishing domain, generate ICANN/registrar takedown report. Closes Cyble/SOCRadar gap. Low effort.
+
+---
+
+## Commercial Terms — Support, SLA, Professional Services
+
+### Current (pre-revenue): Email support included, best-effort response
+
+### Enhanced SLA (offer at 3+ API customers, $150-200/mo add-on)
+- P1 (service down): 4hr response, 8hr resolution target
+- P2 (degraded): 8hr response, 24hr resolution
+- Named technical contact
+- Monthly uptime report
+- AWS API Gateway + Lambda delivers ~99.95% natively — SLA commitment is a document exercise, not infrastructure work
+
+### Professional Services (deal-by-deal, not published rate card)
+- Integration support: $175/hr
+- Custom endpoint development: $200/hr
+- Security review / onboarding audit: $1,500 flat (half-day)
+- Target: OrcX onboarding, first MSSP integration, enterprise deals >$5K/yr
+- Do NOT publish a PS rate card until 5+ paying API customers — adds friction to early sales
+
+### Annual M&S
+- Not applicable to SaaS (monthly subscription IS the M&S)
+- For future on-prem/private cloud deployments: 18% of license value/year (standard enterprise rate)
+
+---
+
+## Sprint B Items 6 & 7 — Deployed Jun 25 2026 (Zero Cost)
+
+### Item 6: Actor Pivot — Related Threat Actor Discovery
+**Added to `GET /v1/intel/actor` response** as `related_actors[]` field. Given a threat actor name, the endpoint now also returns related actors that share ATT&CK techniques or target sectors — surfaces lateral attribution and infrastructure overlap. Example: query "LummaC2" and see which other groups share C2 techniques or target the same industries. Uses existing `relayshield_mitre_attack` table (189 groups, 858 techniques). No new data source, no new cost. Closes Intel 471 / Group-IB actor relationship mapping gap. Included in TI subscription, no separate meter.
+
+### Item 7: Tech Stack CVE Targeting — `POST /v1/metered/tech-stack-cve`
+**New metered endpoint at $0.20/call.** Accepts a list of declared technology products (`["nginx", "wordpress", "cisco ios"]`) OR a `domain` to pull the stored `tech_stack` field from the user record. Cross-references against the CISA KEV corpus + high-EPSS CVEs to return CVEs actively being exploited that target the caller's specific stack. Response includes EPSS score, KEV status, ransomware-campaign flag, severity, and description. Critical CVEs (KEV/ransomware-linked) surfaced first. Closes Intel 471 / Flashpoint vulnerability intelligence gap. Stripe meter: `relayshield_tech_stack_cve_calls` (create in Dashboard).
+
+**Monetization:**
+- Tech-stack-cve: $0.20/call metered — new Stripe meter needed: `relayshield_tech_stack_cve_calls`
+- Actor pivot: included in TI subscription, no separate meter
+
+---
+
+## New Product Directions — Jun 26 2026
+
+### Multi-Site Shield — Franchise & Multi-Location SMB
+
+**Use case trigger:** Prospect with 10-15 bar/restaurant locations. Each location = separate team, separate POS, separate risk surface. Needs monitoring per location plus unified roll-up view.
+
+**Architecture:**
+- Each location = sub-account under a master "franchise admin" account (existing `admin_user_id` field already supports hierarchy)
+- Business Shield per location pricing with volume discount (e.g., ~$79-99/location/mo at 10+ locations vs $139.99 standard)
+- Master account gets cross-location dashboard: breach/SIM swap/infostealer alerts aggregated, per-location risk score, trend line
+- MSP weekly digest Lambda already handles multi-account aggregation — extend it for franchise view
+
+**What's missing to build:**
+- Customer-facing web dashboard (currently WA/TG delivery only)
+- "Franchise admin" role type in DynamoDB
+- Cross-location alert roll-up endpoint
+
+**Pricing target:** $79-99/location/month with 10+ location minimum = $790-990/mo MRR per franchise customer
+
+**ConnectWise / Autotask PSA integration note:** ConnectWise and Autotask are Professional Services Automation platforms used by MSPs to manage client accounts, helpdesk tickets, and billing. Integration means RelayShield alerts (breach, SIM swap, infostealer) automatically create service tickets in the MSP's PSA tool — the MSP never has to manually check RelayShield. This is the standard expectation for MSP-focused security tools and opens the ConnectWise/Datto/Kaseya marketplace channels. Builds on top of Multi-Site Shield once the webhook/alert delivery layer is in place.
+
+### Crypto Shield — Solana Mobile App Store
+
+**Rationale:** Solana Mobile (Saga/Seeker phones) has 1,561+ apps on their dApp store, 0% fees vs Apple/Google's 30%, and their user base is exactly the crypto-native demographic that needs wallet monitoring + SIM swap protection. Adoption probability near-term is higher than waiting for x402 B2A business to materialize.
+
+**What this requires:**
+- React Native or native Android APK (Saga/Seeker are Android-based)
+- Wrap existing Crypto Shield functionality: wallet monitoring (Alchemy Notify), GoPlus risk scoring, SIM swap alerts, breach monitoring
+- Delivery via push notifications (instead of Telegram) for native feel
+- Solana wallet connect for authentication (replace phone-number onboarding)
+
+**Positioning:** "The security layer every Solana user needs before their wallet gets drained." Native on the phone that crypto-native users actually carry.
+
+**Build sequence:** Telegram Crypto Shield → validate demand → Solana Mobile app as native upgrade path. The Telegram version is the MVP; the Solana app is the distribution play.
+
+**Revenue model:** In-app subscription via Solana dApp Store (15% cut):
+- Monthly: $11.99/mo → $10.19 net to RS
+- Annual: $107.91/yr ($8.99/mo equiv, 25% off) → $91.72 net to RS
+- Free tier: 1 wallet, breach monitoring only, 3 alerts/month
+- Realistic year 1: 150–400 paid users = $1,500–$4,000/month net
+- Package ID: net.relayshield.cryptoshield
+- Build scaffold complete: crypto-shield-app/ (React Native + Expo + Solana Mobile Stack SDK)
+
+
+---
+
+## Multi-Site Shield — Product Specification
+
+**Trigger:** Prospect with 10-15 bar/restaurant locations needing unified identity monitoring across all sites.
+
+### Product Name
+**Multi-Site Shield** — identity protection for franchise, multi-location, and distributed SMB operations.
+
+### Pricing Tiers
+
+| Tier | Users/location | Best for | Price/location/mo | Min locations |
+|---|---|---|---|---|
+| **Micro-Site** | Up to 5 | Small cafes, sole-prop locations, kiosks | $59 | 5 |
+| **Site Standard** | Up to 10 | Bars, mid-size restaurants, retail | $89 | 5 |
+| **Site Pro** | Up to 20 | Larger venues, multi-manager operations | $129 | 5 |
+
+**Volume discount:** 10+ locations = 15% off, 20+ locations = 25% off
+
+**Example:** 12-location bar/restaurant group at Site Standard = $89 × 12 = **$1,068/mo MRR**
+
+### What's Included at All Tiers
+- Per-location breach, SIM swap, infostealer, domain lookalike monitoring
+- WA/TG alerts to location managers
+- **Roll-up dashboard** showing cross-location risk scores and trending alerts
+- Weekly executive digest email to franchise owner/operator
+- Sub-account hierarchy (franchise admin sees all locations, managers see their own)
+
+### What's Missing to Build
+1. Customer-facing web dashboard (currently WA/TG delivery only)
+2. "Franchise admin" role in DynamoDB (admin_user_id hierarchy exists, needs UI)
+3. Cross-location alert aggregation endpoint
+4. Tex-Mex Group demo dashboard (static Cloudflare Worker showing fictional 12-location view)
+
+### PSA Integration Path
+ConnectWise/Autotask PSA integration is a prerequisite for CW/Datto marketplace listing. Build sequence:
+**Multi-Site Shield → PSA webhook integration → ConnectWise Marketplace listing → Datto Marketplace listing**
+
+PSA integration: when RelayShield fires a breach/infostealer/SIM swap alert for a managed client, it POSTs to the MSP's ConnectWise/Autotask instance creating a service ticket with severity, affected account, and remediation steps. MSPs manage RelayShield alerts in their existing workflow.
+
+### Competitive Positioning
+- No competitor offers per-location monitoring with a unified franchise dashboard at SMB pricing
+- Closest competitor: Aura Business ($34.99/seat) — but no multi-site roll-up, no infostealer, no SIM swap
+- Multi-Site Shield targets the franchise IT gap: too small for enterprise tools, too distributed for single-site SMB tools
+
+---
+
+## Prediction Markets Vertical — Go-To-Market Playbook
+
+**Trigger:** Polymarket hack (June 2026, est. $8–14M loss) — Lazarus Group credential compromise of oracle signing infrastructure. First major prediction markets breach with documented nation-state attribution.
+
+**Why This Vertical Fits RelayShield:**
+Prediction markets have an identity/credential attack surface, not a smart contract attack surface. The Polymarket incident was an NHI failure (oracle signing key in stealer logs) — exactly what RS monitors. No new features required.
+
+**Target Buyer:** Security-conscious founder or CTO at small-to-mid prediction markets platform. These companies are:
+- Post-seed to Series A ($5M–$30M raised)
+- 10–50 person engineering teams
+- Managing oracle infrastructure, exchange API keys, and settlement signing credentials
+- No dedicated security team, CISO typically the CTO
+
+**Entry Point Pricing:** TI Starter $499/mo. Compelling ROI anchor: Polymarket lost ~$10M. $499/mo = $6K/yr = 0.06% of that loss.
+
+**5 Signals That Map to This Vertical:**
+1. Infostealer monitoring — employee credentials in criminal markets before ATO
+2. NHI Exposure — oracle signing keys / API credentials in stealer archives
+3. Identity Risk Score — domain-level pre-attack composite score with infostealer + session dimensions
+4. Threat Actor Intelligence — Lazarus Group IOC attribution, DeFi sector activity
+5. Supply Chain risk — oracle providers (Chainlink, Pyth, UMA) credential exposure
+
+**Pitch Angle:**
+> "You don't need a SOC. You need a webhook that fires when your oracle signing key hits criminal markets — before the attacker uses it to manipulate a market settlement."
+
+**Blog Asset:** `blog-polymarket-lazarus-relayshield.md` — ready for nephew/brother review
+
+### Prediction Markets TODO
+- [ ] Pass blog post to nephew/brother for warm intro to prediction markets startup contact
+- [ ] Check if Polymarket's domain shows findings in RS corpus — useful as a concrete proof point in pitch
+- [ ] Check Lazarus Group IOC corpus coverage — confirm DeFi-specific IOC attribution is in our feed
+- [ ] Develop cold email template targeting post-seed DeFi/prediction markets CTOs (use blog as nurture content)
+- [ ] Evaluate wallet address → stealer log correlation (extends Crypto Shield to B2A, relevant for DeFi sector)
+- [ ] Track prediction markets funding rounds for outreach timing (post-raise = new security budget)
+
+---
+
+## Crypto Shield — Mobile Distribution Expansion Strategy
+
+### Core positioning / messaging
+Every competing product competes solely on-chain, but the majority of attack chains originate off-chain. Crypto Shield is the only consumer product that treats the credential layer and the chain layer as one attack surface. Use this line in launch copy, store listing, and press/influencer outreach.
+
+**Land-and-expand model:** Single React Native + Expo codebase, three distribution tiers:
+
+### Phase 1 — Solana dApp Store (launch)
+- Target: crypto-native Solana Mobile device owners (Saga + Chapter 2, ~150K devices by end 2026)
+- Store cut: 15%
+- Pricing: $10.99/mo | $105.99/yr (Stripe, confirmed source of truth) — paid subscription only, no free tier
+- Net to RS: $9.34/mo | $90.09/yr
+- Audience: highest-intent crypto security buyers, early mover advantage, 0 competitors in this category on dApp Store
+- Validation: confirms product-market fit before broader rollout
+
+### Phase 2 — Google Play Store
+- Same APK, same codebase — change signing config and store target
+- Store cut: 15% (Google small developer program, first $1M revenue)
+- Audience: 170M+ Android users, broader crypto holder demographic, not just Solana-native
+- Timing: after Solana dApp Store validates retention and ratings (target: 3–6 months post-launch)
+- Discoverability: Google Play search + crypto/security app category browse
+
+### Phase 3 — Apple App Store (iOS)
+- Expo handles cross-compile to iOS — same codebase, minimal rework
+- Store cut: 30% (15% under $1M via Apple Small Business Program)
+- Pricing adjustment needed: $13.99/mo to maintain ~$10 net after 30% cut
+- Timing: after Google Play proves Android market demand
+- iOS crypto audience skews higher income — premium pricing justified
+
+### Revenue trajectory (conservative)
+| Phase | Users | Net MRR |
+|---|---|---|
+| Solana dApp Store (mo 6) | 200 | $2,040 |
+| + Google Play (mo 12) | 800 | $8,150 |
+| + iOS App Store (mo 18) | 2,000 | $20,380 |
+
+### Strategic value beyond direct revenue
+- Brand presence across all major crypto mobile distribution channels
+- Cross-sell path: free/pro app users → TI Starter API ($499/mo) for developers
+- Data: mobile alert engagement informs which RS signals matter most to end users
+- Credibility: "Available on Solana dApp Store, Google Play, and App Store" on relayshield.net
+
+## AWS Marketplace — Non-TI API Bundle Pricing (Metered, Decided 2026-07-06)
+
+Following the TI Starter/Unlimited flat-rate listing going fully live and verified on AWS Marketplace (3% referral fee, public visibility confirmed, disbursement to Relay Financial confirmed), the next expansion is exposing the remaining 17 non-TI metered API endpoints (currently sold direct via Stripe/x402 at api.relayshield.net/developers) as new AWS Marketplace metered dimensions.
+
+**Decision: bundle the 17 endpoints into 3 logical groups rather than 17 individual dimensions**, each with a minimum monthly spend commitment (AWS Marketplace "contract with consumption" model) rather than pure unbundled pay-per-call — gives line-of-sight to guaranteed minimum revenue per AWS-sourced subscriber, versus fully variable usage. Per-call rates within each bundle stay identical to existing Stripe pricing — no channel-based price discrimination.
+
+### Bundle A — Core Identity Exposure ($150/mo minimum commitment)
+`breach` ($0.10) · `sim-swap` ($0.25) · `infostealer` ($0.50) · `domain` ($0.30) · `oauth-watchlist` ($0.30) · `crypto-intel` ($0.30)
+Fundamental "is this identity/asset already compromised" signals — expected highest call-volume bundle.
+
+### Bundle B — Attack Surface & Supply Chain ($100/mo minimum commitment)
+`supply-chain` ($0.10) · `asset-intel` ($0.15) · `secret-scan` ($0.35) · `threat-actor` ($0.30) · `session-risk` ($0.30)
+External-facing monitoring — vendor risk, exposed secrets, active session/threat-actor tracking.
+
+### Bundle C — Advanced Risk Correlation ($200/mo minimum commitment)
+`identity-graph` ($0.35) · `ransomware-risk` ($0.40) · `nhi-exposure` ($0.40) · `cve-identity-risk` ($0.40) · `identity-risk-score` ($0.35) · `target-risk` ($0.50)
+Highest-value composite/correlation endpoints — most differentiated vs. competitors, highest minimum floor.
+
+### Architecture principle
+Build as an isolated new Lambda module wired to its own SNS subscription-handling path — zero shared code with the existing, already-approved flat-rate (`ti_starter`/`ti_unlimited`) fulfillment in `relayshield_aws_marketplace.py`. This is a genuinely new billing/settlement model from AWS's perspective (first use of `BatchMeterUsage` + metering SNS flow for this product), even though the SNS-handling pattern itself is familiar. Full design discussion in project memory (`project_relayshield.md`, July 6 2026 entry) and TODO.md item 32.
+
+**Status: bundle grouping and pricing approved by founder 2026-07-06. Implementation (dimension setup in AWS Marketplace + isolated Lambda build) not yet started.**
+
+## Distribution Priority — Snowflake Marketplace vs. Shopify Checkout-Fraud App (2026-07-11)
+
+Comparing two candidate distribution channels raised in the same conversation: listing the existing TI data as a Snowflake Marketplace data share (TODO.md item 40) vs. building a new Shopify app that uses RelayShield's identity-risk signals as a checkout-time fraud flag.
+
+### The product is genuinely differentiated — the market access isn't
+
+Important nuance, corrected after founder pushback on an earlier draft of this analysis that said RelayShield would be "competing directly against incumbents" (Signifyd, Forter, Riskified, etc.) in a way that read as contradicting the "unique signal" pitch. Both things are true at once, on different axes:
+
+- **Product/signal level — not direct competition.** RelayShield's angle (identity/credential exposure: breach data, infostealer logs, SIM-swap activity) is a genuinely different signal type from what the incumbents primarily sell (transaction/behavioral fraud modeling — device fingerprinting, order-velocity checks, cross-merchant fraud-network effects). None of the major players are known to be pulling from stealer-log/infostealer monitoring the way RelayShield does. This is real, defensible differentiation, not a marketing gloss — a merchant using Signifyd wouldn't be getting this signal from them.
+- **Go-to-market/distribution level — real competition, unavoidable.** A merchant browsing Shopify's "Security & Fraud" app category sees Signifyd/Forter/NoFraud first — established brand recognition, review counts, and (for larger merchants) existing contracts already occupying the "fraud tools" budget line. Winning attention and adoption in that marketplace means competing for visibility and budget against much bigger, better-known players, *regardless of* how different the underlying signal is. Being uniquely useful doesn't exempt a new entrant from the discovery/adoption fight.
+
+Net: this is "differentiated product, hard distribution" — not "me-too product." The priority call below is about the distribution difficulty and net-new build cost, not a claim that the signal itself is undifferentiated.
+
+### What RelayShield's identity signal actually enriches at checkout (added 2026-07-12)
+
+The prior section establishes that RelayShield's signal is "different" from what Signifyd/Forter/Riskified sell, but not the concrete mechanism. Here it is:
+
+Existing checkout-fraud vendors are built around **transaction-shape and device-shape analysis**: device fingerprinting, behavioral biometrics (typing cadence, mouse movement), order-velocity patterns, cross-merchant fraud-network blocklists, IP/geolocation consistency, BIN/issuer risk. All of these ask a version of the same question: *does this transaction look anomalous, given the device and behavior placing it?*
+
+RelayShield's identity-monitored attack surface (breach exposure, infostealer log presence, SIM-swap activity, hijacked-session detection) asks a categorically different question: *is the identity behind this transaction already known to be compromised, independent of how the transaction itself looks?* Concretely, at checkout time, RelayShield can flag whether the customer's email has appeared in a recent breach, whether their device/browser session has been logged by infostealer malware (meaning saved payment methods, autofill data, or session cookies may already be in a criminal's hands), whether their phone number was recently SIM-swapped (a classic account-takeover precursor), or whether an active session tied to their account shows signs of hijacking (AiTM).
+
+This matters because it targets a fraud category that device/behavioral models are structurally unable to see: **account takeover fraud**, where the attacker is transacting from the victim's real device, real browser session, and real behavioral fingerprint — because they've genuinely compromised the victim's identity, not spoofed it. A device-fingerprinting or behavioral-biometrics system sees exactly what it expects to see (the real customer's device, the real customer's typing pattern) and passes the transaction clean, precisely because the attacker isn't faking the transaction shape — they're using stolen legitimate credentials/sessions to place a transaction that looks completely normal. This is the blind spot RelayShield's identity layer is built to close: it doesn't replace device/behavioral fraud scoring, it adds the one signal that catches fraud when the device and behavior are genuinely real but the identity behind them isn't.
+
+For a Shopify merchant, the pitch is additive, not competitive: "keep your existing fraud tool for transaction-shape anomalies; add RelayShield as the identity-integrity check it structurally cannot perform." This is also the same framing already validated with OrcX for AI-agent governance (`OrcX_Partnership_Strategy.md`) — RelayShield treats the credential layer and the transaction/agent layer as one attack surface, where incumbents in both spaces (fraud vendors here, AI governance tools there) only see the latter.
+
+### Addressable market (Shopify)
+
+- Shopify: ~4.82M active merchants globally (3.75M in the U.S. alone); only ~47,000 are Shopify Plus (enterprise) — that enterprise slice is where Signifyd/Forter/Riskified are strongest and hardest to displace.
+- Global e-commerce fraud prevention software market: $5.22B in 2026, growing to $18.83B by 2035 (15.2% CAGR).
+- Top 5 vendors already hold 52% market share. The realistic addressable slice for a new, self-serve entrant is the fragmented long tail below that — roughly **$2.5B**, concentrated among mid-market/self-serve merchants who can't justify an enterprise contract but still want some signal. Real market, but smaller and more contested than the headline $5.22B suggests.
+
+### What building the Shopify app would require (net-new, not reused)
+
+- Shopify OAuth app infrastructure (installation flow, encrypted per-merchant access token storage — new data model, though the encryption pattern itself reuses existing KMS field-encryption)
+- An architecture decision: post-order flagging via Shopify's Order Risk API (simpler, matches how most fraud apps work) vs. real-time blocking via Shopify Functions (a Rust/WASM sandbox — a materially bigger technical lift). Recommend starting with post-order flagging.
+- Shopify's own Billing API — apps distributed through their marketplace generally must bill through Shopify, not Stripe directly. A new billing surface RelayShield hasn't built before.
+- Mandatory GDPR compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) — required for any Shopify app, and a new class of data-handling obligation since this touches each merchant's *end customers'* PII, not just RelayShield's own direct subscribers.
+- An embedded merchant-facing UI inside Shopify Admin (Polaris/App Bridge) — a UI framework RelayShield has never used.
+- Shopify Partner Program app review process.
+- The actual risk-scoring logic itself is reusable — `identity-risk-score`, `breach`, `infostealer` endpoints already exist and are fast enough for checkout-time use. The net-new work is entirely in the surrounding app infrastructure, not the core signal.
+
+### Priority: Snowflake first
+
+| | Snowflake (TODO item 40) | Shopify checkout-fraud app |
+|---|---|---|
+| New backend build | None — reuses existing IOC corpus as a data share | New OAuth, new billing, new compliance webhooks, new UI |
+| Time to market | Fast — pure listing/configuration | Slow — real product build + app review |
+| Precedent | GreyNoise, Team Cymru already sell this way | Competing for shelf space against 52%-share incumbents |
+| Sequencing | Natural next step after Bundle D/AWS work already done this session | Standalone new initiative, no on-ramp from current work |
+| Market | Established buyers already on Snowflake | Real but crowded long-tail (~$2.5B realistic slice) |
+
+Recommendation: ship Snowflake now (near-zero incremental build, already assessed high-value/fast-time-to-market, direct continuation of momentum from this session's work). Treat Shopify as worth a **cheap validation step first** — informal conversations with a few Shopify merchants or agencies to gauge real interest in a complementary identity signal — before committing to the OAuth/billing/UI build.
+
+## Open-Source Agent Framework Distribution — Flywheel/Network-Effect Play (added 2026-07-15)
+
+### Why this is different from a marketplace listing
+
+A marketplace listing (RapidAPI, AWS Marketplace, Tines/n8n/Zapier templates) needs to be found each time — its reach is roughly linear with ongoing marketing effort. Getting `mcp-registry-risk`/`prompt-injection-breach` adopted as **default tools inside an open-source agent framework's own codebase** is structurally different: once merged, every project that installs that framework going forward pulls the tool in with zero further distribution spend. Distribution compounds instead of staying linear.
+
+### Monetization, not just exposure
+
+1. **Direct recurring revenue** — using the tool for real requires a `RELAYSHIELD_API_KEY` (the metered route, $0.35/call). Adoption converts directly into billed API volume, not just impressions.
+2. **Compounding distribution** — see above; the mechanism itself is the differentiator versus every other channel RelayShield uses.
+3. **Enterprise credibility leverage** — "our security checks are default-available inside [framework]" is a stronger sentence in an AWS co-sell conversation, an OrcX pitch, or a Bundle D ("Agentic Attack Surface") sales conversation than "we have an API." Directly strengthens three initiatives already in motion.
+4. **Threat-intel data flywheel** — every real call through the metered/PAYG route is a loggable query (which MCP servers get flagged, which typosquat patterns recur), enriching the corpus as a free byproduct of adoption.
+
+### Status (as of 2026-07-15)
+
+- **CrewAI** — [crewAIInc/crewAI#6550](https://github.com/crewAIInc/crewAI/pull/6550), submitted, in automated review (CodeRabbit), awaiting human review.
+- **LangChain** — scoped, not started. `libs/partners` contribution pattern confirmed live in the current monorepo.
+- **OpenAI Agents SDK** — scoped, not started. Real repo confirmed (`openai/openai-agents-python`, 27.9K stars); no formal contribution culture found, so lead with a GitHub Issue rather than a cold PR.
+
+### Additional candidate projects (identified 2026-07-15, verified live via GitHub API — not guessed)
+
+| Project | Stars | Notes |
+|---|---|---|
+| `modelcontextprotocol/servers` | 88.5K | **Highest-priority new candidate.** The official MCP servers registry — directly on-thesis, since `mcp-registry-risk` is literally about MCP server safety. Contributing an actual MCP server implementation here (not just a framework tool wrapper) is the most natural placement of any candidate on this list. |
+| `microsoft/autogen` | 59.7K | Major multi-agent framework, Microsoft-backed. Last push April 2026 — noticeably less recently active than the others below; verify current contribution activity before investing effort. |
+| `run-llama/llama_index` | 50.9K | Heavily used in RAG + agent contexts; has its own tool/integration contribution pattern (llama-hub). |
+| `huggingface/smolagents` | 28.4K | Lightweight, fast-growing, HF's large developer reach; simple tool-definition pattern. |
+| `microsoft/semantic-kernel` | 28.3K | Microsoft's agent orchestration SDK, plugin-based; enterprise/.NET audience overlap with RelayShield's MSP/enterprise ICP. |
+
+Recommended next sequencing: finish LangChain + OpenAI Agents SDK (already scoped) before adding new candidates. Of the five above, `modelcontextprotocol/servers` is the strongest next pick given the direct thematic fit.

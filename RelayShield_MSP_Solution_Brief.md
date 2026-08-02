@@ -39,7 +39,7 @@ RelayShield monitors five attack surfaces simultaneously and correlates events a
 | Signal | What We Detect | When We Fire |
 |---|---|---|
 | **Credential breach** | Employee email in a breach database | Within hours of indexing — before attackers begin credential stuffing |
-| **Infostealer log exposure** | Device credentials in criminal Telegram markets | 24–72 hours ahead of HIBP — before attackers replay stolen sessions |
+| **Infostealer log exposure** | Device credentials in criminal Telegram markets | 24–72 hours ahead of public breach databases — before attackers replay stolen sessions |
 | **SIM swap** | Phone number being hijacked at carrier level | Real-time carrier query — before 2FA bypass completes |
 | **Domain lookalike** | Typosquat domains registered to impersonate your client | Within hours of registration — before phishing campaigns launch |
 | **OAuth supply chain** | Rogue app granted persistent access to Microsoft 365 or Google Workspace | On detection — with one-tap revocation instructions |
@@ -78,6 +78,24 @@ Stolen VPN and remote access credentials are the primary entry point for ransomw
 RelayShield monitors criminal Telegram channels and infostealer log markets in near real-time. When an employee's credentials appear in a log, the alert fires within hours — with a four-step device remediation protocol — before session replay, password resets on financial accounts, or ransomware deployment begins.
 
 **No other MSP-accessible product monitors the Telegram channels where these logs are sold.**
+
+### LLMjacking & Shadow AI — The Credential Class Your Stack Cannot See
+
+The same infostealer that harvests browser passwords also harvests AI provider API keys. That changes the economics of a single leaked credential.
+
+A stolen password gives an attacker access. A stolen LLM API key gives them **your client's credit card with no spending limit**. Published incidents range from tens of thousands of dollars per day to a **$500K single-month bill** from one unthrottled key. The underground price for a stolen LLM key is roughly **$30**. That asymmetry — $30 to buy, six figures to absorb — is why this is the fastest-moving credential category in criminal markets.
+
+The exposure is larger than most MSPs realise, because it is not confined to the AI tools a client has approved:
+
+- **Shadow AI.** Developers sign up for DeepSeek, Moonshot Kimi and Alibaba Qwen directly, on personal accounts, without going through procurement. None of it appears in an MSP's SaaS inventory.
+- **One key, many models.** A single leaked Hugging Face token bills against DeepSeek, Qwen, Kimi and NVIDIA models through Inference Providers — the attacker never needs a vendor key at all.
+- **Cloud keys are now AI keys.** Amazon Bedrock issues dedicated long-lived API keys used as bearer tokens. They are not IAM credentials, and tooling built to spot `AKIA` keys does not see them.
+
+**RelayShield detects exposed API keys across 14 LLM and AI providers** in criminal stealer log archives — OpenAI, Anthropic Claude, Google Gemini, xAI Grok, Amazon Bedrock, Groq, Replicate, LangSmith, Hugging Face, NVIDIA NIM, DeepSeek, Moonshot Kimi, Alibaba Qwen, and Alibaba Cloud.
+
+**Coverage no other tooling provides.** Gitleaks — the most widely deployed open-source secret scanner — ships **zero** detection rules for DeepSeek, Moonshot, Qwen or NVIDIA. An MSP relying on standard secret scanning is blind to every one of them. RelayShield is not scanning your client's repositories for keys they might leak; it is scanning the criminal channels where keys **already leaked** are being sold.
+
+**The MSP conversation this opens:** *"Do you know which AI services your developers are using, and whether any of those keys are already for sale?"* Most clients cannot answer either half. It is a fast, concrete way into an AI-governance discussion that does not require the client to have an AI strategy first.
 
 ### SIM Swap — The Only Cost-Effective Carrier Surface Monitor
 
@@ -134,6 +152,7 @@ For MSP-managed business accounts, alerts go simultaneously to the affected empl
 | **Business Shield** | Growing SMBs up to 10 seats — all Basic features + per-seat SIM monitoring + priority alerts | $139.99/account | 25% |
 | **Business Shield Pro** | Established SMBs up to 25 seats — full stack + SIM lock onboarding + compliance reporting | $299.99/account | 25% |
 | **Crypto Shield** | Crypto-native businesses, DeFi operators, Web3 companies | $19.99/seat | 20% |
+| **Multi-Site Shield** | Multi-location businesses — franchises, retail chains, distributed teams with shared/service account exposure | From $45/location | Reseller pricing available |
 
 **On Crypto Shield for MSPs:** If your client base includes crypto-native businesses — exchanges, DeFi operators, Web3 agencies, or high-net-worth individuals with significant digital asset holdings — Crypto Shield adds wallet monitoring, counterparty risk screening, and address poisoning detection alongside the full identity stack. Relevant for MSPs serving financial services or technology verticals.
 
@@ -145,40 +164,60 @@ For MSP-managed business accounts, alerts go simultaneously to the affected empl
 
 RelayShield exposes its full monitoring capability via REST API — enabling MSPs and MSSPs to embed RelayShield intelligence directly into their own tooling, SIEM integrations, and SOAR playbooks.
 
-**Transactional API endpoints (PAYG and subscription):**
-- `POST /v1/breach` — credential breach lookup
-- `POST /v1/sim-swap` — real-time carrier SIM swap check
-- `POST /v1/domain` — domain lookalike scan
-- `POST /v1/infostealer` — infostealer log exposure check
-- `POST /v1/oauth-watchlist` — OAuth supply chain exposure check (31 watched apps)
-- `POST /v1/crypto-intel` — wallet address risk, token honeypot/tax flags, counterparty screening (GoPlus composite)
-- `GET /v1/intel/telegram` — IOC lookup against live threat intelligence database (200,000+ indicators across 9 sources; domains, IPs, URLs, hashes)
+**Transactional API endpoints (PAYG and subscription) — 24 endpoints live:**
+- `POST /v1/metered/breach` — credential breach lookup ($0.10)
+- `POST /v1/metered/sim-swap` — real-time carrier SIM swap check ($0.25)
+- `POST /v1/metered/domain` — domain lookalike scan ($0.30)
+- `POST /v1/metered/infostealer` — infostealer log exposure check ($0.50)
+- `POST /v1/metered/oauth-watchlist` — OAuth supply chain exposure check ($0.30)
+- `POST /v1/metered/supply-chain` — vendor breach + stealer composite risk score, up to 10 domains ($0.10)
+- `POST /v1/metered/session-risk` — active session hijack / AiTM detection ($0.30)
+- `POST /v1/metered/identity-graph` — email → phone/domain correlation from criminal dumps ($0.35)
+- `POST /v1/metered/ransomware-risk` — ransomware victim list check + pre-ransomware credentials ($0.40)
+- `POST /v1/metered/nhi-exposure` — API key/token/machine credential exposure in stealer logs ($0.40)
+- `POST /v1/metered/secret-scan` — GitHub public repo secret detection ($0.35)
+- `POST /v1/metered/target-risk` — 6-signal correlation risk score ($0.50)
+- `POST /v1/metered/crypto-intel` — wallet address risk, token honeypot/tax flags ($0.30)
+- `POST /v1/metered/asset-intel` — **NEW** asset watchlist + continuous IOC monitoring, push alerts on match ($0.15)
+- `POST /v1/metered/threat-actor` — **Early Warning Intelligence**: surfaces CVE PoC discussion in criminal channels **before NVD publication** (24–72hr warning window) + full MITRE ATT&CK threat actor/campaign lookup ($0.30)
+- `POST /v1/metered/tech-stack-cve` — **Agent Framework Exploit Monitoring**: cross-references a client's declared tech stack against CISA KEV + high-EPSS CVEs ($0.20)
+- `POST /v1/metered/cve-identity-risk` — CVE × identity signal composite risk: EPSS + KEV + infostealer corpus + ransomware victim + exploit chatter — the only API closing the loop from vulnerability to live organizational identity exposure ($0.40)
+- `POST /v1/metered/identity-risk-score` — domain security credit score (0–100, grade A–F) across 6 dimensions: breach, infostealer density, IOC presence, ransomware victim, active session exposure, CVE exposure. Embeds directly in client QBRs and cyber insurance renewals ($0.35)
+- `POST /v1/metered/bulk-identity-risk` — **NEW** hierarchical org + agent-level risk scoring: up to 10 client domains + up to 5 individual agent identities (emails) per domain in a single call. Returns domain risk score (6 dimensions) plus per-agent breach, infostealer, and active session signals. Purpose-built for AI governance workflows and MSP weekly client sweeps. No competitor offers per-agent identity risk within an organizational hierarchy ($2.00/call)
+- `POST /v1/metered/bulk-ioc` — **NEW** bulk IOC enrichment: submit up to 100 IPs, domains, or hashes in a single call — built for SIEM log enrichment pipelines ($0.50/batch)
+- `POST /v1/metered/ioc-pivot` — **NEW** lateral infrastructure discovery: given one IOC, return all related IOCs sharing the same malware family — surfaces full C2 networks from a single indicator ($0.20)
+- `POST /v1/metered/brand-monitor` — **NEW** brand protection: scan 2M+ IOC corpus for brand name patterns — phishing domains, malware C2 infrastructure, and dark web mentions ($0.25)
+- `POST /v1/metered/mcp-registry-risk` — **NEW** MCP server / agent-tool registry reputation check: typosquat detection, registration-age scoring against RelayShield's IOC corpus ($0.35)
+- `POST /v1/metered/prompt-injection-breach` — **NEW** detects breach exposure sourced from prompt-injection attacks against AI agents, not traditional phishing/malware ($0.35)
+- `GET /v1/intel/telegram` — IOC lookup against live threat intelligence database (2M+ indicators; domains, IPs, URLs, hashes)
 - `GET /v1/intel/cve` — CISA KEV lookup by CVE ID or keyword, ransomware-campaign flag included
+- `GET /v1/intel/actor` — full MITRE ATT&CK threat actor profile: TTPs, target sectors, associated IOCs from corpus (TI subscription)
+- `GET /v1/intel/trending` — top IOCs seen across all feeds in the last 24/48 hours — what's actively spreading now (TI subscription)
 
 **Threat Intelligence API — live:**
-MSSPs operating at scale can query RelayShield's live IOC database directly via `GET /v1/intel/telegram`. The feed aggregates **200,000+ indicators** from two source categories — **8 verified criminal Telegram channels** and **11 authoritative threat intelligence feeds** — updated continuously:
+MSSPs operating at scale can query RelayShield's live IOC database directly via `GET /v1/intel/telegram`. The feed aggregates **4.4M+ indicators** from **20+ authoritative threat intelligence feeds** and **83+ criminal Telegram channels** — updated continuously. RelayShield tracks **3,750+ malware families** including QakBot, LummaC2, Emotet, TrickBot, RedLine, Vidar, Raccoon, and 3,743+ others. IOCs are enriched with threat actor attribution, confidence scoring, and MITRE ATT&CK technique mapping.
 
-- **Criminal Telegram channels (8 verified)** — infostealer log markets, credential dump channels, and SIM swap service listings. The underground sources that surface threats 24–72 hours before public breach databases. Active session cookies, raw credential files, and breach announcements appear here first. RelayShield tracks **450+ malware families and variants** across all sources — including QakBot, LummaC2, Emotet, TrickBot, Dridex, RedLine, Vidar, Raccoon, BumbleBee, PikaBot, BazarLoader, ClearFake, and 440+ others.
-- **ThreatFox (abuse.ch)** — malware IOCs tagged by family: LummaC2, RedLine, Vidar, Stealc, Raccoon, and 14 other credential-theft families
-- **URLhaus (abuse.ch)** — malicious URLs used for active malware distribution, updated daily
-- **Feodo Tracker aggressive (abuse.ch)** — ~8,000 active botnet C2 IPs (Emotet, QakBot, Dridex, IcedID, TrickBot)
-- **MalwareBazaar (abuse.ch)** — malware sample SHA256 hashes, tagged by malware family
-- **Spamhaus DROP/EDROP** — IP CIDR ranges operated by professional spam and cybercrime networks
-- **AbuseIPDB** — crowdsourced IP abuse reports, confidence-filtered (≥90%)
-- **Emerging Threats** — compromised IP blocklist updated daily
-- **AlienVault OTX** — community threat pulses covering domains, IPs, and file hashes
+Pass any domain, IP, URL, or SHA256 hash to check for known malware infrastructure — ahead of reputation services that lag by days or weeks. New: submit batches of up to 100 IOCs via `/v1/metered/bulk-ioc` for log enrichment pipelines.
 
-Pass any domain, IP, URL, or SHA256 hash to check for known malware infrastructure association — ahead of reputation services that lag by days or weeks.
+**Early Warning Intelligence:** RelayShield surfaces CVE PoC discussion in criminal Telegram channels **before NVD publication** — giving MSPs a 24–72 hour warning window before vendors issue patches. RelayShield ingests the full CISA KEV catalog daily — 1,600+ actively-exploited CVEs tracked, with ransomware-campaign-linked vulnerabilities flagged separately.
 
-**Global ransomware CVE intelligence:** RelayShield ingests the full CISA Known Exploited Vulnerabilities (KEV) catalog daily — 1,600+ actively-exploited CVEs tracked, with vulnerabilities tied to known ransomware campaigns flagged separately. Use this as a concrete upsell signal: when a vendor/product your clients run appears with an actively-exploited, ransomware-linked CVE, you have a dated, documented reason to open a remediation conversation — not a generic "patch your systems" reminder.
+**Automated feed formats — STIX/TAXII 2.1 and MISP:** Point your SIEM's built-in TAXII client at `GET /v1/intel/taxii/*` for a standards-compliant feed of STIX 2.1 Indicator objects — no custom integration work required for Splunk, Sentinel, Elastic, or QRadar. For MISP-based environments (the default/co-primary format across government, CERT/ISAC, and mid-market SOC tooling that STIX-only integration doesn't reach), `GET /v1/intel/misp/event` exports the same IOC corpus as native MISP Event JSON with tagged attributes. Both require a TI subscription and support incremental pulls (`added_after` + pagination) so your SIEM only ingests what's new.
 
-**Price-to-performance:** Enterprise threat intelligence platforms start at $30K–$300K/year for equivalent IOC coverage. RelayShield delivers 200,000+ queryable indicators at **$499/month** — the same enrichment data your clients' enterprise competitors pay $5K+/month to access.
+**Shareable risk report links:** Any wallet scan, domain check, or vendor sweep result can be turned into a persistent, shareable URL (`POST /v1/report/share`) — generation requires a subscription, but viewing the resulting link is public with no login required. Paste it into a client ticket, a security write-up, or an incident report the same way you'd link to a VirusTotal or Shodan result page. Doubles as a light audit trail for client-facing deliverables.
 
-IOC data is retained for 90 days.
+**Third-Party Risk Score:** `POST /v1/metered/supply-chain` delivers a composite vendor risk score across breach exposure, infostealer density, and dark web presence for up to 10 vendor domains per call ($0.10). Equivalent to Recorded Future's vendor risk module at developer-accessible pricing.
 
-**Developer subscription — live today:** $499/mo for 10,000 API calls, $999/mo unlimited. Self-serve signup at relayshield.net/developers — covers all metered endpoints above plus the threat intelligence feed. Built for security engineers at small-to-mid-size companies building internal SIEM/SOAR tooling, and security SaaS vendors embedding breach and infostealer data into their own product. No commitment, cancel anytime.
+**Price-to-performance:** Enterprise threat intelligence platforms (Recorded Future, ThreatConnect) start at $30K–$300K/year. RelayShield delivers 4.4M+ queryable indicators at **$499/month** — the same enrichment data your clients' enterprise competitors pay $5K+/month to access.
+
+IOC data is retained for 365 days.
+
+**Developer subscription — live today:** $499/mo for 10,000 API calls, $999/mo unlimited. Self-serve signup at api.relayshield.net/developers — covers all metered endpoints above plus the threat intelligence feed. Built for security engineers at small-to-mid-size companies building internal SIEM/SOAR tooling, and security SaaS vendors embedding breach and infostealer data into their own product. No commitment, cancel anytime. Also available on **AWS Marketplace** for teams that prefer to procure and bill through an existing AWS account.
 
 **Mid-market MSSP feed (coming):** A bulk export tier ($1,500–$3,000/mo) for MSSPs running this data through their own SIEM/SOAR pipeline at scale across many client tenants, delivered as a continuous feed rather than per-query lookups. Contact us to join early access.
+
+**Drops into the SIEM your clients already run:** RelayShield's IOC corpus is served over STIX/TAXII 2.1 and MISP, so it ingests through **Elastic Security's built-in Threat Intel integrations** with configuration alone — no connector to build and no professional-services engagement. Splunk HEC, CEF/QRadar and Cortex XSOAR are supported as push destinations. For an MSSP running a shared SIEM across client tenants, this removes the integration objection entirely.
+
+**Live automation, not just an API:** RelayShield's employee-offboarding credential check is a published, officially-approved template in n8n's workflow library ([n8n.io/workflows/16694](https://n8n.io/workflows/16694)) — an HR webhook triggers three parallel identity-risk checks (breach, infostealer, OAuth token exposure) the moment someone's offboarded, routing findings to Slack, a manager email summary, and a Notion audit log automatically. This isn't a hypothetical integration path — it's live, installable today, built on the same API MSPs get direct access to above.
 
 ---
 

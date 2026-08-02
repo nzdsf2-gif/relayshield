@@ -4,11 +4,11 @@ Block commits and builds that introduce API keys, tokens and other machine crede
 
 Detects 31 credential patterns — AWS IAM keys, GitHub PATs, Stripe secrets, Slack tokens, private keys, and LLM provider keys (OpenAI, Anthropic, Google, Groq, xAI, Replicate).
 
+**Free, and it runs entirely on your machine.** No account, no API key, no network call. Your source code never leaves the host — matching happens locally against patterns shipped inside the package.
+
 **The pre-commit hook is the point.** It runs *before* the commit enters git history. A CI check only sees the secret after a push, and by then it is in history and has to be rotated even if you delete the commit. The CI integrations below are a backstop, not a substitute.
 
 ## Install
-
-Get an API key at [api.relayshield.net/developers](https://api.relayshield.net/developers), then pick your client.
 
 ### pre-commit hook (recommended)
 
@@ -23,8 +23,9 @@ repos:
 
 ```bash
 pre-commit install
-export RELAYSHIELD_API_KEY=rs_live_...
 ```
+
+That is the whole setup. Nothing to configure, nothing to sign up for.
 
 ### GitHub Actions
 
@@ -34,7 +35,6 @@ export RELAYSHIELD_API_KEY=rs_live_...
     fetch-depth: 0        # required — the range needs history
 - uses: RelayShield/rsscan@v0.1.0
   with:
-    api-key: ${{ secrets.RELAYSHIELD_API_KEY }}
     fail-on: HIGH
 ```
 
@@ -46,8 +46,6 @@ include:
     inputs:
       fail_on: HIGH
 ```
-
-Set `RELAYSHIELD_API_KEY` as a masked CI/CD variable.
 
 ### CircleCI
 
@@ -64,7 +62,6 @@ workflows:
 
 ```bash
 docker run --rm -v "$PWD:/workspace" \
-  -e RELAYSHIELD_API_KEY \
   -e RSSCAN_REV_RANGE=origin/main...HEAD \
   relayshield/rsscan:0.1.0
 ```
@@ -76,7 +73,6 @@ Bitbucket Pipelines:
     script:
       - pipe: docker://relayshield/rsscan:0.1.0
         variables:
-          RELAYSHIELD_API_KEY: $RELAYSHIELD_API_KEY
           RSSCAN_REV_RANGE: "origin/main...HEAD"
 ```
 
@@ -87,22 +83,13 @@ pip install rsscan
 RSSCAN_REV_RANGE="origin/main...HEAD" rsscan
 ```
 
-Or call the API directly, no client at all:
-
-```bash
-git diff --cached -U0 | jq -Rs '{diff: .}' | \
-curl -sX POST https://api.relayshield.net/v1/metered/secret-scan-text \
-  -H "X-RS-API-KEY: $RELAYSHIELD_API_KEY" \
-  -H 'Content-Type: application/json' --data-binary @-
-```
-
 ## How it works
 
-Sends the diff to RelayShield's scan endpoint and fails on a finding at or above `--fail-on` (default `HIGH`).
+Scans the diff locally and fails on a finding at or above `--fail-on` (default `HIGH`).
 
 **Only added lines are scanned.** Secrets already in your files are not re-flagged, so the tool does not become unbypassable noise on a repo with legacy findings.
 
-**Your code is not stored.** The diff is never logged or persisted server-side, and matched values are never sent back — findings carry a file, a line and a truncated fingerprint.
+**Nothing is transmitted and nothing is printed.** There is no scan endpoint to send code to. Matched values never appear in output either — findings carry a file, a line and a non-reversible fingerprint, so a scan is safe to run in CI without leaking the secret into build logs.
 
 ```
   rsscan: secrets detected in staged changes
@@ -131,13 +118,13 @@ Every flag has an environment variable equivalent, which is how the CI clients d
 | `--fail-on` | `RSSCAN_FAIL_ON` | `HIGH` | Lowest severity that fails. `LOW`/`MEDIUM`/`HIGH`/`CRITICAL`. |
 | `--rev-range` | `RSSCAN_REV_RANGE` | *(staged)* | Scan a commit range instead of staged changes. |
 | `--allowlist` | `RSSCAN_ALLOWLIST` | `.relayshield-allowlist` | Fingerprints to ignore. |
+| `--report` | `RSSCAN_REPORT` | *(off)* | Write a shareable exposure report to this path. |
+| `--org` | `RSSCAN_ORG` | *(off)* | Opt in to reporting adoption for your org domain. |
 | `--strict` / `--no-strict` | `RSSCAN_STRICT` | *see below* | Fail when the scan cannot run. |
-| `--timeout` | `RSSCAN_TIMEOUT` | `10` | Request timeout, seconds. |
-| | `RELAYSHIELD_API_KEY` | *(required)* | Your API key. |
 
 ### Failure behaviour differs by mode, on purpose
 
-**Pre-commit fails open.** No key, no network, or a server error warns on stderr and lets the commit through. A hook that wedges every commit on a flaky connection gets uninstalled, and then it catches nothing.
+**Pre-commit fails open.** If the scan genuinely cannot run — an unreadable diff, a broken git invocation — it warns on stderr and lets the commit through. A hook that wedges every commit gets uninstalled, and then it catches nothing.
 
 **CI fails closed.** A gate that silently reports success when it could not actually run is worse than no gate — it manufactures false assurance. Override either way with `--strict` / `--no-strict` or `RSSCAN_STRICT`.
 
@@ -150,9 +137,33 @@ The allowlist holds **fingerprints, not secrets** — a file containing the actu
 sha256:1a5d44a2dca19669   # documented example key in docs/quickstart.md
 ```
 
+## Sharing a finding with your security team
+
+```bash
+rsscan --report exposure.md
+```
+
+Writes a Markdown report you can attach to a ticket or forward by email. It contains **no secret values** — only fingerprints — so it is safe to share.
+
+## Optional: telling us your org uses rsscan
+
+```bash
+rsscan --org yourcompany.com
+```
+
+**Off by default and entirely optional.** When enabled it sends only your org domain, an anonymous per-machine id, the tool version, and how many findings there were by severity.
+
+It never sends file paths, fingerprints, repository names, source code, or the secrets themselves. There is no mechanism in the tool to do so.
+
+## What this tool cannot tell you
+
+rsscan stops credentials *before* they enter git history. It cannot see credentials that have already left — a key committed last year, or one leaked through a dependency, a published package or a container image, may already be indexed and scraped.
+
+Answering that needs a view of what is public, plus the identity layer secret scanners do not cover at all: workforce credentials surfacing in infostealer logs and breach dumps, SIM-swap risk on staff accounts, and session/token exposure. That is what [RelayShield](https://api.relayshield.net/developers?source=rsscan) does.
+
 ## Pricing
 
-$0.05 per scan. Empty diffs are not sent and are not billed.
+rsscan is free. There is no paid tier of this tool, no scan quota, and no account.
 
 ## Licence
 

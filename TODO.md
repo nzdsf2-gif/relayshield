@@ -25,12 +25,85 @@
 **2. XSOAR DEMO for MosheEichler** — see the XSOAR-DEMO section below. Needs the free Cortex XSOAR
    Community Edition signup (founder), then **record it** rather than booking a live call.
 
-Also open: **BB-6** (Postman) and **BB-8** (GitHub Checks / Slack / webhook delivery) are the last
-two BB items. Artifact Hub listing is cheap now that Docker Hub is live.
+Also open: ~~**BB-6** (Postman)~~ ✅ **DONE + DEPLOYED 2026-08-05** and **BB-8** (GitHub Checks /
+Slack / webhook delivery). Artifact Hub listing is cheap now that Docker Hub is live.
 
 ---
 
-## X402-LIST: our public x402 directory entry is stale, added 2026-08-04
+## CSM-UNPUBLISH: retire the old v1.4.0 dApp Store record, added 2026-08-05
+
+**Do NOT unpublish yet. Founder decision 2026-08-05: wait for Arjen to confirm a successful v1.5.0
+upgrade, then allow a cool-down so no users are stranded on an earlier version.**
+
+**Current state, verified live 2026-08-05.** Two records are published and both are discoverable:
+
+| Package | Version live | Record |
+|---|---|---|
+| `net.relayshield.cryptoshieldmobile` | **1.5.0** | new, correct |
+| `net.relayshield.cryptoshield` | **1.4.0** | old, to be retired |
+
+Confirmed via `seekertracker.com/apps?app=<package>` for each. **The risk while both are up:** someone
+searching the dApp Store for "Crypto Shield" can find and install the dead 1.4.0 record, which has no
+upgrade path to 1.5.0 and no in-app update nudge, so they land exactly where Arjen was.
+
+**Gate before unpublishing, in order:**
+1. Arjen confirms he is on v1.5.0 (he is on vacation without his phone until Friday 2026-08-07).
+2. Cool-down period so any other 1.2.0-1.4.0 install has a chance to migrate. There is no telemetry
+   on install counts, so this is a judgement call, not a measurement.
+3. Then unpublish `net.relayshield.cryptoshield` via the Solana Mobile publisher portal.
+
+**Why it cannot simply be updated instead:** certificate rotation is not supported by the dApp Store
+(their support answer, 2026-07-29). That is what forced the rename in the first place. See
+[[project-cs-mobile-build-environment]] and [[reference-cs-mobile-keystore-backup]].
+
+**Related decision, settled 2026-08-05: do NOT mirror the APK to GitHub Releases.** The store already
+hosts it content-addressed and immutable at
+`r2.solanamobiledappstore.com/a/<sha256>.apk`, verified byte-identical to the local build. On a
+public repo a mirrored APK becomes a sideload path that bypasses the store's update mechanism, which
+manufactures more stranded-version users, the exact problem this item exists to clean up. Record the
+store URL plus sha256 in the repo instead of the binary.
+
+---
+
+## X402-LIST: RE-DIAGNOSED 2026-08-05 — it is not an editable listing
+
+**The 2026-08-04 diagnosis below is wrong on two counts. Read this first.**
+
+**1. x402-list is not a directory you edit. It indexes from the CDP Bazaar**, stated in the page's
+own copy ("indexed in the Coinbase CDP Bazaar"). So there is nothing to submit or correct on their
+side. Fixing the count means fixing what CDP has indexed.
+
+**2. The two agentic endpoints are already there.** `mcp-registry-risk` and
+`prompt-injection-breach` both appear on the live page. The item below assumed they were the missing
+ones; they are not.
+
+**The actual gap, measured 2026-08-05 by paginating all 14,675 CDP Bazaar resources:**
+**25 of our 28 endpoints are indexed.** The three that are not:
+
+- `/v1/payg/cert-expiry`
+- `/v1/payg/ip-intel`
+- `/v1/payg/secret-scan-text`
+
+All three were checked live and **serve a well-formed x402Version 2 challenge**, structurally
+identical to the indexed `/v1/payg/domain` control (the challenge nests under an `x402` key, not a
+top-level `accepts` array — a parser expecting `accepts` will wrongly report them as broken). So
+nothing is wrong with the endpoints. **CDP indexes a resource after a real settlement, so these three
+need one settled payment each.** That is a founder action: it spends real money from the wallet.
+
+**Also found 2026-08-05 and fixable without spending anything:** these PAYG descriptions are
+published prose — they are what the Bazaar carries and x402-list renders — and **7 of 25 contain a
+banned em-dash**: `domain`, `infostealer`, `session-risk`, `nhi-exposure`, `llm-credential-exposure`,
+`bulk-identity-risk`, `cert-expiry`. See [[feedback-no-dashes-in-prose]]. Separately
+`relayshield_openapi_spec.py` still has **26** ` -- ` occurrences rendering publicly at `/docs`.
+
+**Note on CDP search, measured 2026-08-05:** `GET /platform/v2/x402/discovery/search` returns **0
+results for every query**, including single letters and generic terms, while
+`/discovery/resources` paginates fine. Their search endpoint is degraded platform-wide, not just for
+us. Do not use it to check indexing; paginate `/resources` instead.
+
+---
+
+## X402-LIST (original 2026-08-04 diagnosis, superseded above)
 
 **https://x402-list.com/services/relayshield says 24 endpoints. We have 28.**
 

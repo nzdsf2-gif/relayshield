@@ -7505,7 +7505,7 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "from this number."
     ),
     "/v1/payg/domain": (
-        "Scan a domain for phishing lookalikes — typosquats, homoglyphs, and common phishing "
+        "Scan a domain for phishing lookalikes: typosquats, homoglyphs, and common phishing "
         "registration patterns. Returns matched lookalike domains found in the wild. Call to "
         "detect brand-impersonation phishing campaigns targeting a company before they're "
         "reported elsewhere."
@@ -7558,7 +7558,7 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
     ),
     "/v1/payg/infostealer": (
         "Check whether an email address's credentials were harvested by infostealer malware "
-        "and appear in a criminal stealer-log marketplace — detected 24-72 hours ahead of "
+        "and appear in a criminal stealer-log marketplace, detected 24-72 hours ahead of "
         "public breach databases. Call to catch device-level compromise before stolen session "
         "cookies or saved passwords are used for account takeover."
     ),
@@ -7570,7 +7570,7 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
     ),
     "/v1/payg/session-risk": (
         "Check whether an email address has an active stolen session cookie circulating in a "
-        "criminal archive — a signal of account takeover that bypasses password resets and 2FA "
+        "criminal archive, a signal of account takeover that bypasses password resets and 2FA "
         "entirely. Call to detect AiTM/session-hijack attacks before an authenticated agent "
         "session is trusted."
     ),
@@ -7586,14 +7586,14 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "assess active ransomware exposure for a domain, not just historical breach history."
     ),
     "/v1/payg/nhi-exposure": (
-        "Check whether API keys or tokens tied to a domain — used by non-human identities like "
-        "AI agents, service accounts, or CI/CD — appear exposed in criminal stealer logs. Call "
+        "Check whether API keys or tokens tied to a domain, used by non-human identities like "
+        "AI agents, service accounts, or CI/CD, appear exposed in criminal stealer logs. Call "
         "to audit whether the credentials an autonomous agent relies on have already been "
         "compromised upstream."
     ),
     "/v1/payg/llm-credential-exposure": (
         "Check whether a domain's LLM/AI provider API keys (OpenAI, Anthropic, Google, Groq, "
-        "xAI, Replicate) appear exposed in criminal stealer logs — LLMjacking, a fast-growing "
+        "xAI, Replicate) appear exposed in criminal stealer logs. This is LLMjacking, a fast-growing "
         "threat where a leaked key becomes a live, uncapped billing liability rather than just "
         "a data exposure. Call to catch an exposed key before the drain, not after the invoice."
     ),
@@ -7619,7 +7619,7 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
     "/v1/payg/bulk-identity-risk": (
         "Score up to 10 organizational domains, each with up to 5 associated agent/employee "
         "emails, for combined breach/infostealer/session/CVE risk in one call. Built for "
-        "enterprise AI-governance platforms scoring many identities per customer in one pass — "
+        "enterprise AI-governance platforms scoring many identities per customer in one pass, "
         "the recommended entry point for agent-governance and identity-posture integrations."
     ),
     "/v1/payg/identity-risk-score": (
@@ -7631,7 +7631,7 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
     ),
     "/v1/payg/cert-expiry": (
         "Check how many days remain before a domain's TLS certificate expires, via Certificate "
-        "Transparency logs. Call to catch a lapsing certificate before it causes an outage — "
+        "Transparency logs. Call to catch a lapsing certificate before it causes an outage, "
         "especially relevant as CA/Browser Forum rules shrink standard certificate lifespans "
         "toward 47 days by 2029."
     ),

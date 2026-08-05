@@ -30,6 +30,88 @@ Slack / webhook delivery). Artifact Hub listing is cheap now that Docker Hub is 
 
 ---
 
+## AWSMP-INSIGHTS: AWS is auto-publishing AI-written pricing copy on both listings, added 2026-08-05
+
+**AWS Marketplace emailed twice on 2026-08-05**, once per listing, to say it has published "AI
+Insights" generated **from publicly available content on your website** to explain our pricing to
+buyers. This is automatic and was not requested.
+
+| Listing | Entity | prodview |
+|---|---|---|
+| RelayShield - Threat Intelligence & Identity Security API | `prod-kb3ftelx44wlk` | `prodview-z3izf6val3jb2` |
+| RelayShield - Consumption Security API Bundles | `prod-kkvurtspreofy` | `prodview-6p6csngrcg3zq` |
+
+**Why it matters:** an AI wrote pricing claims about RelayShield from scraped web copy and published
+them on our own storefront, where buyers make purchase decisions. We have shipped stale pricing on
+public surfaces before (brand-monitor at $0.25 when it was $0.35). **Nobody has yet read what it
+says.**
+
+**Already found while looking, and it feeds the AI's input:** the IOC count is inconsistent across
+live surfaces. The Bundles listing says **4.4M+**, the `/developers` page says **4.6M+**, and the
+2026-08-04 MSP brief says **4.9M+**. The AI Insights are generated from exactly this kind of public
+copy, so inconsistent source material produces inconsistent generated claims.
+
+**To do:**
+1. Read the AI Insights on both listings and diff against real `METERED_CREDIT_COSTS`, the
+   Marketplace dimensions, and the contract-with-consumption terms.
+2. Reconcile the IOC figure to one verified number across every surface.
+3. If anything is wrong: AWS Marketplace Management Portal, contact us form, category **Product
+   Listing**, subcategory **Text Change**, supply the product ID and the suggested edits. **AWS
+   removes the insight from display while it reviews and regenerates**, so filing is also the way to
+   pull an inaccurate claim down quickly.
+4. Optional: an EventBridge rule on the **"AI Insights Updated"** event, so a future regeneration
+   does not go unnoticed the way this one nearly did.
+
+---
+
+## AGGREGATOR: list RelayShield in Twilio / Vonage / Sinch marketplaces, added 2026-08-05
+
+**The converse of consuming carrier data.** RelayShield already *consumes* Twilio Lookup v2
+(`Fields=sim_swap,carrier`) in `relayshield_sim_swap_monitor.py`. This is being on the other side of
+that relationship, as a data provider selling into an aggregator's existing customer base. It is the
+nearer-term, lower-gate version of the CAMARA play below, and it hedges the one real commoditisation
+risk: carriers exposing the CAMARA SIM Swap API natively would compress margin on our single
+sim-swap lookup.
+
+**PRIORITY: 4th of 4.** Ranked below XSOAR, Microsoft Sentinel and AWS Bundles A-C. Research only,
+do not build until one of the three below confirms a live partner path. Full ranking:
+
+| Rank | Item | Why |
+|---|---|---|
+| 1 | **XSOAR demo** for MosheEichler | Code already APPROVED and a named person asked for the demo. A won approval going cold. Cheapest path to a real partner outcome. |
+| 2 | **Microsoft Sentinel** | The only one that passes the flywheel test: open contribution, public catalog, no gatekeeper, confirmed 7-day review and 2-week gallery timeline. Same signals reshaped. |
+| 3 | **AWS Bundles A-C** | Real revenue surface, but *waiting* rather than building. Marketplace serialises submissions per seller account, so effort does not convert to progress on our schedule. |
+| 4 | **Aggregator marketplaces (this item)** | Everything above has a known route. This does not yet, see the Twilio gate below. |
+
+### Twilio, checked live 2026-08-05
+
+**Twilio Marketplace still exists** and is actively documented at `twilio.com/docs/marketplace`
+(Listings, Publishers, Available Add-ons Resource, Installed Add-ons Resource, API Migration Guide).
+It was NOT discontinued. `marketplace.twilio.com` 404s, but that is just the wrong hostname.
+
+**Category fit is strong.** The two tutorials Twilio features are the **Prove TCPA Add-on** and the
+**Trestle Reverse Phone Add-on**, both phone and identity data providers. That is precisely
+RelayShield's category, so this is an existing shelf rather than a new one.
+
+**The gate, and it is a real one.** `twilio.com/docs/marketplace/publishers` states plainly:
+**"Publishing is available by invitation only. Contact your Twilio Account Executive for details."**
+Console-based, partner-only, no self-serve path. RelayShield is already a paying Twilio customer
+(Lookup plus WhatsApp via Twilio as BSP), so an account team may exist. **First action is a single
+email to the Twilio account team asking whether we qualify for a Marketplace Listing invitation.**
+That costs nothing and either opens the path or closes the item.
+
+### Vonage and Sinch, NOT yet verified
+
+- **Vonage (Ericsson)** — the most committed Open Gateway player, so it doubles as the natural bridge
+  to the CAMARA item below. Partner path unverified.
+- **Sinch** — CPaaS with an existing verification and identity line, so RelayShield enrichment is an
+  adjacent upsell rather than a new category. Partner path unverified.
+
+**Do not research these two until Twilio answers.** If an invitation-only gate is the norm in this
+category, that finding applies to all three and the whole item drops in priority.
+
+---
+
 ## KEYSTORE-BACKUP: encrypted 7-Zip archive of the CS Mobile signing credentials, added 2026-08-05
 
 **Founder to run. Verified safe by actual test 2026-08-05, not by assumption.**
@@ -84,9 +166,33 @@ an aggregator, as a data provider into Twilio-class marketplaces, reaches simila
 fraction of the gate. It also hedges the one real commoditisation risk: carriers exposing the CAMARA
 SIM Swap API natively would compress margin on our single sim-swap lookup.
 
-**Deliverable requested 2026-08-05:** Google-Slides-compatible marketing slides with network
-diagrams showing a telco calling RelayShield endpoints and passing enriched signals to a bank for
-fraud detection. **NOT YET BUILT.**
+### CAMARA-SLIDES: telco marketing deck, requested 2026-08-05, NOT YET BUILT
+
+**Purpose, per founder: a reusable asset for future telco discussions**, not a one-off for a single
+meeting. Build it to survive being sent ahead of a call without narration.
+
+**Format:** `.pptx`, which imports into Google Slides cleanly. Do NOT hand-build Google Slides via
+API; a pptx is portable and editable in both.
+
+**Slides to build:**
+
+1. **The asymmetry.** Two columns. Telco owns network truth (SIM swap, porting, device binding);
+   RelayShield owns criminal-underground intelligence (stealer logs, breach corpora, session-cookie
+   archives, 85+ monitored Telegram channels). Neither can source the other's side.
+2. **Network diagram: the flow.** Bank fraud engine -> Telco Open Gateway / CAMARA -> RelayShield
+   endpoints -> enriched verdict back to the bank. Show the telco as the reseller and billing
+   relationship, since that is the commercial point.
+3. **The worked example, and the strongest slide.** A carrier can tell a bank a SIM was swapped. It
+   cannot tell them the subscriber's credentials appeared in a stealer log three days earlier. One
+   is a fact; the two together are the difference between a targeted attack and a phone upgrade.
+4. **Endpoint menu** relevant to telco/bank fraud: sim-swap, infostealer, breach, session-risk,
+   identity-risk-score, bulk-identity-risk. Live prices, verified before the deck ships.
+5. **Commercial model.** Telco resells to enterprise customers. RelayShield does not contract with
+   the bank directly. Keep this explicit; it is the question a telco BD person asks first.
+
+**Verify live before shipping the deck:** IOC count, channel count and every price. Three different
+IOC figures are currently in circulation across surfaces (see AWSMP-INSIGHTS below), so quoting from
+memory here would put a wrong number in front of a carrier.
 
 **Do not reposition the product over this.** Defensibility was never the single SIM-swap lookup; it
 is Bundle A as a correlated set (SIM swap plus infostealer plus breach plus session risk on

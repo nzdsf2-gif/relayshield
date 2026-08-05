@@ -30,6 +30,70 @@ Slack / webhook delivery). Artifact Hub listing is cheap now that Docker Hub is 
 
 ---
 
+## KEYSTORE-BACKUP: encrypted 7-Zip archive of the CS Mobile signing credentials, added 2026-08-05
+
+**Founder to run. Verified safe by actual test 2026-08-05, not by assumption.**
+
+`sevenzip` (official 7-Zip 26.02, binary `7zz`) is **already installed** on this Mac. Note the
+formula is `sevenzip`, NOT `p7zip` — p7zip is an abandoned fork stuck at 17.06.
+
+```
+7zz a -p -mhe=on ~/cs-mobile-signing-2026-08.7z \
+  "/Users/andrewgibbs/Side SaaS Hustle/crypto-shield-app/android/app/cryptoshield-release.keystore" \
+  "/Users/andrewgibbs/Side SaaS Hustle/crypto-shield-app/android/keystore.properties"
+7zz t ~/cs-mobile-signing-2026-08.7z
+```
+
+`-p` with no value prompts, so the passphrase never enters shell history. `-mhe=on` encrypts the
+headers so even the filenames are hidden.
+
+**Tested on dummy files before recommending, all four checks passed:** sources survive byte-identical
+with unchanged mtime; filenames are hidden without the passphrase; a wrong passphrase is rejected;
+the correct passphrase round-trips byte-identical. `7z a` only reads sources and writes a new
+archive. The only flag that deletes sources is `-sdel`, which is not in this command.
+
+**Then:** put the archive in two places that fail independently (not both Proton), and keep the
+passphrase in Proton. Today the keystore exists only on this Mac and in Proton, which is two copies
+across two accounts the founder owns. The scenarios to survive are "Proton lost" and "Mac dies".
+
+See [[reference-cs-mobile-keystore-backup]] for the fingerprint and the Java-free verify commands.
+
+---
+
+## CAMARA: expose RelayShield endpoints TO telcos, added 2026-08-05
+
+**Founder's framing, and it is the right one: this is the converse of Open Gateway.** Telcos are
+exposing network APIs to developers. The inverse play is RelayShield exposing its endpoints to
+telcos, who resell them to their own enterprise customers (banks, fintechs) for fraud detection.
+
+**The asymmetry that makes it work.** Telcos own network truth: SIM swap, porting, device binding.
+They do **not** have criminal-underground intelligence, and cannot source it: stealer logs, breach
+corpora, session-cookie archives, 85+ monitored Telegram channels. A carrier can tell a bank a SIM
+was swapped. It cannot tell them the subscriber's credentials appeared in a stealer log three days
+earlier, which is the part that distinguishes a targeted attack from a phone upgrade.
+
+**Honest classification: this is a DEAL, not a flywheel.** Per [[project-platform-integration-order]]
+the default is flywheels, and deals only when something pulls. Telco partnerships are
+procurement-heavy and slow, and CAMARA conformance is real engineering: the auth model is
+CIBA/OIDC, not API keys, so it is not a repackaging exercise. Prior TAXII 2.1 conformance work means
+the shape of the problem is familiar.
+
+**Nearer-term variant worth testing FIRST.** RelayShield already *consumes* Twilio Lookup v2
+(`Fields=sim_swap,carrier`) inside `relayshield_sim_swap_monitor.py`. Being on the **other side** of
+an aggregator, as a data provider into Twilio-class marketplaces, reaches similar buyers with a
+fraction of the gate. It also hedges the one real commoditisation risk: carriers exposing the CAMARA
+SIM Swap API natively would compress margin on our single sim-swap lookup.
+
+**Deliverable requested 2026-08-05:** Google-Slides-compatible marketing slides with network
+diagrams showing a telco calling RelayShield endpoints and passing enriched signals to a bank for
+fraud detection. **NOT YET BUILT.**
+
+**Do not reposition the product over this.** Defensibility was never the single SIM-swap lookup; it
+is Bundle A as a correlated set (SIM swap plus infostealer plus breach plus session risk on
+workforce identities). A carrier auth API does not get anyone closer to that.
+
+---
+
 ## CSM-UNPUBLISH: retire the old v1.4.0 dApp Store record, added 2026-08-05
 
 **Do NOT unpublish yet. Founder decision 2026-08-05: wait for Arjen to confirm a successful v1.5.0

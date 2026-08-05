@@ -10,6 +10,9 @@ on:
       - 'relayshield_domain_monitor.py'
       - 'relayshield_sim_swap_monitor.py'
       - 'relayshield_api.py'
+      # relayshield-api is a TWO-file package. Editing the spec alone must
+      # still redeploy, or /docs and /openapi.json go stale against the code.
+      - 'relayshield_openapi_spec.py'
       - 'relayshield_digest_sender.py'
       - 'relayshield_day3_sender.py'
       - 'relayshield_oauth_watchlist_monitor.py'
@@ -87,17 +90,49 @@ jobs:
             ["relayshield_liquidation_monitor.py"]="relayshield-liquidation-monitor"
             ["relayshield_tgmonthly_digest.py"]="relayshield_tgmonthly_digest"
             ["relayshield_stablecoin_monitor.py"]="relayshield-stablecoin-monitor"
+            ["relayshield_openapi_spec.py"]="relayshield-api"
           )
 
+          # Functions whose deployment package is more than one file. Zipping
+          # only the handler here ships a package that imports a module that is
+          # not in it, and update-function-code still reports success — the
+          # Lambda then 502s on every route with Runtime.ImportModuleError.
+          # This took relayshield-api down on 2026-08-05.
+          declare -A EXTRA_FILES=(
+            ["relayshield-api"]="relayshield_openapi_spec.py"
+          )
+
+          # A function can be reached by more than one changed file, so collapse
+          # to a unique function list before deploying.
+          FUNCS=""
           for FILE in ${{ steps.changes.outputs.files }}; do
             FUNC="${LAMBDA_MAP[$FILE]}"
             if [ -z "$FUNC" ]; then
               echo "No Lambda mapping for $FILE — skipping"
               continue
             fi
+            case " $FUNCS " in
+              *" $FUNC "*) ;;
+              *) FUNCS="$FUNCS $FUNC" ;;
+            esac
+          done
 
-            echo "→ Packaging $FILE → $FUNC"
-            zip -j deploy.zip "$FILE"
+          for FUNC in $FUNCS; do
+            # Every source file that belongs to this function's package
+            PKG=""
+            for FILE in "${!LAMBDA_MAP[@]}"; do
+              [ "${LAMBDA_MAP[$FILE]}" = "$FUNC" ] && PKG="$PKG $FILE"
+            done
+            PKG="$PKG ${EXTRA_FILES[$FUNC]:-}"
+
+            FILES=""
+            for F in $PKG; do
+              [ -f "$F" ] && FILES="$FILES $F"
+            done
+
+            echo "→ Packaging$FILES → $FUNC"
+            rm -f deploy.zip
+            zip -j deploy.zip $FILES
 
             echo "→ Deploying to $FUNC"
             aws lambda update-function-code \
@@ -111,7 +146,35 @@ jobs:
               --region us-east-1
 
             echo "✅ $FUNC deployed"
-            rm deploy.zip
+            rm -f deploy.zip
+          done
+
+      # update-function-code succeeding only means the bytes uploaded. It says
+      # nothing about whether the handler can be imported. Invoke and fail the
+      # run if it cannot, so a broken deploy is red instead of green.
+      - name: Verify deployed Lambdas import cleanly
+        if: steps.changes.outputs.files != ''
+        run: |
+          for FUNC in $(aws lambda list-functions --region us-east-1 \
+                          --query 'Functions[?starts_with(FunctionName, `relayshield-`)].FunctionName' \
+                          --output text); do
+            case " ${{ steps.changes.outputs.files }} " in
+              *relayshield_api.py*|*relayshield_openapi_spec.py*) ;;
+              *) continue ;;
+            esac
+            [ "$FUNC" = "relayshield-api" ] || continue
+
+            echo "→ Smoke testing $FUNC"
+            aws lambda invoke --function-name "$FUNC" --region us-east-1 \
+              --payload '{"rawPath":"/openapi.json","requestContext":{"http":{"method":"GET","path":"/openapi.json"}},"headers":{}}' \
+              --cli-binary-format raw-in-base64-out out.json >/dev/null
+
+            if grep -q "Runtime.ImportModuleError\|errorType" out.json; then
+              echo "::error::$FUNC failed to import after deploy:"
+              cat out.json
+              exit 1
+            fi
+            echo "✅ $FUNC imports and responds"
           done
 
       - name: No Lambda changes detected

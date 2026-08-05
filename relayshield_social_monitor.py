@@ -224,8 +224,14 @@ def send_admin_message(text: str, reply_markup: dict | None = None) -> None:
 
 
 def _make_draft_key(post_id: str) -> str:
-    """12-char hex key derived from post_id — fits safely in callback_data."""
-    return hashlib.md5(post_id.encode()).hexdigest()[:12]
+    """12-char hex key derived from post_id — fits safely in callback_data.
+
+    usedforsecurity=False because this is a length-reduction key for Telegram's
+    64-byte callback_data limit, not a digest anything trusts. Without it bandit
+    reports B324 at HIGH, which fails Security Audit before pip-audit and
+    gitleaks ever run, so secret scanning silently stops happening.
+    """
+    return hashlib.md5(post_id.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def _store_draft_context(draft_key: str, m: dict) -> None:

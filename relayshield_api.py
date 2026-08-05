@@ -267,7 +267,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/ransomware-risk":       400000,   # $0.40 — ransomware victim list + pre-ransomware credential check
     "/v1/payg/nhi-exposure":          400000,   # $0.40 — non-human identity: API keys/tokens in stealer logs
     "/v1/payg/llm-credential-exposure": 400000,  # $0.40 — LLMjacking: exposed LLM/AI provider API keys
-    "/v1/payg/secret-scan":           350000,   # $0.35 — 5-source public artifact secret detection (GitHub, npm, PyPI, Docker Hub, HF)
+    "/v1/payg/secret-scan":           350000,   # $0.35 — 6-source public artifact secret detection (GitHub, npm, PyPI, Docker Hub, HF, Postman)
     "/v1/payg/secret-scan-text":       50000,   # $0.05 — local scan, no external API call (see METERED_CREDIT_COSTS)
     "/v1/payg/target-risk":           500000,   # $0.50 — target probability score (6-signal correlation)
     "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
@@ -399,7 +399,7 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/ransomware-risk": 40,   # $0.40 — ransomware victim + pre-ransomware credential check
     "/v1/metered/nhi-exposure":    40,   # $0.40 — NHI: API keys/tokens in stealer logs
     "/v1/metered/llm-credential-exposure": 40,   # $0.40 — LLMjacking: exposed LLM/AI provider API keys
-    "/v1/metered/secret-scan":     35,   # $0.35 — 5-source public artifact secret detection (GitHub, npm, PyPI, Docker Hub, HF)
+    "/v1/metered/secret-scan":     35,   # $0.35 — 6-source public artifact secret detection (GitHub, npm, PyPI, Docker Hub, HF, Postman)
     "/v1/metered/secret-scan-text": 5,   # $0.05 — local pattern scan, no external API call.
                                          # Deliberately below secret-scan's $0.35: this is the
                                          # pre-commit path and fires on every commit, so parity
@@ -6219,7 +6219,7 @@ def handle_rsscan_install(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# BB-4 / BB-5 / BB-7 — package, image and model-hub sources
+# BB-4 / BB-5 / BB-6 / BB-7 — package, image, model-hub and API-collection sources
 # ---------------------------------------------------------------------------
 # Secrets ship inside published artifacts constantly, and that is a genuinely
 # different surface from repo scanning: GitGuardian's public monitoring is
@@ -6256,6 +6256,23 @@ def _http_json(url: str, timeout: int = 10) -> dict | list | None:
         return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     except Exception as exc:
         logger.warning("source fetch failed url=%s: %s", url.split("?")[0], exc)
+        return None
+
+
+def _http_json_post(url: str, payload: dict, timeout: int = 10) -> dict | list | None:
+    """POST variant of _http_json. Postman's search is the only POST source."""
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={
+                "User-Agent":   "RelayShield-SecretScan/1.0",
+                "Content-Type": "application/json",
+            },
+        )
+        return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    except Exception as exc:
+        logger.warning("source post failed url=%s: %s", url.split("?")[0], exc)
         return None
 
 
@@ -6382,6 +6399,79 @@ def _huggingface_secret_scan(org: str) -> list[dict]:
     return findings
 
 
+_POSTMAN_SEARCH_URL = "https://www.postman.com/_api/ws/proxy"
+
+
+def _postman_secret_scan(org: str) -> list[dict]:
+    """BB-6 — Postman public workspaces and collections.
+
+    A well known and underserved leak surface: teams publish an API collection
+    to share it, and the description, the example requests and the environment
+    notes routinely carry a working key. GitGuardian's public monitoring is
+    GitHub-centric, so none of this is covered by a repo scanner.
+
+    Verified unauthenticated 2026-08-05 before building, per the BB-3 lesson.
+    The public search is a POST through Postman's own web proxy -- there is no
+    documented REST search endpoint, this is the one the site itself calls.
+
+    The description comes back INSIDE the search response (measured up to
+    ~3.5 KB), so unlike the request/header surface this needs no second fetch
+    per collection, which keeps it to one HTTP call per domain.
+    """
+    data = _http_json_post(_POSTMAN_SEARCH_URL, {
+        "service": "search",
+        "method":  "POST",
+        "path":    "/search-all",
+        "body": {
+            # Both indices: a workspace description leaks as readily as a
+            # collection's, and they are ranked into one result set.
+            "queryIndices":      ["collaboration.workspace", "runtime.collection"],
+            "queryText":         org,
+            "size":              _SOURCE_ARTIFACT_LIMIT,
+            "from":              0,
+            "clientTraceId":     "",
+            "requestOrigin":     "srp",
+            "mergeEntities":     True,
+            "nonNestedRequests": True,
+        },
+    })
+
+    findings: list[dict] = []
+    for item in (data or {}).get("data", [])[:_SOURCE_ARTIFACT_LIMIT]:
+        doc = item.get("document") or {}
+        name = doc.get("name")
+        if not name:
+            continue
+
+        kind      = doc.get("entityType") or "collection"
+        publisher = doc.get("publisherHandle") or ""
+        ident     = doc.get("id") or ""
+
+        # Public URL. Workspaces expose a slug; collections hang off their
+        # workspace's slug. Fall back to the publisher page rather than
+        # emitting a broken link -- a finding a customer cannot open is noise.
+        slug = ""
+        for ws in (doc.get("workspaces") or []):
+            if ws.get("slug"):
+                slug = ws["slug"]
+                break
+        if kind == "workspace" and publisher and slug:
+            url = f"https://www.postman.com/{publisher}/{slug}"
+        elif publisher and slug and ident:
+            url = f"https://www.postman.com/{publisher}/{slug}/collection/{ident}"
+        elif publisher:
+            url = f"https://www.postman.com/{publisher}"
+        else:
+            url = "https://www.postman.com/search?q=" + urllib.parse.quote(org)
+
+        blob = "\n".join(filter(None, [
+            doc.get("name"), doc.get("summary"), doc.get("description"),
+        ]))
+        findings += _findings_from_text(
+            blob, source=f"postman_{kind}", artifact=name, url=url)
+    return findings
+
+
 def handle_secret_scan(params: dict) -> dict:
     raw_domains = list(params.get("vendor_domains") or [])
     own_domain  = (params.get("domain") or "").strip().lower().removeprefix("www.")
@@ -6428,6 +6518,7 @@ def handle_secret_scan(params: dict) -> dict:
                 ("pypi",        _pypi_secret_scan),
                 ("dockerhub",   _dockerhub_secret_scan),
                 ("huggingface", _huggingface_secret_scan),
+                ("postman",     _postman_secret_scan),
             ):
                 if time.time() > artifact_deadline:
                     logger.warning(
@@ -7507,9 +7598,10 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "a data exposure. Call to catch an exposed key before the drain, not after the invoice."
     ),
     "/v1/payg/secret-scan": (
-        "Scan public GitHub repositories, npm and PyPI packages, Docker Hub images and "
-        "Hugging Face models and Spaces for API keys, tokens and credentials already "
-        "published against a domain. Repo-only scanners miss credentials shipped inside "
+        "Scan public GitHub repositories, npm and PyPI packages, Docker Hub images, "
+        "Hugging Face models and Spaces, and Postman public workspaces and collections "
+        "for API keys, tokens and credentials already published against a domain. "
+        "Repo-only scanners miss credentials shipped inside "
         "released packages and images. Every hit is verified against the credential "
         "pattern before it is reported."
     ),

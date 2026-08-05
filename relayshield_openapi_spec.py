@@ -717,9 +717,10 @@ ENDPOINTS = [
         "path": "/v1/metered/secret-scan",
         "price_cents": 35,
         "tag": "Secrets and non-human identity",
-        "summary": "Find published secrets across five public artifact sources",
+        "summary": "Find published secrets across six public artifact sources",
         "description": (
-            "Scans GitHub repositories plus npm, PyPI, Docker Hub and Hugging Face artifacts for "
+            "Scans GitHub repositories plus npm, PyPI, Docker Hub, Hugging Face and Postman "
+            "public workspaces and collections for "
             "secrets already published against your domain. Secrets ship inside released packages "
             "and images constantly, and repo-only scanners never see them. Every hit is verified "
             "against the matching credential pattern before it is reported, so a docs example or a "

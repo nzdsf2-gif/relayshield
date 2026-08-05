@@ -79,31 +79,33 @@ jobs:
           MONTH=$(date -u +"%B %Y")
           DIGESTS=$(cat /tmp/digests.txt 2>/dev/null | head -80 || echo "No digest data found.")
 
-          BODY="## INTEL-2 Monthly Channel Review — $MONTH
+          BODY="## INTEL-2 Monthly Channel Review: $MONTH
 
-This issue is auto-generated on the 1st of every month. Review channel performance and update \`MONITORED_CHANNELS\` in \`relayshield_intel_monitor.py\` before closing.
+          This issue is auto-generated on the 1st of every month. Review channel performance and update \`MONITORED_CHANNELS\` in \`relayshield_intel_monitor.py\` before closing.
 
-### Checklist
-- [ ] Review channels with zero IOC hits last 30 days — consider replacing
-- [ ] Check if any channels went private or were deleted (Telethon join errors in logs)
-- [ ] Search for newly active criminal channels to add (sim swap, credential dumps, infostealers, crypto drainers)
-- [ ] Verify the 4 confirmed-accessible channels are still live: \`@exposed_vc\`, \`@logsmarket\`, \`@cloudsek_alerts\`, \`@vxunderground\`
-- [ ] Update \`MONITORED_CHANNELS\` list if needed, commit, and redeploy
+          ### Checklist
+          - [ ] Review channels with zero IOC hits last 30 days, consider replacing
+          - [ ] Check if any channels went private or were deleted (Telethon join errors in logs)
+          - [ ] Search for newly active criminal channels to add (sim swap, credential dumps, infostealers, crypto drainers)
+          - [ ] Verify the 4 confirmed-accessible channels are still live: \`@exposed_vc\`, \`@logsmarket\`, \`@cloudsek_alerts\`, \`@vxunderground\`
+          - [ ] Update \`MONITORED_CHANNELS\` list if needed, commit, and redeploy
 
-### Last 30-Day Lambda Digest
-\`\`\`
-$DIGESTS
-\`\`\`
+          ### Last 30-Day Lambda Digest
+          \`\`\`
+          $DIGESTS
+          \`\`\`
 
-### Resources
-- [CloudWatch Logs](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252Frelayshield-intel-monitor)
-- [relayshield_intel_monitor.py](../blob/main/relayshield_intel_monitor.py)
-- [DynamoDB intel_iocs table](https://us-east-1.console.aws.amazon.com/dynamodbv2/home?region=us-east-1#table?name=relayshield_intel_iocs)
+          ### Resources
+          - [CloudWatch Logs](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252Frelayshield-intel-monitor)
+          - [relayshield_intel_monitor.py](../blob/main/relayshield_intel_monitor.py)
+          - [DynamoDB intel_iocs table](https://us-east-1.console.aws.amazon.com/dynamodbv2/home?region=us-east-1#table?name=relayshield_intel_iocs)
 
-_Auto-opened by GitHub Actions · intel_channel_review.yml_"
+          _Auto-opened by GitHub Actions · intel_channel_review.yml_"
 
-          # Write to a temp file to avoid shell quoting issues
-          echo "$BODY" > /tmp/issue_body.txt
+          # Indented above so the YAML block scalar stays valid; strip it back out
+          # or every line renders as a Markdown code block in the issue.
+          echo "$BODY" | sed 's/^          //' > /tmp/issue_body.txt
+
           echo "MONTH=$MONTH" >> $GITHUB_OUTPUT
 
       - name: Open GitHub Issue

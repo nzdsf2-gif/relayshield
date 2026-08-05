@@ -10,9 +10,12 @@ on:
       - 'relayshield_domain_monitor.py'
       - 'relayshield_sim_swap_monitor.py'
       - 'relayshield_api.py'
-      # relayshield-api is a TWO-file package. Editing the spec alone must
-      # still redeploy, or /docs and /openapi.json go stale against the code.
+      # Shared modules. These are not handlers, but handlers import them, so a
+      # change to one must redeploy every package that pulls it in. The job
+      # resolves that by walking imports; these entries just make the push
+      # actually trigger the workflow.
       - 'relayshield_openapi_spec.py'
+      - 'relayshield_siem_connector.py'
       - 'relayshield_digest_sender.py'
       - 'relayshield_day3_sender.py'
       - 'relayshield_oauth_watchlist_monitor.py'
@@ -93,37 +96,64 @@ jobs:
             ["relayshield_openapi_spec.py"]="relayshield-api"
           )
 
-          # Functions whose deployment package is more than one file. Zipping
-          # only the handler here ships a package that imports a module that is
-          # not in it, and update-function-code still reports success — the
-          # Lambda then 502s on every route with Runtime.ImportModuleError.
-          # This took relayshield-api down on 2026-08-05.
-          declare -A EXTRA_FILES=(
-            ["relayshield-api"]="relayshield_openapi_spec.py"
-          )
+          # Resolve a handler's local dependencies from its own imports, rather
+          # than a hand-maintained list. Zipping only the handler ships a
+          # package that imports a module that is not in it;
+          # update-function-code still reports success, and the Lambda then dies
+          # on every invocation with Runtime.ImportModuleError.
+          #
+          # On 2026-08-05 a single-file zip took relayshield-api down, and the
+          # same push silently broke four scheduled monitors that import
+          # relayshield_siem_connector. A hardcoded map fixed only the one we
+          # happened to know about, which is why this walks imports instead.
+          resolve_deps() {
+            local seen="$1" queue="$1" cur dep
+            while [ -n "$queue" ]; do
+              cur="${queue%% *}"; queue="${queue#$cur}"; queue="${queue# }"
+              [ -f "$cur" ] || continue
+              for dep in $(grep -hoE '^[[:space:]]*(import|from) relayshield_[a-z0-9_]+' "$cur" \
+                             | awk '{print $2".py"}' | sort -u); do
+                case " $seen " in
+                  *" $dep "*) ;;
+                  *) seen="$seen $dep"; queue="$queue $dep" ;;
+                esac
+              done
+            done
+            echo "$seen"
+          }
 
-          # A function can be reached by more than one changed file, so collapse
-          # to a unique function list before deploying.
+          # Select functions by DEPENDENCY, not just by handler filename. A
+          # shared module like relayshield_siem_connector.py is not itself a
+          # handler, but four monitors import it, and a change to it must
+          # redeploy all four. Matching on handler names alone would deploy none
+          # of them and leave the fleet running stale code.
           FUNCS=""
-          for FILE in ${{ steps.changes.outputs.files }}; do
-            FUNC="${LAMBDA_MAP[$FILE]}"
-            if [ -z "$FUNC" ]; then
-              echo "No Lambda mapping for $FILE — skipping"
-              continue
-            fi
-            case " $FUNCS " in
-              *" $FUNC "*) ;;
-              *) FUNCS="$FUNCS $FUNC" ;;
-            esac
+          for HANDLER in "${!LAMBDA_MAP[@]}"; do
+            [ -f "$HANDLER" ] || continue
+            DEPS="$(resolve_deps "$HANDLER")"
+            for CHANGED in ${{ steps.changes.outputs.files }}; do
+              case " $DEPS " in
+                *" $CHANGED "*)
+                  FUNC="${LAMBDA_MAP[$HANDLER]}"
+                  case " $FUNCS " in
+                    *" $FUNC "*) ;;
+                    *) FUNCS="$FUNCS $FUNC"; echo "$CHANGED affects $FUNC" ;;
+                  esac
+                  ;;
+              esac
+            done
           done
+          [ -n "$FUNCS" ] || echo "No changed file belongs to any mapped Lambda package"
 
           for FUNC in $FUNCS; do
-            # Every source file that belongs to this function's package
+            # Every handler that maps to this function
             PKG=""
             for FILE in "${!LAMBDA_MAP[@]}"; do
               [ "${LAMBDA_MAP[$FILE]}" = "$FUNC" ] && PKG="$PKG $FILE"
             done
-            PKG="$PKG ${EXTRA_FILES[$FUNC]:-}"
+            # Pull in every local relayshield_* module the handler imports,
+            # transitively, so the package is complete by construction.
+            PKG="$(resolve_deps "$PKG")"
 
             FILES=""
             for F in $PKG; do
@@ -133,6 +163,9 @@ jobs:
             echo "→ Packaging$FILES → $FUNC"
             rm -f deploy.zip
             zip -j deploy.zip $FILES
+
+            # Record the package so the smoke step knows what to probe
+            echo "$FUNC" >> deployed_funcs.txt
 
             echo "→ Deploying to $FUNC"
             aws lambda update-function-code \
@@ -155,27 +188,33 @@ jobs:
       - name: Verify deployed Lambdas import cleanly
         if: steps.changes.outputs.files != ''
         run: |
-          for FUNC in $(aws lambda list-functions --region us-east-1 \
-                          --query 'Functions[?starts_with(FunctionName, `relayshield-`)].FunctionName' \
-                          --output text); do
-            case " ${{ steps.changes.outputs.files }} " in
-              *relayshield_api.py*|*relayshield_openapi_spec.py*) ;;
-              *) continue ;;
-            esac
-            [ "$FUNC" = "relayshield-api" ] || continue
+          [ -f deployed_funcs.txt ] || { echo "nothing deployed"; exit 0; }
+          FAILED=""
+          while read -r FUNC; do
+            [ -n "$FUNC" ] || continue
+            echo "→ Import probe: $FUNC"
 
-            echo "→ Smoke testing $FUNC"
+            # A deliberately unroutable payload. Every handler either ignores it
+            # or returns its own error, which is fine — the only thing being
+            # asserted is that the module loaded at all. An import failure shows
+            # up as Runtime.ImportModuleError regardless of payload.
             aws lambda invoke --function-name "$FUNC" --region us-east-1 \
-              --payload '{"rawPath":"/openapi.json","requestContext":{"http":{"method":"GET","path":"/openapi.json"}},"headers":{}}' \
-              --cli-binary-format raw-in-base64-out out.json >/dev/null
+              --payload '{"source":"ci.import-probe"}' \
+              --cli-binary-format raw-in-base64-out out.json >/dev/null 2>&1 || true
 
-            if grep -q "Runtime.ImportModuleError\|errorType" out.json; then
-              echo "::error::$FUNC failed to import after deploy:"
+            if grep -qi "ImportModuleError\|No module named" out.json 2>/dev/null; then
+              echo "::error::$FUNC failed to import after deploy"
               cat out.json
-              exit 1
+              FAILED="$FAILED $FUNC"
+            else
+              echo "✅ $FUNC imports cleanly"
             fi
-            echo "✅ $FUNC imports and responds"
-          done
+          done < deployed_funcs.txt
+
+          if [ -n "$FAILED" ]; then
+            echo "::error::Broken after deploy:$FAILED"
+            exit 1
+          fi
 
       - name: No Lambda changes detected
         if: steps.changes.outputs.files == ''

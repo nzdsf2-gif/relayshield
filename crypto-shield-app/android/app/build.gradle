@@ -10,6 +10,42 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
+// Refuse to build a release without the real signing credentials.
+//
+// keystore.properties is gitignored, so a fresh clone or a new machine simply
+// does not have it. Without this guard the release buildType silently falls
+// back to signingConfigs.debug, and debug.keystore is fingerprint-identical to
+// the one React Native ships in node_modules/react-native/template/ -- a key
+// every RN developer on earth already has. A release signed with it is both
+// unpublishable as an update and worthless as a publisher identity.
+//
+// That silent-fallback class of failure is what cost us the original signing
+// key and forced unpublishing the Solana dApp Store listing in 2026-07.
+//
+// Checked at taskGraph time, NOT at configuration time, so that debug builds
+// still work fine on a machine without the credentials. Only an actual release
+// task trips it.
+gradle.taskGraph.whenReady { graph ->
+    def wantsRelease = graph.allTasks.any { t ->
+        t.project == project && t.name ==~ /(?i).*(assemble|bundle|install|package).*release.*/
+    }
+    if (wantsRelease && !keystorePropertiesFile.exists()) {
+        throw new GradleException(
+            "\n\n" +
+            "  Refusing to build a release: android/keystore.properties is missing.\n\n" +
+            "  Without it this build would be signed with the PUBLIC React Native debug\n" +
+            "  key instead of the RelayShield release key, and that is unrecoverable\n" +
+            "  once published.\n\n" +
+            "  Restore keystore.properties and cryptoshield-release.keystore from the\n" +
+            "  founder's Proton Password Manager, then verify the built APK with:\n" +
+            "    unzip -p <apk> META-INF/CERT.RSA | openssl pkcs7 -inform DER -print_certs \\\n" +
+            "      | openssl x509 -noout -fingerprint -sha256\n" +
+            "  Expected: 5F:72:93:7B:97:47:A3:62:2B:73:24:67:AF:32:4F:B1:\n" +
+            "            84:74:CE:E6:0A:17:43:0E:84:C6:6A:D3:C6:09:D4:E8\n"
+        )
+    }
+}
+
 static def versionToNumber(major, minor, patch) {
   return patch * 100 + minor * 10000 + major * 1000000
 }

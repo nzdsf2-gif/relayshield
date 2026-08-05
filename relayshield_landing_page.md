@@ -93,6 +93,29 @@ This is how attackers get into Google accounts, Microsoft 365, and banking apps 
 
 ---
 
+## INFOSTEALER MALWARE BLOCK
+
+**Header:** Your password manager can't protect you from infostealer malware.
+
+**Sub-header:** A single silent infection steals everything — before you know it happened.
+
+**Body:**
+Infostealers like RedLine, Raccoon, and Vidar run silently in the background and exfiltrate:
+
+→ Every browser-saved password across every site
+→ Active session cookies — bypassing 2FA without needing your password
+→ Credit card autofill data
+→ Crypto wallet keys
+
+Unlike a corporate breach (where your data leaks weeks later), infostealer logs appear on dark web markets within days of infection.
+
+**What RelayShield does:**
+→ Monitors your email against near real-time infostealer log databases
+→ Alerts you on WhatsApp with the infection date, device OS, and credential count exposed
+→ Guides you through the 4-step device remediation in the right order — isolate first, change passwords from a clean device second
+
+---
+
 ## EMAIL SECURITY SWEEP — HERO BLOCK
 
 **Header:** The most dangerous thing you can do after a breach is reset your password immediately.
@@ -185,6 +208,26 @@ RelayShield follows up until you are actually protected. Day 3: did you complete
 - PERSONAL → https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00
 - BUSINESS STARTER → https://buy.stripe.com/fZucN6ceGglv3qs9830Ny0a
 - BUSINESS → (Business Basic payment link)
+
+---
+
+## DEVELOPER / API CTA BLOCK
+*(Placement: after Telegram bot notice, above "From the Founder" section)*
+
+**Section heading:** Built for Security Teams
+
+**Body:**
+RelayShield doesn't just wrap public breach databases.
+
+Our intelligence pipeline monitors 25+ criminal Telegram channels in real time — infostealer log markets, credential dump channels, and SIM swap service listings — surfacing IOCs 24–72 hours before they appear in HIBP or public databases. The corpus now exceeds **1,000,000+ indicators** across 20 threat intelligence feeds, tracking **1,000+ malware families** with MITRE ATT&CK attribution.
+
+**New: Agentic AI Identity Risk** — `POST /v1/metered/bulk-identity-risk` scores up to 10 organizational domains plus their individual AI agent identities in a single call. Built for teams running AI copilots, agent workflows, and automated systems that need to know whether the identities they operate on behalf of are compromised. Each domain returns a 6-dimension risk score (0–100); each agent email returns breach, infostealer, and active session signals. $2.00/call.
+
+Available as a REST API for SOAR playbooks, SIEM enrichment, AI governance workflows, and incident response. Pay-as-you-go from $0.10/call, or subscribe at $499/month for unlimited access across all 23 endpoints.
+
+**CTA button:** View Developer API →
+**URL:** https://api.relayshield.net/developers
+**Style:** Outline/secondary
 
 ---
 

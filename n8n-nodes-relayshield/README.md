@@ -11,6 +11,8 @@ An [n8n](https://n8n.io) community node for [RelayShield](https://relayshield.ne
 | **Infostealer Check** | `POST /v1/metered/infostealer` | $0.50/call |
 | **Domain Lookalike Scan** | `POST /v1/metered/domain` | $0.30/call |
 | **OAuth Watchlist Check** | `POST /v1/metered/oauth-watchlist` | $0.20/call |
+| **Secret Scan** | `POST /v1/metered/secret-scan` | $0.35/call |
+| **MCP Registry Risk** | `POST /v1/metered/mcp-registry-risk` | $0.35/call |
 | **Threat Intelligence — IOC Lookup** | `GET /v1/intel/telegram` | Subscription |
 | **Threat Intelligence — CVE Lookup** | `GET /v1/intel/cve` | Free |
 

@@ -97,6 +97,54 @@ VT_SECRET_KEY = "virustotal_api_key"
 TWILIO_MESSAGES_URL = (
     "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 )
+
+# Twilio Content API list-picker menus — tappable, paginated command shortcuts.
+# Created 2026-07-16 via one-off script (since removed); each page is a
+# twilio/list-picker resource with up to 10 items (9 commands + a "More
+# commands" continuation item on every page but the last), safe to use
+# in-session without WhatsApp template approval. See msg_help()'s tiers for
+# the equivalent text menu these mirror — every real command appears exactly
+# once across a tier's pages, most-compelling first.
+WA_MENU_PAGES = {
+    "personal": [
+        "HX0fb2dc6b89c983f04652c5de3338ce24",
+        "HX6815404ceba836b600585b6817e171e5",
+        "HXd6dc7aa697289648d1ec32e99c7b782d",
+    ],
+    "business": [
+        "HXfa344d207e09bb7e9f3cef50bee940e8",
+        "HX386456bf1049a30a26a233d70f02fe16",
+        "HXad7cb851c2ef257abf0fe83b3deddaf7",
+    ],
+    "domain": [
+        "HXe2317fe82a6d3df57659ab1a8c788ca3",
+        "HX7228cd884b89b11fd65249af672fc211",
+        "HX13642d8f8a1d2b795b6ebc51005f2a67",
+        "HXb02275518442fe8e0cd498718e7fe211",
+    ],
+}
+
+# Every command id used across all list-picker pages above — a tap sends
+# this back as ButtonPayload, and it should route exactly like the user
+# having typed the bare command.
+WA_MENU_COMMAND_IDS = frozenset({
+    "SCAN", "SWEEP", "BREACH", "SESSIONS", "OTP", "INFOSTEALER", "WASCAM",
+    "MSGSCAN", "SIM", "STATUS", "VERIFY", "ATTACH", "SMS", "EMAIL", "OAUTH",
+    "RESET", "REUSE", "MANAGER", "RESOLVED", "CALL", "PHONE", "VISHING",
+    "PLAN", "ADD", "REMOVE", "DOMAIN", "DOMAIN SCAN", "DOMAIN REGISTER",
+    "SETDOMAIN", "DELEGATE", "REVOKE", "HELPTEXT",
+})
+
+# First token of every recognized WhatsApp command — used to tell a fresh
+# command apart from a bare argument reply to a pending_command prompt.
+ALL_COMMAND_KEYWORDS = frozenset({
+    "BREACH", "SIM", "INFOSTEALER", "SWEEP", "SESSIONS", "OAUTH", "RESET",
+    "REUSE", "MANAGER", "RESOLVED", "SMS", "EMAIL", "MSGSCAN", "EMAILSCAN",
+    "SCAN", "ATTACH", "OTP", "WASCAM", "CALL", "VERIFY", "PHONE", "VISHING",
+    "PLAN", "LICENSE", "LICTYPE", "ADD", "REMOVE", "STATUS", "DOMAIN",
+    "SETDOMAIN", "DELEGATE", "REVOKE", "HELP", "HELPTEXT", "YES", "NO", "DONE", "ACK",
+    "ADDTECH", "MYTECH", "REMOVETECH", "LINKEDDEVICES", "SAFE",
+})
 GSB_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 VT_BASE_URL = "https://www.virustotal.com/api/v3"
 
@@ -133,6 +181,15 @@ TIER_SHIELD          = "business_shield"
 TIER_PRO             = "business_shield_pro"
 
 BUSINESS_TIERS = {TIER_STARTER, TIER_STARTER_DOMAIN, TIER_BASIC, TIER_SHIELD, TIER_PRO}
+
+PLAN_LABELS = {
+    TIER_PERSONAL:       "Personal Shield",
+    TIER_STARTER:        "Business Starter",
+    TIER_STARTER_DOMAIN: "Starter + Domain",
+    TIER_BASIC:          "Business Basic",
+    TIER_SHIELD:         "Business Shield",
+    TIER_PRO:            "Business Shield Pro",
+}
 
 # Max emails per subscriber (personal) or per employee (business)
 EMAIL_LIMITS = {
@@ -184,6 +241,13 @@ STATE_EMAIL_1 = "AWAITING_EMAIL_1"
 STATE_MORE_EMAILS = "AWAITING_MORE_EMAILS"
 STATE_PASSWORD_MANAGER = "AWAITING_PASSWORD_MANAGER"
 STATE_ACTIVE = "ACTIVE"
+
+# Commands that should always break out of mid-onboarding states and route normally
+ONBOARDING_ESCAPE_COMMANDS = {
+    "BREACH", "SIM", "PHONE", "HELP", "PLAN", "STATUS", "SWEEP", "OAUTH", "LINKEDDEVICES",
+    "SESSIONS", "RESET", "REUSE", "MANAGER", "SCAN", "INFOSTEALER", "DOMAIN",
+    "OTP", "WASCAM", "CALL", "VERIFY", "VISHING", "RESOLVED",
+}
 
 # Employee onboarding states
 STATE_EMP_EMAIL_1 = "AWAITING_EMPLOYEE_EMAIL_1"
@@ -318,6 +382,98 @@ def check_urls_safe_browsing(urls: list[str], api_key: str) -> dict:
         return {"matches": [], "error": str(e)}
 
 
+RDAP_URL = "https://rdap.org/domain/{domain}"
+
+
+def _rdap_registration_age_days(domain: str) -> int | None:
+    """Mirrors relayshield_telegram_webhook.py's / relayshield_agentic_api.py's
+    helper of the same name."""
+    url = RDAP_URL.format(domain=urllib.parse.quote(domain))
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        for event in data.get("events", []):
+            if event.get("eventAction") == "registration":
+                reg_str = event.get("eventDate", "")
+                if reg_str:
+                    reg_dt = datetime.fromisoformat(reg_str.replace("Z", "+00:00"))
+                    return (datetime.now(timezone.utc) - reg_dt).days
+    except Exception as exc:
+        logger.warning("RDAP lookup failed for %s: %s", domain, exc)
+    return None
+
+
+def _heuristic_url_check(url: str) -> dict:
+    """Fast, VT-independent red-flag check — unifies WhatsApp's SCAN/ATTACH
+    URL scan with the same three signals Telegram's /scan and
+    check_mcp_server_risk already use: RelayShield's own criminal IOC
+    corpus, Google Safe Browsing's real-time blocklist, and very recent
+    domain registration. Added 2026-07-16. Not as authoritative as a real
+    multi-engine VT verdict — callers should word a heuristic-only
+    "flagged" result more cautiously than a VT one.
+    Returns {"flagged": bool, "reasons": [str, ...]}."""
+    try:
+        domain = urllib.parse.urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+    except Exception:
+        domain = ""
+
+    reasons: list[str] = []
+    if not domain:
+        return {"flagged": False, "reasons": reasons}
+
+    try:
+        table = dynamodb.Table("relayshield_intel_iocs")
+        resp = table.query(
+            KeyConditionExpression=Key("ioc_value").eq(domain),
+            FilterExpression=Attr("ioc_type").is_in(["domain", "url"]),
+            Limit=5,
+        )
+        if resp.get("Items"):
+            reasons.append("this domain appears in RelayShield's criminal IOC corpus")
+    except Exception as exc:
+        logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
+
+    try:
+        gsb_api_key = get_gsb_api_key()
+        gsb_result = check_urls_safe_browsing([url], gsb_api_key)
+        if gsb_result.get("matches"):
+            reasons.append("Google Safe Browsing flags this domain")
+    except Exception as exc:
+        logger.warning("Heuristic GSB check failed for %s: %s", url, exc)
+
+    age_days = _rdap_registration_age_days(domain)
+    if age_days is not None and age_days < 30:
+        reasons.append(f"the domain was registered only {age_days} day{'s' if age_days != 1 else ''} ago")
+
+    return {"flagged": bool(reasons), "reasons": reasons}
+
+
+def build_verdict_response(stats: dict | None, heuristics: dict, target_label: str) -> str:
+    """Combines VT's own verdict with the heuristic layer — added 2026-07-16
+    to unify WhatsApp's scanning with Telegram's. VT malicious/suspicious
+    always wins (strongest signal). A VT clean or unavailable/timed-out
+    result never overrides a real heuristic hit (e.g. a domain actually on
+    Google's blocklist shouldn't get called clean just because VT hasn't
+    caught up, or timed out)."""
+    vt_flagged = bool(stats and (stats.get("malicious", 0) > 0 or stats.get("suspicious", 0) > 0))
+    if vt_flagged or not heuristics.get("flagged"):
+        return build_vt_verdict_response(stats, target_label)
+
+    reasons = "; ".join(heuristics["reasons"])
+    return (
+        f"⚠️ *SUSPICIOUS — quick checks flagged {target_label}*\n\n"
+        f"{reasons.capitalize()}.\n\n"
+        "→ Do not open the file or enter any information on the page\n"
+        "→ If this arrived in an unexpected email, report the email as phishing\n"
+        "→ Reply *SWEEP* if you already interacted with it\n\n"
+        "— RelayShield"
+    )
+
+
 def _analyze_sms_text(text: str) -> dict:
     """
     Pattern-based social engineering analysis of SMS message body.
@@ -439,6 +595,59 @@ def _analyze_sms_text(text: str) -> dict:
     if tech_hits:
         flags.append(f"tech support/refund scam pattern: '{tech_hits[0]}'")
 
+    # --- Personal/nostalgic bait (hijacked-contact or romance-scam lure) ---
+    # Distinct from brand impersonation / account pretense — this targets a
+    # stranger or hijacked contact posing as someone familiar, with a vague
+    # "look at these" pretext leading to a link. Added 2026-07-22 after a
+    # real example (spoofed display name + fresh-looking domain + "pics you
+    # might remember" + link) scored zero flags under every prior category.
+    BAIT_PHRASES = [
+        "pics you might remember", "photos you might remember",
+        "thought you'd want to see", "thought you would want to see",
+        "check this out", "look what i found", "you might remember",
+        "take a look at these", "remember this one", "remember these",
+    ]
+    bait_hits = [p for p in BAIT_PHRASES if p in t]
+    if bait_hits:
+        flags.append(
+            f"personal/nostalgic bait phrase ('{bait_hits[0]}') paired with a link — "
+            "a known pattern for hijacked-contact or romance-scam phishing, not just corporate impersonation"
+        )
+
+    # --- Sender display-name / email-domain mismatch (spoofed or hijacked sender) ---
+    # Only fires when the OCR'd/pasted text includes a "From:" header, which
+    # is the common case for a forwarded/screenshotted email. A personal-
+    # looking display name (e.g. "J. Gibbs") paired with an unrelated domain
+    # is the single strongest signal in the case that prompted this fix, and
+    # was invisible to every keyword category above.
+    sender_match = _re.search(
+        r'from:\s*"?([^"<\n]{2,60}?)"?\s*<([^<>\s]+@[^<>\s]+)>',
+        text, _re.IGNORECASE,
+    )
+    if sender_match:
+        display_name = sender_match.group(1).strip().strip("'\"")
+        sender_email = sender_match.group(2).strip().lower()
+        sender_domain = sender_email.split("@")[-1] if "@" in sender_email else ""
+        KNOWN_WEBMAIL = {
+            "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
+            "aol.com", "live.com", "msn.com", "me.com", "protonmail.com",
+        }
+        name_tokens = [tok.lower() for tok in _re.findall(r"[a-zA-Z]+", display_name) if len(tok) > 1]
+        is_brand_name = any(b.lower() in display_name.lower() for _, b in BRAND_PATTERNS)
+        name_in_domain = bool(name_tokens) and any(tok in sender_domain for tok in name_tokens)
+        if (
+            sender_domain
+            and name_tokens
+            and not is_brand_name
+            and sender_domain not in KNOWN_WEBMAIL
+            and not name_in_domain
+        ):
+            flags.append(
+                f"sender display name (\"{display_name}\") does not match the actual "
+                f"email address ({sender_email}) — a classic spoofed-sender or "
+                "hijacked-account pattern, especially if you know a real person by that name"
+            )
+
     # Severity rating
     n = len(flags)
     severity = "HIGH" if n >= 3 else "MEDIUM" if n >= 1 else "LOW"
@@ -449,6 +658,99 @@ def _analyze_sms_text(text: str) -> dict:
         "brands": brands,
         "severity": severity,
     }
+
+
+def _build_msgscan_response(source_text: str) -> str:
+    """
+    Shared response builder for MSGSCAN/EMAILSCAN — used by both the
+    text-paste and screenshot-OCR paths, which previously duplicated the
+    same incomplete logic independently.
+
+    Added 2026-07-22: prior versions of both call sites ran only
+    _analyze_sms_text() (keyword patterns) and never checked any URL found
+    in the message — a real gap, since a message with no matching keyword
+    but a fresh phishing link (the common case for a spoofed-sender "look
+    at these pics" lure) scored zero flags and returned a false-reassuring
+    "no automatic fraud signals detected." This now also runs every
+    extracted URL through _heuristic_url_check() (RelayShield's own IOC
+    corpus + Google Safe Browsing + domain-registration-age), the same
+    multi-signal check already used by SCAN/ATTACH — not just plain GSB,
+    since a same-day-registered throwaway domain is exactly the case GSB
+    alone is slowest to catch.
+    """
+    analysis = _analyze_sms_text(source_text)
+    flags = list(analysis["flags"])
+    severity = analysis["severity"]
+    callback_numbers = analysis["callback_numbers"]
+
+    urls = extract_urls(source_text)
+    flagged_url_reasons: list[tuple[str, list[str]]] = []
+    clean_urls: list[str] = []
+    for url in urls:
+        try:
+            result = _heuristic_url_check(url)
+        except Exception as exc:
+            logger.warning("MSGSCAN heuristic URL check failed url=%s: %s", url, exc)
+            result = {"flagged": False, "reasons": []}
+        if result["flagged"]:
+            flagged_url_reasons.append((url, result["reasons"]))
+        else:
+            clean_urls.append(url)
+
+    if flagged_url_reasons:
+        severity = "HIGH"
+
+    if not flags and not flagged_url_reasons:
+        no_link_note = ""
+        if clean_urls:
+            no_link_note = (
+                f"\nChecked {len(clean_urls)} link(s) in the message — none matched a known "
+                "threat, but a clean result never guarantees safety; new phishing domains can "
+                "take hours to appear in any threat database.\n"
+            )
+        return (
+            "📧 *Message Analysis*\n\n"
+            "✅ No automatic fraud signals detected in the message.\n"
+            f"{no_link_note}\n"
+            "This doesn't guarantee the message is safe — always verify unexpected "
+            "requests by going directly to the company's official website. And no "
+            "dollar signs doesn't mean it's genuine — a stranger building rapport "
+            "fast, or a familiar name paired with a link, is a manipulation pattern too. "
+            "If you don't know them, consider blocking."
+        )
+
+    icon = "🚨" if severity == "HIGH" else "⚠️"
+    flag_lines = "\n".join(f"🚩 {f}" for f in flags) if flags else ""
+    url_lines = "\n".join(
+        f"🚩 link {url} — {'; '.join(reasons)}" for url, reasons in flagged_url_reasons
+    )
+    combined_lines = "\n".join(x for x in (flag_lines, url_lines) if x)
+    total_signals = len(flags) + len(flagged_url_reasons)
+
+    callback_warn = ""
+    if callback_numbers:
+        callback_warn = (
+            f"\n*Do NOT call {', '.join(callback_numbers)}.* "
+            "Look up the real company number on their official website independently.\n"
+        )
+
+    link_warn = ""
+    if flagged_url_reasons:
+        link_warn = "\n*Do NOT click any links in this message* — one or more were flagged above.\n"
+
+    return (
+        f"📧 *Message Analysis — {severity} RISK* {icon}\n\n"
+        f"*{total_signals} fraud signal(s) detected:*\n{combined_lines}\n"
+        f"{callback_warn}"
+        f"{link_warn}\n"
+        "*Recommended actions:*\n"
+        "→ Do not call any number in this message\n"
+        "→ Do not click any links in this message\n"
+        "→ Verify independently at the company's official website — or, if it names a "
+        "specific person, contact them directly through a channel you already trust\n"
+        "→ Report to the FTC: reportfraud.ftc.gov\n"
+        "→ Mark as spam and delete"
+    )
 
 
 def build_sms_analysis_response(
@@ -601,7 +903,7 @@ def build_email_analysis_response(
             "No links were found to analyze. If the email contains an attachment, "
             "do not open it. To check an attachment safely:\n"
             "→ In Gmail: right-click the attachment → *Copy link address* → "
-            "paste that URL at virustotal.com (no download needed)\n"
+            "reply *ATTACH* followed by that link to scan it (no download needed)\n"
             "→ Do not download the file to open it — opening is when malware executes\n\n"
             + immediate_steps
             + "\nReply *SWEEP* to check your email accounts for backdoors, "
@@ -659,6 +961,53 @@ def build_email_analysis_response(
 # ---------------------------------------------------------------------------
 # VirusTotal scanning helpers
 # ---------------------------------------------------------------------------
+
+def _normalize_scan_url(raw: str) -> str | None:
+    """Accepts a shortform domain (e.g. "evil.com") as well as a full URL —
+    added 2026-07-16, users shouldn't have to type https:// themselves.
+    Prepends https:// when no scheme is given. Returns None if the input
+    doesn't look like a URL/domain at all (e.g. empty, or no dot)."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw.startswith(("http://", "https://")):
+        return raw
+    if "." not in raw or " " in raw:
+        return None
+    return f"https://{raw}"
+
+
+def check_existing_vt_report(url: str, api_key: str) -> dict | None:
+    """Fast existing-report lookup (GET /urls/{id}) — mirrors
+    relayshield_telegram_webhook.py's check_url_sync. Added 2026-07-16:
+    SCAN/ATTACH previously always did a fresh submit_url_to_vt +
+    poll_vt_analysis, ignoring any report VT already had cached — for a
+    URL VT has already scanned (the common case for anything actually
+    circulating as a scam/malware link), a NEW analysis job can take
+    longer than VT_URL_MAX_WAIT, timing out with stats=None even though
+    a real, complete verdict already existed. Checking the existing
+    report first (same fast GET Telegram already uses successfully)
+    avoids that unnecessary wait. Returns the same stats dict shape as
+    poll_vt_analysis (malicious/suspicious/harmless/undetected), or None
+    if VT has no existing report (404) or the lookup failed."""
+    url_id = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+    req = urllib.request.Request(
+        f"{VT_BASE_URL}/urls/{url_id}",
+        headers={"x-apikey": api_key},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            attrs = json.loads(resp.read()).get("data", {}).get("attributes", {})
+            return attrs.get("last_analysis_stats", {})
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            logger.warning("VT existing-report lookup HTTP %d for %s", exc.code, url)
+        return None
+    except Exception as exc:
+        logger.warning("VT existing-report lookup failed for %s: %s", url, exc)
+        return None
+
 
 def submit_url_to_vt(url: str, api_key: str) -> str | None:
     """
@@ -797,7 +1146,6 @@ def build_vt_verdict_response(stats: dict | None, target_label: str) -> str:
             "🔍 *RelayShield scan — result not available.*\n\n"
             f"Analysis of {target_label} took longer than expected or could not complete. "
             "Treat it as potentially unsafe until verified.\n\n"
-            "💡 You can also check manually at *virustotal.com* by pasting the URL or uploading the file directly.\n\n"
             "— RelayShield"
         )
 
@@ -1298,7 +1646,12 @@ def msg_domain_status(domains: list[str], domain_state: dict, tier: str) -> str:
         mx_set       = entry.get("mx_fingerprint") is not None
         expiry_alerted = entry.get("expiry_days_alerted")
 
-        lookalike_line = f"⚠️ {len(lookalikes)} lookalike(s) on record" if lookalikes else "✅ No lookalikes detected"
+        if lookalikes:
+            names = ", ".join(f"`{lk}`" for lk in lookalikes[:5])
+            more  = f" +{len(lookalikes) - 5} more" if len(lookalikes) > 5 else ""
+            lookalike_line = f"⚠️ {len(lookalikes)} lookalike domain{'s' if len(lookalikes) != 1 else ''} on record: {names}{more}"
+        else:
+            lookalike_line = "✅ No lookalike domains detected"
         mx_line        = "✅ Email configuration baseline recorded" if mx_set else "⏳ Email configuration baseline pending (next scan)"
         expiry_line    = (
             f"⚠️ Expiry alert sent ({expiry_alerted}d threshold)" if expiry_alerted else "✅ No expiry warning"
@@ -1402,6 +1755,29 @@ def get_employees_for_admin(admin_user_id: str) -> list[dict]:
     return response.get("Items", [])
 
 
+def get_user_record_by_id(user_id: str) -> dict | None:
+    """Fetch a user record directly by user_id."""
+    table = dynamodb.Table(USERS_TABLE)
+    resp  = table.get_item(Key={"user_id": user_id})
+    return resp.get("Item")
+
+
+def _wa_is_delegate(user: dict) -> bool:
+    """True if this user has delegated admin access granted by their team admin."""
+    admin_id = user.get("admin_user_id")
+    if not admin_id:
+        return False
+    admin = get_user_record_by_id(admin_id)
+    if not admin:
+        return False
+    return user.get("user_id", "") in admin.get("delegated_admin_ids", [])
+
+
+def _wa_effective_admin_id(user: dict) -> str:
+    """Return the user_id of the team admin for both admins and delegates."""
+    return user["user_id"] if user.get("is_team_admin") else user.get("admin_user_id", "")
+
+
 def deactivate_employee_emails(user_id: str) -> int:
     """
     Set active=False on all monitored emails for this employee.
@@ -1498,6 +1874,44 @@ ATTACK_CHAINS = [
             "a major OAuth provider. If you use SMS-based 2FA on apps connected to that "
             "provider, both authentication factors are potentially in attacker hands. "
             "Revoke all OAuth grants, lock your SIM, and sign out of all active sessions."
+        ),
+    },
+    # --- Crypto asset surface chains ---
+    {
+        "chain":    "sim_swap_wallet_flag",
+        "signals":  {"sim_swap", "wallet_risk_flag"},
+        "severity": "CRITICAL",
+        "label":    "SIM Swap + Flagged Wallet Counterparty",
+        "what": (
+            "Your phone number is being hijacked at the same time your wallet received a "
+            "transaction from an address flagged as malicious. This is the most common "
+            "crypto theft chain: SIM swap to bypass exchange 2FA, then drain the wallet. "
+            "Do not approve any pending transactions or sign anything until your SIM is locked."
+        ),
+    },
+    {
+        "chain":    "breach_wallet_flag",
+        "signals":  {"breach_alert", "wallet_risk_flag"},
+        "severity": "HIGH",
+        "label":    "Credential Breach + Flagged Wallet Counterparty",
+        "what": (
+            "Your credentials were found in a breach while your wallet has a flagged "
+            "transaction counterparty. Attackers who compromise exchange login credentials "
+            "alongside wallet-adjacent malicious addresses may be coordinating a combined "
+            "identity and asset drain. Change exchange passwords and revoke active sessions now."
+        ),
+    },
+    {
+        "chain":    "port_out_wallet_flag",
+        "signals":  {"port_out", "wallet_risk_flag"},
+        "severity": "CRITICAL",
+        "label":    "Port-Out Fraud + Flagged Wallet Counterparty",
+        "what": (
+            "Your phone number has been ported to another carrier while your wallet has a "
+            "flagged transaction counterparty. Port-out fraud gives attackers complete control "
+            "of your SMS-based 2FA. Combined with a malicious wallet contact, this is an "
+            "active coordinated crypto theft chain. Act immediately: call your carrier, "
+            "freeze all exchange accounts, and do not sign any wallet transactions."
         ),
     },
 ]
@@ -1605,6 +2019,43 @@ PREDICTIVE_WARNINGS = {
             "also recently breached. Together these create a high-risk window — attackers with "
             "your SIM can intercept 2FA codes for any OAuth-connected app.\n\n"
             "Lock your SIM immediately and reply *OAUTH* to audit all OAuth grants."
+        ),
+    },
+    # --- Crypto asset surface predictive warnings ---
+    "sim_swap_wallet_flag": {
+        "sim_swap": (
+            "⚠️ *Heads up:* SIM swap activity detected. If you hold crypto assets, this is "
+            "the primary method attackers use to bypass exchange 2FA before draining wallets. "
+            "Secure your carrier account immediately and review any pending wallet transactions."
+        ),
+        "wallet_risk_flag": (
+            "⚠️ *Heads up:* A malicious address interacted with your wallet. SIM swap is "
+            "the most common way attackers then access your exchange accounts to complete "
+            "an asset drain. Reply *PHONE* to lock your SIM as a precaution."
+        ),
+    },
+    "breach_wallet_flag": {
+        "breach_alert": (
+            "⚠️ *Heads up:* Your credentials are exposed in a breach. If those credentials "
+            "include exchange logins, attackers may coordinate an exchange account takeover "
+            "alongside any wallet-level activity. Change exchange passwords now."
+        ),
+        "wallet_risk_flag": (
+            "⚠️ *Heads up:* A flagged address interacted with your wallet. If your exchange "
+            "credentials are also exposed in any breach, this could be the start of a "
+            "coordinated identity + asset attack. Reply *SWEEP* to check your breach exposure."
+        ),
+    },
+    "port_out_wallet_flag": {
+        "port_out": (
+            "⚠️ *Heads up:* Port-out fraud detected on your number. This gives attackers "
+            "full control of SMS 2FA on any exchange account linked to this phone number. "
+            "Freeze all exchange accounts immediately and contact your new carrier to reverse the port."
+        ),
+        "wallet_risk_flag": (
+            "⚠️ *Heads up:* A malicious address interacted with your wallet. Port-out fraud "
+            "is sometimes used in the same attack window to bypass exchange 2FA. Check your "
+            "carrier account for any unauthorised porting activity."
         ),
     },
 }
@@ -1867,6 +2318,61 @@ def send_whatsapp(
         return False
 
 
+def wa_menu_tier_key(is_business: bool, is_domain_tier: bool) -> str:
+    if is_domain_tier:
+        return "domain"
+    if is_business:
+        return "business"
+    return "personal"
+
+
+def send_wa_menu(
+    to_number: str,
+    tier_key: str,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    page: int = 1,
+) -> bool:
+    """Send page `page` (1-indexed) of the tappable list-picker command menu
+    for the given tier ("personal" / "business" / "domain")."""
+    pages = WA_MENU_PAGES[tier_key]
+    content_sid = pages[min(page, len(pages)) - 1]
+
+    url = TWILIO_MESSAGES_URL.format(account_sid=account_sid)
+    credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+
+    payload = urllib.parse.urlencode({
+        "From": to_whatsapp_number(from_number),
+        "To": to_whatsapp_number(to_number),
+        "ContentSid": content_sid,
+        "ContentVariables": "{}",
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            logger.info("WA menu sent to %s — SID: %s", to_number, result.get("sid"))
+            return True
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        logger.error("Twilio menu HTTP %d to %s: %s", exc.code, to_number, error_body)
+        return False
+    except Exception as exc:
+        logger.exception("Twilio menu send failed to %s: %s", to_number, exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Response message builders
 # ---------------------------------------------------------------------------
@@ -1918,51 +2424,58 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
     commands = (
         "*🛡️ RelayShield — Commands*\n\n"
 
+        "*🔍 Identity Monitoring*\n"
+        "• *BREACH* — Check emails for data breach exposure\n"
+        "• *SIM* — Check SIM swap / carrier monitoring status\n"
+        "• *INFOSTEALER* <email> — Malware log check\n\n"
+
         "*🔐 Breach Response*\n"
-        "• *SWEEP* — Close email backdoors (forwarding rules, filters, sessions)\n"
-        "• *SESSIONS* — Revoke active sessions across Google, Microsoft, social media\n"
-        "• *OAUTH* — Audit third-party app access\n"
-        "• *RESET* — Strong password guide\n"
-        "• *REUSE* — Check cross-account password reuse\n"
-        "• *MANAGER* — Free password manager setup guide\n"
-        "• *RESOLVED* — Mark an incident as resolved\n\n"
+        "• *SWEEP* — Close email backdoors\n"
+        "• *SESSIONS* — Revoke active sessions\n"
+        "• *OAUTH* — Audit connected app access\n"
+        "• *RESET* — Password reset guide\n"
+        "• *REUSE* — Cross-account reuse check\n"
+        "• *MANAGER* — Password manager setup\n"
+        "• *RESOLVED* — Mark incident resolved\n\n"
 
         "*🚨 Threat Analysis*\n"
-        "• *SMS* <text> — Analyze a suspicious text message\n"
-        "• *EMAILSCAN* — Screenshot a suspicious email and send as attachment, or reply EMAILSCAN followed by the email text\n"
-        "• *EMAIL* <text> — Paste a forwarded email body to scan every link inside it\n"
-        "• *SCAN* <url> — Scan a suspicious link for malware or phishing\n"
-        "• *INFOSTEALER* <email> — Check if an email was stolen by infostealer malware\n"
-        "• *ATTACH* — Send a suspicious file as a WhatsApp attachment to scan for malware\n"
-        "• *OTP* — You received an unexpected verification code\n"
-        "• *WASCAM* — Suspicious WhatsApp, call, or browser scam\n"
-        "• *CALL* — You received a suspicious phone call\n"
-        "• *VERIFY* — Callback rule, OTP rule, safe word, wire transfer protocol\n"
-        "• *SAFE* — Confirm you have read a security warning\n\n"
+        "• *SMS* <text> — Analyse suspicious text\n"
+        "• *EMAIL* <text> — Scan links in an email\n"
+        "• *MSGSCAN* — Email & SMS fraud scan — paste text or send a screenshot\n"
+        "• *SCAN* <url> — Scan a link for phishing\n"
+        "• *ATTACH* — Send file attachment to scan\n"
+        "• *OTP* — Unexpected verification code\n"
+        "• *WASCAM* — Suspicious WA/call/browser scam\n"
+        "• *CALL* — Suspicious phone call guidance\n"
+        "• *VERIFY* — Verification protocol\n\n"
 
         "*📡 Phone Protection*\n"
-        "• *PHONE* — Carrier hardening against SIM swap and smishing\n"
-        "• *VISHING* — Voice phishing: how to recognise and respond to phone-based attacks\n"
+        "• *PHONE* — SIM swap + smishing hardening\n"
+        "• *VISHING* — Voice phishing guidance\n"
+
+        "\n*⚙️ Account*\n"
+        "• *PLAN* — View your license type and upgrade options\n"
     )
 
     if is_business and not is_employee and has_seats:
         commands += (
-            "\n*🏢 Team Management*\n"
-            "• *ADD +1XXXXXXXXXX Name* — Add a team member\n"
-            "• *REMOVE +1XXXXXXXXXX* — Remove a team member\n"
-            "• *STATUS* — View team onboarding and monitoring status\n"
+            "\n*🏢 Team*\n"
+            "• *ADD +1XXXXXXXXXX Name* — Add member\n"
+            "• *REMOVE +1XXXXXXXXXX* — Remove member\n"
+            "• *STATUS* — Team security overview\n"
         )
 
     if is_domain_tier:
         commands += (
-            "\n*🌐 Domain Security*\n"
-            "• *DOMAIN* — Your domain security status\n"
-            "• *DOMAIN SCAN* — Run a full scan (lookalikes, MX records, expiry)\n"
+            "\n*🌐 Domain*\n"
+            "• *DOMAIN* — Domain security status\n"
+            "• *DOMAIN SCAN* — Run full domain scan\n"
         )
         if not is_employee:
             commands += (
-                "• *DOMAIN REGISTER domain.com* — Add a domain to monitor\n"
-                "• *DOMAIN WARN lookalike.com* — Broadcast a phishing domain warning\n"
+                "• *DOMAIN REGISTER domain.com* — Add domain\n"
+                "• *SETDOMAIN company.com* — Set team domain\n"
+                "• *DELEGATE / REVOKE +1XXXXXXXXXX*\n"
             )
 
     commands += "\nReply any command to get started."
@@ -2019,15 +2532,15 @@ def msg_sweep_part1() -> str:
         "✅ *Steps 2, 4 and 5 work on any device — phone, tablet, or computer.*\n\n"
         "*Step 2 — Check recovery email and phone*\n"
         "Gmail: myaccount.google.com/security\n"
-        "Yahoo: account.yahoo.com/security\n"
+        "Yahoo: myaccount.yahoo.com/security\n"
         "→ Remove any recovery contact you do not recognise.\n\n"
         "*Step 4 — Review connected apps*\n"
         "Gmail: myaccount.google.com/permissions\n"
-        "Yahoo: account.yahoo.com/security/connected-apps\n"
+        "Yahoo: myaccount.yahoo.com/security/connected-apps\n"
         "→ Revoke anything unrecognised.\n\n"
         "*Step 5 — Check active sessions*\n"
         "Gmail: myaccount.google.com/device-activity\n"
-        "Yahoo: account.yahoo.com/security/recent-activity\n"
+        "Yahoo: myaccount.yahoo.com/activity\n"
         "→ Sign out of all unknown sessions.\n\n"
         "_(Steps 1 & 3 follow in the next message)_"
     )
@@ -2051,7 +2564,7 @@ def msg_sweep_part2() -> str:
         "⚠️ If you see an address you didn't add: disable it → remove → Save.\n\n"
         "*Step 3 — Inbox filters*\n"
         "Silent rules can hide breach warnings and delete bank alerts.\n"
-        "Gmail: Settings → Filters and Blocked Addresses\n"
+        "Gmail: Settings → See all settings → Filters and Blocked Addresses\n"
         "Outlook: Settings → Rules → delete unknown rules.\n"
         "→ Delete any filter you did not create.\n\n"
         "✅ *Sweep complete. All 5 checks done.*\n\n"
@@ -2150,21 +2663,16 @@ def msg_manager() -> str:
     )
 
 
-def msg_phone_hardening(subscription_tier: str) -> str:
+def msg_phone_hardening_part1(subscription_tier: str) -> str:
+    """Carrier hardening steps — part 1 of 2 (keeps under Twilio 1600-char limit)."""
     base = (
         "📱 *Phone Number Protection — Carrier Hardening Steps*\n\n"
-        "Your phone number is a target for two related attacks:\n"
-        "→ *SIM swap* — attacker convinces your carrier to move your number to their SIM, "
-        "intercepting every SMS code you receive\n"
-        "→ *Smishing* — fraudulent texts impersonate your bank, carrier, or delivery services "
-        "to steal credentials or carrier PINs. Attackers often use smishing to gather the "
-        "information needed to execute a SIM swap.\n\n"
-        "These steps lock your carrier account against both attacks.\n\n"
-        "⚠️ *Your carrier will never text or call asking for your PIN. "
-        "Any message asking for it is an attack.*\n\n"
+        "Your phone number is a target for two attacks:\n"
+        "→ *SIM swap* — attacker moves your number to their SIM, intercepting every SMS code\n"
+        "→ *Smishing* — fraudulent texts gather your carrier PIN to enable a SIM swap\n\n"
+        "⚠️ *Your carrier will never text or call asking for your PIN.*\n\n"
     )
     if subscription_tier in (TIER_SHIELD, TIER_PRO):
-        # Shield and Pro: full carrier-specific steps including eSIM audit guidance
         carrier_steps = (
             "*AT&T*\n"
             "→ Enable Wireless Account Lock: att.com/accountlock\n"
@@ -2179,11 +2687,10 @@ def msg_phone_hardening(subscription_tier: str) -> str:
             "→ Set a PIN/passcode on your account\n"
             "→ Review eSIM: My Verizon app → Devices → Manage eSIM\n\n"
             "*All carriers*\n"
-            "→ Never give out your account PIN on a phone call — carriers will never ask\n"
-            "→ Set a unique carrier PIN not used anywhere else\n"
+            "→ Never give out your account PIN on a call — carriers will never ask\n"
+            "→ Set a unique carrier PIN not used anywhere else"
         )
-    elif subscription_tier in (TIER_STARTER, TIER_BASIC):
-        # Starter and Basic: carrier-specific lock steps, no eSIM audit guidance
+    elif subscription_tier in (TIER_STARTER, TIER_STARTER_DOMAIN, TIER_BASIC):
         carrier_steps = (
             "*AT&T*\n"
             "→ Enable Wireless Account Lock: att.com/accountlock\n"
@@ -2195,24 +2702,36 @@ def msg_phone_hardening(subscription_tier: str) -> str:
             "→ Enable Number Lock: verizon.com/myverizon → Account → Number Lock\n"
             "→ Set a PIN/passcode on your account\n\n"
             "*All carriers*\n"
-            "→ Never give out your account PIN on a phone call — carriers will never ask\n"
+            "→ Never give out your account PIN on a call — carriers will never ask\n"
             "→ Set a unique carrier PIN not used anywhere else\n\n"
-            "💡 Business Shield plans include eSIM profile audit guidance "
-            "to detect silent backdoor SIM cloning."
+            "💡 Business Shield includes eSIM profile audit guidance."
         )
     else:
-        # Personal: concise guidance with upsell note
         carrier_steps = (
-            "*Lock your carrier account:*\n"
-            "• AT&T: att.com/accountlock\n"
-            "• T-Mobile: Account → Profile → SIM Protection\n"
+            "• AT&T: att.com/accountlock — enable Wireless Account Lock\n"
+            "• T-Mobile: account.t-mobile.com → Profile → SIM Protection\n"
             "• Verizon: verizon.com/myverizon → Number Lock\n\n"
-            "→ Set a unique PIN/passcode on your carrier account\n"
-            "→ Never share your account PIN — carriers will never call to ask for it\n\n"
-            "💡 Business Shield plans include full carrier hardening walkthroughs "
-            "and eSIM profile audit guidance."
+            "→ Set a unique PIN on your carrier account\n"
+            "→ Never share it — carriers will never call to ask for it\n\n"
+            "💡 Business plans include full carrier walkthroughs and eSIM audit guidance."
         )
-    return base + carrier_steps + "\n\nReply *HELP* to see all available commands."
+    return base + carrier_steps
+
+
+def msg_phone_hardening_part2() -> str:
+    """eSIM myth explainer — part 2 of 2."""
+    return (
+        "⚠️ *eSIM myth: \"eSIM protects against SIM swap\"*\n\n"
+        "It doesn't. eSIM changes _how_ the attack happens — not whether it can.\n\n"
+        "Physical SIM: attacker walks into a carrier store and social-engineers a rep.\n"
+        "eSIM: attacker calls the carrier and does the same thing remotely — arguably easier.\n\n"
+        "Some carriers have loosened eSIM verification to reduce friction. That helps attackers.\n\n"
+        "eSIM prevents physical card theft — real but rare. SIM swap is almost always social "
+        "engineering, and eSIM doesn't touch that.\n\n"
+        "✅ *Same defences protect both physical SIM and eSIM:*\n"
+        "carrier PIN + number lock + authenticator app 2FA.\n\n"
+        "Reply *HELP* to see all commands."
+    )
 
 
 def msg_employee_welcome(admin_tier: str) -> str:
@@ -2533,6 +3052,18 @@ def msg_unknown_command() -> str:
 # Onboarding handlers
 # ---------------------------------------------------------------------------
 
+def _escape_onboarding_to_active(user: dict, twilio_creds: tuple) -> None:
+    """Advance a stuck onboarding account to ACTIVE so the next command routes normally."""
+    account_sid, auth_token, from_number = twilio_creds
+    to_number = get_user_whatsapp_number(user)
+    update_user(user["user_id"], {"onboarding_state": STATE_ACTIVE})
+    send_whatsapp(
+        to_number,
+        "✅ Setup complete. Reply *HELP* to see all available commands.",
+        account_sid, auth_token, from_number,
+    )
+
+
 def handle_awaiting_email_1(
     user: dict,
     message_body: str,
@@ -2544,7 +3075,12 @@ def handle_awaiting_email_1(
     tier = user.get("subscription_tier", TIER_PERSONAL)
     email_limit = EMAIL_LIMITS.get(tier, 3)
     to_number = get_user_whatsapp_number(user)
-    email = message_body.strip().lower()
+    body = message_body.strip()
+    email = body.lower()
+
+    if body.upper() in ONBOARDING_ESCAPE_COMMANDS:
+        _escape_onboarding_to_active(user, twilio_creds)
+        return "escape_to_active"
 
     if not is_valid_email(email):
         reply = (
@@ -2602,6 +3138,10 @@ def handle_awaiting_more_emails(
         send_whatsapp(to_number, msg_ask_password_manager(), account_sid, auth_token, from_number)
         return "done_collecting_emails"
 
+    if body.upper() in ONBOARDING_ESCAPE_COMMANDS:
+        _escape_onboarding_to_active(user, twilio_creds)
+        return "escape_to_active"
+
     email = body.lower()
     if not is_valid_email(email):
         reply = (
@@ -2657,6 +3197,10 @@ def handle_awaiting_password_manager(
     tier = user.get("subscription_tier", TIER_PERSONAL)
     to_number = get_user_whatsapp_number(user)
     body = message_body.strip().upper()
+
+    if body in ONBOARDING_ESCAPE_COMMANDS:
+        _escape_onboarding_to_active(user, twilio_creds)
+        return "escape_to_active"
 
     if body not in ("YES", "NO"):
         send_whatsapp(
@@ -2849,57 +3393,49 @@ def handle_active_message(
         logger.info("Delivered pending Claude analysis to user_id=%s.", user_id)
         return "pending_analysis_delivered"
 
-    # --- EMAILSCAN image — Textract OCR + fraud pattern analysis ---
-    # Triggered when user sends a screenshot of a suspicious email with caption EMAILSCAN.
-    # Downloads the image, extracts text via AWS Textract, then runs _analyze_sms_text().
-    if num_media > 0 and body == "EMAILSCAN":
+    # --- Resolve a pending argument reply ---
+    # Tapping SCAN/ATTACH/SMS/EMAIL/MSGSCAN/INFOSTEALER from the list-picker menu
+    # (or typing the bare word) sets pending_command and prompts for the argument.
+    # This lets the very next message be just the URL/email/text, without the
+    # user re-typing the command name. One-shot: always cleared after this
+    # single message, whether or not it ends up being used as an argument.
+    pending_command = user.get("pending_command", "")
+    if pending_command:
+        dynamodb.Table(USERS_TABLE).update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="REMOVE pending_command",
+        )
+        first_token = body.split()[0] if body else ""
+        if num_media == 0 and body and first_token not in ALL_COMMAND_KEYWORDS:
+            message_body = f"{pending_command} {message_body.strip()}"
+            body = message_body.strip().upper()
+        elif num_media > 0 and pending_command in ("MSGSCAN", "EMAILSCAN") and not body:
+            message_body = pending_command
+            body = pending_command
+
+    # --- MSGSCAN image — Textract OCR + fraud pattern analysis ---
+    # Triggered when user sends a screenshot of a suspicious email or SMS with caption MSGSCAN.
+    # Downloads the image, extracts text via AWS Textract, then runs it through
+    # _build_msgscan_response() — pattern analysis AND URL checking (see that
+    # function's docstring for why this changed 2026-07-22).
+    if num_media > 0 and body in ("MSGSCAN", "EMAILSCAN"):
         media_url = media_info.get("media_url", "")
         media_content_type = media_info.get("media_content_type", "")
         if media_content_type.startswith("image/"):
             send_whatsapp(
                 to_number,
-                "📧 *Scanning your email screenshot...* This may take a few seconds.",
+                "🔍 *Scanning your message screenshot...* This may take a few seconds.",
                 account_sid, auth_token, from_number,
             )
             file_bytes = download_twilio_media(media_url, account_sid, auth_token)
             extracted_text = run_textract_ocr(file_bytes) if file_bytes else None
             if extracted_text:
-                analysis = _analyze_sms_text(extracted_text)
-                flags = analysis["flags"]
-                severity = analysis["severity"]
-                callback_numbers = analysis["callback_numbers"]
-                if flags:
-                    icon = "🚨" if severity == "HIGH" else "⚠️"
-                    flag_lines = "\n".join(f"🚩 {f}" for f in flags)
-                    callback_warn = ""
-                    if callback_numbers:
-                        callback_warn = (
-                            f"\n*Do NOT call {', '.join(callback_numbers)}.* "
-                            "Look up the real company number on their official website independently.\n"
-                        )
-                    response = (
-                        f"📧 *Email Analysis — {severity} RISK* {icon}\n\n"
-                        f"*{len(flags)} fraud signal(s) detected:*\n{flag_lines}\n"
-                        f"{callback_warn}\n"
-                        "*Recommended actions:*\n"
-                        "→ Do not call any number in this email\n"
-                        "→ Do not click any links — reply *EMAIL* followed by any link to scan it\n"
-                        "→ Verify independently at the company's official website\n"
-                        "→ Report to the FTC: reportfraud.ftc.gov\n"
-                        "→ Mark as spam and delete"
-                    )
-                else:
-                    response = (
-                        "📧 *Email Analysis*\n\n"
-                        "✅ No automatic fraud signals detected in the screenshot.\n\n"
-                        "This doesn't guarantee the email is safe — always verify unexpected "
-                        "requests by going directly to the company's official website."
-                    )
+                response = _build_msgscan_response(extracted_text)
             else:
                 response = (
                     "⚠️ *Could not read text from that image.*\n\n"
                     "Try taking a clearer screenshot, or paste the email text directly:\n"
-                    "*EMAILSCAN* <paste email text here>"
+                    "*MSGSCAN* <paste email or SMS text here>"
                 )
             send_whatsapp(to_number, response, account_sid, auth_token, from_number)
             return "emailscan_image_complete"
@@ -2939,6 +3475,29 @@ def handle_active_message(
         return "vt_file_scanned"
 
     # --- SWEEP ---
+    if body == "LINKEDDEVICES":
+        msg = (
+            "🔗 *Linked Device Audit*\n\n"
+            "Attackers use fake QR codes to silently link their device to your messaging accounts — "
+            "reading every message without you knowing.\n\n"
+            "*TELEGRAM*\n"
+            "Settings → Devices → remove unrecognised sessions\n"
+            "→ Tap 'Terminate All Other Sessions' if unsure\n\n"
+            "*WHATSAPP*\n"
+            "Settings → Linked Devices → log out unfamiliar entries\n"
+            "⚠️ WhatsApp sends NO alert when a new device links\n\n"
+            "*SIGNAL*\n"
+            "Settings → Account → Linked Devices\n"
+            "→ Tap minus to unlink unrecognised devices\n\n"
+            "*KEY RULE:* Never scan a QR code from a message link. "
+            "Telegram, WhatsApp and Signal never send QR codes via message.\n\n"
+            "If you found an unrecognised device — reply *BREACH* immediately.\n\n"
+            "📢 t.me/RelayShield\n"
+            "🛡️ RelayShield"
+        )
+        send_whatsapp(to_number, msg, account_sid, auth_token, from_number)
+        return "linkeddevices_sent"
+
     if body == "SWEEP":
         send_whatsapp(to_number, msg_sweep_part1(), account_sid, auth_token, from_number)
         time.sleep(1)
@@ -2996,9 +3555,9 @@ def handle_active_message(
 
     # --- PHONE ---
     if body == "PHONE":
-        send_whatsapp(
-            to_number, msg_phone_hardening(tier), account_sid, auth_token, from_number
-        )
+        send_whatsapp(to_number, msg_phone_hardening_part1(tier), account_sid, auth_token, from_number)
+        time.sleep(1)
+        send_whatsapp(to_number, msg_phone_hardening_part2(), account_sid, auth_token, from_number)
         return "phone_hardening_sent"
 
     # --- SESSIONS (active session revocation walkthrough) ---
@@ -3083,6 +3642,7 @@ def handle_active_message(
             "RelayShield will check any links for malware and phishing.",
             account_sid, auth_token, from_number,
         )
+        update_user(user_id, {"pending_command": "SMS"})
         return "sms_prompt_sent"
 
     # --- SMS (user forwards a suspicious text for analysis) ---
@@ -3130,6 +3690,7 @@ def handle_active_message(
             "⚠️ Do not open any attachments in the email before sending.",
             account_sid, auth_token, from_number,
         )
+        update_user(user_id, {"pending_command": "EMAIL"})
         return "email_prompt_sent"
 
     # --- EMAIL (user pastes suspicious email body for analysis) ---
@@ -3160,56 +3721,27 @@ def handle_active_message(
         )
         return "suspicious_email_analyzed"
 
-    # --- EMAILSCAN — paste email body or send screenshot for fraud pattern analysis ---
-    if body == "EMAILSCAN":
+    # --- MSGSCAN — paste email/SMS body or send screenshot for fraud pattern analysis ---
+    if body in ("MSGSCAN", "EMAILSCAN"):
         send_whatsapp(
             to_number,
-            "📧 *Email Fraud Scanner*\n\n"
+            "🔍 *Email & SMS Fraud Scanner*\n\n"
             "*Option 1 — Screenshot:*\n"
-            "Take a screenshot of the suspicious email, then send it as an attachment "
-            "with *EMAILSCAN* as the caption.\n\n"
+            "Take a screenshot of the suspicious email or SMS, then send it as an "
+            "attachment with *MSGSCAN* as the caption.\n\n"
             "*Option 2 — Paste text:*\n"
-            "EMAILSCAN Dear customer, your Geek Squad renewal of $649.99...\n\n"
+            "MSGSCAN Dear customer, your Geek Squad renewal of $649.99...\n\n"
             "I'll scan for brand impersonation, fake order IDs, callback numbers, "
             "urgency tactics, and refund/renewal scam patterns.",
             account_sid, auth_token, from_number,
         )
-        return "emailscan_prompt_sent"
+        update_user(user_id, {"pending_command": "MSGSCAN"})
+        return "msgscan_prompt_sent"
 
-    if body.startswith("EMAILSCAN "):
-        email_body_text = message_body.strip()[10:].strip()
-        analysis = _analyze_sms_text(email_body_text)
-        flags = analysis["flags"]
-        severity = analysis["severity"]
-        callback_numbers = analysis["callback_numbers"]
-
-        if flags:
-            icon = "🚨" if severity == "HIGH" else "⚠️"
-            flag_lines = "\n".join(f"🚩 {f}" for f in flags)
-            callback_warn = ""
-            if callback_numbers:
-                callback_warn = (
-                    f"\n*Do NOT call {', '.join(callback_numbers)}.* "
-                    "Look up the real company number on their official website independently.\n"
-                )
-            response = (
-                f"📧 *Email Analysis — {severity} RISK* {icon}\n\n"
-                f"*{len(flags)} fraud signal(s) detected:*\n{flag_lines}\n"
-                f"{callback_warn}\n"
-                "*Recommended actions:*\n"
-                "→ Do not call any number in this email\n"
-                "→ Do not click any links — reply *EMAIL* followed by any link to scan it\n"
-                "→ Verify independently at the company's official website\n"
-                "→ Report to the FTC: reportfraud.ftc.gov\n"
-                "→ Mark as spam and delete"
-            )
-        else:
-            response = (
-                "📧 *Email Analysis*\n\n"
-                "✅ No automatic fraud signals detected in the text.\n\n"
-                "This doesn't guarantee the email is safe — always verify unexpected "
-                "requests by going directly to the company's official website."
-            )
+    if body.startswith("MSGSCAN ") or body.startswith("EMAILSCAN "):
+        prefix_len = 8 if body.startswith("MSGSCAN ") else 10
+        email_body_text = message_body.strip()[prefix_len:].strip()
+        response = _build_msgscan_response(email_body_text)
         send_whatsapp(to_number, response, account_sid, auth_token, from_number)
         return "emailscan_complete"
 
@@ -3219,21 +3751,22 @@ def handle_active_message(
         send_whatsapp(
             to_number,
             "🔍 *Link Scanner*\n\n"
-            "Reply *SCAN* followed by the URL to check it for malware or phishing.\n\n"
-            "Example: *SCAN https://suspicious-link.com*\n\n"
+            "Reply with the URL you want to check for malware or phishing — no need to type *SCAN* again.\n\n"
+            "Example: *suspicious-link.com* or *google.com* — just the domain works, no *https://* needed.\n\n"
             "💡 *To scan a file attachment*, use *ATTACH* and send the file directly.",
             account_sid, auth_token, from_number,
         )
+        update_user(user_id, {"pending_command": "SCAN"})
         return "scan_prompt_sent"
 
     if body.startswith("SCAN "):
-        scan_url = message_body.strip()[5:].strip()
+        scan_url = _normalize_scan_url(message_body.strip()[5:].strip())
 
-        if not scan_url.startswith(("http://", "https://")):
+        if not scan_url:
             send_whatsapp(
                 to_number,
-                "Please include the full URL starting with https://\n\n"
-                "Example: *SCAN https://suspicious-link.com*",
+                "That doesn't look like a URL.\n\n"
+                "Example: *SCAN suspicious-link.com* or *SCAN https://suspicious-link.com*",
                 account_sid, auth_token, from_number,
             )
             return "scan_invalid_url"
@@ -3246,15 +3779,18 @@ def handle_active_message(
 
         try:
             vt_api_key = get_vt_api_key()
-            analysis_id = submit_url_to_vt(scan_url, vt_api_key)
-            stats = poll_vt_analysis(analysis_id, vt_api_key, max_wait=VT_URL_MAX_WAIT) if analysis_id else None
+            stats = check_existing_vt_report(scan_url, vt_api_key)
+            if stats is None:
+                analysis_id = submit_url_to_vt(scan_url, vt_api_key)
+                stats = poll_vt_analysis(analysis_id, vt_api_key, max_wait=VT_URL_MAX_WAIT) if analysis_id else None
         except Exception as exc:
             logger.error("VT URL scan failed for %s: %s", scan_url, exc)
             stats = None
+        heuristics = _heuristic_url_check(scan_url)
 
-        verdict = build_vt_verdict_response(stats, "that URL")
+        verdict = build_verdict_response(stats, heuristics, "that URL")
         send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)
-        logger.info("VT URL scan complete — url=%s stats=%s", scan_url, stats)
+        logger.info("VT URL scan complete — url=%s stats=%s heuristics=%s", scan_url, stats, heuristics)
         return "vt_url_scanned"
 
     if body == "ATTACH":
@@ -3262,23 +3798,23 @@ def handle_active_message(
             to_number,
             "📎 *File Scanner*\n\n"
             "Send the suspicious file directly as a WhatsApp attachment and RelayShield will scan it for malware.\n\n"
-            "💡 *To scan a link instead*, use:\n"
-            "*SCAN https://example.com*",
+            "💡 *To scan a link instead*, just reply with the URL — e.g. *suspicious-link.com* or *google.com*.",
             account_sid, auth_token, from_number,
         )
+        update_user(user_id, {"pending_command": "ATTACH"})
         return "attach_prompt_sent"
 
     # --- ATTACH <url> — VirusTotal URL scan ---
     # User pastes a direct link to a file or a suspicious URL.
     # Synchronous with VT_URL_MAX_WAIT polling window.
     if body.startswith("ATTACH "):
-        attach_url = message_body.strip()[7:].strip()
+        attach_url = _normalize_scan_url(message_body.strip()[7:].strip())
 
-        if not attach_url.startswith(("http://", "https://")):
+        if not attach_url:
             send_whatsapp(
                 to_number,
-                "Please include the full URL starting with https://\n\n"
-                "Example: *ATTACH https://example.com/invoice.pdf*",
+                "That doesn't look like a URL.\n\n"
+                "Example: *ATTACH example.com/invoice.pdf* or *ATTACH https://example.com/invoice.pdf*",
                 account_sid, auth_token, from_number,
             )
             return "attach_invalid_url"
@@ -3291,13 +3827,16 @@ def handle_active_message(
 
         try:
             vt_api_key = get_vt_api_key()
-            analysis_id = submit_url_to_vt(attach_url, vt_api_key)
-            stats = poll_vt_analysis(analysis_id, vt_api_key, max_wait=VT_URL_MAX_WAIT) if analysis_id else None
+            stats = check_existing_vt_report(attach_url, vt_api_key)
+            if stats is None:
+                analysis_id = submit_url_to_vt(attach_url, vt_api_key)
+                stats = poll_vt_analysis(analysis_id, vt_api_key, max_wait=VT_URL_MAX_WAIT) if analysis_id else None
         except Exception as exc:
             logger.error("VT URL scan failed for %s: %s", attach_url, exc)
             stats = None
+        heuristics = _heuristic_url_check(attach_url)
 
-        verdict = build_vt_verdict_response(stats, "that URL")
+        verdict = build_verdict_response(stats, heuristics, "that URL")
         send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)
         logger.info(
             "VT URL scan complete — url=%s stats=%s",
@@ -3315,9 +3854,10 @@ def handle_active_message(
             "(bypassing 2FA), credit card autofill, and crypto wallet keys.\n\n"
             "Check your own email to see if your device was compromised, or check a "
             "suspicious sender's email to see if their account may have been hijacked.\n\n"
-            "Reply: *INFOSTEALER your@email.com*",
+            "Just reply with the email address — no need to type *INFOSTEALER* again.",
             account_sid, auth_token, from_number,
         )
+        update_user(user_id, {"pending_command": "INFOSTEALER"})
         return "stealer_prompt_sent"
 
     if body.startswith("INFOSTEALER "):
@@ -3425,15 +3965,329 @@ def handle_active_message(
         logger.info("stealer-check hit — email=%s count=%d", stealer_email, count)
         return "stealer_found"
 
+    # --- BREACH — monitored email status + live HIBP check ---
+    if body == "BREACH":
+        me_table = dynamodb.Table(MONITORED_EMAILS_TABLE)
+        try:
+            response = me_table.scan(
+                FilterExpression=Attr("user_id").eq(user.get("user_id")),
+            )
+            enrolled = response.get("Items", [])
+        except Exception:
+            enrolled = []
+
+        email_limit = EMAIL_LIMITS.get(tier, 3)
+        if not enrolled:
+            per_label = "per member" if tier in SEAT_LIMITS else "per account"
+            send_whatsapp(
+                to_number,
+                "🔍 *Breach Monitoring — No emails enrolled*\n\n"
+                f"You can monitor up to {email_limit} email addresses {per_label}. "
+                "You'll receive an alert the moment any enrolled address appears in a breach.\n\n"
+                "Reply: *ADD EMAIL your@email.com*",
+                account_sid, auth_token, from_number,
+            )
+            return "breach_status_sent"
+
+        # Send a "checking…" acknowledgement first — HIBP calls can take a few seconds
+        count = len(enrolled)
+        remaining = max(0, email_limit - count)
+        send_whatsapp(
+            to_number,
+            f"🔍 Checking {count} enrolled address{'es' if count != 1 else ''} for breach exposure…",
+            account_sid, auth_token, from_number,
+        )
+
+        # Decrypt each email and run HIBP
+        try:
+            hibp_api_key = get_secret_json("relayshield/hibp_api_key", "HIBP_API_KEY")
+        except Exception:
+            hibp_api_key = None
+
+        lines = [f"🔍 *Breach Monitoring — {count} email{'s' if count != 1 else ''} enrolled*\n"]
+        any_breaches = False
+
+        for item in enrolled:
+            active = item.get("active", True)
+            status_icon = "✅" if active else "⏸"
+            enrolled_date = item.get("created_at", "")[:10]
+
+            # Decrypt to run HIBP check
+            try:
+                email_plain = decrypt_email(item["email_encrypted"])
+            except Exception:
+                email_plain = None
+
+            if email_plain and hibp_api_key and active:
+                try:
+                    encoded = urllib.parse.quote(email_plain, safe="")
+                    hibp_url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{encoded}?truncateResponse=false"
+                    req = urllib.request.Request(hibp_url, headers={
+                        "hibp-api-key": hibp_api_key,
+                        "user-agent": "RelayShield/1.0",
+                    })
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        breaches = json.loads(resp.read())
+                except urllib.error.HTTPError as exc:
+                    breaches = [] if exc.code == 404 else None
+                except Exception:
+                    breaches = None
+
+                # Mask email for display: j***@gmail.com
+                at_idx = email_plain.index("@")
+                masked = email_plain[0] + "***" + email_plain[at_idx:]
+
+                if breaches is None:
+                    lines.append(f"{status_icon} {masked} — ⚠️ check unavailable (since {enrolled_date})")
+                elif not breaches:
+                    lines.append(f"{status_icon} {masked} — ✅ No breaches found (since {enrolled_date})")
+                else:
+                    any_breaches = True
+                    bcount = len(breaches)
+                    recent = sorted(breaches, key=lambda b: b.get("BreachDate", ""), reverse=True)[:3]
+                    breach_names = ", ".join(b["Name"] for b in recent)
+                    if bcount > 3:
+                        breach_names += f" +{bcount - 3} more"
+                    lines.append(f"⚠️ {masked} — found in *{bcount} breach{'es' if bcount != 1 else ''}*: {breach_names} (since {enrolled_date})")
+            else:
+                lines.append(f"{status_icon} (enrolled {enrolled_date})")
+
+        lines.append("\nAlerts fire automatically when any address appears in a new breach.")
+        if any_breaches:
+            lines.append("\n*Recommended:* Reply *SWEEP* to close email backdoors, *REUSE* to check password reuse.")
+        if remaining > 0:
+            lines.append(f"\nReply *ADD EMAIL your@email.com* to add {remaining} more address{'es' if remaining != 1 else ''}.")
+        lines.append("🛡️ RelayShield")
+        send_whatsapp(to_number, "\n".join(lines), account_sid, auth_token, from_number)
+        return "breach_status_sent"
+
+    # --- SIM — live Twilio Lookup v2 carrier check ---
+    if body == "SIM":
+        send_whatsapp(
+            to_number,
+            "📡 Checking your number at the carrier level…",
+            account_sid, auth_token, from_number,
+        )
+
+        # Twilio Lookup v2 — reuse the same credentials already loaded
+        phone_e164 = to_number  # WA from-number is already E.164
+        lookup_url = (
+            f"https://lookups.twilio.com/v2/PhoneNumbers/{urllib.parse.quote(phone_e164, safe='')}?Fields=sim_swap"
+        )
+        import base64
+        credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+        lookup_req = urllib.request.Request(
+            lookup_url,
+            headers={"Authorization": f"Basic {credentials}", "Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(lookup_req, timeout=15) as lookup_resp:
+                lookup_body   = json.loads(lookup_resp.read())
+                sim_swap_obj  = lookup_body.get("sim_swap") or {}
+                last_swap     = sim_swap_obj.get("last_sim_swap") or {}
+                swapped       = bool(last_swap.get("swapped_in_period", False))
+                swap_ts       = last_swap.get("last_sim_swap_date", "")
+                carrier_name  = sim_swap_obj.get("carrier_name", "your carrier")
+            lookup_ok = True
+        except Exception:
+            lookup_ok = False
+            swapped = False
+            carrier_name = ""
+
+        if not lookup_ok:
+            send_whatsapp(
+                to_number,
+                "📡 *SIM Swap Monitoring — Active*\n\n"
+                "Carrier check temporarily unavailable — ongoing monitoring is active and will alert you immediately if a swap is detected.\n\n"
+                "Reply *PHONE* for SIM lock hardening steps.\n\n🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
+        elif swapped:
+            swap_time = f" at {swap_ts[:16].replace('T', ' ')} UTC" if swap_ts else ""
+            send_whatsapp(
+                to_number,
+                f"🚨 *SIM Swap Detected — IMMEDIATE ACTION REQUIRED*\n\n"
+                f"A SIM swap or port event was recorded on your number{swap_time} via {carrier_name}.\n\n"
+                "*Do this now:*\n"
+                f"→ Call {carrier_name} fraud line and report an unauthorized SIM swap\n"
+                "→ Ask them to reverse the swap and place a SIM lock / port freeze on your account\n"
+                "→ Change passwords on your bank, email, and any account that uses SMS 2FA\n\n"
+                "Reply *PHONE* for your carrier's exact fraud contact numbers.\n\n🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
+        else:
+            carrier_display = f" on {carrier_name}" if carrier_name else ""
+            send_whatsapp(
+                to_number,
+                f"✅ *SIM Swap Monitoring — No swap detected*\n\n"
+                f"Your number{carrier_display} shows no SIM swap or port activity in the last 24 hours.\n\n"
+                "RelayShield monitors your number continuously — you'll receive an alert the moment any carrier-level change is detected, before the attacker can intercept your 2FA codes.\n\n"
+                "Reply *PHONE* for SIM lock hardening steps to make your number harder to swap.\n\n🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
+        return "sim_status_sent"
+
     # --- HELP ---
     if body == "HELP":
+        send_wa_menu(to_number, wa_menu_tier_key(is_business, tier in DOMAIN_TIERS), account_sid, auth_token, from_number)
+        return "help_sent"
+
+    # --- HELPTEXT — full command list as plain text, reached only via the
+    # "Full text list" button on the last page of the tappable menu above ---
+    if body == "HELPTEXT":
         send_whatsapp(
             to_number, msg_help(is_business, is_employee, is_domain_tier=tier in DOMAIN_TIERS, has_seats=tier in SEAT_LIMITS), account_sid, auth_token, from_number
         )
-        return "help_sent"
+        return "helptext_sent"
+
+    # --- ADDTECH / MYTECH / REMOVETECH — tech stack onboarding for CVE targeting ---
+    # ADDTECH ConnectWise, Cisco, Apache → adds products to tech_stack field
+    # MYTECH → lists current tech stack
+    # REMOVETECH ConnectWise → removes one product
+    if body.startswith("ADDTECH "):
+        products_raw = message_body.strip()[8:].strip()
+        products     = [p.strip() for p in products_raw.replace(",", "\n").splitlines() if p.strip()]
+        if not products:
+            send_whatsapp(to_number, "Usage: *ADDTECH ConnectWise* (or comma-separated list)\n\nYou'll receive alerts when new CVEs affect declared products.", account_sid, auth_token, from_number)
+            return "addtech_usage"
+        existing = list(user.get("tech_stack") or [])
+        added    = [p for p in products if p not in existing]
+        updated  = existing + added
+        dynamodb.Table(USERS_TABLE).update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="SET tech_stack = :ts",
+            ExpressionAttributeValues={":ts": updated},
+        )
+        send_whatsapp(
+            to_number,
+            f"✅ *Tech stack updated*\n\nAdded: {', '.join(added) if added else 'already in list'}\n"
+            f"Monitoring: {', '.join(updated)}\n\n"
+            "You'll receive CRITICAL alerts when new actively-exploited CVEs affect these products.\n"
+            "Reply *MYTECH* to view or *REMOVETECH [product]* to remove one.",
+            account_sid, auth_token, from_number,
+        )
+        return "addtech_done"
+
+    if body == "MYTECH":
+        stack = list(user.get("tech_stack") or [])
+        if stack:
+            msg = f"🛠️ *Your monitored tech stack:*\n\n" + "\n".join(f"• {p}" for p in stack) + \
+                  "\n\nReply *ADDTECH [product]* to add or *REMOVETECH [product]* to remove."
+        else:
+            msg = "No tech stack declared yet.\n\nReply *ADDTECH ConnectWise* (or any product) to start receiving CVE targeting alerts."
+        send_whatsapp(to_number, msg, account_sid, auth_token, from_number)
+        return "mytech_sent"
+
+    if body.startswith("REMOVETECH "):
+        product = message_body.strip()[11:].strip()
+        existing = list(user.get("tech_stack") or [])
+        updated  = [p for p in existing if p.lower() != product.lower()]
+        dynamodb.Table(USERS_TABLE).update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="SET tech_stack = :ts",
+            ExpressionAttributeValues={":ts": updated},
+        )
+        removed = len(existing) - len(updated)
+        send_whatsapp(
+            to_number,
+            f"{'✅ Removed *' + product + '* from your tech stack.' if removed else f'*{product}* was not in your tech stack.'}\n"
+            f"Remaining: {', '.join(updated) if updated else 'none'}",
+            account_sid, auth_token, from_number,
+        )
+        return "removetech_done"
 
     # --- ADD (Business tier admin only) ---
     # Syntax: ADD +16175551234 [Optional Name]
+    # --- ADD EMAIL <address> — add a monitored email address ---
+    if body.startswith("ADD EMAIL "):
+        new_email = message_body.strip()[10:].strip().lower()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", new_email):
+            send_whatsapp(
+                to_number,
+                "That doesn't look like a valid email address.\n\n"
+                "Example: *ADD EMAIL you@example.com*",
+                account_sid, auth_token, from_number,
+            )
+            return "add_email_invalid"
+
+        if email_already_monitored(user.get("user_id"), new_email):
+            send_whatsapp(
+                to_number,
+                f"✅ That address is already being monitored.\n\n"
+                "Reply *BREACH* to see all enrolled emails.",
+                account_sid, auth_token, from_number,
+            )
+            return "add_email_duplicate"
+
+        email_limit = EMAIL_LIMITS.get(tier, 3)
+        current_count = count_monitored_emails(user.get("user_id"))
+        if current_count >= email_limit:
+            send_whatsapp(
+                to_number,
+                f"You've reached your {email_limit}-email limit on this plan.\n\n"
+                "Reply *PLAN* to see upgrade options.",
+                account_sid, auth_token, from_number,
+            )
+            return "add_email_limit_reached"
+
+        add_monitored_email(user.get("user_id"), new_email)
+        remaining = email_limit - current_count - 1
+        more_msg = f"\n\nReply *ADD EMAIL your@email.com* to add {remaining} more." if remaining > 0 else ""
+
+        # Acknowledge enrollment immediately, then run HIBP
+        send_whatsapp(
+            to_number,
+            f"✅ *{new_email}* enrolled. Checking for known breaches…",
+            account_sid, auth_token, from_number,
+        )
+
+        try:
+            hibp_api_key = get_secret_json("relayshield/hibp_api_key", "HIBP_API_KEY")
+            encoded = urllib.parse.quote(new_email, safe="")
+            hibp_url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{encoded}?truncateResponse=false"
+            req = urllib.request.Request(hibp_url, headers={
+                "hibp-api-key": hibp_api_key,
+                "user-agent": "RelayShield/1.0",
+            })
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                breaches = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            breaches = [] if exc.code == 404 else None
+        except Exception:
+            breaches = None
+
+        if breaches is None:
+            send_whatsapp(
+                to_number,
+                f"⚠️ Breach check temporarily unavailable — monitoring is active and will alert you automatically.{more_msg}\n\n🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
+        elif not breaches:
+            send_whatsapp(
+                to_number,
+                f"✅ *No breaches found* for {new_email}.\n\nOngoing monitoring is active — you'll be alerted the moment this changes.{more_msg}\n\n🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
+        else:
+            bcount = len(breaches)
+            recent = sorted(breaches, key=lambda b: b.get("BreachDate", ""), reverse=True)[:3]
+            breach_names = ", ".join(b["Name"] for b in recent)
+            if bcount > 3:
+                breach_names += f" +{bcount - 3} more"
+            lines = [
+                f"⚠️ *{new_email}* found in *{bcount} breach{'es' if bcount != 1 else ''}*: {breach_names}\n",
+                "*Recommended actions:*",
+                "→ Reply *SWEEP* — close email backdoors attackers may have planted",
+                "→ Reply *REUSE* — check cross-account password reuse",
+                "→ Reply *SESSIONS* — revoke all active sessions",
+            ]
+            lines.append(more_msg)
+            lines.append("\n🛡️ RelayShield")
+            send_whatsapp(to_number, "\n".join(lines), account_sid, auth_token, from_number)
+
+        return "add_email_success"
+
     if body.startswith("ADD ") and tier == TIER_STARTER_DOMAIN and not is_employee:
         send_whatsapp(
             to_number,
@@ -3445,7 +4299,26 @@ def handle_active_message(
         )
         return "starter_domain_no_seats"
 
-    if body.startswith("ADD ") and is_business and not is_employee:
+    if body == "ADD" and is_business and (not is_employee or _wa_is_delegate(user)):
+        send_whatsapp(
+            to_number,
+            "👥 *Add Team Member*\n\n"
+            "Reply with their phone number (and optionally their name) — no need to type *ADD* again.\n\n"
+            "Example: *+16175551234 Jane Smith* or just *+16175551234*",
+            account_sid, auth_token, from_number,
+        )
+        update_user(user_id, {"pending_command": "ADD"})
+        return "add_prompt_sent"
+
+    if body.startswith("ADD ") and is_business and (not is_employee or _wa_is_delegate(user)):
+        if is_employee and not _wa_is_delegate(user):
+            send_whatsapp(to_number, "🔒 Only the account admin or a delegated admin can add team members.", account_sid, auth_token, from_number)
+            return "add_denied"
+
+        effective_admin_id   = _wa_effective_admin_id(user)
+        effective_admin_user = user if not is_employee else (get_user_record_by_id(effective_admin_id) or user)
+        effective_tier       = effective_admin_user.get("subscription_tier", tier)
+
         add_args = message_body.strip()[4:].strip()
         parts = add_args.split(None, 1)  # split on first whitespace only
         raw_phone = parts[0]
@@ -3461,9 +4334,9 @@ def handle_active_message(
             )
             return "invalid_employee_phone"
 
-        # Check seat limit
-        seat_limit = SEAT_LIMITS.get(tier, 5)
-        current_employees = count_employees(user_id)
+        # Check seat limit against the main admin's tier and count
+        seat_limit = SEAT_LIMITS.get(effective_tier, 5)
+        current_employees = count_employees(effective_admin_id)
         if current_employees >= seat_limit:
             send_whatsapp(
                 to_number,
@@ -3473,8 +4346,8 @@ def handle_active_message(
             )
             return "seat_limit_reached"
 
-        # Create employee record
-        employee_id = create_employee_record(phone, user_id, tier, employee_name)
+        # Create employee record under the main admin's account
+        employee_id = create_employee_record(phone, effective_admin_id, effective_tier, employee_name)
         display = f"*{employee_name}* ({phone})" if employee_name else f"*{phone}*"
 
         # Confirm to admin
@@ -3498,9 +4371,25 @@ def handle_active_message(
         )
         return "employee_added"
 
-    # --- REMOVE (Business tier admin only) ---
+    # --- REMOVE (Business tier admin and delegates) ---
     # Syntax: REMOVE +16175551234
-    if body.startswith("REMOVE ") and is_business and not is_employee:
+    if body == "REMOVE" and is_business and (not is_employee or _wa_is_delegate(user)):
+        send_whatsapp(
+            to_number,
+            "👥 *Remove Team Member*\n\n"
+            "Reply with their phone number — no need to type *REMOVE* again.\n\n"
+            "Example: *+16175551234*",
+            account_sid, auth_token, from_number,
+        )
+        update_user(user_id, {"pending_command": "REMOVE"})
+        return "remove_prompt_sent"
+
+    if body.startswith("REMOVE ") and is_business and (not is_employee or _wa_is_delegate(user)):
+        if is_employee and not _wa_is_delegate(user):
+            send_whatsapp(to_number, "🔒 Only the account admin or a delegated admin can remove team members.", account_sid, auth_token, from_number)
+            return "remove_denied"
+
+        effective_admin_id = _wa_effective_admin_id(user)
         raw_phone = message_body.strip()[7:].strip()
         phone = normalise_phone(raw_phone)
 
@@ -3513,7 +4402,7 @@ def handle_active_message(
             )
             return "invalid_remove_phone"
 
-        employee = get_employee_by_phone_and_admin(phone, user_id)
+        employee = get_employee_by_phone_and_admin(phone, effective_admin_id)
         if not employee:
             send_whatsapp(
                 to_number,
@@ -3561,10 +4450,42 @@ def handle_active_message(
         )
         return "employee_removed"
 
-    # --- STATUS (Business tier admin only) ---
-    if body == "STATUS" and is_business and not is_employee:
-        employees = get_employees_for_admin(user_id)
-        seat_limit = SEAT_LIMITS.get(tier, 5)
+    # --- PLAN / LICENSE TYPE (all tiers — license type + upgrade nudge) ---
+    # PLAN / LICENSE / LICTYPE — always show plan view.
+    # STATUS also routes here for solo tiers (no seats): Personal Shield and Starter + Domain.
+    if body in ("PLAN", "LICENSE", "LICTYPE") or (body == "STATUS" and tier not in SEAT_LIMITS):
+        plan_label = PLAN_LABELS.get(tier, tier.replace("_", " ").title())
+        emails     = user.get("monitored_emails", [])
+        domains    = user.get("monitored_domains") or []
+
+        _upgrade_nudges = {
+            TIER_PERSONAL:       "💡 *Add team coverage* — share breach alerts, SIM monitoring, and incident response across your whole team → relayshield.net",
+            TIER_STARTER_DOMAIN: "💡 *Add team seats* — Business Basic extends breach, SIM, and domain monitoring to every member of your team → relayshield.net",
+        }
+        nudge = _upgrade_nudges.get(tier, "")
+
+        msg = f"🪪 *License Type:* {plan_label}\n"
+        msg += f"📧 *Monitored emails:* {len(emails)}\n"
+        if tier in DOMAIN_TIERS:
+            if domains:
+                domain_list = ", ".join(f"`{d}`" for d in domains)
+                msg += f"🌐 *Domain monitoring:* {domain_list}\n"
+            else:
+                msg += "🌐 *Domain monitoring:* ⚠️ No domain registered — reply *DOMAIN REGISTER yourdomain.com* to activate\n"
+        if nudge:
+            msg += f"\n{nudge}"
+        msg += "\n\nReply *HELP* to see all available commands."
+
+        send_whatsapp(to_number, msg, account_sid, auth_token, from_number)
+        return "plan_shown"
+
+    # --- STATUS (Business tier admin and delegates — seat-managed tiers only) ---
+    # starter_domain is solo-only (not in SEAT_LIMITS) so STATUS is handled above in the PLAN block.
+    if body == "STATUS" and is_business and tier in SEAT_LIMITS and (not is_employee or _wa_is_delegate(user)):
+        effective_admin_id = _wa_effective_admin_id(user)
+        employees  = get_employees_for_admin(effective_admin_id)
+        admin_user = user if not is_employee else (get_user_record_by_id(effective_admin_id) or user)
+        seat_limit = SEAT_LIMITS.get(admin_user.get("subscription_tier", tier), 5)
         seat_count = len(employees)
 
         if not employees:
@@ -3606,6 +4527,145 @@ def handle_active_message(
             account_sid, auth_token, from_number,
         )
         return "status_sent"
+
+    # --- DELEGATE (Business tier admin only) ---
+    if body.startswith("DELEGATE") and is_business and not is_employee:
+        members   = get_employees_for_admin(user_id)
+        delegated = user.get("delegated_admin_ids", [])
+
+        parts = body.split(maxsplit=1)
+        target_phone = normalise_phone(parts[1].strip()) if len(parts) > 1 else None
+
+        if not members:
+            send_whatsapp(to_number, "No team members enrolled yet. Use *ADD +1XXXXXXXXXX* to invite someone first.", account_sid, auth_token, from_number)
+            return "delegate_no_members"
+
+        if target_phone:
+            employee = get_employee_by_phone_and_admin(target_phone, user_id)
+            if not employee:
+                send_whatsapp(to_number, f"No active team member found with number {target_phone}.\n\nReply *STATUS* to see your team.", account_sid, auth_token, from_number)
+                return "delegate_not_found"
+            emp_id = employee["user_id"]
+            if emp_id in delegated:
+                send_whatsapp(to_number, f"That member already has delegate access.\n\nReply *REVOKE +1XXXXXXXXXX* to remove it.", account_sid, auth_token, from_number)
+                return "delegate_already"
+            current = [uid for uid in delegated if uid != emp_id]
+            current.append(emp_id)
+            update_user(user_id, {"delegated_admin_ids": current})
+            emp_name = employee.get("employee_name", target_phone)
+            emp_wa = employee.get("user_id", "")
+            if emp_wa.startswith("whatsapp:"):
+                send_whatsapp(emp_wa, "🔑 *Delegate Access Granted*\n\nYour admin has granted you delegate access on RelayShield.\n\nYou can now use: ADD, REMOVE, STATUS\n\n🛡️ RelayShield", account_sid, auth_token, from_number)
+            send_whatsapp(to_number, f"✅ *{emp_name}* is now a delegate admin.\n\nThey can add/remove team members and view team status.\nReply *REVOKE {target_phone}* to remove their access.", account_sid, auth_token, from_number)
+            logger.info("DELEGATE granted — admin=%s delegate=%s", user_id, emp_id)
+            return "delegate_granted"
+
+        # No phone given — list eligible members
+        eligible = [m for m in members if m["user_id"] not in delegated]
+        if not eligible:
+            send_whatsapp(to_number, "All team members already have delegate access.\n\nReply *REVOKE +1XXXXXXXXXX* to remove someone's access.", account_sid, auth_token, from_number)
+            return "delegate_all_have"
+        lines = [f"• {m.get('employee_name', 'Member')} — *DELEGATE {m.get('user_id','').replace('whatsapp:','')}*" for m in eligible]
+        send_whatsapp(to_number, "🔑 *Grant Delegate Access*\n\nReply with the command for the member you want to promote:\n\n" + "\n".join(lines) + "\n\nDelegates can: ADD, REMOVE, STATUS", account_sid, auth_token, from_number)
+        return "delegate_list_sent"
+
+    # --- REVOKE (Business tier admin only) ---
+    if body.startswith("REVOKE") and is_business and not is_employee:
+        delegated = user.get("delegated_admin_ids", [])
+
+        parts = body.split(maxsplit=1)
+        target_phone = normalise_phone(parts[1].strip()) if len(parts) > 1 else None
+
+        if not delegated:
+            send_whatsapp(to_number, "No delegates currently set.\n\nReply *DELEGATE +1XXXXXXXXXX* to grant access.", account_sid, auth_token, from_number)
+            return "revoke_none"
+
+        if target_phone:
+            employee = get_employee_by_phone_and_admin(target_phone, user_id)
+            if not employee or employee["user_id"] not in delegated:
+                send_whatsapp(to_number, f"{target_phone} is not a current delegate.\n\nReply *STATUS* to see your team.", account_sid, auth_token, from_number)
+                return "revoke_not_found"
+            emp_id   = employee["user_id"]
+            current  = [uid for uid in delegated if uid != emp_id]
+            update_user(user_id, {"delegated_admin_ids": current})
+            emp_name = employee.get("employee_name", target_phone)
+            emp_wa = employee.get("user_id", "")
+            if emp_wa.startswith("whatsapp:"):
+                send_whatsapp(emp_wa, "🔔 *Delegate Access Removed*\n\nYour admin has removed your delegate access on RelayShield.\n\n🛡️ RelayShield", account_sid, auth_token, from_number)
+            send_whatsapp(to_number, f"✅ Delegate access removed from *{emp_name}*.\n\nReply *DELEGATE +1XXXXXXXXXX* to grant access to another member.", account_sid, auth_token, from_number)
+            logger.info("REVOKE delegate — admin=%s revoked=%s", user_id, emp_id)
+            return "revoke_done"
+
+        # No phone — list current delegates
+        lines = []
+        for uid in delegated:
+            rec = get_user_record_by_id(uid)
+            if rec and rec.get("active"):
+                wa_id = rec.get("user_id", "")
+                ph    = wa_id.replace("whatsapp:", "") if wa_id.startswith("whatsapp:") else "?"
+                lines.append(f"• {rec.get('employee_name', 'Member')} — *REVOKE {ph}*")
+        if not lines:
+            update_user(user_id, {"delegated_admin_ids": []})
+            send_whatsapp(to_number, "No active delegates found. List has been cleared.", account_sid, auth_token, from_number)
+            return "revoke_cleared"
+        send_whatsapp(to_number, "🔒 *Revoke Delegate Access*\n\nReply with the command for the delegate to remove:\n\n" + "\n".join(lines), account_sid, auth_token, from_number)
+        return "revoke_list_sent"
+
+    # --- SETDOMAIN (Business Basic / Shield / Shield Pro admin only) ---
+    if body.startswith("SETDOMAIN") and is_business and not is_employee:
+        COMPANY_DOMAIN_TIERS = {TIER_BASIC, TIER_SHIELD, TIER_PRO}
+        if tier not in COMPANY_DOMAIN_TIERS:
+            send_whatsapp(
+                to_number,
+                "🏢 *Company Domain Monitoring* is available on Business Basic and higher plans.\n\n"
+                "Upgrade to Business Basic to enable shared domain monitoring for your entire team.",
+                account_sid, auth_token, from_number,
+            )
+            return "setdomain_tier_denied"
+
+        parts = body.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            current = user.get("company_domain", "")
+            if current:
+                send_whatsapp(
+                    to_number,
+                    f"🏢 *Company Domain* currently set to: `{current}`\n\n"
+                    "Reply *SETDOMAIN yourdomain.com* to update it.",
+                    account_sid, auth_token, from_number,
+                )
+            else:
+                send_whatsapp(
+                    to_number,
+                    "🏢 *Company Domain Monitoring*\n\n"
+                    "No company domain set yet.\n\n"
+                    "Reply *SETDOMAIN yourdomain.com* to set your company domain.\n"
+                    "RelayShield will scan for lookalikes and alert your entire team if a phishing domain is detected.",
+                    account_sid, auth_token, from_number,
+                )
+            return "setdomain_usage"
+
+        raw_domain = parts[1].strip().lower()
+        raw_domain = raw_domain.removeprefix("https://").removeprefix("http://").rstrip("/")
+        if "." not in raw_domain or len(raw_domain) < 4:
+            send_whatsapp(
+                to_number,
+                f"❌ *Invalid domain:* `{raw_domain}`\n\n"
+                "Please use a plain domain name, e.g. *SETDOMAIN yourcompany.com*",
+                account_sid, auth_token, from_number,
+            )
+            return "setdomain_invalid"
+
+        update_user(user_id, {"company_domain": raw_domain})
+        send_whatsapp(
+            to_number,
+            f"✅ *Company domain set to* `{raw_domain}`\n\n"
+            "RelayShield will now monitor this domain for lookalike/typosquat threats and alert you and your entire team if a phishing domain is detected.\n\n"
+            "The next scheduled scan will pick it up automatically.\n\n"
+            "🛡️ RelayShield",
+            account_sid, auth_token, from_number,
+        )
+        logger.info("SETDOMAIN — user_id=%s domain=%s", user_id, raw_domain)
+        return "setdomain_set"
 
     # --- DOMAIN (Business Basic / Shield / Shield Pro only) ---
     # Employees see status and can run scans. Only admins can register/remove.
@@ -3695,18 +4755,59 @@ def handle_active_message(
             }
             save_domain_state(user_id, domain_state)
 
+            # Acknowledge then run immediate scan
             send_whatsapp(
                 to_number,
-                f"✅ *{raw_domain}* registered for domain monitoring.\n\n"
-                f"RelayShield will check daily for:\n"
-                f"• Lookalike/typosquat domains\n"
-                f"• Email configuration (MX) changes\n"
-                f"• Domain expiry risk\n\n"
-                f"Reply *DOMAIN SCAN* to run the first check now.\n\n"
-                f"🛡️ RelayShield",
+                f"✅ *{raw_domain}* registered. Running first scan now — this may take up to 30 seconds…",
                 account_sid, auth_token, from_number,
             )
             logger.info("Domain registered — user_id=%s domain=%s", user_id, raw_domain)
+
+            # Immediate typosquat + MX + expiry scan
+            findings: list[str] = []
+            entry = domain_state[raw_domain]
+
+            new_lookalikes = _quick_typosquat_check(raw_domain, [])
+            if new_lookalikes:
+                entry["known_lookalikes"] = new_lookalikes
+                total   = len(new_lookalikes)
+                listing = "\n".join(f"  • `{lk}`" for lk in sorted(new_lookalikes)[:10])
+                more    = f"\n  (+{total - 10} more)" if total > 10 else ""
+                findings.append(
+                    f"⚠️ *{total} lookalike domain{'s' if total != 1 else ''} already registered:*\n"
+                    f"{listing}{more}\n"
+                    "→ Attackers use these to send phishing email that appears to come from you.\n"
+                    "→ Consider registering these yourself or reporting to the registrar abuse team."
+                )
+            else:
+                findings.append(f"✅ No lookalike domains found for *{raw_domain}*.")
+
+            current_mx = _doh_mx_fingerprint(raw_domain)
+            if current_mx:
+                entry["mx_fingerprint"] = current_mx
+                findings.append(f"✅ Email configuration baseline recorded for *{raw_domain}*.")
+            else:
+                findings.append(f"ℹ️ Email configuration check pending — will be recorded on next scan.")
+
+            days = _rdap_days_until_expiry(raw_domain)
+            if days is None:
+                findings.append(f"ℹ️ Expiry data unavailable (ccTLD or RDAP unsupported).")
+            elif days <= 30:
+                findings.append(f"⚠️ *{raw_domain}* expires in *{days} days* — renew soon.")
+            else:
+                findings.append(f"✅ Domain expiry: {days} days away.")
+
+            entry["last_scanned"] = datetime.now(timezone.utc).isoformat()
+            domain_state[raw_domain] = entry
+            save_domain_state(user_id, domain_state)
+
+            body_text = "\n\n".join(findings)
+            send_whatsapp(
+                to_number,
+                f"🌐 *{raw_domain} — Initial Scan Complete*\n\n{body_text}\n\n"
+                "Ongoing daily monitoring is now active.\n\n🛡️ RelayShield",
+                account_sid, auth_token, from_number,
+            )
             return "domain_registered"
 
         # ── DOMAIN REMOVE <domain> (admin only) ───────────────────────────
@@ -3774,17 +4875,22 @@ def handle_active_message(
 
                 # Typosquat (inline, time-boxed)
                 new_lookalikes = _quick_typosquat_check(domain, known)
+                all_lookalikes = list(set(known) | set(new_lookalikes))
                 if new_lookalikes:
-                    entry["known_lookalikes"] = list(set(known) | set(new_lookalikes))
-                    count = len(new_lookalikes)
-                    listing = ", ".join(f"*{d}*" for d in new_lookalikes[:3])
-                    more    = f" (+{count - 3} more)" if count > 3 else ""
+                    entry["known_lookalikes"] = all_lookalikes
+                if all_lookalikes:
+                    total   = len(all_lookalikes)
+                    listing = "\n".join(f"  • `{lk}`" for lk in sorted(all_lookalikes)[:10])
+                    more    = f"\n  (+{total - 10} more)" if total > 10 else ""
+                    new_tag = f" — *{len(new_lookalikes)} new*" if new_lookalikes else ""
                     findings.append(
-                        f"⚠️ *Lookalike domains registered for {domain}:*\n"
+                        f"⚠️ *{total} lookalike domain{'s' if total != 1 else ''} registered for {domain}{new_tag}:*\n"
                         f"{listing}{more}\n"
                         "→ Attackers use these to send phishing email that appears to come from you.\n"
                         "→ Report to registrar abuse team; consider registering yourself."
                     )
+                else:
+                    findings.append(f"✅ *{domain}* — no lookalike domains found.")
 
                 # MX check
                 current_mx = _doh_mx_fingerprint(domain)
@@ -3952,12 +5058,19 @@ def handler(event, context):
     if event.get("isBase64Encoded"):
         raw_body = base64.b64decode(raw_body).decode("utf-8")
 
-    params = dict(urllib.parse.parse_qsl(raw_body))
-    from_number = params.get("From", "")
+    # keep_blank_values=True: Twilio includes blank fields (e.g. Body= with no
+    # caption on a media message) in the signed payload. Dropping them here
+    # would make our recomputed signature diverge from Twilio's and reject
+    # every no-caption media message.
+    params = dict(urllib.parse.parse_qsl(raw_body, keep_blank_values=True))
+    from_number  = params.get("From", "")
     message_body = params.get("Body", "").strip()
-    num_media = int(params.get("NumMedia", "0"))
-    media_url = params.get("MediaUrl0", "")
+    num_media    = int(params.get("NumMedia", "0"))
+    media_url    = params.get("MediaUrl0", "")
     media_content_type = params.get("MediaContentType0", "")
+
+    # Quick-reply button taps — Twilio sends ButtonPayload for interactive messages
+    button_payload = params.get("ButtonPayload", "").strip().upper()
 
     logger.info(
         "Inbound WhatsApp from=%s body_len=%d num_media=%d",
@@ -4010,6 +5123,51 @@ def handler(event, context):
 
     onboarding_state = user.get("onboarding_state", STATE_ACTIVE)
 
+    # --- Log last inbound timestamp — used by monitor Lambdas to assess window state ---
+    try:
+        dynamodb.Table(USERS_TABLE).update_item(
+            Key={"user_id": user["user_id"]},
+            UpdateExpression="SET last_wa_inbound = :ts",
+            ExpressionAttributeValues={":ts": datetime.now(timezone.utc).isoformat()},
+        )
+    except Exception as exc:
+        logger.warning("Failed to update last_wa_inbound user_id=%s: %s", user.get("user_id"), exc)
+
+    # --- Handle quick-reply button taps ---
+    # ButtonPayload is set when the user taps a quick-reply button on a
+    # Content API template message. ACK = acknowledge receipt (✓ Got it
+    # button) — log and confirm, no further action.
+    if button_payload == "ACK":
+        logger.info("ACK button tap from user_id=%s", user.get("user_id"))
+        account_sid, auth_token, twilio_from = get_twilio_credentials()
+        send_whatsapp(from_number, "✓ Got it — your alerts are active.", account_sid, auth_token, twilio_from)
+        return {"statusCode": 200, "body": ""}
+
+    if button_payload in WA_MENU_COMMAND_IDS:
+        # Some quick-reply-style templates do set ButtonPayload to the id —
+        # route those exactly like the user having typed the bare command.
+        logger.info("Button tap payload=%s from user_id=%s", button_payload, user.get("user_id"))
+        message_body = button_payload
+
+    # --- Handle list-picker taps ---
+    # Confirmed via Twilio's Messages API on 2026-07-16 (fetched the actual
+    # inbound message bodies after a live test): tapping a twilio/list-picker
+    # item arrives as plain Body = the item's `id` field — NOT via
+    # ButtonPayload (that param is empty for this content type; it's a
+    # quick-reply-only mechanism). E.g. tapping "More commands" sent
+    # Body="MORE_DOMAIN_2" directly. Bare commands (SCAN, SWEEP, etc.) work
+    # because their id equals the command name, so they flow through the
+    # normal body-matching dispatch below with no special handling needed —
+    # only the "More commands" pagination id needs its own parse here.
+    menu_more_match = re.match(r"^MORE_([A-Z]+)_(\d+)$", message_body.strip().upper())
+    if menu_more_match:
+        menu_tier_key = menu_more_match.group(1).lower()
+        menu_page = int(menu_more_match.group(2))
+        if menu_tier_key in WA_MENU_PAGES:
+            logger.info("Menu pagination tap page=%d tier=%s user_id=%s", menu_page, menu_tier_key, user.get("user_id"))
+            send_wa_menu(from_number, menu_tier_key, account_sid, auth_token, twilio_from, page=menu_page)
+            return {"statusCode": 200, "body": ""}
+
     # --- Clear SMS fallback flag — inbound message proves WhatsApp session is active ---
     if user.get("pending_sms_fallback"):
         try:
@@ -4047,11 +5205,20 @@ def handler(event, context):
         )
 
     else:
+        # Unrecognised state (e.g. manually-provisioned accounts with state="DONE").
+        # Treat as ACTIVE so all commands work rather than silently dropping the message.
         logger.warning(
-            "Unknown onboarding_state '%s' for user_id=%s",
+            "Unknown onboarding_state '%s' for user_id=%s — routing as ACTIVE",
             onboarding_state, user.get("user_id"),
         )
-        result = "unknown_state"
+        result = handle_active_message(
+            user, message_body, twilio_creds,
+            media_info={
+                "num_media": num_media,
+                "media_url": media_url,
+                "media_content_type": media_content_type,
+            },
+        )
 
     logger.info(
         "Handled message from=%s state=%s result=%s",

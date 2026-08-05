@@ -184,7 +184,12 @@ def _inline(text):
 
 
 def md_to_html(md):
-    out, lines, i, in_list = [], md.split("\n"), 0, False
+    # in_list holds the open list tag ("ul" / "ol") or None. It was a bool while
+    # only bullets were supported; ordered lists had NO branch at all, so "1. ..."
+    # fell through to the paragraph gatherer and five numbered items rendered as
+    # one run-on paragraph. Caught on the secret-scanning post 2026-08-03, where
+    # the numbered list is the centrepiece.
+    out, lines, i, in_list = [], md.split("\n"), 0, None
     while i < len(lines):
         line = lines[i]
 
@@ -196,8 +201,8 @@ def md_to_html(md):
                 i += 1
             i += 1
             if in_list:
-                out.append("</ul>")
-                in_list = False
+                out.append("</%s>" % in_list)
+                in_list = None
             out.append("<pre><code>%s</code></pre>" % html.escape("\n".join(buf)))
             continue
 
@@ -223,19 +228,25 @@ def md_to_html(md):
             i += 1
             continue
 
-        if re.match(r"^[-*]\s+", line):
-            if not in_list:
-                out.append("<ul>")
-                in_list = True
+        m_li = re.match(r"^([-*]|\d+\.)\s+", line)
+        if m_li:
+            tag = "ul" if m_li.group(1) in ("-", "*") else "ol"
+            # Switching marker type closes the open list rather than nesting the
+            # new items inside it.
+            if in_list != tag:
+                if in_list:
+                    out.append("</%s>" % in_list)
+                out.append("<%s>" % tag)
+                in_list = tag
             # Absorb indented continuation lines into this same <li>. Without
             # this, a wrapped bullet emitted a <p> *inside* the <ul> -- invalid
             # HTML that Medium's importer responded to by dropping the whole
             # list. That silently removed the LLMjacking figures and the entire
             # US/EU provider list from the imported Bundle D post (2026-07-30).
-            item = re.sub(r"^[-*]\s+", "", line)
+            item = line[m_li.end():]
             i += 1
             while (i < len(lines) and lines[i].strip()
-                   and not re.match(r"^[-*]\s+", lines[i])
+                   and not re.match(r"^([-*]|\d+\.)\s+", lines[i])
                    and not lines[i].startswith("```")
                    and not re.match(r"^#{1,6}\s", lines[i])
                    and lines[i].startswith((" ", "\t"))):
@@ -245,8 +256,8 @@ def md_to_html(md):
             continue
 
         if in_list and not line.strip():
-            out.append("</ul>")
-            in_list = False
+            out.append("</%s>" % in_list)
+            in_list = None
 
         if re.match(r"^---+\s*$", line):
             out.append("<hr>")
@@ -273,7 +284,7 @@ def md_to_html(md):
                 nxt = lines[i]
                 if (not nxt.strip() or nxt.startswith("```")
                         or re.match(r"^#{1,6}\s", nxt)
-                        or re.match(r"^[-*]\s+", nxt)
+                        or re.match(r"^([-*]|\d+\.)\s+", nxt)
                         or nxt.startswith("> ")
                         or re.match(r"^---+\s*$", nxt)
                         or re.match(r"^\s*\|.*\|\s*$", nxt)):
@@ -285,7 +296,7 @@ def md_to_html(md):
         i += 1
 
     if in_list:
-        out.append("</ul>")
+        out.append("</%s>" % in_list)
     return "\n".join(out)
 
 

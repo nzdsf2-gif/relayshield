@@ -1,0 +1,7 @@
+name = "relayshield-badge-landing"
+main = "cloudflare_worker_badge_landing.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "badge.relayshield.net/*", zone_name = "relayshield.net" }
+]

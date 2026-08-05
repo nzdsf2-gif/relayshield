@@ -1,0 +1,242 @@
+{
+  "schema_version": 16,
+  "name": "RelayShield — Employee Credential Early Warning",
+  "description": "Checks employee email addresses against RelayShield's breach database AND live criminal Telegram channel intelligence. Telegram IOC hits fire 24–72 hours before public breach databases — giving your SOC a head start while the attack is still forming.",
+  "guid": "relayshield-employee-threat-early-warning-v1",
+  "keep_events_for": 604800,
+  "tags": ["security", "threat-intelligence", "identity", "SOC", "infostealer", "breach", "relayshield"],
+
+  "agents": [
+
+    {
+      "type": "Agents::WebhookAgent",
+      "name": "Receive Employee Email",
+      "guid": "agent-001",
+      "description": "Trigger this story by sending a POST with {\"email\": \"employee@company.com\"}. Wire to your HR system, identity provider, or run manually per employee.",
+      "options": {
+        "secret": "{% credential RelayShield_Webhook_Secret %}",
+        "verbs": "post"
+      },
+      "keep_events_for": 604800,
+      "position": { "x": 0, "y": 0 }
+    },
+
+    {
+      "type": "Agents::HTTPRequestAgent",
+      "name": "1 — Breach Check (HIBP)",
+      "guid": "agent-002",
+      "description": "Check the email against known breach databases via RelayShield. Returns breach count, source names, and exposed data types.",
+      "options": {
+        "url": "https://api.relayshield.net/v1/metered/breach",
+        "method": "post",
+        "content_type": "json",
+        "headers": {
+          "X-RS-API-KEY": "{% credential RelayShield_API_Key %}"
+        },
+        "payload": {
+          "email": "{{ receive_employee_email.body.email }}"
+        }
+      },
+      "keep_events_for": 604800,
+      "position": { "x": 0, "y": 150 }
+    },
+
+    {
+      "type": "Agents::HTTPRequestAgent",
+      "name": "2 — Telegram Intel Check (24–72hr Lead)",
+      "guid": "agent-003",
+      "description": "Query RelayShield's live Telegram criminal channel intelligence. Monitors verified criminal Telegram channels — infostealer log markets, credential dump channels, SIM swap listings. Returns hits 24–72 hours before HIBP.",
+      "options": {
+        "url": "https://api.relayshield.net/v1/intel/telegram",
+        "method": "post",
+        "content_type": "json",
+        "headers": {
+          "X-RS-API-KEY": "{% credential RelayShield_API_Key %}"
+        },
+        "payload": {
+          "email": "{{ receive_employee_email.body.email }}"
+        }
+      },
+      "keep_events_for": 604800,
+      "position": { "x": 0, "y": 300 }
+    },
+
+    {
+      "type": "Agents::EventTransformationAgent",
+      "name": "3 — Evaluate Severity",
+      "guid": "agent-004",
+      "description": "Determine alert severity. Telegram hit = CRITICAL (attack forming). Breach-only = HIGH (standard response). Both = CRITICAL. Clean = no action.",
+      "options": {
+        "mode": "message_only",
+        "payload": {
+          "email": "{{ receive_employee_email.body.email }}",
+          "telegram_hit": "{{ 2_telegram_intel_check_24_72hr_lead.body.matched }}",
+          "breach_hit": "{{ 1_breach_check_hibp.body.data.found }}",
+          "breach_count": "{{ 1_breach_check_hibp.body.data.breach_count }}",
+          "telegram_hit_count": "{{ 2_telegram_intel_check_24_72hr_lead.body.hit_count }}",
+          "telegram_channels": "{{ 2_telegram_intel_check_24_72hr_lead.body.hits | map: 'channel' | join: ', ' }}",
+          "telegram_categories": "{{ 2_telegram_intel_check_24_72hr_lead.body.hits | map: 'category' | uniq | join: ', ' }}",
+          "telegram_earliest": "{{ 2_telegram_intel_check_24_72hr_lead.body.earliest_seen }}",
+          "severity": "{% if 2_telegram_intel_check_24_72hr_lead.body.matched == true %}CRITICAL{% elsif 1_breach_check_hibp.body.data.found == true %}HIGH{% else %}CLEAN{% endif %}",
+          "headline": "{% if 2_telegram_intel_check_24_72hr_lead.body.matched == true %}🚨 CRITICAL — Credential spotted in criminal Telegram channels before public disclosure{% elsif 1_breach_check_hibp.body.data.found == true %}⚠️ HIGH — Employee credential found in breach database{% else %}✅ CLEAN — No exposure detected{% endif %}"
+        }
+      },
+      "keep_events_for": 604800,
+      "position": { "x": 0, "y": 450 }
+    },
+
+    {
+      "type": "Agents::TriggerAgent",
+      "name": "Route — CRITICAL (Telegram Hit)",
+      "guid": "agent-005",
+      "description": "Fires when the email appears in a criminal Telegram channel. Attack is forming — SOC has 24–72hr window to act before HIBP picks it up.",
+      "options": {
+        "rules": [
+          {
+            "type": "field==value",
+            "value": "CRITICAL",
+            "path": "{{ 3_evaluate_severity.severity }}"
+          }
+        ]
+      },
+      "keep_events_for": 604800,
+      "position": { "x": -200, "y": 600 }
+    },
+
+    {
+      "type": "Agents::TriggerAgent",
+      "name": "Route — HIGH (Breach Only)",
+      "guid": "agent-006",
+      "description": "Fires when the email appears in a known breach database but not yet in Telegram channels. Standard breach response workflow.",
+      "options": {
+        "rules": [
+          {
+            "type": "field==value",
+            "value": "HIGH",
+            "path": "{{ 3_evaluate_severity.severity }}"
+          }
+        ]
+      },
+      "keep_events_for": 604800,
+      "position": { "x": 200, "y": 600 }
+    },
+
+    {
+      "type": "Agents::SendToStoryAgent",
+      "name": "CRITICAL — Slack SOC Alert",
+      "guid": "agent-007",
+      "description": "Send CRITICAL alert to SOC Slack channel. Includes Telegram source channel, category, first-seen timestamp, and recommended immediate actions.",
+      "options": {
+        "url": "https://hooks.slack.com/services/{% credential Slack_Webhook_URL %}",
+        "method": "post",
+        "content_type": "json",
+        "payload": {
+          "text": "{{ 3_evaluate_severity.headline }}",
+          "blocks": [
+            {
+              "type": "header",
+              "text": {
+                "type": "plain_text",
+                "text": "🚨 RelayShield — CRITICAL Threat Alert"
+              }
+            },
+            {
+              "type": "section",
+              "fields": [
+                { "type": "mrkdwn", "text": "*Employee:*\n{{ 3_evaluate_severity.email }}" },
+                { "type": "mrkdwn", "text": "*Severity:*\nCRITICAL" },
+                { "type": "mrkdwn", "text": "*Telegram Hits:*\n{{ 3_evaluate_severity.telegram_hit_count }} IOC matches" },
+                { "type": "mrkdwn", "text": "*Source Channels:*\n{{ 3_evaluate_severity.telegram_channels }}" },
+                { "type": "mrkdwn", "text": "*Category:*\n{{ 3_evaluate_severity.telegram_categories }}" },
+                { "type": "mrkdwn", "text": "*First Seen:*\n{{ 3_evaluate_severity.telegram_earliest }}" }
+              ]
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "*Why CRITICAL:* This credential appeared in a criminal Telegram channel *before* public breach databases. Your SOC has a 24–72 hour window to act. The attack is forming — not yet executing.\n\n*Immediate actions:*\n• Force password reset on all corporate systems\n• Revoke active sessions (Google, M365, VPN)\n• Check for MFA bypass attempts in auth logs\n• Notify employee — do not wait for breach confirmation"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "_Powered by RelayShield Threat Intelligence — continuously monitored criminal Telegram channels · api.relayshield.net_"
+              }
+            }
+          ]
+        }
+      },
+      "keep_events_for": 604800,
+      "position": { "x": -200, "y": 750 }
+    },
+
+    {
+      "type": "Agents::HTTPRequestAgent",
+      "name": "HIGH — Slack SOC Alert",
+      "guid": "agent-008",
+      "description": "Send HIGH alert to SOC Slack channel for standard breach response.",
+      "options": {
+        "url": "https://hooks.slack.com/services/{% credential Slack_Webhook_URL %}",
+        "method": "post",
+        "content_type": "json",
+        "payload": {
+          "blocks": [
+            {
+              "type": "header",
+              "text": {
+                "type": "plain_text",
+                "text": "⚠️ RelayShield — HIGH Breach Alert"
+              }
+            },
+            {
+              "type": "section",
+              "fields": [
+                { "type": "mrkdwn", "text": "*Employee:*\n{{ 3_evaluate_severity.email }}" },
+                { "type": "mrkdwn", "text": "*Severity:*\nHIGH" },
+                { "type": "mrkdwn", "text": "*Breach Count:*\n{{ 3_evaluate_severity.breach_count }} known breach(es)" },
+                { "type": "mrkdwn", "text": "*Telegram Status:*\nNot yet in criminal channels" }
+              ]
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "*Recommended actions:*\n• Notify employee to reset password\n• Verify MFA is active on all accounts\n• Run Email Security Sweep (inbox rules, OAuth permissions, active sessions)\n• Re-check in 48hrs — Telegram channels may surface additional IOCs"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "_Powered by RelayShield — api.relayshield.net_"
+              }
+            }
+          ]
+        }
+      },
+      "keep_events_for": 604800,
+      "position": { "x": 200, "y": 750 }
+    }
+
+  ],
+
+  "links": [
+    { "source": "agent-001", "receiver": "agent-002" },
+    { "source": "agent-002", "receiver": "agent-003" },
+    { "source": "agent-003", "receiver": "agent-004" },
+    { "source": "agent-004", "receiver": "agent-005" },
+    { "source": "agent-004", "receiver": "agent-006" },
+    { "source": "agent-005", "receiver": "agent-007" },
+    { "source": "agent-006", "receiver": "agent-008" }
+  ],
+
+  "diagram_notes": [
+    {
+      "content": "## RelayShield — Employee Credential Early Warning\n\nDetects employee credential exposure in criminal Telegram channels **24–72 hours before HIBP**.\n\n**CRITICAL path:** Telegram hit → attack is forming → immediate SOC response\n**HIGH path:** Breach-only hit → standard remediation workflow\n\n**Setup required:**\n- `RelayShield_API_Key` credential (get at api.relayshield.net)\n- `Slack_Webhook_URL` credential (your SOC channel)\n- Optionally replace Slack agents with PagerDuty, ServiceNow, or Jira\n\n**Intelligence source:** Verified criminal Telegram channels monitored in real time — infostealer log markets, credential dump channels, Web3 threat feeds.",
+      "position": { "x": 400, "y": 0 },
+      "width": 420
+    }
+  ]
+}

@@ -44,7 +44,7 @@ You need two values from your AWS setup:
 
 **API URL** — API Gateway → APIs → relayshield-api → Stages → prod → Invoke URL
 ```
-https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod
+https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod
 ```
 
 **API Key** — API Gateway → API Keys → relayshield-test-key → API key value (the long string, not the ID)
@@ -62,7 +62,7 @@ Open (or create) `~/Library/Application Support/Claude/claude_desktop_config.jso
       "command": "/Users/andrewgibbs/anaconda3/bin/python3",
       "args": ["/Users/andrewgibbs/Side SaaS Hustle/relayshield_mcp_server.py"],
       "env": {
-        "RELAYSHIELD_API_URL": "https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod",
+        "RELAYSHIELD_API_URL": "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod",
         "RELAYSHIELD_API_KEY": "YOUR_API_KEY_VALUE_HERE"
       }
     }
@@ -87,7 +87,7 @@ Add the MCP server to your Claude Code project settings:
 claude mcp add relayshield \
   --command python3 \
   --args "/Users/andrewgibbs/Side SaaS Hustle/relayshield_mcp_server.py" \
-  --env RELAYSHIELD_API_URL=https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod \
+  --env RELAYSHIELD_API_URL=https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod \
   --env RELAYSHIELD_API_KEY=YOUR_API_KEY_VALUE_HERE
 ```
 
@@ -129,7 +129,7 @@ Before trusting it in Claude, verify the server launches cleanly:
 
 ```bash
 cd "/Users/andrewgibbs/Side SaaS Hustle"
-RELAYSHIELD_API_URL="https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod" \
+RELAYSHIELD_API_URL="https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod" \
 RELAYSHIELD_API_KEY="YOUR_KEY" \
 python3 relayshield_mcp_server.py
 ```

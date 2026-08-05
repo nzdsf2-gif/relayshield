@@ -19,10 +19,11 @@ Integrate wallet monitoring, token risk, and SIM swap detection directly into yo
 | POST /v1/wallet-risk | Multi-chain risk score — EVM, Solana, TON | $0.15 / call |
 | POST /v1/token-security | Rug pull, honeypot & tax analysis | $0.10 / call |
 | POST /v1/nft-security | NFT contract risk scan | $0.10 / call |
+| POST /v1/infostealer | Near real-time infostealer malware detection — RedLine, Raccoon, Vidar | $0.15 / call |
 | POST /v1/breach | Email breach — 13B+ records | $0.10 / call |
 | POST /v1/sim-swap | SIM/eSIM swap — live carrier data | $0.25 / call |
 
-Pay-as-you-go via x402 (USDC on Base) or subscribe on RapidAPI.
+Pay-as-you-go via x402 (USDC on Base or Solana) or subscribe on RapidAPI.
 
 ---
 

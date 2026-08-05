@@ -25,7 +25,7 @@ import uuid
 from datetime import datetime, timezone
 
 import boto3
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -85,7 +85,30 @@ LLM_LICENSE_PRICE_IDS = frozenset({
 })
 
 # One price per metered endpoint — created in Stripe Dashboard Jun 11 2026
-STRIPE_PRICE_IDS = [
+# The single metered Price a new developer's subscription carries, replacing
+# the 29-entry per-endpoint list below on 2026-08-04.
+#
+# WHY THIS EXISTS: Stripe Checkout rejects a session with more than 20
+# recurring prices ("You can not pass in more than 20 recurring prices"),
+# verified by probing the live API — 20 succeeds, 21 fails. The per-endpoint
+# list had reached 24, so handle_signup() had been returning HTTP 400 and
+# self-serve developer signup had been completely dead since 2026-06-24, the
+# day the 21st price was added. Nobody noticed because there were no signups
+# to lose and the failure surfaced only as a generic error on the page.
+#
+# This price bills $0.01 per unit against the aggregate meter
+# relayshield_api_usage (formula=sum), and both API Lambdas now post
+# payload[value] = the call's price in CENTS. A $0.35 call posts 35 and bills
+# $0.35 — identical amounts to the old model, one line item, and no ceiling to
+# hit as endpoints are added.
+STRIPE_USAGE_PRICE_ID = "price_1U0jLZL2dcjOeFiYG8VktTxK"
+
+# RETIRED 2026-08-04 — kept for reference only, no longer sent to Checkout.
+# Do NOT add new endpoints here; pricing now lives in METERED_CREDIT_COSTS
+# (relayshield_api.py) and PRICE_CENTS (relayshield_agentic_api.py), which is
+# what the meter event reads. Retained because these prices are still attached
+# to the historical per-endpoint meters in Stripe.
+_RETIRED_STRIPE_PRICE_IDS = [
     # --- Original 5 (Jun 11 2026) ---
     "price_1Th6Q5L2dcjOeFiYG1RkNJeP",  # breach              $0.10/call
     "price_1Th6SaL2dcjOeFiYfumGGvde",  # sim-swap            $0.25/call
@@ -139,6 +162,34 @@ STRIPE_PRICE_IDS = [
     # here — Stripe let the existing price_1TlZIkL2dcjOeFiYUgp7D22b be edited
     # in place (0 active subscriptions on it at the time), so the ID already
     # in this list above already reflects the new rate.
+    #
+    # --- Billing-gap sweep (Aug 4 2026) ---
+    # Found by cross-checking all 29 STRIPE_METER_EVENTS entries against live
+    # Stripe: meter -> price -> this list. 24 lined up; these 5 did not, so
+    # every fiat-PAYG developer could call them and never be charged. Three
+    # already had a Product and an active Price and were simply never added
+    # here; cert-expiry and ip-intel had no Price object at all and needed one
+    # created (both mirror secret-scan-text's exact meter/price config).
+    #
+    # The lesson worth keeping: a meter firing events is NOT evidence of
+    # billing, and neither is a Price existing. Only membership in this list
+    # puts a line item on a developer's subscription. Verify all three layers
+    # whenever an endpoint is added — see the check in
+    # memory/project_agentic_api_no_credit_check.md.
+    "price_1TqemTL2dcjOeFiYcx7fHdDW",  # mcp-registry-risk       $0.35/call — Product/Price
+    # created 2026-07-07 with the endpoint (TODO AGENTIC-3), never added here. Served by the
+    # isolated relayshield_agentic_api.py Lambda, which is why it was missed: that file has its
+    # own STRIPE_METER_EVENTS, so a sweep that only reads relayshield_api.py cannot see it.
+    "price_1TqemUL2dcjOeFiY9odgLrHB",  # prompt-injection-breach $0.35/call — same, TODO AGENTIC-4.
+    "price_1TmKDTL2dcjOeFiYn8uq0Kkj",  # tech-stack-cve          $0.20/call — in relayshield_api.py,
+    # not the agentic Lambda, so this one was an independent instance of the same omission.
+    "price_1U0j0cL2dcjOeFiYqExONwf7",  # cert-expiry             $0.05/call — Product
+    # prod_V0kVJ2n5aRukdE + this Price created 2026-08-04; only the meter existed before.
+    "price_1U0j0cL2dcjOeFiYgPgBXs3u",  # ip-intel                $0.10/call — Product
+    # prod_V0kVuMgavb9L2L + this Price created 2026-08-04; only the meter existed before.
+    #
+    # Same no-retroactive-backfill limitation as every previous post-launch
+    # endpoint: these five line items land on NEW subscriptions only.
 ]
 
 SUCCESS_URL        = f"{API_BASE_URL}/developer/success?session_id={{CHECKOUT_SESSION_ID}}"
@@ -237,6 +288,76 @@ def _err(message: str, status: int = 400) -> dict:
 
 VALID_SOURCES = {"direct", "n8n", "tines", "hf-smolagents"}
 
+# Free tier, added 2026-08-04. A developer will not enter a card to try an API
+# they have never called, and the numbers said so plainly: 462 views of
+# /developers since June 1 produced 3 signup clicks (0.65%) and zero completed
+# accounts. Every comparable product in this market (GreyNoise, AbuseIPDB,
+# HIBP) has a free tier; "no free tier" was the wall.
+#
+# 20 calls is deliberately enough to integrate and see a real response on a
+# couple of endpoints, and not enough to run anything in production.
+FREE_TIER_CALLS = 20
+
+
+def _find_developer_key_by_email(email: str) -> dict | None:
+    """Find an existing API key for this address, for the free-tier path.
+
+    Deliberately NOT _find_key_by_email: that helper projects away
+    free_calls_remaining and plan, and it prefers whichever record has
+    cs_mobile_access set. A Crypto Shield Mobile subscriber signing up for a
+    developer key would otherwise be handed their mobile key back.
+
+    Uses the email-index GSI rather than a table scan. Prefers a real developer
+    record (one with a subscription or a free allowance) over a mobile one.
+    """
+    try:
+        resp = dynamodb.Table(API_KEYS_TABLE).query(
+            IndexName="email-index",
+            KeyConditionExpression=Key("email").eq(email.strip().lower()),
+        )
+        # Truthiness must match _verify_rs_api_key in relayshield_api.py exactly,
+        # which does `if item and item.get("active")`. This previously defaulted
+        # to True for a record with no `active` attribute, so a key the API
+        # considers dead looked alive here. On 2026-08-04 that selected a
+        # long-dormant Zapier test-account key with no `active` flag and emailed
+        # it to a partner reviewer mid-review; every call with it returned
+        # "Valid API key required". A lookup used to hand somebody a credential
+        # must apply the same rule the authenticator applies.
+        items = [i for i in resp.get("Items", []) if i.get("active")]
+    except Exception as exc:
+        logger.warning("email-index lookup failed for %s: %s", email, exc)
+        return None
+    if not items:
+        return None
+    for item in items:
+        if item.get("free_calls_remaining") is not None or item.get("stripe_subscription_id"):
+            return item
+    return items[0]
+
+
+def _issue_free_key(email: str, source: str = "direct") -> str:
+    """Mint a no-card free-tier key.
+
+    Deliberately carries NO stripe_customer_id and NO stripe_subscription_id.
+    That matters for billing correctness: handle_metered_request only records a
+    Stripe meter event when a customer id is present, so a free key cannot
+    produce a usage event that nothing can bill. When the developer later adds
+    a card, checkout attaches those ids to this same email.
+    """
+    api_key = f"rs_live_{uuid.uuid4().hex}"
+    dynamodb.Table(API_KEYS_TABLE).put_item(Item={
+        "api_key":              api_key,
+        "email":                email,
+        "active":               True,
+        "source":               source,
+        "plan":                 "free",
+        "free_calls_remaining": FREE_TIER_CALLS,
+        "created_at":           datetime.now(timezone.utc).isoformat(),
+    })
+    logger.info("free-tier key issued email=%s source=%s calls=%d", email, source, FREE_TIER_CALLS)
+    return api_key
+
+
 def handle_signup(body: dict) -> dict:
     email = (body.get("email") or "").strip().lower()
     if not email or "@" not in email:
@@ -246,6 +367,41 @@ def handle_signup(body: dict) -> dict:
     if source not in VALID_SOURCES:
         source = "direct"
 
+    # Free tier is the default path: no card, no Stripe, key by email in one
+    # step. Callers who explicitly want the paid path send {"paid": true},
+    # which is what the "Add a card" button on the success page uses.
+    if not body.get("paid"):
+        existing = _find_developer_key_by_email(email)
+        if existing:
+            # Do not mint a second key for the same address, and do not top the
+            # free allowance back up -- that would make the limit meaningless.
+            # Re-send the key they already have instead, so a developer who
+            # lost the email is not stuck.
+            try:
+                # Report the allowance the key actually has. Reading only
+                # free_calls_remaining told a credits-funded account it had
+                # "0 free calls", which is both wrong and alarming. Credits are
+                # in cents, so convert at the cheapest endpoint price to give a
+                # floor rather than an overstatement.
+                allowance = int(existing.get("free_calls_remaining") or 0)
+                if not allowance:
+                    allowance = int(int(existing.get("credit_balance") or 0) / 5)
+                _send_free_key_email(email, existing["api_key"], allowance)
+            except Exception as exc:
+                logger.warning("free key re-send failed email=%s: %s", email, exc)
+            logger.info("free-tier signup for existing email=%s — key re-sent", email)
+            return _ok({"free_tier": True, "resent": True,
+                        "message": "You already have a key. We have emailed it to you again."})
+        try:
+            api_key = _issue_free_key(email, source)
+            _send_free_key_email(email, api_key, FREE_TIER_CALLS)
+        except Exception as exc:
+            logger.exception("free-tier signup failed email=%s: %s", email, exc)
+            return _err("could not create your key — try again", 502)
+        return _ok({"free_tier": True, "calls": FREE_TIER_CALLS,
+                    "message": f"Your API key is on its way to {email}. "
+                               f"{FREE_TIER_CALLS} free calls, no card needed."})
+
     # Create Stripe Customer
     try:
         customer    = _stripe_post("/customers", {"email": email, "description": "RelayShield API developer"})
@@ -254,7 +410,10 @@ def handle_signup(body: dict) -> dict:
         logger.error("Stripe customer creation failed email=%s error=%s", email, exc)
         return _err("could not create billing account — try again", 502)
 
-    # Build Checkout session with all 4 metered prices
+    # Build Checkout session with the single aggregate usage price.
+    # One line item, not one per endpoint — Stripe caps a Checkout session at
+    # 20 recurring prices and the per-endpoint list had grown to 24, which is
+    # what broke this call. See STRIPE_USAGE_PRICE_ID.
     session_params: dict = {
         "mode":        "subscription",
         "customer":    customer_id,
@@ -263,9 +422,8 @@ def handle_signup(body: dict) -> dict:
         # Store email + source in metadata so webhook can retrieve them without extra Stripe calls
         "subscription_data[metadata][developer_email]": email,
         "subscription_data[metadata][source]":          source,
+        "line_items[0][price]": STRIPE_USAGE_PRICE_ID,
     }
-    for i, price_id in enumerate(STRIPE_PRICE_IDS):
-        session_params[f"line_items[{i}][price]"] = price_id
 
     try:
         session      = _stripe_post("/checkout/sessions", session_params)
@@ -408,6 +566,67 @@ def _issue_api_key(customer_id: str, subscription_id: str, email: str, source: s
     })
     logger.info("API key issued customer=%s subscription=%s email=%s source=%s", customer_id, subscription_id, email, source)
     return api_key
+
+
+def _send_free_key_email(to_email: str, api_key: str, calls_left: int) -> None:
+    """Free-tier welcome. Deliberately short and copy-pasteable.
+
+    The paid key email lists all 29 endpoints, which is the right reference for
+    someone who has already committed. For a first-time free key it is a wall:
+    the job of this email is to get one successful call made, so it leads with
+    a curl that works and names the two wedge endpoints, not the catalogue.
+    """
+    subject = f"Your RelayShield API key ({calls_left} free calls)"
+    body = f"""Your API key
+------------
+{api_key}
+
+{calls_left} free calls, no card. Send it as a header on every request:
+  X-RS-API-KEY: {api_key}
+
+Make your first call now
+------------------------
+curl -X POST {API_BASE_URL}/v1/metered/breach \\
+  -H "X-RS-API-KEY: {api_key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"email":"you@example.com"}}'
+
+Two worth trying with the rest of your free calls
+-------------------------------------------------
+Most secret scanners tell you what is in your code. These tell you what is
+already in criminal hands, which is the part you cannot fix by scanning a repo.
+
+POST /v1/metered/session-risk   stolen session cookies for an address. A stolen
+                                cookie bypasses MFA and stays valid until the
+                                session is revoked, so a password reset alone
+                                does not close it.
+
+POST /v1/metered/nhi-exposure   machine credentials tied to your domain in
+                                stealer-log archives: AWS keys, GitHub PATs,
+                                Stripe secrets, private keys, Slack tokens.
+
+A clean result means nothing was found in the sources we queried. It is not
+proof of safety.
+
+Full reference: https://api.relayshield.net/docs
+Every parameter, response field, error code and example for all 29 endpoints.
+
+When your {calls_left} calls run out, add a card at
+https://api.relayshield.net/developers and you are billed only for what you
+call after that. No minimum, no subscription fee.
+
+Questions: support@relayshield.net
+"""
+    try:
+        ses.send_email(
+            Source=FROM_EMAIL,
+            Destination={"ToAddresses": [to_email]},
+            Message={"Subject": {"Data": subject}, "Body": {"Text": {"Data": body}}},
+        )
+        logger.info("free-tier key email sent to %s", to_email)
+    except Exception as exc:
+        logger.exception("free-tier key email failed for %s: %s", to_email, exc)
+        raise
 
 
 def _send_key_email(to_email: str, api_key: str) -> None:
@@ -1231,7 +1450,7 @@ LANDING_PAGE = """<!DOCTYPE html>
   </div>
 
   <div class="signup-box">
-    <p>Enter your email to get started. Your API key arrives by email instantly.</p>
+    <p><strong style="color:var(--accent)">20 free calls, no card required.</strong> Enter your email and your API key arrives instantly.</p>
     <form id="signup-form">
       <div class="input-row">
         <input type="email" id="email-input" placeholder="you@company.com" required autocomplete="email">
@@ -1239,15 +1458,17 @@ LANDING_PAGE = """<!DOCTYPE html>
       </div>
       <div id="form-error"></div>
     </form>
-    <p class="form-note">No monthly minimum · Pay only for calls made · Cancel anytime</p>
+    <p class="form-note">No credit card · No subscription · Add a card only when your free calls run out</p>
   </div>
 
   <div style="background:rgba(108,99,255,.08);border:1px solid rgba(108,99,255,.25);border-radius:10px;padding:1rem 1.25rem;margin-top:1.25rem;font-size:.9rem;color:var(--text);line-height:1.6">
-    <strong style="color:var(--accent)">How billing works:</strong> There is no free tier, but there is no minimum spend either.
-    Direct customers add a payment method to activate a key and are billed monthly for calls made. Customers who
-    subscribe through AWS Marketplace do not add a payment method &mdash; access is provisioned automatically and all
-    billing is handled by AWS.
-    A test run of 10 breach checks costs $1.00. Most teams spend $0 in their first week while integrating.
+    <strong style="color:var(--accent)">How billing works:</strong> Every new key gets
+    <strong>20 free calls with no payment method</strong> &mdash; enough to integrate and see real
+    responses on a couple of endpoints. When they run out, add a card and you are billed monthly for
+    calls made, with no minimum and no subscription fee. A test run of 10 breach checks after that
+    costs $1.00.
+    Customers who subscribe through AWS Marketplace never add a payment method &mdash; access is
+    provisioned automatically and all billing is handled by AWS.
     Threat Intelligence subscriptions ($499/$999/mo) are separate and billed monthly.
   </div>
 </div>
@@ -1255,6 +1476,23 @@ LANDING_PAGE = """<!DOCTYPE html>
 <div class="section">
   <div class="section-title">Endpoints &amp; pricing</div>
   <div class="section-sub">Pay only for what you use. Billed monthly. No monthly minimum. Low-volume ad-hoc testing costs pennies — a 10-call integration test runs $0.10–$0.50 total.</div>
+  <!-- Docs callout added 2026-08-04. The cards below give the price and a one-line
+       summary of each endpoint, which is what a buyer needs, but a developer
+       evaluating the API needs parameters, response attributes and errors — the
+       exact gap Zapier's partner review raised. Placed at the top of this section
+       rather than in the footer so it is seen by anyone scanning the endpoint list
+       and wondering what the request body looks like. -->
+  <div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:1rem 1.15rem;margin:1.25rem 0 1.5rem">
+    <div style="font-weight:650;margin-bottom:.35rem">Full API reference</div>
+    <div style="color:var(--muted);font-size:.94rem;line-height:1.55">
+      Every endpoint below is documented with its request parameters, response attributes,
+      error codes and a worked example at
+      <a href="/docs">api.relayshield.net/docs</a>.
+      The machine-readable OpenAPI 3.1 specification is at
+      <a href="/openapi.json">api.relayshield.net/openapi.json</a> — point your client
+      generator at it directly.
+    </div>
+  </div>
   <div class="price-grid">
     <div class="price-card">
       <div class="endpoint">/v1/metered/breach</div>
@@ -1309,7 +1547,7 @@ LANDING_PAGE = """<!DOCTYPE html>
     <div class="price-card">
       <div class="endpoint">/v1/metered/secret-scan</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">GitHub public repo secret detection — searches public code repositories for accidentally committed secrets (API keys, tokens, private keys) associated with a domain. Covers own domain and vendor supply chain domains</div>
+      <div class="desc">Public artifact secret detection across <strong>five sources</strong> &mdash; GitHub repositories, <strong>npm</strong> and <strong>PyPI</strong> packages, <strong>Docker Hub</strong> images and <strong>Hugging Face</strong> models and Spaces &mdash; for secrets (API keys, tokens, private keys) already published against your domain. Secrets ship inside released packages and images constantly, and repo-only scanners never see them. Every hit is verified against the matching credential pattern before it is reported, so a docs example or a placeholder is not billed to you as a CRITICAL. Covers your own domain and vendor supply-chain domains</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/target-risk</div>
@@ -1694,6 +1932,10 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
     research that nothing on this page pointed at.
   -->
   <p style="margin-bottom:.6rem">
+    <a href="https://api.relayshield.net/docs" style="color:var(--accent);font-weight:600">API reference</a>
+    <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
+    <a href="https://api.relayshield.net/openapi.json" style="color:var(--accent)">OpenAPI spec</a>
+    <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
     <a href="https://blog.relayshield.net" style="color:var(--accent);font-weight:600">Threat research blog</a>
     <span style="color:var(--muted)">&nbsp;·&nbsp;</span>
     <a href="https://api.relayshield.net/guides/microsoft-sentinel" style="color:var(--accent)">Microsoft Sentinel guide</a>
@@ -1727,7 +1969,20 @@ document.getElementById('signup-form').addEventListener('submit', async function
       body: JSON.stringify({email, source})
     });
     const data = await res.json();
-    if (data.ok && data.data.checkout_url) {
+    if (data.ok && data.data.free_tier) {
+      // Free tier: no redirect, the key is already in their inbox. Replacing
+      // the form with confirmation is deliberate -- bouncing them to a
+      // separate success page loses the momentum, and there is nothing on
+      // that page they need.
+      const box = document.querySelector('.signup-box');
+      box.innerHTML =
+        '<p style="font-size:1.05rem;font-weight:650;color:var(--green);margin-bottom:.5rem">' +
+        (data.data.resent ? 'Key re-sent.' : 'Key sent.') + '</p>' +
+        '<p style="line-height:1.6">' + (data.data.message || '') + '</p>' +
+        '<p style="line-height:1.6;margin-top:.75rem;color:var(--muted);font-size:.92rem">' +
+        'Not there in a minute? Check spam, or email support@relayshield.net. ' +
+        'Full reference: <a href="/docs" style="color:var(--accent);font-weight:600">api.relayshield.net/docs</a></p>';
+    } else if (data.ok && data.data.checkout_url) {
       window.location.href = data.data.checkout_url;
     } else {
       throw new Error(data.error || 'Something went wrong');
@@ -1975,6 +2230,47 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "nothing was found in the sources we queried, which is not the same as proof your keys are safe."
             "</span>")),
     ),
+    # Readers arriving from the secret-scanning post. Deliberately NO hosts: the
+    # llmjacking variant above already claims blog.relayshield.net and medium.com,
+    # and the referer loop returns the first host match, so claiming them here
+    # would make which post you appear to arrive from depend on dict order. This
+    # variant is reachable only by an explicit ?source=, which every link in the
+    # post carries.
+    "secret-scan": (
+        (),
+        _banner("Arriving from the secret scanning post", _p(
+            "Start with the free local scanner &mdash; all 31 credential patterns run on your own machine. "
+            "No API key, no account, no network call, MIT licensed:"
+            '<pre style="background:var(--bg);border:1px solid var(--border);border-radius:8px;'
+            'padding:.9rem 1rem;overflow-x:auto;margin:.8rem 0 0;font-size:.82rem;line-height:1.55">'
+            "<code>pip install rsscan &amp;&amp; rsscan .</code></pre>"
+            '<span style="display:block;margin-top:.7rem">The hosted scan is the half a pre-commit hook '
+            "cannot do: it searches <b>GitHub, npm, PyPI, Docker Hub and Hugging Face</b> for credentials "
+            "already public against a domain you own, and re-matches every candidate against the full "
+            "pattern set so you get findings rather than search hits. "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/metered/secret-scan</code>, '
+            "$0.35 a call. A clean result means nothing was found in the sources we queried, which is not "
+            "the same as proof your keys are safe.</span>")),
+    ),
+    "session-hijack": (
+        (),
+        _banner("Arriving from the session hijacking post", _p(
+            "The post's argument is that the password is the delivery mechanism and the session cookie "
+            "and machine credential are the payload. These are the two checks that look for exactly that, "
+            "against criminal stealer-log archives rather than your own repositories."
+            '<span style="display:block;margin-top:.7rem">'
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/metered/session-risk</code> '
+            "$0.30 a call &mdash; stolen session cookies for an address, severity-ranked by service category. "
+            "A stolen cookie bypasses MFA and stays valid until the session is explicitly revoked, so a "
+            "password reset alone does not close it.</span>"
+            '<span style="display:block;margin-top:.55rem">'
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/metered/nhi-exposure</code> '
+            "$0.40 a call &mdash; machine credentials tied to your domain in the same corpus: AWS IAM keys, "
+            "GitHub PATs, Stripe secrets, private keys, Slack tokens.</span>"
+            '<span style="display:block;margin-top:.7rem">A clean result means nothing was found in the '
+            "sources we queried. It is not proof of safety, and we do not claim detection of the two "
+            "malware families named in the post.</span>")),
+    ),
     "huggingface": (
         ("huggingface.co", "hf.space"),
         _banner("Arriving from Hugging Face", _p(
@@ -1989,11 +2285,45 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
 # discovering after publication that a link in a live post matches nothing, which
 # is exactly what happened with ?src=blog on the Bundle D launch post.
 _SOURCE_ALIASES = {
+    # These five stay on llmjacking. The published LLMjacking post links with
+    # ?src=blog (that is why they were added), so repointing them at whatever the
+    # newest post happens to be would silently hand its existing readers the wrong
+    # landing. Generic channel keys belong to the post that already shipped with
+    # them; a new post registers its own, as secret-scan-* does below.
     "blog": "llmjacking",
     "medium": "llmjacking",
     "linkedin": "llmjacking",
     "telegram": "llmjacking",
     "post": "llmjacking",
+    # Secret-scanning post, 2026-08-03. One key per syndication channel: the raw
+    # parameter is what gets logged, so these stay distinguishable in CloudWatch
+    # while all rendering the same banner. Registered BEFORE the post is
+    # published -- an unregistered key logs unmatched: and renders nothing, which
+    # is exactly how ?source=rsscan shipped broken.
+    "secret-scan":           "secret-scan",
+    "secretscan":            "secret-scan",
+    "secret-scan-post":      "secret-scan",
+    "secret-scan-medium":    "secret-scan",
+    "secret-scan-linkedin":  "secret-scan",
+    "secret-scan-telegram":  "secret-scan",
+    "secret-scan-farcaster": "secret-scan",
+    "secret-scan-mastodon":  "secret-scan",
+    "secret-scan-hn":        "secret-scan",
+    # Session-hijacking post, 2026-08-04 ("The Malware Stopped Stealing
+    # Passwords"). Same one-key-per-channel pattern: the raw parameter is what
+    # CloudWatch logs, so channels stay distinguishable while all rendering the
+    # same banner. Registered BEFORE any link goes out -- the CloudWatch source
+    # report currently shows live unmatched:circleci / unmatched:rsscan /
+    # unmatched:docker entries, which is what an unregistered key looks like.
+    "session-hijack":           "session-hijack",
+    "sessionhijack":            "session-hijack",
+    "session-hijack-post":      "session-hijack",
+    "session-hijack-medium":    "session-hijack",
+    "session-hijack-linkedin":  "session-hijack",
+    "session-hijack-telegram":  "session-hijack",
+    "session-hijack-farcaster": "session-hijack",
+    "session-hijack-mastodon":  "session-hijack",
+    "session-hijack-reddit":    "session-hijack",
     "hn": "github",
     "reddit": "github",
     "opencti": "xsoar",
@@ -2022,6 +2352,19 @@ _SOURCE_ALIASES = {
     # BEFORE the link went live; an unregistered key logs unmatched: and renders
     # no banner, which is the failure the ?source=hf-smolagents entry above records.
     "n8n-profile": "n8n",
+    # rsscan — the free local scanner. `rsscan` is the CTA in the escalation
+    # report a developer forwards to whoever owns security, which is THE
+    # dev -> security-lead bridge in the funnel; it shipped in the published
+    # PyPI package and GitHub release on 2026-08-02 pointing at ?source=rsscan
+    # while that key did not exist, so every arrival logged unmatched: and
+    # rendered no banner. Registered 2026-08-02. The remaining catalogs get
+    # their own keys so a Docker Hub arrival is distinguishable from a
+    # pre-commit one. Maps to the github variant: same developer audience.
+    "rsscan":     "github",
+    "dockerhub":  "github",
+    "docker":     "github",
+    "circleci":   "github",
+    "pre-commit": "github",
     "zapier": "github",
 }
 

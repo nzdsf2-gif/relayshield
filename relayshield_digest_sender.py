@@ -88,7 +88,7 @@ ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 #   {{2}} = Scan summary line     e.g. "3 email addresses monitored — 90 scans completed"
 #   {{3}} = Breach status line    e.g. "✅ All clear — no breaches detected this month."
 #   {{4}} = Monthly security tip  (full tip text from MONTHLY_TIPS)
-DIGEST_TEMPLATE_SID = "HX58cb69a1f9de4793ae225015d186c8e6"
+DIGEST_TEMPLATE_SID = "HX838f59a20fda31aa76f77f29303f4c53"  # rs_monthly_digest_v2 with ACK + BREACHES buttons
 
 # ---------------------------------------------------------------------------
 # Eligible states
@@ -129,6 +129,12 @@ MONTHLY_TIPS = {
         "and identify reused passwords — the most common way one breach becomes five."
     ),
     7: (
+        "Audit your linked messaging devices. Open Telegram → Settings → Devices, "
+        "WhatsApp → Settings → Linked Devices, Signal → Settings → Linked Devices. "
+        "Remove anything you don't recognise. Attackers use fake QR codes to link their "
+        "device to your account and read every message silently. Reply *LINKEDDEVICES* for a step-by-step guide."
+    ),
+    71: (  # fallback slot — original July tip preserved
         "AI-generated phishing emails are now indistinguishable from legitimate ones. "
         "New rule: never act on urgency in an email. Navigate directly to the company's "
         "website — never click a link in a message to log in."
@@ -399,18 +405,18 @@ def build_scan_summary(email_count: int, days_in_month: int, month_name: str) ->
     return f"{email_count} email {word} monitored — {scan_count} scans completed in {month_name}"
 
 
-def build_status_line(breach_count: int, month_name: str) -> str:
+def build_status_line(breach_count: int, month_name: str, breached_accounts: int = 0) -> str:
     """Build the breach status line for the digest template."""
     if breach_count == 0:
-        return f"✅ All clear — no new breaches detected in {month_name}."
-    elif breach_count == 1:
+        return f"✅ All clear — no new breaches detected in {month_name}. Run BREACHES to re-check anytime."
+    accounts_str = f" ({breached_accounts:,} accounts affected)" if breached_accounts > 0 else ""
+    if breach_count == 1:
         return (
-            "⚠️ 1 known breach on record — remediation steps sent for all new detections."
+            f"⚠️ 1 known breach on record{accounts_str} — reply BREACHES to review details and remediation steps."
         )
     else:
         return (
-            f"⚠️ {breach_count} known breaches on record — remediation steps sent "
-            "for all new detections."
+            f"⚠️ {breach_count} known breaches on record{accounts_str} — reply BREACHES to review all detections and next steps."
         )
 
 

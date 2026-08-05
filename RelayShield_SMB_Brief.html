@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RelayShield — SMB Security Brief</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #ffffff;
+    color: #1a1a2e;
+    font-size: 9.5pt;
+    line-height: 1.5;
+  }
+
+  .page {
+    width: 8.5in;
+    min-height: 11in;
+    margin: 0 auto;
+    padding: 0;
+    background: #ffffff;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    background: linear-gradient(135deg, #0d0d1a 0%, #1a1a3e 50%, #0d1b4a 100%);
+    padding: 28px 40px 24px;
+    color: white;
+  }
+
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  .brand {
+    font-size: 22pt;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+    color: #ffffff;
+  }
+
+  .brand span {
+    color: #7c6af7;
+  }
+
+  .tagline {
+    font-size: 8pt;
+    color: #a0aec0;
+    margin-top: 2px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .header-right {
+    text-align: right;
+    font-size: 8pt;
+    color: #a0aec0;
+  }
+
+  .hero-statement {
+    margin-top: 18px;
+    font-size: 14pt;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.3;
+    max-width: 5.5in;
+  }
+
+  .hero-statement span {
+    color: #7c6af7;
+  }
+
+  /* ── BODY ── */
+  .body {
+    padding: 22px 40px 20px;
+  }
+
+  /* ── TWO COLUMN LAYOUT ── */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 18px;
+  }
+
+  /* ── SECTION TITLES ── */
+  .section-title {
+    font-size: 7.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: #7c6af7;
+    border-bottom: 1.5px solid #7c6af7;
+    padding-bottom: 4px;
+    margin-bottom: 10px;
+  }
+
+  /* ── ATTACK CHAIN ── */
+  .attack-chain {
+    background: #f7f7fc;
+    border-left: 3px solid #7c6af7;
+    padding: 12px 16px;
+    margin-bottom: 18px;
+  }
+
+  .attack-chain .section-title {
+    margin-bottom: 10px;
+  }
+
+  .chain-step {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 7px;
+    align-items: flex-start;
+  }
+
+  .step-num {
+    background: #7c6af7;
+    color: white;
+    font-size: 7pt;
+    font-weight: 700;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .step-text {
+    font-size: 8.5pt;
+    color: #2d2d4e;
+    line-height: 1.4;
+  }
+
+  .step-text strong {
+    color: #1a1a2e;
+  }
+
+  /* ── CALLOUT BOX ── */
+  .callout {
+    background: #1a1a3e;
+    color: #e8e8f8;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 8.5pt;
+    font-style: italic;
+    margin-bottom: 18px;
+    line-height: 1.4;
+  }
+
+  /* ── BODY TEXT ── */
+  p {
+    font-size: 8.5pt;
+    color: #2d2d4e;
+    margin-bottom: 8px;
+    line-height: 1.5;
+  }
+
+  .highlight {
+    font-weight: 700;
+    color: #1a1a2e;
+  }
+
+  /* ── CAPABILITY BLOCKS ── */
+  .capability {
+    margin-bottom: 8px;
+    padding-left: 10px;
+    border-left: 2px solid #7c6af7;
+  }
+
+  .capability-title {
+    font-size: 8.5pt;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 2px;
+  }
+
+  .capability-text {
+    font-size: 8pt;
+    color: #4a4a6a;
+    line-height: 1.4;
+  }
+
+  /* ── COMPARISON TABLE ── */
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 18px;
+    font-size: 8pt;
+  }
+
+  .compare-table th {
+    background: #1a1a3e;
+    color: white;
+    padding: 7px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 7.5pt;
+  }
+
+  .compare-table th:first-child {
+    border-radius: 4px 0 0 0;
+  }
+  .compare-table th:last-child {
+    border-radius: 0 4px 0 0;
+  }
+
+  .compare-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid #e8e8f4;
+    color: #2d2d4e;
+    vertical-align: top;
+  }
+
+  .compare-table tr:nth-child(even) td {
+    background: #f7f7fc;
+  }
+
+  .compare-table td:first-child {
+    font-weight: 600;
+    color: #1a1a2e;
+    width: 42%;
+  }
+
+  /* ── PRICING TABLE ── */
+  .pricing-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 14px;
+    font-size: 8pt;
+  }
+
+  .pricing-table th {
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 7.5pt;
+    font-weight: 700;
+  }
+
+  .pricing-table th:first-child {
+    background: #1a1a3e;
+    color: #a0aec0;
+    width: 30%;
+  }
+
+  .pricing-table th:not(:first-child) {
+    background: #7c6af7;
+    color: white;
+    text-align: center;
+  }
+
+  .pricing-table td {
+    padding: 5px 10px;
+    border-bottom: 1px solid #e8e8f4;
+    vertical-align: middle;
+  }
+
+  .pricing-table td:first-child {
+    background: #f0f0fa;
+    font-weight: 600;
+    font-size: 7.5pt;
+    color: #1a1a2e;
+  }
+
+  .pricing-table td:not(:first-child) {
+    text-align: center;
+    color: #2d2d4e;
+  }
+
+  .pricing-table tr:nth-child(even) td:not(:first-child) {
+    background: #f7f7fc;
+  }
+
+  .check { color: #7c6af7; font-weight: 700; }
+  .dash  { color: #c0c0d0; }
+
+  .price-row td {
+    background: #1a1a3e !important;
+    color: white !important;
+    font-weight: 700;
+    font-size: 9.5pt;
+    padding: 8px 10px;
+  }
+
+  .price-row td:first-child {
+    color: #a0aec0 !important;
+    font-size: 7.5pt;
+    font-weight: 400;
+  }
+
+  .annual-row td {
+    background: #f0f0fa !important;
+    color: #4a4a6a !important;
+    font-size: 7.5pt;
+  }
+
+  .annual-row td:first-child {
+    color: #4a4a6a !important;
+  }
+
+  /* ── WHY BULLETS ── */
+  .why-list {
+    list-style: none;
+    padding: 0;
+  }
+
+  .why-list li {
+    font-size: 8.5pt;
+    color: #2d2d4e;
+    padding: 4px 0 4px 16px;
+    position: relative;
+    border-bottom: 1px solid #f0f0fa;
+    line-height: 1.4;
+  }
+
+  .why-list li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: #7c6af7;
+    font-weight: 700;
+  }
+
+  .why-list li strong {
+    color: #1a1a2e;
+  }
+
+  /* ── MASTER KEY BOX ── */
+  .masterkey {
+    background: linear-gradient(135deg, #1a1a3e, #0d1b4a);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-bottom: 18px;
+  }
+
+  .masterkey .section-title {
+    color: #a78bfa;
+    border-color: #a78bfa;
+  }
+
+  .masterkey p {
+    color: #c8c8e8;
+    font-size: 8.5pt;
+  }
+
+  .masterkey .accounts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .account-tag {
+    background: rgba(124, 106, 247, 0.3);
+    border: 1px solid rgba(124, 106, 247, 0.5);
+    color: #e0d8ff;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 7.5pt;
+    font-weight: 600;
+  }
+
+  /* ── FOOTER ── */
+  .footer {
+    background: #0d0d1a;
+    color: #a0aec0;
+    padding: 14px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 7.5pt;
+  }
+
+  .footer-brand {
+    font-weight: 700;
+    color: white;
+    font-size: 9pt;
+  }
+
+  .footer-brand span { color: #7c6af7; }
+
+  .on-request {
+    background: #f0f0fa;
+    border: 1px solid #d0d0ea;
+    border-radius: 4px;
+    padding: 7px 12px;
+    font-size: 8pt;
+    color: #4a4a6a;
+    margin-bottom: 14px;
+    text-align: center;
+  }
+
+  /* ── PRINT ── */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  @media print {
+    body { margin: 0; }
+    .page { width: 100%; margin: 0; }
+    @page { margin: 0; size: letter portrait; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-top">
+      <div>
+        <div class="brand">Relay<span>Shield</span></div>
+        <div class="tagline">Identity Protection with a Response Layer</div>
+      </div>
+      <div class="header-right">
+        relayshield.net<br>
+        relayshieldadmin@gmail.com<br>
+        +1 (339) 203-9730
+      </div>
+    </div>
+    <div class="hero-statement">
+      Most security tools detect threats and stop.<br>
+      <span>RelayShield stops them before they start.</span>
+    </div>
+  </div>
+
+  <!-- BODY -->
+  <div class="body">
+
+    <!-- ROW 1: Problem + Master Key -->
+    <div class="two-col">
+
+      <!-- LEFT: The Problem -->
+      <div>
+        <div class="section-title">The Gap No One Is Filling</div>
+        <p>Enterprise security platforms cost tens of thousands of dollars annually and require dedicated IT staff to operate. Consumer identity tools monitor email breaches — and stop there.</p>
+        <p><span class="highlight">Neither was built for the SMB.</span> Most small businesses operate without an IT team, without an incident response retainer, and without the budget for enterprise-grade tooling. When a breach hits, they're on their own.</p>
+        <p>RelayShield closes that gap — delivering <span class="highlight">enterprise-grade, carrier-layer security at a price that fits a real small business budget.</span></p>
+      </div>
+
+      <!-- RIGHT: Master Key -->
+      <div class="masterkey">
+        <div class="section-title">Your Mobile Number Is the Master Key</div>
+        <p>One successful SIM swap — a fraud call to your carrier that takes under 10 minutes — and an attacker holds the key to every account that trusts your phone number:</p>
+        <div class="accounts">
+          <span class="account-tag">Business Email</span>
+          <span class="account-tag">Bank Accounts</span>
+          <span class="account-tag">Square / Toast POS</span>
+          <span class="account-tag">Crypto Wallets</span>
+          <span class="account-tag">Okta</span>
+          <span class="account-tag">Duo</span>
+          <span class="account-tag">Payment Processors</span>
+          <span class="account-tag">Cloud Accounts</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ATTACK CHAIN -->
+    <div class="attack-chain">
+      <div class="section-title">The Attack Chain Your Business Isn't Watching</div>
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 8px;">
+        <div class="chain-step">
+          <div class="step-num">1</div>
+          <div class="step-text"><strong>Data breach.</strong> Your email, phone &amp; DOB exposed. Nobody tells you.</div>
+        </div>
+        <div class="chain-step">
+          <div class="step-num">2</div>
+          <div class="step-text"><strong>SIM swap.</strong> Attacker calls your carrier. Your number ported in &lt;10 min.</div>
+        </div>
+        <div class="chain-step">
+          <div class="step-num">3</div>
+          <div class="step-text"><strong>Silence.</strong> Your phone stops receiving calls and texts.</div>
+        </div>
+        <div class="chain-step">
+          <div class="step-num">4</div>
+          <div class="step-text"><strong>Takeover.</strong> Forgot Password. Your SMS codes go to their phone.</div>
+        </div>
+        <div class="chain-step">
+          <div class="step-num">5</div>
+          <div class="step-text"><strong>Loss.</strong> You find out 48 hrs later. Avg SMB loss: <strong>$15K–$130K.</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- INFOSTEALER SECTION -->
+    <div style="background: linear-gradient(135deg, #0d0d1a 0%, #1a1a3e 100%); padding: 16px 24px; margin-bottom: 16px; border-radius: 4px;">
+      <div class="section-title" style="color: #a78bfa; border-color: #a78bfa;">The Attack That Doesn't Need Your Password</div>
+      <p style="color: #c8c8e8; font-size: 8.5pt; margin-bottom: 10px;">There is a second, more sophisticated threat that most security tools cannot detect — and that bypasses 2FA entirely. <span style="color: #ffffff; font-weight: 600;">Infostealer malware</span> runs silently on your device. No ransom demand. No slowdown. No warning. Within minutes of infection it extracts every saved password, every active session cookie, every stored credit card from your browser. Those logs are packaged and sold on darknet markets — typically within 48 to 72 hours of infection.</p>
+      <p style="color: #a78bfa; font-size: 8.5pt; font-weight: 600; margin-bottom: 10px;">The attacker does not need your password. They do not need your 2FA code. They use your <em>session cookie</em> — a token your bank, email provider, and business tools issued when you last logged in. From their perspective, they are you. Authenticated. No alerts. No friction.</p>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
+        <div>
+          <div style="color: #a0aec0; font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">How the attack unfolds</div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <span style="background: #7c6af7; color: white; font-size: 7pt; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 52px; text-align: center; margin-top: 1px;">Hour 0</span>
+              <span style="color: #c8c8e8; font-size: 8pt;">Device silently infected. No visible sign.</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <span style="background: #7c6af7; color: white; font-size: 7pt; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 52px; text-align: center; margin-top: 1px;">Hrs 1–4</span>
+              <span style="color: #c8c8e8; font-size: 8pt;">All passwords, session cookies, and credentials extracted.</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <span style="background: #5a4ad7; color: white; font-size: 7pt; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 52px; text-align: center; margin-top: 1px;">Hrs 24–72</span>
+              <span style="color: #c8c8e8; font-size: 8pt;">Credentials appear in darknet log sold for $10–$50. Still no warning to you.</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <span style="background: #3a2ab7; color: white; font-size: 7pt; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 52px; text-align: center; margin-top: 1px;">Day 3–14</span>
+              <span style="color: #c8c8e8; font-size: 8pt;">Attacker uses your session cookie. Authenticated. No 2FA required.</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <span style="background: #e53e3e; color: white; font-size: 7pt; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 52px; text-align: center; margin-top: 1px;">Week 2+</span>
+              <span style="color: #c8c8e8; font-size: 8pt;">Fraudulent transfer clears. Client calls about suspicious email from your address.</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div style="color: #a0aec0; font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">How RelayShield stops it</div>
+          <div style="background: rgba(124,106,247,0.15); border: 1px solid rgba(124,106,247,0.4); border-radius: 4px; padding: 10px 12px; margin-bottom: 8px;">
+            <div style="color: #a78bfa; font-size: 7.5pt; font-weight: 700; margin-bottom: 4px;">DETECT — Before weaponisation</div>
+            <div style="color: #c8c8e8; font-size: 8pt;">We monitor darknet infostealer log markets continuously. The moment your credentials appear in a new dump, you receive an alert — typically within hours of publication and days before an attacker can act.</div>
+          </div>
+          <div style="background: rgba(124,106,247,0.15); border: 1px solid rgba(124,106,247,0.4); border-radius: 4px; padding: 10px 12px;">
+            <div style="color: #a78bfa; font-size: 7.5pt; font-weight: 700; margin-bottom: 4px;">REMEDIATE — Session-first response</div>
+            <div style="color: #c8c8e8; font-size: 8pt;">Our bot walks you through the exact sequence: invalidate active sessions, rotate highest-risk passwords, check for unauthorised access, harden against reinfection — in WhatsApp or Telegram, in plain English, right now.</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="background: rgba(229,62,62,0.1); border-left: 3px solid #e53e3e; padding: 8px 12px; border-radius: 0 4px 4px 0;">
+        <span style="color: #feb2b2; font-size: 8pt;"><strong style="color: white;">Business owners are high-value targets.</strong> A single infected device — with access to banking portals, accounting systems, payroll platforms, and client data — can compromise every system the owner touches. Infostealer logs don't just steal one account. They steal the entire device.</span>
+      </div>
+    </div>
+
+    <!-- ROW 2: Difference + UX -->
+    <div class="two-col">
+
+      <!-- LEFT: The Difference -->
+      <div>
+        <div class="section-title">Proactive. Not Reactive.</div>
+        <p>Traditional tools are <span class="highlight">reactive by design</span> — they detect a confirmed breach and send an alert. By then, the attacker is already at step four.</p>
+        <p>RelayShield monitors threat vectors <span class="highlight">in real-time as attacks are forming</span> — the data exposure that enables the SIM swap call, the SIM swap itself, the infostealer infection stealing sessions before a password is entered.</p>
+        <p><span class="highlight">We act at the point where the attack is assembling — before the damage is done.</span></p>
+
+        <div style="margin-top: 10px;">
+          <div class="capability">
+            <div class="capability-title">① SWEEP — Close the backdoors first</div>
+            <div class="capability-text">Every breach triggers an audit: forwarding rules, rogue OAuth apps, unknown recovery addresses, active sessions on unrecognised devices. Always before remediation.</div>
+          </div>
+          <div class="capability">
+            <div class="capability-title">② REMEDIATE — AI that acts, not notifies</div>
+            <div class="capability-text">Step-by-step guided response in WhatsApp or Telegram. In the right order. At any hour. No support queue. No dashboard to interpret.</div>
+          </div>
+          <div class="capability">
+            <div class="capability-title">③ TRACK — We follow up until you're protected</div>
+            <div class="capability-text">Most breaches go unresolved not because people don't care — because nobody followed up. RelayShield tracks completion and checks in until every action is confirmed closed.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: UX Comparison -->
+      <div>
+        <div class="section-title">11:30 PM. Breach Alert. What Happens Next?</div>
+        <div class="callout" style="margin-bottom: 10px; font-style: normal; font-size: 8pt;">
+          <strong style="color:#a78bfa;">With RelayShield:</strong> Your bot sends an immediate alert in WhatsApp or Telegram — severity score, plain-English explanation, and step-by-step remediation. You act. Right now. No queue. No login.
+        </div>
+
+        <table class="compare-table">
+          <tr>
+            <th>Traditional Tool</th>
+            <th>RelayShield</th>
+          </tr>
+          <tr>
+            <td>Log into dashboard to check status</td>
+            <td>Alert in your existing messaging app</td>
+          </tr>
+          <tr>
+            <td>Interpret charts and severity graphs</td>
+            <td>Plain-English explanation + severity score</td>
+          </tr>
+          <tr>
+            <td>Call support — wait in queue</td>
+            <td>Two-way bot conversation guides every step</td>
+          </tr>
+          <tr>
+            <td>File a ticket, wait for response</td>
+            <td>Immediate guided action at any hour</td>
+          </tr>
+          <tr>
+            <td>Requires IT staff to act on findings</td>
+            <td>Built for owners with no security background</td>
+          </tr>
+        </table>
+
+        <p style="font-size:8pt; color:#4a4a6a;"><strong>Permission-based. Two-way. Conversational.</strong> The bot cannot message you unsolicited. Every interaction is initiated by a verified alert or your own command — inside WhatsApp and Telegram, apps you already use every day.</p>
+      </div>
+    </div>
+
+    <!-- PRICING -->
+    <div class="section-title">Plans &amp; Pricing</div>
+    <table class="pricing-table">
+      <tr>
+        <th></th>
+        <th>Business Starter</th>
+        <th>Business Starter + Domain</th>
+        <th>Business Basic</th>
+      </tr>
+      <tr>
+        <td>Best for</td>
+        <td>Sole proprietors &amp; freelancers</td>
+        <td>Client-facing solo operators</td>
+        <td>Teams up to 5</td>
+      </tr>
+      <tr>
+        <td>Seats included</td>
+        <td>2</td>
+        <td>2</td>
+        <td>5</td>
+      </tr>
+      <tr>
+        <td>Breach monitoring</td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td>Carrier SIM swap monitoring</td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td>Infostealer detection &amp; session response</td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td>Session hijacking alerts</td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td>WhatsApp + Telegram AI remediation</td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td>Domain lookalike monitoring</td>
+        <td><span class="dash">—</span></td>
+        <td><span class="check">✓</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td>Team seat management</td>
+        <td><span class="dash">—</span></td>
+        <td><span class="dash">—</span></td>
+        <td><span class="check">✓</span></td>
+      </tr>
+      <tr class="price-row">
+        <td>Monthly</td>
+        <td>$19.99 / mo</td>
+        <td>$24.99 / mo</td>
+        <td>$89.99 / mo</td>
+      </tr>
+      <tr class="annual-row">
+        <td>Annual (save ~10%)</td>
+        <td>$215.88 / yr</td>
+        <td>$269.99 / yr</td>
+        <td>$971.88 / yr</td>
+      </tr>
+    </table>
+
+    <div class="on-request">
+      <strong>Business Shield</strong> (10 seats) and <strong>Business Shield Pro</strong> (25 seats) available on request &nbsp;·&nbsp; Contact us for enterprise and multi-location pricing
+    </div>
+
+  </div><!-- end body -->
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div>
+      <div class="footer-brand">Relay<span>Shield</span></div>
+      <div style="margin-top:3px;">Built by a 25-year telecom security professional. We've seen every SIM swap from the carrier side.</div>
+    </div>
+    <div style="text-align:right; line-height:1.8;">
+      relayshield.net<br>
+      relayshieldadmin@gmail.com<br>
+      +1 (339) 203-9730<br>
+      <span style="font-size:7pt; color:#606080;">© 2026 RelayShield LLC. All rights reserved.</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-825 -73 2160 1786" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#90a4ae"/></marker>
+<marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#66bb6a"/></marker></defs>
+<rect x="-825" y="-73" width="2160" height="1786" fill="#fff"/>
+<rect x="-765" y="389" width="560" height="862" rx="12" fill="#fffdf0" stroke="#f0c419" stroke-width="2"/>
+<text x="-739.0" y="423.0" font-size="21" font-weight="700" fill="#3e2723">Shadow AI &amp; Vendor Approval Gate with RelayShield</text>
+<text x="-739.0" y="477.0" font-size="16" font-weight="700" fill="#5d4037">How it works</text>
+<text x="-723.0" y="501.0" font-size="13" fill="#5d4037">Runs when a new SaaS vendor or AI-tool request is submitted</text>
+<text x="-723.0" y="521.0" font-size="13" fill="#5d4037">(form or ITSM ticket) via this workflow&#x27;s webhook. Branches on</text>
+<text x="-723.0" y="541.0" font-size="13" fill="#5d4037">request_type: a plain SaaS request runs three checks (supply</text>
+<text x="-723.0" y="561.0" font-size="13" fill="#5d4037">chain risk, public-repo secret exposure, OAuth/token exposure).</text>
+<text x="-723.0" y="581.0" font-size="13" fill="#5d4037">An AI-tool request runs those plus mcp-registry-risk — typosquat</text>
+<text x="-723.0" y="601.0" font-size="13" fill="#5d4037">domains, known-malicious IOCs, newly-registered MCP server</text>
+<text x="-723.0" y="621.0" font-size="13" fill="#5d4037">domains. Either path alerts Slack, logs to Notion, and emails</text>
+<text x="-723.0" y="641.0" font-size="13" fill="#5d4037">the requester an approve/pending-review outcome. Clean results</text>
+<text x="-723.0" y="661.0" font-size="13" fill="#5d4037">are logged too, so every request is auditable.</text>
+<text x="-739.0" y="699.0" font-size="16" font-weight="700" fill="#5d4037">Setup steps</text>
+<circle cx="-735.0" cy="719.0" r="2.6" fill="#a1887f"/>
+<text x="-723.0" y="723.0" font-size="13" fill="#5d4037">Point your intake form or ITSM system at this workflow&#x27;s</text>
+<text x="-723.0" y="743.0" font-size="13" fill="#5d4037">webhook, posting { request_type: &quot;saas&quot;|&quot;ai_tool&quot;,</text>
+<text x="-723.0" y="763.0" font-size="13" fill="#5d4037">requester_name, requester_email, department, vendor_name,</text>
+<text x="-723.0" y="783.0" font-size="13" fill="#5d4037">vendor_domain, server_url } (server_url/package_name only for</text>
+<text x="-723.0" y="803.0" font-size="13" fill="#5d4037">ai_tool)</text>
+<circle cx="-735.0" cy="819.0" r="2.6" fill="#a1887f"/>
+<text x="-723.0" y="823.0" font-size="13" fill="#5d4037">Add your RelayShield API credential to the 4 custom RelayShield</text>
+<text x="-723.0" y="843.0" font-size="13" fill="#5d4037">nodes. The Secret Scan and MCP Registry Risk checks use HTTP</text>
+<text x="-723.0" y="863.0" font-size="13" fill="#5d4037">Request nodes with a Header Auth credential instead (header</text>
+<text x="-723.0" y="883.0" font-size="13" fill="#5d4037">X-RS-API-KEY, value = your API key) — those two operations</text>
+<text x="-723.0" y="903.0" font-size="13" fill="#5d4037">aren&#x27;t in the community node&#x27;s operation list yet</text>
+<circle cx="-735.0" cy="919.0" r="2.6" fill="#a1887f"/>
+<text x="-723.0" y="923.0" font-size="13" fill="#5d4037">Set notionVendorGateDbId and slackSecurityChannelId in your n8n</text>
+<text x="-723.0" y="943.0" font-size="13" fill="#5d4037">variables</text>
+<circle cx="-735.0" cy="959.0" r="2.6" fill="#a1887f"/>
+<text x="-723.0" y="963.0" font-size="13" fill="#5d4037">Connect and authorize the Gmail and Slack credentials</text>
+<text x="-739.0" y="1001.0" font-size="16" font-weight="700" fill="#5d4037">Why the OAuth check runs against the requester, not the vendor</text>
+<text x="-723.0" y="1025.0" font-size="13" fill="#5d4037">It checks the requesting employee&#x27;s email, not the vendor&#x27;s —</text>
+<text x="-723.0" y="1045.0" font-size="13" fill="#5d4037">the real question at approval time is whether the person about</text>
+<text x="-723.0" y="1065.0" font-size="13" fill="#5d4037">to grant this tool OAuth access already shows signs of</text>
+<text x="-723.0" y="1085.0" font-size="13" fill="#5d4037">compromised credentials. That&#x27;s the person whose authority the</text>
+<text x="-723.0" y="1105.0" font-size="13" fill="#5d4037">integration would inherit.</text>
+<text x="-739.0" y="1143.0" font-size="16" font-weight="700" fill="#5d4037">Customization</text>
+<text x="-723.0" y="1167.0" font-size="13" fill="#5d4037">Add more RelayShield checks (ransomware risk, identity graph) to</text>
+<text x="-723.0" y="1187.0" font-size="13" fill="#5d4037">broaden coverage, or adjust alert routing to match your</text>
+<text x="-723.0" y="1207.0" font-size="13" fill="#5d4037">escalation process.</text>
+<path d="M155,820 C190,820 190,820 225,820" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M435,820 C470,820 470,50 505,50" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M435,820 C470,820 470,290 505,290" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M435,820 C470,820 470,530 505,530" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M435,820 C470,820 470,770 505,770" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M435,820 C470,820 470,1110 505,1110" fill="none" stroke="#66bb6a" stroke-width="2" marker-end="url(#g)"/>
+<path d="M435,820 C470,820 470,1350 505,1350" fill="none" stroke="#66bb6a" stroke-width="2" marker-end="url(#g)"/>
+<path d="M435,820 C470,820 470,1590 505,1590" fill="none" stroke="#66bb6a" stroke-width="2" marker-end="url(#g)"/>
+<path d="M715,1110 C750,1110 750,1350 785,1350" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M715,1350 C750,1350 750,1350 785,1350" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M715,1590 C750,1590 750,1350 785,1350" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M715,50 C750,50 750,410 785,410" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M715,290 C750,290 750,410 785,410" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M715,530 C750,530 750,410 785,410" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M715,770 C750,770 750,410 785,410" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M995,1350 C1030,1350 1030,410 1065,410" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M995,1350 C1030,1350 1030,650 1065,650" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M995,1350 C1030,1350 1030,890 1065,890" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M995,1350 C1030,1350 1030,1130 1065,1130" fill="none" stroke="#66bb6a" stroke-width="2" marker-end="url(#g)"/>
+<path d="M995,1350 C1030,1350 1030,1370 1065,1370" fill="none" stroke="#66bb6a" stroke-width="2" marker-end="url(#g)"/>
+<path d="M995,410 C1030,410 1030,410 1065,410" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M995,410 C1030,410 1030,650 1065,650" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M995,410 C1030,410 1030,890 1065,890" fill="none" stroke="#90a4ae" stroke-width="2" marker-end="url(#a)"/>
+<path d="M995,410 C1030,410 1030,1130 1065,1130" fill="none" stroke="#66bb6a" stroke-width="2" marker-end="url(#g)"/>
+<path d="M995,410 C1030,410 1030,1370 1065,1370" fill="none" stroke="#66bb6a" stroke-width="2" marker-end="url(#g)"/>
+<rect x="-55" y="787" width="210" height="66" rx="9" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
+<text x="50" y="817" font-size="12.5" font-weight="600" fill="#1b5e20" text-anchor="middle">Vendor/AI-Tool Request</text>
+<text x="50" y="833" font-size="12.5" font-weight="600" fill="#1b5e20" text-anchor="middle">Webhook</text>
+<rect x="225" y="787" width="210" height="66" rx="9" fill="#fff8e1" stroke="#ef6c00" stroke-width="2"/>
+<text x="330" y="825" font-size="12.5" font-weight="600" fill="#e65100" text-anchor="middle">Is AI-Tool Request?</text>
+<rect x="505" y="1077" width="210" height="66" rx="9" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+<text x="610" y="1107" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">RelayShield Supply Chain</text>
+<text x="610" y="1123" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">Risk (SaaS)</text>
+<rect x="505" y="1317" width="210" height="66" rx="9" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+<text x="610" y="1347" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">RelayShield Secret Scan</text>
+<text x="610" y="1363" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">(SaaS)</text>
+<rect x="505" y="1557" width="210" height="66" rx="9" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+<text x="610" y="1587" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">RelayShield OAuth Watchlist</text>
+<text x="610" y="1603" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">(SaaS)</text>
+<rect x="785" y="1317" width="210" height="66" rx="9" fill="#fff8e1" stroke="#ef6c00" stroke-width="2"/>
+<text x="890" y="1355" font-size="12.5" font-weight="600" fill="#e65100" text-anchor="middle">Any SaaS Risk Found?</text>
+<rect x="505" y="17" width="210" height="66" rx="9" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+<text x="610" y="47" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">RelayShield Supply Chain</text>
+<text x="610" y="63" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">Risk (AI Tool)</text>
+<rect x="505" y="257" width="210" height="66" rx="9" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+<text x="610" y="287" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">RelayShield Secret Scan (AI</text>
+<text x="610" y="303" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">Tool)</text>
+<rect x="505" y="497" width="210" height="66" rx="9" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+<text x="610" y="527" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">RelayShield OAuth Watchlist</text>
+<text x="610" y="543" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">(AI Tool)</text>
+<rect x="505" y="737" width="210" height="66" rx="9" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+<text x="610" y="767" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">RelayShield MCP Registry</text>
+<text x="610" y="783" font-size="12.5" font-weight="600" fill="#0d47a1" text-anchor="middle">Risk (AI Tool)</text>
+<rect x="785" y="377" width="210" height="66" rx="9" fill="#fff8e1" stroke="#ef6c00" stroke-width="2"/>
+<text x="890" y="415" font-size="12.5" font-weight="600" fill="#e65100" text-anchor="middle">Any AI-Tool Risk Found?</text>
+<rect x="1065" y="377" width="210" height="66" rx="9" fill="#f3e5f5" stroke="#6a1b9a" stroke-width="2"/>
+<text x="1170" y="407" font-size="12.5" font-weight="600" fill="#4a148c" text-anchor="middle">Log Flagged Request to</text>
+<text x="1170" y="423" font-size="12.5" font-weight="600" fill="#4a148c" text-anchor="middle">Notion</text>
+<rect x="1065" y="617" width="210" height="66" rx="9" fill="#f3e5f5" stroke="#6a1b9a" stroke-width="2"/>
+<text x="1170" y="647" font-size="12.5" font-weight="600" fill="#4a148c" text-anchor="middle">Alert Security Team in</text>
+<text x="1170" y="663" font-size="12.5" font-weight="600" fill="#4a148c" text-anchor="middle">Slack</text>
+<rect x="1065" y="857" width="210" height="66" rx="9" fill="#f3e5f5" stroke="#6a1b9a" stroke-width="2"/>
+<text x="1170" y="887" font-size="12.5" font-weight="600" fill="#4a148c" text-anchor="middle">Email Requester — Pending</text>
+<text x="1170" y="903" font-size="12.5" font-weight="600" fill="#4a148c" text-anchor="middle">Review</text>
+<rect x="1065" y="1097" width="210" height="66" rx="9" fill="#f3e5f5" stroke="#6a1b9a" stroke-width="2"/>
+<text x="1170" y="1135" font-size="12.5" font-weight="600" fill="#4a148c" text-anchor="middle">Log Clean Result to Notion</text>
+<rect x="1065" y="1337" width="210" height="66" rx="9" fill="#f3e5f5" stroke="#6a1b9a" stroke-width="2"/>
+<text x="1170" y="1375" font-size="12.5" font-weight="600" fill="#4a148c" text-anchor="middle">Email Requester — Approved</text>
+<text x="470" y="400" font-size="14" font-weight="700" fill="#546e7a">true → AI tool (4 checks)</text>
+<text x="470" y="1270" font-size="14" font-weight="700" fill="#2e7d32">false → SaaS (3 checks)</text>
+<text x="-801" y="1693" font-size="12.5" fill="#b0bec5">Shadow AI &amp; Vendor Approval Gate — structure diagram generated from the submitted workflow JSON</text>
+</svg>

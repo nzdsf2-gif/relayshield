@@ -1,5 +1,131 @@
 # RelayShield — Open Items
 
+## 🟩 TOMORROW (2026-08-03) — top two, both unblocked
+
+**1. BLOG + CHANNEL PLAN — ✅ DRAFTED 2026-08-02, ready to review and publish.**
+   **File: `blog-secret-scanning-false-positives.md`** — full post plus the distribution plan, in
+   one file below a NOT FOR PUBLICATION line. **Re-verify the four measured query numbers before
+   publishing** (GitHub result counts drift, and the post's whole credibility is measurement) and
+   confirm `rev: v0.1.2` is still current. Founder-set top priority.
+   **Lead with the findings, not the product** — measurement posts get linked, announcements get
+   ignored. The strongest material, all measured this session and all defensible:
+   - **"We searched public GitHub for leaked AWS keys. 5 of the top 5 results were false positives."**
+     Real data: `"openai.com" AKIA[A-Z0-9]{16}` → 119 results vs literal `AKIA` → **4,272** (36x);
+     the top-5 were a docs table, the literal placeholder `aws_access_key_id=AKIA....`, a README
+     describing which formats it redacts, a link list, and a domain allowlist.
+   - **"GitLab code search is a paid feature"** — `blobs` is Premium/Ultimate at both instance and
+     project level, every `/search` 401s unauthenticated. We had advertised and **billed** for it;
+     the post should own that we cut it rather than quietly fix it. Honest and rare.
+   - **The local-scanning argument** — why a pre-commit secret scanner should never POST your source.
+   **Channels:** self-hosted blog canonical → Medium (**import, don't paste**), LinkedIn, Telegram,
+   Farcaster, Mastodon. **NOT X (suspended), NOT Hashnode (abandoned).** Do not forget Medium.
+   **Gate:** rsscan is live on all 6 catalogs, so the install link is real — the usual
+   "announced before it existed" trap does not apply this time.
+
+**2. XSOAR DEMO for MosheEichler** — see the XSOAR-DEMO section below. Needs the free Cortex XSOAR
+   Community Edition signup (founder), then **record it** rather than booking a live call.
+
+Also open: **BB-6** (Postman) and **BB-8** (GitHub Checks / Slack / webhook delivery) are the last
+two BB items. Artifact Hub listing is cheap now that Docker Hub is live.
+
+---
+
+## X402-LIST: our public x402 directory entry is stale, added 2026-08-04
+
+**https://x402-list.com/services/relayshield says 24 endpoints. We have 28.**
+
+Verified live 2026-08-04: `PAYG_PRICE_UNITS` holds **26** entries in `relayshield_api.py` plus **2**
+in `relayshield_agentic_api.py` (mcp-registry-risk, prompt-injection-breach), all returning a
+well-formed x402Version 2 challenge on Base and Solana with Bazaar discovery metadata embedded.
+The directory entry has not kept up.
+
+**Why it matters more than the number suggests.** x402-list is where someone following the trail
+from the Bazaar, or from the AgentCore proof post, actually lands. It is also linked from the badge
+on `api.relayshield.net/developers`. An entry four endpoints short understates the surface at the
+exact moment a reader is deciding whether this is a real product.
+
+**The two missing ones are the differentiated ones.** `mcp-registry-risk` and
+`prompt-injection-breach` are the agent-security endpoints, which is precisely what an x402 or
+agent-payments audience is looking for. They live in the isolated agentic Lambda, which is almost
+certainly why they were missed when the listing was created.
+
+**To do:** update the listing to 28 endpoints and make sure the two agentic ones are named. Check
+whether x402-list pulls from the Bazaar automatically or needs a manual submission; if it is
+automatic, the real fix is confirming both agentic endpoints are indexed in the CDP Bazaar rather
+than editing the directory.
+
+**Do this before any x402 or agent-payments outreach**, since it is the first thing a curious
+reader checks.
+
+---
+
+## X402-POST: the agent-payments security gap, added 2026-08-04
+
+**Not a re-tell of the July proof post.** `blog.relayshield.net/aws-bedrock-agentcore-x402-bazaar-autonomous-agent-payment`
+(2026-07-13, 1,093 words) already carries the transaction hash, AgentCore, Bazaar and a verifiable
+Bazaar curl. Verified live. A second "we did a transaction" post would be strictly weaker than the
+first. **Cite it, do not repeat it.**
+
+**What is new since July, and what the post is actually about:**
+- **Cloudflare Wallets shipped**, giving agents on their network a stablecoin balance and a
+  human-readable identity to present at checkout.
+- **x402 has settled 160.6M transactions worth $41.2M across seven chains**, averaging about
+  $0.26. RelayShield's PAYG prices ($0.05 to $2.00, most between $0.20 and $0.50) sit in the
+  middle of that distribution.
+- Cloudflare and Stripe are 2 of the x402 Foundation's 17 premier members, with Visa, Mastercard,
+  Google, AWS and Circle.
+
+**The thesis, which is the differentiated part:** agents can now hold a wallet and spend
+autonomously, and nothing in that flow asks whether the endpoint deserved the money. RelayShield
+already sells that check: `mcp-registry-risk` ($0.35, is this MCP server a typosquat, newly
+registered, or in a criminal IOC corpus) and wallet/counterparty screening via `crypto-intel`.
+That reframes RelayShield from "an API that accepts x402" to "the control agent payments are
+missing", which is a much better thing to be.
+
+**Structure:** lead with the checkable transaction hash, link the July post as evidence, then spend
+the body on the gap rather than the demo.
+
+**Distribution is the unusual part.** The x402 world is small, public and reachable, unlike infosec.
+Target the accounts publishing settlement statistics, CDP/Coinbase devrel, Cloudflare devrel and
+the x402 Foundation orbit. A post with a verifiable on-chain transaction is a legitimate reason to
+enter those conversations; a cold partnership email is not.
+
+**BLOCKED ON X402-LIST above.** Fix the stale 24 first. It is where a reader following the trail
+lands, and it currently omits both agent-security endpoints, which are exactly what this audience
+came to see.
+
+**Do NOT bundle a Cloudflare migration into this.** Analysed 2026-08-04 and recommended against for
+now: see the CLOUDFLARE note below.
+
+---
+
+## CLOUDFLARE: analysed and DEFERRED, added 2026-08-04
+
+**Recommendation: do not move `api.relayshield.net` behind Cloudflare yet.**
+
+**The finding that started it:** `blog.relayshield.net` and `relayshield.net` are behind Cloudflare;
+**`api.relayshield.net` is not**, it resolves straight to AWS API Gateway. So the entire API surface,
+every agent-discovery file and all 28 x402 endpoints sit on the one host Cloudflare cannot see.
+
+**Why it is still not worth doing now.** Cloudflare's AI Index auto-generates an MCP server, an
+llms.txt and a search API for a site. RelayShield already has a hand-built 13-tool MCP server and a
+richer llms.txt, so it largely duplicates existing assets. The opt-in discovery pool is aimed at
+content retrieval, not API invocation, and RelayShield is an API to be called rather than content
+to be read. There is **no partner program, no co-marketing and no Cloudflare API directory** behind
+it. The "partner angle" does not exist as a program.
+
+**Real downside:** putting Cloudflare's proxy in front of API Gateway can interfere with TLS/SNI and
+with how a 402 and its payment headers pass through, risking a working x402 flow for unproven gain.
+
+**Unverified claim, treat with caution:** that Cloudflare's scanner probes for x402 endpoints
+directly. Sourced from a DEV Community post cited in a third-party AI conversation, not confirmed
+against Cloudflare's own docs. Even if true, CDP Bazaar is the primary discovery path and
+RelayShield is already indexed there.
+
+**Revisit trigger:** evidence that Cloudflare agent discovery drives actual API calls rather than
+page indexing. The change is DNS-only and reversible in minutes, so nothing is lost by waiting.
+
+
 ## 🔗 N8N-LINKS: attribution links + a live 404 on the developers page — added 2026-08-01
 
 Two link edits, both outside the codebase (n8n's creators portal), both blocking the value of the
@@ -288,8 +414,31 @@ fixed on the way. Publishing runbook in `rsscan/PUBLISHING.md`; needs founder cr
   false-negative fix goes stale in the client. Fingerprints byte-identical to the server's.
 - Tables `relayshield_rsscan_installs` (TTL 180d) + IAM `relayshield-rsscan-installs-dynamodb`.
 
-**Next:** BB-3 (GitLab), then BB-4..BB-8. **Before publishing rsscan**, update `rsscan/README.md` —
-it still instructs users to get an API key, which is no longer true for scanning.
+**rsscan PUBLISHED 2026-08-02 — 5 of 6 catalogs live, every one install-verified, not just "upload succeeded":**
+
+| Catalog | State | Proof |
+|---|---|---|
+| **PyPI** `rsscan` 0.1.0 | ✅ live | clean venv install -> CLI blocked a planted Stripe key (exit 1) |
+| **GitHub** `RelayShield/rsscan` v0.1.0 | ✅ live | scratch repo + README's own `.pre-commit-config.yaml` -> blocked a planted AWS key |
+| **GitHub Marketplace** | ✅ listed | `draft=false`; blocker was **2FA — passkey did not satisfy it, an authenticator app did** |
+| **Docker Hub** `relayshield/rsscan` | ✅ public | `docker run` of the published image blocked a planted Stripe key (exit 1); amd64 + arm64 |
+| **CircleCI orb** | ⬜ ready | `circleci orb validate` passes; namespace + version are both **irreversible** |
+| **GitLab CI catalog** | ⬜ deferred | needs a GitLab mirror; lowest-value of the six |
+
+**Docker on this Mac needs buildx and it is NOT installed** (`~/.docker/cli-plugins/` empty). Colima
+runs aarch64, so plain `docker build --platform linux/amd64` **fails** — verified. Install:
+`brew install docker-buildx` + symlink into `~/.docker/cli-plugins/`, then `docker buildx create --use`.
+
+**Two defects caught before they shipped:** the CircleCI orb description still claimed "Backed by
+RelayShield's secret-scan API" (false since the local-scanning rewrite) and would have been
+permanent once published; and `?source=circleci` in the orb's `home_url` is **rejected by CircleCI**
+(no query strings permitted), so that catalog carries no attribution.
+
+**A live bug found and fixed the same day:** the rsscan escalation report's CTA shipped pointing at
+`?source=rsscan` while that key **was never registered** — it logged `unmatched:rsscan` and rendered
+no banner, silently breaking the single most important attribution path in the funnel (the
+dev -> security-lead bridge), in an already-published PyPI package and GitHub release. Registered
+`rsscan`, `dockerhub`, `docker`, `circleci`, `pre-commit`; all verified live.
 
 ---
 
@@ -514,10 +663,10 @@ Also measured: **`OR` grouping does not work.** Parenthesised `(A OR B)` returns
 | **BB-1** | ✅ **DONE + DEPLOYED 2026-08-02** (`relayshield-api`, `2026-08-02T17:23:52Z`) | Was sending raw regex as search terms. Re-measured live before and after: `"openai.com" AKIA[A-Z0-9]{16}` → **119**, literal `"openai.com" AKIA` → **4,272** (36x); `"openai.com" gh[pousr]_[a-zA-Z0-9` → **261**, literal `ghp_` → **3,552** (14x). Replaced `pattern.pattern[:20]` with `_GITHUB_SEARCH_LITERALS`, a curated map covering **all 31 patterns** (25 queryable; 6 deliberately empty — the `_ctx_key` context-anchored ones and `llm_key_generic_sk`/`twilio_sid`, whose only literal is too generic to query). Selection is now **severity-ranked and literal-aware** instead of a blind `[:6]` slice — which had been spending a query on `slack_bot` (HIGH) while skipping `google_api` (CRITICAL). Budget still capped at 6 queries/domain (`_GITHUB_QUERY_BUDGET`); raising it is BB-2's job. |
 | **BB-2** | ✅ **DONE + DEPLOYED 2026-08-02** (`relayshield-api`, `2026-08-02T17:43:06Z`) | `_verify_github_fragment` (bool) replaced by `_classify_github_fragment`, which returns **every** credential pattern genuinely present in a hit's fragment. **All 31 regexes now run against every fragment at zero query cost**, so the 6 patterns with no searchable literal — and every low-signal one — are classified without ever spending one of the 10 queries/min. A hit surfaced by `AKIA` that actually contains a `ghp_` is now reported as a GitHub token, not mislabelled as an AWS key, and carries `surfaced_by` so the reclassification is visible in support. One leaky `.env` emits a finding per credential type, deduped on `(repo, file, type)`. Query budget stays at 6 and remains **severity-prioritised** (BB-1). Still degrades open when no fragment is returned. **9/9 classifier tests pass**, incl. multi-type emission and all four measured false-positive shapes. |
 | **BB-3** | ❌ **CLOSED — GitLab claim DROPPED, founder decision 2026-08-02.** Effort moves to BB-4. **Copy corrected across every surface and deployed**: live `/developers` page (verified by curl — the claim is gone, "GitHub public repo secret detection" remains), `relayshield_api.py` PAYG/x402 catalogue description + both pricing comments, `relayshield_smolagents_tool.py`, `RelayShield_Strategy.md`, `RelayShield_MSP_Solution_Brief.md`, `generate_pdfs.py`, `relayshield-mcp` (README + server.py), `hf-space-mcp-server` (README + app.py), the n8n node (.ts **and** dist), the Shadow AI workflow JSON, and the self-hosted blog content. The dead `GITLAB_SEARCH_URL` constant is deleted and replaced by a comment recording *why*, so nobody re-adds it. **⚠️ Three published artifacts still carry the old claim until they are re-released — local edits do not reach users:** `relayshield-mcp` on PyPI (needs version bump + publish), `n8n-nodes-relayshield` on npm (needs version bump + publish), and the HF Space (needs a push). Also the two HF blog posts already published on huggingface.co. | Original finding: `GITLAB_SEARCH_URL` was defined at `relayshield_api.py:5818` and **never called**. **Verified live:** `GET /api/v4/search?scope=blobs` returns **401 unauthenticated**, as does `scope=projects`. **Verified in GitLab's docs:** the `blobs` scope "is available only when advanced search or exact code search is enabled" and is **Premium/Ultimate only at BOTH instance and project level** — no free path exists. Unresolved even if paid: GitLab.com global search generally covers projects the user is a *member of*, not all public projects, which would defeat public-exposure discovery at any price. Rejected options: buy Premium (~$29/user/mo for one source, with that risk unresolved) or re-scope to customer-supplied tokens (a different product — internal audit, not public discovery). | `GITLAB_SEARCH_URL` defined at `relayshield_api.py:5818`, **never called** — and it cannot be made to work as designed. **Verified live:** `GET /api/v4/search?scope=blobs` returns **401 unauthenticated**, and so does `scope=projects` — *every* call needs a token. **Verified in GitLab's own API docs:** the `blobs` scope "is available only when advanced search or exact code search is enabled", and blobs is listed **Premium/Ultimate only at BOTH instance and project level**. There is no free path to GitLab code search, with or without a token. **Also unresolved even if paid:** on GitLab.com, global search generally covers projects the user is a *member of*, not all public projects — which would defeat "find this domain's leaked keys anywhere on GitLab" regardless of tier. Must be confirmed before spending anything. **Options: (1)** buy GitLab Premium (~$29/user/mo SaaS list) for one data source, and only if the membership-scope question resolves favourably; **(2)** re-scope to per-project scanning of a customer's *own* GitLab, which is a different product (they'd supply the token) and does not deliver public-exposure discovery; **(3) recommended — drop the GitLab claim**, correct the customer-facing copy, and move the effort to BB-4. **Live accuracy problem either way:** `/v1/metered/secret-scan` is billed at $0.35/call described as "GitHub/GitLab public repo secret detection", and GitLab is claimed in 8+ customer-facing places, while **zero GitLab scanning has ever run**. |
-| **BB-4** | **npm + PyPI package contents** | Secrets ship in published packages constantly. Distinct surface from repo scanning; GitGuardian's public monitoring is GitHub-centric. |
-| **BB-5** | **Docker Hub image layers** | High signal, badly under-served by competitors. |
+| **BB-4** | ✅ **DONE + DEPLOYED 2026-08-02** — npm + PyPI | npm via `registry.npmjs.org/-/v1/search` then each package's own README/scripts. **PyPI has no search API**, so discovery streams the ~45 MB simple index with a chunked regex: **measured 44.6 MB in 5.6s at 28 MB peak RSS** against this Lambda's **256 MB / 120s** budget — `json.load()` of the same payload would not fit, so never buffer the body. Verified live: npm found 3 RelayShield packages, PyPI found 4. |
+| **BB-5** | ✅ **DONE + DEPLOYED 2026-08-02** — Docker Hub | `hub.docker.com/v2/search/repositories` **confirmed live, not deprecated** (nginx → 290,451 results); an earlier `count: 0` for `relayshield` was genuine absence. Scans repo short/long descriptions. `v2/repositories/<org>/` is also available as an org-scoped path if needed later. |
 | **BB-6** | **Postman public workspaces** | Known and underrated leak source. |
-| **BB-7** | **Hugging Face repos + Spaces** | On-brand; RelayShield already has HF presence. |
+| **BB-7** | ✅ **DONE + DEPLOYED 2026-08-02** — Hugging Face | `huggingface.co/api/{models,spaces}?search=&full=true`, scanning card data + description. Verified live: found both RelayShield Spaces. |
 | **BB-8** | **Developer remediation channels** | The rsscan funnel has no developer-native delivery. Build: **GitHub Checks / PR annotations** (findings inline where the developer already is - highest value), **Slack**, **generic webhook**. WhatsApp/Telegram are the wrong audience for this buyer; `relayshield_siem_connector.py` covers Splunk HEC / CEF / XSOAR only. |
 
 ### ✅ BB-1 CACHE — shipped 2026-08-02 after being MISSED on the first pass
@@ -1307,7 +1456,7 @@ Each verified the same way: syntax check, then a real module import (not `handle
 | BA-1 | **Show HN post** — relayshield-mcp. Pending karma threshold or post to r/ClaudeAI as alternative. | ⬜ Pending |
 | BA-2 | **MCP registries** — mcp.so (submitted, in review), glama.ai, mcphub.net, Anthropic directory. Post after x402 confirmed end-to-end. | ⬜ Pending — see MCP sprint items |
 | BA-5 | **AlternativeTo listing** — ✅ Live June 2 2026. URL: https://alternativeto.net/software/relayshield/about/ Alternatives listed: HIBP, Norton 360, Microsoft Defender, Malwarebytes, Identity Guard, DeHashed. Add more alternatives over time to improve visibility. | ✅ Live |
-| BA-4 | **TLDR Security newsletter** — Pitch editorial team for a free mention or sponsored slot. Genuine security tool with free tier — strong candidate for editorial coverage. Pitch angle: "MCP server for real-time breach + infostealer detection — works with Claude, x402 PAYG, no subscription needed." Contact: tldr.tech/security. Do after Show HN post so there's a HN link to reference. | ⬜ Pending |
+| BA-4 | **TLDR Security newsletter** — Pitch editorial team for a free mention or sponsored slot. Genuine security tool with free tier — strong candidate for editorial coverage. Pitch angle: "MCP server for real-time breach + infostealer detection — works with Claude, x402 PAYG, no subscription needed." Contact: **tldr.tech/infosec** (verified 2026-08-03; `/security` 404s). No public editorial address exists - only advertise.tldr.tech, which is paid. 410k subscribers. Do after Show HN post so there's a HN link to reference. | ⬜ Pending |
 | BA-3 | **B2A: Company domain monitoring registration endpoint** — SMB-B2 (shared company domain monitoring) was built for the Telegram/WA tier. Expose a B2A equivalent: `POST /v1/team/domain` (or extend existing `/v1/domain`) so that B2A enterprise customers can register a company domain for continuous monitoring via API, with alerts delivered to a webhook URL rather than WA/TG. This makes RelayShield's team domain monitoring programmable for enterprise buyers who integrate via API rather than messaging. Trigger: first B2A enterprise inquiry or when business_basic B2A tier is designed. | ⬜ Pending — trigger: first B2A enterprise inquiry |
 | MKTPL-1 | **Tines Library — publish RelayShield story** — Submitted June 2026. Awaiting Tines verification/approval. Story covers infostealer detection → employee alert → admin co-notification. | 🔄 Submitted — awaiting Tines verification |
 | MKTPL-2 | **n8n community node — `n8n-nodes-relayshield`** — Published to npm June 16 2026 as `n8n-nodes-relayshield@0.1.0`. 7 operations: breach, sim-swap, infostealer, domain, oauth-watchlist, TI IOC lookup (intel subscription), CVE lookup (free). Install via n8n Settings → Community Nodes → `n8n-nodes-relayshield`. Maintainer: relayshieldadmin. **`secretScan` and `mcpRegistryRisk` operations added and published 2026-07-22 as `v0.1.16`** — closes the gap found while building MKTPL-12's Shadow AI template, which had called these two endpoints via raw HTTP Request nodes since the package didn't support them natively. `npx tsc --noEmit` clean, `npm run build` clean, `n8n-node lint` clean (0 errors — also fixed 2 pre-existing lint violations found along the way: the `oauthWatchlist`/`ransomwareRisk` action strings and the operations list's alphabetical order, both already out of compliance before this change, not introduced by it). Operations list now 13 total, still alphabetically sorted per the linter's `options-sorted-alphabetically` rule. **Published per founder go-ahead 2026-07-22**: committed + tagged `0.1.16` + pushed to `nzdsf2-gif/n8n-nodes-relayshield` (author set to the GitHub noreply email, not the local-hostname fallback, per `feedback_git_commit_email_cla_linkage.md`), which triggered the existing `publish_n8n_node.yml` GitHub Actions workflow (tag-push trigger, npm provenance via OIDC — matches how every prior version was published; local `npm publish` was tried first and correctly failed since provenance requires a supported CI provider). Confirmed live via a direct registry API check (`registry.npmjs.org/n8n-nodes-relayshield/0.1.16`). Bundled in the same commit: a small pre-existing uncommitted change already sitting in the working tree (added `?source=n8n` to the credential's docs URL) — not something this session created, but harmless and reasonable to ship together. MKTPL-12's Shadow AI template still uses the HTTP Request workaround (not yet switched to the new native operations) — that's a follow-up, not done in this pass. | ✅ Live — June 16 2026; 2 new operations published 2026-07-22 as v0.1.16 |

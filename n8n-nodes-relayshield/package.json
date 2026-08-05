@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-relayshield",
-  "version": "0.1.5",
-  "description": "n8n community node for RelayShield — breach detection, SIM swap monitoring, infostealer exposure, domain lookalike scanning, and threat intelligence IOC lookup.",
+  "version": "0.1.17",
+  "description": "n8n community node for RelayShield \u2014 breach detection, SIM swap monitoring, infostealer exposure, domain lookalike scanning, supply chain risk, secret scanning, session hijack, identity correlation, ransomware risk, MCP registry risk, and threat intelligence IOC lookup.",
   "keywords": [
     "n8n-community-node-package",
     "security",
@@ -9,7 +9,9 @@
     "sim-swap",
     "infostealer",
     "threat-intelligence",
-    "identity-protection"
+    "identity-protection",
+    "secret-scan",
+    "mcp"
   ],
   "license": "MIT",
   "homepage": "https://api.relayshield.net/developers",
@@ -19,8 +21,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/nzdsf2-gif/relayshield.git",
-    "directory": "n8n-nodes-relayshield"
+    "url": "https://github.com/nzdsf2-gif/n8n-nodes-relayshield.git"
   },
   "main": "index.js",
   "scripts": {
@@ -51,5 +52,8 @@
   },
   "peerDependencies": {
     "n8n-workflow": "*"
+  },
+  "publishConfig": {
+    "provenance": true
   }
 }

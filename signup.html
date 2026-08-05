@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crypto Shield — RelayShield</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .card {
+      background: #1a1f2e;
+      border: 1px solid #2d3748;
+      border-radius: 16px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 32px;
+    }
+    .logo img { height: 36px; }
+    .logo span {
+      font-size: 20px;
+      font-weight: 700;
+      color: #60a5fa;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      color: #94a3b8;
+      font-size: 15px;
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+
+    .price-display {
+      text-align: center;
+      margin-bottom: 24px;
+      padding: 16px;
+      background: #0f1117;
+      border-radius: 10px;
+      border: 1px solid #2d3748;
+    }
+    .price-display .amount {
+      font-size: 36px;
+      font-weight: 800;
+      color: #60a5fa;
+    }
+    .price-display .period {
+      font-size: 15px;
+      color: #64748b;
+    }
+    .price-display .cancel-note {
+      font-size: 12px;
+      color: #4b5563;
+      margin-top: 4px;
+    }
+
+    .features {
+      list-style: none;
+      margin-bottom: 28px;
+    }
+    .features li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 14px;
+      color: #cbd5e1;
+      margin-bottom: 10px;
+    }
+    .features li::before {
+      content: "✓";
+      color: #34d399;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .field-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 8px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    input[type="email"],
+    input[type="text"] {
+      width: 100%;
+      padding: 14px 16px;
+      background: #0f1117;
+      border: 1px solid #374151;
+      border-radius: 10px;
+      color: #f1f5f9;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+    input[type="email"]:focus,
+    input[type="text"]:focus { border-color: #2563eb; }
+    input[type="email"]::placeholder,
+    input[type="text"]::placeholder { color: #4b5563; }
+    .field-hint {
+      font-size: 12px;
+      color: #4b5563;
+      margin-top: 6px;
+    }
+
+    .cta-btn {
+      width: 100%;
+      padding: 15px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s;
+      letter-spacing: 0.01em;
+      margin-top: 4px;
+    }
+    .cta-btn:hover { background: #1d4ed8; }
+    .cta-btn:disabled { background: #374151; cursor: not-allowed; }
+
+    .error-msg {
+      color: #f87171;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: none;
+      padding: 10px 14px;
+      background: rgba(248,113,113,0.1);
+      border-radius: 8px;
+      border: 1px solid rgba(248,113,113,0.2);
+    }
+
+    /* ── Payment instructions (shown after registration) ── */
+    .payment-section {
+      display: none;
+    }
+
+    .step-header {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 6px;
+    }
+    .step-subheader {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    .step {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 20px;
+      align-items: flex-start;
+    }
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #2563eb;
+      color: white;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .step-body {
+      flex: 1;
+    }
+    .step-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: 4px;
+    }
+    .step-desc {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+
+    .wallet-box {
+      background: #0f1117;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 12px;
+      color: #60a5fa;
+      word-break: break-all;
+      margin: 8px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .copy-btn {
+      background: #1e3a5f;
+      border: none;
+      border-radius: 6px;
+      color: #60a5fa;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .copy-btn:hover { background: #2563eb; color: white; }
+    .copy-btn.copied { background: #064e3b; color: #34d399; }
+
+    .rate-box {
+      background: #0f1117;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #94a3b8;
+      margin: 8px 0;
+    }
+    .rate-box strong { color: #60a5fa; }
+
+    .open-stream-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #7c3aed, #2563eb);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      margin-top: 20px;
+      transition: opacity 0.2s;
+    }
+    .open-stream-btn:hover { opacity: 0.9; }
+
+    .telegram-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: #0088cc;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      margin-top: 12px;
+      transition: opacity 0.2s;
+    }
+    .telegram-btn:hover { opacity: 0.9; }
+
+    .divider {
+      height: 1px;
+      background: #2d3748;
+      margin: 24px 0;
+    }
+
+    .notice {
+      background: #1e3a5f;
+      border: 1px solid #2563eb33;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #93c5fd;
+      line-height: 1.5;
+      margin-top: 16px;
+    }
+    .notice strong { color: #60a5fa; }
+
+    footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #374151;
+      text-align: center;
+    }
+    footer a { color: #4b5563; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">
+    <img src="https://relayshield.net/assets/logo.png" alt="RelayShield" onerror="this.style.display='none'">
+    <span>RelayShield</span>
+  </div>
+
+  <!-- ── Step 1: Registration form ── -->
+  <div id="registration-section">
+    <h1>Crypto Shield</h1>
+    <p class="subtitle">24/7 wallet monitoring, breach detection, SIM swap alerts, and infostealer protection — delivered to your Telegram.</p>
+
+    <div class="price-display">
+      <div><span class="amount">$19.99</span><span class="period">/month</span></div>
+      <div class="cancel-note">Paid in USDC on Base · Cancel anytime by closing your stream</div>
+    </div>
+
+    <ul class="features">
+      <li>Wallet risk screening on every transaction</li>
+      <li>Real-time breach monitoring on up to 3 emails</li>
+      <li>SIM swap detection with instant Telegram alert</li>
+      <li>Infostealer malware log scanning</li>
+      <li>Domain lookalike monitoring</li>
+      <li>DeFi liquidation warnings (Aave V3)</li>
+      <li>AI-powered threat remediation guidance</li>
+    </ul>
+
+    <div class="field-group">
+      <label for="email-input">Your email</label>
+      <input type="email" id="email-input" placeholder="you@example.com" autocomplete="email">
+    </div>
+
+    <div class="field-group">
+      <label for="wallet-input">Your wallet address</label>
+      <input type="text" id="wallet-input" placeholder="0x...">
+      <div class="field-hint">The wallet you'll use to open your USDC stream. Must be self-custody (Coinbase Wallet, MetaMask, Rabby, etc.)</div>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <button class="cta-btn" id="cta-btn" onclick="handleSubmit()">
+      Register &amp; Get Payment Instructions →
+    </button>
+  </div>
+
+  <!-- ── Step 2: Payment instructions (shown after registration) ── -->
+  <div id="payment-section" class="payment-section">
+    <p class="step-header">🎉 Account registered!</p>
+    <p class="step-subheader">Open a USDC stream to activate Crypto Shield. Takes about 2 minutes.</p>
+
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">Open the Superfluid app</div>
+        <div class="step-desc">Click the button below to go to app.superfluid.org. Connect your self-custody wallet (Coinbase Wallet, MetaMask, or Rabby).</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">Send a stream to this address</div>
+        <div class="step-desc">Click <strong>Send Stream</strong>, paste the RelayShield wallet address, and set the token to <strong>USDCx on Base</strong>.</div>
+        <div class="wallet-box">
+          <span id="wallet-display">0x002CfD89c5636F45E3C8576D6E35154748412bAc</span>
+          <button class="copy-btn" onclick="copyWallet(this)">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">Set the stream rate</div>
+        <div class="step-desc">Enter the flow rate exactly as shown below. This equals $19.99/month.</div>
+        <div class="rate-box">
+          Flow rate: <strong>$19.99 / month</strong><br>
+          Token: <strong>USDCx (Super USDC)</strong><br>
+          Network: <strong>Base Mainnet</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <div class="step-title">Confirm and activate</div>
+        <div class="step-desc">Approve the transaction in your wallet. Your Crypto Shield subscription activates automatically within seconds of the stream opening — no manual confirmation needed.</div>
+      </div>
+    </div>
+
+    <a href="https://app.superfluid.org/send?network=base" target="_blank" rel="noopener" class="open-stream-btn">
+      Open Superfluid → Start Stream
+    </a>
+
+    <div class="divider"></div>
+
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <div class="step-title">Connect your Telegram bot</div>
+        <div class="step-desc">Once your stream is open, start the RelayShield bot on Telegram to receive alerts. Your subscription activates automatically when the stream is detected.</div>
+      </div>
+    </div>
+
+    <a href="https://t.me/RelayShield_bot" target="_blank" rel="noopener" class="telegram-btn">
+      Open @RelayShield_bot on Telegram
+    </a>
+
+    <div class="notice">
+      <strong>How it works:</strong> Your USDC streams continuously to RelayShield at $19.99/month. To cancel, simply close the stream in the Superfluid app — your subscription deactivates automatically. No billing periods, no lock-in.
+    </div>
+  </div>
+</div>
+
+<footer>
+  <a href="https://docs.google.com/document/u/2/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub" target="_blank" rel="noopener">Privacy</a> ·
+  <a href="https://docs.google.com/document/u/2/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub" target="_blank" rel="noopener">Terms</a> ·
+  <a href="mailto:relayshieldadmin@gmail.com?subject=Crypto Shield Support">Support</a>
+</footer>
+
+<script>
+  const API_BASE   = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod";
+  const RS_WALLET  = "0x002CfD89c5636F45E3C8576D6E35154748412bAc";
+
+  function showError(msg) {
+    const el = document.getElementById("error-msg");
+    el.textContent = msg;
+    el.style.display = "block";
+  }
+
+  function clearError() {
+    document.getElementById("error-msg").style.display = "none";
+  }
+
+  function isValidEthAddress(addr) {
+    return /^0x[0-9a-fA-F]{40}$/.test(addr);
+  }
+
+  async function handleSubmit() {
+    clearError();
+
+    const email  = document.getElementById("email-input").value.trim();
+    const wallet = document.getElementById("wallet-input").value.trim();
+
+    if (!email || !email.includes("@")) {
+      showError("Please enter a valid email address.");
+      return;
+    }
+    if (!isValidEthAddress(wallet)) {
+      showError("Please enter a valid Ethereum wallet address (0x... format, 42 characters).");
+      return;
+    }
+
+    const btn = document.getElementById("cta-btn");
+    btn.disabled = true;
+    btn.textContent = "Registering your account…";
+
+    try {
+      const resp = await fetch(`${API_BASE}/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          wallet_address: wallet.toLowerCase(),
+          plan: "monthly",
+          payment_method: "superfluid"
+        }),
+      });
+
+      if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+
+      // Show payment instructions
+      document.getElementById("registration-section").style.display = "none";
+      document.getElementById("payment-section").style.display = "block";
+      document.getElementById("wallet-display").textContent = RS_WALLET;
+
+      // Scroll to top of card
+      window.scrollTo({ top: 0, behavior: "smooth" });
+
+    } catch (err) {
+      showError("Something went wrong. Please try again or contact support@relayshield.net.");
+      btn.disabled = false;
+      btn.textContent = "Register & Get Payment Instructions →";
+    }
+  }
+
+  function copyWallet(btn) {
+    navigator.clipboard.writeText(RS_WALLET).then(() => {
+      btn.textContent = "Copied!";
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.textContent = "Copy";
+        btn.classList.remove("copied");
+      }, 2000);
+    });
+  }
+
+  // Enter key to submit
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && document.getElementById("registration-section").style.display !== "none") {
+      handleSubmit();
+    }
+  });
+</script>
+
+</body>
+</html>

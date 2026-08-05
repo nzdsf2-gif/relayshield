@@ -9,7 +9,7 @@ export class RelayShieldApi implements ICredentialType {
 	name = 'relayShieldApi';
 	displayName = 'RelayShield API';
 	icon = 'file:relayshield.svg' as const;
-	documentationUrl = 'https://api.relayshield.net/developers';
+	documentationUrl = 'https://api.relayshield.net/developers?source=n8n';
 	properties: INodeProperties[] = [
 		{
 			displayName: 'API Key',
@@ -34,9 +34,10 @@ export class RelayShieldApi implements ICredentialType {
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: 'https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod',
-			url: '/v1/intel/cve',
-			method: 'GET',
-			qs: { keyword: 'test' },
+			url: '/v1/metered/breach',
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: { email: 'test@example.com' },
 		},
 	};
 }

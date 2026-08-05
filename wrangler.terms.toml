@@ -1,0 +1,7 @@
+name = "relayshield-terms"
+main = "cloudflare_worker_terms.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "terms.relayshield.net/*", zone_name = "relayshield.net" }
+]

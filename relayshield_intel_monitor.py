@@ -876,6 +876,14 @@ _MALWARE_DISTINCTIVE: list[tuple[str, str]] = [
     ("remusstealer",   r"\bremus\s?stealer\b"),
     ("qakbot",         r"\bqakbot\b|\bqbot\b"),
     ("zigclipper",     r"\bzigclipper\b"),
+    # CaptiveCrunch / Midnight Blizzard (APT29), Microsoft + ReliaQuest, Aug 2026.
+    # ChocoShell is an in-memory PowerShell stealer taking browser cookies,
+    # saved passwords and auth tokens -- squarely the session-theft surface this
+    # corpus already tracks. Distinctive enough to need no context guard.
+    # Expect few or no hits: these are nation-state tools, and this pipeline
+    # watches commodity stealer-log markets where APT29 does not sell. Added for
+    # tagging completeness, not because volume is expected.
+    ("chocoshell",     r"\bchoco\s?shell\b"),
 ]
 
 # name -> alias regex; a _MALWARE_CONTEXT word must appear near the match
@@ -884,6 +892,12 @@ _MALWARE_AMBIGUOUS: list[tuple[str, str]] = [
     ("aurorastealer",  r"\baurora\b"),
     ("meduzastealer",  r"\bmeduza\b"),
     ("phantomstealer", r"\bphantom\b"),
+    # CornFlake — the Go RAT half of the same CaptiveCrunch campaign. Placed in
+    # the AMBIGUOUS list deliberately: unlike ChocoShell, "cornflake" is an
+    # ordinary English word, so it needs a malware-context word nearby before it
+    # tags an IOC. A false family tag is worse than a missed one here, because
+    # `malware` is the malware-index GSI hash key.
+    ("cornflake",      r"\bcorn\s?flake\b"),
 ]
 
 _MALWARE_DISTINCTIVE_RE = [(n, re.compile(p, re.I)) for n, p in _MALWARE_DISTINCTIVE]

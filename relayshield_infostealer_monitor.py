@@ -53,6 +53,8 @@ from datetime import datetime, timezone
 import boto3
 from boto3.dynamodb.conditions import Attr
 
+import relayshield_siem_connector as siem_connector
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -85,9 +87,10 @@ TWILIO_SID_SECRET   = "relayshield/twilio_account_sid"
 TWILIO_TOKEN_SECRET = "relayshield/twilio_auth_token"
 TWILIO_FROM_SECRET  = "relayshield/twilio_whatsapp_number"
 
-TWILIO_MESSAGES_URL      = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
-CAVALIER_URL             = "https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-login"
-TWILIO_ERROR_OUTSIDE_WINDOW = 63016
+TWILIO_MESSAGES_URL          = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+CAVALIER_URL                 = "https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-login"
+TWILIO_ERROR_OUTSIDE_WINDOW  = 63016
+INFOSTEALER_TEMPLATE_SID     = "HXbbc602021a711b0c0743d710fb0d3f01"
 
 # Delay between Hudson Rock requests (courtesy rate limit — free API, no stated limit)
 REQUEST_DELAY_SECONDS = 2
@@ -263,29 +266,77 @@ def send_whatsapp(
         return False, None
 
 
-def send_telegram_alert(tg_chat_id: int, message: str) -> bool:
+def send_whatsapp_infostealer_template(
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    to_number: str,
+    email: str,
+    source_count: int,
+) -> bool:
+    """Send rs_infostealer_alert template when 24hr window is closed.
+    {{1}} = monitored email, {{2}} = number of threat intel sources.
     """
-    Send a Telegram message by invoking the TG webhook Lambda directly.
-    Uses the same _push_tg_signal-style async invoke pattern.
-    """
-    if not TG_WEBHOOK_LAMBDA:
-        return False
+    url = TWILIO_MESSAGES_URL.format(account_sid=account_sid)
+    payload = urllib.parse.urlencode({
+        "From": from_number,
+        "To": to_number,
+        "ContentSid": INFOSTEALER_TEMPLATE_SID,
+        "ContentVariables": json.dumps({"1": email, "2": str(source_count)}),
+    }).encode()
+    creds   = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+    headers = {"Authorization": f"Basic {creds}", "Content-Type": "application/x-www-form-urlencoded"}
+    req     = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
-        payload = json.dumps({
-            "source":           "relayshield_internal",
-            "action":           "send_message",
-            "telegram_chat_id": tg_chat_id,
-            "message":          message,
-        }).encode()
-        lambda_client.invoke(
-            FunctionName=TG_WEBHOOK_LAMBDA,
-            InvocationType="Event",
-            Payload=payload,
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            sid = json.loads(resp.read()).get("sid", "unknown")
+            logger.info("Infostealer template sent to %s SID=%s", to_number, sid)
+            return True
+    except Exception as exc:
+        logger.error("Infostealer template send failed to %s: %s", to_number, exc)
+        return False
+
+
+def _send_telegram_admin(tg_chat_id: int, message: str) -> bool:
+    """Send a Telegram message directly to admin via Bot API for co-notification."""
+    try:
+        raw = secrets_client.get_secret_value(
+            SecretId="relayshield/telegram_bot_token"
+        )["SecretString"].strip()
+        try:
+            token = json.loads(raw)["telegram_bot_token"]
+        except (json.JSONDecodeError, KeyError):
+            token = raw
+        url     = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = json.dumps(
+            {"chat_id": tg_chat_id, "text": message, "parse_mode": "Markdown"}
+        ).encode()
+        req = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}
         )
-        logger.info("Telegram infostealer alert queued for chat_id=%s", tg_chat_id)
+        urllib.request.urlopen(req, timeout=5)
         return True
     except Exception as exc:
-        logger.exception("Telegram invoke failed chat_id=%s: %s", tg_chat_id, exc)
+        logger.exception("Telegram admin notify failed chat_id=%s: %s", tg_chat_id, exc)
+        return False
+
+
+def send_telegram_alert(tg_chat_id: int, message: str) -> bool:
+    """Send a Telegram message via Bot API directly."""
+    try:
+        raw = secrets_client.get_secret_value(SecretId="relayshield/telegram_bot_token")["SecretString"].strip()
+        try:
+            token = json.loads(raw)["telegram_bot_token"]
+        except (json.JSONDecodeError, KeyError):
+            token = raw
+        url     = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = json.dumps({"chat_id": tg_chat_id, "text": message, "parse_mode": "Markdown"}).encode()
+        req     = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5)
+        logger.info("Telegram alert sent for chat_id=%s", tg_chat_id)
+        return True
+    except Exception as exc:
+        logger.exception("Telegram alert failed chat_id=%s: %s", tg_chat_id, exc)
         return False
 
 
@@ -376,10 +427,12 @@ def process_email(
     record: dict,
     twilio_creds: tuple[str, str, str],
     user_cache: dict,
+    force_count: int = 0,
 ) -> dict:
     """
     Check one monitored email against the infostealer database.
     Returns a summary dict with alert outcome.
+    Pass force_count > 0 to skip the API call and fire a test alert directly.
     """
     email_id   = record.get("email_id", "")
     user_id    = record.get("user_id", "")
@@ -397,15 +450,27 @@ def process_email(
         logger.warning("Empty email for email_id=%s — skipping.", email_id)
         return {"email_id": email_id, "error": "empty_email"}
 
-    # Query Hudson Rock
-    try:
-        stealers = check_infostealer(email)
-    except Exception as exc:
-        logger.error("Cavalier API error email_id=%s email=%s: %s", email_id, email, exc)
-        return {"email_id": email_id, "email": email, "error": "api_error"}
+    if force_count > 0:
+        # Test override — bypass API, inject synthetic infection data
+        logger.warning("FORCE ALERT MODE — email_id=%s email=%s count=%d", email_id, email, force_count)
+        stealers = [{
+            "date_compromised":        "2026-05-24",
+            "operating_system":        "Windows 10 (test)",
+            "total_corporate_services": 3,
+            "total_user_services":      12,
+        }] * force_count
+        current_count  = force_count
+        previous_count = -1
+    else:
+        # Query Hudson Rock
+        try:
+            stealers = check_infostealer(email)
+        except Exception as exc:
+            logger.error("Cavalier API error email_id=%s email=%s: %s", email_id, email, exc)
+            return {"email_id": email_id, "email": email, "error": "api_error"}
 
-    current_count = len(stealers)
-    previous_count = int(record.get("infostealer_count", -1))  # -1 = never checked
+        current_count  = len(stealers)
+        previous_count = int(record.get("infostealer_count", -1))  # -1 = never checked
 
     logger.info(
         "email_id=%s previous_count=%d current_count=%d",
@@ -442,11 +507,16 @@ def process_email(
     tg_sent = False
     account_sid, auth_token, from_number = twilio_creds
 
-    # WhatsApp alert
+    # WhatsApp alert — freeform first, template fallback if 24hr window closed
     to_number = get_whatsapp_number(user_record)
     if to_number:
-        msg     = build_alert(email, stealers, new_count, is_telegram=False)
-        sent, _ = send_whatsapp(account_sid, auth_token, from_number, to_number, msg)
+        msg          = build_alert(email, stealers, new_count, is_telegram=False)
+        sent, twilio_code = send_whatsapp(account_sid, auth_token, from_number, to_number, msg)
+        if not sent and twilio_code == TWILIO_ERROR_OUTSIDE_WINDOW:
+            logger.info("WA window closed for user_id=%s — sending infostealer template", user_id)
+            sent = send_whatsapp_infostealer_template(
+                account_sid, auth_token, from_number, to_number, email, len(stealers)
+            )
         wa_sent = sent
     else:
         logger.warning("No WhatsApp number for user_id=%s — WA alert skipped.", user_id)
@@ -457,6 +527,60 @@ def process_email(
     if tg_chat_id and "telegram" in tg_channels:
         msg    = build_alert(email, stealers, new_count, is_telegram=True)
         tg_sent = send_telegram_alert(int(tg_chat_id), msg)
+
+    # SIEM/SOAR forwarding — no-ops cleanly if no destination configured.
+    try:
+        siem_email = user_record.get("email") or email
+        if siem_email:
+            siem_connector.dispatch_finding(dynamodb, {
+                "alert_type":  "infostealer",
+                "severity":    "CRITICAL",
+                "customer_id": siem_email,
+                "summary":     f"{new_count} new infostealer log(s) detected for {email}",
+                "details": {
+                    "monitored_email": email,
+                    "new_count":       new_count,
+                    "stealer_count":   len(stealers),
+                },
+                "detected_at": datetime.now(timezone.utc).isoformat(),
+            })
+    except Exception as exc:
+        logger.warning("SIEM dispatch failed (non-fatal) for user_id=%s: %s", user_id, exc)
+
+    # Admin co-notification (Business tiers — employee records only)
+    if (wa_sent or tg_sent) and user_record.get("admin_user_id"):
+        admin_user_id = user_record["admin_user_id"]
+        if admin_user_id not in user_cache:
+            user_cache[admin_user_id] = get_user_record(admin_user_id)
+        admin_record = user_cache[admin_user_id]
+        if admin_record and admin_record.get("active"):
+            try:
+                emp_name    = user_record.get("employee_name", "")
+                emp_display = f"*{emp_name}*" if emp_name else "a team member"
+                admin_msg   = (
+                    f"🚨 *Team Alert — {emp_display} — Infostealer Detected*\n\n"
+                    f"RelayShield found {new_count} new infostealer log(s) containing "
+                    f"{emp_display}'s credentials for `{email}`.\n\n"
+                    f"*Severity: CRITICAL*\n\n"
+                    f"{emp_display}'s device may have been infected with credential-harvesting "
+                    f"malware. All saved passwords and active session cookies on that device "
+                    f"are potentially compromised — 2FA may be bypassed using stolen session tokens.\n\n"
+                    f"{emp_display} has been sent device remediation steps.\n\n"
+                    f"*Recommended action:* Ask them to confirm remediation before resuming "
+                    f"access to shared business systems.\n\n"
+                    f"🛡️ RelayShield — admin alert\n📢 t.me/RelayShield"
+                )
+                admin_wa = get_whatsapp_number(admin_record)
+                if admin_wa:
+                    send_whatsapp(account_sid, auth_token, from_number, admin_wa, admin_msg)
+                    logger.info("Admin infostealer co-notification WA — admin_user_id=%s", admin_user_id)
+                admin_tg_id  = admin_record.get("telegram_chat_id")
+                admin_tg_chs = admin_record.get("delivery_channels", [])
+                if admin_tg_id and "telegram" in admin_tg_chs:
+                    _send_telegram_admin(int(admin_tg_id), admin_msg)
+                    logger.info("Admin infostealer co-notification TG — admin_user_id=%s", admin_user_id)
+            except Exception as exc:
+                logger.exception("Admin infostealer co-notification failed admin_user_id=%s: %s", admin_user_id, exc)
 
     logger.info(
         "email_id=%s new_infections=%d wa_sent=%s tg_sent=%s",
@@ -484,6 +608,28 @@ def handler(event: dict, context) -> dict:  # noqa: ANN001
     """
     logger.info("RelayShield infostealer monitor started.")
     start_time = time.time()
+
+    # ── Test override ────────────────────────────────────────────────────────
+    # Pass {"force_alert_email_id": "test-employee-email-001"} as the test
+    # event to skip the Hudson Rock API and fire a synthetic alert directly.
+    force_email_id = event.get("force_alert_email_id")
+    if force_email_id:
+        try:
+            twilio_creds = get_twilio_credentials()
+            scan_resp = dynamodb.Table(MONITORED_EMAILS_TABLE).scan(
+                FilterExpression=Attr("email_id").eq(force_email_id),
+            )
+            items  = scan_resp.get("Items", [])
+            record = items[0] if items else None
+            if not record:
+                return {"statusCode": 404, "body": {"error": f"email_id '{force_email_id}' not found"}}
+            result = process_email(record, twilio_creds, {}, force_count=1)
+            logger.info("force_alert result: %s", result)
+            return {"statusCode": 200, "body": {"test_mode": True, "result": result}}
+        except Exception as exc:
+            logger.exception("force_alert failed: %s", exc)
+            return {"statusCode": 500, "body": {"error": str(exc)}}
+    # ────────────────────────────────────────────────────────────────────────
 
     try:
         twilio_creds = get_twilio_credentials()

@@ -1,0 +1,1 @@
+Each bundle is licensed independently through AWS Marketplace, with no dependency on any other bundle or platform-wide subscription.

@@ -71,6 +71,13 @@ th{background:var(--surface)}
 footer{border-top:1px solid var(--border);padding:2rem 0 3rem;color:var(--muted);font-size:.85rem}
 footer a{color:var(--muted);text-decoration:underline}
 .back{display:inline-block;color:var(--muted);font-size:.88rem;margin-bottom:1.5rem}
+/* The back link moved out of the article element so importers stop pulling it
+   into the post body. These two rules keep the rendered spacing identical to
+   when it was inside: nav takes over the top padding, article drops its own.
+   Keep literal angle-bracket tag names out of this comment - it ships inside
+   the style block and makes the page source lie to any tag-matching check. */
+.postnav{padding-top:2.5rem}
+.postnav+article{padding-top:0}
 @media(max-width:600px){.hero h1,article h1{font-size:1.55rem}}
 `;
 
@@ -138,8 +145,14 @@ function postPage(post) {
     description: post.excerpt,
     canonical: `${SITE}/${post.slug}`,
     ogType: "article",
-    body: `<div class="wrap"><article>
-  <a class="back" href="/">&larr; All posts</a>
+    // The back link sits OUTSIDE <article> deliberately. Importers and readers
+    // treat <article> as the post body and take everything in it, so while this
+    // link lived inside, Medium's importer pulled "<- All posts" into the top of
+    // the imported story (seen 2026-08-03). It is site navigation, not article
+    // content, so <nav> is also the correct semantics.
+    body: `<div class="wrap">
+  <nav class="postnav"><a class="back" href="/">&larr; All posts</a></nav>
+  <article>
   <h1>${esc(post.title)}</h1>
   <p class="meta">${esc(fmtDate(post.date))}</p>
   ${body}

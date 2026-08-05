@@ -16,7 +16,7 @@ Detects 31 credential patterns — AWS IAM keys, GitHub PATs, Stripe secrets, Sl
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/RelayShield/rsscan
-    rev: v0.1.0
+    rev: v0.1.3
     hooks:
       - id: rsscan
 ```
@@ -33,18 +33,34 @@ That is the whole setup. Nothing to configure, nothing to sign up for.
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0        # required — the range needs history
-- uses: RelayShield/rsscan@v0.1.0
+- uses: RelayShield/rsscan@v0.1.3
   with:
     fail-on: HIGH
 ```
 
+Findings are annotated **inline on the changed lines in the pull request's Files tab**, so a
+developer sees them where the code is rather than in collapsed build output. Blocking findings
+(at or above `fail-on`) appear as errors; everything else appears as warnings.
+
+This needs no token, no `permissions:` block and no GitHub App — annotations are emitted as
+workflow commands, not through the Checks API. Turn them off with `annotate: off` if you only
+want the log.
+
+Annotations never contain the secret value. Each one carries the credential type, its severity,
+and the fingerprint you would add to `.relayshield-allowlist` to suppress a false positive.
+
 ### GitLab CI/CD
 
 ```yaml
-include:
-  - component: $CI_SERVER_FQDN/relayshield/rsscan/secret-scan@0.1.0
-    inputs:
-      fail_on: HIGH
+rsscan:
+  image: relayshield/rsscan:0.1.3
+  variables:
+    GIT_DEPTH: 0        # required — GitLab shallow-clones, and a shallow clone
+                        # yields an empty diff, so the job would pass having
+                        # scanned nothing
+    RSSCAN_REV_RANGE: "origin/$CI_DEFAULT_BRANCH...HEAD"
+    RSSCAN_FAIL_ON: HIGH
+  script: ["rsscan"]
 ```
 
 ### CircleCI
@@ -63,7 +79,7 @@ workflows:
 ```bash
 docker run --rm -v "$PWD:/workspace" \
   -e RSSCAN_REV_RANGE=origin/main...HEAD \
-  relayshield/rsscan:0.1.0
+  relayshield/rsscan:0.1.3
 ```
 
 Bitbucket Pipelines:
@@ -71,7 +87,7 @@ Bitbucket Pipelines:
 ```yaml
 - step:
     script:
-      - pipe: docker://relayshield/rsscan:0.1.0
+      - pipe: docker://relayshield/rsscan:0.1.3
         variables:
           RSSCAN_REV_RANGE: "origin/main...HEAD"
 ```
@@ -121,6 +137,9 @@ Every flag has an environment variable equivalent, which is how the CI clients d
 | `--report` | `RSSCAN_REPORT` | *(off)* | Write a shareable exposure report to this path. |
 | `--org` | `RSSCAN_ORG` | *(off)* | Opt in to reporting adoption for your org domain. |
 | `--strict` / `--no-strict` | `RSSCAN_STRICT` | *see below* | Fail when the scan cannot run. |
+| `--annotate` | `RSSCAN_ANNOTATE` | `auto` | Inline PR annotations. `auto` enables them inside GitHub Actions only; `github` forces; `off` disables. |
+| `--slack-webhook` | `RSSCAN_SLACK_WEBHOOK` | *(off)* | POST a findings summary to your own Slack incoming webhook. |
+| `--webhook` | `RSSCAN_WEBHOOK` | *(off)* | POST findings as JSON to an endpoint you control. |
 
 ### Failure behaviour differs by mode, on purpose
 
@@ -135,6 +154,47 @@ The allowlist holds **fingerprints, not secrets** — a file containing the actu
 ```
 # .relayshield-allowlist
 sha256:1a5d44a2dca19669   # documented example key in docs/quickstart.md
+```
+
+## Sending findings somewhere
+
+Two push channels, both opt-in, both pointing at somewhere you own. (The third delivery
+channel, inline PR annotations, is automatic in GitHub Actions — see above.) Without one of
+these flags rsscan makes no network call at all.
+
+```bash
+# Slack
+rsscan --slack-webhook https://hooks.slack.com/services/T000/B000/xxxx
+
+# Any JSON receiver you control
+rsscan --webhook https://hooks.example.com/rsscan
+```
+
+**None of them ever carries a secret value.** Each finding is transmitted as its credential type,
+severity, file, line and fingerprint — the same guarantee as `--report`. The Slack message says so
+in its own footer, so whoever reads the channel knows it is safe to leave there.
+
+They fire only when there are findings. A notification on every clean build trains people to
+ignore the channel, which is how a real finding gets missed.
+
+**Delivery failure never changes the exit code.** If Slack is unreachable, rsscan warns on stderr
+and the build result stands on the scan alone — a gate should block on secrets, not on a flaky
+notification endpoint.
+
+The generic webhook posts:
+
+```json
+{
+  "tool": "rsscan", "version": "0.1.3", "scanned": "origin/main...HEAD",
+  "repo": "acme/api", "ref": "feature/pay", "build_url": "https://github.com/...",
+  "findings_count": 2, "blocking_count": 2, "highest_severity": "CRITICAL",
+  "severity_counts": {"CRITICAL": 2},
+  "findings": [
+    {"type": "aws_access_key", "severity": "CRITICAL", "description": "AWS IAM Access Key",
+     "file": "src/config.py", "line": 3, "fingerprint": "sha256:1a5d44a2dca19669"}
+  ],
+  "detected_at": "2026-08-04T15:00:00+00:00"
+}
 ```
 
 ## Sharing a finding with your security team

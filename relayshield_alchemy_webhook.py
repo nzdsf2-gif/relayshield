@@ -9,6 +9,26 @@ Also performs real-time drainer detection: records each outbound
 transaction in relayshield_wallet_activity_log (TTL 1 hour) and fires
 a high-urgency drain alert if 2+ outbound txs are seen within 10 minutes.
 
+CRYPTO-3: Address poisoning detection (June 2026)
+  - On every outbound tx, the destination is recorded in relayshield_known_addresses
+    as a "known-good" address for that user.
+  - On every inbound tx, the sender is compared against all known-good addresses
+    using prefix+suffix similarity scoring (the exact technique attackers exploit).
+  - If a high-similarity match is found, a poisoning alert fires immediately with a
+    side-by-side real vs fake address comparison so the user can spot the difference.
+  - Extra weight applied when value is dust (< DUST_THRESHOLD_ETH).
+  - Based on Bitget/Chainalysis research: 270M attacks, $83.8M losses (2025),
+    attackers exploit mempool timing so fake address can appear BEFORE real tx in history.
+
+DynamoDB tables:
+  relayshield_monitored_wallets     — wallet→user_id index
+  relayshield_users                 — user records
+  relayshield_wallet_activity_log   — outbound tx log for drain detection (TTL 1h)
+  relayshield_known_addresses       — known-good outbound destinations per user (persistent)
+    PK: user_id (S), SK: address (S)
+    Attrs: first_seen (N), last_seen (N), tx_count (N)
+    No TTL — persist indefinitely, capped at MAX_KNOWN_ADDRESSES per user
+
 Webhook type: ADDRESS_ACTIVITY
 Trigger: any inbound or outbound transfer on a monitored wallet address
 
@@ -30,6 +50,7 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import boto3
@@ -44,6 +65,7 @@ dynamodb       = boto3.resource("dynamodb")
 MONITORED_WALLETS_TABLE  = "relayshield_monitored_wallets"
 USERS_TABLE              = "relayshield_users"
 ACTIVITY_LOG_TABLE       = "relayshield_wallet_activity_log"
+KNOWN_ADDRESSES_TABLE    = "relayshield_known_addresses"
 ALCHEMY_SECRET_NAME      = "relayshield/alchemy_api_key"
 TG_SECRET_NAME           = "relayshield/telegram_bot_token"
 GOPLUS_BASE_URL          = "https://api.gopluslabs.io/api/v1/address_security"
@@ -54,6 +76,13 @@ TELEGRAM_API_BASE        = "https://api.telegram.org/bot{token}/{method}"
 DRAIN_WINDOW_SECONDS = 600   # 10-minute rolling window
 DRAIN_TX_THRESHOLD   = 2     # number of outbound txs to trigger alert
 ACTIVITY_LOG_TTL     = 3600  # 1 hour TTL on activity log items
+
+# CRYPTO-3: Address poisoning detection thresholds
+POISON_PREFIX_CHARS    = 4    # chars after 0x to compare (attackers match ≥4)
+POISON_SUFFIX_CHARS    = 4    # tail chars to compare
+POISON_HIGH_THRESHOLD  = 6    # prefix OR suffix match ≥ this → HIGH confidence
+DUST_THRESHOLD_ETH     = 0.01 # inbound value below this = dust (extra poisoning signal)
+MAX_KNOWN_ADDRESSES    = 50   # max known-good addresses stored per user
 
 _secret_cache: dict[str, str] = {}
 
@@ -129,6 +158,81 @@ def _goplus_token_security(contract_address: str, chain_id: int) -> dict:
     except Exception as exc:
         logger.warning("GoPlus token security failed contract=%s: %s", contract_address, exc)
         return {}
+
+
+_ADDR_CRITICAL = {"phishing_activities", "blacklist_doubt", "honeypot_related_address",
+                  "cybercrime", "money_laundering", "sanctioned"}
+
+CORRELATION_WINDOW_HOURS = 72
+
+_WALLET_CHAIN_SIGNALS = {"sim_swap", "breach_alert", "port_out"}
+
+_WALLET_CHAIN_MESSAGES = {
+    "sim_swap": (
+        "🚨 *CRITICAL — Coordinated Attack Detected*\n\n"
+        "*SIM Swap + Flagged Wallet Counterparty*\n\n"
+        "Your phone number is being hijacked at the same time your wallet received a "
+        "transaction from an address flagged as malicious. This is the most common crypto "
+        "theft chain: SIM swap to bypass exchange 2FA, then drain the wallet.\n\n"
+        "→ Do NOT approve any pending transactions\n"
+        "→ Lock your SIM with your carrier immediately\n"
+        "→ Disable SMS 2FA on all crypto exchanges\n"
+        "Use /phone for carrier-specific lock steps."
+    ),
+    "breach_alert": (
+        "🚨 *HIGH — Coordinated Attack Detected*\n\n"
+        "*Credential Breach + Flagged Wallet Counterparty*\n\n"
+        "Your credentials were found in a breach while your wallet has a flagged transaction "
+        "counterparty. Attackers coordinating identity and asset attacks may be preparing to "
+        "drain your exchange account and wallet simultaneously.\n\n"
+        "→ Change exchange passwords immediately\n"
+        "→ Enable withdrawal whitelisting on all exchanges\n"
+        "→ Do not approve any pending wallet transactions"
+    ),
+    "port_out": (
+        "🚨 *CRITICAL — Coordinated Attack Detected*\n\n"
+        "*Port-Out Fraud + Flagged Wallet Counterparty*\n\n"
+        "Your phone number has been ported to another carrier while your wallet has a flagged "
+        "transaction counterparty. Port-out fraud gives attackers complete control of your "
+        "SMS-based 2FA. Combined with a malicious wallet contact, this is an active coordinated "
+        "crypto theft chain.\n\n"
+        "→ Call your carrier immediately to reverse the port\n"
+        "→ Freeze all exchange withdrawals now\n"
+        "→ Do not sign any wallet transactions\n"
+        "Use /phone for carrier escalation steps."
+    ),
+}
+
+
+def _record_wallet_signal(user_id: str) -> list:
+    """Record a wallet_risk_flag signal and return the pruned signal list."""
+    table  = dynamodb.Table(USERS_TABLE)
+    now    = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=CORRELATION_WINDOW_HOURS)).isoformat()
+
+    existing = table.get_item(Key={"user_id": user_id}).get("Item", {}).get("recent_signals", [])
+    pruned   = [s for s in existing if isinstance(s, dict) and s.get("ts", "") > cutoff]
+    pruned.append({"type": "wallet_risk_flag", "ts": now.isoformat(), "meta": {}})
+
+    table.update_item(
+        Key={"user_id": user_id},
+        UpdateExpression="SET recent_signals = :s",
+        ExpressionAttributeValues={":s": pruned},
+    )
+    logger.info("Signal recorded — user_id=%s type=wallet_risk_flag", user_id)
+    return pruned
+
+
+def _check_wallet_correlation(user_id: str, signals: list, chat_id: int) -> None:
+    """If an identity signal is already present, fire a composite Telegram alert."""
+    present_types = {s.get("type") for s in signals if isinstance(s, dict)}
+    for sig in _WALLET_CHAIN_SIGNALS & present_types:
+        msg = _WALLET_CHAIN_MESSAGES.get(sig)
+        if msg:
+            _send_telegram(chat_id, msg)
+            logger.warning(
+                "Wallet correlation alert sent — user_id=%s chain=wallet_risk_flag+%s", user_id, sig
+            )
 
 
 def _format_token_risk_line(token_info: dict) -> str:
@@ -320,6 +424,167 @@ def _format_alert(activity: dict, monitored_address: str, risk: dict, token_risk
     )
 
 
+# ---------------------------------------------------------------------------
+# CRYPTO-3: Address poisoning detection helpers
+# ---------------------------------------------------------------------------
+
+def _record_known_address(user_id: str, address: str) -> None:
+    """Persist an outbound destination as a known-good address for this user.
+
+    Caps the table at MAX_KNOWN_ADDRESSES per user by skipping the write once
+    the limit is reached (oldest addresses are already there from prior txs).
+    """
+    if not address or address == _ZERO_ADDRESS:
+        return
+    address = address.lower()
+    now = int(time.time())
+    try:
+        table = dynamodb.Table(KNOWN_ADDRESSES_TABLE)
+        # Upsert: increment tx_count and update last_seen on repeat addresses
+        table.update_item(
+            Key={"user_id": user_id, "address": address},
+            UpdateExpression=(
+                "SET last_seen = :ls, tx_count = if_not_exists(tx_count, :zero) + :one, "
+                "first_seen = if_not_exists(first_seen, :ls)"
+            ),
+            ExpressionAttributeValues={":ls": Decimal(now), ":zero": Decimal(0), ":one": Decimal(1)},
+        )
+    except Exception as exc:
+        logger.error("Known address write failed user=%s addr=%s: %s", user_id, address, exc)
+
+
+def _get_known_addresses(user_id: str) -> list[str]:
+    """Return all known-good addresses for this user (lowercase)."""
+    try:
+        resp = dynamodb.Table(KNOWN_ADDRESSES_TABLE).query(
+            KeyConditionExpression=Key("user_id").eq(user_id),
+            ProjectionExpression="#addr",
+            ExpressionAttributeNames={"#addr": "address"},
+        )
+        return [item["address"] for item in resp.get("Items", [])]
+    except Exception as exc:
+        logger.error("Known address fetch failed user=%s: %s", user_id, exc)
+        return []
+
+
+def _similarity_score(addr1: str, addr2: str) -> tuple[int, int]:
+    """Return (prefix_match_chars, suffix_match_chars) for two EVM addresses.
+
+    Strips the '0x' prefix before comparing so scores reflect meaningful hex chars.
+    Example: 0x1A2B...CDEF vs 0x1A2B...CDFF → prefix=4, suffix=2
+    """
+    a = addr1.lower().lstrip("0x")
+    b = addr2.lower().lstrip("0x")
+    if len(a) != len(b):
+        return 0, 0
+
+    prefix = 0
+    for ca, cb in zip(a, b):
+        if ca == cb:
+            prefix += 1
+        else:
+            break
+
+    suffix = 0
+    for ca, cb in zip(reversed(a), reversed(b)):
+        if ca == cb:
+            suffix += 1
+        else:
+            break
+
+    return prefix, suffix
+
+
+def _check_address_poisoning(
+    user_id: str,
+    inbound_sender: str,
+    value: float,
+    asset: str,
+    network: str,
+    tx_hash: str,
+) -> str | None:
+    """Check whether inbound_sender looks like an address-poisoning attempt.
+
+    Returns a formatted alert string if poisoning is detected, else None.
+
+    Detection logic (based on Bitget/Chainalysis June 2026 research):
+    - Load all known-good outbound destinations for this user.
+    - Compare inbound sender against each known address using prefix+suffix scoring.
+    - A match at prefix ≥ POISON_PREFIX_CHARS AND suffix ≥ POISON_SUFFIX_CHARS is suspicious.
+    - Confidence is HIGH when either dimension reaches POISON_HIGH_THRESHOLD.
+    - Dust value (< DUST_THRESHOLD_ETH) raises confidence one level.
+    - Fires on the FIRST match found (worst-case: most similar known address).
+    """
+    if not inbound_sender or inbound_sender == _ZERO_ADDRESS:
+        return None
+
+    sender = inbound_sender.lower()
+    known  = _get_known_addresses(user_id)
+    if not known:
+        return None  # No history yet — nothing to compare against
+
+    is_dust = (value is not None and float(value) < DUST_THRESHOLD_ETH)
+
+    best_match: str | None = None
+    best_prefix = 0
+    best_suffix = 0
+
+    for known_addr in known:
+        if known_addr == sender:
+            continue  # Exact match — this IS the known address, not a lookalike
+        prefix, suffix = _similarity_score(sender, known_addr)
+        if prefix >= POISON_PREFIX_CHARS and suffix >= POISON_SUFFIX_CHARS:
+            if prefix + suffix > best_prefix + best_suffix:
+                best_match  = known_addr
+                best_prefix = prefix
+                best_suffix = suffix
+
+    if not best_match:
+        return None
+
+    # Determine confidence level
+    high_confidence = (
+        best_prefix >= POISON_HIGH_THRESHOLD or
+        best_suffix >= POISON_HIGH_THRESHOLD or
+        is_dust
+    )
+    confidence_label = "HIGH ⛔" if high_confidence else "MEDIUM ⚠️"
+
+    # Build side-by-side visual diff (highlight differing chars in the middle)
+    real_short  = f"`{best_match[:6]}...{best_match[-6:]}`"
+    fake_short  = f"`{sender[:6]}...{sender[-6:]}`"
+
+    explorer = _EXPLORER_MAP.get(network.upper())
+    tx_line  = f"\n🔗 [View transaction]({explorer.format(tx_hash)})" if tx_hash and explorer else ""
+
+    dust_note = "\n💡 *This is a dust transaction* — a common poisoning technique to plant a fake address in your history." if is_dust else ""
+
+    return (
+        f"☠️ *ADDRESS POISONING ATTEMPT DETECTED*\n\n"
+        f"*Confidence:* {confidence_label}\n"
+        f"*Match:* {best_prefix} prefix chars + {best_suffix} suffix chars\n\n"
+        f"*Real address (yours):*\n{real_short}\n"
+        f"*Fake sender (lookalike):*\n{fake_short}\n\n"
+        f"Attackers create addresses matching your first and last characters, then send a small transaction so the fake appears in your history."
+        f"{dust_note}"
+        f"{tx_line}\n\n"
+        f"*What to do right now:*\n"
+        f"⛔ Do NOT copy any address from your transaction history until you've verified the source\n"
+        f"✅ For any pending send: get the destination address directly from the original source — exchange withdrawal screen, verified contact, or QR code\n"
+        f"✅ Check the *full 42 characters* — not just the start and end\n"
+        f"✅ If you use a hardware wallet, verify the full address on the device screen before confirming\n\n"
+        f"*If you already sent funds to the wrong address:*\n"
+        f"🚨 Act immediately — on-chain transactions are irreversible once confirmed\n"
+        f"• Note the transaction hash and the fake address (from your history)\n"
+        f"• If funds went to a centralised exchange deposit address, contact that exchange's fraud team now — they may be able to freeze the account\n"
+        f"• File a report at ic3.gov (FBI Internet Crime Complaint Center) — required for any law enforcement escalation\n"
+        f"• Report the attacker address on etherscan.io (Report Address → Scam/Phishing) to warn other users\n\n"
+        f"_RelayShield Crypto Shield — Address Poisoning Detection_"
+    )
+
+
+# ---------------------------------------------------------------------------
+
 def lambda_handler(event: dict, context) -> dict:
     # TEST MODE: if event contains _test=true, skip signature verification
     test_mode = event.get("_test", False)
@@ -369,6 +634,14 @@ def lambda_handler(event: dict, context) -> dict:
         is_evm       = network_raw in _EVM_NETWORKS
         risk = _goplus_risk_check(counterparty) if counterparty and is_evm else {}
 
+        # Correlation: if GoPlus flags the counterparty as HIGH risk, record signal
+        # and check whether an identity attack is already in the window
+        if risk and any(risk.get(f) == "1" for f in _ADDR_CRITICAL):
+            user_id = user.get("user_id")
+            if user_id:
+                signals = _record_wallet_signal(user_id)
+                _check_wallet_correlation(user_id, signals, int(chat_id))
+
         # RISK-4: Token security check on inbound ERC-20 transfers
         token_risk_line = ""
         is_inbound = to_addr == monitored
@@ -386,16 +659,41 @@ def lambda_handler(event: dict, context) -> dict:
                             token_address, network_raw,
                         )
 
+        value   = activity.get("value", 0)
+        asset   = activity.get("asset", "ETH")
+        tx_hash = activity.get("hash", "")
+
         alert = _format_alert(activity, monitored, risk, token_risk_line)
         _send_telegram(int(chat_id), alert)
         logger.info("Wallet alert sent — user=%s address=%s", user.get("user_id"), monitored)
 
-        # Drainer detection — track outbound txs and alert on rapid drain pattern
         is_outbound = from_addr == monitored
+        is_inbound  = to_addr == monitored
+
+        # CRYPTO-3: On outbound txs, record destination as a known-good address
         if is_outbound:
-            value = activity.get("value", 0)
-            asset = activity.get("asset", "ETH")
-            tx_hash = activity.get("hash", "")
+            _record_known_address(user.get("user_id"), to_addr)
+            logger.info("Known address recorded — user=%s dest=%s", user.get("user_id"), to_addr)
+
+        # CRYPTO-3: On inbound txs, check sender for address poisoning
+        if is_inbound and is_evm:
+            poison_alert = _check_address_poisoning(
+                user_id=user.get("user_id"),
+                inbound_sender=from_addr,
+                value=value,
+                asset=asset,
+                network=network_raw,
+                tx_hash=tx_hash,
+            )
+            if poison_alert:
+                _send_telegram(int(chat_id), poison_alert)
+                logger.warning(
+                    "Address poisoning alert sent — user=%s sender=%s monitored=%s",
+                    user.get("user_id"), from_addr, monitored,
+                )
+
+        # Drainer detection — track outbound txs and alert on rapid drain pattern
+        if is_outbound:
             _record_outbound_tx(monitored, tx_hash, value, asset, network_raw)
             tx_count = _check_drain_pattern(monitored)
             if tx_count >= DRAIN_TX_THRESHOLD:

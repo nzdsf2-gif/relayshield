@@ -24,6 +24,7 @@ dist/
 build/
 venv/
 .venv/
+.venv-*/
 env/
 
 # ── AWS ──────────────────────────────────────────────────────
@@ -69,3 +70,37 @@ coverage/
 
 # EAS build needs these tracked to bundle the mobile app icon/splash
 !crypto-shield-app/assets/*.png
+.telethon_venv
+zapier_partner_test_key.txt
+
+# ── Mobile signing material ──────────────────────────────────
+# *.key does NOT match these; a release keystore leaking on a public repo lets
+# anyone sign a fake Crypto Shield build.
+*.keystore
+*.jks
+
+# ── Mobile build outputs ─────────────────────────────────────
+*.apk
+*.aab
+
+# ── Firebase client config (contains a Google API key) ───────
+google-services.json
+GoogleService-Info.plist
+
+# ── Wrangler local state and cache ───────────────────────────
+.wrangler/
+
+# ── Local backups ────────────────────────────────────────────
+backups/
+
+# ── Embedded git repos with their own remotes ────────────────
+# These are separate published repos, each already backed up upstream. Adding
+# them here would record a bare gitlink SHA with no .gitmodules entry, which is
+# a dead reference for anyone cloning. agentcore-payer-proof is a fork of an
+# AWS sample repo and is not ours at all.
+/agentcore-payer-proof/
+/ai-sdk-relayshield/
+/langchain-relayshield/
+/llamaindex-relayshield/
+/openai-agents-relayshield/
+/plugin-relayshield/

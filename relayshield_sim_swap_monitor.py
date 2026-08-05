@@ -82,6 +82,8 @@ from datetime import datetime, timedelta, timezone
 import boto3
 from boto3.dynamodb.conditions import Attr
 
+import relayshield_siem_connector as siem_connector
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -482,6 +484,30 @@ def _push_tg_signal(user_id: str, signal_type: str, tg_chat_id: int) -> None:
         logger.exception("_push_tg_signal failed user_id=%s: %s", user_id, exc)
 
 
+def _send_telegram_admin(tg_chat_id: int, message: str) -> bool:
+    """Send a Telegram message directly to admin via Bot API for co-notification."""
+    try:
+        raw = secrets_client.get_secret_value(
+            SecretId="relayshield/telegram_bot_token"
+        )["SecretString"].strip()
+        try:
+            token = json.loads(raw)["telegram_bot_token"]
+        except (json.JSONDecodeError, KeyError):
+            token = raw
+        url     = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = json.dumps(
+            {"chat_id": tg_chat_id, "text": message, "parse_mode": "Markdown"}
+        ).encode()
+        req = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=5)
+        return True
+    except Exception as exc:
+        logger.exception("Telegram admin notify failed chat_id=%s: %s", tg_chat_id, exc)
+        return False
+
+
 def _send_coordinated(
     to_number: str, body: str, account_sid: str, auth_token: str, from_number: str,
 ) -> bool:
@@ -566,7 +592,7 @@ def _build_coordinated_alert(chain: dict, signals: list) -> str:
         f"{url_block}\n"
         f"*What this means:*\n{chain['what']}\n\n"
         f"{action_block}\n\n"
-        f"🛡️ RelayShield — Coordinated Attack Detection"
+        f"🛡️ RelayShield — Coordinated Attack Detection\n📢 t.me/RelayShield"
     )
 
 
@@ -793,7 +819,7 @@ def build_sim_swap_alert_message(
             + "Reply *PHONE* for carrier-specific SIM lock steps.\n"
             + "Reply *SWEEP* to audit your inbox for backdoors left by attackers.\n\n"
             + "⬆️ Upgrade to Business Shield for carrier-specific hardening steps and eSIM audit guidance.\n\n"
-            + "🛡️ RelayShield"
+            + "🛡️ RelayShield\n📢 t.me/RelayShield"
         )
 
     # ── Business Basic / Business Shield ──────────────────────────────────
@@ -806,7 +832,7 @@ def build_sim_swap_alert_message(
     )
 
     if subscription_tier != TIER_PRO:
-        return header + hardening + account_steps + "\n\n🛡️ RelayShield"
+        return header + hardening + account_steps + "\n\n🛡️ RelayShield\n📢 t.me/RelayShield"
 
     # ── Business Shield Pro — adds eSIM disable + FCC complaint ───────────
     esim_disable = (
@@ -822,7 +848,7 @@ def build_sim_swap_alert_message(
         "→ Creates a formal audit trail and accelerates carrier response"
     )
 
-    return header + hardening + account_steps + esim_disable + fcc_block + "\n\n🛡️ RelayShield"
+    return header + hardening + account_steps + esim_disable + fcc_block + "\n\n🛡️ RelayShield\n📢 t.me/RelayShield"
 
 
 def build_port_out_alert_message(
@@ -890,7 +916,7 @@ def build_admin_swap_notification(
             f"Contact {name_str} immediately and direct them to call their carrier to report "
             f"the fraud and request a port-back. Consider restricting access to sensitive "
             f"systems until resolved.\n\n"
-            f"🛡️ RelayShield — admin CRITICAL alert"
+            f"🛡️ RelayShield — admin CRITICAL alert\n📢 t.me/RelayShield"
         )
 
     carrier_line = f" on *{carrier_name}*" if carrier_name else ""
@@ -900,7 +926,7 @@ def build_admin_swap_notification(
         f"{name_str} has been sent immediate action steps. "
         f"Consider restricting access to sensitive systems until they confirm the change "
         f"was authorised.\n\n"
-        f"🛡️ RelayShield — admin alert"
+        f"🛡️ RelayShield — admin alert\n📢 t.me/RelayShield"
     )
 
 
@@ -1175,6 +1201,26 @@ def process_user(
         if tg_chat_id and "telegram" in tg_channels:
             _push_tg_signal(user_id, alert_type, int(tg_chat_id))
 
+        # SIEM/SOAR forwarding — no-ops cleanly if no destination configured.
+        try:
+            email = user.get("email", "")
+            if email:
+                siem_connector.dispatch_finding(dynamodb, {
+                    "alert_type":  alert_type,
+                    "severity":    "CRITICAL",
+                    "customer_id": email,
+                    "summary":     f"{'Port-out' if alert_type == 'port_out' else 'SIM swap'} detected for {phone_e164} (carrier: {carrier_name})",
+                    "details": {
+                        "phone":               phone_e164,
+                        "carrier":             carrier_name,
+                        "last_known_carrier":  last_known_carrier,
+                        "swap_event_timestamp": swap_ts,
+                    },
+                    "detected_at": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as exc:
+            logger.warning("SIEM dispatch failed (non-fatal) for user_id=%s: %s", user_id, exc)
+
         # Admin co-notification for business-tier employee records
         is_employee = bool(user.get("admin_user_id"))
         if is_employee and subscription_tier in BUSINESS_TIERS:
@@ -1187,23 +1233,28 @@ def process_user(
 
                 if admin_record and admin_record.get("active"):
                     try:
+                        phone_last4   = phone_e164[-4:] if len(phone_e164) >= 4 else phone_e164
+                        employee_name = user.get("employee_name", "")
+                        admin_body    = build_admin_swap_notification(
+                            employee_name, phone_last4, carrier_name,
+                            alert_type, old_carrier=last_known_carrier,
+                        )
                         admin_phone = get_e164_phone(admin_record)
                         if admin_phone:
-                            phone_last4   = phone_e164[-4:] if len(phone_e164) >= 4 else phone_e164
-                            employee_name = user.get("employee_name", "")
-                            admin_body    = build_admin_swap_notification(
-                                employee_name, phone_last4, carrier_name,
-                                alert_type, old_carrier=last_known_carrier,
-                            )
                             admin_sent = send_whatsapp(
                                 to_whatsapp_number(admin_phone),
                                 admin_body,
                                 account_sid, auth_token, from_number,
                             )
                             logger.info(
-                                "Admin co-notification — admin_user_id=%s employee=%s sent=%s",
+                                "Admin co-notification WA — admin_user_id=%s employee=%s sent=%s",
                                 admin_user_id, user_id, admin_sent,
                             )
+                        admin_tg_id  = admin_record.get("telegram_chat_id")
+                        admin_tg_chs = admin_record.get("delivery_channels", [])
+                        if admin_tg_id and "telegram" in admin_tg_chs:
+                            _send_telegram_admin(int(admin_tg_id), admin_body)
+                            logger.info("Admin co-notification TG — admin_user_id=%s", admin_user_id)
                     except Exception as exc:
                         logger.exception(
                             "Admin co-notification failed admin_user_id=%s: %s",

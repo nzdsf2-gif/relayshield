@@ -1,0 +1,3 @@
+name = "relayshield-release-notes"
+main = "cloudflare_worker_release_notes.js"
+compatibility_date = "2024-01-01"

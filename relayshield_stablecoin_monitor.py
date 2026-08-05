@@ -61,9 +61,14 @@ STABLECOINS = {
     "tether":      {"symbol": "USDT",  "name": "Tether",      "warn": 0.997, "crit": 0.990, "repeg": 0.999},
     "dai":         {"symbol": "DAI",   "name": "DAI",         "warn": 0.997, "crit": 0.990, "repeg": 0.999},
     "frax":        {"symbol": "FRAX",  "name": "Frax",        "warn": 0.985, "crit": 0.970, "repeg": 0.988},
-    "liquity-usd": {"symbol": "LUSD",  "name": "Liquity USD", "warn": 0.997, "crit": 0.990, "repeg": 0.999},
+    "liquity-usd": {"symbol": "LUSD",  "name": "Liquity USD", "warn": 0.993, "crit": 0.985, "repeg": 0.999},
     "paypal-usd":  {"symbol": "PYUSD", "name": "PayPal USD",  "warn": 0.997, "crit": 0.990, "repeg": 0.999},
 }
+
+# Minimum hours between repeat alerts for the same coin at the same severity level.
+# Raised to 24hrs to prevent alert spam from oscillating stablecoins (e.g. FRAX
+# algorithmic mechanism causes rapid depeg/repeg cycles near the threshold).
+ALERT_COOLDOWN_HOURS = 24
 
 _secret_cache: dict = {}
 
@@ -158,10 +163,30 @@ def _set_depeg_alert(coin_id: str, severity: str, price: float) -> None:
         logger.error("Failed to write depeg alert coin_id=%s: %s", coin_id, exc)
 
 
-def _clear_depeg_alert(coin_id: str) -> None:
+def _is_in_cooldown(coin_id: str, active_alerts: dict) -> bool:
+    """Return True if we already sent an alert for this coin within ALERT_COOLDOWN_HOURS."""
+    from datetime import timedelta
     try:
-        dynamodb.Table(DEPEG_ALERTS_TABLE).delete_item(Key={"coin_id": coin_id})
-        logger.info("Depeg alert cleared: %s", coin_id)
+        item = dynamodb.Table(DEPEG_ALERTS_TABLE).get_item(Key={"coin_id": coin_id}).get("Item")
+        if not item:
+            return False
+        alerted_at = datetime.fromisoformat(item["alerted_at"].replace("Z", "+00:00"))
+        age = datetime.now(timezone.utc) - alerted_at
+        return age < timedelta(hours=ALERT_COOLDOWN_HOURS)
+    except Exception:
+        return False
+
+
+def _clear_depeg_alert(coin_id: str) -> None:
+    """Mark alert as regged — preserve alerted_at timestamp so cooldown window
+    still suppresses re-alerts if the coin oscillates back below threshold."""
+    try:
+        dynamodb.Table(DEPEG_ALERTS_TABLE).update_item(
+            Key={"coin_id": coin_id},
+            UpdateExpression="SET severity = :s",
+            ExpressionAttributeValues={":s": "regged"},
+        )
+        logger.info("Depeg alert regged (cooldown preserved): %s", coin_id)
     except Exception as exc:
         logger.error("Failed to clear depeg alert coin_id=%s: %s", coin_id, exc)
 
@@ -225,7 +250,7 @@ def _depeg_alert_text(coin_id: str, price: float, change_24h: float, severity: s
         f"*{pct_off:.3f}% below peg*\n"
         f"24h change: {change}\n\n"
         f"{action}\n"
-        f"_RelayShield Crypto Shield — Real-time Stablecoin Monitor_"
+        f"_RelayShield Crypto Shield — Real-time Stablecoin Monitor_\n📢 t.me/RelayShield"
     )
 
 
@@ -235,7 +260,7 @@ def _repeg_text(coin_id: str, price: float) -> str:
     return (
         f"✅ *{symbol} Peg Restored*\n\n"
         f"{meta['name']} has returned to *${price:.4f}* — within normal range.\n\n"
-        f"_RelayShield Crypto Shield_"
+        f"_RelayShield Crypto Shield_\n📢 t.me/RelayShield"
     )
 
 
@@ -261,14 +286,15 @@ def lambda_handler(event: dict, context) -> dict:
             continue
         change_24h = data.get("usd_24h_change")
 
-        currently_alerting = coin_id in active_alerts
+        currently_alerting = active_alerts.get(coin_id) in ("warning", "critical")
         warn_thresh  = meta["warn"]
         crit_thresh  = meta["crit"]
         repeg_thresh = meta["repeg"]
 
         if price < crit_thresh:
             severity = "critical"
-            if active_alerts.get(coin_id) != "critical":
+            # Alert if: escalating from warning to critical, OR not in cooldown
+            if active_alerts.get(coin_id) != "critical" and not _is_in_cooldown(coin_id, active_alerts):
                 alerts_to_send.append({
                     "coin_id": coin_id, "price": price,
                     "change": change_24h, "severity": severity,
@@ -277,7 +303,7 @@ def lambda_handler(event: dict, context) -> dict:
 
         elif price < warn_thresh:
             severity = "warning"
-            if not currently_alerting:
+            if not currently_alerting and not _is_in_cooldown(coin_id, active_alerts):
                 alerts_to_send.append({
                     "coin_id": coin_id, "price": price,
                     "change": change_24h, "severity": severity,

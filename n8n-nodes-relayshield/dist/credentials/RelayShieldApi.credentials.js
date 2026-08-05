@@ -6,7 +6,7 @@ class RelayShieldApi {
         this.name = 'relayShieldApi';
         this.displayName = 'RelayShield API';
         this.icon = 'file:relayshield.svg';
-        this.documentationUrl = 'https://api.relayshield.net/developers';
+        this.documentationUrl = 'https://api.relayshield.net/developers?source=n8n';
         this.properties = [
             {
                 displayName: 'API Key',
@@ -29,9 +29,10 @@ class RelayShieldApi {
         this.test = {
             request: {
                 baseURL: 'https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod',
-                url: '/v1/intel/cve',
-                method: 'GET',
-                qs: { keyword: 'test' },
+                url: '/v1/metered/breach',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: { email: 'test@example.com' },
             },
         };
     }

@@ -7,7 +7,7 @@ and other MCP-compatible AI agents.
 
 Configuration (environment variables):
   RELAYSHIELD_API_URL   — API Gateway invoke URL (required)
-                          https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod
+                          https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod
   RELAYSHIELD_API_KEY   — x-api-key for subscription access (RapidAPI / API Gateway)
   RELAYSHIELD_X_PAYMENT — x402 payment proof for pay-as-you-go access (USDC on Base)
 

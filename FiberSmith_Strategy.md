@@ -22,7 +22,7 @@ Andrew's 25-year telecom background gives significant credibility in this conver
 
 ### Integration Point 1 — IOC Feed into DNS/Network-Layer Blocking (Strongest Fit)
 
-RelayShield's IOC database (200K+ malicious IPs, domains, URLs from 8 criminal Telegram channels + 11 authoritative feeds) can feed directly into:
+RelayShield's IOC database (200K+ malicious IPs, domains, URLs from 20+ criminal Telegram channels + 11 authoritative feeds) can feed directly into:
 - **DNS RPZ (Response Policy Zones)** — ISP's recursive DNS resolver blocks known-malicious domains for all customers automatically
 - **Edge firewall / access control** — block outbound connections to known C2 IPs (Emotet, QakBot, TrickBot, etc. from Feodo Tracker)
 

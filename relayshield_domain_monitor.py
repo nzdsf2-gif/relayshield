@@ -55,6 +55,8 @@ from datetime import datetime, timedelta, timezone
 import boto3
 from boto3.dynamodb.conditions import Attr
 
+import relayshield_siem_connector as siem_connector
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -115,6 +117,9 @@ TIER_SHIELD         = "business_shield"
 TIER_PRO            = "business_shield_pro"
 
 DOMAIN_TIERS = {TIER_STARTER_DOMAIN, TIER_BASIC, TIER_SHIELD, TIER_PRO}
+
+# Company domain monitoring — Business Basic and above only (not starter_domain)
+COMPANY_DOMAIN_TIERS = {TIER_BASIC, TIER_SHIELD, TIER_PRO}
 
 DOMAIN_LIMITS = {
     TIER_STARTER_DOMAIN: 1,
@@ -367,7 +372,7 @@ def _build_coordinated_alert(chain: dict, signals: list) -> str:
         f"*Signals detected:*\n{signals_block}\n\n"
         f"*What this means:*\n{chain['what']}\n\n"
         f"{action_block}\n\n"
-        f"🛡️ RelayShield — Coordinated Attack Detection"
+        f"🛡️ RelayShield — Coordinated Attack Detection\n📢 t.me/RelayShield"
     )
 
 
@@ -668,6 +673,282 @@ def blank_domain_entry() -> dict:
         "mx_fingerprint":    None,
         "expiry_days_alerted": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Company domain monitoring helpers (SMB-B2)
+# ---------------------------------------------------------------------------
+
+def send_telegram_direct(tg_chat_id: int, message: str) -> bool:
+    """Send a Telegram message via the TG webhook Lambda (async invoke)."""
+    if not TG_WEBHOOK_LAMBDA:
+        return False
+    try:
+        payload = json.dumps({
+            "source":           "relayshield_internal",
+            "action":           "send_message",
+            "telegram_chat_id": tg_chat_id,
+            "message":          message,
+        }).encode()
+        lambda_client.invoke(
+            FunctionName=TG_WEBHOOK_LAMBDA,
+            InvocationType="Event",
+            Payload=payload,
+        )
+        logger.info("Telegram company-domain alert queued for chat_id=%s", tg_chat_id)
+        return True
+    except Exception as exc:
+        logger.exception("Telegram invoke failed chat_id=%s: %s", tg_chat_id, exc)
+        return False
+
+
+def scan_company_domain_admins() -> list[dict]:
+    """Return Business Basic+ admins who have a company_domain set."""
+    table  = dynamodb.Table(USERS_TABLE)
+    admins: list[dict] = []
+    kwargs: dict = {"FilterExpression": Attr("active").eq(True)}
+
+    while True:
+        response = table.scan(**kwargs)
+        for item in response.get("Items", []):
+            tier     = item.get("subscription_tier", "")
+            state    = item.get("onboarding_state", "")
+            is_admin = not item.get("admin_user_id")
+            has_co   = bool(item.get("company_domain"))
+            if tier in COMPANY_DOMAIN_TIERS and state in ELIGIBLE_STATES and is_admin and has_co:
+                admins.append(item)
+        last_key = response.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        kwargs["ExclusiveStartKey"] = last_key
+
+    return admins
+
+
+def get_team_members_for_domain(admin_user_id: str) -> list[dict]:
+    """Return active team member records for a given admin."""
+    table  = dynamodb.Table(USERS_TABLE)
+    members: list[dict] = []
+    kwargs: dict = {
+        "FilterExpression": Attr("team_id").eq(admin_user_id) & Attr("active").eq(True),
+    }
+    while True:
+        response = table.scan(**kwargs)
+        members.extend(response.get("Items", []))
+        last_key = response.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        kwargs["ExclusiveStartKey"] = last_key
+    return members
+
+
+def build_company_domain_admin_alert(
+    domain: str, new_lookalikes: list[str], enrichment: dict
+) -> str:
+    gsb_hits = [d for d, e in enrichment.items() if e.get("gsb_flagged")]
+    ct_hits  = [d for d, e in enrichment.items() if e.get("ct_recent")]
+    count    = len(new_lookalikes)
+    top      = new_lookalikes[0]
+
+    severity = "🚨 *CRITICAL*" if gsb_hits else "⚠️ *HIGH*"
+    lines = [
+        f"{severity} — *Company Domain Alert: `{domain}`*\n",
+        f"RelayShield detected {count} new lookalike domain{'s' if count > 1 else ''} "
+        f"targeting your company:\n",
+    ]
+    for ld in new_lookalikes[:5]:
+        flags = []
+        e = enrichment.get(ld, {})
+        if e.get("gsb_flagged"):
+            flags.append("GSB flagged — active phishing")
+        if e.get("ct_recent"):
+            flags.append("certificate issued — live site")
+        flag_str = " | ".join(flags)
+        lines.append(f"• `{ld}`{' — ' + flag_str if flag_str else ''}")
+
+    if count > 5:
+        lines.append(f"… and {count - 5} more.")
+
+    lines += [
+        "",
+        "*Recommended actions:*",
+        f"1. Visit `{top}` carefully — check if it is impersonating your brand",
+        "2. Warn your team and clients not to trust emails from these domains",
+        "3. File a UDRP complaint if the domain is actively used against you",
+        "",
+        "Your team has been notified.\n",
+        "🛡️ RelayShield — admin alert\n📢 t.me/RelayShield",
+    ]
+    return "\n".join(lines)
+
+
+def build_company_domain_member_alert(domain: str, new_lookalikes: list[str]) -> str:
+    count = len(new_lookalikes)
+    lines = [
+        f"⚠️ *Company Security Alert*\n",
+        f"RelayShield detected {count} new lookalike domain{'s' if count > 1 else ''} "
+        f"targeting your company domain `{domain}`:\n",
+    ]
+    for ld in new_lookalikes[:3]:
+        lines.append(f"• `{ld}`")
+    if count > 3:
+        lines.append(f"… and {count - 3} more.")
+    lines += [
+        "",
+        "These domains may be used to impersonate your company in phishing emails or "
+        "fake websites. *Do not click links or attachments from these domains.*",
+        "",
+        "Your admin has been notified and will coordinate the response.\n",
+        "🛡️ RelayShield",
+    ]
+    return "\n".join(lines)
+
+
+def build_company_mx_alert(domain: str, old_mx: str, new_mx: str) -> str:
+    return (
+        f"⚠️ *Company Domain MX Change Detected: `{domain}`*\n\n"
+        f"Your company's email routing has changed unexpectedly.\n\n"
+        f"Previous: `{old_mx}`\n"
+        f"Current: `{new_mx}`\n\n"
+        f"If your team did not authorise this, it may indicate DNS hijacking or an "
+        f"unauthorised change at your domain registrar. Check your DNS settings immediately.\n\n"
+        f"🛡️ RelayShield — admin alert\n📢 t.me/RelayShield"
+    )
+
+
+def build_company_expiry_alert(domain: str, days: int) -> str:
+    urgency = "CRITICAL" if days <= 7 else "urgent" if days <= 14 else "soon"
+    return (
+        f"⏰ *Company Domain Expiring {urgency.upper()}: `{domain}`*\n\n"
+        f"Your company domain expires in *{days} day{'s' if days != 1 else ''}*.\n\n"
+        f"An expired domain can be registered by anyone — including attackers who will "
+        f"use it to impersonate your company.\n\n"
+        f"Renew immediately at your domain registrar.\n\n"
+        f"🛡️ RelayShield — admin alert\n📢 t.me/RelayShield"
+    )
+
+
+def _deliver_to_recipients(
+    recipients: list[dict],
+    wa_message: str,
+    tg_message: str,
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    dry_run: bool,
+) -> None:
+    """Send WA + TG alerts to a list of user records."""
+    for rec in recipients:
+        if dry_run:
+            continue
+        wa_num = get_whatsapp_number(rec)
+        if wa_num and wa_num != "whatsapp:":
+            send_whatsapp(wa_num, wa_message, account_sid, auth_token, from_number)
+        tg_id  = rec.get("telegram_chat_id")
+        tg_chs = rec.get("delivery_channels", [])
+        if tg_id and "telegram" in tg_chs:
+            send_telegram_direct(int(tg_id), tg_message)
+
+
+def process_company_domains(
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    dry_run: bool,
+) -> dict:
+    """Scan all Business Basic+ company domains and broadcast alerts to admin + team."""
+    admins = scan_company_domain_admins()
+    logger.info("Company domain scan — %d admin(s) with company_domain.", len(admins))
+
+    scanned = 0
+    alerts  = 0
+    errors  = 0
+
+    for admin in admins:
+        admin_id      = admin["user_id"]
+        company_domain = admin["company_domain"]
+        domain_state  = load_domain_state(admin)
+        state_key     = "__company__"
+        entry         = domain_state.get(state_key) or blank_domain_entry()
+
+        try:
+            # --- Typosquat check ---
+            known          = entry.get("known_lookalikes") or []
+            new_lookalikes = find_active_lookalikes(company_domain, known_lookalikes=known)
+
+            if new_lookalikes and not dry_run:
+                enrichment = _enrich_lookalikes(new_lookalikes, account_sid)
+                members    = get_team_members_for_domain(admin_id)
+
+                admin_msg  = build_company_domain_admin_alert(company_domain, new_lookalikes, enrichment)
+                member_msg = build_company_domain_member_alert(company_domain, new_lookalikes)
+
+                _deliver_to_recipients([admin], admin_msg, admin_msg, account_sid, auth_token, from_number, dry_run)
+                if members:
+                    _deliver_to_recipients(members, member_msg, member_msg, account_sid, auth_token, from_number, dry_run)
+
+                try:
+                    gsb_hit = any(e.get("gsb_flagged") for e in enrichment.values())
+                    ct_hit  = any(e.get("ct_recent")   for e in enrichment.values())
+                    record_signal(
+                        admin_id, "domain_lookalike",
+                        {"domain": company_domain, "count": len(new_lookalikes),
+                         "lookalikes": new_lookalikes[:5], "gsb_flagged": gsb_hit, "ct_active": ct_hit,
+                         "company_domain": True},
+                    )
+                except Exception as exc:
+                    logger.exception("Signal record failed admin_id=%s: %s", admin_id, exc)
+
+                alerts += 1
+                logger.warning(
+                    "Company lookalike alert — admin=%s domain=%s new=%s",
+                    admin_id, company_domain, new_lookalikes,
+                )
+
+            entry["known_lookalikes"] = list(set(known) | set(new_lookalikes))
+
+            # --- MX record check ---
+            current_mx = get_mx_fingerprint(company_domain)
+            stored_mx  = entry.get("mx_fingerprint")
+
+            if current_mx is not None:
+                if stored_mx is None:
+                    entry["mx_fingerprint"] = current_mx
+                    logger.info("Company MX baseline — admin=%s domain=%s mx=%s", admin_id, company_domain, current_mx)
+                elif current_mx != stored_mx and not dry_run:
+                    members   = get_team_members_for_domain(admin_id)
+                    alert_msg = build_company_mx_alert(company_domain, stored_mx, current_mx)
+                    _deliver_to_recipients([admin] + members, alert_msg, alert_msg, account_sid, auth_token, from_number, dry_run)
+                    entry["mx_fingerprint"] = current_mx
+                    alerts += 1
+                    logger.warning("Company MX change — admin=%s domain=%s", admin_id, company_domain)
+                else:
+                    entry["mx_fingerprint"] = current_mx
+
+            # --- Expiry check ---
+            days = get_days_until_expiry(company_domain)
+            if days is not None:
+                already_alerted = entry.get("expiry_days_alerted")
+                if already_alerted is not None and days > 60:
+                    entry["expiry_days_alerted"] = None
+                    already_alerted = None
+                threshold = expiry_threshold_to_alert(days, already_alerted)
+                if threshold is not None and not dry_run:
+                    alert_msg = build_company_expiry_alert(company_domain, days)
+                    _deliver_to_recipients([admin], alert_msg, alert_msg, account_sid, auth_token, from_number, dry_run)
+                    entry["expiry_days_alerted"] = threshold
+                    alerts += 1
+
+            entry["last_scanned"] = datetime.now(timezone.utc).isoformat()
+            domain_state[state_key] = entry
+            update_domain_state(admin_id, domain_state)
+            scanned += 1
+
+        except Exception as exc:
+            logger.exception("Company domain scan error — admin=%s domain=%s: %s", admin_id, company_domain, exc)
+            errors += 1
+
+    return {"company_admins_scanned": scanned, "company_alerts": alerts, "company_errors": errors}
 
 
 # ---------------------------------------------------------------------------
@@ -1050,7 +1331,7 @@ def build_lookalike_alert(
         f"{team_step}"
         f"{abuse_block}\n"
         f"Reply *DOMAIN* to see your full domain security status.\n\n"
-        f"🛡️ RelayShield"
+        f"🛡️ RelayShield\n📢 t.me/RelayShield"
     )
 
 
@@ -1070,7 +1351,7 @@ def build_mx_change_alert(domain: str, old_mx: str, new_mx: str) -> str:
         f"3. Change your registrar password and enable 2FA immediately\n"
         f"4. Contact your IT provider if records don't match\n\n"
         f"Reply *DOMAIN SCAN* to re-check, or *DOMAIN* for full status.\n\n"
-        f"🛡️ RelayShield"
+        f"🛡️ RelayShield\n📢 t.me/RelayShield"
     )
 
 
@@ -1097,7 +1378,7 @@ def build_expiry_alert(domain: str, days: int) -> str:
         f"{advice}\n\n"
         f"Log into your registrar and renew now. Enable auto-renew if not already set.\n\n"
         f"Reply *DOMAIN* for your full domain security status.\n\n"
-        f"🛡️ RelayShield"
+        f"🛡️ RelayShield\n📢 t.me/RelayShield"
     )
 
 
@@ -1207,6 +1488,27 @@ def scan_domain(
             # Telegram correlation — push signal to TG webhook if user has Telegram delivery
             if tg_chat_id:
                 _push_tg_signal(user_id, "domain_lookalike", tg_chat_id)
+
+            # SIEM/SOAR forwarding — no-ops cleanly if no destination configured.
+            try:
+                user_rec = dynamodb.Table(USERS_TABLE).get_item(Key={"user_id": user_id}).get("Item") or {}
+                email = user_rec.get("email", "")
+                if email:
+                    siem_connector.dispatch_finding(dynamodb, {
+                        "alert_type":  "domain_lookalike",
+                        "severity":    "HIGH" if (gsb_hit or ct_hit) else "MEDIUM",
+                        "customer_id": email,
+                        "summary":     f"{len(new_lookalikes)} new lookalike domain(s) detected for {domain}",
+                        "details": {
+                            "domain":      domain,
+                            "lookalikes":  new_lookalikes[:5],
+                            "gsb_flagged": gsb_hit,
+                            "ct_active":   ct_hit,
+                        },
+                        "detected_at": now,
+                    })
+            except Exception as exc:
+                logger.warning("SIEM dispatch failed (non-fatal) for %s: %s", domain, exc)
 
         # Always update known_lookalikes so we don't re-alert next run
         entry["known_lookalikes"] = list(set(known) | set(new_lookalikes))
@@ -1434,13 +1736,19 @@ def lambda_handler(event, context):
             logger.exception("State update failed for user_id=%s: %s", user_id, exc)
             total_errors += 1
 
+    # ── Company domain scan (SMB-B2) ─────────────────────────────────────
+    co_summary = process_company_domains(account_sid, auth_token, from_number, dry_run)
+
     summary = {
-        "admins_scanned":   len(admins),
-        "domains_scanned":  total_scanned,
-        "lookalike_alerts": total_lookalike,
-        "mx_alerts":        total_mx,
-        "expiry_alerts":    total_expiry,
-        "errors":           total_errors,
+        "admins_scanned":          len(admins),
+        "domains_scanned":         total_scanned,
+        "lookalike_alerts":        total_lookalike,
+        "mx_alerts":               total_mx,
+        "expiry_alerts":           total_expiry,
+        "errors":                  total_errors,
+        "company_admins_scanned":  co_summary["company_admins_scanned"],
+        "company_alerts":          co_summary["company_alerts"],
+        "company_errors":          co_summary["company_errors"],
     }
     logger.info("Domain monitor complete — %s", summary)
 

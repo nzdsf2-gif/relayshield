@@ -1,0 +1,178 @@
+{
+  "name": "Send breach alert emails with RelayShield and Gmail",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Send breach alert emails with RelayShield and Gmail\n\n### How it works\nRuns daily on a schedule and checks your monitored email against RelayShield's breach database and infostealer malware logs. If either signal fires, it sends a formatted security alert email via Gmail with recommended next steps. Nothing is sent when both checks come back clean.\n\n### Setup steps\n- Set `monitoredEmail` in your n8n variables (or replace with a static value on both RelayShield nodes)\n- Add your RelayShield API credentials to both RelayShield nodes\n- Connect and authorize the Gmail credential\n- Adjust the Schedule Trigger's cron expression to change how often it runs\n\n### Customization\nAdd more RelayShield checks (e.g. SIM swap, domain lookalikes) to broaden coverage, or route the alert to Slack/Notion instead of email.",
+        "height": 740,
+        "width": 480,
+        "color": 5
+      },
+      "id": "a1b2c3d4-0000-0000-0000-000000000000",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-460, 100]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "notes": "Runs daily at 8:00 AM. Change the cron expression to adjust the schedule."
+    },
+    {
+      "parameters": {
+        "operation": "breach",
+        "email": "={{ $vars.monitoredEmail }}"
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "RelayShield - Breach Check",
+      "type": "n8n-nodes-relayshield.relayShield",
+      "typeVersion": 1,
+      "position": [480, 200],
+      "credentials": {
+        "relayShieldApi": {
+          "id": "1",
+          "name": "RelayShield API"
+        }
+      },
+      "notes": "Checks the monitored email against RelayShield's breach database (HIBP + dark web sources). Set monitoredEmail in your n8n variables or replace with a static value."
+    },
+    {
+      "parameters": {
+        "operation": "infostealer",
+        "email": "={{ $vars.monitoredEmail }}"
+      },
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "RelayShield - Infostealer Check",
+      "type": "n8n-nodes-relayshield.relayShield",
+      "typeVersion": 1,
+      "position": [480, 420],
+      "credentials": {
+        "relayShieldApi": {
+          "id": "1",
+          "name": "RelayShield API"
+        }
+      },
+      "notes": "Checks whether the email has appeared in infostealer malware logs — indicating a device may have been compromised."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-001",
+              "leftValue": "={{ $('RelayShield - Breach Check').item.json.breach_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "cond-002",
+              "leftValue": "={{ $('RelayShield - Infostealer Check').item.json.found }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "Any Threat Detected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "notes": "Proceeds to send an alert email if breach_count > 0 OR infostealer activity was detected."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $vars.monitoredEmail }}",
+        "subject": "🚨 RelayShield Security Alert — Action Required",
+        "emailType": "html",
+        "message": "=<p>Hi,</p>\n<p>RelayShield has detected a security event linked to <strong>{{ $vars.monitoredEmail }}</strong>.</p>\n\n{% if $('RelayShield - Breach Check').item.json.breach_count > 0 %}\n<h3>⚠️ Credential Breach Detected</h3>\n<p>Your email address was found in <strong>{{ $('RelayShield - Breach Check').item.json.breach_count }} breach(es)</strong>.</p>\n<p><strong>Recommended actions:</strong></p>\n<ul>\n  <li>Change your passwords for any affected services immediately</li>\n  <li>Enable two-factor authentication wherever possible</li>\n  <li>Check for unfamiliar login activity on your accounts</li>\n</ul>\n{% endif %}\n\n{% if $('RelayShield - Infostealer Check').item.json.found %}\n<h3>🔴 Infostealer Activity Detected</h3>\n<p>Your credentials were found in infostealer malware logs. This indicates a device you use may have been infected with credential-harvesting malware.</p>\n<p><strong>Recommended actions:</strong></p>\n<ul>\n  <li>Run a full malware scan on all your devices before changing passwords</li>\n  <li>Revoke active sessions for critical accounts (Google, Microsoft, banking)</li>\n  <li>Do not change passwords on a potentially infected device</li>\n</ul>\n{% endif %}\n\n<hr>\n<p style=\"color:#666;font-size:12px;\">Powered by RelayShield — relayshield.net</p>",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
+      "name": "Send Alert Email via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [960, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "notes": "Sends a formatted security alert to the monitored email address. Requires Gmail OAuth2 credentials configured in n8n."
+    },
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0006-0006-0006-000000000006",
+      "name": "No Threat — No Action",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [960, 420],
+      "notes": "No breaches or infostealer activity detected. Workflow completes silently."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          { "node": "RelayShield - Breach Check", "type": "main", "index": 0 },
+          { "node": "RelayShield - Infostealer Check", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "RelayShield - Breach Check": {
+      "main": [
+        [{ "node": "Any Threat Detected?", "type": "main", "index": 0 }]
+      ]
+    },
+    "RelayShield - Infostealer Check": {
+      "main": [
+        [{ "node": "Any Threat Detected?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Any Threat Detected?": {
+      "main": [
+        [{ "node": "Send Alert Email via Gmail", "type": "main", "index": 0 }],
+        [{ "node": "No Threat — No Action", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": ["security", "breach", "relayshield", "email-alerts"],
+  "triggerCount": 0,
+  "updatedAt": "2026-06-24T00:00:00.000Z",
+  "versionId": "v1"
+}

@@ -109,42 +109,31 @@ containing a fake AWS key and passes on a clean diff.
 
 ---
 
-## 5. GitLab CI/CD Catalog
+## 5. GitLab CI/CD — DROPPED 2026-08-02, deliberately
 
-The component must live in a **GitLab** repo — mirror from GitHub, don't move.
+**Do not publish a GitLab CI component.** A component must live in a GitLab-hosted project, which
+means mirroring this repo to GitLab: a second source of truth to keep in sync forever, for the
+smallest audience of the six catalogs. Staleness in a duplicated source is exactly what caused two
+defects on 2026-08-02 (an API-key README that was no longer true, and a deprecated CircleCI
+namespace command in this very runbook).
 
-```bash
-git remote add gitlab https://gitlab.com/relayshield/rsscan.git
-git push gitlab main --tags
-```
-
-Then in the GitLab project:
-
-1. **Settings → General → Visibility** → public.
-2. **Settings → General → CI/CD Catalog resource** → toggle on.
-3. Add `README.md` and a `LICENSE` (both required for catalog listing).
-4. Create a release for the tag — the catalog indexes **releases**, not tags:
+**GitLab users need nothing extra.** rsscan is on PyPI and Docker Hub, so a GitLab pipeline uses it
+directly — this is what the README now documents, and it has zero maintenance cost:
 
 ```yaml
-# .gitlab-ci.yml in the component repo
-create-release:
-  stage: deploy
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
-  rules:
-    - if: $CI_COMMIT_TAG
-  script: echo "Releasing $CI_COMMIT_TAG"
-  release:
-    tag_name: $CI_COMMIT_TAG
-    description: "rsscan $CI_COMMIT_TAG"
+rsscan:
+  image: relayshield/rsscan:0.1.1
+  variables:
+    RSSCAN_REV_RANGE: "origin/$CI_DEFAULT_BRANCH...HEAD"
+    RSSCAN_FAIL_ON: HIGH
+  script: ["rsscan"]
 ```
 
-Component path resolves as `$CI_SERVER_FQDN/relayshield/rsscan/secret-scan@0.1.0`, taken from
-`templates/secret-scan.yml`. The filename **is** the component name — renaming the file changes
-the public path.
+`templates/secret-scan.yml` was deleted in 0.1.1 — it existed only to be published as a component.
 
-**Verify:** include the component in a scratch GitLab project and confirm the job runs and fails
-correctly. Confirm `GIT_DEPTH: 0` took effect — without it GitLab's shallow clone silently yields
-an empty diff and the job passes while scanning nothing.
+**One real GitLab gotcha preserved from the original plan:** GitLab shallow-clones by default, so a
+job needs `GIT_DEPTH: 0` or the diff comes back empty and the scan passes while scanning nothing —
+a silent false all-clear. Add it if a user reports no findings on a repo that should have them.
 
 ---
 
@@ -152,7 +141,14 @@ an empty diff and the job passes while scanning nothing.
 
 ```bash
 circleci setup                                   # personal API token
-circleci namespace create relayshield github RelayShield
+# The positional `<vcs-type> <org-name>` form is DEPRECATED and fails with
+# "the organization ... does not exist" regardless of casing -- verified on
+# CLI 0.1.38646, 2026-08-02. Current CLIs require the CircleCI org UUID, which
+# is in Organization Settings (and in the URL:
+# app.circleci.com/settings/organization/circleci/<uuid>).
+# The org must already be connected in CircleCI -- it now uses a GitHub App,
+# not the legacy OAuth integration.
+circleci namespace create relayshield --org-id <circleci-org-uuid>
 circleci orb create relayshield/rsscan
 circleci orb pack orb/ > orb.yml
 circleci orb validate orb.yml

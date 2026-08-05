@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Activate Crypto Shield — RelayShield</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .card {
+      background: #1a1f2e;
+      border: 1px solid #2d3748;
+      border-radius: 16px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 480px;
+      text-align: center;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+    .logo img { height: 36px; }
+    .logo span {
+      font-size: 20px;
+      font-weight: 700;
+      color: #60a5fa;
+    }
+
+    .success-icon {
+      font-size: 52px;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #94a3b8;
+      font-size: 15px;
+      margin-bottom: 36px;
+      line-height: 1.6;
+    }
+
+    /* Step indicator */
+    .steps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      margin-bottom: 36px;
+    }
+    .step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .step-circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .step.done .step-circle { background: #064e3b; color: #34d399; }
+    .step.active .step-circle { background: #1e3a8a; color: #60a5fa; border: 2px solid #2563eb; }
+    .step.pending .step-circle { background: #1f2937; color: #4b5563; }
+    .step-label { font-size: 11px; color: #4b5563; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .step.done .step-label { color: #34d399; }
+    .step.active .step-label { color: #60a5fa; }
+    .step-line {
+      width: 48px;
+      height: 2px;
+      background: #2d3748;
+      margin-bottom: 22px;
+    }
+    .step-line.done { background: #064e3b; }
+
+    /* QR section */
+    .qr-section {
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .qr-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #4b5563;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 16px;
+    }
+    #qr-container img {
+      border-radius: 8px;
+      border: 4px solid white;
+    }
+    .qr-instruction {
+      font-size: 13px;
+      color: #64748b;
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px 0;
+      color: #4b5563;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .divider::before, .divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: #2d3748;
+    }
+
+    .telegram-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: #0088cc;
+      color: white;
+      text-decoration: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      transition: background 0.2s;
+    }
+    .telegram-btn:hover { background: #006fa6; }
+
+    .pending-notice {
+      background: #1e3a5f;
+      border: 1px solid #1e40af;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 24px;
+      font-size: 14px;
+      color: #93c5fd;
+      display: none;
+    }
+    .pending-notice .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #93c5fd;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .email-fallback {
+      margin-top: 20px;
+      font-size: 13px;
+      color: #4b5563;
+      line-height: 1.6;
+    }
+    .email-fallback a { color: #60a5fa; }
+
+    footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #374151;
+      text-align: center;
+    }
+    footer a { color: #4b5563; }
+
+    /* No link_code state */
+    .recover-form { margin-top: 24px; text-align: left; }
+    .recover-form label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .recover-form input {
+      width: 100%;
+      padding: 12px 14px;
+      background: #0f1117;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #f1f5f9;
+      font-size: 15px;
+      margin-bottom: 12px;
+      outline: none;
+    }
+    .recover-form input:focus { border-color: #2563eb; }
+    .recover-form button {
+      width: 100%;
+      padding: 12px;
+      background: #374151;
+      color: #d1d5db;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .recover-form button:hover { background: #4b5563; }
+  </style>
+</head>
+<body>
+
+<div class="card" id="main-card">
+  <div class="logo">
+    <img src="https://relayshield.net/assets/logo.png" alt="RelayShield" onerror="this.style.display='none'">
+    <span>RelayShield</span>
+  </div>
+
+  <!-- Steps -->
+  <div class="steps">
+    <div class="step done">
+      <div class="step-circle">✓</div>
+      <div class="step-label">Email</div>
+    </div>
+    <div class="step-line done"></div>
+    <div class="step" id="step-payment">
+      <div class="step-circle" id="step-payment-circle">2</div>
+      <div class="step-label">Payment</div>
+    </div>
+    <div class="step-line" id="line-2"></div>
+    <div class="step pending" id="step-telegram">
+      <div class="step-circle">3</div>
+      <div class="step-label">Telegram</div>
+    </div>
+  </div>
+
+  <!-- Pending payment notice (shown if we can't confirm payment yet) -->
+  <div class="pending-notice" id="pending-notice">
+    <span class="spinner"></span>
+    Confirming your payment — this takes a few seconds…
+  </div>
+
+  <span class="success-icon">🎉</span>
+  <h1>Payment confirmed!</h1>
+  <p class="subtitle">One last step — link your Telegram account to activate your 24/7 protection.</p>
+
+  <!-- QR code section (desktop) -->
+  <div class="qr-section" id="qr-section">
+    <div class="qr-label">📱 On desktop — scan with your phone</div>
+    <div id="qr-container">
+      <img id="qr-img" src="" alt="QR code" width="200" height="200">
+    </div>
+    <p class="qr-instruction">Point your camera at the code above, then tap the link to open @RelayShield_bot in Telegram.</p>
+  </div>
+
+  <div class="divider">or</div>
+
+  <!-- Direct Telegram button (mobile) -->
+  <a id="telegram-btn" href="#" class="telegram-btn">
+    Open @RelayShield_bot in Telegram →
+  </a>
+
+  <div class="email-fallback">
+    We also sent these instructions to your email. If you don't see it, check spam or
+    <a href="mailto:support@relayshield.net">contact support</a>.
+  </div>
+
+  <!-- Recovery form — shown if no link_code available -->
+  <div id="recover-section" style="display:none">
+    <p class="subtitle" style="text-align:left">Enter the email you used to sign up and we'll retrieve your activation link.</p>
+    <div class="recover-form">
+      <label for="recover-email">Email address</label>
+      <input type="email" id="recover-email" placeholder="you@example.com">
+      <button onclick="recoverByEmail()">Retrieve my activation link</button>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <a href="https://relayshield.net/privacy">Privacy</a> ·
+  <a href="https://relayshield.net/terms">Terms</a> ·
+  <a href="mailto:support@relayshield.net">Support</a>
+</footer>
+
+<script>
+  const API_BASE = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod";
+  const TG_BOT_DEEP_LINK = "https://t.me/RelayShield_bot?start=";
+  const QR_SERVICE = "https://quickchart.io/qr?size=200&margin=2&text=";
+
+  let pollTimer = null;
+
+  function activateWithLinkCode(linkCode) {
+    const deepLink = TG_BOT_DEEP_LINK + encodeURIComponent(linkCode);
+    const qrUrl    = QR_SERVICE + encodeURIComponent(deepLink);
+
+    // QR code image
+    document.getElementById("qr-img").src = qrUrl;
+    document.getElementById("qr-section").style.display = "block";
+
+    // Telegram button
+    document.getElementById("telegram-btn").href = deepLink;
+
+    // Update steps
+    document.getElementById("step-payment").className = "step done";
+    document.getElementById("step-payment-circle").textContent = "✓";
+    document.getElementById("line-2").className = "step-line done";
+    document.getElementById("step-telegram").className = "step active";
+
+    // Hide recovery section, hide pending notice
+    document.getElementById("recover-section").style.display = "none";
+    document.getElementById("pending-notice").style.display = "none";
+    document.getElementById("main-card").querySelector("span.success-icon").style.display = "block";
+    document.getElementById("main-card").querySelector("h1").style.display = "block";
+    document.getElementById("main-card").querySelector(".subtitle").style.display = "block";
+  }
+
+  function showPendingState() {
+    document.getElementById("pending-notice").style.display = "block";
+    document.getElementById("qr-section").style.display = "none";
+    document.getElementById("telegram-btn").style.display = "none";
+    document.getElementById("main-card").querySelector("span.success-icon").style.display = "none";
+    document.getElementById("main-card").querySelector("h1").textContent = "Confirming payment…";
+    document.querySelector(".subtitle").textContent = "Your payment is being confirmed. This usually takes a few seconds.";
+  }
+
+  async function pollForPayment(email, linkCode) {
+    // Poll /signup/status?email=... up to 12 times with 5s delay (60s total)
+    let attempts = 0;
+    pollTimer = setInterval(async () => {
+      attempts++;
+      try {
+        const resp = await fetch(`${API_BASE}/signup/status?email=${encodeURIComponent(email)}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        if (data.state === "AWAITING_TELEGRAM_LINK" || data.state === "ACTIVE") {
+          clearInterval(pollTimer);
+          const code = data.link_code || linkCode;
+          if (code) {
+            sessionStorage.setItem("rs_link_code", code);
+            activateWithLinkCode(code);
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      if (attempts >= 12) {
+        clearInterval(pollTimer);
+        // Show the link code we have anyway — payment may have gone through
+        if (linkCode) activateWithLinkCode(linkCode);
+      }
+    }, 5000);
+  }
+
+  async function recoverByEmail() {
+    const email = document.getElementById("recover-email").value.trim();
+    if (!email || !email.includes("@")) return;
+
+    try {
+      const resp = await fetch(`${API_BASE}/signup/status?email=${encodeURIComponent(email)}`);
+      if (!resp.ok) throw new Error();
+      const data = await resp.json();
+
+      if (data.link_code) {
+        sessionStorage.setItem("rs_link_code", data.link_code);
+        sessionStorage.setItem("rs_email", email);
+        activateWithLinkCode(data.link_code);
+      } else {
+        alert("We couldn't find an activation link for that email. Contact support@relayshield.net.");
+      }
+    } catch {
+      alert("Something went wrong. Contact support@relayshield.net.");
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Initialise
+  // -----------------------------------------------------------------------
+  (function init() {
+    // 1. Try URL param first (future: if Helio ever passes it back)
+    const params    = new URLSearchParams(window.location.search);
+    const urlCode   = params.get("link_code");
+
+    // 2. Try sessionStorage (set before redirecting to Helio)
+    const storedCode  = sessionStorage.getItem("rs_link_code");
+    const storedEmail = sessionStorage.getItem("rs_email");
+
+    const linkCode = urlCode || storedCode;
+
+    if (linkCode) {
+      // We have a link_code. Check if payment is already confirmed, or show
+      // the code immediately and poll in the background.
+      if (storedEmail) {
+        // Start with the code we have (so desktop user can scan)
+        activateWithLinkCode(linkCode);
+        // Also poll to ensure state is advanced (Helio webhook may be in-flight)
+        // This is best-effort; the Telegram bot will handle the state check.
+      } else {
+        activateWithLinkCode(linkCode);
+      }
+    } else if (storedEmail) {
+      // Have email but no link_code — payment redirect may have cleared sessionStorage
+      showPendingState();
+      pollForPayment(storedEmail, null);
+    } else {
+      // No context at all — show recovery form
+      document.getElementById("qr-section").style.display = "none";
+      document.getElementById("telegram-btn").style.display = "none";
+      document.querySelector(".success-icon").style.display = "none";
+      document.querySelector("h1").textContent = "Retrieve your activation link";
+      document.querySelector(".subtitle").textContent = "Enter your email below to get your Telegram activation link.";
+      document.getElementById("pending-notice").style.display = "none";
+      document.getElementById("recover-section").style.display = "block";
+    }
+  })();
+</script>
+
+</body>
+</html>

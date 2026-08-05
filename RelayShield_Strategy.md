@@ -4851,7 +4851,7 @@ The honest gap remains corpus depth and source breadth — SpyCloud and Recorded
 |---|---|---|
 | `POST /v1/metered/ransomware-risk` | $0.40 | Victim list + pre-ransomware credential count per domain |
 | `POST /v1/metered/nhi-exposure` | $0.40 | Non-human identity: API keys/tokens in stealer logs, own + vendor domains |
-| `POST /v1/metered/secret-scan` | $0.35 | GitHub public repo secret detection per domain |
+| `POST /v1/metered/secret-scan` | $0.35 | Secret detection across GitHub, npm, PyPI, Docker Hub and Hugging Face, per domain |
 | `POST /v1/metered/identity-graph` | $0.35 | Email → linked phones/domains from criminal dump co-occurrences |
 | `POST /v1/metered/supply-chain` | $0.10/call | Vendor breach + stealer exposure + dark web composite score (0–100) |
 | `POST /v1/metered/session-risk` | $0.30 | INTEL-5 active session hijack / AiTM detection |

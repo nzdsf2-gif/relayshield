@@ -52,13 +52,26 @@ STOLEN_SESSIONS_TABLE   = "relayshield_stolen_sessions"
 STRIPE_SECRET_NAME = "relayshield/stripe_secret_key"
 STRIPE_METER_API   = "https://api.stripe.com/v1/billing/meter_events"
 
+# Single aggregate Stripe Billing Meter, replacing per-endpoint meters for
+# billing on 2026-08-04. formula=sum over payload[value] in CENTS, billed
+# against a $0.01-per-unit price. Must match relayshield_api.py's constant.
+STRIPE_USAGE_METER_EVENT = "relayshield_api_usage"
+
+# Per-endpoint meter event names. NO LONGER USED FOR BILLING — retained because
+# the meters still hold historical data in Stripe. PRICE_CENTS is now the
+# authoritative "is this billable, and for how much" table.
 STRIPE_METER_EVENTS = {
     "/v1/metered/mcp-registry-risk":      "relayshield_mcp_registry_risk_calls",
     "/v1/metered/prompt-injection-breach": "relayshield_prompt_injection_breach_calls",
 }
+# Corrected 2026-08-04: the old "proposed, not yet in Stripe" comment was
+# wrong and cost real time. Both meters AND both $0.35 prices have existed
+# since 2026-07-07 (TODO AGENTIC-3/4). What was actually missing was
+# membership in STRIPE_PRICE_IDS, so no subscription ever carried the line
+# item. Now billed through the aggregate meter above.
 PRICE_CENTS = {
-    "/v1/metered/mcp-registry-risk":      35,   # $0.35/call — proposed, not yet in Stripe
-    "/v1/metered/prompt-injection-breach": 35,   # $0.35/call — proposed, not yet in Stripe
+    "/v1/metered/mcp-registry-risk":      35,   # $0.35/call
+    "/v1/metered/prompt-injection-breach": 35,   # $0.35/call
 }
 
 _secret_cache: dict[str, str] = {}
@@ -264,15 +277,31 @@ def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: 
                        aws_account_id, dimension, exc)
 
 
-def _record_stripe_meter_event(stripe_customer_id: str, event_name: str) -> None:
-    """Post a usage event to Stripe Billing Meter. Fire-and-forget — never raises."""
+def _record_stripe_meter_event(stripe_customer_id: str, path: str) -> None:
+    """Post a usage event to Stripe Billing Meter. Fire-and-forget — never raises.
+
+    Mirrors relayshield_api.py's version exactly (duplicated, not imported —
+    same isolation rationale as the rest of this file). Rewritten 2026-08-04
+    from one meter per endpoint to a single aggregate meter carrying the call's
+    price in CENTS as payload[value], billed against a $0.01-per-unit price.
+
+    The reason is in relayshield_api.py's copy: Stripe Checkout rejects more
+    than 20 recurring prices, and per-endpoint prices had passed that ceiling,
+    breaking developer signup outright. Keep the two copies in step — this
+    Lambda's two endpoints are on the same customer subscription as the rest.
+    """
+    cents = PRICE_CENTS.get(path, 0)
+    if not cents:
+        logger.warning("no price for %s — skipping meter event rather than billing 0", path)
+        return
     try:
         secret_key = _stripe_secret_key()
         identifier = f"{stripe_customer_id}-{uuid.uuid4().hex}"
         payload    = urllib.parse.urlencode({
-            "event_name":                  event_name,
-            "payload[value]":              "1",
+            "event_name":                  STRIPE_USAGE_METER_EVENT,
+            "payload[value]":              str(cents),
             "payload[stripe_customer_id]": stripe_customer_id,
+            "payload[path]":               path,
             "identifier":                  identifier,
         }).encode("utf-8")
         req = urllib.request.Request(
@@ -286,11 +315,11 @@ def _record_stripe_meter_event(stripe_customer_id: str, event_name: str) -> None
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
-            logger.info("stripe meter event recorded customer=%s event=%s status=%d",
-                        stripe_customer_id, event_name, resp.status)
+            logger.info("stripe meter event recorded customer=%s path=%s cents=%d status=%d",
+                        stripe_customer_id, path, cents, resp.status)
     except Exception as exc:
-        logger.warning("stripe meter event failed (non-fatal) customer=%s event=%s error=%s",
-                       stripe_customer_id, event_name, exc)
+        logger.warning("stripe meter event failed (non-fatal) customer=%s path=%s error=%s",
+                       stripe_customer_id, path, exc)
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -1110,7 +1139,7 @@ def lambda_handler(event: dict, context) -> dict:
             if not has_subscription:
                 stripe_customer_id = key_record.get("stripe_customer_id", "")
                 if stripe_customer_id:
-                    _record_stripe_meter_event(stripe_customer_id, STRIPE_METER_EVENTS.get(path, ""))
+                    _record_stripe_meter_event(stripe_customer_id, path)
                     rail, account_ref = "stripe", stripe_customer_id
             else:
                 # Unlimited under an existing subscription: genuinely $0 for

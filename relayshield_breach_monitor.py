@@ -31,6 +31,8 @@ from datetime import datetime, timedelta, timezone
 import boto3
 from boto3.dynamodb.conditions import Attr
 
+import relayshield_siem_connector as siem_connector
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -76,7 +78,7 @@ BREACH_ALERT_TEMPLATE_SID = "HXdb9685fae910b63fcfe056fbf6d03bc6"
 TWILIO_ERROR_OUTSIDE_WINDOW = 63016
 
 USER_AGENT = "RelayShield-BreachMonitor"
-CLAUDE_MODEL = "claude-3-haiku-20240307"
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_MAX_TOKENS = 1024
 
 # HIBP Pwned 1 plan: 10 RPM → 1 request per 6 seconds
@@ -1127,6 +1129,30 @@ def _push_tg_signal(user_id: str, signal_type: str, tg_chat_id: int) -> None:
         logger.exception("_push_tg_signal failed user_id=%s: %s", user_id, exc)
 
 
+def _send_telegram_admin(tg_chat_id: int, message: str) -> bool:
+    """Send a Telegram message directly to admin via Bot API for co-notification."""
+    try:
+        raw = secrets_client.get_secret_value(
+            SecretId="relayshield/telegram_bot_token"
+        )["SecretString"].strip()
+        try:
+            token = json.loads(raw)["telegram_bot_token"]
+        except (json.JSONDecodeError, KeyError):
+            token = raw
+        url     = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = json.dumps(
+            {"chat_id": tg_chat_id, "text": message, "parse_mode": "Markdown"}
+        ).encode()
+        req = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=5)
+        return True
+    except Exception as exc:
+        logger.exception("Telegram admin notify failed chat_id=%s: %s", tg_chat_id, exc)
+        return False
+
+
 def _send_coordinated(
     to_number: str, body: str, account_sid: str, auth_token: str, from_number: str,
 ) -> bool:
@@ -1212,7 +1238,7 @@ def _build_coordinated_alert(chain: dict, signals: list) -> str:
         f"{url_block}\n"
         f"*What this means:*\n{chain['what']}\n\n"
         f"{action_block}\n\n"
-        f"🛡️ RelayShield — Coordinated Attack Detection"
+        f"🛡️ RelayShield — Coordinated Attack Detection\n📢 t.me/RelayShield"
     )
 
 
@@ -1610,6 +1636,31 @@ def process_email(
                 len(alertable), email_id,
             )
 
+        # SIEM/SOAR forwarding — independent of WhatsApp delivery outcome
+        # (a SOC customer wants every alert regardless of chat-session state).
+        # No-ops cleanly if this account has no SIEM destination configured.
+        try:
+            any_passwords = any(b.get("passwords_exposed") for b in alertable)
+            siem_connector.dispatch_finding(dynamodb, {
+                "alert_type":  "breach",
+                "severity":    "CRITICAL" if any_passwords else "HIGH",
+                "customer_id": email_address,
+                "summary": (
+                    f"{len(alertable)} new breach(es) detected for {email_address}: "
+                    + ", ".join(b.get("breach_name", "") for b in alertable)
+                ),
+                "details": {
+                    "breach_count":     len(alertable),
+                    "breaches":         [b.get("breach_name", "") for b in alertable],
+                    "breach_dates":     [b.get("breach_date", "") for b in alertable],
+                    "data_types":       [b.get("data_types_exposed", "") for b in alertable],
+                    "passwords_exposed": any_passwords,
+                },
+                "detected_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception as exc:
+            logger.warning("SIEM dispatch failed (non-fatal) for %s: %s", email_address, exc)
+
         # Step 2 — Claude freeform follow-up with full severity analysis.
         # Sent immediately after the template. Works when the user has an active
         # WhatsApp session (recently messaged us). Gracefully skipped on 63016
@@ -1726,6 +1777,13 @@ def process_email(
                         "Admin co-notification skipped — no phone for admin_user_id=%s",
                         admin_user_id,
                     )
+
+                # Telegram admin co-notification
+                admin_tg_id  = admin_record.get("telegram_chat_id")
+                admin_tg_chs = admin_record.get("delivery_channels", [])
+                if admin_tg_id and "telegram" in admin_tg_chs:
+                    _send_telegram_admin(int(admin_tg_id), admin_msg)
+                    logger.info("Admin co-notification TG — admin_user_id=%s", admin_user_id)
 
     for b in new_breaches:
         b["whatsapp_sent"] = whatsapp_sent if b in alertable else False

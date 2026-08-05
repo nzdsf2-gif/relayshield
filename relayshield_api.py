@@ -78,6 +78,11 @@ from datetime import datetime, timezone, timedelta
 
 import boto3
 
+# Local module — pure data, no AWS dependencies. MUST be included in this
+# function's deployment zip; without it every invocation dies at import with
+# Runtime.ImportModuleError. See .claude/skills/relayshield-deploy step 3.
+import relayshield_openapi_spec
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -262,7 +267,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/ransomware-risk":       400000,   # $0.40 — ransomware victim list + pre-ransomware credential check
     "/v1/payg/nhi-exposure":          400000,   # $0.40 — non-human identity: API keys/tokens in stealer logs
     "/v1/payg/llm-credential-exposure": 400000,  # $0.40 — LLMjacking: exposed LLM/AI provider API keys
-    "/v1/payg/secret-scan":           350000,   # $0.35 — GitHub public repo secret detection
+    "/v1/payg/secret-scan":           350000,   # $0.35 — 5-source public artifact secret detection (GitHub, npm, PyPI, Docker Hub, HF)
     "/v1/payg/secret-scan-text":       50000,   # $0.05 — local scan, no external API call (see METERED_CREDIT_COSTS)
     "/v1/payg/target-risk":           500000,   # $0.50 — target probability score (6-signal correlation)
     "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
@@ -327,8 +332,22 @@ INTEL_PLAN_LIMITS: dict[str, int | None] = {
 }
 INTEL_DEFAULT_TIER = "mp_499"
 
-# Stripe Billing Meter event names — one per metered endpoint.
-# These must match the event_name values on the meters created in Stripe Dashboard.
+# Single aggregate Stripe Billing Meter, replacing the 29 per-endpoint meters
+# for billing purposes on 2026-08-04. formula=sum over payload[value], where
+# value is the call's price in CENTS, billed against a $0.01-per-unit price
+# (price_1U0jLZL2dcjOeFiYG8VktTxK, meter mtr_61VA7IvTDjEhWKu9941L2dcjOeFiY7OS).
+#
+# One line item instead of 29 is not a nicety: Stripe Checkout rejects more
+# than 20 recurring prices, and STRIPE_PRICE_IDS had reached 24, so developer
+# signup had been returning HTTP 400 since 2026-06-24. See
+# _record_stripe_meter_event for the full account.
+STRIPE_USAGE_METER_EVENT = "relayshield_api_usage"
+
+# Per-endpoint meter event names. NO LONGER USED FOR BILLING — kept because the
+# meters still exist in Stripe with their historical data, and because
+# relayshield_agentic_api.py's AWS Marketplace path still reads its own copy.
+# METERED_CREDIT_COSTS is now the authoritative "is this endpoint billable"
+# check; adding an entry here bills nothing on its own.
 STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/breach":           "relayshield_breach_calls",
     "/v1/metered/sim-swap":         "relayshield_sim_swap_calls",
@@ -380,7 +399,7 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/ransomware-risk": 40,   # $0.40 — ransomware victim + pre-ransomware credential check
     "/v1/metered/nhi-exposure":    40,   # $0.40 — NHI: API keys/tokens in stealer logs
     "/v1/metered/llm-credential-exposure": 40,   # $0.40 — LLMjacking: exposed LLM/AI provider API keys
-    "/v1/metered/secret-scan":     35,   # $0.35 — GitHub public repo secret detection
+    "/v1/metered/secret-scan":     35,   # $0.35 — 5-source public artifact secret detection (GitHub, npm, PyPI, Docker Hub, HF)
     "/v1/metered/secret-scan-text": 5,   # $0.05 — local pattern scan, no external API call.
                                          # Deliberately below secret-scan's $0.35: this is the
                                          # pre-commit path and fires on every commit, so parity
@@ -675,15 +694,44 @@ def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: 
                        aws_account_id, dimension, exc)
 
 
-def _record_stripe_meter_event(stripe_customer_id: str, event_name: str) -> None:
-    """Post a usage event to Stripe Billing Meter. Fire-and-forget — never raises."""
+def _record_stripe_meter_event(stripe_customer_id: str, path: str) -> None:
+    """Post a usage event to Stripe Billing Meter. Fire-and-forget — never raises.
+
+    Rewritten 2026-08-04 from one meter per endpoint to a single aggregate
+    meter carrying the call's price in cents.
+
+    Why: the old model needed one metered Price per endpoint on every
+    developer's subscription, and **Stripe Checkout rejects more than 20
+    recurring prices**. The list had reached 24, so `handle_signup()` had been
+    failing with HTTP 400 — and self-serve developer signup had been dead —
+    since 2026-06-24, when the 21st price was added. Verified by probing the
+    live API: 20 prices succeed, 21 fail.
+
+    The aggregate meter (`relayshield_api_usage`, formula=sum) takes
+    `payload[value]` in cents against a $0.01-per-unit price, so a $0.35 call
+    posts 35 and bills $0.35 — identical amounts, one line item, and no
+    ceiling to hit as endpoints are added.
+
+    Takes the request path, not a meter event name: the price is looked up here
+    so a caller can never post a usage event with the wrong amount.
+
+    Trade-off accepted: Stripe no longer shows a per-endpoint revenue split,
+    because meter summaries cannot group by a payload key. `path` is still sent
+    on each event for forensics, and CloudWatch remains the per-endpoint
+    breakdown.
+    """
+    cents = METERED_CREDIT_COSTS.get(path, 0)
+    if not cents:
+        logger.warning("no price for %s — skipping meter event rather than billing 0", path)
+        return
     try:
         secret_key = _stripe_secret_key()
         identifier = f"{stripe_customer_id}-{uuid.uuid4().hex}"
         payload    = urllib.parse.urlencode({
-            "event_name":                  event_name,
-            "payload[value]":              "1",
+            "event_name":                  STRIPE_USAGE_METER_EVENT,
+            "payload[value]":              str(cents),
             "payload[stripe_customer_id]": stripe_customer_id,
+            "payload[path]":               path,
             "identifier":                  identifier,
         }).encode("utf-8")
         req = urllib.request.Request(
@@ -697,11 +745,11 @@ def _record_stripe_meter_event(stripe_customer_id: str, event_name: str) -> None
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
-            logger.info("stripe meter event recorded customer=%s event=%s status=%d",
-                        stripe_customer_id, event_name, resp.status)
+            logger.info("stripe meter event recorded customer=%s path=%s cents=%d status=%d",
+                        stripe_customer_id, path, cents, resp.status)
     except Exception as exc:
-        logger.warning("stripe meter event failed (non-fatal) customer=%s event=%s error=%s",
-                       stripe_customer_id, event_name, exc)
+        logger.warning("stripe meter event failed (non-fatal) customer=%s path=%s error=%s",
+                       stripe_customer_id, path, exc)
 
 
 def _send_intel_quota_warning(api_key_str: str, key_record: dict, threshold: int, calls_used: int) -> None:
@@ -970,6 +1018,15 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         )
         credit_cost      = METERED_CREDIT_COSTS.get(path, 0)
         use_credits      = credit_balance >= credit_cost
+        # Free tier (added 2026-08-04): a no-card key issued on email signup.
+        # Counted in CALLS, not credits, because that is what the landing page
+        # promises -- 20 calls means 20 calls whether each is $0.05 cert-expiry
+        # or $2.00 bulk-identity-risk. Checked AFTER credits and subscriptions
+        # so a developer who later adds a card is billed normally rather than
+        # silently burning a leftover free allowance. Decremented atomically on
+        # success only, below.
+        free_calls        = int(key_record.get("free_calls_remaining") or 0)
+        is_free_tier_call = free_calls > 0 and not use_credits and not has_subscription
         is_bundle_d_call = (
             bool(key_record.get("bundle_d_access"))
             and bool(key_record.get("aws_customer_id"))
@@ -1000,7 +1057,9 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             }),
         }
 
-    if not is_demo and not use_credits and not has_subscription and not is_bundle_d_call and not is_bundle_a_call and not is_cs_mobile_call and not is_llm_license_call:
+    if (not is_demo and not use_credits and not has_subscription and not is_bundle_d_call
+            and not is_bundle_a_call and not is_cs_mobile_call and not is_llm_license_call
+            and not is_free_tier_call):
         logger.warning(
             "402 insufficient credits — path=%s key=%s credit_balance=%s source=%s",
             path, api_key_str[:24], credit_balance, key_record.get("source"),
@@ -1010,8 +1069,18 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps({
                 "ok":      False,
-                "error":   "Insufficient credits and no active subscription.",
-                "topup_url": "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/developer/topup",
+                # Says which of the two states the caller is actually in. A key
+                # that has used its free allowance needs a card; a key that
+                # never had one is a different conversation, and one generic
+                # message for both leaves the developer guessing.
+                "error": (
+                    "Your 20 free calls are used up. Add a card to keep going. "
+                    "You are billed only for the calls you make, with no minimum "
+                    "and no subscription fee."
+                    if key_record.get("free_calls_remaining") is not None
+                    else "Insufficient credits and no active subscription."
+                ),
+                "topup_url": "https://api.relayshield.net/developers",
             }),
         }
 
@@ -1032,6 +1101,23 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             _report_marketplace_usage(
                 key_record.get("aws_account_id", ""), key_record.get("aws_license_arn", ""), BUNDLE_A_DIMENSION_NAMES[path]
             )
+        elif is_free_tier_call:
+            # Conditional update: if two calls race, the second fails the
+            # condition rather than driving the counter negative. Non-fatal --
+            # the work is already done and refusing to return it because a
+            # counter update failed would be the wrong trade.
+            try:
+                dynamodb.Table(API_KEYS_TABLE).update_item(
+                    Key={"api_key": api_key_str},
+                    UpdateExpression="SET free_calls_remaining = free_calls_remaining - :one",
+                    ConditionExpression="free_calls_remaining >= :one",
+                    ExpressionAttributeValues={":one": 1},
+                )
+                logger.info("free-tier call key=%s path=%s remaining=%d",
+                            api_key_str[:16], path, free_calls - 1)
+            except Exception as exc:
+                logger.warning("free-tier decrement failed (non-fatal) key=%s error=%s",
+                               api_key_str[:16], exc)
         elif use_credits:
             # Deduct credits atomically
             try:
@@ -1054,11 +1140,16 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             # credits, no Stripe meter event.
             pass
         else:
-            # Fall back to Stripe meter event
-            event_name         = STRIPE_METER_EVENTS.get(path)
+            # Fall back to Stripe meter event. Gated on the path having a
+            # price rather than a per-endpoint meter event name (single
+            # aggregate meter since 2026-08-04 — see
+            # _record_stripe_meter_event). Gating on METERED_CREDIT_COSTS also
+            # closes the older failure mode where an endpoint added to
+            # STRIPE_METER_EVENTS but not to the price table would post a
+            # usage event nothing could bill.
             stripe_customer_id = key_record.get("stripe_customer_id", "")
-            if event_name and stripe_customer_id:
-                _record_stripe_meter_event(stripe_customer_id, event_name)
+            if METERED_CREDIT_COSTS.get(path) and stripe_customer_id:
+                _record_stripe_meter_event(stripe_customer_id, path)
 
         source = headers.get("X-RS-Source") or headers.get("x-rs-source")
         if source == "hf-mcp-space":
@@ -6127,6 +6218,170 @@ def handle_rsscan_install(params: dict) -> dict:
     return _ok({"recorded": True})
 
 
+# ---------------------------------------------------------------------------
+# BB-4 / BB-5 / BB-7 — package, image and model-hub sources
+# ---------------------------------------------------------------------------
+# Secrets ship inside published artifacts constantly, and that is a genuinely
+# different surface from repo scanning: GitGuardian's public monitoring is
+# GitHub-centric, so a key that only ever leaked in a published wheel or an
+# image description is invisible to it.
+#
+# Every API below was verified reachable UNAUTHENTICATED before this was built
+# (2026-08-02) -- the lesson from BB-3, where GitLab was advertised for months
+# behind an endpoint that 401s for everyone and needs a paid tier.
+#
+# Bounded on purpose: a fixed number of artifacts per source per scan. These
+# APIs are far more generous than GitHub's 10 req/min, but an unbounded fan-out
+# over an org with hundreds of packages would be slow and expensive for no
+# additional signal.
+_SOURCE_ARTIFACT_LIMIT = 10
+_PYPI_SIMPLE_URL = "https://pypi.org/simple/"
+
+
+def _org_token(domain: str) -> str:
+    """Reduce a domain to the token an artifact is likely published under.
+
+    acme.com -> acme, my-corp.co.uk -> my-corp. Deliberately naive: a wrong
+    token yields no matches rather than wrong matches, and every hit is
+    fingerprint-verified downstream anyway.
+    """
+    host = (domain or "").strip().lower().removeprefix("www.")
+    first = host.split(".")[0] if host else ""
+    return first if len(first) >= 3 else ""      # 1-2 char tokens match everything
+
+
+def _http_json(url: str, timeout: int = 10) -> dict | list | None:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "RelayShield-SecretScan/1.0"})
+        return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    except Exception as exc:
+        logger.warning("source fetch failed url=%s: %s", url.split("?")[0], exc)
+        return None
+
+
+def _findings_from_text(text: str, *, source: str, artifact: str, url: str) -> list[dict]:
+    """Run the credential patterns over an artifact's text and shape the results.
+
+    Reuses _scan_text_for_secrets, so these sources inherit the same patterns,
+    the same never-return-the-value rule and the same fingerprints as the
+    pre-commit path -- one detection engine, not a second one that can drift.
+    """
+    out = []
+    for f in _scan_text_for_secrets(text or "", artifact):
+        out.append({
+            "source":      source,
+            "type":        f["type"],
+            "description": f["description"],
+            "severity":    f["severity"],
+            "repo":        artifact,
+            "file":        artifact,
+            "url":         url,
+            "preview":     f"Match in {artifact}",
+            "fingerprint": f["fingerprint"],
+        })
+    return out
+
+
+def _npm_secret_scan(org: str) -> list[dict]:
+    """BB-4a — npm. Registry search, then each package's own README."""
+    findings: list[dict] = []
+    data = _http_json(
+        f"https://registry.npmjs.org/-/v1/search?text={urllib.parse.quote(org)}"
+        f"&size={_SOURCE_ARTIFACT_LIMIT}"
+    )
+    for obj in (data or {}).get("objects", [])[:_SOURCE_ARTIFACT_LIMIT]:
+        name = (obj.get("package") or {}).get("name")
+        if not name:
+            continue
+        doc = _http_json(f"https://registry.npmjs.org/{urllib.parse.quote(name, safe='@/')}")
+        if not doc:
+            continue
+        blob = "\n".join(filter(None, [doc.get("readme", ""), json.dumps(doc.get("versions", {}).get(
+            (doc.get("dist-tags") or {}).get("latest", ""), {}).get("scripts", {}))]))
+        findings += _findings_from_text(
+            blob, source="npm", artifact=name, url=f"https://www.npmjs.com/package/{name}")
+    return findings
+
+
+def _pypi_secret_scan(org: str) -> list[dict]:
+    """BB-4b — PyPI. Discovery has no search API, so the simple index is streamed.
+
+    PyPI removed its search API, so "which packages belong to this org" has no
+    endpoint. The simple index does answer it, but it is ~45 MB. Measured on
+    this Lambda's shape: streaming it with a chunked regex costs 5.6s and a
+    28 MB peak RSS, against a 256 MB / 120s budget -- json.load() of the same
+    payload would not fit. Never buffer the whole body.
+    """
+    names: list[str] = []
+    try:
+        pat = _re.compile(rb'>([^<]*' + _re.escape(org.encode()) + rb'[^<]*)</a>', _re.I)
+        req = urllib.request.Request(_PYPI_SIMPLE_URL, headers={"User-Agent": "RelayShield-SecretScan/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            tail = b""
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                buf = tail + chunk
+                for m in pat.finditer(buf):
+                    n = m.group(1).decode(errors="replace")
+                    if n not in names:
+                        names.append(n)
+                if len(names) >= _SOURCE_ARTIFACT_LIMIT * 3:
+                    break                      # plenty; stop pulling 45 MB
+                tail = buf[-200:]              # overlap so a name split across chunks still matches
+    except Exception as exc:
+        logger.warning("pypi index stream failed org=%s: %s", org, exc)
+        return []
+
+    findings: list[dict] = []
+    for name in names[:_SOURCE_ARTIFACT_LIMIT]:
+        doc = _http_json(f"https://pypi.org/pypi/{urllib.parse.quote(name)}/json")
+        info = (doc or {}).get("info") or {}
+        findings += _findings_from_text(
+            info.get("description") or "", source="pypi", artifact=name,
+            url=f"https://pypi.org/project/{name}/")
+    return findings
+
+
+def _dockerhub_secret_scan(org: str) -> list[dict]:
+    """BB-5 — Docker Hub. Repo descriptions; high signal, poorly served elsewhere."""
+    findings: list[dict] = []
+    data = _http_json(
+        f"https://hub.docker.com/v2/search/repositories/?query={urllib.parse.quote(org)}"
+        f"&page_size={_SOURCE_ARTIFACT_LIMIT}"
+    )
+    for repo in (data or {}).get("results", [])[:_SOURCE_ARTIFACT_LIMIT]:
+        name = repo.get("repo_name")
+        if not name:
+            continue
+        blob = "\n".join(filter(None, [repo.get("short_description"), repo.get("description")]))
+        findings += _findings_from_text(
+            blob, source="dockerhub", artifact=name, url=f"https://hub.docker.com/r/{name}")
+    return findings
+
+
+def _huggingface_secret_scan(org: str) -> list[dict]:
+    """BB-7 — Hugging Face models and Spaces. On-brand; model cards leak keys."""
+    findings: list[dict] = []
+    for kind, web in (("models", ""), ("spaces", "spaces/")):
+        data = _http_json(
+            f"https://huggingface.co/api/{kind}?search={urllib.parse.quote(org)}"
+            f"&limit={_SOURCE_ARTIFACT_LIMIT}&full=true"
+        )
+        for item in (data or [])[:_SOURCE_ARTIFACT_LIMIT]:
+            rid = item.get("id")
+            if not rid:
+                continue
+            card = item.get("cardData")
+            blob = json.dumps(card) if card else ""
+            blob += "\n" + (item.get("description") or "")
+            findings += _findings_from_text(
+                blob, source=f"huggingface_{kind}", artifact=rid,
+                url=f"https://huggingface.co/{web}{rid}")
+    return findings
+
+
 def handle_secret_scan(params: dict) -> dict:
     raw_domains = list(params.get("vendor_domains") or [])
     own_domain  = (params.get("domain") or "").strip().lower().removeprefix("www.")
@@ -6144,12 +6399,57 @@ def handle_secret_scan(params: dict) -> dict:
     # from a stale one.
     coverage: list[dict] = []
 
+    # Which artifact sources to run. GitHub is the repo surface; the rest are
+    # published-artifact surfaces (BB-4/5/7) that repo scanning cannot see -- a
+    # key that only ever leaked in a published wheel or an image description is
+    # invisible to a GitHub-centric scanner.
+    include_artifacts = params.get("include_artifact_sources", True)
+
+    # Wall-clock budget. Measured 2026-08-02: artifact discovery costs ~12.5s per
+    # domain (PyPI's 45 MB index stream dominates), and this endpoint accepts up
+    # to 5 domains against a 120s Lambda timeout. Without a deadline a cold
+    # 5-domain scan can be killed mid-flight, which returns nothing at all --
+    # a false all-clear, the worst possible failure for this product. Past the
+    # budget we stop starting new artifact work and report reduced coverage
+    # honestly instead.
+    artifact_deadline = time.time() + 75
+
     for domain in domains:
         hits, was_cached = _github_secret_scan(domain)
         for h in hits:
             h["domain"] = domain
         all_findings.extend(hits)
-        coverage.append({"domain": domain, "cached": was_cached})
+        sources_run = ["github"]
+
+        org = _org_token(domain) if include_artifacts else ""
+        if org:
+            for label, fn in (
+                ("npm",         _npm_secret_scan),
+                ("pypi",        _pypi_secret_scan),
+                ("dockerhub",   _dockerhub_secret_scan),
+                ("huggingface", _huggingface_secret_scan),
+            ):
+                if time.time() > artifact_deadline:
+                    logger.warning(
+                        "artifact budget exhausted, skipping %s for %s", label, domain)
+                    break
+                try:
+                    extra = fn(org)
+                except Exception as exc:
+                    # One dead upstream must never blank the whole scan -- that
+                    # would surface to the customer as a false all-clear.
+                    logger.warning("source %s failed org=%s: %s", label, org, exc)
+                    continue
+                for h in extra:
+                    h["domain"] = domain
+                all_findings.extend(extra)
+                sources_run.append(label)
+
+        coverage.append({
+            "domain":  domain,
+            "cached":  was_cached,
+            "sources": sources_run,
+        })
 
     if not all_findings:
         return _ok({
@@ -7207,9 +7507,11 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "a data exposure. Call to catch an exposed key before the drain, not after the invoice."
     ),
     "/v1/payg/secret-scan": (
-        "Scan public GitHub repositories associated with a domain for exposed API keys, "
-        "tokens, and credentials committed in source code. Call to detect a common "
-        "supply-chain exposure vector before it's exploited."
+        "Scan public GitHub repositories, npm and PyPI packages, Docker Hub images and "
+        "Hugging Face models and Spaces for API keys, tokens and credentials already "
+        "published against a domain. Repo-only scanners miss credentials shipped inside "
+        "released packages and images. Every hit is verified against the credential "
+        "pattern before it is reported."
     ),
     "/v1/payg/target-risk": (
         "Score a domain's probability of being an active or upcoming cyberattack target using "
@@ -10012,7 +10314,10 @@ def handle_robots_txt() -> dict:
 
 def handle_sitemap_xml() -> dict:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    urls = [("/developers", "1.0")] + [(p, "0.8") for p, _t in _GUIDE_PAGES]
+    # /docs added 2026-08-04. "<product> API documentation" is a search query
+    # with buying intent, and an unlisted reference page is one nobody but a
+    # reviewer we hand the link to will ever find.
+    urls = [("/developers", "1.0"), ("/docs", "0.9")] + [(p, "0.8") for p, _t in _GUIDE_PAGES]
     entries = "".join(
         f"  <url><loc>{PUBLIC_BASE_URL}{loc}</loc><lastmod>{today}</lastmod>"
         f"<changefreq>weekly</changefreq><priority>{pri}</priority></url>\n"
@@ -10042,7 +10347,8 @@ def handle_llms_txt() -> dict:
         "",
         "## Machine-readable",
         "",
-        f"- [OpenAPI specification]({PUBLIC_BASE_URL}/openapi.json): every metered and PAYG endpoint, with prices",
+        f"- [API reference]({PUBLIC_BASE_URL}/docs): every endpoint with its parameters, response attributes, errors and examples",
+        f"- [OpenAPI specification]({PUBLIC_BASE_URL}/openapi.json): the same reference as OpenAPI 3.1 JSON, with per-call prices",
         f"- [Service discovery]({PUBLIC_BASE_URL}/): endpoint inventory as JSON",
         "",
         "## Threat intelligence feeds",
@@ -10160,80 +10466,22 @@ def handle_guide_page(slug: str) -> dict:
 
 
 def handle_openapi() -> dict:
-    paths: dict = {}
-    for payg_path in sorted(PAYG_DESCRIPTIONS):
-        name = payg_path.rsplit("/", 1)[-1]
-        price = PAYG_PRICE_UNITS.get(payg_path)
-        price_note = f" Price: ${price / 1_000_000:.2f} per call." if price else ""
-        desc = " ".join(PAYG_DESCRIPTIONS[payg_path].split()) + price_note
-        # The request body differs per endpoint and is documented in the
-        # description rather than schema'd here. Publishing a precise schema we
-        # have not verified per endpoint would be worse than publishing none --
-        # an agent would generate calls against it and get 400s.
-        body_schema = {
-            "type": "object",
-            "additionalProperties": True,
-            "description": "Endpoint-specific parameters. See the description and "
-                           "https://api.relayshield.net/developers for the fields each endpoint takes.",
-        }
-        ok = {
-            "type": "object",
-            "properties": {
-                "ok": {"type": "boolean"},
-                "data": {"type": "object", "additionalProperties": True},
-            },
-        }
-        paths[f"/v1/metered/{name}"] = {
-            "post": {
-                "operationId": f"metered_{name.replace('-', '_')}",
-                "summary": name.replace("-", " ").title(),
-                "description": desc,
-                "security": [{"ApiKeyAuth": []}],
-                "requestBody": {"required": True, "content": {"application/json": {"schema": body_schema}}},
-                "responses": {
-                    "200": {"description": "Success", "content": {"application/json": {"schema": ok}}},
-                    "401": {"description": "Missing or invalid API key."},
-                    "402": {"description": "Payment required: no active subscription or credits."},
-                },
-            }
-        }
-        paths[f"/v1/payg/{name}"] = {
-            "post": {
-                "operationId": f"payg_{name.replace('-', '_')}",
-                "summary": f"{name.replace('-', ' ').title()} (x402 pay-per-call)",
-                "description": desc + " No API key required; responds 402 with x402 payment "
-                                      "requirements, payable in USDC on Base or Solana.",
-                "requestBody": {"required": True, "content": {"application/json": {"schema": body_schema}}},
-                "responses": {
-                    "200": {"description": "Success", "content": {"application/json": {"schema": ok}}},
-                    "402": {"description": "x402 payment required. Retry with an X-PAYMENT header."},
-                },
-            }
-        }
+    """Serve the full OpenAPI 3.1 document from relayshield_openapi_spec.
 
-    spec = {
-        "openapi": "3.1.0",
-        "info": {
-            "title": "RelayShield API",
-            "version": "1.0",
-            "summary": "Threat intelligence and identity-compromise APIs for developers and AI agents.",
-            "description": (
-                "RelayShield exposes breach, infostealer, SIM-swap, domain-lookalike, LLM credential "
-                "exposure and MCP registry risk checks over a metered REST API. The same corpus is "
-                "available as a STIX/TAXII 2.1 feed and a MISP-compatible REST surface for SIEM "
-                "ingestion. Get a key at https://api.relayshield.net/developers"
-            ),
-            "contact": {"name": "RelayShield", "email": "support@relayshield.net",
-                        "url": "https://api.relayshield.net/developers"},
-        },
-        "servers": [{"url": PUBLIC_BASE_URL}],
-        "components": {
-            "securitySchemes": {
-                "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-RS-API-KEY"}
-            }
-        },
-        "paths": paths,
-    }
+    Replaced the generated stub on 2026-08-04. The old version synthesised one
+    operation per PAYG endpoint with an untyped `additionalProperties: true`
+    body and an untyped `data` object, so the spec published prices and paths
+    while documenting no parameters, no response attributes and no error
+    handling -- exactly what Zapier's partner review asked for on 2026-08-03.
+
+    It also emitted a `/v1/metered/<name>` twin for every PAYG path, and seven
+    of those names (nft-security, scan-file, scan-url, scan-wallet,
+    token-security, wallet-risk, wallet-screen-batch) have no metered route:
+    they are subscription routes under bare `/v1/`. A client generated from the
+    old spec called a documented endpoint and got `404 unknown metered
+    endpoint`. Those paths are gone here; the metered list is now the routing
+    table's real contents.
+    """
     return {
         "statusCode": 200,
         "headers": {
@@ -10241,7 +10489,26 @@ def handle_openapi() -> dict:
             "Cache-Control": "public, max-age=3600",
             "Access-Control-Allow-Origin": "*",
         },
-        "body": json.dumps(spec),
+        "body": json.dumps(relayshield_openapi_spec.build_spec(PUBLIC_BASE_URL)),
+    }
+
+
+def handle_api_docs() -> dict:
+    """Rendered API reference at /docs -- Swagger UI over /openapi.json.
+
+    A machine-readable spec alone does not answer "show me the documentation";
+    a partner reviewer, like any developer evaluating the API, wants a page
+    that lists each endpoint with its parameters, attributes and errors. This
+    is that page, and it stays in step with the spec because it renders it
+    rather than restating it.
+    """
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=3600",
+        },
+        "body": relayshield_openapi_spec.DOCS_HTML,
     }
 
 
@@ -10294,6 +10561,11 @@ def lambda_handler(event: dict, context) -> dict:
         return handle_llms_txt()
     if method in ("GET", "HEAD") and path in ("/openapi.json", "/openapi.json/", "/.well-known/openapi.json"):
         return handle_openapi()
+    # Human-readable API reference. /docs is the conventional path and the one
+    # a reviewer or developer guesses first; /api-docs is kept as an alias so a
+    # link written either way resolves.
+    if method in ("GET", "HEAD") and path in ("/docs", "/docs/", "/api-docs", "/api-docs/"):
+        return handle_api_docs()
     if method in ("GET", "HEAD") and path.startswith("/guides/"):
         return handle_guide_page(path[len("/guides/"):].strip("/"))
 

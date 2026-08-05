@@ -33,16 +33,20 @@ Commands (ACTIVE users):
   /verifybot — confirm this is the official RelayShield bot
   /scan <url> — scan a URL or link for malware/phishing
   /infostealer <email> — check if email was harvested by infostealer malware
-  /analyze <text> — social engineering analysis of a suspicious message
+  /msgscan <text> — email & SMS fraud scan — paste text or send a screenshot (alias: /analyze)
   /addwallet <addr> — add EVM, Solana, or TON wallet to monitoring (Crypto Shield only)
   /removewallet <addr> — remove wallet from monitoring
   /wallets  — list monitored wallets with GoPlus risk scores
+  /teamstatus — per-seat security health summary (Business admin only)
+  /setdomain  — set shared company domain for team-wide lookalike monitoring (Business admin only)
   LINK      — link existing WhatsApp account via 6-digit code
 """
 
+import base64
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 import urllib.error
@@ -68,6 +72,7 @@ logger.setLevel(logging.INFO)
 secrets_client = boto3.client("secretsmanager")
 dynamodb = boto3.resource("dynamodb")
 kms_client = boto3.client("kms")
+lambda_client = boto3.client("lambda")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -81,6 +86,11 @@ MONITORED_EMAILS_TABLE  = "relayshield_monitored_emails"
 BREACH_ALERTS_TABLE     = "relayshield_breach_alerts"
 MONITORED_WALLETS_TABLE = "relayshield_monitored_wallets"
 
+TIER_FREE            = "free"
+HIBP_SECRET_NAME     = "relayshield/hibp_api_key"
+HIBP_SECRET_KEY      = "HIBP_API_KEY"
+CRYPTO_MONTHLY_URL   = "https://payments.coinbase.com/payment-links/pl_01ks40rz0seeybnak5jrmmv99j"
+
 ALCHEMY_SECRET_NAME     = "relayshield/alchemy_api_key"
 GOPLUS_BASE_URL         = "https://api.gopluslabs.io/api/v1/address_security"
 CHAINABUSE_URL          = "https://www.chainabuse.com/api/reports/addresses/{address}"
@@ -91,6 +101,14 @@ TG_SECRET_NAME = "relayshield/telegram_bot_token"
 TG_SECRET_KEY = "telegram_bot_token"
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}/{method}"
+
+# Admin
+ADMIN_CHAT_ID = 1729226804  # Andrew — /stats and other privileged commands
+
+# Monitor draft-reply feature (MONITOR-1)
+MONITOR_DRAFTS_TABLE   = "relayshield_monitor_drafts"
+ANTHROPIC_SECRET_NAME  = "relayshield/anthropic_api_key"
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 
 # ---------------------------------------------------------------------------
 # Tier constants (mirrors WhatsApp webhook)
@@ -224,6 +242,44 @@ ATTACK_CHAINS = [
             "Revoke all OAuth grants, lock your SIM, and sign out of all active sessions."
         ),
     },
+    # --- Crypto asset surface chains ---
+    {
+        "chain":    "sim_swap_wallet_flag",
+        "signals":  {"sim_swap", "wallet_risk_flag"},
+        "severity": "CRITICAL",
+        "label":    "SIM Swap + Flagged Wallet Counterparty",
+        "what": (
+            "Your phone number is being hijacked at the same time your wallet received a "
+            "transaction from an address flagged as malicious. This is the most common "
+            "crypto theft chain: SIM swap to bypass exchange 2FA, then drain the wallet. "
+            "Do not approve any pending transactions or sign anything until your SIM is locked."
+        ),
+    },
+    {
+        "chain":    "breach_wallet_flag",
+        "signals":  {"breach_alert", "wallet_risk_flag"},
+        "severity": "HIGH",
+        "label":    "Credential Breach + Flagged Wallet Counterparty",
+        "what": (
+            "Your credentials were found in a breach while your wallet has a flagged "
+            "transaction counterparty. Attackers who compromise exchange login credentials "
+            "alongside wallet-adjacent malicious addresses may be coordinating a combined "
+            "identity and asset drain. Change exchange passwords and revoke active sessions now."
+        ),
+    },
+    {
+        "chain":    "port_out_wallet_flag",
+        "signals":  {"port_out", "wallet_risk_flag"},
+        "severity": "CRITICAL",
+        "label":    "Port-Out Fraud + Flagged Wallet Counterparty",
+        "what": (
+            "Your phone number has been ported to another carrier while your wallet has a "
+            "flagged transaction counterparty. Port-out fraud gives attackers complete control "
+            "of your SMS-based 2FA. Combined with a malicious wallet contact, this is an "
+            "active coordinated crypto theft chain. Act immediately: call your carrier, "
+            "freeze all exchange accounts, and do not sign any wallet transactions."
+        ),
+    },
 ]
 
 PREDICTIVE_WARNINGS = {
@@ -313,6 +369,56 @@ PREDICTIVE_WARNINGS = {
             "also recently breached. Together these create a high-risk window — attackers with "
             "your SIM can intercept 2FA codes for any OAuth-connected app.\n\n"
             "Lock your SIM immediately and audit all OAuth grants."
+        ),
+    },
+    # --- Crypto asset surface predictive warnings ---
+    "sim_swap_wallet_flag": {
+        "sim_swap": (
+            "⚠️ *Heads up:* SIM swaps are the most common precursor to crypto account takeovers. "
+            "Attackers who hijack your phone number can bypass SMS-based 2FA on exchanges and "
+            "drain connected wallets.\n\n"
+            "→ Lock your SIM with your carrier immediately\n"
+            "→ Disable SMS 2FA on all crypto exchanges — switch to an authenticator app\n"
+            "Use /phone for carrier-specific lock steps."
+        ),
+        "wallet_risk_flag": (
+            "⚠️ *Heads up:* Your wallet has interacted with a flagged address. Attackers who "
+            "have targeted your wallet may attempt to escalate by taking over your phone number "
+            "to intercept exchange 2FA codes.\n\n"
+            "→ Do not approve further transactions from unknown addresses\n"
+            "→ Place a SIM lock on your account as a precaution — use /phone for steps"
+        ),
+    },
+    "breach_wallet_flag": {
+        "breach_alert": (
+            "⚠️ *Heads up:* Credential breaches that include exchange logins are frequently "
+            "paired with wallet-level attacks. If your breached credentials include a crypto "
+            "exchange, attackers may be probing your wallet simultaneously.\n\n"
+            "→ Change exchange passwords immediately\n"
+            "→ Review your wallet for unexpected pending transactions"
+        ),
+        "wallet_risk_flag": (
+            "⚠️ *Heads up:* Your wallet has a flagged transaction counterparty. If your "
+            "credentials have also been exposed in any breach, attackers may use both vectors "
+            "to access your exchange account and drain your wallet.\n\n"
+            "→ Check /breach to see if your credentials are in any known database\n"
+            "→ Enable withdrawal whitelisting on all exchanges"
+        ),
+    },
+    "port_out_wallet_flag": {
+        "port_out": (
+            "⚠️ *Heads up:* Port-out fraud gives attackers full control of your phone number, "
+            "including all SMS-based 2FA. This is a high-risk precursor to crypto account takeover.\n\n"
+            "→ Contact your carrier immediately to reverse the port\n"
+            "→ Freeze all crypto exchange withdrawals now\n"
+            "Use /phone for carrier escalation steps."
+        ),
+        "wallet_risk_flag": (
+            "⚠️ *Heads up:* Your wallet has a flagged transaction counterparty. Attackers who "
+            "have made contact with your wallet may escalate by porting your phone number to "
+            "intercept exchange 2FA codes.\n\n"
+            "→ Place a port freeze on your account with your carrier — use /phone for steps\n"
+            "→ Do not approve any pending wallet transactions"
         ),
     },
 }
@@ -580,10 +686,17 @@ def download_telegram_photo(photo_array: list) -> bytes | None:
     Download the largest photo from a Telegram message.photo array.
     Returns raw image bytes or None on failure.
     """
+    # photo_array is sorted smallest→largest; take the last (highest res)
+    return download_telegram_file(photo_array[-1]["file_id"])
+
+
+def download_telegram_file(file_id: str) -> bytes | None:
+    """
+    Download any Telegram file (photo or document) by file_id.
+    Returns raw image bytes or None on failure.
+    """
     try:
         token = get_bot_token()
-        # photo_array is sorted smallest→largest; take the last (highest res)
-        file_id = photo_array[-1]["file_id"]
         # getFile → returns file_path
         url = TELEGRAM_API_BASE.format(token=token, method="getFile")
         data = json.dumps({"file_id": file_id}).encode("utf-8")
@@ -628,8 +741,9 @@ def send_message(chat_id: int, text: str, reply_markup: dict = None,
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": parse_mode,
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     if reply_markup:
         payload["reply_markup"] = reply_markup
     return tg_api("sendMessage", payload)
@@ -690,6 +804,47 @@ def get_team_members(admin_user_id: str) -> list[dict]:
     return resp.get("Items", [])
 
 
+def get_user_record(user_id: str) -> dict | None:
+    """Fetch a user record directly by user_id."""
+    table = dynamodb.Table(USERS_TABLE)
+    resp = table.get_item(Key={"user_id": user_id})
+    return resp.get("Item")
+
+
+def _is_delegate(user: dict) -> bool:
+    """True if this user has delegated admin access granted by their team admin."""
+    admin_id = user.get("admin_user_id")
+    if not admin_id:
+        return False
+    admin = get_user_record(admin_id)
+    if not admin:
+        return False
+    return user.get("user_id", "") in admin.get("delegated_admin_ids", [])
+
+
+def _effective_admin_id(user: dict) -> str:
+    """Return the user_id of the team admin for both admins and delegates."""
+    return user["user_id"] if user.get("is_team_admin") else user.get("admin_user_id", "")
+
+
+def get_breach_alert_count(user_id: str) -> int:
+    """Return the total number of breach alerts recorded for a user."""
+    table = dynamodb.Table(BREACH_ALERTS_TABLE)
+    count = 0
+    kwargs: dict = {
+        "FilterExpression": Attr("user_id").eq(user_id),
+        "Select": "COUNT",
+    }
+    while True:
+        resp = table.scan(**kwargs)
+        count += resp.get("Count", 0)
+        last = resp.get("LastEvaluatedKey")
+        if not last:
+            break
+        kwargs["ExclusiveStartKey"] = last
+    return count
+
+
 def find_invite_code(code: str) -> dict | None:
     """Find an admin user record with this pending invite code."""
     table = dynamodb.Table(USERS_TABLE)
@@ -698,6 +853,63 @@ def find_invite_code(code: str) -> dict | None:
     )
     items = resp.get("Items", [])
     return items[0] if items else None
+
+
+def find_coinbase_charge(charge_id: str) -> dict | None:
+    """
+    Find a pending Crypto Shield stub record by Coinbase charge code.
+    Only returns records still in AWAITING_TELEGRAM_LINK state (not yet linked).
+    """
+    table = dynamodb.Table(USERS_TABLE)
+    resp = table.scan(
+        FilterExpression=(
+            Attr("coinbase_charge_id").eq(charge_id.upper().strip())
+            & Attr("onboarding_state").eq("AWAITING_TELEGRAM_LINK")
+        )
+    )
+    items = resp.get("Items", [])
+    return items[0] if items else None
+
+
+def _create_trust_based_stub(charge_id: str, chat_id_str: str, first_name: str) -> str:
+    """
+    Create a Crypto Shield DynamoDB record on the spot when no webhook pre-created one.
+    Used when the customer enters their Coinbase order ID directly in the bot.
+    plan defaults to 'monthly' — upgraded manually if annual payment confirmed later.
+    onboarding_source='trust_based' flags these records for audit.
+    """
+    now     = datetime.now(timezone.utc)
+    expires = (now + timedelta(days=31)).isoformat()
+    user_id = str(uuid.uuid4())
+
+    item = {
+        "user_id":              user_id,
+        "tier":                 "crypto_shield",
+        "subscription_tier":    "crypto_shield",
+        "plan":                 "monthly",
+        "delivery_channels":    ["telegram"],
+        "preferred_channel":    "telegram",
+        "coinbase_charge_id":   charge_id.upper().strip(),
+        "onboarding_state":     "AWAITING_WALLET_CONFIRM",
+        "onboarding_source":    "trust_based",
+        "telegram_chat_id":     chat_id_str,
+        "first_name":           first_name,
+        "active":               True,
+        "monitored_emails":     [],
+        "wallets":              [],
+        "recent_signals":       [],
+        "subscription_start":   now.isoformat(),
+        "subscription_expires": expires,
+        "created_at":           now.isoformat(),
+        "updated_at":           now.isoformat(),
+    }
+
+    dynamodb.Table(USERS_TABLE).put_item(Item=item)
+    logger.info(
+        "Trust-based Crypto Shield stub created — user_id=%s charge_id=%s",
+        user_id, charge_id,
+    )
+    return user_id
 
 
 def get_user_by_chat_id(chat_id: int) -> dict | None:
@@ -812,6 +1024,7 @@ def intent_keyboard() -> dict:
             [{"text": "🙋 Just myself", "callback_data": "intent_personal"}],
             [{"text": "🏢 My business + employees", "callback_data": "intent_business"}],
             [{"text": "🤝 My clients (MSP / consultant)", "callback_data": "intent_msp"}],
+            [{"text": "🆓 Try free — instant breach check", "callback_data": "intent_free"}],
         ]
     }
 
@@ -920,6 +1133,213 @@ PLAN_FEATURE_CARDS = {
 }
 
 
+def crypto_wallet_confirm_keyboard(wallet_addr: str) -> dict:
+    """Inline keyboard asking if the payer wallet is the one to monitor."""
+    short = wallet_addr[:6] + "..." + wallet_addr[-4:] if len(wallet_addr) > 12 else wallet_addr
+    return {
+        "inline_keyboard": [
+            [{"text": f"✅ Yes — monitor {short}", "callback_data": "wallet_confirm_yes"}],
+            [{"text": "❌ No — I'll enter a different address", "callback_data": "wallet_confirm_no"}],
+        ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Freemium conversion prompts (CRYPTO-2 / MCP-9 pattern)
+# Three triggers: post-sweep, 10th free check, /checktoken high-risk result
+# ---------------------------------------------------------------------------
+
+CRYPTO_SHIELD_CTA = (
+    f"🛡️ *Upgrade to Crypto Shield — $19.99/month*\n"
+    f"→ 24/7 SIM swap monitoring\n"
+    f"→ Real-time wallet alerts (ETH, Base, Solana, BTC, TON)\n"
+    f"→ Infostealer malware detection\n"
+    f"→ Address poisoning detection\n"
+    f"→ Liquidation warnings + token risk screening\n\n"
+    f"Sets up in 2 minutes via Superfluid. No app required — alerts straight to Telegram.\n\n"
+    f"👉 [Start monitoring → crypto.relayshield.net](https://crypto.relayshield.net)"
+)
+
+
+def _increment_free_check_count(user_id: str) -> int:
+    """Increment free_check_count for a free-tier user. Returns the new count."""
+    try:
+        resp = dynamodb_resource.Table(USERS_TABLE).update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="ADD free_check_count :one",
+            ExpressionAttributeValues={":one": 1},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(resp.get("Attributes", {}).get("free_check_count", 1))
+    except Exception as exc:
+        logger.error("free_check_count increment failed user=%s: %s", user_id, exc)
+        return 0
+
+
+def _maybe_send_check_milestone_prompt(chat_id: int, user: dict) -> None:
+    """Fire a conversion prompt exactly at the 10th free command — once per user."""
+    tier = user.get("tier") or user.get("subscription_tier", "")
+    if tier != TIER_FREE:
+        return
+    user_id = user.get("user_id", "")
+    count = _increment_free_check_count(user_id)
+    if count == 10:
+        send_message(
+            chat_id,
+            "👋 You've run 10 security checks — nice work staying sharp.\n\n"
+            "Everything you've used so far is manual and on-demand. Crypto Shield runs the same "
+            "checks automatically, 24/7 — and adds real-time wallet monitoring, SIM swap "
+            "detection, and address poisoning alerts you can't trigger manually.\n\n"
+            + CRYPTO_SHIELD_CTA,
+        )
+
+
+# ---------------------------------------------------------------------------
+# HIBP helpers — free tier + paid onboarding breach check
+# ---------------------------------------------------------------------------
+
+def _run_hibp_check(email: str) -> list:
+    """Call HIBP v3. Returns list of breach dicts; empty list if none found."""
+    api_key = get_secret(HIBP_SECRET_NAME, HIBP_SECRET_KEY)
+    encoded = urllib.parse.quote(email, safe="")
+    url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{encoded}?truncateResponse=false"
+    req = urllib.request.Request(url, headers={
+        "hibp-api-key": api_key,
+        "user-agent":   "RelayShield/1.0",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return []
+        logger.error("HIBP HTTP %s for %s", exc.code, email)
+        raise
+
+
+def _send_free_breach_result(chat_id: int, email: str, breaches: list) -> None:
+    """Gated result for free tier: breach names shown, remediation gated behind upgrade CTA."""
+    if not breaches:
+        send_message(
+            chat_id,
+            f"✅ *No breaches found* for `{email}`.\n\n"
+            "Upgrade to Crypto Shield to add SIM swap monitoring, wallet protection, "
+            "and infostealer malware detection — the complete crypto security stack.\n\n"
+            f"👉 [Get Crypto Shield — $19.99/month]({CRYPTO_MONTHLY_URL})",
+        )
+    else:
+        count = len(breaches)
+        names = ", ".join(b["Name"] for b in breaches[:5])
+        if count > 5:
+            names += f" and {count - 5} more"
+        send_message(
+            chat_id,
+            f"⚠️ *Found in {count} breach{'es' if count != 1 else ''}:* {names}.\n\n"
+            "Upgrade to Crypto Shield to see exactly what data was exposed "
+            "and get step-by-step remediation for each breach.\n\n"
+            f"👉 [Get Crypto Shield — $19.99/month]({CRYPTO_MONTHLY_URL})",
+        )
+
+
+def _send_paid_breach_result(chat_id: int, email: str, breaches: list) -> None:
+    """Full (ungated) breach result for paid users — used by ONBOARD-2."""
+    if not breaches:
+        send_message(
+            chat_id,
+            f"✅ *Breach check:* No breaches found for `{email}`.\n\n"
+            "Ongoing monitoring is active — you'll be alerted immediately if this changes.\n\n"
+            "🛡️ RelayShield",
+        )
+        return
+    count = len(breaches)
+    lines = [f"🔍 *Breach check:* `{email}` found in *{count} breach{'es' if count != 1 else ''}*\n"]
+    for b in breaches[:5]:
+        data_classes = ", ".join(b.get("DataClasses", [])[:4])
+        lines.append(f"• *{b['Name']}* ({b.get('BreachDate', 'unknown')[:4]}) — {data_classes}")
+    if count > 5:
+        lines.append(f"…and {count - 5} more.")
+    lines.append(
+        "\n*Recommended actions:*\n"
+        "→ Run /sweep — close email backdoors attackers may have planted\n"
+        "→ Run /reuse — check cross-account password reuse\n"
+        "→ Run /sessions — revoke all active sessions\n\n"
+        "🛡️ RelayShield"
+    )
+    send_message(chat_id, "\n".join(lines))
+
+
+def _start_free_signup(chat_id: int, first_name: str) -> None:
+    """Create a free tier stub and prompt for email."""
+    existing = get_user_by_chat_id(chat_id)
+    if existing:
+        send_message(
+            chat_id,
+            f"You already have an active RelayShield account, {first_name}. "
+            "Type /help to see your commands.",
+        )
+        return
+    user_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    dynamodb.Table(USERS_TABLE).put_item(Item={
+        "user_id":           user_id,
+        "telegram_chat_id":  str(chat_id),
+        "preferred_channel": "telegram",
+        "delivery_channels": ["telegram"],
+        "tier":              TIER_FREE,
+        "active":            True,
+        "onboarding_state":  "AWAITING_FREE_EMAIL",
+        "first_name":        first_name,
+        "monitored_emails":  [],
+        "recent_signals":    [],
+        "created_at":        now,
+        "updated_at":        now,
+    })
+    send_message(
+        chat_id,
+        "🛡️ *Free Breach Check*\n\n"
+        "Enter your email address and I'll check it against all known data breaches instantly:",
+    )
+
+
+def handle_coinbase_onboarding(chat_id: int, user: dict, first_name: str) -> None:
+    """
+    Called immediately after a Coinbase charge code is matched and
+    telegram_chat_id has been linked to the subscriber record.
+    Sends a welcome message then asks the wallet confirmation question.
+    """
+    plan_label = "Annual" if user.get("plan") == "annual" else "Monthly"
+    payer_wallet = user.get("payer_wallet", "")
+
+    send_message(
+        chat_id,
+        f"🪙 *Welcome to Crypto Shield, {first_name}!*\n\n"
+        f"*Plan:* {plan_label}\n\n"
+        "I monitor your wallets 24/7 — suspicious transactions, counterparty risk "
+        "screening, SIM swap protection, credential breaches, and infostealer malware "
+        "detection. Let's get you set up.",
+    )
+
+    if payer_wallet:
+        update_user(user["user_id"], {"onboarding_state": "AWAITING_WALLET_CONFIRM"})
+        send_message(
+            chat_id,
+            f"📍 *Your payment came from:*\n`{payer_wallet}`\n\n"
+            "Is this the wallet you'd like to monitor?",
+            reply_markup=crypto_wallet_confirm_keyboard(payer_wallet),
+            parse_mode="Markdown",
+        )
+    else:
+        # No payer wallet available — ask directly
+        update_user(user["user_id"], {"onboarding_state": "AWAITING_WALLET_INPUT"})
+        send_message(
+            chat_id,
+            "📍 Please enter the wallet address you'd like to monitor:\n\n"
+            "_(Supports EVM 0x..., Solana, TON, and Bitcoin)_",
+            parse_mode="Markdown",
+        )
+
+
 def confirm_phone_keyboard() -> dict:
     return {
         "inline_keyboard": [
@@ -953,6 +1373,23 @@ def msg_welcome() -> str:
 
 
 def msg_help(tier: str) -> str:
+    if tier == TIER_FREE:
+        return (
+            "🛡️ *RelayShield Free — Commands*\n\n"
+            "• /verify — Callback rule, OTP rule, family safe word\n"
+            "• /otp — Unexpected OTP guidance\n"
+            "• /scan <url> — Scan a suspicious link for malware or phishing\n"
+            "• /plan — Your license type\n"
+            "• /help — This menu\n\n"
+            "*Upgrade to Crypto Shield* to unlock:\n"
+            "→ Breach remediation + inbox sweep + session revocation\n"
+            "→ Infostealer malware detection\n"
+            "→ SIM swap monitoring\n"
+            "→ Wallet monitoring + counterparty risk screening\n"
+            "→ 24/7 ongoing breach + domain monitoring\n\n"
+            f"👉 [Get Crypto Shield — $19.99/month]({CRYPTO_MONTHLY_URL})"
+        )
+
     is_business = tier in BUSINESS_TIERS
 
     text = (
@@ -970,7 +1407,7 @@ def msg_help(tier: str) -> str:
         "• /scam — Suspicious message, bot, or call guidance\n"
         "• /scan <url> — Scan a suspicious link for malware or phishing\n"
         "• /infostealer <email> — Check if an email was stolen by malware\n"
-        "• /analyze — Screenshot a suspicious email or scam message and send the photo with caption /analyze\n"
+        "• /msgscan — Email & SMS fraud scan — paste text or send a screenshot\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"
@@ -979,6 +1416,7 @@ def msg_help(tier: str) -> str:
         "• /vishing — Voice phishing: how to recognise and respond to phone-based attacks\n\n"
 
         "*🤖 Telegram Security*\n"
+        "• /linkeddevices — Audit linked devices on Telegram, WhatsApp and Signal\n"
         "• /tgsecurity — Harden your Telegram account against takeover\n"
         "• /botcheck @username — Analyse a bot or channel for typosquatting and red flags\n"
         "• /verifybot — Confirm this is the official RelayShield bot\n"
@@ -988,8 +1426,12 @@ def msg_help(tier: str) -> str:
         text += (
             "\n*🏢 Team Management*\n"
             "• /status — Seat usage and team overview\n"
+            "• /teamstatus — Per-seat security health: SIM, emails, breach alerts\n"
+            "• /setdomain — Set shared company domain for team-wide lookalike monitoring\n"
             "• /addmember — Generate an invite code for a new team member\n"
             "• /removemember — Remove a team member from your account\n"
+            "• /delegate — Grant a team member admin access (addmember/removemember/teamstatus)\n"
+            "• /revoke — Remove delegate access from a team member\n"
         )
 
     if tier in CRYPTO_TIERS:
@@ -1013,33 +1455,236 @@ def msg_help(tier: str) -> str:
         )
 
     text += (
-        "\n*⚙️ Admin*\n"
+        "\n*⚙️ Account*\n"
+        "• /plan — Your license type and upgrade options\n"
         "• /myid — Your Telegram chat ID (account linking & support)\n"
         "• /help — This menu\n\n"
-        "Tap any command to get started."
+        "Tap any command to get started.\n\n"
+        "📢 *Security intel & updates:* t.me/RelayShield"
     )
 
     return text
 
 
-def msg_onboarding_complete(first_name: str, email_count: int, tier: str) -> str:
-    return (
+def msg_onboarding_complete(first_name: str, email_count: int, tier: str,
+                            wallet_count: int = 0) -> str:
+    base = (
         f"✅ *You're protected, {first_name}!*\n\n"
         f"*SIM swap monitoring:* Active\n"
-        f"*Breach monitoring:* Active for {email_count} email(s)\n\n"
-        "I'll alert you the moment a threat is detected.\n\n"
+        f"*Breach monitoring:* Active for {email_count} email(s)\n"
+    )
+    if tier == TIER_CRYPTO:
+        base += f"*Wallet monitoring:* Active for {wallet_count} wallet(s)\n"
+    base += (
+        "\nI'll alert you the moment a threat is detected.\n\n"
         "Type /help to see all available commands."
     )
+    return base
+
+
+def msg_first_run_tips(tier: str) -> str:
+    """
+    Tier-specific 'top 3 commands to try first' message sent immediately after
+    onboarding completes. Varies by plan to surface the most relevant features.
+    """
+    if tier == TIER_CRYPTO:
+        return (
+            "🚀 *Start here — your top 3 commands:*\n\n"
+            "1️⃣ /wallet — screen your wallet for counterparty risk and suspicious activity right now\n"
+            "2️⃣ /breach — scan your email for known data breaches\n"
+            "3️⃣ /sim — confirm SIM swap protection is active on your number\n\n"
+            "_Tip: Send a wallet address anytime to run an instant counterparty check._"
+        )
+    elif tier == TIER_STARTER_DOMAIN:
+        return (
+            "🚀 *Start here — your top 3 commands:*\n\n"
+            "1️⃣ /breach — scan your email for data breaches right now\n"
+            "2️⃣ /domain — check your business domain for lookalike attacks\n"
+            "3️⃣ /sim — confirm SIM swap protection is active on your number\n\n"
+            "_Tip: /sweep runs a deep audit of your email account for backdoors attackers leave behind after a breach._"
+        )
+    elif tier in (TIER_BASIC, TIER_SHIELD, TIER_PRO):
+        return (
+            "🚀 *Start here — your top 3 commands:*\n\n"
+            "1️⃣ /breach — scan your email for data breaches right now\n"
+            "2️⃣ /status — check your team's monitoring status and seat usage\n"
+            "3️⃣ /domain — check your business domain for lookalike attacks\n\n"
+            "_Tip: Share /help with your team members so they know how to use their alerts._"
+        )
+    elif tier == TIER_STARTER:
+        return (
+            "🚀 *Start here — your top 3 commands:*\n\n"
+            "1️⃣ /breach — scan your email for data breaches right now\n"
+            "2️⃣ /sim — confirm SIM swap protection is active on your number\n"
+            "3️⃣ /sweep — deep audit of your email for backdoors attackers leave behind after a breach\n\n"
+            "_Tip: Most people change their password after a breach and stop there. /sweep catches what a password reset misses._"
+        )
+    elif tier == TIER_FREE:
+        return (
+            "🚀 *Start here — your top 3 commands:*\n\n"
+            "1️⃣ /scan — paste a suspicious link or check a URL before you click it\n"
+            "2️⃣ /breach — run a free breach check on your email\n"
+            "3️⃣ /help — see everything available on the free tier\n\n"
+            "_Tip: Upgrade to Personal Shield anytime for 24/7 monitoring and instant breach alerts._"
+        )
+    else:
+        # TIER_PERSONAL and any future tiers
+        return (
+            "🚀 *Start here — your top 3 commands:*\n\n"
+            "1️⃣ /breach — scan your email for data breaches right now\n"
+            "2️⃣ /sim — confirm SIM swap protection is active on your number\n"
+            "3️⃣ /plan — see everything your Personal Shield account covers\n\n"
+            "_Tip: /sweep runs a deep audit of your email for backdoors attackers may have already planted._"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Onboarding handlers
 # ---------------------------------------------------------------------------
 
-def handle_start(chat_id: int, first_name: str) -> None:
-    """Handle /start — check if existing user, otherwise begin onboarding."""
+def find_helio_link_code(link_code: str) -> dict | None:
+    """
+    Find a pending Crypto Shield stub record by Helio link_code UUID.
+    Only returns records in AWAITING_TELEGRAM_LINK state (payment confirmed,
+    but Telegram not yet linked).
+    """
+    table = dynamodb.Table(USERS_TABLE)
+    resp = table.scan(
+        FilterExpression=(
+            Attr("link_code").eq(link_code)
+            & Attr("onboarding_state").eq("AWAITING_TELEGRAM_LINK")
+        )
+    )
+    items = resp.get("Items", [])
+    return items[0] if items else None
+
+
+def handle_helio_onboarding(chat_id: int, user: dict, first_name: str) -> None:
+    """
+    Called after a Helio link_code has been matched and telegram_chat_id linked.
+    Sends welcome message then starts the wallet-setup flow (same as Coinbase path).
+    """
+    plan_label = "Annual" if user.get("plan") == "annual" else "Monthly"
+
+    send_message(
+        chat_id,
+        f"🪙 *Welcome to Crypto Shield, {first_name}!*\n\n"
+        f"*Plan:* {plan_label}\n\n"
+        "I monitor your wallets 24/7 — suspicious transactions, counterparty risk "
+        "screening, SIM swap protection, credential breaches, and infostealer malware "
+        "detection. Let's get you set up.",
+    )
+
+    # ONBOARD-2: immediate breach check on signup email (~60s after Telegram link)
+    signup_email = user.get("email", "")
+    if signup_email:
+        send_message(chat_id, "🔍 Running a breach check on your email...")
+        try:
+            breaches = _run_hibp_check(signup_email)
+            _send_paid_breach_result(chat_id, signup_email, breaches)
+        except Exception as exc:
+            logger.error("ONBOARD-2 breach check failed email=%s: %s", signup_email, exc)
+
+    # Ask for wallet address to monitor
+    update_user(user["user_id"], {"onboarding_state": "AWAITING_WALLET_INPUT"})
+    send_message(
+        chat_id,
+        "📍 Please enter the wallet address you'd like to monitor:\n\n"
+        "_(Supports EVM 0x..., Solana, TON, and Bitcoin)_",
+        parse_mode="Markdown",
+    )
+
+
+def handle_start(chat_id: int, first_name: str, payload: str = "") -> None:
+    """
+    Handle /start — with optional Telegram deep link payload.
+
+    Deep link paths:
+      Helio web signup: payload is a UUID (link_code) — e.g.
+        t.me/RelayShield_bot?start=f47ac10b-58cc-4372-a567-0e02b2c3d479
+      Coinbase (legacy): payload is a short alphanumeric charge code — e.g.
+        t.me/RelayShield_bot?start=ABCD1234
+
+    Normal path:
+      No payload → show welcome + intent keyboard.
+    """
+    # --- Helio web signup: /start UUID-link-code ---
+    # Telegram deep links can't contain hyphens in the payload, so the UUID
+    # is passed URL-safe (hyphens stripped) or as the full UUID string.
+    # We accept both forms.
+    if payload:
+        # Normalise: if hyphens are missing but length is 32 hex chars, reinsert
+        clean = payload.strip()
+        if re.match(r"^[0-9a-f]{32}$", clean, re.IGNORECASE):
+            # Reconstitute UUID format
+            clean = f"{clean[0:8]}-{clean[8:12]}-{clean[12:16]}-{clean[16:20]}-{clean[20:32]}"
+        if re.match(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            clean,
+            re.IGNORECASE,
+        ):
+            user = find_helio_link_code(clean.lower())
+            if user:
+                now = datetime.now(timezone.utc)
+                # Check link_code hasn't expired
+                expiry_str = user.get("link_code_expiry", "")
+                if expiry_str:
+                    try:
+                        expiry = datetime.fromisoformat(expiry_str)
+                        if now > expiry:
+                            send_message(
+                                chat_id,
+                                "⏱️ That activation link has expired.\n\n"
+                                "Please contact support@relayshield.net for a new link.",
+                            )
+                            return
+                    except (ValueError, TypeError):
+                        pass  # If expiry can't be parsed, allow through
+
+                update_user(user["user_id"], {
+                    "telegram_chat_id": str(chat_id),
+                    "first_name":       first_name,
+                    "active":           True,
+                    "link_code":        None,  # consume the code
+                    "link_code_expiry": None,
+                    "updated_at":       now.isoformat(),
+                })
+                user["telegram_chat_id"] = str(chat_id)
+                user["first_name"] = first_name
+                handle_helio_onboarding(chat_id, user, first_name)
+                return
+            else:
+                # UUID format but no matching record — may already be used or invalid
+                send_message(
+                    chat_id,
+                    "❌ That activation link has already been used or is invalid.\n\n"
+                    "If you've already set up your account, type /status to check.\n"
+                    "Otherwise contact support@relayshield.net.",
+                )
+                return
+
+    # --- Coinbase deep link (legacy): /start CHARGECODE ---
+    if payload and re.match(r"^[A-Z0-9]{6,12}$", payload.upper()):
+        charge = find_coinbase_charge(payload.upper())
+        if charge:
+            update_user(charge["user_id"], {
+                "telegram_chat_id": str(chat_id),
+                "first_name":       first_name,
+                "active":           True,
+                "updated_at":       datetime.now(timezone.utc).isoformat(),
+            })
+            charge["telegram_chat_id"] = str(chat_id)
+            charge["first_name"] = first_name
+            handle_coinbase_onboarding(chat_id, charge, first_name)
+            return
+
+    # --- Normal /start ---
     user = get_user_by_chat_id(chat_id)
-    if user and user.get("onboarding_state") == "ACTIVE":
+    # Accept any state that indicates setup is complete — including manually-provisioned
+    # accounts where onboarding_state may have been set to "DONE" or another non-standard value.
+    _ACTIVE_STATES = ("ACTIVE", "FREE_ACTIVE", "DONE", "AWAITING_MORE_EMAILS",
+                      "AWAITING_DOMAIN", "AWAITING_WALLET_INPUT", "AWAITING_WALLET_CONFIRM")
+    if user and user.get("onboarding_state") in _ACTIVE_STATES:
         send_message(chat_id, f"Welcome back, {first_name}! Type /help to see your commands.")
         return
 
@@ -1063,6 +1708,8 @@ def handle_intent_callback(chat_id: int, intent: str, callback_query_id: str,
             "Tap a plan to see what's included:",
             reply_markup=business_plan_keyboard(),
         )
+    elif intent == "free":
+        _start_free_signup(chat_id, first_name)
 
 
 def handle_planinfo_callback(chat_id: int, tier: str, callback_query_id: str,
@@ -1257,8 +1904,11 @@ def _complete_onboarding(chat_id: int, user: dict, emails: list) -> None:
         return
 
     update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+    set_commands_for_user(chat_id, tier)
     first_name = user.get("first_name", "there")
-    send_message(chat_id, msg_onboarding_complete(first_name, len(emails), tier))
+    wallet_count = len(user.get("wallets", []))
+    send_message(chat_id, msg_onboarding_complete(first_name, len(emails), tier, wallet_count))
+    send_message(chat_id, msg_first_run_tips(tier), parse_mode="Markdown")
 
 
 def handle_domain_input(chat_id: int, text: str, user: dict) -> None:
@@ -1314,11 +1964,13 @@ def handle_domain_input(chat_id: int, text: str, user: dict) -> None:
         )
     else:
         update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+        set_commands_for_user(chat_id, tier)
         send_message(
             chat_id,
             f"✅ *{domain}* added.\n\n" + msg_onboarding_complete(first_name, len(emails), tier),
             parse_mode="Markdown",
         )
+        send_message(chat_id, msg_first_run_tips(tier), parse_mode="Markdown")
 
 
 # ---------------------------------------------------------------------------
@@ -1335,9 +1987,132 @@ def handle_myid(chat_id: int) -> None:
     )
 
 
+def msg_help_top(tier: str) -> str:
+    """Short, curated 'commands to try first' teaser — shown instead of the full
+    command list, which can run long enough to need real scrolling in Telegram's
+    UI once a tier has team/crypto/domain sections. Full list is one tap away via
+    the 'See all commands' button (Telegram has no in-message anchor/scroll, so
+    a follow-up message is the closest equivalent)."""
+    lines = [
+        "🛡️ *RelayShield — Quick Start*\n",
+        "• /scan <url> — Scan a suspicious link for malware or phishing",
+        "• /otp — Unexpected OTP? Get guidance now",
+        "• /sweep — Close email backdoors (forwarding rules, sessions)",
+    ]
+    if tier in CRYPTO_TIERS:
+        lines.append("• /riskcheck — Risk score for all your monitored wallets")
+    lines.append("• /plan — Your license type and upgrade options")
+    return "\n".join(lines)
+
+
+def help_expand_keyboard() -> dict:
+    return {"inline_keyboard": [[{"text": "📋 See all commands", "callback_data": "help_more"}]]}
+
+
+# Telegram's native "/" command menu (populated via setMyCommands) is a
+# SEPARATE mechanism from msg_help's in-chat text menu above — that text
+# menu was already correctly tier-filtered, but nothing in this codebase
+# ever called setMyCommands, so every user saw the exact same global
+# command list in Telegram's own autocomplete/menu UI regardless of tier
+# (whatever was configured once, manually, via BotFather). Selecting an
+# unavailable command there just ran it normally and hit the existing
+# tier-gate message inside the handler — confusing, since the menu itself
+# offered something the plan doesn't include. Fixed 2026-07-16 using
+# Telegram's per-chat command scope (BotCommandScopeChat) so each user's
+# native menu only ever lists what their plan actually has.
+_BOT_COMMANDS_FREE = [
+    ("help", "This menu"),
+    ("verify", "Callback rule, OTP rule, family safe word"),
+    ("otp", "Unexpected OTP guidance"),
+    ("scan", "Scan a suspicious link for malware or phishing"),
+    ("plan", "Your license type"),
+]
+
+_BOT_COMMANDS_BASE = [
+    ("breach", "Breach monitoring status"),
+    ("sweep", "Close email backdoors (forwarding rules, filters, sessions)"),
+    ("sessions", "Revoke active sessions across Google, Microsoft, social media"),
+    ("extensions", "Audit browser extensions for infostealer malware"),
+    ("reuse", "Cross-account password reuse check"),
+    ("otp", "Unexpected OTP guidance"),
+    ("scam", "Suspicious message, bot, or call guidance"),
+    ("scan", "Scan a suspicious link for malware or phishing"),
+    ("infostealer", "Check if an email was stolen by malware"),
+    ("msgscan", "Email & SMS fraud scan — paste text or send a screenshot"),
+    ("verify", "Callback rule, OTP rule, safe word, wire transfer protocol"),
+    ("sim", "SIM swap monitoring status"),
+    ("phone", "Carrier hardening against SIM swap and smishing"),
+    ("vishing", "Voice phishing: how to recognise and respond"),
+    ("linkeddevices", "Audit linked devices on Telegram, WhatsApp and Signal"),
+    ("tgsecurity", "Harden your Telegram account against takeover"),
+    ("botcheck", "Analyse a bot or channel for typosquatting and red flags"),
+    ("verifybot", "Confirm this is the official RelayShield bot"),
+    ("plan", "Your license type and upgrade options"),
+    ("myid", "Your Telegram chat ID (account linking & support)"),
+    ("help", "This menu"),
+]
+
+_BOT_COMMANDS_BUSINESS = [
+    ("status", "Seat usage and team overview"),
+    ("teamstatus", "Per-seat security health: SIM, emails, breach alerts"),
+    ("setdomain", "Set shared company domain for team-wide lookalike monitoring"),
+    ("checkllm", "Check company domain for exposed LLM/AI provider API keys (LLMjacking)"),
+    ("addmember", "Generate an invite code for a new team member"),
+    ("removemember", "Remove a team member from your account"),
+    ("delegate", "Grant a team member admin access"),
+    ("revoke", "Remove delegate access from a team member"),
+]
+
+_BOT_COMMANDS_CRYPTO = [
+    ("addwallet", "Add a wallet to monitoring (EVM, Solana, TON, Bitcoin)"),
+    ("wallets", "List your monitored wallets"),
+    ("removewallet", "Remove a wallet from monitoring"),
+    ("riskcheck", "Risk score for all your monitored wallets"),
+    ("approvals", "Scan EVM wallets for dangerous token approvals"),
+    ("checkvault", "Check a DeFi protocol for audit and contract risks"),
+    ("checktoken", "Check a token contract for rug pull and honeypot risks"),
+    ("checknft", "Check an NFT collection contract for risks"),
+]
+
+_BOT_COMMANDS_DOMAIN = [
+    ("domain", "Domain monitoring status and enrolled domains"),
+    ("domainadd", "Enroll a new domain for monitoring"),
+]
+
+
+def commands_for_tier(tier: str) -> list[tuple[str, str]]:
+    if tier == TIER_FREE:
+        return _BOT_COMMANDS_FREE
+    commands = list(_BOT_COMMANDS_BASE)
+    if tier in BUSINESS_TIERS:
+        commands += _BOT_COMMANDS_BUSINESS
+    if tier in CRYPTO_TIERS:
+        commands += _BOT_COMMANDS_CRYPTO
+    if tier in DOMAIN_TIERS:
+        commands += _BOT_COMMANDS_DOMAIN
+    return commands
+
+
+def set_commands_for_user(chat_id: int, tier: str) -> None:
+    """Scopes Telegram's native command menu to this chat_id so it only
+    ever shows commands the user's plan actually includes. Best-effort —
+    a failure here shouldn't block whatever triggered it."""
+    try:
+        tg_api("setMyCommands", {
+            "commands": [{"command": c, "description": d} for c, d in commands_for_tier(tier)],
+            "scope": {"type": "chat", "chat_id": chat_id},
+        })
+    except Exception as exc:
+        logger.warning("setMyCommands failed for chat_id=%s tier=%s: %s", chat_id, tier, exc)
+
+
 def handle_help(chat_id: int, user: dict) -> None:
     tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
-    send_message(chat_id, msg_help(tier))
+    set_commands_for_user(chat_id, tier)
+    if tier == TIER_FREE:
+        send_message(chat_id, msg_help(tier))
+        return
+    send_message(chat_id, msg_help_top(tier), reply_markup=help_expand_keyboard())
 
 
 def handle_verify(chat_id: int) -> None:
@@ -1409,11 +2184,22 @@ def handle_sweep(chat_id: int) -> None:
         "⚠️ If you see an address you didn't add: disable it → remove → Save.\n\n"
         "*Step 3 — Inbox filters*\n"
         "Silent rules can hide breach warnings and delete bank alerts.\n"
-        "Gmail: Settings → Filters and Blocked Addresses\n"
+        "Gmail: Settings → See all settings → Filters and Blocked Addresses\n"
         "Outlook: Settings → Rules → delete unknown rules.\n"
         "→ Delete any filter you didn't create.\n\n"
         "✅ *Sweep complete. All 5 checks done.*",
     )
+    # Conversion prompt — free tier only
+    user = get_user_by_chat_id(chat_id)
+    if user and (user.get("tier") or user.get("subscription_tier", "")) == TIER_FREE:
+        send_message(
+            chat_id,
+            "💡 *You just did this manually — Crypto Shield does it automatically.*\n\n"
+            "SIM swap, infostealer exposure, wallet drains, and address poisoning run 24/7 "
+            "in the background. You get a Telegram alert the moment anything changes — "
+            "no manual checks required.\n\n"
+            + CRYPTO_SHIELD_CTA,
+        )
 
 
 def handle_vishing(chat_id: int) -> None:
@@ -1465,7 +2251,20 @@ def handle_phone_hardening(chat_id: int) -> None:
         "• Set a SIM PIN\n"
         "• Add a port freeze\n"
         "• Remove SMS as a 2FA method on critical accounts\n"
-        "• Use an authenticator app instead",
+        "• Use an authenticator app instead\n\n"
+        "─────────────────────\n"
+        "⚠️ *eSIM myth: \"eSIM protects against SIM swap\"*\n\n"
+        "It doesn't. eSIM changes *how* the attack happens — not whether it can.\n\n"
+        "With a physical SIM, an attacker walks into a carrier store and social-engineers "
+        "a rep. With eSIM, they call the carrier and do the same thing over the phone. "
+        "The attack is now fully remote — arguably easier, since they never leave the house.\n\n"
+        "Some carriers have also *loosened* eSIM verification to reduce switching friction "
+        "for legitimate customers. That's a gift to attackers.\n\n"
+        "eSIM does prevent physical SIM theft — someone removing the card from your phone. "
+        "That's a real but rare attack. SIM swap is almost always social engineering, "
+        "and eSIM doesn't touch that surface at all.\n\n"
+        "✅ *The same defences protect both physical SIM and eSIM:*\n"
+        "carrier account PIN + number lock + authenticator app 2FA.",
     )
 
 
@@ -1485,6 +2284,35 @@ def handle_verify_bot(chat_id: int) -> None:
         "• Payment outside of the official Stripe checkout link\n\n"
         "If you received a suspicious message from a bot claiming to be RelayShield, "
         "report it immediately at relayshieldadmin@gmail.com.",
+    )
+
+
+def handle_linkeddevices(chat_id: int) -> None:
+    send_message(
+        chat_id,
+        "🔗 Linked Device Audit\n\n"
+        "Attackers abuse QR-based device-linking to silently read your messages — "
+        "no malware, no password needed. Audit all three apps now:\n\n"
+        "TELEGRAM\n"
+        "Settings → Devices\n"
+        "Remove any device you don't recognise.\n"
+        "Tap 'Terminate All Other Sessions' if unsure.\n\n"
+        "WHATSAPP\n"
+        "Settings → Linked Devices\n"
+        "Log out any unfamiliar session.\n"
+        "WhatsApp sends NO alert when a device is linked.\n\n"
+        "SIGNAL\n"
+        "Settings → Account → Linked Devices\n"
+        "Tap minus next to any unrecognised device.\n\n"
+        "KEY RULE: Never scan a QR code from a message link — "
+        "Telegram, WhatsApp and Signal never send QR codes via message.\n\n"
+        "If you found an unrecognised device:\n"
+        "1. Unlink it immediately\n"
+        "2. Enable 2-step verification on all messaging apps\n"
+        "3. Run /breach to check for credential exposure\n\n"
+        "Repeat this audit monthly.\n\n"
+        "📢 t.me/RelayShield\n"
+        "🛡️ RelayShield",
     )
 
 
@@ -1668,41 +2496,343 @@ def handle_botcheck(chat_id: int, username: str | None = None) -> None:
     )
 
 
+# Reply-prompt markers — each is a unique, fixed substring of its command's
+# "no argument given" prompt. handle_message matches these against
+# reply_to_message.text (Telegram echoes the prompt's own text back on a
+# reply) so users can reply directly with their answer instead of retyping
+# "/command <arg>". Originally built for /scan only; generalized to every
+# argument-taking command 2026-07-15 for consistency (see REPLY_PROMPT_HANDLERS).
+SCAN_PROMPT_MARKER         = "URL / File Scanner"
+ANALYZE_PROMPT_MARKER      = "Message Analyzer"
+INFOSTEALER_PROMPT_MARKER  = "Infostealer Check"
+CHECKVAULT_PROMPT_MARKER   = "Vault Risk Check"
+CHECKTOKEN_PROMPT_MARKER   = "Token Risk Check"
+CHECKNFT_PROMPT_MARKER     = "NFT Risk Check"
+ADDWALLET_PROMPT_MARKER    = "Add Wallet"
+REMOVEWALLET_PROMPT_MARKER = "Your Monitored Wallets"
+
+VT_SECRET_NAME = "relayshield/virustotal_api_key"
+VT_BASE_URL    = "https://www.virustotal.com/api/v3"
+
+GSB_SECRET_NAME  = "relayshield/google_safe_browsing"
+GSB_URL          = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
+RDAP_URL         = "https://rdap.org/domain/{domain}"
+
+
+def _vt_api_key() -> str:
+    return get_secret(VT_SECRET_NAME, "virustotal_api_key")
+
+
+def _check_gsb(domain: str) -> bool:
+    """Google Safe Browsing blocklist check — mirrors relayshield_api.py's
+    _check_gsb (same request shape), duplicated here rather than shared
+    since the two Lambdas are otherwise fully isolated."""
+    try:
+        api_key = get_secret(GSB_SECRET_NAME, "google_safe_browsing_api_key")
+    except Exception as exc:
+        logger.warning("GSB secret unavailable: %s", exc)
+        return False
+    urls = [f"http://{domain}/", f"https://{domain}/"]
+    payload = json.dumps({
+        "client": {"clientId": "relayshield", "clientVersion": "1.0"},
+        "threatInfo": {
+            "threatTypes":      ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE"],
+            "platformTypes":    ["ANY_PLATFORM"],
+            "threatEntryTypes": ["URL"],
+            "threatEntries":    [{"url": u} for u in urls],
+        },
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GSB_URL}?key={api_key}",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            return bool(json.loads(resp.read()).get("matches"))
+    except Exception as exc:
+        logger.warning("GSB check failed for %s: %s", domain, exc)
+        return False
+
+
+def _rdap_registration_age_days(domain: str) -> int | None:
+    """Mirrors relayshield_agentic_api.py's helper of the same name."""
+    url = RDAP_URL.format(domain=urllib.parse.quote(domain))
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+        for event in data.get("events", []):
+            if event.get("eventAction") == "registration":
+                reg_str = event.get("eventDate", "")
+                if reg_str:
+                    reg_dt = datetime.fromisoformat(reg_str.replace("Z", "+00:00"))
+                    return (datetime.now(timezone.utc) - reg_dt).days
+    except Exception as exc:
+        logger.warning("RDAP lookup failed for %s: %s", domain, exc)
+    return None
+
+
+def _normalize_scan_url(raw: str) -> str | None:
+    """Accepts a shortform domain (e.g. "evil.com") as well as a full URL —
+    added 2026-07-16, users shouldn't have to type https:// themselves.
+    Prepends https:// when no scheme is given. Without this, a bare
+    domain silently broke _heuristic_url_check's domain extraction
+    (urlparse("evil.com").netloc is empty without a scheme) rather than
+    erroring — same fix as relayshield_whatsapp_webhook.py's version.
+    Returns None if the input doesn't look like a URL/domain at all."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw.startswith(("http://", "https://")):
+        return raw
+    if "." not in raw or " " in raw:
+        return None
+    return f"https://{raw}"
+
+
+def _heuristic_url_check(url: str) -> dict:
+    """Fast, VT-independent red-flag check so a URL VT hasn't analyzed yet
+    can still get a definitive-ish verdict instead of a blanket "unknown"
+    reply. Added 2026-07-16. Three signals, matching check_mcp_server_risk's
+    identical-looking check: a direct hit in RelayShield's own criminal IOC
+    corpus, Google Safe Browsing's real-time blocklist, and very recent
+    domain registration. The IOC-corpus signal was deliberately left out of
+    the first version of this function — testing that day found
+    relayshield_intel_iocs contained false-positive "domain" records for
+    google.com (9), microsoft.com (12), and apple.com (3), all from
+    PhishTank's classic redirect-URL misattribution bug (a phishing page
+    reached via e.g. google.com/url?q=... gets ingested under the
+    redirector's own domain). That's now fixed at the source
+    (relayshield_intel_feed.py's _ingest_phishtank stores the full URL as an
+    ioc_type "url" now, matching openphish's already-correct convention) and
+    the existing bad records (1,147 across 8 contaminated domains, found via
+    a broader audit) were deleted — safe to re-add here. Not as
+    authoritative as a real multi-engine VT verdict — callers should word a
+    heuristic-only "flagged" result more cautiously than a VT one.
+    Returns {"flagged": bool, "reasons": [str, ...]}."""
+    try:
+        domain = urllib.parse.urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+    except Exception:
+        domain = ""
+
+    reasons: list[str] = []
+    if not domain:
+        return {"flagged": False, "reasons": reasons}
+
+    try:
+        table = dynamodb.Table("relayshield_intel_iocs")
+        resp = table.query(
+            KeyConditionExpression=Key("ioc_value").eq(domain),
+            FilterExpression=Attr("ioc_type").is_in(["domain", "url"]),
+            Limit=5,
+        )
+        if resp.get("Items"):
+            reasons.append("this domain appears in RelayShield's criminal IOC corpus")
+    except Exception as exc:
+        logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
+
+    if _check_gsb(domain):
+        reasons.append("Google Safe Browsing flags this domain")
+
+    age_days = _rdap_registration_age_days(domain)
+    if age_days is not None and age_days < 30:
+        reasons.append(f"the domain was registered only {age_days} day{'s' if age_days != 1 else ''} ago")
+
+    return {"flagged": bool(reasons), "reasons": reasons}
+
+
+def check_url_sync(url: str) -> dict:
+    """Synchronous URL reputation check against VirusTotal's existing-report
+    lookup (GET /urls/{id}) — deliberately not the submit-then-poll flow used
+    by /v1/scan-url, since that's async and doesn't fit a single Telegram
+    reply. Most URLs a user would actually paste here (known phishing/malware
+    sites) have already been scanned by someone else, so a plain GET usually
+    has an answer immediately. Added 2026-07-11 — current volume is low
+    enough that a straightforward per-call VT lookup is the right tradeoff;
+    revisit if/when volume grows enough to need VT's commercial API tier.
+
+    Returns {"status": "clean"|"malicious"|"suspicious"|"unknown", "detail": str}.
+    "unknown" means VT has no report yet — fires a fire-and-forget submission
+    for future reference but does not wait for that analysis to complete."""
+    url_id = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+    try:
+        vt_key = _vt_api_key()
+    except Exception as exc:
+        logger.error("VT secret unavailable: %s", exc)
+        return {"status": "unknown", "detail": "Scan service temporarily unavailable"}
+
+    req = urllib.request.Request(
+        f"{VT_BASE_URL}/urls/{url_id}",
+        headers={"x-apikey": vt_key},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            attrs = json.loads(resp.read()).get("data", {}).get("attributes", {})
+            stats = attrs.get("last_analysis_stats", {})
+            malicious  = stats.get("malicious", 0)
+            suspicious = stats.get("suspicious", 0)
+            total      = sum(stats.values()) or 1
+            if malicious > 0:
+                return {"status": "malicious", "detail": f"{malicious}/{total} security vendors flagged this URL as malicious"}
+            if suspicious > 0:
+                return {"status": "suspicious", "detail": f"{suspicious}/{total} security vendors flagged this URL as suspicious"}
+            return {"status": "clean", "detail": f"Scanned by {total} security vendors — no threats found"}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            try:
+                submit_body = urllib.parse.urlencode({"url": url}).encode("utf-8")
+                submit_req = urllib.request.Request(
+                    f"{VT_BASE_URL}/urls", data=submit_body,
+                    headers={"x-apikey": vt_key, "Content-Type": "application/x-www-form-urlencoded"},
+                    method="POST",
+                )
+                urllib.request.urlopen(submit_req, timeout=5)
+            except Exception:
+                pass  # best-effort — not knowing the submission result is fine here
+            return {"status": "unknown", "detail": "Not yet analyzed — submitted for scanning"}
+        logger.error("VT lookup HTTP %d for url=%s", exc.code, url)
+        return {"status": "unknown", "detail": "Scan service temporarily unavailable"}
+    except Exception as exc:
+        logger.error("VT lookup failed url=%s error=%s", url, exc)
+        return {"status": "unknown", "detail": "Scan service temporarily unavailable"}
+
+
+def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, prefix: str = "Scan result") -> None:
+    """Shared formatting for a scan verdict — used by both the immediate
+    handle_scan reply and handle_deferred_url_scan's follow-up, so the two
+    messages read consistently."""
+    if verdict in ("malicious", "suspicious"):
+        send_message(
+            chat_id,
+            f"⚠️ *{prefix} for* `{target}`\n\n"
+            f"{detail}.\n\n"
+            "Do not click this link. Report it and delete the message if it was sent to you.",
+            parse_mode="Markdown",
+        )
+    elif verdict == "clean":
+        send_message(
+            chat_id,
+            f"🔍 *{prefix} for* `{target}`\n\n"
+            f"{detail}. No suspicious scam signals detected.\n\n"
+            "Still worth a second look if something feels off:\n"
+            "→ Check the domain's registration date (whois)\n"
+            "→ Watch for URL shorteners hiding the real destination\n"
+            "→ Look for mismatched domains (paypa1.com, g00gle.com)\n\n"
+            "Still unsure? Don't click — ask us.",
+            parse_mode="Markdown",
+        )
+    else:
+        send_message(
+            chat_id,
+            f"🔍 *{prefix}:* `{target}`\n\n"
+            f"{detail}. Here's what to check manually in the meantime:\n\n"
+            "→ Check the domain's registration date (whois)\n"
+            "→ Watch for URL shorteners hiding the real destination\n"
+            "→ Look for mismatched domains (paypa1.com, g00gle.com)\n"
+            "→ Confirm HTTPS, not HTTP\n"
+            "→ Be wary of urgent language pushing you to act immediately\n\n"
+            "Still unsure? Don't click — ask us.",
+            parse_mode="Markdown",
+        )
+
+
 def handle_scan(chat_id: int, target: str | None = None, user: dict | None = None) -> None:
     """Scan a URL or file link for threats — Telegram equivalent of ATTACH."""
     if not target:
         send_message(
             chat_id,
-            "🔍 *URL / File Scanner*\n\n"
-            "Send me a suspicious link to scan:\n"
-            "`/scan https://example.com`\n\n"
+            f"🔍 *{SCAN_PROMPT_MARKER}*\n\n"
+            "Reply to this message with a suspicious link to scan.\n\n"
             "I'll check it for malware, phishing, and reputation signals.",
+            reply_markup={"force_reply": True, "input_field_placeholder": "Paste URL here…"},
             parse_mode="Markdown",
         )
         return
+
+    normalized = _normalize_scan_url(target)
+    if not normalized:
+        send_message(chat_id, f"That doesn't look like a URL: `{target}`", parse_mode="Markdown")
+        return
+    target = normalized
+
     send_message(chat_id, f"🔍 Scanning `{target}` — one moment...", parse_mode="Markdown")
-    try:
-        from relayshield_mcp_server import check_url  # noqa: F401
-        result = check_url(target)
-        send_message(chat_id, f"🔍 *Scan result for* `{target}`\n\n{result}", parse_mode="Markdown")
-    except Exception:
+
+    result     = check_url_sync(target)
+    heuristics = _heuristic_url_check(target)
+
+    # VT's own verdict wins when it has one. A VT "clean" or "unknown" never
+    # overrides a real heuristic hit (e.g. a domain actually on Google's
+    # blocklist shouldn't get called clean just because VT hasn't caught up
+    # yet) — added 2026-07-16 so a URL VT hasn't analyzed can still get a
+    # definitive-ish verdict instead of always falling into "unknown".
+    if result["status"] in ("malicious", "suspicious"):
+        verdict, detail = result["status"], result["detail"]
+    elif heuristics["flagged"]:
+        verdict, detail = "suspicious", "; ".join(heuristics["reasons"]).capitalize()
+    elif result["status"] == "clean":
+        verdict, detail = "clean", result["detail"]
+    else:
+        verdict, detail = "unknown", result["detail"]
+
+    is_suspicious = verdict in ("malicious", "suspicious")
+
+    if verdict == "unknown":
+        # Truly unknown: VT has no report yet and the fast heuristics found
+        # nothing either. Give an honest immediate answer, then follow up
+        # once VT has had a few seconds to process the submission
+        # check_url_sync just fired — avoids blocking this reply on VT's
+        # queue (which doesn't fit a single synchronous Telegram response)
+        # while still surfacing a real verdict if one lands shortly.
         send_message(
             chat_id,
             f"🔍 *Scan:* `{target}`\n\n"
-            "*Red flags to check manually:*\n"
-            "→ Domain registered recently (check whois)\n"
-            "→ URL shortener hiding the real destination\n"
-            "→ Mismatched domain (paypa1.com, g00gle.com)\n"
-            "→ HTTP instead of HTTPS\n"
-            "→ Urgent language prompting you to act immediately\n\n"
-            "If in doubt, do not click the link.",
+            "No immediate red flags from quick checks. Running a deeper scan — I'll follow up in a few seconds.",
             parse_mode="Markdown",
         )
-    # Record signal regardless of scan outcome — the user encountered a suspicious URL
-    if user:
+        try:
+            lambda_client.invoke(
+                FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "relayshield-telegram-webhook"),
+                InvocationType="Event",
+                Payload=json.dumps({
+                    "source": "relayshield_deferred_scan",
+                    "chat_id": chat_id,
+                    "target": target,
+                }).encode("utf-8"),
+            )
+        except Exception as exc:
+            logger.warning("Failed to schedule deferred scan follow-up for %s: %s", target, exc)
+    else:
+        _send_scan_verdict(chat_id, target, verdict, detail)
+
+    # Only record a signal / fire the predictive "Heads up" warning when the scan
+    # actually flagged something — not on every /scan call regardless of outcome
+    # (previously fired unconditionally here, which meant a clean scan could still
+    # trigger a scary phishing/SIM-swap warning with nothing to back it up).
+    if user and is_suspicious:
         signals = record_signal(user["user_id"], "suspicious_url", {"url": target})
         check_and_warn_predictive(user["user_id"], "suspicious_url", signals, chat_id)
         check_and_fire_correlation(user["user_id"], signals, chat_id)
+
+
+def handle_deferred_url_scan(chat_id: int, target: str) -> None:
+    """Runs in a separate async Lambda invocation (self-invoked from
+    handle_scan via lambda_client.invoke, InvocationType="Event") so the
+    original Telegram reply doesn't have to block on VT's analysis queue.
+    Gives VT a short window to finish processing the URL check_url_sync
+    already submitted for scanning, then re-checks and sends the
+    definitive follow-up message. Added 2026-07-16."""
+    time.sleep(8)
+    result = check_url_sync(target)
+    if result["status"] == "unknown":
+        _send_scan_verdict(chat_id, target, "unknown", "Still not analyzed yet", prefix="Follow-up scan")
+    else:
+        _send_scan_verdict(chat_id, target, result["status"], result["detail"], prefix="Follow-up scan result")
 
 
 def handle_analyze(chat_id: int, content: str | None = None) -> None:
@@ -1710,10 +2840,10 @@ def handle_analyze(chat_id: int, content: str | None = None) -> None:
     if not content:
         send_message(
             chat_id,
-            "🧠 *Message Analyzer*\n\n"
-            "Forward or paste a suspicious message:\n"
-            "`/analyze <paste message here>`\n\n"
+            f"🧠 *{ANALYZE_PROMPT_MARKER}*\n\n"
+            "Reply to this message with a suspicious message to analyze.\n\n"
             "I'll identify social engineering patterns, urgency tactics, and impersonation signals.",
+            reply_markup={"force_reply": True, "input_field_placeholder": "Paste message here…"},
             parse_mode="Markdown",
         )
         return
@@ -1803,11 +2933,85 @@ def handle_analyze(chat_id: int, content: str | None = None) -> None:
     if tech_hits:
         flags.append(f"🚩 Tech support/refund scam pattern: *'{tech_hits[0]}'*")
 
-    # Suspicious link
-    if re.search(r"https?://\S+|bit\.ly|tinyurl|t\.co", content_lower):
-        flags.append("🚩 Contains a link — verify with /scan before clicking")
+    # Personal/nostalgic bait (hijacked-contact or romance-scam lure) — added
+    # 2026-07-22, same real-world case as the WhatsApp fix: a spoofed display
+    # name + fresh-looking domain + "pics you might remember" + link scored
+    # zero flags under every category above, since none of them cover this
+    # shape of scam (a stranger or hijacked contact posing as someone
+    # familiar, not corporate/brand impersonation).
+    BAIT_PHRASES = [
+        "pics you might remember", "photos you might remember",
+        "thought you'd want to see", "thought you would want to see",
+        "check this out", "look what i found", "you might remember",
+        "take a look at these", "remember this one", "remember these",
+    ]
+    bait_hits = [p for p in BAIT_PHRASES if p in content_lower]
+    if bait_hits:
+        flags.append(
+            f"🚩 Personal/nostalgic bait: *'{bait_hits[0]}'* paired with a link — "
+            "a hijacked-contact or romance-scam pattern, not just corporate impersonation"
+        )
 
-    severity = "HIGH" if len(flags) >= 3 else "MEDIUM" if flags else "LOW"
+    # Sender display-name / email-domain mismatch — added 2026-07-22. Only
+    # fires when the pasted/OCR'd text includes a "From:" header, the common
+    # case for a forwarded/screenshotted email. A personal-looking display
+    # name paired with an unrelated domain is the single strongest signal in
+    # the case that prompted this fix, and nothing above checked for it.
+    sender_match = re.search(
+        r'from:\s*"?([^"<\n]{2,60}?)"?\s*<([^<>\s]+@[^<>\s]+)>',
+        content, re.IGNORECASE,
+    )
+    if sender_match:
+        display_name = sender_match.group(1).strip().strip("'\"")
+        sender_email = sender_match.group(2).strip().lower()
+        sender_domain = sender_email.split("@")[-1] if "@" in sender_email else ""
+        KNOWN_WEBMAIL = {
+            "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
+            "aol.com", "live.com", "msn.com", "me.com", "protonmail.com",
+        }
+        name_tokens = [tok.lower() for tok in re.findall(r"[a-zA-Z]+", display_name) if len(tok) > 1]
+        is_brand_name = any(display in display_name for display in matched_brands)
+        name_in_domain = bool(name_tokens) and any(tok in sender_domain for tok in name_tokens)
+        if (
+            sender_domain
+            and name_tokens
+            and not is_brand_name
+            and sender_domain not in KNOWN_WEBMAIL
+            and not name_in_domain
+        ):
+            flags.append(
+                f"🚩 Sender mismatch: display name *\"{display_name}\"* does not match the "
+                f"actual email address *{sender_email}* — a classic spoofed-sender or "
+                "hijacked-account pattern, especially if you know a real person by that name"
+            )
+
+    # Suspicious link — checked automatically via the same multi-signal
+    # heuristic used by /scan (IOC corpus + Google Safe Browsing + domain
+    # registration age), not just flagged for the user to verify manually.
+    # Changed 2026-07-22: previously this only added a "verify yourself with
+    # /scan" note and never actually checked the link, which is exactly how
+    # a same-day-registered phishing domain got a false-reassuring result.
+    found_urls = re.findall(r"https?://\S+", content)
+    link_flagged = False
+    checked_clean_note = ""
+    for url in found_urls:
+        url = url.rstrip(".,;:!?)")
+        try:
+            result = _heuristic_url_check(url)
+        except Exception as exc:
+            logger.warning("MSGSCAN heuristic URL check failed url=%s: %s", url, exc)
+            result = {"flagged": False, "reasons": []}
+        if result["flagged"]:
+            link_flagged = True
+            flags.append(f"🚩 Link {url} flagged — {'; '.join(result['reasons'])}")
+    if found_urls and not link_flagged:
+        checked_clean_note = (
+            f"\nChecked {len(found_urls)} link(s) — none matched a known threat, but a clean "
+            "result never guarantees safety; new phishing domains can take hours to appear "
+            "in any threat database.\n"
+        )
+
+    severity = "HIGH" if (len(flags) >= 3 or link_flagged) else "MEDIUM" if flags else "LOW"
     icon = "🚨" if severity == "HIGH" else "⚠️" if severity == "MEDIUM" else "✅"
 
     if flags:
@@ -1822,7 +3026,8 @@ def handle_analyze(chat_id: int, content: str | None = None) -> None:
             chat_id,
             f"🧠 *Message Analysis — {severity} RISK*\n\n"
             f"{icon} *{len(flags)} social engineering signal(s) detected:*\n{flag_text}\n"
-            f"{callback_warn}\n"
+            f"{callback_warn}"
+            f"{checked_clean_note}\n"
             f"*Recommended action:* Do not click, reply, or call any number in this message. "
             f"If this claims to be from a company, contact them directly via their official website.\n\n"
             f"Reply /vishing for a full guide on phone-based scam tactics.",
@@ -1832,9 +3037,12 @@ def handle_analyze(chat_id: int, content: str | None = None) -> None:
         send_message(
             chat_id,
             "🧠 *Message Analysis*\n\n"
-            "✅ No automatic red flags detected in the text.\n\n"
+            "✅ No automatic red flags detected in the text.\n"
+            f"{checked_clean_note}\n"
             "This doesn't guarantee the message is safe — always verify unexpected requests "
-            "by calling back on a number you look up yourself.",
+            "by calling back on a number you look up yourself. And no dollar signs doesn't "
+            "mean it's genuine — a stranger building rapport fast or pushing to move platforms "
+            "is a manipulation pattern too. If you don't know them, consider blocking.",
             parse_mode="Markdown",
         )
 
@@ -1899,14 +3107,13 @@ def handle_infostealer_check(chat_id: int, email_raw: str | None, user: dict) ->
     if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         send_message(
             chat_id,
-            "🦠 *Infostealer Check*\n\n"
+            f"🦠 *{INFOSTEALER_PROMPT_MARKER}*\n\n"
             "Infostealer malware infects a device and silently exfiltrates *everything* the "
             "browser knows — saved passwords for every site, active session cookies (bypassing 2FA), "
             "credit card autofill, and crypto wallet keys.\n\n"
-            "Check your own email to see if your device has been compromised, or check a "
-            "suspicious sender's email to see if their account may have been hijacked.\n\n"
-            "Usage:\n"
-            "`/infostealer you@example.com`",
+            "Reply to this message with an email address — your own, to see if your device has "
+            "been compromised, or a suspicious sender's, to see if their account may have been hijacked.",
+            reply_markup={"force_reply": True, "input_field_placeholder": "you@example.com"},
             parse_mode="Markdown",
         )
         return
@@ -2004,6 +3211,25 @@ def handle_sessions(chat_id: int) -> None:
     )
 
 
+def handle_plan(chat_id: int, user: dict) -> None:
+    """Show license type + feature-led upgrade nudge. Available to all tiers."""
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    plan_label = PLAN_PRICES.get(tier, {}).get("label") or (
+        "Free Tier" if tier == TIER_FREE else tier.replace("_", " ").title()
+    )
+    _upgrade_nudges = {
+        TIER_FREE:           "💡 *Unlock Crypto Shield* — wallet monitoring, SIM swap detection, breach remediation + infostealer alerts → crypto.relayshield.net",
+        TIER_PERSONAL:       "💡 *Add team coverage* — share breach alerts, SIM monitoring, and incident response across your whole team → relayshield.net",
+        TIER_STARTER_DOMAIN: "💡 *Add team seats* — Business Starter extends breach, SIM, and domain monitoring to every member of your team → relayshield.net",
+        TIER_STARTER:        "💡 *Growing your team?* — Business Basic covers up to 5 seats with per-member SIM swap and breach monitoring → relayshield.net",
+    }
+    nudge = _upgrade_nudges.get(tier, "")
+    text = f"🪪 *License Type:* {plan_label}"
+    if nudge:
+        text += f"\n\n{nudge}"
+    send_message(chat_id, text, parse_mode="Markdown")
+
+
 def handle_status(chat_id: int, user: dict) -> None:
     tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
     emails = user.get("monitored_emails", [])
@@ -2013,7 +3239,6 @@ def handle_status(chat_id: int, user: dict) -> None:
 
     text = (
         f"📊 *Account Status*\n\n"
-        f"*Plan:* {tier.replace('_', ' ').title()}\n"
         f"*SIM monitoring:* {'✅ Active' if user.get('phone_encrypted') else '⚠️ Pending setup'}\n"
         f"*Emails monitored:* {len(emails)}\n"
         f"*Delivery:* {', '.join(channels)}\n"
@@ -2042,14 +3267,23 @@ def handle_status(chat_id: int, user: dict) -> None:
 
 
 def handle_addmember(chat_id: int, user: dict) -> None:
-    """Generate a one-time invite code for a new team member."""
-    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    """Generate a one-time invite code for a new team member. Supports delegates."""
+    is_admin   = user.get("is_team_admin", False)
+    is_del     = _is_delegate(user)
+    if not is_admin and not is_del:
+        send_message(chat_id, "🔒 Only the account admin or a delegated admin can add team members.")
+        return
+
+    admin_id   = _effective_admin_id(user)
+    admin_user = user if is_admin else (get_user_record(admin_id) or user)
+    tier       = admin_user.get("tier") or admin_user.get("subscription_tier", TIER_PERSONAL)
+
     if tier not in BUSINESS_TIERS:
         send_message(chat_id, "Team management is available on Business plans. Upgrade at relayshield.net.")
         return
 
     seat_limit = SEAT_LIMITS.get(tier, 1)
-    members = get_team_members(user["user_id"])
+    members    = get_team_members(admin_id)
     seats_used = len(members) + 1  # +1 for admin
 
     if seats_used >= seat_limit:
@@ -2061,12 +3295,13 @@ def handle_addmember(chat_id: int, user: dict) -> None:
         )
         return
 
-    code = generate_invite_code()
+    code   = generate_invite_code()
     expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
 
-    update_user(user["user_id"], {
+    # Invite code always stored on the main admin's record
+    update_user(admin_id, {
         "is_team_admin": True,
-        "team_id": user["user_id"],
+        "team_id": admin_id,
         "pending_invite_code": code,
         "pending_invite_expiry": expiry,
     })
@@ -2085,17 +3320,19 @@ def handle_addmember(chat_id: int, user: dict) -> None:
 
 
 def handle_removemember(chat_id: int, user: dict) -> None:
-    """List team members for removal selection."""
-    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    """List team members for removal selection. Supports delegates."""
+    if not user.get("is_team_admin") and not _is_delegate(user):
+        send_message(chat_id, "🔒 Only the account admin or a delegated admin can remove team members.")
+        return
+
+    admin_id = _effective_admin_id(user)
+    admin_user = user if user.get("is_team_admin") else (get_user_record(admin_id) or user)
+    tier = admin_user.get("tier") or admin_user.get("subscription_tier", TIER_PERSONAL)
     if tier not in BUSINESS_TIERS:
         send_message(chat_id, "Team management is available on Business plans.")
         return
 
-    if not user.get("is_team_admin"):
-        send_message(chat_id, "Only the account admin can remove team members.")
-        return
-
-    members = get_team_members(user["user_id"])
+    members = get_team_members(admin_id)
     if not members:
         send_message(chat_id, "No team members enrolled yet. Use /addmember to invite someone.")
         return
@@ -2122,28 +3359,355 @@ def handle_removemember(chat_id: int, user: dict) -> None:
     )
 
 
-def handle_sim_status(chat_id: int, user: dict) -> None:
-    """Show SIM swap monitoring status for this account."""
-    phone_enc = user.get("phone_encrypted")
-    sim_active = bool(phone_enc)
-    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
-
-    if sim_active:
+def handle_teamstatus(chat_id: int, user: dict) -> None:
+    """Return a per-seat security health summary — Business admin and delegates."""
+    if not user.get("is_team_admin") and not _is_delegate(user):
         send_message(
             chat_id,
-            "📡 *SIM Swap Monitoring — Active*\n\n"
-            "✅ Your phone number is enrolled and being monitored 24/7.\n\n"
-            "We alert you immediately if your carrier shows signs of a SIM or eSIM swap — "
-            "before an attacker can use your number to access your accounts.\n\n"
-            "*What we detect:*\n"
-            "• Unexpected SIM/eSIM changes at your carrier\n"
-            "• Port-out fraud attempts\n"
-            "• Number re-assignment activity\n\n"
-            "If you receive a SIM swap alert, reply immediately — time is critical.\n\n"
-            "🛡️ RelayShield",
-            parse_mode="Markdown",
+            "🔒 /teamstatus is only available to the account admin or a delegated admin.\n\n"
+            "Contact your admin to check team security status.",
+        )
+        return
+
+    admin_id   = _effective_admin_id(user)
+    admin_user = user if user.get("is_team_admin") else (get_user_record(admin_id) or user)
+    tier       = admin_user.get("tier") or admin_user.get("subscription_tier", TIER_PERSONAL)
+
+    if tier not in BUSINESS_TIERS:
+        send_message(
+            chat_id,
+            "👥 /teamstatus is available on Business plans.\n\n"
+            "Upgrade at relayshield.net to unlock team management.",
+        )
+        return
+
+    members = get_team_members(admin_id)
+    seat_limit = SEAT_LIMITS.get(tier, 2)
+    seats_used = len(members) + 1  # +1 for admin
+    tier_label = PLAN_PRICES.get(tier, {}).get("label", tier.replace("_", " ").title())
+
+    # Build rows — admin first, then team members
+    all_seats = [{"record": admin_user, "is_admin": True}] + [
+        {"record": m, "is_admin": False} for m in members
+    ]
+
+    seats_needing_attention = 0
+    seat_lines = []
+
+    for seat in all_seats:
+        rec = seat["record"]
+        name = rec.get("first_name", "Unknown")
+        role_tag = " _(Admin)_" if seat["is_admin"] else ""
+
+        sim_ok      = bool(rec.get("phone_encrypted"))
+        email_count = len(rec.get("monitored_emails") or [])
+        breach_count = get_breach_alert_count(rec["user_id"])
+
+        sim_icon    = "✅" if sim_ok else "⚠️"
+        email_icon  = "✅" if email_count else "⚠️"
+        breach_text = f"⚠️ {breach_count}" if breach_count else "✅ 0"
+
+        if not sim_ok or not email_count:
+            seats_needing_attention += 1
+
+        seat_lines.append(
+            f"👤 *{name}*{role_tag}\n"
+            f"  SIM {sim_icon}  |  Emails: {email_count} {email_icon}  |  Breaches: {breach_text}"
+        )
+
+    divider = "─" * 26
+    text = (
+        f"🏢 *Team Security Status*\n"
+        f"{tier_label} · {seats_used} of {seat_limit} seats active\n"
+        f"{divider}\n\n"
+        + "\n\n".join(seat_lines)
+        + f"\n\n{divider}\n"
+    )
+
+    if seats_needing_attention:
+        text += (
+            f"⚠️ *{seats_needing_attention} seat(s) need attention* — "
+            "SIM monitoring unset or no emails enrolled."
         )
     else:
+        text += "✅ *All seats healthy.*"
+
+    seats_remaining = seat_limit - seats_used
+    if seats_remaining > 0:
+        text += f"\n💺 {seats_remaining} seat(s) available — use /addmember to invite."
+
+    send_message(chat_id, text, parse_mode="Markdown")
+
+
+def handle_delegate(chat_id: int, user: dict) -> None:
+    """Admin-only: grant a team member delegated admin access (addmember/removemember/teamstatus)."""
+    if not user.get("is_team_admin"):
+        send_message(chat_id, "🔒 Only the account admin can grant delegate access.")
+        return
+
+    members   = get_team_members(user["user_id"])
+    delegated = user.get("delegated_admin_ids", [])
+    eligible  = [m for m in members if m["user_id"] not in delegated]
+
+    if not members:
+        send_message(chat_id, "No team members enrolled yet. Use /addmember to invite someone first.")
+        return
+    if not eligible:
+        send_message(
+            chat_id,
+            "All team members already have delegate access.\n\nUse /revoke to remove access from someone.",
+        )
+        return
+
+    lines = []
+    member_ids = []
+    for i, m in enumerate(eligible, 1):
+        name = m.get("employee_name") or m.get("first_name", "Unknown")
+        lines.append(f"{i}. *{name}*")
+        member_ids.append(m["user_id"])
+
+    update_user(user["user_id"], {
+        "onboarding_state":    "AWAITING_DELEGATE_SELECT",
+        "pending_delegate_list": member_ids,
+    })
+    send_message(
+        chat_id,
+        "🔑 *Grant Delegate Access*\n\n"
+        "Select a team member to grant admin access.\n"
+        "Delegates can: /addmember, /removemember, /teamstatus\n\n"
+        + "\n".join(lines)
+        + "\n\nReply with the number, or `cancel` to go back:",
+        parse_mode="Markdown",
+    )
+
+
+def handle_revoke(chat_id: int, user: dict) -> None:
+    """Admin-only: revoke delegated admin access from a team member."""
+    if not user.get("is_team_admin"):
+        send_message(chat_id, "🔒 Only the account admin can revoke delegate access.")
+        return
+
+    delegated = user.get("delegated_admin_ids", [])
+    if not delegated:
+        send_message(chat_id, "No delegates currently set.\n\nUse /delegate to grant access to a team member.")
+        return
+
+    lines     = []
+    valid_ids = []
+    for uid in delegated:
+        record = get_user_record(uid)
+        if record and record.get("active"):
+            name = record.get("employee_name") or record.get("first_name", "Unknown")
+            lines.append(f"{len(valid_ids) + 1}. *{name}*")
+            valid_ids.append(uid)
+
+    if not valid_ids:
+        update_user(user["user_id"], {"delegated_admin_ids": []})
+        send_message(chat_id, "No active delegates found. Delegate list has been cleared.")
+        return
+
+    update_user(user["user_id"], {
+        "onboarding_state":   "AWAITING_REVOKE_SELECT",
+        "pending_revoke_list": valid_ids,
+    })
+    send_message(
+        chat_id,
+        "🔒 *Revoke Delegate Access*\n\n"
+        "Select a delegate to remove:\n\n"
+        + "\n".join(lines)
+        + "\n\nReply with the number, or `cancel` to go back:",
+        parse_mode="Markdown",
+    )
+
+
+def handle_setdomain(chat_id: int, domain_arg: str | None, user: dict) -> None:
+    """Set the shared company domain for team-wide lookalike monitoring — admin only."""
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+
+    if tier not in {TIER_BASIC, TIER_SHIELD, TIER_PRO}:
+        send_message(
+            chat_id,
+            "🏢 */setdomain* is available on Business Basic and above.\n\n"
+            "Business Basic ($89.99/mo) includes shared company domain monitoring — "
+            "lookalike alerts delivered to you and all team seats the moment an attacker "
+            "registers a domain designed to impersonate your company.\n\n"
+            "Upgrade at relayshield.net.",
+            parse_mode="Markdown",
+        )
+        return
+
+    if not user.get("is_team_admin"):
+        send_message(
+            chat_id,
+            "🔒 /setdomain is only available to the account admin.",
+        )
+        return
+
+    if not domain_arg:
+        current = user.get("company_domain")
+        if current:
+            send_message(
+                chat_id,
+                f"🏢 *Company Domain Monitoring*\n\n"
+                f"Currently monitoring: `{current}`\n\n"
+                f"To change it: `/setdomain yourdomain.com`\n"
+                f"To remove it: `/setdomain remove`",
+                parse_mode="Markdown",
+            )
+        else:
+            send_message(
+                chat_id,
+                "🏢 *Company Domain Monitoring*\n\n"
+                "No company domain set.\n\n"
+                "Set one with: `/setdomain yourdomain.com`\n\n"
+                "RelayShield will monitor for lookalike domains (typosquatting, phishing "
+                "impersonation) and alert your entire team if an attacker registers a "
+                "domain designed to impersonate your company.",
+                parse_mode="Markdown",
+            )
+        return
+
+    domain = domain_arg.strip().lower()
+
+    if domain == "remove":
+        update_user(user["user_id"], {"company_domain": None})
+        send_message(chat_id, "✅ Company domain monitoring removed.")
+        return
+
+    domain = re.sub(r"^https?://", "", domain)
+    domain = re.sub(r"^www\.", "", domain)
+    domain = domain.split("/")[0]
+
+    if not re.match(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z]{2,})+$", domain):
+        send_message(
+            chat_id,
+            "⚠️ That doesn't look like a valid domain. Use the format: `yourdomain.com`",
+            parse_mode="Markdown",
+        )
+        return
+
+    update_user(user["user_id"], {"company_domain": domain})
+
+    members = get_team_members(user["user_id"])
+    seat_count = len(members) + 1
+
+    send_message(
+        chat_id,
+        f"✅ *Company domain set: `{domain}`*\n\n"
+        f"RelayShield will monitor `{domain}` for lookalike domains — typosquatting and "
+        f"phishing impersonation attempts.\n\n"
+        f"Alerts will be delivered to you and all {seat_count} team seat(s) if an attacker "
+        f"registers a domain designed to impersonate your company.\n\n"
+        f"🛡️ RelayShield",
+        parse_mode="Markdown",
+    )
+
+
+# LLM/AI provider key patterns for LLMjacking detection (added 2026-07-26) —
+# deliberately a small, curated duplicate of the CRITICAL-severity subset of
+# relayshield_api.py's NHI_PATTERNS, not an import. Each Lambda in this
+# codebase is self-contained by design (separate deployment zips, no shared
+# module), and this list is small and stable enough (well-documented provider
+# key formats) that the duplication risk is low and matches the established
+# pattern the rest of this file already uses for its own checks.
+import re as _llm_re
+
+_LLM_KEY_PATTERNS = [
+    ("openai",    _llm_re.compile(r"sk-[a-zA-Z0-9]{48}"),             "OpenAI"),
+    ("anthropic", _llm_re.compile(r"sk-ant-[a-zA-Z0-9\-]{90,}"),      "Anthropic"),
+    ("google",    _llm_re.compile(r"AIza[0-9A-Za-z\-_]{35}"),         "Google AI (Gemini)"),
+    ("groq",      _llm_re.compile(r"gsk_[a-zA-Z0-9]{52}"),            "Groq"),
+    ("xai",       _llm_re.compile(r"xai-[a-zA-Z0-9]{80}"),            "xAI (Grok)"),
+    ("replicate", _llm_re.compile(r"r8_[a-zA-Z0-9]{37}"),             "Replicate"),
+]
+
+
+def handle_checkllm(chat_id: int, user: dict) -> None:
+    """Check the account's set company domain for exposed LLM/AI provider API
+    keys (LLMjacking) in RelayShield's stealer-log corpus — a live, uncapped
+    billing liability, not just a data exposure. Business Basic and above,
+    reuses the same company_domain set via /setdomain."""
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+
+    if tier not in {TIER_BASIC, TIER_SHIELD, TIER_PRO}:
+        send_message(
+            chat_id,
+            "🤖 */checkllm* is available on Business Basic and above.\n\n"
+            "Checks your company domain for exposed OpenAI/Anthropic/Google/Groq/xAI/Replicate "
+            "API keys in criminal stealer logs — a leaked key is a live, uncapped billing "
+            "liability, not just a data exposure. Real incidents have run from tens of "
+            "thousands of dollars per day to a $500K single-month bill from one unthrottled key.\n\n"
+            "Upgrade at relayshield.net.",
+            parse_mode="Markdown",
+        )
+        return
+
+    domain = user.get("company_domain")
+    if not domain:
+        send_message(
+            chat_id,
+            "🤖 No company domain set yet.\n\n"
+            "Set one first with `/setdomain yourdomain.com`, then run /checkllm again.",
+            parse_mode="Markdown",
+        )
+        return
+
+    send_message(chat_id, f"🤖 Checking `{domain}` for exposed LLM/AI provider API keys...", parse_mode="Markdown")
+
+    findings = []
+    try:
+        table = dynamodb.Table("relayshield_stolen_sessions")
+        resp  = table.scan(
+            FilterExpression=(
+                boto3.dynamodb.conditions.Attr("session_type").eq("credential") &
+                boto3.dynamodb.conditions.Attr("domain").contains(domain)
+            ),
+        )
+        items = resp.get("Items", [])
+    except Exception:
+        items = []
+
+    seen = set()
+    for item in items:
+        text = item.get("domain", "")
+        for slug, pattern, label in _LLM_KEY_PATTERNS:
+            for match in pattern.finditer(text):
+                key = (slug, match.group(0)[:16])
+                if key not in seen:
+                    seen.add(key)
+                    findings.append(label)
+
+    if not findings:
+        send_message(
+            chat_id,
+            f"✅ No exposed LLM/AI provider API keys found for `{domain}`.\n\n"
+            "This checks OpenAI, Anthropic, Google, Groq, xAI, and Replicate key formats "
+            "specifically. An AWS key exposure (see infostealer checks) can also enable "
+            "LLMjacking if it has Bedrock access — this check doesn't cover that route.",
+            parse_mode="Markdown",
+        )
+        return
+
+    providers = ", ".join(sorted(set(findings)))
+    send_message(
+        chat_id,
+        f"🚨 *LLMjacking risk detected for `{domain}`*\n\n"
+        f"Exposed provider key(s) found: *{providers}*\n\n"
+        "This is a live, uncapped billing liability, not just a data exposure — rotate "
+        "immediately and check your provider's usage dashboard for anomalous spend right now, "
+        "don't wait for the invoice. Real incidents have run from tens of thousands of dollars "
+        "per day to a $500K single-month bill from one unthrottled key.\n\n"
+        "🛡️ RelayShield",
+        parse_mode="Markdown",
+    )
+
+
+def handle_sim_status(chat_id: int, user: dict) -> None:
+    """Live Twilio Lookup v2 carrier check on the user's registered phone number."""
+    import base64 as _b64
+    phone_enc = user.get("phone_encrypted")
+
+    if not phone_enc:
         send_message(
             chat_id,
             "📡 *SIM Swap Monitoring — Not Active*\n\n"
@@ -2153,50 +3717,158 @@ def handle_sim_status(chat_id: int, user: dict) -> None:
             "🛡️ RelayShield",
             parse_mode="Markdown",
         )
+        return
+
+    send_message(chat_id, "📡 Checking your number at the carrier level…", parse_mode="Markdown")
+
+    try:
+        phone_e164 = decrypt_field(phone_enc)
+    except Exception:
+        send_message(chat_id, "⚠️ Unable to retrieve your phone number. Please contact support.", parse_mode="Markdown")
+        return
+
+    try:
+        sid   = get_secret("relayshield/twilio_account_sid", "TWILIO_ACCOUNT_SID")
+        token = get_secret("relayshield/twilio_auth_token",  "TWILIO_AUTH_TOKEN")
+        creds = _b64.b64encode(f"{sid}:{token}".encode()).decode()
+        url   = (
+            "https://lookups.twilio.com/v2/PhoneNumbers/"
+            + urllib.parse.quote(phone_e164, safe="")
+            + "?Fields=sim_swap"
+        )
+        req = urllib.request.Request(url, headers={"Authorization": f"Basic {creds}", "Accept": "application/json"}, method="GET")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body        = json.loads(resp.read())
+            sim_obj     = body.get("sim_swap") or {}
+            last_swap   = sim_obj.get("last_sim_swap") or {}
+            swapped     = bool(last_swap.get("swapped_in_period", False))
+            swap_ts     = last_swap.get("last_sim_swap_date", "")
+            carrier     = sim_obj.get("carrier_name", "your carrier")
+        lookup_ok = True
+    except Exception:
+        lookup_ok = False
+        swapped   = False
+        carrier   = ""
+
+    if not lookup_ok:
+        send_message(
+            chat_id,
+            "📡 *SIM Swap Monitoring — Active*\n\n"
+            "Carrier check temporarily unavailable — ongoing monitoring is active and will alert you immediately if a swap is detected.\n\n"
+            "🛡️ RelayShield",
+            parse_mode="Markdown",
+        )
+    elif swapped:
+        swap_time = f" at {swap_ts[:16].replace('T', ' ')} UTC" if swap_ts else ""
+        send_message(
+            chat_id,
+            f"🚨 *SIM Swap Detected — IMMEDIATE ACTION REQUIRED*\n\n"
+            f"A SIM swap or port event was recorded on your number{swap_time} via {carrier}.\n\n"
+            "*Do this now:*\n"
+            f"→ Call {carrier} fraud line and report an unauthorized SIM swap\n"
+            "→ Ask them to reverse the swap and place a SIM lock / port freeze\n"
+            "→ Change passwords on your bank, email, and any account that uses SMS 2FA\n\n"
+            "Reply /phone for your carrier's exact fraud contact numbers.\n\n🛡️ RelayShield",
+            parse_mode="Markdown",
+        )
+    else:
+        carrier_display = f" on {carrier}" if carrier else ""
+        send_message(
+            chat_id,
+            f"✅ *SIM Swap Monitoring — No swap detected*\n\n"
+            f"Your number{carrier_display} shows no SIM swap or port activity in the last 24 hours.\n\n"
+            "RelayShield monitors your number continuously — you'll receive an alert the moment "
+            "any carrier-level change is detected, before the attacker can intercept your 2FA codes.\n\n"
+            "Reply /phone for SIM lock hardening steps.\n\n🛡️ RelayShield",
+            parse_mode="Markdown",
+        )
 
 
 def handle_breach_status(chat_id: int, user: dict) -> None:
-    """Show breach monitoring status — list monitored emails and alert count."""
-    user_id = user.get("user_id")
+    """Live HIBP breach check on all enrolled emails."""
+    user_id  = user.get("user_id")
+    tier     = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
     me_table = dynamodb.Table(MONITORED_EMAILS_TABLE)
 
     try:
-        response = me_table.query(
-            IndexName="user_id-index",
-            KeyConditionExpression=Key("user_id").eq(user_id),
-        )
-        emails = response.get("Items", [])
+        response = me_table.scan(FilterExpression=Attr("user_id").eq(user_id))
+        emails   = response.get("Items", [])
     except Exception:
         emails = []
+
+    email_limit = EMAIL_LIMITS.get(tier, 3)
 
     if not emails:
         update_user(user["user_id"], {"onboarding_state": "AWAITING_BREACH_EMAIL"})
         send_message(
             chat_id,
-            "🔍 *Breach Monitoring — No emails enrolled*\n\n"
-            "Send an email address to start monitoring (e.g. `you@example.com`):\n\n"
-            "_Type_ `cancel` _to go back._",
-            parse_mode="Markdown",
+            f"🔍 Breach Monitoring — No emails enrolled\n\n"
+            f"You can monitor up to {email_limit} email addresses.\n\n"
+            "Send an email address to start monitoring (e.g. you@example.com):\n\n"
+            "Type 'cancel' to go back.",
         )
         return
 
-    lines = []
-    for item in emails:
-        active = item.get("active", True)
-        label = "✅ Active" if active else "⏸ Paused"
-        # Email is encrypted — show partial info only
-        lines.append(f"• {label} (enrolled {item.get('created_at', '')[:10]})")
-
-    email_block = "\n".join(lines)
     count = len(emails)
-    send_message(
-        chat_id,
-        f"🔍 *Breach Monitoring — {count} email{'s' if count != 1 else ''} enrolled*\n\n"
-        f"{email_block}\n\n"
-        "You'll receive an alert here the moment any monitored address appears in a new breach.\n\n"
-        "🛡️ RelayShield",
-        parse_mode="Markdown",
-    )
+    send_message(chat_id, f"🔍 Checking {count} enrolled address{'es' if count != 1 else ''} for breach exposure…", parse_mode=None)
+
+    try:
+        hibp_api_key = get_secret(HIBP_SECRET_NAME, HIBP_SECRET_KEY)
+    except Exception:
+        hibp_api_key = None
+
+    lines      = [f"🔍 Breach Monitoring — {count} email{'s' if count != 1 else ''} enrolled\n"]
+    any_breach = False
+
+    for item in emails:
+        active       = item.get("active", True)
+        status_icon  = "✅" if active else "⏸"
+        enrolled_date = item.get("created_at", "")[:10]
+
+        try:
+            email_plain = decrypt_field(item["email_encrypted"])
+        except Exception:
+            email_plain = None
+
+        if email_plain and hibp_api_key and active:
+            try:
+                encoded  = urllib.parse.quote(email_plain, safe="")
+                hibp_url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{encoded}?truncateResponse=false"
+                req = urllib.request.Request(hibp_url, headers={"hibp-api-key": hibp_api_key, "user-agent": "RelayShield/1.0"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    breaches = json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                breaches = [] if exc.code == 404 else None
+            except Exception:
+                breaches = None
+
+            at_idx = email_plain.index("@")
+            masked = email_plain[0] + "***" + email_plain[at_idx:]
+
+            if breaches is None:
+                lines.append(f"{status_icon} {masked} — ⚠️ check unavailable (since {enrolled_date})")
+            elif not breaches:
+                lines.append(f"{status_icon} {masked} — ✅ No breaches found (since {enrolled_date})")
+            else:
+                any_breach = True
+                bcount = len(breaches)
+                recent = sorted(breaches, key=lambda b: b.get("BreachDate", ""), reverse=True)[:3]
+                names  = ", ".join(b["Name"] for b in recent)
+                if bcount > 3:
+                    names += f" +{bcount - 3} more"
+                lines.append(f"⚠️ {masked} — {bcount} breach{'es' if bcount != 1 else ''}: {names} (since {enrolled_date})")
+        else:
+            lines.append(f"{status_icon} (enrolled {enrolled_date})")
+
+    lines.append("\nAlerts fire automatically when any address appears in a new breach.")
+    if any_breach:
+        lines.append("\nRecommended: /sweep to close email backdoors, /reuse to check password reuse.")
+    remaining = max(0, email_limit - count)
+    if remaining > 0:
+        lines.append(f"\nSend an email address to add {remaining} more slot{'s' if remaining != 1 else ''}.")
+    lines.append("🛡️ RelayShield")
+
+    send_message(chat_id, "\n".join(lines), parse_mode=None)
 
 
 def handle_domain_add(chat_id: int, domain_raw: str, user: dict) -> None:
@@ -2325,14 +3997,24 @@ def handle_domain_status(chat_id: int, user: dict) -> None:
         )
         return
 
-    domain_state = user.get("domain_state") or {}
+    raw_state = user.get("domain_monitor_state") or "{}"
+    try:
+        import json as _json
+        domain_state = _json.loads(raw_state) if isinstance(raw_state, str) else (raw_state or {})
+    except Exception:
+        domain_state = {}
     lines = []
     for d in domains:
         entry = domain_state.get(d, {})
         last_scanned = entry.get("last_scanned")
         scan_label = "Never scanned" if not last_scanned else last_scanned[:10]
         lookalikes = entry.get("known_lookalikes") or []
-        lookalike_line = f"⚠️ {len(lookalikes)} lookalike(s) on record" if lookalikes else "✅ No lookalikes detected"
+        if lookalikes:
+            names = ", ".join(f"`{lk}`" for lk in lookalikes[:5])
+            more  = f" +{len(lookalikes) - 5} more" if len(lookalikes) > 5 else ""
+            lookalike_line = f"⚠️ {len(lookalikes)} lookalike domain{'s' if len(lookalikes) != 1 else ''}: {names}{more}"
+        else:
+            lookalike_line = "✅ No lookalike domains detected"
         lines.append(f"*{d}*\n  Last scan: {scan_label}\n  {lookalike_line}")
 
     usage = f"{len(domains)} of {domain_limit} domain{'s' if domain_limit > 1 else ''} in use"
@@ -2703,10 +4385,9 @@ def handle_addwallet(chat_id: int, address_raw: str | None, user: dict) -> None:
     if not address_raw:
         send_message(
             chat_id,
-            "Please provide the wallet address:\n\n"
-            "`/addwallet 0xYourEVMAddress`\n"
-            "`/addwallet YourSolanaAddress`\n"
-            "`/addwallet EQYourTONAddress`",
+            f"👛 *{ADDWALLET_PROMPT_MARKER}*\n\n"
+            "Reply to this message with a wallet address — EVM (`0x...`), Solana, or TON (`EQ...`).",
+            reply_markup={"force_reply": True, "input_field_placeholder": "0xYourEVMAddress"},
             parse_mode="Markdown",
         )
         return
@@ -2839,8 +4520,9 @@ def handle_removewallet(chat_id: int, address_raw: str | None, user: dict) -> No
         )
         send_message(
             chat_id,
-            f"Your monitored wallets:\n\n{lines}\n\n"
-            "To remove one: `/removewallet <address>`",
+            f"*{REMOVEWALLET_PROMPT_MARKER}*\n\n{lines}\n\n"
+            "Reply to this message with the address to remove.",
+            reply_markup={"force_reply": True, "input_field_placeholder": "Address to remove…"},
             parse_mode="Markdown",
         )
         return
@@ -3143,6 +4825,109 @@ def handle_riskcheck(chat_id: int, user: dict) -> None:
         send_message(chat_id, f"⚠️ Risk check error for {chain_type.upper()} wallet — please try again.")
 
 
+def handle_stats(chat_id: int) -> None:
+    """Admin-only command: show signup and conversion stats.
+    Silently no-ops for non-admin chat IDs — command is invisible to users.
+    """
+    if chat_id != ADMIN_CHAT_ID:
+        return
+
+    try:
+        table = dynamodb.Table(USERS_TABLE)
+
+        # Full scan — table is small, this is fine
+        raw: list[dict] = []
+        resp = table.scan()
+        raw.extend(resp.get("Items", []))
+        while "LastEvaluatedKey" in resp:
+            resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+            raw.extend(resp.get("Items", []))
+
+        # Exclude test/beta records — user_ids with known test prefixes AND demo/internal accounts
+        TEST_PREFIXES = ("beta-", "test-", "user-onboard-test", "onboard-test")
+        items = [u for u in raw if not any(
+            u.get("user_id", "").startswith(p) for p in TEST_PREFIXES
+        ) and not u.get("is_demo") and not u.get("is_sales_agent")]
+        excluded = len(raw) - len(items)
+
+        now      = datetime.now(timezone.utc)
+        week_ago = (now - timedelta(days=7)).isoformat()
+
+        # Split into genuinely active paid, pending/trial, and free
+        PAID_TIERS = {TIER_PERSONAL, TIER_STARTER, TIER_STARTER_DOMAIN,
+                      TIER_BASIC, TIER_SHIELD, TIER_PRO, TIER_CRYPTO}
+
+        active_paid   = [u for u in items if u.get("active") and u.get("tier") in PAID_TIERS]
+        pending_users = [u for u in items if not u.get("active") and u.get("tier") in PAID_TIERS
+                         and u.get("onboarding_state") == "AWAITING_PAYMENT"]
+        free_users    = [u for u in items if u.get("tier") == "free" or u.get("tier") is None]
+        active_count  = sum(1 for u in items if u.get("active"))
+
+        total        = len(items)
+        paid_count   = len(active_paid)
+        pending_count = len(pending_users)
+        free_count   = len(free_users)
+
+        # Paid tier breakdown (active paid only)
+        tier_counts: dict[str, int] = {}
+        for u in active_paid:
+            t = u.get("tier") or "unknown"
+            tier_counts[t] = tier_counts.get(t, 0) + 1
+
+        TIER_LABELS = {
+            TIER_PERSONAL:       "Personal Shield",
+            TIER_STARTER:        "Business Starter",
+            TIER_STARTER_DOMAIN: "Starter + Domain",
+            TIER_BASIC:          "Business Basic",
+            TIER_SHIELD:         "Business Shield",
+            TIER_PRO:            "Business Shield Pro",
+            TIER_CRYPTO:         "Crypto Shield",
+        }
+        paid_lines = [
+            f"  • {label}: {tier_counts[key]}"
+            for key, label in TIER_LABELS.items()
+            if tier_counts.get(key, 0) > 0
+        ]
+        paid_breakdown = "\n".join(paid_lines) if paid_lines else "  • (none yet)"
+
+        # Pending/trial breakdown by tier
+        pending_tier_counts: dict[str, int] = {}
+        for u in pending_users:
+            t = u.get("tier") or "unknown"
+            pending_tier_counts[t] = pending_tier_counts.get(t, 0) + 1
+        pending_lines = [
+            f"  • {TIER_LABELS.get(k, k)}: {v}"
+            for k, v in pending_tier_counts.items()
+        ]
+        pending_breakdown = "\n".join(pending_lines) if pending_lines else "  • (none)"
+
+        week_signups = sum(1 for u in items if u.get("created_at", "") >= week_ago)
+        conversions  = sum(1 for u in items if u.get("converted_from_free"))
+
+        text = (
+            f"📊 *RelayShield Stats*\n\n"
+            f"👥 *Users* _(test/demo excluded: {excluded})_\n"
+            f"  • Total: {total}\n"
+            f"  • Active: {active_count}\n"
+            f"  • Free tier: {free_count}\n"
+            f"  • Paid (active): {paid_count}\n"
+            f"  • Pending payment: {pending_count}\n\n"
+            f"💳 *Paid breakdown*\n"
+            f"{paid_breakdown}\n\n"
+            f"⏳ *Pending / AWAITING\\_PAYMENT*\n"
+            f"{pending_breakdown}\n\n"
+            f"🔄 *Conversion*\n"
+            f"  • Free → Paid: {conversions}\n\n"
+            f"📅 *Signups this week*: {week_signups}\n\n"
+            f"_RelayShield Admin_"
+        )
+        send_message(chat_id, text, parse_mode="Markdown")
+        logger.info("stats — chat_id=%s total=%s free=%s paid=%s", chat_id, total, free_count, paid_count)
+    except Exception as exc:
+        logger.error("handle_stats error: %s", exc)
+        send_message(chat_id, f"⚠️ Stats error: {exc}")
+
+
 def handle_checkvault(chat_id: int, url_raw: str | None, user: dict) -> None:
     tier = user.get("tier") or user.get("subscription_tier", "")
     if tier not in CRYPTO_TIERS:
@@ -3156,10 +4941,9 @@ def handle_checkvault(chat_id: int, url_raw: str | None, user: dict) -> None:
     if not url_raw:
         send_message(
             chat_id,
-            "Please provide the DeFi protocol URL:\n\n"
-            "`/checkvault app.aave.com`\n"
-            "`/checkvault app.uniswap.org`\n"
-            "`/checkvault curve.fi`",
+            f"🔍 *{CHECKVAULT_PROMPT_MARKER}*\n\n"
+            "Reply to this message with a DeFi protocol URL (e.g. `app.aave.com`, `app.uniswap.org`, `curve.fi`).",
+            reply_markup={"force_reply": True, "input_field_placeholder": "app.aave.com"},
             parse_mode="Markdown",
         )
         return
@@ -3376,7 +5160,11 @@ def _format_nft_risk(address: str, info: dict) -> str:
 
 def handle_checktoken(chat_id: int, address_raw: str | None, user: dict) -> None:
     tier = user.get("tier") or user.get("subscription_tier", "")
-    if tier not in CRYPTO_TIERS:
+    is_free = (tier == TIER_FREE)
+    is_paid_crypto = (tier in CRYPTO_TIERS)
+
+    # Fully blocked tiers (non-crypto paid plans) — keep hard gate
+    if tier and tier not in CRYPTO_TIERS and tier != TIER_FREE:
         send_message(
             chat_id,
             "Token risk checks are available on the Crypto Shield plan.\n"
@@ -3387,8 +5175,9 @@ def handle_checktoken(chat_id: int, address_raw: str | None, user: dict) -> None
     if not address_raw or not address_raw.startswith("0x") or len(address_raw) < 10:
         send_message(
             chat_id,
-            "Please provide a token contract address:\n\n"
-            "`/checktoken 0xTokenContractAddress`",
+            f"🔍 *{CHECKTOKEN_PROMPT_MARKER}*\n\n"
+            "Reply to this message with a token contract address (`0x...`).",
+            reply_markup={"force_reply": True, "input_field_placeholder": "0xTokenContractAddress"},
             parse_mode="Markdown",
         )
         return
@@ -3405,7 +5194,68 @@ def handle_checktoken(chat_id: int, address_raw: str | None, user: dict) -> None
         )
         return
 
+    if is_free:
+        # Free tier: show risk verdict only, gate full detail + remediation
+        is_honeypot   = info.get("is_honeypot") == "1"
+        is_scam       = info.get("is_airdrop_scam") == "1" or info.get("fake_token") == "1"
+        try:
+            sell_tax = float(info.get("sell_tax") or 0)
+        except (ValueError, TypeError):
+            sell_tax = 0.0
+        is_high_tax   = sell_tax >= 50
+        is_high_risk  = is_honeypot or is_scam or is_high_tax
+
+        if is_high_risk:
+            danger_label = (
+                "HONEYPOT — you cannot sell this token" if is_honeypot else
+                "AIRDROP SCAM / FAKE TOKEN" if is_scam else
+                f"SELL TAX {sell_tax:.0f}% — effectively unsellable"
+            )
+            send_message(
+                chat_id,
+                f"🚨 *HIGH RISK TOKEN DETECTED*\n\n"
+                f"*Contract:* `{address[:6]}...{address[-4:]}`\n"
+                f"*Verdict:* {danger_label}\n\n"
+                f"⛔ Do NOT swap, approve, or interact with this token.\n\n"
+                f"_Crypto Shield subscribers get full risk detail — buy/sell tax breakdown, "
+                f"owner privileges, hidden mint functions, and step-by-step safe disposal "
+                f"instructions — plus automatic detection when risky tokens land in your wallet "
+                f"before you even know they're there._\n\n"
+                + CRYPTO_SHIELD_CTA,
+                parse_mode="Markdown",
+            )
+        else:
+            send_message(
+                chat_id,
+                f"✅ *No critical flags detected* for `{address[:6]}...{address[-4:]}`.\n\n"
+                f"_Full risk detail — owner privileges, tax rates, hidden mint, contract audit — "
+                f"is available on Crypto Shield. Continuous monitoring alerts you the moment "
+                f"a token's risk profile changes after you hold it._\n\n"
+                + CRYPTO_SHIELD_CTA,
+                parse_mode="Markdown",
+            )
+        logger.info("checktoken free-tier — chat_id=%s address=%s high_risk=%s", chat_id, address, is_high_risk)
+        return
+
+    # Paid crypto tier — full result
     send_message(chat_id, _format_token_risk(address, info), parse_mode="Markdown")
+
+    # Conversion prompt: if HIGH-risk found, reinforce the value of continuous monitoring
+    is_honeypot  = info.get("is_honeypot") == "1"
+    is_scam      = info.get("is_airdrop_scam") == "1" or info.get("fake_token") == "1"
+    try:
+        sell_tax = float(info.get("sell_tax") or 0)
+    except (ValueError, TypeError):
+        sell_tax = 0.0
+    if is_honeypot or is_scam or sell_tax >= 50:
+        send_message(
+            chat_id,
+            "☝️ *This is exactly what Crypto Shield catches automatically.*\n\n"
+            "Every token that lands in your monitored wallets is screened in real time — "
+            "honeypots, rug pulls, airdrop scams — before you interact with them. "
+            "Share Crypto Shield with anyone who trades actively:\n\n"
+            f"👉 crypto.relayshield.net",
+        )
     logger.info("checktoken — chat_id=%s address=%s", chat_id, address)
 
 
@@ -3422,8 +5272,9 @@ def handle_checknft(chat_id: int, address_raw: str | None, user: dict) -> None:
     if not address_raw or not address_raw.startswith("0x") or len(address_raw) < 10:
         send_message(
             chat_id,
-            "Please provide an NFT contract address:\n\n"
-            "`/checknft 0xNFTContractAddress`",
+            f"🔍 *{CHECKNFT_PROMPT_MARKER}*\n\n"
+            "Reply to this message with an NFT contract address (`0x...`).",
+            reply_markup={"force_reply": True, "input_field_placeholder": "0xNFTContractAddress"},
             parse_mode="Markdown",
         )
         return
@@ -3447,6 +5298,28 @@ def handle_checknft(chat_id: int, address_raw: str | None, user: dict) -> None:
 def route_active_command(chat_id: int, text: str, user: dict) -> None:
     """Route commands from ACTIVE users."""
     cmd = text.strip().lower().lstrip("/")
+
+    # Free tier: allowlist — only awareness commands, no remediation tools
+    tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+    if tier == TIER_FREE:
+        # checktoken is allowed for free tier (teaser result — see handle_checktoken)
+        # sweep is allowed for free tier (CTA appended in handle_sweep)
+        _FREE_ALLOWED = {"help", "verify", "otp", "scan", "sweep", "checktoken", "plan", "license", "lictype"}
+        base_cmd = cmd.split()[0] if cmd else ""
+        if base_cmd not in _FREE_ALLOWED:
+            send_message(
+                chat_id,
+                "🔒 This command requires a Crypto Shield subscription.\n\n"
+                "Crypto Shield adds:\n"
+                "→ Breach remediation + inbox sweep\n"
+                "→ Infostealer malware detection\n"
+                "→ SIM swap monitoring\n"
+                "→ Wallet monitoring + counterparty screening\n\n"
+                f"👉 [Upgrade — $19.99/month]({CRYPTO_MONTHLY_URL})",
+            )
+            return
+        # Track free check usage — fire conversion prompt at check #10
+        _maybe_send_check_milestone_prompt(chat_id, user)
 
     if cmd == "help":
         handle_help(chat_id, user)
@@ -3479,6 +5352,8 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         handle_vishing(chat_id)
     elif cmd in ("wascam", "scam"):
         handle_wascam(chat_id)
+    elif cmd == "linkeddevices":
+        handle_linkeddevices(chat_id)
     elif cmd == "tgsecurity":
         handle_tgsecurity(chat_id)
     elif cmd.startswith("botcheck"):
@@ -3493,18 +5368,31 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         parts = text.strip().split(None, 1)
         target = parts[1] if len(parts) > 1 else None
         handle_scan(chat_id, target, user)
-    elif cmd.startswith("analyze") or cmd.startswith("analyse"):
+    elif cmd.startswith("msgscan") or cmd.startswith("analyze") or cmd.startswith("analyse"):
         parts = text.strip().split(None, 1)
         content = parts[1] if len(parts) > 1 else None
         handle_analyze(chat_id, content)
     elif cmd == "sessions":
         handle_sessions(chat_id)
+    elif cmd in ("plan", "license", "lictype"):
+        handle_plan(chat_id, user)
     elif cmd in ("status", "account"):
         handle_status(chat_id, user)
     elif cmd == "addmember":
         handle_addmember(chat_id, user)
     elif cmd == "removemember":
         handle_removemember(chat_id, user)
+    elif cmd == "delegate":
+        handle_delegate(chat_id, user)
+    elif cmd == "revoke":
+        handle_revoke(chat_id, user)
+    elif cmd == "teamstatus":
+        handle_teamstatus(chat_id, user)
+    elif cmd.startswith("setdomain"):
+        domain_arg = text.split(maxsplit=1)[1].strip() if len(text.split()) > 1 else None
+        handle_setdomain(chat_id, domain_arg, user)
+    elif cmd == "checkllm":
+        handle_checkllm(chat_id, user)
     elif cmd == "riskcheck":
         handle_riskcheck(chat_id, user)
     elif cmd == "approvals":
@@ -3534,11 +5422,28 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         parts = text.strip().split(None, 1)
         email = parts[1].strip() if len(parts) > 1 else None
         handle_infostealer_check(chat_id, email, user)
+    elif cmd == "stats":
+        handle_stats(chat_id)  # silently no-ops for non-admin
     else:
         send_message(
             chat_id,
             "I didn't recognise that command. Type /help to see all available commands.",
         )
+
+
+# Maps each ForceReply prompt marker to the handler that should receive the
+# replied-to text as its argument — see handle_message. handle_analyze takes
+# no user param, so it's wrapped to match the common (chat_id, text, user) shape.
+REPLY_PROMPT_HANDLERS = [
+    (SCAN_PROMPT_MARKER,         handle_scan),
+    (ANALYZE_PROMPT_MARKER,      lambda chat_id, text, user: handle_analyze(chat_id, text)),
+    (INFOSTEALER_PROMPT_MARKER,  handle_infostealer_check),
+    (CHECKVAULT_PROMPT_MARKER,   handle_checkvault),
+    (CHECKTOKEN_PROMPT_MARKER,   handle_checktoken),
+    (CHECKNFT_PROMPT_MARKER,     handle_checknft),
+    (ADDWALLET_PROMPT_MARKER,    handle_addwallet),
+    (REMOVEWALLET_PROMPT_MARKER, handle_removewallet),
+]
 
 
 def handle_message(update: dict) -> None:
@@ -3554,13 +5459,20 @@ def handle_message(update: dict) -> None:
     # --- Photo + /analyze caption → Rekognition OCR + fraud analysis ---
     # User sends a screenshot of a suspicious email/message with caption /analyze
     photo = message.get("photo")
+    document = message.get("document")
+    is_image_document = bool(
+        document and str(document.get("mime_type", "")).startswith("image/")
+    )
     caption = message.get("caption", "").strip()
-    if photo and caption.lower().lstrip("/") in ("analyze", "analyse"):
+    if (photo or is_image_document) and caption.lower().lstrip("/") in ("msgscan", "analyze", "analyse"):
         send_message(
             chat_id,
             "📧 *Scanning your screenshot...* This may take a few seconds.",
         )
-        image_bytes = download_telegram_photo(photo)
+        if photo:
+            image_bytes = download_telegram_photo(photo)
+        else:
+            image_bytes = download_telegram_file(document["file_id"])
         extracted_text = run_textract_ocr(image_bytes) if image_bytes else None
         if extracted_text:
             handle_analyze(chat_id, extracted_text)
@@ -3573,6 +5485,20 @@ def handle_message(update: dict) -> None:
                 parse_mode="Markdown",
             )
         return
+
+    # Reply to any ForceReply prompt above — treat the plain text as that
+    # command's argument directly, no need to retype "/command <arg>".
+    # Stateless (no DB field needed): Telegram echoes the prompt's own text
+    # back on reply_to_message, so matching against each command's marker is
+    # enough to identify which one it was replying to.
+    reply_to = message.get("reply_to_message") or {}
+    reply_text = reply_to.get("text", "")
+    if text and reply_text:
+        for marker, handler in REPLY_PROMPT_HANDLERS:
+            if marker in reply_text:
+                user = get_user_by_chat_id(chat_id)
+                handler(chat_id, text, user)
+                return
 
     # Handle contact share (phone number)
     if contact:
@@ -3587,6 +5513,37 @@ def handle_message(update: dict) -> None:
         if not user:
             handle_link_code(chat_id, text, first_name)
             return
+
+    # Handle CB Business ULID-format order IDs (e.g. ord_01ks..., pay_01ks..., 01ks...)
+    # These are longer than invite codes — handle before the 8-char block.
+    # No existing-user check: a Personal Shield user can also subscribe to Crypto Shield.
+    if re.match(r"^[A-Z0-9_]{10,}$", text, re.IGNORECASE) and not re.match(r"^(0x[0-9A-Fa-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}|EQ[0-9A-Za-z_-]{46}|UQ[0-9A-Za-z_-]{46})$", text):
+        charge = find_coinbase_charge(text)
+        if charge:
+            update_user(charge["user_id"], {
+                "telegram_chat_id": str(chat_id),
+                "first_name":       first_name,
+                "active":           True,
+                "updated_at":       datetime.now(timezone.utc).isoformat(),
+            })
+            charge["telegram_chat_id"] = str(chat_id)
+            charge["first_name"] = first_name
+            handle_coinbase_onboarding(chat_id, charge, first_name)
+            return
+        # Trust-based: create on the spot for longer order ID formats
+        user_id = _create_trust_based_stub(text, str(chat_id), first_name)
+        charge = {
+            "user_id":            user_id,
+            "tier":               "crypto_shield",
+            "subscription_tier":  "crypto_shield",
+            "plan":               "monthly",
+            "coinbase_charge_id": text,
+            "telegram_chat_id":   str(chat_id),
+            "first_name":         first_name,
+            "payer_wallet":       None,
+        }
+        handle_coinbase_onboarding(chat_id, charge, first_name)
+        return
 
     # Handle 8-character team invite code (alphanumeric, at least one letter)
     if re.match(r"^[A-Z0-9]{8}$", text) and not re.match(r"^\d{8}$", text):
@@ -3627,11 +5584,41 @@ def handle_message(update: dict) -> None:
                 else:
                     send_message(chat_id, "⏱️ That invite code has expired. Ask your admin to generate a new one with /addmember.")
                     return
-            # Not an invite code — fall through to normal routing
+            # Not an invite code — try as a Coinbase charge code
+            # 1. Check if webhook pre-created a stub for this charge ID
+            charge = find_coinbase_charge(text)
+            if charge:
+                update_user(charge["user_id"], {
+                    "telegram_chat_id": str(chat_id),
+                    "first_name":       first_name,
+                    "active":           True,
+                    "updated_at":       datetime.now(timezone.utc).isoformat(),
+                })
+                charge["telegram_chat_id"] = str(chat_id)
+                charge["first_name"] = first_name
+                handle_coinbase_onboarding(chat_id, charge, first_name)
+                return
+            # 2. No pre-existing stub — create on the spot (trust-based onboarding).
+            #    Customer has their Coinbase order confirmation; we trust it and onboard.
+            user_id = _create_trust_based_stub(text, str(chat_id), first_name)
+            charge = {
+                "user_id":            user_id,
+                "tier":               "crypto_shield",
+                "subscription_tier":  "crypto_shield",
+                "plan":               "monthly",
+                "coinbase_charge_id": text,
+                "telegram_chat_id":   str(chat_id),
+                "first_name":         first_name,
+                "payer_wallet":       None,
+            }
+            handle_coinbase_onboarding(chat_id, charge, first_name)
+            return
 
-    # Handle /start
-    if text.lower() in ("/start", "/start@relayshield_bot"):
-        handle_start(chat_id, first_name)
+    # Handle /start (with optional deep link payload e.g. /start CHARGECODE)
+    if text.lower().startswith("/start"):
+        parts = text.split(None, 1)
+        payload = parts[1].strip().upper() if len(parts) > 1 else ""
+        handle_start(chat_id, first_name, payload)
         return
 
     # Handle /myid — works at any onboarding state, no user record needed
@@ -3655,7 +5642,77 @@ def handle_message(update: dict) -> None:
 
     state = user.get("onboarding_state", "ACTIVE")
 
-    if state == "AWAITING_PHONE":
+    if state == "AWAITING_WALLET_CONFIRM":
+        # Text fallback for users who type YES/NO instead of tapping inline buttons
+        t = text.strip().upper()
+        payer_wallet = user.get("payer_wallet", "")
+        if t in ("YES", "Y") and payer_wallet:
+            wallets = user.get("wallets", [])
+            if payer_wallet not in wallets:
+                wallets.append(payer_wallet)
+            update_user(user["user_id"], {
+                "wallets":          wallets,
+                "onboarding_state": "AWAITING_PHONE",
+            })
+            request_contact(
+                chat_id,
+                "✅ *Wallet enrolled for monitoring.*\n\n"
+                "Now let's protect your phone against SIM swap attacks.\n\n"
+                "Please share your phone number:",
+            )
+        elif t in ("NO", "N"):
+            update_user(user["user_id"], {"onboarding_state": "AWAITING_WALLET_INPUT"})
+            send_message(
+                chat_id,
+                "📍 Please enter the wallet address you'd like to monitor:\n\n"
+                "_(Supports EVM 0x..., Solana, TON, and Bitcoin)_",
+                parse_mode="Markdown",
+            )
+        else:
+            # Re-prompt with keyboard
+            send_message(
+                chat_id,
+                "Please use the buttons above to confirm — or type YES or NO:",
+                reply_markup=crypto_wallet_confirm_keyboard(payer_wallet) if payer_wallet else None,
+            )
+
+    elif state == "AWAITING_WALLET_INPUT":
+        # Allow slash commands to escape the wallet input state
+        if text.startswith("/"):
+            update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+            user["onboarding_state"] = "ACTIVE"
+            route_active_command(chat_id, text, user)
+            return
+        addr = text.strip()
+        if not _is_valid_wallet_address(addr):
+            send_message(
+                chat_id,
+                "❌ That doesn't look like a valid wallet address. Please try again.\n\n"
+                "_(Supports EVM 0x..., Solana base58, TON EQ.../UQ..., Bitcoin 1.../3.../bc1...)_",
+                parse_mode="Markdown",
+            )
+        else:
+            wallets = user.get("wallets", [])
+            if addr not in wallets:
+                wallets.append(addr)
+            update_user(user["user_id"], {
+                "wallets":          wallets,
+                "onboarding_state": "AWAITING_PHONE",
+            })
+            request_contact(
+                chat_id,
+                "✅ *Wallet enrolled for monitoring.*\n\n"
+                "Now let's protect your phone against SIM swap attacks.\n\n"
+                "Please share your phone number:",
+            )
+
+    elif state == "AWAITING_PHONE":
+        # Allow slash commands to escape the phone input state
+        if text.startswith("/"):
+            update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+            user["onboarding_state"] = "ACTIVE"
+            route_active_command(chat_id, text, user)
+            return
         # Accept typed phone number (e.g. +1 555 123 4567)
         digits = re.sub(r"[\s\-\(\)]", "", text)
         if re.match(r"^\+?[\d]{7,15}$", digits):
@@ -3672,17 +5729,19 @@ def handle_message(update: dict) -> None:
         handle_email_input(chat_id, text, user)
     elif state == "AWAITING_MORE_EMAILS":
         handle_email_input(chat_id, text, user)
-    elif state in ("AWAITING_REMOVE_SELECT", "AWAITING_DOMAIN_ADD", "AWAITING_BREACH_EMAIL") and text.startswith("/"):
+    elif state in (
+        "AWAITING_REMOVE_SELECT", "AWAITING_DOMAIN_ADD", "AWAITING_BREACH_EMAIL",
+        "AWAITING_DELEGATE_SELECT", "AWAITING_REVOKE_SELECT",
+    ) and text.startswith("/"):
         # Slash command received mid-flow — cancel current operation and route normally
         update_user(user["user_id"], {
-            "onboarding_state": "ACTIVE",
-            "pending_remove_list": None,
+            "onboarding_state":      "ACTIVE",
+            "pending_remove_list":   None,
+            "pending_delegate_list": None,
+            "pending_revoke_list":   None,
         })
         user["onboarding_state"] = "ACTIVE"
-        send_message(
-            chat_id,
-            "↩️ Previous operation cancelled.",
-        )
+        send_message(chat_id, "↩️ Previous operation cancelled.")
         route_active_command(chat_id, text, user)
     elif state == "AWAITING_REMOVE_SELECT":
         if text.strip().lower() == "cancel":
@@ -3723,6 +5782,83 @@ def handle_message(update: dict) -> None:
                 send_message(chat_id, "Invalid selection. Please reply with a number from the list, or type `cancel`:")
         else:
             send_message(chat_id, "Please reply with a number from the list, or type `cancel`:")
+    elif state == "AWAITING_DELEGATE_SELECT":
+        if text.strip().lower() == "cancel":
+            update_user(user["user_id"], {"onboarding_state": "ACTIVE", "pending_delegate_list": None})
+            send_message(chat_id, "Cancelled. No changes made.")
+        elif text.strip().isdigit():
+            idx     = int(text.strip()) - 1
+            pending = user.get("pending_delegate_list", [])
+            if 0 <= idx < len(pending):
+                delegate_id = pending[idx]
+                record      = get_user_record(delegate_id)
+                name        = (record.get("employee_name") or record.get("first_name", "This member")) if record else "This member"
+                current     = [uid for uid in user.get("delegated_admin_ids", []) if uid != delegate_id]
+                current.append(delegate_id)
+                update_user(user["user_id"], {
+                    "onboarding_state":      "ACTIVE",
+                    "delegated_admin_ids":   current,
+                    "pending_delegate_list": None,
+                })
+                if record:
+                    delegate_tg = record.get("telegram_chat_id")
+                    if delegate_tg:
+                        send_message(
+                            int(delegate_tg),
+                            "🔑 *Delegate Access Granted*\n\n"
+                            "Your admin has granted you delegate access on RelayShield.\n\n"
+                            "You can now use: /addmember, /removemember, /teamstatus\n\n"
+                            "🛡️ RelayShield",
+                            parse_mode="Markdown",
+                        )
+                send_message(
+                    chat_id,
+                    f"✅ *{name}* is now a delegate admin.\n\n"
+                    "They can add/remove team members and view team status.\n"
+                    "Use /revoke to remove their access at any time.",
+                    parse_mode="Markdown",
+                )
+            else:
+                send_message(chat_id, "Invalid selection. Reply with a number from the list, or `cancel`:")
+        else:
+            send_message(chat_id, "Reply with a number from the list, or `cancel`:")
+    elif state == "AWAITING_REVOKE_SELECT":
+        if text.strip().lower() == "cancel":
+            update_user(user["user_id"], {"onboarding_state": "ACTIVE", "pending_revoke_list": None})
+            send_message(chat_id, "Cancelled. No changes made.")
+        elif text.strip().isdigit():
+            idx     = int(text.strip()) - 1
+            pending = user.get("pending_revoke_list", [])
+            if 0 <= idx < len(pending):
+                revoke_id = pending[idx]
+                record    = get_user_record(revoke_id)
+                name      = (record.get("employee_name") or record.get("first_name", "This member")) if record else "This member"
+                current   = [uid for uid in user.get("delegated_admin_ids", []) if uid != revoke_id]
+                update_user(user["user_id"], {
+                    "onboarding_state":    "ACTIVE",
+                    "delegated_admin_ids": current,
+                    "pending_revoke_list": None,
+                })
+                if record:
+                    delegate_tg = record.get("telegram_chat_id")
+                    if delegate_tg:
+                        send_message(
+                            int(delegate_tg),
+                            "🔔 *Delegate Access Removed*\n\n"
+                            "Your admin has removed your delegate access on RelayShield.\n\n"
+                            "🛡️ RelayShield",
+                            parse_mode="Markdown",
+                        )
+                send_message(
+                    chat_id,
+                    f"✅ Delegate access removed from *{name}*.\n\n"
+                    "Use /delegate to grant access to another team member.",
+                    parse_mode="Markdown",
+                )
+            else:
+                send_message(chat_id, "Invalid selection. Reply with a number from the list, or `cancel`:")
+        else:
+            send_message(chat_id, "Reply with a number from the list, or `cancel`:")
     elif state == "AWAITING_BREACH_EMAIL":
         if text.strip().lower() == "cancel":
             update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
@@ -3790,13 +5926,150 @@ def handle_message(update: dict) -> None:
             first_name = user.get("first_name", "there")
             tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
             update_user(user["user_id"], {"onboarding_state": "ACTIVE"})
+            set_commands_for_user(chat_id, tier)
             send_message(chat_id, msg_onboarding_complete(first_name, len(emails), tier))
+            send_message(chat_id, msg_first_run_tips(tier), parse_mode="Markdown")
         else:
             handle_domain_input(chat_id, text, user)
-    elif state == "ACTIVE":
+    elif state == "AWAITING_FREE_EMAIL":
+        email = text.strip().lower()
+        if not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
+            send_message(chat_id, "That doesn't look like a valid email address. Please try again:")
+            return
+        email_hash = hash_email(email)
+        email_enc  = encrypt_field(email)
+        me_table   = dynamodb.Table(MONITORED_EMAILS_TABLE)
+        me_table.put_item(Item={
+            "email_id":        str(uuid.uuid4()),
+            "user_id":         user["user_id"],
+            "email_encrypted": email_enc,
+            "email_hash":      email_hash,
+            "tier":            TIER_FREE,
+            "created_at":      datetime.now(timezone.utc).isoformat(),
+            "active":          True,
+        })
+        update_user(user["user_id"], {
+            "monitored_emails": [email],
+            "onboarding_state": "FREE_ACTIVE",
+        })
+        send_message(chat_id, "🔍 Checking for breaches...")
+        try:
+            breaches = _run_hibp_check(email)
+        except Exception as exc:
+            logger.error("Free tier HIBP check failed: %s", exc)
+            send_message(chat_id, "⚠️ Breach check temporarily unavailable. Please try /breach later.")
+            return
+        _send_free_breach_result(chat_id, email, breaches)
+    elif state in ("ACTIVE", "FREE_ACTIVE"):
         route_active_command(chat_id, text, user)
     else:
         send_message(chat_id, "Type /start to begin your setup.")
+
+
+def _get_anthropic_key() -> str:
+    resp = secrets_client.get_secret_value(SecretId=ANTHROPIC_SECRET_NAME)
+    return resp["SecretString"].strip()
+
+
+def _claude_draft_reply(title: str, url: str, source: str,
+                        cat_type: str, subreddit: str) -> str:
+    """Call Claude to draft a contextual reply for a monitor alert."""
+    src_str = f"r/{subreddit} on Reddit" if subreddit else source.replace("_", " ").title()
+    cat_descriptions = {
+        "victim_sim":    "someone who was SIM swapped or is at risk",
+        "victim_wallet": "someone whose crypto wallet was drained or hacked",
+        "scam":          "someone asking if a Telegram/crypto message is a scam",
+        "brand":         "a mention of RelayShield by name",
+        "intel":         "a news article about a security threat",
+    }
+    cat_desc = cat_descriptions.get(cat_type, "a security-related post")
+
+    prompt = (
+        f"You are drafting a reply for Andrew, founder of RelayShield "
+        f"(crypto & identity security SaaS). He will edit and post this manually.\n\n"
+        f"Post title: {title}\n"
+        f"Platform: {src_str}\n"
+        f"Context: This is {cat_desc}.\n\n"
+        f"Write a reply that:\n"
+        f"- Opens with genuinely useful, specific advice (not generic)\n"
+        f"- Sounds like a knowledgeable person, not a marketer\n"
+        f"- Mentions RelayShield only at the very end as a natural aside, "
+        f"phrased as 'Full disclosure — I built RelayShield which does X'\n"
+        f"- Is under 150 words\n"
+        f"- Does NOT start with 'Great post', 'Thanks for sharing', or similar\n"
+        f"- For victims: lead with empathy and immediate action steps\n"
+        f"- For scam posts: call out specific red flags from the title\n"
+        f"- For brand mentions: be engaged and add value to the conversation\n\n"
+        f"Output ONLY the reply text. No preamble, no explanation."
+    )
+
+    api_key = _get_anthropic_key()
+    payload = json.dumps({
+        "model":      "claude-haiku-4-5-20251001",
+        "max_tokens": 300,
+        "messages":   [{"role": "user", "content": prompt}],
+    }).encode()
+    req = urllib.request.Request(
+        ANTHROPIC_MESSAGES_URL,
+        data=payload,
+        headers={
+            "Content-Type":      "application/json",
+            "x-api-key":         api_key,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+        return result["content"][0]["text"].strip()
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        logger.error("Anthropic HTTP %s: %s", exc.code, body[:500])
+        raise
+
+
+def handle_monitor_callback(chat_id: int, draft_key: str,
+                             action: str, cq_id: str) -> None:
+    """
+    Handle 📝 Reply Drafted / ⏭ Skip button taps from monitor alerts.
+    action: "draft" or "skip"
+    """
+    answer_callback(cq_id)
+
+    if action == "skip":
+        send_message(chat_id, "⏭ _Skipped._", parse_mode="Markdown")
+        return
+
+    # Look up post context from DynamoDB
+    resp = dynamodb.Table(MONITOR_DRAFTS_TABLE).get_item(Key={"draft_key": draft_key})
+    item = resp.get("Item")
+    if not item:
+        send_message(chat_id, "⚠️ Draft context expired — open the link and draft manually.")
+        return
+
+    send_message(chat_id, "✍️ _Drafting reply with Claude..._", parse_mode="Markdown")
+
+    try:
+        draft = _claude_draft_reply(
+            title     = item.get("title", ""),
+            url       = item.get("url", ""),
+            source    = item.get("source", ""),
+            cat_type  = item.get("cat_type", ""),
+            subreddit = item.get("subreddit", ""),
+        )
+    except Exception as exc:
+        logger.error("Claude draft failed: %s", exc)
+        send_message(chat_id, "⚠️ Draft generation failed. Check CloudWatch.")
+        return
+
+    send_message(
+        chat_id,
+        f"📝 *Draft reply* — edit before posting:\n\n"
+        f"```\n{draft}\n```\n\n"
+        f"⚠️ _Vary the wording. Never paste verbatim twice._",
+        parse_mode="Markdown",
+    )
 
 
 def handle_callback_query(update: dict) -> None:
@@ -3816,7 +6089,13 @@ def handle_callback_query(update: dict) -> None:
         update_user(user["user_id"], {"first_name": first_name})
         user["first_name"] = first_name
 
-    if data.startswith("intent_"):
+    if data.startswith("mdr_"):
+        handle_monitor_callback(chat_id, data[4:], "draft", cq_id)
+
+    elif data.startswith("msk_"):
+        handle_monitor_callback(chat_id, data[4:], "skip", cq_id)
+
+    elif data.startswith("intent_"):
         intent = data.replace("intent_", "")
         handle_intent_callback(chat_id, intent, cq_id, first_name)
 
@@ -3839,6 +6118,39 @@ def handle_callback_query(update: dict) -> None:
     elif data.startswith("plan_"):
         tier = data.replace("plan_", "")
         handle_plan_callback(chat_id, tier, cq_id, first_name)
+
+    elif data == "help_more":
+        answer_callback(cq_id)
+        tier = (user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)) if user else TIER_PERSONAL
+        send_message(chat_id, msg_help(tier))
+
+    elif data == "wallet_confirm_yes" and user:
+        answer_callback(cq_id)
+        payer_wallet = user.get("payer_wallet", "")
+        if payer_wallet:
+            wallets = user.get("wallets", [])
+            if payer_wallet not in wallets:
+                wallets.append(payer_wallet)
+            update_user(user["user_id"], {
+                "wallets":          wallets,
+                "onboarding_state": "AWAITING_PHONE",
+            })
+            request_contact(
+                chat_id,
+                "✅ *Wallet enrolled for monitoring.*\n\n"
+                "Now let's protect your phone against SIM swap attacks.\n\n"
+                "Please share your phone number:",
+            )
+
+    elif data == "wallet_confirm_no" and user:
+        answer_callback(cq_id)
+        update_user(user["user_id"], {"onboarding_state": "AWAITING_WALLET_INPUT"})
+        send_message(
+            chat_id,
+            "📍 Please enter the wallet address you'd like to monitor:\n\n"
+            "_(Supports EVM 0x..., Solana, TON, and Bitcoin)_",
+            parse_mode="Markdown",
+        )
 
     elif data == "phone_confirm_yes" and user:
         answer_callback(cq_id)
@@ -3863,8 +6175,8 @@ def handle_callback_query(update: dict) -> None:
 def handle_successful_payment(update: dict) -> None:
     """
     Telegram Payments 2.0 — successful_payment update.
-    TODO Phase 2: Map payment amount to tier, create user record,
-    begin onboarding (request_contact).
+    Maps payment amount → tier, creates or upgrades user record,
+    tracks free→paid conversions, then begins onboarding.
     """
     message = update.get("message", {})
     chat_id = message.get("chat", {}).get("id")
@@ -3877,9 +6189,27 @@ def handle_successful_payment(update: dict) -> None:
     # Map payment amount to tier
     tier_map = {v["amount"]: k for k, v in PLAN_PRICES.items()}
     tier = tier_map.get(amount, TIER_PERSONAL)
+    now = datetime.now(timezone.utc).isoformat()
 
-    # Create user record
-    user = create_telegram_user(chat_id, tier, first_name)
+    # Check for free→paid conversion — upgrade in place to preserve user_id + emails
+    existing = get_user_by_chat_id(chat_id)
+    if existing and existing.get("tier") == TIER_FREE:
+        update_user(existing["user_id"], {
+            "tier":                tier,
+            "subscription_tier":   tier,
+            "active":              True,
+            "onboarding_state":    "AWAITING_PHONE",
+            "converted_from_free": True,
+            "conversion_date":     now,
+            "updated_at":          now,
+        })
+        logger.info(
+            "Free→paid conversion — user_id=%s chat_id=%s tier=%s",
+            existing["user_id"], chat_id, tier,
+        )
+    else:
+        # Brand new paid user — create fresh record
+        create_telegram_user(chat_id, tier, first_name)
 
     # Begin onboarding — request phone
     request_contact(
@@ -3903,14 +6233,33 @@ def handle_inbound_signal(body: dict) -> str:
     current recent_signals from DynamoDB and runs Telegram-specific predictive
     warnings and correlation checks WITHOUT recording the signal again.
 
-    Expected body shape:
+    Supported payload shapes:
+
+    Correlation signal (predictive warnings + attack chain detection):
         {
             "source":           "relayshield_internal",
             "user_id":          "<DynamoDB user_id>",
             "signal_type":      "sim_swap" | "breach_alert" | "domain_lookalike" | ...,
-            "telegram_chat_id": <int>   # must be supplied by the monitor
+            "telegram_chat_id": <int>
+        }
+
+    Direct message delivery (admin co-notifications):
+        {
+            "source":           "relayshield_internal",
+            "action":           "send_message",
+            "telegram_chat_id": <int>,
+            "message":          "<text>"
         }
     """
+    # Direct message delivery — admin co-notifications and custom alerts
+    if body.get("action") == "send_message":
+        chat_id = body.get("telegram_chat_id")
+        message = body.get("message", "")
+        if chat_id and message:
+            send_message(int(chat_id), message, parse_mode="Markdown")
+            return "message_sent"
+        return "bad_send_payload"
+
     user_id     = body.get("user_id")
     signal_type = body.get("signal_type")
     chat_id     = body.get("telegram_chat_id")
@@ -3958,10 +6307,22 @@ def handle_inbound_signal(body: dict) -> str:
 
 def lambda_handler(event, context):
     try:
+        # Direct Lambda invoke (monitors calling us without API Gateway wrapping)
+        if event.get("source") == "relayshield_internal":
+            result = handle_inbound_signal(event)
+            return {"statusCode": 200, "body": result}
+
+        # Self-invoked async follow-up for a /scan that came back "unknown" —
+        # see handle_scan. Not a real Telegram update, so it's checked before
+        # the body-parsing path below.
+        if event.get("source") == "relayshield_deferred_scan":
+            handle_deferred_url_scan(event["chat_id"], event["target"])
+            return {"statusCode": 200, "body": "ok"}
+
         body = json.loads(event.get("body", "{}"))
         logger.info("Telegram update: %s", json.dumps(body)[:500])
 
-        # Internal signal injection from monitors (SIM swap, breach, domain)
+        # Internal signal injection from monitors via API Gateway path
         if body.get("source") == "relayshield_internal":
             result = handle_inbound_signal(body)
             return {"statusCode": 200, "body": result}

@@ -7,7 +7,7 @@ description: Identity threat intelligence and security scanning via RelayShield.
 
 RelayShield provides real-time identity threat intelligence via a REST API. Use it to verify credential integrity, detect account takeover vectors, and screen on-chain and web threats before acting on user input or executing transactions. Eight endpoints cover the full identity attack surface. Payment is either pay-as-you-go with USDC on Base (x402) or subscription via RapidAPI.
 
-- **API base:** `https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod`
+- **API base:** `https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod`
 - **x402 PAYG path:** `/v1/payg/<endpoint>`
 - **RapidAPI subscription path:** `/v1/<endpoint>`
 - **Free tier:** [rapidapi.com/relayshielduser/api/relayshield-security-intelligence](https://rapidapi.com/relayshielduser/api/relayshield-security-intelligence)
@@ -34,7 +34,7 @@ Use the `/v1/payg/` path prefix and include a signed x402 payment proof header:
 
 ```bash
 curl -X POST \
-  https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod/v1/payg/breach \
+  https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/payg/breach \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: $RELAYSHIELD_X_PAYMENT" \
   -d '{"email": "user@example.com"}'
@@ -48,7 +48,7 @@ Use the `/v1/` path prefix and include your RapidAPI key:
 
 ```bash
 curl -X POST \
-  https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod/v1/breach \
+  https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/breach \
   -H "Content-Type: application/json" \
   -H "x-api-key: $RELAYSHIELD_API_KEY" \
   -d '{"email": "user@example.com"}'
@@ -60,7 +60,7 @@ curl -X POST \
 
 ```bash
 curl -X POST \
-  https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod/v1/payg/breach \
+  https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/payg/breach \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: $RELAYSHIELD_X_PAYMENT" \
   -d '{"email": "user@example.com"}'
@@ -80,7 +80,7 @@ curl -X POST \
 
 ```bash
 curl -X POST \
-  https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod/v1/payg/sim-swap \
+  https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/payg/sim-swap \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: $RELAYSHIELD_X_PAYMENT" \
   -d '{"phone": "+14155551234"}'
@@ -98,7 +98,7 @@ curl -X POST \
 
 ```bash
 curl -X POST \
-  https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod/v1/payg/domain \
+  https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/payg/domain \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: $RELAYSHIELD_X_PAYMENT" \
   -d '{"domain": "acme.com"}'
@@ -118,7 +118,7 @@ curl -X POST \
 
 ```bash
 curl -X POST \
-  https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod/v1/payg/scan-wallet \
+  https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/payg/scan-wallet \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: $RELAYSHIELD_X_PAYMENT" \
   -d '{"address": "0xAbC...123", "chain_id": "8453"}'
@@ -136,14 +136,14 @@ curl -X POST \
 ```bash
 # Step 1 — submit
 curl -X POST \
-  https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod/v1/payg/scan-url \
+  https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/payg/scan-url \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: $RELAYSHIELD_X_PAYMENT" \
   -d '{"url": "https://suspicious-site.example.com"}'
 # Returns: { "analysis_id": "abc123" }
 
 # Step 2 — poll every 5 seconds until status == "completed"
-curl https://xhh3tfrhng.execute-api.us-east-1.amazonaws.com/prod/v1/payg/result/abc123 \
+curl https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/payg/result/abc123 \
   -H "X-PAYMENT: $RELAYSHIELD_X_PAYMENT"
 ```
 

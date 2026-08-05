@@ -68,6 +68,8 @@ from datetime import datetime, timedelta, timezone
 import boto3
 from boto3.dynamodb.conditions import Attr
 
+import relayshield_siem_connector as siem_connector
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -582,6 +584,25 @@ def alert_all_users(
             tg_channels = user.get("delivery_channels", [])
             if tg_chat_id and "telegram" in tg_channels:
                 _push_tg_signal(user_id, "oauth_app_breach", int(tg_chat_id))
+
+            # SIEM/SOAR forwarding — no-ops cleanly if no destination configured.
+            try:
+                email = user.get("email", "")
+                if email:
+                    siem_connector.dispatch_finding(dynamodb, {
+                        "alert_type":  "oauth_app_breach",
+                        "severity":    "HIGH",
+                        "customer_id": email,
+                        "summary":     f"OAuth-connected app breach detected: {app_name}",
+                        "details": {
+                            "app_name":     app_name,
+                            "breach_date":  breach_date,
+                            "data_classes": data_classes,
+                        },
+                        "detected_at": datetime.now(timezone.utc).isoformat(),
+                    })
+            except Exception as exc:
+                logger.warning("SIEM dispatch failed (non-fatal) for user_id=%s: %s", user_id, exc)
 
     return counters
 

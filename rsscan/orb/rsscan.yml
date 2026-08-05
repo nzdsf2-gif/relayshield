@@ -5,7 +5,8 @@ version: 2.1
 
 description: |
   Fail the build when a commit introduces an API key, token or other machine
-  credential. Backed by RelayShield's secret-scan API, 31 credential patterns.
+  credential. Matches 31 credential patterns entirely on the build machine — no
+  API key, no account, no network call.
 
 display:
   home_url: "https://api.relayshield.net/developers"
@@ -30,11 +31,11 @@ commands:
         description: >-
           Fail the build if the scan itself cannot run. Defaults true: a gate
           that silently reports success when it could not run is worse than none.
-      # api-key-var removed in 0.2.0 — scanning is local, no credential needed.
+      # No api-key-var parameter — scanning is local, no credential needed.
     steps:
       - run:
           name: Install rsscan
-          command: python3 -m pip install --quiet --disable-pip-version-check rsscan==0.1.0
+          command: python3 -m pip install --quiet --disable-pip-version-check rsscan==0.1.3
       - run:
           name: Scan for secrets
           command: |

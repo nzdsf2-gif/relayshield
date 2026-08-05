@@ -1,0 +1,78 @@
+Overview
+RelayShield Agentic Attack Surface (Bundle D) is a REST API. All endpoints are served from a single base URL and authenticated with one header.
+
+Base URL
+https://api.relayshield.net
+
+Getting your API key
+1. Subscribe to this product in AWS Marketplace.
+2. On the "Set up your account" page after subscribing, enter the email address where your key should be sent.
+3. Your API key is emailed automatically when the subscription activates. No separate account or payment method is required; all billing is handled by AWS Marketplace.
+4. If the email has not arrived within 15 minutes, contact support@relayshield.net with your AWS account ID.
+
+Authentication
+Every request requires this header:
+X-RS-API-KEY: YOUR_API_KEY
+
+Verifying your access
+Run this call to confirm your key is active. A 200 response confirms the endpoint is reachable and your key is valid.
+
+curl -X POST https://api.relayshield.net/v1/metered/mcp-registry-risk \
+  -H "X-RS-API-KEY: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"server_url": "https://example-mcp-server.com"}'
+
+Example success response:
+{"ok": true, "data": {"risk": "LOW", "findings": []}}
+
+Endpoints
+
+1. MCP Registry Risk
+POST https://api.relayshield.net/v1/metered/mcp-registry-risk
+Scores an MCP tool-server for typosquat risk and registration-age red flags before your agent connects to it.
+curl -X POST https://api.relayshield.net/v1/metered/mcp-registry-risk \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"server_url": "https://example-mcp-server.com"}'
+Accepts "package_name" in place of "server_url".
+
+2. Prompt Injection Breach
+POST https://api.relayshield.net/v1/metered/prompt-injection-breach
+Checks whether a session tied to a given email has been compromised via a prompt-injection-driven infostealer campaign.
+curl -X POST https://api.relayshield.net/v1/metered/prompt-injection-breach \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+
+3. Agent Framework CVEs
+POST https://api.relayshield.net/v1/metered/tech-stack-cve
+Returns CVE targeting risk scoped to your declared agent framework.
+curl -X POST https://api.relayshield.net/v1/metered/tech-stack-cve \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"tech_stack": ["langchain", "autogpt"]}'
+
+4. Bulk Identity Risk
+POST https://api.relayshield.net/v1/metered/bulk-identity-risk
+Bulk per-agent identity risk scoring, up to 10 domains per request.
+curl -X POST https://api.relayshield.net/v1/metered/bulk-identity-risk \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"targets": [{"domain": "example.com", "agents": ["agent1@example.com"]}]}'
+
+5. LLM Credential Exposure
+POST https://api.relayshield.net/v1/metered/llm-credential-exposure
+Checks a domain for exposed LLM/AI provider API keys (OpenAI, Anthropic, Google, Groq, xAI, Replicate) found in criminal stealer logs.
+curl -X POST https://api.relayshield.net/v1/metered/llm-credential-exposure \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"domain": "acme.com"}'
+Accepts "vendor_domains" as an array to check multiple domains.
+
+Response format
+All endpoints return {"ok": true, "data": {...}} on success and {"ok": false, "error": "..."} on failure.
+
+Status codes
+200  Success
+401  Unauthorized. Check the X-RS-API-KEY header value.
+403  Your AWS Marketplace subscription is not active. Confirm the subscription in the AWS Marketplace console.
+429  Rate limit exceeded. Retry with exponential backoff.
+500  Server error. Retry, then contact support if it persists.
+
+Support
+support@relayshield.net. Response within 1 business day.

@@ -368,6 +368,214 @@ def _report(findings: list[dict], blocking: list[dict], where: str, staged: bool
         print(file=sys.stderr)
 
 
+# ---------------------------------------------------------------------------
+# Delivery channels (BB-8): Slack and generic webhook
+#
+# Both are opt-in and point at an endpoint the user owns — their Slack, their
+# receiver. rsscan stays a local scanner: nothing is sent anywhere unless a URL
+# is supplied, and even then the payload carries no secret values, only the
+# credential type, severity, location and fingerprint. Same rule as --report
+# and --org: the tool must never be the thing that leaks the secret.
+#
+# Delivery failure never fails the build. A gate exists to block secrets, not
+# to block on a flaky Slack endpoint; the scan's own exit code is unaffected
+# and the problem is reported on stderr so it is not silent either.
+# ---------------------------------------------------------------------------
+
+def _ci_context() -> dict:
+    """Best-effort repo/build identity from whichever CI is running.
+
+    Read from env rather than git so it stays correct on detached-HEAD checkouts,
+    which is how most CI systems check code out.
+    """
+    env = os.environ
+    repo = (env.get("GITHUB_REPOSITORY") or env.get("CI_PROJECT_PATH")
+            or env.get("BITBUCKET_REPO_FULL_NAME") or env.get("CIRCLE_PROJECT_REPONAME") or "")
+    ref = (env.get("GITHUB_REF_NAME") or env.get("CI_COMMIT_REF_NAME")
+           or env.get("BITBUCKET_BRANCH") or env.get("CIRCLE_BRANCH") or "")
+    url = ""
+    if env.get("GITHUB_SERVER_URL") and repo and env.get("GITHUB_RUN_ID"):
+        url = f"{env['GITHUB_SERVER_URL']}/{repo}/actions/runs/{env['GITHUB_RUN_ID']}"
+    elif env.get("CI_PIPELINE_URL"):
+        url = env["CI_PIPELINE_URL"]
+    elif env.get("CIRCLE_BUILD_URL"):
+        url = env["CIRCLE_BUILD_URL"]
+    return {"repo": repo, "ref": ref, "build_url": url}
+
+
+def _finding_payload(f: dict) -> dict:
+    """The only shape a finding is ever transmitted in. No value, ever."""
+    return {
+        "type":        f.get("type", ""),
+        "severity":    f.get("severity", ""),
+        "description": f.get("description", ""),
+        "file":        f.get("file", ""),
+        "line":        f.get("line", 0),
+        "fingerprint": f.get("fingerprint", ""),
+    }
+
+
+def _post_json(url: str, payload: dict, timeout: int, label: str) -> None:
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": f"rsscan/{_VERSION}"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=timeout).read()
+    except Exception as exc:
+        # Reported, not swallowed: a delivery channel that fails silently is a
+        # channel the owner believes is working. Still does not change exit code.
+        print(_colour(f"rsscan: {label} delivery failed ({exc})", _YELLOW), file=sys.stderr)
+
+
+def _send_webhook(url: str, findings: list[dict], blocking: list[dict],
+                  counts: dict, where: str, timeout: int) -> None:
+    ctx = _ci_context()
+    _post_json(url, {
+        "tool":             "rsscan",
+        "version":          _VERSION,
+        "scanned":          where,
+        "repo":             ctx["repo"],
+        "ref":              ctx["ref"],
+        "build_url":        ctx["build_url"],
+        "findings_count":   len(findings),
+        "blocking_count":   len(blocking),
+        "highest_severity": findings[0].get("severity", "") if findings else None,
+        "severity_counts":  counts,
+        "findings":         [_finding_payload(f) for f in findings],
+        "detected_at":      datetime.now(timezone.utc).isoformat(),
+    }, timeout, "webhook")
+
+
+# Slack renders at most a handful of lines usefully before the message becomes
+# a wall. Link out to the build for the rest rather than pasting 200 findings.
+_SLACK_DETAIL_LIMIT = 10
+
+
+def _send_slack(url: str, findings: list[dict], blocking: list[dict],
+                counts: dict, where: str, timeout: int) -> None:
+    ctx = _ci_context()
+    highest = findings[0].get("severity", "") if findings else ""
+    icon = ":rotating_light:" if blocking else ":warning:"
+    headline = (
+        f"{icon} rsscan: {len(findings)} secret finding(s)"
+        f"{f' — {len(blocking)} blocking' if blocking else ' — none blocking'}"
+    )
+    where_line = " · ".join(x for x in [ctx["repo"] or None, ctx["ref"] or None, where] if x)
+    summary = ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "none"
+
+    lines = []
+    for f in findings[:_SLACK_DETAIL_LIMIT]:
+        loc = f.get("file") or "(unknown file)"
+        if f.get("line"):
+            loc = f"{loc}:{f['line']}"
+        lines.append(f"• *{f.get('severity','')}* `{f.get('type','')}` — {loc}")
+    if len(findings) > _SLACK_DETAIL_LIMIT:
+        lines.append(f"_…and {len(findings) - _SLACK_DETAIL_LIMIT} more._")
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": headline[:150], "emoji": True}},
+        {"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*Where*\n{where_line or 'local'}"},
+            {"type": "mrkdwn", "text": f"*Highest*\n{highest or 'n/a'}"},
+            {"type": "mrkdwn", "text": f"*Severities*\n{summary}"},
+            {"type": "mrkdwn", "text": f"*Blocking*\n{len(blocking)}"},
+        ]},
+        {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines) or "_no detail_"}},
+        {"type": "context", "elements": [{"type": "mrkdwn",
+            "text": "No secret values are included — only type, location and fingerprint."}]},
+    ]
+    if ctx["build_url"]:
+        blocks.append({"type": "actions", "elements": [
+            {"type": "button", "text": {"type": "plain_text", "text": "Open build"},
+             "url": ctx["build_url"]}]})
+
+    _post_json(url, {"text": headline, "blocks": blocks}, timeout, "Slack")
+
+
+# ---------------------------------------------------------------------------
+# GitHub Actions annotations (BB-8)
+#
+# Puts each finding inline on the changed line in the PR's Files tab, where the
+# developer already is, instead of buried in collapsed build log output.
+#
+# Deliberately implemented with workflow commands on stdout rather than the
+# Checks API. The Checks API needs a GitHub App, an installation, a private key
+# and a token exchange -- an account and a setup flow, which is precisely what
+# the free tier promises you do not need. Workflow commands need nothing: no
+# token, no permissions block, no network call. Same inline result.
+# ---------------------------------------------------------------------------
+
+# GitHub's own escaping rules. Message data and property values differ: a bare
+# ":" or "," inside a property value would end the property list and silently
+# mangle the annotation.
+def _gh_escape_data(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _gh_escape_prop(text: str) -> str:
+    return _gh_escape_data(text).replace(":", "%3A").replace(",", "%2C")
+
+
+# GitHub renders at most 10 annotations per step in the PR UI and rejects very
+# large batches. Emitting hundreds would bury the important ones and slow the
+# step, so cap and say so rather than truncating silently.
+_ANNOTATION_LIMIT = 50
+
+
+def _emit_github_annotations(findings: list[dict], blocking: list[dict]) -> None:
+    """Write ::error / ::warning workflow commands to stdout.
+
+    Never emits a secret value -- only the credential type, severity and
+    fingerprint, matching the report's guarantee. The fingerprint is included
+    because it is what the developer needs to allowlist a false positive, and
+    it is non-reversible.
+    """
+    blocking_ids = {id(f) for f in blocking}
+    for i, f in enumerate(findings):
+        if i >= _ANNOTATION_LIMIT:
+            print(
+                f"::notice::rsscan: {len(findings) - _ANNOTATION_LIMIT} further finding(s) "
+                f"not annotated (limit {_ANNOTATION_LIMIT}). See the step log for the full list."
+            )
+            break
+        level = "error" if id(f) in blocking_ids else "warning"
+        props = [f"title={_gh_escape_prop('rsscan: ' + str(f.get('severity', '')) + ' secret detected')}"]
+        # Only claim a location when there is a real one. line=0 would anchor
+        # the annotation to the wrong place, which is worse than a file-level
+        # annotation with no line at all.
+        path = f.get("file") or ""
+        line = f.get("line") or 0
+        if path:
+            props.append(f"file={_gh_escape_prop(path)}")
+            if line > 0:
+                props.append(f"line={line}")
+        # Pattern descriptions are written as noun phrases ("AWS IAM Access
+        # Key") and do not carry terminal punctuation, so add it rather than
+        # running two sentences together in the annotation bubble.
+        desc = str(f.get("description", "")).strip().rstrip(".")
+        message = (
+            f"{f.get('type', 'secret')} ({f.get('severity', '')})."
+            + (f" {desc}." if desc else "")
+            + " Remove the value and load it from a secrets manager or environment variable;"
+            " if it has already been pushed, rotate it."
+            f" False positive? echo '{f.get('fingerprint', '')}' >> .relayshield-allowlist"
+        )
+        print(f"::{level} {','.join(props)}::{_gh_escape_data(message)}")
+
+
+def _annotations_enabled(mode: str) -> bool:
+    if mode == "off":
+        return False
+    if mode == "github":
+        return True
+    # auto: only inside GitHub Actions, where these lines are meaningful.
+    # Anywhere else they are noise printed at a developer.
+    return os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="rsscan",
@@ -418,6 +626,33 @@ def main(argv: list[str] | None = None) -> int:
         action="store_const",
         const=False,
         help="Allow the run to continue when the scan cannot run. Default in pre-commit mode.",
+    )
+    parser.add_argument(
+        "--slack-webhook",
+        default=os.environ.get("RSSCAN_SLACK_WEBHOOK", ""),
+        metavar="URL",
+        help=(
+            "Opt-in. POST a findings summary to your own Slack incoming webhook. "
+            "Sends no secret values — only type, severity, location and fingerprint."
+        ),
+    )
+    parser.add_argument(
+        "--webhook",
+        default=os.environ.get("RSSCAN_WEBHOOK", ""),
+        metavar="URL",
+        help=(
+            "Opt-in. POST findings as JSON to an endpoint you control. "
+            "Sends no secret values — only type, severity, location and fingerprint."
+        ),
+    )
+    parser.add_argument(
+        "--annotate",
+        default=os.environ.get("RSSCAN_ANNOTATE", "auto"),
+        choices=("auto", "github", "off"),
+        help=(
+            "Emit inline CI annotations. 'auto' (default) turns them on only inside "
+            "GitHub Actions; 'github' forces them; 'off' disables them."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"rsscan {_VERSION}")
     args = parser.parse_args(argv)
@@ -493,6 +728,20 @@ def main(argv: list[str] | None = None) -> int:
     ]
 
     _report(findings, blocking, where, staged)
+
+    # Inline PR annotations. After _report so the human-readable block is still
+    # first in the log, and guarded so these never print on a developer's
+    # terminal during a pre-commit run.
+    if _annotations_enabled(args.annotate):
+        _emit_github_annotations(findings, blocking)
+
+    # Delivery channels. Only fire when there is something to report — a
+    # notification on every clean build trains people to ignore the channel,
+    # which is how a real finding gets missed.
+    if args.slack_webhook:
+        _send_slack(args.slack_webhook, findings, blocking, severity_counts, where, args.timeout)
+    if args.webhook:
+        _send_webhook(args.webhook, findings, blocking, severity_counts, where, args.timeout)
 
     if args.report and _write_report(args.report, findings, where, args.org or None):
         print(_colour(f"  Report written to {args.report}", _BOLD), file=sys.stderr)

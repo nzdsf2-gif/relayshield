@@ -1,0 +1,4 @@
+name = "relayshield-multisite-demo"
+main = "cloudflare_worker_multisite_dashboard.js"
+compatibility_date = "2024-01-01"
+workers_dev = true

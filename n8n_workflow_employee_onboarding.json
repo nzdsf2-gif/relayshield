@@ -1,0 +1,610 @@
+{
+  "name": "New hire identity check + account provisioning with RelayShield",
+  "tags": [
+    "security",
+    "onboarding",
+    "hr",
+    "relayshield",
+    "identity",
+    "provisioning"
+  ],
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## New hire identity check + account provisioning with RelayShield\n\n### How it works\n\nThis workflow starts when HR creates a new hire, then runs parallel identity-risk checks through RelayShield and provisions a Google Workspace account. The RelayShield branch checks for breach and infostealer exposure, logs the result in Notion, and alerts Security in Slack when exposure is found. The provisioning branch creates the account, evaluates whether the request succeeded, then logs and notifies IT of success or failure.\n\nThis is the mirror image of the employee-offboarding template: that one enforces revocation off an offboarding trigger, this one enforces provisioning off a hiring trigger. Same shape, opposite direction. Neither branch blocks the other — a risky personal email doesn't delay day-one access, and provisioning outcome is logged independently of what the identity check found.\n\n### Setup steps\n\n- Configure the HR webhook URL in the HR system so new-hire payloads include personal_email, corporate_email, name, department, manager_email, job_title, org_unit_path, and temp_password.\n- Connect RelayShield credentials and confirm the breach and infostealer check nodes are mapped to the new hire's personal email address.\n- Configure Google Workspace Admin API authentication for the provisioning HTTP request (domain-wide delegated service account, scope https://www.googleapis.com/auth/admin.directory.user), including the correct customer/domain, user schema, and required admin scopes. Using Microsoft 365 instead? Swap the provisioning node for a Microsoft Graph POST /users call — downstream logging/alerting is unchanged.\n- Connect Notion credentials and set the n8n variable notionOnboardingDbId to your onboarding/audit-log database ID.\n- Connect Slack credentials and set the n8n variable slackSecurityChannelId to your target security/IT channel.\n\n### Customization\n\nAdjust the RelayShield decision criteria, Slack channels, Notion database fields, and Google Workspace user attributes to match internal onboarding and security-review policies. Add more RelayShield checks (e.g. NHI exposure, identity graph) to broaden the risk signals, or add more provisioning steps (group membership, license assignment) to the Google Workspace branch.",
+        "width": 560,
+        "height": 1500
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1000,
+        0
+      ],
+      "id": "d8fb7e34-4369-46e3-a1c9-a6b1170bb58c",
+      "name": "Sticky Note"
+    },
+    {
+      "id": "c3d4e5f6-0001-0001-0001-000000000001",
+      "name": "When New Hire Added",
+      "type": "n8n-nodes-base.webhook",
+      "notes": "Receives an HTTP POST from your HR system when a new hire is ready to onboard. Expected payload: { \"personal_email\": \"newhire@gmail.com\", \"corporate_email\": \"jsmith@company.com\", \"name\": \"Jane Smith\", \"department\": \"Engineering\", \"manager_email\": \"manager@company.com\", \"job_title\": \"Software Engineer\", \"org_unit_path\": \"/Engineering\", \"temp_password\": \"<one-time-password-from-HR-system>\" }",
+      "position": [
+        0,
+        650
+      ],
+      "webhookId": "relayshield-onboard-001",
+      "parameters": {
+        "path": "employee-onboard",
+        "options": {},
+        "httpMethod": "POST",
+        "responseData": "firstEntryJson",
+        "responseMode": "onReceived"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "c3d4e5f6-0002-0002-0002-000000000002",
+      "name": "Check for Breaches",
+      "type": "n8n-nodes-relayshield.relayShield",
+      "notes": "Checks the new hire's personal email for known credential breaches — a pre-existing exposure worth security's awareness before this identity gets corporate access, even though it doesn't block day-1 provisioning.",
+      "position": [
+        280,
+        120
+      ],
+      "parameters": {
+        "email": "={{ $json.personal_email }}",
+        "operation": "breach"
+      },
+      "credentials": {
+        "relayShieldApi": {
+          "id": "1",
+          "name": "RelayShield API"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000003",
+      "name": "Check for Infostealer Threats",
+      "type": "n8n-nodes-relayshield.relayShield",
+      "notes": "Checks whether the new hire's personal-email credentials appear in infostealer malware logs — indicating their personal device may already be compromised before they ever touch corporate systems.",
+      "position": [
+        280,
+        360
+      ],
+      "parameters": {
+        "email": "={{ $json.personal_email }}",
+        "operation": "infostealer"
+      },
+      "credentials": {
+        "relayShieldApi": {
+          "id": "1",
+          "name": "RelayShield API"
+        }
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "c3d4e5f6-0004-0004-0004-000000000004",
+      "name": "If Prior Exposure Detected",
+      "type": "n8n-nodes-base.if",
+      "notes": "Informational only — does not gate provisioning. Flags a new hire whose personal email already shows breach or infostealer exposure, so security can watch that identity more closely post-onboarding.",
+      "position": [
+        560,
+        240
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "or",
+          "conditions": [
+            {
+              "id": "cond-001",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "leftValue": "={{ $('Check for Breaches').item.json.breach_count }}",
+              "rightValue": 0
+            },
+            {
+              "id": "cond-002",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "leftValue": "={{ $('Check for Infostealer Threats').item.json.found }}",
+              "rightValue": true
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "c3d4e5f6-0005-0005-0005-000000000005",
+      "name": "Record Exposure in Notion",
+      "type": "n8n-nodes-base.notion",
+      "notes": "Creates a page in your onboarding risk log Notion database, independent of the provisioning outcome below.",
+      "position": [
+        840,
+        0
+      ],
+      "parameters": {
+        "title": "={{ $('When New Hire Added').item.json.name }} — Pre-Existing Exposure Flag",
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.notionOnboardingDbId }}"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Corporate Email|rich_text",
+              "richText": false,
+              "textContent": "={{ $('When New Hire Added').item.json.corporate_email }}"
+            },
+            {
+              "key": "Department|rich_text",
+              "richText": false,
+              "textContent": "={{ $('When New Hire Added').item.json.department }}"
+            },
+            {
+              "key": "Breach Count|rich_text",
+              "richText": false,
+              "textContent": "={{ $('Check for Breaches').item.json.breach_count }}"
+            },
+            {
+              "key": "Infostealer Detected|rich_text",
+              "richText": false,
+              "textContent": "={{ $('Check for Infostealer Threats').item.json.found ? 'Yes' : 'No' }}"
+            },
+            {
+              "key": "Status|rich_text",
+              "richText": false,
+              "textContent": "Flagged for Security Awareness"
+            }
+          ]
+        },
+        "authentication": "apiKey"
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "3",
+          "name": "Notion API"
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "c3d4e5f6-0006-0006-0006-000000000006",
+      "name": "Notify Security in Slack",
+      "type": "n8n-nodes-base.slack",
+      "notes": "Posts an awareness alert to your security/IT Slack channel. Does not block or delay provisioning — that branch runs independently.",
+      "position": [
+        840,
+        240
+      ],
+      "parameters": {
+        "select": "channel",
+        "blocksUi": {
+          "blocksValues": [
+            {
+              "type": "header",
+              "textUi": {
+                "text": "⚠️ New Hire With Pre-Existing Exposure — {{ $('When New Hire Added').item.json.name }}"
+              }
+            },
+            {
+              "type": "section",
+              "textUi": {
+                "text": "*New hire:* {{ $('When New Hire Added').item.json.corporate_email }}\n*Department:* {{ $('When New Hire Added').item.json.department }}\n*Manager:* {{ $('When New Hire Added').item.json.manager_email }}\n\n*RelayShield findings (personal email, pre-hire):*\n• Breaches detected: {{ $('Check for Breaches').item.json.breach_count }}\n• Infostealer activity: {{ $('Check for Infostealer Threats').item.json.found ? '⚠️ YES' : '✓ None' }}\n\n*Note:* corporate account provisioning proceeded regardless — this is an awareness flag, not a block. Consider extra monitoring on this identity for the first 90 days."
+              }
+            }
+          ]
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.slackSecurityChannelId }}"
+        },
+        "messageType": "block"
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "4",
+          "name": "Slack API"
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "c3d4e5f6-0007-0007-0007-000000000007",
+      "name": "Record Clean Result in Notion",
+      "type": "n8n-nodes-base.notion",
+      "notes": "Logs a clean result so every onboarding identity check is auditable, even when nothing is found.",
+      "position": [
+        840,
+        480
+      ],
+      "parameters": {
+        "title": "={{ $('When New Hire Added').item.json.name }} — Onboarding Clean (No Prior Exposure)",
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.notionOnboardingDbId }}"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Corporate Email|rich_text",
+              "richText": false,
+              "textContent": "={{ $('When New Hire Added').item.json.corporate_email }}"
+            },
+            {
+              "key": "Status|rich_text",
+              "richText": false,
+              "textContent": "Clean — No Prior Exposure"
+            }
+          ]
+        },
+        "authentication": "apiKey"
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "3",
+          "name": "Notion API"
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "c3d4e5f6-0008-0008-0008-000000000008",
+      "name": "Initiate Google Account Provision",
+      "type": "n8n-nodes-base.httpRequest",
+      "notes": "Fires in parallel with the identity check above, off the same trigger, with zero gap — the new hire gets access on day one regardless of the check's outcome. Requires a Google service account with domain-wide delegation scoped to admin.directory.user. Using Microsoft 365 instead? Replace this node with a Microsoft Graph POST /users call — same downstream logging/alerting applies unchanged.",
+      "position": [
+        280,
+        1180
+      ],
+      "parameters": {
+        "url": "https://admin.googleapis.com/admin/directory/v1/users",
+        "method": "POST",
+        "options": {},
+        "jsonBody": "={{ {\n  \"primaryEmail\": $json.corporate_email,\n  \"name\": {\n    \"givenName\": $json.name.split(' ')[0],\n    \"familyName\": $json.name.split(' ').slice(1).join(' ')\n  },\n  \"password\": $json.temp_password,\n  \"changePasswordAtNextLogin\": true,\n  \"orgUnitPath\": $json.org_unit_path || \"/\"\n} }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi"
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "5",
+          "name": "Google Workspace Admin (Domain-Wide Delegation)"
+        }
+      },
+      "typeVersion": 4.2
+    },
+    {
+      "id": "c3d4e5f6-0009-0009-0009-000000000009",
+      "name": "Check Provisioning Success",
+      "type": "n8n-nodes-base.if",
+      "notes": "Google's Admin SDK returns the created user object (with an `id` field) on success. Logged as its own independent audit event — separate from the identity-check outcome above, same design as the offboarding template's revocation-success tracking.",
+      "position": [
+        560,
+        1180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-provision-001",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              },
+              "leftValue": "={{ $json.id }}",
+              "rightValue": ""
+            }
+          ]
+        }
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "c3d4e5f6-0010-0010-0010-000000000010",
+      "name": "Record Provisioning Success",
+      "type": "n8n-nodes-base.notion",
+      "notes": "Independent audit trail for provisioning outcome, regardless of what the identity check found.",
+      "position": [
+        840,
+        820
+      ],
+      "parameters": {
+        "title": "={{ $('When New Hire Added').item.json.name }} — Account Provisioned",
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.notionOnboardingDbId }}"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Corporate Email|rich_text",
+              "richText": false,
+              "textContent": "={{ $('When New Hire Added').item.json.corporate_email }}"
+            },
+            {
+              "key": "Provisioning Status|rich_text",
+              "richText": false,
+              "textContent": "Success"
+            }
+          ]
+        },
+        "authentication": "apiKey"
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "3",
+          "name": "Notion API"
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "c3d4e5f6-0011-0011-0011-000000000011",
+      "name": "Notify IT of Account Success",
+      "type": "n8n-nodes-base.slack",
+      "notes": "The onboarding-side notification — confirms the new corporate account actually exists. Mirror of the offboarding template's suspension-confirmation alert, opposite direction.",
+      "position": [
+        840,
+        1060
+      ],
+      "parameters": {
+        "select": "channel",
+        "blocksUi": {
+          "blocksValues": [
+            {
+              "type": "section",
+              "textUi": {
+                "text": "✅ *Account provisioned:* {{ $('When New Hire Added').item.json.corporate_email }} is ready — {{ $('When New Hire Added').item.json.name }}, {{ $('When New Hire Added').item.json.job_title }}, {{ $('When New Hire Added').item.json.department }}."
+              }
+            }
+          ]
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.slackSecurityChannelId }}"
+        },
+        "messageType": "block"
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "4",
+          "name": "Slack API"
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "c3d4e5f6-0012-0012-0012-000000000012",
+      "name": "Record Provisioning Failure",
+      "type": "n8n-nodes-base.notion",
+      "notes": "A failed provisioning call needs manual follow-up — logged distinctly from success so it can't get lost in an otherwise-clean audit trail.",
+      "position": [
+        840,
+        1300
+      ],
+      "parameters": {
+        "title": "={{ $('When New Hire Added').item.json.name }} — Provisioning FAILED",
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.notionOnboardingDbId }}"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Corporate Email|rich_text",
+              "richText": false,
+              "textContent": "={{ $('When New Hire Added').item.json.corporate_email }}"
+            },
+            {
+              "key": "Provisioning Status|rich_text",
+              "richText": false,
+              "textContent": "Failed — Needs Manual Action"
+            }
+          ]
+        },
+        "authentication": "apiKey"
+      },
+      "credentials": {
+        "notionApi": {
+          "id": "3",
+          "name": "Notion API"
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "c3d4e5f6-0013-0013-0013-000000000013",
+      "name": "Alert IT of Provisioning Issue",
+      "type": "n8n-nodes-base.slack",
+      "notes": "Urgent path — a new hire without working access on day one is a real operational problem, escalated distinctly from a routine success confirmation.",
+      "position": [
+        840,
+        1540
+      ],
+      "parameters": {
+        "select": "channel",
+        "blocksUi": {
+          "blocksValues": [
+            {
+              "type": "header",
+              "textUi": {
+                "text": "🚨 Account Provisioning FAILED — {{ $('When New Hire Added').item.json.name }}"
+              }
+            },
+            {
+              "type": "section",
+              "textUi": {
+                "text": "Automatic provisioning for {{ $('When New Hire Added').item.json.corporate_email }} did not succeed. This new hire does not have working system access — needs manual account creation before their start date."
+              }
+            }
+          ]
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $vars.slackSecurityChannelId }}"
+        },
+        "messageType": "block"
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "4",
+          "name": "Slack API"
+        }
+      },
+      "typeVersion": 2.2
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "",
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "updatedAt": "2026-07-20T00:00:00.000Z",
+  "versionId": "v1",
+  "staticData": null,
+  "connections": {
+    "Check Provisioning Success": {
+      "main": [
+        [
+          {
+            "node": "Record Provisioning Success",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify IT of Account Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Provisioning Failure",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert IT of Provisioning Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Prior Exposure Detected": {
+      "main": [
+        [
+          {
+            "node": "Record Exposure in Notion",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Security in Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Clean Result in Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Breaches": {
+      "main": [
+        [
+          {
+            "node": "If Prior Exposure Detected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When New Hire Added": {
+      "main": [
+        [
+          {
+            "node": "Check for Breaches",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check for Infostealer Threats",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Initiate Google Account Provision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Infostealer Threats": {
+      "main": [
+        [
+          {
+            "node": "If Prior Exposure Detected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initiate Google Account Provision": {
+      "main": [
+        [
+          {
+            "node": "Check Provisioning Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "triggerCount": 0
+}

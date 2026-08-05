@@ -1,0 +1,7 @@
+name = "relayshield-support-redirect"
+main = "cloudflare_worker_support_redirect.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "support.relayshield.net/*", zone_name = "relayshield.net" }
+]

@@ -1,0 +1,309 @@
+openapi: 3.0.0
+info:
+  title: RelayShield Security Intelligence
+  description: >
+    Identity threat intelligence API — near real-time breach detection, SIM swap
+    monitoring, domain lookalike detection, OAuth watchlist, infostealer malware
+    detection, crypto wallet risk scoring, and URL/file malware scanning.
+  version: "1.0"
+servers:
+  - url: https://relayshield-security-intelligence.p.rapidapi.com
+
+paths:
+
+  /v1/breach:
+    post:
+      operationId: checkBreach
+      summary: Check Email for Data Breaches
+      description: >
+        Check if an email address appears in known data breach databases.
+        Returns breach details including source, date, and exposed data types.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  description: Email address to check for breaches
+                  example: user@example.com
+            example:
+              email: user@example.com
+      responses:
+        "200":
+          description: Breach check result
+          content:
+            application/json:
+              example:
+                ok: true
+                data:
+                  email: user@example.com
+                  found: false
+                  breach_count: 0
+                  breaches: []
+
+  /v1/sim-swap:
+    post:
+      operationId: checkSimSwap
+      summary: Check Phone Number for SIM Swap
+      description: >
+        Check whether a phone number has recently been ported or SIM-swapped,
+        indicating potential account takeover risk.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                  description: Phone number in E.164 format
+                  example: "+12125551234"
+            example:
+              phone: "+12125551234"
+      responses:
+        "200":
+          description: SIM swap check result
+          content:
+            application/json:
+              example:
+                ok: true
+                data:
+                  phone: "+12125551234"
+                  swapped: false
+                  last_ported: null
+
+  /v1/domain:
+    post:
+      operationId: checkDomain
+      summary: Check Domain for Lookalikes
+      description: >
+        Detect lookalike and typosquat domains targeting your brand —
+        homoglyph attacks, combo-squatting, and phishing infrastructure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domain]
+              properties:
+                domain:
+                  type: string
+                  description: Domain name to check for lookalikes
+                  example: example.com
+            example:
+              domain: example.com
+      responses:
+        "200":
+          description: Domain lookalike result
+          content:
+            application/json:
+              example:
+                ok: true
+                data:
+                  domain: example.com
+                  lookalike_count: 0
+                  lookalikes: []
+
+  /v1/oauth:
+    post:
+      operationId: checkOAuth
+      summary: Check OAuth App Watchlist
+      description: >
+        Check whether an OAuth application client ID is on a known malicious
+        or suspicious watchlist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id]
+              properties:
+                client_id:
+                  type: string
+                  description: OAuth client ID to check
+                  example: "1234567890"
+            example:
+              client_id: "1234567890"
+      responses:
+        "200":
+          description: OAuth watchlist result
+          content:
+            application/json:
+              example:
+                ok: true
+                data:
+                  client_id: "1234567890"
+                  flagged: false
+
+  /v1/infostealer:
+    post:
+      operationId: checkInfostealer
+      summary: Check Email for Infostealer Malware Compromise
+      description: >
+        Detects whether an email address appears in infostealer malware logs —
+        credential-harvesting trojans such as RedLine, Raccoon, and Vidar that
+        silently exfiltrate all browser-saved passwords, active session cookies
+        (bypassing 2FA without needing a password), credit card autofill data,
+        and crypto wallet keys from infected devices.
+
+        Unlike breach monitoring which covers historical corporate database leaks
+        (disclosed weeks or months after the fact), infostealer logs are ingested
+        within days of appearing on dark web markets — making this near real-time
+        device compromise detection.
+
+        Returns infection details including date compromised, operating system,
+        malware file path, and total credential counts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  description: Email address to check for infostealer compromise
+                  example: user@example.com
+            example:
+              email: user@example.com
+      responses:
+        "200":
+          description: Infostealer check result
+          content:
+            application/json:
+              examples:
+                clean:
+                  summary: Email not found in any infostealer logs
+                  value:
+                    ok: true
+                    data:
+                      email: user@example.com
+                      found: false
+                      stealer_count: 0
+                      stealers: []
+                infected:
+                  summary: Email found in infostealer logs
+                  value:
+                    ok: true
+                    data:
+                      email: user@example.com
+                      found: true
+                      stealer_count: 1
+                      stealers:
+                        - date_compromised: "2024-11-03T00:00:00.000Z"
+                          computer_name: DESKTOP-ABC123
+                          operating_system: Windows 10
+                          malware_path: "C:\\Users\\user\\AppData\\Local\\Temp\\redline.exe"
+                          total_corporate_services: 12
+                          total_user_services: 47
+
+  /v1/wallet:
+    post:
+      operationId: scanWallet
+      summary: Scan Crypto Wallet for Risk
+      description: >
+        Score a cryptocurrency wallet address for risk — sanctions exposure,
+        darknet market activity, mixer usage, and other on-chain red flags.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address]
+              properties:
+                address:
+                  type: string
+                  description: Cryptocurrency wallet address to scan
+                  example: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+            example:
+              address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+      responses:
+        "200":
+          description: Wallet risk result
+          content:
+            application/json:
+              example:
+                ok: true
+                data:
+                  address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+                  risk_score: 0
+                  flags: []
+
+  /v1/scan/url:
+    post:
+      operationId: scanUrl
+      summary: Scan URL for Malware / Phishing
+      description: >
+        Submit a URL for malware and phishing scanning.
+        Returns a verdict on whether the URL is malicious.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  description: URL to scan
+                  example: https://example.com/page
+            example:
+              url: https://example.com/page
+      responses:
+        "200":
+          description: URL scan result
+          content:
+            application/json:
+              example:
+                ok: true
+                data:
+                  url: https://example.com/page
+                  malicious: false
+                  verdict: clean
+
+  /v1/scan/file:
+    post:
+      operationId: scanFile
+      summary: Scan File for Malware
+      description: >
+        Submit a file (base64-encoded) for malware scanning.
+        Returns a verdict on whether the file is malicious.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  description: Base64-encoded file content to scan
+                filename:
+                  type: string
+                  description: Optional original filename
+                  example: document.pdf
+            example:
+              file: "SGVsbG8gV29ybGQ="
+              filename: "document.pdf"
+      responses:
+        "200":
+          description: File scan result
+          content:
+            application/json:
+              example:
+                ok: true
+                data:
+                  malicious: false
+                  verdict: clean

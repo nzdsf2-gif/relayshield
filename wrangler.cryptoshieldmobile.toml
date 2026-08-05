@@ -1,0 +1,7 @@
+name = "relayshield-cryptoshieldmobile"
+main = "cloudflare_worker_cryptoshield_landing.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "cryptoshieldmobile.relayshield.net/*", zone_name = "relayshield.net" }
+]

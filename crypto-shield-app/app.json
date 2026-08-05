@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Crypto Shield",
+    "slug": "crypto-shield",
+    "version": "1.5.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0a1628"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0a1628"
+      },
+      "package": "net.relayshield.cryptoshieldmobile",
+      "versionCode": 5,
+      "minSdkVersion": 23,
+      "googleServicesFile": "./google-services.json"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-notifications",
+      "./withRemoveDebugPermissions.js"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "cde396d6-c371-4763-b3a5-41f15b4b5e6a"
+      }
+    },
+    "owner": "relayshieldadmin"
+  }
+}

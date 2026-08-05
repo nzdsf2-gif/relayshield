@@ -124,6 +124,13 @@ PAYMENT_LINK_TIER_MAP = {
     "plink_1TIVwiL2dcjOeFiYMdy7fWfu": TIER_PRO,        # Business Shield Pro (annual)
 }
 
+# Threat Intelligence price IDs — these checkouts are handled by relayshield-developer-signup.
+# If Stripe delivers the event here too, skip it to avoid duplicate processing.
+TI_PRICE_IDS = frozenset({
+    "price_1TiIcqL2dcjOeFiY2wTZV8Kb",  # $499/mo MSP
+    "price_1TiIcqL2dcjOeFiYDcuBewo2",  # $999/mo MSSP
+})
+
 # Max emails per subscriber (personal) or per employee (business)
 EMAIL_LIMITS = {
     TIER_PERSONAL: 3,
@@ -792,8 +799,28 @@ def lambda_handler(event, context):
     session_id = session.get("id", "unknown")
     logger.info("Processing checkout.session.completed — session_id=%s", session_id)
 
-    stripe_customer_id = session.get("customer") or ""
+    stripe_customer_id     = session.get("customer") or ""
     stripe_subscription_id = session.get("subscription") or ""
+
+    # --- 3b. Skip TI developer subscription checkouts ---
+    # Stripe delivers checkout.session.completed to all webhook endpoints. TI plans
+    # ($499/$999) are fully handled by relayshield-developer-signup — skip here to
+    # avoid duplicate processing. Detect by checking the subscription's price ID.
+    if stripe_subscription_id:
+        try:
+            stripe_secret_key = get_secret(STRIPE_SECRET_KEY_NAME)
+            checkout_price_id = get_price_id_from_subscription(stripe_subscription_id, stripe_secret_key)
+            if checkout_price_id in TI_PRICE_IDS:
+                logger.info(
+                    "TI checkout detected (price=%s) — handled by developer webhook, skipping",
+                    checkout_price_id,
+                )
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps({"message": "TI checkout handled by developer webhook"}),
+                }
+        except Exception as exc:
+            logger.warning("Could not check price ID for TI skip guard: %s", exc)
 
     # --- 4. Telegram-first flow (client_reference_id = telegram chat_id) ---
     # Check this BEFORE phone extraction — Telegram users have no phone in session

@@ -12,7 +12,7 @@ class RelayShield {
             group: ['transform'],
             version: 1,
             subtitle: '={{$parameter["operation"]}}',
-            description: 'Breach detection, SIM swap monitoring, infostealer exposure, domain lookalike scanning, and threat intelligence IOC lookup via RelayShield.',
+            description: 'Breach detection, SIM swap monitoring, infostealer exposure, domain lookalike scanning, supply chain risk, active session hijack detection, and threat intelligence via RelayShield.',
             defaults: {
                 name: 'RelayShield',
             },
@@ -48,22 +48,58 @@ class RelayShield {
                             action: 'Scan a domain for lookalikes and typosquats',
                         },
                         {
+                            name: 'Identity Correlation',
+                            value: 'identityGraph',
+                            description: 'Link an email to associated phone numbers and domains seen alongside it in criminal channel dumps — pivot from one compromised identifier to find all others',
+                            action: 'Find identifiers correlated with a compromised email',
+                        },
+                        {
                             name: 'Infostealer Check',
                             value: 'infostealer',
                             description: 'Check if credentials appear in criminal infostealer log markets',
                             action: 'Check an email for infostealer log exposure',
                         },
                         {
-                            name: 'OAuth Watchlist Check',
+                            name: 'MCP Registry Risk',
+                            value: 'mcpRegistryRisk',
+                            description: 'Check an MCP server URL or package name for known-malicious IOC matches, typosquat domains, and newly-registered domain risk',
+                            action: 'Check an MCP server for registry risk',
+                        },
+                        {
+                            name: 'OAuth & Token Exposure Check',
                             value: 'oauthWatchlist',
-                            description: 'Check if a breach exposes credentials used with high-risk OAuth apps',
-                            action: 'Check an email for o auth supply chain exposure',
+                            description: 'Check HIBP breach history against 31 OAuth apps + live INTEL-5 stealer corpus for stolen tokens across cloud consoles, CI/CD, and SaaS tools',
+                            action: 'Check an email for oauth and stolen token exposure',
+                        },
+                        {
+                            name: 'Ransomware Risk',
+                            value: 'ransomwareRisk',
+                            description: 'Check a domain against 100+ active ransomware group victim lists and pre-ransomware credential corpus',
+                            action: 'Check a domain for ransomware victim listing or pre ransomware exposure',
+                        },
+                        {
+                            name: 'Secret Scan',
+                            value: 'secretScan',
+                            description: 'Scan public GitHub repositories for secrets exposed alongside a monitored domain',
+                            action: 'Scan for secrets exposed in public repositories',
+                        },
+                        {
+                            name: 'Session Hijack Detection',
+                            value: 'sessionRisk',
+                            description: 'Detect stolen active session cookies in RelayShield INTEL-5 corpus — identifies AiTM attacks that bypass 2FA without needing the password',
+                            action: 'Check an email for active session hijack risk',
                         },
                         {
                             name: 'SIM Swap Detection',
                             value: 'simSwap',
                             description: 'Detect active SIM swap or port-out fraud via carrier-level query',
                             action: 'Detect sim swap or port out fraud on a phone number',
+                        },
+                        {
+                            name: 'Supply Chain Risk',
+                            value: 'supplyChain',
+                            description: 'Check vendor domains for breach exposure and infostealer hits — returns per-domain risk score (CRITICAL / HIGH / MEDIUM / LOW)',
+                            action: 'Check vendor domains for supply chain identity risk',
                         },
                         {
                             name: 'Threat Intelligence — CVE Lookup',
@@ -91,9 +127,74 @@ class RelayShield {
                     default: '',
                     required: true,
                     displayOptions: {
-                        show: { operation: ['breach', 'infostealer', 'oauthWatchlist'] },
+                        show: { operation: ['breach', 'infostealer', 'oauthWatchlist', 'sessionRisk', 'identityGraph'] },
                     },
                     description: 'Email address to check',
+                },
+                // ----------------------------------------------------------------
+                // Ransomware Risk — domain
+                // ----------------------------------------------------------------
+                {
+                    displayName: 'Domain',
+                    name: 'ransomwareDomain',
+                    type: 'string',
+                    placeholder: 'acme.com',
+                    default: '',
+                    required: true,
+                    displayOptions: {
+                        show: { operation: ['ransomwareRisk'] },
+                    },
+                    description: 'Domain to check against ransomware victim lists (e.g. acme.com)',
+                },
+                // ----------------------------------------------------------------
+                // Supply Chain — vendor domains / emails
+                // ----------------------------------------------------------------
+                {
+                    displayName: 'Vendor Domains',
+                    name: 'vendorDomains',
+                    type: 'string',
+                    placeholder: 'acme.com, widget.io',
+                    default: '',
+                    displayOptions: {
+                        show: { operation: ['supplyChain', 'secretScan'] },
+                    },
+                    description: 'Comma-separated vendor domains to check (e.g. acme.com, vendor.io). Max 10 per call for Supply Chain Risk; max 5 for Secret Scan.',
+                },
+                {
+                    displayName: 'Vendor Emails (Optional)',
+                    name: 'vendorEmails',
+                    type: 'string',
+                    placeholder: 'alice@acme.com, bob@vendor.io',
+                    default: '',
+                    displayOptions: {
+                        show: { operation: ['supplyChain'] },
+                    },
+                    description: 'Comma-separated vendor email addresses — domains are extracted automatically. Can be used instead of or alongside Vendor Domains.',
+                },
+                // ----------------------------------------------------------------
+                // MCP Registry Risk — server URL / package name
+                // ----------------------------------------------------------------
+                {
+                    displayName: 'Server URL',
+                    name: 'mcpServerUrl',
+                    type: 'string',
+                    placeholder: 'https://mcp.example.com/sse',
+                    default: '',
+                    displayOptions: {
+                        show: { operation: ['mcpRegistryRisk'] },
+                    },
+                    description: 'MCP server URL to check for typosquat domains, known-malicious IOC matches, and newly-registered domain risk. Provide this or Package Name (or both).',
+                },
+                {
+                    displayName: 'Package Name (Optional)',
+                    name: 'mcpPackageName',
+                    type: 'string',
+                    placeholder: '@some-scope/mcp-server-package',
+                    default: '',
+                    displayOptions: {
+                        show: { operation: ['mcpRegistryRisk'] },
+                    },
+                    description: 'MCP package name, used if Server URL is not available. Checks are more limited without a domain to check.',
                 },
                 // ----------------------------------------------------------------
                 // SIM Swap — phone
@@ -232,20 +333,66 @@ class RelayShield {
                     const email = this.getNodeParameter('email', i);
                     responseData = await relayShieldPost(this, '/v1/metered/oauth-watchlist', { email }, apiKey);
                 }
+                else if (operation === 'sessionRisk') {
+                    const email = this.getNodeParameter('email', i);
+                    responseData = await relayShieldPost(this, '/v1/metered/session-risk', { email }, apiKey);
+                }
+                else if (operation === 'identityGraph') {
+                    const email = this.getNodeParameter('email', i);
+                    responseData = await relayShieldPost(this, '/v1/metered/identity-graph', { email }, apiKey);
+                }
+                else if (operation === 'ransomwareRisk') {
+                    const domain = this.getNodeParameter('ransomwareDomain', i);
+                    responseData = await relayShieldPost(this, '/v1/metered/ransomware-risk', { domain }, apiKey);
+                }
+                else if (operation === 'supplyChain') {
+                    const rawDomains = this.getNodeParameter('vendorDomains', i).trim();
+                    const rawEmails = this.getNodeParameter('vendorEmails', i).trim();
+                    const body = {};
+                    if (rawDomains)
+                        body.vendor_domains = rawDomains.split(',').map((d) => d.trim()).filter(Boolean);
+                    if (rawEmails)
+                        body.vendor_emails = rawEmails.split(',').map((e) => e.trim()).filter(Boolean);
+                    if (!body.vendor_domains && !body.vendor_emails) {
+                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), 'Supply Chain Risk requires at least one Vendor Domain or Vendor Email', { itemIndex: i });
+                    }
+                    responseData = await relayShieldPostJson(this, '/v1/metered/supply-chain', body, apiKey);
+                }
+                else if (operation === 'secretScan') {
+                    const rawDomains = this.getNodeParameter('vendorDomains', i).trim();
+                    if (!rawDomains) {
+                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), 'Secret Scan requires at least one Vendor Domain', { itemIndex: i });
+                    }
+                    const vendor_domains = rawDomains.split(',').map((d) => d.trim()).filter(Boolean);
+                    responseData = await relayShieldPostJson(this, '/v1/metered/secret-scan', { vendor_domains }, apiKey);
+                }
+                else if (operation === 'mcpRegistryRisk') {
+                    const serverUrl = this.getNodeParameter('mcpServerUrl', i).trim();
+                    const packageName = this.getNodeParameter('mcpPackageName', i).trim();
+                    if (!serverUrl && !packageName) {
+                        throw new n8n_workflow_1.NodeOperationError(this.getNode(), 'MCP Registry Risk requires a Server URL or Package Name', { itemIndex: i });
+                    }
+                    const body = {};
+                    if (serverUrl)
+                        body.server_url = serverUrl;
+                    if (packageName)
+                        body.package_name = packageName;
+                    responseData = await relayShieldPostJson(this, '/v1/metered/mcp-registry-risk', body, apiKey);
+                }
                 else if (operation === 'intelTelegram') {
                     const indicator = this.getNodeParameter('indicator', i);
                     const type = this.getNodeParameter('indicatorType', i);
-                    responseData = await relayShieldGet(this, `/v1/intel/telegram?indicator=${encodeURIComponent(indicator)}&type=${type}`, apiKey);
+                    responseData = await relayShieldPost(this, '/v1/intel/telegram', { [type]: indicator, type }, apiKey);
                 }
                 else if (operation === 'intelCve') {
                     const lookupBy = this.getNodeParameter('cveLookupBy', i);
                     if (lookupBy === 'cve_id') {
                         const cveId = this.getNodeParameter('cveId', i);
-                        responseData = await relayShieldGet(this, `/v1/intel/cve?cve_id=${encodeURIComponent(cveId)}`, apiKey);
+                        responseData = await relayShieldPost(this, '/v1/intel/cve', { cve_id: cveId }, apiKey);
                     }
                     else {
                         const keyword = this.getNodeParameter('cveKeyword', i);
-                        responseData = await relayShieldGet(this, `/v1/intel/cve?keyword=${encodeURIComponent(keyword)}`, apiKey);
+                        responseData = await relayShieldPost(this, '/v1/intel/cve', { keyword }, apiKey);
                     }
                 }
                 else {
@@ -269,6 +416,10 @@ exports.RelayShield = RelayShield;
 // HTTP helpers — pass IExecuteFunctions for proper NodeApiError context
 // ---------------------------------------------------------------------------
 async function relayShieldPost(ctx, path, body, apiKey) {
+    return relayShieldPostJson(ctx, path, body, apiKey);
+}
+// Generic POST helper — accepts any JSON-serialisable body (strings, arrays, etc.)
+async function relayShieldPostJson(ctx, path, body, apiKey) {
     const response = await fetch(`${API_BASE}${path}`, {
         method: 'POST',
         headers: {
@@ -276,17 +427,6 @@ async function relayShieldPost(ctx, path, body, apiKey) {
             'X-RS-API-KEY': apiKey,
         },
         body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-        const text = await response.text();
-        throw new n8n_workflow_1.NodeApiError(ctx.getNode(), { message: `RelayShield API error ${response.status}: ${text}` });
-    }
-    return response.json();
-}
-async function relayShieldGet(ctx, pathWithQuery, apiKey) {
-    const response = await fetch(`${API_BASE}${pathWithQuery}`, {
-        method: 'GET',
-        headers: { 'X-RS-API-KEY': apiKey },
     });
     if (!response.ok) {
         const text = await response.text();

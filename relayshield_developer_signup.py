@@ -1547,7 +1547,7 @@ LANDING_PAGE = """<!DOCTYPE html>
     <div class="price-card">
       <div class="endpoint">/v1/metered/secret-scan</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">Public artifact secret detection across <strong>five sources</strong> &mdash; GitHub repositories, <strong>npm</strong> and <strong>PyPI</strong> packages, <strong>Docker Hub</strong> images and <strong>Hugging Face</strong> models and Spaces &mdash; for secrets (API keys, tokens, private keys) already published against your domain. Secrets ship inside released packages and images constantly, and repo-only scanners never see them. Every hit is verified against the matching credential pattern before it is reported, so a docs example or a placeholder is not billed to you as a CRITICAL. Covers your own domain and vendor supply-chain domains</div>
+      <div class="desc">Public artifact secret detection across <strong>six sources</strong> &mdash; GitHub repositories, <strong>npm</strong> and <strong>PyPI</strong> packages, <strong>Docker Hub</strong> images, <strong>Hugging Face</strong> models and Spaces, and <strong>Postman</strong> public workspaces and collections &mdash; for secrets (API keys, tokens, private keys) already published against your domain. Secrets ship inside released packages and images constantly, and repo-only scanners never see them. Every hit is verified against the matching credential pattern before it is reported, so a docs example or a placeholder is not billed to you as a CRITICAL. Covers your own domain and vendor supply-chain domains</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/target-risk</div>
@@ -2172,6 +2172,19 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "It exposes breach, infostealer, SIM-swap and domain-lookalike checks as native nodes, so identity risk drops "
             "into an existing onboarding, offboarding or alert-triage workflow without custom HTTP nodes.")),
     ),
+    "x402": (
+        ("x402scan.com", "x402-list.com", "warpcast.com", "farcaster.xyz"),
+        _banner("Arriving from the x402 ecosystem", _p(
+            "Every counterparty check below is <b>x402 native</b> on Base and Solana, discoverable in the "
+            "CDP Bazaar, with no signup and no API key: "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">wallet-risk</code> $0.05, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">token-security</code> $0.05, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">scan-wallet</code> $0.10, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">mcp-registry-risk</code> $0.35, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">wallet-screen-batch</code> $0.50. '
+            "Point an agent at the endpoint, take the 402, pay it. A wallet-risk check costs less than the "
+            "average x402 payment it protects.")),
+    ),
     "elastic": (
         ("elastic.co", "discuss.elastic.co"),
         _banner("Arriving from Elastic", _p(
@@ -2324,6 +2337,20 @@ _SOURCE_ALIASES = {
     "session-hijack-farcaster": "session-hijack",
     "session-hijack-mastodon":  "session-hijack",
     "session-hijack-reddit":    "session-hijack",
+    # Agent counterparty screening post, 2026-08-05 ("Your Agent Has a Wallet
+    # Now"). Same one-key-per-channel pattern so CloudWatch keeps channels
+    # distinguishable while all rendering the x402 banner. Registered BEFORE the
+    # post goes out, which is the whole point: an unregistered key logs
+    # unmatched: and renders no banner at all.
+    "x402":           "x402",
+    "x402-post":      "x402",
+    "x402-blog":      "x402",
+    "x402-farcaster": "x402",
+    "x402-linkedin":  "x402",
+    "x402-telegram":  "x402",
+    "x402-mastodon":  "x402",
+    "x402-medium":    "x402",
+    "x402scan":       "x402",
     "hn": "github",
     "reddit": "github",
     "opencti": "xsoar",

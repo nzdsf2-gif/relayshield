@@ -2848,9 +2848,16 @@ def _payg_operation(path, ep, price_units):
             # The discovery contract registries read. `price` is structured
             # rather than a display string so an agent can compare offers
             # without parsing currency symbols out of prose.
+            # x402scan's discovery spec is explicit that `currency` is "USD"
+            # and `amount` is decimal USD, while the runtime x402 challenge
+            # carries token atomic units. They are deliberately different
+            # units, so both are published: `amount` for the registry, and
+            # `amount_base_units` alongside it so nothing has to infer the
+            # USDC conversion. Their fields are a superset of the IETF API
+            # payment spec and do not collide.
             "x-payment-info": {
-                "price": {"mode": "fixed", "currency": "USDC", "amount": f"{price_usd:.6f}",
-                          "amount_base_units": price_units, "decimals": 6},
+                "price": {"mode": "fixed", "currency": "USD", "amount": f"{price_usd:.2f}",
+                          "amount_base_units": price_units, "asset": "USDC", "decimals": 6},
                 "protocols": [{"x402": {}}],
                 "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"],
                 "x402_version": ep["x402_version"],

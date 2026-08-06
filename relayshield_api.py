@@ -6959,6 +6959,55 @@ def _bazaar_body_ext(input_example: dict, input_schema: dict, output_example: di
     }
 
 
+def _schema_from_example(value):
+    """Infer a JSON Schema from an example value.
+
+    Deliberately permissive: types only, never `required`, and arrays are
+    described by their first element. The point is to give a discovery client
+    (and x402scan's auditor, which reports SCHEMA_OUTPUT_MISSING for a bare
+    `{"type": "object"}`) a real description of the response, without turning
+    an example into a contract we would then have to keep exactly true for
+    every field on every call. Enrichment fields that come back null on some
+    calls are typed from whatever the example happens to show, so a strict
+    schema here would fail validation on perfectly good responses.
+    """
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if isinstance(value, str):
+        return {"type": "string"}
+    if value is None:
+        # Not "null": the field is nullable, and in this API null means
+        # "not determined" rather than a distinct type.
+        return {}
+    if isinstance(value, list):
+        return {"type": "array", "items": _schema_from_example(value[0]) if value else {}}
+    if isinstance(value, dict):
+        return {"type": "object",
+                "properties": {k: _schema_from_example(v) for k, v in value.items()}}
+    return {}
+
+
+def _bazaar_output_schema(output_example):
+    """Schema for `info.output`, which is the WRAPPER `{type, example}`.
+
+    Same trap that produced the CDP facilitator rejection documented in
+    _v2_bazaar_extension: the SDK validates `info` against `schema`, so this
+    must describe `{"type": "json", "example": ...}` and NOT the response
+    payload directly. The payload's own inferred schema nests under `example`.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string"},
+            "example": _schema_from_example(output_example),
+        },
+    }
+
+
 def _v1_output_schema(bazaar_ext: dict) -> dict:
     """Strips the V2-only _input_schema field so V1's outputSchema stays
     exactly {input, output} on the wire."""
@@ -6998,7 +7047,7 @@ def _v2_bazaar_extension(bazaar_ext: dict) -> dict:
                     },
                     "required": ["body"],
                 },
-                "output": {"type": "object"},
+                "output": _bazaar_output_schema(bazaar_ext["output"]),
             },
             "required": ["input"],
         },

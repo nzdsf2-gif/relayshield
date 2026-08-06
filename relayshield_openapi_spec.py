@@ -2882,7 +2882,10 @@ _TAG_DESCRIPTIONS = [
 
 _DESCRIPTION = """
 Identity-compromise and threat-intelligence checks over a plain REST API. Every endpoint is
-`POST`, takes a JSON body, and returns a JSON envelope.
+`POST`, takes a JSON body, and returns a JSON envelope. Pay per call in USDC over x402 with no
+signup and no API key, or use a key with prepaid credits and a free tier of 20 calls. Screen a
+counterparty wallet, a token contract, an MCP server, a domain or an email against a corpus of
+over 5 million indicators.
 
 ## Authentication
 

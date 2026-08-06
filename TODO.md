@@ -60,8 +60,39 @@ Mirror what worked on n8n, where 2 of 3 templates are approved and live. Candida
 2. **Shadow AI / vendor approval gate** — n8n 17386, approved and live, repositioning already proven.
 3. **Employee onboarding** — hold until the n8n version (17255) clears its own review.
 
-**Sequencing note:** ZAP-3 already records that featuring Zap templates in a launch announcement is
-the cheapest early-exit lever from beta, lighter than building the full embed widget. Do that first.
+**CORRECTION to the early-exit assumption, checked 2026-08-05.** Early exit is **not** gated on a
+template count. Zapier exits the integration from beta **the next business day once they detect one
+real signup through an embedded Zapier tool** on our own site. Templates help adoption; **the embed
+is the actual trigger.**
+
+### ZAPIER-EMBED: put the Workflow Element on /developers
+
+**The tool is Zapier's "Workflow Element"**, part of the Powered by Zapier programme
+(`docs.zapier.com/powered-by-zapier/embedding-zapier/workflow-element`). Their own description: a
+prebuilt UI component, generated from a configurator, "plugged into your product in minutes, no
+engineering resources required."
+
+**It works before we have any templates**, because its Discover mode embeds a filtered copy of
+Zapier's app directory showing RelayShield paired with other apps. Templates make it better, they are
+not a precondition. So the embed can go up first and start earning the early-exit signal immediately.
+
+**Verify in the Zapier console before building:** whether the Workflow Element requires a paid plan
+or a particular partner tier. The docs do not say, and I have not confirmed it.
+
+### Zap template ideas
+
+Ordered. **Do not simply port the three n8n workflows** — that makes us look like a smaller n8n, and
+Zapier's audience is less technical and buys different shapes.
+
+| # | Template | Why this one |
+|---|---|---|
+| 1 | **Employee offboarding credential check** | The proven shape (n8n 16694). Build the access-revocation branch in from day one per MKTPL-14: it is a **public commitment** made in a LinkedIn reply, so it carries reputational stakes. Log the suspension outcome as its own audit event, separate from the credential finding. |
+| 2 | **New-vendor risk gate from a form** | Typeform or Google Forms submission triggers supply-chain plus secret-scan plus OAuth-watchlist on the vendor domain, result to Slack and a Google Sheet. **Zapier-native apps n8n users do not reach.** This is the differentiated one. |
+| 3 | **Breach alert to helpdesk ticket** | Breach or infostealer hit opens a Zendesk, Freshdesk or Jira Service Management ticket. Pure Zapier territory, and it lands with IT ops rather than developers. |
+| 4 | **Domain-lookalike watch to Google Chat / Teams** | Scheduled domain check, alert into the chat tool the customer already uses. Trivial to build, high perceived value, no n8n equivalent published. |
+| 5 | **New-hire onboarding check** | Hold until n8n 17255 clears its own review, so we are not maintaining two versions of a workflow still being revised. |
+
+**Sequencing:** embed first (it is the early-exit trigger), then template 1, then template 2.
 
 ### Open question for the founder: announce it, and how
 

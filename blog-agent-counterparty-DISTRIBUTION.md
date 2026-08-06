@@ -210,6 +210,27 @@ the duplicate-content penalty. Pasting does not.
 
 ---
 
+## Additional x402-native channels, added 2026-08-05
+
+Beyond the five above. These are where the x402 audience actually is, as opposed to where security
+audiences are.
+
+| Channel | Why | Notes |
+|---|---|---|
+| **Farcaster `/x402` AND `/base`** | Post to both, not one. Different subscriber sets. | Already the top target; this just widens it |
+| **Merit Systems Discord** `discord.gg/JuKt7tPnNc` | x402scan's own community. Small, entirely on-topic, and they built the tool whose data the post cites. | Lead with the measurement, not the product |
+| **x402 Foundation orbit / GitHub** | We are an evidenced participant in issue #2814 with a real stuck-resource report, so this is not a cold entry. | Do NOT revive #2814 itself, it is CLOSED and dominated by a third party |
+| **CDP Discord Show and Tell** | Coinbase's own channel for x402 builders. | **Gated on MKTPL-15**, see below. Check before posting |
+| **Hacker News** | The measured-data framing is the shape HN rewards. | One shot only. Hold until the post has settled elsewhere and the numbers are re-verified |
+
+**MKTPL-15 is the gate on the CDP Discord post.** It is a tracked item that holds the Show and Tell
+post until the staged x402 V2 migration completes, on the principle of not marketing listings that
+might be silently stale. Check its state before posting there; everything else in this table is
+ungated.
+
+**Also do first, independent of the post:** x402scan's "Add your API". Blocked on discovery-spec
+work, see X402SCAN-REGISTER in TODO.
+
 ## Channels deliberately excluded
 
 - **X / Twitter.** @RelayShieldHQ suspended since 2026-07-02, appeal denied same day. Do not build

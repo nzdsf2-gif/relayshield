@@ -1893,6 +1893,22 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
     </svg>
     <code style="background:var(--bg);border-radius:4px;padding:.1rem .4rem">n8n-nodes-relayshield</code> is verified and available directly on n8n Cloud — search for it on the canvas, no manual install needed.
   </p>
+  <div style="display:flex;align-items:center;gap:.5rem;margin:0 0 .35rem">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="2" width="20" height="20" rx="5" fill="#FF4F00"/>
+      <path d="M12 6.5v11M6.5 12h11M8.1 8.1l7.8 7.8M15.9 8.1l-7.8 7.8" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/>
+    </svg>
+    <span style="font-size:.82rem;font-weight:700;color:#FF4F00">Zapier</span>
+    <span style="font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;background:var(--bg);color:var(--muted);border-radius:4px;padding:.1rem .38rem">Beta</span>
+  </div>
+  <p style="color:var(--muted);font-size:.82rem;margin:0 0 1rem">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:-2px;margin-right:.3rem">
+      <path d="M9 12l2 2 4-4" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="12" cy="12" r="10" stroke="#22c55e" stroke-width="1.6"/>
+    </svg>
+    The RelayShield Zapier integration is approved and live in the Zapier App Directory, currently in
+    its 90-day beta. Connect it with your API key to reach 8,000+ apps, no invite code needed.
+  </p>
   <!--
     Template links must point at n8n.io/workflows/<id>, NOT creators.n8n.io.
     A creators.n8n.io URL returns HTTP 200 for an unauthenticated visitor but

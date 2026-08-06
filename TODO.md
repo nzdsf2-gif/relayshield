@@ -170,6 +170,14 @@ There are two flat tiers. A buyer could reasonably read that as usage-based bill
 
 ---
 
+## 🟩 ON DECK TOMORROW: send the Twilio Marketplace ask
+
+Message is written and ready in `twilio_marketplace_listing_request.md`. Re-verify the three figures
+in it first (5.0M+ indicators, 85 channels, 28 endpoints), then send to the Twilio Account Executive.
+No self-serve path exists, so this email IS the application.
+
+---
+
 ## AGGREGATOR: list RelayShield in Twilio / Vonage / Sinch marketplaces, added 2026-08-05
 
 **The converse of consuming carrier data.** RelayShield already *consumes* Twilio Lookup v2

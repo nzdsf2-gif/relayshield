@@ -30,6 +30,78 @@ Slack / webhook delivery). Artifact Hub listing is cheap now that Docker Hub is 
 
 ---
 
+## ZAPIER-BETA: integration APPROVED 2026-08-05, 90-day beta begins
+
+**Abraham D. confirmed approval.** The app is going live in the Zapier App Directory; the invite code
+is no longer needed. **Risk to watch, stated by Zapier:** "if we receive a significant number of
+support requests for the app we may revert it to Private while the issues get addressed."
+
+**Beta lasts 90 days, then automatic entry to the Partner Program.** Marketing and support benefits
+are promised but **undefined** in their material, so do not plan around them. Beta can be **exited
+early by embedding the integration** in our own product, which is the only concrete lever they name.
+
+**Zapier's own list of what successful integrations do during beta:**
+1. **Create Zap templates** and surface them in-product. This is the n8n playbook and the highest
+   value item; see ZAPIER-TEMPLATES below.
+2. Let users discover and build Zaps without leaving our UI (the embed).
+3. Publish help documentation on our own site.
+4. Apply for the **Zapier Partner Sandbox**, to test new versions before promoting them to users.
+   Cheap and directly reduces the "reverted to Private" risk above.
+
+### ZAPIER-TEMPLATES: port the n8n template playbook to Zapier
+
+Mirror what worked on n8n, where 2 of 3 templates are approved and live. Candidates, in order:
+
+1. **Employee offboarding** — the proven one (n8n 16694). **Build the access-revocation branch in
+   from day one** (Google Workspace Admin SDK / Microsoft Graph suspend), plus Google Chat / Teams
+   notification delivery, and log the suspension outcome as its own audit event separate from the
+   credential finding. All of that is already scoped in MKTPL-14 and is a **public commitment** made
+   in a LinkedIn reply, so it has reputational stakes.
+2. **Shadow AI / vendor approval gate** — n8n 17386, approved and live, repositioning already proven.
+3. **Employee onboarding** — hold until the n8n version (17255) clears its own review.
+
+**Sequencing note:** ZAP-3 already records that featuring Zap templates in a launch announcement is
+the cheapest early-exit lever from beta, lighter than building the full embed widget. Do that first.
+
+### Open question for the founder: announce it, and how
+
+**Recommendation: yes to the logo, not yet to a blog.**
+
+- **Add the Zapier logo/badge to `api.relayshield.net/developers`** alongside the existing n8n
+  placement. Consistent with MKTPL-2a, cheap, and it doubles as the "reference the templates on our
+  own site" early-exit lever from ZAP-3.
+- **Hold the blog post until at least one Zap template is live.** An announcement whose call to
+  action is "connect RelayShield to 8,000 apps" with no template to click is the weaker version of
+  the post, and we would be spending the announcement twice. The n8n announcement worked because it
+  linked a real, approved template. Same pattern here.
+- **Do not describe it as anything other than Beta** while the Beta tag is on the directory listing.
+
+---
+
+## X402SCAN-REGISTER: ON DECK, blocked on discovery-spec work, added 2026-08-05
+
+**Not a form fill.** x402scan registration requires a published discovery specification. Audited
+live 2026-08-05: our `/openapi.json` has **32 operations, 29 of them `/v1/metered`, and ZERO
+`/v1/payg` operations**. `x-payment-info` appears nowhere in the document.
+
+**Their hard rule:** do not register until the implementation is live and discovery plus probe audits
+are clean against the deployed origin, because registration creates a public listing agents will
+call and pay for.
+
+**Required per payable operation:** `x-payment-info` with a structured `price`
+(`{mode, currency, amount}`) and `protocols: [{"x402": {}}]`, plus a declared `402` response and a
+`requestBody` JSON schema. Recommended: `info.x-guidance` (missing) and `info.contact.email`
+(already present).
+
+**Why it is worth doing beyond the listing:** our public API reference does not document the x402
+surface at all, which is the surface the entire agent audience cares about. Registered origins also
+get Poncho merchant and health pages.
+
+**Scale context, measured 2026-08-05:** 1.39K active merchants in 24h but only **35 active
+*registered*** merchants. Registration puts us in a set of 35, not 1,390.
+
+---
+
 ## AWSMP-INSIGHTS: AWS is auto-publishing AI-written pricing copy on both listings, added 2026-08-05
 
 **AWS Marketplace emailed twice on 2026-08-05**, once per listing, to say it has published "AI
@@ -46,15 +118,49 @@ them on our own storefront, where buyers make purchase decisions. We have shippe
 public surfaces before (brand-monitor at $0.25 when it was $0.35). **Nobody has yet read what it
 says.**
 
-**Already found while looking, and it feeds the AI's input:** the IOC count is inconsistent across
-live surfaces. The Bundles listing says **4.4M+**, the `/developers` page says **4.6M+**, and the
-2026-08-04 MSP brief says **4.9M+**. The AI Insights are generated from exactly this kind of public
-copy, so inconsistent source material produces inconsistent generated claims.
+### READ 2026-08-05. The AI is accurate. Our own copy is not.
+
+**Both listings' AI Insights were pulled and checked against source. The generated text faithfully
+reproduces our listing copy. Every problem found is ours.**
+
+**TI listing** says buyers get "10,000 API calls per month across all **26 metered endpoints**". That
+number comes straight from our own dimension descriptions for `ti_starter` and `ti_unlimited`.
+Reality: `METERED_CREDIT_COSTS` has **27** entries and `/openapi.json` documents **29** metered
+paths. Three numbers, none matching, one of them printed on the storefront.
+
+**The IOC count is wrong on every surface, and all four understate it.** Measured live from
+`relayshield_intel_iocs` on 2026-08-05: **5,027,104 indicators.**
+
+| Surface | Claims | vs live |
+|---|---|---|
+| TI listing dimensions | 4.5M+ | understated |
+| Bundles listing overview | 4.4M+ | understated |
+| `/developers` page | 4.6M+ | understated |
+| MSP Solution Brief | 4.9M+ | understated |
+| **Live table** | **5.03M** | |
+
+Understating is the benign direction, but four different numbers on four live surfaces is the actual
+problem, and it is the exact material AWS's generator reads.
+
+**Bundles listing insights are accurate.** The five-functions-plus-monthly-minimum description is a
+fair reading of Bundle D. No correction needed.
+
+**AWS's generated "top-of-mind questions" are free buyer research, and two are unanswered on-page:**
+- *"What happens if I exceed the 10,000 monthly calls on TI Starter?"* The real answer is a hard
+  **HTTP 429 lockout until the next billing period**, not an overage charge. That is material to a
+  purchase decision and appears nowhere on the listing.
+- *"Am I charged if I make no calls to a given security function in a month?"* Yes, the monthly
+  minimum still applies. Also unanswered.
+
+**One phrase worth challenging:** the TI summary says *"Pricing scales by call volume."* It does not.
+There are two flat tiers. A buyer could reasonably read that as usage-based billing.
 
 **To do:**
-1. Read the AI Insights on both listings and diff against real `METERED_CREDIT_COSTS`, the
-   Marketplace dimensions, and the contract-with-consumption terms.
-2. Reconcile the IOC figure to one verified number across every surface.
+1. ~~Read the AI Insights on both listings~~ ✅ done 2026-08-05, see above.
+2. **Reconcile the IOC figure to 5.0M+ across all four surfaces**, and fix the endpoint count to one
+   verified number (settle 27 vs 29 first: the gap between `METERED_CREDIT_COSTS` and
+   `/openapi.json` is itself a defect).
+3. **Answer the two buyer questions on the listings**, especially the 429 lockout.
 3. If anything is wrong: AWS Marketplace Management Portal, contact us form, category **Product
    Listing**, subcategory **Text Change**, supply the product ID and the suggested edits. **AWS
    removes the insight from display while it reviews and regenerates**, so filing is also the way to

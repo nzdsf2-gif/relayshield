@@ -4318,6 +4318,8 @@ def handle_report_view(report_id: str) -> dict:
         for k, v in summary.items()
     )
     body = f"""<html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>RelayShield Report — {html.escape(report_type)}</title></head>
 <body style="background:#0a1628;color:#e2e8f0;font-family:-apple-system,sans-serif;margin:0;padding:24px">
 <div style="max-width:480px;margin:0 auto">
@@ -10432,6 +10434,54 @@ def _text_response(body: str, content_type: str, max_age: int = 3600) -> dict:
     }
 
 
+
+
+# ---------------------------------------------------------------------------
+# Favicon
+#
+# Added 2026-08-06. x402scan's discovery auditor reports FAVICON_MISSING for
+# this origin, and the Poncho merchant card it generates falls back to a
+# generic globe while other listings show their own mark.
+#
+# SVG, not ICO or PNG, and that is not a style preference. This is a REST API
+# (v1) behind a single {proxy+} integration. Binary responses there need the
+# response media type in `binaryMediaTypes` AND the request's Accept header to
+# match one of those entries EXACTLY -- a real browser sends
+# "image/avif,image/webp,image/png,...", which matches nothing, so a base64
+# body is delivered verbatim as text. Verified directly: `Accept: image/png`
+# returned a valid PNG while the browser's own multi-value Accept returned the
+# base64 string. The alternative, setting contentHandling CONVERT_TO_BINARY on
+# the proxy method, would convert every JSON response on the API too.
+#
+# SVG is text, so none of that applies, it is crisp at every size, and it is
+# supported by every current browser. /favicon.ico redirects here for crawlers
+# that ask for the conventional path.
+# ---------------------------------------------------------------------------
+
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<rect width="64" height="64" rx="12" fill="#1a1035"/>'
+    '<path d="M32 8 54 16v16c0 13-9 21-22 24-13-3-22-11-22-24V16z" fill="#a855f7"/>'
+    '<path d="M32 12 50 18.5V32c0 11-7.5 17.5-18 20.5V12z" fill="#9333ea"/>'
+    '<path d="M21 32.5 28.5 40 44 24" fill="none" stroke="#f4f4e8" '
+    'stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>'
+    '</svg>'
+)
+
+
+def handle_favicon():
+    """Serve the site icon. Cached hard: it changes roughly never, and every
+    browser tab, crawler and marketplace card fetches it."""
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "image/svg+xml",
+            "Cache-Control": "public, max-age=604800",
+        },
+        "body": _FAVICON_SVG,
+    }
+
+
 def handle_robots_txt() -> dict:
     body = (
         "User-agent: *\n"
@@ -10538,6 +10588,8 @@ def handle_guide_page(slug: str) -> dict:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>{guide['title']} — RelayShield</title>
 <meta name="description" content="{guide['desc']}">
 <link rel="canonical" href="{url}">
@@ -10697,6 +10749,14 @@ def lambda_handler(event: dict, context) -> dict:
     # meant crawlers had no entry point and coding agents had no spec to read --
     # awkward for a product whose whole thesis is that agents discover and pay
     # for it, and whose LangChain placement is driven by install volume.
+    if method in ("GET", "HEAD") and path in ("/favicon.svg", "/favicon.svg/"):
+        return handle_favicon()
+    if method in ("GET", "HEAD") and path in ("/favicon.ico", "/favicon.ico/",
+                                              "/apple-touch-icon.png",
+                                              "/apple-touch-icon-precomposed.png"):
+        return {"statusCode": 302, "headers": {"Location": "/favicon.svg",
+                                               "Cache-Control": "public, max-age=604800"},
+                "body": ""}
     if method in ("GET", "HEAD") and path in ("/robots.txt", "/robots.txt/"):
         return handle_robots_txt()
     if method in ("GET", "HEAD") and path in ("/sitemap.xml", "/sitemap.xml/"):

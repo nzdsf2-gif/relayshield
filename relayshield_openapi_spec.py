@@ -3072,6 +3072,8 @@ DOCS_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>RelayShield API Reference</title>
 <meta name="description" content="Full REST reference for the RelayShield API: request parameters, response attributes, error handling and live examples for every endpoint.">
 <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@__V__/swagger-ui.css">

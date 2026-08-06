@@ -10,7 +10,7 @@ item by item, in their order, so nothing gets asked afterwards.
 |---|---|
 | Review threads | **39 total, 0 unresolved** |
 | `docs-approved` label | **applied** (the old open item is closed) |
-| Current label | **`pending-demo`** — this recording is the only gate |
+| Current label | **`pending-demo`** , this recording is the only gate |
 | Failing check | `check_docs_approved_label_job`, **stale**: it ran before the label existed and has not re-run |
 | Last activity | 2026-08-02, so it has been quiet three days |
 
@@ -41,12 +41,12 @@ than Community Edition.** That was never researched, and asking costs one Slack 
 ## What the pack actually contains
 
 Three commands. Reputation-style commands only. **No fetch-incidents, no playbooks, no layouts, no
-mirroring** — say this explicitly on the recording rather than waiting to be asked, since demo-prep
+mirroring.** Say this explicitly on the recording rather than waiting to be asked, since demo-prep
 lists those and their absence is a deliberate scope choice, not an omission.
 
 | Command | Arguments | Context outputs |
 |---|---|---|
-| `relayshield-mcp-registry-risk` | `server_url` **or** `package_name`, neither individually required | `RelayShield.MCPRegistryRisk.{queried,verdict,findings}` |
+| `relayshield-mcp-registry-risk` | `server_url` or `package_name`, neither individually required | `RelayShield.MCPRegistryRisk.{queried,verdict,findings}` |
 | `relayshield-cert-expiry` | `domain` | `RelayShield.CertExpiry.{domain,days_remaining,risk_level}` |
 | `relayshield-supply-chain` | up to 10 vendor domains or emails | `RelayShield.SupplyChain.{domains_checked,highest_risk,critical_vendors}` |
 

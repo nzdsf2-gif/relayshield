@@ -72,12 +72,26 @@ is the actual trigger.**
 prebuilt UI component, generated from a configurator, "plugged into your product in minutes, no
 engineering resources required."
 
-**It works before we have any templates**, because its Discover mode embeds a filtered copy of
-Zapier's app directory showing RelayShield paired with other apps. Templates make it better, they are
-not a precondition. So the embed can go up first and start earning the early-exit signal immediately.
+**CORRECTION 2026-08-05, checked against their Getting Started page.** The documented embedded
+Zap-editor path has two prerequisites:
 
-**Verify in the Zapier console before building:** whether the Workflow Element requires a paid plan
-or a particular partner tier. The docs do not say, and I have not confirmed it.
+1. "Your app has passed the review process and is Published in the Zapier App Directory" -> **met, as
+   of today**
+2. "Any Zap templates you want to query have been reviewed and made public" -> **NOT met, we have
+   zero**
+
+So the simple iframe embed is template-gated. The pattern is
+`<iframe src="https://api.zapier.com/v1/embed/<app>/create/<template-id>"></iframe>`, where the id
+comes from the Workflow API's `GET /v1/zap-templates`. **An earlier note in this file said the embed
+works before any templates exist; that was wrong for this path.** The Workflow Element's Discover
+mode (embedding a filtered app directory) may still work standalone, but that is **unverified**.
+
+**Two things to verify in the Zapier console tomorrow, before building anything:**
+- Does the **Workflow Element Discover mode** render without any public Zap templates? If yes, the
+  embed can ship first and start earning the early-exit signal immediately. If no, **template 1 must
+  ship first** and the sequencing below flips.
+- Does the Workflow Element require a **paid plan or a particular partner tier**? Their docs list no
+  pricing gate in the prerequisites, which is a good sign but is not confirmation.
 
 ### Zap template ideas
 
@@ -92,7 +106,9 @@ Zapier's audience is less technical and buys different shapes.
 | 4 | **Domain-lookalike watch to Google Chat / Teams** | Scheduled domain check, alert into the chat tool the customer already uses. Trivial to build, high perceived value, no n8n equivalent published. |
 | 5 | **New-hire onboarding check** | Hold until n8n 17255 clears its own review, so we are not maintaining two versions of a workflow still being revised. |
 
-**Sequencing:** embed first (it is the early-exit trigger), then template 1, then template 2.
+**Sequencing, pending the two checks above:** if Discover works standalone, embed first since it is
+the early-exit trigger, then template 1, then template 2. If it does not, template 1 first, then the
+embed, then template 2.
 
 ### Open question for the founder: announce it, and how
 
@@ -198,6 +214,14 @@ There are two flat tiers. A buyer could reasonably read that as usage-based bill
    pull an inaccurate claim down quickly.
 4. Optional: an EventBridge rule on the **"AI Insights Updated"** event, so a future regeneration
    does not go unnoticed the way this one nearly did.
+
+---
+
+## 🟩 ON DECK TOMORROW: Zapier Workflow Element
+
+Verify the two open questions above in the Zapier console (does Discover mode work with zero public
+templates; is there a paid-plan or partner-tier gate), then build whichever comes first. This is the
+lever that exits beta early, so it outranks the templates themselves.
 
 ---
 

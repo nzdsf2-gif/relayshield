@@ -10581,7 +10581,10 @@ def handle_openapi() -> dict:
             "Cache-Control": "public, max-age=3600",
             "Access-Control-Allow-Origin": "*",
         },
-        "body": json.dumps(relayshield_openapi_spec.build_spec(PUBLIC_BASE_URL)),
+        # Prices passed in, never duplicated in the spec module: PAYG_PRICE_UNITS
+        # here is the same table the 402 challenge is built from, so the
+        # published document cannot advertise a price we do not charge.
+        "body": json.dumps(relayshield_openapi_spec.build_spec(PUBLIC_BASE_URL, PAYG_PRICE_UNITS)),
     }
 
 

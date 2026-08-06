@@ -2198,6 +2198,669 @@ def _operation(ep):
     return {"post": op}
 
 
+
+# ---------------------------------------------------------------------------
+# x402 pay-per-call surface (/v1/payg/*)
+#
+# These are the same checks as the metered routes, paid per call in USDC over
+# x402 instead of with an API key. They are documented here because the
+# discovery-spec requirement for registries such as x402scan is an OpenAPI
+# document carrying `x-payment-info` on every payable operation. Before this
+# existed the published spec had 32 operations, ALL of them `/v1/metered`, and
+# `x-payment-info` appeared nowhere -- the x402 surface the agent audience
+# actually cares about was undocumented.
+#
+# Every schema, example and price below was harvested from the LIVE 402
+# challenges on 2026-08-06, not hand-written, and every price was cross-checked
+# against `PAYG_PRICE_UNITS` in relayshield_api.py with zero mismatches.
+#
+# `price_units` here is a FALLBACK only. `build_spec()` takes the live price
+# table from relayshield_api.py as an argument, so the served document cannot
+# drift from what the 402 challenge actually charges. The two agentic paths
+# (`mcp-registry-risk`, `prompt-injection-breach`) are priced in
+# relayshield_agentic_api.py, a separate Lambda that this one does not import,
+# so those two fall back to the values below.
+# ---------------------------------------------------------------------------
+
+PAYG_ENDPOINTS: dict[str, dict] = {
+    '/v1/payg/breach': {
+        'summary': 'Check an email address against known data breaches',
+        'description': 'Check whether an email address appears in known data breaches. Returns breach count, source names, dates, and exposed data types (passwords, emails, etc). Call before trusting a new user identity or granting elevated access.',
+        'price_units': 100000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'email': {'type': 'string', 'description': 'Email address to check'}},
+ 'required': ['email']},
+        'example': {'email': 'user@example.com'},
+        'output_example': {'ok': True,
+ 'data': {'email': 'user@example.com',
+          'breach_count': 3,
+          'breaches': [{'name': 'ExampleBreach',
+                        'domain': 'example.com',
+                        'breach_date': '2023-06-01',
+                        'data_classes': ['Passwords', 'Email addresses'],
+                        'is_verified': True}]}},
+    },
+    '/v1/payg/bulk-identity-risk': {
+        'summary': 'Score up to 10 organisations and their agent identities',
+        'description': 'Score up to 10 organizational domains, each with up to 5 associated agent/employee emails, for combined breach/infostealer/session/CVE risk in one call. Built for enterprise AI-governance platforms scoring many identities per customer in one pass, the recommended entry point for agent-governance and identity-posture integrations.',
+        'price_units': 2000000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'targets': {'type': 'array',
+                            'description': 'Up to 10 domains, each with up to 5 agent emails',
+                            'items': {'type': 'object',
+                                      'properties': {'domain': {'type': 'string'},
+                                                     'agents': {'type': 'array',
+                                                                'items': {'type': 'string'}}},
+                                      'required': ['domain']}}},
+ 'required': ['targets']},
+        'example': {'targets': [{'domain': 'acme.com', 'agents': ['ceo@acme.com']}]},
+        'output_example': {'ok': True,
+ 'data': {'queried': 1,
+          'critical_count': 0,
+          'high_count': 0,
+          'results': [{'domain': 'acme.com',
+                       'domain_score': 10,
+                       'domain_grade': 'A',
+                       'agent_count': 1}]}},
+    },
+    '/v1/payg/cert-expiry': {
+        'summary': 'Check TLS certificate expiry from CT logs',
+        'description': "Check how many days remain before a domain's TLS certificate expires, via Certificate Transparency logs. Call to catch a lapsing certificate before it causes an outage, especially relevant as CA/Browser Forum rules shrink standard certificate lifespans toward 47 days by 2029.",
+        'price_units': 50000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string',
+                           'description': 'Domain to check TLS certificate expiry for'}},
+ 'required': ['domain']},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'domain': 'acme.com',
+          'cert_found': True,
+          'expires_at': '2026-09-05T00:00:00+00:00',
+          'days_remaining': 46,
+          'risk_level': 'MEDIUM',
+          'issued_at': '2026-06-07T00:00:00+00:00',
+          'recommendation': 'Certificate renews in 46 days, no action needed yet, but confirm '
+                            'your renewal automation is configured.'}},
+    },
+    '/v1/payg/domain': {
+        'summary': 'Scan a domain for active phishing lookalikes',
+        'description': "Scan a domain for phishing lookalikes: typosquats, homoglyphs, and common phishing registration patterns. Returns matched lookalike domains found in the wild. Call to detect brand-impersonation phishing campaigns targeting a company before they're reported elsewhere.",
+        'price_units': 500000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string',
+                           'description': 'Root domain to scan for lookalikes'}},
+ 'required': ['domain']},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'domain': 'acme.com',
+          'lookalikes_found': 2,
+          'lookalikes': [{'domain': 'acrne.com'}, {'domain': 'acme-login.com'}],
+          'candidates_checked': 30,
+          'checked_at': '2026-05-19T10:00:00+00:00'}},
+    },
+    '/v1/payg/identity-graph': {
+        'summary': 'Correlate an email to phones and domains seen alongside it',
+        'description': 'Correlate an email address against the criminal breach/stealer corpus to surface linked phone numbers, secondary domains, and other identifiers tied to the same compromised identity. Call to map the blast radius of a known compromise across an organization.',
+        'price_units': 350000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'email': {'type': 'string',
+                          'description': 'Email address to correlate against the criminal dump '
+                                         'corpus'}},
+ 'required': ['email']},
+        'example': {'email': 'user@example.com'},
+        'output_example': {'ok': True,
+ 'data': {'email': 'user@example.com',
+          'found': False,
+          'correlated_identifiers': 0,
+          'correlated_phones': [],
+          'correlated_domains': [],
+          'sources': []}},
+    },
+    '/v1/payg/identity-risk-score': {
+        'summary': 'Score a domain 0-100 across six identity dimensions',
+        'description': 'Return a 0-100 domain security score across 6 identity-risk dimensions (breach exposure, infostealer density, ransomware exposure, session exposure, CVE exposure, threat-actor targeting) with a letter grade and plain-English risk factors. Call as a single-number identity health check before onboarding, financing, or partnering with a domain.',
+        'price_units': 350000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string', 'description': 'Root domain to score'}},
+ 'required': ['domain']},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'domain': 'acme.com',
+          'risk_score': 10,
+          'risk_level': 'LOW',
+          'grade': 'A',
+          'dimension_scores': {'breach_exposure': 5,
+                               'infostealer_density': 0,
+                               'threat_actor_targeting': 0,
+                               'ransomware_exposure': 0,
+                               'session_exposure': 0,
+                               'cve_exposure': 5},
+          'max_score': 100,
+          'risk_factors': ['Breach exposure: 1 known breach event(s), 50,000 accounts '
+                           'affected'],
+          'summary': 'Domain acme.com scores 10/100 (A, LOW) across 2 of 6 monitored identity '
+                     'signal dimensions.'}},
+    },
+    '/v1/payg/infostealer': {
+        'summary': 'Check an email address against infostealer malware logs',
+        'description': "Check whether an email address's credentials were harvested by infostealer malware and appear in a criminal stealer-log marketplace, detected 24-72 hours ahead of public breach databases. Call to catch device-level compromise before stolen session cookies or saved passwords are used for account takeover.",
+        'price_units': 150000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'email': {'type': 'string',
+                          'description': 'Email address to check for infostealer compromise'}},
+ 'required': ['email']},
+        'example': {'email': 'user@example.com'},
+        'output_example': {'ok': True,
+ 'data': {'email': 'user@example.com', 'found': False, 'stealer_count': 0, 'stealers': []}},
+    },
+    '/v1/payg/ip-intel': {
+        'summary': 'Passive DNS and reputation for a domain or IP',
+        'description': 'Look up passive DNS resolution history and reputation for a domain or IP address. For a domain: which IPs it has resolved to over time. For an IP: which hostnames have resolved to it, plus malicious/suspicious vendor detection counts. Call to pivot from an indicator to its infrastructure history during an investigation.',
+        'price_units': 100000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string',
+                           'description': 'Domain to look up (returns reputation + passive DNS '
+                                          'resolution history)'},
+                'ip': {'type': 'string',
+                       'description': 'Alternative: IP address to look up (returns reputation '
+                                      '+ reverse passive DNS)'}}},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'queried': 'acme.com',
+          'query_type': 'domain',
+          'reputation': 0,
+          'malicious_votes': 0,
+          'suspicious_votes': 0,
+          'resolutions': [{'ip_address': '93.184.216.34',
+                           'date': '2026-06-01T00:00:00+00:00'}]}},
+    },
+    '/v1/payg/llm-credential-exposure': {
+        'summary': 'Find exposed LLM and AI provider API keys',
+        'description': "Check whether a domain's LLM/AI provider API keys (OpenAI, Anthropic, Google, Groq, xAI, Replicate) appear exposed in criminal stealer logs. This is LLMjacking, a fast-growing threat where a leaked key becomes a live, uncapped billing liability rather than just a data exposure. Call to catch an exposed key before the drain, not after the invoice.",
+        'price_units': 400000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string', 'description': 'Your own domain'},
+                'vendor_domains': {'type': 'array',
+                                   'items': {'type': 'string'},
+                                   'description': 'Optional: vendor/supply-chain domains, up '
+                                                  'to 10'}}},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'domains_checked': 1,
+          'found': False,
+          'findings': [],
+          'highest_severity': None,
+          'providers_affected': []}},
+    },
+    '/v1/payg/mcp-registry-risk': {
+        'summary': 'Check an MCP server or package for registry risk',
+        'description': 'Assess an MCP server URL for supply-chain and registry risk before your agent connects to it or grants it tool-calling access: flags unverified publishers, known-malicious servers, and other trust signals. Call before an autonomous agent adds a new MCP server to its toolset.',
+        'price_units': 350000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'server_url': {'type': 'string',
+                               'description': 'URL of the MCP server to assess for '
+                                              'registry/supply-chain risk'}},
+ 'required': ['server_url']},
+        'example': {'server_url': 'https://example-mcp-server.com'},
+        'output_example': {'ok': True, 'data': {'verdict': 'LOW', 'findings': []}},
+    },
+    '/v1/payg/nft-security': {
+        'summary': 'Screen an NFT contract for known scam, wash-trading, or malicious-approval risk signals before your agent buys, bids on, or approves it',
+        'description': 'Screen an NFT contract for known scam, wash-trading, or malicious-approval risk signals before your agent buys, bids on, or approves it. Returns risk level and risk flags plus basic collection metadata. Call before an autonomous agent interacts with an unfamiliar NFT contract.',
+        'price_units': 100000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'contract_address': {'type': 'string', 'description': 'NFT contract address'},
+                'chain_id': {'type': 'string',
+                             'description': 'EVM chain ID (default: 1 for Ethereum)'}},
+ 'required': ['contract_address']},
+        'example': {'contract_address': '0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d', 'chain_id': '1'},
+        'output_example': {'ok': True,
+ 'data': {'contract_address': '0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d',
+          'chain_id': '1',
+          'risk_level': 'LOW',
+          'risk_flags': [],
+          'nft_name': 'Bored Ape Yacht Club',
+          'nft_symbol': 'BAYC',
+          'raw': {}}},
+    },
+    '/v1/payg/nhi-exposure': {
+        'summary': 'Find machine credentials in stealer logs',
+        'description': 'Check whether API keys or tokens tied to a domain, used by non-human identities like AI agents, service accounts, or CI/CD, appear exposed in criminal stealer logs. Call to audit whether the credentials an autonomous agent relies on have already been compromised upstream.',
+        'price_units': 400000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string', 'description': 'Your own domain'},
+                'vendor_domains': {'type': 'array',
+                                   'items': {'type': 'string'},
+                                   'description': 'Optional: vendor/supply-chain domains, up '
+                                                  'to 10'}}},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'domains_checked': 1, 'found': False, 'findings': [], 'highest_severity': None}},
+    },
+    '/v1/payg/oauth-watchlist': {
+        'summary': 'Find exposed OAuth tokens and SaaS credentials',
+        'description': 'Check whether an email address has OAuth-connected app credentials exposed in a known SaaS breach (GitHub, Slack, Notion, Zapier, and 30+ other high-risk OAuth-capable apps). Returns matched apps and direct revoke-access links. Call to detect supply-chain credential exposure via connected apps.',
+        'price_units': 300000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'email': {'type': 'string',
+                          'description': 'Email address to check for OAuth exposure'}},
+ 'required': ['email']},
+        'example': {'email': 'user@example.com'},
+        'output_example': {'ok': True,
+ 'data': {'email': 'user@example.com',
+          'matched_count': 1,
+          'matched_apps': [{'app': 'GitHub',
+                            'breach_date': '2023-01-15',
+                            'data_classes': ['Usernames', 'Email addresses'],
+                            'revoke_url': 'https://github.com/settings/applications'}],
+          'recommendation': 'Revoke OAuth access for matched apps immediately.',
+          'checked_at': '2026-05-19T10:00:00+00:00'}},
+    },
+    '/v1/payg/prompt-injection-breach': {
+        'summary': 'Find exposure from breaches that look AI-agent-sourced',
+        'description': "Check whether an email address tied to an AI agent session has an active stolen session or credential exposure that could enable a prompt-injection-driven account takeover. Call to audit whether an agent's own session integrity has already been compromised upstream, not just what the agent is being asked to do.",
+        'price_units': 350000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'email': {'type': 'string',
+                          'description': 'Email address to check for agent-session compromise '
+                                         'from a prompt-injection-driven breach'}},
+ 'required': ['email']},
+        'example': {'email': 'user@example.com'},
+        'output_example': {'ok': True, 'data': {'found': False, 'session_count': 0}},
+    },
+    '/v1/payg/ransomware-risk': {
+        'summary': 'Check a domain against ransomware leak sites',
+        'description': "Check whether a domain appears on a known ransomware group's victim/leak-site list, and whether pre-ransomware credential harvesting was detected beforehand. Call to assess active ransomware exposure for a domain, not just historical breach history.",
+        'price_units': 400000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string',
+                           'description': 'Domain to check against the ransomware victim '
+                                          'list'}},
+ 'required': ['domain']},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'domain': 'acme.com', 'on_victim_list': False, 'pre_ransomware_credential_count': 0}},
+    },
+    '/v1/payg/scan-file': {
+        'summary': "Scan a file (via its public download URL) for malware using VirusTotal's multi-engine analysis",
+        'description': "Scan a file (via its public download URL) for malware using VirusTotal's multi-engine analysis. Returns an async analysis ID to poll. Call before an agent downloads, opens, or executes a file attachment from an untrusted source.",
+        'price_units': 100000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'file_url': {'type': 'string',
+                             'description': 'Publicly accessible download URL'},
+                'filename': {'type': 'string',
+                             'description': 'Optional filename hint for AV engines'}},
+ 'required': ['file_url']},
+        'example': {'file_url': 'https://cdn.example.com/invoice.pdf', 'filename': 'invoice.pdf'},
+        'output_example': {'ok': True,
+ 'data': {'status': 'pending',
+          'target': 'https://cdn.example.com/invoice.pdf',
+          'filename': 'invoice.pdf',
+          'analysis_id': 'f-abc123def456',
+          'poll_endpoint': '/v1/result/f-abc123def456',
+          'note': 'Poll /v1/result/{analysis_id} every 5s until status is completed'}},
+    },
+    '/v1/payg/scan-url': {
+        'summary': 'Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis',
+        'description': 'Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis. Returns an async analysis ID to poll. Call before an agent clicks, fetches, or shares a link from an untrusted source.',
+        'price_units': 50000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'url': {'type': 'string',
+                        'description': 'URL to scan (must start with http:// or https://)'}},
+ 'required': ['url']},
+        'example': {'url': 'https://suspicious-site.example.com'},
+        'output_example': {'ok': True,
+ 'data': {'status': 'pending',
+          'target': 'https://suspicious-site.example.com',
+          'analysis_id': 'u-abc123def456',
+          'poll_endpoint': '/v1/result/u-abc123def456',
+          'note': 'Poll /v1/result/{analysis_id} every 5s until status is completed'}},
+    },
+    '/v1/payg/scan-wallet': {
+        'summary': 'Screen an EVM wallet address for known scam, exploit, or sanctions-list association before your agent transacts with it',
+        'description': 'Screen an EVM wallet address for known scam, exploit, or sanctions-list association before your agent transacts with it. Returns a risk level and specific risk flags. Call before an autonomous agent sends funds to or interacts with an unfamiliar wallet.',
+        'price_units': 100000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'address': {'type': 'string',
+                            'description': 'EVM wallet address (0x + 40 hex chars)'},
+                'chain_id': {'type': 'string',
+                             'description': 'EVM chain ID: 1=ETH, 8453=Base, 137=Polygon'}},
+ 'required': ['address']},
+        'example': {'address': '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', 'chain_id': '1'},
+        'output_example': {'ok': True,
+ 'data': {'address': '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
+          'chain_id': '1',
+          'risk_level': 'LOW',
+          'risk_flags': [],
+          'raw': {}}},
+    },
+    '/v1/payg/secret-scan': {
+        'summary': 'Find published secrets across six public artifact sources',
+        'description': 'Scan public GitHub repositories, npm and PyPI packages, Docker Hub images, Hugging Face models and Spaces, and Postman public workspaces and collections for API keys, tokens and credentials already published against a domain. Repo-only scanners miss credentials shipped inside released packages and images. Every hit is verified against the credential pattern before it is reported.',
+        'price_units': 350000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string', 'description': 'Your own domain'},
+                'vendor_domains': {'type': 'array',
+                                   'items': {'type': 'string'},
+                                   'description': 'Optional: vendor domains, up to 5'}}},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'domains_checked': 1, 'found': False, 'findings': [], 'highest_severity': None}},
+    },
+    '/v1/payg/secret-scan-text': {
+        'summary': 'Scan supplied text or a diff for secrets',
+        'description': '',
+        'price_units': 50000,
+        'x402_version': 1,
+        'body': {'type': 'object',
+ 'properties': {'content': {'type': 'string',
+                            'description': 'Raw file content to scan. Mutually exclusive with '
+                                           '`diff`.'},
+                'diff': {'type': 'string',
+                         'description': 'Unified diff. Only added lines are scanned. Mutually '
+                                        'exclusive with `content`.'},
+                'filename': {'type': 'string',
+                             'description': 'Optional filename, echoed on each finding as '
+                                            '`file`. Used with `content`.'}}},
+        'example': {'diff': '--- a/config.py\n'
+         '+++ b/config.py\n'
+         '@@ -1,2 +1,3 @@\n'
+         ' import os\n'
+         '+AWS_SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"\n'},
+        'output_example': {'ok': True, 'data': {}},
+    },
+    '/v1/payg/session-risk': {
+        'summary': 'Detect stolen session cookies before they are used',
+        'description': 'Check whether an email address has an active stolen session cookie circulating in a criminal archive, a signal of account takeover that bypasses password resets and 2FA entirely. Call to detect AiTM/session-hijack attacks before an authenticated agent session is trusted.',
+        'price_units': 300000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'email': {'type': 'string',
+                          'description': 'Email address to check for active session/AiTM '
+                                         'exposure'}},
+ 'required': ['email']},
+        'example': {'email': 'user@example.com'},
+        'output_example': {'ok': True,
+ 'data': {'email': 'user@example.com',
+          'found': False,
+          'session_count': 0,
+          'highest_severity': None,
+          'sessions': []}},
+    },
+    '/v1/payg/sim-swap': {
+        'summary': 'Detect a recent SIM swap or carrier port',
+        'description': 'Check whether a phone number has had a SIM swap or carrier port in the last 24 hours via real-time carrier lookup. A recent swap is a strong signal of an active account-takeover attempt targeting SMS-based 2FA. Call before trusting an SMS OTP from this number.',
+        'price_units': 250000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'phone': {'type': 'string', 'description': 'Phone number in E.164 format'}},
+ 'required': ['phone']},
+        'example': {'phone': '+14155551234'},
+        'output_example': {'ok': True,
+ 'data': {'phone': '+14155551234',
+          'swapped': True,
+          'swap_timestamp': '2026-05-18T14:23:00Z',
+          'carrier': 'T-Mobile',
+          'checked_at': '2026-05-19T10:00:00+00:00'}},
+    },
+    '/v1/payg/supply-chain': {
+        'summary': 'Assess breach and infostealer risk across vendors',
+        'description': 'Check up to 10 vendor domains for combined breach, infostealer, and dark-web risk exposure in one call. Returns a composite risk score per vendor. Call to assess third-party API/vendor risk before an agent integrates with or continues calling an external service.',
+        'price_units': 100000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'vendor_domains': {'type': 'array',
+                                   'items': {'type': 'string'},
+                                   'description': 'Up to 10 vendor domains'},
+                'vendor_emails': {'type': 'array',
+                                  'items': {'type': 'string'},
+                                  'description': 'Alternative: vendor contact emails, domain '
+                                                 'extracted automatically'}}},
+        'example': {'vendor_domains': ['acme.com', 'vendor2.com']},
+        'output_example': {'ok': True,
+ 'data': {'domains_checked': 1,
+          'highest_risk': 'LOW',
+          'results': [{'domain': 'acme.com',
+                       'risk_level': 'LOW',
+                       'breach_count': 0,
+                       'infostealer_found': False}]}},
+    },
+    '/v1/payg/target-risk': {
+        'summary': 'Score how likely a domain is to be targeted',
+        'description': "Score a domain's probability of being an active or upcoming cyberattack target using a 6-signal correlation model (breach, infostealer, ransomware, session, CVE, and threat-actor targeting history). Call for proactive risk triage, not just after-the-fact breach checking.",
+        'price_units': 500000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'domain': {'type': 'string', 'description': 'Domain to score (e.g. acme.com)'}},
+ 'required': ['domain']},
+        'example': {'domain': 'acme.com'},
+        'output_example': {'ok': True,
+ 'data': {'domain': 'acme.com',
+          'target_risk_score': 0,
+          'probability_tier': 'LOW',
+          'signals': []}},
+    },
+    '/v1/payg/tech-stack-cve': {
+        'summary': 'Find CVEs actively targeting your declared stack',
+        'description': 'Check a declared technology stack (e.g. nginx, WordPress, Cisco IOS) against actively-exploited CVEs (CISA KEV) and high-EPSS-score vulnerabilities. Call before deploying or continuing to run a given technology stack in production.',
+        'price_units': 200000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'tech_stack': {'type': 'array',
+                               'items': {'type': 'string'},
+                               'description': 'Declared technology product names'},
+                'domain': {'type': 'string',
+                           'description': 'Alternative: pull tech_stack from a stored user '
+                                          'profile by domain'}}},
+        'example': {'tech_stack': ['nginx', 'wordpress', 'cisco ios']},
+        'output_example': {'ok': True, 'data': {'tech_stack_queried': ['nginx'], 'matched_cves': [], 'critical_count': 0}},
+    },
+    '/v1/payg/token-security': {
+        'summary': 'Screen an ERC-20/BEP-20 token contract for honeypot, mintable-supply, hidden-owner, and other rug-pull risk signals before your agent trades it',
+        'description': 'Screen an ERC-20/BEP-20 token contract for honeypot, mintable-supply, hidden-owner, and other rug-pull risk signals before your agent trades it. Returns risk level, specific critical/warning flags, and basic token metadata. Call before an autonomous trading agent buys or approves spending on an unfamiliar token.',
+        'price_units': 50000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'contract_address': {'type': 'string',
+                                     'description': 'EVM token contract address'},
+                'chain_id': {'type': 'string',
+                             'description': 'EVM chain ID (default: 1 for Ethereum)'}},
+ 'required': ['contract_address']},
+        'example': {'contract_address': '0x6982508145454ce325ddbe47a25d4ec3d2311933', 'chain_id': '1'},
+        'output_example': {'ok': True,
+ 'data': {'contract_address': '0x6982508145454ce325ddbe47a25d4ec3d2311933',
+          'chain_id': '1',
+          'risk_level': 'HIGH',
+          'critical_flags': ['honeypot'],
+          'warning_flags': ['mintable supply'],
+          'token_name': 'Example Token',
+          'token_symbol': 'EXT',
+          'holder_count': '12345',
+          'raw': {}}},
+    },
+    '/v1/payg/wallet-risk': {
+        'summary': 'Screen a wallet address across EVM, Solana, TON, or Bitcoin for known scam, exploit, drainer, or sanctions-list association before your agent transacts with it',
+        'description': 'Screen a wallet address across EVM, Solana, TON, or Bitcoin for known scam, exploit, drainer, or sanctions-list association before your agent transacts with it. Returns a risk level and specific risk flags. The recommended first call for any autonomous trading or DeFi agent before interacting with a new counterparty wallet.',
+        'price_units': 50000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'address': {'type': 'string',
+                            'description': 'Wallet address: EVM (0x), Solana (base58), TON '
+                                           '(EQ.../UQ...), or Bitcoin'}},
+ 'required': ['address']},
+        'example': {'address': '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'},
+        'output_example': {'ok': True,
+ 'data': {'address': '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
+          'chain': 'evm',
+          'risk_level': 'LOW',
+          'risk_flags': [],
+          'metadata': {}}},
+    },
+    '/v1/payg/wallet-screen-batch': {
+        'summary': 'Screen up to 10 wallet addresses (any chain: EVM, Solana, TON, Bitcoin) for known scam or exploit association in a single call',
+        'description': 'Screen up to 10 wallet addresses (any chain: EVM, Solana, TON, Bitcoin) for known scam or exploit association in a single call. Returns per-address risk level and flags. Use for bulk counterparty screening in trading or portfolio-monitoring agent workflows.',
+        'price_units': 500000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+ 'properties': {'addresses': {'type': 'array',
+                              'items': {'type': 'string'},
+                              'maxItems': 10,
+                              'description': 'Up to 10 wallet addresses (any chain: EVM, '
+                                             'Solana, TON, Bitcoin)'}},
+ 'required': ['addresses']},
+        'example': {'addresses': ['0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+               '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM']},
+        'output_example': {'ok': True,
+ 'data': {'screened': 2,
+          'high_risk': 0,
+          'results': [{'address': '0xd8da6bf26964af9d7eed9e03e53415d37aa96045',
+                       'chain': 'evm',
+                       'risk_level': 'LOW',
+                       'risk_flags': [],
+                       'error': None},
+                      {'address': '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+                       'chain': 'solana',
+                       'risk_level': 'LOW',
+                       'risk_flags': [],
+                       'error': None}]}},
+    },
+}
+
+_PAYG_TAG = "x402 pay-per-call"
+
+_PAYG_DESCRIPTION_SUFFIX = """
+
+**Billing.** {price} in USDC per call over x402, on Base or Solana. No API key, no signup and no
+subscription. Send the request with no payment header, take the `402` challenge that comes back,
+pay it, and repeat the request. Only successful calls are charged.
+"""
+
+
+def _payg_operation(path, ep, price_units):
+    """Build the operation for one x402 pay-per-call route.
+
+    Kept separate from `_operation` rather than folded into it: these routes
+    carry no `security` at all, and conflating "no auth" with "auth optional"
+    is the kind of thing that makes a generated client send an empty API key
+    header and get a confusing answer.
+    """
+    op_id = "payg_" + path.removeprefix("/v1/payg/").replace("-", "_")
+    price_usd = round(price_units / 1_000_000, 6)
+    price_str = f"${price_usd:.2f}"
+
+    req_schema = dict(ep["body"] or {"type": "object", "properties": {}})
+
+    responses = {
+        "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["ok", "data"],
+                        "properties": {"ok": {"type": "boolean", "const": True},
+                                       "data": {"type": "object"}},
+                    },
+                    "example": ep["output_example"],
+                }
+            },
+        },
+        "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "content": {"application/json": {"schema": _ERROR_SCHEMA_REF,
+                                             "example": {"ok": False, "error": "address is required"}}},
+        },
+        # The 402 is the point of this surface, not an error path. It is the
+        # payment challenge an x402 client is expected to receive, pay and retry.
+        "402": {
+            "description": (
+                f"Payment required. The body carries a complete x402 version {ep['x402_version']} "
+                "challenge with the accepted networks, the amount in USDC base units, and the "
+                "recipient. Pay it and repeat the request with the payment header."
+            ),
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["ok", "error", "x402"],
+                        "properties": {
+                            "ok": {"type": "boolean", "const": False},
+                            "error": {"type": "string", "const": "Payment required"},
+                            "price": _str("Human-readable price, e.g. `$0.05 USDC (Base or Solana)`."),
+                            "x402": _obj(
+                                "The x402 payment challenge.",
+                                {
+                                    "x402Version": _int("Protocol version of this challenge."),
+                                    "resource": _obj("What is being paid for.", {}),
+                                    "accepts": _arr("One entry per accepted network.", {"type": "object"}),
+                                    "extensions": _obj("Discovery metadata, including the Bazaar input and output schemas.", {}),
+                                },
+                            ),
+                        },
+                    },
+                    "example": {
+                        "ok": False,
+                        "error": "Payment required",
+                        "price": f"{price_str} USDC (Base or Solana)",
+                    },
+                }
+            },
+        },
+        "405": {
+            "description": _STANDARD_ERROR_TEXT["405"],
+            "content": {"application/json": {"schema": _ERROR_SCHEMA_REF,
+                                             "example": {"ok": False, "error": _STANDARD_ERROR_TEXT["405"]}}},
+        },
+    }
+
+    return {
+        "post": {
+            "operationId": op_id,
+            "summary": ep["summary"],
+            "description": ep["description"] + _PAYG_DESCRIPTION_SUFFIX.format(price=price_str),
+            "tags": [_PAYG_TAG],
+            # Explicitly empty: this route takes no credentials of any kind.
+            "security": [],
+            "requestBody": {
+                "required": True,
+                "content": {"application/json": {"schema": req_schema, "example": ep["example"]}},
+            },
+            "responses": responses,
+            # The discovery contract registries read. `price` is structured
+            # rather than a display string so an agent can compare offers
+            # without parsing currency symbols out of prose.
+            "x-payment-info": {
+                "price": {"mode": "fixed", "currency": "USDC", "amount": f"{price_usd:.6f}",
+                          "amount_base_units": price_units, "decimals": 6},
+                "protocols": [{"x402": {}}],
+                "networks": ["eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"],
+                "x402_version": ep["x402_version"],
+                "payment_required_status": 402,
+            },
+            "x-price-usd": price_usd,
+            "x-billing-unit": "call",
+        }
+    }
+
 _TAG_DESCRIPTIONS = [
     ("Identity exposure", "Whether a person's credentials, sessions or payment cards are already circulating."),
     ("Domain and infrastructure", "Lookalike domains, certificate expiry, passive DNS and reputation."),
@@ -2207,6 +2870,7 @@ _TAG_DESCRIPTIONS = [
     ("Crypto", "Wallet address and token contract screening."),
     ("Agent and MCP security", "MCP server reputation and AI-agent-sourced breach exposure. These two authenticate slightly differently -- see each operation."),
     ("Account", "Free, unmetered endpoints for key validation and webhook delivery."),
+    (_PAYG_TAG, "The same checks paid per call in USDC over x402, on Base or Solana. No API key and no signup: send the request, take the 402 challenge, pay it, repeat. Discoverable in the CDP Bazaar."),
 ]
 
 _DESCRIPTION = """
@@ -2294,11 +2958,23 @@ MISP-compatible REST surface at `/v1/intel/misp`, and an x402 pay-per-call surfa
 """.strip()
 
 
-def build_spec(base_url="https://api.relayshield.net"):
-    """Return the complete OpenAPI 3.1 document as a dict."""
+def build_spec(base_url="https://api.relayshield.net", payg_prices=None):
+    """Return the complete OpenAPI 3.1 document as a dict.
+
+    `payg_prices` is `PAYG_PRICE_UNITS` from relayshield_api.py, passed in by
+    the caller rather than imported here because relayshield_api imports THIS
+    module and the reverse import would be circular. Passing it in is what
+    stops the published price drifting from the price the 402 challenge
+    actually charges, which has been a real defect on other public surfaces.
+    Paths absent from it (the two agentic routes, which live in a different
+    Lambda) fall back to the table above.
+    """
     paths = {}
     for ep in ENDPOINTS:
         paths[ep["path"]] = _operation(ep)
+    for path, ep in PAYG_ENDPOINTS.items():
+        price = (payg_prices or {}).get(path, ep["price_units"])
+        paths[path] = _payg_operation(path, ep, price)
 
     return {
         "openapi": "3.1.0",
@@ -2313,6 +2989,16 @@ def build_spec(base_url="https://api.relayshield.net"):
                 "url": "https://api.relayshield.net/developers",
             },
             "termsOfService": "https://relayshield.carrd.co/terms",
+            "x-guidance": (
+                "Two ways to call this API. With an API key, every route under `/v1/metered/` is "
+                "charged against prepaid credits or a subscription; get a key at "
+                "https://api.relayshield.net/developers, and the first 20 calls are free. Without "
+                "an API key, the same checks are under `/v1/payg/` and are paid per call in USDC "
+                "over x402 on Base or Solana: send the request, take the `402` challenge, pay it, "
+                "repeat. Agents should prefer `/v1/payg/`, which needs no signup and no key "
+                "custody. Every endpoint is POST with a JSON body and returns "
+                "`{ok, data}` or `{ok, error}`. Only successful calls are billed."
+            ),
         },
         "servers": [{"url": base_url, "description": "Production"}],
         "tags": [{"name": n, "description": d} for n, d in _TAG_DESCRIPTIONS],

@@ -2367,6 +2367,15 @@ _SOURCE_ALIASES = {
     "x402-mastodon":  "x402",
     "x402-medium":    "x402",
     "x402scan":       "x402",
+    # Added 2026-08-06 for the syndication run. The distribution plan named five
+    # channels and only five keys were registered; these three cover the
+    # x402-native channels the plan added later, registered before anything is
+    # posted rather than after. `x402-hn` is registered now even though Hacker
+    # News is deliberately held back, so the one shot there cannot go out
+    # untracked.
+    "x402-discord":   "x402",
+    "x402-merit":     "x402",
+    "x402-hn":        "x402",
     "hn": "github",
     "reddit": "github",
     "opencti": "xsoar",

@@ -408,7 +408,7 @@ def build_msp(output_path):
         'unlimited access to the full IOC corpus, threat actor intelligence, trending threats, and '
         'STIX/TAXII or MISP feed, everything your team needs to enrich alerts, run investigations, and brief clients. '
         '<b>Enterprise TI platforms charge $30K to $300K/year for equivalent coverage. '
-        'RelayShield delivers 4.9M+ queryable indicators at $499/month.</b>',
+        'RelayShield delivers 5.0M+ queryable indicators at $499/month.</b>',
         s['body']))
     story.append(Spacer(1, 6))
 
@@ -429,7 +429,7 @@ def build_msp(output_path):
         _card_para('$499 / month', bold=True, color=WHITE, size=13),
         _card_para('10,000 API calls/month', color=WHITE),
         _card_para(' '),
-        _card_para('✓  4.9M+ IOC corpus query', color=WHITE),
+        _card_para('✓  5.0M+ IOC corpus query', color=WHITE),
         _card_para('✓  Bulk IOC lookup (100/batch)', color=WHITE),
         _card_para('✓  IOC pivot & lateral discovery', color=WHITE),
         _card_para('✓  Early Warning Intelligence', color=WHITE),
@@ -539,7 +539,7 @@ def build_msp(output_path):
         [Table([
             [_cap_header('IOC Corpus & Bulk Enrichment', CAP_TEAL)],
             [_cap_body([
-                '4.9M+ indicators: domains, IPs, URLs, hashes',
+                '5.0M+ indicators: domains, IPs, URLs, hashes',
                 '20 live feeds + 85+ criminal Telegram channels',
                 '3,750+ malware families with ATT&CK attribution',
                 'Bulk lookup: 100 IOCs per api call',
@@ -574,7 +574,7 @@ def build_msp(output_path):
             [_cap_header('Vendor & Brand Protection', CAP_RED)],
             [_cap_body([
                 'Third-party risk score: vendor breach + stealer + dark web ($0.10)',
-                'Brand monitor: scan 4.9M+ IOC corpus for brand patterns ($0.35)',
+                'Brand monitor: scan 5.0M+ IOC corpus for brand patterns ($0.35)',
                 'Domain lookalike / typosquat scanning ($0.30)',
                 'OAuth supply chain: 31 high-risk SaaS apps monitored ($0.30)',
                 'Secret scan: secrets already published across GitHub, npm, PyPI, Docker Hub and Hugging Face ($0.35)',
@@ -830,8 +830,8 @@ def build_agentcore_onepager(output_path):
 
     story.append(Paragraph('About RelayShield', s['h2']))
     for line in [
-        '**4.5M+ indicators of compromise**, from criminal Telegram marketplaces and 11 authoritative feeds',
-        '**83+ monitored criminal channels** - typically 24-72 hours ahead of public breach databases',
+        '**5.0M+ indicators of compromise**, from criminal Telegram marketplaces and 11 authoritative feeds',
+        '**85+ monitored criminal channels** - typically 24-72 hours ahead of public breach databases',
         '**3,750+ tracked malware families**',
         '**26 identity endpoints** - breach, infostealer, SIM swap, OAuth and domain exposure, non-human identity, LLM credential exposure',
         'Live on AWS Marketplace (prod-kb3ftelx44wlk), AWS account 239677749008; STIX/TAXII 2.1 and MISP feeds available',

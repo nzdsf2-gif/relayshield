@@ -186,16 +186,16 @@ RelayShield exposes its full monitoring capability via REST API, enabling MSPs a
 - `POST /v1/metered/bulk-identity-risk`: **NEW** hierarchical org + agent-level risk scoring: up to 10 client domains + up to 5 individual agent identities (emails) per domain in a single call. Returns domain risk score (6 dimensions) plus per-agent breach, infostealer, and active session signals. Purpose-built for AI governance workflows and MSP weekly client sweeps. No competitor offers per-agent identity risk within an organizational hierarchy ($2.00/call)
 - `POST /v1/metered/bulk-ioc`: **NEW** bulk IOC enrichment: submit up to 100 IPs, domains, or hashes in a single call, built for SIEM log enrichment pipelines ($0.50/batch)
 - `POST /v1/metered/ioc-pivot`: **NEW** lateral infrastructure discovery: given one IOC, return all related IOCs sharing the same malware family, surfaces full C2 networks from a single indicator ($0.20)
-- `POST /v1/metered/brand-monitor`: **NEW** brand protection: scan 4.9M+ IOC corpus for brand name patterns, phishing domains, malware C2 infrastructure, and dark web mentions ($0.35)
+- `POST /v1/metered/brand-monitor`: **NEW** brand protection: scan 5.0M+ IOC corpus for brand name patterns, phishing domains, malware C2 infrastructure, and dark web mentions ($0.35)
 - `POST /v1/metered/mcp-registry-risk`: **NEW** MCP server / agent-tool registry reputation check: typosquat detection, registration-age scoring against RelayShield's IOC corpus ($0.35)
 - `POST /v1/metered/prompt-injection-breach`: **NEW** detects breach exposure sourced from prompt-injection attacks against AI agents, not traditional phishing/malware ($0.35)
-- `GET /v1/intel/telegram`: IOC lookup against live threat intelligence database (4.9M+ indicators; domains, IPs, URLs, hashes)
+- `GET /v1/intel/telegram`: IOC lookup against live threat intelligence database (5.0M+ indicators; domains, IPs, URLs, hashes)
 - `GET /v1/intel/cve`: CISA KEV lookup by CVE ID or keyword, ransomware-campaign flag included
 - `GET /v1/intel/actor`: full MITRE ATT&CK threat actor profile: TTPs, target sectors, associated IOCs from corpus (TI subscription)
 - `GET /v1/intel/trending`: top IOCs seen across all feeds in the last 24/48 hours, what's actively spreading now (TI subscription)
 
 **Threat Intelligence API, live:**
-MSSPs operating at scale can query RelayShield's live IOC database directly via `GET /v1/intel/telegram`. The feed aggregates **4.9M+ indicators** from **20+ authoritative threat intelligence feeds** and **85+ criminal Telegram channels**: updated continuously. RelayShield tracks **3,750+ malware families** including QakBot, LummaC2, Emotet, TrickBot, RedLine, Vidar, Raccoon, and 3,743+ others. IOCs are enriched with threat actor attribution, confidence scoring, and MITRE ATT&CK technique mapping.
+MSSPs operating at scale can query RelayShield's live IOC database directly via `GET /v1/intel/telegram`. The feed aggregates **5.0M+ indicators** from **20+ authoritative threat intelligence feeds** and **85+ criminal Telegram channels**: updated continuously. RelayShield tracks **3,750+ malware families** including QakBot, LummaC2, Emotet, TrickBot, RedLine, Vidar, Raccoon, and 3,743+ others. IOCs are enriched with threat actor attribution, confidence scoring, and MITRE ATT&CK technique mapping.
 
 Pass any domain, IP, URL, or SHA256 hash to check for known malware infrastructure, ahead of reputation services that lag by days or weeks. New: submit batches of up to 100 IOCs via `/v1/metered/bulk-ioc` for log enrichment pipelines.
 
@@ -207,7 +207,7 @@ Pass any domain, IP, URL, or SHA256 hash to check for known malware infrastructu
 
 **Third-Party Risk Score:** `POST /v1/metered/supply-chain` delivers a composite vendor risk score across breach exposure, infostealer density, and dark web presence for up to 10 vendor domains per call ($0.10). Equivalent to Recorded Future's vendor risk module at developer-accessible pricing.
 
-**Price-to-performance:** Enterprise threat intelligence platforms (Recorded Future, ThreatConnect) start at $30K to $300K/year. RelayShield delivers 4.9M+ queryable indicators at **$499/month**: the same enrichment data your clients' enterprise competitors pay $5K+/month to access.
+**Price-to-performance:** Enterprise threat intelligence platforms (Recorded Future, ThreatConnect) start at $30K to $300K/year. RelayShield delivers 5.0M+ queryable indicators at **$499/month**: the same enrichment data your clients' enterprise competitors pay $5K+/month to access.
 
 IOC data is retained for 365 days.
 

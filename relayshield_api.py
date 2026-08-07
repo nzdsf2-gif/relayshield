@@ -674,8 +674,12 @@ def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: 
     + ProductCode-only pattern — AWS's Concurrent Agreements model (rolled
     out 2026-06-01) rejects the old pattern for products created after that
     date with InvalidLicenseException, confirmed 2026-07-10."""
-    if not aws_account_id or not license_arn or not dimension or not BUNDLE_D_PRODUCT_CODE:
-        logger.warning("Skipping Bundle D usage report — missing account/license_arn/dimension/product_code")
+    # Deliberately does NOT require BUNDLE_D_PRODUCT_CODE. BatchMeterUsage
+    # under Concurrent Agreements identifies the product from the LicenseArn,
+    # so gating on Bundle D's product code would have silently dropped every
+    # Bundle A call once Bundle A moved to its own product entity.
+    if not aws_account_id or not license_arn or not dimension:
+        logger.warning("Skipping bundle usage report: missing account/license_arn/dimension")
         return
     try:
         mp_client = boto3.client("meteringmarketplace", region_name="us-east-1")

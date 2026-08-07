@@ -1,0 +1,7 @@
+Core Identity Exposure is built for teams that need to know whether an identity has already been compromised, before it is used against them.
+
+The bundle includes breach exposure checks against an aggregated breach corpus and dark web credential databases, SIM swap detection that surfaces recent swap activity on a phone number (a common account takeover precursor), infostealer log checks that find credentials harvested by stealer malware, domain lookalike detection for typosquatted domains registered against your brand, an OAuth token exposure watchlist covering leaked OAuth and API tokens, and crypto threat intelligence for wallet and domain checks against RelayShield's criminal corpus.
+
+The six endpoints are designed to be used together. An identity appearing in a breach corpus is routine. The same identity showing recent SIM swap activity and credentials in a fresh stealer log is an active incident, and correlating those signals is what this bundle exists to do.
+
+All endpoints are backed by RelayShield's live threat intelligence corpus: 5.1M+ indicators of compromise and 87 monitored criminal Telegram channels. Your API key is issued automatically by email when your AWS Marketplace subscription activates, with full usage instructions included. All access is provisioned and billed through AWS Marketplace.

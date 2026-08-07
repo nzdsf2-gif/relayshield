@@ -1,0 +1,171 @@
+{
+  "Catalog": "AWSMarketplace",
+  "ChangeSet": [
+    {
+      "ChangeType": "CreateOffer",
+      "ChangeName": "CreateTestOffer",
+      "Entity": {
+        "Type": "Offer@1.0"
+      },
+      "DetailsDocument": {
+        "ProductId": "prod-f5qkfsxlxs4qg"
+      }
+    },
+    {
+      "ChangeType": "UpdateInformation",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateTestOffer.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "Name": "442429445748 - TestUser - Bundle A Fulfillment Verification",
+        "Description": "Internal test subscription to verify two-entity fulfillment and BatchMeterUsage for Bundle A before requesting public visibility."
+      }
+    },
+    {
+      "ChangeType": "UpdateTargeting",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateTestOffer.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "PositiveTargeting": {
+          "BuyerAccounts": [
+            "442429445748"
+          ]
+        }
+      }
+    },
+    {
+      "ChangeType": "UpdatePricingTerms",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateTestOffer.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "PricingModel": "Contract",
+        "Terms": [
+          {
+            "Type": "FixedUpfrontPricingTerm",
+            "CurrencyCode": "USD",
+            "Price": "0",
+            "Grants": [
+              {
+                "DimensionKey": "core_identity_bundle_access",
+                "MaxQuantity": 1
+              }
+            ]
+          },
+          {
+            "Type": "UsageBasedPricingTerm",
+            "CurrencyCode": "USD",
+            "RateCards": [
+              {
+                "RateCard": [
+                  {
+                    "DimensionKey": "breach_calls",
+                    "Price": "0.00000001"
+                  },
+                  {
+                    "DimensionKey": "sim_swap_calls",
+                    "Price": "0.00000001"
+                  },
+                  {
+                    "DimensionKey": "infostealer_calls",
+                    "Price": "0.00000001"
+                  },
+                  {
+                    "DimensionKey": "domain_calls",
+                    "Price": "0.00000001"
+                  },
+                  {
+                    "DimensionKey": "oauth_watchlist_calls",
+                    "Price": "0.00000001"
+                  },
+                  {
+                    "DimensionKey": "crypto_intel_calls",
+                    "Price": "0.00000001"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "UpdateValidityTerms",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateTestOffer.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "Terms": [
+          {
+            "Type": "ValidityTerm",
+            "AgreementDuration": "P1M"
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "UpdatePaymentScheduleTerms",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateTestOffer.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "Terms": [
+          {
+            "Type": "PaymentScheduleTerm",
+            "CurrencyCode": "USD",
+            "Schedule": [
+              {
+                "ChargeDate": "2026-08-08",
+                "ChargeAmount": "0.01"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "UpdateLegalTerms",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateTestOffer.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "Terms": [
+          {
+            "Type": "LegalTerm",
+            "Documents": [
+              {
+                "Type": "StandardEula",
+                "Version": "2022-07-14"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "UpdateAvailability",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateTestOffer.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "AvailabilityEndDate": "2026-09-06"
+      }
+    },
+    {
+      "ChangeType": "ReleaseOffer",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateTestOffer.Entity.Identifier"
+      },
+      "DetailsDocument": {}
+    }
+  ]
+}

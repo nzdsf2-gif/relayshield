@@ -2836,6 +2836,48 @@ def _detect_chain_api(address: str) -> str:
     return "unknown"
 
 
+# --- Freshness contract -----------------------------------------------------
+# A screening verdict is a point-in-time observation. At $0.05 against a ~$0.06
+# average x402 payment, nobody screens every call in practice, so every serious
+# integrator caches on payTo. Once that is true the useful question stops being
+# "is this address clean" and becomes "how long does that answer stay true".
+# Without a stated TTL the caller invents one, and they invent it in the
+# dangerous direction.
+#
+# Deliberately asymmetric. A positive finding is sticky, because corpora rarely
+# un-flag an address. A clean verdict is the one that flips without announcing
+# itself to whoever cached it. So clean expires SOONER than flagged, which is
+# the opposite of what a naive cache would do.
+_WALLET_RISK_TTL_DEGRADED = 300      # upstream failed, this is barely a verdict
+_WALLET_RISK_TTL_FLAGGED  = 86_400   # a hit stays a hit
+_WALLET_RISK_TTL_CLEAN    = 3_600    # absence of evidence, not evidence of absence
+
+
+def _freshness(risk_flags: list, metadata: dict) -> dict:
+    """Freshness contract for a screening verdict.
+
+    `degraded` is true when an upstream lookup failed, which the handlers record
+    as a `*_error` key in metadata. That case previously returned risk_level LOW
+    and was indistinguishable from a genuine clean result, so a caller could
+    cache "safe" off the back of an outage. It now carries a 5 minute TTL and
+    says so explicitly.
+    """
+    degraded = any(k.endswith("_error") for k in metadata)
+    if degraded:
+        ttl = _WALLET_RISK_TTL_DEGRADED
+    elif risk_flags:
+        ttl = _WALLET_RISK_TTL_FLAGGED
+    else:
+        ttl = _WALLET_RISK_TTL_CLEAN
+    now = datetime.now(timezone.utc)
+    return {
+        "observed_at":       now.isoformat(),
+        "valid_for_seconds": ttl,
+        "expires_at":        (now + timedelta(seconds=ttl)).isoformat(),
+        "degraded":          degraded,
+    }
+
+
 def handle_wallet_risk(params: dict) -> dict:
     address = (params.get("address") or "").strip()
     if not address:
@@ -2893,6 +2935,7 @@ def handle_wallet_risk(params: dict) -> dict:
             "risk_level": risk_level,
             "risk_flags": risk_flags,
             "metadata":   metadata,
+            **_freshness(risk_flags, metadata),
         })
 
     if chain in ("evm", "solana"):
@@ -2939,6 +2982,7 @@ def handle_wallet_risk(params: dict) -> dict:
         "risk_level": risk_level,
         "risk_flags": risk_flags,
         "metadata":   metadata,
+        **_freshness(risk_flags, metadata),
     })
 
 
@@ -2963,12 +3007,21 @@ def handle_wallet_screen_batch(params: dict) -> dict:
         result = handle_wallet_risk({"address": addr})
         body   = json.loads(result.get("body", "{}"))
         data   = body.get("data", {})
+        # Freshness is carried PER RESULT, not once for the batch: a flagged
+        # address, a clean one and one whose upstream errored all come back in
+        # the same call with legitimately different lifetimes. Batch is the
+        # endpoint people cache from, so collapsing them to one TTL would push
+        # the caller straight back into guessing.
         return {
-            "address":    data.get("address", addr),
-            "chain":      data.get("chain", "unknown"),
-            "risk_level": data.get("risk_level", "UNKNOWN"),
-            "risk_flags": data.get("risk_flags", []),
-            "error":      body.get("error") if not body.get("ok") else None,
+            "address":           data.get("address", addr),
+            "chain":             data.get("chain", "unknown"),
+            "risk_level":        data.get("risk_level", "UNKNOWN"),
+            "risk_flags":        data.get("risk_flags", []),
+            "observed_at":       data.get("observed_at"),
+            "valid_for_seconds": data.get("valid_for_seconds"),
+            "expires_at":        data.get("expires_at"),
+            "degraded":          data.get("degraded"),
+            "error":             body.get("error") if not body.get("ok") else None,
         }
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:

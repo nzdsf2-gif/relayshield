@@ -674,8 +674,12 @@ def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: 
     + ProductCode-only pattern — AWS's Concurrent Agreements model (rolled
     out 2026-06-01) rejects the old pattern for products created after that
     date with InvalidLicenseException, confirmed 2026-07-10."""
-    if not aws_account_id or not license_arn or not dimension or not BUNDLE_D_PRODUCT_CODE:
-        logger.warning("Skipping Bundle D usage report — missing account/license_arn/dimension/product_code")
+    # Deliberately does NOT require BUNDLE_D_PRODUCT_CODE. BatchMeterUsage
+    # under Concurrent Agreements identifies the product from the LicenseArn,
+    # so gating on Bundle D's product code would have silently dropped every
+    # Bundle A call once Bundle A moved to its own product entity.
+    if not aws_account_id or not license_arn or not dimension:
+        logger.warning("Skipping bundle usage report: missing account/license_arn/dimension")
         return
     try:
         mp_client = boto3.client("meteringmarketplace", region_name="us-east-1")
@@ -2832,6 +2836,48 @@ def _detect_chain_api(address: str) -> str:
     return "unknown"
 
 
+# --- Freshness contract -----------------------------------------------------
+# A screening verdict is a point-in-time observation. At $0.05 against a ~$0.06
+# average x402 payment, nobody screens every call in practice, so every serious
+# integrator caches on payTo. Once that is true the useful question stops being
+# "is this address clean" and becomes "how long does that answer stay true".
+# Without a stated TTL the caller invents one, and they invent it in the
+# dangerous direction.
+#
+# Deliberately asymmetric. A positive finding is sticky, because corpora rarely
+# un-flag an address. A clean verdict is the one that flips without announcing
+# itself to whoever cached it. So clean expires SOONER than flagged, which is
+# the opposite of what a naive cache would do.
+_WALLET_RISK_TTL_DEGRADED = 300      # upstream failed, this is barely a verdict
+_WALLET_RISK_TTL_FLAGGED  = 86_400   # a hit stays a hit
+_WALLET_RISK_TTL_CLEAN    = 3_600    # absence of evidence, not evidence of absence
+
+
+def _freshness(risk_flags: list, metadata: dict) -> dict:
+    """Freshness contract for a screening verdict.
+
+    `degraded` is true when an upstream lookup failed, which the handlers record
+    as a `*_error` key in metadata. That case previously returned risk_level LOW
+    and was indistinguishable from a genuine clean result, so a caller could
+    cache "safe" off the back of an outage. It now carries a 5 minute TTL and
+    says so explicitly.
+    """
+    degraded = any(k.endswith("_error") for k in metadata)
+    if degraded:
+        ttl = _WALLET_RISK_TTL_DEGRADED
+    elif risk_flags:
+        ttl = _WALLET_RISK_TTL_FLAGGED
+    else:
+        ttl = _WALLET_RISK_TTL_CLEAN
+    now = datetime.now(timezone.utc)
+    return {
+        "observed_at":       now.isoformat(),
+        "valid_for_seconds": ttl,
+        "expires_at":        (now + timedelta(seconds=ttl)).isoformat(),
+        "degraded":          degraded,
+    }
+
+
 def handle_wallet_risk(params: dict) -> dict:
     address = (params.get("address") or "").strip()
     if not address:
@@ -2889,6 +2935,7 @@ def handle_wallet_risk(params: dict) -> dict:
             "risk_level": risk_level,
             "risk_flags": risk_flags,
             "metadata":   metadata,
+            **_freshness(risk_flags, metadata),
         })
 
     if chain in ("evm", "solana"):
@@ -2935,6 +2982,7 @@ def handle_wallet_risk(params: dict) -> dict:
         "risk_level": risk_level,
         "risk_flags": risk_flags,
         "metadata":   metadata,
+        **_freshness(risk_flags, metadata),
     })
 
 
@@ -2959,12 +3007,21 @@ def handle_wallet_screen_batch(params: dict) -> dict:
         result = handle_wallet_risk({"address": addr})
         body   = json.loads(result.get("body", "{}"))
         data   = body.get("data", {})
+        # Freshness is carried PER RESULT, not once for the batch: a flagged
+        # address, a clean one and one whose upstream errored all come back in
+        # the same call with legitimately different lifetimes. Batch is the
+        # endpoint people cache from, so collapsing them to one TTL would push
+        # the caller straight back into guessing.
         return {
-            "address":    data.get("address", addr),
-            "chain":      data.get("chain", "unknown"),
-            "risk_level": data.get("risk_level", "UNKNOWN"),
-            "risk_flags": data.get("risk_flags", []),
-            "error":      body.get("error") if not body.get("ok") else None,
+            "address":           data.get("address", addr),
+            "chain":             data.get("chain", "unknown"),
+            "risk_level":        data.get("risk_level", "UNKNOWN"),
+            "risk_flags":        data.get("risk_flags", []),
+            "observed_at":       data.get("observed_at"),
+            "valid_for_seconds": data.get("valid_for_seconds"),
+            "expires_at":        data.get("expires_at"),
+            "degraded":          data.get("degraded"),
+            "error":             body.get("error") if not body.get("ok") else None,
         }
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
@@ -4318,6 +4375,8 @@ def handle_report_view(report_id: str) -> dict:
         for k, v in summary.items()
     )
     body = f"""<html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>RelayShield Report — {html.escape(report_type)}</title></head>
 <body style="background:#0a1628;color:#e2e8f0;font-family:-apple-system,sans-serif;margin:0;padding:24px">
 <div style="max-width:480px;margin:0 auto">
@@ -6959,6 +7018,55 @@ def _bazaar_body_ext(input_example: dict, input_schema: dict, output_example: di
     }
 
 
+def _schema_from_example(value):
+    """Infer a JSON Schema from an example value.
+
+    Deliberately permissive: types only, never `required`, and arrays are
+    described by their first element. The point is to give a discovery client
+    (and x402scan's auditor, which reports SCHEMA_OUTPUT_MISSING for a bare
+    `{"type": "object"}`) a real description of the response, without turning
+    an example into a contract we would then have to keep exactly true for
+    every field on every call. Enrichment fields that come back null on some
+    calls are typed from whatever the example happens to show, so a strict
+    schema here would fail validation on perfectly good responses.
+    """
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if isinstance(value, str):
+        return {"type": "string"}
+    if value is None:
+        # Not "null": the field is nullable, and in this API null means
+        # "not determined" rather than a distinct type.
+        return {}
+    if isinstance(value, list):
+        return {"type": "array", "items": _schema_from_example(value[0]) if value else {}}
+    if isinstance(value, dict):
+        return {"type": "object",
+                "properties": {k: _schema_from_example(v) for k, v in value.items()}}
+    return {}
+
+
+def _bazaar_output_schema(output_example):
+    """Schema for `info.output`, which is the WRAPPER `{type, example}`.
+
+    Same trap that produced the CDP facilitator rejection documented in
+    _v2_bazaar_extension: the SDK validates `info` against `schema`, so this
+    must describe `{"type": "json", "example": ...}` and NOT the response
+    payload directly. The payload's own inferred schema nests under `example`.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string"},
+            "example": _schema_from_example(output_example),
+        },
+    }
+
+
 def _v1_output_schema(bazaar_ext: dict) -> dict:
     """Strips the V2-only _input_schema field so V1's outputSchema stays
     exactly {input, output} on the wire."""
@@ -6998,7 +7106,7 @@ def _v2_bazaar_extension(bazaar_ext: dict) -> dict:
                     },
                     "required": ["body"],
                 },
-                "output": {"type": "object"},
+                "output": _bazaar_output_schema(bazaar_ext["output"]),
             },
             "required": ["input"],
         },
@@ -10383,6 +10491,54 @@ def _text_response(body: str, content_type: str, max_age: int = 3600) -> dict:
     }
 
 
+
+
+# ---------------------------------------------------------------------------
+# Favicon
+#
+# Added 2026-08-06. x402scan's discovery auditor reports FAVICON_MISSING for
+# this origin, and the Poncho merchant card it generates falls back to a
+# generic globe while other listings show their own mark.
+#
+# SVG, not ICO or PNG, and that is not a style preference. This is a REST API
+# (v1) behind a single {proxy+} integration. Binary responses there need the
+# response media type in `binaryMediaTypes` AND the request's Accept header to
+# match one of those entries EXACTLY -- a real browser sends
+# "image/avif,image/webp,image/png,...", which matches nothing, so a base64
+# body is delivered verbatim as text. Verified directly: `Accept: image/png`
+# returned a valid PNG while the browser's own multi-value Accept returned the
+# base64 string. The alternative, setting contentHandling CONVERT_TO_BINARY on
+# the proxy method, would convert every JSON response on the API too.
+#
+# SVG is text, so none of that applies, it is crisp at every size, and it is
+# supported by every current browser. /favicon.ico redirects here for crawlers
+# that ask for the conventional path.
+# ---------------------------------------------------------------------------
+
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<rect width="64" height="64" rx="12" fill="#1a1035"/>'
+    '<path d="M32 8 54 16v16c0 13-9 21-22 24-13-3-22-11-22-24V16z" fill="#a855f7"/>'
+    '<path d="M32 12 50 18.5V32c0 11-7.5 17.5-18 20.5V12z" fill="#9333ea"/>'
+    '<path d="M21 32.5 28.5 40 44 24" fill="none" stroke="#f4f4e8" '
+    'stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>'
+    '</svg>'
+)
+
+
+def handle_favicon():
+    """Serve the site icon. Cached hard: it changes roughly never, and every
+    browser tab, crawler and marketplace card fetches it."""
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "image/svg+xml",
+            "Cache-Control": "public, max-age=604800",
+        },
+        "body": _FAVICON_SVG,
+    }
+
+
 def handle_robots_txt() -> dict:
     body = (
         "User-agent: *\n"
@@ -10489,6 +10645,8 @@ def handle_guide_page(slug: str) -> dict:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>{guide['title']} — RelayShield</title>
 <meta name="description" content="{guide['desc']}">
 <link rel="canonical" href="{url}">
@@ -10581,7 +10739,10 @@ def handle_openapi() -> dict:
             "Cache-Control": "public, max-age=3600",
             "Access-Control-Allow-Origin": "*",
         },
-        "body": json.dumps(relayshield_openapi_spec.build_spec(PUBLIC_BASE_URL)),
+        # Prices passed in, never duplicated in the spec module: PAYG_PRICE_UNITS
+        # here is the same table the 402 challenge is built from, so the
+        # published document cannot advertise a price we do not charge.
+        "body": json.dumps(relayshield_openapi_spec.build_spec(PUBLIC_BASE_URL, PAYG_PRICE_UNITS)),
     }
 
 
@@ -10645,6 +10806,14 @@ def lambda_handler(event: dict, context) -> dict:
     # meant crawlers had no entry point and coding agents had no spec to read --
     # awkward for a product whose whole thesis is that agents discover and pay
     # for it, and whose LangChain placement is driven by install volume.
+    if method in ("GET", "HEAD") and path in ("/favicon.svg", "/favicon.svg/"):
+        return handle_favicon()
+    if method in ("GET", "HEAD") and path in ("/favicon.ico", "/favicon.ico/",
+                                              "/apple-touch-icon.png",
+                                              "/apple-touch-icon-precomposed.png"):
+        return {"statusCode": 302, "headers": {"Location": "/favicon.svg",
+                                               "Cache-Control": "public, max-age=604800"},
+                "body": ""}
     if method in ("GET", "HEAD") and path in ("/robots.txt", "/robots.txt/"):
         return handle_robots_txt()
     if method in ("GET", "HEAD") and path in ("/sitemap.xml", "/sitemap.xml/"):

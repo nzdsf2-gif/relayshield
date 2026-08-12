@@ -1,0 +1,1 @@
+Correlates breach, SIM swap, infostealer, OAuth token and domain signals against the same identity, separating an active account takeover from a stale breach record.

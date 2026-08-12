@@ -29,6 +29,18 @@ const fmtDate = (iso) => {
     : d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 };
 
+// Byte-identical to the one relayshield_api.py serves at
+// api.relayshield.net/favicon.svg. Kept as a literal in both rather than
+// fetched, so neither origin's icon depends on the other being up.
+const FAVICON_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
+  '<rect width="64" height="64" rx="12" fill="#1a1035"/>' +
+  '<path d="M32 8 54 16v16c0 13-9 21-22 24-13-3-22-11-22-24V16z" fill="#a855f7"/>' +
+  '<path d="M32 12 50 18.5V32c0 11-7.5 17.5-18 20.5V12z" fill="#9333ea"/>' +
+  '<path d="M21 32.5 28.5 40 44 24" fill="none" stroke="#f4f4e8" ' +
+  'stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '</svg>';
+
 const CSS = `
 :root{--bg:#0d0f14;--surface:#161a23;--border:#252b38;--text:#e8ecf4;--muted:#98a2b8;--accent:#6c63ff;--accent2:#00B5A5}
 *{box-sizing:border-box}
@@ -94,6 +106,8 @@ function shell({ title, description, canonical, body, ogType = "website" }) {
 <meta property="og:url" content="${esc(canonical)}">
 <meta property="og:image" content="${SITE}/og.png">
 <meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="alternate" type="application/rss+xml" title="${esc(NAME)}" href="${SITE}/rss.xml">
 <style>${CSS}</style>
 </head><body>
@@ -249,6 +263,25 @@ export default {
           "Cache-Control": "public, max-age=86400, immutable",
         },
       });
+    }
+
+    // Favicon. blog.relayshield.net served no icon at all, so every browser
+    // tab and every card renderer fell back to the 134 KB og.png, which is the
+    // same shield card on every post. SVG to match api.relayshield.net exactly,
+    // so both origins show one mark from one source. /favicon.ico redirects
+    // here for anything asking by convention.
+    if (path === "/favicon.svg") {
+      return new Response(FAVICON_SVG, {
+        headers: {
+          "Content-Type": "image/svg+xml",
+          "Cache-Control": "public, max-age=604800",
+        },
+      });
+    }
+
+    if (path === "/favicon.ico" || path === "/apple-touch-icon.png" ||
+        path === "/apple-touch-icon-precomposed.png") {
+      return Response.redirect(`${SITE}/favicon.svg`, 302);
     }
 
     if (path === "/og.png") {

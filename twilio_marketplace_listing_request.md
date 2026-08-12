@@ -35,8 +35,8 @@ The reason I think it is a fit: your two documented Add-on tutorials are Prove T
 Reverse Phone, both phone and identity data providers. RelayShield sits in that same category, but
 covers signals those providers do not. We correlate a phone number or email against criminal
 underground sources rather than carrier or public records: infostealer stealer-log marketplaces,
-breach corpora, stolen session-cookie archives, and around 85 monitored criminal Telegram channels,
-against a corpus of roughly 5 million indicators.
+breach corpora, stolen session-cookie archives, and around 87 monitored criminal Telegram channels,
+against a corpus of over 5 million indicators.
 
 The practical difference for a Twilio customer is this. Lookup can already tell them a number was
 recently ported or swapped. It cannot tell them that the same subscriber's credentials showed up in
@@ -48,10 +48,10 @@ natural fit rather than something we would need to build.
 
 A few things you may want to know up front:
 
-- Live production API, currently 28 endpoints, with published OpenAPI documentation at
-  api.relayshield.net/docs
+- Live production API, currently 28 pay-per-call endpoints, with published OpenAPI documentation
+  at api.relayshield.net/docs
 - Existing integrations with n8n (verified community node), Zapier (approved, entering beta),
-  Elastic Security, and listings on AWS Marketplace
+  Elastic Security, and listings on AWS Marketplace and the x402 agent-payments registry
 - US entity, RelayShield LLC
 
 Could you tell me whether we qualify for a Marketplace Listing invitation, and what the process and
@@ -68,9 +68,12 @@ support@relayshield.net
 
 They are in the message and they have all drifted before.
 
-- **~5 million indicators.** Measured 2026-08-05 from `relayshield_intel_iocs`: 5,027,104. Note four
-  public surfaces currently claim between 4.4M and 4.9M, so use the live figure, not those.
-- **~85 Telegram channels.** The 2026-08-05 monitor run reported "Channels checked: 85."
+- **Over 5 million indicators.** Re-measured 2026-08-06 from `relayshield_intel_iocs`: **5,089,873**.
+  Four public surfaces once claimed between 4.4M and 4.9M; all were reconciled on 2026-08-05. Use the
+  live figure, never a remembered one.
+- **87 Telegram channels.** Re-counted live 2026-08-06: `relayshield_intel_channels` where
+  `active = true` returns **87**, up from 85 yesterday. Count `active`, never the raw row count,
+  which is 294 and includes unverified auto-discovered candidates.
 - **28 endpoints.** 26 PAYG in `relayshield_api.py` plus 2 in `relayshield_agentic_api.py`. Do **not**
   say "28 discoverable in the CDP Bazaar"; only 25 are indexed, deliberately.
 

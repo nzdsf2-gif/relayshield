@@ -1,0 +1,77 @@
+Overview
+RelayShield Core Identity Exposure (Bundle A) is a REST API. All endpoints are served from a single base URL and authenticated with one header.
+
+Base URL
+https://api.relayshield.net
+
+Getting your API key
+1. Subscribe to this product in AWS Marketplace.
+2. On the "Set up your account" page after subscribing, enter the email address where your key should be sent.
+3. Your API key is emailed automatically when the subscription activates. No separate account or payment method is required; all billing is handled by AWS Marketplace.
+4. If the email has not arrived within 15 minutes, contact support@relayshield.net with your AWS account ID.
+
+Authentication
+Every request requires this header:
+X-RS-API-KEY: YOUR_API_KEY
+
+Verifying your access
+Run this call to confirm your key is active. A 200 response confirms the endpoint is reachable and your key is valid.
+
+curl -X POST https://api.relayshield.net/v1/metered/breach \
+  -H "X-RS-API-KEY: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+
+Endpoints
+
+1. Breach Exposure Check
+POST https://api.relayshield.net/v1/metered/breach
+Checks an email address against an aggregated breach corpus and dark web credential databases.
+curl -X POST https://api.relayshield.net/v1/metered/breach \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+
+2. SIM Swap Detection
+POST https://api.relayshield.net/v1/metered/sim-swap
+Detects a recent SIM swap or carrier port on a phone number, a common account takeover precursor.
+curl -X POST https://api.relayshield.net/v1/metered/sim-swap \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"phone": "+15551234567"}'
+
+3. Infostealer Log Check
+POST https://api.relayshield.net/v1/metered/infostealer
+Checks an email address against credentials harvested by infostealer malware.
+curl -X POST https://api.relayshield.net/v1/metered/infostealer \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+
+4. Domain Lookalike Detection
+POST https://api.relayshield.net/v1/metered/domain
+Scans a domain for active phishing lookalikes and typosquats registered against your brand.
+curl -X POST https://api.relayshield.net/v1/metered/domain \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"domain": "example.com"}'
+
+5. OAuth Token Exposure Watchlist
+POST https://api.relayshield.net/v1/metered/oauth-watchlist
+Finds exposed OAuth tokens and SaaS credentials tied to an email address.
+curl -X POST https://api.relayshield.net/v1/metered/oauth-watchlist \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+
+6. Crypto Intelligence Check
+POST https://api.relayshield.net/v1/metered/crypto-intel
+Screens an EVM address, and optionally a token contract, against RelayShield's crypto threat intelligence corpus.
+Optional fields: "chain_id", "token_address".
+curl -X POST https://api.relayshield.net/v1/metered/crypto-intel \
+  -H "X-RS-API-KEY: YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"address": "0x0000000000000000000000000000000000000000"}'
+
+Billing
+Your monthly contract covers access to the bundle. Individual calls are metered per endpoint and reported to AWS Marketplace, and they appear on your AWS bill. There is no separate invoice from RelayShield.
+
+Full API reference
+https://api.relayshield.net/docs
+
+Support
+support@relayshield.net, response within 1 business day for standard issues.

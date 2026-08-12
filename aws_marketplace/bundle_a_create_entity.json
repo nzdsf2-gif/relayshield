@@ -1,0 +1,305 @@
+{
+  "Catalog": "AWSMarketplace",
+  "ChangeSet": [
+    {
+      "ChangeType": "CreateProduct",
+      "ChangeName": "CreateProductChange",
+      "Entity": {
+        "Type": "SaaSProduct@1.0"
+      },
+      "DetailsDocument": {}
+    },
+    {
+      "ChangeType": "UpdateInformation",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "ProductTitle": "RelayShield - Core Identity Exposure API Bundle",
+        "ShortDescription": "RelayShield Core Identity Exposure delivers metered access to six identity threat detection APIs, billed entirely through AWS Marketplace. It covers breach exposure, SIM swap detection, infostealer log checks, domain lookalike detection, OAuth token exposure, and crypto threat intelligence. The bundle is licensed independently, with no dependency on any other RelayShield product or bundle.",
+        "LongDescription": "Core Identity Exposure is built for teams that need to know whether an identity has already been compromised, before it is used against them.\n\nThe bundle includes breach exposure checks against an aggregated breach corpus and dark web credential databases, SIM swap detection that surfaces recent swap activity on a phone number (a common account takeover precursor), infostealer log checks that find credentials harvested by stealer malware, domain lookalike detection for typosquatted domains registered against your brand, an OAuth token exposure watchlist covering leaked OAuth and API tokens, and crypto threat intelligence for wallet and domain checks against RelayShield's criminal corpus.\n\nThe six endpoints are designed to be used together. An identity appearing in a breach corpus is routine. The same identity showing recent SIM swap activity and credentials in a fresh stealer log is an active incident, and correlating those signals is what this bundle exists to do.\n\nAll endpoints are backed by RelayShield's live threat intelligence corpus: 5.1M+ indicators of compromise and 87 monitored criminal Telegram channels. Your API key is issued automatically by email when your AWS Marketplace subscription activates, with full usage instructions included. All access is provisioned and billed through AWS Marketplace.",
+        "Highlights": [
+          "Six identity exposure APIs licensed as one bundle through AWS Marketplace, with no dependency on any other bundle or platform-wide subscription.",
+          "Correlates breach, SIM swap, infostealer, OAuth token and domain signals against the same identity, separating an active account takeover from a stale breach record.",
+          "Backed by a live threat intelligence corpus of 5.1M+ indicators of compromise and 87 monitored criminal Telegram channels, updated continuously."
+        ],
+        "SearchKeywords": [
+          "breach detection",
+          "SIM swap",
+          "infostealer",
+          "identity security",
+          "credential exposure",
+          "threat intelligence",
+          "account takeover",
+          "dark web"
+        ],
+        "Categories": [
+          "Security"
+        ],
+        "LogoUrl": "https://relayshield-public-assets.s3.amazonaws.com/bundle_a/relayshield_logo_bundle_a.png",
+        "AdditionalResources": [],
+        "SupportDescription": "Email support: support@relayshield.net. Full API documentation, authentication steps, endpoint URLs, and sample requests are included in this product's Usage Instructions. Response within 1 business day for standard issues."
+      }
+    },
+    {
+      "ChangeType": "UpdateTargeting",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "PositiveTargeting": {
+          "BuyerAccounts": [
+            "442429445748"
+          ]
+        }
+      }
+    },
+    {
+      "ChangeType": "AddDeliveryOptions",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "DeliveryOptions": [
+          {
+            "Details": {
+              "SaaSUrlDeliveryOptionDetails": {
+                "FulfillmentUrl": "https://api.relayshield.net/marketplace/bundle-fulfillment",
+                "UsageInstructions": "Overview\nRelayShield Core Identity Exposure (Bundle A) is a REST API. All endpoints are served from a single base URL and authenticated with one header.\n\nBase URL\nhttps://api.relayshield.net\n\nGetting your API key\n1. Subscribe to this product in AWS Marketplace.\n2. On the \"Set up your account\" page after subscribing, enter the email address where your key should be sent.\n3. Your API key is emailed automatically when the subscription activates. No separate account or payment method is required; all billing is handled by AWS Marketplace.\n4. If the email has not arrived within 15 minutes, contact support@relayshield.net with your AWS account ID.\n\nAuthentication\nEvery request requires this header:\nX-RS-API-KEY: YOUR_API_KEY\n\nVerifying your access\nRun this call to confirm your key is active. A 200 response confirms the endpoint is reachable and your key is valid.\n\ncurl -X POST https://api.relayshield.net/v1/metered/breach \\\n  -H \"X-RS-API-KEY: YOUR_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"email\": \"user@example.com\"}'\n\nEndpoints\n\n1. Breach Exposure Check\nPOST https://api.relayshield.net/v1/metered/breach\nChecks an email address against an aggregated breach corpus and dark web credential databases.\ncurl -X POST https://api.relayshield.net/v1/metered/breach \\\n  -H \"X-RS-API-KEY: YOUR_API_KEY\" -H \"Content-Type: application/json\" \\\n  -d '{\"email\": \"user@example.com\"}'\n\n2. SIM Swap Detection\nPOST https://api.relayshield.net/v1/metered/sim-swap\nDetects a recent SIM swap or carrier port on a phone number, a common account takeover precursor.\ncurl -X POST https://api.relayshield.net/v1/metered/sim-swap \\\n  -H \"X-RS-API-KEY: YOUR_API_KEY\" -H \"Content-Type: application/json\" \\\n  -d '{\"phone\": \"+15551234567\"}'\n\n3. Infostealer Log Check\nPOST https://api.relayshield.net/v1/metered/infostealer\nChecks an email address against credentials harvested by infostealer malware.\ncurl -X POST https://api.relayshield.net/v1/metered/infostealer \\\n  -H \"X-RS-API-KEY: YOUR_API_KEY\" -H \"Content-Type: application/json\" \\\n  -d '{\"email\": \"user@example.com\"}'\n\n4. Domain Lookalike Detection\nPOST https://api.relayshield.net/v1/metered/domain\nScans a domain for active phishing lookalikes and typosquats registered against your brand.\ncurl -X POST https://api.relayshield.net/v1/metered/domain \\\n  -H \"X-RS-API-KEY: YOUR_API_KEY\" -H \"Content-Type: application/json\" \\\n  -d '{\"domain\": \"example.com\"}'\n\n5. OAuth Token Exposure Watchlist\nPOST https://api.relayshield.net/v1/metered/oauth-watchlist\nFinds exposed OAuth tokens and SaaS credentials tied to an email address.\ncurl -X POST https://api.relayshield.net/v1/metered/oauth-watchlist \\\n  -H \"X-RS-API-KEY: YOUR_API_KEY\" -H \"Content-Type: application/json\" \\\n  -d '{\"email\": \"user@example.com\"}'\n\n6. Crypto Intelligence Check\nPOST https://api.relayshield.net/v1/metered/crypto-intel\nScreens an EVM address, and optionally a token contract, against RelayShield's crypto threat intelligence corpus.\nOptional fields: \"chain_id\", \"token_address\".\ncurl -X POST https://api.relayshield.net/v1/metered/crypto-intel \\\n  -H \"X-RS-API-KEY: YOUR_API_KEY\" -H \"Content-Type: application/json\" \\\n  -d '{\"address\": \"0x0000000000000000000000000000000000000000\"}'\n\nBilling\nYour monthly contract covers access to the bundle. Individual calls are metered per endpoint and reported to AWS Marketplace, and they appear on your AWS bill. There is no separate invoice from RelayShield.\n\nFull API reference\nhttps://api.relayshield.net/docs\n\nSupport\nsupport@relayshield.net, response within 1 business day for standard issues."
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "AddDimensions",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": [
+        {
+          "Key": "core_identity_bundle_access",
+          "Name": "Core Identity Exposure - Monthly Access",
+          "Description": "Monthly minimum commitment for Core Identity Exposure API access, six endpoints.",
+          "Unit": "Units",
+          "Types": [
+            "Entitled"
+          ]
+        },
+        {
+          "Key": "breach_calls",
+          "Name": "Breach Exposure Check",
+          "Description": "Checks an email against an aggregated breach and dark web credential corpus.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "sim_swap_calls",
+          "Name": "SIM Swap Detection",
+          "Description": "Detects recent SIM swap activity on a phone number, a common account takeover precursor.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "infostealer_calls",
+          "Name": "Infostealer Log Check",
+          "Description": "Checks whether credentials for an identity appear in infostealer malware logs.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "domain_calls",
+          "Name": "Domain Lookalike Detection",
+          "Description": "Finds typosquatted and lookalike domains registered against your brand.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "oauth_watchlist_calls",
+          "Name": "OAuth Token Exposure Watchlist",
+          "Description": "Surfaces exposed OAuth and API tokens across leaked credential sources.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "crypto_intel_calls",
+          "Name": "Crypto Intelligence Check",
+          "Description": "Checks wallets and domains against RelayShield's crypto threat intelligence corpus.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        }
+      ]
+    },
+    {
+      "ChangeType": "ReleaseProduct",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": {}
+    },
+    {
+      "ChangeType": "CreateOffer",
+      "ChangeName": "CreateOfferChange",
+      "Entity": {
+        "Type": "Offer@1.0"
+      },
+      "DetailsDocument": {
+        "ProductId": "$CreateProductChange.Entity.Identifier"
+      }
+    },
+    {
+      "ChangeType": "UpdateInformation",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateOfferChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "Name": "RelayShield Core Identity Exposure - public offer",
+        "Description": "Public offer for the Core Identity Exposure API bundle, 150 USD monthly minimum plus metered per-call usage."
+      }
+    },
+    {
+      "ChangeType": "UpdatePricingTerms",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateOfferChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "PricingModel": "Contract",
+        "Terms": [
+          {
+            "Type": "UsageBasedPricingTerm",
+            "CurrencyCode": "USD",
+            "RateCards": [
+              {
+                "RateCard": [
+                  {
+                    "DimensionKey": "breach_calls",
+                    "Price": "0.10"
+                  },
+                  {
+                    "DimensionKey": "sim_swap_calls",
+                    "Price": "0.25"
+                  },
+                  {
+                    "DimensionKey": "infostealer_calls",
+                    "Price": "0.50"
+                  },
+                  {
+                    "DimensionKey": "domain_calls",
+                    "Price": "0.30"
+                  },
+                  {
+                    "DimensionKey": "oauth_watchlist_calls",
+                    "Price": "0.30"
+                  },
+                  {
+                    "DimensionKey": "crypto_intel_calls",
+                    "Price": "0.30"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "Type": "ConfigurableUpfrontPricingTerm",
+            "CurrencyCode": "USD",
+            "RateCards": [
+              {
+                "Selector": {
+                  "Type": "Duration",
+                  "Value": "P1M"
+                },
+                "RateCard": [
+                  {
+                    "DimensionKey": "core_identity_bundle_access",
+                    "Price": "150"
+                  }
+                ],
+                "Constraints": {
+                  "MultipleDimensionSelection": "Allowed",
+                  "QuantityConfiguration": "Allowed"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "UpdateLegalTerms",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateOfferChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "Terms": [
+          {
+            "Type": "LegalTerm",
+            "Documents": [
+              {
+                "Type": "StandardEula",
+                "Version": "2022-07-14"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "UpdateSupportTerms",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateOfferChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "Terms": [
+          {
+            "Type": "SupportTerm",
+            "RefundPolicy": "Email support: support@relayshield.net. Full API documentation, authentication steps, endpoint URLs, and sample requests are included in this product's Usage Instructions. Response within 1 business day for standard issues."
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "UpdateRenewalTerms",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateOfferChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "Terms": [
+          {
+            "Type": "RenewalTerm"
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "ReleaseOffer",
+      "Entity": {
+        "Type": "Offer@1.0",
+        "Identifier": "$CreateOfferChange.Entity.Identifier"
+      },
+      "DetailsDocument": {}
+    }
+  ]
+}

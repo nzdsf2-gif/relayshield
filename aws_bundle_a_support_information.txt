@@ -1,0 +1,1 @@
+Email support: support@relayshield.net. Full API documentation, authentication steps, endpoint URLs, and sample requests are included in this product's Usage Instructions. Response within 1 business day for standard issues.

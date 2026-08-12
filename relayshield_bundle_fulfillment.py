@@ -74,18 +74,51 @@ API_BASE_URL   = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod"
 PUBLIC_API_BASE_URL = "https://api.relayshield.net"
 DEVELOPERS_URL = f"{PUBLIC_API_BASE_URL}/developers"
 
-# Fill in once available from AWS Marketplace Seller Central for this
-# specific product listing — distinct from the TI product's values. Shared
-# across all bundles on this product (Bundle A, D, ...) — the env var name
-# is a historical artifact of Bundle D being built first.
-PRODUCT_CODE = os.environ.get("BUNDLE_D_PRODUCT_CODE", "")
+# One product code per AWS Marketplace product entity this Lambda fulfills.
+#
+# Bundle D lives on prod-kkvurtspreofy. Bundle A was originally planned for
+# that same entity, but adding it there meant submitting a change set that
+# replaces the whole rate card, which had already rolled Bundle D's prices
+# back to placeholders once (2026-07-27). Bundle A therefore gets its own
+# product entity, and this Lambda now fulfills BOTH, so nothing about a
+# Bundle A submission can touch the live Bundle D listing.
+#
+# BUNDLE_A_PRODUCT_CODE is empty until that entity exists. Everything below
+# skips empty codes, so this file behaves exactly as before until it is set.
+BUNDLE_D_PRODUCT_CODE = os.environ.get("BUNDLE_D_PRODUCT_CODE", "")
+BUNDLE_A_PRODUCT_CODE = os.environ.get("BUNDLE_A_PRODUCT_CODE", "")
 
-# One entry per contract ("Entitled") dimension on this product. The
-# dimension key on a customer's entitlement (GetEntitlements' Dimension
-# field) is the lookup key — that's how a single fulfillment/SNS handler
+# Every product code we recognise, for the DynamoDB scans that previously
+# filtered on a single equality. A key row belongs to us if its
+# aws_product_code is any of these.
+PRODUCT_CODES = [c for c in (BUNDLE_D_PRODUCT_CODE, BUNDLE_A_PRODUCT_CODE) if c]
+
+
+def _product_code_filter():
+    """Attr filter matching any product code we fulfill.
+
+    Replaces the old `Attr("aws_product_code").eq(PRODUCT_CODE)`, which
+    silently matched nothing for a bundle on a second entity.
+    """
+    # Falling back to [""] keeps the old behaviour when no product code is
+    # configured at all: a filter that matches nothing, rather than a crash.
+    codes = PRODUCT_CODES or [""]
+    cond = boto3.dynamodb.conditions.Attr("aws_product_code").eq(codes[0])
+    for code in codes[1:]:
+        cond = cond | boto3.dynamodb.conditions.Attr("aws_product_code").eq(code)
+    return cond
+
+
+# One entry per contract ("Entitled") dimension across all bundle products.
+# The dimension key on a customer's entitlement (GetEntitlements' Dimension
+# field) is the lookup key, which is how a single fulfillment/SNS handler
 # figures out *which* bundle a given customer/entitlement is for.
+# `product_code` records which entity the dimension lives on, so a mismatch
+# between the resolved product and the resolved dimension is detectable
+# rather than being provisioned as if it were fine.
 BUNDLE_CONFIGS = {
     "agentic_bundle_access": {
+        "product_code": BUNDLE_D_PRODUCT_CODE,
         "label":        "agentic_attack_surface",
         "dynamo_flag":  "bundle_d_access",
         "display_name": "Agentic Attack Surface (Bundle D)",
@@ -98,6 +131,7 @@ BUNDLE_CONFIGS = {
         ),
     },
     "core_identity_bundle_access": {
+        "product_code": BUNDLE_A_PRODUCT_CODE,
         "label":        "core_identity_exposure",
         "dynamo_flag":  "bundle_a_access",
         "display_name": "Core Identity Exposure (Bundle A)",
@@ -133,44 +167,90 @@ def _resolve_token(token: str) -> dict:
         raise
 
 
-def _get_entitlement(customer_id: str) -> dict | None:
-    """Active entitlement for *any* contract (Entitled) dimension on this
-    product. A present, unexpired entitlement means the customer has an
-    active contract for whichever bundle its Dimension resolves to (see
-    _resolve_bundle) — this file no longer assumes a single bundle."""
-    try:
-        resp = ent_client.get_entitlements(
-            ProductCode=PRODUCT_CODE,
-            Filter={"CUSTOMER_IDENTIFIER": [customer_id]},
-        )
-        entitlements = resp.get("Entitlements", [])
-        active = [e for e in entitlements if not e.get("ExpirationDate") or
-                  e["ExpirationDate"] > datetime.now(timezone.utc)]
-        # Prefer an entitlement whose Dimension is a known bundle-access
-        # dimension (the contract-commitment dimension) over per-call
-        # metered dimensions, which GetEntitlements can also return.
-        for e in active:
-            if e.get("Dimension") in BUNDLE_CONFIGS:
-                return e
-        return active[0] if active else None
-    except Exception as exc:
-        logger.error("get_entitlements failed customer=%s: %s", customer_id, exc)
-        return None
+def _get_entitlement(customer_id: str, product_code: str = "") -> tuple[dict | None, str]:
+    """Active entitlement for any contract (Entitled) dimension, plus the
+    product code it was found on.
+
+    GetEntitlements is scoped to ONE product, so with bundles split across
+    two entities a single call can no longer answer "does this customer have
+    a contract". When `product_code` is known (the fulfillment redirect gets
+    it from ResolveCustomer) we query just that one; otherwise, as on the SNS
+    path where only a customer id is available, we probe each product in turn.
+    """
+    codes = [product_code] if product_code else PRODUCT_CODES
+    for code in codes:
+        if not code:
+            continue
+        try:
+            resp = ent_client.get_entitlements(
+                ProductCode=code,
+                Filter={"CUSTOMER_IDENTIFIER": [customer_id]},
+            )
+            entitlements = resp.get("Entitlements", [])
+            active = [e for e in entitlements if not e.get("ExpirationDate") or
+                      e["ExpirationDate"] > datetime.now(timezone.utc)]
+            # Prefer an entitlement whose Dimension is a known bundle-access
+            # dimension (the contract-commitment dimension) over per-call
+            # metered dimensions, which GetEntitlements can also return.
+            for e in active:
+                if e.get("Dimension") in BUNDLE_CONFIGS:
+                    return e, code
+            if active:
+                return active[0], code
+        except Exception as exc:
+            logger.error("get_entitlements failed customer=%s product=%s: %s", customer_id, code, exc)
+    return None, ""
 
 
-def _resolve_bundle(entitlement: dict | None) -> dict:
-    """Map an entitlement's Dimension to its BUNDLE_CONFIGS entry. Falls
-    back to Bundle D (the original/default bundle on this product) if the
-    dimension is unrecognized, so this never silently drops a customer."""
+def _resolve_bundle(entitlement: dict | None, product_code: str = "") -> dict | None:
+    """Map an entitlement's Dimension to its BUNDLE_CONFIGS entry.
+
+    Returns None when the bundle cannot be established. It used to fall back
+    to Bundle D on any unrecognised dimension, which was safe while Bundle D
+    was the only bundle and becomes a real defect once it is not: a Bundle A
+    subscriber would have been provisioned a Bundle D key, granting the wrong
+    endpoints and metering the wrong dimensions, with nothing in the logs
+    saying so. Callers must treat None as a failure and not provision.
+    """
+    # With a single product configured there is nothing to be ambiguous about,
+    # so infer it. This keeps today's behaviour identical while Bundle A has no
+    # entity yet, and matters for the real race where AWS sends
+    # subscribe-success before GetEntitlements is consistent: without this we
+    # would refuse to provision a legitimate Bundle D customer. Strictness only
+    # kicks in once a second product exists, which is exactly when it is needed.
+    if not product_code and len(PRODUCT_CODES) == 1:
+        product_code = PRODUCT_CODES[0]
+
     dimension = (entitlement or {}).get("Dimension", "")
-    return BUNDLE_CONFIGS.get(dimension, BUNDLE_CONFIGS["agentic_bundle_access"])
+    config    = BUNDLE_CONFIGS.get(dimension)
+    if config:
+        # A dimension that belongs to a different entity than the one the
+        # entitlement came from means the two sources disagree. Trust neither.
+        if product_code and config.get("product_code") and config["product_code"] != product_code:
+            logger.error("Bundle mismatch: dimension=%s belongs to product=%s but entitlement came from product=%s",
+                         dimension, config["product_code"], product_code)
+            return None
+        return config
+
+    # Unrecognised dimension, e.g. a metered dimension returned instead of the
+    # contract one. If the product it came from hosts exactly one bundle, that
+    # is still unambiguous, so recover rather than fail a real customer.
+    if product_code:
+        candidates = [c for c in BUNDLE_CONFIGS.values() if c.get("product_code") == product_code]
+        if len(candidates) == 1:
+            logger.warning("Unrecognised dimension=%s on product=%s, resolved to %s by product",
+                           dimension or "(none)", product_code, candidates[0]["display_name"])
+            return candidates[0]
+
+    logger.error("Cannot resolve bundle: dimension=%s product=%s", dimension or "(none)", product_code or "(none)")
+    return None
 
 
 # ---------------------------------------------------------------------------
 # API key provisioning
 # ---------------------------------------------------------------------------
 
-def _provision_api_key(customer_id: str, email: str, bundle_config: dict, license_arn: str = "", aws_account_id: str = "") -> str:
+def _provision_api_key(customer_id: str, email: str, bundle_config: dict, license_arn: str = "", aws_account_id: str = "", product_code: str = "") -> str:
     """license_arn + aws_account_id are required for BatchMeterUsage under
     AWS's Concurrent Agreements model (rolled out 2026-06-01) — new SaaS
     products must meter using CustomerAWSAccountId + LicenseArn instead of
@@ -184,7 +264,10 @@ def _provision_api_key(customer_id: str, email: str, bundle_config: dict, licens
         "api_key":                     api_key,
         "aws_customer_id":             customer_id,
         "aws_account_id":              aws_account_id,
-        "aws_product_code":            PRODUCT_CODE,
+        # The product the entitlement actually came from, not a module-level
+        # constant. Stamping the wrong code here makes the key invisible to
+        # every lookup below, which reads as "key being provisioned" forever.
+        "aws_product_code":            product_code or bundle_config.get("product_code", ""),
         "aws_license_arn":             license_arn,
         "aws_bundle":                  bundle_config["label"],
         bundle_config["dynamo_flag"]:  True,
@@ -205,7 +288,7 @@ def _deactivate_api_key(customer_id: str) -> None:
     table = dynamodb.Table(API_KEYS_TABLE)
     resp  = table.scan(
         FilterExpression=boto3.dynamodb.conditions.Attr("aws_customer_id").eq(customer_id)
-        & boto3.dynamodb.conditions.Attr("aws_product_code").eq(PRODUCT_CODE)
+        & _product_code_filter()
     )
     for item in resp.get("Items", []):
         table.update_item(
@@ -223,7 +306,7 @@ def _find_api_key_for_customer(customer_id: str) -> dict | None:
         return pending
     resp  = table.scan(
         FilterExpression=boto3.dynamodb.conditions.Attr("aws_customer_id").eq(customer_id)
-        & boto3.dynamodb.conditions.Attr("aws_product_code").eq(PRODUCT_CODE)
+        & _product_code_filter()
     )
     items = resp.get("Items", [])
     return items[0] if items else None
@@ -239,7 +322,7 @@ def _find_provisioned_key_for_customer(customer_id: str) -> dict | None:
     table = dynamodb.Table(API_KEYS_TABLE)
     resp  = table.scan(
         FilterExpression=boto3.dynamodb.conditions.Attr("aws_customer_id").eq(customer_id)
-        & boto3.dynamodb.conditions.Attr("aws_product_code").eq(PRODUCT_CODE)
+        & _product_code_filter()
         & boto3.dynamodb.conditions.Attr("active").eq(True)
         & boto3.dynamodb.conditions.Attr("api_key").begins_with("rs_live_")
     )
@@ -456,11 +539,28 @@ Support: <a href="mailto:support@relayshield.net">support@relayshield.net</a></p
         customer_id = resolved.get("CustomerIdentifier", "")
         product     = resolved.get("ProductCode", "")
 
-        if PRODUCT_CODE and product != PRODUCT_CODE:
-            logger.warning("Product code mismatch: got %s expected %s", product, PRODUCT_CODE)
+        if PRODUCT_CODES and product not in PRODUCT_CODES:
+            logger.warning("Product code not recognised: got %s, known %s", product, PRODUCT_CODES)
 
-        entitlement   = _get_entitlement(customer_id)
-        bundle_config = _resolve_bundle(entitlement)
+        # ResolveCustomer already told us the product, so scope the entitlement
+        # lookup to it rather than probing both entities.
+        entitlement, ent_product = _get_entitlement(customer_id, product)
+        bundle_config = _resolve_bundle(entitlement, ent_product or product)
+        if bundle_config is None:
+            # Do not guess. A wrong guess here provisions the wrong bundle,
+            # which grants the wrong endpoints and meters the wrong dimensions.
+            logger.error("Bundle unresolved at fulfillment customer=%s product=%s, sending customer to support",
+                         customer_id, product)
+            _send_admin_notification("bundle-unresolved", customer_id, "", f"product={product}")
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "text/html"},
+                "body": f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>RelayShield</title></head>
+<body><p>Your subscription is being set up and needs a quick manual check. We have been notified and
+will email your API key shortly. Questions: <a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
+</body></html>""",
+            }
         logger.info("%s fulfillment entitlement check customer=%s active=%s",
                     bundle_config["display_name"], customer_id, bool(entitlement))
 
@@ -520,8 +620,11 @@ def handle_sns(event: dict) -> dict:
 
         action      = msg.get("action", "")
         customer_id = msg.get("customer-identifier", "")
+        # Present on both marketplace topics, and now load-bearing: it says
+        # which of the two bundle products the event is about.
+        product     = msg.get("product-code", "")
 
-        logger.info("Bundle D marketplace SNS action=%s customer=%s", action, customer_id)
+        logger.info("Bundle marketplace SNS action=%s customer=%s product=%s", action, customer_id, product)
 
         if action == "subscribe-success":
             pending = dynamodb.Table(API_KEYS_TABLE).get_item(
@@ -529,11 +632,20 @@ def handle_sns(event: dict) -> dict:
             ).get("Item", {})
             email = pending.get("email", f"aws_customer_{customer_id}@marketplace.aws")
 
-            entitlement    = _get_entitlement(customer_id)
-            bundle_config  = _resolve_bundle(entitlement)
+            entitlement, ent_product = _get_entitlement(customer_id, product)
+            bundle_config  = _resolve_bundle(entitlement, ent_product or product)
+            if bundle_config is None:
+                # Provisioning the wrong bundle is worse than provisioning
+                # none: the customer gets a working key for endpoints they did
+                # not buy, and nothing flags it. Stop and page a human.
+                logger.error("Bundle unresolved on subscribe-success customer=%s product=%s, NOT provisioning",
+                             customer_id, product)
+                _send_admin_notification("bundle-unresolved", customer_id, email, f"product={product}")
+                continue
             license_arn    = (entitlement or {}).get("LicenseArn", "")
             aws_account_id = (entitlement or {}).get("CustomerAWSAccountId", "")
-            api_key = _provision_api_key(customer_id, email, bundle_config, license_arn, aws_account_id)
+            api_key = _provision_api_key(customer_id, email, bundle_config, license_arn, aws_account_id,
+                                         ent_product or product)
             _send_welcome_email(email, api_key, bundle_config)
             _send_admin_notification("subscribe-success", customer_id, email, bundle_config["display_name"])
 
@@ -552,7 +664,7 @@ def handle_sns(event: dict) -> dict:
 
         elif action == "entitlement-updated":
             # Contract renewed, upgraded, or expired — aws-mp-entitlement-notification
-            entitlement = _get_entitlement(customer_id)
+            entitlement, _ = _get_entitlement(customer_id, product)
             if not entitlement:
                 _deactivate_api_key(customer_id)
                 _send_admin_notification("entitlement-expired", customer_id)

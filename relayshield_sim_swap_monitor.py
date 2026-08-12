@@ -35,7 +35,7 @@ Phone resolution:
     - Fallback: legacy plaintext whatsapp_number / phone_number field
 
 Twilio Lookup v2 SIM Swap API:
-    GET https://lookups.twilio.com/v2/PhoneNumbers/{phone}?Fields=sim_swap,carrier
+    GET https://lookups.twilio.com/v2/PhoneNumbers/{phone}?Fields=sim_swap,line_type_intelligence
     Auth: Basic (Account SID + Auth Token)
     Cost: ~$0.01 per query
 
@@ -689,7 +689,10 @@ def call_twilio_sim_swap_lookup(
     auth_token: str,
 ) -> dict | None:
     """
-    Call Twilio Lookup v2 with Fields=sim_swap,carrier.
+    Call Twilio Lookup v2 with Fields=sim_swap,line_type_intelligence.
+
+    Returns None when the sim_swap package reports an error_code, rather
+    than a false clean. `carrier` is NOT a valid v2 field name.
 
     Returns dict:
         swapped_in_period (bool)   — swap detected within the last 24 hours
@@ -702,9 +705,14 @@ def call_twilio_sim_swap_lookup(
     Returns None on HTTP or network error.
     """
     encoded = urllib.parse.quote(phone_e164, safe="")
+    # line_type_intelligence is what actually carries carrier_name on Lookup v2.
+    # `carrier` is a v1 field name and 400s the whole request if sent. Without
+    # this the sim_swap object's own carrier_name is null whenever the package
+    # is unavailable, so last_known_carrier stayed "unknown" forever and
+    # port-out detection (which fires on carrier CHANGE) could never trigger.
     url     = (
         TWILIO_LOOKUP_URL.format(phone_number=encoded)
-        + "?Fields=sim_swap"
+        + "?Fields=sim_swap,line_type_intelligence"
     )
     credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
 
@@ -718,12 +726,36 @@ def call_twilio_sim_swap_lookup(
         with urllib.request.urlopen(req, timeout=15) as resp:
             body         = json.loads(resp.read())
             sim_swap_obj = body.get("sim_swap") or {}
-            last_swap    = sim_swap_obj.get("last_sim_swap") or {}
+            lti          = body.get("line_type_intelligence") or {}
 
+            # Twilio returns HTTP 200 with a per-package error_code inside the
+            # body when the package is unavailable. 60606 means the SIM swap
+            # package is not enabled on this account; 60600/60620 mean the
+            # carrier did not answer. In every one of those cases last_sim_swap
+            # is null, and the old code read that as swapped_in_period=False.
+            #
+            # That turned "we have no idea" into "you are fine" on a security
+            # product, silently, on every run. Absence of data is not evidence
+            # of absence: return None so the caller records an error instead of
+            # a clean result. See project-sim-swap-never-worked.
+            pkg_error = sim_swap_obj.get("error_code")
+            if pkg_error:
+                logger.error(
+                    "Twilio Lookup %s — sim_swap unavailable, error_code=%s. "
+                    "NOT reporting a clean result. 60606 means the SIM swap package "
+                    "is not enabled for this account (carrier registration required).",
+                    phone_e164, pkg_error,
+                )
+                return None
+
+            last_swap = sim_swap_obj.get("last_sim_swap") or {}
             result = {
                 "swapped_in_period":    bool(last_swap.get("swapped_in_period", False)),
                 "swap_event_timestamp": last_swap.get("last_sim_swap_date", ""),
-                "carrier_name":         sim_swap_obj.get("carrier_name", ""),
+                # Prefer line_type_intelligence, which is populated independently
+                # of the sim_swap package, and fall back to the sim_swap object.
+                "carrier_name":         lti.get("carrier_name")
+                                        or sim_swap_obj.get("carrier_name", ""),
             }
             logger.info(
                 "Twilio Lookup %s — swapped=%s carrier=%s",

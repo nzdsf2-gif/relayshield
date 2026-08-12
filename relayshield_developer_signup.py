@@ -1284,6 +1284,8 @@ LANDING_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>RelayShield API — Security Intelligence for Developers</title>
 <!--
   Discoverability block added 2026-07-30. Until then this page had NO meta
@@ -2020,6 +2022,8 @@ SUCCESS_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>You're set — RelayShield API</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -2367,6 +2371,15 @@ _SOURCE_ALIASES = {
     "x402-mastodon":  "x402",
     "x402-medium":    "x402",
     "x402scan":       "x402",
+    # Added 2026-08-06 for the syndication run. The distribution plan named five
+    # channels and only five keys were registered; these three cover the
+    # x402-native channels the plan added later, registered before anything is
+    # posted rather than after. `x402-hn` is registered now even though Hacker
+    # News is deliberately held back, so the one shot there cannot go out
+    # untracked.
+    "x402-discord":   "x402",
+    "x402-merit":     "x402",
+    "x402-hn":        "x402",
     "hn": "github",
     "reddit": "github",
     "opencti": "xsoar",
@@ -2498,6 +2511,8 @@ def _aws_email_capture_page(aws_customer_id: str, source: str = "aws_marketplace
     action = f"{PUBLIC_API_BASE_URL}/marketplace/" + ("bundle-fulfillment" if is_bundle else "fulfillment")
     return f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>RelayShield — Almost done</title>
 <style>body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d0f14;
 color:#e8eaf0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:2rem}}
@@ -2530,6 +2545,8 @@ CS_MOBILE_SUCCESS_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>You're subscribed — Crypto Shield</title>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -2612,6 +2629,8 @@ TOPUP_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>Top up credits — RelayShield API</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -2725,6 +2744,8 @@ TOPUP_SUCCESS_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <title>Credits added — RelayShield API</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

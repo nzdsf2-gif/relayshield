@@ -6,7 +6,7 @@ Sources, in precedence order (later wins):
                               truth and the reason the blog does not depend on
                               Hashnode staying up.
   2. The live Hashnode RSS  - only fills in slugs not already frozen locally.
-  3. hashnode_export/*.md   - manually exported posts (incl. archived ones the
+  3. blog_source/*.md       - manually exported posts (incl. archived ones the
                               public RSS cannot reach). Front matter: title,
                               slug, date. Overrides both of the above.
 
@@ -31,7 +31,11 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RSS = "https://relayshield.hashnode.dev/rss.xml"
-EXPORT_DIR = os.path.join(HERE, "hashnode_export")
+# Renamed from "hashnode_export" on 2026-08-11. This directory is a LOCAL input
+# to this build and has never been a publishing destination, but the old name
+# read like one and caused a false alarm that a post had been sent to Hashnode.
+# Hashnode is retired: never publish there. See the RSS note below.
+EXPORT_DIR = os.path.join(HERE, "blog_source")
 CONTENT_DIR = os.path.join(HERE, "blog_content")
 OUT = os.path.join(HERE, "blog_posts.js")
 
@@ -223,9 +227,32 @@ def md_to_html(md):
                 out.append("<p>%s</p>" % _inline(" | ".join(r)))
             continue
 
-        if line.startswith("> "):
-            out.append("<blockquote>%s</blockquote>" % _inline(line[2:]))
-            i += 1
+        if line.startswith(">"):
+            # Gather the whole quote, not one <blockquote> per source line. The
+            # sources are hard-wrapped at ~100 chars, so emitting a blockquote
+            # per line turned every multi-line callout into a stack of
+            # separately-bordered boxes with gaps between them, and stopped
+            # **bold** spanning a line break from rendering at all -- the same
+            # failure the paragraph gatherer below already fixes. A bare ">"
+            # separates paragraphs inside a quote; it previously fell through
+            # to the paragraph branch and rendered as a literal "&gt;".
+            # Caught on the Sentinel guide 2026-08-16.
+            if in_list:
+                out.append("</%s>" % in_list)
+                in_list = None
+            para, paras = [], []
+            while i < len(lines) and lines[i].startswith(">"):
+                content = lines[i][1:].strip()
+                if content:
+                    para.append(content)
+                elif para:
+                    paras.append(para)
+                    para = []
+                i += 1
+            if para:
+                paras.append(para)
+            for p in paras:
+                out.append("<blockquote>%s</blockquote>" % _inline(" ".join(p)))
             continue
 
         m_li = re.match(r"^([-*]|\d+\.)\s+", line)
@@ -307,9 +334,18 @@ def main():
     for post in from_local():
         by_slug[post["slug"]] = post
 
-    # RSS only fills gaps; it never overwrites frozen content.
-    for post in from_rss():
-        by_slug.setdefault(post["slug"], post)
+    # Hashnode RSS: RETIRED 2026-08-11, deliberately not called.
+    #
+    # Hashnode is not to be used again. It silently unpublished the Elastic
+    # guide twice and its AutoMod archived a post three times. Every one of the
+    # 21 posts is now frozen in blog_content/ or authored in blog_source/, so
+    # this fetch had nothing left to contribute: the last build that ran it
+    # reported "0 from RSS". from_rss() is kept only so old frozen posts remain
+    # explainable, and calling it again would reintroduce a live dependency on
+    # a service we have deliberately left.
+    #
+    # for post in from_rss():
+    #     by_slug.setdefault(post["slug"], post)
 
     # Exports win: they carry archived posts and any corrected copy.
     for post in from_exports():
@@ -338,7 +374,7 @@ def main():
     from_rss_n = sum(1 for p in posts if p.get("source") == "rss")
     from_exp_n = sum(1 for p in posts if p.get("source") == "export")
     print(
-        "wrote %s\n  %d posts total (%d from RSS, %d from hashnode_export/)\n  %.0f KB"
+        "wrote %s\n  %d posts total (%d from RSS, %d from blog_source/)\n  %.0f KB"
         % (OUT, len(posts), from_rss_n, from_exp_n, os.path.getsize(OUT) / 1024)
     )
     return 0

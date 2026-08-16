@@ -24,10 +24,15 @@ tactics:
 query: |
   let starttime = todatetime('{{StartTimeISO}}');
   let endtime = todatetime('{{EndTimeISO}}');
+  // Behaviours, platforms and vendor names all share the malware: namespace.
+  // "connectwise" was observed classified as a family on 2026-08-16; it is a
+  // vendor whose remote-access tooling gets abused, not a malware family.
   let not_families = dynamic([
     "phishing", "coinminer", "cryptominer", "spam", "scam", "ransomware", "loader",
     "stealer", "botnet", "trojan", "backdoor", "downloader", "malware", "apt",
-    "windows", "linux", "macos", "android", "ios"
+    "windows", "linux", "macos", "android", "ios",
+    "connectwise", "screenconnect", "anydesk", "teamviewer", "rmm", "generic",
+    "unknown", "suspicious", "test"
   ]);
   ThreatIntelIndicators
   | where TimeGenerated between (starttime .. endtime)
@@ -42,7 +47,7 @@ query: |
   | where isnotempty(Tag)
   // Well-formed names only. Hash fragments and other malformed identifiers occur in
   // this namespace and are not family names.
-  | extend IsWellFormed = Tag matches regex @"^[a-z][a-z0-9._-]{2,}$"
+  | extend IsWellFormed = Tag matches regex @"^[a-z]{3,}[a-z0-9._-]*$" and Tag !contains "0x" and not(Tag matches regex @"[0-9]{4,}")
   | extend Kind = case(
         Tag in (not_families), "behaviour or platform",
         IsWellFormed == false,  "malformed",

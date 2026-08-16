@@ -35,12 +35,16 @@ query: |
   let min_families = 2;
   // The malware: namespace is not purely malware families. It also carries
   // behaviours, platforms and vendor names, and a host trivially reaches two
-  // "families" if those are counted. Excluded here so the family count means
-  // what the alert says it means.
+  // "families" if those are counted, which on a High severity rule is a false
+  // positive. Excluded here so the family count means what the alert says it
+  // means. "connectwise" was observed being classified as a family on
+  // 2026-08-16; it is a vendor whose remote-access tooling gets abused.
   let not_families = dynamic([
     "phishing", "coinminer", "cryptominer", "spam", "scam", "ransomware", "loader",
     "stealer", "botnet", "trojan", "backdoor", "downloader", "malware", "apt",
-    "windows", "linux", "macos", "android", "ios"
+    "windows", "linux", "macos", "android", "ios",
+    "connectwise", "screenconnect", "anydesk", "teamviewer", "rmm", "generic",
+    "unknown", "suspicious", "test"
   ]);
   let RelayShield_Indicators = materialize(
       ThreatIntelIndicators
@@ -62,8 +66,13 @@ query: |
       | mv-expand Family = split(Family, ",")
       | extend Family = trim(" ", tostring(Family))
       | where isnotempty(Family) and Family !in (not_families)
-      // Drop malformed identifiers such as hash fragments, which are not family names.
-      | where Family matches regex @"^[a-z][a-z0-9._-]{2,}$"
+      // Drop malformed identifiers. "win-0x4679" passed an earlier, looser check
+      // because it starts with a letter and uses only permitted characters, so the
+      // hex marker and long digit runs are now rejected explicitly. This costs any
+      // real family whose name starts with a digit, such as 8base; that is accepted
+      // here for precision on a High severity rule, and the prevalence hunting query
+      // still surfaces those tags rather than hiding them.
+      | where Family matches regex @"^[a-z]{3,}[a-z0-9._-]*$" and Family !contains "0x" and not(Family matches regex @"[0-9]{4,}")
       | project IndicatorId = Id, IndicatorValue = tolower(ObservableValue), Family,
                 Confidence, ValidUntil, ThreatDescription = tostring(Data.description)
   );

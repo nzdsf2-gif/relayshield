@@ -31,10 +31,15 @@ query: |
   // range in the picker does not silently inflate the growth factor.
   let recent_window = 1d;
   let baseline_days = max_of(1.0, (endtime - recent_window - starttime) / 1d);
+  // Behaviours, platforms and vendor names all share the malware: namespace.
+  // "connectwise" was observed classified as a family on 2026-08-16; it is a
+  // vendor whose remote-access tooling gets abused, not a malware family.
   let not_families = dynamic([
     "phishing", "coinminer", "cryptominer", "spam", "scam", "ransomware", "loader",
     "stealer", "botnet", "trojan", "backdoor", "downloader", "malware", "apt",
-    "windows", "linux", "macos", "android", "ios"
+    "windows", "linux", "macos", "android", "ios",
+    "connectwise", "screenconnect", "anydesk", "teamviewer", "rmm", "generic",
+    "unknown", "suspicious", "test"
   ]);
   let Labelled =
       ThreatIntelIndicators
@@ -46,7 +51,7 @@ query: |
       | mv-expand Family = split(Family, ",")
       | extend Family = trim(" ", tostring(Family))
       | where isnotempty(Family) and Family !in (not_families)
-      | where Family matches regex @"^[a-z][a-z0-9._-]{2,}$"
+      | where Family matches regex @"^[a-z]{3,}[a-z0-9._-]*$" and Family !contains "0x" and not(Family matches regex @"[0-9]{4,}")
       | extend Period = iff(TimeGenerated > endtime - recent_window, "recent", "baseline");
   Labelled
   | summarize

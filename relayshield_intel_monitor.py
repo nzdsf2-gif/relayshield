@@ -441,14 +441,31 @@ def _send_wa_session_hijack(user_id: str, email: str, sessions: list[dict]) -> b
 # ---------------------------------------------------------------------------
 
 async def _extract_image_text(client, message) -> str:
-    """Download image attachment and OCR via Rekognition. Returns extracted text."""
-    if not message.document:
+    """Download image attachment and OCR via Rekognition. Returns extracted text.
+
+    CORPUS-3 fix, 2026-08-16. This required message.document, but Telegram
+    delivers a normally-posted screenshot as message.photo -- only an image sent
+    explicitly "as file" arrives as a document. So every ordinary screenshot in
+    every monitored channel was skipped, and images_ocrd was 0 on every run.
+    Criminal channels post credential and panel screenshots constantly, which
+    made this the single largest blind spot in collection.
+    """
+    media = getattr(message, "document", None) or getattr(message, "photo", None)
+    if not media:
         return ""
-    mime = getattr(message.document, "mime_type", "") or ""
-    if mime not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+
+    is_photo = getattr(message, "photo", None) is not None
+    finfo = getattr(message, "file", None)
+    mime = (getattr(finfo, "mime_type", "") or getattr(media, "mime_type", "") or "")
+    size = getattr(finfo, "size", None) or getattr(media, "size", None) or 0
+
+    # A photo has no reliable mime type on the media object, so accept it on
+    # type. Documents still have to declare an image mime, which is what keeps
+    # this cheap for the ZIPs and text files handled elsewhere.
+    if not is_photo and mime not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
         return ""
-    if message.document.size > MAX_IMAGE_BYTES:
-        logger.info("OCR: skipping oversized image msg=%d size=%d", message.id, message.document.size)
+    if size and size > MAX_IMAGE_BYTES:
+        logger.info("OCR: skipping oversized image msg=%d size=%d", message.id, size)
         return ""
     try:
         raw = await client.download_media(message, file=bytes)
@@ -2045,15 +2062,37 @@ async def _poll_channels(stats: dict) -> None:
                                 stats["pastes_fetched"] = stats.get("pastes_fetched", 0) + 1
                                 logger.info("Paste fetched url=%s chars=%d", paste_url[:60], len(paste_content))
 
-                    # INTEL-5: ZIP archive parsing for infostealer channels
-                    if category == "infostealer" and message.document and email_domain_map:
+                    # INTEL-5 archive parsing.
+                    #
+                    # CORPUS-3 fix, 2026-08-16. This used to read:
+                    #
+                    #   if category == "infostealer" and message.document and email_domain_map:
+                    #
+                    # Two of those three conditions made the capability nearly
+                    # dead, and archives_parsed was 0 on every run:
+                    #
+                    # 1. The category gate allowed only 10 of 90 active channels.
+                    #    It excluded ALL 19 credential_dump channels, which are
+                    #    the ones most likely to post a stealer archive, plus 12
+                    #    ransomware and 14 phaas. A channel's category label is
+                    #    a curation note, not a statement about what it attaches.
+                    # 2. email_domain_map is the monitored-customer map, so
+                    #    collection itself was gated on already having customers.
+                    #    That is the same "only keep what matches something we
+                    #    already know" pattern that left the marketplace
+                    #    contribution at 1.67%, except here it stopped us even
+                    #    LOOKING.
+                    #
+                    # The file type is the only filter that should apply.
+                    if message.document:
                         fname = ""
                         for attr in (message.document.attributes or []):
                             if hasattr(attr, "file_name"):
                                 fname = (attr.file_name or "").lower()
-                        if fname.endswith(".zip") or (
+                        if fname.endswith((".zip", ".rar", ".7z", ".tar", ".gz", ".tgz")) or (
                             not fname and getattr(message.document, "mime_type", "") in (
-                                "application/zip", "application/x-zip-compressed", "application/octet-stream"
+                                "application/zip", "application/x-zip-compressed", "application/octet-stream",
+                                "application/x-rar-compressed", "application/vnd.rar", "application/x-7z-compressed",
                             )
                         ):
                             try:
@@ -2247,12 +2286,15 @@ async def _poll_channels(stats: dict) -> None:
             # Scans the last 20 messages for those with reply counts > 0 and reads their replies.
             # Criminal channels often post IOC-rich content in replies to announcements.
             try:
-                async for post in client.iter_messages(entity, limit=20):
+                # CORPUS-3: raised from 20/20. Criminal channels post an
+                # announcement and put the actual payload in the replies, so a
+                # 20x20 window was sampling a fraction of the richest content.
+                async for post in client.iter_messages(entity, limit=60):
                     if post.date and post.date.replace(tzinfo=timezone.utc) < since:
                         break
                     reply_count = getattr(getattr(post, 'replies', None), 'replies', 0)
                     if reply_count and reply_count > 0:
-                        async for reply in client.iter_messages(entity, reply_to=post.id, limit=20):
+                        async for reply in client.iter_messages(entity, reply_to=post.id, limit=60):
                             reply_text = (reply.text or "") + " " + (getattr(reply, "caption", "") or "")
                             reply_text = reply_text.strip()
                             if not reply_text:

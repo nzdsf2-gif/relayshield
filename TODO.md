@@ -119,10 +119,51 @@ the **MISP `restSearch` handler, which had it identically**. Cursors are base64u
 raw-JSON form is still accepted so nothing mid-traversal breaks.
 
 **Still open:** a full pass is 242 sequential requests. That fits this client; a consumer with a
-smaller budget still would not finish, and `more=False` has not yet been observed. **The durable fix
-is an index that lets the feed serve time-ordered slices without scanning all 5.74M rows**, so a
-pass is bounded by the data a client actually needs rather than by table size. That is a GSI with
-backfill: real cost and hours of build time, so it needs a decision rather than a commit.
+smaller budget still would not finish, and `more=False` has not yet been observed.
+
+### TAXII-PAGINATION-2: the structural fix. Founder-approved 2026-08-16 on the condition that it does not add compute cost. IT DOES NOT.
+
+**Costed from measured figures, not estimates.** Item size 127 B (`describe-table`), 11.9 sightings
+per IOC (64,000-row sample), 63,056 WRU/day (CloudWatch, 3 days), on-demand pricing.
+
+| Per month, hourly polling | 1 consumer | 5 | 25 |
+|---|---|---|---|
+| Reads today, scan-based | $7.99 | $39.96 | $199.79 |
+| Reads, indexed | $0.67 | $3.36 | $16.79 |
+| Extra writes | $4.73 | $4.73 | $4.73 |
+| **Net** | **-$2.59** | **-$31.87** | **-$178.27** |
+
+One full pass drops from **88,794 RRU to 7,461, a 12x reduction**. The write cost is **fixed**, so
+every consumer added improves the case. Storage is about 61 MB. **My earlier "real cost" framing was
+wrong; only the build time is real.**
+
+**A plain GSI does NOT solve this.** GSI entries mirror base items, so the 11.9x sighting
+duplication would simply be indexed too. The feed needs **one entry per distinct IOC**, which is a
+write-side change.
+
+**Recommended design: DynamoDB Streams, not dual-writes.**
+
+`relayshield_intel_iocs` has **seven** writers (`relayshield_intel_feed`, `intel_monitor`,
+`intel_kev`, `intel_ransomware`, `intel_substack`, `cert_monitor`, plus `tools/ingest_apt38_jumpsec`
+and the API itself). Threading a dual-write through all of them means seven deploys, seven chances
+to miss one, and any future writer silently omitted. **Streams are enabled on the table (currently
+`StreamSpecification: null`) and one new maintainer Lambda keeps the feed table current, regardless
+of who writes.** New ingest sources are covered automatically.
+
+Shape:
+
+- New table `relayshield_intel_feed_current`, PK `ioc_value`, one item per distinct IOC (~483K).
+- GSI for retrieval: PK a small fixed shard, SK `last_seen_ts`, so the feed is queryable in time
+  order with native durable pagination and no scan.
+- Maintainer Lambda on the stream upserts `last_seen_ts` and merges labels.
+- One-time backfill of ~483K entries.
+- `handle_taxii_objects` and the MISP handler switch from `scan` to `query` against the GSI.
+
+**Naming care:** `relayshield_intel_feed.py` already exists and is the ThreatFox/URLhaus ingester.
+Do not reuse that name for the maintainer.
+
+**This also resolves METRICS-2**, because the new table's `ItemCount` is the distinct-indicator
+figure we should have been publishing all along.
 
 ---
 

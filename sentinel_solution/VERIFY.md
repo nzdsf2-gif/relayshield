@@ -19,10 +19,23 @@ a pass. That distinction is the entire point of check 0.
 ## Check 0: what data does this workspace actually have?
 
 ```kusto
-union withsource=TableName *
+union withsource=SourceTable *
 | where TimeGenerated > ago(24h)
-| summarize Rows = count() by TableName
+| summarize Rows = count() by SourceTable
 | order by Rows desc
+```
+
+Do not name the `withsource` alias `TableName`. At least one table in a Sentinel workspace already
+has a column by that name, and the union fails with "column named 'TableName' already exists"
+rather than shadowing it.
+
+That union touches every table. If it is slow, this is cheaper and answers the same question:
+
+```kusto
+Usage
+| where TimeGenerated > ago(24h)
+| summarize GB = round(sum(Quantity) / 1000, 3) by DataType
+| order by GB desc
 ```
 
 Expected: `ThreatIntelIndicators` present with a large count. If `CommonSecurityLog` is absent,

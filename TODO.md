@@ -276,6 +276,58 @@ cached accessor must read the NEW table's count, not `relayshield_intel_iocs.Ite
 
 ---
 
+## 🟥🟥🟥 CORPUS-1: 98.3% of the corpus is free public feeds, not marketplace intel — found 2026-08-16
+
+**Found while checking the founder's correction that we already ingest the free feeds I listed. They
+were right, I was wrong, and verifying it surfaced something much more serious than the metric.**
+
+Measured against `relayshield_intel_feed_current` (489,990 distinct IOCs) cross-referenced with the
+90 rows in `relayshield_intel_channels` where `active == true`:
+
+| Source | Distinct IOCs | Share |
+|---|---|---|
+| **The 90 marketed Telegram channels** | **8,171** | **1.67%** |
+| Public commodity feeds | 481,819 | **98.33%** |
+
+Commodity breakdown: blocklist_de 148,027 · hagezi 122,344 · phishtank 76,060 · abuseipdb 49,048 ·
+ipsum 33,197 · malwarebazaar 24,528 · openphish 16,716 · feodo 7,614 · urlhaus 2,870 ·
+emerging_threats 1,047. **Every one is free and public. Any competitor has the same data.**
+
+### Worse: 73 of the 90 active channels have contributed ZERO IOCs
+
+Only **17 of 90** produced a single indicator. And the top "channel" contributors are
+`cybermonitum` (4,110), `ctinow` (2,320), `cti_vn` (188), `ctifeeds` (105) — names that read as **CTI
+aggregator channels rebroadcasting public intel**, not criminal marketplaces. Strip those and the
+genuinely marketplace-sourced material is on the order of **~1,400 IOCs**.
+
+The channels are not unreachable: 63 of 90 were `last_verified` on 2026-08-10. They are being
+checked and yielding nothing.
+
+### Why this matters more than METRICS-2
+
+Our copy reads **"5.6M+ indicators sourced from 90 criminal Telegram marketplaces and 20
+authoritative feeds"**. The ordering implies marketplace sourcing is the bulk. It is 1.67%. The
+Elastic guide's **"24 to 72 hours ahead of public feeds"** claim also rests entirely on that 1.67%.
+
+Nothing here is fabricated: both source types are real. But a customer would reasonably conclude the
+differentiated content is the majority, and it is not.
+
+**This also answers "how do we grow unique IOCs".** Adding more commodity feeds grows volume and
+adds **zero** differentiation, because those feeds are what everyone already has. **The only growth
+that matters commercially is the 1.67%, and the biggest lever is repairing the 73 channels that
+already exist and produce nothing.** That is fixing something already built, not building something new.
+
+**Consistent with our own competitive benchmark**, which already concluded the real gap is
+collection depth: "RelayShield's current OSINT corpus is ~52 curated/keyword-verified public
+Telegram channels plus a handful of free clearnet feeds". This quantifies that gap.
+
+**Next diagnostic:** the channels table has `first_seen` and `last_verified` but **no
+last-collected or last-message field**, so there is no way to tell a channel that is being read and
+is quiet from one that is silently failing to collect. Add that field first; without it this is
+unfixable by measurement.
+
+---
+
 ## 🟥 METRICS-2: the published IOC count is SIGHTINGS, not distinct indicators — found 2026-08-16
 
 Fell out of the pagination work. **`relayshield_intel_iocs` is keyed (ioc_value HASH, seen_ts RANGE),

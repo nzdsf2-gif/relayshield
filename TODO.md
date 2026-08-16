@@ -1,5 +1,233 @@
 # RelayShield — Open Items
 
+## 🟦 MICROSOFT SURFACES — added 2026-08-15, founder-approved
+
+**The shape differs per surface and this is the thing to get right.** Researched 2026-08-15.
+A Sentinel Content Hub solution is a **Solution template** plan, and Microsoft states plainly that
+**solution template plans are NOT transactable**. So the Sentinel listing is free content that drives
+discovery inside every Sentinel customer's Content hub. **It is a flywheel, not a sales channel, and
+it needs no co-sell or Microsoft seller introduction.** Selling through Azure is a separate,
+AWS-shaped project (MS-2 below). Do not conflate the two.
+
+| ID | Item | Shape | Status |
+|---|---|---|---|
+| **MS-1** | **Microsoft Sentinel Content Hub solution.** Guide already written and RelayShield-side verified (`sentinel_integration_guide.md`). Step 1 is a self-serve PR into `Solutions/` in `Azure/Azure-Sentinel`, stated 5-business-day first response. Step 3 (Content Hub listing) needs a Partner Center commercial marketplace account, which Microsoft says to register for early rather than waiting. **Search keyword GUID `f1de974b-f438-4719-b423-8bf704ba2aef` is MANDATORY on the offer or the solution never appears in Sentinel.** | Flywheel | 🔄 Blocked on founder creating the free Azure workspace to verify the KQL. See SENTINEL-1 |
+| **MS-1b** | **Tear down the Threat Intel demo environment in Content Hub once QA is finished.** Installing a Content hub solution is free; the cost is **data ingestion** into `ThreatIntelIndicators`, waived for the first 10 GB/day for 31 days on a NEW workspace only. **Deleting the whole workspace is the clean stop**, not merely uninstalling the solution, because a lingering connector keeps ingesting. Do this the moment the KQL is verified and the PR is submitted. | Cleanup | ⬜ Gated on MS-1 QA finishing |
+| **MS-2** | **Transactable SaaS offer on Azure Marketplace.** This is the actual selling motion, and it is AWS-shaped: needs a landing page that resolves tokens and activates subscriptions, a webhook endpoint handling lifecycle events, and a fulfillment API client reporting subscription status. **RelayShield has already built this shape once for AWS** (`relayshield_bundle_fulfillment.py`, the developer-signup landing bypass), so it is a port rather than a new design. Microsoft handles billing and remits. **Do NOT start this until MS-1 or MS-3 produces real inbound** — it is the expensive one and it is not a prerequisite for any of the others. | High-touch, AWS-shaped | ⬜ Deliberately deferred |
+| **MS-3** | **Microsoft Security Store — publish a Security Copilot agent.** New in 2026 and explicitly aimed at ISVs: partners publish Security Copilot agents and Sentinel Data Lake notebook jobs, discoverable inside the workflows security teams already use. Packaging is an agent manifest plus required Azure resources in a valid `.zip`. **Strongest follow-on after MS-1** and squarely on-thesis (identity-layer signals surfaced to a SOC analyst mid-workflow). **Verify before scoping:** whether publishing requires the same Partner Center enrolment as MS-1, in which case do that registration once and reuse it. | Likely flywheel | ⬜ Not started |
+| **MS-4** | **Power Automate custom connector.** Same flywheel shape as the n8n and Zapier work, and the connector pattern has now been built three times (n8n, Zapier, Rapid7), so this is largely a reshaping exercise. Lower priority than MS-1/MS-3 but cheap. | Flywheel | ⬜ Not started |
+
+**Sequencing:** MS-1 → MS-3 → MS-4, with MS-1b as mandatory cleanup after MS-1 QA. MS-2 only on real inbound.
+
+**Azure account identity, recorded 2026-08-15 so it is not re-derived later:** the Azure free
+account was started on **`relayshieldadmin@gmail.com`**, registered as an **organization**
+(RelayShield LLC). That is a third identity alongside `nzdsf2@gmail.com` (GitHub, PyPI, Galaxy) and
+`andrew@relayshield.net`. **Partner Center verifies the legal entity separately from the login
+email**, so this is workable, but use RelayShield LLC's registered details consistently across
+Azure, Stripe and the AWS seller account, because company verification compares them.
+
+---
+
+## 🟩 TOMORROW (2026-08-16) — Sentinel finish, then MS-3/MS-4, plus Discord outreach
+
+**Founder-set order.** The Azure workspace `relayshield-sentinel-ws` is live and ingesting; the
+31-day trial covers it, so leaving it up overnight costs nothing.
+
+| # | Item | Notes |
+|---|---|---|
+| **1** | **SENTINEL-GUIDE-SYNC — regenerate the served HTML guide.** The guide exists as **two independent copies with no build step**: `sentinel_integration_guide.md` (corrected 2026-08-15) and a hardcoded HTML string in `relayshield_api.py` served at `/guides/microsoft-sentinel`. Only the metrics reconciliation reached both; **every substantive correction from 2026-08-15 is markdown-only**, so the live guide still claims four `ObservableKey` values and still says "derived, not measured". **Fix the drift, then make it generated rather than a second hand-maintained copy** — the same split exists for `/guides/elastic-security`. | ✅ **DONE 2026-08-16.** `build_guides.py` now generates the block from the markdown with `build_blog.md_to_html`; `--check` mode fails on drift. Both guides regenerated and deployed (`relayshield-api` LastModified `2026-08-16T13:57:18Z`), all 14 assertions verified against the live URLs |
+| **2** | **SENTINEL-RULES — write the Analytic Rules and Hunting Queries.** Now unblocked: every query is verified against a real workspace. **Lead with the `malware:<family>` labels, do NOT duplicate Microsoft's 48 generic TI analytic rule templates** that ship with the Threat Intelligence solution and already cover "match feed IPs against firewall traffic". Our differentiator is family attribution and criminal-Telegram provenance, which a generic TAXII feed cannot supply. Every published query must fold case and split comma-joined labels, see INTEL-LABELS-1. Model the folder on `Solutions/Spur` (fork already cloned, sparse-checked-out at `scratchpad/Azure-Sentinel`). | ✅ **WRITTEN 2026-08-16**, 2 analytic rules + 3 hunting queries in `sentinel_solution/`, commit `bcc0a4b`. **Schema-validated, NOT executed** — see `sentinel_solution/VERIFY.md`. **`Solutions/Spur` was the wrong model, it has no rules at all**; used `Solutions/Threat Intelligence (NEW)` instead |
+| **3** | **MS-1b — tear down `relayshield-sentinel-rg`.** Once rules are verified. **Delete the whole resource group**, not just the solution; a lingering connector keeps ingesting. Also delete the QA key `rs_demo_52c0c1…2e20` (`source: sentinel_qa`) at the same time. | ⬜ Gated on #2 |
+| **4** | **MS-3 Security Store**, then **MS-4 Power Automate connector** | See the Microsoft Surfaces block |
+| **5** | **Discord outreach messages** | See below |
+
+**Discord outreach, state as of 2026-08-15.** The "already joined, standing exists" pool is nearly
+exhausted: **LEAP WALLET is sunset and Suiet is an unsupported chain**
+([[project-discord-already-in-servers-narrowed]]), leaving **Ctrl** (EVM wallet, fits the bot),
+**Blue Team Village** (`#tools`, right audience for `rsscan`, post drafted in `btv_rsscan_post.md`,
+never sent) and **MSPGeek** (Bundle A audience, **self-promo policy unknown, ask a mod first**).
+**Check any new chain community's address format against `relayshield_discord_bot.py:112`
+(`^0x[a-fA-F0-9]{40}$`) before adding it to a target list** — that regex is why Suiet, Starknet and
+Loot Survivor were all ruled out.
+
+---
+
+## 🟩 SENTINEL-UPSTREAM-1: a shipped Microsoft TI rule joins on a literal string — found 2026-08-16
+
+**Found while checking that our rules would not duplicate Microsoft's.** In
+`Solutions/Threat Intelligence (NEW)/Analytic Rules/DomainEntity_CommonSecurityLog.yaml` at upstream
+commit `5f94754`:
+
+```kusto
+| extend IndicatorType = replace(@"\[|\]|\""", "", tostring(split(ObservableKey, ":", 0)))
+| where IndicatorType == "domain-name"
+| extend DomainName = tolower(IndicatorType)     // <- sets DomainName to "domain-name"
+...
+Domain_Indicators | join kind=innerunique (SecurityLog) on $left.DomainName == $right.Domain
+```
+
+`DomainName` is set to the literal `"domain-name"` rather than to `ObservableValue`, so the join can
+only match a host literally named `domain-name`. **The rule matches nothing and raises no error**,
+which is the exact failure mode our own Sentinel guide opens by warning about.
+
+Confirmed against the correct sibling: `DomainEntity_DnsEvents.yaml` uses
+`DomainName = tolower(ObservableValue)`. `DomainEntity_CloudAppEvents_Updated.yaml` contains **both**
+forms in two different `let` blocks; the one it joins on is correct, so only its TLD-extraction
+helper is affected. **Scope: one rule definitively dead, one partially.**
+
+**Why this is worth acting on.** A one-line fix PR into `Azure/Azure-Sentinel` lands before our own
+`Solutions/RelayShield` PR, from the same account, on the exact content area we are about to submit
+into. That is a relationship with the reviewers plus public evidence we read the code, for maybe
+thirty minutes of work. **Do it before the MS-1 solution PR, not after.**
+
+Do not overstate it in the PR text. Report the observation and the fix; do not editorialise about
+Microsoft's testing.
+
+---
+
+## 🟨 SENTINEL-GUIDE-2: point the guide at Microsoft's own parser — found 2026-08-16
+
+`Solutions/Threat Intelligence (NEW)/Parsers/ThreatIntelIndicatorsv2.yaml` ships a
+`ThreatIntelIndicatorsv2` function that flattens `ThreatIntelIndicators` into the legacy column
+names, including `Labels = Data.labels`, `FileHashType`, `FileHashValue`, `Url`, `DomainName`,
+`ThreatType` and the x509 fields.
+
+Our guide's "Reading the legacy-shaped fields" section hand-rolls a **subset** of this by hand and
+does not cover MD5, SHA-1, x509 or the email fields. Replace that section with a pointer to the
+official parser and keep the hand-rolled version only as a fallback for workspaces without the
+Threat Intelligence solution installed.
+
+**Also check while in there:** the guide uses `where IsDeleted == false`; Microsoft's current rules
+all use `where IsActive`. Both columns exist in the schema. Confirm which is authoritative and make
+the guide consistent with Microsoft's convention.
+
+---
+
+## 🟥 INTEL-LABELS-1: `malware:<family>` labels are not normalised — found 2026-08-15
+
+**Found by running our own feed through a live Microsoft Sentinel workspace**, which is the first
+time anyone has looked at these labels from a consumer's side rather than ours.
+
+Four distinct problems in one output:
+
+| Problem | Evidence from the live query |
+|---|---|
+| **Inconsistent casing** | `ClearFake` and lowercase families (`mirai`, `qakbot`, `vidar`) coexist |
+| **Comma-joined multi-values in one label** | `Loader,p...` was one label; splitting it yielded `loader` 151 and `potemkin` 151, identical counts confirming a single joined source |
+| **Same family split across rows** | `ClearFake` and `ClearFake...` counted separately |
+| **Behaviours labelled as families** | `phishing` (4,012, the single largest bucket) and `coinminer` are categories |
+| **Platforms labelled as families** | `windows` (254) |
+| **Vendor names labelled as families** | `connectw...` (102), presumably ConnectWise/ScreenConnect abuse |
+| **Malformed identifiers** | `win-0x46...` (202), which looks like a hash fragment rather than any name |
+
+### The impact, quantified
+
+Running the corrected case-folding + comma-splitting query against the same two-hour window:
+
+**`clearfake` went from 196 to 608 indicators.** An exact-match hunt on `"clearfake"` was missing
+**68% of matching indicators**, silently. Every family with mixed casing or a joined label is
+understated by a similar unknown margin, and the totals we might quote from these labels are all
+low.
+
+**Why it matters, and it is the familiar failure shape.** A customer hunting with
+`where Family == "clearfake"` gets a partial result and **no signal that it is partial** — the same
+silent false-clean pattern as [[project-asset-intel-false-clean-and-apt38]] and
+[[project-goplus-address-security-shape]]. Splitting one family across rows also understates every
+prevalence figure we might quote.
+
+**Fix at the source**, in whatever writes `labels` into the IOC records: lowercase on write, split
+comma-joined values into separate labels, and separate behaviour tags into their own namespace
+(e.g. `category:phishing`) so `malware:` means only a family.
+
+**Interim mitigation, already applied to `sentinel_integration_guide.md`:** every published query
+matches case-insensitively via `tolower(Family)`, and the guide states the rough edge plainly rather
+than shipping queries that quietly under-match.
+
+---
+
+## 🟨 METRICS-1: derive scale figures at request time instead of hardcoding — added 2026-08-15
+
+**Founder-requested. The recurring cleanup this ends is the reason to do it.**
+
+On 2026-08-15, reconciling two numbers touched **29 lines across 11 live surfaces**. The drift was
+not a single stale value, it was many at once: the IOC corpus was simultaneously published as
+**5.4M+, 5.0M+, 4.9M+, 4.6M+, 4.5M+, "4.7 million" and "5 million"**, and the channel count as
+**82, 83, 85, 87 and 89**. Live values that day: **90 active channels, 5,685,655 IOCs**. The same
+exercise happened on 2026-08-05. **The corpus grows continuously, so hardcoded copy is guaranteed to
+drift again.**
+
+**Why it matters beyond tidiness:** AWS Marketplace's automatic "AI Insights" generates pricing copy
+from our public text, so an understated figure propagates onto the storefront.
+
+**Proposed fix.** A single cached accessor (~1h TTL) that both figures come from, wired into the
+surfaces that are generated at request time:
+
+| Figure | Live source |
+|---|---|
+| Active Telegram channels | scan `relayshield_intel_channels`, count `active == true`. **NOT the raw row count** — 376 rows vs 90 active, and quoting the row count caused a wrong call in July |
+| IOC corpus | `describe-table relayshield_intel_iocs`, `Table.ItemCount` |
+
+**Round for copy** (e.g. `5.6M+`) rather than printing an exact figure that changes hourly.
+
+**Scope, honestly:** this only helps the surfaces rendered from code — `/developers` and its meta
+tags, the TAXII discovery and collection descriptions, the OpenAPI description, the TI demo worker,
+the guides served from `relayshield_api.py`. **Static markdown, generated PDFs, AWS/Zapier listing
+copy and Discord submissions still need a manual pass**, so keep the reconciliation script at
+`scratchpad/reconcile_metrics.py` (it prints every change with context and deliberately excludes
+published blog posts and the external "11.1 million devices" statistic).
+
+See [[reference-relayshield-scale-metrics]] for the canonical figures and re-check commands.
+
+---
+
+## 🟨 ENTITY-1: change the Stripe account from `individual` to company — added 2026-08-15
+
+**Founder-requested. Do it on its own merits, and read the warning before starting.**
+
+The Stripe account `acct_1TGqqsL2dcjOeFiY` is `business_type: individual`, while **RelayShield LLC is
+the entity named in the Terms' carrier consent clause, on the Vouch and Corix policies, in the
+Twilio SIM-swap registration (#28883049), on the AWS seller account, and now on the Azure
+organization signup.** Every external party is contracting with an LLC that the payment processor
+does not know exists. That is the reason to fix it.
+
+**⚠️ Two hard constraints, both previously established:**
+
+1. **This is NOT an MPP fix and must not be justified as one.** Stripe crypto is `Ineligible` on this
+   account as a staged-rollout gate, not an entity problem. See
+   [[project-mpp-blocked-stripe-crypto-ineligible]]. Converting will very likely change nothing about
+   crypto eligibility, and doing it *expecting* that outcome sets up a bad decision.
+2. **It triggers re-verification on a LIVE revenue account.** Billing runs on one aggregate Stripe
+   meter ([[project-stripe-aggregate-usage-meter]]) and there are paying customers on it. Schedule
+   this for a window where a temporary payout or charge hold would not matter, have the LLC
+   documents (EIN, formation certificate, registered address) ready before starting, and **verify the
+   metered billing chain still works afterwards** per [[feedback-verify-stripe-billing-chain]] rather
+   than assuming it survived.
+
+**Not urgent. Do not bundle it with anything else.** Its whole value is removing a mismatch that
+would otherwise surface at a bad moment, e.g. during Partner Center or an insurer's diligence.
+
+---
+
+## 🟦 IBM / RED HAT DISCOVERY SURFACE — added 2026-08-15, founder-approved
+
+Three surfaces, researched 2026-08-15. **Very different gates, so do not treat them as one project.**
+Ranked by how self-serve they are, which is the property that has decided every previous win.
+
+| ID | Item | Gate | Status |
+|---|---|---|---|
+| **IBMRH-1** | **Ansible Galaxy collection `relayshield.security`.** Fully self-serve: log in to Galaxy with GitHub, namespace is created automatically, `ansible-galaxy collection publish`. **No gatekeeper, no review queue, no partner program.** Same flywheel shape as LangChain and n8n. **Namespace `relayshield` was confirmed FREE on 2026-08-15** via the Galaxy v3 API (0 namespaces, 0 collections match). | None | 🔄 **Built 2026-08-15** in `ansible-relayshield/`. Builds, installs and `ansible-doc` renders for all 3 modules. **Not published** — needs founder Galaxy login + namespace claim + API token |
+| **IBMRH-2** | **IBM QRadar Threat Intelligence config guide.** The QRadar TI app added **STIX/TAXII 2.1** support, which is exactly the protocol our feed already serves and that four conformance defects were fixed to make correct (see [[project-taxii-conformance-verified]]). So this is a **configuration guide, not an engineering project** — the same pattern as Elastic, Sentinel and OpenCTI, reusing work already paid for. Guide doubles as a blog post. | None to write the guide; a real QRadar instance to verify it | ⬜ Not started |
+| **IBMRH-3** | **Red Hat Ecosystem Catalog / IBM certified partner listing.** Gated behind a partner program application, same shape as the SentinelOne Partner Portal. Worth applying because the application itself is cheap; **not worth blocking anything on**. | Partner program application | ⬜ Not started |
+
+**Sequencing:** IBMRH-1 first because it is self-serve and already built. IBMRH-2 second because the
+TAXII work is already done. IBMRH-3 in parallel as a low-effort application.
+
+**Do not confuse IBMRH-2 with a QRadar app.** The X-Force App Exchange is a separate, gated
+distribution channel. IBMRH-2 is a document telling an existing QRadar customer how to point their
+TI app at our existing feed. That distinction is what makes it cheap.
+
+---
+
 ## 🟩 TOMORROW (2026-08-03) — top two, both unblocked
 
 **1. BLOG + CHANNEL PLAN — ✅ DRAFTED 2026-08-02, ready to review and publish.**

@@ -52,6 +52,72 @@ Loot Survivor were all ruled out.
 
 ---
 
+## 🟥🟥 TAXII-PAGINATION-1: the TAXII collection NEVER ENDS — found 2026-08-16, BLOCKS MS-1
+
+**This is the most serious defect found this week and it affects every TAXII consumer, not just
+Sentinel.** Found because a Sentinel cost check looked wrong, which is the only reason anyone looked.
+
+### Measured, not inferred
+
+| Source | Measurement |
+|---|---|
+| CloudWatch, `/aws/lambda/relayshield-api`, 1 hour | **1,188** TAXII object requests, mean interval **3.02 s** |
+| Same window | `returned=500 more=True` on **1,188 of 1,188**. Histogram has exactly one bucket |
+| Last **24 hours** | **ZERO** responses with `more=False`. The collection has never signalled its end |
+| Implied throughput | **595,889 objects/hour** |
+| Sentinel workspace, same period | **596,000 rows/hour**, and only **12,331 distinct indicators** |
+
+The two independent measurements agree to within 0.02%, so this is one behaviour seen from both ends.
+
+### What it means
+
+- **The client paginates forever.** `more` is never false, so a conformant TAXII client keeps
+  requesting the next page indefinitely, every 3 seconds, around the clock.
+- **It is not making progress.** 596k objects an hour resolve to only 12,331 distinct indicators,
+  about 25 pages of 500 being cycled. A customer never receives the corpus; they receive the same
+  small slice forever.
+- **The customer pays for all of it.** Extrapolated: **~12.6 GB/day into a billed Log Analytics
+  table, against a 10 GB/day free grant**, of which roughly 98% is duplicate rows. Our guide is
+  currently what tells them to configure this.
+
+### Prime suspect, in `handle_taxii_objects`
+
+```python
+if cursor := query_params.get("next"):
+    try:
+        scan_kwargs["ExclusiveStartKey"] = json.loads(cursor)
+    except Exception:
+        pass          # <- silently restarts the scan from the beginning
+```
+
+An unparseable or rejected cursor falls through to a scan with **no** `ExclusiveStartKey`, which
+returns the first page again with `more=True`. To the client that is indistinguishable from
+progress. It is the same silent-false-success shape as
+[[project-asset-intel-false-clean-and-apt38]] and [[project-goplus-address-security-shape]].
+
+The cursor is `json.dumps(next_key)` passed back as a **query parameter**, so anything that mangles
+JSON in a query string (encoding, length, a client that does not round-trip it verbatim) lands in
+that `except`.
+
+### Decisions needed before fixing
+
+1. **An unparseable cursor must not silently restart.** Return `400` instead. Silence is what made
+   this invisible for however long it has been running.
+2. **`more` must become false at the end of the collection.** Whatever else changes, a client has to
+   be able to finish.
+3. **Cursor format.** A JSON blob in a query string is fragile. Opaque base64url of the key, or a
+   server-side cursor, would survive round-tripping.
+4. **Consider whether a scan is the right access pattern at all** for an ordered, resumable feed.
+
+**Do not tear down the Sentinel workspace until this is fixed and re-measured** (MS-1b, item 3). It
+is the only instrumented consumer we have, and CloudWatch plus the workspace together are what made
+the defect legible.
+
+**Also re-check the guide's cost note**, which currently explains ingestion volume as the 7 to 10
+day republish cycle. That is not the cause of what was measured here.
+
+---
+
 ## 🟩 SENTINEL-UPSTREAM-1: a shipped Microsoft TI rule joins on a literal string — found 2026-08-16
 
 **Found while checking that our rules would not duplicate Microsoft's.** In

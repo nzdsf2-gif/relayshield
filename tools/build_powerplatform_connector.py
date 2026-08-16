@@ -196,9 +196,19 @@ def main():
         "swagger": "2.0",
         "info": {
             "title":       "RelayShield",
-            "description": ("Identity-layer threat intelligence for your flows. Check emails, "
-                            "domains, phone numbers and URLs against breach, infostealer and "
-                            "criminal-marketplace data before granting access or trusting a message."),
+            # Certification rules: 30 to 500 characters, English, no Power Platform
+            # product names. "flows" was removed for that reason.
+            #
+            # "criminal-marketplace data" was also removed, and that one matters more.
+            # Measured 2026-08-16, 98.3% of the corpus comes from public feeds
+            # (abuse.ch, OpenPhish, blocklist.de, PhishTank and similar) and 1.67%
+            # from monitored Telegram channels. Leading with the marketplace framing
+            # in Microsoft's certified connector catalogue would put an overclaim
+            # somewhere permanent and public. This says what the data actually is.
+            "description": ("Identity-layer threat intelligence. Check emails, domains, phone "
+                            "numbers and IP addresses against breach records, infostealer logs "
+                            "and aggregated threat feeds before granting access, resetting a "
+                            "credential or trusting a message."),
             "version":     "1.0.0",
             "contact":     {"name": "RelayShield Support", "email": "support@relayshield.net"},
         },

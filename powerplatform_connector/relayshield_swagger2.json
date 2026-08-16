@@ -1552,8 +1552,7 @@
                         "CRITICAL",
                         "HIGH",
                         "MEDIUM",
-                        "LOW",
-                        null
+                        "LOW"
                       ],
                       "description": "Highest severity found. null when clean.",
                       "x-ms-summary": "Highest severity"
@@ -1684,8 +1683,7 @@
                         "CRITICAL",
                         "HIGH",
                         "MEDIUM",
-                        "LOW",
-                        null
+                        "LOW"
                       ],
                       "description": "Highest severity across all sessions. null when none found.",
                       "x-ms-summary": "Highest severity"
@@ -1910,8 +1908,7 @@
                         "CRITICAL",
                         "HIGH",
                         "MEDIUM",
-                        "LOW",
-                        null
+                        "LOW"
                       ],
                       "description": "Highest severity found. null when none.",
                       "x-ms-summary": "Highest severity"

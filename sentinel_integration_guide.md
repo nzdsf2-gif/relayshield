@@ -3,7 +3,7 @@
 RelayShield serves its IOC corpus over **STIX 2.1 / TAXII 2.1** and a **MISP-compatible REST API**.
 Microsoft Sentinel consumes both, so this is a configuration task rather than a development one.
 
-**What you get:** 4.5M+ indicators sourced from 83+ criminal Telegram marketplaces and 20
+**What you get:** 5.6M+ indicators sourced from 90 criminal Telegram marketplaces and 20
 authoritative feeds, landing in Sentinel's `ThreatIntelIndicators` table where they drive analytics
 rules, hunting queries and incident enrichment.
 
@@ -15,12 +15,12 @@ Contributor at the resource group level).
 > The `ThreatIntelligenceIndicator` table **stopped receiving data on 31 July 2025 and retired on 31 May 2026**.
 > Every query, analytics rule, workbook and automation must target
 > **`ThreatIntelIndicators`** (and `ThreatIntelObjects` for actors and relationships). A rule still
-> pointing at the legacy table matches nothing and raises no error — the worst failure mode a
-> detection control has.
+> pointing at the legacy table matches nothing and raises no error, which is the worst failure mode
+> a detection control has.
 
 ---
 
-## Option A — STIX/TAXII (recommended)
+## Option A: STIX/TAXII (recommended)
 
 ### 1. Confirm your key works
 
@@ -35,12 +35,16 @@ to confirm the endpoint is reachable before adding credentials.
 > separate optional fields. The OASIS reference TAXII client skips authentication entirely when the
 > password is empty (`if user and password:`), which we confirmed against this feed: key-as-username
 > with a blank password returns `401`, and it looks exactly like a bad key. We have not inspected
-> Sentinel's own client, so this may not apply to it — but RelayShield accepts the key in either
-> position, so filling both fields costs nothing and removes the failure mode either way.
+> Sentinel's own client, so this may not apply to it. RelayShield accepts the key in either
+> position regardless, so filling both fields costs nothing and removes the failure mode either way.
 
 ### 2. Add the Threat Intelligence - TAXII data connector
 
-**Microsoft Sentinel → Data connectors → Threat Intelligence - TAXII → Open connector page**
+**Microsoft Sentinel → Configuration → Data connectors → Threat intelligence - TAXII → Open connector page**
+
+> The connector page button sits at the **bottom of the right-hand detail panel**, which scrolls
+> independently of the page. If it is not there, the `...` menu on the connector row has the same
+> action. Verified in the portal on 2026-08-15.
 
 | Field | Value |
 |---|---|
@@ -55,7 +59,7 @@ to confirm the endpoint is reachable before adding credentials.
 Select **Add**. Indicators begin arriving within a few minutes and appear under
 **Threat intelligence** in the Sentinel menu.
 
-The API root URL is also the discovery endpoint — RelayShield serves both resources at that one URL,
+The API root URL is also the discovery endpoint: RelayShield serves both resources at that one URL,
 so you can paste the same value wherever a provider asks for either.
 
 ### 3. Confirm indicators are landing
@@ -68,23 +72,33 @@ ThreatIntelIndicators
 | order by Indicators desc
 ```
 
-You should see four `ObservableKey` values. In a representative 1,000-object sample of the live
-feed the split was:
+You should see five `ObservableKey` values. **Measured in a live Sentinel workspace on 2026-08-15**,
+across the first 51,815 indicators ingested in a two-hour window:
 
-| IOC type | `ObservableKey` | Share of sample |
-|---|---|---|
-| IP address | `ipv4-addr:value` | 440 |
-| Domain | `domain-name:value` | 349 |
-| URL | `url:value` | 173 |
-| SHA-256 | `file:hashes.'SHA-256'` | 38 |
+| IOC type | `ObservableKey` | Indicators | Share |
+|---|---|---|---|
+| IP address | `ipv4-addr:value` | 24,929 | 48.1% |
+| Domain | `domain-name:value` | 15,613 | 30.1% |
+| URL | `url:value` | 8,384 | 16.2% |
+| SHA-256 | `file:hashes.'SHA-256'` | 2,870 | 5.5% |
+| Email sender | `email-message:from_ref.value` | 19 | 0.04% |
+
+The email-sender type is low volume and appears only intermittently, so do not treat its absence in
+a short window as a fault.
+
+**`ThreatIntelObjects` stays empty for this feed.** RelayShield emits STIX `Indicator` objects only,
+not `Threat Actor`, `Attack Pattern`, `Identity` or `Relationship` objects. Sentinel's own
+documentation points at `ThreatIntelObjects` for actors and relationships; you will not get those
+from this connector, and a query joining to that table returns nothing.
 
 If `ObservableKey` and `ObservableValue` come back **empty**, Sentinel could not parse the STIX
-pattern. That is worth reporting to support@relayshield.net — it should not happen against the
-current feed (see "Changed from earlier versions" below).
+pattern. That is worth reporting to support@relayshield.net. It should not happen against the
+current feed (see "Changed from earlier versions" below), and it was confirmed working in a live
+workspace on 2026-08-15, including the SHA-256 path.
 
 ---
 
-## Option B — MISP via misp2sentinel
+## Option B: MISP via misp2sentinel
 
 Sentinel has no first-party MISP connector. The community standard is
 [`cudeso/misp2sentinel`](https://github.com/cudeso/misp2sentinel), an Azure Function that reads a
@@ -102,7 +116,7 @@ In the misp2sentinel configuration:
 | `misp_verifycert` | `True` |
 
 > **The trailing slash on `misp_domain` is required.** PyMISP joins paths with `urljoin`, which
-> replaces the last segment when the base has no trailing slash — `/v1/intel/misp` silently becomes
+> replaces the last segment when the base has no trailing slash, so `/v1/intel/misp` silently becomes
 > `/v1/intel/servers/getVersion` and every call 404s.
 
 Prefer Option A unless you are already running misp2sentinel. TAXII is a first-party connector with
@@ -131,7 +145,7 @@ CommonSecurityLog
 
 `summarize arg_max(TimeGenerated, *) by Id` followed by `where IsDeleted == false` is the pattern
 Microsoft's own examples use, and it matters here: the feed republishes every unexpired indicator on
-a 7–10 day cycle, so without it you count the same indicator many times.
+a 7 to 10 day cycle, so without it you count the same indicator many times.
 
 ### Analytics rule: match feed domains against DNS
 
@@ -152,7 +166,8 @@ DnsEvents
 ### Hunting query: which malware families is the feed seeing?
 
 RelayShield tags each indicator with the family it was observed alongside, as a `malware:<family>`
-label.
+label. This is the part a generic TAXII feed cannot give you, and it is what makes the corpus
+huntable by campaign rather than only by indicator.
 
 ```kusto
 ThreatIntelIndicators
@@ -161,9 +176,41 @@ ThreatIntelIndicators
 | where IsDeleted == false
 | mv-expand Label = Data.labels
 | where tostring(Label) startswith "malware:"
-| extend Family = replace_string(tostring(Label), "malware:", "")
+// Labels are not case-normalised at source: ClearFake and clearfake both occur.
+// Fold case before grouping, or the same family lands in two rows and every
+// count is understated. Some labels also carry comma-joined values, so split
+// them rather than treating the whole string as one family name.
+| extend Family = tolower(replace_string(tostring(Label), "malware:", ""))
+| mv-expand Family = split(Family, ",")
+| extend Family = trim(" ", tostring(Family))
+| where isnotempty(Family)
 | summarize Indicators = count() by Family
 | top 25 by Indicators
+```
+
+Measured against a live workspace on 2026-08-15, the highest-volume labels in a two-hour window were
+`phishing` (4,012), `mirai` (2,341), `qakbot` (855), `clearfake` (608), `efimer` (309),
+`agenttesla` (304), `trickbot` (255), `formbook` (255), `vidar` (254), `remcosrat` (254),
+`bumblebee` (251), `wannacry` (155), `emotet` (103) and `stealc` (98).
+
+> **The `malware:` namespace is not purely malware families, so filter with that in mind.** It also
+> carries behaviours (`phishing`, `coinminer`), platforms (`windows`), vendor names
+> (`connectwise`), and occasional malformed identifiers. Treat a label as a hint, not a taxonomy.
+>
+> **Case folding is not cosmetic.** Without the `tolower` and comma-split above, `clearfake` returns
+> **196** indicators in this window. With them it returns **608**. An exact-match filter silently
+> drops roughly two thirds of the matches and gives you no indication it did.
+
+To hunt one family, always fold case on both sides:
+
+```kusto
+ThreatIntelIndicators
+| where TimeGenerated > ago(7d)
+| summarize arg_max(TimeGenerated, *) by Id
+| where IsDeleted == false
+| mv-expand Label = Data.labels
+| where tolower(tostring(Label)) == "malware:clearfake"
+| project TimeGenerated, ObservableKey, ObservableValue, Confidence
 ```
 
 ### Reading the legacy-shaped fields
@@ -185,7 +232,7 @@ ThreatIntelIndicators
 ## Cost note
 
 `ThreatIntelIndicators` is a billed Log Analytics table, and the feed republishes every unexpired
-indicator every 7–10 days. Before importing **All available**, consider whether your detection
+indicator every 7 to 10 days. Before importing **All available**, consider whether your detection
 surface needs the full corpus. Two levers:
 
 - Set the connector to import a narrower indicator group.
@@ -222,18 +269,29 @@ it re-polls from the start of the collection, and re-check any rule keyed on fil
 
 Stated plainly, because a threat-intel guide that overstates its testing is worse than no guide:
 
-**Verified against live systems.** Every RelayShield-side claim — the API root and collection URLs,
+**Verified against live systems.** Every RelayShield-side claim (the API root and collection URLs,
 the auth behaviour including the blank-password trap, the TAXII protocol walk end to end, the
-validity of every STIX pattern in a 1,000-object live sample, and the PyMISP handshake — was
+validity of every STIX pattern in a 1,000-object live sample, and the PyMISP handshake) was
 measured against the production feed with the OASIS `taxii2-client`, `stix2-patterns` validator, and
 PyMISP.
 
-**Derived, not measured.** The `ObservableKey` values, table schema and KQL come from Microsoft's
-published `ThreatIntelIndicators` schema combined with the STIX object paths RelayShield is verified
-to emit. They have **not** been run through a live Sentinel workspace. The mapping is a
-straightforward correspondence and we have no reason to doubt it, but an equivalent assumption in an
-earlier Elastic guide turned out to be wrong in two places, so treat the KQL as needing a first-run
-check in your own workspace rather than as measured fact.
+**Measured in a live Microsoft Sentinel workspace, 2026-08-15.** The `ObservableKey` values, the
+table names and the malware-family label queries were previously *derived* from Microsoft's
+published schema rather than run. They have now been executed against a real workspace ingesting
+this feed:
+
+- `ThreatIntelIndicators` and `ThreatIntelObjects` are confirmed as the current table names, both
+  plural. Some Microsoft solution descriptions render the first as singular; that text is wrong.
+- All five `ObservableKey` values above were returned with populated `ObservableValue`, confirming
+  Sentinel parses every STIX pattern this feed emits, SHA-256 included.
+- `ThreatIntelObjects` remained empty, as expected for an Indicator-only feed.
+- The `malware:<family>` label queries return real families.
+
+**Known rough edge in the family labels.** Label values are not normalised: casing is inconsistent
+(`ClearFake` and `clearfake` both occur), some labels carry several comma-joined values in a single
+string, and a few describe a behaviour rather than a family (`phishing`, `coinminer`). **Match
+case-insensitively** (`where tolower(Family) == "clearfake"` rather than an exact comparison), or
+you will silently miss indicators. This is being fixed at source.
 
 ---
 

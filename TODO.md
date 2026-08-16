@@ -182,6 +182,52 @@ Do not reuse that name for the maintainer.
 **This also resolves METRICS-2**, because the new table's `ItemCount` is the distinct-indicator
 figure we should have been publishing all along.
 
+### ✅ BUILT, BACKFILLED AND DEPLOYED 2026-08-16
+
+| Component | State |
+|---|---|
+| `relayshield_intel_feed_current` + `feed-time-index` GSI | Live, **489,947** items |
+| Streams on `relayshield_intel_iocs` | Enabled, `NEW_IMAGE` |
+| `relayshield-feed-maintainer` + own least-privilege role | Live on the stream |
+| Backfill | **Complete, 0 errors**, 93 min |
+| API serving from the index, scan retained as fallback | Deployed `2026-08-16T17:06:36Z` |
+
+**Backfill result, exhaustive rather than sampled:**
+
+```
+rows scanned    : 5,744,557      <- the entire table, not a sample
+distinct IOCs   :   489,974
+written         :   489,947
+already current :        27      <- the conditional guard refusing to overwrite newer stream writes
+errors          :         0
+sightings/IOC   :      11.7
+```
+
+The 27 are the point: the backfill ran concurrently with the live stream, and the
+strictly-newer condition stopped it dragging `last_seen_ts` backwards on rows the stream had
+already updated. That race would have resurfaced stale indicators as fresh.
+
+**IAM note:** `relayshield-breach-check-role-1sapnwdl` **has hit the 10,240-byte inline policy
+limit**, so the feed read grant had to go on as a managed policy
+(`relayshield-intel-feed-read`). That role now carries 26 inline policies plus 7 attached and is
+shared by many functions. **It cannot take another inline policy.** Worth splitting before it
+blocks something urgent.
+
+### METRICS-2 is now MEASURED, three ways
+
+| Method | Distinct IOCs |
+|---|---|
+| Parallel-segment sample, 64,000 rows | ~482,735 |
+| One complete TAXII pass, objects delivered | 482,481 |
+| **Exhaustive backfill scan of all 5,744,557 rows** | **489,974** |
+
+**Use 489,974 (round to 490K).** It is the only exhaustive count. The other two agree with it to
+within 1.5% and were taken before the last ingest cycle.
+
+**The published "5.6M+ indicators" is a sighting count and overstates distinct indicators by
+11.7x.** Correcting the public copy is a separate task across 11 surfaces, and METRICS-1's proposed
+cached accessor must read the NEW table's count, not `relayshield_intel_iocs.ItemCount`.
+
 ---
 
 ## 🟥 METRICS-2: the published IOC count is SIGHTINGS, not distinct indicators — found 2026-08-16

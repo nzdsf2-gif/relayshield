@@ -99,6 +99,57 @@ The cursor is `json.dumps(next_key)` passed back as a **query parameter**, so an
 JSON in a query string (encoding, length, a client that does not round-trip it verbatim) lands in
 that `except`.
 
+### FIXED AND DEPLOYED 2026-08-16, commit `75cb9da`, Lambda `2026-08-16T15:10:17Z`
+
+| | Before | After |
+|---|---|---|
+| Objects per request | 500 | **2000** |
+| Requests for a full pass | 965 | **242** |
+| Client restarts | every 74 s, ~48/hour | **0 in a 258 s window** |
+| Objects/hour delivered | 595,889 | **417,921** |
+| Bad cursor | silently restarts at page one | **400** |
+| Log line | `returned= more=` only | adds `resumed= rows_scanned= pages= elapsed= cursor_at=` |
+
+**The cursor was NOT the cause.** The new `resumed=True` telemetry shows the client was always
+sending valid cursors, which the direct DynamoDB test had already suggested. The cause was page size:
+965 sequential requests to traverse the collection, against a client budget of about 25.
+
+**The `except Exception: pass` was still a real defect** and is fixed, in the TAXII handler and in
+the **MISP `restSearch` handler, which had it identically**. Cursors are base64url now; the legacy
+raw-JSON form is still accepted so nothing mid-traversal breaks.
+
+**Still open:** a full pass is 242 sequential requests. That fits this client; a consumer with a
+smaller budget still would not finish, and `more=False` has not yet been observed. **The durable fix
+is an index that lets the feed serve time-ordered slices without scanning all 5.74M rows**, so a
+pass is bounded by the data a client actually needs rather than by table size. That is a GSI with
+backfill: real cost and hours of build time, so it needs a decision rather than a commit.
+
+---
+
+## 🟥 METRICS-2: the published IOC count is SIGHTINGS, not distinct indicators — found 2026-08-16
+
+Fell out of the pagination work. **`relayshield_intel_iocs` is keyed (ioc_value HASH, seen_ts RANGE),
+one row per sighting.** `Table.ItemCount` therefore counts sightings, and that is what every public
+surface quotes.
+
+Measured over a **64,000-row parallel-segment sample** (8 of 64 segments, zero cross-segment overlap
+as expected since a partition key lives in exactly one segment):
+
+- **11.9 sightings per distinct IOC**, max observed **248** for a single IP
+- 5,744,557 rows implies roughly **483,000 distinct IOCs**
+
+**We publish "5.6M+ indicators" across 11 live surfaces.** The honest distinct-indicator figure is
+about an order of magnitude lower. The 5.7M number is not fabricated, it is a real row count, but
+"indicators" is the wrong noun for it and a customer who counts what lands in their SIEM will find
+the gap immediately.
+
+**Do not change any public copy until the distinct count is measured properly** rather than
+extrapolated from a 1.1% sample. [[reference-relayshield-scale-metrics]] and METRICS-1's cached
+accessor both need to change with it, since METRICS-1 proposes deriving the figure from
+`Table.ItemCount`, which is exactly the wrong source.
+
+---
+
 ### Decisions needed before fixing
 
 1. **An unparseable cursor must not silently restart.** Return `400` instead. Silence is what made

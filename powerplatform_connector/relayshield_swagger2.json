@@ -1,0 +1,1588 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "RelayShield",
+    "description": "Identity-layer threat intelligence for your flows. Check emails, domains, phone numbers and URLs against breach, infostealer and criminal-marketplace data before granting access or trusting a message.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "RelayShield Support",
+      "email": "support@relayshield.net"
+    }
+  },
+  "host": "api.relayshield.net",
+  "basePath": "/",
+  "schemes": [
+    "https"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "securityDefinitions": {
+    "api_key": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "X-RS-API-KEY"
+    }
+  },
+  "security": [
+    {
+      "api_key": []
+    }
+  ],
+  "paths": {
+    "/v1/payg/breach": {
+      "post": {
+        "operationId": "CheckEmailBreach",
+        "summary": "Check email for breach exposure",
+        "description": "Check whether an email address appears in known data breaches. Returns breach count, source names, dates, and exposed data types (passwords, emails, etc). Call before trusting a new user identity or granting elevated access.\n\n**Billing.** $0.10 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "description": "Email address to check",
+                  "x-ms-summary": "Email"
+                }
+              },
+              "required": [
+                "email"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/infostealer": {
+      "post": {
+        "operationId": "CheckInfostealer",
+        "summary": "Check email in infostealer logs",
+        "description": "Check whether an email address's credentials were harvested by infostealer malware and appear in a criminal stealer-log marketplace, detected 24-72 hours ahead of public breach databases. Call to catch device-level compromise before stolen session cookies or saved passwords are used for account takeover.\n\n**Billing.** $0.15 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "description": "Email address to check for infostealer compromise",
+                  "x-ms-summary": "Email"
+                }
+              },
+              "required": [
+                "email"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/sim-swap": {
+      "post": {
+        "operationId": "CheckSimSwap",
+        "summary": "Check phone number for SIM swap",
+        "description": "Check whether a phone number has had a SIM swap or carrier port in the last 24 hours via real-time carrier lookup. A recent swap is a strong signal of an active account-takeover attempt targeting SMS-based 2FA. Call before trusting an SMS OTP from this number.\n\n**Billing.** $0.25 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "phone": {
+                  "type": "string",
+                  "description": "Phone number in E.164 format",
+                  "x-ms-summary": "Phone"
+                }
+              },
+              "required": [
+                "phone"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/domain": {
+      "post": {
+        "operationId": "CheckDomainLookalikes",
+        "summary": "Find phishing lookalike domains",
+        "description": "Scan a domain for phishing lookalikes: typosquats, homoglyphs, and common phishing registration patterns. Returns matched lookalike domains found in the wild. Call to detect brand-impersonation phishing campaigns targeting a company before they're reported elsewhere.\n\n**Billing.** $0.50 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "domain": {
+                  "type": "string",
+                  "description": "Root domain to scan for lookalikes",
+                  "x-ms-summary": "Domain"
+                }
+              },
+              "required": [
+                "domain"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/scan-url": {
+      "post": {
+        "operationId": "ScanUrl",
+        "summary": "Scan a URL for phishing or malware",
+        "description": "Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis. Returns an async analysis ID to poll. Call before an agent clicks, fetches, or shares a link from an untrusted source.\n\n**Billing.** $0.05 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "URL to scan (must start with http:// or https://)",
+                  "x-ms-summary": "Url"
+                }
+              },
+              "required": [
+                "url"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/supply-chain": {
+      "post": {
+        "operationId": "CheckSupplyChain",
+        "summary": "Assess vendor breach risk",
+        "description": "Check up to 10 vendor domains for combined breach, infostealer, and dark-web risk exposure in one call. Returns a composite risk score per vendor. Call to assess third-party API/vendor risk before an agent integrates with or continues calling an external service.\n\n**Billing.** $0.10 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "vendor_domains": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Up to 10 vendor domains",
+                  "x-ms-summary": "Vendor domains"
+                },
+                "vendor_emails": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Alternative: vendor contact emails, domain extracted automatically",
+                  "x-ms-summary": "Vendor emails"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/ransomware-risk": {
+      "post": {
+        "operationId": "CheckRansomwareRisk",
+        "summary": "Check domain on ransomware leak sites",
+        "description": "Check whether a domain appears on a known ransomware group's victim/leak-site list, and whether pre-ransomware credential harvesting was detected beforehand. Call to assess active ransomware exposure for a domain, not just historical breach history.\n\n**Billing.** $0.40 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "domain": {
+                  "type": "string",
+                  "description": "Domain to check against the ransomware victim list",
+                  "x-ms-summary": "Domain"
+                }
+              },
+              "required": [
+                "domain"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/identity-risk-score": {
+      "post": {
+        "operationId": "GetIdentityRiskScore",
+        "summary": "Score a domain for identity risk",
+        "description": "Return a 0-100 domain security score across 6 identity-risk dimensions (breach exposure, infostealer density, ransomware exposure, session exposure, CVE exposure, threat-actor targeting) with a letter grade and plain-English risk factors. Call as a single-number identity health check before onboarding, financing, or partnering with a domain.\n\n**Billing.** $0.35 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "domain": {
+                  "type": "string",
+                  "description": "Root domain to score",
+                  "x-ms-summary": "Domain"
+                }
+              },
+              "required": [
+                "domain"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/secret-scan-text": {
+      "post": {
+        "operationId": "ScanTextForSecrets",
+        "summary": "Scan text or a diff for secrets",
+        "description": "**Billing.** $0.05 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Raw file content to scan. Mutually exclusive with `diff`.",
+                  "x-ms-summary": "Content"
+                },
+                "diff": {
+                  "type": "string",
+                  "description": "Unified diff. Only added lines are scanned. Mutually exclusive with `content`.",
+                  "x-ms-summary": "Diff"
+                },
+                "filename": {
+                  "type": "string",
+                  "description": "Optional filename, echoed on each finding as `file`. Used with `content`.",
+                  "x-ms-summary": "Filename"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 1 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/session-risk": {
+      "post": {
+        "operationId": "CheckSessionRisk",
+        "summary": "Check for stolen session cookies",
+        "description": "Check whether an email address has an active stolen session cookie circulating in a criminal archive, a signal of account takeover that bypasses password resets and 2FA entirely. Call to detect AiTM/session-hijack attacks before an authenticated agent session is trusted.\n\n**Billing.** $0.30 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "description": "Email address to check for active session/AiTM exposure",
+                  "x-ms-summary": "Email"
+                }
+              },
+              "required": [
+                "email"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/nhi-exposure": {
+      "post": {
+        "operationId": "CheckMachineCredentials",
+        "summary": "Find exposed machine credentials",
+        "description": "Check whether API keys or tokens tied to a domain, used by non-human identities like AI agents, service accounts, or CI/CD, appear exposed in criminal stealer logs. Call to audit whether the credentials an autonomous agent relies on have already been compromised upstream.\n\n**Billing.** $0.40 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "domain": {
+                  "type": "string",
+                  "description": "Your own domain",
+                  "x-ms-summary": "Domain"
+                },
+                "vendor_domains": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Optional: vendor/supply-chain domains, up to 10",
+                  "x-ms-summary": "Vendor domains"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    },
+    "/v1/payg/oauth-watchlist": {
+      "post": {
+        "operationId": "CheckOauthTokens",
+        "summary": "Find exposed OAuth and SaaS tokens",
+        "description": "Check whether an email address has OAuth-connected app credentials exposed in a known SaaS breach (GitHub, Slack, Notion, Zapier, and 30+ other high-risk OAuth-capable apps). Returns matched apps and direct revoke-access links. Call to detect supply-chain credential exposure via connected apps.\n\n**Billing.** $0.30 in USDC per call over x402, on Base or Solana. No API key, no signup and no\nsubscription. Send the request with no payment header, take the `402` challenge that comes back,\npay it, and repeat the request. Only successful calls are charged.",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "description": "Email address to check for OAuth exposure",
+                  "x-ms-summary": "Email"
+                }
+              },
+              "required": [
+                "email"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment settled and the check ran. `ok` is true and `data` holds the result.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "data"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "data": {
+                  "type": "object",
+                  "x-ms-summary": "Data"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A required field is missing or malformed. Never billed.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          },
+          "402": {
+            "description": "Payment required. The body carries a complete x402 version 2 challenge with the accepted networks, the amount in USDC base units, and the recipient. Pay it and repeat the request with the payment header.",
+            "schema": {
+              "type": "object",
+              "required": [
+                "ok",
+                "error",
+                "x402"
+              ],
+              "properties": {
+                "ok": {
+                  "type": "boolean",
+                  "x-ms-summary": "Ok"
+                },
+                "error": {
+                  "type": "string",
+                  "x-ms-summary": "Error"
+                },
+                "price": {
+                  "type": "string",
+                  "description": "Human-readable price, e.g. `$0.05 USDC (Base or Solana)`.",
+                  "x-ms-summary": "Price"
+                },
+                "x402": {
+                  "type": "object",
+                  "description": "The x402 payment challenge.",
+                  "properties": {
+                    "x402Version": {
+                      "type": "integer",
+                      "description": "Protocol version of this challenge.",
+                      "x-ms-summary": "X402version"
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "What is being paid for.",
+                      "properties": {},
+                      "x-ms-summary": "Resource"
+                    },
+                    "accepts": {
+                      "type": "array",
+                      "description": "One entry per accepted network.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "x-ms-summary": "Accepts"
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "description": "Discovery metadata, including the Bazaar input and output schemas.",
+                      "properties": {},
+                      "x-ms-summary": "Extensions"
+                    }
+                  },
+                  "x-ms-summary": "X402"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong HTTP method. Every endpoint is POST.",
+            "schema": {
+              "$ref": "#/definitions/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "Error": {
+      "type": "object",
+      "description": "Failure envelope. Returned for every non-2xx response.",
+      "required": [
+        "ok",
+        "error"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "x-ms-summary": "Ok"
+        },
+        "error": {
+          "type": "string",
+          "description": "Human-readable description of what went wrong, naming the offending field where there is one.",
+          "x-ms-summary": "Error"
+        },
+        "topup_url": {
+          "type": "string",
+          "description": "Present only on 402. Where to add credits.",
+          "x-ms-summary": "Topup url"
+        },
+        "docs": {
+          "type": "string",
+          "description": "Present on 401. Link to the developer documentation.",
+          "x-ms-summary": "Docs"
+        }
+      }
+    }
+  }
+}

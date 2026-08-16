@@ -6,8 +6,9 @@ description: |
   one alert per indicator type per log source, so a host touching a stealer domain and a loader IP
   produces two unrelated low-signal alerts. This rule correlates them into a single incident and reports
   which families converged, which is a far stronger indication of an actual compromise than any single
-  indicator match. RelayShield attributes indicators to families from criminal marketplace observation,
-  so the family names are the differentiating signal rather than a generic reputation score.'
+  indicator match. The contribution here is the correlation, not the underlying feed: family labels are
+  aggregated from abuse.ch and OpenPhish, and the value this rule adds is joining them across entity
+  types so that one incident carries the whole picture.'
 severity: High
 requiredDataConnectors:
   - connectorId: ThreatIntelligenceTaxii

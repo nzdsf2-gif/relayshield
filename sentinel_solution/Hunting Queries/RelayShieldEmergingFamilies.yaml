@@ -6,11 +6,11 @@ description: |
   families are where detection coverage is thinnest, because signatures and vendor reporting lag the
   marketplace by days.'
 description-detailed: |
-  'RelayShield sources indicators from criminal Telegram marketplaces, so a family appearing here has
-  been observed being traded rather than inferred from a sandbox detonation. That makes emergence a
-  usable early signal: a family that shows up today with no history in the previous week is either
-  genuinely new or newly commodified, and either way your existing detections were not written with it
-  in mind.
+  'Family labels in this feed are aggregated from abuse.ch (MalwareBazaar, URLhaus, Feodo Tracker) and
+  OpenPhish. Measured 2026-08-16, those four sources account for 99.8% of all family-labelled
+  indicators, so treat emergence here as "newly prevalent across those sources", not as evidence of
+  private or exclusive collection. A family that appears today with no history in the previous week
+  is worth attention because your existing detections were probably not written with it in mind.
   Interpret volume changes with care. The feed republishes every unexpired indicator on a 7 to 10 day
   cycle, so this query compares distinct indicator identities rather than raw row counts, and a family
   landing on its republish day will still show an increase. Treat the "new" list as the higher-confidence

@@ -1,0 +1,122 @@
+id: 9cdec0e5-78e1-4a9e-9031-3a15835ccfc3
+name: RelayShield - Host contacted infrastructure from multiple malware families
+description: |
+  'Identifies an internal host that contacted RelayShield network indicators attributed to two or more
+  distinct malware families within the lookback window. The shipped Threat Intelligence templates raise
+  one alert per indicator type per log source, so a host touching a stealer domain and a loader IP
+  produces two unrelated low-signal alerts. This rule correlates them into a single incident and reports
+  which families converged, which is a far stronger indication of an actual compromise than any single
+  indicator match. RelayShield attributes indicators to families from criminal marketplace observation,
+  so the family names are the differentiating signal rather than a generic reputation score.'
+severity: High
+requiredDataConnectors:
+  - connectorId: ThreatIntelligenceTaxii
+    dataTypes:
+      - ThreatIntelIndicators
+  - connectorId: CEF
+    dataTypes:
+      - CommonSecurityLog
+queryFrequency: 1h
+queryPeriod: 14d
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - CommandAndControl
+  - CredentialAccess
+relevantTechniques:
+  - T1071
+  - T1571
+  - T1555
+query: |
+  let dt_lookBack = 1h;
+  let ioc_lookBack = 14d;
+  // Two distinct families is the point of the rule. Raise this if your environment
+  // is noisy enough that two is not interesting.
+  let min_families = 2;
+  // The malware: namespace is not purely malware families. It also carries
+  // behaviours, platforms and vendor names, and a host trivially reaches two
+  // "families" if those are counted. Excluded here so the family count means
+  // what the alert says it means.
+  let not_families = dynamic([
+    "phishing", "coinminer", "cryptominer", "spam", "scam", "ransomware", "loader",
+    "stealer", "botnet", "trojan", "backdoor", "downloader", "malware", "apt",
+    "windows", "linux", "macos", "android", "ios"
+  ]);
+  let RelayShield_Indicators = materialize(
+      ThreatIntelIndicators
+      | where TimeGenerated >= ago(ioc_lookBack)
+      | where SourceSystem has "RelayShield" or tostring(Data.external_references) has "relayshield"
+      | where ObservableKey in ("ipv4-addr:value", "domain-name:value")
+      // The feed republishes every unexpired indicator on a 7 to 10 day cycle, so
+      // without this the same indicator is counted many times.
+      | summarize arg_max(TimeGenerated, *) by Id
+      | where IsActive and (isnull(ValidUntil) or ValidUntil > now())
+      | mv-expand Label = Data.labels
+      | where tostring(Label) startswith "malware:"
+      // Labels are not normalised at source: ClearFake and clearfake both occur, and
+      // some labels carry several comma-joined values in one string. Fold case and
+      // split before grouping, or one family lands in two buckets and the count is
+      // understated. Measured 2026-08-15: exact matching on "clearfake" returned 196
+      // of 608 matching indicators, silently.
+      | extend Family = tolower(replace_string(tostring(Label), "malware:", ""))
+      | mv-expand Family = split(Family, ",")
+      | extend Family = trim(" ", tostring(Family))
+      | where isnotempty(Family) and Family !in (not_families)
+      // Drop malformed identifiers such as hash fragments, which are not family names.
+      | where Family matches regex @"^[a-z][a-z0-9._-]{2,}$"
+      | project IndicatorId = Id, IndicatorValue = tolower(ObservableValue), Family,
+                Confidence, ValidUntil, ThreatDescription = tostring(Data.description)
+  );
+  let Traffic = materialize(
+      CommonSecurityLog
+      | extend IngestionTime = ingestion_time()
+      | where IngestionTime > ago(dt_lookBack)
+      | extend RequestUrl = tostring(column_ifexists("RequestURL", ""))
+      | extend DestinationHost = tolower(tostring(column_ifexists("DestinationHostName", "")))
+      | extend UrlHost = tolower(tostring(parse_url(RequestUrl).Host))
+      | extend Traffic_TimeGenerated = TimeGenerated
+  );
+  // One indicator column to join on, whether the log recorded the destination as an
+  // address, a hostname or inside a URL.
+  let TrafficKeys = union
+      (Traffic | where isnotempty(DestinationIP)   | extend MatchKey = tolower(DestinationIP)),
+      (Traffic | where isnotempty(DestinationHost) | extend MatchKey = DestinationHost),
+      (Traffic | where isnotempty(UrlHost)         | extend MatchKey = UrlHost);
+  RelayShield_Indicators
+  | join kind=innerunique (TrafficKeys) on $left.IndicatorValue == $right.MatchKey
+  | where isnull(ValidUntil) or Traffic_TimeGenerated < ValidUntil
+  | summarize
+      Families        = make_set(Family, 20),
+      FamilyCount     = dcount(Family),
+      MatchedIOCs     = make_set(IndicatorValue, 20),
+      IndicatorCount  = dcount(IndicatorValue),
+      MaxConfidence   = max(Confidence),
+      FirstSeen       = min(Traffic_TimeGenerated),
+      LastSeen        = max(Traffic_TimeGenerated)
+      by SourceIP, DeviceName
+  | where FamilyCount >= min_families
+  | extend FamilyList = strcat_array(Families, ", "),
+           IOCList    = strcat_array(MatchedIOCs, ", ")
+  | extend timestamp = LastSeen
+  | project timestamp, FirstSeen, LastSeen, SourceIP, DeviceName, FamilyCount, FamilyList,
+            IndicatorCount, IOCList, MaxConfidence
+entityMappings:
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: SourceIP
+  - entityType: Host
+    fieldMappings:
+      - identifier: HostName
+        columnName: DeviceName
+customDetails:
+  MalwareFamilies: FamilyList
+  FamilyCount: FamilyCount
+  MatchedIndicators: IOCList
+  IndicatorCount: IndicatorCount
+  HighestConfidence: MaxConfidence
+alertDetailsOverride:
+  alertDisplayNameFormat: 'RelayShield - {{DeviceName}} contacted {{FamilyCount}} malware families'
+  alertDescriptionFormat: 'Host {{SourceIP}} contacted RelayShield indicators attributed to {{FamilyList}}. Matched indicators: {{IOCList}}.'
+version: 1.0.0
+kind: Scheduled

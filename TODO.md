@@ -118,8 +118,25 @@ sending valid cursors, which the direct DynamoDB test had already suggested. The
 the **MISP `restSearch` handler, which had it identically**. Cursors are base64url now; the legacy
 raw-JSON form is still accepted so nothing mid-traversal breaks.
 
-**Still open:** a full pass is 242 sequential requests. That fits this client; a consumer with a
-smaller budget still would not finish, and `more=False` has not yet been observed.
+**✅ CONFIRMED RESOLVED for this client, 76 minutes after deploy.** Watched continuously:
+
+```
+requests           : 242          (predicted 241)
+restarts           : 0            (old behaviour ~48/hour, so ~61 expected in this window)
+more=False reached : 1            <- the collection TERMINATED, for the first time ever
+objects delivered  : 482,481
+```
+
+**A client completed a full pass of the corpus.** That had never happened. The predicted request
+count was 241 and the measured count was 242.
+
+**This also confirms METRICS-2 by a second, independent method.** 482,481 objects delivered in one
+complete pass against the 482,735 estimated from an 11.9x sighting ratio: agreement to **0.05%**.
+The distinct-indicator count is now measured twice, two different ways, not extrapolated.
+
+**Still worth doing anyway:** a consumer with a smaller page budget than Sentinel's still would not
+finish, and the pass costs 88,794 RRU where an indexed one costs 7,461. TAXII-PAGINATION-2 below is
+about cost and robustness now rather than about correctness.
 
 ### TAXII-PAGINATION-2: the structural fix. Founder-approved 2026-08-16 on the condition that it does not add compute cost. IT DOES NOT.
 

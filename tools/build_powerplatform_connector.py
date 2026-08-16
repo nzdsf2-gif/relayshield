@@ -99,6 +99,18 @@ def to_swagger2(node):
         if k == "nullable":
             out["x-nullable"] = v
             continue
+        # An enum must only contain values of the declared type. In 3.1 a
+        # nullable field is type ["string","null"] and null is a legitimate
+        # enum member; collapsing the type to "string" above leaves that null
+        # behind, and Power Platform rejects the whole definition with
+        # "Definition is not valid" naming only the path, not the field.
+        # x-nullable already carries the nullability, so drop the null.
+        if k == "enum" and isinstance(v, list):
+            cleaned = [e for e in v if e is not None]
+            if len(cleaned) != len(v):
+                out["x-nullable"] = True
+            out["enum"] = cleaned
+            continue
         out[k] = to_swagger2(v)
 
     # Field labels for the flow designer.

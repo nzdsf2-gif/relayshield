@@ -75,13 +75,22 @@ Confirmed against the correct sibling: `DomainEntity_DnsEvents.yaml` uses
 forms in two different `let` blocks; the one it joins on is correct, so only its TLD-extraction
 helper is affected. **Scope: one rule definitively dead, one partially.**
 
-**Why this is worth acting on.** A one-line fix PR into `Azure/Azure-Sentinel` lands before our own
-`Solutions/RelayShield` PR, from the same account, on the exact content area we are about to submit
-into. That is a relationship with the reviewers plus public evidence we read the code, for maybe
-thirty minutes of work. **Do it before the MS-1 solution PR, not after.**
+**✅ SUBMITTED 2026-08-16 as [Azure/Azure-Sentinel#14924](https://github.com/Azure/Azure-Sentinel/pull/14924)**,
+open and mergeable, one file, `license/cla` passing. Branch `fix/ti-domain-commonsecuritylog-join`
+on the `nzdsf2-gif` fork; version bumped 1.4.5 to 1.4.6 to satisfy
+`checkThatTemplatesVersionWasChanged.sh`. **Testing declared honestly as not end to end** (no CEF
+source to run the join against), with the static verification listed instead.
 
-Do not overstate it in the PR text. Report the observation and the fix; do not editorialise about
-Microsoft's testing.
+This lands before our own `Solutions/RelayShield` PR, from the same account, on the exact content
+area we are about to submit into.
+
+**Also noted in the PR body, not changed:** `DomainEntity_CloudAppEvents_Updated.yaml`'s TLD block,
+and that `Package/mainTemplate.json` carries the old expression and needs regenerating. Offered to
+submit the former separately if they want it.
+
+**The template is in `.script/tests/KqlvalidationsTests/SkipValidationsTemplates.json`**, which is
+why the KQL validator never caught it. Worth remembering when we rely on their CI as evidence that
+anything is correct.
 
 ---
 

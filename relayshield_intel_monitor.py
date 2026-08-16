@@ -89,6 +89,23 @@ INTEL_ALERTS_TABLE    = "relayshield_intel_alerts"
 INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
 INTEL_CHANNELS_TABLE  = "relayshield_intel_channels"
 STOLEN_SESSIONS_TABLE  = "relayshield_stolen_sessions"
+# CORPUS-1, added 2026-08-16. Measured that day: of 489,990 distinct IOCs, only
+# 8,171 (1.67%) came from the 90 monitored Telegram channels and 481,819
+# (98.33%) from free public feeds any competitor also has. 73 of the 90 active
+# channels had produced zero indicators.
+#
+# The cause was not collection -- every channel is polled every 6 hours without
+# failure. The cause is that this pipeline only KEPT data that matched something
+# it already knew: a message with no IOC regex hit was dropped by
+# `if total_iocs == 0: continue`, and a stolen session was dropped unless it
+# matched an existing customer's email. A marketplace sales post ("50k US logs,
+# fresh, $200") contains neither, so the single most differentiated content we
+# collect was being discarded on arrival.
+#
+# This table is where that content now lands. It is the differentiated asset:
+# "your organisation's credentials are being sold, 50k records, $200, posted
+# three hours ago" is something no free feed provides.
+MARKETPLACE_LISTINGS_TABLE = "relayshield_marketplace_listings"
 IDENTITY_GRAPH_TABLE   = "relayshield_identity_graph"
 USERS_TABLE           = "relayshield_users"
 EMAILS_TABLE          = "relayshield_monitored_emails"
@@ -1255,6 +1272,159 @@ def _store_stolen_session(session: dict, channel: str, matched_email: str, match
         logger.warning("Stolen session write failed domain=%s: %s", session.get("domain"), exc)
 
 
+def _store_observed_session(session: dict, channel: str) -> None:
+    """Record a stolen session seen in a criminal archive, matched or not.
+
+    CORPUS-1 fix, 2026-08-16. _store_stolen_session above requires a
+    matched_email and matched_user_id, so a session was only ever kept when it
+    belonged to an existing customer. With a small customer base that discards
+    essentially everything: the table held 9 rows on 2026-08-16, all of them
+    source "demo", after months of collection.
+
+    That is backwards. A stolen session for an organisation that is NOT yet a
+    customer is exactly the intelligence worth having -- it is the reason to
+    call them.
+
+    PRIVACY: no email, no cookie value, no credential is stored on this path.
+    Only the service domain, the session type and the channel it was seen in,
+    which is aggregate exposure intelligence rather than personal data. The
+    matched path above keeps its existing hashed-and-encrypted handling and is
+    unchanged.
+    """
+    ttl = int(time.time()) + ALERT_TTL_DAYS * 86400
+    try:
+        _dynamodb.Table(STOLEN_SESSIONS_TABLE).put_item(Item={
+            "session_id":       str(uuid.uuid4()),
+            "domain":           session["domain"],
+            "session_type":     session["type"],
+            "cookie_name":      session.get("cookie_name", ""),
+            "severity":         session["severity"],
+            "service_category": session["category"],
+            "channel_source":   channel,
+            "source":           "observed",   # distinguishes from "demo" and matched rows
+            "matched":          False,
+            "ingested_at":      datetime.now(timezone.utc).isoformat(),
+            "ttl":              Decimal(ttl),
+        })
+    except Exception as exc:
+        logger.warning("Observed session write failed domain=%s: %s", session.get("domain"), exc)
+
+
+def _extract_marketplace_listing(text: str, channel: str, category: str) -> dict | None:
+    """Pull the sale signals out of a marketplace post.
+
+    _RE_LOG_COUNT and _RE_LOG_PRICE have existed in this file since the sale
+    signal work and were wired to NOTHING -- confirmed 2026-08-16, zero call
+    sites. The regexes to capture our most differentiated content were written
+    and then never connected to an output.
+
+    Returns None when the post carries no commercial signal at all, so ordinary
+    chatter does not create rows.
+    """
+    if not text:
+        return None
+
+    counts = [c.replace(",", "").replace(".", "") for c in _RE_LOG_COUNT.findall(text)]
+    prices = [p.replace(",", "") for p in _RE_LOG_PRICE.findall(text)]
+    victims = [v.strip() for v in _RE_RANSOM_VICTIM.findall(text) if len(v.strip()) > 3]
+
+    # A listing needs at least a volume or a price. Victim alone is already
+    # handled by the ransomware-victim path.
+    if not counts and not prices:
+        return None
+
+    def _biggest(vals):
+        nums = []
+        for v in vals:
+            try:
+                nums.append(int(v))
+            except ValueError:
+                continue
+        return max(nums) if nums else None
+
+    record_count = _biggest(counts)
+    price = _biggest(prices)
+
+    # Domains in the post are the likeliest victim identifiers, and are far more
+    # reliable than the prose victim regex.
+    domains = [d.lower() for d in _RE_DOMAIN.findall(text)][:5]
+
+    return {
+        "record_count":  record_count,
+        "price":         price,
+        "victim_domain": domains[0] if domains else "",
+        "victim_domains": domains,
+        "victim_names":  victims[:3],
+        "channel":       channel,
+        "category":      category,
+    }
+
+
+def _store_marketplace_listing(listing: dict, channel: str, preview: str) -> bool:
+    """Write one marketplace listing. Returns True if written."""
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        item = {
+            "listing_id":    str(uuid.uuid4()),
+            "observed_at":   now,
+            "channel":       channel,
+            "category":      listing.get("category", ""),
+            # GSI partition key must exist on every row, so unattributed listings
+            # get a sentinel rather than being silently excluded from the index.
+            "victim_domain": listing.get("victim_domain") or "unattributed",
+            "ttl":           Decimal(int(time.time()) + 365 * 86400),
+        }
+        if listing.get("record_count") is not None:
+            item["record_count"] = Decimal(listing["record_count"])
+        if listing.get("price") is not None:
+            item["price_usd"] = Decimal(listing["price"])
+        if listing.get("victim_domains"):
+            item["victim_domains"] = listing["victim_domains"]
+        if listing.get("victim_names"):
+            item["victim_names"] = listing["victim_names"]
+        if preview:
+            item["preview"] = preview[:400]
+        _dynamodb.Table(MARKETPLACE_LISTINGS_TABLE).put_item(Item=item)
+        return True
+    except Exception as exc:
+        logger.warning("Marketplace listing write failed channel=%s: %s", channel, exc)
+        return False
+
+
+def _record_channel_yield(username: str, messages: int, iocs: int, listings: int) -> None:
+    """Write per-channel yield back to the channel row.
+
+    Until now the channels table held first_seen and last_verified but nothing
+    about what a channel actually PRODUCED, so a channel that is quiet and one
+    that is silently failing looked identical. That made every cull-or-keep
+    decision guesswork, which is why 73 dead channels sat in an "active" list
+    for months. Cumulative counters plus a last_message_at are enough to rank
+    channels by measured yield.
+    """
+    try:
+        _dynamodb.Table(INTEL_CHANNELS_TABLE).update_item(
+            Key={"username": username},
+            UpdateExpression=(
+                "SET last_collected_at = :now, "
+                "    last_message_at = if_not_exists(last_message_at, :never) "
+                "ADD messages_total :m, iocs_total :i, listings_total :l"
+            ),
+            ExpressionAttributeValues={
+                ":now":   datetime.now(timezone.utc).isoformat(),
+                ":never": "",
+                ":m": Decimal(messages), ":i": Decimal(iocs), ":l": Decimal(listings),
+            },
+        )
+        if messages:
+            _dynamodb.Table(INTEL_CHANNELS_TABLE).update_item(
+                Key={"username": username},
+                UpdateExpression="SET last_message_at = :now",
+                ExpressionAttributeValues={":now": datetime.now(timezone.utc).isoformat()},
+            )
+    except Exception as exc:
+        logger.warning("Channel yield write failed for @%s: %s", username, exc)
+
+
 def _format_session_alert(email: str, sessions: list[dict], channel: str) -> str:
     by_severity: dict[str, list[dict]] = {}
     for s in sessions:
@@ -1402,6 +1572,20 @@ async def _process_stealer_archive(client, message, channel: str,
     except Exception as _exc:
         logger.warning("Package tracking write failed: %s", _exc)
     session_domains = {s["domain"] for s in unique_sessions}
+
+    # CORPUS-1 fix, 2026-08-16. Everything below this point only keeps a session
+    # if it matches a monitored customer email, so with a small customer base
+    # essentially every session found in a criminal archive was parsed, matched
+    # against nothing, and dropped. Measured that day: the table held 9 rows,
+    # all of them source "demo", after months of collection.
+    #
+    # Record every session we observe first, then do the matching. A stolen
+    # session for an organisation that is NOT yet a customer is the reason to
+    # call them, not something to discard. No email, cookie value or credential
+    # is written on this path; see _store_observed_session.
+    for _s in unique_sessions:
+        _store_observed_session(_s, channel)
+
     matched_users: dict[str, tuple[str, list[dict]]] = {}
     for email_domain, records in email_domain_map.items():
         relevant = [s for s in unique_sessions
@@ -1782,6 +1966,7 @@ async def _poll_channels(stats: dict) -> None:
 
             stats["channels_checked"] += 1
             msg_count = 0
+            chan_iocs = chan_listings = 0
 
             try:
                 async for message in client.iter_messages(entity, limit=300):
@@ -1961,6 +2146,16 @@ async def _poll_channels(stats: dict) -> None:
                     except Exception as _exc:
                         logger.warning("Brand monitoring scan failed: %s", _exc)
 
+                    # Marketplace listing extraction, CORPUS-1 2026-08-16.
+                    # MUST run before the `total_iocs == 0: continue` below. A
+                    # sales post is exactly the message that carries no IOC, so
+                    # anything that runs after that guard never sees the content
+                    # this pipeline exists to collect.
+                    _listing = _extract_marketplace_listing(msg_text, username, category)
+                    if _listing and _store_marketplace_listing(_listing, username, preview):
+                        stats["listings_captured"] = stats.get("listings_captured", 0) + 1
+                        chan_listings += 1
+
                     # IOC extraction
                     iocs       = extract_iocs(msg_text)
                     total_iocs = sum(len(v) for v in iocs.values())
@@ -1978,6 +2173,7 @@ async def _poll_channels(stats: dict) -> None:
                     if total_iocs == 0:
                         continue
                     stats["iocs_extracted"] += total_iocs
+                    chan_iocs += total_iocs
                     _fam = detect_malware_families(msg_text)
                     if _fam:
                         stats["malware_tagged"] = stats.get("malware_tagged", 0) + total_iocs
@@ -2041,7 +2237,11 @@ async def _poll_channels(stats: dict) -> None:
             except Exception as exc:
                 logger.error("Error processing channel @%s: %s", username, exc)
 
-            logger.info("Channel @%s — processed %d messages", username, msg_count)
+            # CORPUS-1: record what this channel actually produced, so a quiet
+            # channel and a broken one stop looking identical.
+            _record_channel_yield(username, msg_count, chan_iocs, chan_listings)
+            logger.info("Channel @%s: %d messages, %d IOCs, %d listings",
+                        username, msg_count, chan_iocs, chan_listings)
 
             # Enhancement 6: Harvest replies on high-engagement posts (reply_to set)
             # Scans the last 20 messages for those with reply counts > 0 and reads their replies.
@@ -2127,6 +2327,7 @@ def lambda_handler(event, context):
         "images_ocrd":            0,
         "pastes_fetched":         0,
         "archives_parsed":        0,
+        "listings_captured":      0,
         "user_matches":           0,
         "alerts_fired":           0,
         "ransomware_victims":     0,

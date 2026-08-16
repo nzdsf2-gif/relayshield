@@ -8,7 +8,7 @@
 
 Hello,
 
-I maintain the RelayShield content pack for Cortex XSOAR. Moshe Eichler reviewed and approved the
+I manage the RelayShield content pack for Cortex XSOAR. Moshe Eichler reviewed and approved the
 code on PR #45206 in `demisto/content` and asked for a recorded demo before the pack can be
 published. He suggested I reach out to this address to arrange access.
 
@@ -25,10 +25,6 @@ commands that let an XSOAR playbook check an email address, domain, phone number
 against breach, infostealer and criminal-marketplace data before a playbook grants access, resets a
 credential or closes an incident. The code is complete and approved; the demo is the only
 outstanding item.
-
-If a tenant is not something you can provide, I am happy to work another way. If there is a
-reference environment, a recorded-demo template you prefer, or a partner program I should enrol in
-first, please point me at it and I will follow that path instead.
 
 Company details for your records:
 

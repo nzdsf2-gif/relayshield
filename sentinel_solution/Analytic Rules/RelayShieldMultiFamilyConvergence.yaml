@@ -51,13 +51,15 @@ query: |
       ThreatIntelIndicators
       | where TimeGenerated >= ago(ioc_lookBack)
       | where SourceSystem has "RelayShield" or tostring(Data.external_references) has "relayshield"
-      // Measured 2026-08-16: restricting this to IP and domain dropped vidar (46
-      // indicators) and agenttesla (21) to zero and cut remcosrat from 19 to 1, over a
-      // window that was WIDER, not narrower. So the key filter is what removed them.
-      // url:value is included on the assumption they are URL indicators; if the pending
-      // ObservableKey-by-family breakdown shows file hashes instead, this needs a
-      // DeviceFileEvents or SecurityEvent branch rather than a URL one.
-      | where ObservableKey in ("ipv4-addr:value", "domain-name:value", "url:value")
+      // RESOLVED 2026-08-16 by measuring ObservableKey per family. An earlier version
+      // restricted this to IP and domain, which dropped the stealer families entirely,
+      // and I first guessed the missing ones were URLs. They are not: measured in the
+      // live workspace, vidar is 1,024 hashes to 4 domains, agenttesla 642 to 17 and
+      // efimer 743 to 0, with ZERO url:value rows for any of them. Matching only
+      // network observables made this structurally incapable of seeing 97% of the
+      // stealer intel it claims to hunt for.
+      | where ObservableKey in ("ipv4-addr:value", "domain-name:value", "url:value",
+                               "file:hashes.'SHA-256'")
       // The feed republishes every unexpired indicator on a 7 to 10 day cycle, so
       // without this the same indicator is counted many times.
       | summarize arg_max(TimeGenerated, *) by Id
@@ -90,6 +92,7 @@ query: |
       | extend RequestUrl = tostring(column_ifexists("RequestURL", ""))
       | extend DestinationHost = tolower(tostring(column_ifexists("DestinationHostName", "")))
       | extend UrlHost = tolower(tostring(parse_url(RequestUrl).Host))
+      | extend FileHashValue = tostring(column_ifexists("FileHash", ""))
       | extend Traffic_TimeGenerated = TimeGenerated
   );
   // One indicator column to join on, whether the log recorded the destination as an
@@ -100,7 +103,12 @@ query: |
       (Traffic | where isnotempty(UrlHost)         | extend MatchKey = UrlHost),
       // Full-URL branch, for url:value indicators. The host-only branch above still
       // catches the case where the indicator is the bare domain.
-      (Traffic | where isnotempty(RequestUrl)      | extend MatchKey = tolower(RequestUrl));
+      (Traffic | where isnotempty(RequestUrl)      | extend MatchKey = tolower(RequestUrl)),
+      // File-hash branch. Without this the stealer families cannot match at all,
+      // because their indicators are hashes. CommonSecurityLog carries FileHash on
+      // products that report file events; the column is read defensively because
+      // many CEF sources never populate it.
+      (Traffic | where isnotempty(FileHashValue)   | extend MatchKey = tolower(FileHashValue));
   RelayShield_Indicators
   | join kind=innerunique (TrafficKeys) on $left.IndicatorValue == $right.MatchKey
   | where isnull(ValidUntil) or Traffic_TimeGenerated < ValidUntil

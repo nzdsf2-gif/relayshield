@@ -4504,7 +4504,12 @@ def _ioc_to_stix(item: dict) -> dict | None:
     """Convert a relayshield_intel_iocs record to a STIX 2.1 Indicator object."""
     ioc_val  = item.get("ioc_value", "")
     ioc_type = item.get("ioc_type", "")
-    seen_ts  = item.get("seen_ts", datetime.now(timezone.utc).isoformat())
+    # Accept both record shapes: the sighting rows in relayshield_intel_iocs use
+    # seen_ts, the deduplicated rows in relayshield_intel_feed_current use
+    # last_seen_ts. One serialiser for both keeps the scan fallback and the
+    # indexed path emitting byte-identical objects, which is the only way the
+    # fallback is worth having.
+    seen_ts  = item.get("seen_ts") or item.get("last_seen_ts") or datetime.now(timezone.utc).isoformat()
     malware  = item.get("malware", "")
     channel  = item.get("channel", "")
     category = item.get("category", "")
@@ -4536,9 +4541,32 @@ def _ioc_to_stix(item: dict) -> dict | None:
         return None
 
     indicator_id = f"indicator--{str(_uuid_mod.uuid5(_uuid_mod.NAMESPACE_URL, f'relayshield:{ioc_val}'))}"
-    labels       = ["malicious-activity"]
-    if malware and malware not in ("None", "n/a", ""):
-        labels.append(f"malware:{malware[:50]}")
+
+    # INTEL-LABELS-1 fixed at source, 2026-08-16. This line is where the defect
+    # was born: it emitted the raw malware value as ONE label, so a stored value
+    # of "Loader,Potemkin" became the single label "malware:Loader,Potemkin", and
+    # "ClearFake" and "clearfake" became two different labels for one family.
+    #
+    # Measured downstream in a live Sentinel workspace on 2026-08-15: an exact
+    # match on "clearfake" returned 196 of 608 matching rows, so a customer
+    # hunting by family silently missed roughly two thirds of the matches and got
+    # no indication the result was partial.
+    #
+    # Now: split comma-joined values, fold case, drop blanks and placeholders,
+    # de-duplicate, and emit one label per family. Consumers that already fold
+    # case keep working; consumers doing exact matches start being correct.
+    labels = ["malicious-activity"]
+    raw_families = malware if isinstance(malware, list) else str(malware or "").split(",")
+    seen_families = set()
+    for fam in raw_families:
+        fam = str(fam).strip().lower()
+        if not fam or fam in ("none", "n/a", "unknown", "null"):
+            continue
+        if fam in seen_families:
+            continue
+        seen_families.add(fam)
+        labels.append(f"malware:{fam[:50]}")
+    family_text = ", ".join(sorted(seen_families))
 
     return {
         "type":          "indicator",
@@ -4547,7 +4575,9 @@ def _ioc_to_stix(item: dict) -> dict | None:
         "created":       seen_ts,
         "modified":      seen_ts,
         "name":          ioc_val,
-        "description":   f"Observed in {channel} ({category})" + (f" — {malware}" if malware and malware not in ("None","n/a","") else ""),
+        # No em-dash: this string is published prose, delivered verbatim into
+        # every consumer's SIEM as the indicator description.
+        "description":   f"Observed in {channel} ({category})" + (f": {family_text}" if family_text else ""),
         "pattern":       pattern,
         "pattern_type":  "stix",
         "valid_from":    seen_ts,
@@ -4678,24 +4708,41 @@ def handle_taxii_collection(params: dict, api_key_record: dict, collection_id: s
 # so that clients mid-traversal at deploy time are not broken.
 _CURSOR_KEYS = {"ioc_value", "seen_ts"}
 
+# The two paths have different key shapes -- the scan resumes on
+# (ioc_value, seen_ts), the indexed query on (feed_shard, last_seen_ts,
+# ioc_value) -- so a cursor now carries which path issued it. Without the tag a
+# cursor from one path silently means something else to the other, which is how
+# a fallback quietly starts returning the wrong slice of the corpus.
+_CURSOR_SCAN = "scan"
+_CURSOR_FEED = "feed"
 
-def _encode_feed_cursor(key: dict) -> str:
-    raw = json.dumps(key, separators=(",", ":")).encode("utf-8")
+
+def _encode_feed_cursor(key: dict, source: str = _CURSOR_SCAN) -> str:
+    raw = json.dumps({"v": 1, "s": source, "k": key}, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def _decode_feed_cursor(cursor: str) -> dict | None:
-    """Return the DynamoDB key a cursor encodes, or None if it is unusable."""
+def _decode_feed_cursor(cursor: str) -> tuple | None:
+    """Return (source, key) for a cursor, or None if it is unusable."""
     for attempt in (cursor + "=" * (-len(cursor) % 4), None):
         try:
             if attempt is None:          # legacy raw JSON, accepted for compatibility
-                key = json.loads(cursor)
+                blob = json.loads(cursor)
             else:
-                key = json.loads(base64.urlsafe_b64decode(attempt).decode("utf-8"))
+                blob = json.loads(base64.urlsafe_b64decode(attempt).decode("utf-8"))
         except Exception:
             continue
-        if isinstance(key, dict) and _CURSOR_KEYS <= set(key):
-            return key
+        if not isinstance(blob, dict):
+            continue
+        # Current form: {"v":1,"s":...,"k":{...}}
+        if blob.get("v") == 1 and isinstance(blob.get("k"), dict):
+            source = blob.get("s")
+            if source in (_CURSOR_SCAN, _CURSOR_FEED):
+                return source, blob["k"]
+            continue
+        # Legacy bare key, from before the tag existed. Only ever a scan cursor.
+        if _CURSOR_KEYS <= set(blob):
+            return _CURSOR_SCAN, blob
     return None
 
 
@@ -4710,6 +4757,47 @@ def _bad_cursor_response(content_type: str) -> dict:
                            "cursor taken verbatim from a previous response.",
         }),
     }
+
+
+INTEL_FEED_TABLE = os.environ.get("INTEL_FEED_TABLE", "relayshield_intel_feed_current")
+INTEL_FEED_SHARD = "v1"
+
+
+def _query_feed_indicators(added_after: str, limit: int, start_key: dict | None):
+    """Serve the feed from the deduplicated table via its time-ordered index.
+
+    Returns (items, next_key), or None if the feed table cannot serve the request
+    and the caller should fall back to scanning the sightings table.
+
+    This is the whole point of TAXII-PAGINATION-2. The sightings table carries
+    11.9 rows per distinct IOC, so a scan reads ~11.9 rows for every object it
+    can return and a full traversal costs 88,794 RRU. Querying an index that
+    holds one row per IOC in last_seen_ts order costs 7,461 for the same corpus,
+    reads only what it returns, and gives DynamoDB-native durable pagination
+    instead of a hand-rolled cursor over scan order.
+    """
+    try:
+        table = dynamodb.Table(INTEL_FEED_TABLE)
+        cond = Key("feed_shard").eq(INTEL_FEED_SHARD)
+        if added_after:
+            cond = cond & Key("last_seen_ts").gt(added_after)
+        kwargs = {
+            "IndexName":              "feed-time-index",
+            "KeyConditionExpression": cond,
+            "Limit":                  limit,
+            "ScanIndexForward":       True,   # oldest first, so added_after walks forward
+        }
+        if start_key:
+            kwargs["ExclusiveStartKey"] = start_key
+        resp = table.query(**kwargs)
+        return resp.get("Items", []), resp.get("LastEvaluatedKey")
+    except Exception as exc:
+        # Deliberately not fatal. The scan path still works, and a feed table
+        # that is missing, mid-backfill or throttled should degrade to slower
+        # rather than to broken. Logged at warning so a permanent fallback shows
+        # up in the logs instead of hiding as "it still works".
+        logger.warning("feed table query unavailable, falling back to scan: %s", exc)
+        return None
 
 
 def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict) -> dict:
@@ -4737,13 +4825,44 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
             boto3.dynamodb.conditions.Attr("seen_ts").gte(added_after)
         )
     resumed = False
+    cursor_source, cursor_key = _CURSOR_FEED, None
     if cursor := query_params.get("next"):
-        cursor_key = _decode_feed_cursor(cursor)
-        if cursor_key is None:
+        decoded = _decode_feed_cursor(cursor)
+        if decoded is None:
             logger.warning("TAXII objects rejected an unusable cursor (len=%d)", len(cursor))
             return _bad_cursor_response("application/taxii+json;version=2.1")
-        scan_kwargs["ExclusiveStartKey"] = cursor_key
+        cursor_source, cursor_key = decoded
         resumed = True
+
+    # Indexed path first. A client that started on the scan path keeps its scan
+    # cursor honoured to the end of its traversal rather than being silently
+    # moved onto a different ordering mid-collection.
+    if cursor_source == _CURSOR_FEED:
+        feed = _query_feed_indicators(added_after, limit, cursor_key)
+        if feed is not None:
+            feed_items, feed_next = feed
+            if feed_items or resumed:
+                indicators = [o for o in (_ioc_to_stix(i) for i in feed_items) if o]
+                body = {"objects": indicators, "more": bool(feed_next)}
+                if feed_next:
+                    body["next"] = _encode_feed_cursor(feed_next, _CURSOR_FEED)
+                logger.info(
+                    "TAXII objects path=feed returned=%d more=%s resumed=%s added_after=%s",
+                    len(indicators), bool(feed_next), resumed, bool(added_after),
+                )
+                return {
+                    "statusCode": 200,
+                    "headers": {"Content-Type": "application/taxii+json;version=2.1"},
+                    "body": json.dumps(body),
+                }
+            # Empty and not a resume means the feed table is not populated yet.
+            # Fall through to the scan rather than telling a client the corpus is
+            # empty, which is the failure this whole exercise exists to prevent.
+            logger.warning("feed table returned nothing on a fresh request, falling back to scan")
+        cursor_key = None
+
+    if cursor_key:
+        scan_kwargs["ExclusiveStartKey"] = cursor_key
 
     # Deduplication, 2026-07-29. The table is keyed (ioc_value HASH, seen_ts RANGE)
     # -- one row per *sighting* -- while _ioc_to_stix derives the STIX id from
@@ -4829,7 +4948,7 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
 
     response_body = {"objects": indicators, "more": bool(next_key)}
     if next_key:
-        response_body["next"] = _encode_feed_cursor(next_key)
+        response_body["next"] = _encode_feed_cursor(next_key, _CURSOR_SCAN)
 
     # Log enough to tell a traversal from a treadmill. The old line recorded only
     # the object count and `more`, which looked healthy while the collection was
@@ -4838,7 +4957,7 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
     # from one restarting from page one every 74 seconds. `resumed` and the
     # cursor position are what make that visible.
     logger.info(
-        "TAXII objects returned=%d more=%s resumed=%s rows_scanned=%d pages=%d "
+        "TAXII objects path=scan returned=%d more=%s resumed=%s rows_scanned=%d pages=%d "
         "elapsed=%.1fs cursor_at=%s",
         len(indicators), bool(next_key), resumed, rows_scanned, pages,
         time.time() - scan_started,

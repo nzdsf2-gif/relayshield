@@ -276,6 +276,58 @@ cached accessor must read the NEW table's count, not `relayshield_intel_iocs.Ite
 
 ---
 
+## 🟩🟥 CORPUS-2: our channels ARE unique, but we market the two things we do not have — measured 2026-08-16
+
+**Ran the whole sightings table, 5,744,601 rows, comparing when a monitored channel first saw an
+indicator against when a public feed first saw the same one.**
+
+| Measure | Result |
+|---|---|
+| IOCs ever seen in a monitored channel | 12,586 |
+| IOCs ever seen in a public feed | 484,454 |
+| **Seen in BOTH** | **81** |
+| **EXCLUSIVE to our channels** | **12,505** |
+| Of the 81 overlaps, channel was first | **3 (3.7%)** |
+| Median lead time where both saw it | **MINUS 720 hours (30 days BEHIND)** |
+
+### The good news, and it is the answer to "what is uniquely ours"
+
+**99.4% of what our channels produce appears in no public feed we ingest.** Only 81 of 12,586
+channel indicators overlap. The 1.67% figure says channels are a small *share of volume*; this says
+that what they produce is *almost entirely unique*.
+
+**So the differentiator is exclusivity, not volume and not speed.** We have been marketing volume
+(5.6M, which is mostly commodity) and speed (see below, which is false), and not marketing the one
+property we can actually defend.
+
+### The bad news: the lead-time claim is false, and backwards
+
+**"RelayShield's Telegram-sourced indicators typically surface 24 to 72 hours ahead of public
+feeds"** is published in the live Elastic guide and elsewhere. Measured against our own data, where
+both sources saw the same indicator the channel was first **3 times out of 81**, and the median is
+**30 days behind**.
+
+This is not merely unsupported, it is contradicted in the opposite direction, and a technical buyer
+can disprove it with the same query. **Highest-risk item on this list; remove it before anything
+else.**
+
+### Recommendations, in order
+
+1. **Delete the 24-to-72-hour claim everywhere.** Live Elastic guide first.
+2. **Reposition on exclusivity with the measured number**: "12,505 indicators observed in criminal
+   channels that appear in no public feed", alongside "490K aggregated from public sources". Two
+   true claims, both verifiable, and the first is a better pitch than volume ever was.
+3. **Ship exclusivity as a product feature.** Tag every IOC `exclusive: true/false` by testing
+   whether it appears in any ingested public feed. Then customers can filter to RelayShield-only
+   indicators, and the Sentinel and Elastic content can lead with exclusive-only rules. We already
+   hold the data to compute this; it is a derivation, not new collection.
+4. **Grow exclusivity, not volume.** 17 productive channels yield 12,505 exclusive indicators.
+   Adding productive channels scales that directly, and the per-channel yield instrumentation
+   deployed today is what makes "productive" measurable rather than guessed.
+5. **Listings and observed sessions compound it** — both are 100% channel-derived by construction.
+
+---
+
 ## 🟥🟥🟥 CORPUS-1: 98.3% of the corpus is free public feeds, not marketplace intel — found 2026-08-16
 
 **Found while checking the founder's correction that we already ingest the free feeds I listed. They

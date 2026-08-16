@@ -4658,12 +4658,70 @@ def handle_taxii_collection(params: dict, api_key_record: dict, collection_id: s
     }
 
 
+# Feed pagination cursors, reworked 2026-08-16 (TAXII-PAGINATION-1).
+#
+# The cursor used to be a raw json.dumps() of a DynamoDB key, handed back to the
+# client as a query parameter and read back with:
+#
+#     try:    ExclusiveStartKey = json.loads(cursor)
+#     except: pass
+#
+# That `pass` is the defect. A cursor that failed to parse -- for any reason, and
+# a JSON blob with braces and quotes travelling through a query string has
+# several -- fell through to a scan with NO start key, which returns page one
+# again with more=true. To the client that is indistinguishable from progress,
+# so it re-ingests the same objects forever and nothing anywhere reports a fault.
+# Same silent-false-success shape as the asset-intel and GoPlus defects.
+#
+# Now: base64url, so it survives a query string intact, and an unusable cursor is
+# a 400 rather than a silent restart. The legacy raw-JSON form is still accepted
+# so that clients mid-traversal at deploy time are not broken.
+_CURSOR_KEYS = {"ioc_value", "seen_ts"}
+
+
+def _encode_feed_cursor(key: dict) -> str:
+    raw = json.dumps(key, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_feed_cursor(cursor: str) -> dict | None:
+    """Return the DynamoDB key a cursor encodes, or None if it is unusable."""
+    for attempt in (cursor + "=" * (-len(cursor) % 4), None):
+        try:
+            if attempt is None:          # legacy raw JSON, accepted for compatibility
+                key = json.loads(cursor)
+            else:
+                key = json.loads(base64.urlsafe_b64decode(attempt).decode("utf-8"))
+        except Exception:
+            continue
+        if isinstance(key, dict) and _CURSOR_KEYS <= set(key):
+            return key
+    return None
+
+
+def _bad_cursor_response(content_type: str) -> dict:
+    return {
+        "statusCode": 400,
+        "headers": {"Content-Type": content_type},
+        "body": json.dumps({
+            "title": "Invalid cursor",
+            "description": "The 'next' parameter is not a cursor this server issued. "
+                           "Restart the collection without 'next', or resume from a "
+                           "cursor taken verbatim from a previous response.",
+        }),
+    }
+
+
 def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict) -> dict:
     added_after = query_params.get("added_after", "")
+    # Default raised from 500 on 2026-08-16. At 500 a full traversal of the
+    # collection needs ~965 sequential requests, which no polling client budgets
+    # for; measured, Sentinel got ~25 pages in before restarting. Fewer, larger
+    # pages is the part of that gap this file can close on its own.
     try:
-        limit = min(int(query_params.get("limit", 500)), 2000)
+        limit = min(int(query_params.get("limit", 2000)), 5000)
     except (ValueError, TypeError):
-        limit = 500
+        limit = 2000
 
     table = dynamodb.Table(INTEL_IOCS_TABLE)
     scan_kwargs: dict = {
@@ -4678,11 +4736,14 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
             scan_kwargs["FilterExpression"] &
             boto3.dynamodb.conditions.Attr("seen_ts").gte(added_after)
         )
+    resumed = False
     if cursor := query_params.get("next"):
-        try:
-            scan_kwargs["ExclusiveStartKey"] = json.loads(cursor)
-        except Exception:
-            pass
+        cursor_key = _decode_feed_cursor(cursor)
+        if cursor_key is None:
+            logger.warning("TAXII objects rejected an unusable cursor (len=%d)", len(cursor))
+            return _bad_cursor_response("application/taxii+json;version=2.1")
+        scan_kwargs["ExclusiveStartKey"] = cursor_key
+        resumed = True
 
     # Deduplication, 2026-07-29. The table is keyed (ioc_value HASH, seen_ts RANGE)
     # -- one row per *sighting* -- while _ioc_to_stix derives the STIX id from
@@ -4700,17 +4761,26 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
     # Because duplicates collapse, a single over-fetched scan can no longer be
     # relied on to yield `limit` unique indicators, so we scan forward across a
     # bounded number of pages instead of returning a near-empty response.
-    MAX_SCAN_PAGES = 6
+    # Raised from 6 on 2026-08-16. The table carries 11.9 sightings per distinct
+    # IOC (measured over a 64,000-row parallel-segment sample), so ~11.9 rows have
+    # to be read for every object returned. Six scan pages could not feed a larger
+    # `limit`. The elapsed-time guard below is what keeps this bounded, rather
+    # than the page count alone.
+    MAX_SCAN_PAGES = 24
+    MAX_SCAN_SECONDS = 10.0
+    scan_started = time.time()
     unique: dict[str, dict] = {}
     last_consumed_key = None
     next_key = None
     pages = 0
+    rows_scanned = 0
 
     try:
-        while pages < MAX_SCAN_PAGES:
+        while pages < MAX_SCAN_PAGES and (time.time() - scan_started) < MAX_SCAN_SECONDS:
             resp = table.scan(**scan_kwargs)
             pages += 1
             items = resp.get("Items", [])
+            rows_scanned += len(items)
             next_key = resp.get("LastEvaluatedKey")
 
             hit_limit = False
@@ -4759,9 +4829,21 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
 
     response_body = {"objects": indicators, "more": bool(next_key)}
     if next_key:
-        response_body["next"] = json.dumps(next_key)
+        response_body["next"] = _encode_feed_cursor(next_key)
 
-    logger.info("TAXII objects returned=%d more=%s", len(indicators), bool(next_key))
+    # Log enough to tell a traversal from a treadmill. The old line recorded only
+    # the object count and `more`, which looked healthy while the collection was
+    # in fact never terminating: every response for 24 hours was
+    # "returned=500 more=True" and nothing distinguished a client making progress
+    # from one restarting from page one every 74 seconds. `resumed` and the
+    # cursor position are what make that visible.
+    logger.info(
+        "TAXII objects returned=%d more=%s resumed=%s rows_scanned=%d pages=%d "
+        "elapsed=%.1fs cursor_at=%s",
+        len(indicators), bool(next_key), resumed, rows_scanned, pages,
+        time.time() - scan_started,
+        (next_key or {}).get("ioc_value", "-")[:24],
+    )
     return {
         "statusCode": 200,
         # The Envelope is a TAXII resource, not a STIX one, so TAXII 2.1 s3.6
@@ -5110,11 +5192,15 @@ def handle_misp_event(params: dict, api_key_record: dict, query_params: dict) ->
             scan_kwargs["FilterExpression"] &
             boto3.dynamodb.conditions.Attr("seen_ts").gte(added_after)
         )
+    # Same silent-restart defect as the TAXII handler, fixed together on
+    # 2026-08-16. See _decode_feed_cursor. A MISP client hitting this got the
+    # first page back forever with no indication anything was wrong.
     if cursor := query_params.get("next"):
-        try:
-            scan_kwargs["ExclusiveStartKey"] = json.loads(cursor)
-        except Exception:
-            pass
+        cursor_key = _decode_feed_cursor(cursor)
+        if cursor_key is None:
+            logger.warning("MISP restSearch rejected an unusable cursor (len=%d)", len(cursor))
+            return _bad_cursor_response("application/json")
+        scan_kwargs["ExclusiveStartKey"] = cursor_key
 
     try:
         resp  = table.scan(**scan_kwargs)
@@ -5148,7 +5234,7 @@ def handle_misp_event(params: dict, api_key_record: dict, query_params: dict) ->
             "Orgc":            {"name": "RelayShield"},
             "Attribute":       attributes,
             "more":            bool(next_key),
-            **({"next": json.dumps(next_key)} if next_key else {}),
+            **({"next": _encode_feed_cursor(next_key)} if next_key else {}),
         }
     }
 

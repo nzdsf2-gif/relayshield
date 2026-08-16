@@ -36,8 +36,34 @@ Checked directly against `Solutions/Threat Intelligence (NEW)` at upstream commi
   loader IP produces two unrelated low-signal alerts and nothing correlates them.
 - Nothing detects the feed itself going silent.
 
-So the content here leads with what the corpus uniquely has: **family attribution from criminal
-marketplace observation**, correlation across families, and a guard against the silent-failure mode.
+So the content here leads with **correlation across families** and **a guard against the
+silent-failure mode**, neither of which the shipped templates do.
+
+### Provenance, stated accurately
+
+An earlier draft of this file claimed the differentiator was "family attribution from criminal
+marketplace observation". **That was wrong and is corrected here.** Measured 2026-08-16 against the
+live corpus, family labels come from:
+
+| Source of family labels | Share |
+|---|---|
+| MalwareBazaar (abuse.ch) | 47.3% |
+| OpenPhish | 32.3% |
+| Feodo Tracker (abuse.ch) | 14.7% |
+| URLhaus (abuse.ch) | 5.5% |
+| All Telegram channels combined | **0.01%** |
+
+All four are free and public. Every SHA-256 in the corpus (24,528 of 24,592) comes from
+MalwareBazaar. **The labels are an aggregation and normalisation convenience, not private
+collection**, and nothing in this solution should be pitched otherwise.
+
+What this content actually contributes, and it is still worth shipping:
+
+- **Correlation the shipped templates cannot express.** They are single-entity, single-source, so
+  they raise several unrelated low-signal alerts where one incident is warranted.
+- **Feed-health detection.** Nothing upstream notices the feed going silent.
+- **Label normalisation.** The case folding and comma splitting below fix a real under-match that
+  the raw labels cause, whoever produced them.
 
 ## The label rough edge, and why every query handles it
 

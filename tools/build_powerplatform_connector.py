@@ -40,21 +40,30 @@ SPEC_URL = "https://api.relayshield.net/openapi.json"
 
 # Curated for a Power Automate audience: IT ops, MSPs and security teams wiring
 # checks into onboarding, offboarding, ticketing and mail flows. Chosen for
-# "obvious as a flow step", not for breadth. The payg surface is used rather than
-# metered because it needs no separate subscription to start.
+# "obvious as a flow step", not for breadth.
+#
+# METERED, not PAYG. An earlier version of this file used /v1/payg/* on the
+# reasoning that it "needs no separate subscription to start". That was exactly
+# backwards and would have shipped a connector where all twelve actions failed:
+# PAYG is the x402 surface, and it answers an unauthenticated call with
+# 402 "Payment required, $0.10 USDC (Base or Solana)". A Power Automate user
+# cannot settle a USDC payment from inside a flow. /v1/metered/* is API-key
+# authenticated, which is what the connector's security definition provides.
+#
+# scan-url has no metered equivalent (PAYG only), so ip-intel takes its place.
 OPERATIONS = [
-    ("/v1/payg/breach",               "CheckEmailBreach",      "Check email for breach exposure"),
-    ("/v1/payg/infostealer",          "CheckInfostealer",      "Check email in infostealer logs"),
-    ("/v1/payg/sim-swap",             "CheckSimSwap",          "Check phone number for SIM swap"),
-    ("/v1/payg/domain",               "CheckDomainLookalikes", "Find phishing lookalike domains"),
-    ("/v1/payg/scan-url",             "ScanUrl",               "Scan a URL for phishing or malware"),
-    ("/v1/payg/supply-chain",         "CheckSupplyChain",      "Assess vendor breach risk"),
-    ("/v1/payg/ransomware-risk",      "CheckRansomwareRisk",   "Check domain on ransomware leak sites"),
-    ("/v1/payg/identity-risk-score",  "GetIdentityRiskScore",  "Score a domain for identity risk"),
-    ("/v1/payg/secret-scan-text",     "ScanTextForSecrets",    "Scan text or a diff for secrets"),
-    ("/v1/payg/session-risk",         "CheckSessionRisk",      "Check for stolen session cookies"),
-    ("/v1/payg/nhi-exposure",         "CheckMachineCredentials", "Find exposed machine credentials"),
-    ("/v1/payg/oauth-watchlist",      "CheckOauthTokens",      "Find exposed OAuth and SaaS tokens"),
+    ("/v1/metered/breach",              "CheckEmailBreach",      "Check email for breach exposure"),
+    ("/v1/metered/infostealer",         "CheckInfostealer",      "Check email in infostealer logs"),
+    ("/v1/metered/sim-swap",            "CheckSimSwap",          "Check phone number for SIM swap"),
+    ("/v1/metered/domain",              "CheckDomainLookalikes", "Find phishing lookalike domains"),
+    ("/v1/metered/ip-intel",            "GetIpIntel",            "Get reputation for a domain or IP"),
+    ("/v1/metered/supply-chain",        "CheckSupplyChain",      "Assess vendor breach risk"),
+    ("/v1/metered/ransomware-risk",     "CheckRansomwareRisk",   "Check domain on ransomware leak sites"),
+    ("/v1/metered/identity-risk-score", "GetIdentityRiskScore",  "Score a domain for identity risk"),
+    ("/v1/metered/secret-scan-text",    "ScanTextForSecrets",    "Scan text or a diff for secrets"),
+    ("/v1/metered/session-risk",        "CheckSessionRisk",      "Check for stolen session cookies"),
+    ("/v1/metered/nhi-exposure",        "CheckMachineCredentials", "Find exposed machine credentials"),
+    ("/v1/metered/oauth-watchlist",     "CheckOauthTokens",      "Find exposed OAuth and SaaS tokens"),
 ]
 
 

@@ -19,6 +19,52 @@ AWS-shaped project (MS-2 below). Do not conflate the two.
 
 **Sequencing:** MS-1 → MS-3 → MS-4, with MS-1b as mandatory cleanup after MS-1 QA. MS-2 only on real inbound.
 
+### MS-3 RESEARCHED 2026-08-16, the open question is ANSWERED
+
+**Yes, Partner Center is required, and it is the SAME commercial marketplace enrolment as MS-1.**
+Do that registration once and reuse it. That was the stated gate and it is now settled.
+
+| Fact | Detail |
+|---|---|
+| Offer type | **Software as a Service**, even for an agent. Not a new offer type |
+| "Sell through Microsoft?" | **Must be Yes.** Security Store supports no other option. A $0 price is allowed, but the transactable path means a payout and tax profile in Partner Center |
+| License management | Choose **"No, I prefer to manage customer licenses myself"** unless we want Microsoft billing the agent |
+| Package root | `PackageManifest.yaml`, then `<AgentName>/AgentManifest.yaml`. One agent manifest per package, subfolders at the ROOT of the zip, not inside a parent folder |
+| **Optional `openapispec_<n>.yaml`** | **This is the shortcut. We already serve a full OpenAPI spec**, so the agent can wrap the existing API rather than needing new backend work |
+| Agent name | **Under 30 characters** or it truncates in the Security Copilot UI |
+| Technical config | Landing page is a FIXED URL (`securitystore.microsoft.com/mysolutions`), plus a connection webhook, Entra Tenant ID and Entra Application ID |
+| Versioning | Semver. **Agents auto-update to the latest version** for all customers, so a bad publish reaches everyone |
+| After publishing | Submit the NIST CSF 2.0 self-attestation survey to appear in the NIST view |
+
+**🍎 macOS zip trap, documented by Microsoft explicitly.** The default macOS archive tool adds
+`.DS_Store` and `__MACOSX` entries that **break publishing**. Must build the package with:
+
+```
+zip -r data.zip . -x ".*" -x "__MACOSX"
+```
+
+We already hit exactly this class of problem with Lambda packaging, so use the same discipline.
+
+### MS-4 RESEARCHED 2026-08-16, and there is a hard blocker to plan around
+
+**Power Platform custom connectors require OpenAPI 2.0 (Swagger). OpenAPI 3.0 is explicitly NOT
+supported.** Microsoft states it twice on the same page.
+
+**`api.relayshield.net/openapi.json` is `3.1.0`.** So MS-4 is not "point the wizard at our spec":
+it needs a 3.1 to 2.0 downconversion. That is the whole job, and it is why this looked cheaper than
+it is.
+
+| Constraint | Ours | Verdict |
+|---|---|---|
+| Must be Swagger 2.0 | **3.1.0** | **Conversion required** |
+| Definition under 1 MB | 279 KB | Fine, though 2.0 output will be larger |
+| Multiple security definitions | We publish **three** (`ApiKeyAuth`, `BearerAuth`, `ApiKeyAuthAlt`) | **The connector silently uses only the TOP one.** Ship a definition with exactly one: apiKey, header, `X-RS-API-KEY` |
+| 62 paths | All of them | Select a useful subset; a 62-action connector is hostile in a flow picker |
+
+**Do not convert all 62 paths.** Pick the endpoints that make sense as flow actions, add `x-ms-summary`
+annotations so the fields read well in the designer, then submit for certification to get it listed
+publicly rather than staying org-private.
+
 **Azure account identity, recorded 2026-08-15 so it is not re-derived later:** the Azure free
 account was started on **`relayshieldadmin@gmail.com`**, registered as an **organization**
 (RelayShield LLC). That is a third identity alongside `nzdsf2@gmail.com` (GitHub, PyPI, Galaxy) and

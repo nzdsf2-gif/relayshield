@@ -89,6 +89,32 @@ it is.
 annotations so the fields read well in the designer, then submit for certification to get it listed
 publicly rather than staying org-private.
 
+### Microsoft identity chain, complete as of 2026-08-16. Do not re-derive this.
+
+| Thing | Value |
+|---|---|
+| Entra tenant | `relayshieldadmingmail.onmicrosoft.com` |
+| **Tenant ID** | **`4abf9bc4-9257-4c71-8b6b-a8afc934b4a5`** |
+| Work account (use this for everything Microsoft) | `andrew@relayshieldadmingmail.onmicrosoft.com` |
+| Role | Global Administrator, MFA enrolled |
+| Contact email on the Entra account | `andrew@relayshield.net` |
+| Partner Center seller account | **Created 2026-08-16**, bound to the tenant above |
+
+**Why the work account exists.** `relayshieldadmin@gmail.com` is a personal Microsoft account.
+Power Platform rejects it outright ("Selected user account does not exist in tenant"), and Security
+Store's technical configuration needs an Entra Tenant ID and Application ID that a personal account
+does not have. The Azure signup had already created a default directory; the work account is a user
+inside it. **MS-1b deletes the resource group, not the tenant, so this survives teardown.**
+
+**The contact email is load-bearing.** Microsoft: *"If the Email ID for the Entra account is
+missing, the certification request is auto-rejected."* The work account has no mailbox, so the
+contact address must stay pointed at `andrew@relayshield.net`.
+
+**Next: confirm company verification status**, which is separate from account creation. Account
+settings > Legal info shows whether RelayShield LLC has actually been verified or is still pending.
+Enrolment in Commercial Marketplace (MS-3) and Microsoft 365 and Copilot (MS-4 certification) both
+hang off a **verified** account, not merely a created one.
+
 **Azure account identity, recorded 2026-08-15 so it is not re-derived later:** the Azure free
 account was started on **`relayshieldadmin@gmail.com`**, registered as an **organization**
 (RelayShield LLC). That is a third identity alongside `nzdsf2@gmail.com` (GitHub, PyPI, Galaxy) and

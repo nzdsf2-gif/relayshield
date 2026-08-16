@@ -3045,3 +3045,31 @@ Sequenced after CDPX-1 below is confirmed resolved. Item 1 of the original 4-ite
 - [ ] Update `app.json`: add `ios.bundleIdentifier`, `android.package` already set to `net.relayshield.cryptoshield`
 - [ ] Add `privacy_policy_url` to `app.json` extra
 - [ ] Run `eas build --platform android --profile preview` for a test build before production
+
+---
+
+## 🟦 NEXT SESSION: MS-4 Power Automate certification — deferred 2026-08-16
+
+**Founder decision: MS-3 goes first because it is unblocked and this is not.** The Commercial
+Marketplace enrolment we already hold is what MS-3 needs; certification needs the **Microsoft 365
+and Copilot** program, which is a separate enrolment we do not have.
+
+The connector itself is **built and live** in the tenant with 12 metered actions. But a custom
+connector is visible only in our own tenant, so **certification is the flywheel, not the build**.
+
+Four prerequisites, none complete:
+
+1. **Enrol in Microsoft 365 and Copilot** in Partner Center. Separate from Commercial Marketplace.
+2. **Re-cut the icon** (MS-4a). The current one likely fails the under-70%-of-frame and
+   consistent-background rules.
+3. **120 successful test calls** (MS-4b), 10 per operation, needs a metered API key.
+4. **Rebuild the connector inside a solution.** Certification packages a *solution export*, not the
+   standalone connector we built. Then run Solution Checker.
+
+Package also needs `intro.md` and an **Azure blob SAS URI valid 15+ days**.
+
+Full requirement set, checked against what we actually have, in
+`powerplatform_connector/CERTIFICATION_PREP.md`.
+
+**Timeline once submitted:** 24 to 48 hours review, a **48-business-hour** preview test window, then
+10 to 14 days to deploy across regions. **Premium tier is permanent and cannot be changed later.**

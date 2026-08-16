@@ -4,7 +4,7 @@ RelayShield serves its IOC corpus over **STIX 2.1 / TAXII 2.1** and a **MISP-com
 Elastic Security ingests both through integrations it already ships, so this is a configuration task,
 not a development one.
 
-**What you get:** 4.6M+ indicators sourced from 83+ criminal Telegram marketplaces and 20
+**What you get:** 5.6M+ indicators sourced from 90 criminal Telegram marketplaces and 20
 authoritative feeds, flowing into Elastic's `logs-ti_*` indices where they enrich alerts and power
 Indicator Match detection rules.
 
@@ -13,11 +13,11 @@ Indicator Match detection rules.
 
 > Every field name, integration name and mapping below was verified against a live Elasticsearch
 > 8.15 stack ingesting the production RelayShield feed. If you followed an earlier version of this
-> guide, see the note at the end — the integration name and two of the rule mappings have changed.
+> guide, see the note at the end: the integration name and two of the rule mappings have changed.
 
 ---
 
-## Option A — STIX/TAXII via Custom Threat Intelligence (recommended)
+## Option A: STIX/TAXII via Custom Threat Intelligence (recommended)
 
 Use the **Custom Threat Intelligence** integration (package `ti_custom`), which has a built-in
 TAXII 2.1 mode. Elastic does not ship a generic "TAXII" integration; this is the one.
@@ -30,7 +30,7 @@ curl -s https://api.relayshield.net/v1/intel/taxii/ \
 ```
 
 A valid key returns the TAXII discovery document. `X-RS-API-KEY: YOUR_API_KEY` also works and is
-equivalent — use whichever your tooling prefers. Without a valid key you get `401`, which is a useful
+equivalent, so use whichever your tooling prefers. Without a valid key you get `401`, which is a useful
 way to confirm the endpoint is reachable before adding credentials.
 
 ### 2. Add the integration in Kibana
@@ -47,7 +47,7 @@ way to confirm the endpoint is reachable before adding credentials.
 | Interval | `1h` to start; tighten only if your use case needs it |
 | IOC Expiration Duration | leave default |
 
-The collection is part of the URL — there is no separate "Collection ID" field. The trailing slash is
+The collection is part of the URL: there is no separate "Collection ID" field. The trailing slash is
 optional.
 
 **On API Key Type:** the integration sends your key as `Authorization: <API Key Type> <API Key>`.
@@ -70,7 +70,7 @@ Indicators land with `threat.indicator.type` set to `ipv4-addr`, `domain-name`, 
 
 ---
 
-## Option B — MISP-compatible REST API
+## Option B: MISP-compatible REST API
 
 If you already run Elastic's **MISP** integration, RelayShield can be added as an additional source
 rather than replacing your existing one.
@@ -84,7 +84,7 @@ rather than replacing your existing one.
 | Interval | `1h` |
 
 The integration appends `/attributes/restSearch` to that base URL and sends your key in the
-`Authorization` header — both are handled. Confirm ingestion with:
+`Authorization` header, and both are handled. Confirm ingestion with:
 
 ```
 data_stream.dataset : "ti_misp.threat_attributes"
@@ -100,7 +100,7 @@ Elastic maps to the same `threat.indicator.type` values as Option A.
 ### Enrichment
 
 Once indicators are flowing, Elastic's built-in **Threat Intel enrichment** matches them against your
-existing logs automatically. No rule authoring needed — matches appear on the alert under
+existing logs automatically. No rule authoring needed: matches appear on the alert under
 `threat.enrichments`.
 
 ### Indicator Match rule
@@ -118,8 +118,8 @@ For explicit detection, create a rule under **Security → Rules → Create new 
 | | `file.hash.sha256` → `threat.indicator.file.hash.sha256` |
 
 **Note on domain and URL indicators.** Both land in `threat.indicator.url.original`. There is no
-`threat.indicator.url.domain` or `threat.indicator.url.full` field on these documents — mapping to
-either produces a rule that never matches and raises no error, so it looks configured while doing
+`threat.indicator.url.domain` or `threat.indicator.url.full` field on these documents, and mapping
+to either produces a rule that never matches and raises no error, so it looks configured while doing
 nothing. Values are stored as arrays, which Indicator Match handles natively but is worth knowing if
 you write your own queries.
 
@@ -141,8 +141,8 @@ not instead of, your existing feeds.
 | Symptom | Cause |
 |---|---|
 | `401 Unauthorized` | Key is missing, wrong, or lacks a TI subscription. The TI endpoints require an active TI plan, separate from PAYG API access. |
-| `404` on `/v1/taxii/...` | Wrong path — the prefix is `/v1/intel/taxii/`, not `/v1/taxii/`. |
-| No "TAXII" integration in Kibana | Correct — Elastic has no generic TAXII integration. Use **Custom Threat Intelligence** and switch on Enable TAXII 2.1. |
+| `404` on `/v1/taxii/...` | Wrong path. The prefix is `/v1/intel/taxii/`, not `/v1/taxii/`. |
+| No "TAXII" integration in Kibana | Correct. Elastic has no generic TAXII integration. Use **Custom Threat Intelligence** and switch on Enable TAXII 2.1. |
 | Integration added, no documents | Check the interval has elapsed, then confirm the URL includes the full collection path `/collections/iocs/objects/`. |
 | Documents arrive with only `threat.indicator.name` and no type | An expiry field was missing and Elastic's pipeline aborted. RelayShield now emits `valid_until`, so update to the current feed. |
 | Indicators arrive but the rule never matches | Almost always the domain/URL mapping. Both must point at `threat.indicator.url.original`. |
@@ -166,5 +166,5 @@ documented path returned 404.
 
 ## Support
 
-`support@relayshield.net` — include the integration type (Custom Threat Intelligence or MISP) and the
+`support@relayshield.net`. Include the integration type (Custom Threat Intelligence or MISP) and the
 Kibana or Elastic Agent error text if there is one.

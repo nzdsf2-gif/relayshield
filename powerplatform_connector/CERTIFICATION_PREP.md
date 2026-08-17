@@ -22,7 +22,7 @@ done once.
 | Response schemas | Exact, no empty schemas, no empty operations | ✅ |
 | Swagger validity | OpenAPI 2.0 | ✅ generated, 0 leftover 3.x constructs |
 | Production host URL | No staging or dev hosts | ✅ `api.relayshield.net` |
-| Icon | See below | ⚠️ **likely fails** |
+| Icon | See below | ✅ **re-cut 2026-08-16, all 11 rules pass** |
 | 10 successful calls per operation | 120 calls total | ❌ needs a metered key |
 | Solution Checker run | Required | ❌ not run |
 | `intro.md` | Required | ❌ not written |
@@ -43,22 +43,27 @@ public and outside our control.
 Now reads: *"...against breach records, infostealer logs and aggregated threat feeds"*. True, and it
 still describes something worth buying. Fixed in the generator, so it cannot drift back.
 
-### 2. The icon probably fails certification
+### 2. The icon: FIXED 2026-08-16
 
-Microsoft's rules for verified publishers:
+The first attempt was a straight downscale of `relayshield_discord_app_icon_1024.png`. It was 1:1
+and the right size, but the shield filled nearly the whole frame and sat on the source's **gradient**,
+failing both the under-70% rule and the consistent-background rule.
 
-- 1:1, between **100x100 and 230x230** px, no rounded edges
-- Non-transparent, **non-white**, and **not the default #007ee5** background
-- **Logo must occupy under 70% of the image height and width**
-- **Consistent background**, not a gradient
-- Unique against every other certified connector icon
+Re-cut and verified against all eleven rules:
 
-`relayshield_connector_icon.png` is 160x160 and 1:1, which passes. But the shield fills close to the
-full frame and sits on a **gradient**, so it likely fails both the 70% rule and the consistent
-background rule.
+| | |
+|---|---|
+| Frame | 192x192, 1:1, inside the 100 to 230 range |
+| Logo extent | **51% x 60%**, rule is under 70% |
+| Background | flat `#6c63ff`, uniform on all four corners, opaque, not white, not `#007ee5` |
+| Size | 11,582 bytes |
 
-**Fix:** re-cut the shield at about 60% of the frame on a flat `#6c63ff` field. That also makes the
-`iconBrandColor` meaningful instead of a thin surround. Needs doing before submission, not after.
+**How, because a luminance threshold alone was not enough.** Cutting on brightness kept a detached
+patch of the source gradient that happened to be bright, which showed as a rectangle beside the
+shield. A flood fill from the borders failed the other way and consumed the shield entirely, because
+the gradient blends into it with no hard edge. What worked was building the luminance mask and then
+keeping only the **largest connected component**: the shield is one contiguous mark, the artifact is
+a separate blob, and connectivity separates them where a threshold could not.
 
 ## The step that will actually take time
 

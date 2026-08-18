@@ -26,7 +26,8 @@ done once.
 | 10 successful calls per operation | **110 calls total (11 ops)** | ✅ **110/110 PASSED 2026-08-17** |
 | Solution Checker run | Required | ✅ **CLEAN 2026-08-18 11:19**, no issues. First run found 1 medium, fixed as MS-4c |
 | `intro.md` | Required | ✅ written, in the package |
-| Package zip + SAS URI | 15 day validity minimum | ❌ needs an Azure storage account |
+| Package zip | Built 2026-08-18, see below | ✅ |
+| SAS URI | 15 day validity minimum | ❌ needs an Azure storage account |
 | `ConnectorPackageValidator.ps1` | Required | ❌ needs PowerShell on macOS |
 
 ## CheckSimSwap REMOVED, 2026-08-17. Founder decision.
@@ -217,6 +218,33 @@ support, not a RelayShield one.
 **Decision: the sample flow ships without the connector call.** Trigger plus a Compose satisfies the
 two-solution package structure, which is all the package needs. Everything certification actually
 checks is done: 11 operations, a live 200 from the connector, and a clean Solution Checker run.
+
+## The submission package, built 2026-08-18
+
+```
+RelayShield_submission.zip
+├── Packages.zip
+│   └── PkgAssets/
+│       ├── RelayShieldConnector_1_0_0_2_managed.zip
+│       └── RelayShieldConnectorSample_1_0_0_3_managed.zip
+└── intro.md
+```
+
+Built in `~/Downloads`. Both solutions exported **Managed**, which is the setting most easily got
+wrong.
+
+**Three things that cost time and are worth knowing next release:**
+
+1. **Export is two steps.** "Export solution" packages asynchronously and *then* surfaces a separate
+   Download prompt, in a banner or under the bell icon. Navigating away between them saves nothing
+   and leaves the solution list looking completely normal. It happened twice.
+2. **`zip -j` for `intro.md`.** Without it the file lands under a `powerplatform_connector/` path
+   inside the archive and the submission is rejected for a missing `intro.md`.
+3. **Re-export after any change.** The first Sample export was taken before the flow was fixed, so it
+   contained the version that 401s. Exports are snapshots, not links.
+
+The sample flow is a trigger plus a Compose. It exists to satisfy the two-solution package structure;
+see MS-4d for why it does not call the connector.
 
 ## The step that will actually take time
 

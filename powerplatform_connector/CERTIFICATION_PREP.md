@@ -187,6 +187,37 @@ not downloaded before it was superseded, so the before/after pair exists only in
 in commit history, not as two report files. If a reviewer wants evidence of the finding and its fix,
 point at MS-4c above and at the commit that added `x-ms-connector-metadata`.
 
+## MS-4d: the sample flow 401s, and the request never reaches the API
+
+Found 2026-08-18. **Not a connector defect, and not blocking the package.**
+
+The connector itself is proven: the Test tab in the connector editor returned **HTTP 200 with live
+breach data**, and the same key returns 200 from `curl` against
+`https://api.relayshield.net/v1/metered/breach` with header `X-RS-API-KEY`.
+
+The sample flow calling the same operation fails in **0.3s** with `Unauthorized`. Three separate
+connections were created, including one pasted with `printf '%s' | pbcopy` to rule out a trailing
+newline. All three behaved identically.
+
+**The decisive evidence: the request never arrives.** `/aws/lambda/relayshield-api` logged **982
+events in the hour** covering those attempts and **zero 401s**. The log group was verified live
+before drawing the conclusion, because an empty filter result and a wrong log-group name look
+identical. So Power Platform's connector runtime is returning Unauthorized before the request ever
+leaves Microsoft. Nothing done to the key can change that.
+
+**Most likely cause, untested:** the flow is solution-aware and binds through a *connection
+reference* (`rsh_sharedrsh5frelayshield...`) rather than a plain connection. The reference survived
+deleting the underlying connections and may not be resolving to one with a populated `api_key`.
+
+**A clean way to confirm, if it matters later:** build the same two-step flow *outside* any solution
+(My flows, not Solutions). A non-solution flow uses a direct connection with no reference layer. If
+that succeeds, the connection reference is the culprit and it is a Power Platform question for their
+support, not a RelayShield one.
+
+**Decision: the sample flow ships without the connector call.** Trigger plus a Compose satisfies the
+two-solution package structure, which is all the package needs. Everything certification actually
+checks is done: 11 operations, a live 200 from the connector, and a clean Solution Checker run.
+
 ## The step that will actually take time
 
 > *"You tested your custom connector to ensure the operations work as expected (**at least 10

@@ -27,7 +27,7 @@ done once.
 | Solution Checker run | Required | ✅ **CLEAN 2026-08-18 11:19**, no issues. First run found 1 medium, fixed as MS-4c |
 | `intro.md` | Required | ✅ written, in the package |
 | Package zip | Built 2026-08-18, see below | ✅ |
-| SAS URI | 15 day validity minimum | ❌ needs an Azure storage account |
+| SAS URI | 15 day validity minimum | ✅ **live and verified 2026-08-18, expires 2026-09-18** |
 | `ConnectorPackageValidator.ps1` | Required | ❌ needs PowerShell on macOS |
 
 ## CheckSimSwap REMOVED, 2026-08-17. Founder decision.
@@ -298,6 +298,33 @@ Azure subscription, which remains the trap worth remembering.
 A storage account created under `Nzdsf2@gmail.com` is fine even though Power Platform lives in the
 other tenant. A SAS URL is an ordinary HTTPS link and Partner Center does not care which tenant
 produced it.
+
+## The SAS URI. Live 2026-08-18.
+
+| | |
+|---|---|
+| Subscription | `Azure subscription 1`, **Pay-As-You-Go** under `Nzdsf2@gmail.com` |
+| Tenant | `f8cdef31-a31e-4b4a-93e4-5f571e91255a` |
+| Resource group | `relayshield-marketplace` |
+| Storage account | `relayshieldmp`, East US, Standard, LRS, Hot |
+| Container | `submissions`, **Private** |
+| Blob | `RelayShield_submission.zip` |
+| SAS | Read only, HTTPS only, no IP restriction, **expires 2026-09-18** |
+
+**Verified by fetching it**, not by assuming: `curl` against the SAS URL returned the archive and
+`unzip -l` listed exactly `Packages.zip` and `intro.md`. That is the same fetch a reviewer performs.
+
+**The SAS URL is a credential and is not recorded here.** Regenerate from the blob's Generate SAS
+panel if it is lost or expires; it takes thirty seconds. Leave **Allowed IP addresses blank**, or
+Microsoft's reviewers cannot reach it.
+
+**If Partner Center verification clears after 18 September, regenerate before submitting.**
+
+**Cost and teardown.** A 29KB blob in LRS hot storage rounds to zero. Do **not** delete the storage
+account when the package is submitted: the reviewer fetches from this URL during review, preview
+testing and go-live, which is 3 to 4 weeks. Delete it once the connector is live in the catalogue,
+and leave the subscription in place. An empty Pay-As-You-Go subscription bills nothing and saves
+re-doing all of this for the next connector update.
 
 ## The step that will actually take time
 

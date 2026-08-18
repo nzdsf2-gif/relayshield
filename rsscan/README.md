@@ -2,11 +2,13 @@
 
 Block commits and builds that introduce API keys, tokens and other machine credentials.
 
-Detects 33 credential patterns: AWS IAM keys, GitHub PATs, Stripe secrets, Slack tokens and incoming webhook URLs, private keys, RelayShield API keys, and LLM provider keys (OpenAI, Anthropic, Google, Groq, xAI, Replicate).
+Detects 34 credential patterns: AWS IAM keys, GitHub PATs, Stripe secrets, Slack tokens, Slack and Zapier webhook URLs, private keys, RelayShield API keys, and LLM provider keys (OpenAI, Anthropic, Google, Groq, xAI, Replicate).
 
 **Free, and it runs entirely on your machine.** No account, no API key, no network call. Your source code never leaves the host. Matching happens locally against patterns shipped inside the package.
 
 **The pre-commit hook is the point.** It runs *before* the commit enters git history. A CI check only sees the secret after a push, and by then it is in history and has to be rotated even if you delete the commit. The CI integrations below are a backstop, not a substitute.
+
+**New in 0.2.1:** detection for RelayShield API keys and for Slack and Zapier webhook URLs.
 
 **New in 0.2.0:** `rsscan --deps` counts the accounts that can publish into your npm dependencies. See [Counting who can publish your dependencies](#counting-who-can-publish-your-dependencies).
 
@@ -18,7 +20,7 @@ Detects 33 credential patterns: AWS IAM keys, GitHub PATs, Stripe secrets, Slack
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/RelayShield/rsscan
-    rev: v0.2.0
+    rev: v0.2.1
     hooks:
       - id: rsscan
 ```
@@ -35,7 +37,7 @@ That is the whole setup. Nothing to configure, nothing to sign up for.
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0        # required: the range needs history
-- uses: RelayShield/rsscan@v0.2.0
+- uses: RelayShield/rsscan@v0.2.1
   with:
     fail-on: HIGH
 ```
@@ -55,7 +57,7 @@ and the fingerprint you would add to `.relayshield-allowlist` to suppress a fals
 
 ```yaml
 rsscan:
-  image: relayshield/rsscan:0.2.0
+  image: relayshield/rsscan:0.2.1
   variables:
     GIT_DEPTH: 0        # required: GitLab shallow-clones, and a shallow clone
                         # yields an empty diff, so the job would pass having
@@ -81,7 +83,7 @@ workflows:
 ```bash
 docker run --rm -v "$PWD:/workspace" \
   -e RSSCAN_REV_RANGE=origin/main...HEAD \
-  relayshield/rsscan:0.2.0
+  relayshield/rsscan:0.2.1
 ```
 
 Bitbucket Pipelines:
@@ -89,7 +91,7 @@ Bitbucket Pipelines:
 ```yaml
 - step:
     script:
-      - pipe: docker://relayshield/rsscan:0.2.0
+      - pipe: docker://relayshield/rsscan:0.2.1
         variables:
           RSSCAN_REV_RANGE: "origin/main...HEAD"
 ```
@@ -187,7 +189,7 @@ The generic webhook posts:
 
 ```json
 {
-  "tool": "rsscan", "version": "0.2.0", "scanned": "origin/main...HEAD",
+  "tool": "rsscan", "version": "0.2.1", "scanned": "origin/main...HEAD",
   "repo": "acme/api", "ref": "feature/pay", "build_url": "https://github.com/...",
   "findings_count": 2, "blocking_count": 2, "highest_severity": "CRITICAL",
   "severity_counts": {"CRITICAL": 2},

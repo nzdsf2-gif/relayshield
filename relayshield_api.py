@@ -6920,6 +6920,11 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     # never matched it. GitHub push protection caught one we shipped; we did not.
     ("slack_webhook",    r"https://hooks\.slack\.com/services/T[A-Za-z0-9_]+/B[A-Za-z0-9_]+/[A-Za-z0-9_]{16,}",
                                                                      "HIGH",     "Slack Incoming Webhook URL", None),
+    # Same shape, same reasoning: a Zapier catch hook fires the Zap for anyone
+    # holding the URL. Found 2026-08-18 on an internal key record while auditing
+    # the rs_live_ exposure.
+    ("zapier_webhook",   r"https://hooks\.zapier\.com/hooks/(?:catch|standard)/[0-9]+/[a-zA-Z0-9]{16,}",
+                                                                     "HIGH",     "Zapier Webhook URL", None),
     # LLM/AI provider keys — bumped to CRITICAL 2026-07-26 (LLMjacking):
     # a leaked key here isn't just data exposure, it's a live, uncapped
     # billing liability — real incidents range from $46K/day (Sysdig, AWS
@@ -7356,6 +7361,7 @@ _GITHUB_SEARCH_LITERALS: dict[str, tuple[str, ...]] = {
     "slack_bot":             ("xoxb-",),
     "slack_user":            ("xoxp-",),
     "slack_webhook":         ("hooks.slack.com/services",),
+    "zapier_webhook":        ("hooks.zapier.com/hooks",),
     "google_api":            ("AIza",),
     # Every modern OpenAI key embeds T3BlbkFJ -- base64("OpenAI") -- which is a
     # far more selective literal than the shared sk- prefix.

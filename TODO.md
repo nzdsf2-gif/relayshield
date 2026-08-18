@@ -1,5 +1,71 @@
 # RelayShield — Open Items
 
+## 🔵 MS-4 CARRY-FORWARD, added 2026-08-18. Read before touching Azure or submitting.
+
+**Do NOT delete the storage account after submitting.** The reviewer fetches the package from the
+SAS URL through review, preview testing and go-live, which is **3 to 4 weeks**. Deleting it after
+submission kills the submission.
+
+Delete the storage account only **once the connector is live in the catalogue**, and **leave the
+empty subscription in place**. An empty Pay-As-You-Go subscription bills nothing, and keeping it
+saves repeating the whole Azure setup for the next connector update.
+
+**If Partner Center verification clears after 18 September 2026, regenerate the SAS first.** Thirty
+seconds from the blob's Generate SAS panel. **Allowed IP addresses must stay blank**, or Microsoft's
+reviewers cannot reach it.
+
+Full detail, including the storage account and tenant, is in
+`powerplatform_connector/CERTIFICATION_PREP.md`.
+
+### MS-4e: the 110 certification calls need a key that can pay for them
+
+The key used for the connector test is `plan: free`, `source: direct` — the no-card signup tier,
+counted in **calls, not credits**, with a 20-call allowance. It cannot survive 110 calls, and a run
+that dies partway leaves some operations at 10 successful calls and others at zero, which is exactly
+the uneven spread that fails certification.
+
+**Measured cost of the run**, from `METERED_CREDIT_COSTS` (credits are cents):
+
+| Endpoint | Credits/call | x10 |
+|---|---|---|
+| breach | 10 | 100 |
+| infostealer | 50 | 500 |
+| domain | 30 | 300 |
+| ip-intel | 10 | 100 |
+| supply-chain | 10 | 100 |
+| ransomware-risk | 40 | 400 |
+| identity-risk-score | 35 | 350 |
+| secret-scan-text | 5 | 50 |
+| session-risk | 30 | 300 |
+| nhi-exposure | 40 | 400 |
+| oauth-watchlist | 30 | 300 |
+| **Total** | | **2,900 credits, about $29** |
+
+**Preferred fix: a dedicated prepaid key.** Mint one, name it so the spend is attributable, and set
+`credit_balance` to 3,770 (2,900 plus 30% headroom for retries). Credits are the intended prepaid
+path and need no Stripe subscription:
+
+```
+AWS_PROFILE=relayshield aws dynamodb update-item --no-cli-pager \
+  --table-name relayshield_api_keys \
+  --key '{"api_key":{"S":"<the new key>"}}' \
+  --update-expression "SET credit_balance = :c, #n = :n" \
+  --expression-attribute-names '{"#n":"name"}' \
+  --expression-attribute-values '{":c":{"N":"3770"},":n":{"S":"MS-4 certification calls"}}' \
+  --return-values ALL_NEW
+```
+
+**Do NOT set `intel_plan_tier` by hand.** `relayshield_api.py` documents it as set exclusively by
+`relayshield_aws_marketplace.py::_provision_api_key`. Setting it manually would fake an AWS
+Marketplace entitlement and break that invariant.
+
+**Do NOT reuse a `demo_portal` key.** Those are uncapped and server-side only, which is how the
+public-commit exposure was as bad as it was.
+
+Revoke the key when the run is done, the same way as any other: set `active` to false.
+
+---
+
 ## 🟦 TELEGRAM DISCOVERY + MINI-APP — added 2026-08-17, founder-approved
 
 Supersedes the loose MOAT-8 note. **The existing bot is the asset, not a blocker**: every surface

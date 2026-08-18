@@ -74,6 +74,10 @@ coverage/
 # Without this the package cannot be assembled from a clone, which is how the
 # 2026-08-16 re-cut was lost.
 !powerplatform_connector/*.png
+# The exported managed solutions are the submission artifact itself, not build
+# output. Downloads is transient and the export flow is easy to get wrong, so
+# the verified pair lives in the repo.
+!powerplatform_connector/submission/*.zip
 .telethon_venv
 zapier_partner_test_key.txt
 

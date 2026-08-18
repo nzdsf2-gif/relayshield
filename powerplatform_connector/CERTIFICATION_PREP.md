@@ -230,8 +230,25 @@ RelayShield_submission.zip
 └── intro.md
 ```
 
-Built in `~/Downloads`. Both solutions exported **Managed**, which is the setting most easily got
-wrong.
+**The two managed solutions are committed at `powerplatform_connector/submission/`:**
+
+| File | Verified |
+|---|---|
+| `RelayShieldConnector_1_0_0_2_managed.zip` | `<Managed>1</Managed>`, publisher `relayshield`, **11 operations**, `x-ms-connector-metadata` present, no sim-swap, no phone claim in the description |
+| `RelayShieldConnectorSample_1_0_0_3_managed.zip` | `<Managed>1</Managed>`, publisher `relayshield`, trigger plus Compose |
+
+`~/Downloads` is transient and the export flow is easy to get wrong, so the verified pair is in the
+repo. Rebuild `RelayShield_submission.zip` from these rather than re-exporting, unless the connector
+itself has changed.
+
+```bash
+cd powerplatform_connector/submission
+rm -rf PkgAssets Packages.zip RelayShield_submission.zip
+mkdir PkgAssets && cp *_managed.zip PkgAssets/
+zip -r Packages.zip PkgAssets
+zip -j RelayShield_submission.zip Packages.zip ../intro.md
+unzip -l RelayShield_submission.zip
+```
 
 **Three things that cost time and are worth knowing next release:**
 

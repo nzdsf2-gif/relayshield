@@ -111,8 +111,9 @@ const RELEASE_NOTES = `
     <div class="product-label api">🔬 Threat Intelligence API &mdash; For Security Teams &amp; Developers</div>
 
     <section>
-      <h3>📊 IOC Corpus &mdash; Now 3.2M+ Indicators</h3>
-      <p>Our threat intelligence database has grown to <strong>3.2M+ indicators</strong> drawn from 17 authoritative external sources updated daily, layered with continuous, verified monitoring across 122 active criminal Telegram channels. We track <strong>4,500+ malware families</strong> including LummaC2, RedLine, Vidar, Emotet, and QakBot. Every indicator carries threat actor attribution, confidence scoring, MITRE ATT&amp;CK technique mapping, and 365-day retention.</p>
+      <h3>📊 IOC Corpus &mdash; 494K+ Distinct Indicators, 5.8M+ Sightings</h3>
+      <p>Our threat intelligence database holds <strong>494K+ distinct indicators</strong> drawn from <strong>5.8M+ sightings</strong>, sourced from 20 authoritative external feeds updated daily and layered with continuous, verified monitoring across <strong>95 monitored channels</strong>. We track <strong>3,800+ malware families</strong> including LummaC2, RedLine, Vidar, Emotet, and QakBot. Every indicator carries threat actor attribution, confidence scoring, MITRE ATT&amp;CK technique mapping, and 365-day retention.</p>
+      <p style="opacity:.75;font-size:.9em">Counts corrected 2026-08-17. Earlier notes said &ldquo;3.2M+ indicators&rdquo;; that figure was a <em>sighting</em> count. An indicator is one unique instance, a sighting is one observation of it, and the corpus averages about 11.7 sightings per indicator. Both figures are now reported separately everywhere.</p>
     </section>
 
     <section>

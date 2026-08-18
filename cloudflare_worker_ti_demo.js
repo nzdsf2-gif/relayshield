@@ -86,8 +86,28 @@ function renderIdentityRisk(data) {
       <span class="dim-val">${v}</span>
     </div>`).join("");
 
+  // Say what is being scored, directly above the number.
+  //
+  // Without this, a big red "F / 75 / CRITICAL" next to a domain name reads as
+  // "this domain is dangerous". It means the opposite kind of thing: this
+  // organisation's own people have credentials in breaches and stealer logs.
+  // adobe.com scores 75 because of the 2013 breach, while our Discord /scan
+  // correctly reports the same domain as carrying no known flags, because it is
+  // not a malicious link. Both are right, and a prospect seeing the two side by
+  // side without this caption will reasonably think one of them is broken.
+  const scoredDomain = data.domain ? `<b>${data.domain}</b>` : "this organisation";
+  const caption = `
+      <p style="margin:0 0 14px;font-size:13px;line-height:1.5;color:#94a3b8">
+        <b style="color:#e2e8f0">Workforce identity exposure for ${scoredDomain}.</b>
+        This scores credentials belonging to this organisation that appear in breach corpora,
+        infostealer logs and session data. It is <b style="color:#e2e8f0">not</b> a verdict on
+        whether the domain is malicious or unsafe to visit, and a high score is common for large,
+        long-established companies with a historic breach.
+      </p>`;
+
   return `
     <div class="result-card">
+      ${caption}
       <div class="score-hero">
         <div class="grade-circle" style="border-color:${grade_color(g)};color:${grade_color(g)}">${g}</div>
         <div class="score-detail">
@@ -616,16 +636,17 @@ footer a{color:#00B5A5;text-decoration:none}
 <div class="container">
   <div class="hero">
     <h1>Live Threat Intelligence</h1>
-    <p>Query 5,400,000+ indicators, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
+    <p>Query 494,000+ distinct indicators drawn from 5,800,000+ sightings, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
   </div>
 
   <div class="corpus-stats">
     <!-- Metrics verified live against DynamoDB 2026-08-12:
          intel_iocs 5,483,159 · malpedia_families 3,802 · intel_channels active=true 89 ·
          mitre_attack sk=info 193. Re-verify before quoting these anywhere. -->
-    <div class="stat-card"><div class="stat-num">5.4M+</div><div class="stat-label">IOC indicators</div></div>
+    <div class="stat-card"><div class="stat-num">494K+</div><div class="stat-label">Distinct indicators</div></div>
+    <div class="stat-card"><div class="stat-num">5.8M+</div><div class="stat-label">Sightings</div></div>
     <div class="stat-card"><div class="stat-num">3,800+</div><div class="stat-label">Malware families</div></div>
-    <div class="stat-card"><div class="stat-num">89</div><div class="stat-label">Active criminal Telegram channels</div></div>
+    <div class="stat-card"><div class="stat-num">95</div><div class="stat-label">Monitored channels</div></div>
     <div class="stat-card"><div class="stat-num">193</div><div class="stat-label">MITRE ATT&CK groups</div></div>
   </div>
 

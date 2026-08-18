@@ -1,5 +1,170 @@
 # RelayShield — Open Items
 
+## 🟦 TELEGRAM DISCOVERY + MINI-APP — added 2026-08-17, founder-approved
+
+Supersedes the loose MOAT-8 note. **The existing bot is the asset, not a blocker**: every surface
+below can point at `relayshield_telegram_bot` today, and a mini-app is an addition to it rather than
+a replacement. Inline mode failed because it needed distribution INTO channels; everything here is
+carried by the user or by a directory instead.
+
+### TG-DISC-1: list in Telegram App Center (`t.me/apps`)
+
+Telegram's own mini-app directory, the closest thing to an app store, and **we are not in it**. Free.
+Requires a mini-app to exist, so it gates on TG-APP-1. **This is the single highest-value listing.**
+
+### TG-DISC-2: list in the TON ecosystem catalogs
+
+`ton.app` and tApps Center list mini-apps for free. Lower traffic than App Center, near-zero effort,
+and the audience is wallet-native by definition, which is exactly our corpus shape.
+
+### TG-DISC-3: shareable result deep links (`startapp`)
+
+`t.me/<bot>/<app>?startapp=<address>` opens the app with a scan already loaded. **The viral unit is
+a RESULT, not the app.** The recipient needs nothing installed. This is the mechanic that inverts
+inline mode's failure: the link travels with the user instead of requiring us to be in the channel.
+**Build this into the first version, not as a later feature** -- it is the distribution.
+
+### TG-DISC-4: attachment-menu placement
+
+Puts the app behind the paperclip in **every** chat. Requires Telegram approval, so start it early
+and treat it as a long pole. This is the real successor to what inline mode was reaching for.
+
+### TG-DISC-5: Telegram Wallet partnership
+
+Telegram's own Wallet mini-app has enormous reach. A pre-send counterparty check is a natural fit
+rather than a bolt-on. Partnership motion, not a listing. Slowest of the five, highest ceiling.
+
+### TG-APP-1: what the mini-app actually does
+
+Wallet counterparty screening is the anchor, but the corpus and existing endpoints already support
+more, and a single-purpose app has a much weaker reason to be reopened:
+
+- **Address / counterparty screening** (anchor). 4,460 criminal-channel wallets + `address_first_seen`.
+- **Token contract risk.** GoPlus token_security. **Note the shape trap**: `address_security` returns
+  a FLAT result while token endpoints are address-keyed. See the GoPlus memory before wiring.
+- **NFT contract risk.** Already implemented in CS Mobile; port rather than rebuild.
+- **Airdrop / drainer site check.** `scan_url` against 7,927 channel-sourced URLs, which is 59.3% of
+  the corpus and the single best-covered check we have.
+- **Your own exposure.** breach + infostealer + SIM swap for the user's email/phone.
+
+**Recommended v1 scope: address + URL only.** Those two are the best-covered by the corpus and cover
+the two things people actually paste into group chats.
+
+### TG-PAY-1: the free-to-paid path. **DECIDE THIS BEFORE BUILDING.**
+
+Five candidates, best first:
+
+1. **Group tier (B2B2C). Strongest.** A group admin pays for the bot to auto-scan every address and
+   link posted in their group. The discovery surface (members sharing results) and the paying
+   customer (the admin who wants it always-on) are different people, which is what makes it scale.
+   **It is also the same motion as the Discord bot**, so the pitch, the pricing and the admin
+   conversation are shared rather than duplicated.
+2. **Watch, not lookup.** Free: check an address you paste. Paid: continuous monitoring of your own
+   addresses with an alert when the answer changes. The recurring value is the watch; a one-off
+   lookup is a commodity. This mirrors the API's existing watch endpoints.
+3. **Telegram Stars for micro-payments.** Native in-app payment, no card entry, no Stripe redirect.
+   Removes the checkout friction that kills a $1 purchase. **Also note Stripe MPP is parked because
+   crypto is ineligible**, so Stars may be the only frictionless option here.
+4. **API upsell.** A developer who hits the mini-app is one step from a key; deep-link to the
+   developers page with a `?source=` key registered in advance.
+5. **Free tier with a daily cap.** Weakest on its own, fine as a limiter on top of 1 or 2.
+
+**Do not ship the lookup until one of these is chosen.** An unmetered free tool with no path is the
+CS Mobile free-scan problem again.
+
+
+## 🟦 MOAT PROGRAMME — added 2026-08-17, founder-approved
+
+Ranked by defensibility against time to value. Full reasoning in
+`Moat_Widening_From_95_Channels.md`. **Read `memory/project_corpus_composition_and_provenance.md`
+first**: the corpus is 92.7% URLs and crypto wallets, so anything depending on company domains
+(594, mostly news sites) or emails (11) is dead on arrival.
+
+### MOAT-1: wallet attestation. Absence, aimed at the right noun. **DO THIS FIRST**
+
+"Absence is the signal" was right and was pointed at the wrong object. It fails for company domains
+and works for crypto addresses, where the denominator is **4,460 addresses observed across 95
+monitored channels**. Both directions sell: first-observed date and channel count, or a clean
+attestation.
+
+**`relayshield_address_first_seen` holds 7 rows and NOTHING READS IT.** Shipped, recording, unused.
+Verify why it is only 7 before building on it, then expose it as an endpoint.
+
+### MOAT-2: scam URL freshness and lifetime decay
+
+7,927 URLs, 59.3% of the corpus, the largest slice and the least exploited. Nobody else has the
+moment a scam URL was advertised in a criminal channel. Add a periodic liveness check and two
+products appear: a blocklist with provenance, and a median-scam-URL-lifetime statistic that doubles
+as proof of access. Needs a liveness checker, 1 to 2 weeks.
+
+### MOAT-3: actor and alias graph across channels
+
+`relayshield_intel_messages` went live 2026-08-17 with no TTL, which makes this possible for the
+first time. Same seller handle across N channels, what they offer, when they go quiet, which
+channels co-occur. **The only genuinely non-reconstructable asset we have.** Needs nothing but
+retention and time; the clock started today.
+
+### MOAT-4: PhaaS kit to targeted brand mapping
+
+15 phaas channels. Kits name the brands they impersonate. **This is the honest recovery of the
+victim-side thesis**: the victim is a consumer brand, and brand names are extractable from kit copy
+in a way company domains are not. See INTEL-OTP-1 below, which is the same data source.
+
+### MOAT-5: CVE discussion heat
+
+83 CVEs, accumulating since 2026-07-24. Measures attacker attention rather than theoretical
+severity, so it differs from CVSS and EPSS. Small, cheap, genuinely ours. Needs a scoring endpoint.
+
+### MOAT-6: phone numbers into SIM swap
+
+122 phone numbers from criminal channels feed the SIM swap product. **Blocked on that product**,
+which has never worked end to end. Listed for completeness, not priority.
+
+### MOAT-7: stolen cards. **`relayshield_stolen_cards` HOLDS 0 ROWS**
+
+`_parse_card_data` exists and is wired at `relayshield_intel_monitor.py:1790`, inside the stealer
+archive path. `archives_parsed` has been 0 on every run because no archive has arrived, so this has
+never had input. **Same built-and-collecting-nothing shape as CORPUS-5 and PREVIEW-1.** Verify the
+path independently of archives rather than assuming it works when one arrives. Hashed only, no PAN
+is logged or stored, and that must stay true.
+
+### MOAT-8: the conversion surface is a Telegram mini-app, NOT a web page
+
+**Founder redirect 2026-08-17, and it is the right call.** A standalone lookup page decays fast and
+carries no distribution. A mini-app on the existing bot does not, for a specific reason: **inline
+mode is already enabled**, so a wallet lookup can be invoked inside any third-party group chat.
+Pasting an address into a group to ask "is this a scam" is already the native behaviour in crypto
+chats, so the product sits exactly where the question is asked.
+
+**Flywheel, needs design:** mini-app lookup (free, no account) to bot install to `/exposure` and
+wallet watch to API key. The open question is the step from a free inline lookup to a paying
+surface, whether that is the API listing, the Telegram bot's paid tiers, or the Solana dApp.
+**Do not build the lookup until that step is decided**, or we repeat the free-tier-with-no-path
+problem. Note `relayshield_telegram_bot` has 5 active users, so this is a growth bet, not an
+expansion of an existing base.
+
+### INTEL-OTP-1: add Telegram OTP bot vouches channels to the corpus
+
+Source: Gary Warner (DarkTower), 2026-08-17. **This is a channel category we do not monitor.**
+
+OTP bots automate harvesting one-time passwords to take over accounts or authorise transfers. The
+"Dinosaur OTP" bot has been active about 8 months and used for roughly **21,000 OTP calls**. Top
+targeted brands reported: **AfterPay, Yahoo, AT&T, Microsoft, Cash App**.
+
+**Why this matters more than one bot:** Warner's point is that Telegram-advertised OTP bots keep a
+**"Vouches" channel**, and vouches are structured, dated, brand-tagged records of completed
+transactions. That is the marketplace-listing data we have been trying to extract from free text,
+already in a semi-structured form, and it maps directly onto MOAT-4.
+
+**Actions:**
+1. Find and verify the Dinosaur OTP channel and its vouches channel. **Do not invent handles**; run
+   them through the existing channel classifier before adding.
+2. Add a `vouches` category to the channel taxonomy, and include it in `FAST_TIER_CATEGORIES`.
+3. Extend the listing extractor to parse vouch records (brand, date, outcome), which is a different
+   shape from a sale post and will not match `_RE_SALE_INTENT`.
+4. Attribute the intel to Gary Warner / DarkTower in anything published from it.
+
+
 ## 🟦 MICROSOFT SURFACES — added 2026-08-15, founder-approved
 
 **The shape differs per surface and this is the thing to get right.** Researched 2026-08-15.
@@ -645,7 +810,7 @@ Ranked by how self-serve they are, which is the property that has decided every 
 
 | ID | Item | Gate | Status |
 |---|---|---|---|
-| **IBMRH-1** | **Ansible Galaxy collection `relayshield.security`.** Fully self-serve: log in to Galaxy with GitHub, namespace is created automatically, `ansible-galaxy collection publish`. **No gatekeeper, no review queue, no partner program.** Same flywheel shape as LangChain and n8n. **Namespace `relayshield` was confirmed FREE on 2026-08-15** via the Galaxy v3 API (0 namespaces, 0 collections match). | None | 🔄 **Built 2026-08-15** in `ansible-relayshield/`. Builds, installs and `ansible-doc` renders for all 3 modules. **Not published** — needs founder Galaxy login + namespace claim + API token |
+| **IBMRH-1** | **Ansible Galaxy collection `relayshield.security`.** Fully self-serve: log in to Galaxy with GitHub, namespace is created automatically, `ansible-galaxy collection publish`. **No gatekeeper, no review queue, no partner program.** Same flywheel shape as LangChain and n8n. **Namespace `relayshield` was confirmed FREE on 2026-08-15** via the Galaxy v3 API (0 namespaces, 0 collections match). | None | ✅ **PUBLISHED 2026-08-17.** `relayshield.security` v0.1.0 live on Galaxy, import task completed, and verified by a clean `ansible-galaxy collection install` into an empty dir (all 3 modules land). Namespace granted by Sandra McCann, Ansible Community Team. Attribution keys `galaxy` / `ansible` / `ansible-galaxy` / `galaxy-collection` registered and live, plus referer matching on galaxy.ansible.com (the primary path, since galaxy.yml carries no query string). Landing-page card added. **Next: cut a 1.0** once the modules are exercised; v0.1.0 reads as pre-production to infra buyers. |
 | **IBMRH-2** | **IBM QRadar Threat Intelligence config guide.** The QRadar TI app added **STIX/TAXII 2.1** support, which is exactly the protocol our feed already serves and that four conformance defects were fixed to make correct (see [[project-taxii-conformance-verified]]). So this is a **configuration guide, not an engineering project** — the same pattern as Elastic, Sentinel and OpenCTI, reusing work already paid for. Guide doubles as a blog post. | None to write the guide; a real QRadar instance to verify it | ⬜ Not started |
 | **IBMRH-3** | **Red Hat Ecosystem Catalog / IBM certified partner listing.** Gated behind a partner program application, same shape as the SentinelOne Partner Portal. Worth applying because the application itself is cheap; **not worth blocking anything on**. | Partner program application | ⬜ Not started |
 

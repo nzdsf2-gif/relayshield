@@ -21,7 +21,12 @@ export function StreakCard({ streak, shieldScore, referralCode }: Props) {
 
   async function shareReferral() {
     await Share.share({
-      message: `I use CryptoShield by RelayShield to protect my wallets. Join me — use my referral code ${referralCode} at relayshield.net/app for a free month. t.me/RelayShield`,
+      // Fixed 2026-08-10. This shipped pointing at relayshield.net/app, which
+      // returns a 404: the apex is a Carrd site and serves no sub-paths, the
+      // same trap that broke the privacy policy URL. Every referral anyone
+      // shared sent them to a dead page. Now points at the live landing site,
+      // and at the bot rather than the 4-subscriber broadcast channel.
+      message: `I use CryptoShield by RelayShield to protect my wallets. Join me, use my referral code ${referralCode} at cryptoshieldmobile.relayshield.net for a free month. Free scam checks on Telegram: t.me/relayshield_bot`,
       title: "CryptoShield — Wallet Security",
     });
   }

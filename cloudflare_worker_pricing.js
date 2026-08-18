@@ -199,8 +199,8 @@ function html() {
 <footer>
   <p>Questions? <a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
   <p style="margin-top:8px;">
-    <a href="https://relayshield.net/terms">Terms</a> &nbsp;·&nbsp;
-    <a href="https://relayshield.net/privacy">Privacy</a> &nbsp;·&nbsp;
+    <a href="https://terms.relayshield.net">Terms</a> &nbsp;·&nbsp;
+    <a href="https://privacy.relayshield.net">Privacy</a> &nbsp;·&nbsp;
     <a href="https://api.relayshield.net/developers">Developer API</a>
   </p>
   <p style="margin-top:12px; color:#1e3a5f;">© 2026 RelayShield</p>

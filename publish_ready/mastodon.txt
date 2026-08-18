@@ -1,0 +1,16 @@
+A completely ordinary npm install: Next.js, React, TypeScript, ESLint, Jest, axios, Tailwind, Prettier, dotenv.
+
+433 packages.
+275 distinct accounts that can publish into them.
+126 of those on consumer webmail. 118 are Gmail.
+
+Nobody in that sentence is doing anything wrong. It is just how open source gets published, and it is invisible to every tool that reads the artifact instead of asking who can replace it.
+
+We released the counting tool free and MIT. Runs locally, sends nothing:
+
+pip install rsscan && rsscan --deps
+
+Method and all six measurements:
+https://blog.relayshield.net/rsscan-deps-who-can-publish-into-your-dependencies
+
+#infosec #npm #supplychain #opensource

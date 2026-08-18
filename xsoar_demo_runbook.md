@@ -38,6 +38,47 @@ and will tell you the fastest route to get a PR's pack onto a tenant. Do not bur
 https://api.relayshield.net
 ```
 
+### 0.3b DEMO INPUTS, verified live against the API 2026-08-12
+
+**Use these exact values.** Every one was checked against production on the day and returns a real,
+non-empty result. The most common way a recorded demo goes wrong is a command returning "nothing
+found" on camera, which looks like a broken integration rather than a clean verdict.
+
+| Command | Input | What it returns |
+|---|---|---|
+| `domain` | `paypal.com` | **23 lookalikes** out of 30 candidates checked |
+| `ip` | `185.220.101.1` | **found: true**, 5 malicious votes, source `relayshield_ioc_corpus` |
+| `email` | `john@gmail.com` | **448 breaches** |
+
+**One thing to know before you record.** The `email` command combines `/v1/metered/breach` and
+`/v1/metered/session-risk`. On `john@gmail.com` the breach half returns 448 hits and the
+**session-risk half returns zero**. That is a genuine clean result on that half, not a fault, but on
+camera it can read as a missing feature.
+
+Two ways to handle it, pick one before recording:
+
+1. **Say it out loud.** "Breach exposure comes back with 448 records; active session exposure comes
+   back clean, and we report those separately rather than collapsing them into one score." That is
+   the honest framing and it demonstrates the freshness contract, which is a selling point.
+2. **Find an address with both.** Re-run the probe below against a few candidates until one returns
+   `session_count > 0`, then use that instead.
+
+```bash
+python3 -c "
+import json,urllib.request
+k='YOUR_KEY'
+for e in ['test@gmail.com','admin@gmail.com','info@gmail.com']:
+    r=urllib.request.Request('https://api.relayshield.net/v1/metered/session-risk',
+      data=json.dumps({'email':e}).encode(),
+      headers={'Content-Type':'application/json','X-RS-API-KEY':k},method='POST')
+    d=json.load(urllib.request.urlopen(r))['data']
+    print(e, d.get('session_count'), d.get('highest_severity'))
+"
+```
+
+**Re-verify these inputs on the day you record.** Threat data moves. A domain with 23 lookalikes
+today may have a different number next week, and the IOC corpus is updated continuously.
+
 Your real API key, and a deliberately broken one:
 
 ```

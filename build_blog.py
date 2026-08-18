@@ -128,6 +128,13 @@ def from_exports():
                     meta[k.strip()] = v.strip().strip('"').strip("'")
             body_md = fm.group(2)
 
+        # Everything after this marker is internal: pre-publication checklists,
+        # distribution plans, editorial notes. Added 2026-08-17 after the Privy
+        # post was about to ship with its own checklist appended to the article,
+        # including the line telling us not to name a partner. The marker was
+        # already in the file; nothing honoured it.
+        body_md = re.split(r"<!--\s*NOT FOR PUBLICATION.*?-->", body_md, maxsplit=1)[0]
+
         slug = meta.get("slug") or os.path.splitext(os.path.basename(path))[0]
         title = meta.get("title") or _first_heading(body_md) or slug.replace("-", " ").title()
         # Strip the leading H1 — the Worker renders the title itself, so leaving

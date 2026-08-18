@@ -4,7 +4,7 @@ RelayShield serves its IOC corpus over **STIX 2.1 / TAXII 2.1** and a **MISP-com
 Elastic Security ingests both through integrations it already ships, so this is a configuration task,
 not a development one.
 
-**What you get:** 5.6M+ indicators sourced from 90 criminal Telegram marketplaces and 20
+**What you get:** 494K+ distinct indicators (5.8M+ sightings) sourced from 95 monitored channels and 20
 authoritative feeds, flowing into Elastic's `logs-ti_*` indices where they enrich alerts and power
 Indicator Match detection rules.
 

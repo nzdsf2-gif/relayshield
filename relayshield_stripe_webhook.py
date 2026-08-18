@@ -364,7 +364,18 @@ def create_user_record(
         "onboarding_state": "AWAITING_EMAIL_1",
         "emails_added": 0,
         "password_manager_user": False,
-        "sim_swap_monitoring": True,
+        # CHANGED 2026-08-14. This used to be True, which enrolled a number for
+        # carrier SIM swap lookups off a Stripe checkout that captures NO
+        # consent: there is no consent_collection and no terms_of_service
+        # acceptance configured anywhere in the checkout. A phone field on a
+        # payment form is not authorization to query that number with a carrier,
+        # and the required clause reads "YOU authorize your wireless carrier".
+        #
+        # The number is still stored, so nothing is lost. Consent is captured in
+        # onboarding, which then calls relayshield_sim_swap_consent.enroll() and
+        # flips this on. That module is the ONLY thing allowed to set it.
+        "sim_swap_monitoring": False,
+        "consent_state": "PENDING",
         "active": True,
         "created_at": now,
         "updated_at": now,

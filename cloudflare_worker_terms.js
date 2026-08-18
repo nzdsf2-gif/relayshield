@@ -5,7 +5,7 @@ export default {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Terms of Service — RelayShield</title>
+  <title>Terms of Service | RelayShield</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 0 auto; padding: 40px 24px; color: #1e293b; line-height: 1.7; }
     h1 { font-size: 28px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
@@ -19,12 +19,17 @@ export default {
 <body>
   <a href="https://relayshield.net" class="back">← RelayShield</a>
   <h1>Terms of Service</h1>
-  <p class="meta">Last updated: June 2026</p>
+  <p class="meta">Last updated: August 2026</p>
 
   <p>By accessing or using RelayShield ("Service"), you agree to these Terms. If you do not agree, do not use the Service. RelayShield is based in Massachusetts, United States.</p>
 
   <h2>1. Service Description</h2>
-  <p>RelayShield provides threat intelligence APIs, breach monitoring, and security alerting services. The Service is provided for informational purposes only and does not constitute financial, legal, or security advice.</p>
+  <p>RelayShield provides threat intelligence APIs, breach and credential exposure monitoring, SIM swap risk monitoring, and security alerting services. The Service is provided for informational purposes only and does not constitute financial, legal, or security advice.</p>
+
+  <h2>1a. SIM Swap Monitoring</h2>
+  <p>SIM swap monitoring is an optional feature. If you enroll a mobile number, you confirm that you own or control that number and that you consent to us periodically checking it with our telecommunications data provider for SIM and carrier change activity. You may not enroll a number belonging to anyone else, and you may not use the Service to look up, track, or investigate a number that is not your own. Results are provided to you alone, and you may withdraw consent and remove the number at any time. SIM swap detection depends on carrier-supplied data, is not guaranteed to be complete or timely, and must not be relied on as your only defense against account takeover.</p>
+
+  <p><strong>Wireless carrier authorization.</strong> You authorize your wireless carrier to use or disclose information about your account and your wireless device, if available, to RelayShield LLC or its service provider for the duration of your business relationship, solely to help them identify you or your wireless device and to prevent fraud. See our <a href="https://privacy.relayshield.net">Privacy Policy</a> for how we treat your data.</p>
 
   <h2>2. Accounts &amp; API Keys</h2>
   <p>You are responsible for maintaining the confidentiality of your API key and for all activity under your account. You must notify us immediately at <a href="mailto:support@relayshield.net">support@relayshield.net</a> if you suspect unauthorized use.</p>

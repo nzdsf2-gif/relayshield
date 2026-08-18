@@ -6,7 +6,7 @@ module.exports = {
   display: {
     label: 'Look Up Threat Indicator',
     description:
-      'Queries a live indicator database of 4.7 million entries drawn from 83 criminal Telegram channels and 20 authoritative threat feeds, for a domain, IP, email, phone, or wallet address. Returns confidence score, malware family, and threat actor attribution.',
+      'Queries a live database of 494,000+ distinct indicators, drawn from 5.8 million sightings across 95 monitored channels and 20 authoritative threat feeds, for a domain, IP, email, phone, or wallet address. Returns confidence score, malware family, and threat actor attribution.',
   },
   operation: {
     inputFields: [

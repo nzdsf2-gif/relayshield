@@ -245,6 +245,11 @@ ${verticalNav(key)}
       <a href="https://aws.amazon.com/marketplace/pp/prodview-z3izf6val3jb2" class="btn-secondary">View on AWS Marketplace</a>
     </div>
     <div class="aws-card">
+      <div class="aws-card-title">Core Identity Exposure API Bundle</div>
+      <div class="aws-card-desc">Six identity-exposure checks billed per call through AWS Marketplace: breach exposure, SIM swap detection, infostealer log checks, domain lookalikes, OAuth app watchlist, and crypto address intel. $150/mo minimum commitment plus usage from $0.10 per call.</div>
+      <a href="https://aws.amazon.com/marketplace/pp/prodview-zgdxyqfd63hog" class="btn-secondary">View on AWS Marketplace</a>
+    </div>
+    <div class="aws-card">
       <div class="aws-card-title">Consumption Security API Bundles</div>
       <div class="aws-card-desc">Metered access to focused capability sets, billed per-call through AWS Marketplace. Bundle D, Agentic Attack Surface, covers MCP registry risk, prompt-injection breach correlation, agent-framework CVE targeting, bulk per-agent identity risk scoring, and LLM credential exposure detection. $299/mo minimum commitment.</div>
       <a href="https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq" class="btn-secondary">View on AWS Marketplace</a>

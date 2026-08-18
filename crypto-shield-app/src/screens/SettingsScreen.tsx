@@ -537,7 +537,10 @@ export function SettingsScreen() {
             { label: "API Docs",      url: "https://api.relayshield.net/developers",         icon: "📄" },
             { label: "System Status", url: "https://stats.uptimerobot.com/lsa89C5S8W",     icon: "📡" },
             { label: "Blog",          url: "https://blog.relayshield.net",                icon: "✍" },
-            { label: "Security Intel", url: "https://t.me/RelayShield",                   icon: "📢" },
+            // Repointed 2026-08-10 from t.me/RelayShield, the broadcast channel,
+            // which has 4 subscribers. The bot is the live product: it scans a
+            // link or address for free, and can be added to a group chat.
+            { label: "Telegram bot",  url: "https://t.me/relayshield_bot?start=src_csmobile", icon: "✈" },
           ].map(r => (
             <TouchableOpacity key={r.label} style={styles.resourceRow} onPress={() => Linking.openURL(r.url)}>
               <Text style={styles.resourceIcon}>{r.icon}</Text>
@@ -555,9 +558,12 @@ export function SettingsScreen() {
           </Text>
           <View style={styles.socialGrid}>
             {[
-              { label: "X / Twitter", url: "https://x.com/RelayShieldHQ",                          icon: "𝕏",  color: "#e2e8f0" },
+              // X removed 2026-08-10: @RelayShieldHQ has been suspended since
+              // 2026-07-02 and the appeal was denied, so this button sent users
+              // to a suspended-account page.
               { label: "LinkedIn",    url: "https://linkedin.com/company/relayshield",            icon: "in", color: "#0a66c2" },
-              { label: "Telegram",    url: "https://t.me/RelayShield",                            icon: "✈",  color: "#2AABEE" },
+              // Repointed from the 4-subscriber channel to the bot, same as above.
+              { label: "Telegram",    url: "https://t.me/relayshield_bot?start=src_csmobile",     icon: "✈",  color: "#2AABEE" },
               { label: "Farcaster",   url: "https://warpcast.com/cryptonomicon",                  icon: "⬡",  color: "#8b5cf6" },
               { label: "Mastodon",    url: "https://infosec.exchange/@relayshieldadmin",          icon: "🐘", color: "#6364ff" },
             ].map(s => (

@@ -64,9 +64,9 @@ proves our endpoints are consumable by autonomous agents today, not on a roadmap
 
 Threat intelligence and identity-exposure API for MSPs, MSSPs and enterprise SOCs.
 
-- **4.5M+ indicators of compromise**, sourced from criminal Telegram marketplaces and 11 authoritative feeds
-- **83+ monitored criminal channels** — typically 24–72 hours ahead of public breach databases
-- **3,750+ tracked malware families**
+- **494K+ distinct indicators** drawn from **5.8M+ sightings**, sourced from 95 monitored channels and 11 authoritative feeds
+- **95 monitored channels** — typically 24–72 hours ahead of public breach databases
+- **3,800+ tracked malware families**
 - **26 identity endpoints** — breach, infostealer, SIM swap, OAuth exposure, domain lookalike, non-human identity, LLM credential exposure
 - Live on AWS Marketplace (`prod-kb3ftelx44wlk`), STIX/TAXII 2.1 and MISP feeds available
 - AWS account `239677749008`
@@ -88,7 +88,7 @@ Happy to walk through the full technical detail or run the demo live.
 <!--
 INTERNAL NOTES — remove before sending
 1. FIGURES: IOC count measured live at 4,530,716 on 2026-07-28. Channel count (83+), malware
-   families (3,750+) and endpoint count (26) are taken from the published demo page and the MSP
+   families (3,800+) and endpoint count (31) are taken from the published demo page and the MSP
    brief — RE-VERIFY before sending, per feedback_verify_live_stats_not_memory.
 2. AGENTCORE STATUS: AWS_Partner_Pitch_AgentCore.md still describes AgentCore Payments as "still in
    Preview" and claims "as far as we can tell this is a genuine, very early real world

@@ -1,0 +1,361 @@
+# Gaming and prediction markets: outreach focus list
+
+*Built 2026-08-14. Supersedes the betting/perps sweep in `NEXT_SESSION_2026-08-14.md` section 2.*
+
+## The correction that starts this
+
+Yesterday's sweep offered `dydx` (23,928), `gmx` (6,314) and `azuro` (18,891) as prediction-market
+candidates. **Founder rejected all three on 2026-08-14 and was right.** dYdX and GMX are perpetuals
+exchanges, and Azuro is a betting *protocol* rather than a community. None of them is a gaming or
+prediction-market audience. That sweep is discarded rather than reranked.
+
+Also carried forward: **Polymarket (107,897) and Kalshi are ruled out.** Too big, and Kalshi is not
+crypto.
+
+## Chain support gate, checked first this time
+
+`relayshield_discord_bot.py:112` is `^0x[a-fA-F0-9]{40}$`, exactly 40 hex characters, plus base58
+Solana and Bitcoin. Verified today by reading the regex, not from memory.
+
+**This rules out Starknet outright.** Starknet addresses are `0x` followed by up to 64 hex, so they
+fail the EVM pattern. **Loot Survivor is therefore out** despite resolving at 1,015 members and a
+strong 16.0% online. It would have been the second-best gaming number in the set.
+
+BNB Chain, Arbitrum, Base, Ronin and Immutable zkEVM all use 40-hex `0x` addresses and pass.
+
+### Avalanche C-Chain qualifies, and this was tested rather than assumed
+
+**Yes, and Avalanche subnets too** (Beam, DFK Chain, MapleStory's chain). All use standard 40-hex
+`0x` addresses.
+
+A pedantic but load-bearing correction: **C-Chain is an L1, not an L2.** It is one of Avalanche's
+three native chains and settles on its own consensus, not to Ethereum. It does not change the answer
+here, but it matters if the distinction ever ends up in outreach copy.
+
+**The part that needed checking.** `relayshield_api.py:3183` is
+`_GOPLUS_CHAIN_IDS = {"evm": 1, "solana": 101}`, so **every** `0x` address is queried against GoPlus
+on **Ethereum mainnet**, whatever chain it is really from. That is the exact shape of the false-clean
+defect this codebase has fixed repeatedly, so it was worth testing rather than reasoning about.
+
+**Tested 2026-08-14** against the documented Ronin bridge exploiter address
+(`0x098B716B8Aaf21512996dC57EB0615e2383E2f96`) across `chain_id` 1, 56, 43114 and 42161:
+
+| chain_id | Chain | Flags returned |
+|---|---|---|
+| 1 | Ethereum | `blacklist_doubt`, `sanctioned`, `stealing_attack` |
+| 56 | BNB | identical |
+| 43114 | Avalanche C-Chain | identical |
+| 42161 | Arbitrum | identical |
+
+**GoPlus's malicious-address labels are cross-chain**, so the hardcoded `chain_id=1` does not produce
+false cleans for the flags the verdict is built from. The per-chain fields that *do* vary
+(`contract_address`) are not read by the risk logic at `relayshield_api.py:3454`.
+
+**This also clears the Thetan/BNB caveat below.** It was flagged as "confirm GoPlus BSC coverage
+before pitching", and that check now passes.
+
+> Honest limit on the test: it exercised `blacklist_doubt` and `stealing_attack` on one address.
+> `phishing_activities`, `darkweb_transactions` and `cybercrime` were not exercised and are assumed
+> to behave the same way. The evidence is strong, not exhaustive.
+
+### AVAX gaming: qualifies technically, thin in practice
+
+Resolved 2026-08-14. The chain is fine; the communities are the problem.
+
+| Server | Members | Online % | Verdict |
+|---|---|---|---|
+| Arena | 15,384 | 4.2% | In band, but this is the AVAX social app, not a game. Verify before using |
+| Beam.gg | 3,801 | 2.2% | In band, quiet |
+| Castle Crush | 19,853 | 1.0% | 191 online. Effectively dead |
+| MapleStory Universe | 222,588 | 4.3% | Far over band, company-run |
+| Avalanche | 50,002 | 5.5% | Two members over the ceiling, and it is the L1's own staff-moderated server |
+
+**Did not resolve:** Crabada, Ascenders, Heroes of NFT, Imperium Empires, Colony, Kingdom Karnage,
+DFK Chain, Shatterline, and `playbeam`. Nine 404s means this picture is incomplete rather than
+settled, so if AVAX is worth pursuing the next step is pulling those invites from official sites.
+
+**As it stands, nothing in the AVAX set beats the top five below.** Shrapnel, the best-known AVAX
+game, resolved at 63,924 and is over the ceiling.
+
+## Read this before pitching anyone below
+
+**Every invite code in this document was guessed, not taken from an official site.** The resolver's
+own docstring warns that this is how you end up measuring a squatted server, and this run proved it
+six times over:
+
+| Guessed code | What it actually resolved to |
+|---|---|
+| `limitless` | "Limitless Rust", 111,201 members. A Rust game server, not Limitless Exchange |
+| `nyan` | A 139,490-member social and giveaways server, not Nyan Heroes |
+| `unicorns` | "/unicorns #vc :3", 363 members |
+| `dfk` | "dfk Party Royale", 1,418 members. Not DeFi Kingdoms' main server |
+| `faraway` | "Faraway Placeholder", 591 members |
+| `sipher` | "\>.\<", 2,530 members at 0.8% online |
+
+Roughly one guessed code in six landed on the wrong server. **Confirm every invite from the
+project's own website before sending anything.**
+
+---
+
+## Prediction markets: the honest finding
+
+**The crypto prediction-market category is too small to build a pipeline from.** This is the result,
+not a failure to search hard enough. Twenty-two candidate codes across two passes produced exactly
+one live, in-band community.
+
+| Project | Members | Online % | Verdict |
+|---|---|---|---|
+| **Overtime** | 4,163 | **16.5%** | **The only real target.** In band, genuinely active |
+| Myriad | 50,605 | 3.2% | 605 over the band ceiling and quiet. Marginal |
+| Opinion Labs | 71,905 | 1.8% | Too big, and very quiet for its size |
+| Divvy.Bet | 1,307 | 0.5% | In band on paper. **6 people online. Dead** |
+| Truemarkets | 172 | 88.4% | Too small to matter |
+
+**Did not resolve at all**, on any code tried: Hedgehog Markets, Aver, Monaco Protocol, SX Bet,
+Thales, Limitless Exchange, BetOnSol, Futuur, Prediqt, Augur, BetSwirl. A 404 is not proof a project
+has no Discord, but eleven consecutive ones says the category's communities are either gone,
+private, or never existed at scale.
+
+**Recommendation: treat Overtime as a one-off, not a category.** Overtime runs on Optimism, Arbitrum
+and Base, so addresses pass the EVM gate. Do not spend more time trying to manufacture a
+prediction-market list out of what is left.
+
+### CORRECTION TO THE CORRECTION, later on 2026-08-14: the category is one, and it is Limitless
+
+**I said the category was zero. That was wrong, and the reason I got it wrong matters.**
+
+`limitless` resolved to a Rust game server and `limitlessexchange` returned 404, and I let two failed
+lookups stand in for evidence of absence. **This document's own rule says a 404 tells you nothing
+either way**, and I broke it in the paragraph immediately below.
+
+**Limitless is real, live, and the best prediction-market target available.** Their X handle is
+`@trylimitless`, and `discord.gg/trylimitless` resolves to **Limitless, 12,249 members, 935 online,
+7.6%**. In band.
+
+It is not a marginal project. Limitless launched in 2025 on Base, is backed by **Coinbase Ventures**,
+and crossed **$1B in notional monthly volume** for the first time this year, up from roughly $360M.
+Markets span crypto prices, stocks, politics and events, so unlike Overtime it is a genuine
+prediction market rather than a sportsbook.
+
+**Verify the invite from `limitless.exchange` before sending.** The code above was inferred from their
+X handle, which is exactly the guessing this document warns against.
+
+**Truemarkets** is also on Base but its Discord resolved at 172 members. Too small.
+
+### Overtime is sports betting, not a prediction market. And it is now a NO.
+
+**Founder correction, and it was right.**
+
+**Founder correction, and it is right.** Overtime is a sports betting protocol, not a prediction
+market. Its own channel list settles it: `#casino`, `#speed-markets`, and a `#report-scammers`
+channel full of betting-tout scams.
+
+**So the honest count for crypto prediction markets in band is zero, not one.** The single "real
+target" in the table above was misfiled. Nothing else in that table survives either: Myriad is over
+the ceiling, Opinion Labs is too big and quiet, Divvy.Bet has six people online, Truemarkets is 172.
+**Stop treating prediction markets as a channel.** It is not one.
+
+**Overtime moves into the gambling bucket**, which is the decision the founder left open on
+2026-08-13 and which is now being made in practice rather than in principle. Worth naming: the
+practical exposure is low, since installing a free bot is not a marketing partnership and does not
+appear in AWS Marketplace materials. But it is the gambling question being answered, not sidestepped.
+
+**Member count discrepancy, unresolved.** The invite preview returned **4,163 members**. The server's
+own stats channel, read from inside by the founder, says **10,975**. The in-server figure is the one
+to trust; invite previews and stats bots count differently, and a stats bot may include all-time
+joins or bots. **It changes nothing actionable**: both numbers sit inside the 1,000 to 50,000 band.
+Recorded because the same gap appeared on LAMINA1 and will appear again.
+
+**Chain note:** Overtime is EVM (Optimism, Arbitrum, Base), not Solana. The bot covers both, so
+nothing is blocked, but the pitch should not describe it as a Solana community.
+
+**OUTCOME: declined 2026-08-14. "Not looking rn."** Ticket opened, message sent, answer back within
+the hour. **Close the thread and do not follow up.**
+
+**This is the ask-permission approach working, not failing.** A clean no in under an hour, with no
+rule breached and no server burned, is the outcome that method is designed to produce. Compare the
+alternative: post first, get removed, and lose the room permanently. The cost of finding out was
+roughly ten minutes.
+
+## Predi by Virtuals: not a Discord target. See the x402 section instead.
+
+Checked 2026-08-14. **`predictbase`, `predibot` and `predi` all 404.** That is consistent with how the
+product actually works: **PrediBot is X-native**, users create and place onchain predictions by
+tagging `@predibot_` in a tweet. There is no community room to pitch a Discord bot into.
+
+PREDI is on Base, contract `0xaeA742f80922f7C94B8FD91686c9dFbDFE90d9E6`.
+
+**Virtuals Protocol itself has two servers resolving under the same name**, which is a live instance
+of the trap at the top of this document:
+
+| Code | Guild | Members | Online % |
+|---|---|---|---|
+| `virtualsio` | Virtuals Protocol | 12,661 | 9.2% |
+| `virtuals` | Virtuals Protocol | 5,677 | 4.5% |
+
+**One of these is not theirs.** Do not touch either until the invite is confirmed from `virtuals.io`.
+
+**But the Discord bot is the wrong product for this audience anyway.** See below.
+
+---
+
+## Gaming: this is where the audience actually is
+
+Ranked by online percentage, which is the presence proxy, not by member count.
+
+| Rank | Server | Members | Online % | Chain | Note |
+|---|---|---|---|---|---|
+| 1 | **Wildcard** | 1,085 | **14.7%** | EVM | Small, engaged, one person decides |
+| 2 | **Honeyland** | 1,051 | **13.8%** | Solana | Best Solana engagement in the set |
+| 3 | **Pirate Nation** | 1,075 | **13.5%** | Arbitrum | Resolved as "Pirate Nation Foundation", verify this is the player community and not a governance server |
+| 4 | **Gods Unchained** | 24,937 | **11.8%** | Immutable zkEVM | Best size-to-engagement trade here. Biggest prize on the list |
+| 5 | **Genopets** | 1,190 | **11.6%** | Solana | Move-to-earn, wallet-native |
+| 6 | Amiko Arena | 31,193 | 6.6% | Solana | Resolved from the `aurory` code under a different name. **Verify the rebrand before trusting this row** |
+| 7 | Treasure | 39,502 | 5.5% | Arbitrum | Large, quieter. An ecosystem hub rather than one game |
+| 8 | Thetan World | 1,936 | 5.1% | BNB Chain | Chain support verified 2026-08-14, see the Avalanche section |
+
+### VERIFIED INVITE CODES, resolved 2026-08-17
+
+**The original list ranked servers but recorded invite codes for only three of them**, which is why
+the Wildcard row was unusable. Every code below was resolved live against Discord's public
+unauthenticated invite endpoint on 2026-08-17. All show `expires: never`.
+
+| Server | Invite | Members | Online % | Status |
+|---|---|---|---|---|
+| **Splinterlands** | `discord.gg/splinterlands` | 16,271 | **19.1%** | **NEW, best engagement on the whole list** |
+| Gods Unchained | `discord.gg/godsunchained` | 24,909 | 14.6% | verified |
+| Honeyland | `discord.gg/honeyland` | 1,052 | 13.6% | verified |
+| Pirate Nation | `discord.gg/piratenation` | 1,077 | 13.3% | verified |
+| ~~Wildcard~~ | `discord.gg/wildcard` | 1,086 | 12.2% | **WRONG AUDIENCE, see below** |
+| The Sandbox | `discord.gg/thesandbox` | 5,348 | 11.4% | **NEW, in band** |
+| Genopets | `discord.gg/genopets` | 1,194 | 11.3% | verified |
+
+**Wildcard: the invite on their own website is EXPIRED.** `discord.com/invite/QZRgv9M2UZ` returns
+`{"message": "Invite is expired.", "code": 50270}` from Discord's API, so it is not a permission
+problem and retrying will not help. **`discord.gg/wildcard` is live and permanent.** Game Discords
+rotate invites after raids and often forget to update the website link, so resolve a code before
+trusting any published invite.
+
+### WILDCARD IS NOT A WEB3 GAME. Corrected 2026-08-17.
+
+**The original row labelled Wildcard "EVM". That was wrong.** `discord.gg/wildcard` resolves to
+**Wildcard Gaming, an esports organisation**. Its own welcome message reads "Wildcard Gaming's
+discord server ... prospective esport legends", and the channels are `#esport-discussion`,
+`Watch Party` and `Gaming`. There is no wallet-holding audience here, so a counterparty-screening
+bot has nothing to attach to.
+
+Member count matches the original measurement almost exactly (1,085 vs 1,087), so this is the same
+server that was ranked #1, mis-categorised at the time. **The confusion is a real one**: there is a
+separate web3 game also called Wildcard (Wildcard Alliance), and neither `playwildcard` nor
+`wildcardalliance` resolves to anything.
+
+Discord's own API also reports the guild as `VERIFIED` with `AUTO_MODERATION` enabled. A verified
+brand server with automated moderation is the opposite of the "small community without mods who ban
+harmless requests" profile this pipeline is built for.
+
+**Do not pitch here.** Redirect that effort to Splinterlands, Honeyland, Pirate Nation and Genopets,
+which are actual web3 games with wallet-native audiences.
+
+**Lesson for the rest of the list: resolving an invite proves a server EXISTS, not that it is the
+right server.** Member count and online percentage say nothing about whether the audience holds
+wallets. Read the welcome or rules channel before writing a chain label into this table. The
+"Pirate Nation Foundation" and "Amiko Arena" rows carry the same unverified risk and are flagged
+accordingly.
+
+### Checked and rejected 2026-08-17, with the reason
+
+| Server | Invite | Members | Online % | Why not |
+|---|---|---|---|---|
+| Illuvium | `discord.gg/illuvium` | 138,709 | 8.0% | Far over the size ceiling |
+| Shrapnel | `discord.gg/shrapnel` | 63,883 | 6.7% | Over ceiling, engagement below band |
+| Open Loot (OLD) | `discord.gg/bigtime` | 25,465 | 6.8% | Resolves to a server named "(OLD)". **Legacy, find the current one before using** |
+| Aavegotchi | `discord.gg/aavegotchi` | 25,238 | 5.3% | Engagement below band |
+
+`axieinfinity`, `ember`, `darkbright`, `playwildcard`, `wildcardalliance`, `nyanheroes`, `parallel`,
+`guildofguardians`, `galagames`, `cryptounicorns` all return **Unknown Invite**. Guessing vanity
+codes works maybe half the time; do not put a guessed code in a doc without resolving it first.
+
+### Revised order, 2026-08-17
+
+1. **Splinterlands.** 19.1% online at 16,271 members is the best size-to-engagement trade found so
+   far, better than Gods Unchained. A trading-card game with an active market means constant address
+   and link traffic, which is exactly the surface the bot serves.
+2. **Honeyland**, **Pirate Nation**, **Genopets.** All ~1,100 at 11-14%, the "one person decides"
+   profile. Founder decision 2026-08-17: **these smaller communities are the target precisely
+   because they lack mods who ban harmless requests.** Wildcard is removed from this tier; it is an
+   esports org, see above. **Verify Pirate Nation is the player community and not the governance
+   server before pitching.**
+3. **Gods Unchained**, then **The Sandbox**.
+
+### Founder additions 2026-08-14, both verified against official invites
+
+**DeFi Kingdoms. Add it, and override the band.**
+
+My guessed `dfk` code resolved to "dfk Party Royale", 1,418 members, which I flagged as probably not
+the main server. It was not. The official invite from `defikingdoms.com/social.html` is
+`discord.com/invite/kARBQuMAhS`, and it resolves to **DeFi Kingdoms, 55,661 members, 5.4% online**.
+
+That is 5,661 over the band ceiling, and it should still go on the list. **The band is a proxy, not a
+rule.** It exists to approximate "small enough that one person decides and standing is achievable".
+The founder is a former player who knows the community is still active and knows it has a healthy
+partner channel. That is actual standing plus a named intake route, which is the thing the band was
+only ever estimating. When you have the real signal, stop using the proxy.
+
+Also resolved: **DeFi Kingdoms JP [OFFICIAL]**, 3,263 members, 3.3% online, a separate official
+Japanese server. In band, and a plausible second shot if the main one stalls.
+
+DFK runs on DFK Chain, an Avalanche subnet, so addresses are 40-hex `0x` and pass the gate.
+
+**LAMINA1. Add it, but the member count is not what we thought.**
+
+`discord.gg/lamina1` is confirmed official and resolves to **LAMINA1, 1,924 members, 98 online,
+5.1%**. Comfortably in band.
+
+**It is not 49K.** LAMINA1's own communications describe "over 50k engaged" in its Betanet, which is
+a total community-engagement figure across all channels, not Discord membership. Worth knowing before
+pitching, so the ask is not built on reach that is not in the room.
+
+The upside of the correction is real: at 1,924 it is far more likely one identifiable person decides
+than it would be at 49,000.
+
+LAMINA1 is a Layer 1 built on Avalanche, so `0x` addresses, and chain support is confirmed by the
+GoPlus test above.
+
+**One thing to check first, per the playbook.** It is a metaverse and creator-economy project rather
+than a trading community, and 98 people online is quiet. Read the general channel for actual
+wallet-scam traffic before pitching. If nobody is asking "is this link real", the product does not
+solve a problem they feel, whatever the chain support says.
+
+### Ruled out, with the reason
+
+- **Loot Survivor** (1,015, 16.0%): Starknet. Fails the address regex. The single most painful cut.
+- **Open Loot** (`bigtime` code): resolved to "Open Loot (OLD)", a server the project itself has
+  marked stale. The current one is 295,342 members, far over band.
+- **Star Atlas** 162,212, **Axie** 641,599, **Pixels** 214,197, **STEPN** 201,008, **Illuvium**
+  138,714, **Off The Grid** 138,541, **Sunflower Land** 114,239, **Ember Sword** 57,557,
+  **Shrapnel** 63,924, **MixMob** 50,180: all over the 50,000 ceiling. Company-run servers with
+  staff moderators, which per `discord_midsize_pipeline_2026-08-13.md` is the profile that does not
+  add an outside bot.
+- **Photo Finish** (168), **Influence** (79), **SX Network** (36): too small, and the low counts
+  suggest the guessed code found a side server rather than the main one.
+
+---
+
+## Suggested order
+
+1. **Gods Unchained**, rank 4. Largest audience that is still in band, 11.8% online is genuinely
+   active for 24,937 members, and a trading-card game means constant link and address traffic.
+2. **Wildcard**, **Honeyland**, **Genopets**, **Pirate Nation**. All four are ~1,100 members at
+   13-15% online, which is the "one person decides" profile that the Famous Fox approach is built
+   for. Cheap to try, and four attempts at this size cost less than one at Gods Unchained's.
+3. **Overtime**, as the only prediction-market entry.
+
+Use the message and the per-server checklist in `discord_admin_approach_message.md`. The rules-first
+step is not optional: it is what stopped the Solana Mobile post on 2026-08-13.
+
+## Still open, founder decision from yesterday
+
+Gambling communities (Gamdom 10,586 at 16.5%, Duelbits 18,044, Shuffle) remain undecided. Nothing on
+this list depends on that call. Prediction markets carry less of the baggage, but the category turned
+out to be one server deep, so if the gambling question is answered "no", the practical effect is that
+this becomes a gaming-only pipeline.

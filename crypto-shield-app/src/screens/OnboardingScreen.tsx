@@ -135,7 +135,7 @@ export function OnboardingScreen({ onComplete }: Props) {
 
               <View style={styles.trustStrip}>
                 {[
-                  ["🔒", "We never ask for your seed phrase or private keys — read-only monitoring only, we can't move your funds."],
+                  ["🔒", "We never ask for your seed phrase or private keys. Read-only monitoring only, we can't move your funds."],
                   ["🛡", "Every alert is cryptographically verified before it reaches your phone."],
                   ["📋", "RelayShield carries active Tech E&O and Cyber Insurance coverage."],
                 ].map(([icon, text]) => (
@@ -150,8 +150,8 @@ export function OnboardingScreen({ onComplete }: Props) {
                 {[
                   ["🔍", "Token risk scanning"],
                   ["🧲", "Address poisoning detection"],
-                  ["📡", "Live IOC feed — phishing, C2, drainers"],
-                  ["🔐", "Security sweep — breach + infostealer"],
+                  ["📡", "Live IOC feed: phishing, C2, drainers"],
+                  ["🔐", "Security sweep: breach + infostealer"],
                   ["📊", "Vendor supply chain monitoring"],
                 ].map(([icon, text]) => (
                   <View key={text} style={styles.featureRow}>
@@ -278,9 +278,30 @@ export function OnboardingScreen({ onComplete }: Props) {
                 autoCorrect={false}
               />
               <Text style={styles.skipHint}>
-                Must be in E.164 format. Cannot be read automatically — mobile OS does not expose the
-                device phone number to apps.
+                Must be in E.164 format. Cannot be read automatically, because mobile operating
+                systems do not expose the device phone number to apps.
               </Text>
+
+              {/* Privacy answer placed at the point of collection, not buried in the
+                  policy. This is the screen where a user decides whether to hand over
+                  a phone number, so it is the only place the reassurance is worth
+                  anything. Wording matches privacy.relayshield.net section 4. */}
+              <View style={styles.privacyNote}>
+                <Text style={styles.privacyTitle}>What we do with these</Text>
+                <Text style={styles.privacyBody}>
+                  Your email, phone number and wallet addresses are stored encrypted on this
+                  device. They are the questions we ask on your behalf, not a profile we keep.
+                  {"\n\n"}
+                  An identifier is kept only while you have monitoring switched on for it.
+                  Remove it here and it is deleted, along with its history. Continuous
+                  monitoring cannot re-check something it has thrown away.
+                  {"\n\n"}
+                  Each check goes to the one provider that can answer it, and each sees a single
+                  detail and nothing else. The provider that checks your number never learns your
+                  email. The one that checks your email never learns your number. They are never
+                  linked together anywhere but on this device.
+                </Text>
+              </View>
             </View>
           )}
 
@@ -290,7 +311,7 @@ export function OnboardingScreen({ onComplete }: Props) {
               <Text style={styles.stepNum}>4 of 4</Text>
               <Text style={styles.stepTitle}>Enhanced monitoring</Text>
               <Text style={styles.stepDesc}>
-                Crypto Shield works out of the box — wallet scanning, live threat intel, and address
+                Crypto Shield works out of the box. Wallet scanning, live threat intel, and address
                 poisoning detection require no account. Breach monitoring, infostealer checks, and
                 vendor supply chain analysis are already included in your subscription.
               </Text>
@@ -380,9 +401,9 @@ export function OnboardingScreen({ onComplete }: Props) {
         {step === 0 && (
           <Text style={styles.consentText}>
             By continuing, you agree to our{" "}
-            <Text style={styles.consentLink} onPress={() => Linking.openURL("https://relayshield.net/terms")}>Terms of Service</Text>
+            <Text style={styles.consentLink} onPress={() => Linking.openURL("https://terms.relayshield.net")}>Terms of Service</Text>
             {" "}and{" "}
-            <Text style={styles.consentLink} onPress={() => Linking.openURL("https://relayshield.net/privacy")}>Privacy Policy</Text>.
+            <Text style={styles.consentLink} onPress={() => Linking.openURL("https://privacy.relayshield.net")}>Privacy Policy</Text>.
           </Text>
         )}
 
@@ -407,6 +428,10 @@ const styles = StyleSheet.create({
   chainBtnActive: { borderColor: "#00B5A5", backgroundColor: "#00B5A510" },
   chainBtnText: { fontSize: 11, color: "#64748b", fontWeight: "600" },
   skipHint:    { fontSize: 11, color: "#4a7fa5", lineHeight: 16, fontStyle: "italic" },
+  privacyNote:  { marginTop: 18, padding: 14, borderRadius: 10, backgroundColor: "#0f1b2a",
+                  borderWidth: 1, borderColor: "#1e3a52" },
+  privacyTitle: { fontSize: 13, fontWeight: "700", color: "#7dd3fc", marginBottom: 8 },
+  privacyBody:  { fontSize: 12, color: "#94a3b8", lineHeight: 18 },
   tipsBox:     { backgroundColor: "#0F1F3D", borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: "#1e3a5f" },
   tipsTitle:   { fontSize: 10, color: "#4a7fa5", fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 10 },
   tipRow:      { flexDirection: "row", gap: 10, marginBottom: 10, alignItems: "flex-start" },

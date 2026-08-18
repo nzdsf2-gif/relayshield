@@ -3,7 +3,7 @@
 RelayShield serves its IOC corpus over **STIX 2.1 / TAXII 2.1** and a **MISP-compatible REST API**.
 Microsoft Sentinel consumes both, so this is a configuration task rather than a development one.
 
-**What you get:** 5.6M+ indicators sourced from 90 criminal Telegram marketplaces and 20
+**What you get:** 494K+ distinct indicators (5.8M+ sightings) sourced from 95 monitored channels and 20
 authoritative feeds, landing in Sentinel's `ThreatIntelIndicators` table where they drive analytics
 rules, hunting queries and incident enrichment.
 

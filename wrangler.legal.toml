@@ -1,0 +1,8 @@
+name = "relayshield-legal-redirect"
+main = "cloudflare_worker_legal_redirect.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "relayshield.net/terms*", zone_name = "relayshield.net" },
+  { pattern = "relayshield.net/privacy*", zone_name = "relayshield.net" }
+]

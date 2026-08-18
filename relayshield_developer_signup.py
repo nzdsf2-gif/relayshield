@@ -19,6 +19,8 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import re
 import urllib.parse
 import urllib.request
 import uuid
@@ -79,6 +81,79 @@ CS_MOBILE_PRICE_IDS = frozenset({
 # flat rate, not the full $499+/mo TI catalog. Same flag-based bypass pattern
 # as CS_MOBILE_PRICE_IDS/cs_mobile_access above — see is_llm_license_call in
 # relayshield_api.py's handle_metered_request.
+# ---------------------------------------------------------------------------
+# Bundle D "Door 2" — direct Stripe purchase of the same bundle sold on AWS
+# Marketplace as prod-kkvurtspreofy ($299/mo, agentic_bundle_access).
+#
+# Why this exists: AWS Marketplace is high-friction for anyone without an AWS
+# procurement relationship, and Bundle D's audience includes developers who
+# will never touch it. Same product, same price, two doors. Enterprises who
+# want to draw down committed AWS spend keep using Marketplace; everyone else
+# checks out with a card.
+#
+# AWS COMPLIANCE NOTE, read before touching this. Marketplace is not
+# exclusive and dual-channel selling is permitted. What is NOT permitted is
+# disintermediation: taking a customer who ARRIVED through Marketplace and
+# moving them off it, or failing to meter Marketplace-originated usage
+# through Marketplace. The separation that keeps us clean:
+#
+#   * An AWS-provisioned key carries aws_account_id + aws_license_arn and is
+#     metered via BatchMeterUsage on every billed call, forever.
+#   * A Stripe-provisioned key carries stripe_customer_id and source
+#     "bundle_d_direct", and is billed through the Stripe meter.
+#   * NEVER migrate a customer from an AWS key to a Stripe key, and never
+#     steer a Marketplace-originated lead to the Stripe door.
+#
+# The `source` field on every api_keys record is the audit trail for exactly
+# this question. Do not overload it.
+#
+# Set BUNDLE_D_DIRECT_PRICE_IDS once the Stripe Product and Price exist. The
+# empty set is safe: an unmatched price falls through to the generic metered
+# signup path below, exactly as it did before this block existed.
+BUNDLE_D_DIRECT_PRICE_IDS = frozenset(
+    p for p in os.environ.get("BUNDLE_D_DIRECT_PRICE_IDS", "").split(",") if p.strip()
+)
+
+# Bundle A "Door 2" — direct Stripe purchase of Core Identity Exposure, sold on
+# AWS Marketplace as its own entity prod-f5qkfsxlxs4qg / product code
+# cvfvhwhmichl13kcuuutkbwmp ($150/mo access + per-call, bundle_a_access).
+# Added 2026-08-12. Every compliance note in the Bundle D block above applies
+# here unchanged: never migrate an AWS key to Stripe, never steer a
+# Marketplace-originated lead to this door.
+BUNDLE_A_DIRECT_PRICE_IDS = frozenset(
+    p for p in os.environ.get("BUNDLE_A_DIRECT_PRICE_IDS", "").split(",") if p.strip()
+)
+
+# The two doors must charge the same per-call rates, and the mechanism that
+# guarantees it is that neither door has per-call prices of its own: both ride
+# the aggregate meter below, whose amount relayshield_api.py looks up from the
+# request path. A Checkout session for either bundle therefore carries exactly
+# two line items -- the licensed monthly price, and STRIPE_USAGE_PRICE_ID.
+#
+# DO NOT add per-endpoint prices here. Stripe Checkout rejects more than 20
+# recurring prices, and that ceiling is what killed self-serve developer signup
+# for six weeks in June 2026.
+#
+# A subscription with ONLY the licensed price would give unlimited calls for the
+# monthly fee, undercutting the AWS door. That is lost revenue and, in front of
+# an AWS audit, bad optics.
+BUNDLE_DIRECT_CHECKOUT = {
+    "a": {
+        "price_ids":  lambda: BUNDLE_A_DIRECT_PRICE_IDS,
+        "env_var":    "BUNDLE_A_DIRECT_PRICE_IDS",
+        "label":      "Core Identity Exposure",
+        "monthly":    "$150/mo",
+        "aws_listing": "https://aws.amazon.com/marketplace/pp/prodview-zgdxyqfd63hog",
+    },
+    "d": {
+        "price_ids":  lambda: BUNDLE_D_DIRECT_PRICE_IDS,
+        "env_var":    "BUNDLE_D_DIRECT_PRICE_IDS",
+        "label":      "Agentic Attack Surface",
+        "monthly":    "$299/mo",
+        "aws_listing": "https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq",
+    },
+}
+
 LLM_LICENSE_PRICE_IDS = frozenset({
     "price_1TxdQpL2dcjOeFiYeXtONMuK",  # $39/mo
     "price_1TxdQpL2dcjOeFiYe1XqvVGn",  # $399/yr
@@ -294,9 +369,22 @@ VALID_SOURCES = {"direct", "n8n", "tines", "hf-smolagents"}
 # accounts. Every comparable product in this market (GreyNoise, AbuseIPDB,
 # HIBP) has a free tier; "no free tier" was the wall.
 #
-# 20 calls is deliberately enough to integrate and see a real response on a
-# couple of endpoints, and not enough to run anything in production.
-FREE_TIER_CALLS = 20
+# Raised 20 -> 100 on 2026-08-09. 20 was sized to "integrate and see a real
+# response on a couple of endpoints", which is the wrong goal: the developer
+# funnel depends on the evaluator producing an ARTIFACT worth forwarding to
+# whoever holds the budget, and 20 calls does not survive one domain scan plus
+# a handful of employee emails plus the calls you waste getting the request
+# body right. The page's own worked example (10 breach checks) spent half of it.
+#
+# 100 still will not run anything in production, and the marginal cost to us is
+# near zero: HIBP is a flat monthly subscription and GoPlus is called on its
+# free public tier, so a free-tier call adds Lambda time and nothing else.
+#
+# The exception is the handful of endpoints that fan out to many upstream calls
+# per request. Those are excluded from the free tier entirely rather than being
+# allowed to burn 100 of them; see FREE_TIER_EXCLUDED_ENDPOINTS in
+# relayshield_api.py, which is where the allowance is actually spent.
+FREE_TIER_CALLS = 100
 
 
 def _find_developer_key_by_email(email: str) -> dict | None:
@@ -434,6 +522,63 @@ def handle_signup(body: dict) -> dict:
 
     logger.info("developer signup — email=%s customer=%s session=%s", email, customer_id, session["id"])
     return _ok({"checkout_url": checkout_url})
+
+
+def handle_bundle_checkout(body: dict) -> dict:
+    """POST /developer/bundle-checkout — Door 2 for Bundle A and Bundle D.
+
+    Builds a Checkout session with exactly two line items: the bundle's
+    licensed monthly price, and the aggregate usage price. See
+    BUNDLE_DIRECT_CHECKOUT for why it is two and not one, and not twenty-four.
+    """
+    bundle = (body.get("bundle") or "").strip().lower()
+    cfg    = BUNDLE_DIRECT_CHECKOUT.get(bundle)
+    if not cfg:
+        return _err("bundle must be 'a' or 'd'")
+
+    email = (body.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return _err("email is required")
+
+    price_ids = sorted(cfg["price_ids"]())
+    if not price_ids:
+        # Fail loudly rather than falling through to the generic metered
+        # signup. An unset env var previously meant a buyer silently got a
+        # pay-as-you-go key instead of the bundle they clicked on.
+        logger.error("bundle checkout requested but %s is unset — refusing", cfg["env_var"])
+        return _err("this bundle is not available for direct purchase yet — "
+                    f"buy it on AWS Marketplace at {cfg['aws_listing']}", 503)
+
+    try:
+        customer    = _stripe_post("/customers", {"email": email,
+                                                  "description": f"RelayShield Bundle {bundle.upper()} direct"})
+        customer_id = customer["id"]
+    except Exception as exc:
+        logger.error("Stripe customer creation failed (bundle_%s) email=%s error=%s", bundle, email, exc)
+        return _err("could not create billing account — try again", 502)
+
+    session_params: dict = {
+        "mode":        "subscription",
+        "customer":    customer_id,
+        "success_url": SUCCESS_URL,
+        "cancel_url":  CANCEL_URL,
+        "subscription_data[metadata][developer_email]": email,
+        "subscription_data[metadata][source]":          f"bundle_{bundle}_direct",
+        "line_items[0][price]":    price_ids[0],
+        "line_items[0][quantity]": "1",
+        "line_items[1][price]":    STRIPE_USAGE_PRICE_ID,
+    }
+
+    try:
+        session = _stripe_post("/checkout/sessions", session_params)
+    except Exception as exc:
+        logger.error("Stripe checkout session failed (bundle_%s) customer=%s error=%s",
+                     bundle, customer_id, exc)
+        return _err("could not create checkout session — try again", 502)
+
+    logger.info("bundle %s direct checkout — email=%s customer=%s session=%s",
+                bundle.upper(), email, customer_id, session["id"])
+    return _ok({"checkout_url": session["url"], "bundle": bundle, "monthly": cfg["monthly"]})
 
 
 # ---------------------------------------------------------------------------
@@ -713,8 +858,17 @@ def _tg_alert(text: str) -> None:
         logger.error("Admin TG alert failed: %s", exc)
 
 
-def _get_subscription_price_id(subscription_id: str) -> str | None:
-    """Call the Stripe API to get the price ID for a subscription."""
+def _get_subscription_price_ids(subscription_id: str) -> list[str]:
+    """Every price ID on a subscription, not just the first.
+
+    WHY THIS EXISTS, added 2026-08-12. A bundle subscription carries TWO items:
+    the licensed monthly price and the aggregate metered price. Stripe does not
+    guarantee item order, so reading items[0] is a coin flip -- if the metered
+    price came back first, the bundle branch in the webhook would not fire and
+    the customer would be charged $150 or $299 a month and handed an ordinary
+    pay-as-you-go key with no bundle access at all. Silent, and only visible
+    when a real buyer complained.
+    """
     credentials = base64.b64encode(f"{_stripe_key()}:".encode()).decode()
     req = urllib.request.Request(
         f"{STRIPE_API_BASE}/subscriptions/{subscription_id}",
@@ -724,12 +878,20 @@ def _get_subscription_price_id(subscription_id: str) -> str | None:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            items = data.get("items", {}).get("data", [])
-            if items:
-                return items[0].get("price", {}).get("id")
+            return [i.get("price", {}).get("id") for i in data.get("items", {}).get("data", [])
+                    if i.get("price", {}).get("id")]
     except Exception as exc:
         logger.error("Stripe subscription lookup failed sub=%s error=%s", subscription_id, exc)
-    return None
+    return []
+
+
+def _get_subscription_price_id(subscription_id: str) -> str | None:
+    """First price ID on a subscription. Kept for the single-item paths (TI,
+    CS Mobile, LLM licence), all of which have exactly one item. Anything that
+    can be part of a multi-item bundle subscription must use
+    _get_subscription_price_ids instead."""
+    ids = _get_subscription_price_ids(subscription_id)
+    return ids[0] if ids else None
 
 
 def _find_key_by_customer(stripe_customer_id: str) -> dict | None:
@@ -738,9 +900,19 @@ def _find_key_by_customer(stripe_customer_id: str) -> dict | None:
     Table PK is api_key — no GSI on stripe_customer_id yet (acceptable at current scale;
     add a GSI when the key count grows past a few hundred).
     """
+    # The bundle fields and the aws_* fields are projected deliberately. The
+    # bundle checkout handlers branch on record.get("aws_license_arn") to refuse
+    # to modify an AWS-fulfilled key, and on record.get("bundle_?_access") to
+    # avoid re-provisioning and re-emailing a key that already has it. A
+    # ProjectionExpression that omits them does not raise -- it returns None for
+    # every one, so both guards silently evaluate false. Added 2026-08-12; the
+    # Bundle D door had shipped with them missing.
     resp = dynamodb.Table(API_KEYS_TABLE).scan(
         FilterExpression=Attr("stripe_customer_id").eq(stripe_customer_id),
-        ProjectionExpression="api_key, email, intel_access, intel_plan_tier, stripe_subscription_id",
+        ProjectionExpression=(
+            "api_key, email, intel_access, intel_plan_tier, stripe_subscription_id, "
+            "bundle_a_access, bundle_d_access, aws_account_id, aws_customer_id, aws_license_arn"
+        ),
     )
     items = resp.get("Items", [])
     return items[0] if items else None
@@ -944,6 +1116,233 @@ def _handle_llm_license_checkout(session: dict) -> None:
             _send_llm_license_key_email(customer_email, api_key)
         else:
             logger.warning("LLM license checkout with no email — key issued but not emailed, session=%s", session.get("id"))
+
+
+def _provision_bundle_d_direct(api_key_str: str, stripe_subscription_id: str) -> None:
+    """Set bundle_d_access=True for a DIRECT Stripe purchase of Bundle D.
+
+    Same flag the AWS Marketplace fulfilment path sets, deliberately: the
+    capability gate in relayshield_api.py keys on bundle_d_access, so one flag
+    serves both doors and there is no second code path to keep in sync.
+
+    What is NOT set here, and must never be: aws_account_id and
+    aws_license_arn. Their absence is what stops the metering code reporting
+    a Stripe customer's usage to AWS. See is_bundle_d_call in
+    relayshield_api.py, which requires aws_customer_id before metering.
+    """
+    dynamodb.Table(API_KEYS_TABLE).update_item(
+        Key={"api_key": api_key_str},
+        UpdateExpression="SET bundle_d_access = :yes, stripe_subscription_id = :sid",
+        ExpressionAttributeValues={":yes": True, ":sid": stripe_subscription_id},
+    )
+    logger.info("bundle_d_access provisioned (direct) api_key=%s", api_key_str[:16])
+
+
+def _revoke_bundle_d_direct(api_key_str: str) -> None:
+    """Set bundle_d_access=False on direct Bundle D cancellation.
+
+    Only ever called for a subscription whose price is in
+    BUNDLE_D_DIRECT_PRICE_IDS, so an AWS-fulfilled key can never be revoked
+    by a Stripe event.
+    """
+    dynamodb.Table(API_KEYS_TABLE).update_item(
+        Key={"api_key": api_key_str},
+        UpdateExpression="SET bundle_d_access = :no",
+        ExpressionAttributeValues={":no": False},
+    )
+    logger.info("bundle_d_access revoked (direct) api_key=%s", api_key_str[:16])
+
+
+def _handle_bundle_d_direct_checkout(session: dict) -> None:
+    """Provision Bundle D after a direct Stripe checkout. Mirrors
+    _handle_llm_license_checkout's idempotency shape exactly."""
+    stripe_customer_id     = session.get("customer") or ""
+    stripe_subscription_id = session.get("subscription") or ""
+    customer_email         = (session.get("customer_details") or {}).get("email") or ""
+
+    record = _find_key_by_customer(stripe_customer_id)
+
+    if record:
+        api_key = record["api_key"]
+        # Refuse to touch a key that came from AWS. If someone with a
+        # Marketplace subscription also checks out on Stripe, that is exactly
+        # the double-billing/disintermediation shape an audit looks for, and
+        # silently flipping a flag on their AWS key would be the wrong repair.
+        if record.get("aws_license_arn") or record.get("aws_account_id"):
+            logger.error(
+                "Bundle D direct checkout matched an AWS-fulfilled key, refusing to modify it. "
+                "api_key=%s stripe_customer=%s sub=%s — resolve manually.",
+                api_key[:16], stripe_customer_id, stripe_subscription_id,
+            )
+            return
+        if not record.get("bundle_d_access"):
+            _provision_bundle_d_direct(api_key, stripe_subscription_id)
+            if customer_email:
+                _send_bundle_d_direct_key_email(customer_email, api_key)
+        else:
+            logger.info("bundle_d_access already provisioned api_key=%s", api_key[:16])
+    else:
+        api_key = _issue_api_key(stripe_customer_id, stripe_subscription_id,
+                                 customer_email, source="bundle_d_direct")
+        _provision_bundle_d_direct(api_key, stripe_subscription_id)
+        if customer_email:
+            _send_bundle_d_direct_key_email(customer_email, api_key)
+        else:
+            logger.warning("Bundle D direct checkout with no email — key issued but not emailed, session=%s",
+                           session.get("id"))
+
+
+def _send_bundle_d_direct_key_email(to_email: str, api_key: str) -> None:
+    subject = "Your RelayShield Agentic Attack Surface bundle is active"
+    body = f"""Thanks for subscribing.
+
+Your API key: {api_key}
+
+Included endpoints:
+  POST /v1/metered/tech-stack-cve
+  POST /v1/metered/bulk-identity-risk
+  POST /v1/metered/llm-credential-exposure
+  POST /v1/metered/mcp-registry-risk
+  POST /v1/metered/prompt-injection-breach
+
+Send it as the X-RS-API-KEY header. Full reference and live examples:
+https://api.relayshield.net/developers
+
+Questions: support@relayshield.net
+
+RelayShield
+"""
+    try:
+        ses.send_email(
+            Source=FROM_EMAIL,
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject},
+                "Body":    {"Text": {"Data": body}},
+            },
+        )
+        logger.info("Bundle D direct key email sent to %s", to_email)
+    except Exception as exc:
+        logger.error("SES send failed (bundle_d_direct) to=%s error=%s", to_email, exc)
+
+
+def _provision_bundle_a_direct(api_key_str: str, stripe_subscription_id: str) -> None:
+    """Set bundle_a_access=True for a DIRECT Stripe purchase of Bundle A.
+
+    Same flag the AWS Marketplace fulfilment path sets (see
+    relayshield_bundle_fulfillment.py's core_identity_bundle_access ->
+    bundle_a_access mapping), so one flag serves both doors.
+
+    What is NOT set here, and must never be: aws_account_id, aws_customer_id
+    and aws_license_arn. Their absence is what stops relayshield_api.py
+    reporting a Stripe customer's usage to AWS through BatchMeterUsage, and
+    what makes is_bundle_a_direct_call rather than is_bundle_a_call fire.
+    """
+    dynamodb.Table(API_KEYS_TABLE).update_item(
+        Key={"api_key": api_key_str},
+        UpdateExpression="SET bundle_a_access = :yes, stripe_subscription_id = :sid",
+        ExpressionAttributeValues={":yes": True, ":sid": stripe_subscription_id},
+    )
+    logger.info("bundle_a_access provisioned (direct) api_key=%s", api_key_str[:16])
+
+
+def _revoke_bundle_a_direct(api_key_str: str) -> None:
+    """Set bundle_a_access=False on direct Bundle A cancellation.
+
+    Only ever called for a subscription whose price is in
+    BUNDLE_A_DIRECT_PRICE_IDS, so an AWS-fulfilled key can never be revoked
+    by a Stripe event.
+    """
+    dynamodb.Table(API_KEYS_TABLE).update_item(
+        Key={"api_key": api_key_str},
+        UpdateExpression="SET bundle_a_access = :no",
+        ExpressionAttributeValues={":no": False},
+    )
+    logger.info("bundle_a_access revoked (direct) api_key=%s", api_key_str[:16])
+
+
+def _handle_bundle_a_direct_checkout(session: dict) -> None:
+    """Provision Bundle A after a direct Stripe checkout. Mirrors
+    _handle_bundle_d_direct_checkout exactly."""
+    stripe_customer_id     = session.get("customer") or ""
+    stripe_subscription_id = session.get("subscription") or ""
+    customer_email         = (session.get("customer_details") or {}).get("email") or ""
+
+    record = _find_key_by_customer(stripe_customer_id)
+
+    if record:
+        api_key = record["api_key"]
+        # Refuse to touch a key that came from AWS -- the disintermediation
+        # shape an audit looks for. Same guard as the Bundle D door.
+        if record.get("aws_license_arn") or record.get("aws_account_id"):
+            logger.error(
+                "Bundle A direct checkout matched an AWS-fulfilled key, refusing to modify it. "
+                "api_key=%s stripe_customer=%s sub=%s — resolve manually.",
+                api_key[:16], stripe_customer_id, stripe_subscription_id,
+            )
+            return
+        if not record.get("bundle_a_access"):
+            _provision_bundle_a_direct(api_key, stripe_subscription_id)
+            if customer_email:
+                _send_bundle_a_direct_key_email(customer_email, api_key)
+        else:
+            logger.info("bundle_a_access already provisioned api_key=%s", api_key[:16])
+    else:
+        api_key = _issue_api_key(stripe_customer_id, stripe_subscription_id,
+                                 customer_email, source="bundle_a_direct")
+        _provision_bundle_a_direct(api_key, stripe_subscription_id)
+        if customer_email:
+            _send_bundle_a_direct_key_email(customer_email, api_key)
+        else:
+            logger.warning("Bundle A direct checkout with no email — key issued but not emailed, session=%s",
+                           session.get("id"))
+
+
+def _send_bundle_a_direct_key_email(to_email: str, api_key: str) -> None:
+    subject = "Your RelayShield Core Identity Exposure bundle is active"
+    # SIM swap is listed with its real status. It is a live paid endpoint that
+    # currently returns 503 pending Twilio registration (#28883049), and a
+    # welcome email that silently omits it would have the customer discover
+    # that on their own. Founder's decision 2026-08-11: it stays in the copy.
+    body = f"""Thanks for subscribing.
+
+Your API key: {api_key}
+
+Included endpoints, billed per call on top of the $150/mo access fee:
+
+  POST /v1/metered/breach            $0.10   breach and dark web credential exposure
+  POST /v1/metered/infostealer       $0.50   credentials harvested by stealer malware
+  POST /v1/metered/domain            $0.30   typosquat and lookalike domain detection
+  POST /v1/metered/oauth-watchlist   $0.30   leaked OAuth and API tokens
+  POST /v1/metered/crypto-intel      $0.30   wallet and domain checks against our corpus
+  POST /v1/metered/sim-swap          $0.25   recent SIM swap activity on a phone number
+
+These are the same rates as the AWS Marketplace listing. Usage appears on your
+monthly invoice as a single metered line.
+
+Note on sim-swap: carrier registration is still in progress, so that endpoint
+returns 503 today and is not billed while it does. We will email you when it
+is live.
+
+Send your key as the X-RS-API-KEY header. Full reference and live examples:
+https://api.relayshield.net/developers
+
+Questions: support@relayshield.net
+
+RelayShield
+"""
+    try:
+        ses.send_email(
+            Source=FROM_EMAIL,
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject},
+                "Body":    {"Text": {"Data": body}},
+            },
+        )
+        logger.info("Bundle A direct key email sent to %s", to_email)
+    except Exception as exc:
+        logger.error("SES send failed (bundle_a_direct) to=%s error=%s", to_email, exc)
 
 
 def _send_cs_mobile_key_email(to_email: str, api_key: str) -> None:
@@ -1165,6 +1564,34 @@ def handle_webhook(headers: dict, raw_body: bytes) -> dict:
         sub_id       = subscription.get("id", "")
         items        = subscription.get("items", {}).get("data", [])
         price_id     = items[0].get("price", {}).get("id") if items else None
+        # Bundles carry two items and Stripe does not guarantee order, so the
+        # bundle branches below match against the whole set. Reading items[0]
+        # alone meant a cancelled bundle subscription could fail to revoke and
+        # the customer would keep access indefinitely. Fixed 2026-08-12.
+        price_ids    = {i.get("price", {}).get("id") for i in items}
+        if price_ids & BUNDLE_A_DIRECT_PRICE_IDS:
+            record = _find_key_by_subscription(sub_id)
+            if record:
+                # A Stripe cancellation must never revoke an AWS entitlement.
+                if record.get("aws_license_arn") or record.get("aws_account_id"):
+                    logger.error("subscription.deleted (bundle_a_direct) matched an AWS-fulfilled key, "
+                                 "refusing to revoke. api_key=%s sub=%s", record["api_key"][:16], sub_id)
+                else:
+                    _revoke_bundle_a_direct(record["api_key"])
+            else:
+                logger.warning("subscription.deleted (bundle_a_direct): no API key for sub=%s", sub_id)
+            return {"statusCode": 200, "body": "ok"}
+        if price_ids & BUNDLE_D_DIRECT_PRICE_IDS:
+            record = _find_key_by_subscription(sub_id)
+            if record:
+                if record.get("aws_license_arn") or record.get("aws_account_id"):
+                    logger.error("subscription.deleted (bundle_d_direct) matched an AWS-fulfilled key, "
+                                 "refusing to revoke. api_key=%s sub=%s", record["api_key"][:16], sub_id)
+                else:
+                    _revoke_bundle_d_direct(record["api_key"])
+            else:
+                logger.warning("subscription.deleted (bundle_d_direct): no API key for sub=%s", sub_id)
+            return {"statusCode": 200, "body": "ok"}
         if price_id in TI_PRICE_TIER_MAP:
             record = _find_key_by_subscription(sub_id)
             if record:
@@ -1228,7 +1655,20 @@ def handle_webhook(headers: dict, raw_body: bytes) -> dict:
         # Check if this is a TI or CS Mobile subscription checkout before assuming
         # it's a generic metered developer signup
         if sub_id:
-            price_id = _get_subscription_price_id(sub_id)
+            # Bundles are checked FIRST and against the full item list, because
+            # a bundle subscription has two items and the licensed price may not
+            # be items[0]. Everything below this is single-item.
+            price_ids = set(_get_subscription_price_ids(sub_id))
+            if price_ids & BUNDLE_A_DIRECT_PRICE_IDS:
+                logger.info("Bundle A direct checkout detected prices=%s sub=%s", sorted(price_ids), sub_id)
+                _handle_bundle_a_direct_checkout(session)
+                return {"statusCode": 200, "body": "ok"}
+            if price_ids & BUNDLE_D_DIRECT_PRICE_IDS:
+                logger.info("Bundle D direct checkout detected prices=%s sub=%s", sorted(price_ids), sub_id)
+                _handle_bundle_d_direct_checkout(session)
+                return {"statusCode": 200, "body": "ok"}
+
+            price_id = next(iter(price_ids), None)
             if price_id in TI_PRICE_TIER_MAP:
                 logger.info("TI checkout detected price=%s sub=%s", price_id, sub_id)
                 _handle_ti_checkout(session, source=source)
@@ -1286,33 +1726,33 @@ LANDING_PAGE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" href="/favicon.ico" sizes="any">
-<title>RelayShield API — Security Intelligence for Developers</title>
+<title>RelayShield API: Security Intelligence for Developers</title>
 <!--
   Discoverability block added 2026-07-30. Until then this page had NO meta
   description, NO Open Graph tags, no canonical and no structured data, while
   blog.relayshield.net and relayshield.net both had the full set. This is the
   page every blog post, integration listing and community message points at,
   so every one of those links rendered as a bare URL with no title card in
-  Slack, Discord, LinkedIn, X and Telegram -- throwing away the click-through
+  Slack, Discord, LinkedIn, X and Telegram, throwing away the click-through
   at the last inch of a funnel we were paying for everywhere else.
 -->
-<meta name="description" content="Threat intelligence and identity-compromise APIs for developers and AI agents. 5.0M+ IOCs from 85+ criminal Telegram channels and 20 feeds. Breach, infostealer, SIM-swap, LLM credential exposure, MCP registry risk. Pay-as-you-go, no minimum.">
+<meta name="description" content="Threat intelligence and identity-compromise APIs for developers and AI agents. 494K+ distinct indicators (5.8M+ sightings) from 95 monitored channels and 20 feeds. Breach, infostealer, SIM-swap, LLM credential exposure, MCP registry risk. Pay-as-you-go, no minimum.">
 <link rel="canonical" href="https://api.relayshield.net/developers">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="RelayShield">
 <meta property="og:url" content="https://api.relayshield.net/developers">
-<meta property="og:title" content="RelayShield API — Security Intelligence for Developers &amp; Agents">
-<meta property="og:description" content="5.0M+ IOCs from 85+ criminal Telegram channels and 20 authoritative feeds. Breach, infostealer, SIM-swap, LLM credential exposure and MCP registry risk, over REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
+<meta property="og:title" content="RelayShield API: Security Intelligence for Developers &amp; Agents">
+<meta property="og:description" content="494K+ distinct indicators (5.8M+ sightings) from 95 monitored channels and 20 authoritative feeds. Breach, infostealer, SIM-swap, LLM credential exposure and MCP registry risk, over REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
 <meta property="og:image" content="https://blog.relayshield.net/developers-og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="RelayShield API — security intelligence for developers and agents">
+<meta property="og:image:alt" content="RelayShield API: security intelligence for developers and agents">
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="RelayShield API — Security Intelligence for Developers &amp; Agents">
-<meta name="twitter:description" content="5.0M+ IOCs from 85+ criminal Telegram channels and 20 authoritative feeds. REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
+<meta name="twitter:title" content="RelayShield API: Security Intelligence for Developers &amp; Agents">
+<meta name="twitter:description" content="494K+ distinct indicators (5.8M+ sightings) from 95 monitored channels and 20 authoritative feeds. REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
 <meta name="twitter:image" content="https://blog.relayshield.net/developers-og.png">
 
 <link rel="alternate" type="application/json" href="https://api.relayshield.net/openapi.json" title="RelayShield OpenAPI specification">
@@ -1354,6 +1794,12 @@ LANDING_PAGE = """<!DOCTYPE html>
   body { background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; }
   a { color: var(--accent); text-decoration: none; }
 
+  /* Long unbroken tokens (URLs, header values, keys) must wrap rather than
+     overflow their container. Without this the TAXII collection URL in the
+     Elastic callout bled outside its border on a phone. `anywhere` also lets
+     the box shrink to the viewport, which `break-word` alone does not. */
+  code { overflow-wrap: anywhere; word-break: break-word; }
+
   /* Nav */
   nav { display: flex; align-items: center; justify-content: space-between;
         padding: 1.1rem 2rem; border-bottom: 1px solid var(--border); }
@@ -1393,7 +1839,8 @@ LANDING_PAGE = """<!DOCTYPE html>
 
   /* Pricing table */
   .section { max-width: 860px; margin: 4.5rem auto; padding: 0 1.5rem; }
-  .section-title { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; }
+  .section-title { font-size: 1.4rem; font-weight: 700; margin: 0 0 .4rem; }
+  h2.section-title, h3.section-title { line-height: 1.25; }
   .section-sub { color: var(--muted); font-size: .95rem; margin-bottom: 2rem; }
   .price-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
   .price-card { background: var(--surface); border: 1px solid var(--border);
@@ -1413,6 +1860,34 @@ LANDING_PAGE = """<!DOCTYPE html>
         font-size: .82rem; line-height: 1.7; color: #abb2bf; }
   .kw { color: #c678dd; } .str { color: #98c379; } .key { color: #e06c75; }
   .cmt { color: #5c6370; font-style: italic; }
+
+  /* Mobile. Added 2026-08-09: this page had NO media query at all, on any
+     breakpoint, which is why the signup CTA overflowed its box on a phone.
+     The direct cause was button[type=submit] carrying white-space:nowrap
+     inside a non-wrapping flex row, so the button could not shrink and simply
+     pushed out of the container. That button is the primary conversion action
+     on the page, and rsscan and the MetaMask Snap both send arrivals who are
+     plausibly on a phone. */
+  @media (max-width: 640px) {
+    nav { padding: .9rem 1.1rem; }
+    .hero { margin-top: 2.5rem; padding: 0 1.1rem; }
+    .section { padding-left: 1.1rem; padding-right: 1.1rem; }
+
+    /* The actual bug: stack the field and the button instead of letting a
+       nowrap button overflow. */
+    .input-row { flex-direction: column; }
+    .signup-box { padding: 1.4rem 1.1rem; }
+    .signup-box button[type=submit] { width: 100%; padding-top: .8rem; padding-bottom: .8rem; }
+
+    /* A fixed two-column grid cannot survive a 375px viewport. */
+    .section div[style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
+
+    /* The TI tier table is wider than a phone. Let it scroll in place rather
+       than widening the whole document and creating a horizontal page scroll. */
+    table { display: block; width: 100%; overflow-x: auto; }
+
+    pre { padding: 1rem .9rem; font-size: .76rem; }
+  }
 
   /* Footer */
   footer { border-top: 1px solid var(--border); text-align: center;
@@ -1439,11 +1914,11 @@ LANDING_PAGE = """<!DOCTYPE html>
 <div class="hero">
   <div class="badge">Developer API</div>
   <h1>Security intelligence<br>for <span>developers &amp; agents</span></h1>
-  <p>Breach detection, SIM swap monitoring, infostealer exposure, domain lookalike scanning, and live threat intelligence — REST API, no monthly minimum, no commitments.</p>
-  <p style="margin-top:.6rem;font-size:.95rem;color:var(--muted)">Unlike leading enterprise threat intelligence platforms that charge per API key <em>and</em> per user seat, RelayShield charges only for the calls you make. One API key, no seat fees, no per-user licensing.</p>
+  <p>Breach detection, SIM swap monitoring, infostealer exposure, domain lookalike scanning, and live threat intelligence. REST API, priced per call.</p>
+  <p style="margin-top:.6rem;font-size:1rem;color:var(--text)"><strong>Every comparable threat intelligence platform is quote-only.</strong> You book a call to find out the price, then pay per API key <em>and</em> per user seat, on an annual contract. RelayShield publishes every price on this page. One key, no seat fees, no minimum, no contract, no call. A breach check is $0.10 and you can run one in the next two minutes.</p>
 
   <!-- AWS Marketplace notice. Wording is deliberately verbatim from the
-       UsageInstructions field AWS has already passed in audit — see TODO
+       UsageInstructions field AWS has already passed in audit, see TODO
        AGENTIC-6. Do not reword without re-reading that note. -->
   <div style="background:rgba(0,181,165,.08);border:1px solid rgba(0,181,165,.35);border-radius:10px;padding:1rem 1.25rem;margin-top:1.5rem;font-size:.9rem;color:var(--text);line-height:1.6">
     <strong style="color:var(--accent2,#00B5A5)">AWS Marketplace subscribers:</strong> your API key is provisioned
@@ -1452,7 +1927,7 @@ LANDING_PAGE = """<!DOCTYPE html>
   </div>
 
   <div class="signup-box">
-    <p><strong style="color:var(--accent)">20 free calls, no card required.</strong> Enter your email and your API key arrives instantly.</p>
+    <p><strong style="color:var(--accent)">100 free calls, no card required.</strong> Enter your email and your API key arrives instantly.</p>
     <form id="signup-form">
       <div class="input-row">
         <input type="email" id="email-input" placeholder="you@company.com" required autocomplete="email">
@@ -1465,22 +1940,51 @@ LANDING_PAGE = """<!DOCTYPE html>
 
   <div style="background:rgba(108,99,255,.08);border:1px solid rgba(108,99,255,.25);border-radius:10px;padding:1rem 1.25rem;margin-top:1.25rem;font-size:.9rem;color:var(--text);line-height:1.6">
     <strong style="color:var(--accent)">How billing works:</strong> Every new key gets
-    <strong>20 free calls with no payment method</strong> &mdash; enough to integrate and see real
-    responses on a couple of endpoints. When they run out, add a card and you are billed monthly for
-    calls made, with no minimum and no subscription fee. A test run of 10 breach checks after that
-    costs $1.00.
-    Customers who subscribe through AWS Marketplace never add a payment method &mdash; access is
+    <strong>100 free calls with no payment method</strong>, enough to scan a domain, check a
+    team's worth of employee emails, and have a real finding to show someone. When they run out, add
+    a card and you are billed monthly for calls made, with no minimum and no subscription fee. Ten
+    breach checks cost $1.00.
+    Customers who subscribe through AWS Marketplace never add a payment method. Access is
     provisioned automatically and all billing is handled by AWS.
-    Threat Intelligence subscriptions ($499/$999/mo) are separate and billed monthly.
+  </div>
+
+  <!-- The subscriptions used to be disclosed here, one screen under a headline
+       promising "no monthly minimum, no commitments". The page argued against
+       its own hero before the reader reached the price list. They are still
+       fully disclosed, just where they belong: in their own sections, below the
+       per-call catalogue the hero is actually describing. -->
+  <p style="margin-top:1rem;font-size:.88rem;color:var(--muted)">
+    Prefer a flat rate? There are optional subscriptions for
+    <a href="#llmjacking-license">LLMjacking detection</a> and
+    <a href="#threat-intelligence">bulk threat intelligence</a>. Neither is required to use the API.
+  </p>
+</div>
+
+<div class="section">
+  <h2 class="section-title" id="from-rsscan">Came here from rsscan?</h2>
+  <div class="section-sub">The scanner runs locally and reads your diff, so it catches the credential that is about to leak. This API answers the other half.</div>
+  <div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:1.15rem 1.25rem;margin:1.25rem 0 0;line-height:1.6">
+    <p style="margin:0 0 .85rem"><code>rsscan</code> cannot see a credential that already left: committed months ago, shipped in a published package, or sitting in a public artifact somebody else owns. Those are the ones already being sold.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem;margin:1rem 0 .85rem">
+      <div style="background:var(--bg,rgba(0,0,0,.15));border:1px solid var(--border);border-radius:8px;padding:.85rem 1rem">
+        <div style="font-family:monospace;color:var(--accent);font-size:.85rem;margin-bottom:.35rem">/v1/metered/secret-scan</div>
+        <div style="color:var(--muted);font-size:.87rem">Finds keys already published across GitHub, npm, PyPI, Docker Hub and Postman. $0.35 a call.</div>
+      </div>
+      <div style="background:var(--bg,rgba(0,0,0,.15));border:1px solid var(--border);border-radius:8px;padding:.85rem 1rem">
+        <div style="font-family:monospace;color:var(--accent);font-size:.85rem;margin-bottom:.35rem">/v1/metered/nhi-exposure</div>
+        <div style="color:var(--muted);font-size:.87rem">Finds machine credentials and tokens inside criminal infostealer logs, where a leaked key ends up after it is stolen rather than published. $0.40 a call.</div>
+      </div>
+    </div>
+    <p style="margin:0;color:var(--muted);font-size:.9rem">Run <code>rsscan --org</code> and it reports across your whole organisation instead of one checkout. That output is the thing worth forwarding to whoever owns security where you work, and your 100 free calls are enough to produce it.</p>
   </div>
 </div>
 
 <div class="section">
-  <div class="section-title">Endpoints &amp; pricing</div>
-  <div class="section-sub">Pay only for what you use. Billed monthly. No monthly minimum. Low-volume ad-hoc testing costs pennies — a 10-call integration test runs $0.10–$0.50 total.</div>
+  <h2 class="section-title" id="endpoints">Endpoints &amp; pricing</h2>
+  <div class="section-sub">Pay only for what you use. Billed monthly. No monthly minimum. Low-volume ad-hoc testing costs pennies: a 10-call integration test runs $0.10 to $0.50 total.</div>
   <!-- Docs callout added 2026-08-04. The cards below give the price and a one-line
        summary of each endpoint, which is what a buyer needs, but a developer
-       evaluating the API needs parameters, response attributes and errors — the
+       evaluating the API needs parameters, response attributes and errors, the
        exact gap Zapier's partner review raised. Placed at the top of this section
        rather than in the footer so it is seen by anyone scanning the endpoint list
        and wondering what the request body looks like. -->
@@ -1491,7 +1995,7 @@ LANDING_PAGE = """<!DOCTYPE html>
       error codes and a worked example at
       <a href="/docs">api.relayshield.net/docs</a>.
       The machine-readable OpenAPI 3.1 specification is at
-      <a href="/openapi.json">api.relayshield.net/openapi.json</a> — point your client
+      <a href="/openapi.json">api.relayshield.net/openapi.json</a>. Point your client
       generator at it directly.
     </div>
   </div>
@@ -1499,159 +2003,159 @@ LANDING_PAGE = """<!DOCTYPE html>
     <div class="price-card">
       <div class="endpoint">/v1/metered/breach</div>
       <div class="price">$0.10<span class="per"> / call</span></div>
-      <div class="desc">Email breach check — breach name, date, and exposed data classes across 13B+ compromised accounts</div>
+      <div class="desc">Email breach check: breach name, date, and exposed data classes across 13B+ compromised accounts</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/sim-swap</div>
       <div class="price">$0.25<span class="per"> / call</span></div>
-      <div class="desc">SIM swap detection via telco carrier lookup database — confirms whether a number has been ported or swapped, with carrier name and swap timestamp</div>
+      <div class="desc">SIM swap detection via telco carrier lookup database: confirms whether a number has been ported or swapped, with carrier name and swap timestamp</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/infostealer</div>
       <div class="price">$0.50<span class="per"> / call</span></div>
-      <div class="desc">Infostealer malware log check — a single infected device exposes every saved password across 50+ services simultaneously: banking credentials, credit card autofill, email, SaaS tools, and active session cookies that bypass 2FA. Returns infection date, OS, malware path, and at-risk service counts</div>
+      <div class="desc">Infostealer malware log check: a single infected device exposes every saved password across 50+ services simultaneously: banking credentials, credit card autofill, email, SaaS tools, and active session cookies that bypass 2FA. Returns infection date, OS, malware path, and at-risk service counts</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/domain</div>
       <div class="price">$0.30<span class="per"> / call</span></div>
-      <div class="desc">Typosquat domain scan — active lookalikes via DNS + cert transparency</div>
+      <div class="desc">Typosquat domain scan: active lookalikes via DNS + cert transparency</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/oauth-watchlist</div>
       <div class="price">$0.30<span class="per"> / call</span></div>
-      <div class="desc">OAuth &amp; token exposure — combines breach history watchlist with live stealer log corpus. Detects stolen credentials and OAuth tokens with category-level severity scores: cloud consoles and code repositories (CRITICAL), identity providers and payment processors (HIGH), productivity SaaS (MEDIUM)</div>
+      <div class="desc">OAuth &amp; token exposure: combines breach history watchlist with live stealer log corpus. Detects stolen credentials and OAuth tokens with category-level severity scores: cloud consoles and code repositories (CRITICAL), identity providers and payment processors (HIGH), productivity SaaS (MEDIUM)</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/supply-chain</div>
       <div class="price">$0.10<span class="per"> / call</span></div>
-      <div class="desc">Vendor / supply chain risk — breach exposure + infostealer hits per vendor domain. Up to 10 domains per call. Returns per-domain risk score: CRITICAL · HIGH · MEDIUM · LOW</div>
+      <div class="desc">Vendor / supply chain risk: breach exposure + infostealer hits per vendor domain. Up to 10 domains per call. Returns per-domain risk score: CRITICAL · HIGH · MEDIUM · LOW</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/session-risk</div>
       <div class="price">$0.30<span class="per"> / call</span></div>
-      <div class="desc">Active session hijack detection — identifies stolen session cookies in criminal stealer log archives before attackers use them. Detects AiTM attacks that bypass 2FA without needing the user&apos;s password. Returns severity-ranked results by service category</div>
+      <div class="desc">Active session hijack detection: identifies stolen session cookies in criminal stealer log archives before attackers use them. Detects AiTM attacks that bypass 2FA without needing the user&apos;s password. Returns severity-ranked results by service category</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/identity-graph</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">Identity correlation — links an email to associated phone numbers and domains seen alongside it in criminal channel dumps. Pivot from one compromised identifier to find all others exposed in the same breach or stealer log</div>
+      <div class="desc">Identity correlation: links an email to associated phone numbers and domains seen alongside it in criminal channel dumps. Pivot from one compromised identifier to find all others exposed in the same breach or stealer log</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/ransomware-risk</div>
       <div class="price">$0.40<span class="per"> / call</span></div>
-      <div class="desc">Ransomware victim check — queries 100+ active ransomware group leak sites. Returns victim list status, responsible group(s), and count of pre-ransomware credentials found in stealer logs before the incident</div>
+      <div class="desc">Ransomware victim check: queries 100+ active ransomware group leak sites. Returns victim list status, responsible group(s), and count of pre-ransomware credentials found in stealer logs before the incident</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/nhi-exposure</div>
       <div class="price">$0.40<span class="per"> / call</span></div>
-      <div class="desc">Non-human identity (NHI) detection — scans stealer log corpus for API keys, tokens, and machine credentials (AWS IAM keys, GitHub PATs, Stripe secrets, private keys, Slack tokens) linked to your domain or vendor supply chain domains</div>
+      <div class="desc">Non-human identity (NHI) detection: scans stealer log corpus for API keys, tokens, and machine credentials (AWS IAM keys, GitHub PATs, Stripe secrets, private keys, Slack tokens) linked to your domain or vendor supply chain domains</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/secret-scan</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">Public artifact secret detection across <strong>six sources</strong> &mdash; GitHub repositories, <strong>npm</strong> and <strong>PyPI</strong> packages, <strong>Docker Hub</strong> images, <strong>Hugging Face</strong> models and Spaces, and <strong>Postman</strong> public workspaces and collections &mdash; for secrets (API keys, tokens, private keys) already published against your domain. Secrets ship inside released packages and images constantly, and repo-only scanners never see them. Every hit is verified against the matching credential pattern before it is reported, so a docs example or a placeholder is not billed to you as a CRITICAL. Covers your own domain and vendor supply-chain domains</div>
+      <div class="desc">Public artifact secret detection across <strong>six sources</strong>, GitHub repositories, <strong>npm</strong> and <strong>PyPI</strong> packages, <strong>Docker Hub</strong> images, <strong>Hugging Face</strong> models and Spaces, and <strong>Postman</strong> public workspaces and collections, for secrets (API keys, tokens, private keys) already published against your domain. Secrets ship inside released packages and images constantly, and repo-only scanners never see them. Every hit is verified against the matching credential pattern before it is reported, so a docs example or a placeholder is not billed to you as a CRITICAL. Covers your own domain and vendor supply-chain domains</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/target-risk</div>
       <div class="price">$0.50<span class="per"> / call</span></div>
-      <div class="desc">Target probability scoring — correlates 6 threat signals (ransomware victim listing, stealer log hits, breach exposure, criminal channel mentions, high-EPSS CVEs, pre-ransomware credentials) into a 0–100 risk score with 4-tier rating and recommended action</div>
+      <div class="desc">Target probability scoring: correlates 6 threat signals (ransomware victim listing, stealer log hits, breach exposure, criminal channel mentions, high-EPSS CVEs, pre-ransomware credentials) into a 0 to 100 risk score with 4-tier rating and recommended action</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/crypto-intel</div>
       <div class="price">$0.30<span class="per"> / call</span></div>
-      <div class="desc">Crypto asset surface — wallet address risk, token honeypot &amp; tax flags, NFT contract risk, counterparty screening across EVM, Solana, TON, and Bitcoin</div>
+      <div class="desc">Crypto asset surface: wallet address risk, token honeypot &amp; tax flags, NFT contract risk, counterparty screening across EVM, Solana, TON, and Bitcoin</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/asset-intel</div>
       <div class="price">$0.15<span class="per"> / call</span></div>
-      <div class="desc">Asset watchlist &amp; continuous monitoring — register domains and IPs for ongoing IOC surveillance. Actions: <code>register</code> assets, <code>sweep</code> all registered assets against 5.0M+ IOC corpus, <code>list</code> or <code>remove</code>. Webhook push alerts fire automatically when new IOCs match your registered assets</div>
+      <div class="desc">Asset watchlist &amp; continuous monitoring: register domains and IPs for ongoing IOC surveillance. Actions: <code>register</code> assets, <code>sweep</code> all registered assets against the 494K+ distinct indicator corpus (5.8M+ sightings), <code>list</code> or <code>remove</code>. Webhook push alerts fire automatically when new IOCs match your registered assets</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/threat-actor</div>
       <div class="price">$0.30<span class="per"> / call</span></div>
-      <div class="desc">Threat actor intelligence — two actions in one endpoint. <code>exploit-chatter</code>: detect pre-publication CVE PoC discussion in criminal channels before NVD/KEV publication, with EPSS score and KEV status. <code>actor-lookup</code>: track a threat actor or malware campaign (e.g. LummaC2, APT29) — returns IOC count, IOC breakdown by type, MITRE ATT&amp;CK group info, aliases, and techniques</div>
+      <div class="desc">Threat actor intelligence: two actions in one endpoint. <code>exploit-chatter</code>: detect pre-publication CVE PoC discussion in criminal channels before NVD/KEV publication, with EPSS score and KEV status. <code>actor-lookup</code>: track a threat actor or malware campaign (e.g. LummaC2, APT29), returns IOC count, IOC breakdown by type, MITRE ATT&amp;CK group info, aliases, and techniques</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/cve-identity-risk</div>
       <div class="price">$0.40<span class="per"> / call</span></div>
-      <div class="desc">CVE × identity risk correlation — pass a CVE ID and domain to get a composite risk score (0–100) combining CISA KEV status, EPSS exploitation probability, infostealer corpus hits for exploiting malware families, ransomware victim listing, and exploit chatter signals. The only API that closes the loop from vulnerability to live identity exposure for a specific organization</div>
+      <div class="desc">CVE × identity risk correlation: pass a CVE ID and domain to get a composite risk score (0 to 100) combining CISA KEV status, EPSS exploitation probability, infostealer corpus hits for exploiting malware families, ransomware victim listing, and exploit chatter signals. The only API that closes the loop from vulnerability to live identity exposure for a specific organization</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/identity-risk-score</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">Domain identity risk score — a security credit score (0–100, grade A–F) for any domain across 6 dimensions: breach exposure, infostealer density, IOC corpus presence, ransomware victim listing, active session exposure, and CVE exposure. MSPs can embed this in client QBRs, insurance renewal reports, and onboarding risk assessments</div>
+      <div class="desc">Domain identity risk score: a security credit score (0 to 100, grade A to F) for any domain across 6 dimensions: breach exposure, infostealer density, IOC corpus presence, ransomware victim listing, active session exposure, and CVE exposure. MSPs can embed this in client QBRs, insurance renewal reports, and onboarding risk assessments</div>
     </div>
     <p style="margin:1.5rem 0 .75rem;padding:.9rem 1.1rem;background:rgba(108,99,255,.07);border:1px solid rgba(108,99,255,.2);border-radius:8px;font-size:.9rem;color:var(--muted)">
-      <strong style="color:var(--accent)">🤗 Try the Agentic Attack Surface live on Hugging Face</strong> — no signup required to explore the MCP schema.
+      <strong style="color:var(--accent)">🤗 Try the Agentic Attack Surface live on Hugging Face</strong>. No signup required to explore the MCP schema.
       <a href="https://huggingface.co/spaces/relayshieldadmin/relayshield-agentic-attack-surface" target="_blank" rel="noopener" style="color:var(--accent)">Space</a>
       · <a href="https://huggingface.co/blog/relayshieldadmin/relayshield-agentic-attack-surface-mcp" target="_blank" rel="noopener" style="color:var(--accent)">announcement post</a>
     </p>
     <div class="price-card" id="ep-tech-stack-cve">
       <div class="endpoint">/v1/metered/tech-stack-cve</div>
       <div class="price">$0.20<span class="per"> / call</span></div>
-      <div class="desc">Agent framework &amp; tech stack exploit monitoring — pass a declared tech stack (or a domain to pull its stored stack) and get back CISA KEV / high-EPSS CVEs actively targeting it. Covers AI agent orchestration frameworks (Langflow, LangChain, AutoGPT, CrewAI, Flowise, n8n self-hosted) and their common companion infrastructure (Nacos, MinIO) — the exact vector used in the first documented autonomous-AI-agent ransomware operation (JadePuffer, July 2026)</div>
+      <div class="desc">Agent framework &amp; tech stack exploit monitoring: pass a declared tech stack (or a domain to pull its stored stack) and get back CISA KEV / high-EPSS CVEs actively targeting it. Covers AI agent orchestration frameworks (Langflow, LangChain, AutoGPT, CrewAI, Flowise, n8n self-hosted) and their common companion infrastructure (Nacos, MinIO), the exact vector used in the first documented autonomous-AI-agent ransomware operation (JadePuffer, July 2026)</div>
     </div>
     <div class="price-card" id="ep-mcp-registry-risk">
       <div class="endpoint">/v1/metered/mcp-registry-risk</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">MCP server &amp; agent-tool registry reputation — checks an MCP server URL or package name against RelayShield's criminal IOC corpus, typosquat/near-miss detection against well-known MCP domains, and domain registration age. Early-mover coverage for the MCP ecosystem, where dedicated security tooling is still minimal industry-wide</div>
+      <div class="desc">MCP server &amp; agent-tool registry reputation: checks an MCP server URL or package name against RelayShield's criminal IOC corpus, typosquat/near-miss detection against well-known MCP domains, and domain registration age. Early-mover coverage for the MCP ecosystem, where dedicated security tooling is still minimal industry-wide</div>
     </div>
     <div class="price-card" id="ep-prompt-injection-breach">
       <div class="endpoint">/v1/metered/prompt-injection-breach</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">Prompt-injection-sourced breach detection — flags stolen session/credential exposure whose source dump text suggests an AI agent (rather than a traditional phishing/malware campaign) was involved in obtaining it. A best-effort signal based on how the breach was described, not a confirmed attribution</div>
+      <div class="desc">Prompt-injection-sourced breach detection: flags stolen session/credential exposure whose source dump text suggests an AI agent (rather than a traditional phishing/malware campaign) was involved in obtaining it. A best-effort signal based on how the breach was described, not a confirmed attribution</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/bulk-ioc</div>
       <div class="price">$0.50<span class="per"> / batch (up to 100 IOCs)</span></div>
-      <div class="desc">Bulk IOC enrichment — submit up to 100 indicators in a single call. Built for SIEM log-enrichment pipelines. Returns malware family, threat actor, confidence score, and first/last seen for each indicator</div>
+      <div class="desc">Bulk IOC enrichment: submit up to 100 indicators in a single call. Built for SIEM log-enrichment pipelines. Returns malware family, threat actor, confidence score, and first/last seen for each indicator</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/ioc-pivot</div>
       <div class="price">$0.20<span class="per"> / call</span></div>
-      <div class="desc">IOC pivot — given one known-malicious indicator, discover all related infrastructure sharing the same malware family. Surfaces full C2 networks from a single indicator</div>
+      <div class="desc">IOC pivot: given one known-malicious indicator, discover all related infrastructure sharing the same malware family. Surfaces full C2 networks from a single indicator</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/brand-monitor</div>
       <div class="price">$0.35<span class="per"> / call</span></div>
-      <div class="desc">Brand monitoring — scans the full IOC corpus for your brand name. Returns phishing domains, malware C2 infrastructure referencing your name, dark web mentions, and image/logo mentions extracted via OCR from infostealer-archive screenshots</div>
+      <div class="desc">Brand monitoring: scans the full IOC corpus for your brand name. Returns phishing domains, malware C2 infrastructure referencing your name, dark web mentions, and image/logo mentions extracted via OCR from infostealer-archive screenshots</div>
     </div>
     <div class="price-card" id="ep-card-exposure">
       <div class="endpoint">/v1/metered/card-exposure</div>
       <div class="price">$0.30<span class="per"> / call</span></div>
-      <div class="desc">Stolen payment card exposure check — pass a client-computed SHA-256 hash of a card number, or just a 6-8 digit BIN, to check against RelayShield's stolen-card corpus (sourced from infostealer logs). RelayShield never accepts or stores a raw card number</div>
+      <div class="desc">Stolen payment card exposure check: pass a client-computed SHA-256 hash of a card number, or just a 6-8 digit BIN, to check against RelayShield's stolen-card corpus (sourced from infostealer logs). RelayShield never accepts or stores a raw card number</div>
     </div>
     <div class="price-card" id="ep-bulk-identity-risk">
       <div class="endpoint">/v1/metered/bulk-identity-risk</div>
       <div class="price">$2.00<span class="per"> / call</span></div>
-      <div class="desc">Hierarchical org + agent-level risk scoring — up to 10 organizational domains plus up to 5 agent/service-account identities per domain in a single call. Each domain returns a 0–100 risk score across 6 dimensions; each agent identity returns breach, infostealer, and stolen-session signals. A critically exposed agent automatically elevates the organizational risk rating. Purpose-built for MSP weekly client sweeps and AI agent governance use cases</div>
+      <div class="desc">Hierarchical org + agent-level risk scoring: up to 10 organizational domains plus up to 5 agent/service-account identities per domain in a single call. Each domain returns a 0 to 100 risk score across 6 dimensions; each agent identity returns breach, infostealer, and stolen-session signals. A critically exposed agent automatically elevates the organizational risk rating. Purpose-built for MSP weekly client sweeps and AI agent governance use cases</div>
     </div>
     <div class="price-card" id="ep-cert-expiry">
       <div class="endpoint">/v1/metered/cert-expiry</div>
       <div class="price">$0.05<span class="per"> / call</span></div>
-      <div class="desc">TLS certificate expiry &amp; renewal risk — checks Certificate Transparency logs for how many days remain before a domain&apos;s live certificate expires. Returns a 4-tier risk level (CRITICAL/HIGH/MEDIUM/LOW) and a plain-English recommendation. Increasingly relevant as CA/Browser Forum rules shrink standard certificate lifespans toward 47 days by 2029</div>
+      <div class="desc">TLS certificate expiry &amp; renewal risk: checks Certificate Transparency logs for how many days remain before a domain&apos;s live certificate expires. Returns a 4-tier risk level (CRITICAL/HIGH/MEDIUM/LOW) and a plain-English recommendation. Increasingly relevant as CA/Browser Forum rules shrink standard certificate lifespans toward 47 days by 2029</div>
     </div>
     <div class="price-card" id="ep-ip-intel">
       <div class="endpoint">/v1/metered/ip-intel</div>
       <div class="price">$0.10<span class="per"> / call</span></div>
-      <div class="desc">Passive DNS &amp; IP reputation — pass a domain to get its historical IP resolution history plus reputation, or pass an IP to get reverse resolution history (hostnames that have pointed to it), AS owner, country, and malicious/suspicious vendor detection counts</div>
+      <div class="desc">Passive DNS &amp; IP reputation: pass a domain to get its historical IP resolution history plus reputation, or pass an IP to get reverse resolution history (hostnames that have pointed to it), AS owner, country, and malicious/suspicious vendor detection counts</div>
     </div>
   </div>
 </div>
 
 <div class="section" style="margin-top:2rem">
-  <div class="section-title">Account &amp; integration endpoints</div>
+  <h2 class="section-title" id="account-endpoints">Account &amp; integration endpoints</h2>
   <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">Free to call and not metered. These support key validation and webhook delivery, and are the endpoints our published integrations (Zapier, n8n, Make) use to verify a connection and register alert delivery.</p>
   <div class="price-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr))">
     <div class="price-card" id="ep-account-info">
       <div class="endpoint">/v1/account/info</div>
       <div class="price">Free<span class="per"> / call</span></div>
-      <div class="desc"><strong>POST</strong> — returns the account behind the API key. Send an empty JSON body. Response: <code>plan</code>, <code>intel_access</code>, <code>calls_this_month</code>, <code>customer_id</code>, <code>email</code>, <code>active</code>. Used to confirm a key is live, and by integrations to label a connected account. Returns <code>401</code> if the key is missing, invalid or inactive.</div>
+      <div class="desc"><strong>POST</strong>: returns the account behind the API key. Send an empty JSON body. Response: <code>plan</code>, <code>intel_access</code>, <code>calls_this_month</code>, <code>customer_id</code>, <code>email</code>, <code>active</code>. Used to confirm a key is live, and by integrations to label a connected account. Returns <code>401</code> if the key is missing, invalid or inactive.</div>
     </div>
     <div class="price-card" id="ep-webhook-configure">
       <div class="endpoint">/v1/webhook/configure</div>
       <div class="price">Free<span class="per"> / call</span></div>
-      <div class="desc"><strong>POST</strong> — registers a URL to receive findings (breach, infostealer, session hijack, ransomware victim listing) as they are detected, instead of polling. Body: <code>{"webhook_url": "https://..."}</code>. Response: <code>{"webhook_url": "...", "status": "registered"}</code>. Posting an empty <code>webhook_url</code> clears the registration and returns <code>status: "cleared"</code>.</div>
+      <div class="desc"><strong>POST</strong>: registers a URL to receive findings (breach, infostealer, session hijack, ransomware victim listing) as they are detected, instead of polling. Body: <code>{"webhook_url": "https://..."}</code>. Response: <code>{"webhook_url": "...", "status": "registered"}</code>. Posting an empty <code>webhook_url</code> clears the registration and returns <code>status: "cleared"</code>.</div>
     </div>
   </div>
   <pre style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.82rem;margin-top:1rem"><code>curl -X POST https://api.relayshield.net/v1/account/info \
@@ -1665,15 +2169,55 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
 </div>
 
 <div class="section" style="margin-top:2rem">
-  <div class="section-title">Threat Intelligence API <span style="background:var(--accent);color:#fff;font-size:.7rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem;vertical-align:middle">NEW</span></div>
-  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">RelayShield&apos;s edge is OSINT threat hunting most vendors can&apos;t reach — our own collection pipeline runs continuous, verified monitoring across <strong>85+ active criminal Telegram channels</strong> (infostealer markets, credential dumps, breach announcements), not a static feed subscription. That&apos;s layered with <strong>5.0M+ indicators</strong> aggregated from <strong>20 authoritative external sources</strong> (abuse.ch, Spamhaus, AbuseIPDB, AlienVault OTX, PhishTank, CISA KEV, MITRE ATT&amp;CK/ATLAS, and more). Emails, domains, IPs, hashes, phone numbers, and wallet addresses — <strong>24–72 hours ahead of public breach databases.</strong></p>
-  <p style="color:var(--muted);font-size:.9rem;margin:.5rem 0 1.25rem;background:rgba(108,99,255,.07);border:1px solid rgba(108,99,255,.2);border-radius:8px;padding:.75rem 1rem"><strong style="color:var(--accent)">All 26 metered endpoints included.</strong> Both TI subscription tiers cover unlimited access to all metered API endpoints above — breach, SIM swap, infostealer, domain, OAuth &amp; token exposure, supply chain, session hijack detection, crypto asset surface, asset intel monitoring, threat actor intelligence, CVE × identity risk correlation, domain identity risk scoring, bulk IOC enrichment, IOC pivot, brand monitoring, bulk identity risk, agent framework exploit monitoring, MCP registry risk, prompt-injection breach detection, certificate expiry risk, and passive DNS/IP reputation — in addition to the Threat Intelligence IOC and CVE feeds. No per-endpoint add-ons. One subscription, full access.</p>
+  <h2 class="section-title" id="aws-bundles">Buy through AWS Marketplace</h2>
+  <div class="section-sub">Same API, same keys, billed against your existing AWS account. No new vendor to onboard, no separate payment method, and it draws down committed spend.</div>
+  <p style="color:var(--muted);font-size:.92rem;margin:1rem 0 1.25rem">If procurement is the reason a card is hard to get approved, this is the route around it. Your API key is provisioned automatically the moment the subscription activates.</p>
+  <div class="price-grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">Agentic Attack Surface</div>
+      <div class="desc" style="margin-top:.5rem">MCP registry risk, prompt-injection breach correlation, agent-framework CVE targeting, bulk per-agent identity risk scoring, and LLM credential exposure detection. Licensed on its own, with no dependency on any other bundle.</div>
+      <a href="https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">View on AWS Marketplace</a>
+    </div>
+    <div class="price-card">
+      <div class="endpoint" style="color:var(--accent)">Core Identity Exposure</div>
+      <div class="desc" style="margin-top:.5rem">Breach exposure, SIM swap detection, infostealer log checks, domain lookalike detection, OAuth token exposure, and crypto threat intelligence. Six identity detection APIs as one metered bundle. $150/mo minimum commitment plus usage from $0.10 per call.</div>
+      <a href="https://aws.amazon.com/marketplace/pp/prodview-zgdxyqfd63hog" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">View on AWS Marketplace</a>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:2rem">
+  <h2 class="section-title" id="llmjacking-license">LLMjacking Detection License <span style="background:var(--accent);color:#fff;font-size:.7rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem;vertical-align:middle">NEW</span></h2>
+  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">Stolen LLM API keys drain a company&apos;s AI budget, not its data. Real incidents have run $46K/day to $500K/month from a single leaked key, while the underground price for a stolen key is about $30. <code>llm-credential-exposure</code> scans our criminal stealer-log corpus for exposed keys across <strong>14 LLM and AI providers</strong> tied to your domain: OpenAI, Anthropic Claude, Google Gemini, xAI Grok, Amazon Bedrock, Groq, Replicate, LangSmith, Hugging Face, NVIDIA NIM, DeepSeek, Moonshot Kimi, Alibaba Qwen and Alibaba Cloud. Available pay-per-call at $0.40 on any metered key, or as a dedicated unlimited-call license below.</p>
+  <div style="background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:.85rem 1rem;margin:0 0 1.25rem;font-size:.85rem">
+    <strong style="color:var(--accent)">Coverage standard secret scanners miss.</strong> <span style="color:var(--muted)">Gitleaks, the most widely deployed open-source secret scanner, ships <strong>zero</strong> detection rules for DeepSeek, Moonshot, Qwen or NVIDIA. Shadow-AI keys from those providers are invisible to conventional scanning. And a single leaked Hugging Face token bills against DeepSeek, Qwen, Kimi and NVIDIA models through Inference Providers without the attacker ever holding a vendor key. We are not scanning your repos for keys you might leak. We scan the criminal channels where leaked keys are already being sold.</span>
+  </div>
+  <div class="price-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">/v1/metered/llm-credential-exposure</div>
+      <div class="price">$39<span class="per"> / mo</span></div>
+      <div class="desc">Unlimited calls to the LLMjacking detection endpoint: no per-call metering, no other endpoints included. Auto-provisions or upgrades your existing API key.</div>
+      <a href="https://buy.stripe.com/9B600k92u2uFgde0Bx0Ny0i" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">Subscribe: $39/mo</a>
+    </div>
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">/v1/metered/llm-credential-exposure</div>
+      <div class="price">$399<span class="per"> / yr</span></div>
+      <div class="desc">Same unlimited-call license, billed annually, just under 2 months free vs. paying monthly.</div>
+      <a href="https://buy.stripe.com/fZu4gA4Mec5f3qs4RN0Ny0j" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">Subscribe: $399/yr</a>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:2rem">
+  <h2 class="section-title" id="threat-intelligence">Threat Intelligence API <span style="background:var(--accent);color:#fff;font-size:.7rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem;vertical-align:middle">NEW</span></h2>
+  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">RelayShield&apos;s edge is OSINT threat hunting most vendors can&apos;t reach: our own collection pipeline runs continuous, verified monitoring across <strong>95 monitored channels</strong> (infostealer markets, credential dumps, breach announcements), not a static feed subscription. That&apos;s layered with <strong>494K+ distinct indicators</strong> (5.8M+ sightings) aggregated from <strong>20 authoritative external sources</strong> (abuse.ch, Spamhaus, AbuseIPDB, AlienVault OTX, PhishTank, CISA KEV, MITRE ATT&amp;CK/ATLAS, and more). Emails, domains, IPs, hashes, phone numbers, and wallet addresses, <strong>24 to 72 hours ahead of public breach databases.</strong></p>
+  <p style="color:var(--muted);font-size:.9rem;margin:.5rem 0 1.25rem;background:rgba(108,99,255,.07);border:1px solid rgba(108,99,255,.2);border-radius:8px;padding:.75rem 1rem"><strong style="color:var(--accent)">All 26 metered endpoints included.</strong> Both TI subscription tiers cover unlimited access to all metered API endpoints above: breach, SIM swap, infostealer, domain, OAuth &amp; token exposure, supply chain, session hijack detection, crypto asset surface, asset intel monitoring, threat actor intelligence, CVE × identity risk correlation, domain identity risk scoring, bulk IOC enrichment, IOC pivot, brand monitoring, bulk identity risk, agent framework exploit monitoring, MCP registry risk, prompt-injection breach detection, certificate expiry risk, and passive DNS/IP reputation, in addition to the Threat Intelligence IOC and CVE feeds. No per-endpoint add-ons. One subscription, full access.</p>
   <table style="width:100%;border-collapse:collapse;font-size:.88rem;margin-bottom:1.5rem">
     <thead>
       <tr style="border-bottom:1px solid var(--border)">
         <th style="text-align:left;padding:.5rem .75rem;color:var(--muted);font-weight:600"></th>
-        <th style="text-align:center;padding:.5rem .75rem;color:var(--accent);font-weight:700">MSP — $499/mo</th>
-        <th style="text-align:center;padding:.5rem .75rem;color:var(--accent);font-weight:700">MSSP — $999/mo</th>
+        <th style="text-align:center;padding:.5rem .75rem;color:var(--accent);font-weight:700">MSP: $499/mo</th>
+        <th style="text-align:center;padding:.5rem .75rem;color:var(--accent);font-weight:700">MSSP: $999/mo</th>
       </tr>
     </thead>
     <tbody style="color:var(--text)">
@@ -1692,7 +2236,7 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
       </tr>
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:.45rem .75rem">Lead time vs HIBP</td>
-        <td style="text-align:center;padding:.45rem .75rem" colspan="2">24–72 hours</td>
+        <td style="text-align:center;padding:.45rem .75rem" colspan="2">24 to 72 hours</td>
       </tr>
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:.45rem .75rem">Rate limit</td>
@@ -1715,42 +2259,21 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
     <div class="price-card" style="border-color:var(--accent)">
       <div class="endpoint" style="color:var(--accent)">/v1/intel/telegram</div>
       <div class="price">$499<span class="per"> / mo</span></div>
-      <div class="desc">In-house SOC teams — up to 10,000 calls/month across all endpoints. Includes IOC lookup, CVE intelligence, and all 8 metered endpoints. Embed in SOAR playbooks, SIEM enrichment, or incident response workflows.</div>
-      <a href="https://buy.stripe.com/28EcN66Umb1be56bgb0Ny0e" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">Subscribe — $499/mo</a>
+      <div class="desc">In-house SOC teams: up to 10,000 calls/month across all endpoints. Includes IOC lookup, CVE intelligence, and all 8 metered endpoints. Embed in SOAR playbooks, SIEM enrichment, or incident response workflows.</div>
+      <a href="https://buy.stripe.com/28EcN66Umb1be56bgb0Ny0e" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">Subscribe: $499/mo</a>
     </div>
     <div class="price-card" style="border-color:var(--accent)">
       <div class="endpoint" style="color:var(--accent)">/v1/intel/telegram</div>
       <div class="price">$999<span class="per"> / mo</span></div>
-      <div class="desc">MSSPs &amp; MDRs — unlimited calls across all endpoints, priority support + SLA. Includes IOC lookup, CVE intelligence, and all 8 metered endpoints. For teams running continuous enrichment pipelines across multiple client environments.</div>
-      <a href="https://buy.stripe.com/4gM3cw1A23yJf9a2JF0Ny0f" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">Subscribe — $999/mo</a>
+      <div class="desc">MSSPs &amp; MDRs: unlimited calls across all endpoints, priority support + SLA. Includes IOC lookup, CVE intelligence, and all 8 metered endpoints. For teams running continuous enrichment pipelines across multiple client environments.</div>
+      <a href="https://buy.stripe.com/4gM3cw1A23yJf9a2JF0Ny0f" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">Subscribe: $999/mo</a>
     </div>
   </div>
 
-  <div style="margin-top:2rem">
-    <div class="section-title">LLMjacking Detection License <span style="background:var(--accent);color:#fff;font-size:.7rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem;vertical-align:middle">NEW</span></div>
-    <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">Stolen LLM API keys drain a company&apos;s AI budget, not its data &mdash; real incidents have run $46K/day to $500K/month from a single leaked key, while the underground price for a stolen key is about $30. <code>llm-credential-exposure</code> scans our criminal stealer-log corpus for exposed keys across <strong>14 LLM and AI providers</strong> tied to your domain: OpenAI, Anthropic Claude, Google Gemini, xAI Grok, Amazon Bedrock, Groq, Replicate, LangSmith, Hugging Face, NVIDIA NIM, DeepSeek, Moonshot Kimi, Alibaba Qwen and Alibaba Cloud. Available pay-per-call at $0.40 on any metered key, or as a dedicated unlimited-call license below.</p>
-    <div style="background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:.85rem 1rem;margin:0 0 1.25rem;font-size:.85rem">
-      <strong style="color:var(--accent)">Coverage standard secret scanners miss.</strong> <span style="color:var(--muted)">Gitleaks &mdash; the most widely deployed open-source secret scanner &mdash; ships <strong>zero</strong> detection rules for DeepSeek, Moonshot, Qwen or NVIDIA. Shadow-AI keys from those providers are invisible to conventional scanning. And a single leaked Hugging Face token bills against DeepSeek, Qwen, Kimi and NVIDIA models through Inference Providers without the attacker ever holding a vendor key. We are not scanning your repos for keys you might leak &mdash; we scan the criminal channels where leaked keys are already being sold.</span>
-    </div>
-    <div class="price-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
-      <div class="price-card" style="border-color:var(--accent)">
-        <div class="endpoint" style="color:var(--accent)">/v1/metered/llm-credential-exposure</div>
-        <div class="price">$39<span class="per"> / mo</span></div>
-        <div class="desc">Unlimited calls to the LLMjacking detection endpoint — no per-call metering, no other endpoints included. Auto-provisions or upgrades your existing API key.</div>
-        <a href="https://buy.stripe.com/9B600k92u2uFgde0Bx0Ny0i" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">Subscribe — $39/mo</a>
-      </div>
-      <div class="price-card" style="border-color:var(--accent)">
-        <div class="endpoint" style="color:var(--accent)">/v1/metered/llm-credential-exposure</div>
-        <div class="price">$399<span class="per"> / yr</span></div>
-        <div class="desc">Same unlimited-call license, billed annually — just under 2 months free vs. paying monthly.</div>
-        <a href="https://buy.stripe.com/fZu4gA4Mec5f3qs4RN0Ny0j" style="display:block;margin-top:1rem;background:var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;text-decoration:none;font-size:.85rem;font-weight:600">Subscribe — $399/yr</a>
-      </div>
-    </div>
-  </div>
 
   <div style="margin-top:2rem">
-    <div class="section-title" style="font-size:1rem;margin-bottom:.75rem">CVE &amp; Ransomware Intelligence</div>
-    <p style="color:var(--muted);font-size:.9rem;margin-bottom:1rem">Look up CISA Known Exploited Vulnerabilities by CVE ID or keyword — cross-referenced for active ransomware campaign activity. Included on all TI subscription tiers.</p>
+    <h3 class="section-title" style="font-size:1rem;margin-bottom:.75rem">CVE &amp; Ransomware Intelligence</h3>
+    <p style="color:var(--muted);font-size:.9rem;margin-bottom:1rem">Look up CISA Known Exploited Vulnerabilities by CVE ID or keyword, cross-referenced for active ransomware campaign activity. Included on all TI subscription tiers.</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;font-size:.85rem">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem">
         <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">POST /v1/intel/cve</div>
@@ -1759,7 +2282,7 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem">
         <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">POST /v1/intel/cve</div>
-        <div style="color:var(--muted);margin-bottom:.75rem">Keyword scan — vendor, product, or CVE name</div>
+        <div style="color:var(--muted);margin-bottom:.75rem">Keyword scan: vendor, product, or CVE name</div>
         <pre style="background:var(--bg);border-radius:6px;padding:.75rem;font-size:.78rem;overflow-x:auto"><span class="str">{"keyword": "apache"}</span></pre>
       </div>
     </div>
@@ -1770,30 +2293,30 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
   </div>
 
   <div style="margin-top:2rem">
-    <div class="section-title" style="font-size:1rem;margin-bottom:.75rem">Automated Feed Formats — STIX/TAXII, MISP &amp; SIEM/SOAR Push</div>
-    <p style="color:var(--muted);font-size:.9rem;margin-bottom:1rem">Pull our IOC corpus with your SIEM's built-in TAXII client or MISP instance — no custom integration work, both require a TI subscription and support incremental pulls via <code>added_after</code> + pagination. Or configure a destination once and have real-time findings pushed to you as they fire.</p>
+    <h3 class="section-title" style="font-size:1rem;margin-bottom:.75rem">Automated Feed Formats: STIX/TAXII, MISP &amp; SIEM/SOAR Push</h3>
+    <p style="color:var(--muted);font-size:.9rem;margin-bottom:1rem">Pull our IOC corpus with your SIEM's built-in TAXII client or MISP instance. No custom integration work, both require a TI subscription and support incremental pulls via <code>added_after</code> + pagination. Or configure a destination once and have real-time findings pushed to you as they fire.</p>
     <div style="background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:.85rem 1rem;margin-bottom:1rem;font-size:.85rem">
-      <strong style="color:var(--accent)">Elastic Security users:</strong> <span style="color:var(--muted)">RelayShield works with Elastic's built-in <em>Custom Threat Intelligence</em> integration (switch on <em>Enable TAXII 2.1</em>) or its <em>MISP</em> integration &mdash; configuration only, no connector to build. Point it at <code>https://api.relayshield.net/v1/intel/taxii/collections/iocs/objects/</code> with <code>Authorization: Bearer YOUR_API_KEY</code>. <a href="https://blog.relayshield.net/elastic-security-threat-intelligence-integration" style="color:var(--accent)">Full step-by-step guide &rarr;</a></span>
+      <strong style="color:var(--accent)">Elastic Security users:</strong> <span style="color:var(--muted)">RelayShield works with Elastic's built-in <em>Custom Threat Intelligence</em> integration (switch on <em>Enable TAXII 2.1</em>) or its <em>MISP</em> integration, configuration only, no connector to build. Point it at <code>https://api.relayshield.net/v1/intel/taxii/collections/iocs/objects/</code> with <code>Authorization: Bearer YOUR_API_KEY</code>. <a href="https://blog.relayshield.net/elastic-security-threat-intelligence-integration" style="color:var(--accent)">Full step-by-step guide &rarr;</a></span>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;font-size:.85rem">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem">
         <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">GET /v1/intel/taxii/*</div>
-        <div style="color:var(--muted)">STIX 2.1 compliant feed — Indicator objects for Splunk, Sentinel, Elastic, or QRadar's built-in TAXII client.</div>
+        <div style="color:var(--muted)">STIX 2.1 compliant feed: Indicator objects for Splunk, Sentinel, Elastic, or QRadar's built-in TAXII client.</div>
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem">
         <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">GET /v1/intel/misp/event</div>
-        <div style="color:var(--muted)">Native MISP Event JSON with tagged Attributes — the default/co-primary format for government, CERT/ISAC, and mid-market SOC tooling that STIX-only integration doesn't reach.</div>
+        <div style="color:var(--muted)">Native MISP Event JSON with tagged Attributes, the default/co-primary format for government, CERT/ISAC, and mid-market SOC tooling that STIX-only integration doesn't reach.</div>
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem">
         <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">POST /v1/siem/configure</div>
-        <div style="color:var(--muted)">Push delivery to Splunk HEC, CEF/QRadar, or Cortex XSOAR's Generic Webhook incident-creation shape — configure a destination once, then real-time findings from breach, domain, infostealer, SIM swap, OAuth, and dark-web-channel monitoring dispatch automatically, no polling required.</div>
+        <div style="color:var(--muted)">Push delivery to Splunk HEC, CEF/QRadar, or Cortex XSOAR's Generic Webhook incident-creation shape. Configure a destination once, then real-time findings from breach, domain, infostealer, SIM swap, OAuth, and dark-web-channel monitoring dispatch automatically, no polling required.</div>
       </div>
     </div>
   </div>
 
   <div style="margin-top:2rem">
-    <div class="section-title" style="font-size:1rem;margin-bottom:.75rem">Shareable Report Links</div>
-    <p style="color:var(--muted);font-size:.9rem;margin-bottom:1rem">Turn any wallet scan, domain check, or vendor sweep result into a persistent, shareable URL. Generation requires a subscription; viewing the resulting link is public with no login required — paste it into a client ticket or incident report.</p>
+    <h3 class="section-title" style="font-size:1rem;margin-bottom:.75rem">Shareable Report Links</h3>
+    <p style="color:var(--muted);font-size:.9rem;margin-bottom:1rem">Turn any wallet scan, domain check, or vendor sweep result into a persistent, shareable URL. Generation requires a subscription; viewing the resulting link is public with no login required. Paste it into a client ticket or incident report.</p>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem;font-size:.85rem">
       <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">POST /v1/report/share</div>
       <div style="color:var(--muted)">Returns a <code>report_id</code> and public <code>share_url</code> for the summary you submit.</div>
@@ -1802,7 +2325,7 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
 </div>
 
 <div class="code-section">
-  <div class="section-title" style="margin-bottom:1rem">Quick start</div>
+  <h2 class="section-title" id="quick-start" style="margin-bottom:1rem">Quick start</h2>
 <pre><span class="cmt"># Breach check</span>
 curl -X POST https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/metered/breach \\
   -H <span class="str">"X-RS-API-KEY: rs_live_your_key_here"</span> \\
@@ -1819,8 +2342,8 @@ curl -X POST https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/mete
   }
 }</pre>
 
-  <div class="section-title" style="margin-top:2rem;margin-bottom:.5rem">Python sample — breach + infostealer in sequence</div>
-  <p style="color:var(--muted);font-size:.88rem;margin-bottom:.75rem">Copy-paste to run immediately. No SDK required — standard library only.</p>
+  <h3 class="section-title" style="margin-top:2rem;margin-bottom:.5rem">Python sample: breach + infostealer in sequence</h3>
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:.75rem">Copy-paste to run immediately. No SDK required, standard library only.</p>
 <pre><span class="cmt">import urllib.request, json</span>
 
 API_KEY = <span class="str">"rs_live_your_key_here"</span>
@@ -1849,7 +2372,7 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
 </div>
 
 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem 1.75rem;margin:2rem 0">
-  <div class="section-title" style="font-size:1.2rem;margin:0 0 1rem">Agent framework SDKs</div>
+  <h2 class="section-title" id="sdks" style="font-size:1.2rem;margin:0 0 1rem">Agent framework SDKs</h2>
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem">MCP registry-risk and prompt-injection-breach checks, plus a mandatory pre-execution gate, packaged natively for the agent frameworks you're already building on.</p>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.85rem">
     <a href="https://github.com/nzdsf2-gif/openai-agents-relayshield" target="_blank" rel="noopener" style="text-decoration:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem">
@@ -1877,7 +2400,7 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
 
 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem 1.75rem;margin:2rem 0">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem;margin-bottom:1rem">
-    <div class="section-title" style="font-size:1.2rem;margin:0">What practitioners are building</div>
+    <h2 class="section-title" id="templates" style="font-size:1.2rem;margin:0">What practitioners are building</h2>
     <div style="display:flex;align-items:center;gap:.4rem;background:rgba(255,109,90,.12);border:1px solid rgba(255,109,90,.3);border-radius:20px;padding:.35rem .8rem">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <circle cx="5" cy="12" r="3" fill="#FF6D5A"/>
@@ -1893,7 +2416,7 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
       <path d="M9 12l2 2 4-4" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
       <circle cx="12" cy="12" r="10" stroke="#22c55e" stroke-width="1.6"/>
     </svg>
-    <code style="background:var(--bg);border-radius:4px;padding:.1rem .4rem">n8n-nodes-relayshield</code> is verified and available directly on n8n Cloud — search for it on the canvas, no manual install needed.
+    <code style="background:var(--bg);border-radius:4px;padding:.1rem .4rem">n8n-nodes-relayshield</code> is verified and available directly on n8n Cloud. Search for it on the canvas, no manual install needed.
   </p>
   <div style="display:flex;align-items:center;gap:.5rem;margin:0 0 .35rem">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1911,6 +2434,24 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
     The RelayShield Zapier integration is approved and live in the Zapier App Directory, currently in
     its 90-day beta. Connect it with your API key to reach 8,000+ apps, no invite code needed.
   </p>
+  <div style="display:flex;align-items:center;gap:.5rem;margin:0 0 .35rem">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="10" fill="#EE0000"/>
+      <path d="M12 6.2l4.6 9.6h-2.5l-2.1-4.6-2.1 4.6H7.4z" fill="#fff"/>
+    </svg>
+    <span style="font-size:.82rem;font-weight:700;color:#EE0000">Ansible Galaxy</span>
+  </div>
+  <p style="color:var(--muted);font-size:.82rem;margin:0 0 1rem">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:-2px;margin-right:.3rem">
+      <path d="M9 12l2 2 4-4" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="12" cy="12" r="10" stroke="#22c55e" stroke-width="1.6"/>
+    </svg>
+    <code style="background:var(--bg);border-radius:4px;padding:.1rem .4rem">ansible-galaxy collection install relayshield.security</code>
+    installs three modules for gating a play on identity risk: <code style="background:var(--bg);border-radius:4px;padding:.1rem .4rem">breach_check</code>,
+    <code style="background:var(--bg);border-radius:4px;padding:.1rem .4rem">domain_lookalikes</code> and
+    <code style="background:var(--bg);border-radius:4px;padding:.1rem .4rem">supply_chain_risk</code>.
+    Published and installable from Ansible Galaxy.
+  </p>
   <!--
     Template links must point at n8n.io/workflows/<id>, NOT creators.n8n.io.
     A creators.n8n.io URL returns HTTP 200 for an unauthenticated visitor but
@@ -1924,20 +2465,20 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
   <a href="https://n8n.io/workflows/16694" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:.9rem;text-decoration:none;background:rgba(255,109,90,.08);border:1px solid rgba(255,109,90,.25);border-radius:8px;padding:.85rem 1rem;margin-bottom:.6rem">
     <div style="flex:1;min-width:0">
       <p style="color:var(--text);font-size:.9rem;font-weight:600;margin:0 0 .2rem">Featured in n8n&apos;s official template gallery</p>
-      <p style="color:var(--muted);font-size:.82rem;margin:0">&ldquo;Check offboarding credential risks with RelayShield, Slack, Notion and Gmail&rdquo; — HR trigger → parallel breach, infostealer and OAuth-token checks → Slack alert, manager email and Notion audit log. n8n.io/workflows/16694</p>
+      <p style="color:var(--muted);font-size:.82rem;margin:0">&ldquo;Check offboarding credential risks with RelayShield, Slack, Notion and Gmail&rdquo;: HR trigger → parallel breach, infostealer and OAuth-token checks → Slack alert, manager email and Notion audit log. n8n.io/workflows/16694</p>
     </div>
     <span style="color:var(--accent);font-size:.82rem;font-weight:600;white-space:nowrap">View template &rarr;</span>
   </a>
   <a href="https://n8n.io/workflows/17386" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:.9rem;text-decoration:none;background:rgba(255,109,90,.08);border:1px solid rgba(255,109,90,.25);border-radius:8px;padding:.85rem 1rem;margin-bottom:1rem">
     <div style="flex:1;min-width:0">
       <p style="color:var(--text);font-size:.9rem;font-weight:600;margin:0 0 .2rem">Shadow AI &amp; vendor approval gate</p>
-      <p style="color:var(--muted);font-size:.82rem;margin:0">&ldquo;Gate SaaS and AI tool approvals with RelayShield, Notion, Slack, and Gmail&rdquo; — a new tool request branches on SaaS vs AI tool, then runs supply-chain, secret-scan, OAuth-watchlist and MCP registry-risk checks before anyone approves it. n8n.io/workflows/17386</p>
+      <p style="color:var(--muted);font-size:.82rem;margin:0">&ldquo;Gate SaaS and AI tool approvals with RelayShield, Notion, Slack, and Gmail&rdquo;: a new tool request branches on SaaS vs AI tool, then runs supply-chain, secret-scan, OAuth-watchlist and MCP registry-risk checks before anyone approves it. n8n.io/workflows/17386</p>
     </div>
     <span style="color:var(--accent);font-size:.82rem;font-weight:600;white-space:nowrap">View template &rarr;</span>
   </a>
   <div style="border-left:3px solid var(--accent);padding-left:1rem;margin-bottom:1rem">
-    <p style="color:var(--text);font-size:.95rem;margin:0 0 .4rem">&ldquo;Nice work! You could extend this to trigger when an employee is deactivated in your HR system — run breach + infostealer checks on offboarding, then log to Notion or alert Slack if their credentials are circulating.&rdquo;</p>
-    <p style="color:var(--muted);font-size:.82rem;margin:0">— n8n community member, on the RelayShield breach monitoring workflow template</p>
+    <p style="color:var(--text);font-size:.95rem;margin:0 0 .4rem">&ldquo;Nice work! You could extend this to trigger when an employee is deactivated in your HR system: run breach + infostealer checks on offboarding, then log to Notion or alert Slack if their credentials are circulating.&rdquo;</p>
+    <p style="color:var(--muted);font-size:.82rem;margin:0">n8n community member, on the RelayShield breach monitoring workflow template</p>
   </div>
   <p style="color:var(--muted);font-size:.85rem;margin:0">Used in SOAR playbooks, SIEM enrichment pipelines, MSP onboarding/offboarding automations, and incident response triage workflows. <a href="https://n8n.io/creators/relayshieldadmin" target="_blank" rel="noopener" style="color:var(--accent)">All our n8n templates</a> &middot; <a href="mailto:support@relayshield.net" style="color:var(--accent)">Tell us what you&apos;re building.</a></p>
 </div>
@@ -1965,7 +2506,7 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
   <p>RelayShield LLC · <a href="https://relayshield.net">relayshield.net</a> · <a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
   <p style="margin-top:.6rem">
     <a href="https://x402-list.com/services/relayshield?utm_source=badge&amp;utm_medium=referral&amp;utm_campaign=embed" target="_blank" rel="noopener">
-      <img src="https://x402-list.com/badge/relayshield.svg?data=uptime&amp;period=30d" alt="RelayShield on x402-list.com — continuously monitored" style="height:20px;vertical-align:middle" />
+      <img src="https://x402-list.com/badge/relayshield.svg?data=uptime&amp;period=30d" alt="RelayShield on x402-list.com: continuously monitored" style="height:20px;vertical-align:middle" />
     </a>
   </p>
 </footer>
@@ -1989,7 +2530,7 @@ document.getElementById('signup-form').addEventListener('submit', async function
     const data = await res.json();
     if (data.ok && data.data.free_tier) {
       // Free tier: no redirect, the key is already in their inbox. Replacing
-      // the form with confirmation is deliberate -- bouncing them to a
+      // the form with confirmation is deliberate, bouncing them to a
       // separate success page loses the momentum, and there is nothing on
       // that page they need.
       const box = document.querySelector('.signup-box');
@@ -2183,6 +2724,81 @@ def _p(text: str) -> str:
 # select its own framing even when the referrer is stripped (which is what happens
 # with most Slack, Discord and native app clicks).
 _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
+    "discord-bot": (
+        ("top.gg", "discordbotlist.com", "discord.bots.gg"),
+        _banner("Arriving from the RelayShield Discord bot", _p(
+            "The bot runs the same checks this API exposes. "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">/scan</code> is '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">wallet-risk</code> and our IOC corpus, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">/exposure</code> is '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">breach</code>. '
+            "Everything the bot does in one server, your own code can do across every account you are "
+            "responsible for: breach and infostealer exposure, SIM swap, leaked OAuth tokens, "
+            "typosquat domains and wallet screening. Free tier is 100 calls, no card.")),
+    ),
+    "npm-worm": (
+        # The last three entries are the ARTICLE SLUG, not a domain, and that is
+        # deliberate. `_resolve_source` substring-matches the whole Referer
+        # string rather than just its host, so any page whose URL contains the
+        # slug resolves here: our blog, the Medium syndication, the dev.to
+        # syndication, or anyone who reposts it.
+        #
+        # WHY, found live 2026-08-12: Medium STRIPS the query string from the
+        # rendered anchor href. Its own GraphQL payload stores
+        # `.../developers?source=npm-worm-medium` correctly and the visible link
+        # text shows it, but the `<a href>` the browser actually follows is the
+        # bare path. So a click arrives with no ?source at all, logs as "-", and
+        # renders no banner. Re-editing the link on Medium does not fix it,
+        # because it is Medium's renderer and not our link.
+        #
+        # Referer matching is the durable answer: it survives any platform that
+        # rewrites, shortens or strips outbound URLs, which is most of them.
+        # The query parameter still wins when present, since it is checked
+        # first, so per-channel attribution is unaffected wherever it survives.
+        ("npmjs.com", "socket.dev",
+         "the-npm-worm-does-not-start-with-malicious-code",
+         "npm-worm-does-not-start",
+         "the-npm-worm"),
+        _banner("Arriving from the npm maintainer post", _p(
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/metered/dependency-risk</code> '
+            "takes a list of package names, or your package.json or package-lock.json, and tells you which "
+            "dependencies are maintained by an account that appears in a recent infostealer log. Findings come "
+            "back at the dependency level: we never return, log or store the identity of a maintainer. "
+            "<b>Included at no per-call charge in the Agentic Attack Surface bundle</b> at $299/mo, or $0.50 "
+            "a call outside it. Register a package as a <b>dependency</b> watch and you are told when the "
+            "answer changes rather than on a schedule.")),
+    ),
+    "fourth-party": (
+        # The last three entries are the ARTICLE SLUG, not a domain. _resolve_source
+        # substring-matches the whole Referer, so any page whose URL carries the slug
+        # resolves here: our blog, the Medium syndication, or anyone who reposts it.
+        # This is the durable path, because Medium strips the query string from the
+        # rendered anchor href (found live 2026-08-12 on the npm post).
+        ("your-wallet-provider-had-a-vendor",
+         "that-vendor-had-a-dashboard",
+         "fourth-party-risk"),
+        _banner("Arriving from the fourth-party exposure post", _p(
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/metered/breach-check</code> '
+            "and "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">/v1/metered/infostealer-check</code> '
+            "answer the question this post is really about: not whether your vendor was breached, but whether "
+            "an address you are responsible for has surfaced in the exposure that followed. Register an address "
+            "as a watch and you are told when the answer changes, rather than finding out from a notice four "
+            "parties downstream. <b>$0.10 a call, no monthly minimum</b>, or included in the bundles.")),
+    ),
+    "ansible-galaxy": (
+        # Referer entries cover a Galaxy collection page and the docs site. The
+        # collection's own galaxy.yml points documentation/homepage here without
+        # a query string, so referer matching is the primary path, not a fallback.
+        ("galaxy.ansible.com", "ansible.com", "console.redhat.com"),
+        _banner("Arriving from Ansible Galaxy", _p(
+            'The <code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">relayshield.security</code> '
+            "collection gives you three modules: <b>breach_check</b>, <b>domain_lookalikes</b> and "
+            "<b>supply_chain_risk</b>. They are built to gate a play before it grants access or deploys, so a "
+            "playbook can refuse to onboard an identity that is already in a stealer log. Every module needs an "
+            "API key, which is what this page issues. <b>Pay per call, no monthly minimum</b>, and the same key "
+            "works across REST, MCP and STIX/TAXII.")),
+    ),
     "langchain": (("langchain.com",), _LANGCHAIN_BANNER),
     "n8n": (
         ("n8n.io", "creators.n8n.io"),
@@ -2243,6 +2859,64 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "and an MCP server. Every one of them talks to the same REST API documented below, so you can drop to raw "
             "HTTP whenever the wrapper is in the way.")),
     ),
+    # rsscan arrivals. Previously aliased to "github", so every developer sent
+    # here by the scanner read a paragraph about client libraries, which is the
+    # wrong answer to the question they arrived with. rsscan's own source states
+    # the right one above EXPOSURE_URL: a local hook can only prevent the NEXT
+    # leak, it cannot see what has already been scraped. Checking what is
+    # already public is the one job that genuinely needs a key, so it is the
+    # only honest reason for this visitor to sign up.
+    # Added 2026-08-09 with the MetaMask Snap. Registered at the same time as the
+    # link that points here, deliberately: rsscan shipped its link first and was
+    # silently aliased to the generic "github" banner for months, so roughly 397
+    # arrivals a month read a paragraph about client libraries instead of an
+    # answer to the question they arrived with. A source key with no banner is
+    # not a cosmetic gap, it is a wasted arrival.
+    "metamask-snap": (
+        (),
+        _banner("Arriving from the MetaMask Snap", _p(
+            "The Snap screens the counterparty on transactions you are about to sign. Everything it "
+            "checks, it checks through this API, and the same key works everywhere else here. "
+            "The screening call itself is "
+            "<code style=\"background:var(--bg);border-radius:5px;padding:.15rem .4rem\">/v1/metered/wallet-risk</code> "
+            "at $0.05. What the Snap cannot see is the rest of the attack: the breach that leaked the "
+            "credential, the infostealer log holding the session, the lookalike domain that sent the "
+            "link. Those are the endpoints below, and your free calls cover them with no card.")),
+    ),
+    "rsscan": (
+        (),
+        _banner("Arriving from rsscan", _p(
+            "rsscan reads your diff, so it catches what is <b>about to</b> leak. It cannot see a credential that "
+            "already left: committed months ago, shipped in a published package, or baked into a container image, "
+            "and possibly indexed and scraped since. That is a different question and it needs a search of public "
+            "artifacts rather than a local scan. "
+            "<code style=\"background:var(--bg);border-radius:5px;padding:.15rem .4rem\">/v1/metered/secret-scan</code> "
+            "checks six public sources for credentials belonging to your org: GitHub, npm, PyPI, Docker Hub, Hugging "
+            "Face and Postman. Your free calls cover it, and there is no card required.")),
+    ),
+    # Readers arriving from the `rsscan --deps` release post, 2026-08-13. Its own
+    # variant rather than an alias onto "rsscan", for the same reason rsscan is
+    # not aliased onto "github": the rsscan banner pitches secret-scan, which
+    # answers "are my org's credentials already public". Somebody who just
+    # counted 275 publisher accounts in their dependency tree is asking a
+    # different question, and dependency-risk is the answer to that one.
+    "rsscan-deps": (
+        (),
+        _banner("Arriving from the rsscan --deps release", _p(
+            "<code style=\"background:var(--bg);border-radius:5px;padding:.15rem .4rem\">rsscan --deps</code> "
+            "counts the accounts that can publish into your dependencies, and deliberately stops there. It "
+            "cannot tell you whether any of them is compromised right now, because that means screening "
+            "identities against infostealer corpora rather than reading registry metadata. "
+            '<span style="display:block;margin-top:.7rem">'
+            "<code style=\"background:var(--bg);border-radius:5px;padding:.15rem .4rem\">POST /v1/metered/dependency-risk</code> "
+            "is that step. Send a package list or a <code>package-lock.json</code>; findings come back at the "
+            "dependency level and never name the maintainer. Included at no per-call charge in the Agentic "
+            "Attack Surface bundle, because re-screening 400 maintainers costs us about what re-screening "
+            "four does.</span>"
+            '<span style="display:block;margin-top:.7rem;opacity:.85">'
+            "A clean result means nothing was found in the sources we queried. Registry metadata is not always "
+            "current, so an address the registry has gone stale on screens clean.</span>")),
+    ),
     # Readers arriving from the LLMjacking / Bundle D launch post. Added
     # 2026-07-30 after the published post was found linking to ?src=blog, which
     # was never a registered key and therefore rendered no banner at all. The
@@ -2259,7 +2933,7 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             '  -H "Content-Type: application/json" \\\n'
             "  -d '{\"domain\": \"yourcompany.com\"}'</code></pre>"
             '<span style="display:block;margin-top:.7rem">We match 19 LLM credential formats across 14 '
-            "providers against 5.0M+ indicators from 85 criminal Telegram channels. A clean result means "
+            "providers against 494K+ distinct indicators (5.8M+ sightings) from 95 monitored channels. A clean result means "
             "nothing was found in the sources we queried, which is not the same as proof your keys are safe."
             "</span>")),
     ),
@@ -2284,6 +2958,36 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/metered/secret-scan</code>, '
             "$0.35 a call. A clean result means nothing was found in the sources we queried, which is not "
             "the same as proof your keys are safe.</span>")),
+    ),
+    # BlueNoroff post, 2026-08-10. No hosts claimed, same reasoning as
+    # secret-scan above: reachable only by an explicit ?source=, which every
+    # link in the post carries.
+    #
+    # What this banner may and may not claim: we ingested JUMPSEC's published
+    # campaign infrastructure with attribution intact. We did NOT detect this
+    # campaign, and the copy must never imply otherwise. The audience for this
+    # post checks.
+    "bluenoroff": (
+        (),
+        _banner("Arriving from the DPRK ClickFix post", _p(
+            "The post's argument is that the compromise is an identity event, not a chain event: "
+            "a trusted contact's Telegram session becomes the delivery channel for the next round. "
+            "These are the checks that look at that layer."
+            '<span style="display:block;margin-top:.7rem">'
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/metered/session-risk</code> '
+            "$0.30 a call &mdash; stolen session cookies for an address, severity-ranked. Step 6 of the "
+            "chain in the post is session theft, and this is where that output surfaces."
+            "</span>"
+            '<span style="display:block;margin-top:.55rem">'
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/metered/asset-intel</code> '
+            "$0.15 a call &mdash; sweep your own domains and IPs against our indicator corpus, which now "
+            "carries the 60 domains and 10 IPs JUMPSEC published for this campaign, each row citing the "
+            "research it came from."
+            "</span>"
+            '<span style="display:block;margin-top:.7rem;opacity:.85">'
+            "We did not discover this campaign. JUMPSEC did, and we ingested what they published. "
+            "A clean result means nothing was found in the sources we queried, which is not the same "
+            "as proof you were not targeted.</span>")),
     ),
     "session-hijack": (
         (),
@@ -2333,6 +3037,48 @@ _SOURCE_ALIASES = {
     # while all rendering the same banner. Registered BEFORE the post is
     # published -- an unregistered key logs unmatched: and renders nothing, which
     # is exactly how ?source=rsscan shipped broken.
+    # npm maintainer-compromise post, 2026-08-12 ("The npm Worm Does Not Start
+    # With Malicious Code"). Registered BEFORE syndication for the reason spelt
+    # out below: an unregistered key logs unmatched: and renders no banner, so
+    # the link looks fine and quietly attributes nothing.
+    # Discord bot listings, 2026-08-12. Registered BEFORE the top.gg submission
+    # goes in, because the listing's website field is public the moment it is
+    # approved and an unregistered key renders no banner.
+    "discord":             "discord-bot",
+    "discord-bot":         "discord-bot",
+    "discord-topgg":       "discord-bot",
+    "discord-appdir":      "discord-bot",
+    "discord-exposure":    "discord-bot",
+    "discord-wallet":      "discord-bot",
+    # Fourth-party / Privy-Metabase post, 2026-08-17 ("Your Wallet Provider Had a
+    # Vendor, and That Vendor Had a Dashboard"). Registered BEFORE syndication:
+    # an unregistered key logs unmatched: and renders no banner, so the link
+    # looks fine and quietly attributes nothing.
+    # Ansible Galaxy collection relayshield.security, published 2026-08-17.
+    # Registered at publish time: an unregistered key logs unmatched: and renders
+    # no banner, so the link looks fine and attributes nothing.
+    "galaxy":              "ansible-galaxy",
+    "ansible":             "ansible-galaxy",
+    "ansible-galaxy":      "ansible-galaxy",
+    "galaxy-collection":   "ansible-galaxy",
+    "fourth-party":            "fourth-party",
+    "blog-fourth-party":       "fourth-party",
+    "fourth-party-medium":     "fourth-party",
+    "fourth-party-linkedin":   "fourth-party",
+    "fourth-party-telegram":   "fourth-party",
+    "fourth-party-mastodon":   "fourth-party",
+    "fourth-party-farcaster":  "fourth-party",
+    "fourth-party-reddit":     "fourth-party",
+    "npm-worm":            "npm-worm",
+    "blog-npm-worm":       "npm-worm",
+    "npm-worm-medium":     "npm-worm",
+    "npm-worm-linkedin":   "npm-worm",
+    "npm-worm-telegram":   "npm-worm",
+    "npm-worm-mastodon":   "npm-worm",
+    "npm-worm-farcaster":  "npm-worm",
+    "npm-worm-hf":         "npm-worm",
+    "npm-worm-devto":      "npm-worm",
+    "npm-worm-hn":         "npm-worm",
     "secret-scan":           "secret-scan",
     "secretscan":            "secret-scan",
     "secret-scan-post":      "secret-scan",
@@ -2357,6 +3103,16 @@ _SOURCE_ALIASES = {
     "session-hijack-farcaster": "session-hijack",
     "session-hijack-mastodon":  "session-hijack",
     "session-hijack-reddit":    "session-hijack",
+    # BlueNoroff / DPRK ClickFix post, 2026-08-10 ("Sender Recognition Is Not
+    # Authentication"). Registered BEFORE the post goes out, same rule as above.
+    "bluenoroff":           "bluenoroff",
+    "bluenoroff-post":      "bluenoroff",
+    "bluenoroff-linkedin":  "bluenoroff",
+    "bluenoroff-telegram":  "bluenoroff",
+    "bluenoroff-mastodon":  "bluenoroff",
+    "bluenoroff-farcaster": "bluenoroff",
+    "bluenoroff-medium":    "bluenoroff",
+    "bluenoroff-reddit":    "bluenoroff",
     # Agent counterparty screening post, 2026-08-05 ("Your Agent Has a Wallet
     # Now"). Same one-key-per-channel pattern so CloudWatch keeps channels
     # distinguishable while all rendering the x402 banner. Registered BEFORE the
@@ -2413,15 +3169,34 @@ _SOURCE_ALIASES = {
     # dev -> security-lead bridge in the funnel; it shipped in the published
     # PyPI package and GitHub release on 2026-08-02 pointing at ?source=rsscan
     # while that key did not exist, so every arrival logged unmatched: and
-    # rendered no banner. Registered 2026-08-02. The remaining catalogs get
-    # their own keys so a Docker Hub arrival is distinguishable from a
-    # pre-commit one. Maps to the github variant: same developer audience.
-    "rsscan":     "github",
+    # rendered no banner. Registered 2026-08-02.
+    #
+    # 2026-08-08: rsscan now has its OWN banner and is deliberately NOT aliased
+    # here. It was mapped to "github" on the reasoning "same developer audience",
+    # which is true about the audience and wrong about the moment: someone who
+    # just watched a secret scanner block their commit is not asking which client
+    # library to install. The remaining catalogs stay on github, since a Docker
+    # Hub or pre-commit arrival really is a generic integration visit.
     "dockerhub":  "github",
     "docker":     "github",
     "circleci":   "github",
     "pre-commit": "github",
     "zapier": "github",
+    # rsscan --deps release post, 2026-08-13. Registered BEFORE anything is
+    # published, which is the rule this file keeps relearning: an unregistered
+    # key renders no banner and logs unmatched:, so the link looks fine in the
+    # post and quietly attributes nothing.
+    #
+    # `rsscan-deps` (no channel suffix) is the CTA inside the canonical post.
+    # The suffixed keys keep the syndication channels distinguishable in
+    # CloudWatch while all landing on the same banner.
+    "rsscan-deps":           "rsscan-deps",
+    "rsscan-deps-hf":        "rsscan-deps",
+    "rsscan-deps-medium":    "rsscan-deps",
+    "rsscan-deps-linkedin":  "rsscan-deps",
+    "rsscan-deps-telegram":  "rsscan-deps",
+    "rsscan-deps-devto":     "rsscan-deps",
+    "rsscan-deps-mastodon":  "rsscan-deps",
 }
 
 
@@ -2461,6 +3236,32 @@ def _banner_for(referer: str, query_params: dict) -> str:
     return _resolve_source(referer, query_params)[1]
 
 
+# Matches an HTML comment. Applied to the rendered page, never to the literal,
+# so authors can keep annotating the markup inline.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _strip_html_comments(html: str) -> str:
+    """Drop HTML comments before the page is served.
+
+    Added 2026-08-09. The comments in LANDING_PAGE are engineering notes, and
+    they were shipping to the public: one of them recorded that an n8n template
+    "was demoted to Implement changes by the reviewer", which is a third party's
+    rejection of our work, readable by anyone using View Source. Others named
+    internal TODO ids and audit history.
+
+    Stripping at render time rather than deleting them keeps the notes next to
+    the markup they explain, which is where they are useful, and makes it
+    impossible to leak the next one by forgetting. Verified safe: no <script>
+    or <style> block in the page contains a comment marker, so there is no
+    JavaScript string this can cut through.
+
+    Runs AFTER the referrer banner substitution, since that placeholder is
+    itself an HTML comment and must still be there to be replaced.
+    """
+    return _HTML_COMMENT_RE.sub("", html)
+
+
 def handle_landing_page(query_params: dict | None = None, referer: str = "") -> dict:
     query_params = query_params or {}
     # Email-capture prompt for AWS Marketplace subscribers (added 2026-07-09).
@@ -2484,7 +3285,7 @@ def handle_landing_page(query_params: dict | None = None, referer: str = "") -> 
     # tables land on a general API page and have to hunt for the piece that
     # brought them. Swap in a LangChain-specific quickstart above the fold.
     banner = _banner_for(referer, query_params)
-    return _html(LANDING_PAGE.replace("<!--REFERRER_BANNER-->", banner))
+    return _html(_strip_html_comments(LANDING_PAGE.replace("<!--REFERRER_BANNER-->", banner)))
 
 
 def _aws_email_capture_page(aws_customer_id: str, source: str = "aws_marketplace") -> str:
@@ -2859,6 +3660,13 @@ def lambda_handler(event: dict, context) -> dict:
         except Exception:
             body = {}
         return handle_topup(body)
+
+    if method == "POST" and path in ("/developer/bundle-checkout", "/developer/bundle-checkout/"):
+        try:
+            body = json.loads(event.get("body") or "{}")
+        except Exception:
+            body = {}
+        return handle_bundle_checkout(body)
 
     if method == "POST" and path == "/developer/signup":
         try:

@@ -109,3 +109,4 @@ backups/
 ansible-relayshield/
 relayshield-snap/
 crypto-shield-app/.expo/
+publish_ready/*.tar.gz

@@ -104,6 +104,13 @@ const HTML = `<!DOCTYPE html>
       </div>
       <p class="cta-note">Search "Crypto Shield" in the Solana dApp Store app.</p>
       <p class="cta-note">On desktop, you can also browse the <a href="https://seekertracker.com/apps" target="_blank" rel="noopener">Seeker dApp Store catalog</a> (community-run) and search "Crypto Shield" there.</p>
+      <p class="cta-note" style="margin-top:14px">
+        Nothing to install: send a wallet address or a suspicious link to
+        <a href="https://t.me/relayshield_bot?start=src_cslanding" target="_blank" rel="noopener">@relayshield_bot</a>
+        on Telegram and it will check it, free.
+        You can also <a href="https://t.me/relayshield_bot?startgroup=true" target="_blank" rel="noopener">add it to a group chat</a>,
+        where anyone can check an address inline without leaving the conversation.
+      </p>
     </div>
 
     <div class="trust-strip">
@@ -170,14 +177,41 @@ const HTML = `<!DOCTYPE html>
       <h2>Why Crypto Shield is different</h2>
       <p>
         Every competing wallet-security product watches on-chain activity only. Most real attacks start
-        off-chain — a leaked password, a phished session, a SIM-swap — long before a malicious transaction
-        ever gets signed. Crypto Shield is the only consumer product that treats the credential layer and
-        the chain layer as one attack surface.
+        off-chain, with a leaked password, a phished session or a SIM swap, long before a malicious
+        transaction ever gets signed. Crypto Shield is the only consumer product that treats the
+        credential layer and the chain layer as one attack surface.
+      </p>
+    </div>
+
+    <div class="differentiator">
+      <h2>Asking for your email and phone number is the obvious objection</h2>
+      <p>
+        A security app that wants your email, your phone number and your wallet addresses ought to have
+        to explain itself. So here is exactly what happens to each one.
+      </p>
+      <p>
+        They are stored encrypted on your own device. They are the questions we ask on your behalf, not
+        a profile we keep. <strong>An identifier is kept only for as long as you have monitoring
+        switched on for it, and deleting it in the app deletes it and its history.</strong> Continuous
+        monitoring cannot re-check something it has thrown away, so we say what we do rather than
+        claim we keep nothing. Wallet addresses are kept for the same reason, and a wallet address is
+        public on the chain already.
+      </p>
+      <p>
+        Each check goes to the single provider that can answer it, and each one sees a single detail and
+        nothing else. The provider that checks your number never learns your email. The one that checks
+        your email never learns your number. Neither ever learns your wallets.
+        <strong>Your identifiers are never linked together anywhere except on your own device</strong>,
+        which means there is no profile of you for us to lose, leak or be compelled to hand over.
+      </p>
+      <p style="font-size:.9rem;opacity:.75">
+        The full detail, including every provider by name and how long anything is kept, is in the
+        <a href="https://privacy.relayshield.net">privacy policy</a>.
       </p>
     </div>
 
     <footer>
-      <p>RelayShield — Identity protection built for what comes after the breach.</p>
+      <p>RelayShield. Identity protection built for what comes after the breach.</p>
       <div class="footer-links">
         <a href="https://relayshield.net">Company</a> ·
         <a href="https://terms.relayshield.net">Terms</a> ·
@@ -186,7 +220,7 @@ const HTML = `<!DOCTYPE html>
       </div>
       <div class="footer-links" style="margin-top: 12px;">
         <a href="https://linkedin.com/company/relayshield">LinkedIn</a> ·
-        <a href="https://t.me/RelayShield">Telegram</a> ·
+        <a href="https://t.me/relayshield_bot?start=src_cslanding">Telegram bot</a> ·
         <a href="https://warpcast.com/cryptonomicon">Farcaster</a> ·
         <a href="https://infosec.exchange/@relayshieldadmin">Mastodon</a>
       </div>

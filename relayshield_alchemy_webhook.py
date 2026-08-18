@@ -163,6 +163,21 @@ def _goplus_token_security(contract_address: str, chain_id: int) -> dict:
 _ADDR_CRITICAL = {"phishing_activities", "blacklist_doubt", "honeypot_related_address",
                   "cybercrime", "money_laundering", "sanctioned"}
 
+# Keys in a GoPlus address_security result that are "1"/non-empty but are NOT
+# risk signals. Anything that enumerates the raw result looking for "1" must
+# subtract this set, or it invents a risk flag out of a descriptor.
+#
+# `contract_address` means "this address is a contract", nothing more. Verified
+# live 2026-08-14 against vitalik.eth, the USDC contract and a Tornado router:
+# all three return contract_address=1 and no other non-zero key, so every
+# transfer to or from a contract carried a MEDIUM counterparty-risk line.
+#
+# `data_source` is a provider credit string ("SlowMist,BlockSec"), so it never
+# equals "1" and is listed here for documentation rather than for effect.
+#
+# _ADDR_CRITICAL above is an explicit allowlist and never had the bug.
+_ADDR_NON_RISK_KEYS = {"contract_address", "data_source"}
+
 CORRELATION_WINDOW_HOURS = 72
 
 _WALLET_CHAIN_SIGNALS = {"sim_swap", "breach_alert", "port_out"}
@@ -382,14 +397,23 @@ def _format_alert(activity: dict, monitored_address: str, risk: dict, token_risk
     direction = "📥 IN" if to_addr.lower() == monitored_address.lower() else "📤 OUT"
     other     = from_addr if to_addr.lower() == monitored_address.lower() else to_addr
 
-    risk_flags = [k for k, v in risk.items() if v == "1"]
-    risk_level = "HIGH 🔴" if len(risk_flags) >= 2 else "MEDIUM 🟡" if risk_flags else "LOW 🟢"
+    risk_flags = [k for k, v in risk.items()
+                  if v == "1" and k not in _ADDR_NON_RISK_KEYS]
+    # Sanctions alone forces HIGH. The count rule would grade a sanctions-only
+    # counterparty as MEDIUM, and dealing with an OFAC-listed address is a
+    # compliance event on the first flag, not the second. Matches
+    # handle_wallet_risk in relayshield_api.py.
+    risk_level = "HIGH 🔴" if risk.get("sanctioned") == "1" or len(risk_flags) >= 2 \
+        else "MEDIUM 🟡" if risk_flags else "LOW 🟢"
     risk_line  = f"\n⚠️ *Counterparty Risk:* {risk_level}" if risk_flags else ""
 
-    # Scam/malicious address flags from GoPlus address_security API
+    # Scam/malicious address flags from GoPlus address_security API.
+    # `sanctioned` added 2026-08-14: it was missing here, so an OFAC-listed
+    # counterparty with no other flag produced a bare MEDIUM risk line and
+    # never the do-not-transact block.
     scam_flags = {
         "phishing_activities", "honeypot_related_address", "blacklist_doubt",
-        "darkweb_transactions", "stealing_attack", "cybercrime",
+        "darkweb_transactions", "stealing_attack", "cybercrime", "sanctioned",
     }
     active_scam = scam_flags & set(risk_flags)
     if active_scam:
@@ -400,6 +424,7 @@ def _format_alert(activity: dict, monitored_address: str, risk: dict, token_risk
             "darkweb_transactions":   "dark web activity",
             "stealing_attack":        "stealing attack",
             "cybercrime":             "cybercrime",
+            "sanctioned":             "sanctions-listed",
         }
         scam_desc = ", ".join(scam_labels.get(f, f) for f in active_scam)
         risk_line = f"\n🚨 *MALICIOUS ADDRESS DETECTED:* {scam_desc}\n⛔ Do NOT approve any further transactions with this address"

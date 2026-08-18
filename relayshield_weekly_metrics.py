@@ -199,7 +199,129 @@ def _aws_marketplace_stats() -> dict:
     }
 
 
-SOURCES = ["direct", "n8n", "tines", "hf-smolagents"]
+# Channel attribution.
+#
+# This was a hardcoded list of four sources until 2026-08-09, and the counting
+# expression only had buckets for those four. Every other source was silently
+# DROPPED, not folded into an "other" row. Measured against the live table on
+# the day it was fixed: 35 of 39 keys were invisible, including all 13 Bundle A
+# keys and all 8 AWS Marketplace keys. The `hf-smolagents` row was permanently
+# zero as well, because the value actually stored is `hf_smolagents_demo`.
+#
+# That is the worst possible failure for a report whose whole job is telling you
+# which channels work: it does not look broken, it looks like the channel
+# produced nothing. A new channel would have to be added here by hand or it
+# would read as a dead channel forever.
+#
+# So sources are now derived from the data. A channel that has never been seen
+# shows as absent, a channel that appears once shows immediately, and nothing
+# needs editing here when the next one ships.
+
+# Presentation only. Anything not listed still appears, using its raw value.
+_SOURCE_LABELS = {
+    "direct":         "Direct",
+    "rsscan":         "rsscan",
+    "metamask-snap":  "MetaMask Snap",
+    "github":         "GitHub",
+    "n8n":            "n8n",
+    "tines":          "Tines",
+    "langchain":      "LangChain",
+    "llmjacking":     "LLMjacking post",
+    "cs_mobile":      "Crypto Shield Mobile",
+}
+
+
+def _source_group(source: str) -> str:
+    """Which section of the report a source belongs in.
+
+    Acquisition channels are kept apart from Marketplace fulfilment and from
+    demo keys on purpose. Lumping 13 Bundle A fulfilment keys in with developer
+    signups would drown exactly the signal this section exists to show.
+    """
+    s = (source or "direct").lower()
+    if s.startswith("aws_marketplace"):
+        return "aws"
+    if s.endswith("_demo") or s in ("demo_portal",) or "test" in s:
+        return "demo"
+    return "channel"
+
+
+def _label(source: str) -> str:
+    if source in _SOURCE_LABELS:
+        return _SOURCE_LABELS[source]
+    if source.startswith("aws_marketplace"):
+        rest = source[len("aws_marketplace"):].strip("_")
+        if not rest:
+            return "Threat Intelligence (TI)"
+        pending = rest.endswith("_pending")
+        if pending:
+            rest = rest[: -len("_pending")]
+        name = rest.replace("_", " ").title()
+        return f"{name} (pending)" if pending else name
+    return source.replace("_", " ")
+
+
+def _group_sources(counts: dict) -> dict:
+    """Split a {source: value} mapping into the three report sections.
+
+    Every input key lands in exactly one section, so the section totals always
+    reconcile to the grand total. That property is what makes a silent drop
+    impossible to reintroduce.
+    """
+    out = {"channel": {}, "aws": {}, "demo": {}}
+    for src, val in counts.items():
+        out[_source_group(src)][src] = val
+    return {g: dict(sorted(v.items(), key=lambda kv: (-kv[1], kv[0]))) for g, v in out.items()}
+
+
+_GROUP_HEADINGS = [
+    ("channel", "By channel"),
+    ("aws",     "AWS Marketplace fulfilment"),
+    ("demo",    "Demo and internal keys"),
+]
+
+
+def _hdr(text: str) -> str:
+    return (f'  <tr><td colspan="2" style="padding-top:6px;color:#888;'
+            f'font-size:12px">{text}</td></tr>')
+
+
+def _source_rows(by_source: dict, new_by_source: dict, attributed: int, total: int) -> str:
+    """Key-count rows, one per source actually present, grouped."""
+    out = []
+    for group, heading in _GROUP_HEADINGS:
+        rows = by_source.get(group) or {}
+        if not rows:
+            continue
+        out.append(_hdr(heading))
+        for src, count in rows.items():
+            new = (new_by_source.get(group) or {}).get(src, 0)
+            delta = f' <span style="color:#2e9e5b">+{new} this week</span>' if new else ""
+            out.append(f'  <tr><td>&nbsp;&nbsp;{_label(src)}</td>'
+                       f'<td><b>{count}</b>{delta}</td></tr>')
+    if attributed != total:
+        out.append('  <tr><td colspan="2" style="color:#e94560;font-size:12px">'
+                   f'Attribution mismatch: {attributed} of {total} keys accounted for. '
+                   'A source is being dropped.</td></tr>')
+    return "\n".join(out)
+
+
+def _mrr_rows(mrr_by_source: dict) -> str:
+    """MRR rows, one per source actually present, grouped."""
+    out = []
+    for group, heading in _GROUP_HEADINGS:
+        rows = mrr_by_source.get(group) or {}
+        rows = {k: v for k, v in rows.items() if v}
+        if not rows:
+            continue
+        out.append(_hdr(f"MRR {heading[0].lower()}{heading[1:]}"))
+        for src, amt in rows.items():
+            out.append(f'  <tr><td>&nbsp;&nbsp;{_label(src)}</td><td><b>${amt}</b></td></tr>')
+    if not out:
+        out.append(_hdr("MRR by channel"))
+        out.append('  <tr><td>&nbsp;&nbsp;No active subscriptions</td><td><b>$0.00</b></td></tr>')
+    return "\n".join(out)
+
 
 def _api_key_stats() -> dict:
     table = dynamodb.Table("relayshield_api_keys")
@@ -214,13 +336,27 @@ def _api_key_stats() -> dict:
     intel      = sum(1 for i in items if i.get("intel_access"))
     new_week   = sum(1 for i in items if (i.get("created_at") or "") >= cutoff)
     intel_calls= sum(int(i.get("intel_period_calls") or 0) for i in items)
-    by_source  = {s: sum(1 for i in items if (i.get("source") or "direct") == s) for s in SOURCES}
+    counts: dict = {}
+    new_counts: dict = {}
+    for i in items:
+        src = (i.get("source") or "direct")
+        counts[src] = counts.get(src, 0) + 1
+        if (i.get("created_at") or "") >= cutoff:
+            new_counts[src] = new_counts.get(src, 0) + 1
     return {
         "total":              total,
         "intel_enabled":      intel,
         "new_this_week":      new_week,
         "intel_calls_period": intel_calls,
-        "by_source":          by_source,
+        "by_source":          _group_sources(counts),
+        # Per-channel NEW keys is the number that actually answers "is this
+        # channel working". A cumulative count cannot distinguish a channel that
+        # delivered once a year ago from one delivering every week.
+        "new_by_source":      _group_sources(new_counts),
+        # Reconciliation guard. If this ever disagrees with `total`, a source is
+        # being dropped again and the report should say so rather than quietly
+        # under-report.
+        "attributed_total":   sum(counts.values()),
     }
 
 
@@ -230,7 +366,7 @@ def _stripe_mrr(stripe_key: str) -> dict:
         for status in ("active", "past_due"):
             data = _stripe_get(f"/v1/subscriptions?status={status}&limit=100&expand[]=data.latest_invoice", stripe_key)
             subs.extend(data.get("data", []))
-        mrr_by_source = {s: 0.0 for s in SOURCES}
+        mrr_by_source: dict = {}
         for s in subs:
             inv = s.get("latest_invoice")
             if isinstance(inv, dict) and inv.get("total") is not None:
@@ -241,19 +377,22 @@ def _stripe_mrr(stripe_key: str) -> dict:
                 continue
             if s.get("plan", {}).get("interval") == "year":
                 amount = amount / 12
+            # Previously any unrecognised source was rewritten to "direct",
+            # which did not lose the money but did attribute it to the wrong
+            # channel. Silently crediting one channel with another's revenue is
+            # worse than showing an unfamiliar label, so the real value is kept.
             source = (s.get("metadata") or {}).get("source") or "direct"
-            if source not in SOURCES:
-                source = "direct"
-            mrr_by_source[source] += amount
+            mrr_by_source[source] = mrr_by_source.get(source, 0.0) + amount
         total_mrr = sum(mrr_by_source.values())
         return {
             "active_subscriptions": len(subs),
             "mrr_usd":              round(total_mrr, 2),
-            "mrr_by_source":        {k: round(v, 2) for k, v in mrr_by_source.items()},
+            "mrr_by_source":        _group_sources({k: round(v, 2) for k, v in mrr_by_source.items()}),
         }
     except Exception as exc:
         logger.warning("Stripe MRR fetch failed: %s", exc)
-        return {"active_subscriptions": 0, "mrr_usd": 0.0, "mrr_by_source": {s: 0.0 for s in SOURCES}}
+        return {"active_subscriptions": 0, "mrr_usd": 0.0,
+                "mrr_by_source": {"channel": {}, "aws": {}, "demo": {}}}
 
 
 # Founder's own account — used for testing checkout flows. Its invoices are
@@ -546,6 +685,71 @@ def _hf_mcp_stats() -> dict:
         }
 
 
+def _discord_install_stats() -> dict:
+    """Discord bot install footprint: servers, reach, and the App Directory gap.
+
+    Added 2026-08-13. Until the harvester existed we could not answer "how many
+    servers is the bot in", which meant no way to tell whether a post to a big
+    server produced installs, and no way to track progress toward the 75-server
+    Discord App Directory threshold.
+
+    This REFRESHES rather than reading the table blind. `sync()` calls Discord,
+    reconciles the table and returns live counts, so the number in the Monday
+    email is true as of the moment the email was built. Reading the table alone
+    would report whatever the last successful run happened to find, which could
+    be weeks old and would look identical to a current number. That is the same
+    stale-looks-fresh failure the freshness contract exists to prevent.
+
+    On any failure it returns degraded=True rather than zeros. Zero servers and
+    "we could not ask Discord" are very different facts, and a report that
+    renders them identically is worse than one that admits the gap.
+    """
+    try:
+        import relayshield_discord_installs as installs
+    except Exception as exc:
+        logger.warning("discord installs module unavailable: %s", exc)
+        return {"degraded": True, "reason": "module not packaged with this Lambda"}
+
+    try:
+        stats = installs.sync(dry_run=False)
+    except Exception as exc:
+        logger.warning("discord install sync raised: %s", exc)
+        return {"degraded": True, "reason": type(exc).__name__}
+
+    if stats.get("error"):
+        return {"degraded": True, "reason": stats["error"]}
+
+    # Departures are the signal worth surfacing loudest: an admin removing the
+    # bot is the most informative feedback this channel produces, and it is the
+    # thing nobody would otherwise notice.
+    return {
+        "degraded":         False,
+        "servers":          stats["servers"],
+        "new_installs":     stats["new_installs"],
+        "departures":       stats["departures"],
+        "total_reach":      stats["total_reach"],
+        "to_app_directory": stats["to_app_directory"],
+    }
+
+
+def _discord_html(d: dict) -> str:
+    if d.get("degraded"):
+        return (f"""<tr><td colspan="2" style="color:#e94560;"><b>Could not read Discord</b><br>
+        <span style="font-size:12px;">{d.get('reason','unknown')}. This is not a report of zero
+        servers; it is a report that we could not ask.</span></td></tr>""")
+
+    rows = f"""  <tr><td>Servers with the bot</td><td><b>{d['servers']}</b></td></tr>
+  <tr><td>New installs this week</td><td><b>{d['new_installs']}</b></td></tr>
+  <tr><td>Combined member reach</td><td><b>{d['total_reach']:,}</b></td></tr>
+  <tr><td>Servers still needed for the App Directory</td><td><b>{d['to_app_directory']}</b></td></tr>"""
+
+    if d["departures"]:
+        names = ", ".join(x["guild_name"] or x["guild_id"] for x in d["departures"])
+        rows += (f"""\n  <tr><td style="color:#e94560;">Removed the bot</td>"""
+                 f"""<td style="color:#e94560;"><b>{len(d['departures'])}</b> ({names})</td></tr>""")
+    return rows
+
+
 def _feedback_sentiment_stats() -> dict:
     """Crypto Shield Mobile in-app thumbs up/down feedback, aggregated across
     all devices in relayshield_push_tokens. One record per device (latest
@@ -608,16 +812,17 @@ def _build_email(metrics: dict) -> str:
   <tr><td>New this week</td><td><b>{s['api_keys']['new_this_week']}</b></td></tr>
   <tr><td>Intel-enabled keys</td><td><b>{s['api_keys']['intel_enabled']}</b></td></tr>
   <tr><td>Intel API calls (current period)</td><td><b>{s['api_keys']['intel_calls_period']}</b></td></tr>
-  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">By channel</td></tr>
-  <tr><td>&nbsp;&nbsp;Direct</td><td><b>{s['api_keys']['by_source']['direct']}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;n8n</td><td><b>{s['api_keys']['by_source']['n8n']}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;Tines</td><td><b>{s['api_keys']['by_source']['tines']}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;HF (smolagents)</td><td><b>{s['api_keys']['by_source']['hf-smolagents']}</b></td></tr>
+  {_source_rows(s['api_keys']['by_source'], s['api_keys']['new_by_source'], s['api_keys']['attributed_total'], s['api_keys']['total'])}
 </table>
 
 <h3 style="color: #e94560;">Stripe Metered Calls (Last 7 Days)</h3>
 <table border="0" cellpadding="4">
 {"".join(f"  <tr><td>{k}</td><td><b>{v}</b></td></tr>" for k, v in s['meter_calls'].items())}
+</table>
+
+<h3 style="color: #e94560;">Discord Bot Installs</h3>
+<table border="0" cellpadding="4">
+{_discord_html(s['discord'])}
 </table>
 
 <h3 style="color: #e94560;">Alerts Fired</h3>
@@ -639,11 +844,7 @@ def _build_email(metrics: dict) -> str:
   <tr><td>Active subscriptions</td><td><b>{s['stripe']['active_subscriptions']}</b></td></tr>
   <tr><td>MRR</td><td><b>${s['stripe']['mrr_usd']}</b></td></tr>
   <tr><td>Cumulative revenue (YTD)</td><td><b>${s['ytd_revenue']}</b></td></tr>
-  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">MRR by channel</td></tr>
-  <tr><td>&nbsp;&nbsp;Direct</td><td><b>${s['stripe']['mrr_by_source']['direct']}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;n8n</td><td><b>${s['stripe']['mrr_by_source']['n8n']}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;Tines</td><td><b>${s['stripe']['mrr_by_source']['tines']}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;HF (smolagents)</td><td><b>${s['stripe']['mrr_by_source']['hf-smolagents']}</b></td></tr>
+  {_mrr_rows(s['stripe']['mrr_by_source'])}
 </table>
 
 <h3 style="color: #e94560;">x402 PAYG Calls & Revenue</h3>
@@ -877,6 +1078,7 @@ and includes this same section.</p>
         "monitored_emails":     _scan_count("relayshield_monitored_emails"),
         "monitored_emails_new": _new_this_week("relayshield_monitored_emails", "created_at"),
         "api_keys":             _api_key_stats(),
+        "discord":              _discord_install_stats(),
         "breach_alerts_total":  _scan_count("relayshield_breach_alerts"),
         "breach_alerts_new":    _new_this_week("relayshield_breach_alerts", "alert_sent_at"),
         "sim_alerts_total":     _scan_count("relayshield_sim_swap_alerts"),

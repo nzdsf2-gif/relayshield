@@ -274,10 +274,26 @@ this wrong cost most of an evening on 2026-08-18.
 | Azure subscription for the SAS URI | `Nzdsf2@gmail.com` | `f8cdef31-a31e-4b4a-93e4-5f571e91255a` |
 | Partner Center seller account | To be confirmed | To be confirmed |
 
-**Verified 2026-08-18:** the `Nzdsf2@gmail.com` directory had **no subscriptions and no other
-directories**. The Azure free trial was never activated, despite a memory of going through the card
-process. The MS-1b teardown did not consume it, because it never existed. Switching directories
-inside the `.onmicrosoft.com` tenant will never reveal it, which is the trap.
+**Verified 2026-08-18.** The `Nzdsf2@gmail.com` directory shows **no subscriptions and no other
+directories**, and Azure signup returns **"You're not eligible for an Azure free account."**
+
+Read those together: the free trial **was used**, and the subscription was **deleted** with the
+MS-1b teardown. A deleted subscription disappears from the portal entirely rather than showing as
+Disabled, which is why the directory looks untouched. **The $200 credit is spent and does not
+re-issue.**
+
+An empty subscription list plus a visible "Start free trial" button is **not** evidence the trial was
+never taken. That button renders regardless of eligibility; the check happens at signup. Do not draw
+that conclusion again.
+
+**The teardown had a cost that was not priced in at the time.** The 08-16 note said the storage
+account was "Azure spend that survives the MS-1b teardown, so decide deliberately" — it named the
+dependency but not that tearing down would also burn the one-time free credit.
+
+**Path forward: Pay-As-You-Go**, no upfront commitment, cancel anytime. For one 29KB blob in LRS hot
+storage the cost is fractions of a cent a month, so this is a payment method on file rather than
+meaningful spend. Switching directories inside the `.onmicrosoft.com` tenant will never reveal an
+Azure subscription, which remains the trap worth remembering.
 
 A storage account created under `Nzdsf2@gmail.com` is fine even though Power Platform lives in the
 other tenant. A SAS URL is an ordinary HTTPS link and Partner Center does not care which tenant

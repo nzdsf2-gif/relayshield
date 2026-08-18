@@ -36,6 +36,7 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(HERE, "powerplatform_connector")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPEC_URL = "https://api.relayshield.net/openapi.json"
 
 # Curated for a Power Automate audience: IT ops, MSPs and security teams wiring
@@ -54,7 +55,16 @@ SPEC_URL = "https://api.relayshield.net/openapi.json"
 OPERATIONS = [
     ("/v1/metered/breach",              "CheckEmailBreach",      "Check email for breach exposure"),
     ("/v1/metered/infostealer",         "CheckInfostealer",      "Check email in infostealer logs"),
-    ("/v1/metered/sim-swap",            "CheckSimSwap",          "Check phone number for SIM swap"),
+    # CheckSimSwap REMOVED 2026-08-17, founder decision. A full 10-calls-per-operation
+    # run returned 110/120 with sim-swap failing all 10 on HTTP 503 "SIM swap data
+    # unavailable from the carrier (code 60606)". Twilio ticket #28883049 has been open
+    # since 2026-08-08 with no ETA. Microsoft requires 10 SUCCESSFUL calls per operation,
+    # so the connector cannot pass with it present.
+    #
+    # It was deleted from relayshield_swagger2.json by hand and NOT from here, so
+    # regenerating would have silently put it back. Restore this line, re-run the 10
+    # calls against it, and publish a connector UPDATE once Twilio clears.
+    # ("/v1/metered/sim-swap",          "CheckSimSwap",          "Check phone number for SIM swap"),
     ("/v1/metered/domain",              "CheckDomainLookalikes", "Find phishing lookalike domains"),
     ("/v1/metered/ip-intel",            "GetIpIntel",            "Get reputation for a domain or IP"),
     ("/v1/metered/supply-chain",        "CheckSupplyChain",      "Assess vendor breach risk"),
@@ -133,9 +143,37 @@ def collect_refs(node, acc):
                 collect_refs(v, acc)
 
 
+def load_spec():
+    """Fetch the live spec, falling back to building it from the local module.
+
+    The live URL is the right default: it is what the API actually serves, so a
+    connector generated from it cannot describe an endpoint that was never
+    deployed. But the fetch makes this script unrunnable anywhere without egress
+    to api.relayshield.net, which is how the generator and the shipped swagger
+    were allowed to drift apart in the first place.
+
+    relayshield_openapi_spec.build_spec() is the same source the API serves from,
+    so the fallback is faithful rather than a second copy. Pass --local to force it.
+    """
+    if "--local" not in sys.argv:
+        try:
+            with urllib.request.urlopen(SPEC_URL, timeout=30) as r:
+                return json.loads(r.read().decode("utf-8")), SPEC_URL
+        except Exception as exc:
+            print("live spec unreachable (%s), falling back to the local module" % exc,
+                  file=sys.stderr)
+
+    import importlib.util
+    path = os.path.join(ROOT, "relayshield_openapi_spec.py")
+    sp = importlib.util.spec_from_file_location("rs_openapi_spec", path)
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return mod.build_spec(), path
+
+
 def main():
-    with urllib.request.urlopen(SPEC_URL, timeout=30) as r:
-        spec = json.loads(r.read().decode("utf-8"))
+    spec, source = load_spec()
+    print("spec source     : %s" % source)
     if not str(spec.get("openapi", "")).startswith("3."):
         sys.exit("expected an OpenAPI 3.x source, got %r" % spec.get("openapi"))
 
@@ -205,13 +243,25 @@ def main():
             # from monitored Telegram channels. Leading with the marketplace framing
             # in Microsoft's certified connector catalogue would put an overclaim
             # somewhere permanent and public. This says what the data actually is.
-            "description": ("Identity-layer threat intelligence. Check emails, domains, phone "
-                            "numbers and IP addresses against breach records, infostealer logs "
-                            "and aggregated threat feeds before granting access, resetting a "
-                            "credential or trusting a message."),
+            # "phone numbers" was dropped with CheckSimSwap on 2026-08-17. No remaining
+            # operation accepts one, and a description promising capability the connector
+            # does not have is itself a certification failure.
+            "description": ("Identity-layer threat intelligence. Check emails, domains and IP "
+                            "addresses against breach records, infostealer logs and aggregated "
+                            "threat feeds before granting access, resetting a credential or "
+                            "trusting a message."),
             "version":     "1.0.0",
             "contact":     {"name": "RelayShield Support", "email": "support@relayshield.net"},
         },
+        # Required by the connectors' extended standard. Solution Checker reports
+        # RequiredPropertyMissing without it (found 2026-08-18). Three properties,
+        # root level, matching the certified-connectors examples. "Security;IT Operations"
+        # is the pair SOCRadar and Webhood URL Scan use, and is the right shelf for this.
+        "x-ms-connector-metadata": [
+            {"propertyName": "Website",        "propertyValue": "https://api.relayshield.net"},
+            {"propertyName": "Privacy policy", "propertyValue": "https://relayshield.net/privacy"},
+            {"propertyName": "Categories",     "propertyValue": "Security;IT Operations"},
+        ],
         "host":     "api.relayshield.net",
         "basePath": "/",
         "schemes":  ["https"],
@@ -241,6 +291,12 @@ def main():
             },
             "iconBrandColor": "#6c63ff",
             "capabilities":   [],
+            # Required for a certified connector and present on every one of the
+            # certified-connectors entries in microsoft/PowerPlatformConnectors.
+            # Added 2026-08-18; they were missing, and because this file is
+            # generated, adding them by hand would have been undone by the next run.
+            "publisher":      "RelayShield",
+            "stackOwner":     "RelayShield",
             "policyTemplateInstances": [],
         }
     }

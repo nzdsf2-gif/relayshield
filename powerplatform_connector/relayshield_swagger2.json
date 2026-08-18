@@ -9,6 +9,20 @@
       "email": "support@relayshield.net"
     }
   },
+  "x-ms-connector-metadata": [
+    {
+      "propertyName": "Website",
+      "propertyValue": "https://api.relayshield.net"
+    },
+    {
+      "propertyName": "Privacy policy",
+      "propertyValue": "https://relayshield.net/privacy"
+    },
+    {
+      "propertyName": "Categories",
+      "propertyValue": "Security;IT Operations"
+    }
+  ],
   "host": "api.relayshield.net",
   "basePath": "/",
   "schemes": [

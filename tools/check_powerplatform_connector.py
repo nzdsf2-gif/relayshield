@@ -104,6 +104,21 @@ for leftover in ('"oneOf"', '"anyOf"', '"const"', '"prefixItems"', '"examples"',
     if leftover in blob:
         fail("swagger", "OpenAPI 3.x leftover present: %s" % leftover)
 
+# 7b. x-ms-connector-metadata. Solution Checker reports RequiredPropertyMissing
+#     without it, which cost a cloud round-trip to discover on 2026-08-18.
+meta = swagger.get("x-ms-connector-metadata")
+if not isinstance(meta, list) or not meta:
+    fail("metadata", "x-ms-connector-metadata is required by the connectors' extended standard")
+else:
+    got = {m.get("propertyName"): m.get("propertyValue")
+           for m in meta if isinstance(m, dict)}
+    for required in ("Website", "Privacy policy", "Categories"):
+        if not got.get(required):
+            fail("metadata", "x-ms-connector-metadata is missing %r" % required)
+    cats = [c.strip() for c in (got.get("Categories") or "").split(";") if c.strip()]
+    if len(cats) > 2:
+        fail("metadata", "Categories allows at most 2, found %d: %s" % (len(cats), cats))
+
 # 8. Production host URL, https only
 host = swagger.get("host", "")
 if not host:

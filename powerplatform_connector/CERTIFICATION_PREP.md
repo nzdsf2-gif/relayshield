@@ -24,7 +24,7 @@ done once.
 | Production host URL | No staging or dev hosts | ✅ `api.relayshield.net` |
 | Icon | See below | ✅ re-cut, **committed 2026-08-18** (was never committed on 08-16) |
 | 10 successful calls per operation | **110 calls total (11 ops)** | ✅ **110/110 PASSED 2026-08-17** |
-| Solution Checker run | Required | ❌ not run |
+| Solution Checker run | Required | ✅ run 2026-08-18: 0 critical, 0 high, 1 medium (fixed), 0 low |
 | `intro.md` | Required | ✅ written, in the package |
 | Package zip + SAS URI | 15 day validity minimum | ❌ needs an Azure storage account |
 | `ConnectorPackageValidator.ps1` | Required | ❌ needs PowerShell on macOS |
@@ -136,6 +136,34 @@ Two things came with it:
 `api.ransomware.live`, so the field names come from the published API documentation rather than a
 response we read. **Run the Lambda once and confirm `feed freshness OK` appears in the logs before
 relying on it**, and confirm the record count looks sane.
+
+## MS-4c: generator drift, found 2026-08-18 by running Solution Checker
+
+Solution Checker returned **0 critical, 0 high, 1 medium, 0 low**. The medium was
+`RequiredPropertyMissing`: `x-ms-connector-metadata` absent. Added at root level with Website,
+Privacy policy and Categories `Security;IT Operations`, the same pair SOCRadar and Webhood URL Scan
+use in `microsoft/PowerPlatformConnectors`.
+
+**Fixing it exposed something worse.** `relayshield_swagger2.json` had been hand-edited on 08-17 and
+`tools/build_powerplatform_connector.py` had not. Regenerating would have silently:
+
+- **put `CheckSimSwap` back**, the operation removed because it failed all 10 calls on HTTP 503, and
+- **restored "phone numbers"** to `info.description`, the overclaim removed with it.
+
+The note above saying the description was "fixed in the generator, so it cannot drift back" was
+wrong. It was fixed in the output only. Both are now fixed in the generator, and a regeneration
+reproduces the shipped swagger byte for byte apart from the intended metadata addition.
+
+`apiProperties.json` had the same problem in the other direction: `publisher` and `stackOwner` were
+added by hand and would have been erased by the next run. Both now come from the generator.
+
+**Root cause worth naming: the generator fetched the live spec over HTTP and nothing else.** That
+made it unrunnable anywhere without egress to `api.relayshield.net`, so editing the output by hand
+was the path of least resistance. It now falls back to `relayshield_openapi_spec.build_spec()`, the
+same source the API serves from, and takes `--local` to force it.
+
+`tools/check_powerplatform_connector.py` now asserts the metadata block, so this specific finding no
+longer needs a cloud round-trip to catch.
 
 ## The step that will actually take time
 

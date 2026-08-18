@@ -169,7 +169,7 @@ rather you hear that from us than find it yourself.
 `rsscan` is MIT licensed, on [PyPI](https://pypi.org/project/rsscan/) and
 [GitHub](https://github.com/RelayShield/rsscan), and also ships as a pre-commit hook, a GitHub
 Action, a GitLab CI component, a CircleCI orb and a Docker image. The dependency counting is new in
-this release. The secret scanning has been there since the start, matches 31 credential patterns
+this release. The secret scanning has been there since the start, matches 33 credential patterns
 entirely on your machine, and never transmits your code or a matched value.
 
 If you want the part that answers "and is any of them compromised", that is

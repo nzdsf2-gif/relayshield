@@ -6907,9 +6907,19 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}",              "CRITICAL", "GitHub Personal Access Token", None),
     ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}",             "CRITICAL", "GitHub Fine-Grained PAT", None),
     ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}",                "CRITICAL", "Stripe Secret Key", None),
+    # Our own key format. Added 2026-08-18 after a live rs_live_ key reached a
+    # public commit and was caught by GitGuardian, not by us. rsscan carried 33
+    # patterns and none of them matched the credential this product issues,
+    # which is the first thing a security audience tests.
+    ("relayshield_key",  r"rs_(?:live|demo)_[a-f0-9]{32,}",           "CRITICAL", "RelayShield API Key", None),
     ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Cryptographic Key", None),
     ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+",        "HIGH",     "Slack Bot Token", None),
     ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+","HIGH",     "Slack User Token", None),
+    # A webhook URL is a credential in its own right: anyone holding it can post
+    # into the channel. Distinct shape from xoxb/xoxp, so the token patterns above
+    # never matched it. GitHub push protection caught one we shipped; we did not.
+    ("slack_webhook",    r"https://hooks\.slack\.com/services/T[A-Za-z0-9_]+/B[A-Za-z0-9_]+/[A-Za-z0-9_]{16,}",
+                                                                     "HIGH",     "Slack Incoming Webhook URL", None),
     # LLM/AI provider keys — bumped to CRITICAL 2026-07-26 (LLMjacking):
     # a leaked key here isn't just data exposure, it's a live, uncapped
     # billing liability — real incidents range from $46K/day (Sysdig, AWS
@@ -7341,9 +7351,11 @@ _GITHUB_SEARCH_LITERALS: dict[str, tuple[str, ...]] = {
     "github_pat":            ("ghp_",),
     "github_pat_fine":       ("github_pat_",),
     "stripe_secret":         ("sk_live_",),
+    "relayshield_key":       ("rs_live_",),
     "private_key":           ("BEGIN RSA PRIVATE KEY",),
     "slack_bot":             ("xoxb-",),
     "slack_user":            ("xoxp-",),
+    "slack_webhook":         ("hooks.slack.com/services",),
     "google_api":            ("AIza",),
     # Every modern OpenAI key embeds T3BlbkFJ -- base64("OpenAI") -- which is a
     # far more selective literal than the shared sk- prefix.

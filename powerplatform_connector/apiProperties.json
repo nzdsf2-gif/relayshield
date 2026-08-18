@@ -17,6 +17,8 @@
     },
     "iconBrandColor": "#6c63ff",
     "capabilities": [],
+    "publisher": "RelayShield",
+    "stackOwner": "RelayShield",
     "policyTemplateInstances": []
   }
 }

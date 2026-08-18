@@ -22,10 +22,10 @@ done once.
 | Response schemas | Exact, no empty schemas, no empty operations | ✅ |
 | Swagger validity | OpenAPI 2.0 | ✅ generated, 0 leftover 3.x constructs |
 | Production host URL | No staging or dev hosts | ✅ `api.relayshield.net` |
-| Icon | See below | ✅ **re-cut 2026-08-16, all 11 rules pass** |
+| Icon | See below | ✅ re-cut, **committed 2026-08-18** (was never committed on 08-16) |
 | 10 successful calls per operation | **110 calls total (11 ops)** | ✅ **110/110 PASSED 2026-08-17** |
 | Solution Checker run | Required | ❌ not run |
-| `intro.md` | Required | ❌ not written |
+| `intro.md` | Required | ✅ written, in the package |
 | Package zip + SAS URI | 15 day validity minimum | ❌ needs an Azure storage account |
 | `ConnectorPackageValidator.ps1` | Required | ❌ needs PowerShell on macOS |
 
@@ -82,6 +82,37 @@ shield. A flood fill from the borders failed the other way and consumed the shie
 the gradient blends into it with no hard edge. What worked was building the luminance mask and then
 keeping only the **largest connected component**: the shield is one contiguous mark, the artifact is
 a separate blob, and connectivity separates them where a threshold could not.
+
+## MS-4b: `CheckRansomwareRisk` is backed by a dead feed. Decide before submitting.
+
+Found 2026-08-18, while re-checking the package after the session recovery.
+
+`/v1/metered/ransomware-risk` is one of the 11 operations. It is backed by
+`relayshield_intel_ransomware.py`, whose `RANSOMWATCH_URL` still points at
+`joshhighet/ransomwatch`, **which is archived**. Its `posts.json` still serves 16,072 records so
+every fetch returns HTTP 200, but the newest `discovered` value is **2025-06-16**. There are zero
+2026 posts. None of the 37 recovered commits touched it, so INTEL-4-SOURCE is still open.
+
+**This is the same class of problem as the criminal-marketplace overclaim, and it is worse.** That
+one was a description that promised more than the corpus held. This is an operation that returns
+`200 OK` with confident-looking output computed against data that stopped moving 14 months ago. A
+certification reviewer will not catch it, because it responds correctly. Customers will not catch
+it, because a stale feed looks exactly like a quiet week. It would sit in Microsoft's certified
+catalogue, permanent and public and outside our control, which is precisely the reason the
+description was corrected.
+
+**Three options, in order of preference:**
+
+1. **Migrate the feed first.** `https://api.ransomware.live/v2/recentvictims` is verified live and
+   returned same-day records when checked. Swap the URL, map the response to
+   `_extract_victim_domain`, keep the watermark logic unchanged. Then the operation is honest and
+   the 11 stay 11.
+2. **Remove the operation**, exactly as `CheckSimSwap` was removed, and re-add it as a connector
+   update once the migration lands. Costs 10 of the 110 verified calls and drops to 10 operations.
+3. **Ship it as is.** Not recommended. It also has revenue exposure beyond MS-4: `ransomware-risk`
+   is a Bundle C dimension billed at $0.40 a call against the same dead feed.
+
+Option 1 is a small change and unblocks Bundle C at the same time.
 
 ## The step that will actually take time
 

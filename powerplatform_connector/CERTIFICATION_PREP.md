@@ -166,9 +166,26 @@ same source the API serves from, and takes `--local` to force it.
 longer needs a cloud round-trip to catch.
 
 **Re-run after the fix: clean.** "No issues have been identified in this solution", 11:19 on
-2026-08-18, against the re-imported connector. Results downloaded and kept as submission evidence.
-The before/after pair is worth retaining: it shows the finding and its resolution, which is a better
-answer to a reviewer than a single clean run with no history.
+2026-08-18, against the re-imported connector.
+
+### Where the evidence lives
+
+`powerplatform_connector/evidence/`
+
+| File | What it is |
+|---|---|
+| `272e7c34-c07e-4952-a8a8-d79e9130c506_RelayShieldConnector_reports.csv` | The downloadable Solution Checker report |
+| `272e7c34-c07e-4952-a8a8-d79e9130c506_RelayShieldConnector_reports.xlsx` | Same content, spreadsheet form |
+
+`272e7c34-c07e-4952-a8a8-d79e9130c506` is the Solution Checker run id, which is how Microsoft
+identifies the run if a reviewer asks. The download also contains `en/` and `en-US/` subfolders
+holding byte-identical copies; they are localisation variants of the same report and only one set
+needs keeping.
+
+**This is the clean 11:19 run.** The 10:51 run that found the `x-ms-connector-metadata` medium was
+not downloaded before it was superseded, so the before/after pair exists only in this document and
+in commit history, not as two report files. If a reviewer wants evidence of the finding and its fix,
+point at MS-4c above and at the commit that added `x-ms-connector-metadata`.
 
 ## The step that will actually take time
 

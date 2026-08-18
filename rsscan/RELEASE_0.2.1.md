@@ -43,12 +43,17 @@ git reset _canary.py && rm -f _canary.py
 
 ## 1. Build
 
+**Homebrew Python is PEP 668 "externally managed"**, so `pip install` into it is refused and
+`python3 -m build` then fails with "No module named build". Build from a throwaway venv instead;
+it touches nothing system-wide and needs no `--break-system-packages`.
+
 ```bash
 cd "/Users/andrewgibbs/Side SaaS Hustle/rsscan"
 rm -rf dist build *.egg-info
-python3 -m pip install --quiet --upgrade build twine
-python3 -m build
-python3 -m twine check dist/*
+python3 -m venv /tmp/rsbuild
+/tmp/rsbuild/bin/pip install --quiet --upgrade build twine
+/tmp/rsbuild/bin/python -m build
+/tmp/rsbuild/bin/twine check dist/*
 ```
 
 Expect `dist/rsscan-0.2.1-py3-none-any.whl` and `dist/rsscan-0.2.1.tar.gz`, both PASSED.
@@ -58,6 +63,10 @@ Confirm the runbooks did not get bundled:
 ```bash
 tar -tzf dist/rsscan-0.2.1.tar.gz | grep -E "RELEASE|PUBLISHING" || echo "correctly excluded"
 ```
+
+**That check is only meaningful once `dist/` exists.** If the build failed, the tar is missing, grep
+matches nothing and the `||` prints "correctly excluded" having inspected nothing. Confirm the
+artifact is there first with `ls -l dist/`.
 
 ## 2. Upload
 
@@ -71,7 +80,7 @@ happen on tag push with no secret anywhere.
 
 ```bash
 cd "/Users/andrewgibbs/Side SaaS Hustle/rsscan"
-python3 -m twine upload dist/rsscan-0.2.1*
+/tmp/rsbuild/bin/twine upload dist/rsscan-0.2.1*
 # username: __token__
 # password: paste the pypi-… token at the prompt, it is not echoed
 ```

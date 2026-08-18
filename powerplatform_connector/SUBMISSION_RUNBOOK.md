@@ -18,7 +18,23 @@ container's egress policy, so the sequence below comes from the 2026-08-16 resea
 The connector we built is **standalone**. Certification needs it created **inside a solution**. The
 swagger imports identically so nothing is wasted, but it is a re-do and it comes first.
 
-1. [make.powerapps.com](https://make.powerapps.com), pick the target environment (top right).
+**Prerequisite that is easy to miss: solutions need a Dataverse database.** In an environment
+without one, the Solutions page shows "No database found" and there is no **New solution** command
+at all. The Default environment ships without Dataverse.
+
+**Do not add a database to the Default environment to get past this.** A Dataverse database cannot
+be removed from an environment once provisioned, and the Default environment cannot be deleted, so
+it is a one-way door on a tenant-wide environment. Create a Developer environment instead: free,
+Dataverse included, disposable, and it carries the Premium connector access needed to test a
+Premium-tier connector before submitting it.
+
+- Developer Plan: [aka.ms/PowerAppsDevPlan](https://aka.ms/PowerAppsDevPlan)
+- [admin.powerplatform.microsoft.com](https://admin.powerplatform.microsoft.com) → **Environments**
+  → **+ New** → Type **Developer**, **Add a Dataverse data store: Yes**
+
+Then:
+
+1. [make.powerapps.com](https://make.powerapps.com), switch to that environment with the picker (top right).
 2. **Solutions** → **New solution**.
    - Display name: `RelayShield Connector`
    - Publisher: create one if you have none. **Use a real prefix, not `cr` or `new`** — the default

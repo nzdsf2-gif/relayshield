@@ -263,6 +263,26 @@ unzip -l RelayShield_submission.zip
 The sample flow is a trigger plus a Compose. It exists to satisfy the two-solution package structure;
 see MS-4d for why it does not call the connector.
 
+## Which account owns what. Check here before hunting.
+
+Three separate Microsoft identities are in play and they do not see each other's resources. Getting
+this wrong cost most of an evening on 2026-08-18.
+
+| Thing | Account | Tenant / directory |
+|---|---|---|
+| Power Platform environment, the solutions, the connector | `andrew@relayshieldadmingmail.onmicrosoft.com` | Default Directory (RelayShield) |
+| Azure subscription for the SAS URI | `Nzdsf2@gmail.com` | `f8cdef31-a31e-4b4a-93e4-5f571e91255a` |
+| Partner Center seller account | To be confirmed | To be confirmed |
+
+**Verified 2026-08-18:** the `Nzdsf2@gmail.com` directory had **no subscriptions and no other
+directories**. The Azure free trial was never activated, despite a memory of going through the card
+process. The MS-1b teardown did not consume it, because it never existed. Switching directories
+inside the `.onmicrosoft.com` tenant will never reveal it, which is the trap.
+
+A storage account created under `Nzdsf2@gmail.com` is fine even though Power Platform lives in the
+other tenant. A SAS URL is an ordinary HTTPS link and Partner Center does not care which tenant
+produced it.
+
 ## The step that will actually take time
 
 > *"You tested your custom connector to ensure the operations work as expected (**at least 10

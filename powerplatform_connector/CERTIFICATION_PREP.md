@@ -83,7 +83,7 @@ the gradient blends into it with no hard edge. What worked was building the lumi
 keeping only the **largest connected component**: the shield is one contiguous mark, the artifact is
 a separate blob, and connectivity separates them where a threshold could not.
 
-## MS-4b: `CheckRansomwareRisk` is backed by a dead feed. Decide before submitting.
+## MS-4b: `CheckRansomwareRisk` was backed by a dead feed. FIXED 2026-08-18.
 
 Found 2026-08-18, while re-checking the package after the session recovery.
 
@@ -112,7 +112,30 @@ description was corrected.
 3. **Ship it as is.** Not recommended. It also has revenue exposure beyond MS-4: `ransomware-risk`
    is a Bundle C dimension billed at $0.40 a call against the same dead feed.
 
-Option 1 is a small change and unblocks Bundle C at the same time.
+**Option 1 was taken.** `relayshield_intel_ransomware.py` now reads
+`https://api.ransomware.live/v2/recentvictims`, normalising `group`/`victim` onto the
+`group_name`/`post_title` names the rest of the module already used, so the watermark, the alert
+text and the DynamoDB writes are untouched.
+
+Two things came with it:
+
+- **A staleness guard.** `_warn_if_stale` logs an ERROR when the newest record is more than 14 days
+  old. Record *count* is what made the dead feed look healthy; record *age* is the signal that
+  actually distinguishes a live source from an archived one. Run against the old ransomwatch data it
+  fires at 428 days.
+- **A silent false negative, found while migrating.** `_find_monitored_users` matches
+  `monitored_domain` with `eq()`, an exact compare, but `_extract_victim_domain` returned the
+  hostname as written. A victim listed as `https://www.acme.com` produced `www.acme.com`, which never
+  equals the `acme.com` a customer registered, so the CRITICAL ransomware alert did not fire.
+  `_canonical_domain` now strips a leading `www.`. This affected every victim record with a `www`
+  website, on the highest-severity path in the module.
+
+`test_intel_ransomware.py` covers both, plus the field mapping and the `attackdate` fallback.
+
+**Still to verify against the live endpoint:** this container's egress policy blocks
+`api.ransomware.live`, so the field names come from the published API documentation rather than a
+response we read. **Run the Lambda once and confirm `feed freshness OK` appears in the logs before
+relying on it**, and confirm the record count looks sane.
 
 ## The step that will actually take time
 

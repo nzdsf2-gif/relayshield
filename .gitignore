@@ -70,6 +70,10 @@ coverage/
 
 # EAS build needs these tracked to bundle the mobile app icon/splash
 !crypto-shield-app/assets/*.png
+# The connector icon is a required certification artifact, not a build output.
+# Without this the package cannot be assembled from a clone, which is how the
+# 2026-08-16 re-cut was lost.
+!powerplatform_connector/*.png
 .telethon_venv
 zapier_partner_test_key.txt
 

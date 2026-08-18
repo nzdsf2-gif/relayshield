@@ -1,11 +1,11 @@
 """
 RelayShield INTEL-4 — Ransomware Victim Site Monitor
 
-Scrapes active ransomware group leak sites via ransomwatch (open-source project
-that maintains an updated list of .onion victim pages for 100+ ransomware groups).
+Tracks active ransomware group leak sites via ransomware.live, which maintains
+victim listings scraped from the groups' own .onion pages.
 
 Two components:
-  1. Victim site scraping: fetches ransomwatch JSON, extracts victim company names
+  1. Victim site scraping: fetches ransomware.live JSON, extracts victim company names
      and domains, stores in relayshield_intel_ransomware table, cross-references
      against relayshield_users monitored domains, fires CRITICAL alerts.
 
@@ -17,7 +17,7 @@ Two components:
 Architecture:
   EventBridge cron (daily at 08:00 UTC)
   → Lambda (this file)
-      → Fetch ransomwatch posts.json (GitHub, no auth required)
+      → Fetch ransomware.live /v2/recentvictims (no auth required)
       → Parse victim domains
       → Cross-reference relayshield_users monitored_domain fields
       → Tag pre-existing IOCs in relayshield_intel_iocs
@@ -72,9 +72,20 @@ TWILIO_TOK_SECRET = "relayshield/twilio_auth_token"
 TWILIO_FROM_SECRET = "relayshield/twilio_whatsapp_number"
 TWILIO_MESSAGES_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
 VICTIM_TTL_DAYS   = 180
+# A live leak-site feed publishes most days. Fourteen days without a single new
+# record means the source is very likely dead, not that ransomware stopped.
+STALE_FEED_DAYS   = 14
 
-# ransomwatch posts.json — maintained by joshhighet, updated continuously
-RANSOMWATCH_URL   = "https://raw.githubusercontent.com/joshhighet/ransomwatch/main/posts.json"
+# INTEL-4-SOURCE, migrated 2026-08-18.
+#
+# The previous source was joshhighet/ransomwatch posts.json. That repository is
+# ARCHIVED. It still served 16,072 records and every fetch returned 200, but the
+# newest `discovered` value was 2025-06-16 and there were zero 2026 posts. The
+# feed had been dead for 14 months and the failure was silent, because a stale
+# feed and a quiet week look identical. `ransomware-risk` is billed at $0.40 a
+# call and is a certified Power Platform operation, so it was answering both
+# with stale data.
+RANSOMWARE_LIVE_URL = "https://api.ransomware.live/v2/recentvictims"
 
 # ---------------------------------------------------------------------------
 # AWS clients
@@ -104,41 +115,123 @@ def _send_telegram(chat_id: int, text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Ransomwatch feed parsing
+# Feed parsing
 # ---------------------------------------------------------------------------
 
 _RE_DOMAIN = re.compile(r"\b(?:[a-zA-Z0-9\-]{1,63}\.)+(?:com|net|org|io|co|uk|gov|edu|biz|info)\b", re.IGNORECASE)
 
 
-def fetch_ransomwatch() -> list[dict]:
-    """Fetch ransomwatch posts.json. Returns list of victim records."""
+def _normalise(rec: dict) -> dict:
+    """Map a ransomware.live v2 record onto the field names this module uses.
+
+    Everything downstream - _extract_victim_domain, the watermark, the alert
+    text and the DynamoDB writes - was written against ransomwatch's names.
+    Normalising here keeps the migration to one function instead of threading a
+    second schema through all of them.
+
+        ransomware.live      ransomwatch (internal)
+        group            ->  group_name
+        victim           ->  post_title
+        discovered       ->  discovered      (same name, ISO 8601)
+        description      ->  description
+        website          ->  website
+    """
+    return {
+        "group_name":  rec.get("group") or rec.get("group_name") or "unknown",
+        "post_title":  rec.get("victim") or rec.get("post_title") or "",
+        # attackdate is the fallback: `discovered` is when the listing was seen,
+        # which is what the watermark orders on, but not every record carries it.
+        "discovered":  str(rec.get("discovered") or rec.get("attackdate") or ""),
+        "description": rec.get("description") or "",
+        "website":     rec.get("website") or "",
+    }
+
+
+def fetch_victims() -> list[dict]:
+    """Fetch recent ransomware victims. Returns records in the internal shape.
+
+    Returns [] on any failure, which the handler treats as "nothing new" rather
+    than an error. That is the behaviour that hid the dead feed for 14 months,
+    so the staleness guard below is what actually catches a source going quiet:
+    an empty list is indistinguishable from a quiet day, but a newest-record
+    date weeks in the past is not.
+    """
     try:
         req = urllib.request.Request(
-            RANSOMWATCH_URL,
-            headers={"User-Agent": "RelayShield-INTEL4/1.0"},
+            RANSOMWARE_LIVE_URL,
+            headers={"User-Agent": "RelayShield-INTEL4/1.0", "Accept": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
+            raw = json.loads(resp.read())
     except Exception as exc:
-        logger.error("ransomwatch fetch failed: %s", exc)
+        logger.error("ransomware.live fetch failed: %s", exc)
         return []
+
+    if not isinstance(raw, list):
+        logger.error("ransomware.live returned %s, expected a list", type(raw).__name__)
+        return []
+
+    posts = [_normalise(r) for r in raw if isinstance(r, dict)]
+    _warn_if_stale(posts)
+    return posts
+
+
+def _warn_if_stale(posts: list[dict], max_age_days: int = STALE_FEED_DAYS) -> None:
+    """Log loudly when the newest record is older than a source should ever be.
+
+    INTEL-4-SOURCE went unnoticed because a feed that returns plenty of rows
+    looks healthy. Age of the newest record is the signal that distinguishes a
+    live source from an archived one.
+    """
+    dates = [p["discovered"][:10] for p in posts if p.get("discovered")]
+    if not dates:
+        logger.error("STALE FEED: no record carries a discovered date")
+        return
+    newest = max(dates)
+    try:
+        age = (datetime.now(timezone.utc).date()
+               - datetime.strptime(newest, "%Y-%m-%d").date()).days
+    except ValueError:
+        logger.warning("could not parse newest discovered value %r", newest)
+        return
+    if age > max_age_days:
+        logger.error(
+            "STALE FEED: newest ransomware record is %s, %d days old (limit %d). "
+            "The source may be archived, as joshhighet/ransomwatch was.",
+            newest, age, max_age_days,
+        )
+    else:
+        logger.info("feed freshness OK: newest record %s, %d days old", newest, age)
+
+
+def _canonical_domain(raw: str) -> str:
+    """Lower-case and strip a leading www.
+
+    _find_monitored_users matches monitored_domain with eq(), an exact compare.
+    A victim record whose website is "https://www.acme.com" yields
+    "www.acme.com", which never equals the "acme.com" a user actually
+    registered, so the CRITICAL alert silently does not fire. Same failure
+    shape as the dead feed: it goes wrong by finding nothing.
+    """
+    d = raw.lower().strip().rstrip(".")
+    return d[4:] if d.startswith("www.") else d
 
 
 def _extract_victim_domain(post: dict) -> str | None:
-    """Extract the most likely domain from a ransomwatch post record."""
-    # ransomwatch provides: group_name, post_title, discovered, description, website
+    """Extract the most likely domain from a normalised victim record."""
+    # normalised shape: group_name, post_title, discovered, description, website
     website = post.get("website", "")
     if website:
         m = _RE_DOMAIN.search(website)
         if m:
-            return m.group(0).lower()
+            return _canonical_domain(m.group(0))
     # Fall back to extracting from title/description
     for field in ("post_title", "description"):
         text = post.get(field, "")
         if text:
             m = _RE_DOMAIN.search(text)
             if m:
-                return m.group(0).lower()
+                return _canonical_domain(m.group(0))
     return None
 
 
@@ -311,20 +404,20 @@ def _send_wa_ransomware_alert(domain: str, group: str, user: dict) -> bool:
 def lambda_handler(event, context):
     logger.info("INTEL-4 ransomware monitor starting")
 
-    posts = fetch_ransomwatch()
+    posts = fetch_victims()
     if not posts:
-        logger.warning("No ransomwatch posts returned")
+        logger.warning("No ransomware victim records returned")
         return {"statusCode": 200, "new_victims": 0, "alerts_fired": 0}
 
-    logger.info("ransomwatch: %d posts fetched", len(posts))
+    logger.info("ransomware.live: %d victim records fetched", len(posts))
 
     # Only process posts newer than the last successful run.
     #
-    # ransomwatch's posts.json is the full historical archive and only grows -
-    # 16,072 entries as of 2026-07-31. The loop below does one conditional
-    # put_item per post, so a full pass is 16k sequential DynamoDB round trips
-    # and the function timed out at exactly 120000ms on every run. Raising the
-    # timeout only defers that, since the file keeps growing.
+    # /v2/recentvictims returns a recent window rather than the full archive,
+    # so the 16k-record timeout that forced this watermark no longer applies.
+    # The watermark stays: it is what stops a re-alert when the same listing
+    # appears in consecutive windows, and it makes the backlog fill in
+    # incrementally instead of in one replay.
     #
     # The high-water mark is stored as a reserved row in the same table
     # (domain="__state__", group="__watermark__"), which the (domain, group)

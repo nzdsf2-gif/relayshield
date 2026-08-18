@@ -24,7 +24,7 @@ done once.
 | Production host URL | No staging or dev hosts | ✅ `api.relayshield.net` |
 | Icon | See below | ✅ re-cut, **committed 2026-08-18** (was never committed on 08-16) |
 | 10 successful calls per operation | **110 calls total (11 ops)** | ✅ **110/110 PASSED 2026-08-17** |
-| Solution Checker run | Required | ✅ run 2026-08-18: 0 critical, 0 high, 1 medium (fixed), 0 low |
+| Solution Checker run | Required | ✅ **CLEAN 2026-08-18 11:19**, no issues. First run found 1 medium, fixed as MS-4c |
 | `intro.md` | Required | ✅ written, in the package |
 | Package zip + SAS URI | 15 day validity minimum | ❌ needs an Azure storage account |
 | `ConnectorPackageValidator.ps1` | Required | ❌ needs PowerShell on macOS |
@@ -164,6 +164,11 @@ same source the API serves from, and takes `--local` to force it.
 
 `tools/check_powerplatform_connector.py` now asserts the metadata block, so this specific finding no
 longer needs a cloud round-trip to catch.
+
+**Re-run after the fix: clean.** "No issues have been identified in this solution", 11:19 on
+2026-08-18, against the re-imported connector. Results downloaded and kept as submission evidence.
+The before/after pair is worth retaining: it shows the finding and its resolution, which is a better
+answer to a reviewer than a single clean run with no history.
 
 ## The step that will actually take time
 

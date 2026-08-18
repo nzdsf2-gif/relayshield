@@ -1,0 +1,25 @@
+{
+  "properties": {
+    "connectionParameters": {
+      "api_key": {
+        "type": "securestring",
+        "uiDefinition": {
+          "displayName": "RelayShield API key",
+          "description": "The API key issued to your RelayShield account.",
+          "tooltip": "Create or copy a key at https://api.relayshield.net/developers",
+          "constraints": {
+            "tabIndex": 2,
+            "clearText": false,
+            "required": "true"
+          }
+        }
+      }
+    },
+    "iconBrandColor": "#0D0917",
+    "scriptOperations": [],
+    "capabilities": [],
+    "policyTemplateInstances": [],
+    "publisher": "RelayShield",
+    "stackOwner": "RelayShield"
+  }
+}

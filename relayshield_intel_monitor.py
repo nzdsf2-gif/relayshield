@@ -46,7 +46,11 @@ DynamoDB tables:
   relayshield_intel_channels    — PK username (S), active (BOOL) — dynamic channel list
   relayshield_stolen_sessions   — PK session_id (S), email-index GSI, TTL 90 days
   relayshield_users             — user asset lookup
-  relayshield_monitored_emails  — email → user_id index
+  relayshield_monitored_emails  — PK email_id (S), SK user_id (S); addresses are
+                                  stored ONLY as email_encrypted (KMS) +
+                                  email_hash (SHA-256). There is no plaintext
+                                  "email" attribute and no email-index GSI —
+                                  join on email_hash. See CORPUS-5.
   relayshield_monitored_wallets — wallet → user_id index
 """
 
@@ -106,6 +110,40 @@ STOLEN_SESSIONS_TABLE  = "relayshield_stolen_sessions"
 # "your organisation's credentials are being sold, 50k records, $200, posted
 # three hours ago" is something no free feed provides.
 MARKETPLACE_LISTINGS_TABLE = "relayshield_marketplace_listings"
+
+# MOAT-1: raw message archive. See _archive_message().
+INTEL_MESSAGES_TABLE = "relayshield_intel_messages"
+ARCHIVE_TEXT_CAP     = 8000
+
+# CADENCE-1: which channels earn the 15-minute tier.
+#
+# Two conditions, both required. The channel must be a MARKETPLACE category,
+# and it must have actually produced something.
+#
+# Category alone fails: 91 of the 94 non-general channels are silent, so
+# category-only tiering means 376 fetches/hour to catch 3 that post, which buys
+# flood waits and no intelligence.
+#
+# Activity alone also fails, and more subtly: 7 of the 10 channels that produce
+# anything are CTI aggregators. @coaled_tadpoles alone posts 125 messages of
+# Russian hashtag spam with 0 IOCs. Promoting on activity fills the 15-minute
+# tier with noise.
+#
+# Deliberately NOT gated on iocs_total. A marketplace sale post contains no
+# IOCs by design -- that is precisely why listings_captured sat at 0 for
+# months (see the CORPUS-1 note on the extraction call site). Gating the fast
+# tier on IOC yield would re-create the gate we just removed.
+#
+# Aggregators stay on the 6-hourly sweep even when they out-produce everything
+# else on IOC count, because what they repost is already public. Freshness only
+# has value for content that is not.
+FAST_TIER_CATEGORIES = frozenset({
+    "credential_dump", "infostealer", "ransomware", "phaas", "crypto",
+    # INTEL-OTP-1: vouches channels are marketplace content, not aggregator
+    # content, so they belong in the fast tier once they start producing.
+    "otp_vouches",
+})
+FAST_TIER_MIN_MESSAGES = 1
 IDENTITY_GRAPH_TABLE   = "relayshield_identity_graph"
 USERS_TABLE           = "relayshield_users"
 EMAILS_TABLE          = "relayshield_monitored_emails"
@@ -145,8 +183,74 @@ _RE_PASTE_URL = re.compile(
 )
 
 # Infostealer log sale price signals — extract record counts and prices from sale posts
-_RE_LOG_COUNT  = re.compile(r'(\d[\d,\.]+)\s*(?:logs?|lines?|records?|entries|строк|записей|日志)', re.IGNORECASE)
-_RE_LOG_PRICE  = re.compile(r'(?:\$|USD|usdt|BTC|XMR|€)\s*(\d[\d,\.]+)', re.IGNORECASE)
+# LISTING-1, 2026-08-17. The originals dropped magnitude suffixes entirely, so
+# "€30M" parsed as a price of 30, and they matched any number next to a currency
+# symbol with no requirement that the post be selling anything. The first row
+# this table ever captured was a news headline ("Four arrested after hackers
+# siphoned €30M from Commerzbank accounts") scored as a $30 sale of
+# news.google.com. Both now carry an optional magnitude suffix, and neither is
+# sufficient on its own -- see _RE_SALE_INTENT.
+_MAG = r'(?:\s*(k|kk|m|mm|b|к|кк|млн|млрд|万|亿))?'
+_RE_LOG_COUNT  = re.compile(
+    r'(\d[\d,\.]*)' + _MAG + r'\s*(?:logs?|lines?|records?|entries|accounts?|combos?|'
+    r'строк|записей|аккаунтов|日志|条)', re.IGNORECASE)
+_RE_LOG_PRICE  = re.compile(
+    r'(?:\$|USD|usdt|BTC|XMR|€|£)\s*(\d[\d,\.]*)' + _MAG, re.IGNORECASE)
+
+_MAG_FACTOR = {"k": 1_000, "кк": 1_000_000, "kk": 1_000_000, "к": 1_000,
+               "m": 1_000_000, "mm": 1_000_000, "млн": 1_000_000,
+               "b": 1_000_000_000, "млрд": 1_000_000_000,
+               "万": 10_000, "亿": 100_000_000}
+
+# A listing has to be SELLING. A number beside a currency symbol is not a sale.
+_RE_SALE_INTENT = re.compile(
+    r'\b(?:sell(?:ing)?|for\s+sale|price|pricing|buy(?:er|ing)?|escrow|vouch|'
+    r'dm\s+me|pm\s+me|contact\s+me|in\s+stock|fresh\s+(?:logs|base|dump)|'
+    r'fullz|combo\s*list|private\s+base|access\s+for|selling\s+access|'
+    r'прода(?:м|жа|ю)|цена|куплю|в\s+наличии|'
+    r'出售|价格|收购)\b', re.IGNORECASE)
+
+# Reporting ABOUT crime is not an offer of crime. These channels are 7 of the 10
+# that actually post, so this guard carries most of the precision.
+_RE_NEWS_CONTEXT = re.compile(
+    r'\b(?:arrested|arrest|police|prosecutor|authorities|indicted|charged|'
+    r'sentenced|convicted|court|lawsuit|according\s+to|researchers?\s+(?:say|found)|'
+    r'reportedly|report(?:s|ed)\s+that|has\s+been\s+fined|investigation\s+by|'
+    r'disclosed\s+that|confirms?\s+breach|statement)\b', re.IGNORECASE)
+
+# Domains that are never the victim: news outlets, aggregators, platform
+# infrastructure. Measured 2026-08-17: a random sample of 30 channel-sourced
+# domains was almost entirely these.
+_NON_VICTIM_DOMAIN_HINTS = (
+    "news.google.com", "google.com", "youtube.com", "youtu.be", "facebook.com",
+    "twitter.com", "x.com", "t.me", "telegram.me", "telegra.ph", "schema.org",
+    "github.com", "githubassets.com", "githubusercontent.com", "medium.com",
+    "linkedin.com", "reddit.com", "wikipedia.org", "archive.org", "bit.ly",
+    "cybernews.com", "bleepingcomputer.com", "thehackernews.com", "securityaffairs.com",
+    "krebsonsecurity.com", "therecord.media", "infosecurity-magazine.com",
+    "darkreading.com", "scmagazine.com", "malwarebytes.com", "welivesecurity.com",
+)
+
+
+def _magnitude(raw: str, suffix: str) -> int | None:
+    """Parse "4.2" + "M" into 4200000. Returns None when unparseable."""
+    try:
+        base = float(raw.replace(",", "").rstrip("."))
+    except ValueError:
+        return None
+    factor = _MAG_FACTOR.get((suffix or "").lower().strip(), 1)
+    val = base * factor
+    # A bare "4.2" with no suffix is a decimal, not a record count.
+    if factor == 1 and base != int(base):
+        return None
+    return int(val)
+
+
+def _is_non_victim_domain(domain: str) -> bool:
+    d = domain.lower().lstrip(".")
+    if d.startswith("www."):
+        d = d[4:]
+    return any(d == h or d.endswith("." + h) or h in d for h in _NON_VICTIM_DOMAIN_HINTS)
 
 # Telegram forwarded message source extraction
 _RE_TG_FORWARD = re.compile(r'(?:Forwarded from|Переслано из|转发自)\s+[@]?([A-Za-z0-9_]+)', re.IGNORECASE)
@@ -618,18 +722,25 @@ def _hash_value(value: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _match_emails(emails: list[str]) -> list[dict]:
+    """Match observed addresses against monitored customers.
+
+    CORPUS-5 fix, 2026-08-17. This used to Query IndexName="email-index" with a
+    plaintext "email" key. That GSI does not exist on the table -- describe-table
+    returns no GlobalSecondaryIndexes at all -- so every call raised, the except
+    below swallowed it, and user_matches was structurally 0. The warning it
+    logged also put the observed address into CloudWatch in plaintext.
+
+    Matching now uses the SHA-256 email_hash that the rest of the codebase
+    already joins on (relayshield_breach_monitor.get_existing_breach_names,
+    the WhatsApp webhook), against the map loaded once per run. Ciphertext is
+    non-deterministic, so the hash is the only usable join key. This is also a
+    lookup rather than a network call per observed address.
+    """
     matches = []
-    table   = _dynamodb.Table(EMAILS_TABLE)
     for email in emails:
-        try:
-            resp = table.query(
-                IndexName="email-index",
-                KeyConditionExpression=boto3.dynamodb.conditions.Key("email").eq(email.lower()),
-            )
-            for item in resp.get("Items", []):
-                matches.append({"user_id": item["user_id"], "matched": email, "type": "email"})
-        except Exception as exc:
-            logger.warning("Email match failed email=%s: %s", email, exc)
+        for record in _MONITORED_EMAIL_HASHES.get(_sha256_index(email), []):
+            if record.get("user_id"):
+                matches.append({"user_id": record["user_id"], "matched": email, "type": "email"})
     return matches
 
 
@@ -966,7 +1077,23 @@ def detect_malware_families(text: str) -> str:
     return ",".join(sorted(found))
 
 
-def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> None:
+def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "",
+                posted_ts: str = "") -> None:
+    """Persist one message's IOCs as sightings.
+
+    SPEED-1, 2026-08-17. `seen_ts` is OUR INGEST TIME, and it is the only
+    timestamp this table has ever carried. That makes any lead-time measurement
+    a comparison of two poll schedules rather than of two publication times:
+    Telegram sightings quantise to the 6-hourly collector grid (04:21 / 10:21 /
+    16:21 / 22:21) and feed sightings to whenever that feed is pulled. Measured
+    across all 5.8M sightings, the entire overlap population was 14 indicators,
+    and every observed lead was an artefact of that grid to within several hours.
+
+    `posted_ts` is the Telegram message's own date, which the poller already has
+    (it filters on it) and has always discarded. Storing it is what makes a
+    defensible speed claim possible later. It accumulates from this deploy
+    forward and cannot be backfilled, because raw messages are not retained.
+    """
     now   = datetime.now(timezone.utc).isoformat()
     ttl   = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
     table = _dynamodb.Table(INTEL_IOCS_TABLE)
@@ -995,6 +1122,8 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> N
                     "ioc_type": ioc_type, "channel": channel,
                     "category": category, "ttl": ttl,
                 }
+                if posted_ts:
+                    item["posted_ts"] = posted_ts
                 # Only set when non-empty -- "malware" is the malware-index GSI
                 # hash key, and writing "" would index every untagged IOC.
                 if malware:
@@ -1227,8 +1356,46 @@ def _parse_card_data(text: str, channel: str) -> int:
     return stored
 
 
+# INTEL-5: email_hash -> monitored records, rebuilt once per run by
+# _monitored_email_domains(). _match_emails() reads this instead of querying
+# an index; see the note there for why. The value is a LIST because two
+# different user_ids legitimately monitor the same address (measured: 8 active
+# rows, 7 distinct hashes), and a dict here would silently drop one customer's
+# alerts.
+_MONITORED_EMAIL_HASHES: dict[str, list[dict]] = {}
+
+
+def _decrypt_email(ciphertext_b64: str) -> str:
+    """Decrypt a KMS-encrypted address. Returns "" on failure and never raises.
+
+    The failure log deliberately carries no address; a decrypt failure is about
+    the key, not the value.
+    """
+    try:
+        blob = base64.b64decode(ciphertext_b64)
+        return _kms.decrypt(CiphertextBlob=blob)["Plaintext"].decode("utf-8").strip().lower()
+    except Exception as exc:
+        logger.warning("Monitored email decrypt failed: %s", exc)
+        return ""
+
+
 def _monitored_email_domains() -> dict[str, list[dict]]:
+    """Domain -> monitored records, for INTEL-5 stolen-session attribution.
+
+    CORPUS-5 fix, 2026-08-17. This used to read item["email"], a plaintext
+    attribute that relayshield_monitored_emails has never carried: the KMS
+    migration stores every address as email_encrypted (ciphertext) plus
+    email_hash (SHA-256). get("email") therefore returned "" on every row,
+    "@" was never in it, and the map came back empty on every run since.
+    "INTEL-5: loaded 0 monitored email domains" was not a quiet market, it was
+    a dead path, and it gated the archive attribution below it.
+
+    Decrypting is unavoidable here because the alert text and the stored
+    session record both need the address itself. It costs one KMS call per
+    active monitored row, once per run.
+    """
     domain_map: dict[str, list[dict]] = {}
+    _MONITORED_EMAIL_HASHES.clear()
     try:
         table  = _dynamodb.Table(EMAILS_TABLE)
         kwargs = {"FilterExpression": boto3.dynamodb.conditions.Attr("active").eq(True)}
@@ -1236,9 +1403,17 @@ def _monitored_email_domains() -> dict[str, list[dict]]:
             resp = table.scan(**kwargs)
             for item in resp.get("Items", []):
                 email = item.get("email", "")
-                if "@" in email:
-                    domain = email.split("@", 1)[1].lower()
-                    domain_map.setdefault(domain, []).append(item)
+                if not email and item.get("email_encrypted"):
+                    email = _decrypt_email(item["email_encrypted"])
+                if not email or "@" not in email:
+                    continue
+                record          = dict(item)
+                record["email"] = email
+                # Prefer the stored hash so we join on exactly what the rest of
+                # the codebase wrote, and only derive one for pre-migration rows.
+                _MONITORED_EMAIL_HASHES.setdefault(
+                    item.get("email_hash") or _sha256_index(email), []).append(record)
+                domain_map.setdefault(email.split("@", 1)[1].lower(), []).append(record)
             last = resp.get("LastEvaluatedKey")
             if not last:
                 break
@@ -1330,51 +1505,269 @@ def _store_observed_session(session: dict, channel: str) -> None:
 def _extract_marketplace_listing(text: str, channel: str, category: str) -> dict | None:
     """Pull the sale signals out of a marketplace post.
 
-    _RE_LOG_COUNT and _RE_LOG_PRICE have existed in this file since the sale
+    _RE_LOG_COUNT and _RE_LOG_PRICE had existed in this file since the sale
     signal work and were wired to NOTHING -- confirmed 2026-08-16, zero call
-    sites. The regexes to capture our most differentiated content were written
-    and then never connected to an output.
+    sites. LISTING-1 (2026-08-17) then found that once wired, precision was the
+    problem: the first and only row captured was a news headline about an
+    arrest, scored as a $30 sale of news.google.com.
 
-    Returns None when the post carries no commercial signal at all, so ordinary
-    chatter does not create rows.
+    Three gates now, in order of how much they cost us to get wrong:
+
+    1. SALE INTENT is required. A number beside a currency symbol is not an
+       offer. Without this, every CTI channel reporting a breach figure becomes
+       a listing, and 7 of the 10 channels that actually post are CTI channels.
+    2. NEWS CONTEXT rejects. Reporting about crime is not crime for sale.
+    3. Volume or price still required, but parsed WITH magnitude, so "4.2M
+       records" is 4,200,000 rather than 4.
+
+    Returns None when the post carries no commercial signal, so ordinary
+    chatter and news reposts do not create rows.
     """
     if not text:
         return None
 
-    counts = [c.replace(",", "").replace(".", "") for c in _RE_LOG_COUNT.findall(text)]
-    prices = [p.replace(",", "") for p in _RE_LOG_PRICE.findall(text)]
-    victims = [v.strip() for v in _RE_RANSOM_VICTIM.findall(text) if len(v.strip()) > 3]
+    # Gate 1: is anything actually being sold?
+    if not _RE_SALE_INTENT.search(text):
+        return None
 
-    # A listing needs at least a volume or a price. Victim alone is already
-    # handled by the ransomware-victim path.
+    # Gate 2: is this a news report rather than an offer? Sale intent wins only
+    # if the post has no reporting markers at all -- criminals selling data do
+    # not write "according to researchers".
+    if _RE_NEWS_CONTEXT.search(text):
+        return None
+
+    counts, prices = [], []
+    for raw, suf in _RE_LOG_COUNT.findall(text):
+        v = _magnitude(raw, suf)
+        if v is not None:
+            counts.append(v)
+    for raw, suf in _RE_LOG_PRICE.findall(text):
+        v = _magnitude(raw, suf)
+        if v is not None:
+            prices.append(v)
+
+    # Gate 3: a listing needs at least a volume or a price. Victim alone is
+    # already handled by the ransomware-victim path.
     if not counts and not prices:
         return None
 
-    def _biggest(vals):
-        nums = []
-        for v in vals:
-            try:
-                nums.append(int(v))
-            except ValueError:
-                continue
-        return max(nums) if nums else None
+    record_count = max(counts) if counts else None
+    price        = max(prices) if prices else None
 
-    record_count = _biggest(counts)
-    price = _biggest(prices)
+    # Domains in the post are the likeliest victim identifiers, but only after
+    # news outlets, aggregators and platform infrastructure are removed.
+    domains = []
+    for d in _RE_DOMAIN.findall(text):
+        d = d.lower()
+        if not _is_non_victim_domain(d) and d not in domains:
+            domains.append(d)
+        if len(domains) >= 5:
+            break
 
-    # Domains in the post are the likeliest victim identifiers, and are far more
-    # reliable than the prose victim regex.
-    domains = [d.lower() for d in _RE_DOMAIN.findall(text)][:5]
+    # The prose victim regex is noisy ("rs siphoned" came out of a headline), so
+    # dedupe it and require something name-shaped rather than a verb phrase.
+    victims, seen_v = [], set()
+    for v in _RE_RANSOM_VICTIM.findall(text):
+        v = " ".join(v.split()).strip(" .,-")
+        k = v.lower()
+        if len(v) > 3 and k not in seen_v and not v.islower():
+            seen_v.add(k)
+            victims.append(v)
 
     return {
-        "record_count":  record_count,
-        "price":         price,
-        "victim_domain": domains[0] if domains else "",
+        "record_count":   record_count,
+        "price":          price,
+        "victim_domain":  domains[0] if domains else "",
         "victim_domains": domains,
-        "victim_names":  victims[:3],
-        "channel":       channel,
-        "category":      category,
+        "victim_names":   victims[:3],
+        "channel":        channel,
+        "category":       category,
     }
+
+
+# ---------------------------------------------------------------------------
+# INTEL-OTP-1: OTP bot vouch records
+# ---------------------------------------------------------------------------
+# Source: Gary Warner (DarkTower), 2026-08-17. OTP bots automate harvesting
+# one-time passwords to take over accounts or authorise transfers. The reusable
+# insight is not any single bot: Telegram-advertised OTP bots keep a "Vouches"
+# channel, and a vouch is a structured, dated, BRAND-TAGGED record of a
+# completed job. That is the marketplace data we have been trying to pull out
+# of free prose, already semi-structured.
+#
+# Vouches deliberately do NOT go through _extract_marketplace_listing. A vouch
+# carries no sale intent and usually no price, so _RE_SALE_INTENT rejects it by
+# design, and the volume/price gate would reject it again. Different shape,
+# separate parser.
+
+_RE_OTP_BRAND = re.compile(
+    r"\b(afterpay|cash\s?app|cashapp|venmo|paypal|zelle|chime|revolut|wise|"
+    r"coinbase|binance|kraken|robinhood|apple\s?pay|google\s?pay|"
+    r"at\s?&\s?t|at\s?and\s?t|att|verizon|t-?mobile|sprint|"
+    r"microsoft|outlook|yahoo|gmail|google|icloud|amazon|ebay|walmart|target|"
+    r"bank\s?of\s?america|boa|chase|wells\s?fargo|citi|capital\s?one|usaa|"
+    r"discover|amex|american\s?express|synchrony|barclays|hsbc|santander)\b",
+    re.IGNORECASE)
+
+# "otp sent", "code received", "hit", "knocked", "bypassed 2fa", "job done"
+_RE_OTP_OUTCOME = re.compile(
+    r"\b(otp\s*(?:sent|received|received|grabbed|pulled)|code\s*(?:sent|received|grabbed)|"
+    r"hit|hits|knocked|knock|bypass(?:ed)?|success(?:ful)?|worked|legit|"
+    r"vouch(?:ed|ing)?|payment\s*received|job\s*done|delivered)\b",
+    re.IGNORECASE)
+
+_RE_OTP_CALLS = re.compile(r"(\d[\d,]*)\s*(?:otp\s*)?(?:calls?|attempts?|hits?|jobs?)", re.IGNORECASE)
+
+# A vouches channel names its bot constantly; @handles are the cheapest anchor.
+_RE_OTP_BOT = re.compile(r"@([A-Za-z][A-Za-z0-9_]{4,31})")
+
+_OTP_BRAND_CANON = {
+    "cashapp": "Cash App", "cash app": "Cash App", "att": "AT&T",
+    "afterpay": "AfterPay", "paypal": "PayPal", "ebay": "eBay",
+    "icloud": "iCloud", "usaa": "USAA", "hsbc": "HSBC", "citi": "Citi",
+    "at&t": "AT&T", "at & t": "AT&T", "at and t": "AT&T",
+    "boa": "Bank of America", "bank of america": "Bank of America",
+    "amex": "American Express", "american express": "American Express",
+    "applepay": "Apple Pay", "apple pay": "Apple Pay",
+    "googlepay": "Google Pay", "google pay": "Google Pay",
+    "tmobile": "T-Mobile", "t-mobile": "T-Mobile",
+}
+
+
+def _canon_brand(raw: str) -> str:
+    k = " ".join(raw.split()).lower()
+    if k in _OTP_BRAND_CANON:
+        return _OTP_BRAND_CANON[k]
+    k2 = k.replace(" ", "")
+    if k2 in _OTP_BRAND_CANON:
+        return _OTP_BRAND_CANON[k2]
+    return k.title()
+
+
+def _extract_otp_vouch(text: str, channel: str, category: str) -> dict | None:
+    """Parse one OTP-bot vouch record. Returns None when the post is not a vouch.
+
+    INTEL-OTP-1, 2026-08-17. Requires BOTH a targeted brand and an outcome
+    marker. Brand alone matches ordinary chatter ("anyone got a Chase method?"),
+    and outcome alone matches generic praise ("legit seller"). Requiring the
+    pair is what keeps a vouches channel from turning into noise, and it is the
+    same precision lesson as LISTING-1, where a news headline scored as a sale.
+    """
+    if not text:
+        return None
+    outcome = _RE_OTP_OUTCOME.search(text)
+    if not outcome:
+        return None
+    brands = []
+    for b in _RE_OTP_BRAND.findall(text):
+        c = _canon_brand(b)
+        if c not in brands:
+            brands.append(c)
+    if not brands:
+        return None
+
+    calls = None
+    for raw in _RE_OTP_CALLS.findall(text):
+        try:
+            v = int(raw.replace(",", ""))
+        except ValueError:
+            continue
+        calls = v if calls is None else max(calls, v)
+
+    bots = [b for b in _RE_OTP_BOT.findall(text) if b.lower() != channel.lower()]
+
+    return {
+        "brands":       brands[:5],
+        "brand":        brands[0],
+        "outcome":      outcome.group(0).lower(),
+        "call_count":   calls,
+        "bot_handles":  bots[:3],
+        "channel":      channel,
+        "category":     category,
+    }
+
+
+def _store_otp_vouch(vouch: dict, channel: str, preview: str) -> bool:
+    """Write one vouch. Reuses relayshield_marketplace_listings.
+
+    Same table on purpose: a vouch and a sale post are both "criminal commerce
+    observed against a named victim brand", they share the victim-brand GSI, and
+    a second table would fragment the only differentiated dataset we have.
+    `record_type` separates them.
+    """
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        item = {
+            "listing_id":    str(uuid.uuid4()),
+            "record_type":   "otp_vouch",
+            "observed_at":   now,
+            "channel":       channel,
+            "category":      vouch.get("category", ""),
+            "victim_domain": "unattributed",
+            "victim_brand":  vouch["brand"],
+            "brands":        vouch["brands"],
+            "outcome":       vouch["outcome"],
+            "ttl":           Decimal(int(time.time()) + 365 * 86400),
+        }
+        if vouch.get("call_count") is not None:
+            item["call_count"] = Decimal(vouch["call_count"])
+        if vouch.get("bot_handles"):
+            item["bot_handles"] = vouch["bot_handles"]
+        if preview:
+            item["preview"] = preview[:400]
+        _dynamodb.Table(MARKETPLACE_LISTINGS_TABLE).put_item(Item=item)
+        return True
+    except Exception as exc:
+        logger.warning("OTP vouch store failed @%s: %s", channel, exc)
+        return False
+
+
+def _archive_message(channel: str, message, text: str, category: str) -> bool:
+    """Retain the raw message. This is the compounding asset.
+
+    MOAT-1, 2026-08-17. Until now NOTHING in this pipeline kept message text.
+    `relayshield_intel_seen` holds message_id for dedup only, so the corpus kept
+    whatever matched an extractor and discarded everything else -- including the
+    marketplace sale posts, which are the differentiated product. Measured the
+    same day: 99.89% of what these channels produce appears in no public feed we
+    ingest, and all of that context was being thrown away every six hours.
+
+    An archive of what a criminal channel posted over eighteen months cannot be
+    reconstructed by a competitor who starts later. That is the only asset here
+    that compounds, and it only compounds if we write it down.
+
+    Deliberately NO TTL. At the measured rate (~250 messages/day across the ten
+    channels that actually post) this is roughly 90MB/year. An archive that
+    expires is not an archive.
+
+    Sort key is posted_ts#message_id so a channel's history reads back in
+    publication order with a single Query.
+    """
+    try:
+        posted = message.date.isoformat() if getattr(message, "date", None) else ""
+        item = {
+            "channel":    channel,
+            "msg_key":    f"{posted}#{message.id}",
+            "message_id": Decimal(message.id),
+            "seen_ts":    datetime.now(timezone.utc).isoformat(),
+            "category":   category,
+        }
+        if posted:
+            item["posted_ts"] = posted
+        if text:
+            item["text"] = text[:ARCHIVE_TEXT_CAP]
+            item["text_truncated"] = len(text) > ARCHIVE_TEXT_CAP
+        media = getattr(message, "document", None) or getattr(message, "photo", None)
+        if media:
+            item["has_media"] = True
+            mime = getattr(getattr(message, "document", None), "mime_type", "")
+            if mime:
+                item["media_mime"] = mime
+        _dynamodb.Table(INTEL_MESSAGES_TABLE).put_item(Item=item)
+        return True
+    except Exception as exc:
+        logger.warning("Archive failed @%s msg=%s: %s", channel, getattr(message, "id", "?"), exc)
+        return False
 
 
 def _store_marketplace_listing(listing: dict, channel: str, preview: str) -> bool:
@@ -1777,7 +2170,7 @@ def _queue_discovered_discord_invites(text: str, source_channel: str, category: 
     return queued
 
 
-def _load_channels() -> list[tuple[str, str, str, int | None, int | None]]:
+def _load_channels(tier: str = "") -> list[tuple[str, str, str, int | None, int | None]]:
     """Return active channel list from DynamoDB; fall back to hardcoded list.
 
     channel_id/access_hash are a cached Telegram peer, written back by
@@ -1789,9 +2182,21 @@ def _load_channels() -> list[tuple[str, str, str, int | None, int | None]]:
         table = _dynamodb.Table(INTEL_CHANNELS_TABLE)
         resp  = table.scan(
             FilterExpression=boto3.dynamodb.conditions.Attr("active").eq(True),
-            ProjectionExpression="username, category, description, channel_id, access_hash",
+            ProjectionExpression="username, category, description, channel_id, "
+                                 "access_hash, messages_total",
         )
         items = resp.get("Items", [])
+        # CADENCE-1. "fast" is purely ADDITIVE: the 6-hourly sweep still covers
+        # every active channel, so nothing can lose coverage if this filter is
+        # wrong, and _already_seen() means the extra polls create no duplicate
+        # sightings. They only shorten the window in which a deleted post is
+        # missed, which is the entire point for a marketplace channel.
+        if tier == "fast":
+            items = [
+                i for i in items
+                if (i.get("category") or "") in FAST_TIER_CATEGORIES
+                and int(i.get("messages_total", 0) or 0) >= FAST_TIER_MIN_MESSAGES
+            ]
         if items:
             return [
                 (
@@ -1805,12 +2210,30 @@ def _load_channels() -> list[tuple[str, str, str, int | None, int | None]]:
             ]
     except Exception as exc:
         logger.warning("Could not load channels from DynamoDB, using fallback: %s", exc)
+    # The hardcoded fallback carries no yield data, so the fast tier declines to
+    # run rather than putting all 33 seed channels on a 15-minute cadence.
+    if tier == "fast":
+        return []
     return [(u, c, d, None, None) for u, c, d in MONITORED_CHANNELS]
 
 
 # ---------------------------------------------------------------------------
 # Admin digest
 # ---------------------------------------------------------------------------
+
+def _format_mimes(mimes: dict | None) -> str:
+    """Render the mime census, or say plainly that nothing was attached.
+
+    "Documents: 0" and a missing line read the same to a tired reader at 6am.
+    Saying "no attachments at all" is the difference between "the extraction is
+    broken" and "there was nothing to extract", which is the exact ambiguity
+    that let three dead paths sit at zero for months.
+    """
+    if not mimes:
+        return "No attachments seen this run\n"
+    top = sorted(mimes.items(), key=lambda kv: -kv[1])[:6]
+    return "".join("  %s: %d\n" % (m, c) for m, c in top)
+
 
 def _send_admin_digest(stats: dict) -> None:
     # Suppress only when there was genuinely nothing to check (e.g. the
@@ -1822,6 +2245,29 @@ def _send_admin_digest(stats: dict) -> None:
     # instead of channels_attempted, which silently swallowed the digest
     # (and all visibility into the problem) on every such run.
     if not stats.get("channels_attempted"):
+        return
+
+    # CADENCE-1, 2026-08-17: suppress a COMPLETELY empty fast-tier run. Hourly,
+    # most fast runs legitimately find nothing (measured: 10 of 14), and a
+    # digest per empty run buries the ones that matter.
+    #
+    # Deliberately narrow. It does NOT touch the channels_checked==0 case above,
+    # which is the flood-wait signal and must always be visible. It requires
+    # every attempted channel to have resolved cleanly AND every counter to be
+    # zero, so a partial failure still reports. And the 6-hourly sweep always
+    # reports regardless, so a silent fast tier cannot hide a systemic failure
+    # for longer than six hours.
+    if (
+        stats.get("tier") == "fast"
+        and stats.get("channels_checked") == stats.get("channels_attempted")
+        and not stats.get("messages_processed")
+        and not stats.get("iocs_extracted")
+        and not stats.get("listings_captured")
+        and not stats.get("alerts_fired")
+        and not stats.get("archives_parsed")
+    ):
+        logger.info("Fast tier found nothing; digest suppressed (channels=%s)",
+                    stats.get("channels_checked"))
         return
     warning = ""
     if not stats["channels_checked"]:
@@ -1845,8 +2291,16 @@ def _send_admin_digest(stats: dict) -> None:
         f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
         f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
         f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n"
-        f"Discord channels discovered: {stats.get('discord_channels_discovered', 0)}\n\n"
-        f"_RelayShield INTEL — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_"
+        f"Discord channels discovered: {stats.get('discord_channels_discovered', 0)}\n"
+        # Marketplace listings were being counted and never reported, so the one
+        # number that measures our own contribution was invisible in the very
+        # digest meant to show it.
+        f"*Marketplace listings captured: {stats.get('listings_captured', 0)}*\n"
+        f"\n*Media seen* (explains the zeros above)\n"
+        f"Photos: {stats.get('media_photos', 0)}\n"
+        f"Documents: {stats.get('media_documents', 0)}\n"
+        f"{_format_mimes(stats.get('media_mimes'))}"
+        f"\n_RelayShield INTEL — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_"
     )
     _send_telegram(ADMIN_CHAT_ID, text)
 
@@ -1910,7 +2364,7 @@ async def _fetch_specific_messages(targets: list[dict]) -> list[dict]:
 # Telethon channel polling
 # ---------------------------------------------------------------------------
 
-async def _poll_channels(stats: dict) -> None:
+async def _poll_channels(stats: dict, tier: str = "") -> None:
     try:
         from telethon import TelegramClient
         from telethon.sessions import StringSession
@@ -1940,11 +2394,25 @@ async def _poll_channels(stats: dict) -> None:
 
     async with client:
         logger.info("Telethon client connected")
-        since          = datetime.now(timezone.utc) - timedelta(hours=6, minutes=10)
-        channels       = _load_channels()
+        # CADENCE-1: the lookback must track the cadence, with a small overlap
+        # so a message landing between runs is never dropped. The 6h tier uses
+        # 6h10m for the same reason.
+        #
+        # Moved to hourly 2026-08-17 (was 15 minutes): 10 of 14 fast runs found
+        # nothing, and no sub-hour deletion has been measured. `posted_ts` is
+        # now recorded, so revisit this with a measured deletion rate rather
+        # than a guess. **If the schedule changes again, change this with it** --
+        # a 25-minute window left on an hourly rule silently drops 35 minutes of
+        # every hour.
+        if tier == "fast":
+            since = datetime.now(timezone.utc) - timedelta(minutes=70)
+        else:
+            since = datetime.now(timezone.utc) - timedelta(hours=6, minutes=10)
+        channels       = _load_channels(tier)
         channels_table = _dynamodb.Table(INTEL_CHANNELS_TABLE)
         stats["channels_attempted"] = len(channels)
-        logger.info("Polling %d channels", len(channels))
+        logger.info("Polling %d channels (tier=%s, since=%s)",
+                    len(channels), tier or "all", since.isoformat(timespec="seconds"))
 
         for username, category, desc, channel_id, access_hash in channels:
             if channel_id is not None and access_hash is not None:
@@ -2023,7 +2491,14 @@ async def _poll_channels(stats: dict) -> None:
                     # text files already handled above). Runs on every image
                     # now, appending to whatever caption already exists
                     # rather than requiring an empty one.
-                    if message.document:
+                    # The guard must accept message.photo too. _extract_image_text was
+                    # fixed on 2026-08-16 to handle photos, but THIS line still read
+                    # `if message.document:`, and a normally-posted screenshot has
+                    # document = None. The function fix was unreachable and
+                    # images_ocrd stayed 0 on the very next run. Fixing an inner
+                    # function while an outer guard blocks it is the same defect
+                    # shape as the archive category gate.
+                    if message.document or getattr(message, "photo", None):
                         ocr_text = await _extract_image_text(client, message)
                         if ocr_text:
                             msg_text = (msg_text + "\n" + ocr_text).strip()
@@ -2101,8 +2576,33 @@ async def _poll_channels(stats: dict) -> None:
                             except Exception as arch_exc:
                                 logger.warning("INTEL-5 archive failed @%s msg=%d: %s", username, message.id, arch_exc)
 
+                    # MOAT-1: archive before the text guard, so a media-only
+                    # post is still part of the channel's record.
+                    if _archive_message(username, message, msg_text, category):
+                        stats["messages_archived"] = stats.get("messages_archived", 0) + 1
+
                     if not msg_text:
                         continue
+
+                    # PREVIEW-1 fix, 2026-08-17. `preview` was assigned ~130
+                    # lines below this point, AFTER an `if not matches:
+                    # continue`. Two consumers above that assignment read it:
+                    # the brand alert (swallowed by its own except) and the
+                    # marketplace listing store (not guarded at all), so the
+                    # listing call raised UnboundLocalError and aborted the
+                    # whole channel -- logged as "Error processing channel
+                    # @cybermonitum: cannot access local variable 'preview'".
+                    #
+                    # It failed on exactly the messages we most want, because
+                    # _extract_marketplace_listing returns non-None only for a
+                    # commercial post. And it failed EVERY time, because
+                    # `matches` was structurally empty while INTEL-5 email
+                    # matching was dead (CORPUS-5), so the assignment below was
+                    # never reached on any message. That pair is why
+                    # relayshield_marketplace_listings held 0 rows.
+                    preview = msg_text[:120].replace("\n", " ").strip()
+                    if len(msg_text) > 120:
+                        preview += "..."
 
                     # Enhancement: auto-queue channels found via message forwards
                     if getattr(message, "forward", None):
@@ -2128,6 +2628,18 @@ async def _poll_channels(stats: dict) -> None:
                                                     fwd_username, username, category in ("infostealer", "credential_dump"))
                         except Exception:
                             pass
+                    # Media census. Every "0" in the digest used to be ambiguous
+                    # between "the channels never post this" and "they do and our
+                    # filter misses it". Counting what actually arrives is the only
+                    # way to tell those apart, and not having it is why the dead
+                    # extraction paths went unnoticed for months.
+                    if getattr(message, "photo", None):
+                        stats["media_photos"] = stats.get("media_photos", 0) + 1
+                    if message.document:
+                        stats["media_documents"] = stats.get("media_documents", 0) + 1
+                        _mime = (getattr(message.document, "mime_type", "") or "?")
+                        stats.setdefault("media_mimes", {})
+                        stats["media_mimes"][_mime] = stats["media_mimes"].get(_mime, 0) + 1
                     _mark_seen(msg_id)
                     msg_count += 1
                     stats["messages_processed"] += 1
@@ -2195,6 +2707,30 @@ async def _poll_channels(stats: dict) -> None:
                         stats["listings_captured"] = stats.get("listings_captured", 0) + 1
                         chan_listings += 1
 
+                    # INTEL-OTP-1: vouch records. Runs alongside the listing
+                    # extractor rather than after it, because the two are
+                    # mutually exclusive by construction (a vouch has no sale
+                    # intent) and must both sit ABOVE the total_iocs==0 guard
+                    # for the same reason the listing extractor does.
+                    _vouch = _extract_otp_vouch(msg_text, username, category)
+                    if _vouch and _store_otp_vouch(_vouch, username, preview):
+                        stats["vouches_captured"] = stats.get("vouches_captured", 0) + 1
+                        chan_listings += 1
+                        # INTEL-OTP-1 bootstrap. The hard part of this vector is
+                        # not the parser, it is finding the first vouches
+                        # channel, and a handle list is not something to compile
+                        # by hand. A vouch names its bot constantly, so every
+                        # handle in one goes straight into the same review queue
+                        # the Telegram-mention discovery already uses. Monitored
+                        # phaas channels advertise OTP bots, so the loop closes
+                        # itself from channels we already poll.
+                        if _vouch.get("bot_handles"):
+                            _n = _queue_discovered_channels(_vouch["bot_handles"], username)
+                            if _n:
+                                stats["channels_discovered"] = stats.get("channels_discovered", 0) + _n
+                                logger.info("INTEL-OTP-1: queued %d bot handle(s) from a vouch @%s",
+                                            _n, username)
+
                     # IOC extraction
                     iocs       = extract_iocs(msg_text)
                     total_iocs = sum(len(v) for v in iocs.values())
@@ -2216,16 +2752,14 @@ async def _poll_channels(stats: dict) -> None:
                     _fam = detect_malware_families(msg_text)
                     if _fam:
                         stats["malware_tagged"] = stats.get("malware_tagged", 0) + total_iocs
-                    _store_iocs(iocs, username, category, _fam)
+                    _store_iocs(iocs, username, category, _fam,
+                                posted_ts=message.date.isoformat() if message.date else "")
 
                     # User asset matching + alerts
                     matches = find_matches(iocs)
                     if not matches:
                         continue
                     stats["user_matches"] += len(matches)
-                    preview = msg_text[:120].replace("\n", " ").strip()
-                    if len(msg_text) > 120:
-                        preview += "..."
                     for match in matches:
                         user_id = match["user_id"]
                         chat_id = _get_user_chat_id(user_id)
@@ -2310,7 +2844,8 @@ async def _poll_channels(stats: dict) -> None:
                                 _rfam = detect_malware_families(reply_text)
                                 if _rfam:
                                     stats["malware_tagged"] = stats.get("malware_tagged", 0) + r_total
-                                _store_iocs(r_iocs, username, category, _rfam)
+                                _store_iocs(r_iocs, username, category, _rfam,
+                                            posted_ts=reply.date.isoformat() if reply.date else "")
                                 logger.info("Reply IOCs: @%s post=%d reply=%d iocs=%d",
                                             username, post.id, reply.id, r_total)
             except Exception as reply_exc:
@@ -2377,7 +2912,11 @@ def lambda_handler(event, context):
         "onions_extracted":       0,
         "channels_discovered":    0,
         "discord_channels_discovered": 0,
+        "messages_archived":      0,
+        "vouches_captured":       0,
     }
+    tier = (event or {}).get("tier", "")
+    stats["tier"] = tier
     if not _acquire_lock():
         logger.warning("Another invocation already holds the lock — exiting without touching the Telegram session")
         return {"statusCode": 200, "body": json.dumps({"skipped": "lock_held"})}
@@ -2397,7 +2936,7 @@ def lambda_handler(event, context):
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(_poll_channels(stats))
+            loop.run_until_complete(_poll_channels(stats, tier))
         except Exception as exc:
             logger.exception("INTEL-2/5 monitor failed: %s", exc)
             _send_telegram(ADMIN_CHAT_ID, f"🚨 *INTEL-2/5 monitor error*\n\n`{str(exc)[:300]}`")

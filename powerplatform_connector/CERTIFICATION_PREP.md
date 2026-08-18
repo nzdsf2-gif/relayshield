@@ -15,19 +15,37 @@ done once.
 | Requirement | Rule | Us |
 |---|---|---|
 | Title | Under 30 chars, no "API", "Connector" or product names | ✅ `RelayShield`, 11 chars |
-| Description | 30 to 500 chars, English, no product names | ✅ 228 chars, corrected 2026-08-16 |
+| Description | 30 to 500 chars, English, no product names | ✅ 211 chars, re-corrected 2026-08-17 (dropped the phone claim with sim-swap) |
 | Auth type | OAuth2, anonymous, API key or basic | ✅ API key, header |
 | Support contact | Required | ✅ `support@relayshield.net` |
-| Operation summaries | Under 80 chars, alphanumeric and parentheses only | ✅ all 12 |
+| Operation summaries | Under 80 chars, alphanumeric and parentheses only | ✅ all 11 |
 | Response schemas | Exact, no empty schemas, no empty operations | ✅ |
 | Swagger validity | OpenAPI 2.0 | ✅ generated, 0 leftover 3.x constructs |
 | Production host URL | No staging or dev hosts | ✅ `api.relayshield.net` |
 | Icon | See below | ✅ **re-cut 2026-08-16, all 11 rules pass** |
-| 10 successful calls per operation | 120 calls total | ❌ needs a metered key |
+| 10 successful calls per operation | **110 calls total (11 ops)** | ✅ **110/110 PASSED 2026-08-17** |
 | Solution Checker run | Required | ❌ not run |
 | `intro.md` | Required | ❌ not written |
 | Package zip + SAS URI | 15 day validity minimum | ❌ needs an Azure storage account |
 | `ConnectorPackageValidator.ps1` | Required | ❌ needs PowerShell on macOS |
+
+## CheckSimSwap REMOVED, 2026-08-17. Founder decision.
+
+Measured, not assumed: a full 10-calls-per-operation run on 2026-08-17 returned **110/120**, with
+**CheckSimSwap failing all 10** on `HTTP 503 "SIM swap data unavailable from the carrier (code
+60606)"`. Twilio ticket **#28883049** has been open since 2026-08-08; their 2026-08-17 reply says
+they are still "coordinating with the carriers", with no ETA.
+
+Microsoft requires 10 **successful** calls per operation, so the connector could not have passed with
+this operation present. It was removed from `relayshield_swagger2.json` rather than blocking MS-4 on
+a third party indefinitely.
+
+**The `info.description` was corrected at the same time.** It still promised "phone numbers", and no
+remaining operation accepts one. An inaccurate description is itself a certification failure.
+
+**Re-adding it later is a connector UPDATE, not a new submission.** If Twilio clears, restore the
+path from `swagger2.bak.json`, re-run 10 calls against it, and publish an update.
+
 
 ## Two things that need fixing before anything else
 
@@ -70,7 +88,7 @@ a separate blob, and connectivity separates them where a threshold could not.
 > *"You tested your custom connector to ensure the operations work as expected (**at least 10
 > successful calls per operation**)."*
 
-**12 operations means 120 successful calls**, and they must succeed, so they need a real API key with
+**11 operations means 110 successful calls** (was 12/120 before CheckSimSwap was removed), and they must succeed, so they need a real API key with
 an active metered subscription. Worth scripting rather than clicking, and worth doing early because
 any operation that fails here is a resubmission.
 

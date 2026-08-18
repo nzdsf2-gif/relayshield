@@ -104,3 +104,8 @@ backups/
 /llamaindex-relayshield/
 /openai-agents-relayshield/
 /plugin-relayshield/
+
+# separate repos, cloned inside the working tree
+ansible-relayshield/
+relayshield-snap/
+crypto-shield-app/.expo/

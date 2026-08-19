@@ -2835,7 +2835,8 @@ def handle_deferred_url_scan(chat_id: int, target: str) -> None:
         _send_scan_verdict(chat_id, target, result["status"], result["detail"], prefix="Follow-up scan result")
 
 
-def handle_analyze(chat_id: int, content: str | None = None) -> None:
+def handle_analyze(chat_id: int, content: str | None = None,
+                   from_image: bool = False) -> None:
     """Analyze suspicious message text — Telegram equivalent of SMS/EMAIL."""
     if not content:
         send_message(
@@ -2869,10 +2870,107 @@ def handle_analyze(chat_id: int, content: str | None = None) -> None:
         ("norton", "Norton"), ("mcafee", "McAfee"), ("kaspersky", "Kaspersky"),
         ("avg", "AVG"), ("avast", "Avast"), ("malwarebytes", "Malwarebytes"),
         ("pc support", "PC Support"), ("tech support", "Tech Support"),
+        # --- International couriers / postal operators (added 2026-08-19) ---
+        # A parcel-fee lure impersonates whatever carrier is local to the
+        # victim. A US-only carrier list is why the SPL case scored zero.
+        ("dhl", "DHL"), ("tnt", "TNT"), ("dpd", "DPD"), ("gls", "GLS"),
+        ("aramex", "Aramex"), ("smsa", "SMSA Express"), ("naqel", "Naqel Express"),
+        ("spl", "SPL (Saudi Post)"), ("saudi post", "Saudi Post"),
+        ("emirates post", "Emirates Post"), ("qatar post", "Qatar Post"),
+        ("royal mail", "Royal Mail"), ("evri", "Evri"), ("hermes", "Hermes"),
+        ("yodel", "Yodel"), ("parcelforce", "Parcelforce"), ("an post", "An Post"),
+        ("postnl", "PostNL"), ("poste italiane", "Poste Italiane"),
+        ("correos", "Correos"), ("correios", "Correios"),
+        ("la poste", "La Poste"), ("colissimo", "Colissimo"),
+        ("chronopost", "Chronopost"), ("deutsche post", "Deutsche Post"),
+        ("canada post", "Canada Post"), ("purolator", "Purolator"),
+        ("australia post", "Australia Post"), ("auspost", "AusPost"),
+        ("nz post", "NZ Post"), ("singpost", "SingPost"),
+        ("pos malaysia", "Pos Malaysia"), ("j&t", "J&T Express"),
+        ("sf express", "SF Express"), ("china post", "China Post"),
+        ("cainiao", "Cainiao"), ("india post", "India Post"),
+        ("blue dart", "Blue Dart"), ("bluedart", "Blue Dart"),
+        ("delhivery", "Delhivery"), ("ptt kargo", "PTT Kargo"),
+        # --- Non-US banks / payment rails ---
+        ("hsbc", "HSBC"), ("barclays", "Barclays"), ("lloyds", "Lloyds"),
+        ("natwest", "NatWest"), ("halifax", "Halifax"), ("monzo", "Monzo"),
+        ("revolut", "Revolut"), ("santander", "Santander"), ("bbva", "BBVA"),
+        ("caixabank", "CaixaBank"), ("deutsche bank", "Deutsche Bank"),
+        ("rabobank", "Rabobank"), ("emirates nbd", "Emirates NBD"),
+        ("al rajhi", "Al Rajhi Bank"), ("alrajhi", "Al Rajhi Bank"),
+        ("saudi national bank", "Saudi National Bank"), ("riyad bank", "Riyad Bank"),
+        ("qnb", "QNB"), ("adcb", "ADCB"), ("mashreq", "Mashreq"),
+        ("interac", "Interac"), ("commonwealth bank", "Commonwealth Bank"),
+        ("westpac", "Westpac"), ("anz", "ANZ"), ("icici", "ICICI"),
+        ("hdfc", "HDFC"), ("paytm", "Paytm"), ("m-pesa", "M-Pesa"),
+        ("mpesa", "M-Pesa"), ("nubank", "Nubank"),
+        # --- Non-US carriers / telcos ---
+        ("vodafone", "Vodafone"), ("stc", "STC"), ("mobily", "Mobily"),
+        ("zain", "Zain"), ("etisalat", "Etisalat"), ("airtel", "Airtel"),
+        ("jio", "Jio"), ("mtn", "MTN"), ("safaricom", "Safaricom"),
+        ("telstra", "Telstra"), ("optus", "Optus"), ("telus", "Telus"),
+        ("swisscom", "Swisscom"), ("movistar", "Movistar"), ("telcel", "Telcel"),
+        # --- Non-US government / tax authorities ---
+        ("hmrc", "HMRC"), ("dvla", "DVLA"), ("dwp", "DWP"), ("gov.uk", "GOV.UK"),
+        ("service canada", "Service Canada"), ("absher", "Absher"),
+        ("tawakkalna", "Tawakkalna"), ("nhs", "NHS"),
+        # --- Non-US exchanges / wallets ---
+        ("bybit", "Bybit"), ("okx", "OKX"), ("kucoin", "KuCoin"),
+        ("bitfinex", "Bitfinex"), ("trust wallet", "Trust Wallet"),
+        ("phantom", "Phantom"), ("trezor", "Trezor"),
     ]
-    matched_brands = [display for kw, display in BRANDS if kw in content_lower]
+    # Word-boundary match, not substring: substring matching silently produced
+    # false positives ("ups" inside "groups"/"signups") and would have made the
+    # short international tokens below ("spl", "dpd", "anz") unusable.
+    matched_brands = []
+    for _kw, _display in BRANDS:
+        if re.search(r"(?<![a-z0-9])" + re.escape(_kw) + r"(?![a-z0-9])", content_lower):
+            if _display not in matched_brands:
+                matched_brands.append(_display)
     if matched_brands:
         flags.append(f"🚩 Brand impersonation: *{', '.join(matched_brands)}*")
+
+    # Parcel / delivery-fee lure — added 2026-08-19 after a real miss reported
+    # by Arjen: an OCR'd SPL (Saudi Post) "a handling fee is required to
+    # complete the delivery" screenshot scored ZERO flags. Nothing above covers
+    # the most common smishing shape worldwide, and the payment link sat behind
+    # a "Pay for fees" button, so no URL was extractable from the image either.
+    DELIVERY_CONTEXT = [
+        "shipment", "parcel", "package", "delivery", "courier", "tracking",
+        "consignment", "customs", "shipping", "postal", "post office",
+        "pickup point", "collection point", "regional facility",
+    ]
+    FEE_DEMAND = [
+        "handling fee", "customs fee", "customs duty", "customs charge",
+        "delivery fee", "shipping fee", "service fee", "clearance fee",
+        "import fee", "import duty", "unpaid fee", "outstanding fee",
+        "small fee", "fee is required", "fee to complete", "pay for fees",
+        "pay the fee", "pay this fee", "amount due", "payment is required",
+        "payment required", "complete the delivery", "complete your delivery",
+        "redelivery", "re-delivery", "reschedule your delivery",
+        "reschedule the delivery", "view payment details", "unpaid shipping",
+        "incomplete address", "address is incomplete",
+    ]
+    # Any currency, not just dollars — the missed message was priced in SAR.
+    CURRENCY_AMOUNT = re.compile(
+        r"(?:(?:sar|aed|qar|kwd|bhd|omr|jod|egp|usd|eur|gbp|cad|aud|nzd|chf|sek|nok"
+        r"|dkk|pln|try|inr|pkr|bdt|lkr|ngn|kes|zar|ghs|mad|dzd|tnd|myr|sgd|thb|php"
+        r"|idr|vnd|jpy|cny|krw|brl|mxn|ars|clp|cop)\s?\d|[$\u20ac\u00a3\u00a5\u20b9\u20a6\u20ba\u20a9\u20aa\u20b1\u0e3f]\s?\d)",
+        re.IGNORECASE,
+    )
+    delivery_hits = [p for p in DELIVERY_CONTEXT if p in content_lower]
+    fee_hits = [p for p in FEE_DEMAND if p in content_lower]
+    money_hit = bool(CURRENCY_AMOUNT.search(content))
+    fee_lure = bool(fee_hits or (delivery_hits and money_hit))
+    if fee_lure:
+        detail = fee_hits[0] if fee_hits else delivery_hits[0]
+        flags.append(
+            f"🚩 Parcel/delivery fee lure: *'{detail}'* — a delivery notice that asks "
+            "for a payment is the most-copied scam template in the world. Real couriers "
+            "collect customs or handling charges through their own app or at the door, "
+            "never through a link in an unexpected message. Track the parcel yourself "
+            "from the carrier's official site using a number you already had."
+        )
 
     # Callback phone number — biggest red flag in link-free smishing
     phone_matches = re.findall(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}", content)
@@ -3011,7 +3109,18 @@ def handle_analyze(chat_id: int, content: str | None = None) -> None:
             "in any threat database.\n"
         )
 
-    severity = "HIGH" if (len(flags) >= 3 or link_flagged) else "MEDIUM" if flags else "LOW"
+    # A screenshot hides its links: "Pay for fees" is a button whose URL lives
+    # in the message's markup, not in the pixels, so OCR never sees it and the
+    # link check below has nothing to check. Say so rather than letting the
+    # result read as an all-clear.
+    image_note = (
+        "\n\U0001F5BC *Read from an image.* Buttons like *Pay* or *View details* keep "
+        "their real link inside the message, not in the picture, so I could not check "
+        "where they lead. Forward the original message, or send me the link with "
+        "`/scan <link>`, for an actual link check.\n"
+    ) if from_image else ""
+
+    severity = "HIGH" if (len(flags) >= 3 or link_flagged or fee_lure) else "MEDIUM" if flags else "LOW"
     icon = "🚨" if severity == "HIGH" else "⚠️" if severity == "MEDIUM" else "✅"
 
     if flags:
@@ -3027,7 +3136,8 @@ def handle_analyze(chat_id: int, content: str | None = None) -> None:
             f"🧠 *Message Analysis — {severity} RISK*\n\n"
             f"{icon} *{len(flags)} social engineering signal(s) detected:*\n{flag_text}\n"
             f"{callback_warn}"
-            f"{checked_clean_note}\n"
+            f"{checked_clean_note}"
+            f"{image_note}\n"
             f"*Recommended action:* Do not click, reply, or call any number in this message. "
             f"If this claims to be from a company, contact them directly via their official website.\n\n"
             f"Reply /vishing for a full guide on phone-based scam tactics.",
@@ -3038,7 +3148,8 @@ def handle_analyze(chat_id: int, content: str | None = None) -> None:
             chat_id,
             "🧠 *Message Analysis*\n\n"
             "✅ No automatic red flags detected in the text.\n"
-            f"{checked_clean_note}\n"
+            f"{checked_clean_note}"
+            f"{image_note}\n"
             "This doesn't guarantee the message is safe — always verify unexpected requests "
             "by calling back on a number you look up yourself. And no dollar signs doesn't "
             "mean it's genuine — a stranger building rapport fast or pushing to move platforms "
@@ -5475,7 +5586,7 @@ def handle_message(update: dict) -> None:
             image_bytes = download_telegram_file(document["file_id"])
         extracted_text = run_textract_ocr(image_bytes) if image_bytes else None
         if extracted_text:
-            handle_analyze(chat_id, extracted_text)
+            handle_analyze(chat_id, extracted_text, from_image=True)
         else:
             send_message(
                 chat_id,

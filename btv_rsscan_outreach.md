@@ -33,7 +33,7 @@ Discord staff channel). Do not guess an address.
 >   no account, no network call, no size cap. Nothing leaves the box.
 > - Report output carries **fingerprints only, never secret values**, so it is safe to forward
 >   to a security team or paste into a ticket.
-> - Installs from PyPI, GitHub, GitHub Marketplace or Docker Hub. Apache-licensed.
+> - Installs from PyPI, GitHub, GitHub Marketplace or Docker Hub. MIT-licensed.
 > - Telemetry is **off unless you pass `--org`**, and even then it is org, an anonymous install
 >   id, version, and per-severity counts. No paths, no findings, no secrets.
 >

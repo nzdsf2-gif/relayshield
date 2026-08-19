@@ -42,7 +42,33 @@ from datetime import datetime, timezone
 IOCS_TABLE = "relayshield_intel_iocs"
 
 # Never exported. See decision 1 above.
-EXCLUDED_TYPES = {"email", "phone"}
+EXCLUDED_TYPES = {"email", "phone", "_control"}
+
+# relayshield_intel_iocs is a MIXED table. relayshield_intel_feed.py writes
+# public-feed indicators into it with category "threat_feed" and channel set to
+# the feed name; relayshield_intel_monitor.py writes channel-collected ones with
+# the Telegram channel as channel. Exporting both would hand a blockchain
+# analytics firm their own URLhaus and ThreatFox rows back while claiming the
+# data appears in no public feed, which they would disprove in minutes.
+FEED_CATEGORY = "threat_feed"
+FEED_CHANNELS = {
+    "_system", "cisa_kev", "threatfox", "urlhaus",
+    "feodo_tracker", "feodo_aggressive",
+}
+
+# Several writers disagree on casing and on hash naming, which splits one
+# indicator type across several buckets and skews every share we quote.
+TYPE_ALIASES = {"sha256": "hash_sha256", "md5": "hash_md5"}
+
+
+def normalise_type(raw):
+    t = (raw or "unknown").strip().lower()
+    return TYPE_ALIASES.get(t, t)
+
+
+def is_feed_row(item):
+    return ((item.get("category") or "") == FEED_CATEGORY
+            or (item.get("channel") or "") in FEED_CHANNELS)
 
 
 def _scan_live(table_name, region):
@@ -83,25 +109,33 @@ def collapse(items):
         if not value:
             continue
         ts = it.get("seen_ts") or ""
+        feed_row = is_feed_row(it)
         rec = by_value.get(value)
         if rec is None:
             by_value[value] = {
                 "ioc_value": value,
-                "ioc_type": it.get("ioc_type") or "unknown",
+                "ioc_type": normalise_type(it.get("ioc_type")),
                 "first_seen": ts,
                 "last_seen": ts,
                 "times_seen": 1,
-                "channels": {it.get("channel") or ""},
+                # Only channel-collected sightings contribute a source label;
+                # a feed name is not ours to hand over as provenance.
+                "channels": set() if feed_row else {it.get("channel") or ""},
                 "category": it.get("category") or "",
                 "malware": it.get("malware") or "",
+                "from_channel": not feed_row,
+                "from_feed": feed_row,
             }
         else:
             rec["times_seen"] += 1
+            rec["from_channel"] = rec["from_channel"] or not feed_row
+            rec["from_feed"] = rec["from_feed"] or feed_row
+            if not feed_row:
+                rec["channels"].add(it.get("channel") or "")
             if ts and (not rec["first_seen"] or ts < rec["first_seen"]):
                 rec["first_seen"] = ts
             if ts and ts > rec["last_seen"]:
                 rec["last_seen"] = ts
-            rec["channels"].add(it.get("channel") or "")
             if not rec["malware"] and it.get("malware"):
                 rec["malware"] = it["malware"]
     return list(by_value.values())
@@ -192,8 +226,14 @@ def rows_for_export(sample, labels):
 
 METHODOLOGY = """# RelayShield indicator sample — methodology
 
-Generated {generated}. Sample of {sample_n} distinct indicators drawn from a live corpus of
-{corpus_n} distinct indicators collected from monitored criminal Telegram channels.
+Generated {generated}. Sample of {sample_n} distinct indicators drawn from {corpus_n} distinct
+indicators collected from monitored criminal Telegram channels.
+
+Of those {corpus_n}, {overlap} also appear in a public threat feed we ingest, so **{excl}** of this
+corpus is exclusive to our own collection. That figure is measured at export time, not asserted.
+
+Indicators we merely re-distribute from public feeds (abuse.ch ThreatFox, URLhaus, Feodo Tracker,
+CISA KEV) are **excluded from this export entirely**. They are not ours to offer you.
 
 ## What this is
 
@@ -239,8 +279,8 @@ which is what any claim about arriving earlier than a public feed has to rest on
 
 ## How to verify the exclusivity claim yourself
 
-We claim 99.89% of channel-sourced indicators appear in none of the public feeds we ingest.
-That is our measurement, against our feed set, and you should not take it on our word:
+The exclusivity figure above is measured against the public feeds we ingest, which is not the same
+as the feeds you ingest. Check it yourself:
 
 1. Take the wallet and URL rows from this slice.
 2. Intersect them with your own coverage, and with whatever public feeds you ingest.
@@ -266,15 +306,34 @@ def main():
     ap.add_argument("--region", default="us-east-1")
     ap.add_argument("--table", default=IOCS_TABLE)
     ap.add_argument("--fixture", help="read items from a JSONL file instead of DynamoDB")
+    ap.add_argument("--include-feeds", action="store_true",
+                    help="also export public-feed indicators (threatfox, urlhaus, feodo, "
+                         "cisa_kev). Off by default: they are not ours to pitch as exclusive.")
     args = ap.parse_args()
 
     items = _load_fixture(args.fixture) if args.fixture else _scan_live(args.table, args.region)
-    records = [r for r in collapse(items) if r["ioc_type"] not in EXCLUDED_TYPES]
-    if not records:
+    everything = [r for r in collapse(items) if r["ioc_type"] not in EXCLUDED_TYPES]
+    if not everything:
         sys.exit("no exportable indicators found")
+
+    feed_only = [r for r in everything if not r["from_channel"]]
+    records = [r for r in everything if r["from_channel"]]
+    if args.include_feeds:
+        records = everything
+    if not records:
+        sys.exit("no channel-collected indicators found — nothing to export")
+
+    # The exclusivity claim, measured rather than asserted: of the indicators we
+    # collected ourselves, how many never appeared in a public feed we ingest.
+    overlap = sum(1 for r in records if r["from_feed"])
+    exclusive_share = (len(records) - overlap) / len(records)
 
     composition = Counter(r["ioc_type"] for r in records)
     corpus_n = len(records)
+    print(f"channel-collected: {corpus_n}  |  public-feed rows excluded: {len(feed_only)}",
+          file=sys.stderr)
+    print(f"of the channel-collected, {overlap} also appear in an ingested public feed "
+          f"({exclusive_share:.2%} exclusive)", file=sys.stderr)
     sample = stratify(records, args.size, args.seed)
     labels = channel_labels(sample)
     rows = rows_for_export(sample, labels)
@@ -299,13 +358,18 @@ def main():
     with open(md_path, "w") as fh:
         fh.write(METHODOLOGY.format(
             generated=generated, sample_n=len(rows), corpus_n=corpus_n, seed=args.seed,
+            overlap=overlap, excl=f"{exclusive_share:.2%}",
             composition="| Type | Distinct | Share |\n|---|---|---|\n" + comp_lines,
         ))
 
     manifest = {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "seed": args.seed,
-        "corpus_distinct_exportable": corpus_n,
+        "corpus_distinct_channel_collected": corpus_n,
+        "public_feed_indicators_excluded": len(feed_only),
+        "channel_collected_also_in_public_feed": overlap,
+        "measured_exclusive_share": round(exclusive_share, 6),
+        "include_feeds": args.include_feeds,
         "corpus_composition": dict(composition.most_common()),
         "sample_size": len(rows),
         "sample_composition": dict(Counter(r["ioc_type"] for r in rows).most_common()),

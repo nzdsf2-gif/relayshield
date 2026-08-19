@@ -108,8 +108,15 @@ Roles to target: Head of Data Partnerships · Director of Threat Intelligence ·
 >
 > — Andrew Gibbs, RelayShield
 
-**Blocker before the first send:** every message offers a sample slice. Cut it first —
-a defensible export with the methodology note — or the offer stalls on the reply.
+**The sample slice each message offers is built:** `tools/export_intel_sample.py`. Run it with
+AWS credentials to produce `dist/intel_sample/` — the CSV/JSONL slice, `METHODOLOGY.md`, and a
+`manifest.json` carrying live corpus totals and file hashes:
+
+    AWS_PROFILE=relayshield python3 tools/export_intel_sample.py --out dist/intel_sample
+
+Read the manifest's `corpus_composition` before sending: the messages quote 13,358 / 3,131 /
+1,215 / 99.89%, and indicators carry a 90-day TTL, so those figures drift. **Quote the manifest,
+not this file.** Emails, phone numbers and channel names are never exported.
 
 ---
 

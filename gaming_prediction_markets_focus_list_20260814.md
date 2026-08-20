@@ -535,3 +535,114 @@ gaming names above, where the audience is not leaving the platform.
 4. **One guild test** before deciding whether guilds are a category.
 5. Existing order stands for the already-verified names: Splinterlands, then Honeyland / Pirate
    Nation / Genopets, then Gods Unchained and The Sandbox.
+
+---
+
+# Session 2026-08-20, part 2
+
+## `relayshield_discord_bot.py` is now in the repo
+
+Recovered by upload and committed. rsscan reports **0 findings** on it (dogfooded before the commit),
+and the two hardcoded values are non-secret by design: `APPLICATION_ID` is public, and `PUBLIC_KEY`
+is Discord's *verification* key — it only verifies inbound signatures and signs nothing. Every real
+credential comes from Secrets Manager at runtime.
+
+**The regex this whole document's chain gate rests on is now readable by anyone:**
+
+    _EVM_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")     # line 112
+    _SOL_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+    _BTC_RE = re.compile(r"^(bc1[a-z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$")
+
+Everything the document claimed about the gate checks out.
+
+## Ronin: EVM, supported — with one gap worth fixing before pitching a Ronin game
+
+**Yes, Ronin is EVM and it passes.** Ronin addresses are ordinary 20-byte EVM addresses, so they
+match `_EVM_RE`, they resolve to `chain="evm"` in `_detect_chain_api()`
+(`relayshield_api.py:2827`), and Crypto Shield Mobile's wallet type is
+`"solana" | "evm" | "bitcoin" | "ton"` (`crypto-shield-app/src/hooks/useWallet.ts:8`) — generic EVM,
+not a per-chain allowlist. **Nothing about Ronin needs adding for CS Mobile to accept the address.**
+
+Screening goes to GoPlus with `chain_id=1` for every EVM address
+(`_GOPLUS_CHAIN_IDS = {"evm": 1, "solana": 101}`, `relayshield_api.py:2825`). The 2026-08-14 test in
+this document established that GoPlus's malicious-address labels are cross-chain, so a Ronin drainer
+that GoPlus knows about does come back flagged. That still rests on one address and three of the six
+flag types, so it is strong evidence rather than proof.
+
+**The gap: the `ronin:` prefix.** Ronin historically displayed addresses as `ronin:abc…` rather than
+`0xabc…`. It is the *same* 20-byte address — purely cosmetic, no cryptographic difference — and
+Ronin Wallet has since moved to showing `0x`. But legacy `ronin:` strings still circulate, dApps
+still accept them, and **`_EVM_RE` anchors on `^0x`, so a pasted `ronin:` address is rejected** —
+the bot answers "that did not look like a link or a wallet address."
+
+There is **no Ronin handling anywhere in the codebase** (grepped `relayshield_api.py` and
+`relayshield_telegram_webhook.py`: zero hits).
+
+**Fix before pitching Lumiterra or The Machines Arena** — a one-line normalise in
+`_looks_like_address`/`_normalize_url`, rewriting a leading `ronin:` to `0x`. Cheap, and the failure
+mode without it is the worst kind: the bot looks broken to exactly the audience being courted, on
+their own chain, in their own address format. Same class of check as the WAX gate, caught in time.
+
+**DFK itself is unaffected** — DFK Chain is an Avalanche subnet and uses plain `0x`.
+
+## DFK: no channels visible until you pass `#✅verify`
+
+Confirmed from the server view — DFK runs a verification gate, with `#✅verify` under **Launchpad**
+and everything else hidden until it is cleared. That is why the channel list looked empty; it is not
+a permissions bug and not a sign of a dead server.
+
+Live server stats read from inside: **55.6K total, 2.58K online (4.6%)**. That matches the
+2026-08-14 invite-preview figures (55,661 / 5.4%) closely enough to treat both as sound — and it is
+the *opposite* of the LAMINA1 and Overtime discrepancies, where the two sources disagreed sharply.
+
+**Clear `#✅verify` first.** The partner channel cannot be found, let alone used, from outside the
+gate, and the partner channel is the preferred route.
+
+## Draft: DFK BizDev form submission
+
+Route: `https://forms.gle/fv4y1G3ppNgJDpEDA`. **Use only if the partner channel is unavailable after
+verifying.**
+
+> **Nature:** Partnership / collaboration
+> **Company:** RelayShield LLC
+>
+> I played DFK, and I now run RelayShield, a security company. I'd like to offer the DFK server a
+> free Discord bot that screens links and wallet addresses against criminal threat-intel feeds.
+>
+> How it works: a player runs `/scan` on a suspicious link or address and gets a private answer,
+> checked against our own criminal IOC corpus and external reputation sources. If it comes back
+> flagged, they can push the warning to the channel with one click. There is also `/scam`, a short
+> "am I being scammed" checklist.
+>
+> Two things that matter for a server of 55K:
+>
+> • **It cannot read your channels.** Slash commands only — no Message Content Intent, no gateway
+> connection. It is structurally unable to see anything it wasn't explicitly invoked on, and I'd
+> rather you verify that than take my word for it.
+>
+> • **It never says "safe."** A drainer domain registered an hour ago is in no database anywhere, so
+> a clean result says exactly that and nothing stronger. Overclaiming here is how a security bot
+> gets someone drained.
+>
+> Free, no data sharing, no contract, and happy to run it in a staging server first or walk the mod
+> team through it before it touches the main server.
+>
+> Separately, and needing nothing from you: if your engineers want it, rsscan is our free MIT
+> secret-scanner that blocks API keys and deployer keys at commit time rather than after a push —
+> github.com/RelayShield/rsscan. No signup, runs locally.
+
+**Why this shape.** It leads with the players, not the company. The "cannot read your channels"
+paragraph is the strongest thing available given the 2026 climate of protocols abandoning Discord
+over exactly that exposure, and the bot's own docstring says the refusal was designed as the pitch.
+rsscan is one paragraph at the end, aimed at a different reader, and explicitly costs them nothing
+to ignore.
+
+## Guilds: yes, examples were added
+
+Answering the question directly — the guild axis was added in part 1 of this session with three
+named examples: **Yield Guild Games**, **GuildFi**, and **Merit Circle / Beam** (Beam.gg is the only
+one with a measurement: 3,801 members, 2.2% online, in band but quiet). All three are **UNRESOLVED**
+— no invite code, no verified count — because `discord.com` is egress-blocked here.
+
+The standing recommendation is unchanged: **resolve and test exactly one guild** before treating
+guilds as a category, on the lesson prediction markets taught at a cost of twenty-two lookups.

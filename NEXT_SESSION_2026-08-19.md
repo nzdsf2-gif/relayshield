@@ -77,7 +77,7 @@ Re-cut on the founder's Mac:
 `/tmp/rsvenv` is a throwaway venv with boto3 (Homebrew Python 3.14 is PEP 668 externally-managed,
 so a plain `pip install` fails). Recreate with `python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3`.
 
-### 2. Microsoft Sentinel PR #14924 — DONE, awaiting review
+### 2. Microsoft Sentinel PR #14924 — arm-ttk hardcoded-URI fix ready, NOT yet pushed
 
 Commit `7c871321` on `fix/ti-domain-commonsecuritylog-join` carries the V3-regenerated package
 (`mainTemplate.json`, `createUiDefinition.json`, `3.0.21.zip`). Verified against the pushed file:
@@ -95,6 +95,29 @@ and no `tolower(IndicatorType)`. Founder posted the reply to v-shukore.
   **Open: does Microsoft want that PR?**
 - Loose end: temporary branch `ci/v3-package` still on the fork. Deleting it from this sandbox
   fails with a proxy disconnect; delete via the Branches page.
+
+**2026-08-20 — reviewer's arm-ttk ask is diagnosed and fixed.** v-shukore asked to "check the
+arm-ttk validation failure causing due to hardcoded value in maintemplate". It is
+`DeploymentTemplate-Must-Not-Contain-Hardcoded-Uri` / `Hardcoded.Url.Reference`, **2 hits**, both
+the literal `https://management.azure.com/.default` in the Threat Intelligence Upload API
+connector's "Get Microsoft Entra ID Access Token" step.
+
+**It is a regression the V3 repackaging introduced** — master has zero occurrences, because master
+carries `"management": "[concat('https://management','.azure','.com/')]"` and renders the step
+through it. The source connector JSON has always held the literal; the tool's `azureManagementUrl`
+substitution only covers playbooks, never data connectors. Master's form was a manual
+post-generation patch, and regenerating flattened it back.
+
+Fix prepared and verified (see `sentinel/README_ti_hardcoded_uri_fix.md` and
+`sentinel/ti_maintemplate_hardcoded_uri.patch`): 3 hunks, all byte-identical to upstream master,
+plus `3.0.21.zip` rebuilt to match. `tools/armttk_hardcoded_uri.py` reports 0 errors after.
+
+**Not pushed to the fork yet** — pushing to `fix/ti-domain-commonsecuritylog-join` updates the live
+Microsoft PR, so it needs the founder's go-ahead. Everything is staged and one push away.
+
+Also still open on this PR: the `apiVersions-Should-Be-Recent` finding (`Microsoft.Resources/deployments`
+`2020-06-01`, ~2270 days old) is a *separate*, pre-existing issue from Microsoft's own templates —
+already disclosed in the PR reply. Do not conflate the two.
 
 ### 3. XSOAR PR #45206 — awaiting Tech Alliance reply
 

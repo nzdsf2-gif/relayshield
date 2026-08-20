@@ -361,3 +361,38 @@ described in the report. Name them and they can be re-pruned in one pass.
 
 **This is a reconstruction, not a restore.** It matches the described behaviour; it may not match
 the original in detail.
+
+---
+
+## 2026-08-20 late — deployed, merged commands, and the drift fix
+
+**Telegram is DEPLOYED.** Merge `ce1a6fe` → run 32413731965, import-probed clean.
+**Intel is NOT** — `relayshield_intel_monitor.py` has no CI deploy path at all (not in
+`deploy_lambdas.yml`'s paths or FUNCS map). Commands and the safety check are in
+`lambda_recovery_and_deploy.md`; do not hand-deploy it until the layers-vs-vendored check passes.
+
+**Faithful restore is still possible** — my "not recoverable" applied to git only.
+`lambda_recovery_and_deploy.md` §1 lists three places to look, best first: the Mac's own working
+tree / stash / reflog (most likely — the file may never have been committed but could still be on
+disk), then published Lambda versions (only if any were published by hand; CI does not use
+`--publish`, and `$LATEST` has been overwritten twice), then Time Machine.
+
+**Command merges restored and extended.** `/scam` is the hub again — `/vishing`, `/botcheck`,
+`/verifybot` reachable from a keyboard under it, and it moves to Telegram Security as the founder
+described. `/extensions` folded into `/infostealer` under Threat Analysis. Every folded command
+still routes unadvertised. Visible commands: 20 → 13.
+
+**Drift prevention shipped:** `.github/workflows/lambda_drift_check.yml`, daily, diffs each live
+function's handler against `main` and opens an issue on mismatch. Covers `relayshield-intel-monitor`
+deliberately, since a hand-deployed function is the likeliest to drift. Confirm the OIDC role has
+`lambda:GetFunction`/`GetFunctionConfiguration` after the first scheduled run.
+
+**Zapier: Zaps cannot be turned off while over quota either.** Nothing to do this cycle.
+**TODO 1 SEPTEMBER 2026 — push the weekly change to all 12 Zaps**, full steps in
+`zapier_weekly_cadence_runbook.md`.
+
+**`ransomware_victims` rationale rewritten** in `intel_corpus_growth_plan.md` with the concrete
+failure it avoids: the IOC table means "this thing is dangerous", victim names mean "this company
+was attacked", and mixing them fires credential-rotation alerts at breach victims while inflating
+the exclusivity metric with data published on the leak sites themselves. **Filed as a ToDo to build
+properly** in its own table, not as a refusal.

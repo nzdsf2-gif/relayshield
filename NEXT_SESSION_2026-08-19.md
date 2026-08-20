@@ -60,8 +60,17 @@ criminal-channel wallet addresses is a legitimate offer — but the honest frami
 The four Segment 1 drafts in `victim_side_outreach_messages.md` still quote the **stale**
 2026-08-17 figures. Do not send until the new manifest is in hand and the numbers are replaced.
 
-Founder has a **Head of Product at Merkle Science**; the Head-of-Product-specific message is in
-the session, not yet in the file — rewrite it into `victim_side_outreach_messages.md` next session.
+**Merkle Science outreach TABLED 2026-08-20 (founder's call).** The re-cut export confirmed the
+majority of the ~511K indicators come from ingested third-party feeds (abuse.ch et al), not from
+our own channel collection. That guts the differentiator the Merkle pitch rested on — we would be
+selling a blockchain-analytics firm a corpus largely composed of feeds they already ingest.
+
+**Do not send.** The Head-of-Product message stays unwritten on purpose. Revisit only once the
+channel-collected (genuinely exclusive) indicator volume has grown enough to carry the pitch on its
+own. That growth is the prerequisite, and it is the thing to work on — not the message.
+
+The same reasoning applies to the other Segment 1 targets (TRM, Chainalysis, Elliptic): they all
+ingest the same public feeds, so the whole segment is gated on exclusive volume, not on copy.
 
 Founder corrections already applied: Segment 2 on hold (MetaMask Snap **not approved**, so there is
 no warm thread), Phantom excluded (ignored a previous message), Segment 3 ungated (Kraken/Privy
@@ -77,7 +86,7 @@ Re-cut on the founder's Mac:
 `/tmp/rsvenv` is a throwaway venv with boto3 (Homebrew Python 3.14 is PEP 668 externally-managed,
 so a plain `pip install` fails). Recreate with `python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3`.
 
-### 2. Microsoft Sentinel PR #14924 — DONE, awaiting review
+### 2. Microsoft Sentinel PR #14924 — CLA accepted, arm-ttk fix pushed, awaiting review
 
 Commit `7c871321` on `fix/ti-domain-commonsecuritylog-join` carries the V3-regenerated package
 (`mainTemplate.json`, `createUiDefinition.json`, `3.0.21.zip`). Verified against the pushed file:
@@ -96,6 +105,111 @@ and no `tolower(IndicatorType)`. Founder posted the reply to v-shukore.
 - Loose end: temporary branch `ci/v3-package` still on the fork. Deleting it from this sandbox
   fails with a proxy disconnect; delete via the Branches page.
 
+**2026-08-20 — reviewer's arm-ttk ask is diagnosed and fixed.** v-shukore asked to "check the
+arm-ttk validation failure causing due to hardcoded value in maintemplate". It is
+`DeploymentTemplate-Must-Not-Contain-Hardcoded-Uri` / `Hardcoded.Url.Reference`, **2 hits**, both
+the literal `https://management.azure.com/.default` in the Threat Intelligence Upload API
+connector's "Get Microsoft Entra ID Access Token" step.
+
+**It is a regression the V3 repackaging introduced** — master has zero occurrences, because master
+carries `"management": "[concat('https://management','.azure','.com/')]"` and renders the step
+through it. The source connector JSON has always held the literal; the tool's `azureManagementUrl`
+substitution only covers playbooks, never data connectors. Master's form was a manual
+post-generation patch, and regenerating flattened it back.
+
+Fix prepared and verified (see `sentinel/README_ti_hardcoded_uri_fix.md` and
+`sentinel/ti_maintemplate_hardcoded_uri.patch`): 3 hunks, all byte-identical to upstream master,
+plus `3.0.21.zip` rebuilt to match. `tools/armttk_hardcoded_uri.py` reports 0 errors after.
+
+**Pushed 2026-08-20** as `1663444` on `fix/ti-domain-commonsecuritylog-join`. Re-fetched from the
+branch to confirm: the live file is the verified patched one and the check reports 0 errors.
+
+**CLA accepted 2026-08-20** — founder posted
+`@microsoft-github-policy-service agree company="RelayShield LLC"`. Both of v-shukore's asks on the
+PR are now answered.
+
+Also still open on this PR: the `apiVersions-Should-Be-Recent` finding (`Microsoft.Resources/deployments`
+`2020-06-01`, ~2270 days old) is a *separate*, pre-existing issue from Microsoft's own templates —
+already disclosed in the PR reply. Do not conflate the two.
+
+### 2c. Telegram `/scan` was a dead end for pasted messages — FIXED 2026-08-20
+
+**Founder report: "scan seems to be broken, it didn't recognize the screenshot."** Two real defects,
+both fixed in `relayshield_telegram_webhook.py`.
+
+1. **`/scan` rejected any non-URL.** `_normalize_scan_url()` returns `None` when the input contains
+   a space, so a pasted scam SMS or job-offer message hit `"That doesn't look like a URL"` and the
+   user was done. That is the most common thing a worried person does. Now: non-URL prose falls
+   through to `handle_analyze()`, so `/scan` and `/msgscan` behave as one command. A short spaceless
+   token still gets the error, because that is a typo'd URL, not a message.
+2. **A captionless screenshot was ignored entirely.** The OCR branch required
+   `caption in ("msgscan","analyze","analyse")`, so a bare image matched nothing and the bot replied
+   *nothing at all* — which reads as broken. Now any uncaptioned image goes to OCR → fraud analysis.
+
+**The merge never shipped.** The founder remembered `/scan` and `/msgscan` being merged; `git log
+--all --grep=msgscan` returns zero commits and both are still separate in the help text. It was a
+plan, not a release. The fix above delivers the behaviour without collapsing the commands.
+
+**Not yet deployed.** Needs a Lambda deploy — and per the deploy gotcha at the top of this file,
+merge with `--no-ff` or the docs-only commit on top means nothing ships.
+
+### 2d. Corpus: 95 vs 122 explained, and five IOC types were being discarded
+
+**Nothing ever set `active` back to `False`** — every `active=False` write is at row creation. So
+122 vs 95 is not recorded attrition, it is two numbers that were never compared: `active=True`
+("we intend to monitor") vs channels actually readable. On `ChannelPrivateError`/`ValueError` the
+code did a bare `continue`, so a dead channel counted as healthy forever.
+
+Fixed: `_record_channel_failure()` / `_clear_channel_failure()` track `consecutive_failures` and
+`last_error`, and the digest now says **`Channels checked: 95 of 122 active ⚠️ 27 unreachable`**.
+Nothing auto-deactivates — a private channel can come back, so it records and a human decides.
+**Fields are empty until the patched monitor runs; an all-zero column proves nothing yet.**
+
+**`extract_iocs()` extracted five types `type_map` never stored**, so none were ever persisted —
+the identical defect to the documented `cves` one. Added `tg_handle` (**the scam-operator-handle
+category the founder asked for** — highest uniqueness available, since feeds publish infrastructure
+not people), `onion`, `hash_md5`, `hash_sha1`. **`ransomware_victims` deliberately excluded**: those
+are victim organisations, and the IOC table is what customer watchlists match against.
+`tg_handle` is a **lead list, not a verdict** — the regex matches any @mention; do not export it as
+"known scam operators" without filtering.
+
+**The 75 pending channels need AWS and could not be triaged here.**
+`tools/triage_channels.py` does it from the founder's Mac — read-only unless `--apply`.
+
+New ToDos: **pivot enrichment** (with confidence strictly below the seed) and **re-check unknowns on
+delay** (a link clean Monday and flagged Friday was exclusive on Monday, and provably ours first).
+Plus a test that fails when `extract_iocs()` and `type_map` diverge — it has broken silently twice.
+
+### 2b. Discord bot outreach — DFK decision made, and the workstream is still laptop-only
+
+**Recovered 2026-08-20 by upload, not from git.** `gaming_prediction_markets_focus_list_20260814.md`
+is now committed. **`relayshield_discord_bot.py` is still missing from the repo**, along with
+`discord_admin_approach_message.md`, `discord_midsize_pipeline_2026-08-13.md` and
+`NEXT_SESSION_2026-08-14.md`. The address regex at `relayshield_discord_bot.py:112` gates the entire
+outreach list and nobody but the founder can read it. **Third repeat of the single-laptop-only
+failure** (rsscan 0.2.x is the standing example). Push it.
+
+**DeFi Kingdoms — pitch the bot, not rsscan.** The bot serves 55,661 players and is something a
+BizDev team can approve and announce; rsscan is free, MIT and needs no integration, so it has no
+partnership shape and is a one-line mention for their engineers rather than the ask. Route: the
+**partner channel first** (that standing is why the size band was overridden for DFK at all), the
+BizDev form `https://forms.gle/fv4y1G3ppNgJDpEDA` only as fallback. Not the general contact form,
+and never the bug-report route.
+
+**New headwind, dated 2026:** DeFi protocols are leaving Discord — Morpho went read-only Feb 1 2026,
+DefiLlama moved to ticketed support, and Discord's October Zendesk breach is the backdrop. It does
+not kill the DFK pitch (a game's Discord is its social layer, not a support desk) but the pitch
+should name it and turn it: teams are fleeing because they cannot screen what gets posted and DM'd,
+which is what the bot does.
+
+**Do not open a DeFi-protocol candidate list** — same structural dead end as prediction markets.
+Gaming-adjacent DeFi (DFK's own shape) is the exception worth mining.
+
+Four new gaming candidates added, all **UNRESOLVED**: Lumiterra and The Machines Arena (Ronin),
+Guild of Guardians (Immutable, previously dismissed on a *guessed* code), and DFK JP as a second
+shot. Alien Worlds ruled out on the address gate — WAX uses EOS-style account names, not `0x`.
+`discord.com` is egress-blocked in the sandbox, so no invite could be resolved here.
+
 ### 3. XSOAR PR #45206 — awaiting Tech Alliance reply
 
 Founder emailed `techpartners@paloaltonetworks.com` asking whether an already-approved community
@@ -108,7 +222,7 @@ whether any client runs XSOAR and would agree to be named — not another attemp
 
 Everything else on the form is drafted in `xsoar_techalliance_application.md`.
 
-### 4. Zapier — NOT DONE, founder action
+### 4. Zapier — runbook written, founder action in the UI
 
 133 tasks on hold. Root cause is arithmetic: 12 daily "Daily … — RelayShield" test Zaps ≈ 360
 tasks/month against a 100-task cap. Recommendation given and accepted in principle: **move all 12
@@ -118,6 +232,28 @@ early exit. Held tasks are not auto-replayed and replaying them would re-blow th
 Guardrails: do not delete any Zap or template (they are the live-usage validation evidence), do not
 enable pay-per-task. This needs the founder in the Zapier UI — no API exists for editing Zap
 schedules and this session cannot drive their browser.
+
+**2026-08-20 — step-by-step click-path written to `zapier_weekly_cadence_runbook.md`.** Confirms
+there is genuinely no CLI path: the Platform CLI manages published *integrations*, not the Zaps in
+an account, and no REST endpoint edits a trigger schedule. The runbook says to spread the 12 across
+different weekdays rather than stacking them on Monday, since a burst is what trips a cap.
+
+**Partner Sandbox is available but does NOT fix the cap — corrected 2026-08-20.** ZPS is a separate
+*workspace* ("access to a workspace with premium Zap features"), not an upgrade to the workspace the
+12 Zaps live in, and it forbids production data. **So the weekly change is the fix, not a
+tourniquet.** The Sandbox is only where new template development belongs. Route:
+`https://developer.zapier.com/` → RelayShield → Manage → Manage team → Request access (the
+per-integration deep link needs an app ID not recorded in this repo, and all zapier.com domains are
+egress-blocked from the sandbox, so it could not be verified). Request it now; approval is not
+instant and the template todo is blocked behind it. **Do not move the 12 Zaps into the Sandbox** —
+open question whether sandbox usage still counts as the live-usage evidence they exist to produce;
+ask Partners Support first.
+
+**NEW TODO — add a template in the Zapier dev sandbox to pave a flywheel.** Published templates are
+Zapier's own discovery surface: a user installing one becomes a live integration user without
+touching relayshield.net. **Do not build it before Sandbox access lands** — building in the
+production account re-blows the 100-task cap for the same reason it blew the first time. Five
+template ideas already drafted; pick from those.
 
 ### 5. BTV — SENT
 
@@ -159,10 +295,16 @@ vendor sites (`trmlabs.com`, `merklescience.com`, …). Reachable: GitHub, `raw.
 
 ## Suggested order next session
 
-1. **Re-cut the export and fix the four outreach messages' numbers** — everything else in the
-   outreach thread is blocked behind it, and the founder wants to send today.
-2. **Rewrite the Merkle Science Head-of-Product message into the file** so it stops living only in
-   a chat transcript.
+1. **Grow the channel-collected indicator corpus.** With Segment 1 outreach tabled (see thread 1),
+   exclusive-indicator volume is the gating constraint on that whole segment — it is now the work,
+   not a precondition to the work. **Plan written 2026-08-20:
+   `intel_corpus_growth_plan.md`.** Top two by leverage: (a) build the decided-but-unbuilt Haiku 4.5
+   classifier to triage the 75 `pending_review` channels — up to +60% collection surface for ~$0.17;
+   (b) start extracting **scam operator handles** (Telegram/Discord usernames, channel IDs, invite
+   codes) as a first-class indicator type — ~100% exclusive by construction, because no public feed
+   publishes people rather than infrastructure. The KPI is `measured_exclusive_share` per category,
+   not corpus size.
+2. ~~Merkle Science Head-of-Product message~~ — **tabled 2026-08-20**, see thread 1.
 3. **Zapier weekly cadence** — five minutes in the UI, and the task cap is actively stopping Zaps.
 4. **Watch BTV for replies.**
 5. **Chase the Tech Alliance reply** if nothing lands in ~3 business days.
@@ -170,3 +312,52 @@ vendor sites (`trmlabs.com`, `merklescience.com`, …). Reachable: GitHub, `raw.
    counter, SentinelOne Technology Partner registration (DUNS 14-989-2087 in hand, fill the D&B
    profile first), Twilio balance at $5.00, `coinbase/agentkit#1449` stalled at 0/2 Heimdall
    reviews, Ansible Galaxy namespace approved and unclaimed, the 9 em-dashes on `/developers`.
+
+---
+
+## 2026-08-20 — Telegram help shortcuts: rebuilt, NOT restored
+
+**Founder report: "several TG enhancements were deprecated without my consent" — category help
+shortcuts, and a round of command-pruning that simplified the platform.**
+
+**They are not in git, and never were.** `relayshield_telegram_webhook.py` entered the repo on
+2026-07-30 (`26b16ae`) and has only **four commits** in its entire history. There is no earlier
+version of the help menu anywhere in the repository, so `git checkout` cannot bring anything back.
+
+### The likely mechanism, and it will happen again
+
+`deploy_lambdas.yml` deploys `relayshield_telegram_webhook.py` **from the repo** to
+`relayshield-telegram-webhook`. So the sequence is almost certainly:
+
+1. Enhancements were written on the founder's Mac and pushed straight to Lambda.
+2. They were never committed.
+3. A later repo-sourced deploy — the 2026-08-19 run is the obvious candidate — replaced the live
+   function with the repo's copy, silently reverting them.
+
+**Nobody deprecated anything.** A deploy overwrote uncommitted work. This is the same
+single-laptop-only failure as rsscan 0.2.x and the Discord bot, and it is the first time it has
+destroyed shipped behaviour rather than just hidden it. **Anything not in the repo will be erased
+by the next deploy of that Lambda.**
+
+### Rebuilt 2026-08-20 — check it against memory
+
+Category shortcuts are back as an inline keyboard on `/help`, two buttons per row, tier-gated so
+nobody is offered a category their plan lacks: Breach Response, Threat Analysis, Phone Protection,
+Telegram Security, then Team / Crypto Shield / Domain Security where the tier allows, then Account
+and "See all commands". The keyboard stays attached after tapping a category, so users can move
+between them without re-running `/help`.
+
+Sections are **derived from `msg_help()`**, not duplicated from it — a second hardcoded copy of the
+command list is precisely what let `extract_iocs()` and `type_map` drift apart twice in the intel
+monitor.
+
+**Command pruning: only `/msgscan` was folded in**, because `/scan` now takes links, pasted messages
+and screenshots (see 2c), which makes a second command for the same job redundant. It is hidden from
+help and from `setMyCommands`, and still works as an alias alongside `/analyze` and `/analyse`, so
+nobody who learned the old name is broken.
+
+**Open: which other commands were pruned?** That list is not recoverable from the repo and was not
+described in the report. Name them and they can be re-pruned in one pass.
+
+**This is a reconstruction, not a restore.** It matches the described behaviour; it may not match
+the original in detail.

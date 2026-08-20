@@ -932,6 +932,54 @@ def detect_malware_families(text: str) -> str:
     return ",".join(sorted(found))
 
 
+def _record_channel_failure(username: str, error_type: str, detail: str) -> None:
+    """Mark a channel as unreachable on this run, and count how many runs in a row.
+
+    Added 2026-08-20 to make channel attrition visible. `active=True` in
+    relayshield_intel_channels means "we intend to monitor this", and until now
+    there was nothing anywhere meaning "and we actually can". A channel that is
+    deleted, gone private, or has banned the account stayed indistinguishable
+    from a healthy one in every count we report.
+
+    Deliberately does NOT set active=False. Recovery is real (a channel can go
+    private for a week and come back), and silently shrinking the collection
+    surface on a transient error is the more expensive mistake. Once
+    consecutive_failures is high and stable, that is a human's call to make --
+    and now there is a number to make it from.
+    """
+    try:
+        _dynamodb.Table(INTEL_CHANNELS_TABLE).update_item(
+            Key={"username": username},
+            UpdateExpression=(
+                "SET last_error = :e, last_error_detail = :d, last_error_at = :t, "
+                "consecutive_failures = if_not_exists(consecutive_failures, :zero) + :one"
+            ),
+            ExpressionAttributeValues={
+                ":e": error_type,
+                ":d": detail,
+                ":t": datetime.now(timezone.utc).isoformat(),
+                ":zero": 0,
+                ":one": 1,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Could not record failure for @%s: %s", username, exc)
+
+
+def _clear_channel_failure(username: str) -> None:
+    """Reset the failure counter after a channel is read successfully again."""
+    try:
+        _dynamodb.Table(INTEL_CHANNELS_TABLE).update_item(
+            Key={"username": username},
+            UpdateExpression="REMOVE last_error, last_error_detail, last_error_at, consecutive_failures",
+            ConditionExpression="attribute_exists(consecutive_failures)",
+        )
+    except Exception:
+        # No prior failure recorded is the normal case, and the conditional
+        # write failing for that reason is not worth a log line.
+        pass
+
+
 def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> None:
     now   = datetime.now(timezone.utc).isoformat()
     ttl   = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
@@ -950,6 +998,31 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> N
         # it starts accumulating from this deploy forward, not backfilled,
         # since the raw past messages were never stored.
         ("cves", "cve"),
+        # --- Added 2026-08-20. The SAME defect as the "cves" entry above, and
+        # it went unnoticed for the same reason: extract_iocs() has been
+        # pulling all five of these out of every monitored message since it
+        # was written, and type_map never listed them, so not one was ever
+        # persisted. Found while looking for ways to grow the corpus -- these
+        # cost nothing to collect because we were already collecting them and
+        # throwing them away.
+        #
+        # "tg_handle" is the scam-operator-handle category. It is the highest
+        # -uniqueness type here by a distance: public feeds publish
+        # infrastructure, not people, so almost none of this appears anywhere
+        # else. Note _RE_TG_CHANNEL matches ANY @mention, so this is a lead
+        # list, not a verdict -- the value is that each row carries the source
+        # channel and its category, so a handle seen in an infostealer channel
+        # can be told apart from one mentioned in passing. Filter downstream;
+        # do not treat presence here as "this handle is a criminal".
+        ("tg_mentions", "tg_handle"),
+        ("onions",      "onion"),
+        ("md5",         "hash_md5"),
+        ("sha1",        "hash_sha1"),
+        # DELIBERATELY NOT ADDED: "ransomware_victims". Those are the names of
+        # VICTIM organisations, not attacker indicators. Writing them into the
+        # same table the watchlist matches against would mean a customer whose
+        # company name appeared in a leak-site post gets matched as though
+        # their name were an IOC. Needs its own table and its own decision.
     ]
     for field, ioc_type in type_map:
         for value in iocs.get(field, []):
@@ -1627,10 +1700,20 @@ def _send_admin_digest(stats: dict) -> None:
         warning = "⚠️ *0 of {} channels resolved this run* — likely a Telegram flood-wait or session issue. No IOCs were processed.\n\n".format(
             stats["channels_attempted"]
         )
+    # Report reached-vs-intended, not just reached. "Channels checked: 95" on
+    # its own looks healthy; "95 of 122 active, 27 unreachable" is the same run
+    # and tells you the collection surface is degrading. Added 2026-08-20 after
+    # the active count and the reachable count were found to disagree by 27
+    # with nothing anywhere recording it.
+    _unreachable = stats.get("channels_unreachable", 0)
+    _channels_line = (
+        f"Channels checked: {stats['channels_checked']} of {stats['channels_attempted']} active"
+        + (f"  ⚠️ {_unreachable} unreachable\n" if _unreachable else "\n")
+    )
     text = (
         f"🔍 *INTEL-2/5 Monitor Run*\n\n"
         f"{warning}"
-        f"Channels checked: {stats['channels_checked']}\n"
+        f"{_channels_line}"
         f"Messages processed: {stats['messages_processed']}\n"
         f"IOCs extracted: {stats['iocs_extracted']}\n"
         f"Images OCR'd: {stats.get('images_ocrd', 0)}\n"
@@ -1757,10 +1840,26 @@ async def _poll_channels(stats: dict) -> None:
                 try:
                     entity = await client.get_entity(username)
                 except (ValueError, ChannelPrivateError) as exc:
+                    # RECORD THE FAILURE, do not just skip it. Until 2026-08-20
+                    # this was a bare `continue`: the channel stayed active=True
+                    # forever and silently contributed nothing, so every count
+                    # and every digest reported a collection surface larger than
+                    # the one that actually exists. That is how "122 active
+                    # channels" and 95 reachable ones can both be true at once,
+                    # and the gap was invisible because nothing wrote it down.
+                    #
+                    # Nothing here flips active=False on its own -- a private
+                    # channel can come back, and auto-deactivating on one bad
+                    # run would quietly shrink the corpus. It records, counts,
+                    # and lets the digest surface it for a human decision.
                     logger.warning("Cannot access channel @%s: %s", username, exc)
+                    _record_channel_failure(username, type(exc).__name__, str(exc)[:200])
+                    stats["channels_unreachable"] = stats.get("channels_unreachable", 0) + 1
                     continue
                 except Exception as exc:
                     logger.warning("Entity lookup failed @%s: %s", username, exc)
+                    _record_channel_failure(username, type(exc).__name__, str(exc)[:200])
+                    stats["channels_unreachable"] = stats.get("channels_unreachable", 0) + 1
                     continue
 
                 # Cache the resolved peer so future runs use the fast path above.
@@ -1781,6 +1880,7 @@ async def _poll_channels(stats: dict) -> None:
                 await asyncio.sleep(1.5)
 
             stats["channels_checked"] += 1
+            _clear_channel_failure(username)
             msg_count = 0
 
             try:

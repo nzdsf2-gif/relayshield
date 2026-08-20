@@ -190,10 +190,16 @@ there is genuinely no CLI path: the Platform CLI manages published *integrations
 an account, and no REST endpoint edits a trigger schedule. The runbook says to spread the 12 across
 different weekdays rather than stacking them on Monday, since a burst is what trips a cap.
 
-**Partner Sandbox is now available and is the actual fix.** Zapier Partners Support confirmed
-2026-08-19 that going public unlocks it — premium features free, meant for integration development.
-Path: developer platform → integration → Manage → Manage team → Request access. **Weekly cadence is
-the tourniquet; the Sandbox is the treatment.** Request it now, since approval may take days.
+**Partner Sandbox is available but does NOT fix the cap — corrected 2026-08-20.** ZPS is a separate
+*workspace* ("access to a workspace with premium Zap features"), not an upgrade to the workspace the
+12 Zaps live in, and it forbids production data. **So the weekly change is the fix, not a
+tourniquet.** The Sandbox is only where new template development belongs. Route:
+`https://developer.zapier.com/` → RelayShield → Manage → Manage team → Request access (the
+per-integration deep link needs an app ID not recorded in this repo, and all zapier.com domains are
+egress-blocked from the sandbox, so it could not be verified). Request it now; approval is not
+instant and the template todo is blocked behind it. **Do not move the 12 Zaps into the Sandbox** —
+open question whether sandbox usage still counts as the live-usage evidence they exist to produce;
+ask Partners Support first.
 
 **NEW TODO — add a template in the Zapier dev sandbox to pave a flywheel.** Published templates are
 Zapier's own discovery surface: a user installing one becomes a live integration user without

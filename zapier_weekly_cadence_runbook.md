@@ -49,19 +49,48 @@ beta early-exit trigger.
 * **Do not replay the held tasks.** They are not auto-replayed, and replaying them would immediately
   re-blow the cap — which is the exact hole this exercise is climbing out of. Let them expire.
 
-## Then: request the Partner Sandbox
+## Also: request the Partner Sandbox — but it does NOT fix the cap
 
-Zapier Partners Support confirmed on 2026-08-19 that **now the integration is public, the Partner
-Sandbox is available** — premium Zapier features free, intended for ongoing integration
-development.
+**Correction to an earlier note in this file.** It previously said the weekly change was a
+tourniquet and the Partner Sandbox was the treatment. **That was wrong**, and the distinction
+matters enough to state plainly:
 
-Path: **Zapier developer platform → your integration → Manage → Manage team → "Zapier Partner
-Sandbox" panel → Request access.**
+**The Zapier Partner Sandbox (ZPS) is a separate *workspace*, and it does not raise the task limit
+on the workspace where the 12 Zaps live.** Per Zapier's own ZPS documentation:
 
-**This is the real fix, and it should be done regardless of the weekly change.** The cap problem
-exists because integration testing is being paid for out of a consumer task allowance. The Sandbox
-is designed to carry exactly that load — which means the weekly cadence is the tourniquet and the
-Sandbox is the treatment. Do both, in this order, because the request may take days to be granted.
+* It "gives your integration team access to **a workspace** with premium Zap features at no cost."
+  You keep using your existing login; it is a second workspace, not an upgrade to the current one.
+* It is scoped to integration development and "demonstrations of specific illustrative workflows."
+* **"You agree not to submit any production data through Zaps created within the workspace."**
+* It explicitly does **not** include pay-per-task billing.
+
+So the weekly cadence change is **the fix**, not a stopgap. It is the only thing that resolves the
+existing workspace's cap. The Sandbox is where *new template development* belongs — which is exactly
+what the flywheel todo below needs, and nothing more.
+
+**Eligibility and route.** ZPS is open to partners with a **beta or public** integration, and any
+Admin or Collaborator on the team can request it. RelayShield shows `Public` `Beta`, so it qualifies
+— which matches what Partners Support said on 2026-08-19.
+
+Path: **`https://developer.zapier.com/` → select the RelayShield integration → Manage → Manage team
+→ the "Zapier Partner Sandbox" panel at the top → Request access.**
+
+There is a per-integration deep link of the form `developer.zapier.com/app/<APP_ID>/...`, but the
+app ID is not recorded anywhere in this repo and every `zapier.com` domain is egress-blocked from
+the sandbox, so it could not be verified. **Two clicks from the root beats a guessed URL that
+404s.** Program details: `docs.zapier.com/integrations/publish/zps`.
+
+**Request it now anyway** — approval is not instant, and the template work below is blocked behind
+it.
+
+### Open question before moving anything into the Sandbox
+
+Do **not** migrate the 12 test Zaps into the Sandbox workspace on the assumption it solves the cap.
+Two reasons: the no-production-data restriction, and — more importantly — those Zaps exist to be
+**live-usage validation evidence** for the partner listing. Whether usage inside a sandbox workspace
+still counts toward that is unknown, and getting it wrong would destroy the exact evidence they were
+created to produce. **Ask Zapier Partners Support before moving them.** Until there is an answer,
+they stay where they are, on a weekly cadence.
 
 ## New ToDo: template → flywheel
 
@@ -73,7 +102,8 @@ is the acquisition loop the embed was meant to start and the held tasks have bee
 
 Sequence:
 
-1. Get Sandbox access (above) so template development stops consuming the 100-task cap.
+1. Get Sandbox access (above) so template development happens in the workspace built for it,
+   rather than consuming the production workspace's 100-task cap.
 2. Build and test the new template **in the Sandbox**, not the production account.
 3. Publish, then measure installs — not task count.
 

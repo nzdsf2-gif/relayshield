@@ -39,13 +39,13 @@ Lambda keeps the *current* `$LATEST` package, plus any **published versions**. C
 (`update-function-code` runs without `--publish`), so versions exist only if they were published by
 hand.
 
-    aws lambda list-versions-by-function \
+    AWS_PROFILE=relayshield aws lambda list-versions-by-function \
       --function-name relayshield-telegram-webhook \
       --region us-east-1 --query 'Versions[].[Version,LastModified]' --output table
 
 If that shows anything other than just `$LATEST`, download the one dated **before 2026-08-19**:
 
-    aws lambda get-function \
+    AWS_PROFILE=relayshield aws lambda get-function \
       --function-name relayshield-telegram-webhook:<VERSION> \
       --region us-east-1 --query 'Code.Location' --output text
     # then curl that URL and unzip
@@ -79,7 +79,30 @@ package**, so if that function vendors its third-party deps (telethon) inside th
 using a layer, an automated handler-only deploy would delete them and break live intel collection.
 That is not a risk worth taking unverified.
 
-### Check first (one command)
+### FIRST: you were pointed at the wrong AWS account
+
+The `ResourceNotFoundException` on 2026-08-20 named
+`arn:aws:lambda:us-east-1:**620534471984**:function:relayshield-intel-monitor`.
+
+**RelayShield's Lambdas are in account `239677749008`** — that is the account in
+`deploy_lambdas.yml`'s OIDC role ARN, in the KMS key ARNs, and on the AWS Marketplace listing.
+`620534471984` is a different account that your *default* credentials resolve to.
+
+**The function is not missing. You were looking in the wrong account.** Prefix with the profile —
+the same one the handoff uses everywhere else:
+
+    AWS_PROFILE=relayshield aws sts get-caller-identity     # expect Account: 239677749008
+
+Once that returns `239677749008`, re-run the real check:
+
+    AWS_PROFILE=relayshield aws lambda get-function-configuration \
+      --function-name relayshield-intel-monitor --region us-east-1 \
+      --query '{Layers:Layers[].Arn, Runtime:Runtime, CodeSize:CodeSize}'
+
+**Add `AWS_PROFILE=relayshield` to every command in this file.** The earlier ones omitted it, which
+is what produced the error.
+
+### Then check the packaging
 
     aws lambda get-function-configuration \
       --function-name relayshield-intel-monitor --region us-east-1 \
@@ -95,14 +118,14 @@ That is not a risk worth taking unverified.
     cd "$HOME/Side SaaS Hustle"
     git pull origin main
     zip -j /tmp/intel.zip relayshield_intel_monitor.py
-    aws lambda update-function-code \
+    AWS_PROFILE=relayshield aws lambda update-function-code \
       --function-name relayshield-intel-monitor \
       --zip-file fileb:///tmp/intel.zip --region us-east-1
-    aws lambda wait function-updated --function-name relayshield-intel-monitor --region us-east-1
+    AWS_PROFILE=relayshield aws lambda wait function-updated --function-name relayshield-intel-monitor --region us-east-1
 
 Then import-probe it, the same way CI does — a successful upload only means the bytes landed:
 
-    aws lambda invoke --function-name relayshield-intel-monitor \
+    AWS_PROFILE=relayshield aws lambda invoke --function-name relayshield-intel-monitor \
       --payload '{"dry_run":true}' --cli-binary-format raw-in-base64-out \
       --region us-east-1 /tmp/out.json >/dev/null
     grep -qi "ImportModuleError\|No module named" /tmp/out.json \
@@ -136,3 +159,46 @@ nothing anywhere saying so. Now the disagreement surfaces within a day, and the 
 **One thing to confirm:** the OIDC role `relayshield-github-deploy` needs `lambda:GetFunction` and
 `lambda:GetFunctionConfiguration`. It has deploy rights, so it very likely has these, but the first
 scheduled run will log a warning per function if not.
+
+
+---
+
+## 6. Create the ransomware victim table (2026-08-20)
+
+The victim-tracking code is on `main` and writes to `relayshield_ransomware_victims`, which does not
+exist yet. Create it before the next intel deploy, or every write fails (logged as a warning, not a
+crash — collection continues, victims are simply dropped).
+
+    AWS_PROFILE=relayshield aws dynamodb create-table \
+      --table-name relayshield_ransomware_victims \
+      --attribute-definitions AttributeName=victim_name,AttributeType=S \
+                              AttributeName=seen_ts,AttributeType=S \
+      --key-schema AttributeName=victim_name,KeyType=HASH \
+                   AttributeName=seen_ts,KeyType=RANGE \
+      --billing-mode PAY_PER_REQUEST \
+      --region us-east-1
+
+    AWS_PROFILE=relayshield aws dynamodb update-time-to-live \
+      --table-name relayshield_ransomware_victims \
+      --time-to-live-specification "Enabled=true,AttributeName=ttl" \
+      --region us-east-1
+
+Same key shape and TTL attribute as `relayshield_intel_iocs`, so the exporter and any future tooling
+behave the same way against it.
+
+### Opting a customer into supplier-breach alerts
+
+Alerts are **off unless a customer explicitly lists suppliers**. There is no inference — nothing is
+derived from their domain or company name, deliberately.
+
+    AWS_PROFILE=relayshield aws dynamodb update-item \
+      --table-name relayshield_users \
+      --key '{"user_id":{"S":"<USER_ID>"}}' \
+      --update-expression "SET supplier_watchlist = :s" \
+      --expression-attribute-values '{":s":{"L":[{"S":"Acme Corp"},{"S":"Contoso"}]}}' \
+      --region us-east-1
+
+Enter each supplier **as its name appears on leak sites**. Matching is exact on a normalised key,
+with corporate suffixes stripped, so "Acme Corp" matches "Acme", "Acme Corp." and "Acme
+Corporation" — but *not* "Acme Technologies", which is a different company. A longer, more
+descriptive name than the leak site uses will not match.

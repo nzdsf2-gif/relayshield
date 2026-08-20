@@ -87,6 +87,12 @@ LOCK_ID               = "singleton"
 LOCK_TTL_SECONDS      = 280  # just under the 300s Lambda timeout
 INTEL_ALERTS_TABLE    = "relayshield_intel_alerts"
 INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
+# Ransomware leak-site victims live in their OWN table, never in the IOC table.
+# The IOC table means "this thing is dangerous"; a victim name means "this
+# company was attacked". Mixing them would fire credential-rotation alerts at
+# breach victims and inflate the exclusivity metric with data the leak sites
+# publish themselves. Added 2026-08-20.
+RANSOM_VICTIMS_TABLE  = "relayshield_ransomware_victims"
 INTEL_CHANNELS_TABLE  = "relayshield_intel_channels"
 STOLEN_SESSIONS_TABLE  = "relayshield_stolen_sessions"
 IDENTITY_GRAPH_TABLE   = "relayshield_identity_graph"
@@ -980,6 +986,147 @@ def _clear_channel_failure(username: str) -> None:
         pass
 
 
+_CORP_SUFFIXES = ("incorporated", "inc", "llc", "ltd", "limited", "corp",
+                  "corporation", "group", "holdings", "co", "company", "plc", "gmbh", "sa", "ag")
+
+
+def _victim_keys(raw: str) -> set:
+    """Normalised match keys for a victim name.
+
+    Returns BOTH the suffix-stripped and suffix-retained forms, because a
+    customer's domain can encode either one: "Acme Corp." should match both
+    acme.com and acmecorp.com, and there is no way to know in advance which
+    the company actually uses.
+    """
+    base = re.sub(r"[^a-z0-9]+", "", (raw or "").lower())
+    if not base:
+        return set()
+    keys = {base}
+    for suf in _CORP_SUFFIXES:
+        if base.endswith(suf) and len(base) > len(suf) + 2:
+            keys.add(base[: -len(suf)])
+    # Floor of 3, not 4. A floor of 4 silently dropped every three-letter
+    # supplier -- IBM, SAP, AWS, EDF -- so a customer watching IBM could never
+    # be alerted about IBM, which is a worse failure than the collision the
+    # floor was guarding against. Matching is exact key equality rather than
+    # substring, so "ibm" only ever matches "ibm"; short keys are not the risk
+    # here. What IS a risk is a bare corporate suffix surviving as a key, so
+    # those are dropped explicitly.
+    return {k for k in keys if len(k) >= 3 and k not in _CORP_SUFFIXES}
+
+
+def _store_ransomware_victims(victims: list, channel: str, category: str) -> int:
+    """Record leak-site victim names in their own table.
+
+    Storage is unconditional and cheap; ALERTING is not (see
+    _match_supplier_breach). _RE_RANSOM_VICTIM is a loose pattern -- it takes
+    capitalised words after "hacked"/"leaked"/"victim" -- so this table is a
+    lead list that will contain noise, and nothing downstream should treat a
+    row here as a confirmed breach.
+    """
+    if not victims:
+        return 0
+    now    = datetime.now(timezone.utc).isoformat()
+    ttl    = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
+    table  = _dynamodb.Table(RANSOM_VICTIMS_TABLE)
+    stored = 0
+    for name in victims:
+        name = (name or "").strip()
+        if len(name) < 4:
+            continue
+        try:
+            table.put_item(Item={
+                "victim_name":  name.lower(),
+                "seen_ts":      now,
+                "display_name": name,
+                "match_keys":   sorted(_victim_keys(name)) or ["-"],
+                "channel":      channel,
+                "category":     category,
+                "confidence":   "unverified",   # regex-extracted, never confirmed
+                "ttl":          ttl,
+            })
+            stored += 1
+        except Exception as exc:
+            logger.warning("Victim store failed name=%s: %s", name[:40], exc)
+    return stored
+
+
+def _match_supplier_breach(victims: list) -> list:
+    """Match leak-site victims against customers' declared supplier watchlists.
+
+    OPT-IN ONLY, and deliberately so. Telling a customer "your vendor was
+    breached" off a loose regex match would be worse than saying nothing: they
+    would act on it, and the extraction is not reliable enough to carry that.
+    So this reads `supplier_watchlist` -- an explicit list of names the customer
+    entered -- and never infers suppliers from anything else.
+
+    Matching is on normalised keys, not substrings. Substring matching on
+    company names produces absurd hits ("co" inside "cisco"), and a false
+    supplier-breach alert costs more trust than a missed one.
+    """
+    if not victims:
+        return []
+    wanted = {}
+    for name in victims:
+        for key in _victim_keys(name):
+            wanted.setdefault(key, name)
+    if not wanted:
+        return []
+
+    matches = []
+    try:
+        resp = _dynamodb.Table(USERS_TABLE).scan(
+            FilterExpression=boto3.dynamodb.conditions.Attr("supplier_watchlist").exists(),
+        )
+    except Exception as exc:
+        logger.warning("Supplier watchlist scan failed: %s", exc)
+        return []
+
+    for item in resp.get("Items", []):
+        for supplier in (item.get("supplier_watchlist") or []):
+            for key in _victim_keys(str(supplier)):
+                if key in wanted:
+                    matches.append({
+                        "user_id":  item["user_id"],
+                        "matched":  str(supplier),
+                        "type":     "supplier_breach",
+                        "victim":   wanted[key],
+                    })
+                    break
+    return matches
+
+
+def _format_supplier_breach_alert(match: dict, channel: str, channel_desc: str) -> str:
+    """Alert copy for a supplier appearing on a leak site.
+
+    Deliberately a different message from _format_user_alert. That one says
+    "your credential is in criminal hands, rotate it now". This one says "a
+    company you depend on was attacked" -- the customer is not compromised, and
+    the actions are third-party risk actions, not password rotation. Sending
+    the IOC copy here would tell a breach victim's customer to rotate their own
+    credentials for no reason, which is the whole reason victims are not in the
+    IOC table.
+    """
+    return (
+        "⚠️ *RelayShield — Supplier Breach Watch*\n\n"
+        f"*{match['matched']}* is on your supplier watchlist, and a name matching it "
+        "was named as a victim on a ransomware leak site.\n\n"
+        f"*Named as:* `{match.get('victim', match['matched'])}`\n"
+        f"*Source:* @{channel}\n"
+        f"*Channel:* _{channel_desc}_\n\n"
+        "*This is not a compromise of your systems.* It is a supplier of yours being "
+        "attacked, which is early warning rather than an incident.\n\n"
+        "*What to do now:*\n"
+        "• Ask them directly what data of yours they hold and whether it was in scope\n"
+        "• Rotate any credentials or API keys *you issued to them*, not your own\n"
+        "• Watch for invoice-fraud and impersonation mail appearing to come from them — "
+        "this is the most common follow-on\n"
+        "• Do not act on any payment-detail change from them without an out-of-band call\n\n"
+        "_Extracted from a criminal channel and unverified. Confirm with the supplier "
+        "before acting on it as fact._"
+    )
+
+
 def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> None:
     now   = datetime.now(timezone.utc).isoformat()
     ttl   = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
@@ -1705,6 +1852,12 @@ def _send_admin_digest(stats: dict) -> None:
     # and tells you the collection surface is degrading. Added 2026-08-20 after
     # the active count and the reachable count were found to disagree by 27
     # with nothing anywhere recording it.
+    _victims_line = (
+        f"Ransomware victims named: {stats.get('ransomware_victims', 0)}"
+        f" ({stats.get('victims_stored', 0)} stored)\n"
+        + (f"Supplier-breach alerts: {stats['supplier_alerts']}\n"
+           if stats.get("supplier_alerts") else "")
+    )
     _unreachable = stats.get("channels_unreachable", 0)
     _channels_line = (
         f"Channels checked: {stats['channels_checked']} of {stats['channels_attempted']} active"
@@ -1723,7 +1876,7 @@ def _send_admin_digest(stats: dict) -> None:
         f"User matches: {stats['user_matches']}\n"
         f"Alerts fired: {stats['alerts_fired']}\n"
         f"Brand mentions detected: {stats.get('brand_alerts', 0)}\n"
-        f"Ransomware victims named: {stats.get('ransomware_victims', 0)}\n"
+        f"{_victims_line}"
         f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
         f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
         f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n"
@@ -2069,6 +2222,26 @@ async def _poll_channels(stats: dict) -> None:
                     if iocs.get("tg_mentions"):
                         discovered = _queue_discovered_channels(iocs["tg_mentions"], username)
                         stats["channels_discovered"] += discovered
+
+                    # Leak-site victims: own table, own matcher, own alert copy.
+                    # Stored unconditionally (cheap, and the corpus is the
+                    # point); alerts fire only for customers who explicitly
+                    # entered a supplier watchlist.
+                    _victims = iocs.get("ransomware_victims", [])
+                    if _victims:
+                        stats["victims_stored"] = stats.get("victims_stored", 0) + \
+                            _store_ransomware_victims(_victims, username, category)
+                        for _m in _match_supplier_breach(_victims):
+                            _chat = _get_user_chat_id(_m["user_id"])
+                            if _chat:
+                                try:
+                                    _send_telegram(_chat, _format_supplier_breach_alert(
+                                        _m, username, desc))
+                                    stats["supplier_alerts"] = stats.get("supplier_alerts", 0) + 1
+                                    _log_alert(_m["user_id"], _m, username, category)
+                                except Exception as exc:
+                                    logger.warning("Supplier alert failed user=%s: %s",
+                                                   _m["user_id"], exc)
 
                     # Tally new IOC type stats
                     stats["ransomware_victims"] += len(iocs.get("ransomware_victims", []))

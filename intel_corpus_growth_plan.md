@@ -151,12 +151,36 @@ parsing already happened, and the results were being discarded at the last step.
 **Worth a test that fails when they diverge again.** Two lists that must agree, no assertion tying
 them together, and it has now silently broken twice.
 
-### `ransomware_victims` deliberately excluded
+### `ransomware_victims` excluded — the concrete reason
 
-Those are the names of **victim organisations**, not attacker indicators. The IOC table is what the
-customer watchlist matches against, so writing victim names into it means a customer whose company
-appeared in a leak-site post gets matched as though their own name were an indicator of compromise.
-Wrong table, wrong semantics. It needs its own store and its own decision.
+The earlier wording here was too abstract to act on. Plainly:
+
+**Every other row in `relayshield_intel_iocs` answers "this thing is dangerous."** A wallet that
+drains people. A domain that phishes. A hash that is malware. The whole table is a list of things
+you should not touch, and everything downstream treats it that way.
+
+**`ransomware_victims` answers a different question: "this company got attacked."** Acme Corp
+appearing on a leak site does not make Acme Corp dangerous. It makes them a victim.
+
+Why mixing them breaks things, concretely:
+
+1. **It would fire false alerts.** The watchlist matches customer assets against this table. Put
+   "Acme Corp" in it, and a customer who monitors `acmecorp.com` gets an alert saying their domain
+   appears in the criminal IOC corpus — with `_remediation()` telling them to rotate credentials.
+   The correct message is the opposite in tone and content: *your vendor was breached, here is what
+   that means for you.*
+2. **It would corrupt the exclusivity metric.** `measured_exclusive_share` is meant to say what
+   share of our *threat* indicators appear in no public feed. Victim names are published on the leak
+   sites themselves, so they would inflate volume while being trivially public — the same error
+   that nearly went out to TRM and Merkle Science.
+3. **It changes what a hit means.** Anyone consuming the corpus — us, a customer, a partner —
+   reasonably reads "in RelayShield's IOC corpus" as an accusation. For a victim organisation that
+   is defamatory-adjacent and simply wrong.
+
+**This is not "throw the data away."** Ransomware victim tracking is genuinely valuable — it is
+early warning for a customer's suppliers. It wants its own table (`relayshield_ransomware_victims`),
+its own matcher, and its own alert copy. **Filed as a ToDo, not a rejection.** If you want it built,
+say so and it is a contained piece of work; it just must not land in the IOC table.
 
 ### Honest limit on `tg_handle`
 
@@ -234,3 +258,26 @@ shaped; a large off-theme room is noise that costs a Telegram fetch every run.
   provable and is a far better outreach claim than corpus size. It also turns the Telegram,
   WhatsApp and Discord bots from a marketing channel into a collection channel.
 * **Add a test that fails when `extract_iocs()` and `type_map` diverge.** Twice now.
+
+
+---
+
+## Running the channel triage (2026-08-20)
+
+`tools/triage_channels.py` is committed and needs AWS, so it runs on the founder's Mac:
+
+    cd "$HOME/Side SaaS Hustle"
+    git pull origin main
+    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3   # once
+    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py --pending
+
+That prints the active/failing split (the 122-vs-95 answer), the category breakdown, and the 75
+pending channels sorted by member count. Then activate the worthwhile ones:
+
+    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py \
+      --activate name1,name2,name3 --apply
+
+**Read-only without `--apply`.** Run it once without to see what it would do.
+
+**The `consecutive_failures` column is empty until the patched monitor has run at least once.** An
+all-zero column right now means "no data yet", not "no attrition".

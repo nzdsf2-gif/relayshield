@@ -1399,26 +1399,22 @@ def msg_help(tier: str) -> str:
         "• /breach — Breach monitoring status\n"
         "• /sweep — Close email backdoors (forwarding rules, filters, sessions)\n"
         "• /sessions — Revoke active sessions across Google, Microsoft, social media\n"
-        "• /extensions — Audit browser extensions for infostealer malware\n"
         "• /reuse — Cross-account password reuse check\n\n"
 
         "*🚨 Threat Analysis*\n"
         "• /otp — Unexpected OTP guidance\n"
-        "• /scam — Suspicious message, bot, or call guidance\n"
         "• /scan — Link, message or screenshot. Paste anything suspicious\n"
-        "• /infostealer <email> — Check if an email was stolen by malware\n"
+        "• /infostealer — Stolen credentials and browser-extension audit\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"
         "• /sim — SIM swap monitoring status\n"
-        "• /phone — Carrier hardening against SIM swap and smishing\n"
-        "• /vishing — Voice phishing: how to recognise and respond to phone-based attacks\n\n"
+        "• /phone — Carrier hardening against SIM swap and smishing\n\n"
 
         "*🤖 Telegram Security*\n"
+        "• /scam — Suspicious message, bot, or call. Also vishing and bot checks\n"
         "• /linkeddevices — Audit linked devices on Telegram, WhatsApp and Signal\n"
         "• /tgsecurity — Harden your Telegram account against takeover\n"
-        "• /botcheck @username — Analyse a bot or channel for typosquatting and red flags\n"
-        "• /verifybot — Confirm this is the official RelayShield bot\n"
     )
 
     if is_business:
@@ -2063,6 +2059,46 @@ def _help_section(heading: str, tier: str) -> str | None:
     return f"*{heading}*\n{body.strip()}"
 
 
+# --------------------------------------------------------------------------
+# Merged command hubs
+# --------------------------------------------------------------------------
+# Rebuilt 2026-08-20. A prior session collapsed /scam, /vishing, /verifybot and
+# /botcheck into a single /scam, and that work was lost the same way the help
+# shortcuts were -- laptop-only, overwritten by a repo-sourced deploy. Restored
+# here, plus the newly-requested /extensions -> /infostealer merge.
+#
+# The pattern: ONE advertised command per job, with the siblings reachable from
+# a keyboard underneath it. Every old command still routes, just unadvertised,
+# so muscle memory and old links keep working. Fewer commands to learn, nothing
+# taken away.
+
+
+def scam_hub_keyboard() -> dict:
+    return {"inline_keyboard": [
+        [{"text": "📞 Voice phishing (vishing)", "callback_data": "scamhub_vishing"}],
+        [{"text": "🤖 Check a bot or channel",   "callback_data": "scamhub_botcheck"}],
+        [{"text": "✅ Is this the real RelayShield?", "callback_data": "scamhub_verifybot"}],
+    ]}
+
+
+def infostealer_hub_keyboard() -> dict:
+    return {"inline_keyboard": [
+        [{"text": "📧 Check an email address", "callback_data": "stealhub_email"}],
+        [{"text": "🧩 Audit browser extensions", "callback_data": "stealhub_extensions"}],
+    ]}
+
+
+def msg_infostealer_hub() -> str:
+    return (
+        "🕵️ *Infostealer Check*\n\n"
+        "Infostealer malware scrapes saved passwords, cookies and session tokens off a "
+        "device and sells them. Two things worth checking:\n\n"
+        "• *Your email* — whether credentials tied to it are already in stealer logs\n"
+        "• *Your browser extensions* — the most common way the malware gets on the device\n\n"
+        "Pick one below, or send `/infostealer you@example.com` directly."
+    )
+
+
 def help_expand_keyboard(tier: str = TIER_PERSONAL) -> dict:
     """Category shortcuts plus the full list.
 
@@ -2103,12 +2139,14 @@ _BOT_COMMANDS_BASE = [
     ("breach", "Breach monitoring status"),
     ("sweep", "Close email backdoors (forwarding rules, filters, sessions)"),
     ("sessions", "Revoke active sessions across Google, Microsoft, social media"),
-    ("extensions", "Audit browser extensions for infostealer malware"),
     ("reuse", "Cross-account password reuse check"),
     ("otp", "Unexpected OTP guidance"),
-    ("scam", "Suspicious message, bot, or call guidance"),
+    # /vishing, /botcheck and /verifybot are folded into /scam, and /extensions
+    # into /infostealer, 2026-08-20. Dropped from this menu and from /help; all
+    # four still route normally for anyone who knows them.
+    ("scam", "Suspicious message, bot or call — plus vishing and bot checks"),
     ("scan", "Scan a suspicious link for malware or phishing"),
-    ("infostealer", "Check if an email was stolen by malware"),
+    ("infostealer", "Stolen credentials and browser-extension audit"),
     # /msgscan removed from the visible command list 2026-08-20 -- /scan now
     # takes links, pasted messages AND screenshots, so a second command for
     # the same job is the kind of surface the founder asked to keep trimmed.
@@ -2117,11 +2155,8 @@ _BOT_COMMANDS_BASE = [
     ("verify", "Callback rule, OTP rule, safe word, wire transfer protocol"),
     ("sim", "SIM swap monitoring status"),
     ("phone", "Carrier hardening against SIM swap and smishing"),
-    ("vishing", "Voice phishing: how to recognise and respond"),
     ("linkeddevices", "Audit linked devices on Telegram, WhatsApp and Signal"),
     ("tgsecurity", "Harden your Telegram account against takeover"),
-    ("botcheck", "Analyse a bot or channel for typosquatting and red flags"),
-    ("verifybot", "Confirm this is the official RelayShield bot"),
     ("plan", "Your license type and upgrade options"),
     ("myid", "Your Telegram chat ID (account linking & support)"),
     ("help", "This menu"),
@@ -3271,7 +3306,7 @@ def handle_analyze(chat_id: int, content: str | None = None,
         )
 
 
-def handle_wascam(chat_id: int) -> None:
+def handle_wascam(chat_id: int, reply_markup: dict | None = None) -> None:
     send_message(
         chat_id,
         "⚠️ *Suspicious Message — What to Check*\n\n"
@@ -3294,6 +3329,7 @@ def handle_wascam(chat_id: int) -> None:
         "• No legitimate org sends urgent payment requests via text\n"
         "• No legitimate org asks you to run a command or click a link to prove you're human\n"
         "• When in doubt, call back on a number you look up yourself",
+        reply_markup=reply_markup,
     )
 
 
@@ -5575,7 +5611,7 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
     elif cmd == "vishing":
         handle_vishing(chat_id)
     elif cmd in ("wascam", "scam"):
-        handle_wascam(chat_id)
+        handle_wascam(chat_id, reply_markup=scam_hub_keyboard())
     elif cmd == "linkeddevices":
         handle_linkeddevices(chat_id)
     elif cmd == "tgsecurity":
@@ -5645,7 +5681,14 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
     elif cmd.startswith("infostealer"):
         parts = text.strip().split(None, 1)
         email = parts[1].strip() if len(parts) > 1 else None
-        handle_infostealer_check(chat_id, email, user)
+        if email:
+            # An address was supplied -- run it, exactly as before. The hub is
+            # for the bare command only; making someone who already typed the
+            # email tap a button would be a step backwards.
+            handle_infostealer_check(chat_id, email, user)
+        else:
+            send_message(chat_id, msg_infostealer_hub(),
+                         reply_markup=infostealer_hub_keyboard())
     elif cmd == "stats":
         handle_stats(chat_id)  # silently no-ops for non-admin
     else:
@@ -6360,6 +6403,26 @@ def handle_callback_query(update: dict) -> None:
         answer_callback(cq_id)
         tier = (user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)) if user else TIER_PERSONAL
         send_message(chat_id, msg_help(tier))
+
+    elif data.startswith("scamhub_"):
+        answer_callback(cq_id)
+        sub = data[len("scamhub_"):]
+        if sub == "vishing":
+            handle_vishing(chat_id)
+        elif sub == "verifybot":
+            handle_verify_bot(chat_id)
+        elif sub == "botcheck":
+            # No argument to hand over from a button press, so ask for one the
+            # same way every other argument-taking command does.
+            handle_botcheck(chat_id, None)
+
+    elif data.startswith("stealhub_"):
+        answer_callback(cq_id)
+        sub = data[len("stealhub_"):]
+        if sub == "extensions":
+            handle_extensions(chat_id)
+        elif sub == "email":
+            handle_infostealer_check(chat_id, None, user or {})
 
     elif data.startswith("help_cat_"):
         answer_callback(cq_id)

@@ -178,9 +178,40 @@ Why mixing them breaks things, concretely:
    is defamatory-adjacent and simply wrong.
 
 **This is not "throw the data away."** Ransomware victim tracking is genuinely valuable — it is
-early warning for a customer's suppliers. It wants its own table (`relayshield_ransomware_victims`),
-its own matcher, and its own alert copy. **Filed as a ToDo, not a rejection.** If you want it built,
-say so and it is a contained piece of work; it just must not land in the IOC table.
+early warning for a customer's suppliers. It wants its own table, its own matcher, and its own alert
+copy. **BUILT 2026-08-20 — see below.**
+
+### Supplier-breach watch, built 2026-08-20
+
+* **`relayshield_ransomware_victims`** — own table, `victim_name` + `seen_ts`, TTL matching the IOC
+  table. Every row carries `confidence: "unverified"`, because `_RE_RANSOM_VICTIM` takes capitalised
+  words after "hacked"/"leaked"/"victim" and will contain noise. **Storage is unconditional**; it is
+  a lead list.
+* **`_match_supplier_breach()`** — **opt-in only.** It reads `supplier_watchlist`, an explicit list
+  the customer entered, and infers suppliers from nothing else. Telling someone "your vendor was
+  breached" off a loose regex would be worse than silence: they would act on it.
+* **Exact normalised-key matching, not substring.** Substring matching on company names produces
+  absurd hits ("co" inside "cisco"). Keys are lowercased, stripped of non-alphanumerics, and
+  generated both with and without the corporate suffix, so "Acme Corp." matches `acme` *and*
+  `acmecorp` — a company may use either in its domain and there is no way to know which.
+* **`_format_supplier_breach_alert()`** — deliberately different copy. The IOC alert says "your
+  credential is in criminal hands, rotate it". This one says a supplier was attacked, *you are not
+  compromised*, rotate the credentials **you issued to them**, and watch for invoice fraud and
+  impersonation — the most common follow-on. It closes by saying the extraction is unverified and to
+  confirm with the supplier before treating it as fact.
+
+**A bug the tests caught before it shipped:** the first version floored match keys at 4 characters,
+which silently dropped every three-letter supplier — IBM, SAP, AWS, EDF. A customer watching IBM
+could never have been alerted about IBM. Since matching is exact key equality rather than substring,
+short keys were never the risk the floor was guarding against; bare corporate suffixes were, and
+those are now excluded by name. Floor is 3.
+
+**Known limitation:** "Northwind" will not match a supplier entered as "Northwind Traders Global".
+Enter suppliers as they appear on leak sites. Loosening this to substring matching would reintroduce
+exactly the false positives the design exists to avoid.
+
+**The table must be created before the next intel deploy** — see `lambda_recovery_and_deploy.md` §6.
+Until it exists, victim writes fail as logged warnings; collection continues and victims are dropped.
 
 ### Honest limit on `tg_handle`
 

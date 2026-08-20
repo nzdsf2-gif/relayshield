@@ -312,3 +312,52 @@ vendor sites (`trmlabs.com`, `merklescience.com`, …). Reachable: GitHub, `raw.
    counter, SentinelOne Technology Partner registration (DUNS 14-989-2087 in hand, fill the D&B
    profile first), Twilio balance at $5.00, `coinbase/agentkit#1449` stalled at 0/2 Heimdall
    reviews, Ansible Galaxy namespace approved and unclaimed, the 9 em-dashes on `/developers`.
+
+---
+
+## 2026-08-20 — Telegram help shortcuts: rebuilt, NOT restored
+
+**Founder report: "several TG enhancements were deprecated without my consent" — category help
+shortcuts, and a round of command-pruning that simplified the platform.**
+
+**They are not in git, and never were.** `relayshield_telegram_webhook.py` entered the repo on
+2026-07-30 (`26b16ae`) and has only **four commits** in its entire history. There is no earlier
+version of the help menu anywhere in the repository, so `git checkout` cannot bring anything back.
+
+### The likely mechanism, and it will happen again
+
+`deploy_lambdas.yml` deploys `relayshield_telegram_webhook.py` **from the repo** to
+`relayshield-telegram-webhook`. So the sequence is almost certainly:
+
+1. Enhancements were written on the founder's Mac and pushed straight to Lambda.
+2. They were never committed.
+3. A later repo-sourced deploy — the 2026-08-19 run is the obvious candidate — replaced the live
+   function with the repo's copy, silently reverting them.
+
+**Nobody deprecated anything.** A deploy overwrote uncommitted work. This is the same
+single-laptop-only failure as rsscan 0.2.x and the Discord bot, and it is the first time it has
+destroyed shipped behaviour rather than just hidden it. **Anything not in the repo will be erased
+by the next deploy of that Lambda.**
+
+### Rebuilt 2026-08-20 — check it against memory
+
+Category shortcuts are back as an inline keyboard on `/help`, two buttons per row, tier-gated so
+nobody is offered a category their plan lacks: Breach Response, Threat Analysis, Phone Protection,
+Telegram Security, then Team / Crypto Shield / Domain Security where the tier allows, then Account
+and "See all commands". The keyboard stays attached after tapping a category, so users can move
+between them without re-running `/help`.
+
+Sections are **derived from `msg_help()`**, not duplicated from it — a second hardcoded copy of the
+command list is precisely what let `extract_iocs()` and `type_map` drift apart twice in the intel
+monitor.
+
+**Command pruning: only `/msgscan` was folded in**, because `/scan` now takes links, pasted messages
+and screenshots (see 2c), which makes a second command for the same job redundant. It is hidden from
+help and from `setMyCommands`, and still works as an alias alongside `/analyze` and `/analyse`, so
+nobody who learned the old name is broken.
+
+**Open: which other commands were pruned?** That list is not recoverable from the repo and was not
+described in the report. Name them and they can be re-pruned in one pass.
+
+**This is a reconstruction, not a restore.** It matches the described behaviour; it may not match
+the original in detail.

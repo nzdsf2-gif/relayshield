@@ -33,7 +33,7 @@ Commands (ACTIVE users):
   /verifybot — confirm this is the official RelayShield bot
   /scan <url> — scan a URL or link for malware/phishing
   /infostealer <email> — check if email was harvested by infostealer malware
-  /msgscan <text> — email & SMS fraud scan — paste text or send a screenshot (alias: /analyze)
+  /msgscan <text> — hidden alias of /scan, kept for users who learned the old name (also /analyze)
   /addwallet <addr> — add EVM, Solana, or TON wallet to monitoring (Crypto Shield only)
   /removewallet <addr> — remove wallet from monitoring
   /wallets  — list monitored wallets with GoPlus risk scores
@@ -1399,27 +1399,22 @@ def msg_help(tier: str) -> str:
         "• /breach — Breach monitoring status\n"
         "• /sweep — Close email backdoors (forwarding rules, filters, sessions)\n"
         "• /sessions — Revoke active sessions across Google, Microsoft, social media\n"
-        "• /extensions — Audit browser extensions for infostealer malware\n"
         "• /reuse — Cross-account password reuse check\n\n"
 
         "*🚨 Threat Analysis*\n"
         "• /otp — Unexpected OTP guidance\n"
-        "• /scam — Suspicious message, bot, or call guidance\n"
-        "• /scan <url> — Scan a suspicious link for malware or phishing\n"
-        "• /infostealer <email> — Check if an email was stolen by malware\n"
-        "• /msgscan — Email & SMS fraud scan — paste text or send a screenshot\n"
+        "• /scan — Link, message or screenshot. Paste anything suspicious\n"
+        "• /infostealer — Stolen credentials and browser-extension audit\n"
         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
 
         "*📡 Phone Protection*\n"
         "• /sim — SIM swap monitoring status\n"
-        "• /phone — Carrier hardening against SIM swap and smishing\n"
-        "• /vishing — Voice phishing: how to recognise and respond to phone-based attacks\n\n"
+        "• /phone — Carrier hardening against SIM swap and smishing\n\n"
 
         "*🤖 Telegram Security*\n"
+        "• /scam — Suspicious message, bot, or call. Also vishing and bot checks\n"
         "• /linkeddevices — Audit linked devices on Telegram, WhatsApp and Signal\n"
         "• /tgsecurity — Harden your Telegram account against takeover\n"
-        "• /botcheck @username — Analyse a bot or channel for typosquatting and red flags\n"
-        "• /verifybot — Confirm this is the official RelayShield bot\n"
     )
 
     if is_business:
@@ -1995,7 +1990,7 @@ def msg_help_top(tier: str) -> str:
     a follow-up message is the closest equivalent)."""
     lines = [
         "🛡️ *RelayShield — Quick Start*\n",
-        "• /scan <url> — Scan a suspicious link for malware or phishing",
+        "• /scan — Link, message or screenshot. Paste anything suspicious",
         "• /otp — Unexpected OTP? Get guidance now",
         "• /sweep — Close email backdoors (forwarding rules, sessions)",
     ]
@@ -2005,8 +2000,120 @@ def msg_help_top(tier: str) -> str:
     return "\n".join(lines)
 
 
-def help_expand_keyboard() -> dict:
-    return {"inline_keyboard": [[{"text": "📋 See all commands", "callback_data": "help_more"}]]}
+# --------------------------------------------------------------------------
+# Help category shortcuts
+# --------------------------------------------------------------------------
+# Restored 2026-08-20 after the founder reported them missing. IMPORTANT
+# CONTEXT: they could not be recovered, only rebuilt. This file entered git on
+# 2026-07-30 with four commits total, so no earlier version of the help menu
+# exists anywhere in history -- the shortcuts were laptop-only work that a
+# repo-sourced Lambda deploy overwrote. Treat this as a reconstruction to
+# check against memory, not a faithful restore.
+#
+# Each entry: key -> (button label, section heading, tier gate or None).
+# The tier gate mirrors msg_help's own conditionals so a user is never offered
+# a category their plan does not include.
+HELP_CATEGORIES = [
+    ("breach",   "🔐 Breach Response",   None),
+    ("threat",   "🚨 Threat Analysis",   None),
+    ("phone",    "📡 Phone Protection",  None),
+    ("telegram", "🤖 Telegram Security", None),
+    ("team",     "🏢 Team Management",   "business"),
+    ("crypto",   "🪙 Crypto Shield",     "crypto"),
+    ("domain",   "🌐 Domain Security",   "domain"),
+    ("account",  "⚙️ Account",           None),
+]
+
+
+def _help_category_available(gate: str | None, tier: str) -> bool:
+    if gate is None:
+        return True
+    if gate == "business":
+        return tier in BUSINESS_TIERS
+    if gate == "crypto":
+        return tier in CRYPTO_TIERS
+    if gate == "domain":
+        return tier in DOMAIN_TIERS
+    return False
+
+
+def _help_section(heading: str, tier: str) -> str | None:
+    """Pull one section out of the rendered full help.
+
+    Derived from msg_help() rather than duplicated from it, deliberately. A
+    second hardcoded copy of the command list is exactly the failure mode that
+    let extract_iocs() and _store_iocs()'s type_map drift apart twice in
+    relayshield_intel_monitor.py -- two lists that must agree, with nothing
+    making them agree. Rendering from the one source means a command added to
+    msg_help shows up here automatically and can never go stale.
+    """
+    full = msg_help(tier)
+    marker = f"*{heading}*"
+    start = full.find(marker)
+    if start == -1:
+        return None
+    body_start = start + len(marker)
+    # The next section starts at the following "\n*" heading, if any.
+    nxt = full.find("\n*", body_start)
+    body = full[body_start:nxt] if nxt != -1 else full[body_start:]
+    return f"*{heading}*\n{body.strip()}"
+
+
+# --------------------------------------------------------------------------
+# Merged command hubs
+# --------------------------------------------------------------------------
+# Rebuilt 2026-08-20. A prior session collapsed /scam, /vishing, /verifybot and
+# /botcheck into a single /scam, and that work was lost the same way the help
+# shortcuts were -- laptop-only, overwritten by a repo-sourced deploy. Restored
+# here, plus the newly-requested /extensions -> /infostealer merge.
+#
+# The pattern: ONE advertised command per job, with the siblings reachable from
+# a keyboard underneath it. Every old command still routes, just unadvertised,
+# so muscle memory and old links keep working. Fewer commands to learn, nothing
+# taken away.
+
+
+def scam_hub_keyboard() -> dict:
+    return {"inline_keyboard": [
+        [{"text": "📞 Voice phishing (vishing)", "callback_data": "scamhub_vishing"}],
+        [{"text": "🤖 Check a bot or channel",   "callback_data": "scamhub_botcheck"}],
+        [{"text": "✅ Is this the real RelayShield?", "callback_data": "scamhub_verifybot"}],
+    ]}
+
+
+def infostealer_hub_keyboard() -> dict:
+    return {"inline_keyboard": [
+        [{"text": "📧 Check an email address", "callback_data": "stealhub_email"}],
+        [{"text": "🧩 Audit browser extensions", "callback_data": "stealhub_extensions"}],
+    ]}
+
+
+def msg_infostealer_hub() -> str:
+    return (
+        "🕵️ *Infostealer Check*\n\n"
+        "Infostealer malware scrapes saved passwords, cookies and session tokens off a "
+        "device and sells them. Two things worth checking:\n\n"
+        "• *Your email* — whether credentials tied to it are already in stealer logs\n"
+        "• *Your browser extensions* — the most common way the malware gets on the device\n\n"
+        "Pick one below, or send `/infostealer you@example.com` directly."
+    )
+
+
+def help_expand_keyboard(tier: str = TIER_PERSONAL) -> dict:
+    """Category shortcuts plus the full list.
+
+    Two per row: Telegram renders long single-column keyboards as a tall wall
+    that pushes the message itself off screen, which is the problem the
+    shortcuts exist to solve.
+    """
+    buttons = [
+        {"text": label, "callback_data": f"help_cat_{key}"}
+        for key, label, gate in HELP_CATEGORIES
+        if _help_category_available(gate, tier)
+    ]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([{"text": "📋 See all commands", "callback_data": "help_more"}])
+    return {"inline_keyboard": rows}
 
 
 # Telegram's native "/" command menu (populated via setMyCommands) is a
@@ -2032,21 +2139,24 @@ _BOT_COMMANDS_BASE = [
     ("breach", "Breach monitoring status"),
     ("sweep", "Close email backdoors (forwarding rules, filters, sessions)"),
     ("sessions", "Revoke active sessions across Google, Microsoft, social media"),
-    ("extensions", "Audit browser extensions for infostealer malware"),
     ("reuse", "Cross-account password reuse check"),
     ("otp", "Unexpected OTP guidance"),
-    ("scam", "Suspicious message, bot, or call guidance"),
+    # /vishing, /botcheck and /verifybot are folded into /scam, and /extensions
+    # into /infostealer, 2026-08-20. Dropped from this menu and from /help; all
+    # four still route normally for anyone who knows them.
+    ("scam", "Suspicious message, bot or call — plus vishing and bot checks"),
     ("scan", "Scan a suspicious link for malware or phishing"),
-    ("infostealer", "Check if an email was stolen by malware"),
-    ("msgscan", "Email & SMS fraud scan — paste text or send a screenshot"),
+    ("infostealer", "Stolen credentials and browser-extension audit"),
+    # /msgscan removed from the visible command list 2026-08-20 -- /scan now
+    # takes links, pasted messages AND screenshots, so a second command for
+    # the same job is the kind of surface the founder asked to keep trimmed.
+    # The handler and the /analyze + /analyse aliases still work, so anyone
+    # who learned the old name is not broken.
     ("verify", "Callback rule, OTP rule, safe word, wire transfer protocol"),
     ("sim", "SIM swap monitoring status"),
     ("phone", "Carrier hardening against SIM swap and smishing"),
-    ("vishing", "Voice phishing: how to recognise and respond"),
     ("linkeddevices", "Audit linked devices on Telegram, WhatsApp and Signal"),
     ("tgsecurity", "Harden your Telegram account against takeover"),
-    ("botcheck", "Analyse a bot or channel for typosquatting and red flags"),
-    ("verifybot", "Confirm this is the official RelayShield bot"),
     ("plan", "Your license type and upgrade options"),
     ("myid", "Your Telegram chat ID (account linking & support)"),
     ("help", "This menu"),
@@ -2112,7 +2222,7 @@ def handle_help(chat_id: int, user: dict) -> None:
     if tier == TIER_FREE:
         send_message(chat_id, msg_help(tier))
         return
-    send_message(chat_id, msg_help_top(tier), reply_markup=help_expand_keyboard())
+    send_message(chat_id, msg_help_top(tier), reply_markup=help_expand_keyboard(tier))
 
 
 def handle_verify(chat_id: int) -> None:
@@ -2742,6 +2852,20 @@ def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, pre
         )
 
 
+# A pasted message vs a mistyped URL. Whitespace is the strongest signal -- a
+# URL never contains a space, and prose almost always does. The length floor
+# catches the wrapped/single-line cases; 40 chars is comfortably longer than
+# any plausible typo'd domain and comfortably shorter than a real scam message.
+_MESSAGE_MIN_LEN = 40
+
+
+def _looks_like_message(raw: str) -> bool:
+    raw = (raw or "").strip()
+    if not raw:
+        return False
+    return bool(re.search(r"\s", raw)) or len(raw) >= _MESSAGE_MIN_LEN
+
+
 def handle_scan(chat_id: int, target: str | None = None, user: dict | None = None) -> None:
     """Scan a URL or file link for threats — Telegram equivalent of ATTACH."""
     if not target:
@@ -2757,7 +2881,31 @@ def handle_scan(chat_id: int, target: str | None = None, user: dict | None = Non
 
     normalized = _normalize_scan_url(target)
     if not normalized:
-        send_message(chat_id, f"That doesn't look like a URL: `{target}`", parse_mode="Markdown")
+        # NOT a URL. Before 2026-08-20 this dead-ended with "That doesn't look
+        # like a URL" and the user was done -- which is exactly what happens
+        # when someone pastes a scam SMS or job-offer message into the URL
+        # scanner, the single most common thing a worried person does. They
+        # are not going to read the help text and retype it as /msgscan.
+        #
+        # So: pasted prose falls through to the fraud analyser instead of
+        # erroring. /scan and /msgscan behave as one command from the user's
+        # side, which is what the help text has always implied and what the
+        # founder reasonably assumed had already shipped -- it had not; no
+        # commit ever merged them.
+        #
+        # Kept narrow deliberately. A short token with no spaces ("asdf",
+        # "htttp:/x") is a typo'd URL, not a message, and telling the user
+        # that is more useful than running fraud analysis on four characters.
+        if _looks_like_message(target):
+            handle_analyze(chat_id, target)
+            return
+        send_message(
+            chat_id,
+            f"That doesn't look like a URL: `{target}`\n\n"
+            "If you meant to check a suspicious *message*, paste the whole thing "
+            "and I'll analyse it for fraud, or send a screenshot.",
+            parse_mode="Markdown",
+        )
         return
     target = normalized
 
@@ -3158,7 +3306,7 @@ def handle_analyze(chat_id: int, content: str | None = None,
         )
 
 
-def handle_wascam(chat_id: int) -> None:
+def handle_wascam(chat_id: int, reply_markup: dict | None = None) -> None:
     send_message(
         chat_id,
         "⚠️ *Suspicious Message — What to Check*\n\n"
@@ -3181,6 +3329,7 @@ def handle_wascam(chat_id: int) -> None:
         "• No legitimate org sends urgent payment requests via text\n"
         "• No legitimate org asks you to run a command or click a link to prove you're human\n"
         "• When in doubt, call back on a number you look up yourself",
+        reply_markup=reply_markup,
     )
 
 
@@ -5462,7 +5611,7 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
     elif cmd == "vishing":
         handle_vishing(chat_id)
     elif cmd in ("wascam", "scam"):
-        handle_wascam(chat_id)
+        handle_wascam(chat_id, reply_markup=scam_hub_keyboard())
     elif cmd == "linkeddevices":
         handle_linkeddevices(chat_id)
     elif cmd == "tgsecurity":
@@ -5532,7 +5681,14 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
     elif cmd.startswith("infostealer"):
         parts = text.strip().split(None, 1)
         email = parts[1].strip() if len(parts) > 1 else None
-        handle_infostealer_check(chat_id, email, user)
+        if email:
+            # An address was supplied -- run it, exactly as before. The hub is
+            # for the bare command only; making someone who already typed the
+            # email tap a button would be a step backwards.
+            handle_infostealer_check(chat_id, email, user)
+        else:
+            send_message(chat_id, msg_infostealer_hub(),
+                         reply_markup=infostealer_hub_keyboard())
     elif cmd == "stats":
         handle_stats(chat_id)  # silently no-ops for non-admin
     else:
@@ -5575,7 +5731,20 @@ def handle_message(update: dict) -> None:
         document and str(document.get("mime_type", "")).startswith("image/")
     )
     caption = message.get("caption", "").strip()
-    if (photo or is_image_document) and caption.lower().lstrip("/") in ("msgscan", "analyze", "analyse"):
+    # Captionless screenshots count too, from 2026-08-20. Requiring the caption
+    # meant a bare screenshot -- which is what people actually send, and what
+    # they send in reply to the /scan prompt -- fell through this branch and
+    # then through every other one, so the bot said nothing at all. Silence is
+    # the worst possible response from a security bot: the user concludes it is
+    # broken, which is precisely what happened.
+    #
+    # An image with no caption in a security bot is a thing to look at. Any
+    # OTHER caption is still left alone, so a captioned image meant for a
+    # different flow is not hijacked by this branch.
+    _caption_cmd = caption.lower().lstrip("/")
+    if (photo or is_image_document) and (
+        not caption or _caption_cmd in ("msgscan", "analyze", "analyse", "scan")
+    ):
         send_message(
             chat_id,
             "📧 *Scanning your screenshot...* This may take a few seconds.",
@@ -5591,8 +5760,8 @@ def handle_message(update: dict) -> None:
             send_message(
                 chat_id,
                 "⚠️ *Could not read text from that image.*\n\n"
-                "Try a clearer screenshot, or paste the text directly:\n"
-                "`/analyze <paste message text here>`",
+                "Try a clearer screenshot, or just paste the message text "
+                "straight into the chat and I'll analyse it.",
                 parse_mode="Markdown",
             )
         return
@@ -6234,6 +6403,41 @@ def handle_callback_query(update: dict) -> None:
         answer_callback(cq_id)
         tier = (user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)) if user else TIER_PERSONAL
         send_message(chat_id, msg_help(tier))
+
+    elif data.startswith("scamhub_"):
+        answer_callback(cq_id)
+        sub = data[len("scamhub_"):]
+        if sub == "vishing":
+            handle_vishing(chat_id)
+        elif sub == "verifybot":
+            handle_verify_bot(chat_id)
+        elif sub == "botcheck":
+            # No argument to hand over from a button press, so ask for one the
+            # same way every other argument-taking command does.
+            handle_botcheck(chat_id, None)
+
+    elif data.startswith("stealhub_"):
+        answer_callback(cq_id)
+        sub = data[len("stealhub_"):]
+        if sub == "extensions":
+            handle_extensions(chat_id)
+        elif sub == "email":
+            handle_infostealer_check(chat_id, None, user or {})
+
+    elif data.startswith("help_cat_"):
+        answer_callback(cq_id)
+        tier = (user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)) if user else TIER_PERSONAL
+        key = data[len("help_cat_"):]
+        entry = next((e for e in HELP_CATEGORIES if e[0] == key), None)
+        if entry and _help_category_available(entry[2], tier):
+            section = _help_section(entry[1], tier)
+            # Keep the keyboard attached so the user can move between
+            # categories without running /help again -- the whole point of a
+            # shortcut is not having to go back to the top each time.
+            send_message(chat_id, section or msg_help(tier),
+                         reply_markup=help_expand_keyboard(tier))
+        else:
+            send_message(chat_id, msg_help(tier))
 
     elif data == "wallet_confirm_yes" and user:
         answer_callback(cq_id)

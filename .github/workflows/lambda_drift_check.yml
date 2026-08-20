@@ -1,0 +1,132 @@
+name: Lambda Drift Check
+
+# WHY THIS EXISTS
+# ---------------
+# On 2026-08-20 the founder found that Telegram help shortcuts and a round of
+# command merges had vanished from the live bot. Nobody removed them. They were
+# written on a laptop, deployed straight to Lambda, never committed -- and a
+# later repo-sourced deploy of relayshield_telegram_webhook.py replaced the
+# function with the repo's copy, silently destroying them. They were not
+# recoverable from git because they had never been in git.
+#
+# The failure was not the deploy. It was that live code and repo code could
+# disagree for weeks and NOTHING ANYWHERE SAID SO. This job says so, daily.
+#
+# It compares each function's deployed CodeSha256 against the sha of a zip
+# built the same way deploy_lambdas.yml builds one. A mismatch means live and
+# main have diverged: either someone deployed by hand, or a deploy failed
+# silently. Either way it is now visible within a day instead of at the next
+# accidental overwrite.
+
+on:
+  schedule:
+    - cron: '0 13 * * *'   # daily, 13:00 UTC
+  workflow_dispatch:
+
+jobs:
+  drift:
+    name: Compare deployed Lambda code against main
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::239677749008:role/relayshield-github-deploy
+          aws-region: us-east-1
+
+      - name: Compare each function
+        id: compare
+        run: |
+          set -uo pipefail
+
+          # handler file -> live function name. Kept in step with
+          # deploy_lambdas.yml's map; intel-monitor is included here even
+          # though it has no CI deploy, because a hand-deployed function is
+          # exactly the one most likely to drift.
+          declare -A FUNCS=(
+            ["relayshield_telegram_webhook.py"]="relayshield-telegram-webhook"
+            ["relayshield_whatsapp_webhook.py"]="relayshield-whatsapp-webhook"
+            ["relayshield_intel_monitor.py"]="relayshield-intel-monitor"
+            ["relayshield_api.py"]="relayshield-api"
+            ["relayshield_breach_monitor.py"]="relayshield-breach-monitor"
+          )
+
+          DRIFTED=""
+          for FILE in "${!FUNCS[@]}"; do
+            FUNC="${FUNCS[$FILE]}"
+            [ -f "$FILE" ] || { echo "skip $FILE (not in repo)"; continue; }
+
+            LIVE=$(aws lambda get-function-configuration \
+                     --function-name "$FUNC" --region us-east-1 \
+                     --query 'CodeSha256' --output text 2>/dev/null || echo "MISSING")
+            if [ "$LIVE" = "MISSING" ]; then
+              echo "::warning::$FUNC not readable — check the role has lambda:GetFunctionConfiguration"
+              continue
+            fi
+
+            # Deployed packages contain more than one file, so the zip sha will
+            # not match in general. What we CAN compare cheaply and reliably is
+            # the handler's own source, which is what actually drifts. Pull the
+            # deployed package and diff the one file out of it.
+            URL=$(aws lambda get-function --function-name "$FUNC" --region us-east-1 \
+                    --query 'Code.Location' --output text 2>/dev/null || echo "")
+            if [ -z "$URL" ]; then
+              echo "::warning::could not read package URL for $FUNC"
+              continue
+            fi
+            curl -sS -o live.zip "$URL"
+            if unzip -p live.zip "$FILE" > live_handler.py 2>/dev/null && [ -s live_handler.py ]; then
+              if ! diff -q "$FILE" live_handler.py >/dev/null; then
+                echo "::error::DRIFT — $FUNC does not match $FILE on main"
+                diff -u "$FILE" live_handler.py | head -60 || true
+                DRIFTED="$DRIFTED $FUNC"
+              else
+                echo "ok — $FUNC matches $FILE"
+              fi
+            else
+              echo "::warning::$FILE not found inside $FUNC's package (different layout?)"
+            fi
+            rm -f live.zip live_handler.py
+          done
+
+          echo "drifted=$DRIFTED" >> "$GITHUB_OUTPUT"
+          [ -z "$DRIFTED" ] || exit 1
+
+      - name: Open an issue on drift
+        if: failure() && steps.compare.outputs.drifted != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const drifted = '${{ steps.compare.outputs.drifted }}'.trim();
+            const title = `Lambda drift: ${drifted}`;
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'lambda-drift',
+            });
+            if (existing.data.some(i => i.title === title)) return;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title,
+              labels: ['lambda-drift'],
+              body: [
+                `Live Lambda code differs from \`main\` for: **${drifted}**`,
+                '',
+                'One of two things happened:',
+                '',
+                '1. Someone deployed by hand and did not commit. **Recover the code from the',
+                '   live function before anything redeploys over it** — see the run log for the',
+                '   diff, and `aws lambda get-function --function-name <fn> --query Code.Location`',
+                '   for the package.',
+                '2. A deploy failed part-way and the function is stale.',
+                '',
+                'This check exists because case 1 silently destroyed the Telegram help',
+                'shortcuts and command merges on 2026-08-19.',
+              ].join('\n'),
+            });

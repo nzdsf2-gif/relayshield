@@ -60,8 +60,17 @@ criminal-channel wallet addresses is a legitimate offer — but the honest frami
 The four Segment 1 drafts in `victim_side_outreach_messages.md` still quote the **stale**
 2026-08-17 figures. Do not send until the new manifest is in hand and the numbers are replaced.
 
-Founder has a **Head of Product at Merkle Science**; the Head-of-Product-specific message is in
-the session, not yet in the file — rewrite it into `victim_side_outreach_messages.md` next session.
+**Merkle Science outreach TABLED 2026-08-20 (founder's call).** The re-cut export confirmed the
+majority of the ~511K indicators come from ingested third-party feeds (abuse.ch et al), not from
+our own channel collection. That guts the differentiator the Merkle pitch rested on — we would be
+selling a blockchain-analytics firm a corpus largely composed of feeds they already ingest.
+
+**Do not send.** The Head-of-Product message stays unwritten on purpose. Revisit only once the
+channel-collected (genuinely exclusive) indicator volume has grown enough to carry the pitch on its
+own. That growth is the prerequisite, and it is the thing to work on — not the message.
+
+The same reasoning applies to the other Segment 1 targets (TRM, Chainalysis, Elliptic): they all
+ingest the same public feeds, so the whole segment is gated on exclusive volume, not on copy.
 
 Founder corrections already applied: Segment 2 on hold (MetaMask Snap **not approved**, so there is
 no warm thread), Phantom excluded (ignored a previous message), Segment 3 ungated (Kraken/Privy
@@ -77,7 +86,7 @@ Re-cut on the founder's Mac:
 `/tmp/rsvenv` is a throwaway venv with boto3 (Homebrew Python 3.14 is PEP 668 externally-managed,
 so a plain `pip install` fails). Recreate with `python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3`.
 
-### 2. Microsoft Sentinel PR #14924 — arm-ttk hardcoded-URI fix ready, NOT yet pushed
+### 2. Microsoft Sentinel PR #14924 — CLA accepted, arm-ttk fix pushed, awaiting review
 
 Commit `7c871321` on `fix/ti-domain-commonsecuritylog-join` carries the V3-regenerated package
 (`mainTemplate.json`, `createUiDefinition.json`, `3.0.21.zip`). Verified against the pushed file:
@@ -112,12 +121,46 @@ Fix prepared and verified (see `sentinel/README_ti_hardcoded_uri_fix.md` and
 `sentinel/ti_maintemplate_hardcoded_uri.patch`): 3 hunks, all byte-identical to upstream master,
 plus `3.0.21.zip` rebuilt to match. `tools/armttk_hardcoded_uri.py` reports 0 errors after.
 
-**Not pushed to the fork yet** — pushing to `fix/ti-domain-commonsecuritylog-join` updates the live
-Microsoft PR, so it needs the founder's go-ahead. Everything is staged and one push away.
+**Pushed 2026-08-20** as `1663444` on `fix/ti-domain-commonsecuritylog-join`. Re-fetched from the
+branch to confirm: the live file is the verified patched one and the check reports 0 errors.
+
+**CLA accepted 2026-08-20** — founder posted
+`@microsoft-github-policy-service agree company="RelayShield LLC"`. Both of v-shukore's asks on the
+PR are now answered.
 
 Also still open on this PR: the `apiVersions-Should-Be-Recent` finding (`Microsoft.Resources/deployments`
 `2020-06-01`, ~2270 days old) is a *separate*, pre-existing issue from Microsoft's own templates —
 already disclosed in the PR reply. Do not conflate the two.
+
+### 2b. Discord bot outreach — DFK decision made, and the workstream is still laptop-only
+
+**Recovered 2026-08-20 by upload, not from git.** `gaming_prediction_markets_focus_list_20260814.md`
+is now committed. **`relayshield_discord_bot.py` is still missing from the repo**, along with
+`discord_admin_approach_message.md`, `discord_midsize_pipeline_2026-08-13.md` and
+`NEXT_SESSION_2026-08-14.md`. The address regex at `relayshield_discord_bot.py:112` gates the entire
+outreach list and nobody but the founder can read it. **Third repeat of the single-laptop-only
+failure** (rsscan 0.2.x is the standing example). Push it.
+
+**DeFi Kingdoms — pitch the bot, not rsscan.** The bot serves 55,661 players and is something a
+BizDev team can approve and announce; rsscan is free, MIT and needs no integration, so it has no
+partnership shape and is a one-line mention for their engineers rather than the ask. Route: the
+**partner channel first** (that standing is why the size band was overridden for DFK at all), the
+BizDev form `https://forms.gle/fv4y1G3ppNgJDpEDA` only as fallback. Not the general contact form,
+and never the bug-report route.
+
+**New headwind, dated 2026:** DeFi protocols are leaving Discord — Morpho went read-only Feb 1 2026,
+DefiLlama moved to ticketed support, and Discord's October Zendesk breach is the backdrop. It does
+not kill the DFK pitch (a game's Discord is its social layer, not a support desk) but the pitch
+should name it and turn it: teams are fleeing because they cannot screen what gets posted and DM'd,
+which is what the bot does.
+
+**Do not open a DeFi-protocol candidate list** — same structural dead end as prediction markets.
+Gaming-adjacent DeFi (DFK's own shape) is the exception worth mining.
+
+Four new gaming candidates added, all **UNRESOLVED**: Lumiterra and The Machines Arena (Ronin),
+Guild of Guardians (Immutable, previously dismissed on a *guessed* code), and DFK JP as a second
+shot. Alien Worlds ruled out on the address gate — WAX uses EOS-style account names, not `0x`.
+`discord.com` is egress-blocked in the sandbox, so no invite could be resolved here.
 
 ### 3. XSOAR PR #45206 — awaiting Tech Alliance reply
 
@@ -182,10 +225,10 @@ vendor sites (`trmlabs.com`, `merklescience.com`, …). Reachable: GitHub, `raw.
 
 ## Suggested order next session
 
-1. **Re-cut the export and fix the four outreach messages' numbers** — everything else in the
-   outreach thread is blocked behind it, and the founder wants to send today.
-2. **Rewrite the Merkle Science Head-of-Product message into the file** so it stops living only in
-   a chat transcript.
+1. **Grow the channel-collected indicator corpus.** With Segment 1 outreach tabled (see thread 1),
+   exclusive-indicator volume is the gating constraint on that whole segment — it is now the work,
+   not a precondition to the work.
+2. ~~Merkle Science Head-of-Product message~~ — **tabled 2026-08-20**, see thread 1.
 3. **Zapier weekly cadence** — five minutes in the UI, and the task cap is actively stopping Zaps.
 4. **Watch BTV for replies.**
 5. **Chase the Tech Alliance reply** if nothing lands in ~3 business days.

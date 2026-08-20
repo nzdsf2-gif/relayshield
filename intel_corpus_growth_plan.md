@@ -121,3 +121,116 @@ Add to `relayshield_weekly_metrics.py`: **exclusive indicators by category, trai
 
 The gate for restarting Segment 1 outreach should be a number on that report, not a feeling that
 the corpus has grown.
+
+
+---
+
+# Session 2026-08-20, part 2 — shipped, plus a finding that changes the plan
+
+## The biggest win was already in the code and being thrown away
+
+`extract_iocs()` has always extracted **five** indicator types that `_store_iocs()`'s `type_map`
+never listed, so **not one of them was ever written to the table**:
+
+| Extracted as | Now stored as | Why it matters |
+|---|---|---|
+| `tg_mentions` | `tg_handle` | **The scam-operator-handle category.** Highest uniqueness available |
+| `onions` | `onion` | Tor infrastructure; thin in public feeds |
+| `md5` | `hash_md5` | Older samples are still md5-referenced |
+| `sha1` | `hash_sha1` | Same |
+| `ransomware_victims` | **deliberately NOT stored** | See below |
+
+This is the **identical defect** to the `cves` entry, whose own code comment records that CVEs
+"had been extracted from every monitored message all along" and never persisted. It happened twice
+because `extract_iocs()` and `type_map` are two lists that must agree and nothing checks that they
+do.
+
+**Fixed 2026-08-20.** Four types added. This is pure upside: the collection already happened, the
+parsing already happened, and the results were being discarded at the last step.
+
+**Worth a test that fails when they diverge again.** Two lists that must agree, no assertion tying
+them together, and it has now silently broken twice.
+
+### `ransomware_victims` deliberately excluded
+
+Those are the names of **victim organisations**, not attacker indicators. The IOC table is what the
+customer watchlist matches against, so writing victim names into it means a customer whose company
+appeared in a leak-site post gets matched as though their own name were an indicator of compromise.
+Wrong table, wrong semantics. It needs its own store and its own decision.
+
+### Honest limit on `tg_handle`
+
+`_RE_TG_CHANNEL` is `@([a-zA-Z][a-zA-Z0-9_]{4,31})` — it matches **any** @mention, including
+entirely legitimate ones. So this is a **lead list, not a verdict.** Its value is that every row
+carries the source channel and that channel's category, so a handle seen in an `infostealer` room
+is distinguishable from one mentioned in passing.
+
+**Do not export this as "known scam operators" without a filter.** Sending a list that includes
+legitimate handles to a prospect would be the same class of error as the abuse.ch corpus mistake:
+technically derived from real data, trivially disproved on inspection.
+
+## 95 vs 122: the count was never measuring what it claimed
+
+**Nothing in the codebase ever set a channel's `active` back to `False`.** Every `active=False`
+write is at row *creation* (newly-discovered or pending). There is no deactivation path anywhere.
+
+So 122 → 95 is not attrition being recorded. It is the difference between two numbers that were
+never compared:
+
+* **`active=True`** = "we intend to monitor this."
+* **channels actually read on a run** = what the collection surface really is.
+
+When `get_entity()` raised `ChannelPrivateError` or `ValueError` — deleted channel, gone private,
+account banned — the code did a bare `continue`. The channel stayed `active=True` forever, produced
+nothing, and **counted as healthy in every metric we report.** The gap was invisible because nothing
+wrote it down.
+
+This is the same defect family as the false-clean bugs fixed repeatedly here: a number that looks
+fine while the thing underneath has degraded.
+
+**Fixed 2026-08-20**, three parts:
+
+1. `_record_channel_failure()` writes `last_error`, `last_error_detail`, `last_error_at` and
+   increments `consecutive_failures` on every unreachable channel.
+2. `_clear_channel_failure()` resets the counter when a channel reads successfully again.
+3. The digest now reports **`Channels checked: 95 of 122 active  ⚠️ 27 unreachable`** instead of
+   `Channels checked: 95`. Same run, and now the degradation is legible.
+
+**Nothing auto-deactivates.** A channel can go private for a week and come back; silently shrinking
+the corpus on one bad run is the more expensive mistake. It records and counts, and a human decides
+when `consecutive_failures` is high and stable.
+
+**These fields are empty until the patched monitor has run.** An all-zero `consecutive_failures`
+column proves nothing yet — read the digest's new `X of Y` line instead.
+
+## The 75 pending channels: needs AWS, script provided
+
+This could not be done from the dev sandbox — no AWS credentials, and the backlog lives in
+DynamoDB. `tools/triage_channels.py` answers both questions from the founder's Mac:
+
+    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3
+    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py --pending
+
+Read-only by default; `--apply` is required to write. It prints the active/failing split (the
+122-vs-95 answer), the category breakdown, and the pending backlog **sorted by member count**, then
+activates a chosen list:
+
+    ... --activate name1,name2 --apply
+
+**Judge by what the room is for, not by size.** The active set is infostealer/credential_dump
+shaped; a large off-theme room is noise that costs a Telegram fetch every run.
+
+## New ToDos
+
+* **Pivot enrichment.** Wallet → transaction counterparties, domain → certificate-transparency and
+  passive-DNS siblings. `relayshield_alchemy_webhook.py`, `relayshield_cert_monitor.py` and
+  `relayshield_domain_monitor.py` already reach this data. **Every derived indicator must carry its
+  derivation path and a confidence strictly below its seed** — a pivot that silently inherits
+  "confirmed malicious" would flood the corpus with weak associations and cost more credibility
+  than the volume is worth.
+* **Re-check unknowns on a delay.** Log every consumer-bot `/scan` submission with its verdict,
+  then re-check the `unknown` ones after 24h / 72h / 7d. A link clean on Monday and flagged
+  everywhere by Friday **was an exclusive indicator on Monday, and we saw it first.** That gap is
+  provable and is a far better outreach claim than corpus size. It also turns the Telegram,
+  WhatsApp and Discord bots from a marketing channel into a collection channel.
+* **Add a test that fails when `extract_iocs()` and `type_map` diverge.** Twice now.

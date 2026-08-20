@@ -174,7 +174,7 @@ whether any client runs XSOAR and would agree to be named — not another attemp
 
 Everything else on the form is drafted in `xsoar_techalliance_application.md`.
 
-### 4. Zapier — NOT DONE, founder action
+### 4. Zapier — runbook written, founder action in the UI
 
 133 tasks on hold. Root cause is arithmetic: 12 daily "Daily … — RelayShield" test Zaps ≈ 360
 tasks/month against a 100-task cap. Recommendation given and accepted in principle: **move all 12
@@ -184,6 +184,22 @@ early exit. Held tasks are not auto-replayed and replaying them would re-blow th
 Guardrails: do not delete any Zap or template (they are the live-usage validation evidence), do not
 enable pay-per-task. This needs the founder in the Zapier UI — no API exists for editing Zap
 schedules and this session cannot drive their browser.
+
+**2026-08-20 — step-by-step click-path written to `zapier_weekly_cadence_runbook.md`.** Confirms
+there is genuinely no CLI path: the Platform CLI manages published *integrations*, not the Zaps in
+an account, and no REST endpoint edits a trigger schedule. The runbook says to spread the 12 across
+different weekdays rather than stacking them on Monday, since a burst is what trips a cap.
+
+**Partner Sandbox is now available and is the actual fix.** Zapier Partners Support confirmed
+2026-08-19 that going public unlocks it — premium features free, meant for integration development.
+Path: developer platform → integration → Manage → Manage team → Request access. **Weekly cadence is
+the tourniquet; the Sandbox is the treatment.** Request it now, since approval may take days.
+
+**NEW TODO — add a template in the Zapier dev sandbox to pave a flywheel.** Published templates are
+Zapier's own discovery surface: a user installing one becomes a live integration user without
+touching relayshield.net. **Do not build it before Sandbox access lands** — building in the
+production account re-blows the 100-task cap for the same reason it blew the first time. Five
+template ideas already drafted; pick from those.
 
 ### 5. BTV — SENT
 
@@ -227,7 +243,13 @@ vendor sites (`trmlabs.com`, `merklescience.com`, …). Reachable: GitHub, `raw.
 
 1. **Grow the channel-collected indicator corpus.** With Segment 1 outreach tabled (see thread 1),
    exclusive-indicator volume is the gating constraint on that whole segment — it is now the work,
-   not a precondition to the work.
+   not a precondition to the work. **Plan written 2026-08-20:
+   `intel_corpus_growth_plan.md`.** Top two by leverage: (a) build the decided-but-unbuilt Haiku 4.5
+   classifier to triage the 75 `pending_review` channels — up to +60% collection surface for ~$0.17;
+   (b) start extracting **scam operator handles** (Telegram/Discord usernames, channel IDs, invite
+   codes) as a first-class indicator type — ~100% exclusive by construction, because no public feed
+   publishes people rather than infrastructure. The KPI is `measured_exclusive_share` per category,
+   not corpus size.
 2. ~~Merkle Science Head-of-Product message~~ — **tabled 2026-08-20**, see thread 1.
 3. **Zapier weekly cadence** — five minutes in the UI, and the task cap is actively stopping Zaps.
 4. **Watch BTV for replies.**

@@ -428,3 +428,49 @@ risk; bare corporate suffixes were, and are now excluded by name. Floor is 3.
 **BLOCKER: the table does not exist yet.** Create it before the next intel deploy —
 `lambda_recovery_and_deploy.md` §6 has the `create-table` and TTL commands, plus how to opt a
 customer in. Until then victim writes fail as logged warnings; collection continues, victims drop.
+
+---
+
+## 2026-08-20 — intel monitor into CI, and two new ToDos
+
+**Packaging check passed**, so the hand-deploy risk is gone:
+`Layers: [arn:aws:lambda:us-east-1:239677749008:layer:relayshield-telethon:1]`, `Runtime: python3.12`,
+`CodeSize: 47796`. Telethon is in a layer and the package is handler-only, so a
+`update-function-code` with just the `.py` is safe.
+
+**`relayshield_intel_monitor.py` is now in `deploy_lambdas.yml`** — path filter, fallback CHANGED
+list, and the FUNCS map as `relayshield-intel-monitor`. It stops being the one Lambda that could
+only be hand-deployed, which is what made it the likeliest to drift.
+
+**Found while wiring it up, and it would have bitten on every deploy:** the CI import probe invokes
+the function with `{"source":"ci.import-probe"}`, and `lambda_handler` had no branch for that — an
+unrecognised payload falls all the way through to a **real scraping run**, after taking the lock. So
+adding it to CI naively would have started a full Telegram sweep on every deploy and risked a
+flood-wait the next scheduled run inherits. Guarded with an early return **before `_acquire_lock()`**.
+
+Note `relayshield_intel_monitor.py` imports `relayshield_siem_connector` — the workflow resolves
+local imports from the handler's own imports, and that file is already in the path list, so the zip
+carries both. Confirm on the first run.
+
+**macOS zsh gotcha, again:** the `# expect Account: 239677749008` comment appended to the
+`sts get-caller-identity` line became arguments and errored. Already documented in ENVIRONMENT —
+never append comments to commands handed to the founder.
+
+### New ToDos
+
+**a. Add ransomware-victim monitoring to the TI demo — target Saturday.**
+The supplier-breach watch is built (`relayshield_ransomware_victims`, opt-in matcher, distinct alert
+copy) but is invisible to anyone evaluating us. The demo at `cloudflare_worker_ti_demo.js` is where
+prospects actually see capability. Show the victim feed and a supplier-watchlist hit. **Note the
+demo is gated behind Worker secrets (`b7955fe`), so wire it into the existing `/demo/*` gating rather
+than adding an ungated route.** Prerequisite: the table must exist and have data, so create it and
+let one intel run populate it first.
+
+**b. Competitive benchmarking against SOCRadar.**
+SOCRadar is the closest comparable on the threat-intel/dark-web-monitoring axis. What to produce: a
+side-by-side of coverage (IOC categories and counts we can *defend* — exclusive slice, not the 511K
+headline), collection surface (their dark-web/Telegram claims vs our 95 reachable channels), pricing
+and packaging, and integration surface (Sentinel, XSOAR, MISP/STIX-TAXII, MCP). **The honest framing
+matters more than the win column** — the last outreach nearly went out claiming a corpus that was
+mostly ingested public feeds, and a benchmark built on the same number would fail the same way. Use
+`measured_exclusive_share` per category as the defensible figure.

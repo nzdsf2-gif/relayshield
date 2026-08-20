@@ -396,3 +396,35 @@ failure it avoids: the IOC table means "this thing is dangerous", victim names m
 was attacked", and mixing them fires credential-rotation alerts at breach victims while inflating
 the exclusivity metric with data published on the leak sites themselves. **Filed as a ToDo to build
 properly** in its own table, not as a refusal.
+
+---
+
+## 2026-08-20 — wrong AWS account, and supplier-breach watch built
+
+**The intel-monitor "Function not found" was the wrong account, not a missing function.** The error
+named account `620534471984`; **RelayShield's Lambdas are in `239677749008`** (the OIDC role ARN in
+`deploy_lambdas.yml`, the KMS key ARNs, and the Marketplace listing all agree). The command ran
+without `AWS_PROFILE=relayshield`, so it hit the default-credential account. Every command in
+`lambda_recovery_and_deploy.md` now carries the profile, and there is a
+`sts get-caller-identity` check up front. **Re-run the packaging check with the profile before
+deploying intel.**
+
+**Supplier-breach watch BUILT** (was a ToDo, now code on `main`):
+
+* `relayshield_ransomware_victims` — its own table, never the IOC table. Rows carry
+  `confidence: "unverified"`, since the extraction regex will contain noise.
+* `_match_supplier_breach()` — **opt-in only**, reads an explicit `supplier_watchlist` on the user
+  record and infers suppliers from nothing else.
+* Exact normalised-key matching, suffixes stripped both ways, so "Acme Corp." matches `acme` and
+  `acmecorp` but not "Acme Technologies".
+* `_format_supplier_breach_alert()` — separate copy: you are *not* compromised, rotate the
+  credentials **you issued to them**, watch for invoice fraud and impersonation, and confirm with the
+  supplier before treating it as fact.
+
+**Caught by testing before it shipped:** a 4-character key floor silently dropped every three-letter
+supplier (IBM, SAP, AWS). Matching is exact equality, not substring, so short keys were never the
+risk; bare corporate suffixes were, and are now excluded by name. Floor is 3.
+
+**BLOCKER: the table does not exist yet.** Create it before the next intel deploy —
+`lambda_recovery_and_deploy.md` §6 has the `create-table` and TTL commands, plus how to opt a
+customer in. Until then victim writes fail as logged warnings; collection continues, victims drop.

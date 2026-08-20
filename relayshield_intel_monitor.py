@@ -2392,6 +2392,17 @@ def _queue_discovered_channels(mentions: list[str], source_channel: str) -> int:
 # ---------------------------------------------------------------------------
 
 def lambda_handler(event, context):
+    # CI import probe from deploy_lambdas.yml. Returning HERE -- before
+    # _acquire_lock() and before any Telegram work -- is the entire point.
+    # The probe only asserts that the module imported; an unrecognised payload
+    # otherwise falls all the way through to a real scraping run, which on
+    # every deploy would take the lock, start a full Telegram sweep, and risk a
+    # flood-wait that the next scheduled run then inherits. Added 2026-08-20
+    # alongside putting this function into CI deploys for the first time.
+    if (event or {}).get("source") == "ci.import-probe":
+        logger.info("CI import probe — module loaded, returning without a run")
+        return {"statusCode": 200, "body": json.dumps({"probe": "ok"})}
+
     stats = {
         "channels_checked":       0,
         "channels_attempted":     0,

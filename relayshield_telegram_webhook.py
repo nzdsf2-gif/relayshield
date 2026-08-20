@@ -2742,6 +2742,20 @@ def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, pre
         )
 
 
+# A pasted message vs a mistyped URL. Whitespace is the strongest signal -- a
+# URL never contains a space, and prose almost always does. The length floor
+# catches the wrapped/single-line cases; 40 chars is comfortably longer than
+# any plausible typo'd domain and comfortably shorter than a real scam message.
+_MESSAGE_MIN_LEN = 40
+
+
+def _looks_like_message(raw: str) -> bool:
+    raw = (raw or "").strip()
+    if not raw:
+        return False
+    return bool(re.search(r"\s", raw)) or len(raw) >= _MESSAGE_MIN_LEN
+
+
 def handle_scan(chat_id: int, target: str | None = None, user: dict | None = None) -> None:
     """Scan a URL or file link for threats — Telegram equivalent of ATTACH."""
     if not target:
@@ -2757,7 +2771,31 @@ def handle_scan(chat_id: int, target: str | None = None, user: dict | None = Non
 
     normalized = _normalize_scan_url(target)
     if not normalized:
-        send_message(chat_id, f"That doesn't look like a URL: `{target}`", parse_mode="Markdown")
+        # NOT a URL. Before 2026-08-20 this dead-ended with "That doesn't look
+        # like a URL" and the user was done -- which is exactly what happens
+        # when someone pastes a scam SMS or job-offer message into the URL
+        # scanner, the single most common thing a worried person does. They
+        # are not going to read the help text and retype it as /msgscan.
+        #
+        # So: pasted prose falls through to the fraud analyser instead of
+        # erroring. /scan and /msgscan behave as one command from the user's
+        # side, which is what the help text has always implied and what the
+        # founder reasonably assumed had already shipped -- it had not; no
+        # commit ever merged them.
+        #
+        # Kept narrow deliberately. A short token with no spaces ("asdf",
+        # "htttp:/x") is a typo'd URL, not a message, and telling the user
+        # that is more useful than running fraud analysis on four characters.
+        if _looks_like_message(target):
+            handle_analyze(chat_id, target)
+            return
+        send_message(
+            chat_id,
+            f"That doesn't look like a URL: `{target}`\n\n"
+            "If you meant to check a suspicious *message*, paste the whole thing "
+            "and I'll analyse it for fraud, or send a screenshot.",
+            parse_mode="Markdown",
+        )
         return
     target = normalized
 
@@ -5575,7 +5613,20 @@ def handle_message(update: dict) -> None:
         document and str(document.get("mime_type", "")).startswith("image/")
     )
     caption = message.get("caption", "").strip()
-    if (photo or is_image_document) and caption.lower().lstrip("/") in ("msgscan", "analyze", "analyse"):
+    # Captionless screenshots count too, from 2026-08-20. Requiring the caption
+    # meant a bare screenshot -- which is what people actually send, and what
+    # they send in reply to the /scan prompt -- fell through this branch and
+    # then through every other one, so the bot said nothing at all. Silence is
+    # the worst possible response from a security bot: the user concludes it is
+    # broken, which is precisely what happened.
+    #
+    # An image with no caption in a security bot is a thing to look at. Any
+    # OTHER caption is still left alone, so a captioned image meant for a
+    # different flow is not hijacked by this branch.
+    _caption_cmd = caption.lower().lstrip("/")
+    if (photo or is_image_document) and (
+        not caption or _caption_cmd in ("msgscan", "analyze", "analyse", "scan")
+    ):
         send_message(
             chat_id,
             "📧 *Scanning your screenshot...* This may take a few seconds.",

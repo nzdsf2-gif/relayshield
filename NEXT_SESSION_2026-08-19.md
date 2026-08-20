@@ -132,6 +132,54 @@ Also still open on this PR: the `apiVersions-Should-Be-Recent` finding (`Microso
 `2020-06-01`, ~2270 days old) is a *separate*, pre-existing issue from Microsoft's own templates —
 already disclosed in the PR reply. Do not conflate the two.
 
+### 2c. Telegram `/scan` was a dead end for pasted messages — FIXED 2026-08-20
+
+**Founder report: "scan seems to be broken, it didn't recognize the screenshot."** Two real defects,
+both fixed in `relayshield_telegram_webhook.py`.
+
+1. **`/scan` rejected any non-URL.** `_normalize_scan_url()` returns `None` when the input contains
+   a space, so a pasted scam SMS or job-offer message hit `"That doesn't look like a URL"` and the
+   user was done. That is the most common thing a worried person does. Now: non-URL prose falls
+   through to `handle_analyze()`, so `/scan` and `/msgscan` behave as one command. A short spaceless
+   token still gets the error, because that is a typo'd URL, not a message.
+2. **A captionless screenshot was ignored entirely.** The OCR branch required
+   `caption in ("msgscan","analyze","analyse")`, so a bare image matched nothing and the bot replied
+   *nothing at all* — which reads as broken. Now any uncaptioned image goes to OCR → fraud analysis.
+
+**The merge never shipped.** The founder remembered `/scan` and `/msgscan` being merged; `git log
+--all --grep=msgscan` returns zero commits and both are still separate in the help text. It was a
+plan, not a release. The fix above delivers the behaviour without collapsing the commands.
+
+**Not yet deployed.** Needs a Lambda deploy — and per the deploy gotcha at the top of this file,
+merge with `--no-ff` or the docs-only commit on top means nothing ships.
+
+### 2d. Corpus: 95 vs 122 explained, and five IOC types were being discarded
+
+**Nothing ever set `active` back to `False`** — every `active=False` write is at row creation. So
+122 vs 95 is not recorded attrition, it is two numbers that were never compared: `active=True`
+("we intend to monitor") vs channels actually readable. On `ChannelPrivateError`/`ValueError` the
+code did a bare `continue`, so a dead channel counted as healthy forever.
+
+Fixed: `_record_channel_failure()` / `_clear_channel_failure()` track `consecutive_failures` and
+`last_error`, and the digest now says **`Channels checked: 95 of 122 active ⚠️ 27 unreachable`**.
+Nothing auto-deactivates — a private channel can come back, so it records and a human decides.
+**Fields are empty until the patched monitor runs; an all-zero column proves nothing yet.**
+
+**`extract_iocs()` extracted five types `type_map` never stored**, so none were ever persisted —
+the identical defect to the documented `cves` one. Added `tg_handle` (**the scam-operator-handle
+category the founder asked for** — highest uniqueness available, since feeds publish infrastructure
+not people), `onion`, `hash_md5`, `hash_sha1`. **`ransomware_victims` deliberately excluded**: those
+are victim organisations, and the IOC table is what customer watchlists match against.
+`tg_handle` is a **lead list, not a verdict** — the regex matches any @mention; do not export it as
+"known scam operators" without filtering.
+
+**The 75 pending channels need AWS and could not be triaged here.**
+`tools/triage_channels.py` does it from the founder's Mac — read-only unless `--apply`.
+
+New ToDos: **pivot enrichment** (with confidence strictly below the seed) and **re-check unknowns on
+delay** (a link clean Monday and flagged Friday was exclusive on Monday, and provably ours first).
+Plus a test that fails when `extract_iocs()` and `type_map` diverge — it has broken silently twice.
+
 ### 2b. Discord bot outreach — DFK decision made, and the workstream is still laptop-only
 
 **Recovered 2026-08-20 by upload, not from git.** `gaming_prediction_markets_focus_list_20260814.md`

@@ -183,3 +183,29 @@ Candidate templates, each pairing a RelayShield trigger with a popular destinati
 someone who has never heard of us.
 
 Measure **installs**, not task count. Task count is what got us here.
+
+---
+
+## 2026-08-20 — turning them off does not work either
+
+Founder tested it: **the Zaps cannot be turned off while over quota.** So the earlier advice in this
+file to "toggle them off today" is wrong in practice, and both the cap and the daily on-hold
+warnings simply have to be waited out. There is no action available in the Zapier UI this cycle.
+
+**TODO — 1 SEPTEMBER 2026: push the weekly change to all 12 Zaps.**
+
+On the reset date, in one sitting:
+
+1. **zapier.com/app/zaps**, search `— RelayShield`, confirm the count is **12**.
+2. For each: trigger card → **Configure** → **Every Day** → **Every Week**.
+3. **Spread the days across the week.** All 12 on Monday is a 12-task burst, which is how the cap
+   gets tripped again on day one.
+4. Test → **Publish**. Publishing works again only because the quota has reset; that is the whole
+   reason this is dated rather than done now.
+5. Confirm on **zapier.com/app/history** that nothing new is going on hold.
+
+Target after the change: ~52 tasks/month against the 100 cap, leaving headroom for the real embed
+signup that fires the beta early exit.
+
+Do **not** replay the held tasks. They are not auto-replayed, and replaying them re-blows the cap
+immediately — which is the hole this is climbing out of.

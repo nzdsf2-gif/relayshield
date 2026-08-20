@@ -5717,8 +5717,8 @@ def handle_message(update: dict) -> None:
             send_message(
                 chat_id,
                 "⚠️ *Could not read text from that image.*\n\n"
-                "Try a clearer screenshot, or paste the text directly:\n"
-                "`/analyze <paste message text here>`",
+                "Try a clearer screenshot, or just paste the message text "
+                "straight into the chat and I'll analyse it.",
                 parse_mode="Markdown",
             )
         return

@@ -54,6 +54,7 @@ jobs:
             ["relayshield_telegram_webhook.py"]="relayshield-telegram-webhook"
             ["relayshield_whatsapp_webhook.py"]="relayshield-whatsapp-webhook"
             ["relayshield_intel_monitor.py"]="relayshield-intel-monitor"
+            ["relayshield_discord_bot.py"]="rs-discord-bot"
             ["relayshield_api.py"]="relayshield-api"
             ["relayshield_breach_monitor.py"]="relayshield-breach-monitor"
           )

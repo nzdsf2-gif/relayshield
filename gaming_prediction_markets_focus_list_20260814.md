@@ -585,6 +585,51 @@ their own chain, in their own address format. Same class of check as the WAX gat
 
 **DFK itself is unaffected** — DFK Chain is an Avalanche subnet and uses plain `0x`.
 
+### ✅ FIXED 2026-08-21 — the Ronin gate is closed
+
+`_RONIN_RE` and `_normalize_address()` in `relayshield_discord_bot.py` rewrite `ronin:<40 hex>` to
+`0x<40 hex>` before the address shape test, so a pasted legacy address now gets a real verdict.
+Normalising there rather than inside `check_wallet()` means the "Warn the channel" button carries
+the normalised form too, so the re-check on click hits the same API path the first check did.
+Mixed case and surrounding whitespace are handled; a malformed `ronin:` string is still rejected;
+`ronin.example.com` still routes to the URL checker.
+
+`relayshield_discord_bot.py` was also added to `deploy_lambdas.yml`'s `LAMBDA_MAP` as
+`rs-discord-bot` the same day — before that it had **no CI deploy path at all**, so a repo-side fix
+would never have reached the live bot.
+
+**Ronin-game outreach is unblocked.** The recommendations below assume it.
+
+## Recommended Ronin targets, in send order
+
+Ronin is the single best chain on this list for the bot: one publisher (Sky Mavis) curates the
+ecosystem, the games are Discord-native, and Q3 daily active wallets of 419K (+55%) say the players
+are actually there. **Ordered by fit, and the order matters** — the first two are the pitch, the rest
+are what you send only if those stall.
+
+| # | Target | Band | Why this one, in this position |
+|---|---|---|---|
+| 1 | **Lumiterra** | In band | **Send first.** +9,451% active wallets in Q3 2025 means a server that is still growing into its moderation, which is exactly when an automated screening bot is welcome rather than redundant. Open-world survival with constant item trading is the highest address-and-link traffic on the chain. Smaller and hungrier than Pixels, so a partnership is a decision one person can make |
+| 2 | **The Machines Arena** | In band | **Send second, and only after Lumiterra replies or goes quiet for a week.** A 4v4 hero shooter skews younger and more drainer-exposed, which is the strongest *safety* argument available — but it is also a harder audience to claim credit with. Do not run both in parallel: they are ecosystem neighbours and word travels |
+| 3 | **Ronin ecosystem / Sky Mavis developer channels** | Publisher | The leverage play, not the volume play. One integration blessed by the publisher reaches every title at once. Slower, and it needs at least one live game reference first — which is precisely why it sits below Lumiterra rather than above it |
+| 4 | **Pixels** | ~214K, **over the ceiling** | Ruled out on size by this document's own 50,000 rule, and that rule stands. Listed here only so it is not re-proposed: a server that size has staff moderators and an existing tooling stack, so the bot is a procurement conversation, not a favour |
+| 5 | **Axie Infinity** | Far over | Same reason as Pixels, more so. Do not open |
+
+**Pitch the bot, not rsscan** — the same reasoning that settled DFK applies unchanged. rsscan is
+free and MIT-licensed, so there is nothing to negotiate; the bot serves players and has a
+partnership shape.
+
+**Lead with the `ronin:` fix, not with the corpus.** "We handle your chain's legacy address format
+correctly" is a concrete, checkable claim these teams can verify in ten seconds, and it lands far
+better than any indicator count. It also quietly says we did the work before turning up.
+
+**Do not quote total corpus size.** Same rule as every other outreach in this repo, for the same
+reason.
+
+**The headwind still applies.** DeFi protocols are leaving Discord in 2026 (Morpho read-only from
+1 Feb, DefiLlama moved to ticketed support). Games are stickier, but name it and turn it: teams
+leave because they cannot screen what gets posted, and screening what gets posted is the product.
+
 ## DFK: no channels visible until you pass `#✅verify`
 
 Confirmed from the server view — DFK runs a verification gate, with `#✅verify` under **Launchpad**

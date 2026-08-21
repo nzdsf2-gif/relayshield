@@ -266,6 +266,58 @@ not a demo.
 over leak-site posts; the list will contain false positives, and a prospect screenshotting the tab
 must screenshot the caveat with it.
 
+## 7. Create the operator identity table (2026-08-21)
+
+Growth plan item 2. Same silent-failure shape as the victim table — writes log a warning and
+collection continues, so the first sign of trouble is a digest line stuck at zero.
+
+    AWS_PROFILE=relayshield aws dynamodb create-table \
+      --table-name relayshield_operator_identities \
+      --attribute-definitions AttributeName=handle,AttributeType=S \
+                              AttributeName=platform,AttributeType=S \
+      --key-schema AttributeName=handle,KeyType=HASH \
+                   AttributeName=platform,KeyType=RANGE \
+      --billing-mode PAY_PER_REQUEST \
+      --region us-east-1
+
+    AWS_PROFILE=relayshield aws dynamodb update-time-to-live \
+      --table-name relayshield_operator_identities \
+      --time-to-live-specification "Enabled=true,AttributeName=ttl" \
+      --region us-east-1
+
+Then grant the intel monitor's role `dynamodb:UpdateItem` on it — **UpdateItem, not PutItem**: the
+writer uses `if_not_exists` + `ADD` so DynamoDB maintains `first_seen` and the counters server-side.
+Role discovery is in §6a.
+
+    AWS_PROFILE=relayshield aws iam put-role-policy \
+      --role-name <INTEL_MONITOR_ROLE_NAME> \
+      --policy-name relayshield-operator-identities-write \
+      --policy-document file://iam_operator_identities_policy.json
+
+Confirm with the digest's `Operator identities: N updated` line after the next run.
+
+## 8. Switching on pivot enrichment (2026-08-21)
+
+Growth plan item 3, and **off unless you turn it on**. It is the only outbound call this monitor
+makes to a host other than Telegram, so a slow crt.sh inside the run budget costs collection.
+
+    AWS_PROFILE=relayshield aws lambda update-function-configuration \
+      --function-name relayshield-intel-monitor \
+      --environment "Variables={PIVOT_ENRICHMENT=1}" \
+      --region us-east-1
+
+**`update-function-configuration --environment` REPLACES the whole variable map.** Read the current
+one first and merge, or you will silently drop every other variable the function needs:
+
+    AWS_PROFILE=relayshield aws lambda get-function-configuration \
+      --function-name relayshield-intel-monitor --region us-east-1 --query Environment.Variables
+
+Tunable, all optional: `PIVOT_MAX_SEEDS` (15), `PIVOT_MAX_DERIVED` (25), `PIVOT_TIME_BUDGET` (60s).
+
+**Watch the first two runs for total duration**, then check that derived rows carry
+`provenance="derived"` and `confidence_score` 0.5. If run time moves materially, turn it back off —
+collection is the job.
+
 ### Opting a customer into supplier-breach alerts
 
 Alerts are **off unless a customer explicitly lists suppliers**. There is no inference — nothing is

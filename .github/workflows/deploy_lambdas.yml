@@ -24,6 +24,7 @@ on:
       - 'relayshield_sms_fallback_sender.py'
       - 'relayshield_telegram_webhook.py'
       - 'relayshield_intel_monitor.py'
+      - 'relayshield_discord_bot.py'
       - 'relayshield_alchemy_webhook.py'
       - 'relayshield_approval_monitor.py'
       - 'relayshield_gas_monitor.py'
@@ -89,6 +90,7 @@ jobs:
             ["relayshield_sms_fallback_sender.py"]="relayshield-sms-fallback-sender"
             ["relayshield_telegram_webhook.py"]="relayshield-telegram-webhook"
             ["relayshield_intel_monitor.py"]="relayshield-intel-monitor"
+            ["relayshield_discord_bot.py"]="rs-discord-bot"
             ["relayshield_alchemy_webhook.py"]="relayshield-alchemy-webhook"
             ["relayshield_approval_monitor.py"]="relayshield-approval-monitor"
             ["relayshield_gas_monitor.py"]="relayshield-gas-monitor"
@@ -146,6 +148,23 @@ jobs:
             done
           done
           [ -n "$FUNCS" ] || echo "No changed file belongs to any mapped Lambda package"
+
+          # PREFLIGHT. The deploy loop below aborts the whole step on the first
+          # failed call, so a mistyped or renamed function name does not just
+          # skip its own deploy -- it strands every function queued behind it,
+          # half-deployed. Resolve all of them first and fail with the full list
+          # while nothing has been written yet.
+          MISSING=""
+          for FUNC in $FUNCS; do
+            aws lambda get-function-configuration --function-name "$FUNC" \
+              --region us-east-1 --query 'FunctionName' --output text >/dev/null 2>&1 \
+              || MISSING="$MISSING $FUNC"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::LAMBDA_MAP names functions that do not exist or are not readable:$MISSING"
+            echo "::error::Nothing was deployed. Fix the map (or the role's lambda:GetFunctionConfiguration) and re-run."
+            exit 1
+          fi
 
           for FUNC in $FUNCS; do
             # Every handler that maps to this function

@@ -1,0 +1,63 @@
+name: INTEL Channel Classifier (OSINT-2)
+
+# WHY THIS EXISTS
+# ---------------
+# relayshield_intel_classifier.py was written on 2026-07-23 and has never run.
+# It has no EventBridge rule, no entry in deploy_lambdas.yml's LAMBDA_MAP, and
+# no workflow -- so the pending_review backlog it was built to triage has sat
+# untouched ever since, at 75 channels against 122 active.
+#
+# The reason it kept slipping is that running it "needed the Mac". It does not:
+# it needs AWS credentials and Bedrock, both of which this runner already has a
+# path to. This makes the backlog triageable from the Actions tab.
+#
+# DRY RUN IS THE DEFAULT AND SHOULD STAY THAT WAY. The backlog has never been
+# reviewed by anything, an approve flips a channel to active=True, and there is
+# no undo. Read a dry run before committing one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Max candidates to classify'
+        required: false
+        default: '200'
+      apply:
+        description: 'Write verdicts to DynamoDB (leave false for a dry run)'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  classify:
+    name: Triage the pending_review backlog
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install boto3
+        run: pip install --quiet boto3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      # The classifier needs bedrock:InvokeModel on the cross-region inference
+      # profile us.anthropic.claude-haiku-4-5-20251001-v1:0, which is NOT the
+      # bare foundation-model ARN -- on-demand throughput for this model is
+      # rejected without the profile. If this step fails with AccessDenied,
+      # that grant is what is missing, not the credentials.
+      - name: Classify
+        run: |
+          python3 relayshield_intel_classifier.py \
+            --limit "${{ inputs.limit }}" \
+            ${{ inputs.apply == true && '--apply' || '' }}

@@ -106,8 +106,15 @@ def _classify_one(username: str, description: str, provenance: str) -> dict:
     return result
 
 
-def lambda_handler(event, context):
-    limit = int((event or {}).get("limit", 200))
+def run_classification(limit: int = 200, apply: bool = True) -> dict:
+    """Classify the pending_review backlog.
+
+    `apply=False` is a real dry run: it still calls Bedrock (that is the part
+    worth previewing -- the verdicts) but writes nothing back to DynamoDB. The
+    backlog has never been triaged, so the first pass should be read before it
+    is committed; a false approve re-introduces exactly the noise-channel
+    problem this classifier exists to remove, and there is no undo.
+    """
     table = _dynamodb.Table(CHANNELS_TABLE)
 
     resp = table.scan(FilterExpression=Attr("category").eq("pending_review"))
@@ -122,7 +129,8 @@ def lambda_handler(event, context):
 
     logger.info("OSINT-2 classifier: %d pending_review candidates to process", len(candidates))
 
-    stats = {"processed": 0, "approved": 0, "rejected": 0, "errors": 0}
+    stats = {"processed": 0, "approved": 0, "rejected": 0, "errors": 0,
+             "applied": bool(apply), "candidates": len(candidates)}
     now_ts = datetime.now(timezone.utc).isoformat()
 
     for item in candidates:
@@ -142,6 +150,11 @@ def lambda_handler(event, context):
 
         stats["processed"] += 1
         if result.get("approve"):
+            if not apply:
+                stats["approved"] += 1
+                logger.info("[DRY RUN] would APPROVE @%s -> category=%s (%s)",
+                            username, result["category"], result.get("reason", ""))
+                continue
             table.update_item(
                 Key={"username": username},
                 UpdateExpression="SET active = :a, category = :c, classified_at = :t, classifier_reason = :r",
@@ -155,6 +168,10 @@ def lambda_handler(event, context):
             stats["approved"] += 1
             logger.info("APPROVED @%s -> category=%s (%s)", username, result["category"], result.get("reason", ""))
         else:
+            if not apply:
+                stats["rejected"] += 1
+                logger.info("[DRY RUN] would REJECT @%s (%s)", username, result.get("reason", ""))
+                continue
             table.update_item(
                 Key={"username": username},
                 UpdateExpression="SET category = :c, classified_at = :t, classifier_reason = :r",
@@ -169,4 +186,53 @@ def lambda_handler(event, context):
         time.sleep(0.1)  # light rate-limit courtesy pause between Bedrock calls
 
     logger.info("OSINT-2 classifier complete: %s", stats)
+    return stats
+
+
+def lambda_handler(event, context):
+    event = event or {}
+    # The CI import probe invokes every deployed function with this payload.
+    # Returning before the scan matters here more than elsewhere: a probe that
+    # fell through would run a full Bedrock pass over the backlog on every
+    # deploy, and with apply defaulting to True it would COMMIT those verdicts.
+    if event.get("source") == "ci.import-probe":
+        return {"statusCode": 200, "skipped": "ci.import-probe"}
+    stats = run_classification(
+        limit=int(event.get("limit", 200)),
+        apply=bool(event.get("apply", True)),
+    )
     return {"statusCode": 200, **stats}
+
+
+def main() -> int:
+    """CLI entry point, so the backlog can be triaged from CI or a laptop.
+
+    Dry run by default. `--apply` is the only thing that writes.
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Triage the pending_review channel backlog.")
+    ap.add_argument("--limit", type=int, default=200, help="max candidates to classify")
+    ap.add_argument("--apply", action="store_true",
+                    help="write verdicts back to DynamoDB (default: dry run)")
+    args = ap.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    stats = run_classification(limit=args.limit, apply=args.apply)
+
+    print("\n" + "=" * 60)
+    print(f"candidates found : {stats['candidates']}")
+    print(f"classified       : {stats['processed']}")
+    print(f"would approve    : {stats['approved']}" if not args.apply
+          else f"approved         : {stats['approved']}")
+    print(f"would reject     : {stats['rejected']}" if not args.apply
+          else f"rejected         : {stats['rejected']}")
+    print(f"errors           : {stats['errors']}")
+    if not args.apply:
+        print("\nDRY RUN — nothing was written. Re-run with --apply to commit.")
+    print("=" * 60)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

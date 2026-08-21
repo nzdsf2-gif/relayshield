@@ -1,5 +1,39 @@
 # Session record, 2026-08-21
 
+> ## 🔴 READ FIRST — `relayshield-api` has drifted, and it blocks the next API deploy
+>
+> `lambda_drift_check.yml` ran for the first time today (run **32487966683**) and **caught a real
+> one on day one**: live `relayshield-api` carries code that is not on `main`. Issue **#4** is open.
+>
+> This is case 1 — hand-deployed, never committed — the same shape that destroyed the Telegram
+> shortcuts. The functional part: live's `PAYG_PRICE_UNITS` contains
+> `/v1/payg/mcp-registry-risk` and `/v1/payg/prompt-injection-breach` at 350000, and `main` does
+> not. `PAYG_PATHS` is derived from that map, so deploying `main` as it stood would have stopped
+> recognising both paths and undercharged x402 buyers $0.25 against an advertised $0.35 — a bug
+> that had already been found and fixed once, on 2026-08-08.
+>
+> **Ported onto this branch** from the run log: both price entries, the four corrected header
+> prices, the "prices here are illustrative" warning block, and the two module-level imports.
+>
+> **But the recovery is NOT complete, and this is the part that matters.** The workflow pipes
+> `diff -u` through `head -60`, so the log shows only the first four hunks and then
+> `diff: standard output: Broken pipe`. **Any drift past line ~282 of an 11,000-line file is
+> invisible from here.** Before the next deploy of `relayshield_api.py`, dump the live handler and
+> diff it in full:
+>
+>     AWS_PROFILE=relayshield aws lambda get-function --function-name relayshield-api \
+>       --region us-east-1 --query Code.Location --output text \
+>       | xargs curl -sS -o /tmp/live_api.zip
+>     unzip -p /tmp/live_api.zip relayshield_api.py > /tmp/live_api.py
+>     diff -u relayshield_api.py /tmp/live_api.py
+>
+> Anything that comes back is code that exists only on the live function. Port it before merging.
+>
+> **Fix the truncation too** — `head -60` is why this is a partial recovery. Raising it (or
+> uploading the diff as an artifact) is a small change to `lambda_drift_check.yml` and it is the
+> difference between "we know something drifted" and "we know what drifted".
+
+
 Supplements `NEXT_SESSION_2026-08-20.md`, which stays current for every thread not named here.
 
 ---
@@ -111,6 +145,113 @@ either draft.
 
 ---
 
+## Round 2 — shipped this afternoon
+
+### The 75 pending channels: the venv did not exist
+
+`/tmp/rsvenv/bin/python: no such file or directory` — the handoff quoted the *run* line without the
+*create* line above it. Both, in order:
+
+    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3
+    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py --pending
+
+`/tmp` is cleared on reboot, so the venv needs recreating after one.
+
+**But there is now a better route that needs no Mac at all.** See the classifier below.
+
+### Intel monitor — the top 3 enhancements from `intel_corpus_growth_plan.md`
+
+**1. The classifier can finally run (growth plan item 1).**
+`relayshield_intel_classifier.py` was written on 2026-07-23 and **has never executed once** — no
+EventBridge rule, no `LAMBDA_MAP` entry, no workflow. That is the real reason the backlog is
+untriaged; "needs the Mac" was a symptom.
+* Refactored into `run_classification(limit, apply)` with a `main()` CLI. **Dry run is the default**
+  — it still calls Bedrock, so you see the actual verdicts, but writes nothing.
+* New workflow **`intel_channel_classify.yml`**, manual dispatch, `apply` defaults to false. The 75
+  can now be triaged from the Actions tab.
+* `lambda_handler` returns early on `{"source":"ci.import-probe"}` — without that, adding this to CI
+  later would run a full Bedrock pass on every deploy and, with `apply` defaulting True, **commit
+  those verdicts**.
+* **Likely missing grant:** `bedrock:InvokeModel` on `us.anthropic.claude-haiku-4-5-20251001-v1:0`
+  (the cross-region inference profile, not the bare model ARN). AccessDenied there is the expected
+  first failure, not a credentials problem.
+* **Read the dry run before applying.** The one prior data point (2026-07-24) rejected 138 of 141.
+
+**2. Operator identity indicators (growth plan item 2).**
+* `discord_invites` is now a first-class IOC type. The invite regex already existed and was used
+  only for channel discovery — the codes were parsed and thrown away. Stored as the bare code, so
+  the same server posted as `discord.gg/X` and `discord.com/invite/X` dedupes to one indicator.
+* New table **`relayshield_operator_identities`**, one row per `(handle, platform)` rather than one
+  per sighting, with `first_seen` / `last_seen` / `sightings` / `channels` / `categories`. Uses
+  `if_not_exists` + `ADD` so it costs one `update_item` and **no reads**. TTL refreshes on every
+  sighting — an operator we keep seeing never expires, one that goes quiet ages out.
+* Still a lead list. `_RE_TG_CHANNEL` matches any `@mention`; the value is `channels` and
+  `categories`, which separate a handle seen four times across two infostealer rooms from one
+  mentioned once in general chat. **Do not export as "known scam operators".**
+
+**3. Pivot enrichment (growth plan item 3).**
+* `_pivot_domain_siblings()` pivots a collected domain to campaign siblings via crt.sh — the same
+  source `relayshield_cert_monitor.py` already uses, so no new vendor and no new secret.
+* The plan called confidence decay "the real risk", so it is the centre of the design: every derived
+  row carries `provenance="derived"`, `derived_from`, `derivation`, and
+  `confidence_score = seed × 0.5`. One hop only — derived rows are never themselves seeds.
+* **OFF by default** (`PIVOT_ENRICHMENT`). It is the only outbound call in this monitor to a host
+  other than Telegram, and a slow third party inside the run budget costs collection. Bounded on
+  seeds (15), derived-per-seed (25) and wall clock (60s), and only seeds from
+  `phaas / infostealer / credential_dump / ransomware` — pivoting from a general-chat domain
+  produces siblings of a legitimate host, which is noise with a confidence score attached.
+* A `0` on the digest's derived line means "not switched on", not "found nothing".
+
+Digest gains: `Operator identities: N updated (M Discord invites)` and `Derived indicators (pivot): N`.
+
+### MSP brief — `.md` and `.pdf` both regenerated
+
+Content lives in **two places** (`RelayShield_MSP_Solution_Brief.md` and hardcoded in
+`generate_pdfs.py:build_msp`), so both were edited. PDF rebuilt, 10 pages, all new content verified
+present in the rendered output.
+
+* **AWS Marketplace listings named**, as a three-row table: TI Starter/Unlimited (flat-rate), Core
+  Identity Exposure / Bundle A (commitment + metered), Agentic Attack Surface / Bundle D (metered),
+  with the seller account and the "shortest path to a signature" procurement argument.
+* **Microsoft Sentinel added to the STIX/TAXII paragraph**, plus its own paragraph with the API root,
+  collection id, and the two traps from the verified integration guide — key in **both** Username
+  and Password, and `ThreatIntelIndicators` **not** the retired `ThreatIntelligenceIndicator`. Both
+  failure modes look like a bad API key, which is exactly why they belong in a brief.
+* **Zapier added as live** — published in the App Directory, framed as the no-code client-facing
+  workflow an MSP can hand over.
+* **Ansible Galaxy added as roadmap, explicitly not live.** ⚠️ The namespace is *approved and
+  unclaimed* (per the 08-19 carry-forward); the collection is not published. It is written as a
+  commitment with a "not yet published" flag and a closing note on what "live" means in that
+  section. **If the collection has in fact shipped since, tell me and I will promote it** — but a
+  brief that claims an installable integration which does not exist is the failure this repo keeps
+  writing rules about.
+
+### Ronin — deploy path opened
+
+* `relayshield_discord_bot.py` added to `LAMBDA_MAP` as **`rs-discord-bot`** (the name you gave),
+  plus a `paths:` trigger so a bot-only push actually starts the workflow, plus an entry in
+  `lambda_drift_check.yml` so it is watched from now on.
+* **New preflight step in `deploy_lambdas.yml`**: every mapped function is resolved with
+  `get-function-configuration` *before* the first `update-function-code`. The deploy loop aborts on
+  the first failed call, so without this a wrong name does not just skip its own deploy — it strands
+  every function queued behind it, half-deployed. Now it fails with the full list and nothing
+  written. **If `rs-discord-bot` is not the live name, this is what will tell you, safely.**
+* `gaming_prediction_markets_focus_list_20260814.md` — Ronin gap marked fixed, and a
+  **send-order table** added: Lumiterra first, The Machines Arena second (never in parallel — they
+  are ecosystem neighbours), Sky Mavis publisher channels third, Pixels and Axie ruled out on the
+  50,000 ceiling. Lead with the `ronin:` fix, not the corpus size.
+
+### Merge sequencing — this matters
+
+`deploy_lambdas.yml` fires on push to `main` and deploys every changed handler in that push. This
+branch changes **both** `relayshield_discord_bot.py` and `relayshield_api.py`.
+
+**Do the API drift diff at the top of this file before merging**, or split the merge so the bot goes
+first. Merging as-is deploys the API too, and the part of its drift that is still invisible would be
+overwritten.
+
+---
+
 ## Still blocked on the Mac — nothing below can be done from the sandbox
 
 1. **Create `relayshield_ransomware_victims`** — `lambda_recovery_and_deploy.md` §6. Victims are
@@ -118,7 +259,13 @@ either draft.
 2. **Both IAM grants** — §6a. Creating the table does not grant either one, and both fail silently.
 3. **Deploy the demo Worker** — §6c. The API rides `deploy_lambdas.yml`; the Worker does not.
 4. **Confirm the Discord function name, then decide on the CI map entry** — see the box above.
-5. **Triage the 75 pending channels** — `tools/triage_channels.py --pending`.
+5. **Triage the 75 pending channels** — now runnable from the Actions tab via
+   `intel_channel_classify.yml` (dry run first). The Mac route still works once the venv is created.
+6. **Full `relayshield-api` drift diff** — the banner at the top of this file. Do it before the next
+   API deploy.
+7. **Create `relayshield_operator_identities`** — hash `handle`, range `platform`, TTL attribute
+   `ttl`, PAY_PER_REQUEST. Same silent-failure shape as the victim table: writes log a warning and
+   collection continues.
 
 ## Carried forward unchanged
 

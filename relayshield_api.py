@@ -21,19 +21,26 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   GET  /v1/result/{analysis_id}     — Poll VT scan result
 
 Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
+
+  PRICES BELOW ARE ILLUSTRATIVE AND PARTIAL. `PAYG_PRICE_UNITS` is the only
+  source of truth, and it holds ~28 endpoints against the 14 listed here.
+  Never quote a price from this header; read the map. Corrected 2026-08-14
+  after three entries here had drifted from what is actually charged, one of
+  them understating a live price by half.
+
   POST /v1/payg/breach              — $0.10 USDC
   POST /v1/payg/sim-swap            — $0.25 USDC
   POST /v1/payg/domain              — $0.50 USDC
-  POST /v1/payg/oauth-watchlist     — $0.15 USDC
+  POST /v1/payg/oauth-watchlist     — $0.30 USDC — combined HIBP watchlist + INTEL-5 stealer corpus
   POST /v1/payg/scan-wallet         — $0.10 USDC (legacy EVM-only)
   POST /v1/payg/scan-url            — $0.05 USDC
   POST /v1/payg/scan-file           — $0.10 USDC
-  POST /v1/payg/wallet-risk         — $0.15 USDC — multi-chain EVM/Solana/TON/Bitcoin
-  POST /v1/payg/token-security      — $0.10 USDC — token honeypot + tax analysis
+  POST /v1/payg/wallet-risk         — $0.05 USDC — multi-chain EVM/Solana/TON/Bitcoin (teaser price, CDPX-3)
+  POST /v1/payg/token-security      — $0.05 USDC — token honeypot + tax analysis (teaser price, CDPX-3)
   POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
   POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
   POST /v1/payg/infostealer         — $0.15 USDC — Hudson Rock infostealer detection
-  POST /v1/payg/supply-chain        — $0.10 USDC per domain — vendor breach + infostealer risk (up to 10 domains)
+  POST /v1/payg/supply-chain        — $0.10 USDC per CALL, not per domain — vendor breach + infostealer risk (up to 10 domains)
   POST /v1/payg/session-risk        — $0.30 USDC — INTEL-5 active session hijack / AiTM detection
   POST /v1/payg/tech-stack-cve      — $0.20 USDC — CVE targeting risk by declared tech stack
   POST /v1/payg/bulk-identity-risk  — $2.00 USDC — hierarchical org + per-agent-email risk scoring
@@ -62,6 +69,7 @@ import base64
 import bisect as _bisect
 import concurrent.futures
 from decimal import Decimal
+import hashlib
 import json
 import html
 import logging
@@ -78,6 +86,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 # Local module — pure data, no AWS dependencies. MUST be included in this
 # function's deployment zip; without it every invocation dies at import with
@@ -274,6 +283,19 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
     "/v1/payg/bulk-identity-risk":    2000000,  # $2.00 — hierarchical org + per-agent-email risk scoring
     "/v1/payg/identity-risk-score":   350000,   # $0.35 — domain security credit score (0-100), 6 dimensions
+    # Added 2026-08-08. Absent before, so both fell through to the 250000
+    # default and charged x402 buyers $0.25 against an advertised $0.35, and
+    # neither appeared in /.well-known/x402.json (26 resources, not 28).
+    #
+    # RECOVERED FROM THE LIVE FUNCTION 2026-08-21. This fix was deployed by hand
+    # and never committed; `main` still carried the bug, so the next CI deploy
+    # of this file would have reinstated it. Found by lambda_drift_check.yml on
+    # its first scheduled run — exactly the failure mode that check was built
+    # for. Note these two paths are ALSO served by relayshield_agentic_api.py;
+    # that does not make them optional here, because PAYG_PATHS is derived from
+    # this map and an absent key means the path is not recognised at all.
+    "/v1/payg/mcp-registry-risk":     350000,   # $0.35 — MCP server typosquat + reputation risk
+    "/v1/payg/prompt-injection-breach": 350000, # $0.35 — prompt-injection corpus exposure check
     "/v1/payg/cert-expiry":            50000,   # $0.05 — TLS cert expiry/renewal risk for your own domain (crt.sh, free source)
     "/v1/payg/ip-intel":              100000,   # $0.10 — passive DNS + IP reputation via VirusTotal
 }

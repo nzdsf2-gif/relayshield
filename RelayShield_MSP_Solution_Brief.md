@@ -211,13 +211,33 @@ Pass any domain, IP, URL, or SHA256 hash to check for known malware infrastructu
 
 IOC data is retained for 365 days.
 
-**Developer subscription, live today:** $499/mo for 10,000 API calls, $999/mo unlimited. Self-serve signup at api.relayshield.net/developers, covers all metered endpoints above plus the threat intelligence feed. Built for security engineers at small-to-mid-size companies building internal SIEM/SOAR tooling, and security SaaS vendors embedding breach and infostealer data into their own product. No commitment, cancel anytime. Also available on **AWS Marketplace** for teams that prefer to procure and bill through an existing AWS account.
+**Developer subscription, live today:** $499/mo for 10,000 API calls, $999/mo unlimited. Self-serve signup at api.relayshield.net/developers, covers all metered endpoints above plus the threat intelligence feed. Built for security engineers at small-to-mid-size companies building internal SIEM/SOAR tooling, and security SaaS vendors embedding breach and infostealer data into their own product. No commitment, cancel anytime.
+
+**Procure through AWS Marketplace instead, if that is easier:** RelayShield is an AWS Marketplace seller (AWS account 239677749008), so an MSP with an existing AWS agreement can buy on their AWS bill, draw down committed spend, and skip a new vendor onboarding entirely. Three listings are live:
+
+| Listing | What it covers | Shape |
+|---|---|---|
+| **Threat Intelligence — Starter / Unlimited** | The full IOC corpus over STIX/TAXII 2.1 and MISP, plus the TI query endpoints | Flat-rate monthly subscription |
+| **Core Identity Exposure** (Bundle A) | Six identity endpoints: breach exposure, SIM swap detection, infostealer log checks, domain lookalike detection, OAuth token exposure watchlist, crypto threat intelligence | Monthly minimum commitment plus metered usage per endpoint |
+| **Agentic Attack Surface** (Bundle D) | Five agent-era endpoints: MCP registry risk, prompt-injection breach correlation, agent-framework CVE targeting, bulk per-agent identity risk scoring, LLM credential exposure detection | Metered usage per endpoint |
+
+Each bundle is licensed independently, with no dependency on any other bundle or on the direct subscription. Your API key is issued automatically by email when the subscription activates.
+
+**For AWS-native MSPs this is usually the shortest path to a signature.** Marketplace procurement runs through an approval process the client's finance team already has, which removes the "new vendor" objection that stalls small security purchases more often than price does.
 
 **Mid-market MSSP feed (coming):** A bulk export tier ($1,500 to $3,000/mo) for MSSPs running this data through their own SIEM/SOAR pipeline at scale across many client tenants, delivered as a continuous feed rather than per-query lookups. Contact us to join early access.
 
-**Drops into the SIEM your clients already run:** RelayShield's IOC corpus is served over STIX/TAXII 2.1 and MISP, so it ingests through **Elastic Security's built-in Threat Intel integrations** with configuration alone, no connector to build and no professional-services engagement. Splunk HEC, CEF/QRadar and Cortex XSOAR are supported as push destinations. For an MSSP running a shared SIEM across client tenants, this removes the integration objection entirely.
+**Drops into the SIEM your clients already run:** RelayShield's IOC corpus is served over STIX/TAXII 2.1 and MISP, so it ingests through **Elastic Security's built-in Threat Intel integrations** and **Microsoft Sentinel's first-party Threat Intelligence - TAXII data connector** with configuration alone, no connector to build and no professional-services engagement. Splunk HEC, CEF/QRadar and Cortex XSOAR are supported as push destinations. For an MSSP running a shared SIEM across client tenants, this removes the integration objection entirely.
+
+**Microsoft Sentinel, specifically:** point the **Threat Intelligence - TAXII** connector at API root `https://api.relayshield.net/v1/intel/taxii/` with collection ID `iocs`, and indicators land in Sentinel's `ThreatIntelIndicators` table ready for analytics rules, hunting queries and incident enrichment. Two things are worth knowing before the first attempt, because both look like a bad API key when they are not: put your key in **both** the Username and Password fields (Sentinel's TAXII client skips authentication when the password is empty), and target `ThreatIntelIndicators`, **not** the legacy `ThreatIntelligenceIndicator` table, which retired on 31 May 2026 and silently matches nothing. Full walkthrough, including KQL for IP, domain and malware-family rules, is in the Sentinel integration guide.
 
 **Live automation, not just an API:** RelayShield's employee-offboarding credential check is a published, officially-approved template in n8n's workflow library ([n8n.io/workflows/16694](https://n8n.io/workflows/16694)), an HR webhook triggers three parallel identity-risk checks (breach, infostealer, OAuth token exposure) the moment someone's offboarded, routing findings to Slack, a manager email summary, and a Notion audit log automatically. This isn't a hypothetical integration path. It's live, installable today, built on the same API MSPs get direct access to above.
+
+**Zapier, for the no-code half of your client base:** RelayShield has passed Zapier's review process and is published in the **Zapier App Directory**, which connects the same identity checks to 8,000+ apps with no code at all. For an MSP, the practical shape is a client-facing workflow the client can own: a new-hire row in a Google Sheet or an HR tool triggers a breach and infostealer check; a hit posts to a Slack channel and opens a ticket in the PSA you already run. Nothing to host, nothing to maintain, and it survives the client changing their HR stack.
+
+**Ansible, for the MSPs who automate their fleet properly:** an Ansible collection is on the roadmap, publishing to **Ansible Galaxy**, so identity checks can run as ordinary tasks inside the playbooks you already use for onboarding, offboarding and patch cycles. The namespace is reserved; the collection is not yet published, so treat this as a commitment rather than something to demo. Ask us for the timeline if it matters to a specific deal.
+
+**A note on what "live" means in this section.** n8n and Zapier are published and installable today. Ansible Galaxy is not yet. We flag the difference because an MSP who discovers it during a proof of concept, rather than reading it here, is right to wonder what else was oversold.
 
 ---
 

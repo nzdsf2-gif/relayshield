@@ -1,3 +1,8 @@
+> **SUPERSEDED 2026-08-20 — read [`NEXT_SESSION_2026-08-20.md`](NEXT_SESSION_2026-08-20.md) first.**
+> This file was appended to five times during 2026-08-20 and is now hard to read end to end. It is
+> kept for the older threads and for the detail the newer file only summarises. Where the two
+> disagree, the 08-20 file is current.
+
 # Next session pickup, written 2026-08-19
 
 Durable handoff. Everything below is on `main` unless stated otherwise. Read the ENVIRONMENT

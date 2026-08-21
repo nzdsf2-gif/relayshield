@@ -1,6 +1,9 @@
-# Xcitium — EDR/XDR partner outreach
+# Endpoint-security partner outreach — Xcitium and the wider list
 
-*Decision and drafts, 2026-08-21. Not yet sent.*
+*Decision and drafts, 2026-08-21. Nothing here has been sent.*
+
+Part 1 is Xcitium specifically. **Part 2 is a reusable template** for ThreatLocker, Huntress,
+Blackpoint Cyber, WatchGuard and LimaCharlie, with the per-company hook each one needs.
 
 ## Recommendation: yes, send — but not as a services pitch
 
@@ -108,3 +111,86 @@ order. The blog carries the argument; the brief carries the packaging.
 **Before quoting any figure on a call, re-measure it.** The last measured set is in
 `victim_side_outreach_messages.md` and was taken 2026-08-17 — treat anything older than about a week
 as stale, and quote per-category exclusive numbers rather than a total.
+
+
+---
+---
+
+# Part 2 — General partner outreach template
+
+For **ThreatLocker, Huntress, Blackpoint Cyber, WatchGuard and LimaCharlie**. Same motion as
+Xcitium: a technology-alliance conversation, not a services pitch, routed to alliances or product
+rather than a sales inbox.
+
+## The one argument that works on all of them
+
+Every company on this list instruments **something the customer owns** — an endpoint, a tenant, a
+network, a log stream. The attacks RelayShield covers happen **where the customer owns nothing**:
+
+* a **SIM swap** completes inside the mobile carrier's provisioning system;
+* a **session cookie** from a stealer log resumes a session that is already authenticated, so no
+  login event ever looks anomalous;
+* a **credential from someone else's breach** logs in cleanly on the first attempt;
+* an **OAuth grant** issued months ago keeps working after the password is rotated.
+
+None of those produce a process to watch, a binary to block, or a failed login to alert on. They are
+not a gap in anyone's product — they are outside the boundary every one of these products draws.
+
+**That framing is the whole pitch, and getting it wrong kills the send.** Do not tell an endpoint
+vendor their endpoint tool has a blind spot. Tell them the two things cover disjoint ground.
+
+## The template
+
+Replace `<HOOK>` with the company's line from the table below. Everything else stays.
+
+> **Subject: Signal from outside the perimeter — possible fit with <COMPANY>'s partner stack**
+>
+> Hi <name>,
+>
+> <HOOK>
+>
+> I work on the attacks where the customer's own telemetry never fires. A SIM swap completes inside
+> the carrier. A session cookie from a stealer log resumes a session that is already authenticated,
+> so the login looks perfectly normal. A credential from a third-party breach works on the first
+> try. There is no process to inspect, nothing to block, and no failed login to alert on — the
+> evidence sits outside the boundary any endpoint or tenant tool can draw.
+>
+> RelayShield monitors that outside: live carrier queries for SIM/eSIM swap and port-out, breach and
+> stealer-log exposure for a customer's people, lookalike domain registration, and OAuth grant
+> abuse. It is not EDR, XDR or MDR and is not trying to be — it is an input, delivered as an alert
+> or over an API.
+>
+> The reason I am writing to <COMPANY> rather than to an MSP directly: your partners already have a
+> detection answer and a response answer, so this lands as a missing input rather than a competing
+> console. Connectors already exist for Sentinel, XSOAR, Elastic and ConnectWise, so it can arrive
+> inside a partner's current workflow instead of adding another pane of glass.
+>
+> Worth 20 minutes with whoever owns technology alliances? Happy to send the technical write-up
+> first if that is the faster read.
+>
+> <signature>
+
+## Per-company hook, and what to watch for
+
+| Company | `<HOOK>` line | The thing that will decide it |
+|---|---|---|
+| **ThreatLocker** | "Allowlisting answers the hardest version of the endpoint problem: if it is not approved, it does not run. I am writing about the attacks where nothing needs to run." | Cleanest fit on the list. Default-deny is a strong, specific claim and the disjointness argument is exact — a stolen session needs no executable. Lead with ringfencing as the thing that *works*, then the class it cannot reach |
+| **Huntress** | "Huntress ITDR already watches the Microsoft 365 tenant closely — unauthorised access, rogue rules, session abuse inside the tenant. I am writing about the part of that chain that happens before the tenant sees anything." | ⚠️ **The only real overlap on this list. Name it in the first line or the message fails.** Their ITDR covers identity *inside* M365. RelayShield covers the carrier and the criminal market — the credential's life before it reaches a login. Complementary, but only if you say so first; if you don't, they will, and less charitably |
+| **Blackpoint Cyber** | "Your SOC's argument is time to response — analysts on it in minutes, not hours. I am writing about the signals that arrive before there is anything to respond to." | Sell **earlier warning**, not more coverage. An MDR's economics are analyst hours, so a signal that shortens triage or pre-empts an incident is a margin argument. Do not pitch it as more alerts — that is a cost to them |
+| **WatchGuard** | "AuthPoint puts MFA in front of your partners' customers. A SIM swap is the attack that walks straight through the SMS half of that, and it happens at the carrier where no product can see it." | The sharpest single-sentence hook available, because it names a concrete failure of a product they sell. Keep it factual and unsmug — the point is that carrier-side monitoring makes their MFA *hold*, not that their MFA is weak |
+| **LimaCharlie** | "You have built the opposite of a closed platform: telemetry, detections and third-party capability that customers compose themselves. I am writing because our data wants to be an input in exactly that shape." | ⚠️ **Different ask, not a different hook — change the last paragraph.** They are infrastructure, usage-billed, with an add-on marketplace. Propose being **an add-on / feed**, not a partnership. Lead with the API, STIX/TAXII and MISP surfaces and per-call pricing. Do not send them the alert-delivery story |
+
+## Rules for the whole batch
+
+* **No corpus-size headline.** If a number is needed: *500K+ distinct indicators, 5.8M+ citations*,
+  and be ready to explain the difference — see the MSP brief. A single inflated figure is the exact
+  mistake that nearly went out to the blockchain-analytics segment.
+* **Never claim a joint customer, an existing partnership, or overlap you cannot name.** The XSOAR
+  Tech Alliance thread is already gated on two named joint customers; do not invent them here.
+* **Send one at a time, in the order in the table.** ThreatLocker first — it has the cleanest
+  argument, and the first reply teaches you which objection is the real one before you spend the
+  other four.
+* **Do not send the EDR/MDR blog to any of them.** `relayshield_edr_mdr_complement_blog.md` is
+  written for end customers, and its frame is "your EDR cannot see this". To a vendor that reads as
+  an attack on their product. Send `RelayShield_MSP_Solution_Brief.md` instead — it is written for
+  the channel and it is the document that actually matches this pitch.

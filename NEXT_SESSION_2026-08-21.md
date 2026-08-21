@@ -252,6 +252,89 @@ overwritten.
 
 ---
 
+## Round 3 — corrections and additions
+
+### ❌ I got Ansible Galaxy wrong. Corrected.
+
+I wrote it into the MSP brief as a **roadmap commitment, not yet published**, on the strength of a
+carry-forward line in `NEXT_SESSION_2026-08-19.md:319` saying the namespace was "approved and
+unclaimed". **That line is stale.** `relayshield.security` **0.1.0 is published on Ansible Galaxy**
+under the `relayshield` namespace, updated 2026-08-18, 14 downloads, requires Ansible >= 2.15.0.
+
+Both the `.md` and `generate_pdfs.py` now present it as a live, installable integration with the
+install command and the namespace, and the "what live means" hedge is gone. **Lesson worth keeping:
+a carry-forward line is a record of what was true when it was written, not a status.** Anything
+customer-facing needs the primary source checked.
+
+### Corpus numbers reframed: 500K+ distinct indicators, 5.8M+ citations
+
+Replaced every "5.0M+ indicators" claim in the brief. Both files also carry a short **"why two
+numbers"** paragraph: a citation is one sighting (this domain, this channel, this date), a distinct
+indicator is the deduplicated thing. 500K is the corpus; 5.8M is how often we have seen it. Stating
+both, and the difference, is stronger than either alone in front of a technical buyer — and it is
+the same discipline the Segment 1 near-miss was about.
+
+PDF rebuilt: 10 pages, all changes verified present in the rendered output, no stale numbers left.
+
+### New files
+
+* **`sentinelone_partner_submission.md`** — business description at 50 / 100 / 250 words, the form
+  fields (category, integration surfaces, auth, commercial model, marketplace presence), a
+  Singularity Marketplace "why this integration" block, and guardrails. **Do not claim a joint
+  customer** — the XSOAR thread is already gated on exactly that.
+* **`cursor_origin_assessment.md`** — see below.
+* **`xcitium_outreach.md` Part 2** — reusable partner template for ThreatLocker, Huntress,
+  Blackpoint Cyber, WatchGuard and LimaCharlie, with a per-company hook table. Two warnings in it
+  matter: **Huntress ITDR genuinely overlaps** (M365 identity) and must be named in the first line;
+  **LimaCharlie needs a different ask** (add-on/feed, not partnership).
+
+### Cursor Origin — no to CI, yes to secrets
+
+Origin launched 2026-08-17 as a Git host and code-review platform with agent-first PRs and GitHub
+mirroring. Beta integrations are Vercel, Depot and Buildkite.
+
+**Do not move CI.** Nothing on that integration list covers AWS OIDC deploys, and the CI here is
+load-bearing for correctness — `lambda_drift_check.yml` caught real production drift on its first
+run. Do not rehost the safety net on a four-day-old beta. Revisit when Origin supports OIDC to AWS.
+
+**Do take the secrets angle, and soon.** No secret scanner covers Origin yet. `rsscan` already runs
+anywhere a container runs (Bitbucket, Tekton, Drone, Woodpecker, Harness are documented), so getting
+it into an Origin pipeline and publishing that is low effort and a real first-mover position. The
+sharper claim is **"secret scanning for agent-authored pull requests"**, which is aimed directly at
+Origin's own thesis. Items 2 and 3 in that file are blocked on having an actual Origin account.
+
+### The drift diff failed because of the working directory
+
+`diff: relayshield_api.py: No such file or directory` — it was run from `~`. Needs the repo:
+
+    cd ~/"Side SaaS Hustle"
+    AWS_PROFILE=relayshield aws lambda get-function --function-name relayshield-api \
+      --region us-east-1 --query Code.Location --output text | xargs curl -sS -o /tmp/live_api.zip
+    unzip -p /tmp/live_api.zip relayshield_api.py > /tmp/live_api.py
+    diff -u relayshield_api.py /tmp/live_api.py
+
+**Still outstanding, and still blocking the next API deploy.**
+
+### Running the classifier — it is NOT automated
+
+`intel_channel_classify.yml` is `workflow_dispatch` only, deliberately: an approve flips a channel to
+`active=True` and there is no undo. Nothing runs on a schedule.
+
+Two routes. GitHub → Actions → **INTEL Channel Classifier (OSINT-2)** → Run workflow (leave `apply`
+unchecked for the dry run). Or on the Mac — note the filename is `relayshield_intel_classifier.py`,
+not `rs-intel-classifier.py`:
+
+    cd ~/"Side SaaS Hustle"
+    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3
+    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python relayshield_intel_classifier.py --limit 200
+    # read the verdicts, then:
+    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python relayshield_intel_classifier.py --limit 200 --apply
+
+Expect `AccessDenied` on `bedrock:InvokeModel` first time — the grant needs to be on the
+cross-region inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0`, not the bare model ARN.
+
+---
+
 ## Still blocked on the Mac — nothing below can be done from the sandbox
 
 1. **Create `relayshield_ransomware_victims`** — `lambda_recovery_and_deploy.md` §6. Victims are

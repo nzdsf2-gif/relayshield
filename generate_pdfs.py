@@ -408,7 +408,7 @@ def build_msp(output_path):
         'unlimited access to the full IOC corpus, threat actor intelligence, trending threats, and '
         'STIX/TAXII or MISP feed, everything your team needs to enrich alerts, run investigations, and brief clients. '
         '<b>Enterprise TI platforms charge $30K to $300K/year for equivalent coverage. '
-        'RelayShield delivers 5.0M+ queryable indicators at $499/month.</b>',
+        'RelayShield delivers 500K+ distinct queryable indicators, backed by 5.8M+ citations, at $499/month.</b>',
         s['body']))
     story.append(Spacer(1, 6))
 
@@ -429,7 +429,7 @@ def build_msp(output_path):
         _card_para('$499 / month', bold=True, color=WHITE, size=13),
         _card_para('10,000 API calls/month', color=WHITE),
         _card_para(' '),
-        _card_para('✓  5.0M+ IOC corpus query', color=WHITE),
+        _card_para('✓  500K+ indicator corpus query', color=WHITE),
         _card_para('✓  Bulk IOC lookup (100/batch)', color=WHITE),
         _card_para('✓  IOC pivot & lateral discovery', color=WHITE),
         _card_para('✓  Early Warning Intelligence', color=WHITE),
@@ -589,9 +589,10 @@ def build_msp(output_path):
         [Table([
             [_cap_header('IOC Corpus & Bulk Enrichment', CAP_TEAL)],
             [_cap_body([
-                '5.0M+ indicators: domains, IPs, URLs, hashes',
+                '500K+ distinct indicators (5.8M+ citations)',
                 '20 live feeds + 85+ criminal Telegram channels',
                 '3,750+ malware families with ATT&CK attribution',
+                '500K is the corpus; 5.8M is how often we have seen it',
                 'Bulk lookup: 100 IOCs per api call',
                 'IOC pivot: find related C2 infrastructure by malware family',
                 '365-day retention',
@@ -624,7 +625,7 @@ def build_msp(output_path):
             [_cap_header('Vendor & Brand Protection', CAP_RED)],
             [_cap_body([
                 'Third-party risk score: vendor breach + stealer + dark web ($0.10)',
-                'Brand monitor: scan 5.0M+ IOC corpus for brand patterns ($0.35)',
+                'Brand monitor: scan the full IOC corpus for brand patterns ($0.35)',
                 'Domain lookalike / typosquat scanning ($0.30)',
                 'OAuth supply chain: 31 high-risk SaaS apps monitored ($0.30)',
                 'Secret scan: secrets already published across GitHub, npm, PyPI, Docker Hub and Hugging Face ($0.35)',
@@ -730,17 +731,27 @@ def build_msp(output_path):
         s['body']))
     story.append(Spacer(1, 6))
     story.append(md_inline(
-        '**Ansible, for the MSPs who automate their fleet properly:** an Ansible collection is on the '
-        'roadmap, publishing to **Ansible Galaxy**, so identity checks can run as ordinary tasks inside the '
-        'playbooks you already use for onboarding, offboarding and patch cycles. The namespace is reserved; '
-        'the collection is **not yet published**, so treat this as a commitment rather than something to '
-        'demo. Ask us for the timeline if it matters to a specific deal.',
+        '**Ansible, for the MSPs who automate their fleet properly:** the <b>relayshield.security</b> '
+        'collection is published on **Ansible Galaxy** under RelayShield\'s own <b>relayshield</b> '
+        'namespace, so identity checks run as ordinary tasks inside the playbooks you already use for '
+        'onboarding, offboarding and patch cycles:',
+        s['body']))
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(
+        '<font face="Courier" size="8.5">ansible-galaxy collection install relayshield.security</font>',
+        ParagraphStyle('ansiblecmd', fontName='Courier', fontSize=8.5, leading=12,
+                       leftIndent=10, spaceBefore=2, spaceAfter=4,
+                       backColor=colors.HexColor('#F4F7FB'))))
+    story.append(md_inline(
+        'Requires Ansible >= 2.15.0. The collection screens email addresses for breach and infostealer '
+        'exposure, detects lookalike domains, and checks vendor domains for supply chain risk - **before a '
+        'play grants access or deploys**. That ordering is the point: a gate inside the playbook stops a '
+        'provisioning run against an already-compromised identity, rather than reporting it afterwards.',
         s['body']))
     story.append(Spacer(1, 6))
     story.append(md_inline(
-        '**A note on what "live" means in this section.** n8n and Zapier are published and installable '
-        'today. Ansible Galaxy is not yet. We flag the difference because an MSP who discovers it during a '
-        'proof of concept, rather than reading it here, is right to wonder what else was oversold.',
+        '**All three automation surfaces are published and installable today** - n8n, Zapier and Ansible '
+        'Galaxy. Nothing in this section is a roadmap item.',
         s['small']))
 
     story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#D1D9E6'), spaceAfter=2))
@@ -916,7 +927,7 @@ def build_agentcore_onepager(output_path):
 
     story.append(Paragraph('About RelayShield', s['h2']))
     for line in [
-        '**5.0M+ indicators of compromise**, from criminal Telegram marketplaces and 11 authoritative feeds',
+        '**500K+ distinct indicators of compromise**, drawn from **5.8M+ citations** across criminal Telegram marketplaces and 11 authoritative feeds',
         '**85+ monitored criminal channels** - typically 24-72 hours ahead of public breach databases',
         '**3,750+ tracked malware families**',
         '**26 identity endpoints** - breach, infostealer, SIM swap, OAuth and domain exposure, non-human identity, LLM credential exposure',

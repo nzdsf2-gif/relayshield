@@ -186,16 +186,18 @@ RelayShield exposes its full monitoring capability via REST API, enabling MSPs a
 - `POST /v1/metered/bulk-identity-risk`: **NEW** hierarchical org + agent-level risk scoring: up to 10 client domains + up to 5 individual agent identities (emails) per domain in a single call. Returns domain risk score (6 dimensions) plus per-agent breach, infostealer, and active session signals. Purpose-built for AI governance workflows and MSP weekly client sweeps. No competitor offers per-agent identity risk within an organizational hierarchy ($2.00/call)
 - `POST /v1/metered/bulk-ioc`: **NEW** bulk IOC enrichment: submit up to 100 IPs, domains, or hashes in a single call, built for SIEM log enrichment pipelines ($0.50/batch)
 - `POST /v1/metered/ioc-pivot`: **NEW** lateral infrastructure discovery: given one IOC, return all related IOCs sharing the same malware family, surfaces full C2 networks from a single indicator ($0.20)
-- `POST /v1/metered/brand-monitor`: **NEW** brand protection: scan 5.0M+ IOC corpus for brand name patterns, phishing domains, malware C2 infrastructure, and dark web mentions ($0.35)
+- `POST /v1/metered/brand-monitor`: **NEW** brand protection: scan the full IOC corpus for brand name patterns, phishing domains, malware C2 infrastructure, and dark web mentions ($0.35)
 - `POST /v1/metered/mcp-registry-risk`: **NEW** MCP server / agent-tool registry reputation check: typosquat detection, registration-age scoring against RelayShield's IOC corpus ($0.35)
 - `POST /v1/metered/prompt-injection-breach`: **NEW** detects breach exposure sourced from prompt-injection attacks against AI agents, not traditional phishing/malware ($0.35)
-- `GET /v1/intel/telegram`: IOC lookup against live threat intelligence database (5.0M+ indicators; domains, IPs, URLs, hashes)
+- `GET /v1/intel/telegram`: IOC lookup against live threat intelligence database (500K+ distinct indicators; domains, IPs, URLs, hashes)
 - `GET /v1/intel/cve`: CISA KEV lookup by CVE ID or keyword, ransomware-campaign flag included
 - `GET /v1/intel/actor`: full MITRE ATT&CK threat actor profile: TTPs, target sectors, associated IOCs from corpus (TI subscription)
 - `GET /v1/intel/trending`: top IOCs seen across all feeds in the last 24/48 hours, what's actively spreading now (TI subscription)
 
 **Threat Intelligence API, live:**
-MSSPs operating at scale can query RelayShield's live IOC database directly via `GET /v1/intel/telegram`. The feed aggregates **5.0M+ indicators** from **20+ authoritative threat intelligence feeds** and **85+ criminal Telegram channels**: updated continuously. RelayShield tracks **3,750+ malware families** including QakBot, LummaC2, Emotet, TrickBot, RedLine, Vidar, Raccoon, and 3,743+ others. IOCs are enriched with threat actor attribution, confidence scoring, and MITRE ATT&CK technique mapping.
+MSSPs operating at scale can query RelayShield's live IOC database directly via `GET /v1/intel/telegram`. The feed carries **500K+ distinct indicators** drawn from **5.8M+ citations** across **20+ authoritative threat intelligence feeds** and **85+ criminal Telegram channels**: updated continuously. RelayShield tracks **3,750+ malware families** including QakBot, LummaC2, Emotet, TrickBot, RedLine, Vidar, Raccoon, and 3,743+ others. IOCs are enriched with threat actor attribution, confidence scoring, and MITRE ATT&CK technique mapping.
+
+**Why two numbers, and which one matters.** A *citation* is one sighting: this domain, in this channel, on this date. A *distinct indicator* is the deduplicated thing itself. **500K+ is the honest size of the corpus; 5.8M+ is how many times we have seen those things** — which is what powers confidence scoring, first-seen dating, and "how widely is this being shared right now". Both are real, they measure different things, and only one of them is the corpus. Vendors quoting a single very large indicator count are usually quoting citations. Ask any threat intelligence vendor which of the two they mean, including us.
 
 Pass any domain, IP, URL, or SHA256 hash to check for known malware infrastructure, ahead of reputation services that lag by days or weeks. New: submit batches of up to 100 IOCs via `/v1/metered/bulk-ioc` for log enrichment pipelines.
 
@@ -207,7 +209,7 @@ Pass any domain, IP, URL, or SHA256 hash to check for known malware infrastructu
 
 **Third-Party Risk Score:** `POST /v1/metered/supply-chain` delivers a composite vendor risk score across breach exposure, infostealer density, and dark web presence for up to 10 vendor domains per call ($0.10). Equivalent to Recorded Future's vendor risk module at developer-accessible pricing.
 
-**Price-to-performance:** Enterprise threat intelligence platforms (Recorded Future, ThreatConnect) start at $30K to $300K/year. RelayShield delivers 5.0M+ queryable indicators at **$499/month**: the same enrichment data your clients' enterprise competitors pay $5K+/month to access.
+**Price-to-performance:** Enterprise threat intelligence platforms (Recorded Future, ThreatConnect) start at $30K to $300K/year. RelayShield delivers 500K+ distinct queryable indicators, backed by 5.8M+ citations, at **$499/month**: the same class of enrichment data your clients' enterprise competitors pay $5K+/month to access.
 
 IOC data is retained for 365 days.
 
@@ -235,9 +237,15 @@ Each bundle is licensed independently, with no dependency on any other bundle or
 
 **Zapier, for the no-code half of your client base:** RelayShield has passed Zapier's review process and is published in the **Zapier App Directory**, which connects the same identity checks to 8,000+ apps with no code at all. For an MSP, the practical shape is a client-facing workflow the client can own: a new-hire row in a Google Sheet or an HR tool triggers a breach and infostealer check; a hit posts to a Slack channel and opens a ticket in the PSA you already run. Nothing to host, nothing to maintain, and it survives the client changing their HR stack.
 
-**Ansible, for the MSPs who automate their fleet properly:** an Ansible collection is on the roadmap, publishing to **Ansible Galaxy**, so identity checks can run as ordinary tasks inside the playbooks you already use for onboarding, offboarding and patch cycles. The namespace is reserved; the collection is not yet published, so treat this as a commitment rather than something to demo. Ask us for the timeline if it matters to a specific deal.
+**Ansible, for the MSPs who automate their fleet properly:** the **`relayshield.security`** collection is published on **Ansible Galaxy** under RelayShield's own `relayshield` namespace, so identity checks run as ordinary tasks inside the playbooks you already use for onboarding, offboarding and patch cycles:
 
-**A note on what "live" means in this section.** n8n and Zapier are published and installable today. Ansible Galaxy is not yet. We flag the difference because an MSP who discovers it during a proof of concept, rather than reading it here, is right to wonder what else was oversold.
+```
+ansible-galaxy collection install relayshield.security
+```
+
+Requires Ansible >= 2.15.0. The collection screens email addresses for breach and infostealer exposure, detects lookalike domains, and checks vendor domains for supply chain risk — **before a play grants access or deploys**. That ordering is the point: a gate inside the playbook stops a provisioning run against an already-compromised identity, rather than reporting it afterwards.
+
+**All three automation surfaces are published and installable today** — n8n, Zapier and Ansible Galaxy. Nothing in this section is a roadmap item.
 
 ---
 

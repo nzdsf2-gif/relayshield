@@ -15,6 +15,7 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
   POST /v1/domain                   — Typosquat/lookalike domain scan (DNS + CT + GSB)
   POST /v1/intel/telegram           — Threat Intelligence API: IOC lookup against live Telegram criminal channel pipeline (intel_access flag required)
+  POST /v1/intel/ransomware         — Ransomware leak-site victim names, unverified leads (intel_access flag required)
   POST /v1/metered/supply-chain     — Vendor/supply chain risk: breach + infostealer exposure per domain (up to 10 domains)
   POST /v1/metered/session-risk     — INTEL-5 active session hijack detection from stealer log corpus
   GET  /v1/result/{analysis_id}     — Poll VT scan result
@@ -311,6 +312,11 @@ STOLEN_CARDS_TABLE      = "relayshield_stolen_cards"
 ASSET_WATCHLIST_TABLE   = "relayshield_asset_watchlist"
 ACTOR_WATCHLIST_TABLE   = "relayshield_actor_watchlist"
 EXPLOIT_CHATTER_TABLE   = "relayshield_exploit_chatter"
+# Leak-site victim names, written by relayshield_intel_monitor.py's
+# _store_ransomware_victims(). DELIBERATELY not in relayshield_intel_iocs: a
+# victim org is not an indicator of compromise, and mixing the two would let a
+# breached company's own domain be served as "dangerous".
+RANSOM_VICTIMS_TABLE    = "relayshield_ransomware_victims"
 SHARED_REPORTS_TABLE    = "relayshield_shared_reports"
 FROM_EMAIL              = "noreply@relayshield.net"
 
@@ -8791,6 +8797,145 @@ def handle_intel_trending(params: dict, api_key_record: dict | None = None) -> d
 
 
 # ---------------------------------------------------------------------------
+# Ransomware leak-site victims  GET/POST /v1/intel/ransomware
+# Organisations named on ransomware gang leak sites, as observed by the
+# Telegram collection pipeline. TI subscription required.
+#
+# READ THE CONFIDENCE FIELD BEFORE BUILDING ON THIS. Extraction is a regex over
+# leak-site and gang-channel posts (_RE_RANSOM_VICTIM in
+# relayshield_intel_monitor.py), which takes capitalised words following
+# "hacked"/"leaked"/"victim". That is a lead list with real noise in it, never a
+# confirmed breach, and every row carries confidence="unverified" to say so. The
+# response repeats it at the top level so a caller cannot consume the list
+# without seeing it.
+#
+# `victim` filters to one organisation using the same normalised match keys the
+# supplier-breach alerting uses (case-folded, punctuation stripped, corporate
+# suffix optional), so "Acme Corp." finds rows stored as "Acme" and "ACME CORP".
+# ---------------------------------------------------------------------------
+
+_RANSOM_CORP_SUFFIXES = ("incorporated", "inc", "llc", "ltd", "limited", "corp",
+                         "corporation", "group", "holdings", "co", "company",
+                         "plc", "gmbh", "sa", "ag")
+
+
+def _ransom_victim_keys(raw: str) -> set:
+    """Match keys for a victim name.
+
+    Mirrors _victim_keys() in relayshield_intel_monitor.py, which is what wrote
+    the `match_keys` attribute this compares against. The two must agree: if
+    they drift, a lookup silently returns nothing rather than erroring. Same
+    floor of 3 (so IBM/SAP/AWS are searchable) and same exclusion of bare
+    corporate suffixes.
+    """
+    base = re.sub(r"[^a-z0-9]+", "", (raw or "").lower())
+    if not base:
+        return set()
+    keys = {base}
+    for suf in _RANSOM_CORP_SUFFIXES:
+        if base.endswith(suf) and len(base) > len(suf) + 2:
+            keys.add(base[: -len(suf)])
+    return {k for k in keys if len(k) >= 3 and k not in _RANSOM_CORP_SUFFIXES}
+
+
+def handle_intel_ransomware(params: dict, api_key_record: dict | None = None) -> dict:
+    if not api_key_record or not api_key_record.get("intel_access"):
+        return {
+            "statusCode": 403, "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"ok": False, "error": "Threat Intelligence subscription required."}),
+        }
+
+    days   = max(1, min(int(params.get("days", 30) or 30), 90))
+    limit  = max(1, min(int(params.get("limit", 100) or 100), 500))
+    victim = (params.get("victim") or "").strip()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    table = dynamodb.Table(RANSOM_VICTIMS_TABLE)
+    flt   = boto3.dynamodb.conditions.Attr("seen_ts").gte(cutoff)
+    if victim:
+        keys = _ransom_victim_keys(victim)
+        if not keys:
+            return _err("victim must contain at least 3 alphanumeric characters")
+        key_flt = None
+        for k in keys:
+            cond    = boto3.dynamodb.conditions.Attr("match_keys").contains(k)
+            key_flt = cond if key_flt is None else (key_flt | cond)
+        flt = flt & key_flt
+
+    scan_kw = {
+        "FilterExpression": flt,
+        "ProjectionExpression": "display_name, victim_name, seen_ts, channel, category, confidence",
+    }
+    items: list = []
+    try:
+        resp = table.scan(**scan_kw)
+        items.extend(resp.get("Items", []))
+        # The table did not exist until 2026-08-21 and is TTL'd at ALERT_TTL_DAYS,
+        # so it stays small; the 5,000 ceiling is a runaway guard, not a paging
+        # strategy. If it is ever hit, the window is too wide for a scan and this
+        # needs a GSI on seen_ts.
+        while "LastEvaluatedKey" in resp and len(items) < 5000:
+            resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"], **scan_kw)
+            items.extend(resp.get("Items", []))
+    except Exception as exc:
+        # A missing table is the expected failure before the create-table step in
+        # lambda_recovery_and_deploy.md §6 has been run. Say which one it is
+        # rather than returning a bare scan error.
+        if "ResourceNotFound" in str(type(exc).__name__) or "ResourceNotFoundException" in str(exc):
+            return _err("Ransomware victim collection is not yet available.", 503)
+        return _err(f"Victim scan failed: {exc}")
+
+    items.sort(key=lambda i: str(i.get("seen_ts", "")), reverse=True)
+
+    # One row per organisation: the same victim named on five days is one victim
+    # with a five-day sighting span, not five victims. Counting rows would let a
+    # chatty gang channel inflate the figure.
+    by_org: dict = {}
+    for it in items:
+        name = str(it.get("victim_name") or it.get("display_name") or "").lower()
+        if not name:
+            continue
+        rec = by_org.get(name)
+        if rec is None:
+            by_org[name] = {
+                "victim":      it.get("display_name") or name,
+                "first_seen":  str(it.get("seen_ts", "")),
+                "last_seen":   str(it.get("seen_ts", "")),
+                "sightings":   1,
+                "sources":     [s for s in [it.get("channel")] if s],
+                "category":    it.get("category", ""),
+                "confidence":  it.get("confidence", "unverified"),
+            }
+        else:
+            rec["sightings"] += 1
+            ts = str(it.get("seen_ts", ""))
+            if ts and ts < rec["first_seen"]:
+                rec["first_seen"] = ts
+            if ts and ts > rec["last_seen"]:
+                rec["last_seen"] = ts
+            ch = it.get("channel")
+            if ch and ch not in rec["sources"]:
+                rec["sources"].append(ch)
+
+    victims = sorted(by_org.values(), key=lambda v: v["last_seen"], reverse=True)[:limit]
+
+    return _ok({
+        "window_days":    days,
+        "query":          victim,
+        "matched":        bool(victims) if victim else None,
+        "total_victims":  len(by_org),
+        "total_sightings": len(items),
+        "victims":        victims,
+        "confidence":     "unverified",
+        "disclaimer":     ("Names are extracted by pattern match from ransomware leak sites and gang "
+                           "channels. They are unconfirmed leads, not verified breaches, and this list "
+                           "will contain false positives. Confirm independently before acting on, "
+                           "publishing, or notifying anyone about an entry."),
+        "generated_at":   datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
 # RF Feature 2 — Brand monitor  POST /v1/metered/brand-monitor
 # Scans IOC domain corpus and Telegram channel IOCs for brand name patterns.
 # Surfaces typosquat domains, phishing infrastructure, and dark web mentions.
@@ -10442,6 +10587,7 @@ ROUTES = {
     "/v1/intel/cve":        handle_intel_cve,         # CISA KEV lookup by CVE ID or keyword
     "/v1/intel/actor":      handle_intel_actor,       # TC: actor profile — TI subscription
     "/v1/intel/trending":   handle_intel_trending,    # RF: trending IOCs last 24hrs — TI subscription
+    "/v1/intel/ransomware": handle_intel_ransomware,  # Leak-site victim names — TI subscription
     "/v1/account/info":     handle_account_info,
     "/v1/approval-security":    handle_approval_security,
     "/v1/dapp-security":        handle_dapp_security,
@@ -11151,7 +11297,8 @@ def lambda_handler(event: dict, context) -> dict:
 
     params = _body(event)
     try:
-        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending", "/v1/account/info"):
+        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending",
+                    "/v1/intel/ransomware", "/v1/account/info"):
             headers    = event.get("headers") or {}
             api_key    = _header(headers, "X-API-Key") or _header(headers, "X-RS-API-KEY")
             key_record = _verify_rs_api_key(api_key) if api_key else None

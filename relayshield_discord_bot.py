@@ -112,6 +112,24 @@ _URL_RE    = re.compile(r"^[a-z0-9.-]+\.[a-z]{2,}(/.*)?$", re.I)
 _EVM_RE    = re.compile(r"^0x[a-fA-F0-9]{40}$")
 _SOL_RE    = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 _BTC_RE    = re.compile(r"^(bc1[a-z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$")
+# Ronin is EVM under the hood, but the chain's own explorers, wallets and games
+# still hand users the legacy `ronin:` form. Same 40 hex digits, different
+# prefix -- so `_EVM_RE` rejects it and the bot told a Ronin player their
+# perfectly valid address "did not look like a link or a wallet address".
+_RONIN_RE  = re.compile(r"^ronin:([a-fA-F0-9]{40})$", re.I)
+
+
+def _normalize_address(s: str) -> str:
+    """Rewrite chain-specific address spellings into the form the API takes.
+
+    Only `ronin:` today. The API screens Ronin as a generic EVM address, so the
+    0x form is what must go over the wire; doing it here rather than inside
+    check_wallet() means the "Warn the channel" button's custom_id carries the
+    normalised address too, and the re-check on click hits the same API path
+    the first check did.
+    """
+    m = _RONIN_RE.match(s.strip())
+    return "0x" + m.group(1) if m else s
 
 
 def _looks_like_address(s: str) -> bool:
@@ -541,6 +559,10 @@ def _run_deferred(body: dict) -> None:
     # was the wrong answer in the one server type where the bot matters most: in
     # a crypto Discord, "go and use a different product on a different platform"
     # is where the user leaves and does not come back.
+    # Normalise before the shape test, not after: `ronin:<40 hex>` is a wallet
+    # address and must not fall through to the URL parser.
+    target = _normalize_address(target)
+
     if _looks_like_address(target):
         rendered = render_wallet(target, check_wallet(target))
         _followup_patch(token, {
@@ -553,8 +575,8 @@ def _run_deferred(body: dict) -> None:
     if not url:
         _followup_patch(token, {
             "content": ("That did not look like a link or a wallet address.\n\n"
-                        "Paste a URL, for example `https://example.com`, or an EVM, Solana or "
-                        "Bitcoin address.")})
+                        "Paste a URL, for example `https://example.com`, or an EVM (including "
+                        "Ronin), Solana or Bitcoin address.")})
         return
 
     res = check_url(url)

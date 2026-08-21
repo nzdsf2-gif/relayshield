@@ -486,6 +486,52 @@ function renderTrending(data) {
     </div>`;
 }
 
+function renderRansomware(data) {
+  if (data.error) return `<div class="error">Error: ${data.error}</div>`;
+  const victims = data.victims || [];
+  const days = data.window_days || 30;
+
+  // The disclaimer is rendered BEFORE the list and is not collapsible. These
+  // names are regex-extracted from leak-site posts and are unconfirmed leads;
+  // a prospect who screenshots this panel must screenshot the caveat with it.
+  const caveat = `<div style="background:#7f1d1d20;border:1px solid #7f1d1d;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#fca5a5">
+    <strong>Unverified leads.</strong> Names are pattern-matched from ransomware leak sites and gang
+    channels as they are posted. They are not confirmed breaches and this list will contain false
+    positives. Confirm independently before acting on an entry.</div>`;
+
+  if (!victims.length) {
+    const none = data.query
+      ? `<div class="no-result">No leak-site sighting for “${data.query}” in the last ${days} days. That is an absence of evidence in this corpus, not evidence the organisation is unaffected.</div>`
+      : `<div class="no-result">No victims recorded in the last ${days} days.</div>`;
+    return caveat + none;
+  }
+
+  const stats = `<div class="corpus-stats">
+    <div class="stat-card"><div class="stat-num">${data.total_victims || victims.length}</div><div class="stat-label">Organisations named</div></div>
+    <div class="stat-card"><div class="stat-num">${data.total_sightings || 0}</div><div class="stat-label">Sightings</div></div>
+    <div class="stat-card"><div class="stat-num">${days}d</div><div class="stat-label">Window</div></div>
+  </div>`;
+
+  const rows = victims.map(v => {
+    const first = String(v.first_seen || "").slice(0, 10);
+    const last  = String(v.last_seen  || "").slice(0, 10);
+    const span  = first && last && first !== last ? `${first} → ${last}` : (last || first || "—");
+    const srcs  = (v.sources || []).slice(0, 3).join(", ") || "—";
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-bottom:1px solid #1e3a5f">
+      <div style="min-width:0">
+        <div style="color:#e2e8f0;font-weight:600;font-size:14px;word-break:break-word">${v.victim || "—"}</div>
+        <div style="color:#64748b;font-size:12px;margin-top:3px">Seen in ${srcs}</div>
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <div style="color:#94a3b8;font-size:12px">${span}</div>
+        <div style="color:#64748b;font-size:12px;margin-top:3px">${v.sightings || 1} sighting${(v.sightings || 1) === 1 ? "" : "s"} · unverified</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return caveat + stats + `<div>${rows}</div>`;
+}
+
 function renderSupplyChain(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   const results = data.results || [];
@@ -633,6 +679,7 @@ footer a{color:#00B5A5;text-decoration:none}
     <div class="tab active" onclick="switchTab('identity',this)">Identity Risk</div>
     <div class="tab" onclick="switchTab('actor',this)">Threat Actor</div>
     <div class="tab" onclick="switchTab('trending',this)">Trending Threats</div>
+    <div class="tab" onclick="switchTab('ransomware',this)">Ransomware Victims</div>
     <div class="tab" onclick="switchTab('supply',this)">Agentic Identity Risk</div>
     <div class="tab" onclick="switchTab('nhi',this)">NHI Exposure</div>
     <div class="tab" onclick="switchTab('llmjacking',this)">LLM Credential Exposure</div>
@@ -669,6 +716,20 @@ footer a{color:#00B5A5;text-decoration:none}
       <button onclick="runTrending()">Load Trending</button>
     </div>
     <div id="trending-result"></div>
+  </div>
+
+  <div id="ransomware" class="panel">
+    <p class="panel-desc">Organisations named on ransomware gang leak sites, collected from criminal Telegram channels as the posts go up. Leave the box empty for the full recent window, or enter an organisation to check whether it &mdash; or a supplier you depend on &mdash; has been named. Every row is an <strong>unverified lead</strong>, not a confirmed breach.</p>
+    <div class="input-row">
+      <input type="text" id="ransomware-input" placeholder="Optional: an organisation or supplier name (e.g. Acme Corp)" />
+      <select id="ransomware-days" style="background:#0F1F3D;border:1px solid #1e3a5f;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button onclick="runRansomware()">Search Leak Sites</button>
+    </div>
+    <div id="ransomware-result"></div>
   </div>
 
   <div id="nhi" class="panel">
@@ -864,6 +925,18 @@ async function runTrending() {
   document.getElementById('trending-result').innerHTML = renderTrending(data);
 }
 
+async function runRansomware() {
+  const victim = document.getElementById('ransomware-input').value.trim();
+  const days = document.getElementById('ransomware-days').value;
+  setLoading('ransomware-result');
+  const resp = await fetch('/demo/ransomware', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({victim: victim, days: parseInt(days, 10)})
+  });
+  const data = await resp.json();
+  document.getElementById('ransomware-result').innerHTML = renderRansomware(data);
+}
+
 async function runNHI() {
   const domain = document.getElementById('nhi-input').value.trim();
   if (!domain) return;
@@ -1032,6 +1105,7 @@ ${ipIntelRiskLevel.toString()}
 ${renderIpIntel.toString()}
 ${renderBulkIdentity.toString()}
 ${renderSupplyChain.toString()}
+${renderRansomware.toString()}
 `;
 }
 
@@ -1103,6 +1177,16 @@ export default {
     if (path === "/demo/trending" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/intel/trending", { hours: body.hours || 24 });
+      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (path === "/demo/ransomware" && request.method === "POST") {
+      const body = await request.json();
+      const data = await callAPI(env, "/v1/intel/ransomware", {
+        victim: body.victim || "",
+        days: body.days || 30,
+        limit: 100,
+      });
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 

@@ -186,6 +186,86 @@ crash — collection continues, victims are simply dropped).
 Same key shape and TTL attribute as `relayshield_intel_iocs`, so the exporter and any future tooling
 behave the same way against it.
 
+Confirm it went ACTIVE before moving on:
+
+    AWS_PROFILE=relayshield aws dynamodb describe-table \
+      --table-name relayshield_ransomware_victims \
+      --region us-east-1 \
+      --query "Table.TableStatus"
+
+### 6a. Grant the two IAM permissions — creating the table does NOT grant them
+
+**Both failure modes are silent.** The monitor logs a warning and keeps collecting, so victims are
+dropped with a green run; the API returns an error the demo renders as "temporarily unavailable".
+Neither looks like a permissions problem from the outside, so do both now and verify both.
+
+The role names are not written down anywhere, so read them off the functions rather than guessing:
+
+    AWS_PROFILE=relayshield aws lambda get-function-configuration \
+      --function-name relayshield-intel-monitor --region us-east-1 --query Role --output text
+
+    AWS_PROFILE=relayshield aws lambda get-function-configuration \
+      --function-name relayshield-api --region us-east-1 --query Role --output text
+
+Each prints an ARN ending in `role/<NAME>`. Use that `<NAME>` below.
+
+**Write, for the intel monitor** — policy body in `iam_ransomware_victims_policy.json`:
+
+    AWS_PROFILE=relayshield aws iam put-role-policy \
+      --role-name <INTEL_MONITOR_ROLE_NAME> \
+      --policy-name relayshield-ransomware-victims-write \
+      --policy-document file://iam_ransomware_victims_policy.json
+
+**Read, for the API** — needed by `/v1/intel/ransomware`, which the TI demo's Ransomware Victims tab
+calls. Policy body in `iam_api_read_victims_policy.json`:
+
+    AWS_PROFILE=relayshield aws iam put-role-policy \
+      --role-name <API_ROLE_NAME> \
+      --policy-name relayshield-ransomware-victims-read \
+      --policy-document file://iam_api_read_victims_policy.json
+
+Both policies are scoped to the one table ARN in account `239677749008`. They add nothing else.
+
+### 6b. Verify — do not trust a clean deploy
+
+Prove the write path end to end, rather than waiting for the next scheduled run to maybe work:
+
+    AWS_PROFILE=relayshield aws dynamodb put-item \
+      --table-name relayshield_ransomware_victims \
+      --item '{"victim_name":{"S":"rs-selftest"},"seen_ts":{"S":"2026-08-21T00:00:00+00:00"},"display_name":{"S":"RS Selftest"},"match_keys":{"L":[{"S":"rsselftest"}]},"channel":{"S":"selftest"},"category":{"S":"ransomware"},"confidence":{"S":"unverified"}}' \
+      --region us-east-1
+
+    AWS_PROFILE=relayshield aws dynamodb delete-item \
+      --table-name relayshield_ransomware_victims \
+      --key '{"victim_name":{"S":"rs-selftest"},"seen_ts":{"S":"2026-08-21T00:00:00+00:00"}}' \
+      --region us-east-1
+
+Then, after the next intel run, confirm real rows are landing:
+
+    AWS_PROFILE=relayshield aws dynamodb scan \
+      --table-name relayshield_ransomware_victims \
+      --region us-east-1 --select COUNT
+
+The admin digest's `Ransomware victims named: N (M stored)` line is the other read on this. **N large
+and M zero is the permissions failure**, not a quiet week.
+
+### 6c. The TI demo tab
+
+`/v1/intel/ransomware` and the demo's **Ransomware Victims** tab ship with the repo (API in
+`relayshield_api.py`, tab in `cloudflare_worker_ti_demo.js`). The API deploys through
+`deploy_lambdas.yml`; the Worker does not, and needs:
+
+    npx wrangler deploy --config wrangler.ti-demo.toml
+
+The tab is behind the same `DEMO_TOKEN` gate as every other `/demo/*` route — no new ungated path
+was added. **It shows nothing until the table has data**, so run the steps above first; before then
+it renders the "not yet available" state rather than an empty list, which is the honest answer but
+not a demo.
+
+**The panel leads with an unverified-leads caveat and it must stay there.** Extraction is a regex
+over leak-site posts; the list will contain false positives, and a prospect screenshotting the tab
+must screenshot the caveat with it.
+
 ### Opting a customer into supplier-breach alerts
 
 Alerts are **off unless a customer explicitly lists suppliers**. There is no inference — nothing is

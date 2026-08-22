@@ -75,6 +75,38 @@ account other than 239677749008.
 
 ## Step 3 — Deploy the Cloudflare Worker
 
+### ⚠️ Do NOT deploy from `~/Side SaaS Hustle` right now
+
+That clone is checked out on `claude/ms3-ms4-intel-monitor-61zlpg` mid-merge, so its
+`cloudflare_worker_ti_demo.js` is the **old** copy — no Ransomware Victims tab. Deploying from there
+publishes the previous worker over the top and looks like the change did not work.
+
+### Deploy from a clean temp directory instead — no git, no checkout
+
+    mkdir -p /tmp/rs-ti-demo && cd /tmp/rs-ti-demo
+
+    B=https://raw.githubusercontent.com/nzdsf2-gif/relayshield/claude/daily-todo-summary-7zpsvv
+    curl -sSL -o cloudflare_worker_ti_demo.js "$B/cloudflare_worker_ti_demo.js"
+    curl -sSL -o wrangler.ti-demo.toml       "$B/wrangler.ti-demo.toml"
+
+    # confirm you fetched the right one before publishing
+    grep -c "Ransomware Victims" cloudflare_worker_ti_demo.js    # must print 1
+
+    npx wrangler deploy --config wrangler.ti-demo.toml
+
+`wrangler` resolves `main = "cloudflare_worker_ti_demo.js"` relative to the config, so both files
+sitting in the same temp directory is all it needs. If it asks you to log in it opens a browser;
+approve and it continues.
+
+**Worker secrets survive.** `DEMO_KEY` and `DEMO_TOKEN` are stored on the Worker, not in the code, so
+this deploy leaves them in place and the `?token=rs-demo-2026` link keeps working.
+
+Once the PR is merged and the clone is healthy, the normal one-liner works again:
+
+    cd ~/"Side SaaS Hustle" && npx wrangler deploy --config wrangler.ti-demo.toml
+
+### The old instructions (for reference once the clone is fixed)
+
 **Do this AFTER step 2.** The Ransomware Victims tab renders a "not yet available" state until the
 victim table exists, so deploying first makes the demo look broken.
 

@@ -13,12 +13,27 @@
 #
 #   AWS_PROFILE=relayshield bash tools/setup_pending_tables.sh
 #
+# Or, with no repo checkout at all — it is fully self-contained:
+#   curl -sSL -o /tmp/rs_setup.sh https://raw.githubusercontent.com/nzdsf2-gif/relayshield/claude/daily-todo-summary-7zpsvv/tools/setup_pending_tables.sh
+#   AWS_PROFILE=relayshield bash /tmp/rs_setup.sh
+#
 # Dry run (prints what it would do, changes nothing):
 #   AWS_PROFILE=relayshield DRY_RUN=1 bash tools/setup_pending_tables.sh
 
 set -uo pipefail
 REGION="${AWS_REGION:-us-east-1}"
 DRY="${DRY_RUN:-}"
+ACCT_EXPECTED="239677749008"
+
+# IAM policies are INLINE, not file:// paths into the repo. This script has to
+# work when downloaded on its own with curl, and from any working directory —
+# a wrong-cwd failure is exactly what broke the drift diff on 2026-08-22
+# ("relayshield_api.py: No such file or directory", run from ~).
+policy_doc() {
+  local sid="$1" actions="$2" table="$3"
+  printf '{"Version":"2012-10-17","Statement":[{"Sid":"%s","Effect":"Allow","Action":[%s],"Resource":"arn:aws:dynamodb:%s:%s:table/%s"}]}' \
+    "$sid" "$actions" "$REGION" "$ACCT_EXPECTED" "$table"
+}
 
 run() {
   if [ -n "$DRY" ]; then echo "  [dry-run] $*"; else "$@"; fi
@@ -34,7 +49,7 @@ if [ -z "$ACCOUNT" ] || [ "$ACCOUNT" = "None" ]; then
   exit 1
 fi
 echo "AWS account: $ACCOUNT"
-if [ "$ACCOUNT" != "239677749008" ]; then
+if [ "$ACCOUNT" != "$ACCT_EXPECTED" ]; then
   # This exact mistake cost a session on 2026-08-20: a command run without the
   # profile resolved to 620534471984 and returned ResourceNotFoundException,
   # which looked like a missing Lambda and was not.
@@ -112,23 +127,22 @@ echo "intel-monitor role: ${INTEL_ROLE:-<could not read>}"
 echo "api role          : ${API_ROLE:-<could not read>}"
 echo
 
-if [ -n "$INTEL_ROLE" ] && [ "$INTEL_ROLE" != "None" ]; then
-  run aws iam put-role-policy --role-name "$INTEL_ROLE" \
-    --policy-name relayshield-ransomware-victims-write \
-    --policy-document file://iam_ransomware_victims_policy.json && echo "  granted victims PutItem"
-  run aws iam put-role-policy --role-name "$INTEL_ROLE" \
-    --policy-name relayshield-operator-identities-write \
-    --policy-document file://iam_operator_identities_policy.json && echo "  granted operators UpdateItem"
-fi
+grant() {   # role, policy-name, sid, actions, table
+  [ -n "$1" ] && [ "$1" != "None" ] || { echo "  skip $2 — role unknown"; return 0; }
+  if [ -n "$DRY" ]; then echo "  [dry-run] would attach $2 to $1"; return 0; fi
+  aws iam put-role-policy --role-name "$1" --policy-name "$2" \
+    --policy-document "$(policy_doc "$3" "$4" "$5")" \
+    && echo "  attached $2 to $1" || echo "  FAILED to attach $2"
+}
 
-if [ -n "$API_ROLE" ] && [ "$API_ROLE" != "None" ]; then
-  run aws iam put-role-policy --role-name "$API_ROLE" \
-    --policy-name relayshield-ransomware-victims-read \
-    --policy-document file://iam_api_read_victims_policy.json && echo "  granted victims Scan/GetItem"
-  run aws iam put-role-policy --role-name "$API_ROLE" \
-    --policy-name relayshield-scan-submissions-write \
-    --policy-document file://iam_scan_submissions_policy.json && echo "  granted submissions UpdateItem"
-fi
+grant "$INTEL_ROLE" relayshield-ransomware-victims-write \
+      IntelMonitorWriteVictims '"dynamodb:PutItem"' relayshield_ransomware_victims
+grant "$INTEL_ROLE" relayshield-operator-identities-write \
+      IntelMonitorWriteOperators '"dynamodb:UpdateItem"' relayshield_operator_identities
+grant "$API_ROLE" relayshield-ransomware-victims-read \
+      ApiReadVictims '"dynamodb:Scan","dynamodb:GetItem"' relayshield_ransomware_victims
+grant "$API_ROLE" relayshield-scan-submissions-write \
+      ApiWriteScanSubmissions '"dynamodb:UpdateItem","dynamodb:Scan"' relayshield_scan_submissions
 
 echo
 echo "=============================================================="

@@ -55,9 +55,17 @@ live handler** into a downloadable `drift-diffs` artifact automatically.
 
 ## Step 2 — Create the missing tables
 
-    cd ~/"Side SaaS Hustle"
-    AWS_PROFILE=relayshield DRY_RUN=1 bash tools/setup_pending_tables.sh   # look first
-    AWS_PROFILE=relayshield bash tools/setup_pending_tables.sh
+**The Mac clone is currently stuck** (unfinished merge — see `MAC_CLONE_RESCUE.md`), so use the
+standalone copy. The script is self-contained and needs no checkout:
+
+    curl -sSL -o /tmp/rs_setup.sh \
+      https://raw.githubusercontent.com/nzdsf2-gif/relayshield/claude/daily-todo-summary-7zpsvv/tools/setup_pending_tables.sh
+
+    AWS_PROFILE=relayshield DRY_RUN=1 bash /tmp/rs_setup.sh    # look first
+    AWS_PROFILE=relayshield bash /tmp/rs_setup.sh
+
+Once the clone is healthy again, `bash tools/setup_pending_tables.sh` from the repo root does the
+same thing.
 
 Creates all three outstanding tables, enables TTL, seeds `@bjorkanesiaaaa`, finds both Lambda role
 names and attaches the IAM policies, then prints a verification table. It refuses to run against any

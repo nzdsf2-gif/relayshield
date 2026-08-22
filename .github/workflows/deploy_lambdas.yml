@@ -16,6 +16,7 @@ on:
       # actually trigger the workflow.
       - 'relayshield_openapi_spec.py'
       - 'relayshield_siem_connector.py'
+      - 'relayshield_first_seen.py'
       - 'relayshield_digest_sender.py'
       - 'relayshield_day3_sender.py'
       - 'relayshield_oauth_watchlist_monitor.py'

@@ -8409,6 +8409,19 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     result.setdefault("headers", {})
     result["headers"]["PAYMENT-RESPONSE"] = encoded_settlement
     result["headers"]["Access-Control-Expose-Headers"] = "PAYMENT-RESPONSE"
+
+    # First-seen collection for the PAYG rail. This needs its OWN call because
+    # PAYG requests return from here and never reach the dispatcher's hook —
+    # listing the payg paths there was a mapping that could never fire, the
+    # same shape as the `cves` type_map defect. Found by tracing the routing
+    # rather than by anything failing, which is the point: it would have
+    # under-collected silently.
+    #
+    # PAYG traffic is the agent and automation rail, so these are exactly the
+    # submissions worth having.
+    if path in _FIRST_SEEN_PATHS:
+        _log_first_seen(path, params, result)
+
     return result
 
 
@@ -10699,11 +10712,15 @@ def handle_wallet_inbound(params: dict) -> dict:
 # into this function's deploy zip by the CI import-walker, but a missing module
 # must degrade to "no first-seen data" rather than 500ing every scan.
 
+# Two call sites, because these routes return from two different places:
+# subscription paths fall through to the dispatcher's `return handler(params)`,
+# PAYG paths return early from handle_payg_request(). Both are hooked; adding a
+# scan route to only one of them collects half the traffic and says nothing.
 _FIRST_SEEN_PATHS = {
-    "/v1/scan-url":    "url",
-    "/v1/wallet-risk": "wallet",
-    "/v1/payg/scan-url":    "url",
-    "/v1/payg/wallet-risk": "wallet",
+    "/v1/scan-url":         "url",     # dispatcher
+    "/v1/wallet-risk":      "wallet",  # dispatcher
+    "/v1/payg/scan-url":    "url",     # handle_payg_request
+    "/v1/payg/wallet-risk": "wallet",  # handle_payg_request
 }
 
 
@@ -10717,7 +10734,16 @@ def _log_first_seen(path: str, params: dict, result: dict) -> None:
         if not kind or not value:
             return
 
-        data = json.loads(result.get("body") or "{}").get("data", {})
+        # Require a real body. `or "{}"` would turn a 200-with-no-body into a
+        # recorded "unknown" verdict, and this table's whole value rests on
+        # first_verdict being what we actually said. A phantom unknown that
+        # later "turns" would manufacture a we-saw-it-first claim out of
+        # nothing — the one failure that would make the whole corpus
+        # unciteable.
+        raw = result.get("body")
+        if not raw:
+            return
+        data = json.loads(raw).get("data", {})
         if kind == "url":
             level   = str(data.get("level", "")).lower()
             verdict = "flagged" if level in ("malicious", "suspicious", "flagged") else "unknown"

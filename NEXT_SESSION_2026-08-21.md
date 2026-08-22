@@ -680,6 +680,48 @@ own threat-type column says combo lists, which are a distinct product from raw s
 
 ---
 
+## Round 8 — pre-merge review of my own changes
+
+Nothing had moved (`main` still `7009f37`, no manual drift run), so rather than wait I reviewed the
+code that is about to merge and deploy to `relayshield-api`. **Two real defects in my own work,
+both of the silent kind.**
+
+### 1. PAYG scans were never being collected
+
+`_FIRST_SEEN_PATHS` listed `/v1/payg/scan-url` and `/v1/payg/wallet-risk`, but the PAYG branch
+returns from `handle_payg_request()` at ~line 11395 and **never reaches the dispatcher hook** at
+~11433. Those two entries could not fire.
+
+**Exactly the `cves` type_map shape** — a mapping that stores nothing, no error, no log line. Found
+by tracing the routing, not by anything failing, which is the point: it would have quietly collected
+half the traffic. **PAYG is the agent and automation rail**, so those are among the submissions most
+worth having.
+
+Fixed with a second call site inside `handle_payg_request`, and the map now records which hook owns
+each route.
+
+### 2. A 200 with no body recorded a phantom "unknown"
+
+`json.loads(result.get("body") or "{}")` turned a bodyless 200 into a recorded `unknown` verdict.
+That is worse than losing the row: **a phantom unknown that later "turns" manufactures a
+we-saw-it-first claim out of nothing**, and the entire value of this table is that `first_verdict` is
+what we actually said. One unciteable row makes the whole corpus unciteable. Now requires a real
+body.
+
+### 3. `relayshield_first_seen.py` would not have triggered a deploy
+
+The CI import-walker does resolve it into the API's zip (verified — the walker's regex matches
+indented imports). But it was **not in `deploy_lambdas.yml`'s `paths:` filter**, so a future change
+to that file alone would not have started the workflow at all. Added, next to the other shared
+modules that are listed for exactly this reason.
+
+**Verified: 11 cases** across both hooks — verdict mapping for URL and wallet on both rails, plus
+non-200, non-JSON body, missing body, `None` result, empty value and unmapped path. Zero failures,
+nothing raises. The guard is doing its job: during testing it silently swallowed a bad stub
+signature, which is precisely the behaviour a hook on a user-facing request path needs.
+
+---
+
 ## Still blocked on the Mac — nothing below can be done from the sandbox
 
 1. **Create `relayshield_ransomware_victims`** — `lambda_recovery_and_deploy.md` §6. Victims are

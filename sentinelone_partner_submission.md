@@ -1,5 +1,31 @@
 # SentinelOne partner submission — RelayShield business description
 
+> ## 🔴 REJECTED 2026-08-21 — do not resubmit as-is
+>
+> The PartnerOne application was declined **in under five minutes**: "does not currently align with
+> our program requirements and focus areas." A five-minute turnaround on a submission of this length
+> is an automated screen, not a review. Nothing in the copy below was read.
+>
+> **What that means practically.** The rejection carries no signal about the positioning, the use
+> cases, or the technical fit — it is almost certainly a filter on company size, revenue, existing
+> customer count, or an unmet program prerequisite. Rewriting the copy would be solving a problem
+> that has not been shown to exist.
+>
+> **Do not appeal on content.** `partnerops@sentinelone.com` is offered for "if you believe we may
+> have missed key information about your business", but a one-paragraph reply to an automated
+> screen is unlikely to reopen it, and it costs the option of applying again later from a stronger
+> position. The realistic re-entry route is **a joint customer pulling for the integration** — the
+> same gate the XSOAR Tech Alliance thread sits behind. That is a sales outcome, not a submission
+> problem.
+>
+> **This file is not wasted.** The 50/100/250-word descriptions, the form fields, the four use
+> cases, the technical spec and the data-handling section are vendor-neutral. Reuse them for
+> ThreatLocker, Huntress, Blackpoint Cyber, WatchGuard and LimaCharlie (see
+> `xcitium_outreach.md` Part 2) by swapping the product names in the "why this integration" block.
+> Rapid7 InsightConnect (PR #4024) remains the live proof that the open-contribution route works
+> where a partner-program gate does not.
+
+
 *Drafted 2026-08-21. Copy blocks are ready to paste; read the guardrails first.*
 
 Partner and marketplace forms ask the same question at three different lengths and then ask for

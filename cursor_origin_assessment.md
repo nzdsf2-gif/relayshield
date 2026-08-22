@@ -48,7 +48,69 @@ perfectly good test subject.
 
 ---
 
-## Question 2 — RelayShield angle on secrets in Origin: **yes, and it is time-sensitive**
+## Question 2 (RESTATED 2026-08-21) — can Origin become a source in `/v1/metered/secret-scan`?
+
+The question was whether Origin can be added to the existing endpoint that searches *their* repos
+for exposed secrets, the way GitHub, npm, PyPI, Docker Hub, Hugging Face and Postman already are.
+My first pass answered a different question — outreach and CI — so this section answers the one
+actually asked.
+
+### Short answer: not as a seventh public source. There is nothing public to search.
+
+**Origin's August 2026 beta has no public repositories.** Reporting is explicit that public repos
+are not supported in the current beta, which is why it is a poor fit for open source. That is the
+whole gate.
+
+`/v1/metered/secret-scan` is built on one premise, visible in every one of its six sources: **search
+a public surface for artifacts belonging to a domain, unauthenticated.** `_github_secret_scan`
+searches public code; `_pypi_secret_scan` streams the public index; `_postman_secret_scan` hits
+public search. Origin has no such surface, so the existing `(label, fn)` dispatch has nothing to
+call. Adding it would produce a source that always returns zero findings and a `coverage` entry
+saying it ran — **a false all-clear, which the endpoint's own code comments name as the worst
+possible failure for this product.**
+
+### The shape that does work: an authorised scan, which is a different product
+
+Origin does have a REST API at `https://api.cursor.com/v1/origin`, with installation tokens and a
+`GET /installation/repos` call to enumerate the repositories an installation can see. That is a
+GitHub-App-style authorisation model: the customer installs and grants, then we read their repos.
+
+That is genuinely buildable, and arguably more valuable — but it is **not the same product**:
+
+| | `/v1/metered/secret-scan` today | An Origin authorised scan |
+|---|---|---|
+| Question answered | "What is leaking about us in public?" | "What is in our own repos?" |
+| Access | None. Unauthenticated OSINT | Customer grants an installation token |
+| Consent | Not needed — it is all public | Required, per customer |
+| Competitor | GitGuardian public monitoring | GitHub secret scanning, TruffleHog |
+
+**Recommendation: build it as a new endpoint, not a seventh source.** Something like
+`POST /v1/metered/repo-scan`, taking a customer-supplied installation token and scanning what it can
+reach, reusing `_findings_from_text()` and the existing 31 detectors — which is where the real value
+already sits. Folding an authorised, consent-bearing scan into an endpoint whose whole contract is
+"public exposure" would muddle both, and the `coverage` field could no longer be read honestly.
+
+### ⚠️ I could not verify the API contract, and did not guess it
+
+**`cursor.com` is blocked by this sandbox's egress proxy** (403 on CONNECT), so the official Origin
+API documentation could not be read. Everything above about `api.cursor.com/v1/origin`,
+installation tokens and `GET /installation/repos` comes from **secondary reporting, not the docs.**
+
+That is not good enough to write HTTP calls against, and writing them anyway is the same mistake as
+the Ansible Galaxy claim. **Before any implementation, read `cursor.com/docs/api/origin` from an
+unblocked machine and confirm:** the auth header format, how an installation token is obtained and
+refreshed, the exact repo-enumeration path and its pagination, whether file contents or a tree can
+be read, and whether any code-search primitive exists (its absence would mean fetching and scanning
+blobs, which changes the cost model completely).
+
+### Still worth doing regardless — `rsscan` in an Origin pipeline
+
+Independent of the API question, and unblocked today: `rsscan` already runs anywhere a container
+runs, with Bitbucket Pipelines, Tekton, Drone, Woodpecker and Harness documented. Getting it into an
+Origin pipeline and writing that up is low effort and lands while nobody else covers Origin. Detail
+below.
+
+## The outreach and tooling angle (original question 2)
 
 This is the interesting half.
 

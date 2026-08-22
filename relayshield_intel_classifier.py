@@ -50,8 +50,18 @@ BEDROCK_MODEL_ID = os.environ.get(
 )
 BEDROCK_REGION = "us-east-1"
 
+# MUST match INTEL_CATEGORIES in relayshield_intel_monitor.py. The monitor
+# renders a per-category label and severity on every user alert, so a category
+# this classifier can emit but the monitor does not know degrades that alert
+# silently -- no error, no log line. test_intel_category_drift.py enforces the
+# match; do not edit one side without the other.
+#
+# "card_shop" added 2026-08-21: the monitor has always had a label and a
+# severity for it, but nothing anywhere could ever produce one, so it was a
+# dead branch. Stolen-card shops are a real and distinct channel type.
 VALID_CATEGORIES = {
-    "infostealer", "credential_dump", "ransomware", "crypto", "phaas", "sim_swap", "general",
+    "infostealer", "credential_dump", "ransomware", "crypto",
+    "phaas", "sim_swap", "card_shop", "general",
 }
 
 _dynamodb = boto3.resource("dynamodb", region_name="us-east-1")

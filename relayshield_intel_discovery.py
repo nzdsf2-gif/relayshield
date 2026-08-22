@@ -92,6 +92,33 @@ SEARCH_KEYWORDS = [
     ("play ransomware",     "ransomware"),
     ("cl0p",                "ransomware"),
 
+    # --- OSINT sweep 001, 2026-08-21 (intel_channel_recommendations.md) ---
+    # Platform and operation BRAND names, not generic phrases. Reporting is
+    # explicit that these operations survive takedowns by rotating channel
+    # names and running mirrors, so a hand-curated handle list decays within
+    # weeks. A brand name keeps finding whatever the current channel is called,
+    # which is the whole reason the sweep outputs keywords rather than handles.
+    #
+    # Weighted deliberately toward phaas / sim_swap / card_shop: the seeded
+    # channel list carries ZERO of all three, so these create coverage that does
+    # not exist rather than deepening infostealer, which is already the
+    # strongest category.
+    ("omega cloud",         "infostealer"),
+    ("moon cloud",          "infostealer"),
+    ("bidencash",           "card_shop"),
+    ("darcula",             "phaas"),
+    ("magic cat",           "phaas"),
+    ("otp bot",             "sim_swap"),
+    ("sim swap service",    "sim_swap"),
+
+    # Card-shop keywords added 2026-08-21. The monitor has carried a label and a
+    # severity for "card_shop" since it was written, but no discovery path and
+    # no classifier vocabulary could ever produce one, so the category existed
+    # only as a dead branch in the alert formatter.
+    ("cc shop",             "card_shop"),
+    ("dumps and pins",      "card_shop"),
+    ("fullz",               "card_shop"),
+
     ("credential dump",     "credential_dump"),
     ("data breach",         "credential_dump"),
     ("leaked database",     "credential_dump"),

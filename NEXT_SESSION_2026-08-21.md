@@ -335,6 +335,92 @@ cross-region inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0`, no
 
 ---
 
+## Round 4
+
+### SentinelOne — rejected, and the rejection carries no content signal
+
+Declined in **under five minutes**. A turnaround that fast on a submission that long is an automated
+screen, so nothing in the copy was read. **Do not rewrite the positioning** — the filter is almost
+certainly company size, revenue or an unmet program prerequisite, and the realistic re-entry route is
+a joint customer pulling for the integration, the same gate the XSOAR thread sits behind. Recorded
+at the top of `sentinelone_partner_submission.md`; the collateral itself is vendor-neutral and gets
+reused for the five companies in `xcitium_outreach.md` Part 2.
+
+### Intel channel classifier drift — found and fixed
+
+**The categories had drifted across four files, and it was about to get much worse.**
+
+`CATEGORY_LABELS` and `SEVERITY` in the monitor listed five categories. Discovery could already
+assign seven; the classifier could assign seven. **`ransomware`, `crypto` and `phaas` appeared in
+neither dict**, so `SEVERITY.get(category, "⚠️")` fell through to a bare glyph with no severity word
+and `CATEGORY_LABELS.get(category, category)` printed the raw key. **A user alert from a ransomware
+channel rendered as less severe than one from a card shop.** Nothing errored, nothing logged.
+
+And `card_shop` was the mirror image: a label and a severity that had existed since the file was
+written, which nothing anywhere could produce. A dead branch.
+
+**The timing is the point.** The OSINT-2 classifier is about to be run over the 75-channel backlog
+and assigns categories from its own list. Every channel it labelled `ransomware`, `crypto` or
+`phaas` would have produced degraded alerts from that moment on. Running the classifier first would
+have scaled the bug.
+
+Fixed:
+* **`INTEL_CATEGORIES` in `relayshield_intel_monitor.py` is now the single source of truth** —
+  eight categories, each a `(label, severity)` pair; `CATEGORY_LABELS` and `SEVERITY` derive from it.
+* `card_shop` added to the classifier's `VALID_CATEGORIES` and given three discovery keywords, so it
+  can actually be produced.
+* **`test_intel_category_drift.py`** — parses (never imports, so it needs no boto3 and no
+  credentials) all the vocabularies and fails when any two disagree. **It also covers the
+  `extract_iocs()` / `type_map` divergence**, which is the queued item that has now broken silently
+  twice. Verified against three injected faults; wired into `security_audit.yml`, which runs on
+  every push and PR.
+
+That is the third instance of this exact shape in this pipeline. It should be the last.
+
+### Channel recommendations are now a standing OSINT sweep, not your guesswork
+
+**`intel_channel_recommendations.md`** — sweep 001 delivered, with the method written down so
+sweeps stay comparable.
+
+**Automated:** Routine `trig_012eVHz4xEby12AJAXQRG8N2`, **1st and 15th of each month, 09:00 UTC**,
+first fire 2026-09-01. Fresh session per run, appends a new numbered section, pushes to this branch,
+notifies by push and email, opens no PR.
+
+**The central finding, which changed the deliverable.** Reporting is explicit that these operations
+survive takedowns by rotating channel names, running mirrors and moving to request-to-join gating
+specifically to defeat crawlers. **So a curated list of handles decays within weeks.** The sweep's
+primary output is therefore **keywords** — durable platform and malware brand names that feed
+`SEARCH_KEYWORDS`, find whatever the channel is called now, and queue it for the classifier. Handles
+are secondary and always marked unverified. **The Routine's prompt forbids inventing a handle.**
+
+Sweep 001 shipped **7 keywords**, weighted at `phaas`, `sim_swap` and `card_shop` — the seeded
+channel list carries **zero** of all three, so these create coverage rather than deepening
+infostealer, which is already the strongest category.
+
+Structural finding worth carrying: **the public-channel surface is contracting by design.** The 27
+unreachable channels are consistent with deliberate gating, not random attrition — which means flat
+collection over time is actually a decline. Worth a metric.
+
+### Cursor Origin — I answered the wrong question first
+
+You asked whether Origin can be added to `/v1/metered/secret-scan` alongside GitHub and the others.
+**It cannot, and the reason is decisive: Origin's beta has no public repositories.** Every one of
+that endpoint's six sources searches a *public* surface unauthenticated. Origin has no such surface,
+so the source would always return zero and report that it ran — **a false all-clear, which that
+endpoint's own comments call the worst possible failure for this product.**
+
+What does work is an **authorised** scan via `api.cursor.com/v1/origin` and an installation token —
+but that answers "what is in our own repos", not "what is leaking publicly", so it belongs in a new
+endpoint (`/v1/metered/repo-scan`), reusing the existing 31 detectors and `_findings_from_text()`.
+
+⚠️ **`cursor.com` is egress-blocked in this sandbox**, so the API contract above comes from
+secondary reporting, not the docs. Not good enough to write HTTP calls against — read
+`cursor.com/docs/api/origin` from an unblocked machine first and confirm auth format, token
+lifecycle, the enumeration path and pagination, blob reads, and whether any code-search primitive
+exists (its absence changes the cost model completely).
+
+---
+
 ## Still blocked on the Mac — nothing below can be done from the sandbox
 
 1. **Create `relayshield_ransomware_victims`** — `lambda_recovery_and_deploy.md` §6. Victims are

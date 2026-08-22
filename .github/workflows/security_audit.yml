@@ -85,3 +85,14 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 7. Intel vocabulary drift — the pipeline's parallel lists must agree
+      #    Three production defects have come from two lists in two files that
+      #    must match and nothing checking that they do: the `cves` type_map
+      #    gap (2026-07-24), five more IOC types with the same cause
+      #    (2026-08-20), and the channel-category vocabularies (2026-08-21).
+      #    Every one was silent. Pure stdlib, no credentials, runs in a second.
+      # -----------------------------------------------------------------------
+      - name: Check intel vocabulary drift
+        run: python3 test_intel_category_drift.py

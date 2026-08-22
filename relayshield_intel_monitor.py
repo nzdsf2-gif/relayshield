@@ -744,21 +744,44 @@ def _release_lock() -> None:
 # Alert formatting
 # ---------------------------------------------------------------------------
 
-CATEGORY_LABELS = {
-    "sim_swap":        "SIM Swap Service",
-    "credential_dump": "Credential Dump",
-    "infostealer":     "Infostealer Log Sale",
-    "card_shop":       "Card Shop",
-    "general":         "Threat Intelligence",
+# ONE SOURCE OF TRUTH FOR CATEGORIES. Fixed 2026-08-21 after finding the
+# vocabularies had drifted apart across four files.
+#
+# WHAT WAS BROKEN. `CATEGORY_LABELS` and `SEVERITY` listed five categories.
+# relayshield_intel_discovery.py's SEARCH_KEYWORDS could already assign SEVEN,
+# and relayshield_intel_classifier.py could assign seven more. Three of them --
+# "ransomware", "crypto", "phaas" -- appeared in NEITHER dict, so
+# `SEVERITY.get(category, "⚠️")` fell through to a bare warning glyph with no
+# severity word, and `CATEGORY_LABELS.get(category, category)` printed the raw
+# key. A user alert sourced from a ransomware channel therefore rendered as
+# LESS severe than one from a card shop, which is exactly backwards.
+#
+# Nothing errored, nothing logged. Same silent-divergence shape as the `cves`
+# and `type_map` defects, which is now the third instance in this pipeline --
+# hence test_intel_category_drift.py, which fails the build when any two of the
+# four vocabularies disagree.
+#
+# WHY IT WAS ABOUT TO GET WORSE. The OSINT-2 classifier assigns categories from
+# its own list and is about to be run over the 75-channel pending_review
+# backlog. Every channel it labels "ransomware", "crypto" or "phaas" would have
+# produced degraded alerts from that moment on.
+#
+# ADDING A CATEGORY: add it here, add it to VALID_CATEGORIES in
+# relayshield_intel_classifier.py, and the drift test will confirm the rest.
+INTEL_CATEGORIES = {
+    # category         label                       severity
+    "sim_swap":        ("SIM Swap Service",        "🚨 CRITICAL"),
+    "ransomware":      ("Ransomware Operation",    "🚨 CRITICAL"),
+    "credential_dump": ("Credential Dump",         "🚨 HIGH"),
+    "infostealer":     ("Infostealer Log Sale",    "⚠️ HIGH"),
+    "phaas":           ("Phishing-as-a-Service",   "⚠️ HIGH"),
+    "card_shop":       ("Card Shop",               "⚠️ MEDIUM"),
+    "crypto":          ("Crypto Fraud",            "⚠️ MEDIUM"),
+    "general":         ("Threat Intelligence",     "ℹ️ INFO"),
 }
 
-SEVERITY = {
-    "sim_swap":        "🚨 CRITICAL",
-    "credential_dump": "🚨 HIGH",
-    "infostealer":     "⚠️ HIGH",
-    "card_shop":       "⚠️ MEDIUM",
-    "general":         "ℹ️ INFO",
-}
+CATEGORY_LABELS = {k: v[0] for k, v in INTEL_CATEGORIES.items()}
+SEVERITY        = {k: v[1] for k, v in INTEL_CATEGORIES.items()}
 
 
 def _format_user_alert(match: dict, channel: str, category: str, channel_desc: str, msg_preview: str) -> str:

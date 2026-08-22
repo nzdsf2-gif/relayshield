@@ -722,6 +722,119 @@ signature, which is precisely the behaviour a hook on a user-facing request path
 
 ---
 
+## Round 9 — 2026-08-22
+
+### The drift run was not a failure, and you do not need to redo it
+
+Run **32601363705** did exactly what it is built to do: **the workflow exits 1 when it finds drift.**
+That red X is the alarm. Green would mean live and `main` agree.
+
+One thing did miss: the run reports `head_branch: main`, so the **Run workflow ▾** branch selector
+was left on `main` and it ran `main`'s old workflow — 60-line truncation, no artifact. **It does not
+matter now.** The diff it printed is the drift already known and already ported onto the branch.
+Merging gives `main` the fixed workflow, and the next scheduled run produces the full diff plus a
+copy of every live handler as a downloadable artifact, with no branch selector involved.
+
+**The check to actually watch:** after merge and deploy, the next drift run should be **green** for
+`relayshield-api`. If it is still red, the part the 60-line cut hid is real un-ported drift —
+download the artifact and send it.
+
+**`MERGE_AND_DEPLOY_NOW.md`** has the click-by-click PR steps. No renaming, nothing in Settings.
+
+### Cloudflare — why not from here, and the permanent fix
+
+Checked rather than assumed: **`api.cloudflare.com` returns 403 on CONNECT from this sandbox's
+egress proxy**, there is no `CLOUDFLARE_API_TOKEN` in the environment, and no wrangler credentials.
+Earlier sessions presumably ran with different egress. I cannot deploy a Worker from here today.
+
+So the fix is to stop needing me to. **`deploy_workers.yml`** now deploys any changed Worker on push
+to `main`.
+
+**Eleven Workers live in this repo and not one had a CI path** — every deploy was `npx wrangler` from
+a laptop. That is precisely the shape that destroyed the Telegram help shortcuts and forced
+`lambda_drift_check.yml` into existence, and it had been sitting unaddressed on the Cloudflare side
+the whole time. It also explains this specific stall: the TI demo tab was built and just never
+deployed.
+
+Design notes worth keeping:
+* Matches on the **entrypoint declared inside each `wrangler*.toml`**, not a hand-kept map, so
+  renaming a Worker file cannot silently stop deploying it.
+* Dedupes by Worker **name** — `wrangler-badge.toml` and `wrangler.badge.toml` both target
+  `relayshield-badge-landing`.
+* Pins `wrangler@3`: a major bump changing deploy behaviour should be a deliberate commit.
+* **Does not manage Worker secrets.** `wrangler deploy` leaves them untouched, so `DEMO_KEY` and
+  `DEMO_TOKEN` survive; putting them in GitHub as well would double the places they could leak from
+  for no gain.
+* Fails fast with a named message if either repo secret is missing, rather than half-deploying.
+
+Change detection verified against five scenarios including the duplicate badge configs.
+
+Needs two repo secrets once — `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Steps are in
+`MERGE_AND_DEPLOY_NOW.md` §3.
+
+### SOCRadar channels — did any get added? Not yet, and here is why
+
+**No, and none could have been.** The 13 SOCRadar names went into `SEARCH_KEYWORDS`, which is read by
+`relayshield_intel_discovery.py` — a **separate scheduled Lambda** from the intel monitor. Nothing
+happens until that discovery run executes, and it needs the branch merged and deployed first.
+
+Sequence: merge → discovery Lambda runs on its schedule → matching channels queued as
+`pending_review` → **run the classifier** (Actions → INTEL Channel Classifier) to triage them.
+
+**Monthly check-back scheduled**, as asked: Routine `trig_015vG3JFFi2U8wBduaUaw9oA`, **3rd of each
+month at 10:00 UTC**, first fire 2026-09-03. It fills in the scoreboard, re-verifies the RansomLook
+API contract against their GitHub source, and — importantly — **names keywords that have produced
+nothing after two months as candidates for removal**. A keyword list that only grows is a keyword
+list nobody trusts.
+
+### Two blog ToDos added
+
+Both in the ToDo list below with angles, not just titles.
+
+---
+
+## Blog queue
+
+### 1. Secret-scanning false positives — the follow-up, with our own incident in it
+
+`blog-secret-scanning-false-positives.md` already argues that entropy detectors cry wolf. **We now
+have a first-person example that is better than any of the originals**: GitGuardian incident
+**#36505440** flagged `9f2c1a8b4d6e0f37` in commit `33d6a6f` — a made-up hex string in a **docstring**,
+inside `_nhi_fingerprints()`, the function whose entire purpose is ensuring real credentials are
+never stored.
+
+**The angle:** the failure mode is not the false positive itself, it is that alerts like this teach
+people to stop reading the dashboard — so the real one gets skipped. Pair it with what we do
+instead: store `provider:sha256prefix`, never the secret, so a customer can fingerprint their own key
+and ask whether it appears while nobody can read one out.
+
+Ties to `/v1/metered/secret-scan` and `rsscan`. Honest, self-deprecating, and it demonstrates
+judgement rather than claiming a better regex.
+
+### 2. Agent Tesla v4 — emoji obfuscation and the BEC lure
+
+From Infosecurity Magazine / KnowBe4 research: Agent Tesla v4 dropped via a **BEC lure aimed at
+finance departments**, using **Unicode emoji embedded in the code body** as obfuscation, sweeping
+credentials from **40+ applications** and exfiltrating to a **single actor-controlled domain**.
+
+**The angle, and it is ours specifically:** the researchers' advice is to update email security rules
+to catch it *before* it harvests. That is the right advice and it is also a race we should not
+pretend to win — obfuscation exists precisely to beat that rule. **The layer that does not care about
+obfuscation is what happens after the credentials are sold**, which is the corpus we collect from.
+A single exfil domain is one indicator; the credentials appearing in a stealer channel days later is
+a different and more durable signal.
+
+Concrete hooks we can actually claim: RedLine and Agent Tesla families are already in
+`SEARCH_KEYWORDS`; `/v1/metered/infostealer` answers "are my people in a stealer log"; and the new
+NHI fingerprinting covers the API-key half of a 40-app credential sweep, which password-focused
+coverage misses.
+
+**Do not overclaim.** We do not detect Agent Tesla on an endpoint and should not imply it. The claim
+is about the window after exfiltration, and it is provable — that is what the first-seen tracking
+now measures.
+
+---
+
 ## Still blocked on the Mac — nothing below can be done from the sandbox
 
 1. **Create `relayshield_ransomware_victims`** — `lambda_recovery_and_deploy.md` §6. Victims are

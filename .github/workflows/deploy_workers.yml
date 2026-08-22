@@ -1,0 +1,154 @@
+name: Deploy Changed Cloudflare Workers
+
+# WHY THIS EXISTS
+# ---------------
+# Eleven Cloudflare Workers live in this repo and NONE of them had a CI path.
+# Every deploy was `npx wrangler deploy` from a laptop — the exact shape that
+# destroyed the Telegram help shortcuts on 2026-08-19, and the reason
+# lambda_drift_check.yml had to be written. A Worker edited in the repo and
+# never deployed is invisible; a Worker edited in Cloudflare's dashboard and
+# never committed is worse.
+#
+# It also removes a recurring stall: the TI demo's Ransomware Victims tab sat
+# built-but-undeployed because the only person who could run wrangler had to
+# remember to.
+#
+# ONE-TIME SETUP (repo Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN  — Cloudflare dashboard -> My Profile -> API Tokens
+#                           -> Create Token -> "Edit Cloudflare Workers" template.
+#                           Scope it to this account only.
+#   CLOUDFLARE_ACCOUNT_ID — Cloudflare dashboard -> Workers & Pages, right-hand
+#                           sidebar ("Account ID").
+#
+# Until both secrets exist this workflow fails fast with a clear message rather
+# than half-deploying.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare_worker_*.js'
+      - 'wrangler*.toml'
+      - '.github/workflows/deploy_workers.yml'
+  workflow_dispatch:
+    inputs:
+      config:
+        description: 'Deploy one config only (e.g. wrangler.ti-demo.toml). Blank = all changed.'
+        required: false
+        default: ''
+
+jobs:
+  deploy:
+    name: Deploy Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2      # need HEAD~1 to diff what changed
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check secrets are present
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -n "$TOKEN" ]   || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$ACCOUNT" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repo secret(s):$missing"
+            echo "::error::Settings -> Secrets and variables -> Actions. See this file's header."
+            exit 1
+          fi
+          echo "Both secrets present."
+
+      - name: Work out which Workers to deploy
+        id: pick
+        run: |
+          set -uo pipefail
+
+          # Manual single-config run wins over change detection.
+          if [ -n "${{ inputs.config }}" ]; then
+            if [ ! -f "${{ inputs.config }}" ]; then
+              echo "::error::${{ inputs.config }} does not exist"
+              exit 1
+            fi
+            echo "configs=${{ inputs.config }}" >> "$GITHUB_OUTPUT"
+            echo "Manual run: ${{ inputs.config }}"
+            exit 0
+          fi
+
+          CHANGED="$(git diff --name-only HEAD~1 HEAD || true)"
+          echo "Changed files:"; echo "$CHANGED" | sed 's/^/  /'
+
+          CONFIGS=""
+          for CFG in wrangler*.toml; do
+            [ -f "$CFG" ] || continue
+            ENTRY="$(grep -m1 '^main' "$CFG" | cut -d'"' -f2)"
+            # Deploy when the config OR its entrypoint changed. Matching on the
+            # entrypoint declared inside the config, rather than a hand-kept
+            # map, means a renamed worker file cannot silently stop deploying.
+            if echo "$CHANGED" | grep -qx "$CFG" || { [ -n "$ENTRY" ] && echo "$CHANGED" | grep -qx "$ENTRY"; }; then
+              case " $CONFIGS " in *" $CFG "*) ;; *) CONFIGS="$CONFIGS $CFG" ;; esac
+            fi
+          done
+
+          # wrangler-badge.toml and wrangler.badge.toml both target
+          # relayshield-badge-landing from the same entrypoint. Deploying both
+          # is harmless but doubles the work and looks like a mistake in the
+          # log, so keep only the first per worker NAME.
+          SEEN=""; FINAL=""
+          for CFG in $CONFIGS; do
+            NAME="$(grep -m1 '^name' "$CFG" | cut -d'"' -f2)"
+            case " $SEEN " in
+              *" $NAME "*) echo "  skipping $CFG — $NAME already covered" ;;
+              *) SEEN="$SEEN $NAME"; FINAL="$FINAL $CFG" ;;
+            esac
+          done
+
+          echo "configs=$(echo $FINAL)" >> "$GITHUB_OUTPUT"
+          [ -n "$(echo $FINAL)" ] && echo "Will deploy:$FINAL" || echo "No Worker changes in this push."
+
+      - name: Deploy
+        if: steps.pick.outputs.configs != ''
+        env:
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -uo pipefail
+          FAILED=""
+          for CFG in ${{ steps.pick.outputs.configs }}; do
+            NAME="$(grep -m1 '^name' "$CFG" | cut -d'"' -f2)"
+            echo "::group::$NAME  ($CFG)"
+            # Pinned rather than @latest: a wrangler major bump changing deploy
+            # behaviour must be a deliberate commit, not something that happens
+            # on a Tuesday.
+            if npx --yes wrangler@3 deploy --config "$CFG"; then
+              echo "deployed $NAME"
+            else
+              echo "::error::deploy failed for $NAME ($CFG)"
+              FAILED="$FAILED $NAME"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$FAILED" ]; then
+            echo "::error::Failed:$FAILED"
+            exit 1
+          fi
+
+      # Worker SECRETS (DEMO_KEY, DEMO_TOKEN) are NOT managed here. `wrangler
+      # deploy` leaves existing secrets untouched, so the TI demo keeps working
+      # across deploys. Setting them from CI would mean holding them in GitHub
+      # too, doubling the number of places a leak could come from for no gain.
+      - name: Note on Worker secrets
+        if: steps.pick.outputs.configs != ''
+        run: |
+          echo "Worker secrets are preserved across deploys and are not managed by CI."
+          echo "If a demo returns 'not configured', set them by hand:"
+          echo "  npx wrangler secret put DEMO_KEY   --config wrangler.ti-demo.toml"
+          echo "  npx wrangler secret put DEMO_TOKEN --config wrangler.ti-demo.toml"

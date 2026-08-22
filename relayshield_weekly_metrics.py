@@ -587,6 +587,124 @@ def _feedback_sentiment_stats() -> dict:
         return {"total": 0, "up": 0, "down": 0, "pct_positive": None, "testimonial_candidates": []}
 
 
+# ---------------------------------------------------------------------------
+# Exclusive-indicator measurement (growth plan, "Measurement, so this does not repeat")
+# ---------------------------------------------------------------------------
+# THE NUMBER TO TRACK IS NOT 500K. Most of the corpus is ingested from public
+# feeds every buyer already holds — abuse.ch, CISA KEV — and reporting the
+# total is the mistake that nearly went out to the blockchain-analytics
+# segment. What sells, and what is worth growing, is the slice collected by us.
+#
+# So this counts EXCLUSIVE indicators per category over a trailing 30 days:
+# rows whose `channel` is one of our monitored Telegram channels (they start
+# with "@") or a first-party collection path, rather than a feed name.
+#
+# One number per category, tracked weekly. A category that is flat is a
+# category not being invested in, which is invisible if you only watch the
+# headline.
+
+INTEL_IOCS_TABLE_METRICS = "relayshield_intel_iocs"
+
+# Feed sources are NOT ours. Anything whose `channel` matches one of these is
+# ingested, however large the number is.
+_INGESTED_SOURCE_PREFIXES = (
+    "abuse", "urlhaus", "threatfox", "feodo", "malwarebazaar", "cisa", "kev",
+    "openphish", "phishtank", "phishstats", "spamhaus", "blocklist", "ipsum",
+    "abuseipdb", "otx", "talos", "hagezi", "botvrij", "emerging", "c2intel",
+    "paste_ee", "pastehub",
+)
+
+
+def _is_exclusive(channel: str) -> bool:
+    """True when this indicator was collected by us rather than ingested.
+
+    Deliberately conservative: anything that looks like a feed name is counted
+    as ingested. Over-counting exclusivity is the failure that matters here —
+    it is the number we would put in front of a technical buyer, and a buyer
+    who finds one abuse.ch indicator inside it stops believing the rest.
+    """
+    ch = (channel or "").strip().lower()
+    if not ch:
+        return False
+    if ch.startswith("@"):          # a monitored Telegram channel — ours
+        return True
+    return not any(ch.startswith(p) for p in _INGESTED_SOURCE_PREFIXES)
+
+
+def _exclusive_by_category(days: int = 30) -> dict:
+    """Distinct exclusive indicators per ioc_type over the trailing window."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    table  = boto3.resource("dynamodb", region_name="us-east-1").Table(INTEL_IOCS_TABLE_METRICS)
+
+    per_type: dict = {}
+    seen: dict = {}
+    scanned = exclusive = 0
+    try:
+        kwargs = {
+            "FilterExpression": Attr("seen_ts").gte(cutoff),
+            "ProjectionExpression": "ioc_type, ioc_value, channel",
+        }
+        resp = table.scan(**kwargs)
+        while True:
+            for it in resp.get("Items", []):
+                scanned += 1
+                if not _is_exclusive(str(it.get("channel", ""))):
+                    continue
+                exclusive += 1
+                t = str(it.get("ioc_type", "unknown"))
+                v = str(it.get("ioc_value", ""))
+                # Distinct indicators, not citations. Counting rows here would
+                # reproduce exactly the confusion the MSP brief now spells out.
+                bucket = seen.setdefault(t, set())
+                if v and v not in bucket:
+                    bucket.add(v)
+                    per_type[t] = per_type.get(t, 0) + 1
+            if "LastEvaluatedKey" not in resp or scanned > 250_000:
+                break
+            resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"], **kwargs)
+    except Exception as exc:
+        logger.warning("Exclusive-category measurement failed: %s", exc)
+        return {"error": str(exc)}
+
+    return {
+        "window_days":       days,
+        "citations_scanned": scanned,
+        "exclusive_citations": exclusive,
+        "distinct_exclusive": sum(per_type.values()),
+        # The KPI. Share of what we saw in the window that is ours.
+        "measured_exclusive_share": round(exclusive / scanned, 4) if scanned else 0.0,
+        "by_category":       dict(sorted(per_type.items(), key=lambda kv: -kv[1])),
+        "truncated":         scanned > 250_000,
+    }
+
+
+def _exclusive_html(e: dict) -> str:
+    if not e or e.get("error"):
+        return ("<h3>Exclusive indicators</h3><p style='color:#b45309'>Measurement unavailable "
+                f"this run ({(e or {}).get('error', 'no data')}).</p>")
+    rows = "".join(
+        f"<tr><td style='padding:4px 10px'>{t}</td>"
+        f"<td style='padding:4px 10px;text-align:right'>{n:,}</td></tr>"
+        for t, n in e["by_category"].items()
+    ) or "<tr><td colspan='2' style='padding:4px 10px'>none in window</td></tr>"
+    trunc = ("<p style='color:#b45309;font-size:12px'>Scan truncated at 250k citations — "
+             "treat these as a floor.</p>" if e.get("truncated") else "")
+    return f"""
+    <h3>Exclusive indicators (trailing {e['window_days']} days)</h3>
+    <p style="font-size:13px;color:#475569">
+      <b>{e['distinct_exclusive']:,}</b> distinct exclusive indicators from
+      <b>{e['exclusive_citations']:,}</b> exclusive citations.
+      Measured exclusive share: <b>{e['measured_exclusive_share']:.1%}</b>.
+      <br><i>This is the number that sells — not the corpus total, most of which is
+      ingested from feeds a buyer already has.</i>
+    </p>{trunc}
+    <table style="border-collapse:collapse;font-size:13px">
+      <tr><th style="text-align:left;padding:4px 10px">Category</th>
+          <th style="text-align:right;padding:4px 10px">Distinct exclusive</th></tr>
+      {rows}
+    </table>"""
+
+
 def _build_email(metrics: dict) -> str:
     week_end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     s = metrics
@@ -692,6 +810,8 @@ def _build_email(metrics: dict) -> str:
 </table>
 {f'''<p style="color: #888; font-size: 12px; margin-top:10px;">Testimonial candidates (from thumbs-up, needs manual review before publishing):</p>
 <ul style="font-size: 13px;">{"".join(f"<li>{html.escape(c)}</li>" for c in s['cs_mobile_feedback']['testimonial_candidates'])}</ul>''' if s['cs_mobile_feedback']['testimonial_candidates'] else ''}
+
+{_exclusive_html(s.get('exclusive_by_category', {}))}
 
 {_lambda_health_html(s['lambda_health'])}
 
@@ -884,6 +1004,9 @@ and includes this same section.</p>
         "intel_alerts_total":   _scan_count("relayshield_intel_alerts"),
         "intel_alerts_new":     _new_this_week("relayshield_intel_alerts", "created_at"),
         "ioc_total":            _scan_count("relayshield_intel_iocs"),
+        # The KPI the growth plan asks for. ioc_total above is the headline
+        # number and is mostly ingested feeds; this is the slice that is ours.
+        "exclusive_by_category": _exclusive_by_category(),
         "lambda_health":        _scheduled_lambda_health(),
         "stolen_sessions":      _scan_count("relayshield_stolen_sessions"),
         "identity_graph":       _scan_count("relayshield_identity_graph"),

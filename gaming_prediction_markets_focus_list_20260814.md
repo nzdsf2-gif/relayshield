@@ -428,7 +428,7 @@ From the contact page, three routes exist and only one is right:
 | Route | Use for | Verdict |
 |---|---|---|
 | General contact form | General question / Suggestion / Publication / Other. Explicitly **not** user support | Wrong. A bot install is not a suggestion |
-| **BizDev form** — `https://forms.gle/fv4y1G3ppNgJDpEDA` | "partnership or collaboration" | **This one** |
+| **BizDev form** — `https://forms.gle/28MppPk59RGxicrGA` | "partnership or collaboration" | **This one** |
 | `defikingdoms.com/bugreport.html` | vulnerabilities | Wrong, and misusing it would burn credibility |
 
 **But check the partner channel first.** The band was overridden for DFK specifically because the
@@ -708,6 +708,33 @@ reason.
 1 Feb, DefiLlama moved to ticketed support). Games are stickier, but name it and turn it: teams
 leave because they cannot screen what gets posted, and screening what gets posted is the product.
 
+## DFK ROUTE CONFIRMED 2026-08-22 — the BizDev form IS the partner channel
+
+Read from inside the server, past the `#✅verify` gate. `#✨questions-bugs-contacts-suggestions`
+pins a **Biz Dev Inquiry** block: *"Biz Dev Contact Form. Please use this form for interest in
+collaboration."* → **`https://forms.gle/28MppPk59RGxicrGA`**
+
+**This settles the routing question and corrects this document.** Earlier notes carried
+`https://forms.gle/fv4y1G3ppNgJDpEDA` as a *fallback* behind a partner channel. Both halves were
+wrong: **the form URL was different, and there is no separate partner channel to try first.** DFK
+routes collaboration through the form, full stop. Every occurrence of the old URL above has been
+corrected.
+
+**So the sequencing advice changes.** "Partner channel first, form as fallback" no longer applies to
+DFK — the form is the front door. Do not spend time hunting for a partner channel that does not
+exist; that is the same wasted-effort shape as the eleven consecutive 404s in the prediction-market
+sweep.
+
+Also visible from inside, and worth noting: DFK runs a `#🔴report-scammers` channel and a
+`#🔒security-basics` channel. **That is the Version B condition met** — pitch the incident-specific
+message, not the default one, and reference the scam-reporting channel as the reason for writing.
+A server that has staffed a channel for scam reports has already decided the problem is real.
+
+Multiple chain-specific support channels are also visible (`#dfkc-crystalvale-support`,
+`#kaia-serendale-support`, `#metis-sun-support`, `#on-ramp-support`), which confirms DFK now spans
+DFK Chain, Kaia and Metis rather than DFK Chain alone. **All three are EVM with 40-hex `0x`
+addresses**, so the gate still passes — but do not describe DFK as single-chain in the pitch.
+
 ## DFK: no channels visible until you pass `#✅verify`
 
 Confirmed from the server view — DFK runs a verification gate, with `#✅verify` under **Launchpad**
@@ -723,7 +750,7 @@ gate, and the partner channel is the preferred route.
 
 ## Draft: DFK BizDev form submission
 
-Route: `https://forms.gle/fv4y1G3ppNgJDpEDA`. **Use only if the partner channel is unavailable after
+Route: `https://forms.gle/28MppPk59RGxicrGA`. **Use only if the partner channel is unavailable after
 verifying.**
 
 > **Nature:** Partnership / collaboration

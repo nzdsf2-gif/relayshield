@@ -318,6 +318,45 @@ Tunable, all optional: `PIVOT_MAX_SEEDS` (15), `PIVOT_MAX_DERIVED` (25), `PIVOT_
 `provenance="derived"` and `confidence_score` 0.5. If run time moves materially, turn it back off —
 collection is the job.
 
+## 9. New tables, 2026-08-22
+
+Two more, same silent-failure shape as the victim table — writes log a warning and the run
+continues, so the first sign of trouble is a digest line stuck at zero.
+
+**Scan submissions** (first-seen tracking, growth plan item 4):
+
+    AWS_PROFILE=relayshield aws dynamodb create-table \
+      --table-name relayshield_scan_submissions \
+      --attribute-definitions AttributeName=value_key,AttributeType=S \
+                              AttributeName=kind,AttributeType=S \
+      --key-schema AttributeName=value_key,KeyType=HASH \
+                   AttributeName=kind,KeyType=RANGE \
+      --billing-mode PAY_PER_REQUEST --region us-east-1
+
+    AWS_PROFILE=relayshield aws dynamodb update-time-to-live \
+      --table-name relayshield_scan_submissions \
+      --time-to-live-specification "Enabled=true,AttributeName=ttl" --region us-east-1
+
+Grants: `relayshield-api`'s role needs `dynamodb:UpdateItem` on it (the logger uses `ADD` and
+`if_not_exists`, not `PutItem`). The re-check Lambda needs `UpdateItem` and `Scan`.
+
+**Operator identities** — §7 above, if not already created.
+
+### The re-check Lambda
+
+`relayshield_first_seen.py` carries both halves: `log_submission()` runs inside `relayshield-api`,
+and `lambda_handler` runs the delayed re-check. Deploy the re-check as its own function on a daily
+schedule, and give it `RS_INTERNAL_API_KEY` — **an ordinary RelayShield API key**, because the
+re-check calls our own public API rather than reaching into the corpus directly. Without it the
+handler logs an error and returns; it does not crash.
+
+Tunables: `FIRST_SEEN_RECHECK_HOURS` (72), `FIRST_SEEN_MAX_AGE_DAYS` (21), `FIRST_SEEN_BATCH` (150).
+
+**What to watch for.** The row that matters carries `saw_it_first: true` and `lead_time_hours`. That
+is the provable claim — on the day it was submitted, that indicator was in no feed and it was in our
+inbox. **Query for those before quoting any lead-time number in outreach**; the figure has to be
+measured, not asserted, which is the whole reason this exists rather than a slide.
+
 ### Opting a customer into supplier-breach alerts
 
 Alerts are **off unless a customer explicitly lists suppliers**. There is no inference — nothing is

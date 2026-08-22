@@ -326,6 +326,47 @@ _RE_SHA1    = re.compile(r"\b[a-fA-F0-9]{40}\b")
 _RE_URL     = re.compile(r"https?://[^\s<>\"']{10,}")
 _RE_ONION   = re.compile(r"\b[a-z2-7]{16,56}\.onion\b", re.IGNORECASE)
 _RE_CVE     = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+# Non-human identity / machine credentials (growth plan item 6, an under-served
+# category). API keys and service tokens in stealer-log dumps are higher value
+# and far rarer in public feeds than passwords, and /v1/metered/nhi-exposure
+# already exists to sell them — but nothing was feeding it from this pipeline.
+#
+# WE NEVER STORE THE SECRET. Extraction yields a provider label plus a truncated
+# SHA-256 of the value, and that is what goes in the IOC table. A customer can
+# fingerprint their own key and ask "is mine in there"; nobody can read one out.
+# Storing live credentials in a queryable table would make this corpus a
+# liability the moment anyone got a read on it, and the same rule already keeps
+# /exposure from printing passwords.
+_NHI_PATTERNS = (
+    ("aws_access_key",   re.compile(r"\b((?:AKIA|ASIA)[0-9A-Z]{16})\b")),
+    ("github_pat",       re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{36,255})\b")),
+    ("slack_token",      re.compile(r"\b(xox[baprs]-[A-Za-z0-9-]{10,})\b")),
+    ("stripe_secret",    re.compile(r"\b(sk_live_[A-Za-z0-9]{16,})\b")),
+    ("google_api_key",   re.compile(r"\b(AIza[0-9A-Za-z_-]{35})\b")),
+    ("anthropic_key",    re.compile(r"\b(sk-ant-[A-Za-z0-9_-]{20,})\b")),
+    # Deliberately after anthropic_key: sk-ant- also matches the generic
+    # OpenAI-style prefix, and the specific label is the useful one.
+    ("openai_key",       re.compile(r"\b(sk-[A-Za-z0-9]{32,})\b")),
+    ("private_key_block", re.compile(r"(-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----)")),
+)
+
+
+def _nhi_fingerprints(text: str) -> list:
+    """Provider-labelled fingerprints of any machine credentials in `text`.
+
+    Returns e.g. "aws_access_key:9f2c1a8b4d6e0f37" — never the credential.
+    """
+    out = set()
+    for label, pattern in _NHI_PATTERNS:
+        for m in pattern.findall(text):
+            secret = m if isinstance(m, str) else m[0]
+            if len(secret) < 12:
+                continue
+            digest = hashlib.sha256(secret.encode("utf-8", "replace")).hexdigest()[:16]
+            out.add(f"{label}:{digest}")
+    return sorted(out)
+
+
 _RE_RANSOM_VICTIM = re.compile(
     r"(?:hacked?|leaked?|compromised?|victim[s]?[:,]?\s*|added to our blog[:\s]*)"
     r"([A-Z][A-Za-z0-9\s&\-\.]{3,50}(?:Inc\.?|LLC|Ltd\.?|Corp\.?|Group|Co\.?)?)",
@@ -597,6 +638,7 @@ def extract_iocs(text: str) -> dict:
     # kind as a Telegram handle -- it names a place a crew runs, and no public
     # feed we ingest publishes it.
     discord_invites = list({m.lower() for m in _RE_DISCORD_INVITE.findall(text)})
+    nhi_tokens = _nhi_fingerprints(text)
     return {
         "emails": emails, "phones": phones,
         "eth": eth, "btc": btc, "sol": sol, "ton": ton,
@@ -606,6 +648,7 @@ def extract_iocs(text: str) -> dict:
         "ransomware_victims": victims,
         "tg_mentions": tg_mentions,
         "discord_invites": discord_invites,
+        "nhi_tokens": nhi_tokens,
     }
 
 
@@ -1226,6 +1269,10 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> N
         # rather than the full URL so the same server posted as discord.gg/X and
         # discord.com/invite/X deduplicates to one indicator.
         ("discord_invites", "discord_invite"),
+        # Fingerprints, never secrets — see _nhi_fingerprints(). Feeds
+        # /v1/metered/nhi-exposure, which existed with nothing supplying it
+        # from this pipeline.
+        ("nhi_tokens",      "nhi_token"),
         ("onions",      "onion"),
         ("md5",         "hash_md5"),
         ("sha1",        "hash_sha1"),
@@ -2092,6 +2139,7 @@ def _send_admin_digest(stats: dict) -> None:
         # Reads 0 whenever PIVOT_ENRICHMENT is off, which is the default. A zero
         # here means "not switched on", not "found nothing".
         f"Derived indicators (pivot): {stats.get('derived_iocs', 0)}\n"
+        f"Machine credentials (NHI): {stats.get('nhi_tokens', 0)} fingerprinted\n"
     )
     _victims_line = (
         f"Ransomware victims named: {stats.get('ransomware_victims', 0)}"
@@ -2499,6 +2547,8 @@ async def _poll_channels(stats: dict) -> None:
                     stats["onions_extracted"]   += len(iocs.get("onions", []))
                     stats["discord_invites"]     = stats.get("discord_invites", 0) + \
                         len(iocs.get("discord_invites", []))
+                    stats["nhi_tokens"]          = stats.get("nhi_tokens", 0) + \
+                        len(iocs.get("nhi_tokens", []))
 
                     if total_iocs == 0:
                         continue
@@ -2675,6 +2725,7 @@ def lambda_handler(event, context):
         "alerts_fired":           0,
         "ransomware_victims":     0,
         "discord_invites":        0,
+        "nhi_tokens":             0,
         "operator_ids_stored":    0,
         "derived_iocs":           0,
         "cves_extracted":         0,

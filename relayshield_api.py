@@ -10692,6 +10692,45 @@ def handle_wallet_inbound(params: dict) -> dict:
     return _ok({"senders": senders, "tx_count": len(senders)})
 
 
+# ---------------------------------------------------------------------------
+# First-seen submission logging — see relayshield_first_seen.py
+# ---------------------------------------------------------------------------
+# Import is deliberately lazy and guarded. relayshield_first_seen is resolved
+# into this function's deploy zip by the CI import-walker, but a missing module
+# must degrade to "no first-seen data" rather than 500ing every scan.
+
+_FIRST_SEEN_PATHS = {
+    "/v1/scan-url":    "url",
+    "/v1/wallet-risk": "wallet",
+    "/v1/payg/scan-url":    "url",
+    "/v1/payg/wallet-risk": "wallet",
+}
+
+
+def _log_first_seen(path: str, params: dict, result: dict) -> None:
+    """Record one scan and the verdict it got. NEVER RAISES."""
+    try:
+        if not isinstance(result, dict) or result.get("statusCode") != 200:
+            return
+        kind  = _FIRST_SEEN_PATHS.get(path)
+        value = (params.get("url") or params.get("address") or "").strip()
+        if not kind or not value:
+            return
+
+        data = json.loads(result.get("body") or "{}").get("data", {})
+        if kind == "url":
+            level   = str(data.get("level", "")).lower()
+            verdict = "flagged" if level in ("malicious", "suspicious", "flagged") else "unknown"
+        else:
+            verdict = ("flagged" if data.get("flagged")
+                       or data.get("risk_level") in ("HIGH", "CRITICAL") else "unknown")
+
+        import relayshield_first_seen
+        relayshield_first_seen.log_submission(value, kind, verdict, source="api")
+    except Exception as exc:
+        logger.debug("first-seen log skipped path=%s: %s", path, exc)
+
+
 ROUTES = {
     "/v1/breach":           handle_breach,
     "/v1/scan-url":         handle_scan_url,
@@ -11430,7 +11469,20 @@ def lambda_handler(event: dict, context) -> dict:
         # Webhook endpoints receive raw event (signature verified internally)
         if path in ("/v1/app/webhook/alchemy", "/v1/app/webhook/helius"):
             return handler(event)
-        return handler(params)
+
+        # First-seen collection (growth plan item 4). Hooked HERE rather than
+        # inside each handler so there is exactly one call site to reason about
+        # on a user-facing request path, and so adding a scan route later does
+        # not silently miss it.
+        #
+        # Records the submitted value and the verdict we gave — never who asked.
+        # A submission that comes back unknown today and is flagged everywhere
+        # next week proves we had it first, and that is a far better claim than
+        # corpus size.
+        result = handler(params)
+        if path in _FIRST_SEEN_PATHS:
+            _log_first_seen(path, params, result)
+        return result
     except Exception as exc:
         logger.exception("Unhandled error in %s: %s", path, exc)
         return _err("internal server error", 500)

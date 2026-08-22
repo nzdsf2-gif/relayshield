@@ -497,6 +497,94 @@ has public repos or a customer asks by name.
 
 ---
 
+## Round 6 — 2026-08-22
+
+### 🔴 Merging rs-api: do ONE thing first
+
+I could not dispatch the drift check myself — the GitHub integration returns
+`403 Resource not accessible by integration` on workflow dispatch. **You can, and it takes a
+minute.** Do it before merging:
+
+> **Actions → Lambda Drift Check → Run workflow → set branch to
+> `claude/daily-todo-summary-7zpsvv` → Run**
+
+Running it **from the branch** uses the fixed workflow, so the run produces a **`drift-diffs`
+artifact** containing the *full* diff and a **complete copy of the live `relayshield_api.py`**.
+Download it. That is the only copy of any hand-deployed code still on the live function, and the
+merge overwrites it.
+
+Then: if the diff shows only what I already ported (the two PAYG price entries, the four header
+prices, the warning block, the two imports), **merge and let it deploy.** If it shows anything else,
+send it to me and I will port it first. **The whole risk is in the part the old `head -60` hid.**
+
+### Intel monitor — the three remaining growth-plan enhancements, built
+
+**1. Consumer bots as a collection surface (item 4) — `relayshield_first_seen.py`.**
+The item the 08-20 handoff singled out as producing a provable "we saw it first" claim.
+* Every `/v1/scan-url` and `/v1/wallet-risk` call logs the submitted value and the verdict we gave.
+  Hooked at the **dispatcher**, one call site, so a scan route added later cannot silently miss it.
+* **No user id, chat id, phone or email is stored.** The value and the verdict, nothing else, with
+  the value hashed into the partition key. A first-seen corpus is an asset; a log of who asked about
+  what is a liability, and they separate at no cost.
+* `first_verdict` is written once with `if_not_exists` and **never updated** — it is the claim.
+  Overwriting it later would destroy the only thing this table proves.
+* The re-check Lambda re-queries unknowns after 72h. A row that flips unknown → flagged gets
+  `saw_it_first` and `lead_time_hours`. **That is measured, dated and defensible — and it is a far
+  better outreach claim than corpus size.**
+
+**2. Exclusive-indicator measurement — `relayshield_weekly_metrics.py`.**
+The growth plan's "Measurement, so this does not repeat" item. Distinct exclusive indicators per
+category over a trailing 30 days, plus `measured_exclusive_share`, rendered into the weekly email.
+`_is_exclusive()` is **deliberately conservative** — anything resembling a feed name counts as
+ingested, because over-stating exclusivity is the failure that matters: it is the number that would
+go in front of a technical buyer, and one abuse.ch indicator found inside it discredits the rest.
+Verified against nine source labels.
+
+**3. NHI / machine credentials (item 6) — the under-served category.**
+`/v1/metered/nhi-exposure` existed with **nothing from this pipeline feeding it**. Eight provider
+patterns now extract from monitored channels: AWS, GitHub, Slack, Stripe, Google, Anthropic, OpenAI,
+private-key blocks.
+* **The secret is never stored.** Output is `provider:sha256prefix` — a customer can fingerprint
+  their own key and ask "is mine in there"; nobody can read one out. Storing live credentials in a
+  queryable table would make this corpus a liability the moment anyone got a read on it.
+* **Verified: all 8 providers detected, zero raw secrets in the output, clean text yields nothing.**
+
+### RansomLook wired as a discovery source
+
+`ingest_ransomlook_channels()` calls their free public API each discovery run and queues
+ransomware-gang channels as `pending_review`. **Contract read from their source**
+(`RansomLook/RansomLook`, `website/web/api/telegramapi.py`) because `ransomlook.io` is egress-blocked
+here — *not* guessed from documentation I could not open.
+
+Written to fail soft everywhere: a changed response shape adds nothing rather than writing garbage
+usernames. Guards verified against four payload shapes including a dict-of-objects response.
+**Confirm the first real run's digest before trusting it.** `RANSOMLOOK_INGEST=0` disables it.
+
+### Manual collection — `intel_manual_collection_guide.md` + `tools/import_channels.py`
+
+socradar.io and breachsense.com have no API and are both egress-blocked here, so they stay manual.
+The guide says exactly what to copy (name/handle + description, nothing else, and **do not visit the
+channels**), and the script takes the paste.
+
+The script strips `@` and `t.me/`, validates, **reports every rejected line with its number** (a
+silently-dropped line is a channel you think you added and did not), skips anything already known
+with the reason, and **never activates anything**. `--operators` mode writes to the operator table —
+that is where `@bjorkanesiaaaa` goes, once the table exists.
+
+### DFK — route corrected, and the earlier note was wrong twice
+
+Read from inside the server: `#✨questions-bugs-contacts-suggestions` pins a Biz Dev Inquiry form at
+**`https://forms.gle/28MppPk59RGxicrGA`**. The old note carried a **different URL** *and* framed it
+as a fallback behind a partner channel. **Both halves were wrong** — the form is the front door and
+there is no separate partner channel. All occurrences corrected.
+
+Two things visible from inside change the pitch: DFK runs `#🔴report-scammers` and
+`#🔒security-basics`, so **use outreach Version B (incident-specific), not the default** — a server
+that has staffed a scam-reporting channel has already decided the problem is real. And it now spans
+DFK Chain, Kaia and Metis, so do not call it single-chain. All three are 40-hex `0x`; the gate holds.
+
+---
+
 ## Still blocked on the Mac — nothing below can be done from the sandbox
 
 1. **Create `relayshield_ransomware_victims`** — `lambda_recovery_and_deploy.md` §6. Victims are

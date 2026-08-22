@@ -585,6 +585,101 @@ DFK Chain, Kaia and Metis, so do not call it single-chain. All three are 40-hex 
 
 ---
 
+## Round 7 — 2026-08-22
+
+### 🛑 Do NOT rename `main`
+
+The screenshot is **Settings → Branches → Rename branch**, with `main` about to be renamed to
+`claude/daily-todo-summary-7zpsvv`. That is the wrong operation and it would be destructive —
+`deploy_lambdas.yml`, `security_audit.yml` and `lambda_drift_check.yml` all key on `main`, and two
+open pull requests target it. The "Validation failed — branch already exists" message is the only
+thing that prevented it. **Close that dialog.**
+
+### The two things that were actually wanted
+
+**A. Run the drift check from the branch** — Actions tab, not Settings:
+
+> **Actions** (top nav) → left sidebar **Lambda Drift Check** → **Run workflow** ▾ →
+> in **"Use workflow from"** pick `claude/daily-todo-summary-7zpsvv` → **Run workflow**
+
+That branch selector is the whole point: it runs *my fixed* workflow, so the run produces a
+**`drift-diffs` artifact** (bottom of the run page) with the full diff and a complete copy of the
+live `relayshield_api.py`. Download it before merging — the merge overwrites that code.
+
+**B. Merge** — a normal pull request, no renaming involved:
+
+> **Pull requests → New pull request → base `main` ← compare `claude/daily-todo-summary-7zpsvv`**
+> → Create → Merge
+
+Or from the Mac:
+
+    cd ~/"Side SaaS Hustle"
+    git fetch origin && git checkout main
+    git -c pull.rebase=false pull origin main
+    git merge --no-ff origin/claude/daily-todo-summary-7zpsvv
+    git push origin main
+
+Merging deploys `relayshield-api` **and** `rs-discord-bot` via CI. Do A first.
+
+### Everything AWS is still blocked here — but now it is one command
+
+This sandbox **does** carry `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, and I checked them rather
+than assuming: `sts:GetCallerIdentity` returns **`InvalidClientTokenId`**. They are sandbox
+scaffolding, not RelayShield credentials. So I cannot create tables and cannot deploy the Worker.
+
+**`tools/setup_pending_tables.sh` does all of it in one run** — idempotent, dry-runnable, and it
+**refuses to proceed unless the account is 239677749008**, because a command run without the profile
+resolved to 620534471984 once already and looked like a missing resource:
+
+    cd ~/"Side SaaS Hustle"
+    AWS_PROFILE=relayshield DRY_RUN=1 bash tools/setup_pending_tables.sh   # look first
+    AWS_PROFILE=relayshield bash tools/setup_pending_tables.sh
+
+It creates all three outstanding tables (`relayshield_ransomware_victims`,
+`relayshield_operator_identities`, `relayshield_scan_submissions`), enables TTL, **seeds
+`@bjorkanesiaaaa`**, discovers both Lambda role names and attaches all four IAM policies, then
+prints a verification table.
+
+### The Cloudflare Worker
+
+Also not deployable from here — no Cloudflare credentials, and both `dash.cloudflare.com` and the
+demo URL are egress-blocked. The Worker is not in CI, so merging will not do it either:
+
+    cd ~/"Side SaaS Hustle"
+    npx wrangler deploy --config wrangler.ti-demo.toml
+
+The **Ransomware Victims** tab appears after that. It shows the "not yet available" state until the
+victim table exists **and** an intel run has populated it — so do the table script first, or the tab
+will look broken on the demo URL.
+
+### My own commit tripped GitGuardian, and the irony is instructive
+
+**Incident #36505440**, commit `33d6a6f`, `relayshield_intel_monitor.py`. The "secret" was
+`9f2c1a8b4d6e0f37` — a made-up 16-hex string in a **docstring example**, inside
+`_nhi_fingerprints()`: the function whose entire job is ensuring real credentials are never stored.
+
+Fixed by replacing the literal with `<first 16 hex of sha256>`. **Mark the incident as a false
+positive rather than revoking anything** — there is nothing to revoke.
+
+Worth keeping: this is a live, self-inflicted example of the entropy-detector noise problem in
+`blog-secret-scanning-false-positives.md`, and it is exactly the kind of alert that trains people to
+stop reading the dashboard. **It is also material for that blog's follow-up.**
+
+### Sweep 002 — the SOCRadar channels, and a new category
+
+Thirteen keywords from the founder's SOCRadar tables. **New `hacktivist` category**: four of
+SOCRadar's ten most active groups are hacktivist crews (NoName057(16), RipperSec, Dark Storm Team,
+Z-Pentest Alliance) and none of the eight existing categories fit — forcing them into `general`
+would make the corpus's most active segment invisible to any category-aware query. **MEDIUM, not
+HIGH**: collection value is high, per-user alert value is not.
+
+Two calibration notes in `intel_channel_recommendations.md`: **two of the five channels supplied were
+already covered** by sweep 001's open-source pass (so fortnightly manual browsing is the right
+cadence, not weekly), and **`observer cloud` is `credential_dump`, not `infostealer`** — SOCRadar's
+own threat-type column says combo lists, which are a distinct product from raw stealer logs.
+
+---
+
 ## Still blocked on the Mac — nothing below can be done from the sandbox
 
 1. **Create `relayshield_ransomware_victims`** — `lambda_recovery_and_deploy.md` §6. Victims are

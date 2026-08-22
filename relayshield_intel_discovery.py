@@ -97,6 +97,37 @@ SEARCH_KEYWORDS = [
     ("play ransomware",     "ransomware"),
     ("cl0p",                "ransomware"),
 
+    # --- OSINT sweep 002, 2026-08-21: SOCRadar named channels (founder-supplied) ---
+    # Real channel NAMES from SOCRadar's stealer-log and top-groups tables.
+    # Added as keywords rather than as channel rows because SOCRadar publishes
+    # display names, not @handles, and this document's own rule is never to
+    # invent one. A brand name also survives the renames these operations rely
+    # on, which handles do not.
+    #
+    # Stealer-log distribution and credential aggregation:
+    ("moon cloud",          "infostealer"),   # curates + republishes other channels' logs
+    ("daisy cloud",         "infostealer"),   # "fresh one-hand logs", mostly RedLine
+    ("log sync",            "infostealer"),   # free + premium tiers, community uploads
+    ("observer cloud",      "credential_dump"),  # long-standing combo-list distribution
+    ("alien txtbase",       "credential_dump"),  # the massive infostealer-derived dump
+    ("data leak monitoring","credential_dump"),  # SOCRadar rates activity "very high"
+    ("mailpass",            "credential_dump"),  # EMP/mailpass/sqli chat
+    ("bidencash shop",      "card_shop"),
+    ("cti now",             "general"),          # news tracking, useful as a cross-promo seed
+    #
+    # Hacktivist crews — four of SOCRadar's ten most active groups. New
+    # category; see INTEL_CATEGORIES in relayshield_intel_monitor.py for why
+    # these are MEDIUM rather than HIGH.
+    ("noname057",           "hacktivist"),
+    ("rippersec",           "hacktivist"),
+    ("dark storm team",     "hacktivist"),
+    ("z-pentest",           "hacktivist"),
+    #
+    # NOT added: bare "alien". It is an ordinary English word and would match
+    # hundreds of unrelated channels — the generic-phrase trap this list has
+    # already been burned by once. "alien txtbase" is the operation's actual
+    # name and is specific.
+
     # --- OSINT sweep 001b, 2026-08-22 ---
     # The four most active ransomware operations of 2026 per current reporting,
     # NONE of which were in this list: the existing ransomware keywords are the

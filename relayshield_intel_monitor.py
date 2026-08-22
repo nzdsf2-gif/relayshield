@@ -354,7 +354,15 @@ _NHI_PATTERNS = (
 def _nhi_fingerprints(text: str) -> list:
     """Provider-labelled fingerprints of any machine credentials in `text`.
 
-    Returns e.g. "aws_access_key:9f2c1a8b4d6e0f37" — never the credential.
+    Returns "<provider>:<first 16 hex of sha256>" — never the credential.
+
+    The example that used to sit on this line was a made-up 16-hex string, and
+    GitGuardian's generic api-key detector flagged it on commit 33d6a6f
+    (incident #36505440) — a false positive on a docstring in the very function
+    whose job is to make sure real credentials never get stored. It is a neat
+    demonstration of the entropy-detector noise problem in
+    blog-secret-scanning-false-positives.md, and it is also exactly the kind of
+    alert that trains people to ignore the dashboard. No literal hex here.
     """
     out = set()
     for label, pattern in _NHI_PATTERNS:
@@ -819,6 +827,15 @@ INTEL_CATEGORIES = {
     "infostealer":     ("Infostealer Log Sale",    "⚠️ HIGH"),
     "phaas":           ("Phishing-as-a-Service",   "⚠️ HIGH"),
     "card_shop":       ("Card Shop",               "⚠️ MEDIUM"),
+    # Added 2026-08-21 (sweep 002). Four of SOCRadar's ten most active Telegram
+    # groups are hacktivist crews — NoName057(16), RipperSec, Dark Storm Team,
+    # Z-Pentest Alliance — and none of the existing categories fit: they run
+    # DDoS and OT-intrusion campaigns rather than selling credentials.
+    # MEDIUM rather than HIGH on purpose: for an identity-protection customer a
+    # hacktivist mention is context, not an account compromise. The collection
+    # value is high (they publish target lists and leaked data early); the
+    # per-user alert value is not, and the severity has to say which.
+    "hacktivist":      ("Hacktivist Operation",    "⚠️ MEDIUM"),
     "crypto":          ("Crypto Fraud",            "⚠️ MEDIUM"),
     "general":         ("Threat Intelligence",     "ℹ️ INFO"),
 }

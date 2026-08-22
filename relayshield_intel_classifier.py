@@ -61,7 +61,7 @@ BEDROCK_REGION = "us-east-1"
 # dead branch. Stolen-card shops are a real and distinct channel type.
 VALID_CATEGORIES = {
     "infostealer", "credential_dump", "ransomware", "crypto",
-    "phaas", "sim_swap", "card_shop", "general",
+    "phaas", "sim_swap", "card_shop", "hacktivist", "general",
 }
 
 _dynamodb = boto3.resource("dynamodb", region_name="us-east-1")

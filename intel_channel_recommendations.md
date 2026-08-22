@@ -159,6 +159,73 @@ published, people are not. Add it as a seed once the table exists.
 
 ---
 
+---
+
+# Sweep 002 — 2026-08-21, founder-supplied (SOCRadar)
+
+Named channels from SOCRadar's stealer-log and top-groups tables. **This is the sweep working as
+intended**: a source I cannot reach was read in a browser, and the names came back.
+
+## Shipped as keywords
+
+Added as **keywords, not channel rows**, because SOCRadar publishes display names rather than
+`@handles` and the rule against inventing one holds. A brand name also survives the renames these
+operations rely on.
+
+| Keyword | Category | Why |
+|---|---|---|
+| `moon cloud` | infostealer | Curates and republishes other channels' logs — an aggregator, so it reaches further than its own sources |
+| `daisy cloud` | infostealer | "Fresh one-hand logs", mostly RedLine, banking/crypto/enterprise creds |
+| `log sync` | infostealer | Free and premium tiers, community uploads |
+| `observer cloud` | credential_dump | Long-standing combo-list distribution |
+| `alien txtbase` | credential_dump | The large infostealer-derived dump. Inflated, but contains valid credentials |
+| `data leak monitoring` | credential_dump | SOCRadar rates activity "very high" |
+| `mailpass` | credential_dump | EMP/mailpass/sqli chat |
+| `bidencash shop` | card_shop | Refines the `bidencash` keyword from sweep 001 |
+| `cti now` | general | News tracking. Low direct value, useful as a cross-promotion seed |
+| `noname057` | **hacktivist** | DDoS / geopolitical |
+| `rippersec` | **hacktivist** | DDoS |
+| `dark storm team` | **hacktivist** | DDoS / hacking services |
+| `z-pentest` | **hacktivist** | OT intrusion — the most operationally serious of the four |
+
+**Not added: bare `alien`.** It is an ordinary English word and would match hundreds of unrelated
+channels. That is the generic-phrase trap this list has been burned by once already; `alien txtbase`
+is the operation's actual name.
+
+## New category: `hacktivist`
+
+Four of SOCRadar's ten most active groups are hacktivist crews, and **none of the existing eight
+categories fit** — they run DDoS and OT-intrusion campaigns rather than selling credentials. Forcing
+them into `general` would have made the corpus's most active segment invisible to any
+category-aware query.
+
+Added to `INTEL_CATEGORIES` and the classifier vocabulary, at **MEDIUM, not HIGH**, deliberately:
+for an identity-protection customer a hacktivist mention is context, not an account compromise. The
+*collection* value is high — they publish target lists and leaked data early — but per-user alert
+value is not, and the severity has to say which. `test_intel_category_drift.py` passes.
+
+## What the founder should notice about this sweep
+
+**Two of the five stealer-log channels supplied were already covered.** `omega cloud` and
+`bidencash` went in with sweep 001 from open reporting. That is a useful calibration: the automated
+sweep and a manual browse of SOCRadar overlap meaningfully, so the manual pass is worth doing
+fortnightly rather than weekly.
+
+**`observer cloud` was mis-categorised on first pass.** Reporting describes it as log aggregation,
+which reads as infostealer, but SOCRadar's own threat-type column says *credential leaks / combo
+lists*. Combo lists are a distinct product from raw stealer logs, so it is `credential_dump`. Worth
+recording because the same ambiguity will recur for every "cloud"-branded channel.
+
+## Scoreboard
+
+| Sweep | Date | Keywords added | Entity leads | Confirmed active later |
+|---|---|---|---|---|
+| 001 | 2026-08-21 | 7 | 4 | *pending — needs a discovery + classifier run* |
+| 001b | 2026-08-22 | 4 | 0 (1 operator handle) | *pending* |
+| 002 | 2026-08-21 | 13 | 0 (all became keywords) | *pending* |
+
+---
+
 ## Method, so each sweep is comparable
 
 1. Search current published threat-intelligence reporting for named Telegram operations, per

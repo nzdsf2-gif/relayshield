@@ -600,6 +600,84 @@ would never have reached the live bot.
 
 **Ronin-game outreach is unblocked.** The recommendations below assume it.
 
+## THE OUTREACH MESSAGE — send this
+
+*Written 2026-08-22. Short by design: the ask is a two-minute decision, so a long message signals a
+big one.*
+
+**Route it correctly first.** Post in a partner or business channel if one exists, otherwise open a
+ticket or DM an admin. **Do not post in general.** The rules-first step is what stopped the Solana
+Mobile post on 2026-08-13 and it is not optional — read `#rules` before writing anything.
+
+### Version A — the default
+
+> Hi — I built a free Discord bot that screens wallet addresses and links against criminal threat
+> intelligence, and I'd like to offer it to [SERVER] if it's useful.
+>
+> Someone types `/scan` with an address or a URL and gets back a verdict in a few seconds — whether
+> that address shows up in drainer, scam or sanctions data, or whether that link is a known phishing
+> page. Replies are private by default, and there's a button to share a result to the channel if
+> someone wants to warn everyone.
+>
+> It's free, there's no paid tier for it, and I'm not collecting anything from your members. I'm
+> offering it because the alternative is people finding out the hard way in your general chat.
+>
+> Happy to add it to a test channel first so you can try it before it goes anywhere public. Who's
+> the right person to ask?
+
+### Version B — when the server has visibly been hit
+
+Use only if you have actually seen it — a `#report-scammers` channel, a pinned drainer warning, a
+recent incident. **Referencing an incident that did not happen reads as a sales script.**
+
+> Hi — I noticed [the pinned warning about the fake mint / the scam reports channel]. I built a free
+> Discord bot for exactly that: `/scan` an address or a link and it checks it against criminal
+> threat intelligence and comes back in a few seconds. Private reply, with a button to post the
+> result to the channel if it's worth warning people about.
+>
+> Free, no paid tier, nothing collected from your members. Happy to put it in a staff channel first
+> so you can break it before anyone else sees it. Who should I be talking to?
+
+### Version C — Ronin games (Lumiterra, The Machines Arena)
+
+> Hi — I build a free wallet-and-link screening bot for game Discords, and I did the Ronin work
+> before writing to you: `ronin:` addresses are handled properly, not just `0x`. Most tools reject
+> the legacy format outright.
+>
+> `/scan` an address or a link, get a verdict in a few seconds against criminal threat intelligence.
+> Private by default, with a button to warn the channel. Free, no paid tier, nothing collected from
+> your players.
+>
+> Happy to drop it in a test channel so you can try it first. Who's the right person to ask?
+
+### Why these are worded the way they are
+
+* **"Free, no paid tier for it"** removes the objection an admin has before reading — that this is a
+  sales approach. It is also true. Do not soften it into "free to start".
+* **"Nothing collected from your members"** answers the second objection, which for a security bot is
+  the fatal one if left hanging.
+* **"Test channel first"** converts a permission decision into a reversible one. It is the single
+  highest-leverage sentence here.
+* **"Who's the right person to ask?"** — asking for a routing decision is much easier to answer than
+  asking for a yes, and it gets a reply from people who cannot themselves approve.
+* **No corpus numbers.** Same rule as every other outreach in this repo. An admin does not care how
+  many indicators there are; they care whether their members get drained.
+* **No feature list.** One capability, stated once.
+
+### Do not
+
+* Do not send to more than one server in the same ecosystem at once — they talk, and two parallel
+  approaches read as spray. Ronin order is in the next section.
+* Do not pitch rsscan. Free and MIT-licensed means there is nothing to negotiate; it is one line for
+  an engineer, not a partnership.
+* Do not follow up more than once. The Overtime thread is the model: a clean no within the hour, no
+  rule broken, no server burned.
+* Do not claim the bot prevents losses. It screens against what is already known — an address minutes
+  old and in no database yet comes back clean, and saying otherwise sets up the one complaint that
+  would get it removed.
+
+---
+
 ## Recommended Ronin targets, in send order
 
 Ronin is the single best chain on this list for the bot: one publisher (Sky Mavis) curates the

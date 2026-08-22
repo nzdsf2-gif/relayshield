@@ -88,6 +88,77 @@ expensive path.
 
 ---
 
+---
+
+# Sweep 001b — 2026-08-22
+
+Follow-up to the "recommend channels worth adding" question. **The honest headline: I can recommend
+what to hunt for, and I have shipped that. I cannot hand over verified handles from this sandbox,
+and the automated answer is a source, not a list.**
+
+## A. Shipped — the 2026 ransomware cohort was missing entirely
+
+The existing ransomware keywords are the **2024–2025 cohort**: LockBit, ALPHV/BlackCat, Cl0p, Play,
+RansomHub, Akira. Current reporting names the most active groups of 2026 as **Qilin, TheGentlemen,
+DragonForce and Akira** — so three of the top four could not be discovered at all, and two of them
+(Qilin, DragonForce) post-date every keyword in the file.
+
+Added to `SEARCH_KEYWORDS`: `qilin`, `dragonforce`, `thegentlemen`, `babuk`.
+
+**This is the highest-value item in either sweep.** Ransomware is also one of the thinnest categories
+in the seeded list — 2 channels against 7 infostealer — so this creates coverage rather than depth.
+**The general lesson: a keyword list decays as the leaderboard turns over, and nothing was checking.
+That is what this sweep is for.**
+
+## B. The automation answer: wire a public aggregator, do not curate by hand
+
+Asking me for handles produces a list that is stale in weeks — that was sweep 001's central finding
+and it has not changed. **The automated answer is to add a source that publishes them continuously.**
+
+**[RansomLook](https://www.ransomlook.io)** is the strongest candidate: a public, free aggregator
+that tracks ransomware groups **including their Telegram channels**, with an API surface
+(`/api/groups`, and an apparent Telegram listing). Feeding it into `relayshield_intel_discovery.py`
+would give a self-updating supply of ransomware-group channels with no hand-curation and no vendor.
+
+⚠️ **`ransomlook.io` is blocked by this sandbox's egress proxy** (403 on CONNECT), so I could not
+confirm the endpoint paths, the response shape, or whether the Telegram listing is exposed via API
+at all. **Verify from an unblocked machine before scoping**, exactly as the BB-3 lesson requires:
+
+    curl -sS "https://www.ransomlook.io/api/groups" | head -c 2000
+
+If it holds up, this is a small, high-yield addition — a `_ingest_ransomlook_channels()` alongside
+the existing keyword search, writing candidates as `pending_review` for the classifier. Same pattern
+as `_queue_discovered_channels()`, different source.
+
+## C. Named leads, unchanged and still unverified
+
+Sweep 001's four entities stand: **Omega Cloud** and **Moon Cloud** (infostealer), **BidenCash CVV**
+(card_shop), **Darcula / Magic Cat** (phaas). Published reporting names the operations but does not
+publish current channel identifiers.
+
+**Two sources that do publish channel lists are both egress-blocked here** — `socradar.io` and
+`breachsense.com`. Both are reachable from an ordinary browser and both maintain running lists of
+infostealer and threat-actor Telegram channels. **That is the fastest manual path to verified
+handles**, and it is a ten-minute job from the Mac, not a research problem.
+
+## D. One verified operator handle — different destination
+
+**`@bjorkanesiaaaa`** — published as the current administrator of **Babuk**.
+
+**This belongs in `relayshield_operator_identities`, not the channel list.** It is a person, not a
+room; there is nothing to monitor. It is worth recording because it is exactly the indicator class
+the operator-identity work was built for, and the class no public feed publishes — infrastructure is
+published, people are not. Add it as a seed once the table exists.
+
+## Scoreboard
+
+| Sweep | Date | Keywords added | Entity leads | Confirmed active later |
+|---|---|---|---|---|
+| 001 | 2026-08-21 | 7 | 4 | *pending — needs a discovery + classifier run* |
+| 001b | 2026-08-22 | 4 | 0 (1 operator handle) | *pending* |
+
+---
+
 ## Method, so each sweep is comparable
 
 1. Search current published threat-intelligence reporting for named Telegram operations, per
@@ -99,11 +170,7 @@ expensive path.
 5. Record structural findings about the collection surface itself.
 6. Re-check whether the previous sweep's keywords produced anything.
 
-## Scoreboard — carried forward each sweep
-
-| Sweep | Date | Keywords added | Entity leads | Confirmed active later |
-|---|---|---|---|---|
-| 001 | 2026-08-21 | 7 | 4 | *(fill in after the next discovery + classifier run)* |
+## Closing the loop
 
 **Closing the loop matters more than the sweep.** A keyword that has produced nothing after two
 discovery runs should be removed, not left to accumulate. Check

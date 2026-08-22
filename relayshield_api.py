@@ -5486,6 +5486,73 @@ def _ioc_confidence(source: str, seen_ts: str) -> float:
     return round(max(0.40, base - decay), 2)
 
 
+def _telegram_victim_sightings(domain: str) -> dict:
+    """Leak-site victim sightings for `domain` from the Telegram collection pipeline.
+
+    A SECOND, WEAKER SOURCE, and it must stay labelled as one. The existing
+    RANSOMWARE_TABLE_API corpus is scraped from leak sites and is treated as
+    confirmed. This table is written by _store_ransomware_victims() in
+    relayshield_intel_monitor.py from a regex over gang-channel posts, so it
+    carries real false positives and every row is stored confidence="unverified".
+
+    Merging the two into one verdict would launder that uncertainty into a
+    CRITICAL, which for a ransomware claim about a named company is the single
+    most damaging thing this API could get wrong. So this returns its own block
+    and the caller keeps the tiers apart.
+
+    Matching goes domain -> org token -> the same normalised match_keys the
+    monitor wrote, so acme.com finds rows stored as "Acme", "ACME Corp" and
+    "Acme Corporation" -- but not "Acme Technologies", which is a different
+    company. Returns an empty result on any failure: an enrichment source that
+    is down must never fail the primary lookup.
+    """
+    token = _org_token(domain)
+    if not token:
+        return {"sightings": 0, "first_seen": "", "last_seen": "", "channels": [], "names": []}
+
+    keys = _ransom_victim_keys(token)
+    empty = {"sightings": 0, "first_seen": "", "last_seen": "", "channels": [], "names": []}
+    if not keys:
+        return empty
+
+    flt = None
+    for k in keys:
+        cond = boto3.dynamodb.conditions.Attr("match_keys").contains(k)
+        flt = cond if flt is None else (flt | cond)
+
+    try:
+        resp = dynamodb.Table(RANSOM_VICTIMS_TABLE).scan(
+            FilterExpression=flt,
+            ProjectionExpression="display_name, victim_name, seen_ts, channel",
+        )
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp and len(items) < 500:
+            resp = dynamodb.Table(RANSOM_VICTIMS_TABLE).scan(
+                FilterExpression=flt,
+                ProjectionExpression="display_name, victim_name, seen_ts, channel",
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            items.extend(resp.get("Items", []))
+    except Exception as exc:
+        # Includes the pre-create ResourceNotFoundException. Enrichment absent
+        # is not the same as clean, and the caller says so in its response.
+        logger.info("Telegram victim lookup unavailable domain=%s: %s", domain, exc)
+        return empty
+
+    if not items:
+        return empty
+
+    stamps = sorted(str(i.get("seen_ts", "")) for i in items if i.get("seen_ts"))
+    return {
+        "sightings":  len(items),
+        "first_seen": stamps[0] if stamps else "",
+        "last_seen":  stamps[-1] if stamps else "",
+        "channels":   sorted({str(i.get("channel")) for i in items if i.get("channel")})[:5],
+        "names":      sorted({str(i.get("display_name") or i.get("victim_name") or "")
+                              for i in items if (i.get("display_name") or i.get("victim_name"))})[:5],
+    }
+
+
 def handle_ransomware_risk(params: dict) -> dict:
     domain = (params.get("domain") or "").strip().lower().removeprefix("www.")
     if not domain or "." not in domain:
@@ -5519,6 +5586,10 @@ def handle_ransomware_risk(params: dict) -> dict:
     victim_groups  = list({i.get("group", "") for i in victim_items if i.get("group")})
     first_seen     = min((i.get("discovered", "") for i in victim_items), default="") if victim_items else ""
 
+    # Telegram collection pipeline, added 2026-08-22. Its own tier, never merged
+    # into the confirmed verdict — see _telegram_victim_sightings().
+    tg = _telegram_victim_sightings(domain)
+
     if on_victim_list:
         risk_level = "CRITICAL"
         rec = (
@@ -5533,18 +5604,45 @@ def handle_ransomware_risk(params: dict) -> dict:
             "before a ransomware incident was associated with this domain. These credentials may "
             "indicate pre-attack reconnaissance. Rotate any shared credentials with this organisation."
         )
+    elif tg["sightings"]:
+        # MEDIUM, deliberately not HIGH and never CRITICAL. This is a pattern
+        # match over criminal-channel chatter: it is a reason to go and look,
+        # not a finding. The copy has to carry that or the tier is meaningless.
+        risk_level = "MEDIUM"
+        _named = tg["names"][0] if tg["names"] else domain
+        rec = (
+            f"{domain} has not been found on any scraped leak site, but a matching organisation "
+            f"name ({_named}) was seen {tg['sightings']} time(s) in monitored ransomware channels. "
+            "This is an UNVERIFIED lead extracted by pattern match, not a confirmed breach — false "
+            "positives are expected. Treat it as a prompt to confirm directly with the organisation "
+            "before acting, and do not notify anyone on the strength of this alone."
+        )
     else:
         risk_level = "CLEAN"
         rec = f"No ransomware victim listing or pre-ransomware credential exposure found for {domain}."
 
-    logger.info("ransomware-risk domain=%s victim=%s pre_creds=%d risk=%s",
-                domain, on_victim_list, pre_ransomware_count, risk_level)
+    logger.info("ransomware-risk domain=%s victim=%s pre_creds=%d tg_sightings=%d risk=%s",
+                domain, on_victim_list, pre_ransomware_count, tg["sightings"], risk_level)
     return _ok({
         "domain":                   domain,
         "on_victim_list":           on_victim_list,
         "victim_groups":            victim_groups,
         "first_seen":               first_seen,
         "pre_ransomware_ioc_count": pre_ransomware_count,
+        # Kept as its own block, with its confidence stated inline. A consumer
+        # that only reads risk_level is unaffected; one that wants the earlier,
+        # weaker signal has to look at a field that says "unverified" on it.
+        "telegram_sightings": {
+            "count":      tg["sightings"],
+            "first_seen": tg["first_seen"],
+            "last_seen":  tg["last_seen"],
+            "channels":   tg["channels"],
+            "matched_as": tg["names"],
+            "confidence": "unverified",
+            "note": ("Extracted by pattern match from monitored ransomware channels. Typically "
+                     "surfaces before a leak-site listing, and will contain false positives. "
+                     "Confirm independently before acting."),
+        },
         "risk_level":               risk_level,
         "recommendation":           rec,
         "checked_at":               datetime.now(timezone.utc).isoformat(),

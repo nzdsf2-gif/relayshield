@@ -421,6 +421,82 @@ exists (its absence changes the cost model completely).
 
 ---
 
+## Round 5 — 2026-08-22
+
+### Lambda drift check: same finding, and the truncation is now fixed
+
+Run **32575739595** is the **same drift on `relayshield-api`**, not a new one — identical
+`head_sha` (`7009f37`), because `main` has not moved. It will fire daily until this branch merges
+and the API deploys. The issue-dedupe logic worked; no duplicate issue was opened.
+
+**Fixed the thing that actually blocked recovery.** `diff -u | head -60` truncated an 11,000-line
+file's diff after four hunks. `lambda_drift_check.yml` now writes the **full diff** and a **copy of
+each live handler** to a `drift-diffs` artifact, retained 30 days, uploaded even when the step
+fails. The issue body points at the artifact instead of a truncated log.
+
+**That removes the Mac from the loop.** Recovery no longer needs AWS credentials or the right
+working directory — download the artifact from the run. The live handler copy matters most: until
+someone commits it, that artifact is the only copy of that code.
+
+### Ransomware victims — the real gap was two tables, not a missing feature
+
+`relayshield_intel_ransomware` (scraped leak sites, treated as confirmed) already fed
+`/v1/metered/ransomware-risk`, `/v1/metered/cve-identity-risk` and the identity-risk-score dimension.
+`relayshield_ransomware_victims` (the intel monitor's Telegram extraction) fed **only** the new
+`/v1/intel/ransomware`. **A domain named in a gang channel but not yet on a scraped leak site
+returned CLEAN** from every endpoint a customer actually calls.
+
+Wired in as its own tier, never merged into the confirmed verdict:
+* `_telegram_victim_sightings()` matches domain → org token → the same `match_keys` the monitor
+  wrote. Verified both directions: `acme.com` finds "Acme", "Acme Corp" and "Acme Corporation";
+  `acmecorp.com` finds both keys; **"Acme Technologies" correctly does not match.**
+* New `telegram_sightings` block on the response with `confidence: "unverified"` inline, so a
+  consumer reading only `risk_level` is unaffected and one reading the weaker signal has to look at
+  a field that says unverified on it.
+* New **MEDIUM** tier — deliberately not HIGH and never CRITICAL. Merging a regex match over channel
+  chatter into a CRITICAL ransomware claim about a named company is the most damaging thing this API
+  could get wrong.
+* Returns empty on any failure, including the pre-create `ResourceNotFoundException`. Enrichment
+  absent must never fail the primary lookup.
+
+Still gated on the table existing — `lambda_recovery_and_deploy.md` §6.
+
+### smolagents #2557 — reply, do not build yet
+
+HOL Guard (kantorcodes) has the **same pre-execution requirement, arrived at independently**, and
+describes a contract identical to ours. That is the most valuable thing that can happen to a feature
+request, and **no maintainer has answered yet** — so a PR into someone else's core agent loop is
+speculative. Draft reply in `smolagents_gate_hook_issue_draft.md`; endorse their MCP test clause
+specifically, because a hook that holds for native tools and leaks on MCP-imported ones is worse than
+no hook. If a maintainer says yes: **take the tests, not the implementation** — the piece most likely
+to be skipped and the one that makes a PR land.
+
+### Cursor Origin — verdict: no
+
+Asked again, answered the same way and now recorded as a decision. **Origin's beta has no public
+repositories**, and every one of `/v1/metered/secret-scan`'s six sources searches a public surface
+unauthenticated. A seventh source would return zero forever while reporting that it ran — a false
+all-clear, which that endpoint's own comments name as its worst failure. **Not worth building.**
+
+The authorised installation-token path is real but is a different product (`/v1/metered/repo-scan`),
+and `cursor.com` is egress-blocked here so the API contract is unverified. **Park it** until Origin
+has public repos or a customer asks by name.
+
+### Outreach
+
+* **SentinelOne removed** from the target list; PartnerOne rejection was an automated screen.
+* **ThreatLocker sent.** `xcitium_outreach.md` Part 3 adds the wider list with the filter that
+  generalises the ThreatLocker fit: *a specific, falsifiable control* is what the disjointness
+  argument attaches to. Tier 1: Huntress, Blackpoint, WatchGuard, Todyl. Tier 3 is the unworked
+  angle — **backup vendors** (Datto/Kaseya, Acronis, Veeam): restoring into an environment whose
+  credentials are still exposed re-runs the incident.
+  **New negative filter: prefer open contribution routes over partner-portal forms.** Rapid7 took
+  PR #4024 with no gate; SentinelOne's form rejected in five minutes.
+* **Discord bot outreach message written** into the gaming focus list — three versions (default,
+  incident-specific, Ronin), with the reasoning for each line and a do-not list.
+
+---
+
 ## Still blocked on the Mac — nothing below can be done from the sandbox
 
 1. **Create `relayshield_ransomware_victims`** — `lambda_recovery_and_deploy.md` §6. Victims are
@@ -440,5 +516,8 @@ exists (its absence changes the cost model completely).
 
 Sentinel PR #14924 awaiting review · faithful restore of the lost Telegram code · SOCRadar
 benchmarking on `measured_exclusive_share` · new Zapier Sandbox template · DFK outreach · 1 Sept
-Zapier push · the `extract_iocs()`/`type_map` divergence test · the `check_url` duplication between
-the Telegram and Discord bots.
+Zapier push · the `check_url` duplication between the Telegram and Discord bots.
+
+**Closed:** SentinelOne (rejected 2026-08-21, removed from the target list — see
+`xcitium_outreach.md` Part 3). The `extract_iocs()`/`type_map` divergence test is **done** —
+`test_intel_category_drift.py`, running in CI on every push.

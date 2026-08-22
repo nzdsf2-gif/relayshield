@@ -86,7 +86,23 @@ jobs:
             if unzip -p live.zip "$FILE" > live_handler.py 2>/dev/null && [ -s live_handler.py ]; then
               if ! diff -q "$FILE" live_handler.py >/dev/null; then
                 echo "::error::DRIFT — $FUNC does not match $FILE on main"
-                diff -u "$FILE" live_handler.py | head -60 || true
+                # The FULL diff, saved as an artifact. This used to be
+                # `| head -60`, which on 2026-08-21 truncated an 11,000-line
+                # file's diff after four hunks and printed "Broken pipe" -- so
+                # the run proved relayshield-api had drifted but could not say
+                # how far, and recovering the rest needed a laptop with AWS
+                # credentials. The artifact makes the whole diff downloadable
+                # from the run itself, which is the point of the check.
+                mkdir -p drift_diffs
+                diff -u "$FILE" live_handler.py > "drift_diffs/$FUNC.diff" || true
+                # Keep the log readable; the artifact carries the rest.
+                echo "--- first 200 lines, full diff in the drift-diffs artifact ---"
+                head -200 "drift_diffs/$FUNC.diff" || true
+                echo "--- $(wc -l < "drift_diffs/$FUNC.diff") diff lines total ---"
+                # Preserve the live copy too: it is the only place this code
+                # exists. Recovering FROM it is the documented first step, and
+                # a later deploy overwrites it.
+                cp live_handler.py "drift_diffs/$FUNC.live.py"
                 DRIFTED="$DRIFTED $FUNC"
               else
                 echo "ok — $FUNC matches $FILE"
@@ -99,6 +115,16 @@ jobs:
 
           echo "drifted=$DRIFTED" >> "$GITHUB_OUTPUT"
           [ -z "$DRIFTED" ] || exit 1
+
+      # Runs even when the compare step failed -- that is exactly when there is
+      # something to upload.
+      - name: Upload full drift diffs and recovered handlers
+        if: always() && hashFiles('drift_diffs/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-diffs
+          path: drift_diffs/
+          retention-days: 30
 
       - name: Open an issue on drift
         if: failure() && steps.compare.outputs.drifted != ''
@@ -122,9 +148,14 @@ jobs:
                 'One of two things happened:',
                 '',
                 '1. Someone deployed by hand and did not commit. **Recover the code from the',
-                '   live function before anything redeploys over it** — see the run log for the',
-                '   diff, and `aws lambda get-function --function-name <fn> --query Code.Location`',
-                '   for the package.',
+                '   live function before anything redeploys over it.**',
+                '',
+                '   **Download the `drift-diffs` artifact from this run** — it holds the FULL',
+                '   diff and a copy of each live handler as deployed. No AWS access needed, and',
+                '   it is the only copy of that code until someone commits it. Retained 30 days.',
+                '',
+                '   (`aws lambda get-function --function-name <fn> --query Code.Location` gets',
+                '   the package directly, but must be run from inside the repo checkout.)',
                 '2. A deploy failed part-way and the function is stale.',
                 '',
                 'This check exists because case 1 silently destroyed the Telegram help',

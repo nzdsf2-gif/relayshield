@@ -92,6 +92,20 @@ SEARCH_KEYWORDS = [
     ("play ransomware",     "ransomware"),
     ("cl0p",                "ransomware"),
 
+    # --- OSINT sweep 001b, 2026-08-22 ---
+    # The four most active ransomware operations of 2026 per current reporting,
+    # NONE of which were in this list: the existing ransomware keywords are the
+    # 2024-2025 cohort (LockBit, ALPHV, Cl0p, Play), and the leaderboard has
+    # moved. Qilin and DragonForce in particular post-date every keyword here.
+    #
+    # Ransomware is also one of the thinnest categories in the seeded channel
+    # list -- 2 channels against 7 infostealer -- so this is coverage that does
+    # not exist rather than depth on a category that is already strong.
+    ("qilin",               "ransomware"),
+    ("dragonforce",         "ransomware"),
+    ("thegentlemen",        "ransomware"),
+    ("babuk",               "ransomware"),
+
     # --- OSINT sweep 001, 2026-08-21 (intel_channel_recommendations.md) ---
     # Platform and operation BRAND names, not generic phrases. Reporting is
     # explicit that these operations survive takedowns by rotating channel

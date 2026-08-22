@@ -194,3 +194,86 @@ Replace `<HOOK>` with the company's line from the table below. Everything else s
   written for end customers, and its frame is "your EDR cannot see this". To a vendor that reads as
   an attack on their product. Send `RelayShield_MSP_Solution_Brief.md` instead — it is written for
   the channel and it is the document that actually matches this pitch.
+
+
+---
+---
+
+# Part 3 — Wider target list, after the ThreatLocker send
+
+*Added 2026-08-22. ThreatLocker sent; SentinelOne rejected and removed.*
+
+## What the ThreatLocker send tells us about who to target
+
+ThreatLocker was the cleanest fit on Part 2's list for one structural reason worth naming, because
+it generalises: **its product makes a strong, specific, falsifiable claim** — if it is not approved,
+it does not run. A specific claim gives the disjointness argument something to attach to. Vendors
+whose marketing is a broad "complete protection" have no edge to work against, and the message
+collapses into a generic pitch.
+
+**So the filter is not "sells security to MSPs". It is:**
+
+1. **A specific, nameable control** — allowlisting, containment, MFA, network segmentation, backup.
+   The sharper the claim, the sharper the gap next to it.
+2. **The control operates on something the customer owns** — a device, a tenant, a network, a
+   session. That is what makes "outside the perimeter" a real boundary rather than a slogan.
+3. **They sell through a channel**, so they are structurally interested in things their partners can
+   resell or bundle.
+4. **They are not already selling identity threat intelligence**, or if they are, we can name the
+   overlap in the first line.
+
+**And a negative filter, learned today: skip anyone whose partner programme has a hard commercial
+gate.** SentinelOne's PartnerOne rejected in under five minutes — an automated screen on company
+size or revenue, not a judgement on fit. Prefer vendors with an **open contribution route** (a
+plugin repo, a marketplace with public submission, a documented integration path) over a partner
+portal with a form. Rapid7 InsightConnect PR #4024 is the proof: an open-contribution repo took the
+work with no gate at all.
+
+## Ranked targets
+
+Tier 1 first. Send one at a time — the first reply teaches you which objection is real before you
+spend the rest.
+
+### Tier 1 — specific control, channel-led, no obvious identity overlap
+
+| Company | Their specific control | The disjointness line | Route |
+|---|---|---|---|
+| **ThreatLocker** | Application allowlisting and ringfencing | ✅ **SENT 2026-08-22** | — |
+| **Huntress** | Managed EDR + ITDR for SMB via MSPs | ⚠️ Real overlap — ITDR covers M365 identity. Name it in line one: theirs is inside the tenant, ours is the carrier and the criminal market before any login | Partner/alliances |
+| **Blackpoint Cyber** | 24/7 MDR with fast containment | Sell earlier warning, not more coverage. An MDR is billed in analyst hours, so extra alert volume is a cost — a signal that pre-empts an incident is a margin argument | Technology alliances |
+| **WatchGuard** | AuthPoint MFA + firewall + endpoint | Sharpest single line available: a SIM swap walks straight through the SMS half of AuthPoint, at the carrier, where no product can see it. Keep it factual — the point is that carrier monitoring makes their MFA hold | Technology partner |
+| **Todyl** | Single-agent consolidated SASE + SIEM + EDR for MSPs | Their pitch is "one agent, fewer tools", so an extra console is the objection. Lead with the API and the feed, not the alert product | Partner team |
+
+### Tier 2 — platform and infrastructure plays, different ask
+
+These want **data or a marketplace listing**, not a partnership. Do not send them the alert-delivery
+story.
+
+| Company | Why | The ask |
+|---|---|---|
+| **LimaCharlie** | SecOps Cloud Platform, usage-billed, add-on marketplace, telemetry-native | Be an add-on / feed. Lead with the API, STIX/TAXII, MISP and per-call pricing |
+| **Tines** | SOAR, and we already ship a story there (`tines/`) | Extend the existing integration rather than opening a new relationship |
+| **Rapid7 InsightConnect** | ✅ Already done — PR #4024, open contribution, no gate | Follow up on the PR; add actions once it lands |
+| **Microsoft Sentinel** | Open contribution model, and PR #14924 is already in flight | Land #14924, then propose the second data-connector PR |
+
+### Tier 3 — backup and recovery, an angle nobody is working
+
+Worth naming because the argument is unusually clean and these vendors are deeply channel-led.
+
+| Company | The line |
+|---|---|
+| **Datto / Kaseya**, **Acronis**, **Veeam** | Backup answers "we can restore after ransomware". It does not answer how the attacker got valid credentials — which, for the intrusions that matter, is a stolen session, a breached credential, or a swapped SIM. Restoring into an environment whose credentials are still exposed re-runs the incident. That is a genuinely different sale from every EDR conversation on this page |
+
+### Explicitly not on this list
+
+* **SentinelOne** — rejected 2026-08-21 by automated screen. Removed. Re-entry is a joint customer
+  pulling for it, which is a sales outcome, not a submission to redo.
+* **CrowdStrike** — no open build path found (2026-07-26 research); partnerships read as formal
+  enterprise alliances. Deprioritised unless a specific deal pulls for it.
+* **Xcitium** — Part 1 above, still unsent.
+
+## Reuse note
+
+The 50/100/250-word descriptions, form fields, technical spec and data-handling section in
+`sentinelone_partner_submission.md` are vendor-neutral. Swap the product names in the "why this
+integration" block and they work for every company above — that submission is not wasted work.

@@ -1032,7 +1032,12 @@ def _store_ransomware_victims(victims: list, channel: str, category: str) -> int
     stored = 0
     for name in victims:
         name = (name or "").strip()
-        if len(name) < 4:
+        # Floor of 3, matching _victim_keys(). This read 4 and defeated that
+        # function's own fix: a three-letter victim -- IBM, SAP, AWS, EDF -- was
+        # dropped here before match keys were ever generated, so lowering the
+        # key floor to 3 changed nothing for exactly the names it was lowered
+        # for. Both floors have to agree or the shorter one is decorative.
+        if len(name) < 3:
             continue
         try:
             table.put_item(Item={

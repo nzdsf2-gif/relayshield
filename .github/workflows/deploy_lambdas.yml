@@ -176,10 +176,16 @@ jobs:
             echo "$FUNC" >> deployed_funcs.txt
 
             echo "→ Deploying to $FUNC"
+            # --query is not cosmetic. The default output is the function's
+            # FULL configuration, environment block included, so every deploy
+            # since this workflow existed has printed live secrets in plaintext
+            # into a log that anyone with repo read access can fetch. Print the
+            # name only; the wait below is what actually confirms the update.
             aws lambda update-function-code \
               --function-name "$FUNC" \
               --zip-file fileb://deploy.zip \
-              --region us-east-1
+              --region us-east-1 \
+              --query 'FunctionName' --output text
 
             # Wait for update to complete before next deploy
             aws lambda wait function-updated \

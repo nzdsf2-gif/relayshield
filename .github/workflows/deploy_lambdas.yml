@@ -15,6 +15,12 @@ on:
       # resolves that by walking imports; these entries just make the push
       # actually trigger the workflow.
       - 'relayshield_openapi_spec.py'
+      # Recovered from the live package on 2026-08-23: it was deployed by hand
+      # and had never been in the repo, so nothing here listed it and no deploy
+      # could ever have shipped a change to it. relayshield_api.py imports it,
+      # so the job's import walk maps it to relayshield-api on its own -- this
+      # entry only exists so a change to it triggers the workflow at all.
+      - 'relayshield_sim_swap_consent.py'
       - 'relayshield_siem_connector.py'
       - 'relayshield_digest_sender.py'
       - 'relayshield_day3_sender.py'

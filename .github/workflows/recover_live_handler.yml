@@ -1,0 +1,103 @@
+name: Recover Live Lambda Handler
+
+# WHY THIS EXISTS
+# ---------------
+# lambda_drift_check.yml tells you a live function has drifted from main. It
+# does not give you a way to GET the drifted code, and its diff is truncated to
+# 60 lines, so the issue it opens can understate what is actually at stake.
+#
+# The drift issue's own instruction is "recover the code from the live function
+# before anything redeploys over it". That instruction was unrunnable from a
+# sandbox with no AWS credentials -- the only place holding a usable role is
+# Actions. This workflow closes that gap: it pulls the deployed package, lifts
+# the handler out of it, and pushes it to a scratch branch that can then be
+# diffed and reconciled like any other change.
+#
+# It NEVER writes to a Lambda and NEVER pushes to main. Read-only on AWS.
+
+on:
+  workflow_dispatch:
+    inputs:
+      function:
+        description: Live Lambda function name to recover from
+        required: true
+        default: relayshield-api
+      handler:
+        description: Handler file to lift out of the deployed package
+        required: true
+        default: relayshield_api.py
+      branch:
+        description: Scratch branch to push the recovered file to (force-updated)
+        required: true
+        default: claude/recovered-live-relayshield-api
+
+jobs:
+  recover:
+    name: Lift the live handler onto a scratch branch
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC, to read the function
+      contents: write   # to push the scratch branch
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::239677749008:role/relayshield-github-deploy
+          aws-region: us-east-1
+
+      - name: Download the deployed package and extract the handler
+        run: |
+          set -euo pipefail
+          FUNC='${{ inputs.function }}'
+          FILE='${{ inputs.handler }}'
+
+          URL=$(aws lambda get-function --function-name "$FUNC" --region us-east-1 \
+                  --query 'Code.Location' --output text)
+          [ -n "$URL" ] && [ "$URL" != "None" ] || { echo "::error::no package URL for $FUNC"; exit 1; }
+          curl -sS -o live.zip "$URL"
+
+          # The manifest matters as much as the handler. A package carrying
+          # modules that main does not know about is a second kind of drift,
+          # and one a handler-only diff cannot show.
+          mkdir -p recovered
+          unzip -l live.zip | tee "recovered/${FUNC}.manifest.txt"
+
+          unzip -p live.zip "$FILE" > "recovered/$FILE"
+          [ -s "recovered/$FILE" ] || { echo "::error::$FILE not found inside $FUNC's package"; exit 1; }
+
+          # Record what the live sha actually was, so the recovered commit is
+          # pinned to a specific deployed artifact rather than "whatever was
+          # live around then".
+          aws lambda get-function-configuration --function-name "$FUNC" --region us-east-1 \
+            --query '{CodeSha256:CodeSha256,LastModified:LastModified,Runtime:Runtime}' \
+            --output json | tee "recovered/${FUNC}.deployed.json"
+
+          rm -f live.zip
+          echo "--- recovered ---"
+          wc -l "recovered/$FILE"
+          diff -u "$FILE" "recovered/$FILE" > "recovered/${FUNC}.drift.diff" || true
+          echo "drift diff lines: $(wc -l < "recovered/${FUNC}.drift.diff")"
+
+      - name: Push the recovered handler to a scratch branch
+        run: |
+          set -euo pipefail
+          BRANCH='${{ inputs.branch }}'
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan recovery-tmp
+          git rm -rq --cached . || true
+          git add -f recovered/
+          git commit -q \
+            -m "recover: live ${{ inputs.function }} package contents" \
+            -m "Lifted from the deployed package by recover_live_handler.yml." \
+            -m "Not reconciled with main -- this is the live bytes, verbatim."
+          git push -f origin "HEAD:refs/heads/$BRANCH"
+          echo "Pushed to $BRANCH"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recovered-${{ inputs.function }}
+          path: recovered/

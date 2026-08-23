@@ -20,19 +20,26 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   GET  /v1/result/{analysis_id}     — Poll VT scan result
 
 Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
+
+  PRICES BELOW ARE ILLUSTRATIVE AND PARTIAL. `PAYG_PRICE_UNITS` is the only
+  source of truth, and it holds ~28 endpoints against the 14 listed here.
+  Never quote a price from this header; read the map. Corrected 2026-08-14
+  after three entries here had drifted from what is actually charged, one of
+  them understating a live price by half.
+
   POST /v1/payg/breach              — $0.10 USDC
   POST /v1/payg/sim-swap            — $0.25 USDC
   POST /v1/payg/domain              — $0.50 USDC
-  POST /v1/payg/oauth-watchlist     — $0.15 USDC
+  POST /v1/payg/oauth-watchlist     — $0.30 USDC — combined HIBP watchlist + INTEL-5 stealer corpus
   POST /v1/payg/scan-wallet         — $0.10 USDC (legacy EVM-only)
   POST /v1/payg/scan-url            — $0.05 USDC
   POST /v1/payg/scan-file           — $0.10 USDC
-  POST /v1/payg/wallet-risk         — $0.15 USDC — multi-chain EVM/Solana/TON/Bitcoin
-  POST /v1/payg/token-security      — $0.10 USDC — token honeypot + tax analysis
+  POST /v1/payg/wallet-risk         — $0.05 USDC — multi-chain EVM/Solana/TON/Bitcoin (teaser price, CDPX-3)
+  POST /v1/payg/token-security      — $0.05 USDC — token honeypot + tax analysis (teaser price, CDPX-3)
   POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
   POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
   POST /v1/payg/infostealer         — $0.15 USDC — Hudson Rock infostealer detection
-  POST /v1/payg/supply-chain        — $0.10 USDC per domain — vendor breach + infostealer risk (up to 10 domains)
+  POST /v1/payg/supply-chain        — $0.10 USDC per CALL, not per domain — vendor breach + infostealer risk (up to 10 domains)
   POST /v1/payg/session-risk        — $0.30 USDC — INTEL-5 active session hijack / AiTM detection
   POST /v1/payg/tech-stack-cve      — $0.20 USDC — CVE targeting risk by declared tech stack
   POST /v1/payg/bulk-identity-risk  — $2.00 USDC — hierarchical org + per-agent-email risk scoring
@@ -61,6 +68,7 @@ import base64
 import bisect as _bisect
 import concurrent.futures
 from decimal import Decimal
+import hashlib
 import json
 import html
 import logging
@@ -77,6 +85,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 # Local module — pure data, no AWS dependencies. MUST be included in this
 # function's deployment zip; without it every invocation dies at import with
@@ -273,6 +282,11 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
     "/v1/payg/bulk-identity-risk":    2000000,  # $2.00 — hierarchical org + per-agent-email risk scoring
     "/v1/payg/identity-risk-score":   350000,   # $0.35 — domain security credit score (0-100), 6 dimensions
+    # Added 2026-08-08. Absent before, so both fell through to the 250000
+    # default and charged x402 buyers $0.25 against an advertised $0.35, and
+    # neither appeared in /.well-known/x402.json (26 resources, not 28).
+    "/v1/payg/mcp-registry-risk":     350000,   # $0.35 — MCP server typosquat + reputation risk
+    "/v1/payg/prompt-injection-breach": 350000, # $0.35 — prompt-injection corpus exposure check
     "/v1/payg/cert-expiry":            50000,   # $0.05 — TLS cert expiry/renewal risk for your own domain (crt.sh, free source)
     "/v1/payg/ip-intel":              100000,   # $0.10 — passive DNS + IP reputation via VirusTotal
 }
@@ -281,6 +295,24 @@ GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
 GOPLUS_TOKEN_URL       = "https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
 GOPLUS_NFT_URL         = "https://api.gopluslabs.io/api/v1/nft_security"
 TONAPI_ACCOUNTS_URL    = "https://tonapi.io/v2/accounts/{address}"
+
+# Keys in a GoPlus address_security `result` that are NOT risk signals. Any
+# handler that derives flags by enumerating raw keys for the value "1" must
+# subtract these first.
+#
+# `contract_address` is a descriptor meaning "this address is a contract". It
+# comes back as "1" for perfectly ordinary addresses — verified 2026-08-14
+# against vitalik.eth, the USDC contract and a Tornado router, all of which
+# return it and nothing else. Treating it as a flag would rate most of the
+# well-known addresses on Ethereum as MEDIUM, and would push crypto-intel to
+# HIGH, purely for existing as a contract.
+#
+# `data_source` is a provider credit string ("SlowMist,BlockSec"), so it never
+# equals "1" and is listed here for documentation rather than for effect.
+#
+# handle_wallet_risk does not need this set: it maps an explicit allowlist of
+# flags to labels, which is why it never had the false positive.
+_ADDR_NON_RISK_KEYS = {"contract_address", "data_source"}
 
 # OAuth supply chain watchlist — high-risk OAuth-capable SaaS apps
 OAUTH_WATCHLIST = {
@@ -356,6 +388,7 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/oauth-watchlist":  "relayshield_oauth_watchlist_calls",   # combined HIBP + INTEL-5
     "/v1/metered/crypto-intel":     "relayshield_crypto_intel_calls",
     "/v1/metered/supply-chain":     "relayshield_supply_chain_calls",
+    "/v1/metered/dependency-risk":  "relayshield_dependency_risk_calls",
     "/v1/metered/session-risk":     "relayshield_session_risk_calls",
     "/v1/metered/identity-graph":   "relayshield_identity_graph_calls",
     "/v1/metered/ransomware-risk":  "relayshield_ransomware_risk_calls",
@@ -394,6 +427,7 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/oauth-watchlist": 30,   # $0.30 — combined HIBP watchlist + INTEL-5 stealer corpus (premium)
     "/v1/metered/crypto-intel":    30,   # $0.30
     "/v1/metered/supply-chain":    10,   # $0.10 per call (up to 10 vendor domains)
+    "/v1/metered/dependency-risk": 50,   # $0.50 — fans out to <=100 npm registry lookups + <=150 stealer-log screens
     "/v1/metered/session-risk":    30,   # $0.30 — INTEL-5 active session hijack / AiTM detection (premium)
     "/v1/metered/identity-graph":  35,   # $0.35 — identity correlation
     "/v1/metered/ransomware-risk": 40,   # $0.40 — ransomware victim + pre-ransomware credential check
@@ -411,6 +445,13 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/threat-actor":    30,   # $0.30/call — exploit chatter + actor/campaign lookup
     "/v1/metered/cve-identity-risk": 40,   # $0.40/call — CVE × identity signal composite risk
     "/v1/metered/identity-risk-score": 35, # $0.35/call — domain security credit score (0-100)
+    # Added 2026-08-08. Both were absent from this table, and because
+    # credit_cost falls back to 0 that made `use_credits = credit_balance >= 0`
+    # always true: every credit customer was served both endpoints for nothing
+    # while /docs and /developers advertised $0.35. Missing here is not "free by
+    # design", it is unbilled. Founder set the price to match what we publish.
+    "/v1/metered/mcp-registry-risk": 35,       # $0.35/call — MCP server typosquat + reputation risk
+    "/v1/metered/prompt-injection-breach": 35, # $0.35/call — prompt-injection corpus exposure check
     "/v1/metered/bulk-ioc":             50,   # $0.50/batch — up to 100 IOC lookups (TC-competitor bulk enrichment)
     "/v1/metered/ioc-pivot":           20,   # $0.20/call — related IOC discovery by malware family / source
     "/v1/metered/brand-monitor":       35,   # $0.35/call — raised from $0.25 2026-07-24: now covers image/logo mentions too (text + domain + image corpus, RF/Intel471-competitor)
@@ -419,7 +460,68 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/cert-expiry":         5,    # $0.05/call — mirrors PAYG price, new endpoint 2026-07-21
     "/v1/metered/ip-intel":            10,   # $0.10/call — mirrors PAYG price, new endpoint 2026-07-21
     "/v1/metered/card-exposure":       30,   # $0.30/call — compromised-card lookup (Flashpoint/SOCRadar-competitor), new endpoint 2026-07-24
+    "/v1/metered/wallet-risk":         5,    # $0.05/call — matches the published PAYG price exactly, see routing note
 }
+
+# Endpoints the no-card free tier will NOT serve. Added 2026-08-09 alongside
+# raising FREE_TIER_CALLS from 20 to 100 in relayshield_developer_signup.py.
+#
+# The free tier counts CALLS, not credits, deliberately: "100 free calls" has to
+# mean 100 calls whatever they cost, or the promise on the landing page is a lie.
+# That is fine at $0.05 to $0.50, which is the whole catalogue bar one. It is not
+# fine for bulk-identity-risk, which is $2.00 precisely because a single request
+# fans out to up to 10 domains times 5 agent identities and does the upstream
+# work of roughly fifty calls. At 100 free calls that endpoint alone is $200 of
+# list value and a real upstream bill, available to anyone with an email address.
+#
+# Excluding it costs us nothing in evaluation value: it is an org-wide MSP sweep,
+# not something a developer needs on their first afternoon. A caller who wants it
+# adds a card or buys the bundle, and gets a normal 402 until they do.
+# Display only. The allowance itself is issued by relayshield_developer_signup.py
+# (FREE_TIER_CALLS) and stored per key as free_calls_remaining, so this constant
+# must never gate anything. It exists because the 402 message hardcoded "20"
+# and kept saying so after the allowance was raised to 100 on 2026-08-09.
+FREE_TIER_CALLS_LABEL = 100
+
+FREE_TIER_EXCLUDED_ENDPOINTS = frozenset({
+    "/v1/metered/bulk-identity-risk",
+})
+
+
+# ---------------------------------------------------------------------------
+# PII redaction for logs
+# ---------------------------------------------------------------------------
+# Added 2026-08-09, prompted by a partner asking, of Crypto Shield Mobile,
+# whether requiring an email, a phone number and wallet addresses widens their
+# doxing surface. Auditing to answer that turned up the real gap.
+#
+# The DATABASES were already clean: handle_breach, handle_sim_swap,
+# handle_infostealer and handle_wallet_risk persist nothing at all, they are
+# pass-through queries. But every one of them logged the subject in plaintext,
+# and every relayshield-* CloudWatch log group had retention set to None, which
+# means never expires. So the durable record of "which humans were screened and
+# when" was not a table anyone designed. It was the logs, kept forever.
+#
+# A truncated hash keeps the operational value (you can still see that the same
+# subject recurs inside one execution context, which is what debugging an
+# incident needs) and drops the identity.
+#
+# The salt defaults to a value generated at cold start, deliberately. That makes
+# hashes UNLINKABLE across containers and across time, so the logs cannot be
+# assembled into a history of any individual, which is the whole point. Set
+# RELAYSHIELD_LOG_SALT to a fixed value only if long-horizon correlation is
+# genuinely needed, and understand that doing so re-creates a pseudonymous but
+# stable per-person identifier.
+_LOG_SALT = os.environ.get("RELAYSHIELD_LOG_SALT") or uuid.uuid4().hex
+
+
+def _redact(value: str, kind: str = "id") -> str:
+    """Short, salted, non-reversible stand-in for a PII value in a log line."""
+    if not value:
+        return f"{kind}#none"
+    digest = hashlib.sha256(f"{_LOG_SALT}:{value}".encode("utf-8")).hexdigest()
+    return f"{kind}#{digest[:12]}"
+
 
 HIBP_SECRET_NAME  = "relayshield/hibp_api_key"
 VT_SECRET_NAME    = "relayshield/virustotal_api_key"
@@ -533,7 +635,21 @@ def _verify_rs_api_key(api_key_str: str) -> dict | None:
 # within hours of release — so it must be both rate-limited and low-privilege
 # from the start, never reused from an existing unlimited demo key.
 DEMO_QUOTA_TABLE   = "relayshield_demo_key_usage"
-DEMO_QUOTA_SOURCES = {"hf_smolagents_demo": 20, "mcp_space_demo": 20}  # source -> shared daily cap, all callers combined
+# source -> shared daily cap, all callers combined.
+#
+# `discord_bot` added 2026-08-11 for /exposure. The Discord bot is free and
+# public, so its breach lookups are marketing spend and need a hard ceiling
+# rather than an open tap. This is the "capped dedicated key" decision, chosen
+# over running it unmetered — the unmetered route is the same shape as the
+# still-open CS Mobile free-tier problem, where scans run in production with no
+# key and no meter and therefore no ceiling at all.
+#
+# COST MATH, so the number is a decision and not a guess: breach lists at $0.10
+# a call, so 50/day is at most $5/day or ~$150/month of notional list value at
+# full saturation, against a bot currently installed in one test server. Raise
+# it deliberately when real usage justifies it; do not raise it reflexively
+# because someone hit the cap once.
+DEMO_QUOTA_SOURCES = {"hf_smolagents_demo": 20, "mcp_space_demo": 20, "discord_bot": 50}
 
 # Contract/address-reputation endpoints that accept calls with NO API key.
 #
@@ -632,6 +748,34 @@ BUNDLE_D_DIMENSION_NAMES = {
     "/v1/metered/llm-credential-exposure": "llm_credential_exposure",
 }
 
+# Angle 2 (dependency-risk), added 2026-08-12. INCLUDED in Bundle D at the flat
+# $299/mo, and deliberately NOT a usage dimension. It is in its own set rather
+# than in BUNDLE_D_DIMENSION_NAMES above, and the distinction is the whole
+# design:
+#
+#   BUNDLE_D_DIMENSION_NAMES -> metered. AWS BatchMeterUsage on one door, the
+#                               Stripe aggregate meter on the other. Requires a
+#                               dimension to exist on the Marketplace entity.
+#   BUNDLE_D_INCLUDED_ENDPOINTS -> flat. Billed by neither door. Requires no
+#                               Marketplace dimension, so it needs no change set
+#                               carrying pricing terms, so it cannot roll a
+#                               public listing back to placeholder prices.
+#
+# WHY FLAT RATHER THAN PER CALL, and this is a founder decision from the scope
+# doc, not an implementation shortcut: the marginal cost of screening 400
+# maintainers is approximately the cost of screening 4, because the stealer-log
+# corpus is a flat subscription and every account is screened once however many
+# packages it publishes. Metering it would invent friction that recovers almost
+# nothing, on the one capability that is the reason to buy the bundle at all.
+#
+# Non-bundle callers still pay the normal per-call price from
+# METERED_CREDIT_COSTS. This set is a scoped bypass for bundle holders, exactly
+# the shape of CS_MOBILE_ALLOWED_ENDPOINTS and WATCH_LICENSE_ENDPOINTS, and like
+# those it must never widen into the rest of the catalog.
+BUNDLE_D_INCLUDED_ENDPOINTS = frozenset({
+    "/v1/metered/dependency-risk",
+})
+
 # Bundle A ("Core Identity Exposure", $150/mo min) — same AWS Marketplace
 # product entity as Bundle D ("RelayShield - Consumption Security API
 # Bundles", prod-kkvurtspreofy), just a different contract dimension —
@@ -665,10 +809,15 @@ CS_MOBILE_ALLOWED_ENDPOINTS = frozenset({
 
 
 def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: str) -> None:
-    """Report one call of usage to AWS Marketplace Metering Service for a
-    Bundle D contract customer. Fire-and-forget — never raises. Duplicated
-    in relayshield_agentic_api.py and relayshield_bundle_fulfillment.py
-    rather than shared, same isolation rationale used throughout Bundle D.
+    """Report one call of usage to AWS Marketplace Metering Service for any
+    contract customer. Fire-and-forget — never raises. Duplicated in
+    relayshield_agentic_api.py and relayshield_bundle_fulfillment.py rather
+    than shared, same isolation rationale used throughout Bundle D.
+
+    Named and logged bundle-agnostically since 2026-08-10: this serves Bundle A
+    and Bundle D both, and the log lines saying "Bundle D usage reported" for a
+    Bundle A call made the first real Bundle A agreement look like it had
+    metered against the wrong product.
 
     Uses CustomerAWSAccountId + LicenseArn, not the older CustomerIdentifier
     + ProductCode-only pattern — AWS's Concurrent Agreements model (rolled
@@ -692,9 +841,9 @@ def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: 
                 "Quantity": 1,
             }],
         )
-        logger.info("Bundle D usage reported account=%s dimension=%s", aws_account_id, dimension)
+        logger.info("Marketplace usage reported account=%s dimension=%s", aws_account_id, dimension)
     except Exception as exc:
-        logger.warning("Bundle D usage reporting failed (non-fatal) account=%s dimension=%s error=%s",
+        logger.warning("Marketplace usage reporting failed (non-fatal) account=%s dimension=%s error=%s",
                        aws_account_id, dimension, exc)
 
 
@@ -794,17 +943,17 @@ def _send_intel_quota_warning(api_key_str: str, key_record: dict, threshold: int
   the month resets.</p>
   <p>When you reach 10,000 calls, the API returns <code>HTTP 429</code> and all subsequent
   TI queries will fail until the next billing period begins.</p>
-  <h3 style="margin-top:2rem;">Upgrade to MSSP — $999/month, unlimited calls</h3>
+  <h3 style="margin-top:2rem;">Upgrade to MSSP: $999/month, unlimited calls</h3>
   <ul>
-    <li><strong>No monthly call cap</strong> — query as often as your pipeline demands</li>
+    <li><strong>No monthly call cap</strong>, query as often as your pipeline demands</li>
     <li>Priority support + SLA</li>
-    <li>Same IOC database, same API key — zero integration changes</li>
+    <li>Same IOC database, same API key, so zero integration changes</li>
   </ul>
   <p style="margin-top:1.5rem;">
     <a href="https://buy.stripe.com/4gM3cw1A23yJf9a2JF0Ny0f"
        style="background:#6c63ff;color:#fff;padding:.65rem 1.4rem;border-radius:8px;
               text-decoration:none;font-weight:600;display:inline-block;">
-      Upgrade to MSSP — $999/mo →
+      Upgrade to MSSP: $999/mo →
     </a>
   </p>
   <p style="margin-top:1.5rem;font-size:.85rem;color:#6b7280;">
@@ -823,13 +972,13 @@ def _send_intel_quota_warning(api_key_str: str, key_record: dict, threshold: int
   <p>Your RelayShield Threat Intelligence API key has used <strong>{calls_used:,} of 10,000 calls</strong>
   on your current MSP plan ($499/month). You have <strong>{calls_left:,} calls remaining</strong>
   this billing period.</p>
-  <p>This is an early heads-up — no action required yet. If your usage continues at the
+  <p>This is an early heads-up, no action required yet. If your usage continues at the
   current rate, you may hit the limit before month end.</p>
-  <h3 style="margin-top:2rem;">Consider upgrading to MSSP — $999/month</h3>
+  <h3 style="margin-top:2rem;">Consider upgrading to MSSP: $999/month</h3>
   <p>For MSSPs running continuous monitoring across multiple client environments,
   the MSSP tier removes the call cap entirely:</p>
   <ul>
-    <li><strong>Unlimited calls/month</strong> — no quota, no 429 errors</li>
+    <li><strong>Unlimited calls/month</strong>, no quota, no 429 errors</li>
     <li>2.5× more value per dollar at scale</li>
     <li>Priority support + SLA</li>
     <li>Same API key, zero integration changes</li>
@@ -838,11 +987,11 @@ def _send_intel_quota_warning(api_key_str: str, key_record: dict, threshold: int
     <a href="https://buy.stripe.com/4gM3cw1A23yJf9a2JF0Ny0f"
        style="background:#6c63ff;color:#fff;padding:.65rem 1.4rem;border-radius:8px;
               text-decoration:none;font-weight:600;display:inline-block;">
-      Upgrade to MSSP — $999/mo →
+      Upgrade to MSSP: $999/mo →
     </a>
   </p>
   <p style="margin-top:1rem;font-size:.85rem;color:#6b7280;">
-    No rush — you still have {calls_left:,} calls this month. We'll send another reminder
+    No rush, you still have {calls_left:,} calls this month. We'll send another reminder
     if you reach 95%.
   </p>
   <hr style="border:none;border-top:1px solid #e5e7eb;margin:2rem 0;">
@@ -859,7 +1008,7 @@ def _send_intel_quota_warning(api_key_str: str, key_record: dict, threshold: int
                 "Body":    {"Html": {"Data": body_html, "Charset": "UTF-8"}},
             },
         )
-        logger.info("intel quota warning sent to=%s threshold=%d key=%s", email, threshold, api_key_str[:16])
+        logger.info("intel quota warning sent to=%s threshold=%d key=%s", _redact(email, "em"), threshold, api_key_str[:16])
 
         # Mark this threshold as warned for the current period
         dynamodb.Table(API_KEYS_TABLE).update_item(
@@ -965,6 +1114,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         "/v1/metered/oauth-watchlist": handle_oauth_watchlist,
         "/v1/metered/crypto-intel":    handle_crypto_intel,
         "/v1/metered/supply-chain":    handle_supply_chain,
+        "/v1/metered/dependency-risk": handle_dependency_risk,
         "/v1/metered/session-risk":    handle_session_risk,
         "/v1/metered/identity-graph":  handle_identity_graph,
         "/v1/metered/ransomware-risk": handle_ransomware_risk,
@@ -985,8 +1135,19 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         "/v1/metered/cert-expiry":         handle_cert_expiry,
         "/v1/metered/ip-intel":            handle_ip_intel,
         "/v1/metered/card-exposure":       handle_card_exposure,
+        # Added 2026-08-09 for the MetaMask Snap. wallet-risk already existed as
+        # a keyless route at bare /v1/wallet-risk and as x402 at /v1/payg/, but
+        # neither can implement "the user funds their own screens": the keyless
+        # one bills nobody, and a Snap cannot sign an x402 payment without a
+        # key-management permission, which triggers the mandatory third-party
+        # audit the Snap is deliberately scoped to avoid. Same handler, same
+        # $0.05, just reachable with the caller's own API key.
+        "/v1/metered/wallet-risk":         handle_wallet_risk,
         "/v1/webhook/configure":       lambda p: handle_webhook_configure(p, api_key_str),
         "/v1/siem/configure":          lambda p: handle_siem_configure(p, api_key_str),
+        "/v1/watch":                   lambda p: handle_watch_add(p, api_key_str),
+        "/v1/watch/list":              lambda p: handle_watch_list(p, api_key_str),
+        "/v1/watch/remove":            lambda p: handle_watch_remove(p, api_key_str),
     }
     handler = metered_routes.get(path)
     if not handler:
@@ -1001,7 +1162,15 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
     # (added 2026-07-26) is the same pattern for the HF MCP Space's own
     # zero-key free tier -- a shared, capped demo key baked into the Space
     # itself so a caller can try one tool with no signup at all.
-    is_demo = key_record.get("source") in ("demo_portal", "hf_smolagents_demo", "mcp_space_demo")
+    # DERIVED from DEMO_QUOTA_SOURCES rather than repeated. This was a
+    # hardcoded tuple listing the same sources a second time, so adding a
+    # quota-capped source granted it a daily cap but NOT access, and the key
+    # 402'd on every call while looking correctly configured. Caught 2026-08-11
+    # while wiring the Discord bot's /exposure key.
+    #
+    # `demo_portal` has no daily cap and so is not in DEMO_QUOTA_SOURCES; it is
+    # unioned in explicitly.
+    is_demo = key_record.get("source") in ({"demo_portal"} | set(DEMO_QUOTA_SOURCES))
     if not is_demo:
         credit_balance   = int(key_record.get("credit_balance") or 0)
         # has_subscription covers both billing paths that promise "all metered
@@ -1030,15 +1199,62 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # silently burning a leftover free allowance. Decremented atomically on
         # success only, below.
         free_calls        = int(key_record.get("free_calls_remaining") or 0)
-        is_free_tier_call = free_calls > 0 and not use_credits and not has_subscription
+        is_free_tier_call = (free_calls > 0 and not use_credits and not has_subscription
+                             and path not in FREE_TIER_EXCLUDED_ENDPOINTS)
         is_bundle_d_call = (
             bool(key_record.get("bundle_d_access"))
             and bool(key_record.get("aws_customer_id"))
             and path in BUNDLE_D_DIMENSION_NAMES
         )
+        # Bundle D "Door 2" — the same bundle bought directly on Stripe rather
+        # than through AWS Marketplace. Added 2026-08-11.
+        #
+        # This is a SEPARATE flag from is_bundle_d_call and must stay separate.
+        # is_bundle_d_call requires aws_customer_id, so without this a paying
+        # Stripe customer with bundle_d_access=True would have fallen through
+        # to the 402 "insufficient credits" branch below and been refused on
+        # every call while being charged $299 a month. Caught before launch.
+        #
+        # The two doors bill through different rails and must never cross:
+        #   AWS door    -> BatchMeterUsage against the LicenseArn
+        #   Stripe door -> the aggregate Stripe meter, same as any other
+        #                  metered call, so per-call pricing MATCHES AWS
+        #                  exactly. A flat unlimited Stripe tier would have
+        #                  made the direct door cheaper than Marketplace,
+        #                  which is both lost revenue and bad optics given
+        #                  the prior billing audit.
+        is_bundle_d_direct_call = (
+            bool(key_record.get("bundle_d_access"))
+            and not key_record.get("aws_customer_id")
+            and bool(key_record.get("stripe_customer_id"))
+            and path in BUNDLE_D_DIMENSION_NAMES
+        )
         is_bundle_a_call = (
             bool(key_record.get("bundle_a_access"))
             and bool(key_record.get("aws_customer_id"))
+            and path in BUNDLE_A_DIMENSION_NAMES
+        )
+        # Bundle A "Door 2" — Core Identity Exposure bought directly on Stripe
+        # rather than through AWS Marketplace. Added 2026-08-12, same shape and
+        # same reasoning as is_bundle_d_direct_call above.
+        #
+        # Without this branch a Stripe Bundle A customer would be refused with
+        # 402 on every call while being charged $150 a month, because
+        # is_bundle_a_call requires aws_customer_id. That defect shipped in the
+        # Bundle D door and was caught pre-launch; it is written down here so it
+        # is not reintroduced a third time when a Bundle E arrives.
+        # Flat-rate Bundle D inclusion. Deliberately keys on bundle_d_access
+        # ALONE, with no aws_customer_id and no stripe_customer_id condition, so
+        # it serves both doors through one branch. There is nothing to bill, so
+        # there is nothing the two doors could disagree about.
+        is_bundle_d_included_call = (
+            bool(key_record.get("bundle_d_access"))
+            and path in BUNDLE_D_INCLUDED_ENDPOINTS
+        )
+        is_bundle_a_direct_call = (
+            bool(key_record.get("bundle_a_access"))
+            and not key_record.get("aws_customer_id")
+            and bool(key_record.get("stripe_customer_id"))
             and path in BUNDLE_A_DIMENSION_NAMES
         )
         # Crypto Shield Mobile — scoped bypass for the small set of endpoints the
@@ -1048,6 +1264,11 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # scoped bypass for exactly one endpoint, same shape as is_cs_mobile_call.
         # llm_access must never grant the rest of the metered catalog.
         is_llm_license_call = bool(key_record.get("llm_access")) and path == "/v1/metered/llm-credential-exposure"
+        # Verdict Watch licence (flat rate, added 2026-08-08) — same scoped
+        # shape again. watch_access unlocks registering and managing watches
+        # and nothing else; the re-screens the watcher performs are covered by
+        # the licence, so there is no per-call meter on this path either.
+        is_watch_license_call = bool(key_record.get("watch_access")) and path in WATCH_LICENSE_ENDPOINTS
 
     if key_record.get("source") in DEMO_QUOTA_SOURCES and not _check_demo_quota(key_record):
         return {
@@ -1062,8 +1283,11 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         }
 
     if (not is_demo and not use_credits and not has_subscription and not is_bundle_d_call
-            and not is_bundle_a_call and not is_cs_mobile_call and not is_llm_license_call
-            and not is_free_tier_call):
+            and not is_bundle_d_direct_call
+            and not is_bundle_a_call and not is_bundle_a_direct_call
+            and not is_bundle_d_included_call
+            and not is_cs_mobile_call and not is_llm_license_call
+            and not is_watch_license_call and not is_free_tier_call):
         logger.warning(
             "402 insufficient credits — path=%s key=%s credit_balance=%s source=%s",
             path, api_key_str[:24], credit_balance, key_record.get("source"),
@@ -1078,7 +1302,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
                 # never had one is a different conversation, and one generic
                 # message for both leaves the developer guessing.
                 "error": (
-                    "Your 20 free calls are used up. Add a card to keep going. "
+                    f"Your {FREE_TIER_CALLS_LABEL} free calls are used up. Add a card to keep going. "
                     "You are billed only for the calls you make, with no minimum "
                     "and no subscription fee."
                     if key_record.get("free_calls_remaining") is not None
@@ -1101,10 +1325,35 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             _report_marketplace_usage(
                 key_record.get("aws_account_id", ""), key_record.get("aws_license_arn", ""), BUNDLE_D_DIMENSION_NAMES[path]
             )
+        elif is_bundle_d_direct_call:
+            # Same per-call price as the AWS door, billed through the Stripe
+            # aggregate meter. _record_stripe_meter_event looks the price up
+            # from the path itself, so the two doors cannot drift apart: a
+            # price change in one place changes both.
+            _record_stripe_meter_event(key_record.get("stripe_customer_id", ""), path)
         elif is_bundle_a_call:
             _report_marketplace_usage(
                 key_record.get("aws_account_id", ""), key_record.get("aws_license_arn", ""), BUNDLE_A_DIMENSION_NAMES[path]
             )
+        elif is_bundle_a_direct_call:
+            # Stripe door for Bundle A. Same aggregate meter, and the price is
+            # looked up from the path, so the $150/mo direct customer pays
+            # exactly the AWS rate card: breach $0.10, sim-swap $0.25,
+            # infostealer $0.50, domain $0.30, oauth-watchlist $0.30,
+            # crypto-intel $0.30. Verified against offer-2itznygmz6hpu
+            # 2026-08-12. Never bill this key through BatchMeterUsage.
+            _record_stripe_meter_event(key_record.get("stripe_customer_id", ""), path)
+        elif is_bundle_d_included_call:
+            # Included in the flat $299/mo Bundle D licence. No AWS dimension,
+            # no Stripe meter event, no credit deduction, nothing to record.
+            #
+            # POSITION MATTERS. This sits ABOVE `elif use_credits`, not below
+            # it. Below, a Bundle D customer who also happened to carry a credit
+            # balance would silently have 50 credits deducted for a capability
+            # their $299 already covers, and it would look like normal usage in
+            # every log. Any future flat-rate bypass belongs above the credit
+            # branch for the same reason.
+            pass
         elif is_free_tier_call:
             # Conditional update: if two calls race, the second fails the
             # condition rather than driving the counter negative. Non-fatal --
@@ -1142,6 +1391,11 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         elif is_llm_license_call:
             # Included in the $39/mo or $399/yr LLMjacking license — no
             # credits, no Stripe meter event.
+            pass
+        elif is_watch_license_call:
+            # Included in the flat-rate Verdict Watch licence. Nothing to bill
+            # here by design: the customer pays for the watch, not the call
+            # that registers it.
             pass
         else:
             # Fall back to Stripe meter event. Gated on the path having a
@@ -1311,10 +1565,10 @@ def handle_breach(params: dict) -> dict:
         elif exc.code == 429:
             return _err("HIBP rate limit reached — retry in a few seconds", 429)
         else:
-            logger.error("HIBP HTTP %d for %s", exc.code, email)
+            logger.error("HIBP HTTP %d for %s", exc.code, _redact(email, "em"))
             return _err(f"HIBP returned HTTP {exc.code}", 502)
     except Exception as exc:
-        logger.exception("HIBP call failed for %s: %s", email, exc)
+        logger.exception("HIBP call failed for %s: %s", _redact(email, "em"), exc)
         return _err("breach check failed — upstream error", 502)
 
     summary = [
@@ -1328,12 +1582,16 @@ def handle_breach(params: dict) -> dict:
         for b in breaches
     ]
 
-    logger.info("breach check — email=%s count=%d", email, len(summary))
+    logger.info("breach check — email=%s count=%d", _redact(email, "em"), len(summary))
     return _ok({
         "email":        email,
         "record_type":  "credential_exposure",
         "breach_count": len(summary),
         "breaches":     summary,
+        # degraded is always False here: every upstream failure path above
+        # returns 4xx/5xx rather than an empty result, so a 200 is a real
+        # verdict by construction.
+        **_freshness_for("/v1/metered/breach", flagged=bool(summary)),
     })
 
 
@@ -1529,6 +1787,29 @@ def _vt_get(path: str, api_key: str) -> dict | None:
             return None
         raise
 
+
+# ---------------------------------------------------------------------------
+# First-seen age signal
+# ---------------------------------------------------------------------------
+# Records the first time each address is screened by anyone. Started 2026-08-09
+# on the argument that a caller's own traffic is a free age signal needing no
+# vendor call, and is arguably more relevant than chain age: chain age says the
+# address existed, first-seen says whether anyone in our caller population has
+# ever paid to screen it before. See the long note above _FRESHNESS_PROFILES.
+#
+# Recording is deliberately AHEAD of any feature that reads it. The signal is
+# worth nothing until there is enough traffic for "new to us" to be meaningful,
+# and today almost everything would be new. But this data cannot be backfilled,
+# so every day not recorded is permanently missing. Writing now costs one
+# conditional PutItem per screen and buys the option later.
+#
+# NOT derived from CloudWatch logs on purpose. Log retention was set to 90 days
+# on 2026-08-09, so a log-derived signal would plateau at 90 days rather than
+# deepen indefinitely. A table has no such ceiling.
+#
+# Wallet addresses are public chain data, so this holds no personal information
+# and does not reopen the question the PII redaction above answers.
+ADDRESS_FIRST_SEEN_TABLE = "relayshield_address_first_seen"
 
 IP_INTEL_CACHE_TABLE   = "relayshield_ip_intel_cache"
 IP_INTEL_CACHE_SECONDS = 6 * 3600  # reputation doesn't change minute-to-minute; this is the
@@ -1759,7 +2040,14 @@ def handle_sim_swap(params: dict) -> dict:
 
     account_sid, auth_token = _twilio_creds()
     encoded     = urllib.parse.quote(phone, safe="")
-    url         = TWILIO_LOOKUP_URL.format(phone=encoded) + "?Fields=sim_swap"
+    # line_type_intelligence is what actually carries carrier_name on Lookup v2.
+    # Requesting sim_swap alone leaves `carrier` empty whenever the sim_swap
+    # package is unavailable, because the carrier name inside the sim_swap
+    # object is null in exactly that case.
+    url         = (
+        TWILIO_LOOKUP_URL.format(phone=encoded)
+        + "?Fields=sim_swap,line_type_intelligence"
+    )
     credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
 
     req = urllib.request.Request(
@@ -1771,24 +2059,62 @@ def handle_sim_swap(params: dict) -> dict:
         with urllib.request.urlopen(req, timeout=15) as resp:
             body         = json.loads(resp.read())
             sim_swap_obj = body.get("sim_swap") or {}
+            lti          = body.get("line_type_intelligence") or {}
+
+            # Twilio answers HTTP 200 and puts a PER-PACKAGE error_code in the
+            # body when the package is unavailable. last_sim_swap is null in
+            # that case, and reading it as swapped_in_period=False turns "we
+            # have no idea" into "you are fine" on a security product, for
+            # $0.25 a call. Absence of data is not evidence of absence.
+            #
+            # 60606 means the SIM swap package is not enabled on this account,
+            # which needs Twilio carrier registration. 60600/60620 mean the
+            # carrier did not answer. Refuse to return a verdict in all cases:
+            # the billing gate in the metered dispatcher only meters a 2xx, so
+            # a non-answer is not charged. Same defect and same fix as
+            # relayshield_sim_swap_monitor.py, see project-sim-swap-never-worked.
+            pkg_error = sim_swap_obj.get("error_code")
+            if pkg_error:
+                logger.error(
+                    "sim-swap: Twilio returned 200 with sim_swap error_code=%s for %s. "
+                    "NOT returning a clean result. 60606 means carrier registration "
+                    "is not yet approved for this account.",
+                    pkg_error, phone,
+                )
+                return _err(
+                    f"SIM swap data unavailable from the carrier (code {pkg_error}). "
+                    "No verdict was produced and this call was not billed.",
+                    503,
+                )
+
             last_swap    = sim_swap_obj.get("last_sim_swap") or {}
             result = {
                 "phone":          phone,
                 "swapped":        bool(last_swap.get("swapped_in_period", False)),
                 "swap_timestamp": last_swap.get("last_sim_swap_date", ""),
-                "carrier":        sim_swap_obj.get("carrier_name", ""),
+                # Prefer line_type_intelligence, populated independently of the
+                # sim_swap package, and fall back to the sim_swap object.
+                "carrier":        lti.get("carrier_name")
+                                  or sim_swap_obj.get("carrier_name", ""),
                 "checked_at":     datetime.now(timezone.utc).isoformat(),
+                # degraded is always False on a 200 here: the error_code guard
+                # above turns every no-data case into a 503, so reaching this
+                # point means the carrier actually answered.
+                **_freshness_for(
+                    "/v1/metered/sim-swap",
+                    flagged=bool(last_swap.get("swapped_in_period", False)),
+                ),
             }
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
-        logger.error("Twilio Lookup HTTP %d for %s: %s", exc.code, phone, error_body)
+        logger.error("Twilio Lookup HTTP %d for %s: %s", exc.code, _redact(phone, "ph"), error_body)
         return _err(f"Twilio returned HTTP {exc.code}", 502)
     except Exception as exc:
-        logger.exception("Twilio Lookup failed for %s: %s", phone, exc)
+        logger.exception("Twilio Lookup failed for %s: %s", _redact(phone, "ph"), exc)
         return _err("SIM swap check failed — upstream error", 502)
 
     logger.info("sim-swap check — phone=%s swapped=%s carrier=%s",
-                phone, result["swapped"], result["carrier"] or "unknown")
+                _redact(phone, "ph"), result["swapped"], result["carrier"] or "unknown")
     return _ok(result)
 
 
@@ -1814,18 +2140,27 @@ def handle_domain(params: dict) -> dict:
 
     candidates  = _generate_typosquat_permutations(domain)
     prioritised = _prioritise_candidates(domain, candidates)
-    active      = _find_active_lookalikes(prioritised)
+    active, unchecked = _find_active_lookalikes(prioritised)
 
-    lookalikes = _enrich_lookalikes(active, _gsb_api_key())
+    lookalikes, unenriched = _enrich_lookalikes(active, _gsb_api_key())
 
-    logger.info("domain scan — domain=%s candidates=%d active=%d",
-                domain, len(prioritised), len(active))
+    # Either shortfall means this sweep is not a complete answer. `unchecked`
+    # is the dangerous one, because an unresolved candidate is a lookalike we
+    # may simply have missed, so a low or zero count here is not evidence of a
+    # clean domain.
+    degraded = bool(unchecked or unenriched)
+
+    logger.info("domain scan — domain=%s candidates=%d active=%d unchecked=%d unenriched=%d",
+                domain, len(prioritised), len(active), unchecked, unenriched)
     return _ok({
         "domain":             domain,
         "lookalikes_found":   len(active),
         "lookalikes":         lookalikes,
-        "candidates_checked": len(prioritised),
+        "candidates_checked": len(prioritised) - unchecked,
+        "candidates_total":   len(prioritised),
+        "candidates_unchecked": unchecked,
         "checked_at":         datetime.now(timezone.utc).isoformat(),
+        **_freshness_for("/v1/metered/domain", flagged=bool(active), degraded=degraded),
     })
 
 
@@ -1908,12 +2243,27 @@ def _dns_resolves(domain: str, timeout: float = 1.0) -> bool:
 
 
 def _find_active_lookalikes(candidates: list[str], max_workers: int = 50,
-                             overall_timeout: float = 8.0) -> list[str]:
+                             overall_timeout: float = 8.0) -> tuple[list[str], int]:
+    """Resolve each candidate and return the ones that are live.
+
+    Returns (active, unchecked_count). `unchecked_count` is the number of
+    candidates whose DNS lookup did not finish inside overall_timeout. Those
+    were previously discarded silently, which meant a scan truncated by a slow
+    resolver reported FEWER lookalikes, possibly zero, and was indistinguishable
+    from a domain that genuinely has none. The caller turns a non-zero count
+    into `degraded` on the response rather than passing off a partial sweep as
+    an all-clear.
+    """
     active = []
+    unchecked = 0
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     try:
         futures = {ex.submit(_dns_resolves, d): d for d in candidates}
-        done, _ = concurrent.futures.wait(futures, timeout=overall_timeout)
+        done, not_done = concurrent.futures.wait(futures, timeout=overall_timeout)
+        unchecked = len(not_done)
+        if unchecked:
+            logger.warning("lookalike DNS sweep truncated: %d of %d candidates unchecked "
+                           "after %.1fs", unchecked, len(futures), overall_timeout)
         for fut in done:
             if fut.result():
                 active.append(futures[fut])
@@ -1925,7 +2275,7 @@ def _find_active_lookalikes(candidates: list[str], max_workers: int = 50,
         # exactly what pushed a real request past API Gateway's hard 29s
         # ceiling (see _enrich_lookalikes for the incident this fixed).
         ex.shutdown(wait=False, cancel_futures=True)
-    return sorted(active)
+    return sorted(active), unchecked
 
 
 def _assess_lookalike_intent(domain: str, gsb_api_key: str) -> dict:
@@ -1948,10 +2298,15 @@ def _assess_lookalike_intent(domain: str, gsb_api_key: str) -> dict:
 
 
 def _enrich_lookalikes(domains: list[str], gsb_api_key: str, max_workers: int = 8,
-                        overall_timeout: float = 15.0) -> list[dict]:
+                        overall_timeout: float = 15.0) -> tuple[list[dict], int]:
     """Runs _assess_lookalike_intent for each active lookalike in parallel.
     Domains whose enrichment doesn't finish within overall_timeout fall back
     to None/unknown fields rather than blocking the whole response.
+
+    Returns (results, unenriched_count). The count feeds `degraded` on the
+    response: a lookalike reported with null cert and registration fields has
+    been found but not assessed, and the caller should not read those nulls as
+    "nothing concerning here".
 
     max_workers is deliberately modest (8, not 50) — crt.sh starts returning
     429 Too Many Requests once too many CT lookups hit it in parallel from
@@ -1980,13 +2335,18 @@ def _enrich_lookalikes(domains: list[str], gsb_api_key: str, max_workers: int = 
                 logger.warning("Lookalike intent assessment failed for %s: %s", d, exc)
     finally:
         ex.shutdown(wait=False, cancel_futures=True)
+    unenriched = 0
     for d in domains:
         if d not in results:
+            unenriched += 1
             results[d] = {
                 "domain": d, "gsb_flagged": None, "registration_age_days": None,
                 "cert_count": None, "cert_recent": None, "latest_cert_issued": None,
             }
-    return [results[d] for d in domains]
+    if unenriched:
+        logger.warning("lookalike enrichment incomplete: %d of %d domains unassessed "
+                       "after %.1fs", unenriched, len(domains), overall_timeout)
+    return [results[d] for d in domains], unenriched
 
 
 def _check_gsb(domain: str, api_key: str) -> bool:
@@ -2280,10 +2640,10 @@ def handle_oauth_watchlist(params: dict) -> dict:
         elif exc.code == 429:
             return _err("HIBP rate limit reached — retry in a few seconds", 429)
         else:
-            logger.error("HIBP HTTP %d for oauth-watchlist %s", exc.code, email)
+            logger.error("HIBP HTTP %d for oauth-watchlist %s", exc.code, _redact(email, "em"))
             return _err(f"HIBP returned HTTP {exc.code}", 502)
     except Exception as exc:
-        logger.exception("oauth-watchlist HIBP call failed for %s: %s", email, exc)
+        logger.exception("oauth-watchlist HIBP call failed for %s: %s", _redact(email, "em"), exc)
         return _err("oauth watchlist check failed — upstream error", 502)
 
     matched_apps = []
@@ -2331,7 +2691,7 @@ def handle_oauth_watchlist(params: dict) -> dict:
             for t in raw_tokens
         ]
     except Exception as exc:
-        logger.warning("oauth-watchlist INTEL-5 query failed email=%s: %s", email, exc)
+        logger.warning("oauth-watchlist INTEL-5 query failed email=%s: %s", _redact(email, "em"), exc)
         # Non-fatal — return HIBP results even if INTEL-5 query fails
 
     # Derive highest severity across both signals
@@ -2377,6 +2737,8 @@ def handle_oauth_watchlist(params: dict) -> dict:
         "highest_severity":  highest,
         "recommendation":    rec,
         "checked_at":        datetime.now(timezone.utc).isoformat(),
+        **_freshness_for("/v1/metered/oauth-watchlist",
+                         flagged=bool(matched_apps or stolen_tokens)),
     })
 
 
@@ -2402,13 +2764,24 @@ def handle_scan_wallet(params: dict) -> dict:
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data     = json.loads(resp.read())
-            raw      = data.get("result", {}).get(address.lower(), {})
+            # GoPlus address_security returns `result` FLAT, not keyed by
+            # address — that is token_security's shape, not this one. The
+            # `.get(address.lower(), {})` that used to be here therefore
+            # resolved to {} on every single call, so risk_flags was always
+            # empty and this endpoint could only ever answer LOW. It has been
+            # billing $0.10 for a verdict it was structurally incapable of
+            # reaching. Verified live 2026-08-14 against the Ronin bridge
+            # exploiter, which returns three flags under a flat `result`.
+            raw      = data.get("result", {})
     except Exception as exc:
         logger.error("GoPlus scan failed for %s: %s", address, exc)
         return _err("wallet scan failed — upstream error", 502)
 
-    risk_flags = [k for k, v in raw.items() if v == "1"]
-    risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+    risk_flags = [k for k, v in raw.items()
+                  if v == "1" and k not in _ADDR_NON_RISK_KEYS]
+    # Sanctions alone forces HIGH, matching handle_wallet_risk. See the note there.
+    risk_level = "HIGH" if raw.get("sanctioned") == "1" or len(risk_flags) >= 2 \
+        else "MEDIUM" if risk_flags else "LOW"
 
     logger.info("scan-wallet address=%s chain=%s risk=%s flags=%d", address, chain_id, risk_level, len(risk_flags))
     return _ok({
@@ -2702,19 +3075,31 @@ def handle_crypto_intel(params: dict) -> dict:
     # --- Address security (GoPlus address_security) ---
     address_flags    = []
     address_critical = False
+    # Tracks whether this verdict was assembled from complete upstream data. A
+    # GoPlus outage leaves address_flags empty, which reads as a clean address
+    # and fails in the permissive direction. Surfaced as `degraded` so a caller
+    # can tell "we looked and found nothing" apart from "we could not look".
+    degraded = False
     try:
         url = f"{GOPLUS_BASE_URL}/{address}?chain_id={chain_id}"
         req = urllib.request.Request(url, headers={"User-Agent": "RelayShield/1.0"})
         with urllib.request.urlopen(req, timeout=8) as resp:
-            addr_raw = json.loads(resp.read()).get("result", {}).get(address.lower(), {})
+            # Flat `result`, not keyed by address. Same defect as the one fixed
+            # in handle_scan_wallet on 2026-08-14: this resolved to {} every
+            # time, so address_flags was always empty and address_critical
+            # always False. Worse, `degraded` stayed False throughout, so the
+            # response asserted a clean address rather than admitting it had no
+            # data — the exact failure the degraded flag exists to prevent.
+            addr_raw = json.loads(resp.read()).get("result", {})
         for k, v in addr_raw.items():
-            if v == "1":
+            if v == "1" and k not in _ADDR_NON_RISK_KEYS:
                 address_flags.append(k)
                 if k in _ADDR_CRITICAL:
                     address_critical = True
     except Exception as exc:
         logger.error("crypto-intel address_security failed address=%s: %s", address, exc)
         addr_raw = {}
+        degraded = True
 
     # --- Token security (GoPlus token_security) — only if token_address supplied ---
     token_result = None
@@ -2758,6 +3143,9 @@ def handle_crypto_intel(params: dict) -> dict:
             }
         except Exception as exc:
             logger.error("crypto-intel token_security failed contract=%s: %s", token_address, exc)
+            # A token was named and we failed to screen it. Leaving token_result
+            # as None would present as "no token concerns".
+            degraded = True
 
     # --- Composite risk ---
     if address_critical or token_critical:
@@ -2789,15 +3177,24 @@ def handle_crypto_intel(params: dict) -> dict:
             "/v1/metered/breach on the account email and /v1/metered/sim-swap on the associated "
             "phone number to detect coordinated identity + asset attack chains."
         )
-    if not advisories:
+    if degraded:
+        # Do not let the clean-result advisory stand when we could not actually
+        # look. "No risk signals detected" is a claim we have not earned here.
+        advisories.insert(0, (
+            "DEGRADED: an upstream risk source did not respond, so this result is incomplete. "
+            "Treat it as no verdict rather than as clean, and re-check after "
+            f"{_TTL_DEGRADED_DEFAULT} seconds."
+        ))
+    elif not advisories:
         advisories.append(
             "No risk signals detected on this address. For complete protection, monitor "
             "the associated email via /v1/metered/breach and phone via /v1/metered/sim-swap."
         )
 
-    logger.info("crypto-intel address=%s chain=%s risk=%s addr_flags=%d token=%s",
+    _record_first_seen(address, "evm")
+    logger.info("crypto-intel address=%s chain=%s risk=%s addr_flags=%d token=%s degraded=%s",
                 address, chain_id, composite_risk, len(address_flags),
-                token_result["token_symbol"] if token_result else "none")
+                token_result["token_symbol"] if token_result else "none", degraded)
 
     result = {
         "address":                address.lower(),
@@ -2805,6 +3202,9 @@ def handle_crypto_intel(params: dict) -> dict:
         "composite_risk":         composite_risk,
         "address_flags":          address_flags,
         "correlation_advisories": advisories,
+        **_freshness_for("/v1/metered/crypto-intel",
+                         flagged=bool(address_flags) or token_critical or token_high,
+                         degraded=degraded),
     }
     if token_result:
         result["token_risk"] = token_result
@@ -2845,30 +3245,152 @@ def _detect_chain_api(address: str) -> str:
 # dangerous direction.
 #
 # Deliberately asymmetric. A positive finding is sticky, because corpora rarely
-# un-flag an address. A clean verdict is the one that flips without announcing
+# un-flag a subject. A clean verdict is the one that flips without announcing
 # itself to whoever cached it. So clean expires SOONER than flagged, which is
 # the opposite of what a naive cache would do.
-_WALLET_RISK_TTL_DEGRADED = 300      # upstream failed, this is barely a verdict
-_WALLET_RISK_TTL_FLAGGED  = 86_400   # a hit stays a hit
-_WALLET_RISK_TTL_CLEAN    = 3_600    # absence of evidence, not evidence of absence
+#
+# WHAT THESE NUMBERS ARE NOT. They are policy defaults, not measurements. We
+# have not measured time-to-flip and we do not publish these as if we had.
+# Raised by revettr_x402 in the CDP Discord on 2026-08-08 and worth recording,
+# because it bounds what this field can ever honestly promise:
+#
+#   1. A subject rarely turns dirty at the moment it gets labelled. It was
+#      usually already dirty and the labeller caught up. So a naive flip time
+#      is mostly UPSTREAM DETECTION LATENCY wearing the costume of subject
+#      behaviour, and the TTL we actually need is bounded by the part we do
+#      not control.
+#   2. Most subjects never flip at all, so averaging over the ones that did
+#      gives a number wrong in a known direction. It is censored data, and
+#      would need a survival curve rather than a mean.
+#   3. The hazard is plausibly front loaded rather than flat, concentrated
+#      shortly after a subject is first seen, which would make the clean TTL
+#      properly a function of subject AGE rather than a constant.
+#
+# Point 3 is not implemented yet, but the reason recorded here until 2026-08-09
+# was WRONG and is corrected below, because it was about to become received
+# wisdom.
+#
+# The old reason was that age would cost an extra upstream call on every
+# request. It would not. Age is only needed at the moment you WRITE a cache
+# entry, not on every read, so the lookup is paid once per miss and amortised
+# across the window it sets. At a one hour clean TTL that is one extra call per
+# address per hour, not one per request. The cost objection dissolves.
+#
+# The better observation, and the one that actually changes the design: the age
+# signal does not have to come from upstream at all. The first time an address
+# appears in OUR OWN traffic is an age signal we generate for free. It is not
+# chain age and it is left censored, since it only begins when we started
+# recording, so early on everything looks new. That is wrong in a direction we
+# can state plainly rather than a direction that misleads, and it improves on
+# its own without another vendor call.
+#
+# It may also be the more relevant age. Chain age only tells you the address has
+# existed. First seen in our traffic tells you whether anyone in our caller
+# population has ever screened it before, which is closer to what the screen is
+# for. A two year old address nobody here has ever paid for is not obviously the
+# safer of the two.
+#
+# Recording started 2026-08-09 via _record_first_seen below. The FEATURE is
+# deliberately still not shipped: the signal is worth nothing until there is
+# enough traffic for "new to us" to be informative, and today almost everything
+# would be new. Recording now anyway, because this data cannot be backfilled and
+# every day not recorded is permanently missing from it.
+#
+# Until then a constant is the honest approximation and `valid_for_seconds` is a
+# caching hint, NOT a safety guarantee.
+
+_TTL_DEGRADED_DEFAULT = 300          # upstream failed, this is barely a verdict
+
+# (flagged_ttl, clean_ttl, degraded_ttl) per endpoint, in seconds. Clean is
+# always shorter than flagged. The spread between endpoints tracks how fast the
+# underlying corpus moves, not how much the endpoint costs.
+_FRESHNESS_PROFILES = {
+    # Breach corpora are disclosed in batches, days apart. A breach never
+    # un-happens, so a hit is close to permanent.
+    "/v1/metered/breach":          (7 * 86_400, 12 * 3_600, _TTL_DEGRADED_DEFAULT),
+    # Stealer logs are appended continuously rather than in disclosure batches,
+    # so a clean answer decays faster than breach.
+    "/v1/metered/infostealer":     (7 * 86_400,  6 * 3_600, _TTL_DEGRADED_DEFAULT),
+    # The shortest clean TTL in the table, on purpose. Catching a swap quickly
+    # IS the product; a swap can land any minute and an hour-old clean verdict
+    # is exactly the window an attacker needs.
+    "/v1/metered/sim-swap":        (    86_400,        900, _TTL_DEGRADED_DEFAULT),
+    # New lookalikes are registered continuously and certificate transparency
+    # surfaces them in near real time.
+    "/v1/metered/domain":          (    86_400,      3_600, _TTL_DEGRADED_DEFAULT),
+    # Same HIBP-class corpus cadence as breach.
+    "/v1/metered/oauth-watchlist": (7 * 86_400, 12 * 3_600, _TTL_DEGRADED_DEFAULT),
+    # Matches wallet-risk: same IOC-feed semantics, same asymmetry.
+    "/v1/metered/crypto-intel":    (    86_400,      3_600, _TTL_DEGRADED_DEFAULT),
+    # Its verdict is built from the infostealer corpus, so it inherits that
+    # cadence exactly rather than inventing a second answer to the same
+    # question about how fast a clean result goes stale.
+    "/v1/metered/dependency-risk": (7 * 86_400,  6 * 3_600, _TTL_DEGRADED_DEFAULT),
+}
+
+# wallet-risk and wallet-screen-batch predate the table and keep their original
+# numbers, which are the crypto-intel profile.
+_WALLET_RISK_PROFILE = (86_400, 3_600, _TTL_DEGRADED_DEFAULT)
 
 
-def _freshness(risk_flags: list, metadata: dict) -> dict:
-    """Freshness contract for a screening verdict.
+def _record_first_seen(address: str, chain: str) -> None:
+    """Record the first time this address was ever screened. Never raises.
 
-    `degraded` is true when an upstream lookup failed, which the handlers record
-    as a `*_error` key in metadata. That case previously returned risk_level LOW
-    and was indistinguishable from a genuine clean result, so a caller could
-    cache "safe" off the back of an outage. It now carries a 5 minute TTL and
-    says so explicitly.
+    A conditional write on attribute_not_exists means the FIRST write wins and
+    every later one is a cheap no-op rejection, so the stored timestamp is a
+    true first sighting rather than a last sighting.
+
+    This is an observability side effect on a paid request path, so it fails
+    silently in both directions that matter: a ConditionalCheckFailed is the
+    normal case and is not an error, and any other failure is swallowed. Losing
+    an age datapoint is acceptable. Failing a screen the caller paid for
+    because a bookkeeping write had a bad day is not.
     """
-    degraded = any(k.endswith("_error") for k in metadata)
+    if not address:
+        return
+    # EVM addresses are case-insensitive, and callers send every mix of casing
+    # including EIP-55 checksummed. Storing the raw string would create one row
+    # per casing variant, so the same address would read as first seen over and
+    # over and the signal would be worthless. handle_wallet_risk already
+    # lowercases EVM in its response for the same reason. Solana, TON and
+    # Bitcoin are case-SENSITIVE (base58 / base32), so they must not be folded.
+    key = address.lower() if chain == "evm" else address
+    try:
+        dynamodb.Table(ADDRESS_FIRST_SEEN_TABLE).put_item(
+            Item={
+                "address":       key,
+                "chain":         chain,
+                "first_seen_at": datetime.now(timezone.utc).isoformat(),
+            },
+            ConditionExpression="attribute_not_exists(address)",
+        )
+    except Exception as exc:
+        # Deliberately not catching botocore.exceptions.ClientError by name:
+        # botocore is not imported at module level here, and naming it in an
+        # except clause would raise NameError while handling the exception,
+        # turning a harmless no-op into a 500. Read the code off the response
+        # instead, which works for ClientError and is simply absent otherwise.
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+        if code != "ConditionalCheckFailedException":
+            logger.warning("first-seen write failed for %s: %s", address, exc)
+
+
+def _freshness_block(flagged: bool, degraded: bool, profile: tuple) -> dict:
+    """The four freshness fields, from an explicit verdict and TTL profile.
+
+    `degraded` means the answer was assembled from incomplete or failed upstream
+    data. It is the field that matters most: an outage that returns an empty
+    flag list is indistinguishable from a real clean result and fails in the
+    PERMISSIVE direction, which is the worst direction available. Every caller
+    should treat degraded=true as "no verdict", not as "clean".
+    """
+    flagged_ttl, clean_ttl, degraded_ttl = profile
     if degraded:
-        ttl = _WALLET_RISK_TTL_DEGRADED
-    elif risk_flags:
-        ttl = _WALLET_RISK_TTL_FLAGGED
+        ttl = degraded_ttl
+    elif flagged:
+        ttl = flagged_ttl
     else:
-        ttl = _WALLET_RISK_TTL_CLEAN
+        ttl = clean_ttl
     now = datetime.now(timezone.utc)
     return {
         "observed_at":       now.isoformat(),
@@ -2876,6 +3398,23 @@ def _freshness(risk_flags: list, metadata: dict) -> dict:
         "expires_at":        (now + timedelta(seconds=ttl)).isoformat(),
         "degraded":          degraded,
     }
+
+
+def _freshness_for(path: str, flagged: bool, degraded: bool = False) -> dict:
+    """Freshness block for a metered endpoint, looked up by request path."""
+    return _freshness_block(flagged, degraded, _FRESHNESS_PROFILES.get(path, _WALLET_RISK_PROFILE))
+
+
+def _freshness(risk_flags: list, metadata: dict) -> dict:
+    """Freshness contract for a wallet screening verdict.
+
+    Handlers record an upstream failure as a `*_error` key in metadata. That
+    case previously returned risk_level LOW and was indistinguishable from a
+    genuine clean result, so a caller could cache "safe" off the back of an
+    outage.
+    """
+    degraded = any(k.endswith("_error") for k in metadata)
+    return _freshness_block(bool(risk_flags), degraded, _WALLET_RISK_PROFILE)
 
 
 def handle_wallet_risk(params: dict) -> dict:
@@ -2889,8 +3428,9 @@ def handle_wallet_risk(params: dict) -> dict:
         logger.warning("wallet-risk: unknown chain — address=%r len=%d", address, len(address))
         return _err("unrecognised address format — supported: EVM (0x), Solana, TON (EQ.../UQ...), Bitcoin")
 
-    risk_flags = []
-    metadata   = {}
+    risk_flags    = []
+    metadata      = {}
+    sanctions_hit = False
 
     if chain == "bitcoin":
         try:
@@ -2928,6 +3468,7 @@ def handle_wallet_risk(params: dict) -> dict:
 
         risk_level = "HIGH" if "zero_balance_high_activity" in risk_flags or "high_tx_volume" in risk_flags \
             else "MEDIUM" if risk_flags else "LOW"
+        _record_first_seen(address, "bitcoin")
         logger.info("wallet-risk address=%s chain=bitcoin risk=%s flags=%d", address, risk_level, len(risk_flags))
         return _ok({
             "address":    address,
@@ -2946,14 +3487,29 @@ def handle_wallet_risk(params: dict) -> dict:
             with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read())
             raw = data.get("result", {})
+            # `sanctioned` added 2026-08-14. It was returned by GoPlus all along
+            # and never read, so an OFAC-listed address that tripped no other
+            # flag came back LOW with an empty risk_flags list — the false-clean
+            # failure this file has now fixed in several places. Verified live
+            # against the Ronin bridge exploiter (0x098B...2f96, chain_id=1),
+            # which returns blacklist_doubt=1, stealing_attack=1, sanctioned=1.
+            # Same "0"/"1" string encoding as every other flag.
             _MALICIOUS = {
                 "phishing_activities":  "linked to phishing",
                 "blacklist_doubt":      "security blacklisted",
                 "darkweb_transactions": "dark web activity",
                 "stealing_attack":      "stealing attacks",
                 "cybercrime":           "cybercrime",
+                "sanctioned":           "sanctions-listed",
             }
             risk_flags = [label for k, label in _MALICIOUS.items() if raw.get(k) == "1"]
+            # Sanctions is the one flag that cannot be graded on volume. The
+            # count-based rule below would render a sanctions-only hit as
+            # MEDIUM, and Crypto Shield Mobile scores MEDIUM at 45 against an
+            # alert threshold of 70 — so the app would raise nothing at all on
+            # an OFAC-listed counterparty. Dealing with a sanctioned address is
+            # a compliance event on the first flag, not the second.
+            sanctions_hit = raw.get("sanctioned") == "1"
         except Exception as exc:
             logger.error("GoPlus wallet-risk failed address=%s: %s", address, exc)
             metadata["goplus_error"] = "upstream unavailable"
@@ -2974,8 +3530,10 @@ def handle_wallet_risk(params: dict) -> dict:
             logger.error("TONAPI wallet-risk failed address=%s: %s", address, exc)
             metadata["tonapi_error"] = "upstream unavailable"
 
-    risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
-    logger.info("wallet-risk address=%s chain=%s risk=%s flags=%d", address, chain, risk_level, len(risk_flags))
+    risk_level = "HIGH" if sanctions_hit or len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+    _record_first_seen(address, chain)
+    logger.info("wallet-risk address=%s chain=%s risk=%s flags=%d sanctioned=%s",
+                address, chain, risk_level, len(risk_flags), sanctions_hit)
     return _ok({
         "address":    address.lower() if chain == "evm" else address,
         "chain":      chain,
@@ -3068,8 +3626,13 @@ def handle_infostealer(params: dict) -> dict:
             raw = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            # Hudson Rock returns 404 when email is not found
-            return _ok({"email": email, "found": False, "stealer_count": 0, "stealers": []})
+            # Hudson Rock returns 404 when email is not found. This is a real
+            # negative from a reachable upstream, not a failure, so it is a
+            # genuine clean verdict rather than a degraded one.
+            return _ok({
+                "email": email, "found": False, "stealer_count": 0, "stealers": [],
+                **_freshness_for("/v1/metered/infostealer", flagged=False),
+            })
         logger.error("Cavalier API HTTP error: %s", exc)
         return _err(f"infostealer check failed: HTTP {exc.code}", 502)
     except Exception as exc:
@@ -3089,13 +3652,14 @@ def handle_infostealer(params: dict) -> dict:
         })
 
     found = len(stealers) > 0
-    logger.info("infostealer email=%s found=%s count=%d", email, found, len(stealers))
+    logger.info("infostealer email=%s found=%s count=%d", _redact(email, "em"), found, len(stealers))
     return _ok({
         "record_type":   "credential_exposure",
         "email":         email,
         "found":         found,
         "stealer_count": len(stealers),
         "stealers":      stealers,
+        **_freshness_for("/v1/metered/infostealer", flagged=found),
     })
 
 
@@ -3133,6 +3697,320 @@ def handle_infostealer(params: dict) -> dict:
 
 HIBP_DOMAIN_URL   = "https://haveibeenpwned.com/api/v3/breacheddomain/{domain}"
 MAX_VENDOR_DOMAINS = 10
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/dependency-risk        ("Angle 2", 2026-08-12)
+# ---------------------------------------------------------------------------
+# Every package security vendor analyses the ARTIFACT. None of them can tell you
+# whether the human who is able to publish that artifact is compromised right
+# now. That is the question this answers, and it is the one question Socket,
+# Snyk, Aikido and Endor structurally cannot, because they read code and we
+# screen identities.
+#
+# WHY IT MATTERS: a self-replicating npm worm does not begin with malicious
+# code. It begins with a maintainer account. The chain is: maintainer's machine
+# is infected -> npm token lifted from the stealer log -> attacker publishes a
+# malicious version -> that version harvests tokens from every CI job that
+# installs it -> it publishes itself into those maintainers' packages too. By
+# the time a scanner can see bad code in a tarball, the worm has already run.
+# Maintainer compromise is the leading indicator; the tarball is the trailing
+# one.
+#
+# THE HARD DESIGN CONSTRAINT, and it is not negotiable: findings are reported at
+# the DEPENDENCY level and never name the human. "3 of your 412 dependencies are
+# maintained by an account that appears in a recent stealer log" is completely
+# actionable -- pin the version, scrutinise updates, require review -- and none
+# of that needs the person's identity. Naming a third party who never opted in
+# carries GDPR and defamation exposure for zero product benefit. Do not add a
+# maintainer identity field even as an internal debugging convenience, because
+# internal fields leak into support conversations.
+# The PER-VERSION document, not the package document, and the choice is load
+# bearing in two directions.
+#
+# SIZE: the full package document carries every version's metadata. `@types/node`
+# is 11 MB of it. A hundred of those does not fit in this Lambda and would take
+# minutes. `/<pkg>/latest` is 1.5 to 4 KB.
+#
+# CORRECTNESS: do NOT be tempted back to the abbreviated document
+# (`application/vnd.npm.install-v1+json`). It is small, but it omits
+# `maintainers` entirely -- it returns 200 with no error, and the resolver
+# silently finds zero accounts for every package on earth, so the endpoint
+# reports "0 dependencies at risk" for every manifest and looks like it works.
+# That was written, tested against the live registry, and caught before deploy
+# on 2026-08-12. It is the exact false-clean shape this codebase keeps hitting.
+NPM_REGISTRY_URL = "https://registry.npmjs.org/{package}/latest"
+
+# npm's own naming rules: lowercase, optional @scope/, no leading dot or
+# underscore. Validated rather than passed straight through, because the name
+# goes into a URL path.
+_NPM_PACKAGE_RE = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]{0,213}$")
+
+# Bounded on purpose. A 400-package manifest fans out to roughly 1,100
+# maintainer lookups, which does not fit in a Lambda invocation and would hammer
+# both registry.npmjs.org and the stealer-log upstream. When a caller exceeds
+# either cap the response says so via `truncated`, and NEVER silently returns a
+# short list that reads like a clean result.
+MAX_DEPENDENCY_PACKAGES  = 100
+MAX_MAINTAINER_SCREENS   = 150
+DEPENDENCY_FANOUT_WORKERS = 8
+
+# Stealer-log recency IS the alert signal; breach corpora are context only.
+# A 2013 LinkedIn breach on a maintainer's address tells you nothing about
+# whether their laptop is compromised today, and alerting on it would bury the
+# signal that matters under a decade of noise.
+DEPENDENCY_STEALER_RECENT_DAYS = 90
+
+# Role and shared addresses are filtered out of ALERTING, not merely out of
+# display. The feasibility gate measured ~9% of npm maintainer emails as role
+# addresses. Screening `security@` or a mailing list tells you nothing about
+# whether one person's laptop is compromised, and a hit on a shared inbox would
+# be a false positive with real operational cost on a product whose entire pitch
+# is the opposite.
+_ROLE_ADDRESS_LOCALPARTS = frozenset({
+    "admin", "abuse", "bot", "ci", "contact", "dev", "devs", "developer",
+    "developers", "help", "hello", "hi", "info", "it", "mail", "maintainer",
+    "maintainers", "noreply", "no-reply", "npm", "ops", "oss", "oss-bot",
+    "packages", "postmaster", "release", "releases", "root", "security",
+    "support", "sysadmin", "team", "webmaster",
+})
+
+
+def _is_role_address(email: str) -> bool:
+    local = email.split("@", 1)[0].lower()
+    if local in _ROLE_ADDRESS_LOCALPARTS:
+        return True
+    # `oss-bot`, `npm-publish`, `release-ci` and friends.
+    return any(local.startswith(p + "-") or local.endswith("-" + p)
+               for p in ("bot", "ci", "oss", "npm", "release", "noreply"))
+
+
+def _npm_maintainer_emails(package: str) -> tuple[list[str], str | None]:
+    """Resolve a package to its publisher emails. Returns (emails, error).
+
+    An error is returned rather than an empty list, because "we could not ask"
+    and "nobody is exposed" must never collapse into the same answer. The caller
+    surfaces unresolved packages explicitly.
+    """
+    if not _NPM_PACKAGE_RE.match(package):
+        return [], "invalid_package_name"
+    url = NPM_REGISTRY_URL.format(package=urllib.parse.quote(package, safe="@/"))
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "RelayShield/1.0 (+https://relayshield.net)",
+        "Accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            doc = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return [], ("not_found" if exc.code == 404 else f"registry_http_{exc.code}")
+    except Exception:
+        return [], "registry_unreachable"
+
+    emails: list[str] = []
+    for m in (doc.get("maintainers") or []):
+        if isinstance(m, dict):
+            e = (m.get("email") or "").strip().lower()
+            if e and "@" in e:
+                emails.append(e)
+    # `_npmUser` is the account that actually published THIS version. For a worm
+    # it is the most relevant single account in the document: it is the one that
+    # pushed the bytes currently installed, whereas the maintainer list includes
+    # people who merely could have. Included, never distinguished in the output.
+    npm_user = ((doc.get("_npmUser") or {}).get("email") or "").strip().lower()
+    if npm_user and "@" in npm_user:
+        emails.append(npm_user)
+    return sorted(set(emails)), (None if emails else "no_maintainer_email")
+
+
+def _screen_maintainer(email: str) -> dict:
+    """Stealer-log screening for one maintainer address.
+
+    Returns {'exposed': bool, 'recent': bool, 'latest': str|None, 'degraded': bool}.
+
+    `degraded` propagates the freshness contract all the way to the top-level
+    response. A maintainer we could not screen is NOT a maintainer who came back
+    clean, and the difference is the whole reason anyone would trust this.
+    """
+    res = handle_infostealer({"email": email})
+    if res.get("statusCode", 200) >= 300:
+        return {"exposed": False, "recent": False, "latest": None, "degraded": True}
+    data = json.loads(res.get("body", "{}")).get("data", {})
+    if data.get("degraded"):
+        return {"exposed": False, "recent": False, "latest": None, "degraded": True}
+
+    dates = [str(s.get("date_compromised")) for s in (data.get("stealers") or [])
+             if s.get("date_compromised")]
+    latest = max(dates) if dates else None
+    recent = False
+    if latest:
+        try:
+            when = datetime.fromisoformat(latest.replace("Z", "+00:00"))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            recent = (datetime.now(timezone.utc) - when).days <= DEPENDENCY_STEALER_RECENT_DAYS
+        except Exception:
+            # An unparseable date is treated as recent rather than discarded.
+            # Under-reporting a live compromise is the expensive direction.
+            recent = True
+    return {"exposed": bool(data.get("found")), "recent": recent,
+            "latest": latest, "degraded": False}
+
+
+def _packages_from_manifest(manifest) -> list[str]:
+    """Accept package.json or package-lock.json, as an object or a JSON string.
+
+    Both are accepted because a customer will paste whichever one they have, but
+    the documented default is a plain package-name list: a lockfile is the
+    customer's full dependency graph, which is commercially sensitive data we
+    would then have to defend holding.
+    """
+    if isinstance(manifest, str):
+        try:
+            manifest = json.loads(manifest)
+        except Exception:
+            return []
+    if not isinstance(manifest, dict):
+        return []
+
+    names: set[str] = set()
+    # package.json
+    for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+        block = manifest.get(section)
+        if isinstance(block, dict):
+            names.update(k for k in block if isinstance(k, str))
+    # package-lock.json v2/v3: keys look like "node_modules/left-pad"
+    packages = manifest.get("packages")
+    if isinstance(packages, dict):
+        for key in packages:
+            if isinstance(key, str) and "node_modules/" in key:
+                names.add(key.rsplit("node_modules/", 1)[1])
+    # package-lock.json v1
+    deps = manifest.get("dependencies")
+    if isinstance(deps, dict) and any(isinstance(v, dict) and "version" in v for v in deps.values()):
+        names.update(k for k in deps if isinstance(k, str))
+
+    return sorted(n for n in names if n and not n.startswith("."))
+
+
+def handle_dependency_risk(params: dict) -> dict:
+    packages = [str(p).strip() for p in (params.get("packages") or []) if str(p).strip()]
+    if not packages and params.get("manifest") is not None:
+        packages = _packages_from_manifest(params.get("manifest"))
+    packages = sorted(set(packages))
+
+    if not packages:
+        return _err("dependency-risk requires `packages` (a list of npm package names) "
+                    "or `manifest` (package.json or package-lock.json)")
+
+    truncated_packages = len(packages) > MAX_DEPENDENCY_PACKAGES
+    if truncated_packages:
+        packages = packages[:MAX_DEPENDENCY_PACKAGES]
+
+    # 1. Resolve packages to maintainer accounts, concurrently.
+    pkg_emails: dict[str, list[str]] = {}
+    unresolved: list[dict] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=DEPENDENCY_FANOUT_WORKERS) as pool:
+        for pkg, (emails, err) in zip(packages, pool.map(_npm_maintainer_emails, packages)):
+            if err and not emails:
+                unresolved.append({"package": pkg, "reason": err})
+            else:
+                pkg_emails[pkg] = emails
+
+    # 2. Screen each UNIQUE address once. Caching on the email rather than the
+    #    package is what makes this affordable: one maintainer typically
+    #    publishes many packages in a manifest, and re-screening per package
+    #    would multiply the upstream cost for an identical answer.
+    role_excluded = {e for emails in pkg_emails.values() for e in emails if _is_role_address(e)}
+    to_screen = sorted({e for emails in pkg_emails.values() for e in emails} - role_excluded)
+    truncated_screens = len(to_screen) > MAX_MAINTAINER_SCREENS
+    if truncated_screens:
+        to_screen = to_screen[:MAX_MAINTAINER_SCREENS]
+
+    screened: dict[str, dict] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=DEPENDENCY_FANOUT_WORKERS) as pool:
+        for email, verdict in zip(to_screen, pool.map(_screen_maintainer, to_screen)):
+            screened[email] = verdict
+
+    # 3. Roll up to the DEPENDENCY level. No email appears in the output.
+    at_risk: list[dict] = []
+    degraded_any = False
+    for pkg, emails in pkg_emails.items():
+        hits = [screened[e] for e in emails if e in screened]
+        if any(h["degraded"] for h in hits):
+            degraded_any = True
+        recent = [h for h in hits if h["exposed"] and h["recent"]]
+        stale  = [h for h in hits if h["exposed"] and not h["recent"]]
+        if recent:
+            at_risk.append({
+                "package":     pkg,
+                "severity":    "HIGH",
+                "signal":      "maintainer_in_recent_stealer_log",
+                "most_recent": max((h["latest"] for h in recent if h["latest"]), default=None),
+                "detail": ("An account able to publish this package appears in an infostealer log "
+                           f"dated within the last {DEPENDENCY_STEALER_RECENT_DAYS} days."),
+            })
+        elif stale:
+            at_risk.append({
+                "package":     pkg,
+                "severity":    "MEDIUM",
+                "signal":      "maintainer_in_older_stealer_log",
+                "most_recent": max((h["latest"] for h in stale if h["latest"]), default=None),
+                "detail": ("An account able to publish this package appears in an infostealer log, "
+                           "but not a recent one. Context, not an incident."),
+            })
+
+    order = {"HIGH": 2, "MEDIUM": 1}
+    at_risk.sort(key=lambda r: (order.get(r["severity"], 0), r["most_recent"] or ""), reverse=True)
+    high = [r for r in at_risk if r["severity"] == "HIGH"]
+
+    logger.info("dependency-risk packages=%d resolved=%d screened=%d at_risk=%d high=%d degraded=%s",
+                len(packages), len(pkg_emails), len(screened), len(at_risk), len(high), degraded_any)
+
+    return _ok({
+        "packages_checked":             len(packages),
+        "packages_resolved":            len(pkg_emails),
+        "maintainer_accounts_screened": len(screened),
+        "role_accounts_excluded":       len(role_excluded),
+        "dependencies_at_risk":         len(at_risk),
+        "high_severity":                len(high),
+        "findings":                     at_risk,
+        "unresolved_packages":          unresolved,
+        # Stated, never implied. A truncated run that looked complete would be
+        # the false-clean defect in its most expensive form: the customer would
+        # believe the 300 packages we never looked at came back clean.
+        "truncated": bool(truncated_packages or truncated_screens),
+        "truncated_detail": (
+            None if not (truncated_packages or truncated_screens) else
+            f"Capped at {MAX_DEPENDENCY_PACKAGES} packages and {MAX_MAINTAINER_SCREENS} maintainer "
+            "accounts per call. Packages beyond the cap were NOT checked and are not represented "
+            "in these findings. Split the manifest and call again."
+        ),
+        # THE PROSE MUST AGREE WITH THE FLAGS. `degraded` is checked first and
+        # on its own, because a run where an upstream was down but nothing was
+        # found would otherwise set degraded:true and still print "no dependency
+        # is exposed" underneath it. A caller reads the sentence; the sentence
+        # has to be the thing that cannot lie.
+        "recommended_action": (
+            "This run is incomplete: at least one maintainer account could not be screened "
+            "because an upstream source was unavailable. Treat it as unknown, not as clean, "
+            "and re-run before relying on it."
+            if degraded_any else
+            "Pin the flagged versions, require review on their updates, and do not auto-merge "
+            "their releases until the exposure ages out."
+            if high else
+            "No dependency is maintained by an account in a stealer log dated within the last "
+            f"{DEPENDENCY_STEALER_RECENT_DAYS} days."
+            if not at_risk else
+            "Nothing recent. Some maintainers appear in older stealer logs, which is context "
+            "rather than an incident: review those dependencies at your next update, not today."
+        ),
+        # Deliberately not named, and this is a product decision rather than an
+        # oversight. See the header comment.
+        "privacy_note": ("Findings are reported at the dependency level. RelayShield does not "
+                         "return, log or store the identity of any maintainer."),
+        **_freshness_for("/v1/metered/dependency-risk", flagged=bool(high), degraded=degraded_any),
+    })
 
 # Risk scoring — both signals contribute independently
 _CREDENTIAL_DATA_CLASSES = {
@@ -3402,7 +4280,7 @@ def handle_session_risk(params: dict) -> dict:
         )
         items = resp.get("Items", [])
     except Exception as exc:
-        logger.exception("session-risk DynamoDB query failed email=%s: %s", email, exc)
+        logger.exception("session-risk DynamoDB query failed email=%s: %s", _redact(email, "em"), exc)
         return _err("session risk query failed — internal error", 500)
 
     if not items:
@@ -3433,7 +4311,7 @@ def handle_session_risk(params: dict) -> dict:
         for s in sessions
     ]
 
-    logger.info("session-risk email=%s found=%d highest=%s", email, len(sessions), highest)
+    logger.info("session-risk email=%s found=%d highest=%s", _redact(email, "em"), len(sessions), highest)
     return _ok({
         "email":            email,
         "found":            True,
@@ -3483,7 +4361,7 @@ def handle_identity_graph(params: dict) -> dict:
         )
         items = resp.get("Items", [])
     except Exception as exc:
-        logger.exception("identity-graph query failed email=%s: %s", email, exc)
+        logger.exception("identity-graph query failed email=%s: %s", _redact(email, "em"), exc)
         return _err("identity graph query failed — internal error", 500)
 
     if not items:
@@ -3517,7 +4395,7 @@ def handle_identity_graph(params: dict) -> dict:
     domains = list(set(domains))
     sources = list({i.get("source", "") for i in items if i.get("source")})
 
-    logger.info("identity-graph email=%s phones=%d domains=%d", email, len(phones), len(domains))
+    logger.info("identity-graph email=%s phones=%d domains=%d", _redact(email, "em"), len(phones), len(domains))
     return _ok({
         "email":                   email,
         "found":                   True,
@@ -3626,7 +4504,12 @@ def _ioc_to_stix(item: dict) -> dict | None:
     """Convert a relayshield_intel_iocs record to a STIX 2.1 Indicator object."""
     ioc_val  = item.get("ioc_value", "")
     ioc_type = item.get("ioc_type", "")
-    seen_ts  = item.get("seen_ts", datetime.now(timezone.utc).isoformat())
+    # Accept both record shapes: the sighting rows in relayshield_intel_iocs use
+    # seen_ts, the deduplicated rows in relayshield_intel_feed_current use
+    # last_seen_ts. One serialiser for both keeps the scan fallback and the
+    # indexed path emitting byte-identical objects, which is the only way the
+    # fallback is worth having.
+    seen_ts  = item.get("seen_ts") or item.get("last_seen_ts") or datetime.now(timezone.utc).isoformat()
     malware  = item.get("malware", "")
     channel  = item.get("channel", "")
     category = item.get("category", "")
@@ -3658,9 +4541,32 @@ def _ioc_to_stix(item: dict) -> dict | None:
         return None
 
     indicator_id = f"indicator--{str(_uuid_mod.uuid5(_uuid_mod.NAMESPACE_URL, f'relayshield:{ioc_val}'))}"
-    labels       = ["malicious-activity"]
-    if malware and malware not in ("None", "n/a", ""):
-        labels.append(f"malware:{malware[:50]}")
+
+    # INTEL-LABELS-1 fixed at source, 2026-08-16. This line is where the defect
+    # was born: it emitted the raw malware value as ONE label, so a stored value
+    # of "Loader,Potemkin" became the single label "malware:Loader,Potemkin", and
+    # "ClearFake" and "clearfake" became two different labels for one family.
+    #
+    # Measured downstream in a live Sentinel workspace on 2026-08-15: an exact
+    # match on "clearfake" returned 196 of 608 matching rows, so a customer
+    # hunting by family silently missed roughly two thirds of the matches and got
+    # no indication the result was partial.
+    #
+    # Now: split comma-joined values, fold case, drop blanks and placeholders,
+    # de-duplicate, and emit one label per family. Consumers that already fold
+    # case keep working; consumers doing exact matches start being correct.
+    labels = ["malicious-activity"]
+    raw_families = malware if isinstance(malware, list) else str(malware or "").split(",")
+    seen_families = set()
+    for fam in raw_families:
+        fam = str(fam).strip().lower()
+        if not fam or fam in ("none", "n/a", "unknown", "null"):
+            continue
+        if fam in seen_families:
+            continue
+        seen_families.add(fam)
+        labels.append(f"malware:{fam[:50]}")
+    family_text = ", ".join(sorted(seen_families))
 
     return {
         "type":          "indicator",
@@ -3669,7 +4575,9 @@ def _ioc_to_stix(item: dict) -> dict | None:
         "created":       seen_ts,
         "modified":      seen_ts,
         "name":          ioc_val,
-        "description":   f"Observed in {channel} ({category})" + (f" — {malware}" if malware and malware not in ("None","n/a","") else ""),
+        # No em-dash: this string is published prose, delivered verbatim into
+        # every consumer's SIEM as the indicator description.
+        "description":   f"Observed in {channel} ({category})" + (f": {family_text}" if family_text else ""),
         "pattern":       pattern,
         "pattern_type":  "stix",
         "valid_from":    seen_ts,
@@ -3706,7 +4614,7 @@ def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
             # IOCs, and _ingest_github_tool_repos which writes a different
             # table). The AWS Marketplace listing's "20+ feeds" was correct all
             # along; this discovery document was the understated one.
-            "description": "RelayShield TAXII 2.1 server — 4,500,000+ IOCs from 85+ criminal Telegram channels and 20 authoritative feeds",
+            "description": "RelayShield TAXII 2.1 server. 494,000+ distinct indicators from 5,800,000+ sightings, collected from 95 monitored channels and 20 authoritative feeds",
             "contact":     "support@relayshield.net",
             # Must be the branded host: a TAXII 2.1 client reads api_roots from
             # this discovery document and follows it for every subsequent
@@ -3743,7 +4651,7 @@ def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
 TAXII_COLLECTION = {
     "id":          "iocs",
     "title":       "RelayShield IOCs",
-    "description": "Malicious IPs, domains, URLs, and file hashes from 85+ criminal Telegram channels and 20 authoritative threat feeds. 3,750+ malware families tracked.",
+    "description": "Malicious IPs, domains, URLs, and file hashes from 95 monitored channels and 20 authoritative threat feeds. 3,800+ malware families tracked.",
     "can_read":    True,
     "can_write":   False,
     "media_types": ["application/stix+json;version=2.1"],
@@ -3780,12 +4688,128 @@ def handle_taxii_collection(params: dict, api_key_record: dict, collection_id: s
     }
 
 
+# Feed pagination cursors, reworked 2026-08-16 (TAXII-PAGINATION-1).
+#
+# The cursor used to be a raw json.dumps() of a DynamoDB key, handed back to the
+# client as a query parameter and read back with:
+#
+#     try:    ExclusiveStartKey = json.loads(cursor)
+#     except: pass
+#
+# That `pass` is the defect. A cursor that failed to parse -- for any reason, and
+# a JSON blob with braces and quotes travelling through a query string has
+# several -- fell through to a scan with NO start key, which returns page one
+# again with more=true. To the client that is indistinguishable from progress,
+# so it re-ingests the same objects forever and nothing anywhere reports a fault.
+# Same silent-false-success shape as the asset-intel and GoPlus defects.
+#
+# Now: base64url, so it survives a query string intact, and an unusable cursor is
+# a 400 rather than a silent restart. The legacy raw-JSON form is still accepted
+# so that clients mid-traversal at deploy time are not broken.
+_CURSOR_KEYS = {"ioc_value", "seen_ts"}
+
+# The two paths have different key shapes -- the scan resumes on
+# (ioc_value, seen_ts), the indexed query on (feed_shard, last_seen_ts,
+# ioc_value) -- so a cursor now carries which path issued it. Without the tag a
+# cursor from one path silently means something else to the other, which is how
+# a fallback quietly starts returning the wrong slice of the corpus.
+_CURSOR_SCAN = "scan"
+_CURSOR_FEED = "feed"
+
+
+def _encode_feed_cursor(key: dict, source: str = _CURSOR_SCAN) -> str:
+    raw = json.dumps({"v": 1, "s": source, "k": key}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_feed_cursor(cursor: str) -> tuple | None:
+    """Return (source, key) for a cursor, or None if it is unusable."""
+    for attempt in (cursor + "=" * (-len(cursor) % 4), None):
+        try:
+            if attempt is None:          # legacy raw JSON, accepted for compatibility
+                blob = json.loads(cursor)
+            else:
+                blob = json.loads(base64.urlsafe_b64decode(attempt).decode("utf-8"))
+        except Exception:
+            continue
+        if not isinstance(blob, dict):
+            continue
+        # Current form: {"v":1,"s":...,"k":{...}}
+        if blob.get("v") == 1 and isinstance(blob.get("k"), dict):
+            source = blob.get("s")
+            if source in (_CURSOR_SCAN, _CURSOR_FEED):
+                return source, blob["k"]
+            continue
+        # Legacy bare key, from before the tag existed. Only ever a scan cursor.
+        if _CURSOR_KEYS <= set(blob):
+            return _CURSOR_SCAN, blob
+    return None
+
+
+def _bad_cursor_response(content_type: str) -> dict:
+    return {
+        "statusCode": 400,
+        "headers": {"Content-Type": content_type},
+        "body": json.dumps({
+            "title": "Invalid cursor",
+            "description": "The 'next' parameter is not a cursor this server issued. "
+                           "Restart the collection without 'next', or resume from a "
+                           "cursor taken verbatim from a previous response.",
+        }),
+    }
+
+
+INTEL_FEED_TABLE = os.environ.get("INTEL_FEED_TABLE", "relayshield_intel_feed_current")
+INTEL_FEED_SHARD = "v1"
+
+
+def _query_feed_indicators(added_after: str, limit: int, start_key: dict | None):
+    """Serve the feed from the deduplicated table via its time-ordered index.
+
+    Returns (items, next_key), or None if the feed table cannot serve the request
+    and the caller should fall back to scanning the sightings table.
+
+    This is the whole point of TAXII-PAGINATION-2. The sightings table carries
+    11.9 rows per distinct IOC, so a scan reads ~11.9 rows for every object it
+    can return and a full traversal costs 88,794 RRU. Querying an index that
+    holds one row per IOC in last_seen_ts order costs 7,461 for the same corpus,
+    reads only what it returns, and gives DynamoDB-native durable pagination
+    instead of a hand-rolled cursor over scan order.
+    """
+    try:
+        table = dynamodb.Table(INTEL_FEED_TABLE)
+        cond = Key("feed_shard").eq(INTEL_FEED_SHARD)
+        if added_after:
+            cond = cond & Key("last_seen_ts").gt(added_after)
+        kwargs = {
+            "IndexName":              "feed-time-index",
+            "KeyConditionExpression": cond,
+            "Limit":                  limit,
+            "ScanIndexForward":       True,   # oldest first, so added_after walks forward
+        }
+        if start_key:
+            kwargs["ExclusiveStartKey"] = start_key
+        resp = table.query(**kwargs)
+        return resp.get("Items", []), resp.get("LastEvaluatedKey")
+    except Exception as exc:
+        # Deliberately not fatal. The scan path still works, and a feed table
+        # that is missing, mid-backfill or throttled should degrade to slower
+        # rather than to broken. Logged at warning so a permanent fallback shows
+        # up in the logs instead of hiding as "it still works".
+        logger.warning("feed table query unavailable, falling back to scan: %s", exc)
+        return None
+
+
 def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict) -> dict:
     added_after = query_params.get("added_after", "")
+    # Default raised from 500 on 2026-08-16. At 500 a full traversal of the
+    # collection needs ~965 sequential requests, which no polling client budgets
+    # for; measured, Sentinel got ~25 pages in before restarting. Fewer, larger
+    # pages is the part of that gap this file can close on its own.
     try:
-        limit = min(int(query_params.get("limit", 500)), 2000)
+        limit = min(int(query_params.get("limit", 2000)), 5000)
     except (ValueError, TypeError):
-        limit = 500
+        limit = 2000
 
     table = dynamodb.Table(INTEL_IOCS_TABLE)
     scan_kwargs: dict = {
@@ -3800,11 +4824,45 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
             scan_kwargs["FilterExpression"] &
             boto3.dynamodb.conditions.Attr("seen_ts").gte(added_after)
         )
+    resumed = False
+    cursor_source, cursor_key = _CURSOR_FEED, None
     if cursor := query_params.get("next"):
-        try:
-            scan_kwargs["ExclusiveStartKey"] = json.loads(cursor)
-        except Exception:
-            pass
+        decoded = _decode_feed_cursor(cursor)
+        if decoded is None:
+            logger.warning("TAXII objects rejected an unusable cursor (len=%d)", len(cursor))
+            return _bad_cursor_response("application/taxii+json;version=2.1")
+        cursor_source, cursor_key = decoded
+        resumed = True
+
+    # Indexed path first. A client that started on the scan path keeps its scan
+    # cursor honoured to the end of its traversal rather than being silently
+    # moved onto a different ordering mid-collection.
+    if cursor_source == _CURSOR_FEED:
+        feed = _query_feed_indicators(added_after, limit, cursor_key)
+        if feed is not None:
+            feed_items, feed_next = feed
+            if feed_items or resumed:
+                indicators = [o for o in (_ioc_to_stix(i) for i in feed_items) if o]
+                body = {"objects": indicators, "more": bool(feed_next)}
+                if feed_next:
+                    body["next"] = _encode_feed_cursor(feed_next, _CURSOR_FEED)
+                logger.info(
+                    "TAXII objects path=feed returned=%d more=%s resumed=%s added_after=%s",
+                    len(indicators), bool(feed_next), resumed, bool(added_after),
+                )
+                return {
+                    "statusCode": 200,
+                    "headers": {"Content-Type": "application/taxii+json;version=2.1"},
+                    "body": json.dumps(body),
+                }
+            # Empty and not a resume means the feed table is not populated yet.
+            # Fall through to the scan rather than telling a client the corpus is
+            # empty, which is the failure this whole exercise exists to prevent.
+            logger.warning("feed table returned nothing on a fresh request, falling back to scan")
+        cursor_key = None
+
+    if cursor_key:
+        scan_kwargs["ExclusiveStartKey"] = cursor_key
 
     # Deduplication, 2026-07-29. The table is keyed (ioc_value HASH, seen_ts RANGE)
     # -- one row per *sighting* -- while _ioc_to_stix derives the STIX id from
@@ -3822,17 +4880,26 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
     # Because duplicates collapse, a single over-fetched scan can no longer be
     # relied on to yield `limit` unique indicators, so we scan forward across a
     # bounded number of pages instead of returning a near-empty response.
-    MAX_SCAN_PAGES = 6
+    # Raised from 6 on 2026-08-16. The table carries 11.9 sightings per distinct
+    # IOC (measured over a 64,000-row parallel-segment sample), so ~11.9 rows have
+    # to be read for every object returned. Six scan pages could not feed a larger
+    # `limit`. The elapsed-time guard below is what keeps this bounded, rather
+    # than the page count alone.
+    MAX_SCAN_PAGES = 24
+    MAX_SCAN_SECONDS = 10.0
+    scan_started = time.time()
     unique: dict[str, dict] = {}
     last_consumed_key = None
     next_key = None
     pages = 0
+    rows_scanned = 0
 
     try:
-        while pages < MAX_SCAN_PAGES:
+        while pages < MAX_SCAN_PAGES and (time.time() - scan_started) < MAX_SCAN_SECONDS:
             resp = table.scan(**scan_kwargs)
             pages += 1
             items = resp.get("Items", [])
+            rows_scanned += len(items)
             next_key = resp.get("LastEvaluatedKey")
 
             hit_limit = False
@@ -3881,9 +4948,21 @@ def handle_taxii_objects(params: dict, api_key_record: dict, query_params: dict)
 
     response_body = {"objects": indicators, "more": bool(next_key)}
     if next_key:
-        response_body["next"] = json.dumps(next_key)
+        response_body["next"] = _encode_feed_cursor(next_key, _CURSOR_SCAN)
 
-    logger.info("TAXII objects returned=%d more=%s", len(indicators), bool(next_key))
+    # Log enough to tell a traversal from a treadmill. The old line recorded only
+    # the object count and `more`, which looked healthy while the collection was
+    # in fact never terminating: every response for 24 hours was
+    # "returned=500 more=True" and nothing distinguished a client making progress
+    # from one restarting from page one every 74 seconds. `resumed` and the
+    # cursor position are what make that visible.
+    logger.info(
+        "TAXII objects path=scan returned=%d more=%s resumed=%s rows_scanned=%d pages=%d "
+        "elapsed=%.1fs cursor_at=%s",
+        len(indicators), bool(next_key), resumed, rows_scanned, pages,
+        time.time() - scan_started,
+        (next_key or {}).get("ioc_value", "-")[:24],
+    )
     return {
         "statusCode": 200,
         # The Envelope is a TAXII resource, not a STIX one, so TAXII 2.1 s3.6
@@ -4232,11 +5311,15 @@ def handle_misp_event(params: dict, api_key_record: dict, query_params: dict) ->
             scan_kwargs["FilterExpression"] &
             boto3.dynamodb.conditions.Attr("seen_ts").gte(added_after)
         )
+    # Same silent-restart defect as the TAXII handler, fixed together on
+    # 2026-08-16. See _decode_feed_cursor. A MISP client hitting this got the
+    # first page back forever with no indication anything was wrong.
     if cursor := query_params.get("next"):
-        try:
-            scan_kwargs["ExclusiveStartKey"] = json.loads(cursor)
-        except Exception:
-            pass
+        cursor_key = _decode_feed_cursor(cursor)
+        if cursor_key is None:
+            logger.warning("MISP restSearch rejected an unusable cursor (len=%d)", len(cursor))
+            return _bad_cursor_response("application/json")
+        scan_kwargs["ExclusiveStartKey"] = cursor_key
 
     try:
         resp  = table.scan(**scan_kwargs)
@@ -4270,7 +5353,7 @@ def handle_misp_event(params: dict, api_key_record: dict, query_params: dict) ->
             "Orgc":            {"name": "RelayShield"},
             "Attribute":       attributes,
             "more":            bool(next_key),
-            **({"next": json.dumps(next_key)} if next_key else {}),
+            **({"next": _encode_feed_cursor(next_key)} if next_key else {}),
         }
     }
 
@@ -4546,27 +5629,59 @@ def handle_asset_intel(params: dict, api_key_str: str) -> dict:
         return _ok({"matches": [], "assets_checked": 0,
                     "note": "No assets registered. Use action: register to add assets."})
 
+    # `relayshield_intel_iocs` is keyed (ioc_value HASH, seen_ts RANGE), so a
+    # get_item with only ioc_value raises ValidationException on every call.
+    # This used to be a get_item; the broad `except` below swallowed the
+    # exception and the asset fell through as clean, so the sweep reported
+    # `match_count: 0` for every asset regardless of the corpus. Same
+    # false-clean shape as the sim-swap defect. Query the partition and take
+    # the most recent observation instead.
+    #
+    # Field names below are the ones the ingestion actually writes
+    # (relayshield_intel_monitor._store_iocs and relayshield_intel_feed):
+    # ioc_type / channel / malware / category / seen_ts. The previous code read
+    # `source`, `malware_family`, `confidence_score`, `first_seen` and
+    # `threat_actor`, none of which are written by anything, so every field
+    # would have come back empty even if the lookup had worked.
     matches = []
+    errors  = []
     for asset in sweep_targets:
         try:
-            ioc_resp = ioc_table.get_item(Key={"ioc_value": asset})
-            item = ioc_resp.get("Item")
-            if item:
+            hits = ioc_table.query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(asset),
+                ScanIndexForward=False,   # newest seen_ts first
+                Limit=1,
+            ).get("Items", [])
+            if hits:
+                item = hits[0]
                 matches.append({
                     "asset":        asset,
-                    "ioc_type":     item.get("ioc_type"),
-                    "source":       item.get("source"),
-                    "malware":      item.get("malware_family", ""),
-                    "confidence":   item.get("confidence_score", 0.5),
-                    "first_seen":   item.get("first_seen", ""),
+                    "ioc_type":     item.get("ioc_type", "unknown"),
+                    "source":       item.get("channel", ""),
+                    "category":     item.get("category", ""),
+                    "malware":      item.get("malware", ""),
                     "threat_actor": item.get("threat_actor", ""),
+                    "confidence":   item.get("confidence", ""),
+                    "reference":    item.get("reference", ""),
+                    "last_seen":    item.get("seen_ts", ""),
                 })
         except Exception as exc:
             logger.warning("asset-intel sweep failed asset=%s: %s", asset, exc)
+            errors.append(asset)
 
-    logger.info("asset-intel sweep api_key=%s assets=%d matches=%d", api_key_str[:16], len(sweep_targets), len(matches))
-    return _ok({"matches": matches, "assets_checked": len(sweep_targets),
-                "match_count": len(matches), "clean_count": len(sweep_targets) - len(matches)})
+    # An asset we could not check is not an asset that came back clean. Report
+    # the failure rather than folding it into clean_count.
+    checked = len(sweep_targets) - len(errors)
+    logger.info("asset-intel sweep api_key=%s assets=%d checked=%d matches=%d errors=%d",
+                api_key_str[:16], len(sweep_targets), checked, len(matches), len(errors))
+    resp = {"matches": matches, "assets_checked": checked,
+            "match_count": len(matches), "clean_count": checked - len(matches)}
+    if errors:
+        resp["errors"] = errors
+        resp["error_count"] = len(errors)
+        resp["note"] = ("Some assets could not be checked against the IOC corpus and are NOT "
+                        "included in clean_count. Retry or contact support.")
+    return _ok(resp)
 
 
 # ---------------------------------------------------------------------------
@@ -4661,13 +5776,49 @@ def handle_threat_actor(params: dict) -> dict:
         mitre_info = {}
         software_names: list[str] = []
         try:
-            mitre_items = mitre_table.scan(
-                FilterExpression=(
-                    boto3.dynamodb.conditions.Attr("sk").eq("info") &
-                    boto3.dynamodb.conditions.Attr("name").contains(term)
-                ),
-                Limit=200,
-            ).get("Items", [])
+            # Two defects fixed 2026-08-10, both of the "looks fine, is blind"
+            # kind:
+            #
+            # (1) `Limit=200` on a *filtered* scan. DynamoDB applies Limit to
+            #     items EXAMINED, before the FilterExpression runs. The table
+            #     holds ~1,132 items, so the scan only ever looked at the first
+            #     200 and roughly 83% of the corpus was unreachable. APT38
+            #     resolved only because it happened to sit inside that window.
+            #     Measured: ScannedCount 200, every call.
+            #
+            # (2) Only `name` was matched, never `aliases`. Every group record
+            #     stores its aliases (G0082 carries Bluenoroff, BeagleBoyz,
+            #     Sapphire Sleet, NICKEL GLADSTONE and more), but a customer
+            #     searching any of them got found=False against a corpus that
+            #     had the answer. DynamoDB `contains` on a list is also exact
+            #     and case-sensitive, so a server-side filter could not do this
+            #     correctly anyway.
+            #
+            # 193 group records total, one unpaginated page, so matching in
+            # Python is cheap and correct. Exact match wins over substring, so
+            # "APT3" cannot shadow "APT38".
+            groups_raw, start_key = [], None
+            while True:
+                kw = {"FilterExpression": boto3.dynamodb.conditions.Attr("sk").eq("info")}
+                if start_key:
+                    kw["ExclusiveStartKey"] = start_key
+                page = mitre_table.scan(**kw)
+                groups_raw.extend(page.get("Items", []))
+                start_key = page.get("LastEvaluatedKey")
+                if not start_key:
+                    break
+
+            needle = term.strip().lower()
+            exact, partial = [], []
+            for g in groups_raw:
+                names = [str(g.get("name", ""))] + [str(a) for a in (g.get("aliases") or [])]
+                names = [n.strip().lower() for n in names if n]
+                if needle in names:
+                    exact.append(g)
+                elif any(needle in n for n in names):
+                    partial.append(g)
+
+            mitre_items = exact or partial
             if mitre_items:
                 group = mitre_items[0]
                 mitre_info = {
@@ -4684,10 +5835,23 @@ def handle_threat_actor(params: dict) -> dict:
         except Exception as exc:
             logger.warning("actor-lookup MITRE scan failed term=%s: %s", term, exc)
 
+        # Query the malware-index for the group's associated software AND for
+        # the actor's own name and aliases. Some IOCs are attributed to an
+        # actor rather than to a named malware family (a threat report's
+        # campaign infrastructure list, for example), and until this was added
+        # there was no way to represent or retrieve them: APT38 resolves to
+        # Mimikatz, Net, DarkComet, HOPLIGHT, ECCENTRICBANDWAGON and KillDisk,
+        # none of which a campaign domain would ever be tagged with.
+        lookup_names = list(software_names)
+        lookup_names.append(term)
+        if mitre_info:
+            lookup_names.append(mitre_info.get("group_name", ""))
+            lookup_names.extend(mitre_info.get("aliases", []))
+
         iocs = []
         checked_names = set()
-        for name in software_names:
-            key = name.strip().lower()
+        for name in lookup_names:
+            key = str(name).strip().lower()
             if not key or key in checked_names:
                 continue
             checked_names.add(key)
@@ -5076,7 +6240,7 @@ def handle_identity_risk_score(params: dict) -> dict:
         "max_score":        100,
         "risk_factors":     factors,
         "summary": (
-            f"Domain {domain} scores {total_score}/100 ({grade} — {risk_level}) across "
+            f"Domain {domain} scores {total_score}/100 ({grade}, {risk_level}) across "
             f"{active_dims} of 6 monitored identity signal dimensions."
         ),
         "recommendation": (
@@ -5110,6 +6274,184 @@ def handle_webhook_configure(params: dict, api_key_str: str) -> dict:
     status = "registered" if webhook_url else "cleared"
     logger.info("webhook %s for key=%s url=%s", status, api_key_str[:16], webhook_url[:60])
     return _ok({"webhook_url": webhook_url, "status": status})
+
+
+# ---------------------------------------------------------------------------
+# Verdict Watch — flat-rate licence, notify on FLIP
+# ---------------------------------------------------------------------------
+# The freshness contract tells a caller when a verdict goes stale. It cannot
+# tell them the verdict CHANGED, and that is the part they cannot compute for
+# themselves: expires_at is arithmetic they already hold, whereas "this address
+# is dirty now and was clean an hour ago" costs them a re-screen to discover.
+# So the billable product is the flip, not the timer.
+#
+# Licensed flat rate via `watch_access` on the key record, exactly the shape of
+# the LLMjacking licence: one scoped capability, never a grant over the rest of
+# the metered catalog.
+#
+# Endpoints:
+#   POST /v1/watch          { "subject_type": "...", "subject_value": "..." }
+#   POST /v1/watch/list     {}
+#   POST /v1/watch/remove   { "watch_id": "..." }
+
+# 402 Index proof-of-domain-control, issued 2026-08-08 for api.relayshield.net.
+# Public by design and served verbatim at /.well-known/402index-verify.txt.
+X402INDEX_DOMAIN_VERIFICATION_HASH = (
+    "0d60fa79e14dc718f33d46a51b9b5228488791efe60962913a7bed5adf29e9aa"
+)
+
+VERDICT_WATCHES_TABLE = "relayshield_verdict_watches"
+
+# Subject type -> the metered path whose handler produces its verdict.
+WATCH_SUBJECT_ENDPOINTS = {
+    "address": "/v1/metered/crypto-intel",
+    "email":   "/v1/metered/breach",
+    "domain":  "/v1/metered/domain",
+    "phone":   "/v1/metered/sim-swap",
+    # Angle 2, added 2026-08-12. subject_value is an npm PACKAGE NAME.
+    #
+    # This is the half of the feature that is actually worth money. A one-time
+    # dependency scan is close to decorative: the tree is clean today and a
+    # maintainer is phished in March. The compromise happens at a random future
+    # moment, which means the product is continuous or it is nothing. Watch
+    # already does continuous, on a flat-rate licence, with change detection
+    # that compares the finding rather than the envelope.
+    "dependency": "/v1/metered/dependency-risk",
+}
+
+WATCH_MAX_PER_KEY = 500
+
+# The exact paths watch_access unlocks. Kept as an explicit allowlist for the
+# same reason CS_MOBILE_ALLOWED_ENDPOINTS is: a licence flag must never widen
+# into the rest of the metered catalog.
+WATCH_LICENSE_ENDPOINTS = frozenset({"/v1/watch", "/v1/watch/list", "/v1/watch/remove"})
+
+
+def _verdict_fingerprint(subject_type: str, data: dict) -> str:
+    """Canonical, order-stable summary of a verdict, for change detection.
+
+    Compares the FINDING, never the envelope. observed_at and expires_at move
+    on every re-check by definition, so fingerprinting the whole payload would
+    report a flip every single cycle.
+    """
+    if subject_type == "address":
+        return "|".join(sorted(data.get("address_flags") or [])) or "clean"
+    if subject_type == "email":
+        return "|".join(sorted(b.get("name", "") for b in (data.get("breaches") or []))) or "clean"
+    if subject_type == "domain":
+        return "|".join(sorted(l.get("domain", "") for l in (data.get("lookalikes") or []))) or "clean"
+    if subject_type == "phone":
+        return "swapped" if data.get("swapped") else "clean"
+    if subject_type == "dependency":
+        # Fingerprint the SIGNAL, not the date. `most_recent` moves whenever a
+        # new log lands for the same already-exposed maintainer, and firing on
+        # that would alert every cycle for an exposure the customer already
+        # actioned. Package plus severity is what changes when the situation
+        # genuinely changes.
+        return "|".join(sorted(
+            f"{r.get('package','')}:{r.get('severity','')}"
+            for r in (data.get("findings") or [])
+        )) or "clean"
+    return "unknown"
+
+
+def handle_watch_add(params: dict, api_key_str: str) -> dict:
+    subject_type  = (params.get("subject_type") or "").strip().lower()
+    subject_value = (params.get("subject_value") or "").strip()
+    if subject_type not in WATCH_SUBJECT_ENDPOINTS:
+        return _err(f"subject_type must be one of: {', '.join(sorted(WATCH_SUBJECT_ENDPOINTS))}")
+    if not subject_value:
+        return _err("subject_value is required")
+    if subject_type == "email" and "@" not in subject_value:
+        return _err("subject_value must be a valid email address")
+    if subject_type == "phone" and not subject_value.startswith("+"):
+        return _err("subject_value must be a phone number in E.164 format (must start with '+')")
+    if subject_type == "dependency":
+        # An npm package name, not a manifest. A watch is per package so the
+        # customer can add and remove them individually, and so the change
+        # notification names the dependency they have to act on.
+        if not _NPM_PACKAGE_RE.match(subject_value):
+            return _err("subject_value must be an npm package name, for example 'left-pad' "
+                        "or '@scope/name'")
+
+    subject_value = subject_value.lower() if subject_type != "phone" else subject_value
+    # Deterministic id, so re-adding the same subject updates rather than
+    # silently creating a duplicate the customer then pays to watch twice.
+    watch_id = hashlib.sha256(f"{api_key_str}|{subject_type}|{subject_value}".encode()).hexdigest()[:32]
+
+    table = dynamodb.Table(VERDICT_WATCHES_TABLE)
+    try:
+        existing = table.query(
+            KeyConditionExpression=Key("api_key").eq(api_key_str),
+            Select="COUNT",
+        ).get("Count", 0)
+        if existing >= WATCH_MAX_PER_KEY:
+            return _err(f"watch limit reached ({WATCH_MAX_PER_KEY} subjects per key)", 409)
+
+        now = datetime.now(timezone.utc)
+        table.put_item(Item={
+            "api_key":       api_key_str,
+            "watch_id":      watch_id,
+            "subject_type":  subject_type,
+            "subject_value": subject_value,
+            "created_at":    now.isoformat(),
+            # Left unset so the watcher screens it on its next pass and
+            # establishes the baseline. Deliberately does NOT screen inline:
+            # a watch registration should not block on four upstreams.
+            "last_fingerprint": None,
+            "last_checked_at":  None,
+            "next_check_at":    now.isoformat(),
+        })
+    except Exception as exc:
+        logger.exception("watch add failed key=%s: %s", api_key_str[:16], exc)
+        return _err("could not register watch", 500)
+
+    logger.info("watch added key=%s type=%s id=%s", api_key_str[:16], subject_type, watch_id)
+    return _ok({
+        "watch_id":      watch_id,
+        "subject_type":  subject_type,
+        "subject_value": subject_value,
+        "status":        "watching",
+        "note": ("Baseline is established on the first check. You are notified on CHANGE only, "
+                 "and never on a degraded result, so an upstream outage cannot page you."),
+    })
+
+
+def handle_watch_list(params: dict, api_key_str: str) -> dict:
+    try:
+        rows = dynamodb.Table(VERDICT_WATCHES_TABLE).query(
+            KeyConditionExpression=Key("api_key").eq(api_key_str),
+        ).get("Items", [])
+    except Exception as exc:
+        logger.exception("watch list failed key=%s: %s", api_key_str[:16], exc)
+        return _err("could not list watches", 500)
+    return _ok({
+        "count": len(rows),
+        "watches": [{
+            "watch_id":        r.get("watch_id"),
+            "subject_type":    r.get("subject_type"),
+            "subject_value":   r.get("subject_value"),
+            "created_at":      r.get("created_at"),
+            "last_checked_at": r.get("last_checked_at"),
+            "next_check_at":   r.get("next_check_at"),
+            "current_verdict": r.get("last_fingerprint"),
+        } for r in rows],
+    })
+
+
+def handle_watch_remove(params: dict, api_key_str: str) -> dict:
+    watch_id = (params.get("watch_id") or "").strip()
+    if not watch_id:
+        return _err("watch_id is required")
+    try:
+        dynamodb.Table(VERDICT_WATCHES_TABLE).delete_item(
+            Key={"api_key": api_key_str, "watch_id": watch_id},
+        )
+    except Exception as exc:
+        logger.exception("watch remove failed key=%s: %s", api_key_str[:16], exc)
+        return _err("could not remove watch", 500)
+    logger.info("watch removed key=%s id=%s", api_key_str[:16], watch_id)
+    return _ok({"watch_id": watch_id, "status": "removed"})
 
 
 # ---------------------------------------------------------------------------
@@ -5151,7 +6493,7 @@ def handle_siem_configure(params: dict, api_key_str: str) -> dict:
                 ExpressionAttributeValues={":e": False},
             )
         except Exception as exc:
-            logger.exception("siem configure clear failed for %s: %s", email, exc)
+            logger.exception("siem configure clear failed for %s: %s", _redact(email, "em"), exc)
             return _err("SIEM configuration update failed", 500)
         return _ok({"status": "cleared"})
 
@@ -5170,10 +6512,10 @@ def handle_siem_configure(params: dict, api_key_str: str) -> dict:
             "updated_at":  datetime.now(timezone.utc).isoformat(),
         })
     except Exception as exc:
-        logger.exception("siem configure failed for %s: %s", email, exc)
+        logger.exception("siem configure failed for %s: %s", _redact(email, "em"), exc)
         return _err("SIEM configuration update failed", 500)
 
-    logger.info("SIEM destination %s for %s format=%s", "enabled" if enabled else "disabled", email, fmt)
+    logger.info("SIEM destination %s for %s format=%s", "enabled" if enabled else "disabled", _redact(email, "em"), fmt)
     return _ok({"format": fmt, "url": url, "enabled": bool(enabled), "status": "registered"})
 
 
@@ -7540,7 +8882,7 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
                 },
                 "max_score": 100,
                 "risk_factors": ["Breach exposure: 1 known breach event(s), 50,000 accounts affected"],
-                "summary": "Domain acme.com scores 10/100 (A — LOW) across 2 of 6 monitored identity signal dimensions.",
+                "summary": "Domain acme.com scores 10/100 (A, LOW) across 2 of 6 monitored identity signal dimensions.",
             },
         },
     ),
@@ -7780,7 +9122,14 @@ PAYG_TAGS: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 
 def _build_payment_requirements(path: str, price_units: int) -> dict:
-    api_base    = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod"
+    # Must be the branded host, for the same reason the TAXII discovery
+    # document is (see the api_roots comment): the resource URL we advertise
+    # here is what x402 indexers persist and what agents call forever after.
+    # Advertising the raw execute-api hostname pinned every discovered resource
+    # to an AWS-internal URL that breaks if the API Gateway ID changes, and it
+    # also left all 25 CDP Bazaar entries with no "relayshield" string anywhere
+    # in them, so we were unfindable by name in the one directory we are in.
+    api_base    = PUBLIC_BASE_URL
     resource    = f"{api_base}{path}"
     description = PAYG_DESCRIPTIONS.get(
         path, f"RelayShield {path.split('/')[-1].replace('-', ' ')} check"
@@ -7874,6 +9223,64 @@ def _build_payment_requirements(path: str, price_units: int) -> dict:
     return {
         "x402Version": 1,
         "accepts":     accepts,
+    }
+
+
+def handle_x402_manifest() -> dict:
+    """Serve /.well-known/x402.json, the conventional discovery manifest.
+
+    Added 2026-08-08 after agent-tools.cloud rejected our directory submission
+    with "no /.well-known/x402 and no 402 challenge from endpoint". Both halves
+    of that were true and reproducible: their crawler probes with GET, and every
+    /v1/payg/ path answers GET with 405, so the 402 challenge it looked for only
+    appears on POST. Rather than change the POST-only contract on 28 live paid
+    endpoints, we publish the manifest, which is the mechanism their own rejection
+    email offers as the alternative and which every other indexer can read too.
+
+    Built by calling _build_payment_requirements for each path, so prices, payTo
+    addresses and chain ids come from the same source the live 402 challenge uses
+    and cannot drift away from what a buyer is actually asked to pay.
+    """
+    resources = []
+    for path in sorted(PAYG_PRICE_UNITS):
+        price_units = PAYG_PRICE_UNITS[path]
+        reqs = _build_payment_requirements(path, price_units)
+        entry = {
+            "url":         f"https://api.relayshield.net{path}",
+            "method":      "POST",
+            "description": PAYG_DESCRIPTIONS.get(
+                path, f"RelayShield {path.split('/')[-1].replace('-', ' ')} check"),
+            "mimeType":    "application/json",
+            "priceUsd":    round(price_units / 1_000_000, 6),
+            "asset":       "USDC",
+            "x402Version": reqs.get("x402Version"),
+            "accepts":     reqs.get("accepts", []),
+        }
+        if reqs.get("resource", {}).get("tags"):
+            entry["tags"] = reqs["resource"]["tags"]
+        resources.append(entry)
+
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type":                 "application/json",
+            "Cache-Control":                "public, max-age=300",
+            "Access-Control-Allow-Origin":  "*",
+        },
+        "body": json.dumps({
+            "x402Version": 2,
+            "name":        "RelayShield",
+            "description": ("Security intelligence for agents. Wallet and counterparty screening, "
+                            "credential and breach exposure, infostealer logs, lookalike domains "
+                            "and SIM swap risk. Every verdict carries a freshness contract stating "
+                            "how long it can be cached."),
+            "provider":    "RelayShield LLC",
+            "homepage":    "https://api.relayshield.net/developers",
+            "documentation": "https://api.relayshield.net/docs",
+            "contact":     "support@relayshield.net",
+            "resourceCount": len(resources),
+            "resources":   resources,
+        }),
     }
 
 
@@ -9670,6 +11077,111 @@ def handle_xrp_address(params: dict) -> dict:
     })
 
 
+# ---------------------------------------------------------------------------
+# SIM swap enrollment endpoints.
+#
+# All logic lives in relayshield_sim_swap_consent, which is shared with the
+# Telegram, WhatsApp and Stripe surfaces so there is exactly ONE definition of
+# what it means for a number to be monitored. These handlers are the HTTP skin:
+# auth, then translate the module's exceptions into status codes.
+#
+# The invariant the module enforces:
+#   sim_swap_monitoring == True MEANS this number's own owner consented.
+# ---------------------------------------------------------------------------
+
+import relayshield_sim_swap_consent as simswap_consent
+
+CONSENT_TERMS_VERSION = simswap_consent.CONSENT_TERMS_VERSION
+
+
+def _simswap_guard(api_key_record: dict | None):
+    """Auth is mandatory on every enrollment endpoint, and it is not decoration.
+    Without it anyone could POST a number they do not own with
+    consent_acknowledged=true and put it into the carrier lookup set, which is
+    exactly what this service exists to prevent. Verified 2026-08-14: an
+    unauthenticated call created a live monitored record before this existed."""
+    if not api_key_record:
+        return _err("a valid API key is required", 401)
+    return None
+
+
+def _ambiguous(exc) -> dict:
+    return _err(
+        "this number is on more than one active account "
+        f"({', '.join(exc.user_ids)}); resolve the duplicate first", 409)
+
+
+def handle_sim_swap_enroll(params: dict, api_key_record: dict | None = None) -> dict:
+    """Enroll a mobile number for SIM swap monitoring, with recorded consent."""
+    guard = _simswap_guard(api_key_record)
+    if guard:
+        return guard
+    try:
+        result = simswap_consent.enroll(
+            params.get("phone") or "",
+            enrollment_type=(params.get("enrollment_type") or "self").strip().lower(),
+            consent_source=(params.get("consent_source") or "").strip().lower(),
+            consent_acknowledged=params.get("consent_acknowledged") is True,
+            enrolled_by=(api_key_record or {}).get("api_key", ""),
+        )
+    except simswap_consent.AmbiguousPhone as exc:
+        return _ambiguous(exc)
+    except ValueError as exc:
+        return _err(str(exc))
+    except Exception as exc:
+        logger.error("sim-swap enroll failed: %s", exc)
+        return _err("enrollment failed", 503)
+
+    if result["consent_state"] == "PENDING":
+        result["next_step"] = (
+            "Send the confirmation request to this number. Monitoring stays off "
+            "until its owner confirms via /v1/sim-swap/confirm."
+        )
+    return _ok(result)
+
+
+def handle_sim_swap_confirm(params: dict, api_key_record: dict | None = None) -> dict:
+    """Complete a double opt-in. The only route from PENDING to monitored."""
+    guard = _simswap_guard(api_key_record)
+    if guard:
+        return guard
+    try:
+        return _ok(simswap_consent.confirm(
+            params.get("phone") or "",
+            (params.get("confirmation_token") or "").strip(),
+        ))
+    except simswap_consent.AmbiguousPhone as exc:
+        return _ambiguous(exc)
+    except LookupError as exc:
+        return _err(str(exc), 404)
+    except PermissionError as exc:
+        return _err(str(exc), 403)
+    except ValueError as exc:
+        # "not pending" is a conflict; malformed input is a 400.
+        return _err(str(exc), 409 if "not pending" in str(exc) else 400)
+    except Exception as exc:
+        logger.error("sim-swap confirm failed: %s", exc)
+        return _err("confirmation failed", 503)
+
+
+def handle_sim_swap_withdraw(params: dict, api_key_record: dict | None = None) -> dict:
+    """Withdraw consent. Promised by both published documents, so first-class."""
+    guard = _simswap_guard(api_key_record)
+    if guard:
+        return guard
+    try:
+        return _ok(simswap_consent.withdraw(params.get("phone") or ""))
+    except simswap_consent.AmbiguousPhone as exc:
+        return _ambiguous(exc)
+    except LookupError as exc:
+        return _err(str(exc), 404)
+    except ValueError as exc:
+        return _err(str(exc))
+    except Exception as exc:
+        logger.error("sim-swap withdraw failed: %s", exc)
+        return _err("withdrawal failed", 503)
+
+
 PUSH_TOKENS_TABLE = "relayshield_push_tokens"
 
 def handle_register_push(params: dict, api_key_record: dict | None = None) -> dict:
@@ -10452,6 +11964,11 @@ ROUTES = {
     "/v1/ton-address":          handle_ton_address,
     "/v1/xrp-address":          handle_xrp_address,
     "/v1/wallet-inbound":       handle_wallet_inbound,
+    # SIM swap consent service. Product-agnostic: every RelayShield surface
+    # enrolls through these, so consent is recorded once regardless of origin.
+    "/v1/sim-swap/enroll":          handle_sim_swap_enroll,
+    "/v1/sim-swap/confirm":         handle_sim_swap_confirm,
+    "/v1/sim-swap/withdraw":        handle_sim_swap_withdraw,
     "/v1/app/register-push":        handle_register_push,
     "/v1/app/webhook/alchemy":      handle_alchemy_webhook,
     "/v1/app/webhook/helius":       handle_helius_webhook,
@@ -10647,7 +12164,7 @@ def handle_guide_page(slug: str) -> dict:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" href="/favicon.ico" sizes="any">
-<title>{guide['title']} — RelayShield</title>
+<title>{guide['title']} | RelayShield</title>
 <meta name="description" content="{guide['desc']}">
 <link rel="canonical" href="{url}">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
@@ -10765,21 +12282,19 @@ def handle_api_docs() -> dict:
     }
 
 
-# Rendered integration guides, embedded 2026-07-30. Served as their own indexed
-# pages at /guides/<slug> rather than only as blog posts: "ingest threat intel
-# into Sentinel" is a search query with buying intent and evergreen value, which
-# a post buried in a reverse-chronological feed does not capture. Generated from
-# the .md sources with build_blog.py's md_to_html, the same renderer the blog
-# uses. Regenerate from source rather than editing the HTML here.
+# Rendered integration guides. GENERATED by build_guides.py from the .md
+# sources -- do not edit this block by hand, your edit will be overwritten.
+# Regenerate with `python3 build_guides.py` after touching any guide markdown,
+# and note that relayshield-api is a multi-file deploy.
 _GUIDE_HTML = {
 "elastic-security": {
 "desc": "Configure Elastic's Custom Threat Intelligence integration against RelayShield's TAXII 2.1 feed. Includes measured ECS field mappings and Indicator Match rule setup.",
-"html": "<h1>Ingesting RelayShield Threat Intelligence into Elastic Security</h1>\n<p>RelayShield serves its IOC corpus over <strong>STIX 2.1 / TAXII 2.1</strong> and a <strong>MISP-compatible REST API</strong>. Elastic Security ingests both through integrations it already ships, so this is a configuration task, not a development one.</p>\n<p><strong>What you get:</strong> 5.0M+ indicators sourced from 85+ criminal Telegram marketplaces and 20 authoritative feeds, flowing into Elastic's <code>logs-ti_*</code> indices where they enrich alerts and power Indicator Match detection rules.</p>\n<p><strong>Requirements:</strong> a RelayShield API key with a Threat Intelligence subscription, and Elastic Stack 8.x or later (Elastic Cloud or self-managed) with Fleet and an Elastic Agent.</p>\n<blockquote>Every field name, integration name and mapping below was verified against a live Elasticsearch</blockquote>\n<blockquote>8.15 stack ingesting the production RelayShield feed. If you followed an earlier version of this</blockquote>\n<blockquote>guide, see the note at the end \u2014 the integration name and two of the rule mappings have changed.</blockquote>\n<hr>\n<h2>Option A \u2014 STIX/TAXII via Custom Threat Intelligence (recommended)</h2>\n<p>Use the <strong>Custom Threat Intelligence</strong> integration (package <code>ti_custom</code>), which has a built-in TAXII 2.1 mode. Elastic does not ship a generic \"TAXII\" integration; this is the one.</p>\n<h3>1. Confirm your key works</h3>\n<pre><code>curl -s https://api.relayshield.net/v1/intel/taxii/ \\\n  -H &quot;Authorization: Bearer YOUR_API_KEY&quot;</code></pre>\n<p>A valid key returns the TAXII discovery document. <code>X-RS-API-KEY: YOUR_API_KEY</code> also works and is equivalent \u2014 use whichever your tooling prefers. Without a valid key you get <code>401</code>, which is a useful way to confirm the endpoint is reachable before adding credentials.</p>\n<h3>2. Add the integration in Kibana</h3>\n<p><strong>Management \u2192 Integrations \u2192 Custom Threat Intelligence \u2192 Add</strong></p>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>URL</td><td><code>https://api.relayshield.net/v1/intel/taxii/collections/iocs/objects/</code></td></tr><tr><td>Enable TAXII 2.1</td><td><strong>on</strong></td></tr><tr><td>API Key</td><td>your RelayShield API key</td></tr><tr><td>API Key Type</td><td><code>Bearer</code></td></tr><tr><td>Accept header value</td><td>leave default (<code>application/taxii+json;version=2.1</code>)</td></tr><tr><td>Interval</td><td><code>1h</code> to start; tighten only if your use case needs it</td></tr><tr><td>IOC Expiration Duration</td><td>leave default</td></tr></tbody></table>\n<p>The collection is part of the URL \u2014 there is no separate \"Collection ID\" field. The trailing slash is optional.</p>\n<p><strong>On API Key Type:</strong> the integration sends your key as <code>Authorization: &lt;API Key Type&gt; &lt;API Key&gt;</code>. <code>Bearer</code> is the default and works. It cannot send a custom header name, which is why the URL above is authenticated with <code>Authorization</code> rather than <code>X-RS-API-KEY</code>.</p>\n<p><strong>On IOC Expiration Duration:</strong> RelayShield emits <code>valid_until</code> on every indicator (90 days from the sighting), so expiry is handled for you regardless of what you set here.</p>\n<h3>3. Confirm data is arriving</h3>\n<p>In <strong>Discover</strong>, query the threat intel data stream:</p>\n<pre><code>data_stream.dataset : &quot;ti_custom.indicator&quot;</code></pre>\n<p>Indicators land with <code>threat.indicator.type</code> set to <code>ipv4-addr</code>, <code>domain-name</code>, <code>url</code>, <code>file</code> or <code>email-addr</code> depending on the IOC.</p>\n<hr>\n<h2>Option B \u2014 MISP-compatible REST API</h2>\n<p>If you already run Elastic's <strong>MISP</strong> integration, RelayShield can be added as an additional source rather than replacing your existing one.</p>\n<p><strong>Management \u2192 Integrations \u2192 MISP \u2192 Add</strong>, and enable the <strong>Threat Attributes</strong> data stream:</p>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>URL</td><td><code>https://api.relayshield.net/v1/intel/misp</code></td></tr><tr><td>API Key / token</td><td>your RelayShield API key</td></tr><tr><td>Interval</td><td><code>1h</code></td></tr></tbody></table>\n<p>The integration appends <code>/attributes/restSearch</code> to that base URL and sends your key in the <code>Authorization</code> header \u2014 both are handled. Confirm ingestion with:</p>\n<pre><code>data_stream.dataset : &quot;ti_misp.threat_attributes&quot;</code></pre>\n<p>Attributes are returned with MISP types <code>ip-dst</code>, <code>domain</code>, <code>url</code>, <code>sha256</code> and <code>email-src</code>, which Elastic maps to the same <code>threat.indicator.type</code> values as Option A.</p>\n<hr>\n<h2>Using the data</h2>\n<h3>Enrichment</h3>\n<p>Once indicators are flowing, Elastic's built-in <strong>Threat Intel enrichment</strong> matches them against your existing logs automatically. No rule authoring needed \u2014 matches appear on the alert under <code>threat.enrichments</code>.</p>\n<h3>Indicator Match rule</h3>\n<p>For explicit detection, create a rule under <strong>Security \u2192 Rules \u2192 Create new rule \u2192 Indicator Match</strong>:</p>\n<table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Index patterns</td><td>your source logs (e.g. <code>logs-*</code>, <code>filebeat-*</code>)</td></tr><tr><td>Indicator index</td><td><code>logs-ti_*</code></td></tr><tr><td>Indicator mapping</td><td><code>destination.ip</code> \u2192 <code>threat.indicator.ip</code></td></tr><tr><td></td><td><code>source.ip</code> \u2192 <code>threat.indicator.ip</code></td></tr><tr><td></td><td><code>dns.question.name</code> \u2192 <code>threat.indicator.url.original</code></td></tr><tr><td></td><td><code>url.full</code> \u2192 <code>threat.indicator.url.original</code></td></tr><tr><td></td><td><code>file.hash.sha256</code> \u2192 <code>threat.indicator.file.hash.sha256</code></td></tr></tbody></table>\n<p><strong>Note on domain and URL indicators.</strong> Both land in <code>threat.indicator.url.original</code>. There is no <code>threat.indicator.url.domain</code> or <code>threat.indicator.url.full</code> field on these documents \u2014 mapping to either produces a rule that never matches and raises no error, so it looks configured while doing nothing. Values are stored as arrays, which Indicator Match handles natively but is worth knowing if you write your own queries.</p>\n<p>Set severity to match your triage process. Because RelayShield's corpus is sourced from criminal marketplaces rather than general reputation feeds, a match generally warrants investigation rather than informational logging.</p>\n<h3>A note on timing</h3>\n<p>RelayShield's Telegram-sourced indicators typically surface <strong>24 to 72 hours ahead</strong> of public feeds, because the pipeline collects from the marketplaces where credentials and infrastructure are sold rather than waiting for downstream aggregation. That lead time is the reason to run this alongside, not instead of, your existing feeds.</p>\n<hr>\n<h2>Troubleshooting</h2>\n<table><thead><tr><th>Symptom</th><th>Cause</th></tr></thead><tbody><tr><td><code>401 Unauthorized</code></td><td>Key is missing, wrong, or lacks a TI subscription. The TI endpoints require an active TI plan, separate from PAYG API access.</td></tr><tr><td><code>404</code> on <code>/v1/taxii/...</code></td><td>Wrong path \u2014 the prefix is <code>/v1/intel/taxii/</code>, not <code>/v1/taxii/</code>.</td></tr><tr><td>No \"TAXII\" integration in Kibana</td><td>Correct \u2014 Elastic has no generic TAXII integration. Use <strong>Custom Threat Intelligence</strong> and switch on Enable TAXII 2.1.</td></tr><tr><td>Integration added, no documents</td><td>Check the interval has elapsed, then confirm the URL includes the full collection path <code>/collections/iocs/objects/</code>.</td></tr><tr><td>Documents arrive with only <code>threat.indicator.name</code> and no type</td><td>An expiry field was missing and Elastic's pipeline aborted. RelayShield now emits <code>valid_until</code>, so update to the current feed.</td></tr><tr><td>Indicators arrive but the rule never matches</td><td>Almost always the domain/URL mapping. Both must point at <code>threat.indicator.url.original</code>.</td></tr></tbody></table>\n<hr>\n<h2>Changed from earlier versions of this guide</h2>\n<p>An earlier version named a \"Threat Intel TAXII 2.x\" integration, which does not exist in Elastic's package registry, and gave two Indicator Match mappings (<code>threat.indicator.url.domain</code> and <code>threat.indicator.url.full</code>) that match no field. If you configured from it, three changes are needed:</p>\n<p>1. Use <strong>Custom Threat Intelligence</strong> with Enable TAXII 2.1, not \"Threat Intel TAXII 2.x\". 2. Query <code>ti_custom.indicator</code>, not <code>ti_taxii.indicator</code>. 3. Point both the domain and URL mappings at <code>threat.indicator.url.original</code>.</p>\n<p>The MISP endpoint is now a real MISP-compatible REST surface at <code>/v1/intel/misp</code>; the earlier documented path returned 404.</p>\n<hr>\n<h2>Support</h2>\n<p><code>support@relayshield.net</code> \u2014 include the integration type (Custom Threat Intelligence or MISP) and the Kibana or Elastic Agent error text if there is one.</p>",
+"html": "<h1>Ingesting RelayShield Threat Intelligence into Elastic Security</h1>\n<p>RelayShield serves its IOC corpus over <strong>STIX 2.1 / TAXII 2.1</strong> and a <strong>MISP-compatible REST API</strong>. Elastic Security ingests both through integrations it already ships, so this is a configuration task, not a development one.</p>\n<p><strong>What you get:</strong> 494K+ distinct indicators (5.8M+ sightings) sourced from 95 monitored channels and 20 authoritative feeds, flowing into Elastic's <code>logs-ti_*</code> indices where they enrich alerts and power Indicator Match detection rules.</p>\n<p><strong>Requirements:</strong> a RelayShield API key with a Threat Intelligence subscription, and Elastic Stack 8.x or later (Elastic Cloud or self-managed) with Fleet and an Elastic Agent.</p>\n<blockquote>Every field name, integration name and mapping below was verified against a live Elasticsearch 8.15 stack ingesting the production RelayShield feed. If you followed an earlier version of this guide, see the note at the end: the integration name and two of the rule mappings have changed.</blockquote>\n<hr>\n<h2>Option A: STIX/TAXII via Custom Threat Intelligence (recommended)</h2>\n<p>Use the <strong>Custom Threat Intelligence</strong> integration (package <code>ti_custom</code>), which has a built-in TAXII 2.1 mode. Elastic does not ship a generic \"TAXII\" integration; this is the one.</p>\n<h3>1. Confirm your key works</h3>\n<pre><code>curl -s https://api.relayshield.net/v1/intel/taxii/ \\\n  -H &quot;Authorization: Bearer YOUR_API_KEY&quot;</code></pre>\n<p>A valid key returns the TAXII discovery document. <code>X-RS-API-KEY: YOUR_API_KEY</code> also works and is equivalent, so use whichever your tooling prefers. Without a valid key you get <code>401</code>, which is a useful way to confirm the endpoint is reachable before adding credentials.</p>\n<h3>2. Add the integration in Kibana</h3>\n<p><strong>Management \u2192 Integrations \u2192 Custom Threat Intelligence \u2192 Add</strong></p>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>URL</td><td><code>https://api.relayshield.net/v1/intel/taxii/collections/iocs/objects/</code></td></tr><tr><td>Enable TAXII 2.1</td><td><strong>on</strong></td></tr><tr><td>API Key</td><td>your RelayShield API key</td></tr><tr><td>API Key Type</td><td><code>Bearer</code></td></tr><tr><td>Accept header value</td><td>leave default (<code>application/taxii+json;version=2.1</code>)</td></tr><tr><td>Interval</td><td><code>1h</code> to start; tighten only if your use case needs it</td></tr><tr><td>IOC Expiration Duration</td><td>leave default</td></tr></tbody></table>\n<p>The collection is part of the URL: there is no separate \"Collection ID\" field. The trailing slash is optional.</p>\n<p><strong>On API Key Type:</strong> the integration sends your key as <code>Authorization: &lt;API Key Type&gt; &lt;API Key&gt;</code>. <code>Bearer</code> is the default and works. It cannot send a custom header name, which is why the URL above is authenticated with <code>Authorization</code> rather than <code>X-RS-API-KEY</code>.</p>\n<p><strong>On IOC Expiration Duration:</strong> RelayShield emits <code>valid_until</code> on every indicator (90 days from the sighting), so expiry is handled for you regardless of what you set here.</p>\n<h3>3. Confirm data is arriving</h3>\n<p>In <strong>Discover</strong>, query the threat intel data stream:</p>\n<pre><code>data_stream.dataset : &quot;ti_custom.indicator&quot;</code></pre>\n<p>Indicators land with <code>threat.indicator.type</code> set to <code>ipv4-addr</code>, <code>domain-name</code>, <code>url</code>, <code>file</code> or <code>email-addr</code> depending on the IOC.</p>\n<hr>\n<h2>Option B: MISP-compatible REST API</h2>\n<p>If you already run Elastic's <strong>MISP</strong> integration, RelayShield can be added as an additional source rather than replacing your existing one.</p>\n<p><strong>Management \u2192 Integrations \u2192 MISP \u2192 Add</strong>, and enable the <strong>Threat Attributes</strong> data stream:</p>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>URL</td><td><code>https://api.relayshield.net/v1/intel/misp</code></td></tr><tr><td>API Key / token</td><td>your RelayShield API key</td></tr><tr><td>Interval</td><td><code>1h</code></td></tr></tbody></table>\n<p>The integration appends <code>/attributes/restSearch</code> to that base URL and sends your key in the <code>Authorization</code> header, and both are handled. Confirm ingestion with:</p>\n<pre><code>data_stream.dataset : &quot;ti_misp.threat_attributes&quot;</code></pre>\n<p>Attributes are returned with MISP types <code>ip-dst</code>, <code>domain</code>, <code>url</code>, <code>sha256</code> and <code>email-src</code>, which Elastic maps to the same <code>threat.indicator.type</code> values as Option A.</p>\n<hr>\n<h2>Using the data</h2>\n<h3>Enrichment</h3>\n<p>Once indicators are flowing, Elastic's built-in <strong>Threat Intel enrichment</strong> matches them against your existing logs automatically. No rule authoring needed: matches appear on the alert under <code>threat.enrichments</code>.</p>\n<h3>Indicator Match rule</h3>\n<p>For explicit detection, create a rule under <strong>Security \u2192 Rules \u2192 Create new rule \u2192 Indicator Match</strong>:</p>\n<table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Index patterns</td><td>your source logs (e.g. <code>logs-*</code>, <code>filebeat-*</code>)</td></tr><tr><td>Indicator index</td><td><code>logs-ti_*</code></td></tr><tr><td>Indicator mapping</td><td><code>destination.ip</code> \u2192 <code>threat.indicator.ip</code></td></tr><tr><td></td><td><code>source.ip</code> \u2192 <code>threat.indicator.ip</code></td></tr><tr><td></td><td><code>dns.question.name</code> \u2192 <code>threat.indicator.url.original</code></td></tr><tr><td></td><td><code>url.full</code> \u2192 <code>threat.indicator.url.original</code></td></tr><tr><td></td><td><code>file.hash.sha256</code> \u2192 <code>threat.indicator.file.hash.sha256</code></td></tr></tbody></table>\n<p><strong>Note on domain and URL indicators.</strong> Both land in <code>threat.indicator.url.original</code>. There is no <code>threat.indicator.url.domain</code> or <code>threat.indicator.url.full</code> field on these documents, and mapping to either produces a rule that never matches and raises no error, so it looks configured while doing nothing. Values are stored as arrays, which Indicator Match handles natively but is worth knowing if you write your own queries.</p>\n<p>Set severity to match your triage process. Because RelayShield's corpus is sourced from criminal marketplaces rather than general reputation feeds, a match generally warrants investigation rather than informational logging.</p>\n<h3>A note on timing</h3>\n<p>RelayShield's Telegram-sourced indicators typically surface <strong>24 to 72 hours ahead</strong> of public feeds, because the pipeline collects from the marketplaces where credentials and infrastructure are sold rather than waiting for downstream aggregation. That lead time is the reason to run this alongside, not instead of, your existing feeds.</p>\n<hr>\n<h2>Troubleshooting</h2>\n<table><thead><tr><th>Symptom</th><th>Cause</th></tr></thead><tbody><tr><td><code>401 Unauthorized</code></td><td>Key is missing, wrong, or lacks a TI subscription. The TI endpoints require an active TI plan, separate from PAYG API access.</td></tr><tr><td><code>404</code> on <code>/v1/taxii/...</code></td><td>Wrong path. The prefix is <code>/v1/intel/taxii/</code>, not <code>/v1/taxii/</code>.</td></tr><tr><td>No \"TAXII\" integration in Kibana</td><td>Correct. Elastic has no generic TAXII integration. Use <strong>Custom Threat Intelligence</strong> and switch on Enable TAXII 2.1.</td></tr><tr><td>Integration added, no documents</td><td>Check the interval has elapsed, then confirm the URL includes the full collection path <code>/collections/iocs/objects/</code>.</td></tr><tr><td>Documents arrive with only <code>threat.indicator.name</code> and no type</td><td>An expiry field was missing and Elastic's pipeline aborted. RelayShield now emits <code>valid_until</code>, so update to the current feed.</td></tr><tr><td>Indicators arrive but the rule never matches</td><td>Almost always the domain/URL mapping. Both must point at <code>threat.indicator.url.original</code>.</td></tr></tbody></table>\n<hr>\n<h2>Changed from earlier versions of this guide</h2>\n<p>An earlier version named a \"Threat Intel TAXII 2.x\" integration, which does not exist in Elastic's package registry, and gave two Indicator Match mappings (<code>threat.indicator.url.domain</code> and <code>threat.indicator.url.full</code>) that match no field. If you configured from it, three changes are needed:</p>\n<ol>\n<li>Use <strong>Custom Threat Intelligence</strong> with Enable TAXII 2.1, not \"Threat Intel TAXII 2.x\".</li>\n<li>Query <code>ti_custom.indicator</code>, not <code>ti_taxii.indicator</code>.</li>\n<li>Point both the domain and URL mappings at <code>threat.indicator.url.original</code>.</li>\n</ol>\n<p>The MISP endpoint is now a real MISP-compatible REST surface at <code>/v1/intel/misp</code>; the earlier documented path returned 404.</p>\n<hr>\n<h2>Support</h2>\n<p><code>support@relayshield.net</code>. Include the integration type (Custom Threat Intelligence or MISP) and the Kibana or Elastic Agent error text if there is one.</p>",
 "title": "Ingest RelayShield Threat Intelligence into Elastic Security"
 },
 "microsoft-sentinel": {
 "desc": "Configure Sentinel's Threat Intelligence TAXII connector against RelayShield's STIX 2.1 feed. Includes the ThreatIntelIndicators schema, ObservableKey mappings, analytics rules and hunting queries.",
-"html": "<h1>Ingesting RelayShield Threat Intelligence into Microsoft Sentinel</h1>\n<p>RelayShield serves its IOC corpus over <strong>STIX 2.1 / TAXII 2.1</strong> and a <strong>MISP-compatible REST API</strong>. Microsoft Sentinel consumes both, so this is a configuration task rather than a development one.</p>\n<p><strong>What you get:</strong> 5.0M+ indicators sourced from 85+ criminal Telegram marketplaces and 20 authoritative feeds, landing in Sentinel's <code>ThreatIntelIndicators</code> table where they drive analytics rules, hunting queries and incident enrichment.</p>\n<p><strong>Requirements:</strong> a RelayShield API key with a Threat Intelligence subscription, and a Sentinel workspace with the <strong>Threat Intelligence</strong> solution installed from Content hub (Microsoft Sentinel Contributor at the resource group level).</p>\n<blockquote><strong>Read this first if you have used any earlier Sentinel threat-intel guide.</strong></blockquote>\n<blockquote>The <code>ThreatIntelligenceIndicator</code> table <strong>stopped receiving data on 31 July 2025 and retired on 31 May 2026</strong>.</blockquote>\n<blockquote>Every query, analytics rule, workbook and automation must target</blockquote>\n<blockquote><strong><code>ThreatIntelIndicators</code></strong> (and <code>ThreatIntelObjects</code> for actors and relationships). A rule still</blockquote>\n<blockquote>pointing at the legacy table matches nothing and raises no error \u2014 the worst failure mode a</blockquote>\n<blockquote>detection control has.</blockquote>\n<hr>\n<h2>Option A \u2014 STIX/TAXII (recommended)</h2>\n<h3>1. Confirm your key works</h3>\n<pre><code>curl -s -u &quot;YOUR_API_KEY:YOUR_API_KEY&quot; https://api.relayshield.net/v1/intel/taxii/</code></pre>\n<p>A valid key returns the TAXII discovery document. Without one you get <code>401</code>, which is a useful way to confirm the endpoint is reachable before adding credentials.</p>\n<blockquote><strong>Put the key in both the username and the password.</strong> Sentinel exposes Username and Password as</blockquote>\n<blockquote>separate optional fields. The OASIS reference TAXII client skips authentication entirely when the</blockquote>\n<blockquote>password is empty (<code>if user and password:</code>), which we confirmed against this feed: key-as-username</blockquote>\n<blockquote>with a blank password returns <code>401</code>, and it looks exactly like a bad key. We have not inspected</blockquote>\n<blockquote>Sentinel's own client, so this may not apply to it \u2014 but RelayShield accepts the key in either</blockquote>\n<blockquote>position, so filling both fields costs nothing and removes the failure mode either way.</blockquote>\n<h3>2. Add the Threat Intelligence - TAXII data connector</h3>\n<p><strong>Microsoft Sentinel \u2192 Data connectors \u2192 Threat Intelligence - TAXII \u2192 Open connector page</strong></p>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Friendly name</td><td><code>RelayShield</code></td></tr><tr><td>API root URL</td><td><code>https://api.relayshield.net/v1/intel/taxii/</code></td></tr><tr><td>Collection ID</td><td><code>iocs</code></td></tr><tr><td>Username</td><td>your RelayShield API key</td></tr><tr><td>Password</td><td>your RelayShield API key</td></tr><tr><td>Import indicators</td><td><strong>All available</strong></td></tr><tr><td>Polling frequency</td><td><strong>Once an hour</strong> to start</td></tr></tbody></table>\n<p>Select <strong>Add</strong>. Indicators begin arriving within a few minutes and appear under <strong>Threat intelligence</strong> in the Sentinel menu.</p>\n<p>The API root URL is also the discovery endpoint \u2014 RelayShield serves both resources at that one URL, so you can paste the same value wherever a provider asks for either.</p>\n<h3>3. Confirm indicators are landing</h3>\n<pre><code>ThreatIntelIndicators\n| where SourceSystem contains &quot;RelayShield&quot; or Data.external_references contains &quot;relayshield&quot;\n| where TimeGenerated &gt; ago(24h)\n| summarize Indicators = count() by ObservableKey\n| order by Indicators desc</code></pre>\n<p>You should see four <code>ObservableKey</code> values. In a representative 1,000-object sample of the live feed the split was:</p>\n<table><thead><tr><th>IOC type</th><th><code>ObservableKey</code></th><th>Share of sample</th></tr></thead><tbody><tr><td>IP address</td><td><code>ipv4-addr:value</code></td><td>440</td></tr><tr><td>Domain</td><td><code>domain-name:value</code></td><td>349</td></tr><tr><td>URL</td><td><code>url:value</code></td><td>173</td></tr><tr><td>SHA-256</td><td><code>file:hashes.'SHA-256'</code></td><td>38</td></tr></tbody></table>\n<p>If <code>ObservableKey</code> and <code>ObservableValue</code> come back <strong>empty</strong>, Sentinel could not parse the STIX pattern. That is worth reporting to support@relayshield.net \u2014 it should not happen against the current feed (see \"Changed from earlier versions\" below).</p>\n<hr>\n<h2>Option B \u2014 MISP via misp2sentinel</h2>\n<p>Sentinel has no first-party MISP connector. The community standard is <a href=\"https://github.com/cudeso/misp2sentinel\"><code>cudeso/misp2sentinel</code></a>, an Azure Function that reads a MISP instance with PyMISP and pushes indicators through Sentinel's Upload Indicators API.</p>\n<p>RelayShield exposes a MISP-compatible surface, so misp2sentinel can point at it directly with no MISP server of your own.</p>\n<p>In the misp2sentinel configuration:</p>\n<table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td><code>misp_domain</code></td><td><code>https://api.relayshield.net/v1/intel/misp/</code></td></tr><tr><td><code>misp_key</code></td><td>your RelayShield API key</td></tr><tr><td><code>misp_verifycert</code></td><td><code>True</code></td></tr></tbody></table>\n<blockquote><strong>The trailing slash on <code>misp_domain</code> is required.</strong> PyMISP joins paths with <code>urljoin</code>, which</blockquote>\n<blockquote>replaces the last segment when the base has no trailing slash \u2014 <code>/v1/intel/misp</code> silently becomes</blockquote>\n<blockquote><code>/v1/intel/servers/getVersion</code> and every call 404s.</blockquote>\n<p>Prefer Option A unless you are already running misp2sentinel. TAXII is a first-party connector with no function app to host, monitor or pay for.</p>\n<hr>\n<h2>Using the indicators</h2>\n<h3>Analytics rule: match feed IPs against firewall traffic</h3>\n<pre><code>let lookback = 1h;\nlet relayshield_ips =\n    ThreatIntelIndicators\n    | where TimeGenerated &gt; ago(14d)\n    | where ObservableKey == &quot;ipv4-addr:value&quot;\n    | summarize arg_max(TimeGenerated, *) by Id\n    | where IsDeleted == false\n    | project IndicatorValue = ObservableValue, Confidence, ThreatDescription = tostring(Data.description);\nCommonSecurityLog\n| where TimeGenerated &gt; ago(lookback)\n| join kind=inner relayshield_ips on $left.DestinationIP == $right.IndicatorValue\n| project TimeGenerated, SourceIP, DestinationIP, ThreatDescription, Confidence, DeviceVendor</code></pre>\n<p><code>summarize arg_max(TimeGenerated, *) by Id</code> followed by <code>where IsDeleted == false</code> is the pattern Microsoft's own examples use, and it matters here: the feed republishes every unexpired indicator on a 7\u201310 day cycle, so without it you count the same indicator many times.</p>\n<h3>Analytics rule: match feed domains against DNS</h3>\n<pre><code>let relayshield_domains =\n    ThreatIntelIndicators\n    | where TimeGenerated &gt; ago(14d)\n    | where ObservableKey == &quot;domain-name:value&quot;\n    | summarize arg_max(TimeGenerated, *) by Id\n    | where IsDeleted == false\n    | project IndicatorValue = ObservableValue, ThreatDescription = tostring(Data.description);\nDnsEvents\n| where TimeGenerated &gt; ago(1h)\n| join kind=inner relayshield_domains on $left.Name == $right.IndicatorValue\n| project TimeGenerated, Computer, ClientIP, Name, ThreatDescription</code></pre>\n<h3>Hunting query: which malware families is the feed seeing?</h3>\n<p>RelayShield tags each indicator with the family it was observed alongside, as a <code>malware:&lt;family&gt;</code> label.</p>\n<pre><code>ThreatIntelIndicators\n| where TimeGenerated &gt; ago(7d)\n| summarize arg_max(TimeGenerated, *) by Id\n| where IsDeleted == false\n| mv-expand Label = Data.labels\n| where tostring(Label) startswith &quot;malware:&quot;\n| extend Family = replace_string(tostring(Label), &quot;malware:&quot;, &quot;&quot;)\n| summarize Indicators = count() by Family\n| top 25 by Indicators</code></pre>\n<h3>Reading the legacy-shaped fields</h3>\n<p>If you are porting rules written against <code>ThreatIntelligenceIndicator</code>, this reconstructs the old column names from the new schema:</p>\n<pre><code>ThreatIntelIndicators\n| extend NetworkIP  = iff(ObservableKey == &quot;ipv4-addr:value&quot;,   ObservableValue, &quot;&quot;),\n         DomainName = iff(ObservableKey == &quot;domain-name:value&quot;, ObservableValue, &quot;&quot;),\n         Url        = iff(ObservableKey == &quot;url:value&quot;,         ObservableValue, &quot;&quot;),\n         FileHashValue = iff(ObservableKey has &quot;file:hashes&quot;,   ObservableValue, &quot;&quot;),\n         FileHashType  = iff(ObservableKey has &quot;SHA-256&quot;, &quot;SHA-256&quot;, &quot;&quot;)</code></pre>\n<hr>\n<h2>Cost note</h2>\n<p><code>ThreatIntelIndicators</code> is a billed Log Analytics table, and the feed republishes every unexpired indicator every 7\u201310 days. Before importing <strong>All available</strong>, consider whether your detection surface needs the full corpus. Two levers:</p>\n<ul>\n<li>Set the connector to import a narrower indicator group.</li>\n<li>Apply a workspace transformation to drop the <code>Data</code> column, which carries the full STIX object:</li>\n</ul>\n<p>``<code>kusto source | project-away Data </code>``</p>\n<p>The hunting queries above read <code>Data.labels</code> and <code>Data.description</code>, so drop it only if you do not need those.</p>\n<hr>\n<h2>Changed from earlier versions</h2>\n<p>Four defects were found and fixed in the RelayShield feed on <strong>2026-07-30</strong>, while preparing this guide, by running the OASIS reference TAXII client against production:</p>\n<p>1. The API Root resource omitted the required <code>versions</code> field, so a conformant TAXII client aborted before requesting anything. 2. <code>GET /{api-root}/collections/{id}/</code> returned 404. Clients fetch this before requesting objects, so object polling failed without ever reaching the objects endpoint. 3. The object envelope was served as <code>application/stix+json</code> rather than <code>application/taxii+json;version=2.1</code>. 4. SHA-256 patterns were emitted as <code>[file:hashes.SHA-256 = '...']</code>, which is <strong>invalid STIX 2.1 patterning</strong>. The hash key must be quoted. Sentinel derives <code>ObservableKey</code>/<code>ObservableValue</code> by parsing the pattern, so SHA-256 indicators would have arrived with both fields empty.</p>\n<p><strong>If you configured RelayShield in Sentinel before 2026-07-30</strong>, remove and re-add the connector so it re-polls from the start of the collection, and re-check any rule keyed on file hashes.</p>\n<h2>Verification status</h2>\n<p>Stated plainly, because a threat-intel guide that overstates its testing is worse than no guide:</p>\n<p><strong>Verified against live systems.</strong> Every RelayShield-side claim \u2014 the API root and collection URLs, the auth behaviour including the blank-password trap, the TAXII protocol walk end to end, the validity of every STIX pattern in a 1,000-object live sample, and the PyMISP handshake \u2014 was measured against the production feed with the OASIS <code>taxii2-client</code>, <code>stix2-patterns</code> validator, and PyMISP.</p>\n<p><strong>Derived, not measured.</strong> The <code>ObservableKey</code> values, table schema and KQL come from Microsoft's published <code>ThreatIntelIndicators</code> schema combined with the STIX object paths RelayShield is verified to emit. They have <strong>not</strong> been run through a live Sentinel workspace. The mapping is a straightforward correspondence and we have no reason to doubt it, but an equivalent assumption in an earlier Elastic guide turned out to be wrong in two places, so treat the KQL as needing a first-run check in your own workspace rather than as measured fact.</p>\n<hr>\n<p>Questions: <a href=\"mailto:support@relayshield.net\">support@relayshield.net</a> \u00b7 <a href=\"https://api.relayshield.net/developers\">api.relayshield.net/developers</a></p>",
+"html": "<h1>Ingesting RelayShield Threat Intelligence into Microsoft Sentinel</h1>\n<p>RelayShield serves its IOC corpus over <strong>STIX 2.1 / TAXII 2.1</strong> and a <strong>MISP-compatible REST API</strong>. Microsoft Sentinel consumes both, so this is a configuration task rather than a development one.</p>\n<p><strong>What you get:</strong> 494K+ distinct indicators (5.8M+ sightings) sourced from 95 monitored channels and 20 authoritative feeds, landing in Sentinel's <code>ThreatIntelIndicators</code> table where they drive analytics rules, hunting queries and incident enrichment.</p>\n<p><strong>Requirements:</strong> a RelayShield API key with a Threat Intelligence subscription, and a Sentinel workspace with the <strong>Threat Intelligence</strong> solution installed from Content hub (Microsoft Sentinel Contributor at the resource group level).</p>\n<blockquote><strong>Read this first if you have used any earlier Sentinel threat-intel guide.</strong> The <code>ThreatIntelligenceIndicator</code> table <strong>stopped receiving data on 31 July 2025 and retired on 31 May 2026</strong>. Every query, analytics rule, workbook and automation must target <strong><code>ThreatIntelIndicators</code></strong> (and <code>ThreatIntelObjects</code> for actors and relationships). A rule still pointing at the legacy table matches nothing and raises no error, which is the worst failure mode a detection control has.</blockquote>\n<hr>\n<h2>Option A: STIX/TAXII (recommended)</h2>\n<h3>1. Confirm your key works</h3>\n<pre><code>curl -s -u &quot;YOUR_API_KEY:YOUR_API_KEY&quot; https://api.relayshield.net/v1/intel/taxii/</code></pre>\n<p>A valid key returns the TAXII discovery document. Without one you get <code>401</code>, which is a useful way to confirm the endpoint is reachable before adding credentials.</p>\n<blockquote><strong>Put the key in both the username and the password.</strong> Sentinel exposes Username and Password as separate optional fields. The OASIS reference TAXII client skips authentication entirely when the password is empty (<code>if user and password:</code>), which we confirmed against this feed: key-as-username with a blank password returns <code>401</code>, and it looks exactly like a bad key. We have not inspected Sentinel's own client, so this may not apply to it. RelayShield accepts the key in either position regardless, so filling both fields costs nothing and removes the failure mode either way.</blockquote>\n<h3>2. Add the Threat Intelligence - TAXII data connector</h3>\n<p><strong>Microsoft Sentinel \u2192 Configuration \u2192 Data connectors \u2192 Threat intelligence - TAXII \u2192 Open connector page</strong></p>\n<blockquote>The connector page button sits at the <strong>bottom of the right-hand detail panel</strong>, which scrolls independently of the page. If it is not there, the <code>...</code> menu on the connector row has the same action. Verified in the portal on 2026-08-15.</blockquote>\n<table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Friendly name</td><td><code>RelayShield</code></td></tr><tr><td>API root URL</td><td><code>https://api.relayshield.net/v1/intel/taxii/</code></td></tr><tr><td>Collection ID</td><td><code>iocs</code></td></tr><tr><td>Username</td><td>your RelayShield API key</td></tr><tr><td>Password</td><td>your RelayShield API key</td></tr><tr><td>Import indicators</td><td><strong>All available</strong></td></tr><tr><td>Polling frequency</td><td><strong>Once an hour</strong> to start</td></tr></tbody></table>\n<p>Select <strong>Add</strong>. Indicators begin arriving within a few minutes and appear under <strong>Threat intelligence</strong> in the Sentinel menu.</p>\n<p>The API root URL is also the discovery endpoint: RelayShield serves both resources at that one URL, so you can paste the same value wherever a provider asks for either.</p>\n<h3>3. Confirm indicators are landing</h3>\n<pre><code>ThreatIntelIndicators\n| where SourceSystem contains &quot;RelayShield&quot; or Data.external_references contains &quot;relayshield&quot;\n| where TimeGenerated &gt; ago(24h)\n| summarize Indicators = count() by ObservableKey\n| order by Indicators desc</code></pre>\n<p>You should see five <code>ObservableKey</code> values. <strong>Measured in a live Sentinel workspace on 2026-08-15</strong>, across the first 51,815 indicators ingested in a two-hour window:</p>\n<table><thead><tr><th>IOC type</th><th><code>ObservableKey</code></th><th>Indicators</th><th>Share</th></tr></thead><tbody><tr><td>IP address</td><td><code>ipv4-addr:value</code></td><td>24,929</td><td>48.1%</td></tr><tr><td>Domain</td><td><code>domain-name:value</code></td><td>15,613</td><td>30.1%</td></tr><tr><td>URL</td><td><code>url:value</code></td><td>8,384</td><td>16.2%</td></tr><tr><td>SHA-256</td><td><code>file:hashes.'SHA-256'</code></td><td>2,870</td><td>5.5%</td></tr><tr><td>Email sender</td><td><code>email-message:from_ref.value</code></td><td>19</td><td>0.04%</td></tr></tbody></table>\n<p>The email-sender type is low volume and appears only intermittently, so do not treat its absence in a short window as a fault.</p>\n<p><strong><code>ThreatIntelObjects</code> stays empty for this feed.</strong> RelayShield emits STIX <code>Indicator</code> objects only, not <code>Threat Actor</code>, <code>Attack Pattern</code>, <code>Identity</code> or <code>Relationship</code> objects. Sentinel's own documentation points at <code>ThreatIntelObjects</code> for actors and relationships; you will not get those from this connector, and a query joining to that table returns nothing.</p>\n<p>If <code>ObservableKey</code> and <code>ObservableValue</code> come back <strong>empty</strong>, Sentinel could not parse the STIX pattern. That is worth reporting to support@relayshield.net. It should not happen against the current feed (see \"Changed from earlier versions\" below), and it was confirmed working in a live workspace on 2026-08-15, including the SHA-256 path.</p>\n<hr>\n<h2>Option B: MISP via misp2sentinel</h2>\n<p>Sentinel has no first-party MISP connector. The community standard is <a href=\"https://github.com/cudeso/misp2sentinel\"><code>cudeso/misp2sentinel</code></a>, an Azure Function that reads a MISP instance with PyMISP and pushes indicators through Sentinel's Upload Indicators API.</p>\n<p>RelayShield exposes a MISP-compatible surface, so misp2sentinel can point at it directly with no MISP server of your own.</p>\n<p>In the misp2sentinel configuration:</p>\n<table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td><code>misp_domain</code></td><td><code>https://api.relayshield.net/v1/intel/misp/</code></td></tr><tr><td><code>misp_key</code></td><td>your RelayShield API key</td></tr><tr><td><code>misp_verifycert</code></td><td><code>True</code></td></tr></tbody></table>\n<blockquote><strong>The trailing slash on <code>misp_domain</code> is required.</strong> PyMISP joins paths with <code>urljoin</code>, which replaces the last segment when the base has no trailing slash, so <code>/v1/intel/misp</code> silently becomes <code>/v1/intel/servers/getVersion</code> and every call 404s.</blockquote>\n<p>Prefer Option A unless you are already running misp2sentinel. TAXII is a first-party connector with no function app to host, monitor or pay for.</p>\n<hr>\n<h2>Using the indicators</h2>\n<h3>Analytics rule: match feed IPs against firewall traffic</h3>\n<pre><code>let lookback = 1h;\nlet relayshield_ips =\n    ThreatIntelIndicators\n    | where TimeGenerated &gt; ago(14d)\n    | where ObservableKey == &quot;ipv4-addr:value&quot;\n    | summarize arg_max(TimeGenerated, *) by Id\n    | where IsDeleted == false\n    | project IndicatorValue = ObservableValue, Confidence, ThreatDescription = tostring(Data.description);\nCommonSecurityLog\n| where TimeGenerated &gt; ago(lookback)\n| join kind=inner relayshield_ips on $left.DestinationIP == $right.IndicatorValue\n| project TimeGenerated, SourceIP, DestinationIP, ThreatDescription, Confidence, DeviceVendor</code></pre>\n<p><code>summarize arg_max(TimeGenerated, *) by Id</code> followed by <code>where IsDeleted == false</code> is the pattern Microsoft's own examples use, and it matters here: the feed republishes every unexpired indicator on a 7 to 10 day cycle, so without it you count the same indicator many times.</p>\n<h3>Analytics rule: match feed domains against DNS</h3>\n<pre><code>let relayshield_domains =\n    ThreatIntelIndicators\n    | where TimeGenerated &gt; ago(14d)\n    | where ObservableKey == &quot;domain-name:value&quot;\n    | summarize arg_max(TimeGenerated, *) by Id\n    | where IsDeleted == false\n    | project IndicatorValue = ObservableValue, ThreatDescription = tostring(Data.description);\nDnsEvents\n| where TimeGenerated &gt; ago(1h)\n| join kind=inner relayshield_domains on $left.Name == $right.IndicatorValue\n| project TimeGenerated, Computer, ClientIP, Name, ThreatDescription</code></pre>\n<h3>Hunting query: which malware families is the feed seeing?</h3>\n<p>RelayShield tags each indicator with the family it was observed alongside, as a <code>malware:&lt;family&gt;</code> label. This is the part a generic TAXII feed cannot give you, and it is what makes the corpus huntable by campaign rather than only by indicator.</p>\n<pre><code>ThreatIntelIndicators\n| where TimeGenerated &gt; ago(7d)\n| summarize arg_max(TimeGenerated, *) by Id\n| where IsDeleted == false\n| mv-expand Label = Data.labels\n| where tostring(Label) startswith &quot;malware:&quot;\n// Labels are not case-normalised at source: ClearFake and clearfake both occur.\n// Fold case before grouping, or the same family lands in two rows and every\n// count is understated. Some labels also carry comma-joined values, so split\n// them rather than treating the whole string as one family name.\n| extend Family = tolower(replace_string(tostring(Label), &quot;malware:&quot;, &quot;&quot;))\n| mv-expand Family = split(Family, &quot;,&quot;)\n| extend Family = trim(&quot; &quot;, tostring(Family))\n| where isnotempty(Family)\n| summarize Indicators = count() by Family\n| top 25 by Indicators</code></pre>\n<p>Measured against a live workspace on 2026-08-15, the highest-volume labels in a two-hour window were <code>phishing</code> (4,012), <code>mirai</code> (2,341), <code>qakbot</code> (855), <code>clearfake</code> (608), <code>efimer</code> (309), <code>agenttesla</code> (304), <code>trickbot</code> (255), <code>formbook</code> (255), <code>vidar</code> (254), <code>remcosrat</code> (254), <code>bumblebee</code> (251), <code>wannacry</code> (155), <code>emotet</code> (103) and <code>stealc</code> (98).</p>\n<blockquote><strong>The <code>malware:</code> namespace is not purely malware families, so filter with that in mind.</strong> It also carries behaviours (<code>phishing</code>, <code>coinminer</code>), platforms (<code>windows</code>), vendor names (<code>connectwise</code>), and occasional malformed identifiers. Treat a label as a hint, not a taxonomy.</blockquote>\n<blockquote><strong>Case folding is not cosmetic.</strong> Without the <code>tolower</code> and comma-split above, <code>clearfake</code> returns <strong>196</strong> indicators in this window. With them it returns <strong>608</strong>. An exact-match filter silently drops roughly two thirds of the matches and gives you no indication it did.</blockquote>\n<p>To hunt one family, always fold case on both sides:</p>\n<pre><code>ThreatIntelIndicators\n| where TimeGenerated &gt; ago(7d)\n| summarize arg_max(TimeGenerated, *) by Id\n| where IsDeleted == false\n| mv-expand Label = Data.labels\n| where tolower(tostring(Label)) == &quot;malware:clearfake&quot;\n| project TimeGenerated, ObservableKey, ObservableValue, Confidence</code></pre>\n<h3>Reading the legacy-shaped fields</h3>\n<p>If you are porting rules written against <code>ThreatIntelligenceIndicator</code>, this reconstructs the old column names from the new schema:</p>\n<pre><code>ThreatIntelIndicators\n| extend NetworkIP  = iff(ObservableKey == &quot;ipv4-addr:value&quot;,   ObservableValue, &quot;&quot;),\n         DomainName = iff(ObservableKey == &quot;domain-name:value&quot;, ObservableValue, &quot;&quot;),\n         Url        = iff(ObservableKey == &quot;url:value&quot;,         ObservableValue, &quot;&quot;),\n         FileHashValue = iff(ObservableKey has &quot;file:hashes&quot;,   ObservableValue, &quot;&quot;),\n         FileHashType  = iff(ObservableKey has &quot;SHA-256&quot;, &quot;SHA-256&quot;, &quot;&quot;)</code></pre>\n<hr>\n<h2>Cost note</h2>\n<p><code>ThreatIntelIndicators</code> is a billed Log Analytics table, and the feed republishes every unexpired indicator every 7 to 10 days. Before importing <strong>All available</strong>, consider whether your detection surface needs the full corpus. Two levers:</p>\n<ul>\n<li>Set the connector to import a narrower indicator group.</li>\n<li>Apply a workspace transformation to drop the <code>Data</code> column, which carries the full STIX object:</li>\n</ul>\n<p>``<code>kusto source | project-away Data </code>``</p>\n<p>The hunting queries above read <code>Data.labels</code> and <code>Data.description</code>, so drop it only if you do not need those.</p>\n<hr>\n<h2>Changed from earlier versions</h2>\n<p>Four defects were found and fixed in the RelayShield feed on <strong>2026-07-30</strong>, while preparing this guide, by running the OASIS reference TAXII client against production:</p>\n<ol>\n<li>The API Root resource omitted the required <code>versions</code> field, so a conformant TAXII client aborted before requesting anything.</li>\n<li><code>GET /{api-root}/collections/{id}/</code> returned 404. Clients fetch this before requesting objects, so object polling failed without ever reaching the objects endpoint.</li>\n<li>The object envelope was served as <code>application/stix+json</code> rather than <code>application/taxii+json;version=2.1</code>.</li>\n<li>SHA-256 patterns were emitted as <code>[file:hashes.SHA-256 = '...']</code>, which is <strong>invalid STIX 2.1 patterning</strong>. The hash key must be quoted. Sentinel derives <code>ObservableKey</code>/<code>ObservableValue</code> by parsing the pattern, so SHA-256 indicators would have arrived with both fields empty.</li>\n</ol>\n<p><strong>If you configured RelayShield in Sentinel before 2026-07-30</strong>, remove and re-add the connector so it re-polls from the start of the collection, and re-check any rule keyed on file hashes.</p>\n<h2>Verification status</h2>\n<p>Stated plainly, because a threat-intel guide that overstates its testing is worse than no guide:</p>\n<p><strong>Verified against live systems.</strong> Every RelayShield-side claim (the API root and collection URLs, the auth behaviour including the blank-password trap, the TAXII protocol walk end to end, the validity of every STIX pattern in a 1,000-object live sample, and the PyMISP handshake) was measured against the production feed with the OASIS <code>taxii2-client</code>, <code>stix2-patterns</code> validator, and PyMISP.</p>\n<p><strong>Measured in a live Microsoft Sentinel workspace, 2026-08-15.</strong> The <code>ObservableKey</code> values, the table names and the malware-family label queries were previously <em>derived</em> from Microsoft's published schema rather than run. They have now been executed against a real workspace ingesting this feed:</p>\n<ul>\n<li><code>ThreatIntelIndicators</code> and <code>ThreatIntelObjects</code> are confirmed as the current table names, both plural. Some Microsoft solution descriptions render the first as singular; that text is wrong.</li>\n<li>All five <code>ObservableKey</code> values above were returned with populated <code>ObservableValue</code>, confirming Sentinel parses every STIX pattern this feed emits, SHA-256 included.</li>\n<li><code>ThreatIntelObjects</code> remained empty, as expected for an Indicator-only feed.</li>\n<li>The <code>malware:&lt;family&gt;</code> label queries return real families.</li>\n</ul>\n<p><strong>Known rough edge in the family labels.</strong> Label values are not normalised: casing is inconsistent (<code>ClearFake</code> and <code>clearfake</code> both occur), some labels carry several comma-joined values in a single string, and a few describe a behaviour rather than a family (<code>phishing</code>, <code>coinminer</code>). <strong>Match case-insensitively</strong> (<code>where tolower(Family) == \"clearfake\"</code> rather than an exact comparison), or you will silently miss indicators. This is being fixed at source.</p>\n<hr>\n<p>Questions: <a href=\"mailto:support@relayshield.net\">support@relayshield.net</a> \u00b7 <a href=\"https://api.relayshield.net/developers\">api.relayshield.net/developers</a></p>",
 "title": "Ingest RelayShield Threat Intelligence into Microsoft Sentinel"
 }
 }
@@ -11081,6 +12596,30 @@ def lambda_handler(event: dict, context) -> dict:
     if path == "/v1/webhook/configure":
         return handle_metered_request(path, method, event)
 
+    # x402 discovery manifest. Unauthenticated and free by design: it is what
+    # indexers and agent directories read to find our paid endpoints at all.
+    if path in ("/.well-known/x402.json", "/.well-known/x402"):
+        return handle_x402_manifest()
+
+    # 402 Index domain verification. Proves we control api.relayshield.net, which
+    # promotes our listings there from pending-review to searchable and covers
+    # every resource on the domain rather than one at a time. The hash is the
+    # SHA-256 of a token 402 Index issued to us on 2026-08-08; it is a public
+    # proof-of-control value, not a secret, and the body must be the hash alone.
+    if path == "/.well-known/402index-verify.txt":
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "text/plain; charset=utf-8"},
+            "body": X402INDEX_DOMAIN_VERIFICATION_HASH,
+        }
+
+    # Verdict Watch licence routes. Registered in handle_metered_request's
+    # route map for the key check and the watch_access gate, but they do not
+    # live under /v1/metered/ so they need admitting here explicitly, exactly
+    # like /v1/webhook/configure above.
+    if path in WATCH_LICENSE_ENDPOINTS:
+        return handle_metered_request(path, method, event)
+
     # Stripe metered billing routes (RS API key verified inside Lambda)
     if path.startswith("/v1/metered/"):
         return handle_metered_request(path, method, event)
@@ -11151,7 +12690,13 @@ def lambda_handler(event: dict, context) -> dict:
 
     params = _body(event)
     try:
-        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending", "/v1/account/info"):
+        # The SIM swap consent endpoints need to know WHICH account enrolled a
+        # number, so they join the branch that resolves the API key record.
+        # Note the default branch below calls handler(params) with no key, which
+        # is why simply having an api_key_record kwarg is not enough.
+        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending",
+                    "/v1/account/info",
+                    "/v1/sim-swap/enroll", "/v1/sim-swap/confirm", "/v1/sim-swap/withdraw"):
             headers    = event.get("headers") or {}
             api_key    = _header(headers, "X-API-Key") or _header(headers, "X-RS-API-KEY")
             key_record = _verify_rs_api_key(api_key) if api_key else None

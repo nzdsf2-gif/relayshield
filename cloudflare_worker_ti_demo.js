@@ -496,7 +496,44 @@ function renderTrending(data) {
 }
 
 function renderRansomware(data) {
-  if (data.error) return `<div class="error">Error: ${data.error}</div>`;
+  if (data.error) return `<div class="error">${data.error}</div>`;
+
+  // Domain mode — /v1/metered/ransomware-risk. Different shape entirely from
+  // the corpus listing, so it gets its own view rather than being squeezed
+  // into a victims table it does not fit.
+  if (data._mode === "domain" || data.on_victim_list !== undefined) {
+    const level  = String(data.risk_level || "CLEAN").toUpperCase();
+    const colour = {CRITICAL:"#ef4444", HIGH:"#f97316", MEDIUM:"#facc15", CLEAN:"#22c55e"}[level] || "#94a3b8";
+    const groups = (data.victim_groups || []).filter(Boolean);
+    const tg     = data.telegram_sightings || {};
+
+    const cards = `<div class="corpus-stats">
+      <div class="stat-card"><div class="stat-num" style="color:${colour}">${level}</div><div class="stat-label">Risk level</div></div>
+      <div class="stat-card"><div class="stat-num">${data.on_victim_list ? "YES" : "NO"}</div><div class="stat-label">On a leak site</div></div>
+      <div class="stat-card"><div class="stat-num">${data.pre_ransomware_ioc_count || 0}</div><div class="stat-label">Pre-ransomware creds</div></div>
+    </div>`;
+
+    const groupRow = groups.length
+      ? `<div style="padding:10px 0;border-bottom:1px solid #1e3a5f"><span style="color:#94a3b8;font-size:13px">Claimed by</span>
+         <div style="color:#e2e8f0;font-weight:600;margin-top:3px">${groups.join(", ")}</div>
+         ${data.first_seen ? `<div style="color:#64748b;font-size:12px;margin-top:3px">First listed ${String(data.first_seen).slice(0,10)}</div>` : ""}</div>`
+      : "";
+
+    // Only rendered once the API deploy carrying it has run; absent before.
+    const tgRow = (tg.count > 0)
+      ? `<div style="background:#7f1d1d20;border:1px solid #7f1d1d;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin-top:14px;font-size:13px;color:#fca5a5">
+         <strong>${tg.count} sighting${tg.count === 1 ? "" : "s"} in monitored ransomware channels.</strong>
+         ${tg.matched_as && tg.matched_as.length ? `Matched as “${tg.matched_as[0]}”. ` : ""}
+         Unverified leads extracted by pattern match — typically visible before a leak-site listing, and
+         they will contain false positives. Confirm independently before acting.</div>`
+      : "";
+
+    return cards + groupRow +
+      `<div style="color:#94a3b8;font-size:13px;padding:12px 0;line-height:1.55">${data.recommendation || ""}</div>` +
+      tgRow +
+      `<div style="color:#64748b;font-size:12px;margin-top:12px">Checked ${String(data.checked_at || "").slice(0,19).replace("T"," ")} · domain: ${data.domain || ""}</div>`;
+  }
+
   const victims = data.victims || [];
   const days = data.window_days || 30;
 
@@ -743,9 +780,9 @@ footer a{color:#00B5A5;text-decoration:none}
   </div>
 
   <div id="ransomware" class="panel">
-    <p class="panel-desc">Organisations named on ransomware gang leak sites, collected from criminal Telegram channels as the posts go up. Leave the box empty for the full recent window, or enter an organisation to check whether it &mdash; or a supplier you depend on &mdash; has been named. Every row is an <strong>unverified lead</strong>, not a confirmed breach.</p>
+    <p class="panel-desc">Check whether an organisation &mdash; or a supplier you depend on &mdash; has been named on a ransomware gang leak site. <strong>Enter a domain</strong> (e.g. <code>acme.com</code>) for a full risk assessment against the leak-site corpus and pre-ransomware credential exposure. An organisation name or an empty box returns the recent corpus-wide listing collected from criminal Telegram channels, where every row is an <strong>unverified lead</strong> rather than a confirmed breach.</p>
     <div class="input-row">
-      <input type="text" id="ransomware-input" placeholder="Optional: an organisation or supplier name (e.g. Acme Corp)" />
+      <input type="text" id="ransomware-input" placeholder="A domain (e.g. acme.com) — or an organisation name, or leave empty" />
       <select id="ransomware-days" style="background:#0F1F3D;border:1px solid #1e3a5f;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px">
         <option value="7">Last 7 days</option>
         <option value="30" selected>Last 30 days</option>
@@ -1205,12 +1242,35 @@ export default {
     }
 
     if (path === "/demo/ransomware" && request.method === "POST") {
-      const body = await request.json();
+      const body   = await request.json();
+      const query  = String(body.victim || "").trim();
+      // A domain routes to a DIFFERENT endpoint from a corpus listing, and the
+      // difference is not cosmetic: /v1/metered/ransomware-risk has been live
+      // for months and reads the scraped leak-site corpus, while
+      // /v1/intel/ransomware is newer and reads the Telegram-collected victim
+      // table. Sending a domain to the one that answers domains means this tab
+      // works today rather than after the next API deploy.
+      const isDomain = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(query.replace(/^https?:\/\//, "").replace(/\/.*$/, ""));
+
+      if (isDomain) {
+        const domain = query.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+        const data = await callAPI(env, "/v1/metered/ransomware-risk", { domain });
+        if (!data.error) data._mode = "domain";
+        return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+      }
+
       const data = await callAPI(env, "/v1/intel/ransomware", {
-        victim: body.victim || "",
-        days: body.days || 30,
-        limit: 100,
+        victim: query, days: body.days || 30, limit: 100,
       });
+      if (!data.error) data._mode = "corpus";
+      // The corpus endpoint ships with the API deploy that is still pending. A
+      // 404 here is that, and the message says what to do instead of leaving a
+      // prospect looking at a router error.
+      if (data.error && /not live on the API yet|unknown endpoint/i.test(data.error)) {
+        data.error = "The corpus-wide listing needs the next API deploy. " +
+                     "In the meantime, enter a DOMAIN (e.g. acme.com) — domain lookups work now " +
+                     "and query the full leak-site corpus.";
+      }
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 

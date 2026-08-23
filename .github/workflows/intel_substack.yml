@@ -20,6 +20,10 @@ jobs:
       - name: Zip and deploy
         run: |
           zip relayshield-intel-substack.zip relayshield_intel_substack.py
+          # --query, for the same reason as deploy_lambdas.yml: the default
+          # output is the whole function configuration, environment block and
+          # all, printed into a log anyone with repo read access can fetch.
           aws lambda update-function-code \
             --function-name relayshield-intel-substack \
-            --zip-file fileb://relayshield-intel-substack.zip
+            --zip-file fileb://relayshield-intel-substack.zip \
+            --query 'FunctionName' --output text

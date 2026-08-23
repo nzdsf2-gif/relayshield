@@ -104,7 +104,7 @@ leads every classical SOC integration and both of our entries are open PRs.
 |---|---|---|---|
 | **D1** | **Land Microsoft Sentinel PR #14924** | Both reviewer asks answered, awaiting review. Chase it | Chase |
 | **D2** | **Decide on the second Sentinel PR** for the same defect in `TI Map Domain entity to Cloud App Events` | Open question — ask whether Microsoft wants it | 1 day |
-| **D3** | **XSOAR PR #45206 / Tech Alliance** | Gated on 2 named joint customers. Ask Arjen; do not invent them | Blocked |
+| **D3** | ~~XSOAR PR #45206 / Tech Alliance~~ | ✅ **DONE weeks ago.** `NEXT_SESSION_2026-08-20.md` still lists it as carried-forward and blocked on joint customers; that file is stale | — |
 | **D4** | **Ship an Elastic integration for our TAXII feed** | **The highest-leverage item in this phase.** SOCRadar's TAXII server ships as a first-class Elastic integration — that is distribution we have no equivalent to, and ours is a config-and-submit job because the TAXII endpoint already exists and is conformant | 3–5 days |
 | **D5** | **Splunk TA** | Named in their SIEM list, absent from ours | 1 week |
 | **D6** | **Complete MISP server compatibility** (currently partial) | Their MISP server is a named integration; ours is partial | 3 days |
@@ -141,8 +141,7 @@ A3, A4 (wire up what is already merged) → A7 (label normalisation) → D4 (Ela
 A2, A6, A8 → B1, B2, B4 → C2, C3 → E1
 
 **Decide, do not drift**
-C4 (licence vs build forums) and D3 (XSOAR joint customers) both need a decision from you rather
-than work from me.
+C4 (licence vs build forums) needs a decision from you rather than work from me.
 
 ## How we will know it worked
 
@@ -153,7 +152,7 @@ Not "corpus size". These:
 | `measured_exclusive_share` per category, weekly | 0.3 | Rising in `tg_handle`, `wallet_*`, `url` |
 | Median lead time on `/scan` submissions, with sample size | A4 | Any defensible number at n > 100 |
 | Categories above the 100-indicator defensibility floor | 0.1 | All the ones we quote |
-| Shipped SIEM/SOAR integrations | D1–D6 | 2 → 5 |
+| Shipped SIEM/SOAR integrations | D1, D2, D4–D6 | 1 shipped (XSOAR) → 5 |
 | Indicators carrying confidence + derivation | B1 | 100% |
 
 The first two are the ones that decide whether the benchmark can be published aimed at their

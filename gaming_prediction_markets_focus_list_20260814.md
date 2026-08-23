@@ -428,7 +428,7 @@ From the contact page, three routes exist and only one is right:
 | Route | Use for | Verdict |
 |---|---|---|
 | General contact form | General question / Suggestion / Publication / Other. Explicitly **not** user support | Wrong. A bot install is not a suggestion |
-| **BizDev form** — `https://forms.gle/fv4y1G3ppNgJDpEDA` | "partnership or collaboration" | **This one** |
+| **BizDev form** — `https://forms.gle/28MppPk59RGxicrGA` | "partnership or collaboration" | **This one** |
 | `defikingdoms.com/bugreport.html` | vulnerabilities | Wrong, and misusing it would burn credibility |
 
 **But check the partner channel first.** The band was overridden for DFK specifically because the
@@ -585,6 +585,156 @@ their own chain, in their own address format. Same class of check as the WAX gat
 
 **DFK itself is unaffected** — DFK Chain is an Avalanche subnet and uses plain `0x`.
 
+### ✅ FIXED 2026-08-21 — the Ronin gate is closed
+
+`_RONIN_RE` and `_normalize_address()` in `relayshield_discord_bot.py` rewrite `ronin:<40 hex>` to
+`0x<40 hex>` before the address shape test, so a pasted legacy address now gets a real verdict.
+Normalising there rather than inside `check_wallet()` means the "Warn the channel" button carries
+the normalised form too, so the re-check on click hits the same API path the first check did.
+Mixed case and surrounding whitespace are handled; a malformed `ronin:` string is still rejected;
+`ronin.example.com` still routes to the URL checker.
+
+`relayshield_discord_bot.py` was also added to `deploy_lambdas.yml`'s `LAMBDA_MAP` as
+`rs-discord-bot` the same day — before that it had **no CI deploy path at all**, so a repo-side fix
+would never have reached the live bot.
+
+**Ronin-game outreach is unblocked.** The recommendations below assume it.
+
+## THE OUTREACH MESSAGE — send this
+
+*Written 2026-08-22. Short by design: the ask is a two-minute decision, so a long message signals a
+big one.*
+
+**Route it correctly first.** Post in a partner or business channel if one exists, otherwise open a
+ticket or DM an admin. **Do not post in general.** The rules-first step is what stopped the Solana
+Mobile post on 2026-08-13 and it is not optional — read `#rules` before writing anything.
+
+### Version A — the default
+
+> Hi — I built a free Discord bot that screens wallet addresses and links against criminal threat
+> intelligence, and I'd like to offer it to [SERVER] if it's useful.
+>
+> Someone types `/scan` with an address or a URL and gets back a verdict in a few seconds — whether
+> that address shows up in drainer, scam or sanctions data, or whether that link is a known phishing
+> page. Replies are private by default, and there's a button to share a result to the channel if
+> someone wants to warn everyone.
+>
+> It's free, there's no paid tier for it, and I'm not collecting anything from your members. I'm
+> offering it because the alternative is people finding out the hard way in your general chat.
+>
+> Happy to add it to a test channel first so you can try it before it goes anywhere public. Who's
+> the right person to ask?
+
+### Version B — when the server has visibly been hit
+
+Use only if you have actually seen it — a `#report-scammers` channel, a pinned drainer warning, a
+recent incident. **Referencing an incident that did not happen reads as a sales script.**
+
+> Hi — I noticed [the pinned warning about the fake mint / the scam reports channel]. I built a free
+> Discord bot for exactly that: `/scan` an address or a link and it checks it against criminal
+> threat intelligence and comes back in a few seconds. Private reply, with a button to post the
+> result to the channel if it's worth warning people about.
+>
+> Free, no paid tier, nothing collected from your members. Happy to put it in a staff channel first
+> so you can break it before anyone else sees it. Who should I be talking to?
+
+### Version C — Ronin games (Lumiterra, The Machines Arena)
+
+> Hi — I build a free wallet-and-link screening bot for game Discords, and I did the Ronin work
+> before writing to you: `ronin:` addresses are handled properly, not just `0x`. Most tools reject
+> the legacy format outright.
+>
+> `/scan` an address or a link, get a verdict in a few seconds against criminal threat intelligence.
+> Private by default, with a button to warn the channel. Free, no paid tier, nothing collected from
+> your players.
+>
+> Happy to drop it in a test channel so you can try it first. Who's the right person to ask?
+
+### Why these are worded the way they are
+
+* **"Free, no paid tier for it"** removes the objection an admin has before reading — that this is a
+  sales approach. It is also true. Do not soften it into "free to start".
+* **"Nothing collected from your members"** answers the second objection, which for a security bot is
+  the fatal one if left hanging.
+* **"Test channel first"** converts a permission decision into a reversible one. It is the single
+  highest-leverage sentence here.
+* **"Who's the right person to ask?"** — asking for a routing decision is much easier to answer than
+  asking for a yes, and it gets a reply from people who cannot themselves approve.
+* **No corpus numbers.** Same rule as every other outreach in this repo. An admin does not care how
+  many indicators there are; they care whether their members get drained.
+* **No feature list.** One capability, stated once.
+
+### Do not
+
+* Do not send to more than one server in the same ecosystem at once — they talk, and two parallel
+  approaches read as spray. Ronin order is in the next section.
+* Do not pitch rsscan. Free and MIT-licensed means there is nothing to negotiate; it is one line for
+  an engineer, not a partnership.
+* Do not follow up more than once. The Overtime thread is the model: a clean no within the hour, no
+  rule broken, no server burned.
+* Do not claim the bot prevents losses. It screens against what is already known — an address minutes
+  old and in no database yet comes back clean, and saying otherwise sets up the one complaint that
+  would get it removed.
+
+---
+
+## Recommended Ronin targets, in send order
+
+Ronin is the single best chain on this list for the bot: one publisher (Sky Mavis) curates the
+ecosystem, the games are Discord-native, and Q3 daily active wallets of 419K (+55%) say the players
+are actually there. **Ordered by fit, and the order matters** — the first two are the pitch, the rest
+are what you send only if those stall.
+
+| # | Target | Band | Why this one, in this position |
+|---|---|---|---|
+| 1 | **Lumiterra** | In band | **Send first.** +9,451% active wallets in Q3 2025 means a server that is still growing into its moderation, which is exactly when an automated screening bot is welcome rather than redundant. Open-world survival with constant item trading is the highest address-and-link traffic on the chain. Smaller and hungrier than Pixels, so a partnership is a decision one person can make |
+| 2 | **The Machines Arena** | In band | **Send second, and only after Lumiterra replies or goes quiet for a week.** A 4v4 hero shooter skews younger and more drainer-exposed, which is the strongest *safety* argument available — but it is also a harder audience to claim credit with. Do not run both in parallel: they are ecosystem neighbours and word travels |
+| 3 | **Ronin ecosystem / Sky Mavis developer channels** | Publisher | The leverage play, not the volume play. One integration blessed by the publisher reaches every title at once. Slower, and it needs at least one live game reference first — which is precisely why it sits below Lumiterra rather than above it |
+| 4 | **Pixels** | ~214K, **over the ceiling** | Ruled out on size by this document's own 50,000 rule, and that rule stands. Listed here only so it is not re-proposed: a server that size has staff moderators and an existing tooling stack, so the bot is a procurement conversation, not a favour |
+| 5 | **Axie Infinity** | Far over | Same reason as Pixels, more so. Do not open |
+
+**Pitch the bot, not rsscan** — the same reasoning that settled DFK applies unchanged. rsscan is
+free and MIT-licensed, so there is nothing to negotiate; the bot serves players and has a
+partnership shape.
+
+**Lead with the `ronin:` fix, not with the corpus.** "We handle your chain's legacy address format
+correctly" is a concrete, checkable claim these teams can verify in ten seconds, and it lands far
+better than any indicator count. It also quietly says we did the work before turning up.
+
+**Do not quote total corpus size.** Same rule as every other outreach in this repo, for the same
+reason.
+
+**The headwind still applies.** DeFi protocols are leaving Discord in 2026 (Morpho read-only from
+1 Feb, DefiLlama moved to ticketed support). Games are stickier, but name it and turn it: teams
+leave because they cannot screen what gets posted, and screening what gets posted is the product.
+
+## DFK ROUTE CONFIRMED 2026-08-22 — the BizDev form IS the partner channel
+
+Read from inside the server, past the `#✅verify` gate. `#✨questions-bugs-contacts-suggestions`
+pins a **Biz Dev Inquiry** block: *"Biz Dev Contact Form. Please use this form for interest in
+collaboration."* → **`https://forms.gle/28MppPk59RGxicrGA`**
+
+**This settles the routing question and corrects this document.** Earlier notes carried
+`https://forms.gle/fv4y1G3ppNgJDpEDA` as a *fallback* behind a partner channel. Both halves were
+wrong: **the form URL was different, and there is no separate partner channel to try first.** DFK
+routes collaboration through the form, full stop. Every occurrence of the old URL above has been
+corrected.
+
+**So the sequencing advice changes.** "Partner channel first, form as fallback" no longer applies to
+DFK — the form is the front door. Do not spend time hunting for a partner channel that does not
+exist; that is the same wasted-effort shape as the eleven consecutive 404s in the prediction-market
+sweep.
+
+Also visible from inside, and worth noting: DFK runs a `#🔴report-scammers` channel and a
+`#🔒security-basics` channel. **That is the Version B condition met** — pitch the incident-specific
+message, not the default one, and reference the scam-reporting channel as the reason for writing.
+A server that has staffed a channel for scam reports has already decided the problem is real.
+
+Multiple chain-specific support channels are also visible (`#dfkc-crystalvale-support`,
+`#kaia-serendale-support`, `#metis-sun-support`, `#on-ramp-support`), which confirms DFK now spans
+DFK Chain, Kaia and Metis rather than DFK Chain alone. **All three are EVM with 40-hex `0x`
+addresses**, so the gate still passes — but do not describe DFK as single-chain in the pitch.
+
 ## DFK: no channels visible until you pass `#✅verify`
 
 Confirmed from the server view — DFK runs a verification gate, with `#✅verify` under **Launchpad**
@@ -600,7 +750,7 @@ gate, and the partner channel is the preferred route.
 
 ## Draft: DFK BizDev form submission
 
-Route: `https://forms.gle/fv4y1G3ppNgJDpEDA`. **Use only if the partner channel is unavailable after
+Route: `https://forms.gle/28MppPk59RGxicrGA`. **Use only if the partner channel is unavailable after
 verifying.**
 
 > **Nature:** Partnership / collaboration

@@ -15,24 +15,32 @@ Subscription endpoints (API key required — enforced by API Gateway usage plan)
   POST /v1/sim-swap                 — Twilio Lookup v2 SIM/eSIM swap detection
   POST /v1/domain                   — Typosquat/lookalike domain scan (DNS + CT + GSB)
   POST /v1/intel/telegram           — Threat Intelligence API: IOC lookup against live Telegram criminal channel pipeline (intel_access flag required)
+  POST /v1/intel/ransomware         — Ransomware leak-site victim names, unverified leads (intel_access flag required)
   POST /v1/metered/supply-chain     — Vendor/supply chain risk: breach + infostealer exposure per domain (up to 10 domains)
   POST /v1/metered/session-risk     — INTEL-5 active session hijack detection from stealer log corpus
   GET  /v1/result/{analysis_id}     — Poll VT scan result
 
 Pay-as-you-go endpoints (no API key — x402 payment verified in Lambda):
+
+  PRICES BELOW ARE ILLUSTRATIVE AND PARTIAL. `PAYG_PRICE_UNITS` is the only
+  source of truth, and it holds ~28 endpoints against the 14 listed here.
+  Never quote a price from this header; read the map. Corrected 2026-08-14
+  after three entries here had drifted from what is actually charged, one of
+  them understating a live price by half.
+
   POST /v1/payg/breach              — $0.10 USDC
   POST /v1/payg/sim-swap            — $0.25 USDC
   POST /v1/payg/domain              — $0.50 USDC
-  POST /v1/payg/oauth-watchlist     — $0.15 USDC
+  POST /v1/payg/oauth-watchlist     — $0.30 USDC — combined HIBP watchlist + INTEL-5 stealer corpus
   POST /v1/payg/scan-wallet         — $0.10 USDC (legacy EVM-only)
   POST /v1/payg/scan-url            — $0.05 USDC
   POST /v1/payg/scan-file           — $0.10 USDC
-  POST /v1/payg/wallet-risk         — $0.15 USDC — multi-chain EVM/Solana/TON/Bitcoin
-  POST /v1/payg/token-security      — $0.10 USDC — token honeypot + tax analysis
+  POST /v1/payg/wallet-risk         — $0.05 USDC — multi-chain EVM/Solana/TON/Bitcoin (teaser price, CDPX-3)
+  POST /v1/payg/token-security      — $0.05 USDC — token honeypot + tax analysis (teaser price, CDPX-3)
   POST /v1/payg/nft-security        — $0.10 USDC — NFT contract risk
   POST /v1/payg/wallet-screen-batch — $0.50 USDC — batch up to 10 addresses
   POST /v1/payg/infostealer         — $0.15 USDC — Hudson Rock infostealer detection
-  POST /v1/payg/supply-chain        — $0.10 USDC per domain — vendor breach + infostealer risk (up to 10 domains)
+  POST /v1/payg/supply-chain        — $0.10 USDC per CALL, not per domain — vendor breach + infostealer risk (up to 10 domains)
   POST /v1/payg/session-risk        — $0.30 USDC — INTEL-5 active session hijack / AiTM detection
   POST /v1/payg/tech-stack-cve      — $0.20 USDC — CVE targeting risk by declared tech stack
   POST /v1/payg/bulk-identity-risk  — $2.00 USDC — hierarchical org + per-agent-email risk scoring
@@ -61,6 +69,7 @@ import base64
 import bisect as _bisect
 import concurrent.futures
 from decimal import Decimal
+import hashlib
 import json
 import html
 import logging
@@ -77,6 +86,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 # Local module — pure data, no AWS dependencies. MUST be included in this
 # function's deployment zip; without it every invocation dies at import with
@@ -273,6 +283,19 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/tech-stack-cve":        200000,   # $0.20 — CVE targeting risk by declared tech stack
     "/v1/payg/bulk-identity-risk":    2000000,  # $2.00 — hierarchical org + per-agent-email risk scoring
     "/v1/payg/identity-risk-score":   350000,   # $0.35 — domain security credit score (0-100), 6 dimensions
+    # Added 2026-08-08. Absent before, so both fell through to the 250000
+    # default and charged x402 buyers $0.25 against an advertised $0.35, and
+    # neither appeared in /.well-known/x402.json (26 resources, not 28).
+    #
+    # RECOVERED FROM THE LIVE FUNCTION 2026-08-21. This fix was deployed by hand
+    # and never committed; `main` still carried the bug, so the next CI deploy
+    # of this file would have reinstated it. Found by lambda_drift_check.yml on
+    # its first scheduled run — exactly the failure mode that check was built
+    # for. Note these two paths are ALSO served by relayshield_agentic_api.py;
+    # that does not make them optional here, because PAYG_PATHS is derived from
+    # this map and an absent key means the path is not recognised at all.
+    "/v1/payg/mcp-registry-risk":     350000,   # $0.35 — MCP server typosquat + reputation risk
+    "/v1/payg/prompt-injection-breach": 350000, # $0.35 — prompt-injection corpus exposure check
     "/v1/payg/cert-expiry":            50000,   # $0.05 — TLS cert expiry/renewal risk for your own domain (crt.sh, free source)
     "/v1/payg/ip-intel":              100000,   # $0.10 — passive DNS + IP reputation via VirusTotal
 }
@@ -311,6 +334,11 @@ STOLEN_CARDS_TABLE      = "relayshield_stolen_cards"
 ASSET_WATCHLIST_TABLE   = "relayshield_asset_watchlist"
 ACTOR_WATCHLIST_TABLE   = "relayshield_actor_watchlist"
 EXPLOIT_CHATTER_TABLE   = "relayshield_exploit_chatter"
+# Leak-site victim names, written by relayshield_intel_monitor.py's
+# _store_ransomware_victims(). DELIBERATELY not in relayshield_intel_iocs: a
+# victim org is not an indicator of compromise, and mixing the two would let a
+# breached company's own domain be served as "dangerous".
+RANSOM_VICTIMS_TABLE    = "relayshield_ransomware_victims"
 SHARED_REPORTS_TABLE    = "relayshield_shared_reports"
 FROM_EMAIL              = "noreply@relayshield.net"
 
@@ -5458,6 +5486,73 @@ def _ioc_confidence(source: str, seen_ts: str) -> float:
     return round(max(0.40, base - decay), 2)
 
 
+def _telegram_victim_sightings(domain: str) -> dict:
+    """Leak-site victim sightings for `domain` from the Telegram collection pipeline.
+
+    A SECOND, WEAKER SOURCE, and it must stay labelled as one. The existing
+    RANSOMWARE_TABLE_API corpus is scraped from leak sites and is treated as
+    confirmed. This table is written by _store_ransomware_victims() in
+    relayshield_intel_monitor.py from a regex over gang-channel posts, so it
+    carries real false positives and every row is stored confidence="unverified".
+
+    Merging the two into one verdict would launder that uncertainty into a
+    CRITICAL, which for a ransomware claim about a named company is the single
+    most damaging thing this API could get wrong. So this returns its own block
+    and the caller keeps the tiers apart.
+
+    Matching goes domain -> org token -> the same normalised match_keys the
+    monitor wrote, so acme.com finds rows stored as "Acme", "ACME Corp" and
+    "Acme Corporation" -- but not "Acme Technologies", which is a different
+    company. Returns an empty result on any failure: an enrichment source that
+    is down must never fail the primary lookup.
+    """
+    token = _org_token(domain)
+    if not token:
+        return {"sightings": 0, "first_seen": "", "last_seen": "", "channels": [], "names": []}
+
+    keys = _ransom_victim_keys(token)
+    empty = {"sightings": 0, "first_seen": "", "last_seen": "", "channels": [], "names": []}
+    if not keys:
+        return empty
+
+    flt = None
+    for k in keys:
+        cond = boto3.dynamodb.conditions.Attr("match_keys").contains(k)
+        flt = cond if flt is None else (flt | cond)
+
+    try:
+        resp = dynamodb.Table(RANSOM_VICTIMS_TABLE).scan(
+            FilterExpression=flt,
+            ProjectionExpression="display_name, victim_name, seen_ts, channel",
+        )
+        items = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp and len(items) < 500:
+            resp = dynamodb.Table(RANSOM_VICTIMS_TABLE).scan(
+                FilterExpression=flt,
+                ProjectionExpression="display_name, victim_name, seen_ts, channel",
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            items.extend(resp.get("Items", []))
+    except Exception as exc:
+        # Includes the pre-create ResourceNotFoundException. Enrichment absent
+        # is not the same as clean, and the caller says so in its response.
+        logger.info("Telegram victim lookup unavailable domain=%s: %s", domain, exc)
+        return empty
+
+    if not items:
+        return empty
+
+    stamps = sorted(str(i.get("seen_ts", "")) for i in items if i.get("seen_ts"))
+    return {
+        "sightings":  len(items),
+        "first_seen": stamps[0] if stamps else "",
+        "last_seen":  stamps[-1] if stamps else "",
+        "channels":   sorted({str(i.get("channel")) for i in items if i.get("channel")})[:5],
+        "names":      sorted({str(i.get("display_name") or i.get("victim_name") or "")
+                              for i in items if (i.get("display_name") or i.get("victim_name"))})[:5],
+    }
+
+
 def handle_ransomware_risk(params: dict) -> dict:
     domain = (params.get("domain") or "").strip().lower().removeprefix("www.")
     if not domain or "." not in domain:
@@ -5491,6 +5586,10 @@ def handle_ransomware_risk(params: dict) -> dict:
     victim_groups  = list({i.get("group", "") for i in victim_items if i.get("group")})
     first_seen     = min((i.get("discovered", "") for i in victim_items), default="") if victim_items else ""
 
+    # Telegram collection pipeline, added 2026-08-22. Its own tier, never merged
+    # into the confirmed verdict — see _telegram_victim_sightings().
+    tg = _telegram_victim_sightings(domain)
+
     if on_victim_list:
         risk_level = "CRITICAL"
         rec = (
@@ -5505,18 +5604,45 @@ def handle_ransomware_risk(params: dict) -> dict:
             "before a ransomware incident was associated with this domain. These credentials may "
             "indicate pre-attack reconnaissance. Rotate any shared credentials with this organisation."
         )
+    elif tg["sightings"]:
+        # MEDIUM, deliberately not HIGH and never CRITICAL. This is a pattern
+        # match over criminal-channel chatter: it is a reason to go and look,
+        # not a finding. The copy has to carry that or the tier is meaningless.
+        risk_level = "MEDIUM"
+        _named = tg["names"][0] if tg["names"] else domain
+        rec = (
+            f"{domain} has not been found on any scraped leak site, but a matching organisation "
+            f"name ({_named}) was seen {tg['sightings']} time(s) in monitored ransomware channels. "
+            "This is an UNVERIFIED lead extracted by pattern match, not a confirmed breach — false "
+            "positives are expected. Treat it as a prompt to confirm directly with the organisation "
+            "before acting, and do not notify anyone on the strength of this alone."
+        )
     else:
         risk_level = "CLEAN"
         rec = f"No ransomware victim listing or pre-ransomware credential exposure found for {domain}."
 
-    logger.info("ransomware-risk domain=%s victim=%s pre_creds=%d risk=%s",
-                domain, on_victim_list, pre_ransomware_count, risk_level)
+    logger.info("ransomware-risk domain=%s victim=%s pre_creds=%d tg_sightings=%d risk=%s",
+                domain, on_victim_list, pre_ransomware_count, tg["sightings"], risk_level)
     return _ok({
         "domain":                   domain,
         "on_victim_list":           on_victim_list,
         "victim_groups":            victim_groups,
         "first_seen":               first_seen,
         "pre_ransomware_ioc_count": pre_ransomware_count,
+        # Kept as its own block, with its confidence stated inline. A consumer
+        # that only reads risk_level is unaffected; one that wants the earlier,
+        # weaker signal has to look at a field that says "unverified" on it.
+        "telegram_sightings": {
+            "count":      tg["sightings"],
+            "first_seen": tg["first_seen"],
+            "last_seen":  tg["last_seen"],
+            "channels":   tg["channels"],
+            "matched_as": tg["names"],
+            "confidence": "unverified",
+            "note": ("Extracted by pattern match from monitored ransomware channels. Typically "
+                     "surfaces before a leak-site listing, and will contain false positives. "
+                     "Confirm independently before acting."),
+        },
         "risk_level":               risk_level,
         "recommendation":           rec,
         "checked_at":               datetime.now(timezone.utc).isoformat(),
@@ -8283,6 +8409,19 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     result.setdefault("headers", {})
     result["headers"]["PAYMENT-RESPONSE"] = encoded_settlement
     result["headers"]["Access-Control-Expose-Headers"] = "PAYMENT-RESPONSE"
+
+    # First-seen collection for the PAYG rail. This needs its OWN call because
+    # PAYG requests return from here and never reach the dispatcher's hook —
+    # listing the payg paths there was a mapping that could never fire, the
+    # same shape as the `cves` type_map defect. Found by tracing the routing
+    # rather than by anything failing, which is the point: it would have
+    # under-collected silently.
+    #
+    # PAYG traffic is the agent and automation rail, so these are exactly the
+    # submissions worth having.
+    if path in _FIRST_SEEN_PATHS:
+        _log_first_seen(path, params, result)
+
     return result
 
 
@@ -8787,6 +8926,145 @@ def handle_intel_trending(params: dict, api_key_record: dict | None = None) -> d
         "total_new_iocs": len(items),
         "trending":      trending,
         "generated_at":  datetime.now(timezone.utc).isoformat(),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Ransomware leak-site victims  GET/POST /v1/intel/ransomware
+# Organisations named on ransomware gang leak sites, as observed by the
+# Telegram collection pipeline. TI subscription required.
+#
+# READ THE CONFIDENCE FIELD BEFORE BUILDING ON THIS. Extraction is a regex over
+# leak-site and gang-channel posts (_RE_RANSOM_VICTIM in
+# relayshield_intel_monitor.py), which takes capitalised words following
+# "hacked"/"leaked"/"victim". That is a lead list with real noise in it, never a
+# confirmed breach, and every row carries confidence="unverified" to say so. The
+# response repeats it at the top level so a caller cannot consume the list
+# without seeing it.
+#
+# `victim` filters to one organisation using the same normalised match keys the
+# supplier-breach alerting uses (case-folded, punctuation stripped, corporate
+# suffix optional), so "Acme Corp." finds rows stored as "Acme" and "ACME CORP".
+# ---------------------------------------------------------------------------
+
+_RANSOM_CORP_SUFFIXES = ("incorporated", "inc", "llc", "ltd", "limited", "corp",
+                         "corporation", "group", "holdings", "co", "company",
+                         "plc", "gmbh", "sa", "ag")
+
+
+def _ransom_victim_keys(raw: str) -> set:
+    """Match keys for a victim name.
+
+    Mirrors _victim_keys() in relayshield_intel_monitor.py, which is what wrote
+    the `match_keys` attribute this compares against. The two must agree: if
+    they drift, a lookup silently returns nothing rather than erroring. Same
+    floor of 3 (so IBM/SAP/AWS are searchable) and same exclusion of bare
+    corporate suffixes.
+    """
+    base = re.sub(r"[^a-z0-9]+", "", (raw or "").lower())
+    if not base:
+        return set()
+    keys = {base}
+    for suf in _RANSOM_CORP_SUFFIXES:
+        if base.endswith(suf) and len(base) > len(suf) + 2:
+            keys.add(base[: -len(suf)])
+    return {k for k in keys if len(k) >= 3 and k not in _RANSOM_CORP_SUFFIXES}
+
+
+def handle_intel_ransomware(params: dict, api_key_record: dict | None = None) -> dict:
+    if not api_key_record or not api_key_record.get("intel_access"):
+        return {
+            "statusCode": 403, "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"ok": False, "error": "Threat Intelligence subscription required."}),
+        }
+
+    days   = max(1, min(int(params.get("days", 30) or 30), 90))
+    limit  = max(1, min(int(params.get("limit", 100) or 100), 500))
+    victim = (params.get("victim") or "").strip()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    table = dynamodb.Table(RANSOM_VICTIMS_TABLE)
+    flt   = boto3.dynamodb.conditions.Attr("seen_ts").gte(cutoff)
+    if victim:
+        keys = _ransom_victim_keys(victim)
+        if not keys:
+            return _err("victim must contain at least 3 alphanumeric characters")
+        key_flt = None
+        for k in keys:
+            cond    = boto3.dynamodb.conditions.Attr("match_keys").contains(k)
+            key_flt = cond if key_flt is None else (key_flt | cond)
+        flt = flt & key_flt
+
+    scan_kw = {
+        "FilterExpression": flt,
+        "ProjectionExpression": "display_name, victim_name, seen_ts, channel, category, confidence",
+    }
+    items: list = []
+    try:
+        resp = table.scan(**scan_kw)
+        items.extend(resp.get("Items", []))
+        # The table did not exist until 2026-08-21 and is TTL'd at ALERT_TTL_DAYS,
+        # so it stays small; the 5,000 ceiling is a runaway guard, not a paging
+        # strategy. If it is ever hit, the window is too wide for a scan and this
+        # needs a GSI on seen_ts.
+        while "LastEvaluatedKey" in resp and len(items) < 5000:
+            resp = table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"], **scan_kw)
+            items.extend(resp.get("Items", []))
+    except Exception as exc:
+        # A missing table is the expected failure before the create-table step in
+        # lambda_recovery_and_deploy.md §6 has been run. Say which one it is
+        # rather than returning a bare scan error.
+        if "ResourceNotFound" in str(type(exc).__name__) or "ResourceNotFoundException" in str(exc):
+            return _err("Ransomware victim collection is not yet available.", 503)
+        return _err(f"Victim scan failed: {exc}")
+
+    items.sort(key=lambda i: str(i.get("seen_ts", "")), reverse=True)
+
+    # One row per organisation: the same victim named on five days is one victim
+    # with a five-day sighting span, not five victims. Counting rows would let a
+    # chatty gang channel inflate the figure.
+    by_org: dict = {}
+    for it in items:
+        name = str(it.get("victim_name") or it.get("display_name") or "").lower()
+        if not name:
+            continue
+        rec = by_org.get(name)
+        if rec is None:
+            by_org[name] = {
+                "victim":      it.get("display_name") or name,
+                "first_seen":  str(it.get("seen_ts", "")),
+                "last_seen":   str(it.get("seen_ts", "")),
+                "sightings":   1,
+                "sources":     [s for s in [it.get("channel")] if s],
+                "category":    it.get("category", ""),
+                "confidence":  it.get("confidence", "unverified"),
+            }
+        else:
+            rec["sightings"] += 1
+            ts = str(it.get("seen_ts", ""))
+            if ts and ts < rec["first_seen"]:
+                rec["first_seen"] = ts
+            if ts and ts > rec["last_seen"]:
+                rec["last_seen"] = ts
+            ch = it.get("channel")
+            if ch and ch not in rec["sources"]:
+                rec["sources"].append(ch)
+
+    victims = sorted(by_org.values(), key=lambda v: v["last_seen"], reverse=True)[:limit]
+
+    return _ok({
+        "window_days":    days,
+        "query":          victim,
+        "matched":        bool(victims) if victim else None,
+        "total_victims":  len(by_org),
+        "total_sightings": len(items),
+        "victims":        victims,
+        "confidence":     "unverified",
+        "disclaimer":     ("Names are extracted by pattern match from ransomware leak sites and gang "
+                           "channels. They are unconfirmed leads, not verified breaches, and this list "
+                           "will contain false positives. Confirm independently before acting on, "
+                           "publishing, or notifying anyone about an entry."),
+        "generated_at":   datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -10427,6 +10705,58 @@ def handle_wallet_inbound(params: dict) -> dict:
     return _ok({"senders": senders, "tx_count": len(senders)})
 
 
+# ---------------------------------------------------------------------------
+# First-seen submission logging — see relayshield_first_seen.py
+# ---------------------------------------------------------------------------
+# Import is deliberately lazy and guarded. relayshield_first_seen is resolved
+# into this function's deploy zip by the CI import-walker, but a missing module
+# must degrade to "no first-seen data" rather than 500ing every scan.
+
+# Two call sites, because these routes return from two different places:
+# subscription paths fall through to the dispatcher's `return handler(params)`,
+# PAYG paths return early from handle_payg_request(). Both are hooked; adding a
+# scan route to only one of them collects half the traffic and says nothing.
+_FIRST_SEEN_PATHS = {
+    "/v1/scan-url":         "url",     # dispatcher
+    "/v1/wallet-risk":      "wallet",  # dispatcher
+    "/v1/payg/scan-url":    "url",     # handle_payg_request
+    "/v1/payg/wallet-risk": "wallet",  # handle_payg_request
+}
+
+
+def _log_first_seen(path: str, params: dict, result: dict) -> None:
+    """Record one scan and the verdict it got. NEVER RAISES."""
+    try:
+        if not isinstance(result, dict) or result.get("statusCode") != 200:
+            return
+        kind  = _FIRST_SEEN_PATHS.get(path)
+        value = (params.get("url") or params.get("address") or "").strip()
+        if not kind or not value:
+            return
+
+        # Require a real body. `or "{}"` would turn a 200-with-no-body into a
+        # recorded "unknown" verdict, and this table's whole value rests on
+        # first_verdict being what we actually said. A phantom unknown that
+        # later "turns" would manufacture a we-saw-it-first claim out of
+        # nothing — the one failure that would make the whole corpus
+        # unciteable.
+        raw = result.get("body")
+        if not raw:
+            return
+        data = json.loads(raw).get("data", {})
+        if kind == "url":
+            level   = str(data.get("level", "")).lower()
+            verdict = "flagged" if level in ("malicious", "suspicious", "flagged") else "unknown"
+        else:
+            verdict = ("flagged" if data.get("flagged")
+                       or data.get("risk_level") in ("HIGH", "CRITICAL") else "unknown")
+
+        import relayshield_first_seen
+        relayshield_first_seen.log_submission(value, kind, verdict, source="api")
+    except Exception as exc:
+        logger.debug("first-seen log skipped path=%s: %s", path, exc)
+
+
 ROUTES = {
     "/v1/breach":           handle_breach,
     "/v1/scan-url":         handle_scan_url,
@@ -10442,6 +10772,7 @@ ROUTES = {
     "/v1/intel/cve":        handle_intel_cve,         # CISA KEV lookup by CVE ID or keyword
     "/v1/intel/actor":      handle_intel_actor,       # TC: actor profile — TI subscription
     "/v1/intel/trending":   handle_intel_trending,    # RF: trending IOCs last 24hrs — TI subscription
+    "/v1/intel/ransomware": handle_intel_ransomware,  # Leak-site victim names — TI subscription
     "/v1/account/info":     handle_account_info,
     "/v1/approval-security":    handle_approval_security,
     "/v1/dapp-security":        handle_dapp_security,
@@ -11151,7 +11482,8 @@ def lambda_handler(event: dict, context) -> dict:
 
     params = _body(event)
     try:
-        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending", "/v1/account/info"):
+        if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending",
+                    "/v1/intel/ransomware", "/v1/account/info"):
             headers    = event.get("headers") or {}
             api_key    = _header(headers, "X-API-Key") or _header(headers, "X-RS-API-KEY")
             key_record = _verify_rs_api_key(api_key) if api_key else None
@@ -11163,7 +11495,20 @@ def lambda_handler(event: dict, context) -> dict:
         # Webhook endpoints receive raw event (signature verified internally)
         if path in ("/v1/app/webhook/alchemy", "/v1/app/webhook/helius"):
             return handler(event)
-        return handler(params)
+
+        # First-seen collection (growth plan item 4). Hooked HERE rather than
+        # inside each handler so there is exactly one call site to reason about
+        # on a user-facing request path, and so adding a scan route later does
+        # not silently miss it.
+        #
+        # Records the submitted value and the verdict we gave — never who asked.
+        # A submission that comes back unknown today and is flagged everywhere
+        # next week proves we had it first, and that is a far better claim than
+        # corpus size.
+        result = handler(params)
+        if path in _FIRST_SEEN_PATHS:
+            _log_first_seen(path, params, result)
+        return result
     except Exception as exc:
         logger.exception("Unhandled error in %s: %s", path, exc)
         return _err("internal server error", 500)

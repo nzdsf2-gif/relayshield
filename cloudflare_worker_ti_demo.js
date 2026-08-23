@@ -25,7 +25,16 @@ async function _parseApiResponse(resp) {
     return { error: "Unexpected response from API" };
   }
   if (!resp.ok) {
-    return { error: data.error || "Upstream lookup temporarily unavailable — please try again in a moment." };
+    // A 404 "unknown endpoint" means the Worker is ahead of the API: this tab
+    // shipped before the Lambda carrying its endpoint was deployed. Say that,
+    // rather than surfacing a raw router error that reads as a broken product
+    // to anyone being shown the demo.
+    const msg = String(data.error || "");
+    if (resp.status === 404 || /unknown endpoint/i.test(msg)) {
+      return { error: "This capability is not live on the API yet — the demo page is ahead of the deployed backend. " +
+                      "Nothing is broken; check back once the next API deploy has run." };
+    }
+    return { error: msg || "Upstream lookup temporarily unavailable — please try again in a moment." };
   }
   return data.data || data;
 }
@@ -486,6 +495,89 @@ function renderTrending(data) {
     </div>`;
 }
 
+function renderRansomware(data) {
+  if (data.error) return `<div class="error">${data.error}</div>`;
+
+  // Domain mode — /v1/metered/ransomware-risk. Different shape entirely from
+  // the corpus listing, so it gets its own view rather than being squeezed
+  // into a victims table it does not fit.
+  if (data._mode === "domain" || data.on_victim_list !== undefined) {
+    const level  = String(data.risk_level || "CLEAN").toUpperCase();
+    const colour = {CRITICAL:"#ef4444", HIGH:"#f97316", MEDIUM:"#facc15", CLEAN:"#22c55e"}[level] || "#94a3b8";
+    const groups = (data.victim_groups || []).filter(Boolean);
+    const tg     = data.telegram_sightings || {};
+
+    const cards = `<div class="corpus-stats">
+      <div class="stat-card"><div class="stat-num" style="color:${colour}">${level}</div><div class="stat-label">Risk level</div></div>
+      <div class="stat-card"><div class="stat-num">${data.on_victim_list ? "YES" : "NO"}</div><div class="stat-label">On a leak site</div></div>
+      <div class="stat-card"><div class="stat-num">${data.pre_ransomware_ioc_count || 0}</div><div class="stat-label">Pre-ransomware creds</div></div>
+    </div>`;
+
+    const groupRow = groups.length
+      ? `<div style="padding:10px 0;border-bottom:1px solid #1e3a5f"><span style="color:#94a3b8;font-size:13px">Claimed by</span>
+         <div style="color:#e2e8f0;font-weight:600;margin-top:3px">${groups.join(", ")}</div>
+         ${data.first_seen ? `<div style="color:#64748b;font-size:12px;margin-top:3px">First listed ${String(data.first_seen).slice(0,10)}</div>` : ""}</div>`
+      : "";
+
+    // Only rendered once the API deploy carrying it has run; absent before.
+    const tgRow = (tg.count > 0)
+      ? `<div style="background:#7f1d1d20;border:1px solid #7f1d1d;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin-top:14px;font-size:13px;color:#fca5a5">
+         <strong>${tg.count} sighting${tg.count === 1 ? "" : "s"} in monitored ransomware channels.</strong>
+         ${tg.matched_as && tg.matched_as.length ? `Matched as “${tg.matched_as[0]}”. ` : ""}
+         Unverified leads extracted by pattern match — typically visible before a leak-site listing, and
+         they will contain false positives. Confirm independently before acting.</div>`
+      : "";
+
+    return cards + groupRow +
+      `<div style="color:#94a3b8;font-size:13px;padding:12px 0;line-height:1.55">${data.recommendation || ""}</div>` +
+      tgRow +
+      `<div style="color:#64748b;font-size:12px;margin-top:12px">Checked ${String(data.checked_at || "").slice(0,19).replace("T"," ")} · domain: ${data.domain || ""}</div>`;
+  }
+
+  const victims = data.victims || [];
+  const days = data.window_days || 30;
+
+  // The disclaimer is rendered BEFORE the list and is not collapsible. These
+  // names are regex-extracted from leak-site posts and are unconfirmed leads;
+  // a prospect who screenshots this panel must screenshot the caveat with it.
+  const caveat = `<div style="background:#7f1d1d20;border:1px solid #7f1d1d;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#fca5a5">
+    <strong>Unverified leads.</strong> Names are pattern-matched from ransomware leak sites and gang
+    channels as they are posted. They are not confirmed breaches and this list will contain false
+    positives. Confirm independently before acting on an entry.</div>`;
+
+  if (!victims.length) {
+    const none = data.query
+      ? `<div class="no-result">No leak-site sighting for “${data.query}” in the last ${days} days. That is an absence of evidence in this corpus, not evidence the organisation is unaffected.</div>`
+      : `<div class="no-result">No victims recorded in the last ${days} days.</div>`;
+    return caveat + none;
+  }
+
+  const stats = `<div class="corpus-stats">
+    <div class="stat-card"><div class="stat-num">${data.total_victims || victims.length}</div><div class="stat-label">Organisations named</div></div>
+    <div class="stat-card"><div class="stat-num">${data.total_sightings || 0}</div><div class="stat-label">Sightings</div></div>
+    <div class="stat-card"><div class="stat-num">${days}d</div><div class="stat-label">Window</div></div>
+  </div>`;
+
+  const rows = victims.map(v => {
+    const first = String(v.first_seen || "").slice(0, 10);
+    const last  = String(v.last_seen  || "").slice(0, 10);
+    const span  = first && last && first !== last ? `${first} → ${last}` : (last || first || "—");
+    const srcs  = (v.sources || []).slice(0, 3).join(", ") || "—";
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-bottom:1px solid #1e3a5f">
+      <div style="min-width:0">
+        <div style="color:#e2e8f0;font-weight:600;font-size:14px;word-break:break-word">${v.victim || "—"}</div>
+        <div style="color:#64748b;font-size:12px;margin-top:3px">Seen in ${srcs}</div>
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <div style="color:#94a3b8;font-size:12px">${span}</div>
+        <div style="color:#64748b;font-size:12px;margin-top:3px">${v.sightings || 1} sighting${(v.sightings || 1) === 1 ? "" : "s"} · unverified</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return caveat + stats + `<div>${rows}</div>`;
+}
+
 function renderSupplyChain(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   const results = data.results || [];
@@ -616,23 +708,39 @@ footer a{color:#00B5A5;text-decoration:none}
 <div class="container">
   <div class="hero">
     <h1>Live Threat Intelligence</h1>
-    <p>Query 5,400,000+ indicators, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
+    <p>Query 500,000+ distinct indicators drawn from 5,800,000+ citations, MITRE ATT&amp;CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
   </div>
 
   <div class="corpus-stats">
-    <!-- Metrics verified live against DynamoDB 2026-08-12:
-         intel_iocs 5,483,159 · malpedia_families 3,802 · intel_channels active=true 89 ·
-         mitre_attack sk=info 193. Re-verify before quoting these anywhere. -->
-    <div class="stat-card"><div class="stat-num">5.4M+</div><div class="stat-label">IOC indicators</div></div>
+    <!-- CORRECTED 2026-08-22. The old cards read "5.4M+ IOC indicators" and
+         "89 Active criminal Telegram channels".
+
+         5.4M was CITATIONS (sightings: this domain, in this channel, on this
+         date) presented as indicators. The deduplicated corpus is ~500K. Both
+         numbers are real and they measure different things, so the cards now
+         show both and label them — a technical buyer asks which one you mean,
+         and quoting the bigger number as though it were the smaller is the
+         mistake that nearly went out to the blockchain-analytics segment.
+
+         The channel count was measured 2026-08-12 and was already wrong by
+         2026-08-20, when the digest read "95 of 122 active, 27 unreachable".
+         A number that decays between measurements does not belong on a page
+         nobody re-measures, so it is replaced by the collection-lead claim,
+         which is durable and is the thing that actually differentiates.
+
+         Malware families (3,802) and MITRE groups (193) measured 2026-08-12.
+         Re-measure with tools/export_intel_sample.py before quoting anywhere. -->
+    <div class="stat-card"><div class="stat-num">500K+</div><div class="stat-label">Distinct indicators</div></div>
+    <div class="stat-card"><div class="stat-num">5.8M+</div><div class="stat-label">Citations (sightings)</div></div>
     <div class="stat-card"><div class="stat-num">3,800+</div><div class="stat-label">Malware families</div></div>
-    <div class="stat-card"><div class="stat-num">89</div><div class="stat-label">Active criminal Telegram channels</div></div>
-    <div class="stat-card"><div class="stat-num">193</div><div class="stat-label">MITRE ATT&CK groups</div></div>
+    <div class="stat-card"><div class="stat-num">24-72h</div><div class="stat-label">Typical lead over public feeds</div></div>
   </div>
 
   <div class="tabs">
     <div class="tab active" onclick="switchTab('identity',this)">Identity Risk</div>
     <div class="tab" onclick="switchTab('actor',this)">Threat Actor</div>
     <div class="tab" onclick="switchTab('trending',this)">Trending Threats</div>
+    <div class="tab" onclick="switchTab('ransomware',this)">Ransomware Victims</div>
     <div class="tab" onclick="switchTab('supply',this)">Agentic Identity Risk</div>
     <div class="tab" onclick="switchTab('nhi',this)">NHI Exposure</div>
     <div class="tab" onclick="switchTab('llmjacking',this)">LLM Credential Exposure</div>
@@ -669,6 +777,20 @@ footer a{color:#00B5A5;text-decoration:none}
       <button onclick="runTrending()">Load Trending</button>
     </div>
     <div id="trending-result"></div>
+  </div>
+
+  <div id="ransomware" class="panel">
+    <p class="panel-desc">Check whether an organisation &mdash; or a supplier you depend on &mdash; has been named on a ransomware gang leak site. <strong>Enter a domain</strong> (e.g. <code>acme.com</code>) for a full risk assessment against the leak-site corpus and pre-ransomware credential exposure. An organisation name or an empty box returns the recent corpus-wide listing collected from criminal Telegram channels, where every row is an <strong>unverified lead</strong> rather than a confirmed breach.</p>
+    <div class="input-row">
+      <input type="text" id="ransomware-input" placeholder="A domain (e.g. acme.com) — or an organisation name, or leave empty" />
+      <select id="ransomware-days" style="background:#0F1F3D;border:1px solid #1e3a5f;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button onclick="runRansomware()">Search Leak Sites</button>
+    </div>
+    <div id="ransomware-result"></div>
   </div>
 
   <div id="nhi" class="panel">
@@ -864,6 +986,18 @@ async function runTrending() {
   document.getElementById('trending-result').innerHTML = renderTrending(data);
 }
 
+async function runRansomware() {
+  const victim = document.getElementById('ransomware-input').value.trim();
+  const days = document.getElementById('ransomware-days').value;
+  setLoading('ransomware-result');
+  const resp = await fetch('/demo/ransomware', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({victim: victim, days: parseInt(days, 10)})
+  });
+  const data = await resp.json();
+  document.getElementById('ransomware-result').innerHTML = renderRansomware(data);
+}
+
 async function runNHI() {
   const domain = document.getElementById('nhi-input').value.trim();
   if (!domain) return;
@@ -1032,6 +1166,7 @@ ${ipIntelRiskLevel.toString()}
 ${renderIpIntel.toString()}
 ${renderBulkIdentity.toString()}
 ${renderSupplyChain.toString()}
+${renderRansomware.toString()}
 `;
 }
 
@@ -1103,6 +1238,39 @@ export default {
     if (path === "/demo/trending" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/intel/trending", { hours: body.hours || 24 });
+      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (path === "/demo/ransomware" && request.method === "POST") {
+      const body   = await request.json();
+      const query  = String(body.victim || "").trim();
+      // A domain routes to a DIFFERENT endpoint from a corpus listing, and the
+      // difference is not cosmetic: /v1/metered/ransomware-risk has been live
+      // for months and reads the scraped leak-site corpus, while
+      // /v1/intel/ransomware is newer and reads the Telegram-collected victim
+      // table. Sending a domain to the one that answers domains means this tab
+      // works today rather than after the next API deploy.
+      const isDomain = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(query.replace(/^https?:\/\//, "").replace(/\/.*$/, ""));
+
+      if (isDomain) {
+        const domain = query.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+        const data = await callAPI(env, "/v1/metered/ransomware-risk", { domain });
+        if (!data.error) data._mode = "domain";
+        return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+      }
+
+      const data = await callAPI(env, "/v1/intel/ransomware", {
+        victim: query, days: body.days || 30, limit: 100,
+      });
+      if (!data.error) data._mode = "corpus";
+      // The corpus endpoint ships with the API deploy that is still pending. A
+      // 404 here is that, and the message says what to do instead of leaving a
+      // prospect looking at a router error.
+      if (data.error && /not live on the API yet|unknown endpoint/i.test(data.error)) {
+        data.error = "The corpus-wide listing needs the next API deploy. " +
+                     "In the meantime, enter a DOMAIN (e.g. acme.com) — domain lookups work now " +
+                     "and query the full leak-site corpus.";
+      }
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 

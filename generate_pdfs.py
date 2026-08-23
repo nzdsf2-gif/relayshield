@@ -408,7 +408,7 @@ def build_msp(output_path):
         'unlimited access to the full IOC corpus, threat actor intelligence, trending threats, and '
         'STIX/TAXII or MISP feed, everything your team needs to enrich alerts, run investigations, and brief clients. '
         '<b>Enterprise TI platforms charge $30K to $300K/year for equivalent coverage. '
-        'RelayShield delivers 5.0M+ queryable indicators at $499/month.</b>',
+        'RelayShield delivers 500K+ distinct queryable indicators, backed by 5.8M+ citations, at $499/month.</b>',
         s['body']))
     story.append(Spacer(1, 6))
 
@@ -429,7 +429,7 @@ def build_msp(output_path):
         _card_para('$499 / month', bold=True, color=WHITE, size=13),
         _card_para('10,000 API calls/month', color=WHITE),
         _card_para(' '),
-        _card_para('✓  5.0M+ IOC corpus query', color=WHITE),
+        _card_para('✓  500K+ indicator corpus query', color=WHITE),
         _card_para('✓  Bulk IOC lookup (100/batch)', color=WHITE),
         _card_para('✓  IOC pivot & lateral discovery', color=WHITE),
         _card_para('✓  Early Warning Intelligence', color=WHITE),
@@ -493,8 +493,58 @@ def build_msp(output_path):
     story.append(KeepTogether([card_table, Spacer(1, 6)]))
 
     story.append(md_inline(
-        'Self-serve signup: <b>api.relayshield.net/developers</b>, instant API key, no sales call, cancel anytime. '
-        'Also available on <b>AWS Marketplace</b> for teams that prefer to procure and bill through an existing AWS account.',
+        'Self-serve signup: <b>api.relayshield.net/developers</b>, instant API key, no sales call, cancel anytime.',
+        s['small']))
+    story.append(Spacer(1, 6))
+
+    story.append(md_inline(
+        '**Procure through AWS Marketplace instead, if that is easier:** RelayShield is an AWS Marketplace '
+        'seller (AWS account 239677749008), so an MSP with an existing AWS agreement can buy on their AWS '
+        'bill, draw down committed spend, and skip a new vendor onboarding entirely. Three listings are live:',
+        s['body']))
+    story.append(Spacer(1, 4))
+
+    mkt_rows = [
+        ['Listing', 'What it covers', 'Shape'],
+        ['Threat Intelligence -\nStarter / Unlimited',
+         'The full IOC corpus over STIX/TAXII 2.1 and MISP, plus the TI query endpoints',
+         'Flat-rate monthly subscription'],
+        ['Core Identity Exposure\n(Bundle A)',
+         'Six identity endpoints: breach exposure, SIM swap detection, infostealer log checks, '
+         'domain lookalike detection, OAuth token exposure watchlist, crypto threat intelligence',
+         'Monthly minimum commitment plus metered usage per endpoint'],
+        ['Agentic Attack Surface\n(Bundle D)',
+         'Five agent-era endpoints: MCP registry risk, prompt-injection breach correlation, '
+         'agent-framework CVE targeting, bulk per-agent identity risk scoring, LLM credential '
+         'exposure detection',
+         'Metered usage per endpoint'],
+    ]
+    _mc = ParagraphStyle('mktcell', fontName='Helvetica', fontSize=7.4, leading=9.4)
+    _mh = ParagraphStyle('mkthead', fontName='Helvetica-Bold', fontSize=7.4, leading=9.4,
+                         textColor=colors.white)
+    mkt_table = Table(
+        [[Paragraph(c.replace('\n', '<br/>'), _mh if i == 0 else _mc) for c in row]
+         for i, row in enumerate(mkt_rows)],
+        colWidths=[1.35*inch, 4.0*inch, 1.95*inch],
+    )
+    mkt_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F3A5F')),
+        ('GRID',       (0,0), (-1,-1), 0.4, colors.HexColor('#D1D9E6')),
+        ('VALIGN',     (0,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING',(0,0), (-1,-1), 5),
+        ('RIGHTPADDING',(0,0),(-1,-1), 5),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING',(0,0),(-1,-1), 4),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F4F7FB')]),
+    ]))
+    story.append(KeepTogether([mkt_table, Spacer(1, 5)]))
+
+    story.append(md_inline(
+        'Each bundle is licensed independently, with no dependency on any other bundle or on the direct '
+        'subscription. Your API key is issued automatically by email when the subscription activates. '
+        '**For AWS-native MSPs this is usually the shortest path to a signature** - Marketplace procurement '
+        'runs through an approval process the client\'s finance team already has, which removes the "new '
+        'vendor" objection that stalls small security purchases more often than price does.',
         s['small']))
     story.append(Spacer(1, 8))
 
@@ -539,9 +589,10 @@ def build_msp(output_path):
         [Table([
             [_cap_header('IOC Corpus & Bulk Enrichment', CAP_TEAL)],
             [_cap_body([
-                '5.0M+ indicators: domains, IPs, URLs, hashes',
+                '500K+ distinct indicators (5.8M+ citations)',
                 '20 live feeds + 85+ criminal Telegram channels',
                 '3,750+ malware families with ATT&CK attribution',
+                '500K is the corpus; 5.8M is how often we have seen it',
                 'Bulk lookup: 100 IOCs per api call',
                 'IOC pivot: find related C2 infrastructure by malware family',
                 '365-day retention',
@@ -574,7 +625,7 @@ def build_msp(output_path):
             [_cap_header('Vendor & Brand Protection', CAP_RED)],
             [_cap_body([
                 'Third-party risk score: vendor breach + stealer + dark web ($0.10)',
-                'Brand monitor: scan 5.0M+ IOC corpus for brand patterns ($0.35)',
+                'Brand monitor: scan the full IOC corpus for brand patterns ($0.35)',
                 'Domain lookalike / typosquat scanning ($0.30)',
                 'OAuth supply chain: 31 high-risk SaaS apps monitored ($0.30)',
                 'Secret scan: secrets already published across GitHub, npm, PyPI, Docker Hub and Hugging Face ($0.35)',
@@ -643,9 +694,22 @@ def build_msp(output_path):
     story.append(md_inline(
         '**Drops into the SIEM your clients already run:** RelayShield\'s IOC corpus is served over '
         'STIX/TAXII 2.1 and MISP, so it ingests through Elastic Security\'s built-in Threat Intel '
-        'integrations with configuration alone - no connector to build and no professional-services '
+        'integrations and Microsoft Sentinel\'s first-party Threat Intelligence - TAXII data connector '
+        'with configuration alone - no connector to build and no professional-services '
         'engagement. Splunk HEC, CEF/QRadar and Cortex XSOAR are supported as push destinations. For an '
         'MSSP running a shared SIEM across client tenants, this removes the integration objection entirely.',
+        s['body']))
+    story.append(Spacer(1, 6))
+    story.append(md_inline(
+        '**Microsoft Sentinel, specifically:** point the **Threat Intelligence - TAXII** connector at API '
+        'root <b>https://api.relayshield.net/v1/intel/taxii/</b> with collection ID <b>iocs</b>, and '
+        'indicators land in Sentinel\'s ThreatIntelIndicators table ready for analytics rules, hunting '
+        'queries and incident enrichment. Two things are worth knowing before the first attempt, because '
+        'both look like a bad API key when they are not: put your key in **both** the Username and Password '
+        'fields (Sentinel\'s TAXII client skips authentication when the password is empty), and target '
+        'ThreatIntelIndicators, **not** the legacy ThreatIntelligenceIndicator table, which retired on '
+        '31 May 2026 and silently matches nothing. Full walkthrough, including KQL for IP, domain and '
+        'malware-family rules, is in the Sentinel integration guide.',
         s['body']))
     story.append(Spacer(1, 6))
     story.append(md_inline(
@@ -656,6 +720,39 @@ def build_msp(output_path):
         'log automatically. This isn\'t a hypothetical integration path. It\'s live, installable today, built '
         'on the same API MSPs get direct access to above.',
         s['body']))
+    story.append(Spacer(1, 6))
+    story.append(md_inline(
+        '**Zapier, for the no-code half of your client base:** RelayShield has passed Zapier\'s review '
+        'process and is published in the **Zapier App Directory**, which connects the same identity checks '
+        'to 8,000+ apps with no code at all. For an MSP, the practical shape is a client-facing workflow '
+        'the client can own: a new-hire row in a Google Sheet or an HR tool triggers a breach and '
+        'infostealer check; a hit posts to a Slack channel and opens a ticket in the PSA you already run. '
+        'Nothing to host, nothing to maintain, and it survives the client changing their HR stack.',
+        s['body']))
+    story.append(Spacer(1, 6))
+    story.append(md_inline(
+        '**Ansible, for the MSPs who automate their fleet properly:** the <b>relayshield.security</b> '
+        'collection is published on **Ansible Galaxy** under RelayShield\'s own <b>relayshield</b> '
+        'namespace, so identity checks run as ordinary tasks inside the playbooks you already use for '
+        'onboarding, offboarding and patch cycles:',
+        s['body']))
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(
+        '<font face="Courier" size="8.5">ansible-galaxy collection install relayshield.security</font>',
+        ParagraphStyle('ansiblecmd', fontName='Courier', fontSize=8.5, leading=12,
+                       leftIndent=10, spaceBefore=2, spaceAfter=4,
+                       backColor=colors.HexColor('#F4F7FB'))))
+    story.append(md_inline(
+        'Requires Ansible >= 2.15.0. The collection screens email addresses for breach and infostealer '
+        'exposure, detects lookalike domains, and checks vendor domains for supply chain risk - **before a '
+        'play grants access or deploys**. That ordering is the point: a gate inside the playbook stops a '
+        'provisioning run against an already-compromised identity, rather than reporting it afterwards.',
+        s['body']))
+    story.append(Spacer(1, 6))
+    story.append(md_inline(
+        '**All three automation surfaces are published and installable today** - n8n, Zapier and Ansible '
+        'Galaxy. Nothing in this section is a roadmap item.',
+        s['small']))
 
     story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#D1D9E6'), spaceAfter=2))
 
@@ -830,7 +927,7 @@ def build_agentcore_onepager(output_path):
 
     story.append(Paragraph('About RelayShield', s['h2']))
     for line in [
-        '**5.0M+ indicators of compromise**, from criminal Telegram marketplaces and 11 authoritative feeds',
+        '**500K+ distinct indicators of compromise**, drawn from **5.8M+ citations** across criminal Telegram marketplaces and 11 authoritative feeds',
         '**85+ monitored criminal channels** - typically 24-72 hours ahead of public breach databases',
         '**3,750+ tracked malware families**',
         '**26 identity endpoints** - breach, infostealer, SIM swap, OAuth and domain exposure, non-human identity, LLM credential exposure',

@@ -33,6 +33,11 @@ import logging
 import os
 import re
 import time
+# Module level, not inside a function: _ransomlook_get() and
+# _ransomlook_description() run at module scope. _send_telegram() has its
+# own local import, which is why this was not already here.
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -91,6 +96,78 @@ SEARCH_KEYWORDS = [
     ("akira ransomware",    "ransomware"),
     ("play ransomware",     "ransomware"),
     ("cl0p",                "ransomware"),
+
+    # --- OSINT sweep 002, 2026-08-21: SOCRadar named channels (founder-supplied) ---
+    # Real channel NAMES from SOCRadar's stealer-log and top-groups tables.
+    # Added as keywords rather than as channel rows because SOCRadar publishes
+    # display names, not @handles, and this document's own rule is never to
+    # invent one. A brand name also survives the renames these operations rely
+    # on, which handles do not.
+    #
+    # Stealer-log distribution and credential aggregation:
+    ("moon cloud",          "infostealer"),   # curates + republishes other channels' logs
+    ("daisy cloud",         "infostealer"),   # "fresh one-hand logs", mostly RedLine
+    ("log sync",            "infostealer"),   # free + premium tiers, community uploads
+    ("observer cloud",      "credential_dump"),  # long-standing combo-list distribution
+    ("alien txtbase",       "credential_dump"),  # the massive infostealer-derived dump
+    ("data leak monitoring","credential_dump"),  # SOCRadar rates activity "very high"
+    ("mailpass",            "credential_dump"),  # EMP/mailpass/sqli chat
+    ("bidencash shop",      "card_shop"),
+    ("cti now",             "general"),          # news tracking, useful as a cross-promo seed
+    #
+    # Hacktivist crews — four of SOCRadar's ten most active groups. New
+    # category; see INTEL_CATEGORIES in relayshield_intel_monitor.py for why
+    # these are MEDIUM rather than HIGH.
+    ("noname057",           "hacktivist"),
+    ("rippersec",           "hacktivist"),
+    ("dark storm team",     "hacktivist"),
+    ("z-pentest",           "hacktivist"),
+    #
+    # NOT added: bare "alien". It is an ordinary English word and would match
+    # hundreds of unrelated channels — the generic-phrase trap this list has
+    # already been burned by once. "alien txtbase" is the operation's actual
+    # name and is specific.
+
+    # --- OSINT sweep 001b, 2026-08-22 ---
+    # The four most active ransomware operations of 2026 per current reporting,
+    # NONE of which were in this list: the existing ransomware keywords are the
+    # 2024-2025 cohort (LockBit, ALPHV, Cl0p, Play), and the leaderboard has
+    # moved. Qilin and DragonForce in particular post-date every keyword here.
+    #
+    # Ransomware is also one of the thinnest categories in the seeded channel
+    # list -- 2 channels against 7 infostealer -- so this is coverage that does
+    # not exist rather than depth on a category that is already strong.
+    ("qilin",               "ransomware"),
+    ("dragonforce",         "ransomware"),
+    ("thegentlemen",        "ransomware"),
+    ("babuk",               "ransomware"),
+
+    # --- OSINT sweep 001, 2026-08-21 (intel_channel_recommendations.md) ---
+    # Platform and operation BRAND names, not generic phrases. Reporting is
+    # explicit that these operations survive takedowns by rotating channel
+    # names and running mirrors, so a hand-curated handle list decays within
+    # weeks. A brand name keeps finding whatever the current channel is called,
+    # which is the whole reason the sweep outputs keywords rather than handles.
+    #
+    # Weighted deliberately toward phaas / sim_swap / card_shop: the seeded
+    # channel list carries ZERO of all three, so these create coverage that does
+    # not exist rather than deepening infostealer, which is already the
+    # strongest category.
+    ("omega cloud",         "infostealer"),
+    ("moon cloud",          "infostealer"),
+    ("bidencash",           "card_shop"),
+    ("darcula",             "phaas"),
+    ("magic cat",           "phaas"),
+    ("otp bot",             "sim_swap"),
+    ("sim swap service",    "sim_swap"),
+
+    # Card-shop keywords added 2026-08-21. The monitor has carried a label and a
+    # severity for "card_shop" since it was written, but no discovery path and
+    # no classifier vocabulary could ever produce one, so the category existed
+    # only as a dead branch in the alert formatter.
+    ("cc shop",             "card_shop"),
+    ("dumps and pins",      "card_shop"),
+    ("fullz",               "card_shop"),
 
     ("credential dump",     "credential_dump"),
     ("data breach",         "credential_dump"),
@@ -430,6 +507,152 @@ async def _crawl_cross_promotion(client, table, seen_usernames: set[str], now_ts
 # Lambda handler
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# RansomLook — a discovery source that needs no Telegram session
+# ---------------------------------------------------------------------------
+# WHY. Every other path here finds channels by searching Telegram, which needs
+# the Telethon session and is rate-limited. RansomLook is a free public
+# aggregator that already tracks ransomware-gang Telegram channels and
+# publishes them over a plain unauthenticated API. It is a self-updating supply
+# of exactly the category this corpus is thinnest in — 2 seeded ransomware
+# channels against 7 infostealer.
+#
+# CONTRACT, READ FROM THEIR SOURCE, NOT GUESSED. `www.ransomlook.io` is blocked
+# by this dev sandbox's egress proxy, so the endpoints below were taken from
+# RansomLook/RansomLook `website/web/api/telegramapi.py` on GitHub rather than
+# from a live call:
+#
+#   GET /api/telegram/channels        -> ["channelname", ...]   (flat string list)
+#   GET /api/telegram/channel/<name>  -> [group, posts]         (group.meta = description)
+#
+# THIS HAS NOT BEEN EXERCISED AGAINST THE LIVE SERVICE. It is written to fail
+# soft everywhere and to add nothing on an unexpected shape, so the worst case
+# is a no-op run and a log line. Confirm the first real run's admin digest
+# before trusting the count.
+#
+# WHAT IT DOES NOT DO. It does not resolve channels through Telethon and does
+# not activate anything. Every row lands as category="pending_review",
+# active=False — the same safe queue as the cross-promotion crawl — so the
+# OSINT-2 classifier is what decides, not this.
+
+RANSOMLOOK_BASE          = os.environ.get("RANSOMLOOK_BASE", "https://www.ransomlook.io")
+RANSOMLOOK_ENABLED       = os.environ.get("RANSOMLOOK_INGEST", "1").lower() in ("1", "true", "yes")
+RANSOMLOOK_MAX_CHANNELS  = int(os.environ.get("RANSOMLOOK_MAX", "200"))
+# One extra call per NEW channel to fetch its description, which is most of what
+# the classifier has to reason about. Bounded separately because it is the part
+# that scales with their catalogue rather than with ours.
+RANSOMLOOK_MAX_DETAIL    = int(os.environ.get("RANSOMLOOK_MAX_DETAIL", "40"))
+
+
+def _ransomlook_get(path: str, timeout: int = 20):
+    """GET a RansomLook API path. Returns None on any failure, never raises."""
+    try:
+        req = urllib.request.Request(
+            f"{RANSOMLOOK_BASE}{path}",
+            headers={"User-Agent": "RelayShield-IntelDiscovery/1.0",
+                     "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as exc:
+        logger.warning("RansomLook fetch failed path=%s: %s", path, exc)
+        return None
+
+
+def _ransomlook_description(name: str) -> str:
+    """Channel description from /api/telegram/channel/<name>.
+
+    Their handler returns [group, posts]; `group['meta']` is the description and
+    can be None. Anything unexpected yields "" rather than an error — a missing
+    description costs the classifier some signal, which is survivable; a raised
+    exception would cost the whole run.
+    """
+    data = _ransomlook_get(f"/api/telegram/channel/{urllib.parse.quote(name)}")
+    if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+        return ""
+    meta = data[0].get("meta") or ""
+    return str(meta).replace("<br/>", " ").strip()[:400]
+
+
+def ingest_ransomlook_channels() -> list[dict]:
+    """Queue RansomLook's tracked ransomware Telegram channels for review.
+
+    Returns the rows added, for the admin digest. Never raises.
+    """
+    if not RANSOMLOOK_ENABLED:
+        return []
+
+    names = _ransomlook_get("/api/telegram/channels")
+    if not isinstance(names, list):
+        logger.warning("RansomLook /channels returned %s, not a list — skipping",
+                       type(names).__name__)
+        return []
+
+    # Defend against the shape changing under us: keep only plain strings that
+    # look like Telegram usernames. A dict-of-objects response would otherwise
+    # write garbage usernames into the channel table.
+    clean = []
+    for n in names:
+        if not isinstance(n, str):
+            continue
+        u = n.strip().lstrip("@").lower()
+        if u and re.fullmatch(r"[a-z0-9_]{4,32}", u):
+            clean.append(u)
+    if not clean:
+        logger.warning("RansomLook /channels held no usable usernames (%d raw entries)", len(names))
+        return []
+
+    logger.info("RansomLook: %d channels published, %d usable", len(names), len(clean))
+
+    table   = _dynamodb.Table(CHANNELS_TABLE)
+    now_ts  = datetime.now(timezone.utc).isoformat()
+    added: list[dict] = []
+    detail_budget = RANSOMLOOK_MAX_DETAIL
+
+    for username in clean[:RANSOMLOOK_MAX_CHANNELS]:
+        try:
+            existing = table.get_item(Key={"username": username}).get("Item")
+        except Exception as exc:
+            logger.warning("RansomLook: channel lookup failed @%s: %s", username, exc)
+            continue
+
+        # Never touch a channel we already know about. An active one is being
+        # monitored, and a rejected one was rejected on purpose — re-queueing it
+        # every run would make the classifier re-pay for the same verdict.
+        if existing:
+            continue
+
+        description = ""
+        if detail_budget > 0:
+            description = _ransomlook_description(username)
+            detail_budget -= 1
+            time.sleep(0.2)   # courtesy pause against a free community service
+
+        try:
+            table.put_item(Item={
+                "username":         username,
+                "category":         "pending_review",
+                "description":      description or f"RansomLook-tracked ransomware channel: {username}",
+                "member_count":     0,          # unknown until Telethon resolves it
+                "first_seen":       now_ts,
+                "last_verified":    now_ts,
+                "active":           False,
+                "discovery_method": "ransomlook",
+                "found_via":        "ransomlook.io/api/telegram/channels",
+                # The category RansomLook implies, kept separately from
+                # `category` so the classifier still makes its own call but has
+                # the provenance to weigh.
+                "source_category":  "ransomware",
+            })
+            added.append({"username": username, "description": description,
+                          "members": 0, "category": "pending_review"})
+        except Exception as exc:
+            logger.warning("RansomLook: queue failed @%s: %s", username, exc)
+
+    logger.info("RansomLook ingest: %d new channels queued", len(added))
+    return added
+
+
 def lambda_handler(event, context):
     logger.info("INTEL-DISCOVERY starting")
 
@@ -442,6 +665,15 @@ def lambda_handler(event, context):
         bot_token    = _get_bot_token()
 
         results = asyncio.run(_discover(session_data))
+
+        # Runs AFTER the Telegram sweep, deliberately: it needs no session and
+        # must not be able to burn the run's Telethon budget or trip a
+        # flood-wait before the keyword search has had its turn.
+        try:
+            ransomlook_added = ingest_ransomlook_channels()
+        except Exception as exc:
+            logger.warning("RansomLook ingest failed, continuing: %s", exc)
+            ransomlook_added = []
 
         newly_added  = results["newly_added"]
         re_verified  = results["re_verified"]
@@ -461,6 +693,14 @@ def lambda_handler(event, context):
         else:
             lines.append("\nNo new channels discovered this run.")
 
+        if ransomlook_added:
+            lines.append(f"\n<b>{len(ransomlook_added)} channels queued from RansomLook:</b>")
+            for ch in ransomlook_added[:15]:
+                lines.append(f"  @{ch['username']} — {(ch['description'] or '')[:60]}")
+            if len(ransomlook_added) > 15:
+                lines.append(f"  …and {len(ransomlook_added) - 15} more")
+            lines.append("  <i>All pending_review — run the classifier to triage.</i>")
+
         lines.append(f"\n{len(re_verified)} existing channels re-verified active.")
         if inaccessible:
             lines.append(f"{len(inaccessible)} channels inaccessible (private/banned).")
@@ -470,6 +710,7 @@ def lambda_handler(event, context):
         return {
             "statusCode": 200,
             "newly_added": len(newly_added),
+            "ransomlook_queued": len(ransomlook_added),
             "re_verified": len(re_verified),
             "inaccessible": len(inaccessible),
         }

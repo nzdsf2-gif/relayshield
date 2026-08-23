@@ -93,6 +93,34 @@ INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
 # breach victims and inflate the exclusivity metric with data the leak sites
 # publish themselves. Added 2026-08-20.
 RANSOM_VICTIMS_TABLE  = "relayshield_ransomware_victims"
+# Operator identity aggregate (growth plan item 2). One row per handle rather
+# than one per sighting, because the question asked of a handle is "how long
+# have we been seeing this and where", which a pile of sighting rows answers
+# only after a scan. The per-sighting rows still land in the IOC table; this is
+# the index over them.
+OPERATOR_IDS_TABLE    = "relayshield_operator_identities"
+
+# Pivot enrichment (growth plan item 3) is OFF by default and must be switched
+# on deliberately. It is the only part of this monitor that makes an outbound
+# call to a host other than Telegram, and a slow third party inside the per-run
+# budget would cost collection -- which is the thing this pipeline exists to do.
+# Turn it on only once the run has headroom, and watch the first few runs.
+PIVOT_ENRICHMENT_ENABLED = os.environ.get("PIVOT_ENRICHMENT", "").lower() in ("1", "true", "yes")
+PIVOT_MAX_SEEDS_PER_RUN  = int(os.environ.get("PIVOT_MAX_SEEDS", "15"))
+PIVOT_MAX_DERIVED_PER_SEED = int(os.environ.get("PIVOT_MAX_DERIVED", "25"))
+PIVOT_TIME_BUDGET_SECONDS  = int(os.environ.get("PIVOT_TIME_BUDGET", "60"))
+# A derived indicator is never as good as the thing it was derived from. This
+# is the single most important number in the pivot: without it, one collected
+# domain becomes fifty weakly-associated ones carrying the seed's authority,
+# and a technical buyer who spot-checks three of them stops trusting the whole
+# corpus. Derived rows are also tagged provenance="derived" so an export can
+# exclude them wholesale.
+PIVOT_CONFIDENCE_FACTOR    = 0.5
+# Categories whose domains are worth pivoting from. A "general" or "crypto"
+# chat domain is usually a legitimate site someone linked, and pivoting from it
+# produces siblings of a legitimate host -- noise with a confidence score
+# attached, which is worse than nothing.
+PIVOT_SEED_CATEGORIES = {"phaas", "infostealer", "credential_dump", "ransomware"}
 INTEL_CHANNELS_TABLE  = "relayshield_intel_channels"
 STOLEN_SESSIONS_TABLE  = "relayshield_stolen_sessions"
 IDENTITY_GRAPH_TABLE   = "relayshield_identity_graph"
@@ -298,6 +326,55 @@ _RE_SHA1    = re.compile(r"\b[a-fA-F0-9]{40}\b")
 _RE_URL     = re.compile(r"https?://[^\s<>\"']{10,}")
 _RE_ONION   = re.compile(r"\b[a-z2-7]{16,56}\.onion\b", re.IGNORECASE)
 _RE_CVE     = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+# Non-human identity / machine credentials (growth plan item 6, an under-served
+# category). API keys and service tokens in stealer-log dumps are higher value
+# and far rarer in public feeds than passwords, and /v1/metered/nhi-exposure
+# already exists to sell them — but nothing was feeding it from this pipeline.
+#
+# WE NEVER STORE THE SECRET. Extraction yields a provider label plus a truncated
+# SHA-256 of the value, and that is what goes in the IOC table. A customer can
+# fingerprint their own key and ask "is mine in there"; nobody can read one out.
+# Storing live credentials in a queryable table would make this corpus a
+# liability the moment anyone got a read on it, and the same rule already keeps
+# /exposure from printing passwords.
+_NHI_PATTERNS = (
+    ("aws_access_key",   re.compile(r"\b((?:AKIA|ASIA)[0-9A-Z]{16})\b")),
+    ("github_pat",       re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{36,255})\b")),
+    ("slack_token",      re.compile(r"\b(xox[baprs]-[A-Za-z0-9-]{10,})\b")),
+    ("stripe_secret",    re.compile(r"\b(sk_live_[A-Za-z0-9]{16,})\b")),
+    ("google_api_key",   re.compile(r"\b(AIza[0-9A-Za-z_-]{35})\b")),
+    ("anthropic_key",    re.compile(r"\b(sk-ant-[A-Za-z0-9_-]{20,})\b")),
+    # Deliberately after anthropic_key: sk-ant- also matches the generic
+    # OpenAI-style prefix, and the specific label is the useful one.
+    ("openai_key",       re.compile(r"\b(sk-[A-Za-z0-9]{32,})\b")),
+    ("private_key_block", re.compile(r"(-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----)")),
+)
+
+
+def _nhi_fingerprints(text: str) -> list:
+    """Provider-labelled fingerprints of any machine credentials in `text`.
+
+    Returns "<provider>:<first 16 hex of sha256>" — never the credential.
+
+    The example that used to sit on this line was a made-up 16-hex string, and
+    GitGuardian's generic api-key detector flagged it on commit 33d6a6f
+    (incident #36505440) — a false positive on a docstring in the very function
+    whose job is to make sure real credentials never get stored. It is a neat
+    demonstration of the entropy-detector noise problem in
+    blog-secret-scanning-false-positives.md, and it is also exactly the kind of
+    alert that trains people to ignore the dashboard. No literal hex here.
+    """
+    out = set()
+    for label, pattern in _NHI_PATTERNS:
+        for m in pattern.findall(text):
+            secret = m if isinstance(m, str) else m[0]
+            if len(secret) < 12:
+                continue
+            digest = hashlib.sha256(secret.encode("utf-8", "replace")).hexdigest()[:16]
+            out.add(f"{label}:{digest}")
+    return sorted(out)
+
+
 _RE_RANSOM_VICTIM = re.compile(
     r"(?:hacked?|leaked?|compromised?|victim[s]?[:,]?\s*|added to our blog[:\s]*)"
     r"([A-Z][A-Za-z0-9\s&\-\.]{3,50}(?:Inc\.?|LLC|Ltd\.?|Corp\.?|Group|Co\.?)?)",
@@ -563,6 +640,13 @@ def extract_iocs(text: str) -> dict:
     cves    = list({m.upper() for m in _RE_CVE.findall(text)})
     victims = list({m.strip() for m in _RE_RANSOM_VICTIM.findall(text) if len(m.strip()) > 3})
     tg_mentions = list({m.lower() for m in _RE_TG_CHANNEL.findall(text)})
+    # Invite codes were already being parsed out of this same text for channel
+    # DISCOVERY (_queue_discovered_discord_invites); they were never kept as
+    # indicators. An invite code is an operator-identity indicator of the same
+    # kind as a Telegram handle -- it names a place a crew runs, and no public
+    # feed we ingest publishes it.
+    discord_invites = list({m.lower() for m in _RE_DISCORD_INVITE.findall(text)})
+    nhi_tokens = _nhi_fingerprints(text)
     return {
         "emails": emails, "phones": phones,
         "eth": eth, "btc": btc, "sol": sol, "ton": ton,
@@ -571,6 +655,8 @@ def extract_iocs(text: str) -> dict:
         "urls": urls, "onions": onions, "cves": cves,
         "ransomware_victims": victims,
         "tg_mentions": tg_mentions,
+        "discord_invites": discord_invites,
+        "nhi_tokens": nhi_tokens,
     }
 
 
@@ -709,21 +795,53 @@ def _release_lock() -> None:
 # Alert formatting
 # ---------------------------------------------------------------------------
 
-CATEGORY_LABELS = {
-    "sim_swap":        "SIM Swap Service",
-    "credential_dump": "Credential Dump",
-    "infostealer":     "Infostealer Log Sale",
-    "card_shop":       "Card Shop",
-    "general":         "Threat Intelligence",
+# ONE SOURCE OF TRUTH FOR CATEGORIES. Fixed 2026-08-21 after finding the
+# vocabularies had drifted apart across four files.
+#
+# WHAT WAS BROKEN. `CATEGORY_LABELS` and `SEVERITY` listed five categories.
+# relayshield_intel_discovery.py's SEARCH_KEYWORDS could already assign SEVEN,
+# and relayshield_intel_classifier.py could assign seven more. Three of them --
+# "ransomware", "crypto", "phaas" -- appeared in NEITHER dict, so
+# `SEVERITY.get(category, "⚠️")` fell through to a bare warning glyph with no
+# severity word, and `CATEGORY_LABELS.get(category, category)` printed the raw
+# key. A user alert sourced from a ransomware channel therefore rendered as
+# LESS severe than one from a card shop, which is exactly backwards.
+#
+# Nothing errored, nothing logged. Same silent-divergence shape as the `cves`
+# and `type_map` defects, which is now the third instance in this pipeline --
+# hence test_intel_category_drift.py, which fails the build when any two of the
+# four vocabularies disagree.
+#
+# WHY IT WAS ABOUT TO GET WORSE. The OSINT-2 classifier assigns categories from
+# its own list and is about to be run over the 75-channel pending_review
+# backlog. Every channel it labels "ransomware", "crypto" or "phaas" would have
+# produced degraded alerts from that moment on.
+#
+# ADDING A CATEGORY: add it here, add it to VALID_CATEGORIES in
+# relayshield_intel_classifier.py, and the drift test will confirm the rest.
+INTEL_CATEGORIES = {
+    # category         label                       severity
+    "sim_swap":        ("SIM Swap Service",        "🚨 CRITICAL"),
+    "ransomware":      ("Ransomware Operation",    "🚨 CRITICAL"),
+    "credential_dump": ("Credential Dump",         "🚨 HIGH"),
+    "infostealer":     ("Infostealer Log Sale",    "⚠️ HIGH"),
+    "phaas":           ("Phishing-as-a-Service",   "⚠️ HIGH"),
+    "card_shop":       ("Card Shop",               "⚠️ MEDIUM"),
+    # Added 2026-08-21 (sweep 002). Four of SOCRadar's ten most active Telegram
+    # groups are hacktivist crews — NoName057(16), RipperSec, Dark Storm Team,
+    # Z-Pentest Alliance — and none of the existing categories fit: they run
+    # DDoS and OT-intrusion campaigns rather than selling credentials.
+    # MEDIUM rather than HIGH on purpose: for an identity-protection customer a
+    # hacktivist mention is context, not an account compromise. The collection
+    # value is high (they publish target lists and leaked data early); the
+    # per-user alert value is not, and the severity has to say which.
+    "hacktivist":      ("Hacktivist Operation",    "⚠️ MEDIUM"),
+    "crypto":          ("Crypto Fraud",            "⚠️ MEDIUM"),
+    "general":         ("Threat Intelligence",     "ℹ️ INFO"),
 }
 
-SEVERITY = {
-    "sim_swap":        "🚨 CRITICAL",
-    "credential_dump": "🚨 HIGH",
-    "infostealer":     "⚠️ HIGH",
-    "card_shop":       "⚠️ MEDIUM",
-    "general":         "ℹ️ INFO",
-}
+CATEGORY_LABELS = {k: v[0] for k, v in INTEL_CATEGORIES.items()}
+SEVERITY        = {k: v[1] for k, v in INTEL_CATEGORIES.items()}
 
 
 def _format_user_alert(match: dict, channel: str, category: str, channel_desc: str, msg_preview: str) -> str:
@@ -1162,6 +1280,16 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> N
         # can be told apart from one mentioned in passing. Filter downstream;
         # do not treat presence here as "this handle is a criminal".
         ("tg_mentions", "tg_handle"),
+        # Added 2026-08-21, growth plan item 2 (operator identity). Same
+        # exclusivity argument as tg_handle and the same caveat: an invite code
+        # in a criminal channel is a lead, not a verdict. Kept as the bare code
+        # rather than the full URL so the same server posted as discord.gg/X and
+        # discord.com/invite/X deduplicates to one indicator.
+        ("discord_invites", "discord_invite"),
+        # Fingerprints, never secrets — see _nhi_fingerprints(). Feeds
+        # /v1/metered/nhi-exposure, which existed with nothing supplying it
+        # from this pipeline.
+        ("nhi_tokens",      "nhi_token"),
         ("onions",      "onion"),
         ("md5",         "hash_md5"),
         ("sha1",        "hash_sha1"),
@@ -1188,6 +1316,176 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "") -> N
                 table.put_item(Item=item)
             except Exception as exc:
                 logger.warning("IOC store failed value=%s: %s", value[:20], exc)
+
+
+# ---------------------------------------------------------------------------
+# Operator identity aggregate (growth plan item 2)
+# ---------------------------------------------------------------------------
+# WHY A SECOND TABLE. The IOC table is append-only, one row per sighting, keyed
+# (ioc_value, seen_ts). That is the right shape for infrastructure: an IP is
+# malicious or it is not, and when you saw it barely matters. It is the wrong
+# shape for a person. Handles get recycled, sold and abandoned, so the question
+# actually asked of one is "since when, how often, and in which rooms" -- and
+# answering that from sighting rows means scanning them.
+#
+# This keeps one row per handle, updated in place. It costs one update_item per
+# handle per run and no reads, because `if_not_exists` and `ADD` let DynamoDB do
+# the first-seen and the counter server-side.
+#
+# STILL A LEAD LIST. _RE_TG_CHANNEL matches any @mention. A handle here is not a
+# criminal; it is a handle that appeared in a room we monitor. `channels` and
+# `categories` are what make a row worth anything -- a handle seen four times
+# across two infostealer channels reads very differently from one mentioned once
+# in a general chat. Do not export this as "known scam operators".
+
+def _store_operator_identities(iocs: dict, channel: str, category: str) -> int:
+    now   = datetime.now(timezone.utc).isoformat()
+    table = _dynamodb.Table(OPERATOR_IDS_TABLE)
+    stored = 0
+    # (field in extract_iocs output, platform label)
+    for field, platform in (("tg_mentions", "telegram"), ("discord_invites", "discord")):
+        for handle in iocs.get(field, []):
+            handle = (handle or "").strip().lower().lstrip("@")
+            if len(handle) < 3:
+                continue
+            try:
+                table.update_item(
+                    Key={"handle": handle, "platform": platform},
+                    UpdateExpression=(
+                        "SET first_seen = if_not_exists(first_seen, :now), "
+                        "    last_seen  = :now, "
+                        "    #ttl       = :ttl "
+                        "ADD sightings :one, channels :ch, categories :cat"
+                    ),
+                    # `ttl` is a DynamoDB reserved word.
+                    ExpressionAttributeNames={"#ttl": "ttl"},
+                    ExpressionAttributeValues={
+                        ":now": now,
+                        ":one": Decimal(1),
+                        # String sets, so re-seeing the same handle in the same
+                        # channel does not grow the row. This is what makes
+                        # "seen across N distinct rooms" cheap to read later.
+                        ":ch":  {channel},
+                        ":cat": {category or "unknown"},
+                        # Refreshed on every sighting, so an operator we keep
+                        # seeing never expires while one that goes quiet ages
+                        # out. Infrastructure TTL is fixed from first write;
+                        # identity should not be.
+                        ":ttl": Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400),
+                    },
+                )
+                stored += 1
+            except Exception as exc:
+                logger.warning("Operator identity store failed handle=%s: %s", handle[:32], exc)
+    return stored
+
+
+# ---------------------------------------------------------------------------
+# Pivot enrichment (growth plan item 3)
+# ---------------------------------------------------------------------------
+# One collected phishing domain is rarely alone. The certificate that covers it
+# usually covers the rest of the campaign's hosts, and Certificate Transparency
+# publishes that for free. A sibling found this way is OURS by derivation -- it
+# inherits the seed's exclusivity without inheriting a public feed.
+#
+# THE RISK IS THE WHOLE POINT OF THE DESIGN. A pivot with no confidence decay
+# turns one good indicator into fifty mediocre ones that all claim the seed's
+# authority. So every derived row carries:
+#   provenance      = "derived"          (so an export can drop them wholesale)
+#   derived_from    = the seed value     (so any row can be walked back)
+#   derivation      = the method used
+#   confidence_score = seed * PIVOT_CONFIDENCE_FACTOR
+# and nothing derived is ever used to derive again -- one hop only, enforced by
+# only ever seeding from freshly collected domains.
+#
+# crt.sh is the same source relayshield_cert_monitor.py already uses, so this
+# adds no new vendor and no new secret.
+
+_CRT_SH_PIVOT_URL = "https://crt.sh/?q=%25.{domain}&output=json"
+
+
+def _pivot_domain_siblings(domain: str) -> list[str]:
+    """Sibling hostnames sharing certificate coverage with `domain`.
+
+    Returns [] on any failure. A pivot that cannot run is a missed enrichment,
+    never a failed collection run -- the caller must not care why.
+    """
+    try:
+        req = urllib.request.Request(
+            _CRT_SH_PIVOT_URL.format(domain=urllib.parse.quote(domain)),
+            headers={"User-Agent": "RelayShield-IntelMonitor/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            rows = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as exc:
+        logger.info("Pivot crt.sh failed domain=%s: %s", domain, exc)
+        return []
+
+    siblings: set = set()
+    for row in rows if isinstance(rows, list) else []:
+        # name_value can hold several SANs separated by newlines.
+        for name in str(row.get("name_value", "")).split("\n"):
+            name = name.strip().lower().lstrip("*.")
+            if not name or name == domain or not name.endswith("." + domain):
+                continue
+            if any(name.endswith(s) for s in (".local", ".internal", ".localhost", ".example")):
+                continue
+            siblings.add(name)
+            if len(siblings) >= PIVOT_MAX_DERIVED_PER_SEED:
+                return sorted(siblings)
+    return sorted(siblings)
+
+
+def _store_derived_iocs(derived: list, seed: str, derivation: str,
+                        channel: str, category: str, seed_confidence: float = 1.0) -> int:
+    """Write derived indicators, marked as derived and scored below their seed."""
+    if not derived:
+        return 0
+    now   = datetime.now(timezone.utc).isoformat()
+    ttl   = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
+    table = _dynamodb.Table(INTEL_IOCS_TABLE)
+    confidence = round(seed_confidence * PIVOT_CONFIDENCE_FACTOR, 4)
+    stored = 0
+    for value in derived:
+        try:
+            table.put_item(Item={
+                "ioc_value":        value.lower(),
+                "seen_ts":          now,
+                "ioc_type":         "domain",
+                "channel":          channel,
+                "category":         category,
+                "provenance":       "derived",
+                "derived_from":     seed,
+                "derivation":       derivation,
+                "confidence_score": Decimal(str(confidence)),
+                "ttl":              ttl,
+            })
+            stored += 1
+        except Exception as exc:
+            logger.warning("Derived IOC store failed value=%s: %s", value[:40], exc)
+    return stored
+
+
+def _run_domain_pivots(seed_domains: list, channel: str, category: str) -> int:
+    """Pivot a run's freshly collected domains into campaign siblings.
+
+    Hard-bounded on seeds, derived-per-seed and wall clock. Collection is the
+    job; enrichment is a bonus that must never eat the budget.
+    """
+    if not PIVOT_ENRICHMENT_ENABLED or category not in PIVOT_SEED_CATEGORIES:
+        return 0
+    started = time.time()
+    total   = 0
+    for seed in seed_domains[:PIVOT_MAX_SEEDS_PER_RUN]:
+        if time.time() - started > PIVOT_TIME_BUDGET_SECONDS:
+            logger.info("Pivot time budget reached after %d seeds", total)
+            break
+        siblings = _pivot_domain_siblings(seed)
+        if siblings:
+            total += _store_derived_iocs(
+                siblings, seed, "crt.sh:san-siblings", channel, category,
+            )
+    return total
 
 
 def _log_alert(user_id: str, match: dict, channel: str, category: str) -> None:
@@ -1852,6 +2150,14 @@ def _send_admin_digest(stats: dict) -> None:
     # and tells you the collection surface is degrading. Added 2026-08-20 after
     # the active count and the reachable count were found to disagree by 27
     # with nothing anywhere recording it.
+    _operator_line = (
+        f"Operator identities: {stats.get('operator_ids_stored', 0)} updated"
+        f" ({stats.get('discord_invites', 0)} Discord invites)\n"
+        # Reads 0 whenever PIVOT_ENRICHMENT is off, which is the default. A zero
+        # here means "not switched on", not "found nothing".
+        f"Derived indicators (pivot): {stats.get('derived_iocs', 0)}\n"
+        f"Machine credentials (NHI): {stats.get('nhi_tokens', 0)} fingerprinted\n"
+    )
     _victims_line = (
         f"Ransomware victims named: {stats.get('ransomware_victims', 0)}"
         f" ({stats.get('victims_stored', 0)} stored)\n"
@@ -1877,6 +2183,7 @@ def _send_admin_digest(stats: dict) -> None:
         f"Alerts fired: {stats['alerts_fired']}\n"
         f"Brand mentions detected: {stats.get('brand_alerts', 0)}\n"
         f"{_victims_line}"
+        f"{_operator_line}"
         f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
         f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
         f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n"
@@ -2243,10 +2550,22 @@ async def _poll_channels(stats: dict) -> None:
                                     logger.warning("Supplier alert failed user=%s: %s",
                                                    _m["user_id"], exc)
 
+                    # Operator identity: one row per handle, first/last seen and
+                    # the set of rooms it appears in. Runs before the total_iocs
+                    # early-return below, because a message whose only content
+                    # is an @mention still tells us something about an operator.
+                    if iocs.get("tg_mentions") or iocs.get("discord_invites"):
+                        stats["operator_ids_stored"] = stats.get("operator_ids_stored", 0) + \
+                            _store_operator_identities(iocs, username, category)
+
                     # Tally new IOC type stats
                     stats["ransomware_victims"] += len(iocs.get("ransomware_victims", []))
                     stats["cves_extracted"]     += len(iocs.get("cves", []))
                     stats["onions_extracted"]   += len(iocs.get("onions", []))
+                    stats["discord_invites"]     = stats.get("discord_invites", 0) + \
+                        len(iocs.get("discord_invites", []))
+                    stats["nhi_tokens"]          = stats.get("nhi_tokens", 0) + \
+                        len(iocs.get("nhi_tokens", []))
 
                     if total_iocs == 0:
                         continue
@@ -2255,6 +2574,14 @@ async def _poll_channels(stats: dict) -> None:
                     if _fam:
                         stats["malware_tagged"] = stats.get("malware_tagged", 0) + total_iocs
                     _store_iocs(iocs, username, category, _fam)
+
+                    # Pivot: freshly collected domains -> campaign siblings.
+                    # No-ops unless PIVOT_ENRICHMENT is switched on AND the
+                    # channel is in a seed category; see the block comment on
+                    # _run_domain_pivots for why both gates exist.
+                    if iocs.get("domains"):
+                        stats["derived_iocs"] = stats.get("derived_iocs", 0) + \
+                            _run_domain_pivots(iocs["domains"], username, category)
 
                     # User asset matching + alerts
                     matches = find_matches(iocs)
@@ -2414,6 +2741,10 @@ def lambda_handler(event, context):
         "user_matches":           0,
         "alerts_fired":           0,
         "ransomware_victims":     0,
+        "discord_invites":        0,
+        "nhi_tokens":             0,
+        "operator_ids_stored":    0,
+        "derived_iocs":           0,
         "cves_extracted":         0,
         "onions_extracted":       0,
         "channels_discovered":    0,

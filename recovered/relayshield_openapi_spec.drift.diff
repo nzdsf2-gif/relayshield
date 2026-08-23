@@ -1,0 +1,382 @@
+--- relayshield_openapi_spec.py	2026-08-23 13:14:31.222937496 +0000
++++ recovered/relayshield_openapi_spec.py	2026-08-17 15:49:26.000000000 +0000
+@@ -92,6 +92,35 @@
+ 
+ _CHECKED_AT = _ts()
+ 
++# --- Freshness contract, shared by every screening endpoint ----------------
++# A verdict is a point-in-time observation, and every serious integrator caches
++# it. Stating the TTL ourselves stops the caller inventing one, which they
++# invent in the dangerous direction.
++
++
++def _freshness_props(flagged_label: str, clean_label: str) -> dict:
++    """The four freshness fields, with the per-endpoint TTLs spelled out."""
++    return {
++        "observed_at": _ts("When this verdict was observed. Cache keyed on this, not on receipt time."),
++        "valid_for_seconds": _int(
++            "How long this verdict can be cached before it should be re-checked. "
++            f"Flagged results live {flagged_label}; clean results live {clean_label}, "
++            "because a hit stays a hit while a clean answer is the one that flips "
++            "without telling whoever cached it. A degraded result lives 5 minutes. "
++            "This is a caching hint and a policy default, not a measurement and not "
++            "a safety guarantee: how fast a verdict really goes stale is bounded by "
++            "upstream detection latency, which we do not control."
++        ),
++        "expires_at": _ts("observed_at plus valid_for_seconds, precomputed."),
++        "degraded": _bool(
++            "True when this answer was assembled from incomplete or failed upstream data. "
++            "Treat it as NO VERDICT, never as clean. An outage that returns an empty "
++            "finding list is otherwise indistinguishable from a real all-clear, and it "
++            "fails in the permissive direction."
++        ),
++    }
++
++
+ _LOOKALIKE = _obj(
+     "One active lookalike domain, enriched with intent signals.",
+     {
+@@ -214,6 +243,7 @@
+         },
+         "response": {
+             "props": {
++                **_freshness_props("7 days", "12 hours"),
+                 "email": _str("The normalised address that was checked."),
+                 "record_type": _str("Always `credential_exposure`. Lets a SIEM route every identity finding on one field."),
+                 "breach_count": _int("Number of breaches the address appears in. 0 means no known exposure."),
+@@ -274,6 +304,7 @@
+         },
+         "response": {
+             "props": {
++                **_freshness_props("7 days", "6 hours"),
+                 "record_type": _str("Always `credential_exposure`."),
+                 "email": _str("The normalised address that was checked."),
+                 "found": _bool("True when at least one infection record exists."),
+@@ -323,8 +354,8 @@
+         "request": {
+             "props": {
+                 "phone": _str(
+-                    "Phone number in E.164 format. Must start with '+'. Rejected without it -- "
+-                    "national formats are ambiguous across carriers.",
++                    "Phone number in E.164 format. Must start with '+'. Rejected without it, "
++                    "because national formats are ambiguous across carriers.",
+                     examples=["+14155551234"],
+                 ),
+             },
+@@ -333,8 +364,14 @@
+         },
+         "response": {
+             "props": {
++                **_freshness_props("24 hours", "15 minutes"),
+                 "phone": _str("The number that was checked, echoed as supplied."),
+-                "swapped": _bool("True when the carrier reports a SIM swap or port in the lookback period."),
++                "swapped": _bool(
++                    "True when the carrier reports a SIM swap or port in the lookback period. "
++                    "False means the carrier affirmatively reported no swap. When carrier data is "
++                    "unavailable the endpoint returns 503 rather than False, so a 200 response is "
++                    "always a real verdict."
++                ),
+                 "swap_timestamp": _str("When the swap occurred. Empty string when no swap is reported."),
+                 "carrier": _str("Current carrier name. Empty when the carrier does not disclose it."),
+                 "checked_at": _CHECKED_AT,
+@@ -350,6 +387,10 @@
+         "errors": {
+             "400": "`phone` is missing or not in E.164 format (must start with '+').",
+             "502": "Carrier lookup provider unavailable or returned an unexpected status.",
++            "503": (
++                "The carrier returned no SIM swap data for this number, so no verdict was produced. "
++                "This call is not billed. Retry later rather than treating it as a clean result."
++            ),
+         },
+     },
+     {
+@@ -417,6 +458,7 @@
+         },
+         "response": {
+             "props": {
++                **_freshness_props("7 days", "12 hours"),
+                 "email": _str("The normalised address that was checked."),
+                 "matched_count": _int("OAuth-capable apps matched via breach history."),
+                 "matched_apps": _arr(
+@@ -573,10 +615,21 @@
+         },
+         "response": {
+             "props": {
++                **_freshness_props("24 hours", "1 hour"),
+                 "domain": _str("The normalised domain that was scanned."),
+                 "lookalikes_found": _int("Permutations that resolve."),
+                 "lookalikes": _arr("One entry per active lookalike.", _LOOKALIKE),
+-                "candidates_checked": _int("Permutations generated and tested."),
++                "candidates_checked": _int(
++                    "Permutations actually resolved within the scan window. Previously this "
++                    "reported the number generated, which overstated coverage whenever the "
++                    "sweep was truncated."
++                ),
++                "candidates_total": _int("Permutations generated for this domain."),
++                "candidates_unchecked": _int(
++                    "Permutations whose DNS lookup did not finish in time. Non-zero means the "
++                    "sweep was truncated, `degraded` is true, and a low lookalikes_found is "
++                    "not evidence that the domain is clean."
++                ),
+                 "checked_at": _CHECKED_AT,
+             },
+             "example": {
+@@ -990,6 +1043,95 @@
+ 
+     # ---------------- Vendor and organisation risk ----------------
+     {
++        "path": "/v1/metered/dependency-risk",
++        "price_cents": 50,
++        "tag": "Vendor and organisation risk",
++        "summary": "Find dependencies whose maintainers are compromised",
++        "description": (
++            "Every package security tool analyses the artifact. This answers the question none of "
++            "them can: is the human who is able to publish that artifact compromised right now?\n\n"
++            "A self-replicating npm worm does not start with malicious code. It starts with a "
++            "maintainer account, usually via an npm token lifted from an infostealer log. By the "
++            "time bad code is visible in a tarball, the worm has already run. Maintainer "
++            "compromise is the leading indicator.\n\n"
++            "Send a list of package names, or a `package.json` or `package-lock.json`. Each "
++            "package is resolved to the accounts able to publish it, those accounts are screened "
++            "against the infostealer corpus, and findings come back **at the dependency level**. "
++            "Maintainer identities are never returned, logged or stored: you do not need to know "
++            "who someone is in order to pin a version and require review, and naming an "
++            "uninvolved third party is not something we will do.\n\n"
++            "Stealer-log recency is the alert signal. A ten-year-old breach record on a "
++            "maintainer's address says nothing about whether their laptop is compromised today, "
++            "so those are reported as MEDIUM context rather than as an incident.\n\n"
++            "Capped at 100 packages and 150 maintainer accounts per call. If you exceed either, "
++            "`truncated` is `true` and the packages beyond the cap were **not** checked.\n\n"
++            "**Included at no per-call charge in the Agentic Attack Surface bundle** ($299/mo, "
++            "through AWS Marketplace or directly). The per-call price applies only outside the "
++            "bundle. Screening 400 maintainers costs us about what screening 4 does, so metering "
++            "it inside the bundle would invent friction and recover nothing."
++        ),
++        "request": {
++            "props": {
++                "packages": _arr("npm package names. The recommended input: it does not hand us "
++                                 "your full dependency graph.", _str("Package name, for example `left-pad` or `@scope/name`.")),
++                "manifest": _str("A `package.json` or `package-lock.json`, as an object or a JSON "
++                                 "string. Easier, but it is your whole dependency graph."),
++            },
++            "any_of": ["packages", "manifest"],
++            "example": {"packages": ["left-pad", "chalk", "@types/node"]},
++        },
++        "response": {
++            "props": {
++                "packages_checked":  _int("Packages considered after deduplication and the cap."),
++                "packages_resolved": _int("Packages the registry returned a publisher account for."),
++                "maintainer_accounts_screened": _int("Distinct accounts screened. Each is screened once "
++                                                     "however many packages it publishes."),
++                "role_accounts_excluded": _int("Shared or role addresses excluded from alerting. A hit on "
++                                               "`security@` tells you nothing about one person's laptop."),
++                "dependencies_at_risk": _int("Packages with any exposed publisher account."),
++                "high_severity":        _int("Packages whose publisher appears in a stealer log within 90 days."),
++                "findings": _arr("Per-dependency findings, worst first.", _obj("A flagged dependency.", {
++                    "package":     _str("The dependency."),
++                    "severity":    {"type": "string", "enum": ["HIGH", "MEDIUM"],
++                                    "description": "HIGH is a stealer log within 90 days. MEDIUM is older, and is context."},
++                    "signal":      _str("`maintainer_in_recent_stealer_log` or `maintainer_in_older_stealer_log`."),
++                    "most_recent": _str("Date of the most recent stealer log for any publisher of this package.", nullable=True),
++                    "detail":      _str("One sentence you can paste into a ticket."),
++                })),
++                "unresolved_packages": _arr("Packages we could not resolve, with the reason. Listed "
++                                            "explicitly: not-resolved is not the same as not-exposed.",
++                                            _obj("Unresolved package.", {"package": _str("Name."), "reason": _str("Why.")})),
++                "truncated":        _bool("True if the call hit the package or account cap."),
++                "truncated_detail": _str("What was skipped, when truncated.", nullable=True),
++                "recommended_action": _str("What to do. Says the run was incomplete when it was."),
++                "privacy_note":       _str("Restates that no maintainer identity is returned."),
++            },
++            "example": {
++                "packages_checked": 412,
++                "packages_resolved": 409,
++                "maintainer_accounts_screened": 148,
++                "role_accounts_excluded": 13,
++                "dependencies_at_risk": 3,
++                "high_severity": 3,
++                "findings": [{
++                    "package": "left-pad",
++                    "severity": "HIGH",
++                    "signal": "maintainer_in_recent_stealer_log",
++                    "most_recent": "2026-07-28T04:12:00.000Z",
++                    "detail": "An account able to publish this package appears in an infostealer log dated within the last 90 days.",
++                }],
++                "unresolved_packages": [{"package": "some-private-pkg", "reason": "not_found"}],
++                "truncated": False,
++                "truncated_detail": None,
++                "recommended_action": "Pin the flagged versions, require review on their updates, and do not auto-merge their releases until the exposure ages out.",
++                "privacy_note": "Findings are reported at the dependency level. RelayShield does not return, log or store the identity of any maintainer.",
++            },
++        },
++        "errors": {
++            "400": "Neither `packages` nor a parseable `manifest` was supplied.",
++        },
++    },
++    {
+         "path": "/v1/metered/supply-chain",
+         "price_cents": 10,
+         "tag": "Vendor and organisation risk",
+@@ -1101,7 +1243,7 @@
+                 },
+                 "max_score": 100,
+                 "risk_factors": ["Breach exposure: 3 known breach event(s), 2,410,000 accounts affected"],
+-                "summary": "Domain acme.com scores 48/100 (D - HIGH) across 4 of 6 monitored identity signal dimensions.",
++                "summary": "Domain acme.com scores 48/100 (D, HIGH) across 4 of 6 monitored identity signal dimensions.",
+                 "recommendation": "MEDIUM: Elevated risk signals across multiple surfaces. Review breach history, enforce MFA, and monitor for escalation.",
+             },
+         },
+@@ -1671,7 +1813,7 @@
+         "summary": "Register assets and sweep them against the IOC corpus",
+         "description": (
+             "A watchlist scoped to your API key. `register` adds domains and IPs, `sweep` checks "
+-            "them against the 4.6M+ indicator corpus, `list` returns what is registered, `remove` "
++            "them against the 494K+ distinct indicator corpus (5.8M+ sightings), `list` returns what is registered, `remove` "
+             "deletes entries. Once a webhook is configured, new matches against registered assets "
+             "are pushed to you automatically."
+         ),
+@@ -1729,6 +1871,70 @@
+ 
+     # ---------------- Crypto ----------------
+     {
++        "path": "/v1/metered/wallet-risk",
++        "price_cents": 5,
++        "tag": "Crypto",
++        "summary": "Screen a counterparty wallet address before transacting with it",
++        "description": (
++            "Screens a wallet address across EVM, Solana, TON and Bitcoin for known scam, drainer, "
++            "phishing, dark web and sanctions associations, and returns a risk level with the "
++            "specific flags behind it. The chain is detected from the address format, so no chain "
++            "parameter is needed.\n\n"
++            "This is the key-authenticated twin of `/v1/payg/wallet-risk`, added for callers who "
++            "hold an API key rather than paying per call over x402. Same handler, same price, same "
++            "response.\n\n"
++            "Read `degraded` before you read `risk_flags`. When `degraded` is true an upstream "
++            "source did not answer, so an empty flag list means the check did not complete rather "
++            "than that the address is clean. Treat that as no verdict, never as a pass."
++        ),
++        "request": {
++            "props": {
++                "address": _str(
++                    "Wallet address to screen. EVM (0x...), Solana, TON (EQ.../UQ...) or Bitcoin. "
++                    "The chain is inferred from the format.",
++                    examples=["0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"],
++                ),
++            },
++            "required": ["address"],
++            "example": {"address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"},
++        },
++        "response": {
++            "props": {
++                **_freshness_props("24 hours", "1 hour"),
++                "address": _str("The address that was screened, lowercased for EVM."),
++                "chain": _str("Detected chain: `evm`, `solana`, `ton` or `bitcoin`."),
++                "risk_level": _str(
++                    "`HIGH`, `MEDIUM` or `LOW`. LOW with an empty `risk_flags` means nothing known, "
++                    "not a guarantee of safety. Two or more flags give HIGH, one flag gives MEDIUM, "
++                    "with one exception: `sanctions-listed` gives HIGH on its own, because a "
++                    "sanctions match is a compliance event whether or not anything else is known "
++                    "about the address."
++                ),
++                "risk_flags": _arr(
++                    "Specific findings. Empty when nothing is known about the address.",
++                    _str("e.g. `linked to phishing`, `security blacklisted`, `dark web activity`, `sanctions-listed`."),
++                ),
++                "metadata": _obj(
++                    "Chain-specific detail. Bitcoin returns balance and transaction counts; TON returns "
++                    "contract type and account status. Any key ending in `_error` means that source "
++                    "failed, which is also what sets `degraded`.",
++                    {},
++                ),
++            },
++            "example": {
++                "address": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
++                "chain": "evm",
++                "risk_level": "LOW",
++                "risk_flags": [],
++                "metadata": {},
++            },
++        },
++        "errors": {
++            "400": "`address` is missing, or the format matches no supported chain.",
++            "402": "No credit balance and no active subscription.",
++        },
++    },
++    {
+         "path": "/v1/metered/crypto-intel",
+         "price_cents": 30,
+         "tag": "Crypto",
+@@ -1750,6 +1956,7 @@
+         },
+         "response": {
+             "props": {
++                **_freshness_props("24 hours", "1 hour"),
+                 "address": _str("The lowercased address."),
+                 "chain_id": _str("The chain ID used."),
+                 "composite_risk": {"type": "string", "enum": _SEVERITY, "description": "CRITICAL on a critical address or token flag, HIGH on any address flag or token warning, MEDIUM on a warning-tier address flag, otherwise LOW."},
+@@ -2895,9 +3102,9 @@
+ _DESCRIPTION = """
+ Identity-compromise and threat-intelligence checks over a plain REST API. Every endpoint is
+ `POST`, takes a JSON body, and returns a JSON envelope. Pay per call in USDC over x402 with no
+-signup and no API key, or use a key with prepaid credits and a free tier of 20 calls. Screen a
++signup and no API key, or use a key with prepaid credits and a free tier of 100 calls. Screen a
+ counterparty wallet, a token contract, an MCP server, a domain or an email against a corpus of
+-over 5 million indicators.
++over 494,000 distinct indicators, drawn from more than 5.8 million sightings.
+ 
+ ## Authentication
+ 
+@@ -2971,6 +3178,53 @@
+   `oauth-watchlist` adds `NONE`.
+ - Risk scores run 0-100 where higher is worse.
+ 
++## Bundles
++
++Two groups of endpoints are also sold as fixed monthly bundles, for teams that would rather
++commit than meter from zero. Both are available two ways, at identical per-call rates.
++
++### Core Identity Exposure, $150/mo
++
++Six endpoints answering one question: has this identity already been compromised?
++
++| Endpoint | Per call | What it answers |
++|---|---|---|
++| `/v1/metered/breach` | $0.10 | Does this address appear in breach corpora and dark web credential dumps? |
++| `/v1/metered/infostealer` | $0.50 | Were these credentials harvested by stealer malware? |
++| `/v1/metered/domain` | $0.30 | Is someone typosquatting this brand? |
++| `/v1/metered/oauth-watchlist` | $0.30 | Are OAuth or API tokens for this identity circulating? |
++| `/v1/metered/crypto-intel` | $0.30 | Is this wallet or domain in the criminal corpus? |
++| `/v1/metered/sim-swap` | $0.25 | Has this number been SIM swapped recently? |
++
++The six are designed to be correlated rather than used alone. An address in a breach corpus is
++routine; the same address with a fresh stealer-log hit and recent SIM swap activity is an active
++incident.
++
++**`sim-swap` currently returns `503`.** Carrier registration is in progress and the endpoint is
++not billed while it is unavailable. It is listed here because it is part of the bundle you are
++buying, not because it works today.
++
++- AWS Marketplace: [Core Identity Exposure API Bundle](https://aws.amazon.com/marketplace/pp/prodview-zgdxyqfd63hog)
++- Direct: `POST /developer/bundle-checkout` with `{"bundle": "a", "email": "you@example.com"}`
++
++### Agentic Attack Surface, $299/mo
++
++`tech-stack-cve`, `bulk-identity-risk`, `llm-credential-exposure`, `mcp-registry-risk` and
++`prompt-injection-breach`.
++
++- AWS Marketplace: [Consumption Security API Bundles](https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq)
++- Direct: `POST /developer/bundle-checkout` with `{"bundle": "d", "email": "you@example.com"}`
++
++### Which door
++
++Buying through AWS Marketplace draws the spend down against your existing AWS commitment, so
++procurement sees a line item you have already committed to rather than a new vendor. If you do
++not have an AWS procurement relationship, the direct door is a card and takes a minute.
++
++Per-call rates are identical on both, by construction: a single price table in the API decides
++what a call costs, and each door bills that same number through its own rail. The monthly fee
++buys access to the bundle; calls are billed on top of it either way.
++
+ ## Other surfaces
+ 
+ The same corpus is also available as a STIX 2.1 / TAXII 2.1 feed at `/v1/intel/taxii/`, a

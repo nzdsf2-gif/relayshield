@@ -127,22 +127,70 @@ echo "intel-monitor role: ${INTEL_ROLE:-<could not read>}"
 echo "api role          : ${API_ROLE:-<could not read>}"
 echo
 
-grant() {   # role, policy-name, sid, actions, table
-  [ -n "$1" ] && [ "$1" != "None" ] || { echo "  skip $2 — role unknown"; return 0; }
-  if [ -n "$DRY" ]; then echo "  [dry-run] would attach $2 to $1"; return 0; fi
-  aws iam put-role-policy --role-name "$1" --policy-name "$2" \
-    --policy-document "$(policy_doc "$3" "$4" "$5")" \
-    && echo "  attached $2 to $1" || echo "  FAILED to attach $2"
+# ONE MANAGED POLICY, NOT FOUR INLINE ONES.
+#
+# The first version of this script used put-role-policy four times and every
+# call failed with:
+#   LimitExceeded: Maximum policy size of 10240 bytes exceeded for role
+#                  relayshield-breach-check-role-1sapnwdl
+#
+# That role is already at IAM's 10 KB INLINE policy ceiling, and that ceiling is
+# per-role across ALL inline policies combined — so no amount of shrinking these
+# four would have fit. It is also a ceiling that only gets closer: every future
+# table would hit it again.
+#
+# A customer-managed policy is a separate object with its own quota and does not
+# count toward the inline limit at all. One policy covering all three tables,
+# attached once, also happens to be the right shape here because
+# relayshield-intel-monitor and relayshield-api turn out to share a single
+# execution role.
+POLICY_NAME="RelayShieldIntelTables"
+POLICY_ARN="arn:aws:iam::${ACCT_EXPECTED}:policy/${POLICY_NAME}"
+
+managed_policy_doc() {
+  cat <<JSON
+{"Version":"2012-10-17","Statement":[
+ {"Sid":"IntelTablesWrite","Effect":"Allow",
+  "Action":["dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:GetItem","dynamodb:Query","dynamodb:Scan","dynamodb:DeleteItem"],
+  "Resource":[
+    "arn:aws:dynamodb:${REGION}:${ACCT_EXPECTED}:table/relayshield_ransomware_victims",
+    "arn:aws:dynamodb:${REGION}:${ACCT_EXPECTED}:table/relayshield_operator_identities",
+    "arn:aws:dynamodb:${REGION}:${ACCT_EXPECTED}:table/relayshield_scan_submissions"
+  ]}
+]}
+JSON
 }
 
-grant "$INTEL_ROLE" relayshield-ransomware-victims-write \
-      IntelMonitorWriteVictims '"dynamodb:PutItem"' relayshield_ransomware_victims
-grant "$INTEL_ROLE" relayshield-operator-identities-write \
-      IntelMonitorWriteOperators '"dynamodb:UpdateItem"' relayshield_operator_identities
-grant "$API_ROLE" relayshield-ransomware-victims-read \
-      ApiReadVictims '"dynamodb:Scan","dynamodb:GetItem"' relayshield_ransomware_victims
-grant "$API_ROLE" relayshield-scan-submissions-write \
-      ApiWriteScanSubmissions '"dynamodb:UpdateItem","dynamodb:Scan"' relayshield_scan_submissions
+if [ -n "$DRY" ]; then
+  echo "  [dry-run] would create/update managed policy $POLICY_NAME and attach to the role(s)"
+else
+  if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
+    echo "  policy $POLICY_NAME exists — adding a new default version"
+    # IAM allows 5 versions; prune the oldest non-default before adding, so a
+    # re-run can never fail with LimitExceeded on versions instead.
+    OLD=$(aws iam list-policy-versions --policy-arn "$POLICY_ARN" \
+            --query 'Versions[?IsDefaultVersion==`false`]|[-1].VersionId' --output text 2>/dev/null)
+    if [ -n "$OLD" ] && [ "$OLD" != "None" ]; then
+      COUNT=$(aws iam list-policy-versions --policy-arn "$POLICY_ARN" --query 'length(Versions)' --output text)
+      [ "${COUNT:-0}" -ge 5 ] && aws iam delete-policy-version --policy-arn "$POLICY_ARN" --version-id "$OLD" >/dev/null 2>&1
+    fi
+    aws iam create-policy-version --policy-arn "$POLICY_ARN" \
+      --policy-document "$(managed_policy_doc)" --set-as-default >/dev/null \
+      && echo "  updated $POLICY_NAME" || echo "  FAILED to update $POLICY_NAME"
+  else
+    aws iam create-policy --policy-name "$POLICY_NAME" \
+      --description "RelayShield: DynamoDB access to the victim, operator-identity and scan-submission tables" \
+      --policy-document "$(managed_policy_doc)" >/dev/null \
+      && echo "  created $POLICY_NAME" || echo "  FAILED to create $POLICY_NAME"
+  fi
+
+  # Attach to every distinct role. attach-role-policy is idempotent.
+  for R in $(printf '%s\n%s\n' "$INTEL_ROLE" "$API_ROLE" | sort -u); do
+    [ -n "$R" ] && [ "$R" != "None" ] || continue
+    aws iam attach-role-policy --role-name "$R" --policy-arn "$POLICY_ARN" \
+      && echo "  attached $POLICY_NAME to $R" || echo "  FAILED to attach to $R"
+  done
+fi
 
 echo
 echo "=============================================================="
@@ -155,6 +203,15 @@ for t in relayshield_ransomware_victims relayshield_operator_identities relayshi
           --query Count --output text 2>/dev/null || echo "-")
   printf "  %-38s %-10s items=%s\n" "$t" "$status" "$count"
 done
+echo
+echo "Attached policies on the execution role(s):"
+for R in $(printf '%s\n%s\n' "$INTEL_ROLE" "$API_ROLE" | sort -u); do
+  [ -n "$R" ] && [ "$R" != "None" ] || continue
+  echo "  $R:"
+  aws iam list-attached-role-policies --role-name "$R" \
+      --query 'AttachedPolicies[].PolicyName' --output text 2>/dev/null | tr '\t' '\n' | sed 's/^/    /'
+done
+
 echo
 echo "Next: the victim table stays empty until the intel monitor runs again."
 echo "The digest line 'Ransomware victims named: N (M stored)' is the read on it."

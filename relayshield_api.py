@@ -5497,6 +5497,13 @@ def handle_report_view(report_id: str) -> dict:
 # }
 
 RANSOMWARE_TABLE_API  = "relayshield_intel_ransomware"
+# Distinct from the table above, and deliberately so. relayshield_intel_ransomware
+# is the leak-site scrape: PK domain, SK group, a domain the gang NAMED. This one
+# is the INTEL-2 Telegram sweep: PK victim_name, SK seen_ts, regex-extracted org
+# names carrying confidence="unverified". They are different evidence with
+# different standing, they must never be merged into one list, and only the
+# leak-site table may be spoken about as a claim by a named group.
+RANSOM_VICTIMS_TABLE_API = "relayshield_ransomware_victims"
 MITRE_ATTACK_TABLE    = "relayshield_mitre_attack"
 WEBHOOK_MAX_TIMEOUT   = 5   # seconds — webhook delivery must not block main response
 
@@ -6800,10 +6807,131 @@ def _ioc_confidence(source: str, seen_ts: str) -> float:
     return round(max(0.40, base - decay), 2)
 
 
+def _normalise_victim_key(raw: str) -> str:
+    """Match key for a victim name, identical in shape to the collector's.
+
+    Must stay in step with _victim_keys() in relayshield_intel_monitor.py: the
+    collector writes match_keys with that normalisation, and a lookup that
+    normalises differently silently matches nothing.
+    """
+    return re.sub(r"[^a-z0-9]+", "", (raw or "").lower())
+
+
+def _ransomware_corpus_listing(org: str, days: int, limit: int) -> dict:
+    """Recent corpus-wide victim listing from the INTEL-2 Telegram sweep.
+
+    Every row here is an UNVERIFIED LEAD. The names are regex-extracted from
+    criminal channel posts and were never confirmed against a leak site, so
+    this is the one ransomware surface that must not be phrased as a breach.
+    The domain path keeps that distinction: it answers from the leak-site
+    table, where a named group actually claimed the domain.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    want   = _normalise_victim_key(org)
+
+    scan_kwargs: dict = {
+        "FilterExpression": boto3.dynamodb.conditions.Attr("seen_ts").gte(cutoff),
+    }
+
+    # Bounded like every other scan in this file: a corpus sweep is unbounded by
+    # nature and the read cost of a deep page runs away without a ceiling.
+    MAX_SCAN_PAGES = 8
+    POOL_TARGET    = 2000
+    unique: dict[str, dict] = {}
+    pages    = 0
+    complete = True
+    try:
+        while pages < MAX_SCAN_PAGES:
+            resp = dynamodb.Table(RANSOM_VICTIMS_TABLE_API).scan(**scan_kwargs)
+            pages += 1
+            for item in resp.get("Items", []):
+                name = item.get("victim_name", "")
+                if not name:
+                    continue
+                if want:
+                    keys = {str(k) for k in item.get("match_keys", [])}
+                    if want not in keys and want != _normalise_victim_key(name):
+                        continue
+                prev = unique.get(name)
+                if prev is None or str(item.get("seen_ts", "")) > str(prev.get("seen_ts", "")):
+                    unique[name] = item
+            nxt = resp.get("LastEvaluatedKey")
+            if len(unique) >= POOL_TARGET or not nxt:
+                complete = not nxt
+                break
+            scan_kwargs["ExclusiveStartKey"] = nxt
+        else:
+            complete = False
+    except Exception as exc:
+        # The collector's table is created out of band. Until it exists this is
+        # an empty corpus, not a server fault -- say so plainly so the caller
+        # can render "nothing collected yet" instead of an error, and so the
+        # endpoint starts working the moment the table appears.
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+        if code == "ResourceNotFoundException":
+            logger.warning("ransomware corpus listing: %s does not exist yet",
+                           RANSOM_VICTIMS_TABLE_API)
+            return _ok({
+                "mode":              "corpus_listing",
+                "listing_available": False,
+                "reason":            "victim corpus is not yet collecting — no listing available",
+                "org":               org or None,
+                "window_days":       days,
+                "count":             0,
+                "victims":           [],
+                "confidence":        "unverified",
+                "checked_at":        datetime.now(timezone.utc).isoformat(),
+            })
+        logger.exception("ransomware corpus listing failed org=%s: %s", org, exc)
+        return _err("ransomware corpus listing failed — internal error", 500)
+
+    rows = sorted(unique.values(), key=lambda i: str(i.get("seen_ts", "")), reverse=True)[:limit]
+    victims = [{
+        "name":       r.get("display_name") or r.get("victim_name", ""),
+        "seen_ts":    r.get("seen_ts", ""),
+        "channel":    r.get("channel", ""),
+        "category":   r.get("category", ""),
+        "confidence": r.get("confidence", "unverified"),
+    } for r in rows]
+
+    logger.info("ransomware corpus listing org=%s days=%d rows=%d complete=%s",
+                org or "-", days, len(victims), complete)
+    return _ok({
+        "mode":              "corpus_listing",
+        "listing_available": True,
+        "org":               org or None,
+        "window_days":       days,
+        "count":             len(victims),
+        "truncated":         not complete,
+        "victims":           victims,
+        "confidence":        "unverified",
+        "disclaimer": (
+            "Every row is an unverified lead extracted from criminal Telegram channels, "
+            "not a confirmed breach. Names are matched by regex and were never checked "
+            "against a leak site. Confirm independently before acting on any entry. "
+            "For a claim by a named ransomware group, query a specific domain instead."
+        ),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 def handle_ransomware_risk(params: dict) -> dict:
     domain = (params.get("domain") or "").strip().lower().removeprefix("www.")
+
+    # An empty box or a bare organisation name is a corpus-wide listing request,
+    # not a malformed domain. Rejecting it was the whole reason the demo's
+    # Ransomware Victims tab could only answer domain lookups.
     if not domain or "." not in domain:
-        return _err("domain is required (e.g. acme.com)")
+        org = (params.get("org") or "").strip() or domain
+        try:
+            days = int(params.get("days") or 30)
+        except (TypeError, ValueError):
+            days = 30
+        try:
+            limit = int(params.get("limit") or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        return _ransomware_corpus_listing(org, max(1, min(days, 180)), max(1, min(limit, 500)))
 
     # Check victim list
     try:

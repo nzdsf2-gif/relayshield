@@ -202,3 +202,60 @@ Enter each supplier **as its name appears on leak sites**. Matching is exact on 
 with corporate suffixes stripped, so "Acme Corp" matches "Acme", "Acme Corp." and "Acme
 Corporation" — but *not* "Acme Technologies", which is a different company. A longer, more
 descriptive name than the leak site uses will not match.
+
+---
+
+## 7. Cloudflare Worker drift — the TI demo (added 2026-08-23)
+
+**The same drift class as the Lambdas, and there is no drift check for Workers at all.**
+
+The deployed `relayshield-ti-demo` worker has **nine** tabs, including **Ransomware Victims**.
+`cloudflare_worker_ti_demo.js` on `main` has **eight**, no `data-tab` attributes and no leak-site
+markup. The tab was written and deployed by hand and never committed.
+
+The red "The corpus-wide listing needs the next API deploy" banner is text in that **deployed**
+worker, not in the repo and not in the API. It will keep showing until the worker is updated, no
+matter what the API does.
+
+### Recover the live worker before anything redeploys over it
+
+Same rule as the Lambdas: `wrangler deploy` publishes from the repo and would delete whatever else
+is live in that worker. **Do not deploy `cloudflare_worker_ti_demo.js` until the live copy is in
+git.**
+
+The sandbox cannot reach `*.workers.dev` (egress 403 on CONNECT), so this runs on the Mac:
+
+    # Option 1 — Cloudflare API. Returns the deployed script body.
+    curl -sS "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/relayshield-ti-demo" \
+      -H "Authorization: Bearer $CF_API_TOKEN" \
+      -o live_ti_demo.js
+
+    # Option 2 — dashboard, no token needed.
+    # Workers & Pages -> relayshield-ti-demo -> Edit code -> select all -> save as live_ti_demo.js
+
+Then diff it against the repo copy and commit the live version first:
+
+    diff -u cloudflare_worker_ti_demo.js live_ti_demo.js | head -100
+
+Commit the live bytes verbatim as their own commit, exactly as `relayshield_api.py` was recovered
+on 2026-08-23, and only then apply changes on top.
+
+### What the API now expects
+
+`handle_ransomware_risk` supports the corpus-wide listing as of `fa83bb5`. Once the worker source
+is in git, its `/demo/*` route for this tab needs to call the API with an empty or non-domain
+`domain` and render:
+
+    { "mode": "corpus_listing", "listing_available": bool, "count": n, "window_days": n,
+      "victims": [ { "name", "seen_ts", "channel", "category", "confidence" } ],
+      "confidence": "unverified", "disclaimer": "...", "truncated": bool }
+
+`listing_available: false` means the victims table does not exist yet (see §6) — render
+"nothing collected yet", not an error. The `disclaimer` field must be shown: every row is an
+unverified lead, not a confirmed breach.
+
+### Also worth doing
+
+Extend `lambda_drift_check.yml`, or add a sibling, to diff deployed Workers against the repo. The
+Lambda check would not have caught this because it only knows about Lambda functions, and the
+worker drifted for the same reason the API did.

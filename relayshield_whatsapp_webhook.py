@@ -521,13 +521,104 @@ def _analyze_sms_text(text: str) -> dict:
         ("norton", "Norton"), ("mcafee", "McAfee"), ("kaspersky", "Kaspersky"),
         ("avg", "AVG"), ("avast", "Avast"), ("malwarebytes", "Malwarebytes"),
         ("pc support", "PC Support"), ("tech support", "Tech Support"),
+        # --- International couriers / postal operators (added 2026-08-19) ---
+        # A parcel-fee lure impersonates whatever carrier is local to the
+        # victim. A US-only carrier list is why the SPL case scored zero.
+        ("dhl", "DHL"), ("tnt", "TNT"), ("dpd", "DPD"), ("gls", "GLS"),
+        ("aramex", "Aramex"), ("smsa", "SMSA Express"), ("naqel", "Naqel Express"),
+        ("spl", "SPL (Saudi Post)"), ("saudi post", "Saudi Post"),
+        ("emirates post", "Emirates Post"), ("qatar post", "Qatar Post"),
+        ("royal mail", "Royal Mail"), ("evri", "Evri"), ("hermes", "Hermes"),
+        ("yodel", "Yodel"), ("parcelforce", "Parcelforce"), ("an post", "An Post"),
+        ("postnl", "PostNL"), ("poste italiane", "Poste Italiane"),
+        ("correos", "Correos"), ("correios", "Correios"),
+        ("la poste", "La Poste"), ("colissimo", "Colissimo"),
+        ("chronopost", "Chronopost"), ("deutsche post", "Deutsche Post"),
+        ("canada post", "Canada Post"), ("purolator", "Purolator"),
+        ("australia post", "Australia Post"), ("auspost", "AusPost"),
+        ("nz post", "NZ Post"), ("singpost", "SingPost"),
+        ("pos malaysia", "Pos Malaysia"), ("j&t", "J&T Express"),
+        ("sf express", "SF Express"), ("china post", "China Post"),
+        ("cainiao", "Cainiao"), ("india post", "India Post"),
+        ("blue dart", "Blue Dart"), ("bluedart", "Blue Dart"),
+        ("delhivery", "Delhivery"), ("ptt kargo", "PTT Kargo"),
+        # --- Non-US banks / payment rails ---
+        ("hsbc", "HSBC"), ("barclays", "Barclays"), ("lloyds", "Lloyds"),
+        ("natwest", "NatWest"), ("halifax", "Halifax"), ("monzo", "Monzo"),
+        ("revolut", "Revolut"), ("santander", "Santander"), ("bbva", "BBVA"),
+        ("caixabank", "CaixaBank"), ("deutsche bank", "Deutsche Bank"),
+        ("rabobank", "Rabobank"), ("emirates nbd", "Emirates NBD"),
+        ("al rajhi", "Al Rajhi Bank"), ("alrajhi", "Al Rajhi Bank"),
+        ("saudi national bank", "Saudi National Bank"), ("riyad bank", "Riyad Bank"),
+        ("qnb", "QNB"), ("adcb", "ADCB"), ("mashreq", "Mashreq"),
+        ("interac", "Interac"), ("commonwealth bank", "Commonwealth Bank"),
+        ("westpac", "Westpac"), ("anz", "ANZ"), ("icici", "ICICI"),
+        ("hdfc", "HDFC"), ("paytm", "Paytm"), ("m-pesa", "M-Pesa"),
+        ("mpesa", "M-Pesa"), ("nubank", "Nubank"),
+        # --- Non-US carriers / telcos ---
+        ("vodafone", "Vodafone"), ("stc", "STC"), ("mobily", "Mobily"),
+        ("zain", "Zain"), ("etisalat", "Etisalat"), ("airtel", "Airtel"),
+        ("jio", "Jio"), ("mtn", "MTN"), ("safaricom", "Safaricom"),
+        ("telstra", "Telstra"), ("optus", "Optus"), ("telus", "Telus"),
+        ("swisscom", "Swisscom"), ("movistar", "Movistar"), ("telcel", "Telcel"),
+        # --- Non-US government / tax authorities ---
+        ("hmrc", "HMRC"), ("dvla", "DVLA"), ("dwp", "DWP"), ("gov.uk", "GOV.UK"),
+        ("service canada", "Service Canada"), ("absher", "Absher"),
+        ("tawakkalna", "Tawakkalna"), ("nhs", "NHS"),
+        # --- Non-US exchanges / wallets ---
+        ("bybit", "Bybit"), ("okx", "OKX"), ("kucoin", "KuCoin"),
+        ("bitfinex", "Bitfinex"), ("trust wallet", "Trust Wallet"),
+        ("phantom", "Phantom"), ("trezor", "Trezor"),
     ]
+    # Word-boundary match, not substring: substring matching silently produced
+    # false positives ("ups" inside "groups"/"signups") and would have made the
+    # short international tokens above ("spl", "dpd", "anz") unusable.
     for keyword, display in BRAND_PATTERNS:
-        if keyword in t:
-            brands.append(display)
+        if _re.search(r"(?<![a-z0-9])" + _re.escape(keyword) + r"(?![a-z0-9])", t):
+            if display not in brands:
+                brands.append(display)
 
     if brands:
         flags.append(f"impersonates a known brand: {', '.join(brands)}")
+
+    # --- Parcel / delivery-fee lure (added 2026-08-19) ---
+    # Mirrors the Telegram fix after a real miss reported by Arjen: an OCR'd
+    # SPL (Saudi Post) "a handling fee is required to complete the delivery"
+    # screenshot scored ZERO flags under every category above.
+    DELIVERY_CONTEXT = [
+        "shipment", "parcel", "package", "delivery", "courier", "tracking",
+        "consignment", "customs", "shipping", "postal", "post office",
+        "pickup point", "collection point", "regional facility",
+    ]
+    FEE_DEMAND = [
+        "handling fee", "customs fee", "customs duty", "customs charge",
+        "delivery fee", "shipping fee", "service fee", "clearance fee",
+        "import fee", "import duty", "unpaid fee", "outstanding fee",
+        "small fee", "fee is required", "fee to complete", "pay for fees",
+        "pay the fee", "pay this fee", "amount due", "payment is required",
+        "payment required", "complete the delivery", "complete your delivery",
+        "redelivery", "re-delivery", "reschedule your delivery",
+        "reschedule the delivery", "view payment details", "unpaid shipping",
+        "incomplete address", "address is incomplete",
+    ]
+    # Any currency, not just dollars - the missed message was priced in SAR.
+    CURRENCY_AMOUNT = _re.compile(
+        r"(?:(?:sar|aed|qar|kwd|bhd|omr|jod|egp|usd|eur|gbp|cad|aud|nzd|chf|sek|nok"
+        r"|dkk|pln|try|inr|pkr|bdt|lkr|ngn|kes|zar|ghs|mad|dzd|tnd|myr|sgd|thb|php"
+        r"|idr|vnd|jpy|cny|krw|brl|mxn|ars|clp|cop)\s?\d|[$€£¥₹₦₺₩₪₱฿]\s?\d)",
+        _re.IGNORECASE,
+    )
+    delivery_hits = [phrase for phrase in DELIVERY_CONTEXT if phrase in t]
+    fee_hits = [phrase for phrase in FEE_DEMAND if phrase in t]
+    fee_lure = bool(fee_hits or (delivery_hits and CURRENCY_AMOUNT.search(text)))
+    if fee_lure:
+        detail = fee_hits[0] if fee_hits else delivery_hits[0]
+        flags.append(
+            f"parcel/delivery fee lure ('{detail}') — a delivery notice that asks for "
+            "a payment is the most-copied scam template in the world; real couriers collect "
+            "customs or handling charges through their own app or at the door, never through "
+            "a link in an unexpected message"
+        )
 
     # --- Callback phone number (vishing escalation) ---
     phone_matches = _re.findall(
@@ -653,7 +744,9 @@ def _analyze_sms_text(text: str) -> dict:
 
     # Severity rating
     n = len(flags)
-    severity = "HIGH" if n >= 3 else "MEDIUM" if n >= 1 else "LOW"
+    # A parcel/delivery fee demand is HIGH on its own: in an unsolicited
+    # message it is essentially never legitimate.
+    severity = "HIGH" if (n >= 3 or fee_lure) else "MEDIUM" if n >= 1 else "LOW"
 
     return {
         "flags": flags,

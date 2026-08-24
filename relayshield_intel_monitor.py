@@ -309,10 +309,28 @@ _RE_SHA1    = re.compile(r"\b[a-fA-F0-9]{40}\b")
 _RE_URL     = re.compile(r"https?://[^\s<>\"']{10,}")
 _RE_ONION   = re.compile(r"\b[a-z2-7]{16,56}\.onion\b", re.IGNORECASE)
 _RE_CVE     = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+
+# Corrected 2026-08-24: this produced garbage like "rs Remote Control." and
+# "d Linux Machines Into SOCKS5 Proxies..." on the TI demo's Ransomware
+# Victims tab. Two compounding bugs. First, global re.IGNORECASE made the
+# capture group's [A-Z] match ANY case, so it no longer required a real
+# capitalised word to start the name. Second, "hacked?"/"leaked?"/
+# "compromised?" had no required separator (\s+) before the capture and made
+# their own final letter optional, so the engine could match just "hacke"
+# inside "Hackers" or "compromise" inside "compromised" and push the leftover
+# letter ("rs", "d") into the capture as if it were the start of a victim
+# name -- reproduced exactly against "Hackers shut down a UK power plant..."
+# and "...group compromised the recovery process...". Fixed by requiring the
+# keyword as a whole word (\b, no trailing "?"), a real \s+ separator before
+# the capture, and keeping [A-Z] case-sensitive (only the keyword itself is
+# case-folded, via the scoped (?i:...) group) so the capture only starts on
+# an actual capitalised word. The capture itself is now a bounded run of
+# capitalised words (optionally joined by "of"/"and"/"the"/"&") rather than a
+# raw character count, which also stops it running on into the rest of the
+# sentence the way the old {3,50}-char version did.
 _RE_RANSOM_VICTIM = re.compile(
-    r"(?:hacked?|leaked?|compromised?|victim[s]?[:,]?\s*|added to our blog[:\s]*)"
-    r"([A-Z][A-Za-z0-9\s&\-\.]{3,50}(?:Inc\.?|LLC|Ltd\.?|Corp\.?|Group|Co\.?)?)",
-    re.IGNORECASE,
+    r"\b(?i:hacked|leaked|compromised|victims?[:,]?|added to our blog[:,]?)\s+"
+    r"([A-Z][A-Za-z0-9&\-\.]*(?:(?:\s+(?:of|and|the|&))*\s+[A-Z][A-Za-z0-9&\-\.]*){0,6})"
 )
 _RE_TG_CHANNEL = re.compile(r"@([a-zA-Z][a-zA-Z0-9_]{4,31})")  # @mention discovery
 

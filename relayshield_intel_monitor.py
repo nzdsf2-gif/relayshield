@@ -84,7 +84,18 @@ logger.setLevel(logging.INFO)
 INTEL_SEEN_TABLE      = "relayshield_intel_seen"
 LOCK_TABLE            = "relayshield_intel_monitor_lock"
 LOCK_ID               = "singleton"
-LOCK_TTL_SECONDS      = 280  # just under the 300s Lambda timeout
+# Was 280s, "just under" this Lambda's own 300s timeout -- backwards. A lock
+# that expires BEFORE Lambda's hard kill opens a window where a run still
+# alive (mid FloodWaitError sleep, slow channel, etc.) has its lock stolen by
+# the next invocation while its own TelegramClient connection is still open,
+# producing two live sessions on two IPs -- Telegram's AuthKeyDuplicatedError.
+# relayshield_intel_discovery.py now shares this same LOCK_ID (2026-08-24,
+# see its comment) after that exact race fired via a different function
+# holding a different lock_id in this same table. TTL must exceed the LONGER
+# of the two Lambda timeouts sharing this lock -- discovery's 600s, not this
+# function's own 300s -- plus a safety margin. Keep both files' constants in
+# sync.
+LOCK_TTL_SECONDS      = 620
 INTEL_ALERTS_TABLE    = "relayshield_intel_alerts"
 INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
 # Ransomware leak-site victims live in their OWN table, never in the IOC table.

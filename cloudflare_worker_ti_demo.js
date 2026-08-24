@@ -672,17 +672,32 @@ footer a{color:#00B5A5;text-decoration:none}
 <div class="container">
   <div class="hero">
     <h1>Live Threat Intelligence</h1>
-    <p>Query 5,400,000+ indicators, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
+    <p>Query 500,000+ distinct indicators drawn from 5,800,000+ citations, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
   </div>
 
   <div class="corpus-stats">
-    <!-- Metrics verified live against DynamoDB 2026-08-12:
-         intel_iocs 5,483,159 · malpedia_families 3,802 · intel_channels active=true 89 ·
-         mitre_attack sk=info 193. Re-verify before quoting these anywhere. -->
-    <div class="stat-card"><div class="stat-num">5.4M+</div><div class="stat-label">IOC indicators</div></div>
+    <!-- CORRECTED 2026-08-22. The old cards read "5.4M+ IOC indicators" and
+         "89 Active criminal Telegram channels".
+
+         5.4M was CITATIONS (sightings: this domain, in this channel, on this
+         date) presented as indicators. The deduplicated corpus is ~500K. Both
+         numbers are real and they measure different things, so the cards now
+         show both and label them — a technical buyer asks which one you mean,
+         and quoting the bigger number as though it were the smaller is the
+         mistake that nearly went out to the blockchain-analytics segment.
+
+         The channel count was measured 2026-08-12 and was already wrong by
+         2026-08-20, when the digest read "95 of 122 active, 27 unreachable".
+         A number that decays between measurements does not belong on a page
+         nobody re-measures, so it is replaced by the collection-lead claim,
+         which is durable and is the thing that actually differentiates.
+
+         Malware families (3,802) and MITRE groups (193) measured 2026-08-12.
+         Re-measure with tools/export_intel_sample.py before quoting anywhere. -->
+    <div class="stat-card"><div class="stat-num">500K+</div><div class="stat-label">Distinct indicators</div></div>
+    <div class="stat-card"><div class="stat-num">5.8M+</div><div class="stat-label">Citations (sightings)</div></div>
     <div class="stat-card"><div class="stat-num">3,800+</div><div class="stat-label">Malware families</div></div>
-    <div class="stat-card"><div class="stat-num">89</div><div class="stat-label">Active criminal Telegram channels</div></div>
-    <div class="stat-card"><div class="stat-num">193</div><div class="stat-label">MITRE ATT&CK groups</div></div>
+    <div class="stat-card"><div class="stat-num">24-72h</div><div class="stat-label">Typical lead over public feeds</div></div>
   </div>
 
   <div class="tabs">
@@ -1108,6 +1123,7 @@ ${renderAttackTimeline.toString()}
 ${downloadReport.toString()}
 ${renderActor.toString()}
 ${renderTrending.toString()}
+${renderRansomware.toString()}
 ${renderNHI.toString()}
 ${renderLLMJacking.toString()}
 ${riskGaugeSvg.toString()}

@@ -1,8 +1,18 @@
-var __defProp = Object.defineProperty;
-var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
+/**
+ * RelayShield Threat Intelligence Demo Portal
+ * Cloudflare Worker — deploy to: relayshield-ti-demo.relayshieldadmin.workers.dev
+ *
+ * Token-gated: ?token=<DEMO_TOKEN>
+ * Demo API key is rate-limited and read-only. Both the API key and the page
+ * access token are supplied as Worker secrets, not committed — this repo is
+ * public. To set or rotate them:
+ *   wrangler secret put DEMO_KEY   --config wrangler.ti-demo.toml
+ *   wrangler secret put DEMO_TOKEN --config wrangler.ti-demo.toml
+ * If either secret is unset the Worker fails closed: no literal fallback.
+ */
 
-// cloudflare_worker_ti_demo.js
-var API_BASE = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod";
+const API_BASE   = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod";
+
 async function _parseApiResponse(resp) {
   const text = await resp.text();
   let data;
@@ -10,47 +20,57 @@ async function _parseApiResponse(resp) {
     data = JSON.parse(text);
   } catch (e) {
     if (!resp.ok) {
-      return { error: "Upstream lookup temporarily unavailable (rate-limited or busy) \u2014 please try again in a moment." };
+      return { error: "Upstream lookup temporarily unavailable (rate-limited or busy) — please try again in a moment." };
     }
     return { error: "Unexpected response from API" };
   }
   if (!resp.ok) {
-    const msg = String(data.error || "");
-    if (resp.status === 404 || /unknown endpoint/i.test(msg)) {
-      return { error: "This capability is not live on the API yet \u2014 the demo page is ahead of the deployed backend. Nothing is broken; check back once the next API deploy has run." };
-    }
-    return { error: msg || "Upstream lookup temporarily unavailable \u2014 please try again in a moment." };
+    return { error: data.error || "Upstream lookup temporarily unavailable — please try again in a moment." };
   }
   return data.data || data;
 }
-__name(_parseApiResponse, "_parseApiResponse");
+
 async function callAPI(env, path, body) {
-  if (!env.DEMO_KEY) return { error: "Demo is not configured \u2014 DEMO_KEY secret is not set." };
+  if (!env.DEMO_KEY) return { error: "Demo is not configured — DEMO_KEY secret is not set." };
   try {
     const resp = await fetch(`${API_BASE}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-RS-API-KEY": env.DEMO_KEY
+        "X-RS-API-KEY": env.DEMO_KEY,
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     });
     return await _parseApiResponse(resp);
   } catch (e) {
-    return { error: "Network error \u2014 please try again in a moment." };
+    return { error: "Network error — please try again in a moment." };
   }
 }
-__name(callAPI, "callAPI");
+
+async function callAPIGet(env, path, params = {}) {
+  if (!env.DEMO_KEY) return { error: "Demo is not configured — DEMO_KEY secret is not set." };
+  const qs = new URLSearchParams(params).toString();
+  const url = `${API_BASE}${path}${qs ? "?" + qs : ""}`;
+  try {
+    const resp = await fetch(url, {
+      headers: { "X-RS-API-KEY": env.DEMO_KEY },
+    });
+    return await _parseApiResponse(resp);
+  } catch (e) {
+    return { error: "Network error — please try again in a moment." };
+  }
+}
+
 function grade_color(grade) {
   const colors = { A: "#22c55e", B: "#86efac", C: "#facc15", D: "#f97316", F: "#ef4444" };
   return colors[grade] || "#94a3b8";
 }
-__name(grade_color, "grade_color");
+
 function risk_color(level) {
   const colors = { LOW: "#22c55e", MEDIUM: "#facc15", HIGH: "#f97316", CRITICAL: "#ef4444" };
   return colors[level] || "#94a3b8";
 }
-__name(risk_color, "risk_color");
+
 function renderIdentityRisk(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   const g = data.grade || "?";
@@ -58,12 +78,14 @@ function renderIdentityRisk(data) {
   const level = data.risk_level || "UNKNOWN";
   const dims = data.dimension_scores || {};
   const factors = data.risk_factors || [];
+
   const dimRows = Object.entries(dims).map(([k, v]) => `
     <div class="dim-row">
-      <span class="dim-name">${k.replace(/_/g, " ").replace(/\bcve\b/gi, "CVE").replace(/\bioc\b/gi, "IOC").replace(/\b\w/g, (c) => c.toUpperCase())}</span>
-      <div class="dim-bar-wrap"><div class="dim-bar" style="width:${Math.min(100, v / 25 * 100)}%;background:${v >= 20 ? "#ef4444" : v >= 12 ? "#f97316" : v >= 6 ? "#facc15" : v > 0 ? "#22c55e" : "#1e3a5f"}"></div></div>
+      <span class="dim-name">${k.replace(/_/g," ").replace(/\bcve\b/gi,"CVE").replace(/\bioc\b/gi,"IOC").replace(/\b\w/g,c=>c.toUpperCase())}</span>
+      <div class="dim-bar-wrap"><div class="dim-bar" style="width:${Math.min(100,(v/25)*100)}%;background:${v>=20?"#ef4444":v>=12?"#f97316":v>=6?"#facc15":v>0?"#22c55e":"#1e3a5f"}"></div></div>
       <span class="dim-val">${v}</span>
     </div>`).join("");
+
   return `
     <div class="result-card">
       <div class="score-hero">
@@ -79,13 +101,14 @@ function renderIdentityRisk(data) {
         <span style="font-size:10px;color:#4a7fa5;font-weight:600;letter-spacing:.5px">SCORE</span>
       </div>
       <div class="dims">${dimRows}</div>
-      ${factors.length ? `<div class="section-label">Risk Factors</div><ul class="factors">${factors.map((f) => `<li>${f}</li>`).join("")}</ul>` : ""}
+      ${factors.length ? `<div class="section-label">Risk Factors</div><ul class="factors">${factors.map(f=>`<li>${f}</li>`).join("")}</ul>` : ""}
       <div class="recommendation">${data.recommendation || ""}</div>
       ${renderAttackTimeline(dims, score)}
-      <button class="pdf-btn" onclick="downloadReport()">\u2B07 Download Report</button>
+      <button class="pdf-btn" onclick="downloadReport()">⬇ Download Report</button>
     </div>`;
 }
-__name(renderIdentityRisk, "renderIdentityRisk");
+
+
 function renderBulkIdentity(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   const results = data.results || [];
@@ -95,10 +118,10 @@ function renderBulkIdentity(data) {
   const high = data.high_count || 0;
   return `<div class="result-card">
     <div class="trending-header" style="margin-bottom:16px">${summary}</div>
-    ${results.map((r) => {
-    const domainColor = risk_color(r.domain_risk || "LOW");
-    const agents = r.agents || [];
-    return `<div style="margin-bottom:20px">
+    ${results.map(r => {
+      const domainColor = risk_color(r.domain_risk || "LOW");
+      const agents = r.agents || [];
+      return `<div style="margin-bottom:20px">
         <div class="vendor-header">
           <span class="vendor-domain">${r.domain}</span>
           <span class="vendor-badge" style="background:${domainColor}20;color:${domainColor};border:1px solid ${domainColor}">
@@ -109,135 +132,140 @@ function renderBulkIdentity(data) {
           <span style="font-size:10px;color:#4a7fa5;font-weight:600;letter-spacing:.5px">SCORE</span>
         </div>
         <div class="dims" style="margin:0 0 8px 0">
-          ${Object.entries(r.dimension_scores || {}).map(([k, v]) => `
+          ${Object.entries(r.dimension_scores||{}).map(([k,v])=>`
             <div class="dim-row">
-              <span class="dim-name">${k.replace(/_/g, " ").replace(/\bcve\b/gi, "CVE").replace(/\bioc\b/gi, "IOC").replace(/\b\w/g, (c) => c.toUpperCase())}</span>
-              <div class="dim-bar-wrap"><div class="dim-bar" style="width:${Math.min(100, v / 25 * 100)}%;background:${v >= 20 ? "#ef4444" : v >= 12 ? "#f97316" : v >= 6 ? "#facc15" : v > 0 ? "#22c55e" : "#1e3a5f"}"></div></div>
+              <span class="dim-name">${k.replace(/_/g," ").replace(/\bcve\b/gi,"CVE").replace(/\bioc\b/gi,"IOC").replace(/\b\w/g,c=>c.toUpperCase())}</span>
+              <div class="dim-bar-wrap"><div class="dim-bar" style="width:${Math.min(100,(v/25)*100)}%;background:${v>=20?"#ef4444":v>=12?"#f97316":v>=6?"#facc15":v>0?"#22c55e":"#1e3a5f"}"></div></div>
               <span class="dim-val">${v}</span>
             </div>`).join("")}
         </div>
-        ${renderAttackTimeline(r.dimension_scores || {}, r.domain_score || 0)}
+        ${renderAttackTimeline(r.dimension_scores||{}, r.domain_score||0)}
         ${(() => {
-      const maxAgent = agents.length ? Math.max(...agents.map((a) => a.risk_score || 0)) : 0;
-      const domScore = r.domain_score || 0;
-      if (maxAgent > domScore) {
-        const elevColor = maxAgent >= 70 ? "#ef4444" : maxAgent >= 45 ? "#f97316" : "#facc15";
-        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#0f1f3a;border-radius:6px;border:1px solid ${elevColor}40;margin-bottom:8px">
+          const maxAgent = agents.length ? Math.max(...agents.map(a=>a.risk_score||0)) : 0;
+          const domScore = r.domain_score || 0;
+          if (maxAgent > domScore) {
+            const elevColor = maxAgent >= 70 ? "#ef4444" : maxAgent >= 45 ? "#f97316" : "#facc15";
+            return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#0f1f3a;border-radius:6px;border:1px solid ${elevColor}40;margin-bottom:8px">
               <span style="font-size:11px;color:#94a3b8">Domain baseline</span>
               <span style="font-size:12px;color:#94a3b8;font-weight:600">${domScore}/100</span>
-              <span style="font-size:11px;color:#4a7fa5">\u2192</span>
+              <span style="font-size:11px;color:#4a7fa5">→</span>
               <span style="font-size:12px;color:${elevColor};font-weight:700">Elevated ${maxAgent}/100</span>
               <span style="font-size:11px;color:#94a3b8">due to agent credential exposure</span>
             </div>`;
-      }
-      return "";
-    })()}
+          }
+          return "";
+        })()}
         ${agents.length ? `<div class="section-label">AI Agent / Service Account Identities</div>
-        <div class="ioc-list">${agents.map((a) => {
-      const ac = risk_color(a.risk_level || "LOW");
-      return `<div style="padding:8px 0;border-bottom:1px solid #1e3a5f1a">
+        <div class="ioc-list">${agents.map(a => {
+          const ac = risk_color(a.risk_level||"LOW");
+          return `<div style="padding:8px 0;border-bottom:1px solid #1e3a5f1a">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-              <span class="ioc-type" style="background:${ac}20;color:${ac};border:1px solid ${ac};flex-shrink:0">${a.risk_level || "LOW"}</span>
+              <span class="ioc-type" style="background:${ac}20;color:${ac};border:1px solid ${ac};flex-shrink:0">${a.risk_level||"LOW"}</span>
               <span style="font-size:13px;color:#e2e8f0;font-weight:600;font-family:monospace;flex:1;min-width:0;word-break:break-all">${a.identity}</span>
-              <span class="ioc-malware" style="margin-left:auto">${a.risk_score || 0}/100</span>
+              <span class="ioc-malware" style="margin-left:auto">${a.risk_score||0}/100</span>
             </div>
-            ${(a.risk_factors || []).length ? `<div style="font-size:12px;color:#94a3b8;padding-left:4px">${a.risk_factors[0]}</div>` : ""}
-          </div>`;
-    }).join("")}</div>` : ""}
-      </div>`;
-  }).join("")}
+            ${(a.risk_factors||[]).length ? `<div style="font-size:12px;color:#94a3b8;padding-left:4px">${a.risk_factors[0]}</div>` : ""}
+          </div>`;}).join("")}</div>` : ""}
+      </div>`;}).join("")}
   </div>`;
 }
-__name(renderBulkIdentity, "renderBulkIdentity");
+
 function renderLLMJacking(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   if (!data.found) return `
     <div class="result-card">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <span style="font-size:32px;color:#22c55e">\u2713</span>
+        <span style="font-size:32px;color:#22c55e">✓</span>
         <div>
           <div style="font-weight:700;color:#fff;font-size:16px">No Exposed LLM/AI Provider Keys Detected</div>
           <div style="color:#64748b;font-size:13px">${data.domains_checked} domain(s) scanned against stealer log corpus</div>
         </div>
       </div>
-      <div class="recommendation">${data.recommendation || ""}</div>
+      <div class="recommendation">${data.recommendation||""}</div>
     </div>`;
+
   const findings = data.findings || [];
-  const sevColor = { CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#facc15", LOW: "#22c55e" };
-  const critical = findings.filter((f) => f.severity === "CRITICAL").length;
-  const providers = (data.providers_affected || []).join(", ");
+  const sevColor = {CRITICAL:"#ef4444",HIGH:"#f97316",MEDIUM:"#facc15",LOW:"#22c55e"};
+  const critical = findings.filter(f=>f.severity==="CRITICAL").length;
+  const providers = (data.providers_affected||[]).join(", ");
+
   return `<div class="result-card">
     <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px">
-      <span style="font-size:32px;color:#ef4444">\u26A0</span>
+      <span style="font-size:32px;color:#ef4444">⚠</span>
       <div>
         <div style="font-weight:700;color:#fff;font-size:18px">${findings.length} LLM/AI Provider Key(s) Exposed</div>
-        <div style="color:#64748b;font-size:13px">${critical} critical \xB7 providers: ${providers || "n/a"} \xB7 live, uncapped billing liability</div>
+        <div style="color:#64748b;font-size:13px">${critical} critical · providers: ${providers||"n/a"} · live, uncapped billing liability</div>
       </div>
     </div>
     <div class="ioc-list" style="margin-bottom:16px">
-      ${findings.slice(0, 10).map((f) => {
-    const col = sevColor[f.severity] || "#64748b";
-    return `<div class="ioc-item" style="padding:10px 0">
+      ${findings.slice(0,10).map(f=>{
+        const col = sevColor[f.severity]||"#64748b";
+        return `<div class="ioc-item" style="padding:10px 0">
           <span class="ioc-type" style="background:${col}20;color:${col};border:1px solid ${col}">${f.severity}</span>
           <div style="flex:1">
-            <div style="font-size:13px;color:#e2e8f0;font-weight:600">${f.llm_provider || "LLM Provider"} key</div>
-            <div style="font-size:12px;color:#94a3b8">${f.description || ""}</div>
-            ${f.preview ? `<div style="font-size:11px;color:#4a7fa5;font-family:monospace;margin-top:2px">${f.preview}</div>` : ""}
+            <div style="font-size:13px;color:#e2e8f0;font-weight:600">${f.llm_provider||"LLM Provider"} key</div>
+            <div style="font-size:12px;color:#94a3b8">${f.description||""}</div>
+            ${f.preview?`<div style="font-size:11px;color:#4a7fa5;font-family:monospace;margin-top:2px">${f.preview}</div>`:""}
           </div>
-          <span style="font-size:11px;color:#334155">${f.source || ""}</span>
-        </div>`;
-  }).join("")}
+          <span style="font-size:11px;color:#334155">${f.source||""}</span>
+        </div>`;}).join("")}
     </div>
-    <div class="recommendation" style="border-left-color:#ef4444">${data.recommendation || ""}</div>
+    <div class="recommendation" style="border-left-color:#ef4444">${data.recommendation||""}</div>
   </div>`;
 }
-__name(renderLLMJacking, "renderLLMJacking");
+
 function renderNHI(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   if (!data.found) return `
     <div class="result-card">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <span style="font-size:32px;color:#22c55e">\u2713</span>
+        <span style="font-size:32px;color:#22c55e">✓</span>
         <div>
           <div style="font-weight:700;color:#fff;font-size:16px">No NHI Credentials Detected</div>
           <div style="color:#64748b;font-size:13px">${data.domains_checked} domain(s) scanned against stealer log corpus</div>
         </div>
       </div>
-      <div class="recommendation">${data.recommendation || ""}</div>
+      <div class="recommendation">${data.recommendation||""}</div>
     </div>`;
+
   const findings = data.findings || [];
-  const sevColor = { CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#facc15", LOW: "#22c55e" };
-  const critical = findings.filter((f) => f.severity === "CRITICAL").length;
-  const high = findings.filter((f) => f.severity === "HIGH").length;
+  const sevColor = {CRITICAL:"#ef4444",HIGH:"#f97316",MEDIUM:"#facc15",LOW:"#22c55e"};
+  const critical = findings.filter(f=>f.severity==="CRITICAL").length;
+  const high = findings.filter(f=>f.severity==="HIGH").length;
+
   return `<div class="result-card">
     <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px">
-      <span style="font-size:32px;color:#ef4444">\u26A0</span>
+      <span style="font-size:32px;color:#ef4444">⚠</span>
       <div>
         <div style="font-weight:700;color:#fff;font-size:18px">${findings.length} NHI Credential(s) Exposed</div>
-        <div style="color:#64748b;font-size:13px">${critical} critical \xB7 ${high} high \xB7 found in criminal stealer archives</div>
+        <div style="color:#64748b;font-size:13px">${critical} critical · ${high} high · found in criminal stealer archives</div>
       </div>
     </div>
     <div class="ioc-list" style="margin-bottom:16px">
-      ${findings.slice(0, 10).map((f) => {
-    const col = sevColor[f.severity] || "#64748b";
-    return `<div class="ioc-item" style="padding:10px 0">
+      ${findings.slice(0,10).map(f=>{
+        const col = sevColor[f.severity]||"#64748b";
+        return `<div class="ioc-item" style="padding:10px 0">
           <span class="ioc-type" style="background:${col}20;color:${col};border:1px solid ${col}">${f.severity}</span>
           <div style="flex:1">
-            <div style="font-size:13px;color:#e2e8f0;font-weight:600">${f.type || "Credential"}</div>
-            <div style="font-size:12px;color:#94a3b8">${f.description || ""}</div>
-            ${f.preview ? `<div style="font-size:11px;color:#4a7fa5;font-family:monospace;margin-top:2px">${f.preview}</div>` : ""}
+            <div style="font-size:13px;color:#e2e8f0;font-weight:600">${f.type||"Credential"}</div>
+            <div style="font-size:12px;color:#94a3b8">${f.description||""}</div>
+            ${f.preview?`<div style="font-size:11px;color:#4a7fa5;font-family:monospace;margin-top:2px">${f.preview}</div>`:""}
           </div>
-          <span style="font-size:11px;color:#334155">${f.source || ""}</span>
-        </div>`;
-  }).join("")}
+          <span style="font-size:11px;color:#334155">${f.source||""}</span>
+        </div>`;}).join("")}
     </div>
-    <div class="recommendation" style="border-left-color:#ef4444">${data.recommendation || ""}</div>
+    <div class="recommendation" style="border-left-color:#ef4444">${data.recommendation||""}</div>
   </div>`;
 }
-__name(renderNHI, "renderNHI");
+
 function riskGaugeSvg(score, label, color) {
-  const angle = 180 - score / 100 * 180;
-  const rad = angle * Math.PI / 180;
+  // Semi-circle gauge, radius 80 centered at (100,100). Four fixed 45-degree
+  // color bands (gray/green/yellow/red) plus a needle placed by score (0-100).
+  // Angle convention: 180deg = left (score 0), 0deg = right (score 100).
+  // Gray specifically means "no data queried yet" (unknown), never collapsed
+  // into "no known finding" (green) -- those are different claims.
+  const angle = 180 - (score / 100) * 180;
+  const rad = (angle * Math.PI) / 180;
   const needleLen = 65;
   const nx = 100 + needleLen * Math.cos(rad);
   const ny = 100 - needleLen * Math.sin(rad);
@@ -252,7 +280,7 @@ function riskGaugeSvg(score, label, color) {
       <text x="100" y="118" text-anchor="middle" font-size="11" fill="${color}" font-weight="700">${label}</text>
     </svg>`;
 }
-__name(riskGaugeSvg, "riskGaugeSvg");
+
 function ipIntelRiskLevel(data) {
   if (!data.found) return { score: 12, label: "UNKNOWN", color: "#64748b" };
   const malicious = data.malicious_votes || 0;
@@ -261,76 +289,87 @@ function ipIntelRiskLevel(data) {
   if (suspicious > 0) return { score: Math.min(74, 53 + suspicious * 4), label: "SOME SIGNAL", color: "#facc15" };
   return { score: 37, label: "NO KNOWN FINDING", color: "#22c55e" };
 }
-__name(ipIntelRiskLevel, "ipIntelRiskLevel");
+
 function renderIpIntel(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
+
   const isIp = data.query_type === "ip";
   const risk = ipIntelRiskLevel(data);
+
   if (!data.found) {
     return `<div class="result-card">
       <div style="display:flex;align-items:center;gap:20px;margin-bottom:4px;flex-wrap:wrap">
         ${riskGaugeSvg(risk.score, risk.label, risk.color)}
         <div style="flex:1;min-width:200px">
-          <div style="font-weight:700;color:#fff;font-size:18px">${data.queried || ""} <span style="color:#64748b;font-size:13px;font-weight:400">(${isIp ? "IP" : "domain"})</span></div>
+          <div style="font-weight:700;color:#fff;font-size:18px">${data.queried||""} <span style="color:#64748b;font-size:13px;font-weight:400">(${isIp?"IP":"domain"})</span></div>
           <div style="color:#64748b;font-size:13px;margin-top:4px">No record found in the sources queried yet.</div>
-          <div style="color:#475569;font-size:12px;margin-top:6px;line-height:1.5">"Unknown" means this indicator hasn't been seen by the sources queried \u2014 it is not a clean/safe result, just an absence of data.</div>
+          <div style="color:#475569;font-size:12px;margin-top:6px;line-height:1.5">"Unknown" means this indicator hasn't been seen by the sources queried — it is not a clean/safe result, just an absence of data.</div>
         </div>
       </div>
     </div>`;
   }
+
   const malicious = data.malicious_votes || 0;
   const suspicious = data.suspicious_votes || 0;
   const resolutions = data.resolutions || [];
   const ownCorpus = data.source === "relayshield_ioc_corpus";
+
   return `<div class="result-card">
     <div style="display:flex;align-items:center;gap:20px;margin-bottom:16px;flex-wrap:wrap">
       ${riskGaugeSvg(risk.score, risk.label, risk.color)}
       <div style="flex:1;min-width:200px">
-        <div style="font-weight:700;color:#fff;font-size:18px">${data.queried} <span style="color:#64748b;font-size:13px;font-weight:400">(${isIp ? "IP" : "domain"})</span></div>
-        <div style="color:#64748b;font-size:13px;margin-top:4px">${ownCorpus ? `Matched RelayShield's own criminal IOC corpus (${malicious} record(s))` : `${malicious} malicious vote(s) \xB7 ${suspicious} suspicious vote(s)`} on this ${isIp ? "IP" : "domain"} itself${isIp ? ` \xB7 ${data.as_owner || "unknown AS"} (${data.country || "?"})` : ""}</div>
-        <div style="color:#475569;font-size:12px;margin-top:6px;line-height:1.5">"No known finding" means nothing was flagged in the sources queried \u2014 it is not a verified-safe guarantee.</div>
+        <div style="font-weight:700;color:#fff;font-size:18px">${data.queried} <span style="color:#64748b;font-size:13px;font-weight:400">(${isIp?"IP":"domain"})</span></div>
+        <div style="color:#64748b;font-size:13px;margin-top:4px">${ownCorpus ? `Matched RelayShield's own criminal IOC corpus (${malicious} record(s))` : `${malicious} malicious vote(s) · ${suspicious} suspicious vote(s)`} on this ${isIp?"IP":"domain"} itself${isIp?` · ${data.as_owner||"unknown AS"} (${data.country||"?"})`:""}</div>
+        <div style="color:#475569;font-size:12px;margin-top:6px;line-height:1.5">"No known finding" means nothing was flagged in the sources queried — it is not a verified-safe guarantee.</div>
       </div>
     </div>
     ${resolutions.length ? `<div class="ioc-list" style="margin-bottom:16px">
-      <div style="font-size:12px;color:#64748b;margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em">${isIp ? "Hostnames resolved to this IP" : "IP resolution history"}</div>
-      <div style="font-size:11px;color:#475569;margin-bottom:8px">Historical DNS resolution records \u2014 unrelated to the vote count above. None of these are individually flagged; they're context, not findings.</div>
-      ${resolutions.slice(0, 10).map((r) => `<div class="ioc-item" style="padding:8px 0">
-        <div style="flex:1;font-size:13px;color:#e2e8f0;font-family:monospace">${isIp ? r.hostname || "unknown" : r.ip_address || "unknown"}</div>
-        <span style="font-size:11px;color:#334155">${r.date ? new Date(r.date).toLocaleDateString() : ""}</span>
+      <div style="font-size:12px;color:#64748b;margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em">${isIp?"Hostnames resolved to this IP":"IP resolution history"}</div>
+      <div style="font-size:11px;color:#475569;margin-bottom:8px">Historical DNS resolution records — unrelated to the vote count above. None of these are individually flagged; they're context, not findings.</div>
+      ${resolutions.slice(0,10).map(r=>`<div class="ioc-item" style="padding:8px 0">
+        <div style="flex:1;font-size:13px;color:#e2e8f0;font-family:monospace">${isIp?(r.hostname||"unknown"):(r.ip_address||"unknown")}</div>
+        <span style="font-size:11px;color:#334155">${r.date?new Date(r.date).toLocaleDateString():""}</span>
       </div>`).join("")}
     </div>` : ""}
   </div>`;
 }
-__name(renderIpIntel, "renderIpIntel");
+
 function renderActor(data) {
+  // Error check MUST come first. Until 2026-08-01 the !matched check ran
+  // ahead of it, so an upstream error, a rate-limit or a network failure —
+  // none of which carry a `matched` field — rendered as "No threat actor
+  // found matching that name", i.e. a confident false negative. Every other
+  // render function in this file already checks error first.
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   if (!data.matched) return `<div class="no-result">No threat actor found matching that name. Try a MITRE ATT&amp;CK group name or a known alias (e.g. MuddyWater, Seedworm, Mango Sandstorm).</div>`;
+
   const iocs = (data.associated_iocs || []).slice(0, 8);
   const related = (data.related_actors || []).slice(0, 5);
   const techniques = (data.techniques || []).slice(0, 6);
   const malware = (data.associated_malware || []).slice(0, 10);
   const reporting = (data.recent_reporting || []).slice(0, 5);
+
   return `
     <div class="result-card">
       <div class="actor-header">
         <div class="actor-name">${data.actor}</div>
         <div class="actor-meta">${data.mitre_id} &nbsp;|&nbsp; ${data.origin_country || "Unknown origin"}</div>
       </div>
-      <p class="actor-desc">${(data.description || "").slice(0, 300)}${data.description?.length > 300 ? "..." : ""}</p>
-      ${techniques.length ? `<div class="section-label">ATT&CK Techniques (sample)</div><div class="tags">${techniques.map((t) => `<span class="tag tag-red">${t}</span>`).join("")}</div>` : ""}
-      ${data.aliases?.length ? `<div class="section-label">Also known as</div><div class="tags">${data.aliases.map((a) => `<span class="tag tag-gray">${a}</span>`).join("")}</div>` : ""}
+      <p class="actor-desc">${(data.description||"").slice(0,300)}${data.description?.length>300?"...":""}</p>
+      ${techniques.length ? `<div class="section-label">ATT&CK Techniques (sample)</div><div class="tags">${techniques.map(t=>`<span class="tag tag-red">${t}</span>`).join("")}</div>` : ""}
+      ${data.aliases?.length ? `<div class="section-label">Also known as</div><div class="tags">${data.aliases.map(a=>`<span class="tag tag-gray">${a}</span>`).join("")}</div>` : ""}
       ${reporting.length ? `
         <div class="section-label">Recent Open-Source Reporting (${data.reporting_count})</div>
-        <div class="ioc-list">${reporting.map((r) => `
+        <div class="ioc-list">${reporting.map(r=>`
           <div class="ioc-item" style="padding:8px 0;display:block">
-            <div style="font-size:13px;color:#e2e8f0">${r.url ? `<a href="${r.url}" target="_blank" rel="noopener noreferrer" style="color:#5eead4;text-decoration:none">${r.title || "(untitled)"}</a>` : r.title || "(untitled)"}</div>
-            <div style="font-size:11px;color:#475569;margin-top:3px">${r.source || ""}${r.published ? ` \xB7 ${r.published}` : ""}${r.matched_as?.length ? ` \xB7 named as: ${r.matched_as.join(", ")}` : ""}</div>
+            <div style="font-size:13px;color:#e2e8f0">${r.url ? `<a href="${r.url}" target="_blank" rel="noopener noreferrer" style="color:#5eead4;text-decoration:none">${r.title||"(untitled)"}</a>` : (r.title||"(untitled)")}</div>
+            <div style="font-size:11px;color:#475569;margin-top:3px">${r.source||""}${r.published?` · ${r.published}`:""}${r.matched_as?.length?` · named as: ${r.matched_as.join(", ")}`:""}</div>
           </div>`).join("")}
         </div>` : ""}
-      ${malware.length ? `<div class="section-label">Associated Malware/Tools (MITRE ATT&CK)</div><div class="tags">${malware.map((m) => `<span class="tag tag-red">${m}</span>`).join("")}</div>` : ""}
+      ${malware.length ? `<div class="section-label">Associated Malware/Tools (MITRE ATT&CK)</div><div class="tags">${malware.map(m=>`<span class="tag tag-red">${m}</span>`).join("")}</div>` : ""}
       ${related.length ? `
         <div class="section-label">Related Threat Actors</div>
-        <div class="related-actors">${related.map((r) => `
+        <div class="related-actors">${related.map(r=>`
           <div class="related-item">
             <span class="related-name">${r.actor}</span>
             <span class="related-id">${r.mitre_id}</span>
@@ -339,120 +378,99 @@ function renderActor(data) {
         </div>` : ""}
       ${iocs.length ? `
         <div class="section-label">Live IOCs attributed via associated malware (${data.ioc_count || iocs.length} total)</div>
-        <div class="ioc-list">${iocs.map((i) => `<div class="ioc-item"><span class="ioc-type">${i.ioc_type}</span><span class="ioc-val">${i.ioc_value}</span><span class="ioc-malware">${i.malware || ""}</span></div>`).join("")}</div>` : `<div class="section-label">Live IOCs attributed via associated malware</div><p style="color:#888;font-size:13px;">None currently in corpus for this actor's known malware/tools.</p>`}
+        <div class="ioc-list">${iocs.map(i=>`<div class="ioc-item"><span class="ioc-type">${i.ioc_type}</span><span class="ioc-val">${i.ioc_value}</span><span class="ioc-malware">${i.malware||""}</span></div>`).join("")}</div>` : `<div class="section-label">Live IOCs attributed via associated malware</div><p style="color:#888;font-size:13px;">None currently in corpus for this actor's known malware/tools.</p>`}
     </div>`;
 }
-__name(renderActor, "renderActor");
+
 function renderTrending(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   const trending = data.trending || {};
   const total = data.total_new_iocs || 0;
   const hours = data.window_hours || 24;
+
+  // Feed → category mapping
   const feedCategory = {
-    abuseipdb: "Abuse Reports",
-    blocklist_de: "Attack Sources",
-    ipsum: "Aggregated Blocklist",
-    spamhaus_drop: "Spam/Botnet Networks",
-    spamhaus: "Spam/Botnet Networks",
-    threatfox: "Malware C2",
-    feodo: "Banking Trojan C2",
-    feodo_aggressive: "Banking Trojan C2",
-    urlhaus: "Malware Distribution",
-    malwarebazaar: "Malware Samples",
-    openphish: "Phishing",
-    phishtank: "Phishing",
-    phishstats: "Phishing",
-    c2intel: "Command & Control",
-    emerging_threats: "Emerging Threats",
-    botvrij: "Malicious Infrastructure",
-    otx: "Community Intel",
-    talos: "Cisco Talos",
-    hagezi: "DNS Blocklist",
-    paste_ee: "Paste Sites",
-    pastehub: "Paste Sites"
+    abuseipdb:"Abuse Reports", blocklist_de:"Attack Sources", ipsum:"Aggregated Blocklist",
+    spamhaus_drop:"Spam/Botnet Networks", spamhaus:"Spam/Botnet Networks",
+    threatfox:"Malware C2", feodo:"Banking Trojan C2", feodo_aggressive:"Banking Trojan C2",
+    urlhaus:"Malware Distribution", malwarebazaar:"Malware Samples",
+    openphish:"Phishing", phishtank:"Phishing", phishstats:"Phishing",
+    c2intel:"Command & Control", emerging_threats:"Emerging Threats",
+    botvrij:"Malicious Infrastructure", otx:"Community Intel",
+    talos:"Cisco Talos", hagezi:"DNS Blocklist", paste_ee:"Paste Sites",
+    pastehub:"Paste Sites",
   };
   const catColor = {
-    "Malware C2": "#ef4444",
-    "Banking Trojan C2": "#ef4444",
-    "Command & Control": "#ef4444",
-    "Malware Distribution": "#f97316",
-    "Malware Samples": "#f97316",
-    "Phishing": "#facc15",
-    "Abuse Reports": "#fb923c",
-    "Attack Sources": "#fb923c",
-    "Spam/Botnet Networks": "#a78bfa",
-    "Emerging Threats": "#f97316",
-    "Malicious Infrastructure": "#f97316",
-    "Community Intel": "#60a5fa",
-    "DNS Blocklist": "#94a3b8",
-    "Aggregated Blocklist": "#94a3b8",
-    "Paste Sites": "#94a3b8",
-    "Cisco Talos": "#60a5fa"
+    "Malware C2":"#ef4444","Banking Trojan C2":"#ef4444","Command & Control":"#ef4444",
+    "Malware Distribution":"#f97316","Malware Samples":"#f97316",
+    "Phishing":"#facc15","Abuse Reports":"#fb923c","Attack Sources":"#fb923c",
+    "Spam/Botnet Networks":"#a78bfa","Emerging Threats":"#f97316",
+    "Malicious Infrastructure":"#f97316","Community Intel":"#60a5fa",
+    "DNS Blocklist":"#94a3b8","Aggregated Blocklist":"#94a3b8",
+    "Paste Sites":"#94a3b8","Cisco Talos":"#60a5fa",
   };
+
+  // Collect malware families
   const allItems = Object.values(trending).flat();
   const families = {};
-  allItems.forEach((i) => {
-    if (i.malware && i.malware !== "n/a") families[i.malware] = (families[i.malware] || 0) + 1;
-  });
-  const topFamilies = Object.entries(families).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  allItems.forEach(i => { if(i.malware && i.malware !== "n/a") families[i.malware] = (families[i.malware]||0)+1; });
+  const topFamilies = Object.entries(families).sort((a,b)=>b[1]-a[1]).slice(0,8);
+
+  // Category summary
   const catSummary = {};
-  allItems.forEach((i) => {
-    const src = (i.source || "").replace(/-/g, "_");
+  allItems.forEach(i => {
+    const src = (i.source||"").replace(/-/g,"_");
     const cat = feedCategory[src] || "Other";
-    catSummary[cat] = (catSummary[cat] || 0) + 1;
+    catSummary[cat] = (catSummary[cat]||0)+1;
   });
-  const typeLabels = {
-    ip: "Malicious IPs",
-    domain: "Malicious Domains",
-    url: "Malware URLs",
-    hash_sha256: "Malware File Hashes",
-    cidr: "Blocked IP Ranges",
-    hostname: "Malicious Hostnames"
-  };
-  const typeEmoji = { ip: "\u{1F310}", domain: "\u{1F517}", url: "\u26A0\uFE0F", hash_sha256: "\u{1F9EC}", cidr: "\u{1F6AB}", hostname: "\u{1F4BB}" };
+
+  // Dedup and show top IOCs per type with better labels
+  const typeLabels = {ip:"Malicious IPs",domain:"Malicious Domains",url:"Malware URLs",
+    hash_sha256:"Malware File Hashes",cidr:"Blocked IP Ranges",hostname:"Malicious Hostnames"};
+  const typeEmoji = {ip:"🌐",domain:"🔗",url:"⚠️",hash_sha256:"🧬",cidr:"🚫",hostname:"💻"};
+
   const sections = Object.entries(trending).map(([type, items]) => {
-    const seen = /* @__PURE__ */ new Set();
-    const deduped = items.filter((i) => {
-      if (seen.has(i.ioc_value)) return false;
-      seen.add(i.ioc_value);
-      return true;
-    }).slice(0, 6);
-    const label = typeLabels[type] || type.replace(/_/g, " ").toUpperCase();
-    const emoji = typeEmoji[type] || "\u2022";
+    // Deduplicate by value, keep highest confidence
+    const seen = new Set();
+    const deduped = items.filter(i => { if(seen.has(i.ioc_value)) return false; seen.add(i.ioc_value); return true; }).slice(0,6);
+    const label = typeLabels[type] || type.replace(/_/g," ").toUpperCase();
+    const emoji = typeEmoji[type] || "•";
     return `
     <div class="trending-section">
       <div class="trending-type">${emoji} ${label} <span class="trending-count">${items.length}</span></div>
-      <div class="trending-items">${deduped.map((i) => {
-      const src = (i.source || "").replace(/-/g, "_");
-      const cat = feedCategory[src] || "Other";
-      const col = catColor[cat] || "#64748b";
-      return `<div class="trending-item">
-          <span class="trending-val">${i.ioc_value?.slice(0, 45)}</span>
+      <div class="trending-items">${deduped.map(i => {
+        const src = (i.source||"").replace(/-/g,"_");
+        const cat = feedCategory[src] || "Other";
+        const col = catColor[cat] || "#64748b";
+        return `<div class="trending-item">
+          <span class="trending-val">${i.ioc_value?.slice(0,45)}</span>
           <span class="trending-badge" style="background:${col}20;color:${col};border:1px solid ${col};font-size:10px;padding:1px 6px;border-radius:3px;flex-shrink:0">${cat}</span>
-          ${i.malware && i.malware !== "n/a" ? `<span class="trending-malware">${i.malware}</span>` : ""}
-        </div>`;
-    }).join("")}
+          ${i.malware && i.malware!=="n/a" ? `<span class="trending-malware">${i.malware}</span>` : ""}
+        </div>`;}).join("")}
       </div>
     </div>`;
   }).join("");
+
   const familyBars = topFamilies.length ? `
     <div class="section-label" style="margin-top:16px">Active Malware Families</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
-      ${topFamilies.map(([fam, cnt]) => `
+      ${topFamilies.map(([fam,cnt])=>`
         <div style="background:#1e3a5f;border:1px solid #ef444440;border-radius:6px;padding:6px 12px;min-width:120px">
           <div style="font-size:13px;font-weight:600;color:#fca5a5">${fam}</div>
-          <div style="font-size:11px;color:#64748b">${cnt} sample${cnt > 1 ? "s" : ""}</div>
+          <div style="font-size:11px;color:#64748b">${cnt} sample${cnt>1?"s":""}</div>
         </div>`).join("")}
     </div>` : "";
-  const catBars = Object.entries(catSummary).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([cat, cnt]) => {
+
+  const catBars = Object.entries(catSummary).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([cat,cnt]) => {
     const col = catColor[cat] || "#64748b";
-    const pct = Math.min(100, Math.round(cnt / total * 100 * 10));
+    const pct = Math.min(100, Math.round(cnt/total*100*10));
     return `<div class="dim-row">
       <span class="dim-name" style="width:180px;color:#94a3b8">${cat}</span>
       <div class="dim-bar-wrap" style="flex:1"><div class="dim-bar" style="width:${pct}%;background:${col}"></div></div>
       <span class="dim-val">${cnt}</span>
     </div>`;
   }).join("");
+
   return `
     <div class="result-card">
       <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px">
@@ -464,91 +482,92 @@ function renderTrending(data) {
       ${familyBars}
       <div class="section-label" style="margin-top:16px">Sample Indicators</div>
       ${sections || '<div class="no-result">No trending threats in this window.</div>'}
-      <div class="generated-at" style="margin-top:12px">Live data \u2014 ${data.generated_at ? new Date(data.generated_at).toUTCString() : "now"}</div>
+      <div class="generated-at" style="margin-top:12px">Live data — ${data.generated_at ? new Date(data.generated_at).toUTCString() : "now"}</div>
     </div>`;
 }
-__name(renderTrending, "renderTrending");
+
 function renderRansomware(data) {
   if (data.error) return `<div class="error">${data.error}</div>`;
-  if (data._mode === "domain" || data.on_victim_list !== void 0) {
+
+  // Domain mode: handle_ransomware_risk answers from the leak-site table.
+  if (data.mode !== "corpus_listing") {
     const level = String(data.risk_level || "CLEAN").toUpperCase();
-    const colour = { CRITICAL: "#ef4444", HIGH: "#f97316", MEDIUM: "#facc15", CLEAN: "#22c55e" }[level] || "#94a3b8";
+    const colour = {CRITICAL:"#ef4444", HIGH:"#f97316", MEDIUM:"#facc15", CLEAN:"#22c55e"}[level] || "#94a3b8";
     const groups = (data.victim_groups || []).filter(Boolean);
-    const tg = data.telegram_sightings || {};
     const cards = `<div class="corpus-stats">
       <div class="stat-card"><div class="stat-num" style="color:${colour}">${level}</div><div class="stat-label">Risk level</div></div>
       <div class="stat-card"><div class="stat-num">${data.on_victim_list ? "YES" : "NO"}</div><div class="stat-label">On a leak site</div></div>
       <div class="stat-card"><div class="stat-num">${data.pre_ransomware_ioc_count || 0}</div><div class="stat-label">Pre-ransomware creds</div></div>
     </div>`;
-    const groupRow = groups.length ? `<div style="padding:10px 0;border-bottom:1px solid #1e3a5f"><span style="color:#94a3b8;font-size:13px">Claimed by</span>
-         <div style="color:#e2e8f0;font-weight:600;margin-top:3px">${groups.join(", ")}</div>
-         ${data.first_seen ? `<div style="color:#64748b;font-size:12px;margin-top:3px">First listed ${String(data.first_seen).slice(0, 10)}</div>` : ""}</div>` : "";
-    const tgRow = tg.count > 0 ? `<div style="background:#7f1d1d20;border:1px solid #7f1d1d;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin-top:14px;font-size:13px;color:#fca5a5">
-         <strong>${tg.count} sighting${tg.count === 1 ? "" : "s"} in monitored ransomware channels.</strong>
-         ${tg.matched_as && tg.matched_as.length ? `Matched as \u201C${tg.matched_as[0]}\u201D. ` : ""}
-         Unverified leads extracted by pattern match \u2014 typically visible before a leak-site listing, and
-         they will contain false positives. Confirm independently before acting.</div>` : "";
-    return cards + groupRow + `<div style="color:#94a3b8;font-size:13px;padding:12px 0;line-height:1.55">${data.recommendation || ""}</div>` + tgRow + `<div style="color:#64748b;font-size:12px;margin-top:12px">Checked ${String(data.checked_at || "").slice(0, 19).replace("T", " ")} \xB7 domain: ${data.domain || ""}</div>`;
+    const groupRow = groups.length ? `<div style="padding:10px 0;border-bottom:1px solid #1e3a5f">
+      <span style="color:#94a3b8;font-size:13px">Claimed by</span>
+      <div style="color:#e2e8f0;font-weight:600;margin-top:3px">${groups.join(", ")}</div>
+      ${data.first_seen ? `<div style="color:#64748b;font-size:12px;margin-top:3px">First listed ${String(data.first_seen).slice(0,10)}</div>` : ""}
+    </div>` : "";
+    return cards + groupRow
+      + `<div style="color:#94a3b8;font-size:13px;padding:12px 0;line-height:1.55">${data.recommendation || ""}</div>`
+      + `<div style="color:#64748b;font-size:12px;margin-top:12px">Checked ${String(data.checked_at || "").slice(0,19).replace("T"," ")} · domain: ${data.domain || ""}</div>`;
   }
-  const victims = data.victims || [];
+
+  // Corpus-wide listing mode — every row here is an unverified lead, not a
+  // confirmed breach, per the API's disclaimer field (fa83bb5).
   const days = data.window_days || 30;
-  const caveat = `<div style="background:#7f1d1d20;border:1px solid #7f1d1d;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#fca5a5">
-    <strong>Unverified leads.</strong> Names are pattern-matched from ransomware leak sites and gang
-    channels as they are posted. They are not confirmed breaches and this list will contain false
-    positives. Confirm independently before acting on an entry.</div>`;
+  if (!data.listing_available) {
+    return `<div class="no-result">${data.reason || "Nothing collected yet for this corpus."}</div>`;
+  }
+  const disclaimer = `<div style="background:#7f1d1d20;border:1px solid #7f1d1d;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#fca5a5">
+    <strong>Unverified leads.</strong> ${data.disclaimer || "Names are pattern-matched from criminal Telegram channels and were never confirmed against a leak site. Confirm independently before acting on any entry."}
+  </div>`;
+  const victims = data.victims || [];
   if (!victims.length) {
-    const none = data.query ? `<div class="no-result">No leak-site sighting for \u201C${data.query}\u201D in the last ${days} days. That is an absence of evidence in this corpus, not evidence the organisation is unaffected.</div>` : `<div class="no-result">No victims recorded in the last ${days} days.</div>`;
-    return caveat + none;
+    const scope = data.org ? ` matching "${data.org}"` : "";
+    return disclaimer + `<div class="no-result">No victims recorded in the last ${days} days${scope}.</div>`;
   }
   const stats = `<div class="corpus-stats">
-    <div class="stat-card"><div class="stat-num">${data.total_victims || victims.length}</div><div class="stat-label">Organisations named</div></div>
-    <div class="stat-card"><div class="stat-num">${data.total_sightings || 0}</div><div class="stat-label">Sightings</div></div>
+    <div class="stat-card"><div class="stat-num">${data.count}</div><div class="stat-label">Organisations named</div></div>
     <div class="stat-card"><div class="stat-num">${days}d</div><div class="stat-label">Window</div></div>
+    <div class="stat-card"><div class="stat-num">${data.truncated ? "Yes" : "No"}</div><div class="stat-label">List truncated</div></div>
   </div>`;
-  const rows = victims.map((v) => {
-    const first = String(v.first_seen || "").slice(0, 10);
-    const last = String(v.last_seen || "").slice(0, 10);
-    const span = first && last && first !== last ? `${first} \u2192 ${last}` : last || first || "\u2014";
-    const srcs = (v.sources || []).slice(0, 3).join(", ") || "\u2014";
-    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-bottom:1px solid #1e3a5f">
+  const rows = victims.map(v => `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-bottom:1px solid #1e3a5f">
       <div style="min-width:0">
-        <div style="color:#e2e8f0;font-weight:600;font-size:14px;word-break:break-word">${v.victim || "\u2014"}</div>
-        <div style="color:#64748b;font-size:12px;margin-top:3px">Seen in ${srcs}</div>
+        <div style="font-weight:600;color:#e2e8f0">${v.name || "—"}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">${v.channel || "—"} · ${v.category || "—"}</div>
       </div>
-      <div style="text-align:right;white-space:nowrap">
-        <div style="color:#94a3b8;font-size:12px">${span}</div>
-        <div style="color:#64748b;font-size:12px;margin-top:3px">${v.sightings || 1} sighting${(v.sightings || 1) === 1 ? "" : "s"} \xB7 unverified</div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:12px;color:#94a3b8">${String(v.seen_ts || "").slice(0,19).replace("T"," ")}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px">${v.confidence || "unverified"}</div>
       </div>
-    </div>`;
-  }).join("");
-  return caveat + stats + `<div>${rows}</div>`;
+    </div>`).join("");
+  return disclaimer + stats + rows;
 }
-__name(renderRansomware, "renderRansomware");
+
 function renderSupplyChain(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   const results = data.results || [];
   if (!results.length) return `<div class="no-result">No results returned.</div>`;
-  return `<div class="result-card">${results.map((r) => `
+
+  return `<div class="result-card">${results.map(r => `
     <div class="vendor-row">
       <div class="vendor-header">
         <span class="vendor-domain">${r.domain}</span>
-        <span class="vendor-badge" style="background:${risk_color(r.risk_level)}20;color:${risk_color(r.risk_level)};border:1px solid ${risk_color(r.risk_level)}">${r.risk_level || "UNKNOWN"}</span>
+        <span class="vendor-badge" style="background:${risk_color(r.risk_level)}20;color:${risk_color(r.risk_level)};border:1px solid ${risk_color(r.risk_level)}">${r.risk_level||"UNKNOWN"}</span>
       </div>
       <div class="vendor-stats">
-        ${r.breach_count != null ? `<span>Breaches: <b>${r.breach_count}</b></span>` : ""}
-        ${r.infostealer_hits != null ? `<span>Stealer hits: <b>${r.infostealer_hits}</b></span>` : ""}
+        ${r.breach_count!=null?`<span>Breaches: <b>${r.breach_count}</b></span>`:""}
+        ${r.infostealer_hits!=null?`<span>Stealer hits: <b>${r.infostealer_hits}</b></span>`:""}
       </div>
-      <div class="vendor-rec">${r.recommendation || ""}</div>
+      <div class="vendor-rec">${r.recommendation||""}</div>
     </div>`).join("")}
   </div>`;
 }
-__name(renderSupplyChain, "renderSupplyChain");
-var PAGE = /* @__PURE__ */ __name((content, token) => `<!DOCTYPE html>
+
+const PAGE = (content, token) => `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RelayShield \u2014 Threat Intelligence Demo</title>
+<title>RelayShield — Threat Intelligence Demo</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a1628;color:#e2e8f0;min-height:100vh}
@@ -653,32 +672,17 @@ footer a{color:#00B5A5;text-decoration:none}
 <div class="container">
   <div class="hero">
     <h1>Live Threat Intelligence</h1>
-    <p>Query 500,000+ distinct indicators drawn from 5,800,000+ citations, MITRE ATT&amp;CK profiles, trending threats, and identity risk scoring \u2014 powered by RelayShield's live OSINT collection pipeline.</p>
+    <p>Query 5,400,000+ indicators, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
   </div>
 
   <div class="corpus-stats">
-    <!-- CORRECTED 2026-08-22. The old cards read "5.4M+ IOC indicators" and
-         "89 Active criminal Telegram channels".
-
-         5.4M was CITATIONS (sightings: this domain, in this channel, on this
-         date) presented as indicators. The deduplicated corpus is ~500K. Both
-         numbers are real and they measure different things, so the cards now
-         show both and label them \u2014 a technical buyer asks which one you mean,
-         and quoting the bigger number as though it were the smaller is the
-         mistake that nearly went out to the blockchain-analytics segment.
-
-         The channel count was measured 2026-08-12 and was already wrong by
-         2026-08-20, when the digest read "95 of 122 active, 27 unreachable".
-         A number that decays between measurements does not belong on a page
-         nobody re-measures, so it is replaced by the collection-lead claim,
-         which is durable and is the thing that actually differentiates.
-
-         Malware families (3,802) and MITRE groups (193) measured 2026-08-12.
-         Re-measure with tools/export_intel_sample.py before quoting anywhere. -->
-    <div class="stat-card"><div class="stat-num">500K+</div><div class="stat-label">Distinct indicators</div></div>
-    <div class="stat-card"><div class="stat-num">5.8M+</div><div class="stat-label">Citations (sightings)</div></div>
+    <!-- Metrics verified live against DynamoDB 2026-08-12:
+         intel_iocs 5,483,159 · malpedia_families 3,802 · intel_channels active=true 89 ·
+         mitre_attack sk=info 193. Re-verify before quoting these anywhere. -->
+    <div class="stat-card"><div class="stat-num">5.4M+</div><div class="stat-label">IOC indicators</div></div>
     <div class="stat-card"><div class="stat-num">3,800+</div><div class="stat-label">Malware families</div></div>
-    <div class="stat-card"><div class="stat-num">24-72h</div><div class="stat-label">Typical lead over public feeds</div></div>
+    <div class="stat-card"><div class="stat-num">89</div><div class="stat-label">Active criminal Telegram channels</div></div>
+    <div class="stat-card"><div class="stat-num">193</div><div class="stat-label">MITRE ATT&CK groups</div></div>
   </div>
 
   <div class="tabs">
@@ -703,7 +707,7 @@ footer a{color:#00B5A5;text-decoration:none}
   </div>
 
   <div id="actor" class="panel">
-    <p class="panel-desc">Look up any MITRE ATT&CK threat actor \u2014 see their TTPs, target sectors, origin, related actors, and associated indicators from our live corpus.</p>
+    <p class="panel-desc">Look up any MITRE ATT&CK threat actor — see their TTPs, target sectors, origin, related actors, and associated indicators from our live corpus.</p>
     <div class="input-row">
       <input type="text" id="actor-input" placeholder="e.g. APT28, Lazarus Group, Sandworm Team, FIN7, Scattered Spider" />
       <button onclick="runActor()">Look Up</button>
@@ -712,7 +716,7 @@ footer a{color:#00B5A5;text-decoration:none}
   </div>
 
   <div id="trending" class="panel">
-    <p class="panel-desc">The top indicators actively spreading across all feeds in the last 24 hours \u2014 what's attacking infrastructure right now.</p>
+    <p class="panel-desc">The top indicators actively spreading across all feeds in the last 24 hours — what's attacking infrastructure right now.</p>
     <div class="input-row">
       <select id="trending-hours" style="background:#0F1F3D;border:1px solid #1e3a5f;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px">
         <option value="24">Last 24 hours</option>
@@ -725,9 +729,9 @@ footer a{color:#00B5A5;text-decoration:none}
   </div>
 
   <div id="ransomware" class="panel">
-    <p class="panel-desc">Check whether an organisation &mdash; or a supplier you depend on &mdash; has been named on a ransomware gang leak site. <strong>Enter a domain</strong> (e.g. <code>acme.com</code>) for a full risk assessment against the leak-site corpus and pre-ransomware credential exposure. An organisation name or an empty box returns the recent corpus-wide listing collected from criminal Telegram channels, where every row is an <strong>unverified lead</strong> rather than a confirmed breach.</p>
+    <p class="panel-desc">Check whether an organisation — or a supplier you depend on — has been named on a ransomware gang leak site. <strong>Enter a domain</strong> (e.g. <code>acme.com</code>) for a full risk assessment against the leak-site corpus and pre-ransomware credential exposure. An organisation name or an empty box returns the recent corpus-wide listing collected from criminal Telegram channels, where every row is an <strong>unverified lead</strong> rather than a confirmed breach.</p>
     <div class="input-row">
-      <input type="text" id="ransomware-input" placeholder="A domain (e.g. acme.com) \u2014 or an organisation name, or leave empty" />
+      <input type="text" id="ransomware-input" placeholder="A domain (e.g. acme.com) — or an organisation name, or leave empty" />
       <select id="ransomware-days" style="background:#0F1F3D;border:1px solid #1e3a5f;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px">
         <option value="7">Last 7 days</option>
         <option value="30" selected>Last 30 days</option>
@@ -748,7 +752,7 @@ footer a{color:#00B5A5;text-decoration:none}
   </div>
 
   <div id="llmjacking" class="panel">
-    <p class="panel-desc">LLMjacking: detect exposed API keys across 14 LLM and AI providers in criminal stealer log archives \u2014 closed-source platforms including OpenAI, Anthropic Claude, Google Gemini, xAI Grok and Amazon Bedrock, alongside DeepSeek, Moonshot Kimi, Alibaba Qwen, NVIDIA NIM and Hugging Face. Enter your organization's domain to see whether keys belonging to your people or systems have surfaced in stealer logs. A leaked LLM provider key is a live, uncapped billing liability \u2014 real incidents have run from tens of thousands of dollars per day to a $500K single-month bill from one unthrottled key.</p>
+    <p class="panel-desc">LLMjacking: detect exposed API keys across 14 LLM and AI providers in criminal stealer log archives — closed-source platforms including OpenAI, Anthropic Claude, Google Gemini, xAI Grok and Amazon Bedrock, alongside DeepSeek, Moonshot Kimi, Alibaba Qwen, NVIDIA NIM and Hugging Face. Enter your organization's domain to see whether keys belonging to your people or systems have surfaced in stealer logs. A leaked LLM provider key is a live, uncapped billing liability — real incidents have run from tens of thousands of dollars per day to a $500K single-month bill from one unthrottled key.</p>
     <div class="input-row">
       <input type="text" id="llmjacking-input" placeholder="Enter your organization's domain (e.g. acme.com)" />
       <button onclick="runLLMJacking()">Scan for Exposed Keys</button>
@@ -780,11 +784,11 @@ footer a{color:#00B5A5;text-decoration:none}
   </div>
 
   <div id="msp" class="panel">
-    <p class="panel-desc">MSP portfolio view \u2014 monitor all client domains from a single pane. One <code style="background:#1e3a5f;padding:2px 6px;border-radius:4px;font-size:12px">POST /v1/metered/bulk-identity-risk</code> call scores every client. ConnectWise ticket auto-created on every CRITICAL result.</p>
+    <p class="panel-desc">MSP portfolio view — monitor all client domains from a single pane. One <code style="background:#1e3a5f;padding:2px 6px;border-radius:4px;font-size:12px">POST /v1/metered/bulk-identity-risk</code> call scores every client. ConnectWise ticket auto-created on every CRITICAL result.</p>
     <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:10px;overflow:hidden;margin-top:4px">
       <div style="background:#060b18;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e3a5f">
-        <span style="font-size:13px;font-weight:700;color:#e2e8f0">Client Portfolio \u2014 5 managed accounts</span>
-        <span style="font-size:11px;color:#4a7fa5">Last sweep: 8 min ago &nbsp;\xB7&nbsp; 1 API call</span>
+        <span style="font-size:13px;font-weight:700;color:#e2e8f0">Client Portfolio — 5 managed accounts</span>
+        <span style="font-size:11px;color:#4a7fa5">Last sweep: 8 min ago &nbsp;·&nbsp; 1 API call</span>
       </div>
       <table style="width:100%;border-collapse:collapse">
         <thead>
@@ -800,7 +804,7 @@ footer a{color:#00B5A5;text-decoration:none}
         </thead>
         <tbody id="msp-tbody">
           <tr style="background:#ef444408;border-bottom:1px solid #1e3a5f1a">
-            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">acme-logistics.com</div><div style="font-size:11px;color:#64748b">Logistics \xB7 48 employees</div></td>
+            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">acme-logistics.com</div><div style="font-size:11px;color:#64748b">Logistics · 48 employees</div></td>
             <td style="padding:10px 12px"><span style="color:#ef4444;font-weight:700;font-size:13px">78/100</span></td>
             <td style="padding:10px 12px"><span style="color:#ef4444;font-weight:800;font-size:14px">F</span></td>
             <td style="padding:10px 12px"><span style="color:#ef4444;font-weight:600">3 hits</span></td>
@@ -809,7 +813,7 @@ footer a{color:#00B5A5;text-decoration:none}
             <td style="padding:10px 12px"><button onclick="mspTriage('acme-logistics.com','CRITICAL','78','Infostealer: 3 employee credentials in RedLine archive. Session cookies for QuickBooks + Microsoft 365 extracted. Immediate rotation required.')" style="padding:4px 10px;font-size:11px;background:#ef444420;color:#ef4444;border:1px solid #ef444440;border-radius:6px;cursor:pointer">Triage</button></td>
           </tr>
           <tr style="background:#f9731608;border-bottom:1px solid #1e3a5f1a">
-            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">riverdale-dental.com</div><div style="font-size:11px;color:#64748b">Healthcare \xB7 12 employees</div></td>
+            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">riverdale-dental.com</div><div style="font-size:11px;color:#64748b">Healthcare · 12 employees</div></td>
             <td style="padding:10px 12px"><span style="color:#f97316;font-weight:700;font-size:13px">52/100</span></td>
             <td style="padding:10px 12px"><span style="color:#f97316;font-weight:800;font-size:14px">D</span></td>
             <td style="padding:10px 12px"><span style="color:#f97316;font-weight:600">1 hit</span></td>
@@ -818,7 +822,7 @@ footer a{color:#00B5A5;text-decoration:none}
             <td style="padding:10px 12px"><button onclick="mspTriage('riverdale-dental.com','HIGH','52','Breach: billing@riverdale-dental.com in Dropbox 2024 breach (560M records). Password reuse risk: Square, Gusto payroll. Schedule rotation.')" style="padding:4px 10px;font-size:11px;background:#f9731620;color:#f97316;border:1px solid #f9731640;border-radius:6px;cursor:pointer">Triage</button></td>
           </tr>
           <tr style="border-bottom:1px solid #1e3a5f1a">
-            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">summit-realty-group.com</div><div style="font-size:11px;color:#64748b">Real Estate \xB7 22 employees</div></td>
+            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">summit-realty-group.com</div><div style="font-size:11px;color:#64748b">Real Estate · 22 employees</div></td>
             <td style="padding:10px 12px"><span style="color:#facc15;font-weight:700;font-size:13px">31/100</span></td>
             <td style="padding:10px 12px"><span style="color:#facc15;font-weight:800;font-size:14px">C</span></td>
             <td style="padding:10px 12px"><span style="color:#64748b">0 hits</span></td>
@@ -827,20 +831,20 @@ footer a{color:#00B5A5;text-decoration:none}
             <td style="padding:10px 12px"><button onclick="mspTriage('summit-realty-group.com','MEDIUM','31','Domain lookalike: summit-realty-group-secure.com registered 7 days ago. Potential vendor impersonation / invoice fraud setup.')" style="padding:4px 10px;font-size:11px;background:#facc1520;color:#facc15;border:1px solid #facc1540;border-radius:6px;cursor:pointer">Triage</button></td>
           </tr>
           <tr style="border-bottom:1px solid #1e3a5f1a">
-            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">northshore-brewery.com</div><div style="font-size:11px;color:#64748b">F&B \xB7 8 employees</div></td>
+            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">northshore-brewery.com</div><div style="font-size:11px;color:#64748b">F&B · 8 employees</div></td>
             <td style="padding:10px 12px"><span style="color:#22c55e;font-weight:700;font-size:13px">14/100</span></td>
             <td style="padding:10px 12px"><span style="color:#22c55e;font-weight:800;font-size:14px">B</span></td>
             <td style="padding:10px 12px"><span style="color:#64748b">0 hits</span></td>
-            <td style="padding:10px 12px"><span style="color:#22c55e">\u2014</span></td>
+            <td style="padding:10px 12px"><span style="color:#22c55e">—</span></td>
             <td style="padding:10px 12px;font-size:12px;color:#64748b">28d ago</td>
             <td style="padding:10px 12px"><button onclick="mspTriage('northshore-brewery.com','LOW','14','No active threats. Last scan clean. Breach monitoring active for 3 email addresses.')" style="padding:4px 10px;font-size:11px;background:#22c55e20;color:#22c55e;border:1px solid #22c55e40;border-radius:6px;cursor:pointer">View</button></td>
           </tr>
           <tr>
-            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">pinecrest-law.com</div><div style="font-size:11px;color:#64748b">Legal \xB7 6 employees</div></td>
+            <td style="padding:10px 12px"><div style="color:#e2e8f0;font-weight:600;font-size:13px">pinecrest-law.com</div><div style="font-size:11px;color:#64748b">Legal · 6 employees</div></td>
             <td style="padding:10px 12px"><span style="color:#22c55e;font-weight:700;font-size:13px">8/100</span></td>
             <td style="padding:10px 12px"><span style="color:#22c55e;font-weight:800;font-size:14px">A</span></td>
             <td style="padding:10px 12px"><span style="color:#64748b">0 hits</span></td>
-            <td style="padding:10px 12px"><span style="color:#22c55e">\u2014</span></td>
+            <td style="padding:10px 12px"><span style="color:#22c55e">—</span></td>
             <td style="padding:10px 12px;font-size:12px;color:#64748b">41d ago</td>
             <td style="padding:10px 12px"><button onclick="mspTriage('pinecrest-law.com','LOW','8','Clean. Attorney email addresses monitored. SIM swap monitoring active for 4 phone numbers.')" style="padding:4px 10px;font-size:11px;background:#22c55e20;color:#22c55e;border:1px solid #22c55e40;border-radius:6px;cursor:pointer">View</button></td>
           </tr>
@@ -853,7 +857,7 @@ footer a{color:#00B5A5;text-decoration:none}
     <div style="margin-top:14px;padding:12px 16px;background:#060b18;border:1px solid #1e3a5f40;border-radius:8px;font-size:12px;color:#4a7fa5;line-height:1.7">
       <strong style="color:#00B5A5">API call behind this view:</strong>
       <code style="color:#94a3b8;background:#1e3a5f;padding:2px 6px;border-radius:4px">POST /v1/metered/bulk-identity-risk</code>
-      \u2014 submit all 5 client domains in a single request. Each domain scored across 6 signal dimensions. ConnectWise service ticket auto-created for every CRITICAL result \u2014 alert lands in your existing MSP queue with severity, affected identity, and remediation steps pre-populated. &nbsp;<span style="color:#22c55e;font-weight:600">$0.50 per batch of 100 identities.</span>
+      — submit all 5 client domains in a single request. Each domain scored across 6 signal dimensions. ConnectWise service ticket auto-created for every CRITICAL result — alert lands in your existing MSP queue with severity, affected identity, and remediation steps pre-populated. &nbsp;<span style="color:#22c55e;font-weight:600">$0.50 per batch of 100 identities.</span>
     </div>
   </div>
 
@@ -877,9 +881,9 @@ function mspTriage(domain, level, score, detail) {
     </div>
     <div style="font-size:13px;color:#94a3b8;line-height:1.7;margin-bottom:14px">\${detail}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button onclick="alert('WhatsApp remediation sequence sent to client admin contact')" style="padding:6px 14px;font-size:12px;font-weight:600;background:#25d36620;color:#25d366;border:1px solid #25d36640;border-radius:8px;cursor:pointer">\u{1F4F1} WA Remediation</button>
-      <button onclick="alert('ConnectWise ticket created:\\n\\nClient: \${domain}\\nSeverity: \${level}\\nScore: \${score}/100\\nDetail: \${detail}\\n\\nTicket #' + Math.floor(8000+Math.random()*2000) + ' opened in Service Board')" style="padding:6px 14px;font-size:12px;font-weight:600;background:#22c55e20;color:#22c55e;border:1px solid #22c55e40;border-radius:8px;cursor:pointer">\u2197 Create CW Ticket</button>
-      <button onclick="document.getElementById('msp-detail').style.display='none'" style="padding:6px 14px;font-size:12px;font-weight:600;background:#1e3a5f;color:#64748b;border:1px solid #1e3a5f;border-radius:8px;cursor:pointer">\u2715 Dismiss</button>
+      <button onclick="alert('WhatsApp remediation sequence sent to client admin contact')" style="padding:6px 14px;font-size:12px;font-weight:600;background:#25d36620;color:#25d366;border:1px solid #25d36640;border-radius:8px;cursor:pointer">📱 WA Remediation</button>
+      <button onclick="alert('ConnectWise ticket created:\\n\\nClient: \${domain}\\nSeverity: \${level}\\nScore: \${score}/100\\nDetail: \${detail}\\n\\nTicket #' + Math.floor(8000+Math.random()*2000) + ' opened in Service Board')" style="padding:6px 14px;font-size:12px;font-weight:600;background:#22c55e20;color:#22c55e;border:1px solid #22c55e40;border-radius:8px;cursor:pointer">↗ Create CW Ticket</button>
+      <button onclick="document.getElementById('msp-detail').style.display='none'" style="padding:6px 14px;font-size:12px;font-weight:600;background:#1e3a5f;color:#64748b;border:1px solid #1e3a5f;border-radius:8px;cursor:pointer">✕ Dismiss</button>
     </div>\`;
   box.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
@@ -932,12 +936,12 @@ async function runTrending() {
 }
 
 async function runRansomware() {
-  const victim = document.getElementById('ransomware-input').value.trim();
+  const query = document.getElementById('ransomware-input').value.trim();
   const days = document.getElementById('ransomware-days').value;
   setLoading('ransomware-result');
   const resp = await fetch('/demo/ransomware', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({victim: victim, days: parseInt(days, 10)})
+    body: JSON.stringify({query: query, days: parseInt(days, 10)})
   });
   const data = await resp.json();
   document.getElementById('ransomware-result').innerHTML = renderRansomware(data);
@@ -970,8 +974,8 @@ async function runLLMJacking() {
 async function runIpIntel() {
   const query = document.getElementById('ipintel-input').value.trim();
   if (!query) return;
-  // crude IPv4 detection \u2014 anything else is treated as a domain
-  const isIp = /^d{1,3}.d{1,3}.d{1,3}.d{1,3}$/.test(query);
+  // crude IPv4 detection — anything else is treated as a domain
+  const isIp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(query);
   setLoading('ipintel-result');
   const resp = await fetch('/demo/ip-intel', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -999,39 +1003,51 @@ async function runSupply() {
 }
 
 ${renderFunctions()}
-<\/script>
+</script>
 </body>
-</html>`, "PAGE");
+</html>`;
+
 function renderAttackTimeline(dims, score) {
-  const hasBreach = (dims.breach_exposure || 0) > 0;
+  // Determine which stages of the attack chain have fired based on dimension scores
+  const hasBreach      = (dims.breach_exposure || 0) > 0;
   const hasInfostealer = (dims.infostealer_density || 0) > 0;
-  const hasSession = (dims.session_exposure || 0) > 0;
-  const atRisk = score >= 45;
+  const hasSession     = (dims.session_exposure || 0) > 0;
+  const atRisk         = score >= 45;
+
   const stages = [
-    { label: "Data\nBreach", hit: hasBreach, icon: "\u{1F4BE}", tip: "Credentials in breach database" },
-    { label: "Infostealer\nHit", hit: hasInfostealer, icon: "\u{1F575}", tip: "Active credential harvesting detected" },
-    { label: "Session\nStolen", hit: hasSession, icon: "\u{1F36A}", tip: "Live session cookie in criminal archive" },
-    { label: "Account\nTakeover", hit: atRisk, icon: "\u{1F513}", tip: "Risk threshold for ATO reached" }
+    { label: "Data\nBreach",        hit: hasBreach,      icon: "💾", tip: "Credentials in breach database" },
+    { label: "Infostealer\nHit",    hit: hasInfostealer, icon: "🕵", tip: "Active credential harvesting detected" },
+    { label: "Session\nStolen",     hit: hasSession,     icon: "🍪", tip: "Live session cookie in criminal archive" },
+    { label: "Account\nTakeover",   hit: atRisk,         icon: "🔓", tip: "Risk threshold for ATO reached" },
   ];
+
+  // Determine where the domain sits on the chain
   let currentStage = -1;
-  stages.forEach((s, i) => {
-    if (s.hit) currentStage = i;
-  });
+  stages.forEach((s, i) => { if (s.hit) currentStage = i; });
+
   const stageHtml = stages.map((s, i) => {
-    const active = s.hit;
+    const active  = s.hit;
     const current = i === currentStage;
-    const color = active ? i >= 3 ? "#ef4444" : i >= 2 ? "#f97316" : i >= 1 ? "#facc15" : "#22c55e" : "#1e3a5f";
-    const lineColor = i < stages.length - 1 && stages[i + 1].hit ? color : "#1e3a5f";
+    const color   = active ? (i >= 3 ? "#ef4444" : i >= 2 ? "#f97316" : i >= 1 ? "#facc15" : "#22c55e") : "#1e3a5f";
+    const lineColor = (i < stages.length - 1 && stages[i+1].hit) ? color : "#1e3a5f";
     return `<div class="tl-stage">
       <div class="tl-dot-outer" style="border-color:${color};${active ? `box-shadow:0 0 6px ${color}60` : ""}" title="${s.tip}">
-        <span style="font-size:11px">${active ? s.icon : "\xB7"}</span>
+        <span style="font-size:11px">${active ? s.icon : "·"}</span>
       </div>
-      <div class="tl-label" style="color:${active ? "#e2e8f0" : "#334155"}">${s.label.replace("\n", "<br>")}</div>
-      ${current ? `<div class="tl-you" style="color:${color}">\u2190 YOU ARE HERE</div>` : ""}
+      <div class="tl-label" style="color:${active ? "#e2e8f0" : "#334155"}">${s.label.replace("\n","<br>")}</div>
+      ${current ? `<div class="tl-you" style="color:${color}">← YOU ARE HERE</div>` : ""}
       ${i < stages.length - 1 ? `<div style="position:absolute;top:12px;left:50%;width:100%;height:2px;background:${lineColor};z-index:0"></div>` : ""}
     </div>`;
   }).join("");
-  const warningMsg = currentStage >= 2 ? `<div style="font-size:12px;color:#ef4444;margin-top:10px;font-weight:600">\u26A0 Active session exposure detected \u2014 attacker can bypass 2FA without a password</div>` : currentStage >= 1 ? `<div style="font-size:12px;color:#f97316;margin-top:10px">Active credential harvesting on this domain. Session theft is the next step in the attack chain.</div>` : currentStage >= 0 ? `<div style="font-size:12px;color:#facc15;margin-top:10px">Breach data is the raw material for SIM swap and infostealer targeting. Monitor for escalation.</div>` : `<div style="font-size:12px;color:#22c55e;margin-top:10px">No active attack chain signals detected for this domain.</div>`;
+
+  const warningMsg = currentStage >= 2
+    ? `<div style="font-size:12px;color:#ef4444;margin-top:10px;font-weight:600">⚠ Active session exposure detected — attacker can bypass 2FA without a password</div>`
+    : currentStage >= 1
+    ? `<div style="font-size:12px;color:#f97316;margin-top:10px">Active credential harvesting on this domain. Session theft is the next step in the attack chain.</div>`
+    : currentStage >= 0
+    ? `<div style="font-size:12px;color:#facc15;margin-top:10px">Breach data is the raw material for SIM swap and infostealer targeting. Monitor for escalation.</div>`
+    : `<div style="font-size:12px;color:#22c55e;margin-top:10px">No active attack chain signals detected for this domain.</div>`;
+
   return `<div class="attack-timeline">
     <div style="font-size:11px;font-weight:700;color:#4a7fa5;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Attack Chain Position</div>
     <div style="font-size:11px;color:#334155;margin-bottom:12px">Where this domain sits in the identity attack sequence</div>
@@ -1039,15 +1055,15 @@ function renderAttackTimeline(dims, score) {
     ${warningMsg}
   </div>`;
 }
-__name(renderAttackTimeline, "renderAttackTimeline");
+
 function downloadReport() {
-  const { domain, score, grade, level, dims, factors } = window._rsReport || {};
-  const date = (/* @__PURE__ */ new Date()).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-  const dimNames = { breach_exposure: "Breach Exposure", infostealer_density: "Infostealer Density", ioc_presence: "IOC Presence", ransomware_victim: "Ransomware Victim", session_exposure: "Session Exposure", cve_exposure: "CVE Exposure" };
-  const dimLines = Object.entries(dims).map(([k, v]) => `  ${(dimNames[k] || k).padEnd(24)} ${v}`).join("\n");
-  const factorLines = (factors || []).map((f) => `  \u2022 ${f}`).join("\n");
-  const content = `RELAYSHIELD \u2014 IDENTITY RISK REPORT
-${"=".repeat(50)}
+  const {domain,score,grade,level,dims,factors} = window._rsReport || {};
+  const date = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const dimNames = {breach_exposure:'Breach Exposure',infostealer_density:'Infostealer Density',ioc_presence:'IOC Presence',ransomware_victim:'Ransomware Victim',session_exposure:'Session Exposure',cve_exposure:'CVE Exposure'};
+  const dimLines = Object.entries(dims).map(([k,v]) => `  ${(dimNames[k]||k).padEnd(24)} ${v}`).join('\n');
+  const factorLines = (factors||[]).map(f => `  • ${f}`).join('\n');
+  const content = `RELAYSHIELD — IDENTITY RISK REPORT
+${'='.repeat(50)}
 Generated:    ${date}
 Domain:       ${domain}
 Risk Score:   ${score}/100
@@ -1055,34 +1071,35 @@ Risk Level:   ${level}
 Grade:        ${grade}
 
 SIGNAL DIMENSIONS
-${"\u2500".repeat(40)}
+${'─'.repeat(40)}
 ${dimLines}
 
 RISK FACTORS
-${"\u2500".repeat(40)}
-${factorLines || "  None identified"}
+${'─'.repeat(40)}
+${factorLines || '  None identified'}
 
 RECOMMENDED ACTIONS
-${"\u2500".repeat(40)}
-  \u2022 Rotate credentials for all accounts associated with this domain
-  \u2022 Audit active sessions and revoke any unrecognised tokens
-  \u2022 Enable hardware MFA where session cookie exposure is detected
-  \u2022 Review infostealer remediation steps via RelayShield bot
+${'─'.repeat(40)}
+  • Rotate credentials for all accounts associated with this domain
+  • Audit active sessions and revoke any unrecognised tokens
+  • Enable hardware MFA where session cookie exposure is detected
+  • Review infostealer remediation steps via RelayShield bot
 
-${"\u2500".repeat(50)}
+${'─'.repeat(50)}
 RelayShield Threat Intelligence | relayshield.net
-\xA9 2026 RelayShield LLC \u2014 Confidential
+© 2026 RelayShield LLC — Confidential
 `;
-  const blob = new Blob([content], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `relayshield-report-${domain}-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.txt`;
+  const blob = new Blob([content], {type:'text/plain'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `relayshield-report-${domain}-${new Date().toISOString().slice(0,10)}.txt`;
   a.click();
   URL.revokeObjectURL(url);
 }
-__name(downloadReport, "downloadReport");
+
 function renderFunctions() {
+  // These are the render functions inlined — they're in the Worker scope already
   return `
 function grade_color(g){return{A:'#22c55e',B:'#86efac',C:'#facc15',D:'#f97316',F:'#ef4444'}[g]||'#94a3b8'}
 function risk_color(l){return{LOW:'#22c55e',MEDIUM:'#facc15',HIGH:'#f97316',CRITICAL:'#ef4444'}[l]||'#94a3b8'}
@@ -1098,128 +1115,149 @@ ${ipIntelRiskLevel.toString()}
 ${renderIpIntel.toString()}
 ${renderBulkIdentity.toString()}
 ${renderSupplyChain.toString()}
-${renderRansomware.toString()}
 `;
 }
-__name(renderFunctions, "renderFunctions");
-var GATE_HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RelayShield Demo</title>
+
+const GATE_HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RelayShield Demo</title>
 <style>body{font-family:sans-serif;background:#0a1628;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
 .box{background:#0F1F3D;border:1px solid #1e3a5f;border-top:3px solid #00B5A5;border-radius:8px;padding:40px;max-width:400px;text-align:center}
 h2{color:#fff;margin-bottom:12px}p{color:#64748b;font-size:14px;line-height:1.6}a{color:#00B5A5}</style></head>
-<body><div class="box"><h2>\u{1F512} Demo Access Required</h2>
+<body><div class="box"><h2>🔒 Demo Access Required</h2>
 <p>This demo is for qualified prospects and partners.<br><br>
 Contact <a href="mailto:support@relayshield.net">support@relayshield.net</a> to request access.</p></div></body></html>`;
-var cloudflare_worker_ti_demo_default = {
+
+export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-    const token = url.searchParams.get("token") || "";
-    const path = url.pathname;
+    const url    = new URL(request.url);
+    const token  = url.searchParams.get("token") || "";
+    const path   = url.pathname;
+
+    // Fail closed: without the gate secret nobody can be authenticated, and an
+    // undefined token would make `demo_token=undefined` a forgeable cookie.
     if (!env.DEMO_TOKEN) {
-      return new Response("Demo is not configured \u2014 DEMO_TOKEN secret is not set.", {
+      return new Response("Demo is not configured — DEMO_TOKEN secret is not set.", {
         status: 503,
-        headers: { "Content-Type": "text/plain;charset=UTF-8", "Cache-Control": "no-store" }
+        headers: { "Content-Type": "text/plain;charset=UTF-8", "Cache-Control": "no-store" },
       });
     }
+
+    // Gate check — pass token as query param or cookie
     const cookie = request.headers.get("Cookie") || "";
     const authed = token === env.DEMO_TOKEN || cookie.includes(`demo_token=${env.DEMO_TOKEN}`);
+
+    // The /demo/* proxy endpoints are gated too. Until 2026-08-12 they were
+    // exempted (`!authed && !path.startsWith("/demo/")`), so anyone who knew the
+    // Worker hostname could POST to them with no token and get full intel back,
+    // spending the rate-limited demo key against prod — four of the seven proxy
+    // to metered endpoints. The page itself is unaffected: it is only ever
+    // served to an authed request, and that response sets the Path=/ demo_token
+    // cookie the page's own same-origin fetches then carry.
     if (!authed) {
       if (path.startsWith("/demo/")) {
+        // JSON, not the HTML gate page — every render function in the page
+        // branches on `data.error` first, so this surfaces as a readable error
+        // rather than an HTML parse failure.
         return new Response(JSON.stringify({
-          error: "Demo access token required \u2014 reload the demo page using your access link."
+          error: "Demo access token required — reload the demo page using your access link.",
         }), {
           status: 401,
-          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
         });
       }
       return new Response(GATE_HTML, {
         status: 401,
-        headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" }
+        headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" },
       });
     }
+
+    // API proxy endpoints
     if (path === "/demo/identity" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/metered/identity-risk-score", body);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
+
     if (path === "/demo/actor" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/intel/actor", { actor: body.actor });
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
+
     if (path === "/demo/trending" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/intel/trending", { hours: body.hours || 24 });
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
+
     if (path === "/demo/ransomware" && request.method === "POST") {
       const body = await request.json();
-      const query = String(body.victim || "").trim();
-      const isDomain = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(query.replace(/^https?:\/\//, "").replace(/\/.*$/, ""));
-      if (isDomain) {
-        const domain = query.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
-        const data2 = await callAPI(env, "/v1/metered/ransomware-risk", { domain });
-        if (!data2.error) data2._mode = "domain";
-        return new Response(JSON.stringify(data2), { headers: { "Content-Type": "application/json" } });
-      }
-      const data = await callAPI(env, "/v1/intel/ransomware", {
-        victim: query,
-        days: body.days || 30,
-        limit: 100
-      });
-      if (!data.error) data._mode = "corpus";
-      if (data.error && /not live on the API yet|unknown endpoint/i.test(data.error)) {
-        data.error = "The corpus-wide listing needs the next API deploy. In the meantime, enter a DOMAIN (e.g. acme.com) \u2014 domain lookups work now and query the full leak-site corpus.";
-      }
+      const query = String(body.query || "").trim();
+      const cleaned = query.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const isDomain = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(cleaned);
+      // Same endpoint for both modes: handle_ransomware_risk treats an empty
+      // or non-domain input as a corpus-wide listing request (fa83bb5).
+      const params = isDomain
+        ? { domain: cleaned.toLowerCase() }
+        : { org: query, days: body.days || 30 };
+      const data = await callAPI(env, "/v1/metered/ransomware-risk", params);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
+
     if (path === "/demo/nhi" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/metered/nhi-exposure", body);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
+
     if (path === "/demo/llmjacking" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/metered/llm-credential-exposure", body);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
+
     if (path === "/demo/ip-intel" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/metered/ip-intel", body);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
+
     if (path === "/demo/supply" && request.method === "POST") {
       const body = await request.json();
       const targets = body.targets || [];
-      if (!targets.length) return new Response(JSON.stringify({ error: "no targets" }), { headers: { "Content-Type": "application/json" } });
+      if (!targets.length) return new Response(JSON.stringify({error:"no targets"}), {headers:{"Content-Type":"application/json"}});
       const target = targets[0];
+
+      // Run domain scoring and NHI credential scan in parallel
       const agentEmails = target.agents || [];
       const [domainData, nhiData] = await Promise.all([
-        callAPI(env, "/v1/metered/identity-risk-score", { domain: target.domain }),
-        callAPI(env, "/v1/metered/nhi-exposure", { domain: target.domain })
+        callAPI(env, "/v1/metered/identity-risk-score", {domain: target.domain}),
+        callAPI(env, "/v1/metered/nhi-exposure", {domain: target.domain})
       ]);
+
+      // Map NHI findings to agent emails — any finding for the domain flags agents on that domain
       const nhiFindings = nhiData.findings || [];
-      const criticalFindings = nhiFindings.filter((f) => f.severity === "CRITICAL" || f.severity === "HIGH");
+      const criticalFindings = nhiFindings.filter(f => f.severity === "CRITICAL" || f.severity === "HIGH");
       const agents = agentEmails.map((email, idx) => {
         const agentDomain = email.split("@")[1] || "";
-        const domainMatch = nhiFindings.find((f) => f.severity && agentDomain.includes(target.domain));
+        // Any NHI credential finding for this domain flags the agent
+        const domainMatch = nhiFindings.find(f => f.severity && agentDomain.includes(target.domain));
+        // Distribute findings across agents (first agent gets highest severity)
         const finding = criticalFindings[idx] || domainMatch;
         if (finding) {
           return {
             identity: email,
             risk_score: finding.severity === "CRITICAL" ? 95 : finding.severity === "HIGH" ? 70 : 40,
             risk_level: finding.severity || "HIGH",
-            risk_factors: [`${finding.type || "Service credential"} detected in criminal stealer archive \u2014 ${finding.description || "NHI exposure confirmed"}`]
+            risk_factors: [`${finding.type||"Service credential"} detected in criminal stealer archive — ${finding.description||"NHI exposure confirmed"}`]
           };
         }
-        return {
-          identity: email,
-          risk_score: 0,
-          risk_level: "LOW",
-          risk_factors: ["No credential exposure detected in current corpus"]
-        };
+        return { identity: email, risk_score: 0, risk_level: "LOW",
+          risk_factors: ["No credential exposure detected in current corpus"] };
       });
-      const critAgents = agents.filter((a) => a.risk_level === "CRITICAL").length;
-      const highAgents = agents.filter((a) => ["CRITICAL", "HIGH"].includes(a.risk_level)).length;
+
+      const critAgents = agents.filter(a => a.risk_level === "CRITICAL").length;
+      const highAgents = agents.filter(a => ["CRITICAL","HIGH"].includes(a.risk_level)).length;
+
       const result = {
         queried: 1,
         critical_count: critAgents,
@@ -1234,19 +1272,17 @@ var cloudflare_worker_ti_demo_default = {
           dimension_scores: domainData.dimension_scores || {},
           agents,
           agent_count: agents.length,
-          highest_agent_risk: agents.length ? agents.sort((a, b) => b.risk_score - a.risk_score)[0].risk_level : null
+          highest_agent_risk: agents.length ? agents.sort((a,b)=>b.risk_score-a.risk_score)[0].risk_level : null,
         }]
       };
       return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
     }
+
+    // Serve the demo page (set auth cookie so token doesn't need to stay in URL)
     const headers = new Headers({ "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" });
     if (token === env.DEMO_TOKEN) {
       headers.set("Set-Cookie", `demo_token=${env.DEMO_TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`);
     }
     return new Response(PAGE("", token), { headers });
-  }
+  },
 };
-export {
-  cloudflare_worker_ti_demo_default as default
-};
-//# sourceMappingURL=cloudflare_worker_ti_demo.js.map

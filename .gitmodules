@@ -1,0 +1,4 @@
+[submodule "relayshield-mcp"]
+	path = relayshield-mcp
+	url = https://github.com/relayshield/relayshield-mcp.git
+	branch = main

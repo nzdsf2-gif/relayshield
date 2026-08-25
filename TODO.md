@@ -1,6 +1,46 @@
 # RelayShield — Open Items
 
-## 🔵 MS-4 CARRY-FORWARD, added 2026-08-18. Read before touching Azure or submitting.
+## 🟦 BLOG-TOXICPANDA: on deck, drafted 2026-08-25, not time-sensitive to the news cycle
+
+Full research done, not yet written to file. Real facts pulled from the Malwarebytes source
+(sideload via AWS-hosted buckets, VPN + Accessibility Service abuse, on-device fraud using the
+victim's own IP/session/behavioral context to evade bank fraud detection). **No real IOCs exist in
+the source** — checked explicitly, only two vendor detection-signature names, no domains/hashes/
+packages. Checked our own corpus via the `malware-index` GSI for ToxicPanda and every major Android
+banking trojan family (Octo, Cerberus, Anubis, Hook, Medusa, BRATA) plus an 80,000-item sample of
+distinct family labels — **zero Android banking trojan coverage anywhere in the corpus today.**
+
+**The angle** (mirrors the Agent Tesla post's honesty pattern): we checked, we don't have it, and
+here's structurally why no IOC feed will — both Agent Tesla (in-memory injection) and ToxicPanda
+(on-device fraud on the victim's own session) are built to defeat exactly what an indicator feed
+catches. What actually sees the downstream damage is `check_infostealer` / `check_session_risk` —
+stolen credentials and session material, not a malware signature.
+
+Unlike the Agent Tesla draft, this one is not tied to a decaying news window — publish whenever. | ⬜ On deck
+
+---
+
+## 🟦 RAPIDAPI-1: fix the RapidAPI listing gap + add missing endpoints (LLMjacking included) — added 2026-08-25, founder-flagged
+
+**Founder's framing:** RapidAPI hasn't been an effective discovery surface, possibly because it
+requires *developer* discovery rather than *agent* discovery — part of the motivation for standing
+up the Apify Actor (see [[project_apify_mcp_actor]]) as a parallel, agent-facing channel.
+
+**The known gap (from AGENTIC-7a, 2026-07-07, never completed):** the RapidAPI listing at
+`rapidapi.com/relayshield/relayshield-security-intelligence` only exposed 7 of 20+ live endpoints —
+needs the provider dashboard (login as "andrew") to add the rest. Not touched since.
+
+**Now also missing:** `check_llm_credential_exposure` (LLMjacking) — added to `relayshield-mcp`
+2026-08-24 as `check_llm_credential_exposure`, and confirmed LIVE on the backend
+(`POST /v1/payg/llm-credential-exposure` returns a real 402 x402 quote, verified 2026-08-25) — but
+never added to the RapidAPI listing, same gap pattern as AGENTIC-7a.
+
+**Scope:** (1) audit the RapidAPI dashboard against the full live endpoint list in
+`relayshield_api.py` / `PAYG_PRICE_UNITS` to find every gap, not just LLMjacking; (2) add all
+missing endpoints, including LLMjacking; (3) decide whether the underlying "developer discovery"
+problem needs more than an endpoint-count fix (positioning, pricing display, description copy) or
+whether it's a lost-cause channel now that Apify is live for agent discovery. | ⬜ Pending — needs
+founder RapidAPI dashboard login
 
 **Do NOT delete the storage account after submitting.** The reviewer fetches the package from the
 SAS URL through review, preview testing and go-live, which is **3 to 4 weeks**. Deleting it after

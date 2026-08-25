@@ -5496,9 +5496,37 @@ def handle_report_view(report_id: str) -> dict:
 #   "recommendation": "..."
 # }
 
-RANSOMWARE_TABLE_API  = "relayshield_intel_ransomware"
+RANSOMWARE_TABLE_API       = "relayshield_intel_ransomware"
+RANSOMWARE_VICTIMS_LIVE_TABLE = "relayshield_ransomware_victims"
 MITRE_ATTACK_TABLE    = "relayshield_mitre_attack"
 WEBHOOK_MAX_TIMEOUT   = 5   # seconds — webhook delivery must not block main response
+
+
+def _query_ransomware_victims(domain: str) -> list[dict]:
+    """Check both ransomware-victim sources for a domain and merge results.
+
+    A5, 2026-08-25. RANSOMWARE_TABLE_API (`relayshield_intel_ransomware`) is
+    the original table -- 5,235 items, real historical breadth, but its
+    last genuinely new victim was 2025-06-16 (checked: full scan sorted by
+    `discovered`). The Telegram channels that fed it are all confirmed
+    dead. RANSOMWARE_VICTIMS_LIVE_TABLE (`relayshield_ransomware_victims`)
+    is the live replacement, polled hourly from the ransomware.live Pro API
+    by relayshield_intel_monitor.py's _poll_ransomware_live(). Querying
+    both gives historical depth plus current freshness; either alone gives
+    up one or the other. Both tables use `domain` as the partition key.
+    """
+    items = []
+    for table_name in (RANSOMWARE_TABLE_API, RANSOMWARE_VICTIMS_LIVE_TABLE):
+        try:
+            resp = dynamodb.Table(table_name).query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
+                Limit=10,
+            )
+            items.extend(resp.get("Items", []))
+        except Exception as exc:
+            logger.warning("ransomware victim query failed table=%s domain=%s: %s",
+                            table_name, domain, exc)
+    return items
 
 
 def _build_threat_graph(malware_family: str) -> dict | None:
@@ -5913,7 +5941,6 @@ def handle_cve_identity_risk(params: dict) -> dict:
 
     cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
     ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
-    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
     chatter_tbl    = dynamodb.Table(EXPLOIT_CHATTER_TABLE)
 
     # 1. Get CVE baseline data (EPSS + KEV)
@@ -5957,18 +5984,9 @@ def handle_cve_identity_risk(params: dict) -> dict:
                 pass
 
     # 4. Post-CVE breach velocity — ransomware victim check for domain
-    on_victim_list = False
-    victim_groups = []
-    try:
-        resp = ransomware_tbl.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
-            Limit=5,
-        )
-        items = resp.get("Items", [])
-        on_victim_list = bool(items)
-        victim_groups = [i.get("group", "") for i in items]
-    except Exception:
-        pass
+    items = _query_ransomware_victims(domain)
+    on_victim_list = bool(items)
+    victim_groups = [i.get("group", "") for i in items]
 
     # 5. Exploit chatter check
     chatter_count = 0
@@ -6054,7 +6072,6 @@ def handle_identity_risk_score(params: dict) -> dict:
 
     ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
     cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
-    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
     sessions_tbl   = dynamodb.Table("relayshield_stolen_sessions")
     base_name      = domain.split(".")[0]  # adobe.com -> adobe
     company        = base_name.capitalize()  # adobe -> Adobe
@@ -6151,18 +6168,11 @@ def handle_identity_risk_score(params: dict) -> dict:
 
     # Dimension 4: Ransomware victim listing (0-20)
     ransomware_score = 0
-    try:
-        rw_resp = ransomware_tbl.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
-            Limit=5,
-        )
-        rw_items = rw_resp.get("Items", [])
-        if rw_items:
-            ransomware_score = 20
-            groups = list({i.get("group", "") for i in rw_items if i.get("group")})
-            factors.append(f"Ransomware victim: {domain} listed by {', '.join(groups[:3])} ransomware group(s)")
-    except Exception:
-        pass
+    rw_items = _query_ransomware_victims(domain)
+    if rw_items:
+        ransomware_score = 20
+        groups = list({i.get("group", "") for i in rw_items if i.get("group")})
+        factors.append(f"Ransomware victim: {domain} listed by {', '.join(groups[:3])} ransomware group(s)")
     dim_scores["ransomware_victim"] = ransomware_score
 
     # Dimension 5: Active session exposure (0-10)
@@ -6550,18 +6560,12 @@ def handle_target_risk(params: dict) -> dict:
     signals = []
 
     # Signal 1: Ransomware victim listing (+40)
-    try:
-        victim_resp  = dynamodb.Table(RANSOMWARE_TABLE_API).query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
-        )
-        victims = victim_resp.get("Items", [])
-        if victims:
-            groups = [v.get("group", "") for v in victims]
-            score += 40
-            signals.append({"signal": "ransomware_victim", "weight": 40,
-                             "detail": f"Listed by {', '.join(groups[:3])}"})
-    except Exception as exc:
-        logger.warning("target-risk ransomware check failed: %s", exc)
+    victims = _query_ransomware_victims(domain)
+    if victims:
+        groups = [v.get("group", "") for v in victims]
+        score += 40
+        signals.append({"signal": "ransomware_victim", "weight": 40,
+                         "detail": f"Listed by {', '.join(groups[:3])}"})
 
     # Signal 2+3: Infostealer hits + pre-ransomware credentials
     try:
@@ -6805,15 +6809,8 @@ def handle_ransomware_risk(params: dict) -> dict:
     if not domain or "." not in domain:
         return _err("domain is required (e.g. acme.com)")
 
-    # Check victim list
-    try:
-        resp         = dynamodb.Table(RANSOMWARE_TABLE_API).query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
-        )
-        victim_items = resp.get("Items", [])
-    except Exception as exc:
-        logger.exception("ransomware-risk victim query failed domain=%s: %s", domain, exc)
-        return _err("ransomware risk query failed — internal error", 500)
+    # Check victim list (both the historical table and the live-polled one)
+    victim_items = _query_ransomware_victims(domain)
 
     # Count pre-ransomware tagged IOCs for this domain
     pre_ransomware_count = 0
@@ -10311,7 +10308,6 @@ def handle_brand_monitor(params: dict) -> dict:
 def _domain_risk_fast(domain: str) -> dict:
     """Run all 6 identity risk dimensions for one domain. Returns score dict."""
     ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
-    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
     sessions_tbl   = dynamodb.Table("relayshield_stolen_sessions")
     cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
     base_name      = domain.split(".")[0]
@@ -10356,13 +10352,9 @@ def _domain_risk_fast(domain: str) -> dict:
         dim["ioc_presence"] = 0
 
     # D4: Ransomware victim (0-20)
-    try:
-        resp = ransomware_tbl.query(KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain), Limit=3)
-        items = resp.get("Items", [])
-        dim["ransomware_victim"] = 20 if items else 0
-        if items: factors.append(f"Ransomware victim: {', '.join(i.get('group','') for i in items)}")
-    except Exception:
-        dim["ransomware_victim"] = 0
+    items = _query_ransomware_victims(domain)
+    dim["ransomware_victim"] = 20 if items else 0
+    if items: factors.append(f"Ransomware victim: {', '.join(i.get('group','') for i in items)}")
 
     # D5: Session exposure (0-15)
     try:

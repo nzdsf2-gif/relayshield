@@ -93,6 +93,21 @@ INTEL_ALERTS_TABLE    = "relayshield_intel_alerts"
 INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
 INTEL_CHANNELS_TABLE  = "relayshield_intel_channels"
 STOLEN_SESSIONS_TABLE  = "relayshield_stolen_sessions"
+OPERATORS_TABLE        = "relayshield_operator_identities"
+
+# A5, 2026-08-25. All three original `ransomware`-category Telegram channels
+# (ransomwatch, RansomwareUpdates, darkfeed_io) are confirmed dead -- checked
+# live: ransomwatch resolves but shows zero visible messages, the other two
+# no longer exist. The `relayshield_intel_ransomware` table they used to feed
+# hasn't had a genuinely new victim since 2025-06-16 (checked: full scan of
+# all 5,235 items, sorted by `discovered`), despite cosmetic re-ingestion as
+# recently as last month. Replaced with the ransomware.live Pro API -- a
+# free-to-the-founder, structured, real-time source with resolved domains,
+# which the old Telegram-regex approach never had (it only ever extracted a
+# company NAME from free text, never a queryable domain).
+RANSOMWARE_LIVE_SECRET   = "relayshield/ransomware_live_api_key"
+RANSOMWARE_LIVE_API      = "https://api-pro.ransomware.live/victims/recent"
+RANSOMWARE_VICTIMS_TABLE = "relayshield_ransomware_victims"
 # CORPUS-1, added 2026-08-16. Measured that day: of 489,990 distinct IOCs, only
 # 8,171 (1.67%) came from the 90 monitored Telegram channels and 481,819
 # (98.33%) from free public feeds any competitor also has. 73 of the 90 active
@@ -1131,6 +1146,117 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "",
                 table.put_item(Item=item)
             except Exception as exc:
                 logger.warning("IOC store failed value=%s: %s", value[:20], exc)
+
+
+def _poll_ransomware_live() -> int:
+    """Poll ransomware.live Pro API for recent victims, upsert into
+    RANSOMWARE_VICTIMS_TABLE. Returns how many had a usable domain.
+
+    A5, 2026-08-25. Plain upsert, not conditional-insert: hourly polls of
+    the same 100-most-recent endpoint mostly re-see the same victims, and
+    re-writing identical data is harmless, so there is no reason to pay for
+    exception-driven dedup logic on what is normally the common case.
+    Skips victims with no resolved `website` -- keying this table on domain
+    is the whole point (the old Telegram-regex path only ever extracted a
+    free-text company name, never a queryable domain), and roughly 5% of
+    entries lack one (measured 2026-08-25: 95 of the 100 most recent had it).
+    """
+    try:
+        api_key = _secrets.get_secret_value(SecretId=RANSOMWARE_LIVE_SECRET)["SecretString"]
+    except Exception:
+        logger.warning("ransomware.live API key not configured — skipping victim poll")
+        return 0
+
+    try:
+        req = urllib.request.Request(RANSOMWARE_LIVE_API, headers={"X-API-KEY": api_key})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        logger.warning("ransomware.live poll failed: %s", exc)
+        return 0
+
+    table = _dynamodb.Table(RANSOMWARE_VICTIMS_TABLE)
+    ttl = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
+    ingested_at = datetime.now(timezone.utc).isoformat()
+    written = 0
+    for v in data.get("victims", []):
+        domain = (v.get("website") or "").strip().lower()
+        vid = v.get("id", "")
+        if not domain or not vid:
+            continue
+        try:
+            table.put_item(Item={
+                "domain":                     domain,
+                "id":                         vid,
+                "group":                      v.get("group", ""),
+                "victim":                     v.get("victim", ""),
+                "country":                    v.get("country", ""),
+                "activity":                   v.get("activity", ""),
+                "discovered":                 v.get("discovered", ""),
+                "attackdate":                 v.get("attackdate", ""),
+                "permalink":                  v.get("permalink", ""),
+                "has_infostealer_correlation": bool(v.get("infostealer")),
+                "ingested_at":                ingested_at,
+                "ttl":                        ttl,
+            })
+            written += 1
+        except Exception as exc:
+            logger.warning("ransomware victim store failed domain=%s: %s", domain, exc)
+    logger.info("ransomware.live poll: %d victim(s) with a domain stored/refreshed", written)
+    return written
+
+
+def _store_operator_identities(handles: list[str], channel: str, category: str) -> int:
+    """Automated counterpart to tools/import_channels.py's import_operators().
+
+    A4 ("pivot enrichment"), 2026-08-25. The roadmap that named this module
+    (relayshield_intel_pivot.py) described it as 'module merged ✅' --
+    checked, it never existed anywhere in the codebase. What DID exist:
+    relayshield_operator_identities (1 hand-entered item) and a manual CLI
+    tool to populate it, with a comment claiming it "mirrors
+    _store_operator_identities() in relayshield_intel_monitor.py" -- which
+    also never existed. This is that function, finally written, wired to
+    the SAME tg_mentions extraction that already feeds channel discovery
+    (see the `_queue_discovered_channels` call beside this one) rather than
+    a new regex, since a mention worth checking as a future channel is
+    exactly as worth recording as a possible operator sighting.
+
+    Deliberately imprecise, matching the manual tool's own documented
+    stance: `_RE_TG_CHANNEL` matches ANY @mention, channel or person alike,
+    so this is a lead list, not a verdict. The value is cross-channel,
+    cross-category correlation over time -- the same handle turning up in
+    a ransomware channel in one month and a phaas channel in another is a
+    cluster no single-sighting feed can produce, exclusive by derivation.
+    """
+    if not handles:
+        return 0
+    table = _dynamodb.Table(OPERATORS_TABLE)
+    now = datetime.now(timezone.utc).isoformat()
+    ttl = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
+    stored = 0
+    for handle in handles:
+        try:
+            table.update_item(
+                Key={"handle": handle, "platform": "telegram"},
+                UpdateExpression=(
+                    "SET first_seen = if_not_exists(first_seen, :now), "
+                    "    last_seen  = :now, "
+                    "    #ttl       = :ttl "
+                    "ADD sightings :one, channels :ch, categories :cat"
+                ),
+                ExpressionAttributeNames={"#ttl": "ttl"},
+                ExpressionAttributeValues={
+                    ":now": now,
+                    ":one": Decimal(1),
+                    ":ch":  {channel},
+                    ":cat": {category or "unknown"},
+                    ":ttl": ttl,
+                },
+            )
+            stored += 1
+        except Exception as exc:
+            logger.warning("operator identity store failed handle=%s: %s", handle, exc)
+    return stored
 
 
 def _log_alert(user_id: str, match: dict, channel: str, category: str) -> None:
@@ -2288,6 +2414,8 @@ def _send_admin_digest(stats: dict) -> None:
         f"Alerts fired: {stats['alerts_fired']}\n"
         f"Brand mentions detected: {stats.get('brand_alerts', 0)}\n"
         f"Ransomware victims named: {stats.get('ransomware_victims', 0)}\n"
+        f"Ransomware victims stored (ransomware.live, A5): {stats.get('ransomware_victims_stored', 0)}\n"
+        f"Operator identity sightings recorded (A4): {stats.get('operator_identities_stored', 0)}\n"
         f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
         f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
         f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n"
@@ -2740,6 +2868,15 @@ async def _poll_channels(stats: dict, tier: str = "") -> None:
                         discovered = _queue_discovered_channels(iocs["tg_mentions"], username)
                         stats["channels_discovered"] += discovered
 
+                        # A4, 2026-08-25. Same mentions, second consumer: also
+                        # record them as possible operator sightings, building
+                        # the cross-channel identity graph relayshield_intel_pivot.py
+                        # was supposed to be. See _store_operator_identities().
+                        stats["operator_identities_stored"] = (
+                            stats.get("operator_identities_stored", 0)
+                            + _store_operator_identities(iocs["tg_mentions"], username, category)
+                        )
+
                     # Tally new IOC type stats
                     stats["ransomware_victims"] += len(iocs.get("ransomware_victims", []))
                     stats["cves_extracted"]     += len(iocs.get("cves", []))
@@ -2908,6 +3045,8 @@ def lambda_handler(event, context):
         "user_matches":           0,
         "alerts_fired":           0,
         "ransomware_victims":     0,
+        "ransomware_victims_stored": 0,
+        "operator_identities_stored": 0,
         "cves_extracted":         0,
         "onions_extracted":       0,
         "channels_discovered":    0,
@@ -2945,6 +3084,18 @@ def lambda_handler(event, context):
                 loop.close()
             except Exception:
                 pass
+
+        # A5, 2026-08-25. Independent of the Telegram poll above -- a plain
+        # HTTP call, not a Telethon session, so it does not need the
+        # single-flight lock's protection against auth-key duplication. Its
+        # own failure is caught here rather than allowed to mark the whole
+        # run FAILED, matching how the Telegram poll's own exception is
+        # handled just above.
+        try:
+            stats["ransomware_victims_stored"] = _poll_ransomware_live()
+        except Exception as exc:
+            logger.exception("ransomware.live poll failed: %s", exc)
+
         _send_admin_digest(stats)
         logger.info("INTEL-2 run complete — stats=%s", stats)
         return {"statusCode": 200, "body": json.dumps(stats)}

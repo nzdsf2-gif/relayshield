@@ -1,0 +1,76 @@
+name: Recover Live Blog Posts Into Git
+
+# The Worker equivalent of recover_live_handler.yml, which CLAUDE.md notes did
+# not exist for Workers. On 2026-08-26 the blog deploy guard found four posts
+# live on blog.relayshield.net that had never existed in git history at all.
+# They were hand-published, so nothing in this repo described them and a deploy
+# would have deleted them silently.
+#
+# This job reads the blog's own RSS feed, which serves the exact stored html for
+# every post, writes anything missing into blog_content/, and commits it. The
+# commit lands on blog_content/**, which is what deploy_blog.yml watches, so a
+# successful recovery triggers a deploy that now carries the recovered posts.
+#
+# Run this BEFORE deploying, never after. After is too late by definition.
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_only:
+        description: 'List what is missing without committing anything'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-blog
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover posts missing from git
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Report what is live but not in git
+        run: python3 tools/recover_live_blog.py
+
+      - name: Recover into blog_content/ and rebuild
+        if: inputs.report_only != true
+        run: |
+          python3 tools/recover_live_blog.py --write
+          python3 build_blog.py
+
+      - name: Commit the recovered posts
+        if: inputs.report_only != true
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "nothing recovered, nothing to commit"
+            exit 0
+          fi
+          RECOVERED=$(git status --porcelain blog_content/ | awk '{print $2}' \
+                      | xargs -r -n1 basename | sed 's/\.json$//' | paste -sd', ' -)
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add blog_content/ blog_posts.js
+          cat > /tmp/recover_msg.txt <<MSG
+          fix(blog): recover live posts that were never in git
+
+          Recovered from the live RSS feed, which serves the exact stored html:
+          $RECOVERED
+
+          These were published straight to the Worker and had never existed in
+          this repository, so a repo-sourced deploy would have deleted them with
+          no error anywhere. Recovered by recover_live_blog.yml before any
+          deploy could.
+          MSG
+          sed -i 's/^          //' /tmp/recover_msg.txt
+          git commit -F /tmp/recover_msg.txt
+          git push
+          echo "recovered: $RECOVERED"

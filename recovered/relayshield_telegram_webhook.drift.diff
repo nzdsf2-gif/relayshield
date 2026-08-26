@@ -1,0 +1,1580 @@
+--- relayshield_telegram_webhook.py	2026-08-26 17:37:20.332288088 +0000
++++ recovered/relayshield_telegram_webhook.py	2026-08-26 00:49:08.000000000 +0000
+@@ -31,9 +31,10 @@
+   /tgsecurity — Telegram account hardening guide
+   /botcheck @username — typosquat + red flag analysis for any bot/channel
+   /verifybot — confirm this is the official RelayShield bot
+-  /scan <url> — scan a URL or link for malware/phishing
++  /scan — check a link, message or screenshot. One entry point for all three:
++         paste a URL, paste/forward a suspicious email or SMS, or send a
++         screenshot. (hidden aliases, still working: /msgscan /analyze /analyse)
+   /infostealer <email> — check if email was harvested by infostealer malware
+-  /msgscan <text> — hidden alias of /scan, kept for users who learned the old name (also /analyze)
+   /addwallet <addr> — add EVM, Solana, or TON wallet to monitoring (Crypto Shield only)
+   /removewallet <addr> — remove wallet from monitoring
+   /wallets  — list monitored wallets with GoPlus risk scores
+@@ -45,6 +46,7 @@
+ import base64
+ import hashlib
+ import json
++import secrets
+ import logging
+ import os
+ import re
+@@ -81,6 +83,8 @@
+ KMS_KEY_ALIAS = "alias/relayshield-data-key"
+ PHONE_HASH_INDEX = "phone_hash-index"
+ 
++import relayshield_sim_swap_consent as simswap_consent
++
+ USERS_TABLE             = "relayshield_users"
+ MONITORED_EMAILS_TABLE  = "relayshield_monitored_emails"
+ BREACH_ALERTS_TABLE     = "relayshield_breach_alerts"
+@@ -1214,7 +1218,7 @@
+     except urllib.error.HTTPError as exc:
+         if exc.code == 404:
+             return []
+-        logger.error("HIBP HTTP %s for %s", exc.code, email)
++        logger.error("HIBP HTTP %s for email=%s", exc.code, _hash_id(email))
+         raise
+ 
+ 
+@@ -1397,24 +1401,30 @@
+ 
+         "*🔐 Breach Response*\n"
+         "• /breach — Breach monitoring status\n"
+-        "• /sweep — Close email backdoors (forwarding rules, filters, sessions)\n"
+-        "• /sessions — Revoke active sessions across Google, Microsoft, social media\n"
++        "• /sweep — Close email backdoors and sign out hijacked sessions across\n"
++        "  Google, Microsoft, Apple, Facebook and X (was also /sessions)\n"
++        "• /extensions — Audit browser extensions for infostealer malware\n"
+         "• /reuse — Cross-account password reuse check\n\n"
+ 
+         "*🚨 Threat Analysis*\n"
+         "• /otp — Unexpected OTP guidance\n"
+-        "• /scan — Link, message or screenshot. Paste anything suspicious\n"
+-        "• /infostealer — Stolen credentials and browser-extension audit\n"
++        "• /scam — Suspicious message, bot, or call? Get guidance, including what\n"
++        "  to do during a live phone scam (was also /vishing)\n"
++        "• /scan — Check a link, message or screenshot. Paste a URL, forward a "
++        "suspicious email or SMS, or send a screenshot of one\n"
++        "• /infostealer <email> — Check if an email was stolen by malware\n"
+         "• /verify — Callback rule, OTP rule, safe word, wire transfer protocol\n\n"
+ 
+         "*📡 Phone Protection*\n"
+         "• /sim — SIM swap monitoring status\n"
+-        "• /phone — Carrier hardening against SIM swap and smishing\n\n"
++        "• /phone — Carrier hardening against SIM swap and smishing\n"
++
+ 
+         "*🤖 Telegram Security*\n"
+-        "• /scam — Suspicious message, bot, or call. Also vishing and bot checks\n"
+-        "• /linkeddevices — Audit linked devices on Telegram, WhatsApp and Signal\n"
+-        "• /tgsecurity — Harden your Telegram account against takeover\n"
++        "• /tgsecurity — Harden Telegram, audit linked devices, and confirm this\n"
++        "  bot is really RelayShield (was also /linkeddevices, /verifybot)\n"
++        "• /tgsecurity @username — Typosquat and red-flag analysis of any bot or\n"
++        "  channel (was /botcheck)\n"
+     )
+ 
+     if is_business:
+@@ -1578,7 +1588,7 @@
+             breaches = _run_hibp_check(signup_email)
+             _send_paid_breach_result(chat_id, signup_email, breaches)
+         except Exception as exc:
+-            logger.error("ONBOARD-2 breach check failed email=%s: %s", signup_email, exc)
++            logger.error("ONBOARD-2 breach check failed email=%s: %s", _hash_id(signup_email), exc)
+ 
+     # Ask for wallet address to monitor
+     update_user(user["user_id"], {"onboarding_state": "AWAITING_WALLET_INPUT"})
+@@ -1658,6 +1668,36 @@
+                 )
+                 return
+ 
++    # --- Acquisition source: /start SRC_<channel> ---
++    #
++    # Added 2026-08-10 so directory listings, the Snap, CS Mobile and the blog
++    # are distinguishable instead of all arriving as anonymous /start traffic.
++    #
++    # Why the SRC_ prefix rather than a bare name like "botsarchive": the
++    # Coinbase branch immediately below matches ^[A-Z0-9]{6,12}$, and
++    # "BOTSARCHIVE" is 11 characters of A-Z. A bare payload would fire a
++    # pointless charge lookup on every directory arrival before falling
++    # through. An underscore cannot match that pattern, so the two schemes
++    # can never collide. Telegram allows A-Za-z0-9_- in deep link payloads.
++    #
++    # Note the caller upper-cases the payload (see the /start routing), so
++    # everything here is case-insensitive by construction.
++    if payload and payload.upper().startswith("SRC_"):
++        source = payload.upper()[4:].lower()[:32]
++        # Source names are channel labels we choose, never user data, so they
++        # are safe to log in the clear. The chat id is hashed, as everywhere.
++        logger.info("acquisition source=%s chat=%s", source or "(empty)", _hash_id(chat_id))
++        existing = get_any_user_by_chat_id(chat_id)
++        if existing and not existing.get("acquisition_source"):
++            # Only set once. The first touch is the one that earned the arrival;
++            # overwriting on a later visit would credit the wrong channel.
++            try:
++                update_user(existing["user_id"], {"acquisition_source": source})
++            except Exception as exc:
++                logger.warning("acquisition source store failed: %s", exc)
++        # Deliberately falls through to the normal /start welcome below. The
++        # parameter is attribution only and must never change what the user sees.
++
+     # --- Coinbase deep link (legacy): /start CHARGECODE ---
+     if payload and re.match(r"^[A-Z0-9]{6,12}$", payload.upper()):
+         charge = find_coinbase_charge(payload.upper())
+@@ -1796,17 +1836,35 @@
+ 
+ 
+ def handle_phone_contact(chat_id: int, phone_number: str, user: dict) -> None:
+-    """User shared their phone number via request_contact."""
++    """User shared their phone number via request_contact.
++
++    Telegram's request_contact only ever shares the sharer's OWN number, so this
++    is genuinely a self enrollment. The carrier authorization clause is shown
++    here, before the Yes/No, because the Yes IS the consent event and a carrier
++    audit asks what the person was shown at that moment.
++    """
+     send_message(
+         chat_id,
+-        f"We'll monitor *{phone_number}* for SIM swap activity — is that correct?",
++        f"We'll monitor *{phone_number}* for SIM swap activity.\n\n"
++        f"_{simswap_consent.CARRIER_CONSENT_TEXT}_\n\n"
++        "Full terms: https://terms.relayshield.net\n\n"
++        "Do you agree, and is the number correct?",
++        parse_mode="Markdown",
+         reply_markup=confirm_phone_keyboard(),
+     )
+     update_user(user["user_id"], {"pending_phone": phone_number})
+ 
+ 
+ def handle_phone_confirm(chat_id: int, confirmed: bool, user: dict) -> None:
+-    """User confirmed or rejected the phone number."""
++    """User confirmed or rejected the phone number.
++
++    FIXED 2026-08-14. This used to write phone_encrypted and phone_hash and then
++    tell the user "SIM swap monitoring activated" WITHOUT ever setting
++    sim_swap_monitoring. scan_sim_swap_users() filters on that flag, so every
++    Telegram user who completed this flow was told they were protected and was
++    monitored by nothing. Enrollment now goes through the shared consent module,
++    which is the only thing permitted to set the flag.
++    """
+     if not confirmed:
+         send_message(
+             chat_id,
+@@ -1816,19 +1874,50 @@
+         return
+ 
+     phone_raw = user.get("pending_phone", "")
+-    phone_enc = encrypt_field(phone_raw)
+-    phone_hash = hash_phone(phone_raw)
++    if not simswap_consent.is_valid_e164(phone_raw):
++        # Telegram sometimes hands back a number without the leading +.
++        candidate = "+" + simswap_consent.normalise_e164(phone_raw).lstrip("+")
++        phone_raw = candidate if simswap_consent.is_valid_e164(candidate) else phone_raw
+ 
+-    update_user(user["user_id"], {
+-        "phone_encrypted": phone_enc,
+-        "phone_hash": phone_hash,
+-        "pending_phone": None,
+-        "onboarding_state": "AWAITING_EMAIL_1",
+-    })
++    try:
++        # Consent belongs to the NUMBER, session state belongs to THIS record.
++        # They are not always the same row when a number appears on more than
++        # one account, so the session update is done separately rather than
++        # passed through enroll(). See the matching note in the WhatsApp handler.
++        simswap_consent.enroll(
++            phone_raw,
++            enrollment_type="self",
++            consent_source="telegram",
++            consent_acknowledged=True,
++        )
++        update_user(user["user_id"], {"pending_phone": None,
++                                      "onboarding_state": "AWAITING_EMAIL_1"})
++        activated = True
++    except simswap_consent.AmbiguousPhone:
++        logger.error("telegram phone confirm: ambiguous phone for user=%s", user["user_id"])
++        activated = False
++    except Exception as exc:
++        logger.error("telegram phone confirm: enrollment failed: %s", exc)
++        activated = False
++
++    if not activated:
++        # Never claim protection we did not switch on. That false assurance is
++        # the exact defect this change fixes.
++        update_user(user["user_id"], {"pending_phone": None,
++                                      "onboarding_state": "AWAITING_EMAIL_1"})
++        remove_keyboard(
++            chat_id,
++            "⚠️ We couldn't switch on SIM swap monitoring for that number just now, "
++            "and we won't tell you it's active when it isn't. Our team has been alerted. "
++            "Email support@relayshield.net if it isn't sorted shortly.\n\n"
++            "Let's carry on with your email addresses. Send your first one:",
++        )
++        return
+ 
+     remove_keyboard(
+         chat_id,
+         "✅ SIM swap monitoring activated.\n\n"
++        "You can stop it at any time by sending STOPSIM.\n\n"
+         "Now let's monitor your email addresses for breaches.\n\n"
+         "Send your first email address:",
+     )
+@@ -1990,9 +2079,9 @@
+     a follow-up message is the closest equivalent)."""
+     lines = [
+         "🛡️ *RelayShield — Quick Start*\n",
+-        "• /scan — Link, message or screenshot. Paste anything suspicious",
++        "• /scan <url> — Scan a suspicious link for malware or phishing",
+         "• /otp — Unexpected OTP? Get guidance now",
+-        "• /sweep — Close email backdoors (forwarding rules, sessions)",
++        "• /sweep — Close email backdoors and sign out hijacked sessions",
+     ]
+     if tier in CRYPTO_TIERS:
+         lines.append("• /riskcheck — Risk score for all your monitored wallets")
+@@ -2000,119 +2089,62 @@
+     return "\n".join(lines)
+ 
+ 
+-# --------------------------------------------------------------------------
+-# Help category shortcuts
+-# --------------------------------------------------------------------------
+-# Restored 2026-08-20 after the founder reported them missing. IMPORTANT
+-# CONTEXT: they could not be recovered, only rebuilt. This file entered git on
+-# 2026-07-30 with four commits total, so no earlier version of the help menu
+-# exists anywhere in history -- the shortcuts were laptop-only work that a
+-# repo-sourced Lambda deploy overwrote. Treat this as a reconstruction to
+-# check against memory, not a faithful restore.
++# Category shortcuts on the Quick Start card, added 2026-08-11.
+ #
+-# Each entry: key -> (button label, section heading, tier gate or None).
+-# The tier gate mirrors msg_help's own conditionals so a user is never offered
+-# a category their plan does not include.
+-HELP_CATEGORIES = [
+-    ("breach",   "🔐 Breach Response",   None),
+-    ("threat",   "🚨 Threat Analysis",   None),
+-    ("phone",    "📡 Phone Protection",  None),
+-    ("telegram", "🤖 Telegram Security", None),
+-    ("team",     "🏢 Team Management",   "business"),
+-    ("crypto",   "🪙 Crypto Shield",     "crypto"),
+-    ("domain",   "🌐 Domain Security",   "domain"),
+-    ("account",  "⚙️ Account",           None),
++# DELIBERATELY ADDITIVE. "See all commands" stays exactly as it was, because
++# the complaint that started this was never "I can't find commands", it was
++# "two of these look identical". Removing the flat list would solve a problem
++# nobody has and slow down everyone who already knows the bot. These buttons
++# are a shortcut for people who know roughly what they want, nothing more.
++#
++# key, emoji and label must match the section headers msg_help() emits, since
++# msg_help_section() slices that text rather than duplicating it. One source of
++# truth: add a command to msg_help and it appears in its category for free.
++_HELP_SECTIONS = [
++    ("breach", "🔐", "Breach Response",   None),
++    ("threat", "🚨", "Threat Analysis",   None),
++    ("phone",  "📡", "Phone Protection",  None),
++    ("tg",     "🤖", "Telegram Security", None),
++    ("team",   "🏢", "Team Management",   "business"),
++    ("wallet", "🪙", "Crypto Shield",     "crypto"),
++    ("domain", "🌐", "Domain Security",   "domain"),
+ ]
+ 
+ 
+-def _help_category_available(gate: str | None, tier: str) -> bool:
+-    if gate is None:
+-        return True
+-    if gate == "business":
+-        return tier in BUSINESS_TIERS
+-    if gate == "crypto":
+-        return tier in CRYPTO_TIERS
+-    if gate == "domain":
+-        return tier in DOMAIN_TIERS
+-    return False
+-
++def help_categories_for_tier(tier: str) -> list[tuple[str, str, str]]:
++    """Which category buttons this tier may actually use. Free tier gets none:
++    msg_help() returns a flat five-command list for free users with no section
++    headers at all, so a category button would open an empty message."""
++    if tier == TIER_FREE:
++        return []
++    gates = {"business": BUSINESS_TIERS, "crypto": CRYPTO_TIERS, "domain": DOMAIN_TIERS}
++    return [(k, e, l) for k, e, l, gate in _HELP_SECTIONS
++            if gate is None or tier in gates[gate]]
+ 
+-def _help_section(heading: str, tier: str) -> str | None:
+-    """Pull one section out of the rendered full help.
+ 
+-    Derived from msg_help() rather than duplicated from it, deliberately. A
+-    second hardcoded copy of the command list is exactly the failure mode that
+-    let extract_iocs() and _store_iocs()'s type_map drift apart twice in
+-    relayshield_intel_monitor.py -- two lists that must agree, with nothing
+-    making them agree. Rendering from the one source means a command added to
+-    msg_help shows up here automatically and can never go stale.
+-    """
++def msg_help_section(tier: str, key: str) -> str | None:
++    """One category, sliced out of msg_help(tier) so the two can never drift."""
+     full = msg_help(tier)
+-    marker = f"*{heading}*"
+-    start = full.find(marker)
+-    if start == -1:
++    headers = {k: f"*{e} {l}*" for k, e, l, _ in _HELP_SECTIONS}
++    headers["account"] = "*⚙️ Account*"
++    head = headers.get(key)
++    if not head or head not in full:
+         return None
+-    body_start = start + len(marker)
+-    # The next section starts at the following "\n*" heading, if any.
+-    nxt = full.find("\n*", body_start)
+-    body = full[body_start:nxt] if nxt != -1 else full[body_start:]
+-    return f"*{heading}*\n{body.strip()}"
+-
+-
+-# --------------------------------------------------------------------------
+-# Merged command hubs
+-# --------------------------------------------------------------------------
+-# Rebuilt 2026-08-20. A prior session collapsed /scam, /vishing, /verifybot and
+-# /botcheck into a single /scam, and that work was lost the same way the help
+-# shortcuts were -- laptop-only, overwritten by a repo-sourced deploy. Restored
+-# here, plus the newly-requested /extensions -> /infostealer merge.
+-#
+-# The pattern: ONE advertised command per job, with the siblings reachable from
+-# a keyboard underneath it. Every old command still routes, just unadvertised,
+-# so muscle memory and old links keep working. Fewer commands to learn, nothing
+-# taken away.
+-
+-
+-def scam_hub_keyboard() -> dict:
+-    return {"inline_keyboard": [
+-        [{"text": "📞 Voice phishing (vishing)", "callback_data": "scamhub_vishing"}],
+-        [{"text": "🤖 Check a bot or channel",   "callback_data": "scamhub_botcheck"}],
+-        [{"text": "✅ Is this the real RelayShield?", "callback_data": "scamhub_verifybot"}],
+-    ]}
+-
+-
+-def infostealer_hub_keyboard() -> dict:
+-    return {"inline_keyboard": [
+-        [{"text": "📧 Check an email address", "callback_data": "stealhub_email"}],
+-        [{"text": "🧩 Audit browser extensions", "callback_data": "stealhub_extensions"}],
+-    ]}
+-
+-
+-def msg_infostealer_hub() -> str:
+-    return (
+-        "🕵️ *Infostealer Check*\n\n"
+-        "Infostealer malware scrapes saved passwords, cookies and session tokens off a "
+-        "device and sells them. Two things worth checking:\n\n"
+-        "• *Your email* — whether credentials tied to it are already in stealer logs\n"
+-        "• *Your browser extensions* — the most common way the malware gets on the device\n\n"
+-        "Pick one below, or send `/infostealer you@example.com` directly."
+-    )
++    start = full.index(head)
++    after = start + len(head)
++    ends = [full.index(o, after) for o in headers.values()
++            if o != head and o in full[after:]]
++    return full[start:(min(ends) if ends else len(full))].strip()
+ 
+ 
+ def help_expand_keyboard(tier: str = TIER_PERSONAL) -> dict:
+-    """Category shortcuts plus the full list.
+-
+-    Two per row: Telegram renders long single-column keyboards as a tall wall
+-    that pushes the message itself off screen, which is the problem the
+-    shortcuts exist to solve.
+-    """
+-    buttons = [
+-        {"text": label, "callback_data": f"help_cat_{key}"}
+-        for key, label, gate in HELP_CATEGORIES
+-        if _help_category_available(gate, tier)
+-    ]
+-    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+-    rows.append([{"text": "📋 See all commands", "callback_data": "help_more"}])
++    rows = [[{"text": "📋 See all commands", "callback_data": "help_more"}]]
++    cats = help_categories_for_tier(tier)
++    # Two per row: Telegram renders long single-column keyboards as a wall,
++    # which is the thing we are trying to avoid.
++    for i in range(0, len(cats), 2):
++        rows.append([{"text": f"{e} {l}", "callback_data": f"help_cat_{k}"}
++                     for k, e, l in cats[i:i + 2]])
+     return {"inline_keyboard": rows}
+ 
+ 
+@@ -2137,26 +2169,27 @@
+ 
+ _BOT_COMMANDS_BASE = [
+     ("breach", "Breach monitoring status"),
+-    ("sweep", "Close email backdoors (forwarding rules, filters, sessions)"),
+-    ("sessions", "Revoke active sessions across Google, Microsoft, social media"),
++    # Merged 2026-08-11, all on one test: would a real user fail to tell these
++    # apart? /sessions into /sweep (sweep's own description already claimed
++    # sessions), /vishing into /scam (scam already said "or call"),
++    # /linkeddevices + /botcheck + /verifybot into /tgsecurity. Every merged
++    # command still works as a hidden alias.
++    ("sweep", "Close email backdoors and sign out hijacked sessions"),
++    ("extensions", "Audit browser extensions for infostealer malware"),
+     ("reuse", "Cross-account password reuse check"),
+     ("otp", "Unexpected OTP guidance"),
+-    # /vishing, /botcheck and /verifybot are folded into /scam, and /extensions
+-    # into /infostealer, 2026-08-20. Dropped from this menu and from /help; all
+-    # four still route normally for anyone who knows them.
+-    ("scam", "Suspicious message, bot or call — plus vishing and bot checks"),
+-    ("scan", "Scan a suspicious link for malware or phishing"),
+-    ("infostealer", "Stolen credentials and browser-extension audit"),
+-    # /msgscan removed from the visible command list 2026-08-20 -- /scan now
+-    # takes links, pasted messages AND screenshots, so a second command for
+-    # the same job is the kind of surface the founder asked to keep trimmed.
+-    # The handler and the /analyze + /analyse aliases still work, so anyone
+-    # who learned the old name is not broken.
++    ("scam", "Suspicious message, bot, or call? Get guidance"),
++    # Merged 2026-08-10 in the handler, but msgscan survived here and in the
++    # /help text until 2026-08-11, so a paid user's native menu still offered
++    # both and Arjen's original complaint was still live. msgscan, analyze and
++    # analyse remain working ALIASES in cmd_scan; they are simply not advertised
++    # as separate commands anywhere a user looks.
++    ("scan", "Check a link, message or screenshot"),
++    ("infostealer", "Check if an email was stolen by malware"),
+     ("verify", "Callback rule, OTP rule, safe word, wire transfer protocol"),
+     ("sim", "SIM swap monitoring status"),
+     ("phone", "Carrier hardening against SIM swap and smishing"),
+-    ("linkeddevices", "Audit linked devices on Telegram, WhatsApp and Signal"),
+-    ("tgsecurity", "Harden your Telegram account against takeover"),
++    ("tgsecurity", "Telegram security: harden, linked devices, check a bot"),
+     ("plan", "Your license type and upgrade options"),
+     ("myid", "Your Telegram chat ID (account linking & support)"),
+     ("help", "This menu"),
+@@ -2216,6 +2249,25 @@
+         logger.warning("setMyCommands failed for chat_id=%s tier=%s: %s", chat_id, tier, exc)
+ 
+ 
++def handle_help_no_account(chat_id: int) -> None:
++    """/help for a chat with no user record.
++
++    Deliberately does NOT reuse msg_help(TIER_FREE). Every command in that list
++    is routed through route_active_command, which needs a record, so showing it
++    here would advertise commands that answer "Type /start" when tapped. Say
++    what the bot does and what the one working command is instead.
++    """
++    send_message(
++        chat_id,
++        "🛡️ *RelayShield*\n\n"
++        "I watch for the things that precede an account takeover: credential "
++        "breaches, infostealer malware, SIM swaps, and lookalike domains.\n\n"
++        "You do not have an account on this chat yet, so commands will not run.\n\n"
++        "👉 Type /start to set one up. The free tier needs no card.",
++        parse_mode="Markdown",
++    )
++
++
+ def handle_help(chat_id: int, user: dict) -> None:
+     tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+     set_commands_for_user(chat_id, tier)
+@@ -2264,16 +2316,29 @@
+         "✅ *Steps 2, 4 and 5 work on any device — phone, tablet, or computer.*\n\n"
+         "*Step 2 — Check recovery email and phone*\n"
+         "Gmail: myaccount.google.com/security\n"
+-        "Yahoo: account.yahoo.com/security\n"
++        "Yahoo: login.yahoo.com/account/security\n"
+         "→ Remove any recovery contact you don't recognise.\n\n"
+         "*Step 4 — Review connected apps*\n"
+         "Gmail: myaccount.google.com/permissions\n"
+-        "Yahoo: account.yahoo.com/security/connected-apps\n"
++        "Yahoo: login.yahoo.com/account/security → \"External connections\"\n"
+         "→ Revoke anything unrecognised.\n\n"
+-        "*Step 5 — Check active sessions*\n"
++        # /sessions was merged in here 2026-08-11. Its provider list was wider
++        # than this step's Gmail/Yahoo pair, and a user with a hijacked session
++        # has no way to guess which of two commands to run, so the full list
++        # lives here now. /sessions still works as a hidden alias.
++        "*Step 5 — Check active sessions and sign out*\n"
++        "A stolen session cookie survives a password change, so this step is the one\n"
++        "that actually ends an intruder's access.\n"
+         "Gmail: myaccount.google.com/device-activity\n"
+-        "Yahoo: account.yahoo.com/security/recent-activity\n"
+-        "→ Sign out of all unknown sessions.\n\n"
++        "Yahoo: login.yahoo.com/account/security → \"Recent activity\"\n"
++        "Google (all devices): myaccount.google.com → Security → Your devices\n"
++        "Microsoft: mysignins.microsoft.com\n"
++        "Apple: Settings → Your name → scroll to devices\n"
++        "Facebook: Settings → Security → Where you're logged in\n"
++        "X/Twitter: Settings → Security → Sessions\n"
++        "→ Sign out of every session you don't recognise, then change your password.\n"
++        "→ Do this from a device you trust. If malware is on the machine you're\n"
++        "  using, a password change from it just hands over the new one.\n\n"
+         "_(Steps 1 & 3 follow in the next message)_",
+     )
+     send_message(
+@@ -2312,44 +2377,6 @@
+         )
+ 
+ 
+-def handle_vishing(chat_id: int) -> None:
+-    send_message(
+-        chat_id,
+-        "📞 *Vishing — Voice Phishing Defence*\n\n"
+-        "Vishing is fraud conducted over the phone. The caller impersonates a trusted "
+-        "authority — a bank, government agency, carrier, tech company, or professional service. "
+-        "The goal is always the same: pressure you into acting before you think.\n\n"
+-        "*How to recognise an attack in progress:*\n"
+-        "• Unsolicited call, often urgent or threatening — your account is suspended, "
+-        "you owe an overdue payment, action required within 24 hours\n"
+-        "• Caller already knows some of your details (name, address, last 4 digits) "
+-        "and uses them to build false trust\n"
+-        "• Request to confirm identity by reading back a code you just received — "
+-        "this is the attacker triggering the code themselves\n"
+-        "• Pressure to stay on the line, not hang up, or keep the call confidential\n"
+-        "• Asked to pay via gift card, wire transfer, cryptocurrency, or a 'secure account'\n"
+-        "• Transferred to a 'supervisor' or 'fraud specialist' who increases the pressure\n\n"
+-        "*✅ Do:*\n"
+-        "→ Hang up and call back on the official number from the company's website or "
+-        "the back of your card — never redial a number the caller gives you\n"
+-        "→ Tell someone else about the call before taking any action\n"
+-        "→ Check your accounts independently after any unsolicited call\n"
+-        "→ Report the call: FTC reportfraud.ftc.gov / FCC fcc.gov/consumers\n\n"
+-        "*🚫 Don't:*\n"
+-        "→ Read back any OTP or verification code — no legitimate company needs this\n"
+-        "→ Allow remote access to your device under any circumstances\n"
+-        "→ Confirm, correct, or add to personal details the caller already seems to know\n"
+-        "→ Stay on the line because they told you not to hang up\n"
+-        "→ Act within any time limit they set — urgency is the weapon, not the deadline\n\n"
+-        "*After a suspected vishing call:*\n"
+-        "→ Run /sweep — vishing often runs alongside inbox takeover\n"
+-        "→ Run /sessions — sign out of all active sessions\n"
+-        "→ Run /verify — review your personal verification protocol\n\n"
+-        "Use /verify to set up your Callback Rule, OTP Rule, and Family Safe Word "
+-        "before an attack — not after.",
+-    )
+-
+-
+ def handle_phone_hardening(chat_id: int) -> None:
+     send_message(
+         chat_id,
+@@ -2426,7 +2453,23 @@
+     )
+ 
+ 
+-def handle_tgsecurity(chat_id: int) -> None:
++def handle_tgsecurity(chat_id: int, username: str | None = None) -> None:
++    """One Telegram-security command with three jobs, merged 2026-08-11.
++
++        /tgsecurity            -> harden the account, audit linked devices,
++                                  and confirm this bot is the real RelayShield
++        /tgsecurity @somebot   -> typosquat and red-flag analysis of that bot
++
++    Why the merge: nobody types /verifybot while being impersonated, because
++    doubting the bot is exactly the thought an impersonation attack prevents.
++    Folding it into the command people DO reach for makes it discoverable at
++    the moment it matters. /linkeddevices, /botcheck and /verifybot all still
++    work as hidden aliases, so nothing anyone has learned breaks.
++    """
++    if username:
++        handle_botcheck(chat_id, username)
++        return
++
+     send_message(
+         chat_id,
+         "🔐 *Telegram Account Hardening*\n\n"
+@@ -2454,6 +2497,20 @@
+         "RelayShield monitors your phone number for SIM swap activity — "
+         "if your carrier is compromised, you'll be alerted before your Telegram is taken over.",
+     )
++    # /linkeddevices and /verifybot merged in here 2026-08-11.
++    handle_linkeddevices(chat_id)
++    send_message(
++        chat_id,
++        "🤖 *Checking a bot, including this one*\n\n"
++        "*Is this really RelayShield?* Run /tgsecurity any time and compare what you see "
++        "here against the official details. An impostor can copy a name and a picture, "
++        "but not the username.\n\n"
++        "*Checking someone else's bot or channel:*\n"
++        "`/tgsecurity @thebotusername`\n"
++        "→ Typosquat and red-flag analysis before you interact with it.\n\n"
++        "Telegram will never ask for your login code. Neither will we.",
++    )
++    handle_verify_bot(chat_id)
+ 
+ 
+ def _levenshtein(a: str, b: str) -> int:
+@@ -2612,6 +2669,66 @@
+ # reply) so users can reply directly with their answer instead of retyping
+ # "/command <arg>". Originally built for /scan only; generalized to every
+ # argument-taking command 2026-07-15 for consistency (see REPLY_PROMPT_HANDLERS).
++# Per-cold-start salt, same construction as relayshield_api.py's redaction.
++# A hash is stable within one container so a single conversation can be
++# followed through the logs, and unlinkable across time because the salt dies
++# with the container.
++_LOG_SALT = secrets.token_hex(16)
++
++
++def _hash_id(value) -> str:
++    """Short, salted, one-way handle for an identifier destined for a log."""
++    if value in (None, ""):
++        return "-"
++    return hashlib.sha256(f"{_LOG_SALT}|{value}".encode()).hexdigest()[:12]
++
++
++def _summarise_update(body: dict) -> str:
++    """Describe a Telegram update for the log WITHOUT its content.
++
++    Replaced a raw `json.dumps(body)[:500]` on 2026-08-10. That line wrote
++    every inbound message body to CloudWatch in plaintext, so any email or
++    phone number a user typed was retained for the full 90 days, along with
++    Telegram user ids and usernames. The 2026-08-09 PII sweep covered
++    relayshield_api.py and missed this file completely.
++
++    Newly urgent because inline mode went live the same day: inline queries
++    arrive from people who have never started the bot and have no account
++    with us at all.
++
++    What is safe to keep, and why: the update type and a salted chat-id hash
++    are enough to trace one conversation through a debugging session, which is
++    what the original line was actually used for. The message text never was.
++    """
++    kind = next((k for k in (
++        "message", "callback_query", "inline_query", "chosen_inline_result",
++        "edited_message", "channel_post", "my_chat_member",
++    ) if k in body), "unknown")
++
++    payload = body.get(kind) or {}
++    if not isinstance(payload, dict):
++        payload = {}
++    chat = payload.get("chat") or {}
++    frm  = payload.get("from") or {}
++
++    parts = [f"type={kind}",
++             f"chat={_hash_id(chat.get('id') or frm.get('id'))}"]
++
++    if kind == "message":
++        # Shape only. Never the text itself.
++        parts.append("has_text=%s" % bool(payload.get("text")))
++        parts.append("has_photo=%s" % bool(payload.get("photo")))
++        if payload.get("text", "").startswith("/"):
++            parts.append("cmd=%s" % payload["text"].split()[0].split("@")[0][:20])
++    elif kind == "inline_query":
++        # Length, not content: an inline query can be a wallet address.
++        parts.append("qlen=%d" % len(payload.get("query", "")))
++    elif kind == "callback_query":
++        parts.append("data=%s" % str(payload.get("data", ""))[:24])
++
++    return " ".join(parts)
++
++
+ SCAN_PROMPT_MARKER         = "URL / File Scanner"
+ ANALYZE_PROMPT_MARKER      = "Message Analyzer"
+ INFOSTEALER_PROMPT_MARKER  = "Infostealer Check"
+@@ -2734,26 +2851,42 @@
+     if not domain:
+         return {"flagged": False, "reasons": reasons}
+ 
++    # ORDER IS THE DESIGN, not an accident. Cheapest and most authoritative
++    # first, and RETURN as soon as a blocklist-grade signal fires, so a known
++    # bad domain costs one local DynamoDB query and no external calls at all.
++    # Restored 2026-08-11 after the ordering was found inverted in production.
++    #
++    # `blocklist_hit` is what the caller uses to skip VirusTotal entirely. The
++    # domain-age signal deliberately does NOT set it: young is not guilty, so
++    # that one still needs corroboration.
+     try:
+         table = dynamodb.Table("relayshield_intel_iocs")
++        # NO FilterExpression with a Limit. DynamoDB applies Limit to items
++        # EXAMINED, before filtering, so `Limit=5` + a type filter could return
++        # empty for a domain with thousands of matching rows -- the same shape
++        # of bug that made actor-lookup blind to 83% of the MITRE table. Pull a
++        # bounded page newest-first and filter in Python instead: one round
++        # trip, 100 rows instead of 5, and no false clean.
+         resp = table.query(
+             KeyConditionExpression=Key("ioc_value").eq(domain),
+-            FilterExpression=Attr("ioc_type").is_in(["domain", "url"]),
+-            Limit=5,
++            ScanIndexForward=False,
++            Limit=100,
+         )
+-        if resp.get("Items"):
++        if any(i.get("ioc_type") in ("domain", "url") for i in resp.get("Items", [])):
+             reasons.append("this domain appears in RelayShield's criminal IOC corpus")
++            return {"flagged": True, "blocklist_hit": True, "reasons": reasons}
+     except Exception as exc:
+         logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
+ 
+     if _check_gsb(domain):
+         reasons.append("Google Safe Browsing flags this domain")
++        return {"flagged": True, "blocklist_hit": True, "reasons": reasons}
+ 
+     age_days = _rdap_registration_age_days(domain)
+     if age_days is not None and age_days < 30:
+         reasons.append(f"the domain was registered only {age_days} day{'s' if age_days != 1 else ''} ago")
+ 
+-    return {"flagged": bool(reasons), "reasons": reasons}
++    return {"flagged": bool(reasons), "blocklist_hit": False, "reasons": reasons}
+ 
+ 
+ def check_url_sync(url: str) -> dict:
+@@ -2852,22 +2985,61 @@
+         )
+ 
+ 
+-# A pasted message vs a mistyped URL. Whitespace is the strongest signal -- a
+-# URL never contains a space, and prose almost always does. The length floor
+-# catches the wrapped/single-line cases; 40 chars is comfortably longer than
+-# any plausible typo'd domain and comfortably shorter than a real scam message.
+-_MESSAGE_MIN_LEN = 40
++def handle_scan_dispatch(chat_id: int, content: str | None = None, user: dict | None = None) -> None:
++    """Single entry point for /scan, /msgscan, /analyze and /analyse.
+ 
++    Merged 2026-08-10. A real user (Arjen) could not tell /scan and /msgscan
++    apart, which is a fair complaint: both are "check this thing for me".
++    One command now, and the input decides which engine runs.
++
++    IMPORTANT, and the reason this is a dispatcher rather than a deletion:
++    the two paths are NOT interchangeable, in the opposite direction to what
++    you would guess from the command names.
++
++      handle_scan     URL only. Calls check_url_sync (VirusTotal, multi-engine)
++                      plus _heuristic_url_check, and schedules a deferred
++                      follow-up when VT has not finished processing. This is
++                      the ONLY VirusTotal path in the bot.
++      handle_analyze  Text or OCR'd image. Social-engineering and impersonation
++                      analysis, and it heuristically checks any embedded URL
++                      via _heuristic_url_check, which is IOC corpus + Google
++                      Safe Browsing + domain age and, in its own docstring,
++                      "not as authoritative as a real multi-engine VT verdict".
++
++    So retiring either one loses capability. Retiring handle_scan would have
++    silently removed VirusTotal from the product. The commands merge; the
++    engines do not.
++    """
++    if not content:
++        # No argument: ask for input rather than guessing. Accepts either kind.
++        send_message(
++            chat_id,
++            f"🔍 *{SCAN_PROMPT_MARKER}*\n\n"
++            "Reply with any of these and I'll check it:\n"
++            "• a link, before you click it\n"
++            "• a suspicious email or text, pasted in\n"
++            "• a screenshot of one\n",
++            reply_markup={"force_reply": True, "input_field_placeholder": "Paste a link or message…"},
++            parse_mode="Markdown",
++        )
++        return
+ 
+-def _looks_like_message(raw: str) -> bool:
+-    raw = (raw or "").strip()
+-    if not raw:
+-        return False
+-    return bool(re.search(r"\s", raw)) or len(raw) >= _MESSAGE_MIN_LEN
++    # A bare URL and nothing else goes to the VirusTotal path. Anything with
++    # prose around it is a message to analyse, and handle_analyze checks any
++    # URLs inside it on the way through.
++    stripped = content.strip()
++    if _normalize_scan_url(stripped) and len(stripped.split()) == 1:
++        handle_scan(chat_id, stripped, user)
++    else:
++        handle_analyze(chat_id, content)
+ 
+ 
+ def handle_scan(chat_id: int, target: str | None = None, user: dict | None = None) -> None:
+-    """Scan a URL or file link for threats — Telegram equivalent of ATTACH."""
++    """Scan a URL or file link for threats — Telegram equivalent of ATTACH.
++
++    Reached via handle_scan_dispatch, not routed directly from a command since
++    2026-08-10.
++    """
+     if not target:
+         send_message(
+             chat_id,
+@@ -2881,52 +3053,40 @@
+ 
+     normalized = _normalize_scan_url(target)
+     if not normalized:
+-        # NOT a URL. Before 2026-08-20 this dead-ended with "That doesn't look
+-        # like a URL" and the user was done -- which is exactly what happens
+-        # when someone pastes a scam SMS or job-offer message into the URL
+-        # scanner, the single most common thing a worried person does. They
+-        # are not going to read the help text and retype it as /msgscan.
+-        #
+-        # So: pasted prose falls through to the fraud analyser instead of
+-        # erroring. /scan and /msgscan behave as one command from the user's
+-        # side, which is what the help text has always implied and what the
+-        # founder reasonably assumed had already shipped -- it had not; no
+-        # commit ever merged them.
+-        #
+-        # Kept narrow deliberately. A short token with no spaces ("asdf",
+-        # "htttp:/x") is a typo'd URL, not a message, and telling the user
+-        # that is more useful than running fraud analysis on four characters.
+-        if _looks_like_message(target):
+-            handle_analyze(chat_id, target)
+-            return
+-        send_message(
+-            chat_id,
+-            f"That doesn't look like a URL: `{target}`\n\n"
+-            "If you meant to check a suspicious *message*, paste the whole thing "
+-            "and I'll analyse it for fraud, or send a screenshot.",
+-            parse_mode="Markdown",
+-        )
++        send_message(chat_id, f"That doesn't look like a URL: `{target}`", parse_mode="Markdown")
+         return
+     target = normalized
+ 
+     send_message(chat_id, f"🔍 Scanning `{target}` — one moment...", parse_mode="Markdown")
+ 
+-    result     = check_url_sync(target)
++    # OUR CORPUS FIRST, VIRUSTOTAL LAST. Restored 2026-08-11: production had
++    # inverted this and was calling VT unconditionally on every scan, before
++    # the local checks, which cost a third-party call and its latency even
++    # when our own corpus already had the answer. VT is an external HTTP call
++    # with an 8s timeout; the IOC query is a single local DynamoDB read.
++    #
++    #   1. IOC corpus, then Safe Browsing, then domain age (_heuristic_url_check)
++    #   2. blocklist-grade hit -> malicious, and VT is never called
++    #   3. domain-age-only hit -> soft signal, so still ask VT
++    #   4. nothing -> ask VT, then the deferred follow-up path below
+     heuristics = _heuristic_url_check(target)
+ 
+-    # VT's own verdict wins when it has one. A VT "clean" or "unknown" never
+-    # overrides a real heuristic hit (e.g. a domain actually on Google's
+-    # blocklist shouldn't get called clean just because VT hasn't caught up
+-    # yet) — added 2026-07-16 so a URL VT hasn't analyzed can still get a
+-    # definitive-ish verdict instead of always falling into "unknown".
+-    if result["status"] in ("malicious", "suspicious"):
+-        verdict, detail = result["status"], result["detail"]
+-    elif heuristics["flagged"]:
+-        verdict, detail = "suspicious", "; ".join(heuristics["reasons"]).capitalize()
+-    elif result["status"] == "clean":
+-        verdict, detail = "clean", result["detail"]
++    if heuristics.get("blocklist_hit"):
++        # Named source beats an anonymous vendor count, and we already know.
++        verdict, detail = "malicious", "; ".join(heuristics["reasons"]).capitalize()
++        result = {"status": "not_queried", "detail": detail}
+     else:
+-        verdict, detail = "unknown", result["detail"]
++        result = check_url_sync(target)
++        # VT's own verdict wins when it has one. A VT "clean" or "unknown"
++        # never overrides a real heuristic hit.
++        if result["status"] in ("malicious", "suspicious"):
++            verdict, detail = result["status"], result["detail"]
++        elif heuristics["flagged"]:
++            verdict, detail = "suspicious", "; ".join(heuristics["reasons"]).capitalize()
++        elif result["status"] == "clean":
++            verdict, detail = "clean", result["detail"]
++        else:
++            verdict, detail = "unknown", result["detail"]
+ 
+     is_suspicious = verdict in ("malicious", "suspicious")
+ 
+@@ -3306,7 +3466,7 @@
+         )
+ 
+ 
+-def handle_wascam(chat_id: int, reply_markup: dict | None = None) -> None:
++def handle_wascam(chat_id: int) -> None:
+     send_message(
+         chat_id,
+         "⚠️ *Suspicious Message — What to Check*\n\n"
+@@ -3329,7 +3489,35 @@
+         "• No legitimate org sends urgent payment requests via text\n"
+         "• No legitimate org asks you to run a command or click a link to prove you're human\n"
+         "• When in doubt, call back on a number you look up yourself",
+-        reply_markup=reply_markup,
++    )
++    # /vishing merged in here 2026-08-11. This command already said "message,
++    # bot, or call", so a user with a suspicious CALL had two commands and no
++    # way to choose between them. /vishing still works as a hidden alias.
++    # Sent as a second message: the combined body would otherwise approach
++    # Telegram's 4,096 character limit per message.
++    send_message(
++        chat_id,
++        "📞 *If it's a phone call*\n\n"
++        "The caller impersonates a bank, government agency, carrier or tech support. "
++        "They may already know your name, address, or the last four digits of a card, "
++        "and they use that to build trust. Urgency is the weapon, not the deadline.\n\n"
++        "*Signs it's an attack in progress:*\n"
++        "• Unsolicited, urgent, or threatening: account suspended, payment overdue, act within 24 hours\n"
++        "• Asked to read back a code you just received. That code was triggered by the caller\n"
++        "• Pressure to stay on the line, not hang up, or keep the call confidential\n"
++        "• Payment by gift card, wire, crypto, or a 'secure account'\n"
++        "• Transferred to a 'supervisor' or 'fraud specialist' who raises the pressure\n\n"
++        "*Do:*\n"
++        "→ Hang up. Call back on the number from the company's website or the back of your card, "
++        "never a number the caller gave you\n"
++        "→ Tell someone else before you act\n"
++        "→ Report it: reportfraud.ftc.gov or fcc.gov/consumers\n\n"
++        "*Don't:*\n"
++        "→ Read back any OTP or verification code. No legitimate company needs one\n"
++        "→ Allow remote access to your device, under any circumstances\n"
++        "→ Confirm or correct personal details the caller already seems to know\n\n"
++        "*After a suspected call:* run /sweep, which now also signs you out of "
++        "hijacked sessions, then /verify to set your callback rule and safe word.",
+     )
+ 
+ 
+@@ -3455,20 +3643,7 @@
+     )
+ 
+     send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+-    logger.info("infostealer-check — chat_id=%s email=%s count=%d", chat_id, email, count)
+-
+-
+-def handle_sessions(chat_id: int) -> None:
+-    send_message(
+-        chat_id,
+-        "🔒 *Session Revocation — Sign Out Everything*\n\n"
+-        "*Google:* myaccount.google.com → Security → Your devices\n"
+-        "*Microsoft:* mysignins.microsoft.com\n"
+-        "*Apple:* Settings → Your name → scroll down to devices\n"
+-        "*Facebook:* Settings → Security → Where you're logged in\n"
+-        "*Twitter/X:* Settings → Security → Sessions\n\n"
+-        "After signing out all sessions, change your password immediately.",
+-    )
++    logger.info("infostealer-check chat_id=%s email=%s count=%d", _hash_id(chat_id), _hash_id(email), count)
+ 
+ 
+ def handle_plan(chat_id: int, user: dict) -> None:
+@@ -4011,10 +4186,28 @@
+         carrier   = ""
+ 
+     if not lookup_ok:
++        # Fixed 2026-08-10. This used to reply "SIM Swap Monitoring - Active"
++        # and promise "ongoing monitoring is active and will alert you
++        # immediately if a swap is detected". Both were false whenever the
++        # lookup failed, and today the lookup ALWAYS fails: Twilio's SIM-swap
++        # registration (#28883049) is still pending, so the API returns 60606
++        # and /v1/metered/sim-swap 503s by design.
++        #
++        # That is not failing silently, it is failing reassuringly, which is
++        # the dangerous version. A user reading the old text believed they were
++        # covered against the exact attack they came here to avoid. Same defect
++        # family as the sim-swap false-clean (162d31e) and the asset-intel
++        # sweep, and worse than both because it made an affirmative promise of
++        # protection rather than merely omitting a warning.
+         send_message(
+             chat_id,
+-            "📡 *SIM Swap Monitoring — Active*\n\n"
+-            "Carrier check temporarily unavailable — ongoing monitoring is active and will alert you immediately if a swap is detected.\n\n"
++            "📡 *SIM Swap Check — Could not complete*\n\n"
++            "We could not reach your carrier to check for a SIM swap, so we "
++            "cannot tell you either way right now. *Please do not read this as "
++            "an all-clear.*\n\n"
++            "If you have any reason to suspect a swap, contact your carrier's "
++            "fraud line directly. Reply /phone for their numbers and for SIM "
++            "lock hardening steps.\n\n"
+             "🛡️ RelayShield",
+             parse_mode="Markdown",
+         )
+@@ -4364,6 +4557,23 @@
+     "solana": 101,
+ }
+ 
++# Keys in a GoPlus address_security result that are "1"/non-empty but are NOT
++# risk signals. Anything that enumerates the raw result looking for "1" must
++# subtract this set, or it invents a risk flag out of a descriptor.
++#
++# `contract_address` means "this address is a contract", nothing more. Verified
++# live 2026-08-14 against vitalik.eth, the USDC contract and a Tornado router:
++# all three return contract_address=1 and no other non-zero key, so /addwallet
++# told anyone monitoring a contract that it was MEDIUM risk.
++#
++# `data_source` is a provider credit string ("SlowMist,BlockSec"), so it never
++# equals "1" and is listed here for documentation rather than for effect.
++#
++# The allowlist-driven checks in this file (RISK_FLAGS in the approvals scan,
++# _malicious_fields in /riskcheck, the inline-mode tuple) never had the bug and
++# do not need this set.
++_ADDR_NON_RISK_KEYS = {"contract_address", "data_source"}
++
+ 
+ def _goplus_risk_check(address: str, chain_id: int = 1) -> dict:
+     """Query GoPlus address_security. Returns risk dict or {} on failure.
+@@ -4697,8 +4907,14 @@
+     goplus_chain_id = _GOPLUS_CHAIN_IDS.get(chain_type)
+     if goplus_chain_id:
+         risk = _goplus_risk_check(canonical, goplus_chain_id)
+-        risk_flags = [k for k, v in risk.items() if v == "1"]
+-        risk_level = "HIGH" if len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
++        risk_flags = [k for k, v in risk.items()
++                      if v == "1" and k not in _ADDR_NON_RISK_KEYS]
++        # Sanctions alone forces HIGH. The count rule would grade a
++        # sanctions-only hit as MEDIUM, and dealing with an OFAC-listed address
++        # is a compliance event on the first flag, not the second. Matches
++        # handle_wallet_risk in relayshield_api.py.
++        risk_level = "HIGH" if risk.get("sanctioned") == "1" or len(risk_flags) >= 2 \
++            else "MEDIUM" if risk_flags else "LOW"
+     elif chain_type == "bitcoin":
+         btc_risk   = _bitcoin_risk_check(canonical)
+         risk_flags = btc_risk.get("flags", []) if btc_risk.get("ok") else []
+@@ -5559,12 +5775,68 @@
+     """Route commands from ACTIVE users."""
+     cmd = text.strip().lower().lstrip("/")
+ 
++    # STOPSIM / SIMSWAP. Added 2026-08-14: the onboarding completion message
++    # told users "You can stop it at any time by sending STOPSIM" before the
++    # command existed. Promising a control that does nothing is the same defect
++    # class as claiming monitoring is on when it is not.
++    if cmd in ("stopsim", "stop sim"):
++        try:
++            phone = decrypt_field(user["phone_encrypted"]) if user.get("phone_encrypted") else ""
++            simswap_consent.withdraw(phone)
++            send_message(
++                chat_id,
++                "SIM swap monitoring is now *off* for your number and we've stopped "
++                "all carrier lookups for it.\n\nSend /simswap if you want it back on.",
++                parse_mode="Markdown",
++            )
++        except LookupError:
++            send_message(chat_id, "SIM swap monitoring isn't currently on. Send /simswap to enable it.")
++        except Exception as exc:
++            logger.error("telegram STOPSIM failed user=%s: %s", user.get("user_id"), exc)
++            send_message(
++                chat_id,
++                "⚠️ We couldn't turn it off just now and we won't pretend we did. "
++                "Email support@relayshield.net and we'll stop it manually.",
++            )
++        return
++
++    if cmd in ("simswap", "sim swap"):
++        update_user(user["user_id"], {"onboarding_state": "AWAITING_PHONE"})
++        request_contact(
++            chat_id,
++            "To enable SIM swap monitoring, please share your phone number.\n\n"
++            "We only ever monitor a number its own owner has shared with us.",
++        )
++        return
++
++    # Bare address or link, no command. Handled FIRST, before the free-tier
++    # gate below, because that gate keys on the first token: an address is not
++    # in _FREE_ALLOWED, so a free user pasting one would be shown the upgrade
++    # paywall instead of a result. Scanning is already free, so gating it here
++    # would be wrong as well as hostile.
++    #
++    # Added 2026-08-10. Someone who has just seen an inline result in a group
++    # and opened a DM will paste an address, not type /scan, and "I didn't
++    # recognise that command" is the worst possible first impression for a bot
++    # whose entire growth problem is strangers arriving.
++    _bare = text.strip()
++    if not _bare.startswith("/") and (
++        _looks_like_wallet_address(_bare)
++        or (_normalize_scan_url(_bare) and " " not in _bare)
++    ):
++        handle_scan_dispatch(chat_id, _bare, user)
++        return
++
+     # Free tier: allowlist — only awareness commands, no remediation tools
+     tier = user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)
+     if tier == TIER_FREE:
+         # checktoken is allowed for free tier (teaser result — see handle_checktoken)
+         # sweep is allowed for free tier (CTA appended in handle_sweep)
+-        _FREE_ALLOWED = {"help", "verify", "otp", "scan", "sweep", "checktoken", "plan", "license", "lictype"}
++        # The msgscan/analyze/analyse aliases must be here too, or the free
++        # tier silently breaks for anyone who learned the old command name.
++        # /scan and its aliases all reach the same dispatcher.
++        _FREE_ALLOWED = {"help", "verify", "otp", "scan", "msgscan", "analyze", "analyse",
++                         "sweep", "checktoken", "plan", "license", "lictype"}
+         base_cmd = cmd.split()[0] if cmd else ""
+         if base_cmd not in _FREE_ALLOWED:
+             send_message(
+@@ -5608,32 +5880,42 @@
+         handle_reuse(chat_id)
+     elif cmd == "phone":
+         handle_phone_hardening(chat_id)
+-    elif cmd == "vishing":
+-        handle_vishing(chat_id)
+-    elif cmd in ("wascam", "scam"):
+-        handle_wascam(chat_id, reply_markup=scam_hub_keyboard())
+-    elif cmd == "linkeddevices":
+-        handle_linkeddevices(chat_id)
+-    elif cmd == "tgsecurity":
+-        handle_tgsecurity(chat_id)
+-    elif cmd.startswith("botcheck"):
+-        # /botcheck          → general guidance
+-        # /botcheck @somebot → typosquat + red flag analysis
++    # /vishing is a hidden alias for /scam since the 2026-08-11 merge. It
++    # routes to the SAME handler rather than the old standalone one, so the
++    # phone-scam guidance has a single source of truth and cannot drift.
++    elif cmd in ("wascam", "scam", "vishing"):
++        handle_wascam(chat_id)
++    # /tgsecurity is the one visible Telegram-security command. linkeddevices,
++    # botcheck, verifybot, legit and relayshield stay as hidden aliases so
++    # existing muscle memory keeps working. Merged 2026-08-11.
++    #   /tgsecurity            → hardening + linked devices + verify this bot
++    #   /tgsecurity @somebot   → typosquat + red flag analysis of that bot
++    elif cmd.startswith("tgsecurity") or cmd.startswith("botcheck"):
+         parts = text.strip().split(None, 1)
+         username = parts[1].lstrip("@") if len(parts) > 1 else None
+-        handle_botcheck(chat_id, username)
++        if username:
++            handle_botcheck(chat_id, username)
++        elif cmd.startswith("botcheck"):
++            # Bare /botcheck kept its own general-guidance reply.
++            handle_botcheck(chat_id, None)
++        else:
++            handle_tgsecurity(chat_id)
++    elif cmd == "linkeddevices":
++        handle_linkeddevices(chat_id)
+     elif cmd in ("verifybot", "legit", "relayshield"):
+         handle_verify_bot(chat_id)
+-    elif cmd.startswith("scan"):
+-        parts = text.strip().split(None, 1)
+-        target = parts[1] if len(parts) > 1 else None
+-        handle_scan(chat_id, target, user)
+-    elif cmd.startswith("msgscan") or cmd.startswith("analyze") or cmd.startswith("analyse"):
++    # /scan is the one visible command; msgscan, analyze and analyse stay as
++    # hidden aliases so existing users' muscle memory keeps working. All four
++    # go through the dispatcher, which picks the engine from the input.
++    elif (cmd.startswith("scan") or cmd.startswith("msgscan")
++          or cmd.startswith("analyze") or cmd.startswith("analyse")):
+         parts = text.strip().split(None, 1)
+         content = parts[1] if len(parts) > 1 else None
+-        handle_analyze(chat_id, content)
++        handle_scan_dispatch(chat_id, content, user)
++    # /sessions is a hidden alias for /sweep since the 2026-08-11 merge, and
++    # routes to the same handler for the same reason.
+     elif cmd == "sessions":
+-        handle_sessions(chat_id)
++        handle_sweep(chat_id)
+     elif cmd in ("plan", "license", "lictype"):
+         handle_plan(chat_id, user)
+     elif cmd in ("status", "account"):
+@@ -5681,20 +5963,17 @@
+     elif cmd.startswith("infostealer"):
+         parts = text.strip().split(None, 1)
+         email = parts[1].strip() if len(parts) > 1 else None
+-        if email:
+-            # An address was supplied -- run it, exactly as before. The hub is
+-            # for the bare command only; making someone who already typed the
+-            # email tap a button would be a step backwards.
+-            handle_infostealer_check(chat_id, email, user)
+-        else:
+-            send_message(chat_id, msg_infostealer_hub(),
+-                         reply_markup=infostealer_hub_keyboard())
++        handle_infostealer_check(chat_id, email, user)
+     elif cmd == "stats":
+         handle_stats(chat_id)  # silently no-ops for non-admin
+     else:
++        # Bare addresses and links are already handled at the top of this
++        # function, above the free-tier gate. Anything reaching here is neither.
+         send_message(
+             chat_id,
+-            "I didn't recognise that command. Type /help to see all available commands.",
++            "I didn't recognise that. Send me a wallet address or a link and "
++            "I'll check it, or use /scan for a suspicious email or text.\n\n"
++            "Type /help to see everything I can do.",
+         )
+ 
+ 
+@@ -5702,8 +5981,11 @@
+ # replied-to text as its argument — see handle_message. handle_analyze takes
+ # no user param, so it's wrapped to match the common (chat_id, text, user) shape.
+ REPLY_PROMPT_HANDLERS = [
+-    (SCAN_PROMPT_MARKER,         handle_scan),
+-    (ANALYZE_PROMPT_MARKER,      lambda chat_id, text, user: handle_analyze(chat_id, text)),
++    # Must be the dispatcher, not handle_scan: the merged /scan prompt invites
++    # "a link, a message, or a screenshot", so a reply is often prose. Routing
++    # it straight to handle_scan would answer "That doesn't look like a URL".
++    (SCAN_PROMPT_MARKER,         handle_scan_dispatch),
++    (ANALYZE_PROMPT_MARKER,      lambda chat_id, text, user: handle_scan_dispatch(chat_id, text, user)),
+     (INFOSTEALER_PROMPT_MARKER,  handle_infostealer_check),
+     (CHECKVAULT_PROMPT_MARKER,   handle_checkvault),
+     (CHECKTOKEN_PROMPT_MARKER,   handle_checktoken),
+@@ -5713,6 +5995,20 @@
+ ]
+ 
+ 
++# Every onboarding_state the chain in handle_message actually branches on.
++# Kept next to nothing else on purpose: its ONLY job is to make an orphaned
++# state loud in the logs instead of silently bricking an account. If you add a
++# state to the chain, add it here; if this list goes stale the worst outcome is
++# a spurious ERROR line, never a broken user.
++_KNOWN_ONBOARDING_STATES = frozenset({
++    "ACTIVE", "FREE_ACTIVE",
++    "AWAITING_WALLET_CONFIRM", "AWAITING_WALLET_INPUT", "AWAITING_PHONE",
++    "AWAITING_EMAIL_1", "AWAITING_MORE_EMAILS", "AWAITING_FREE_EMAIL",
++    "AWAITING_REMOVE_SELECT", "AWAITING_DOMAIN_ADD", "AWAITING_BREACH_EMAIL",
++    "AWAITING_DELEGATE_SELECT", "AWAITING_REVOKE_SELECT", "AWAITING_DOMAIN",
++})
++
++
+ def handle_message(update: dict) -> None:
+     message = update.get("message", {})
+     chat_id = message.get("chat", {}).get("id")
+@@ -5731,20 +6027,22 @@
+         document and str(document.get("mime_type", "")).startswith("image/")
+     )
+     caption = message.get("caption", "").strip()
+-    # Captionless screenshots count too, from 2026-08-20. Requiring the caption
+-    # meant a bare screenshot -- which is what people actually send, and what
+-    # they send in reply to the /scan prompt -- fell through this branch and
+-    # then through every other one, so the bot said nothing at all. Silence is
+-    # the worst possible response from a security bot: the user concludes it is
+-    # broken, which is precisely what happened.
++    # "scan" added 2026-08-10 alongside the command merge: /scan is now the
++    # documented name, so a screenshot captioned /scan must work too.
++    #
++    # NO CAPTION REQUIRED, from 2026-08-11. Someone who has just been sent a
++    # scam SMS screenshots it and sends the image. Requiring them to remember a
++    # caption first meant the bot silently ignored exactly the person it exists
++    # for. In a DM with a security bot there is no other plausible reason to
++    # send an image, so a bare screenshot now goes straight to OCR.
+     #
+-    # An image with no caption in a security bot is a thing to look at. Any
+-    # OTHER caption is still left alone, so a captioned image meant for a
+-    # different flow is not hijacked by this branch.
+-    _caption_cmd = caption.lower().lstrip("/")
++    # A caption that is some OTHER slash command still falls through to the
++    # normal dispatcher, so a photo captioned "/help" does not get OCR'd. Free
++    # text captions ("is this a scam?") DO scan, which is what the words mean.
++    _cap_cmd = (caption.lower().lstrip("/").split()[0]
++                if caption.startswith("/") and len(caption) > 1 else "")
+     if (photo or is_image_document) and (
+-        not caption or _caption_cmd in ("msgscan", "analyze", "analyse", "scan")
+-    ):
++            not _cap_cmd or _cap_cmd in ("scan", "msgscan", "analyze", "analyse")):
+         send_message(
+             chat_id,
+             "📧 *Scanning your screenshot...* This may take a few seconds.",
+@@ -5760,8 +6058,8 @@
+             send_message(
+                 chat_id,
+                 "⚠️ *Could not read text from that image.*\n\n"
+-                "Try a clearer screenshot, or just paste the message text "
+-                "straight into the chat and I'll analyse it.",
++                "Try a clearer screenshot, or paste the text directly:\n"
++                "`/analyze <paste message text here>`",
+                 parse_mode="Markdown",
+             )
+         return
+@@ -5909,6 +6207,32 @@
+     # Existing user routing
+     user = get_user_by_chat_id(chat_id)
+     if not user:
++        # A record can exist and still miss the lookup above, which filters on
++        # active==True. That combination is invisible from the user's side:
++        # every command answered "Type /start", and /start itself re-ran the
++        # plan picker because handle_start uses the same active-only lookup —
++        # so a lapsed subscriber was told to sign up again rather than told
++        # their account was inactive. Checked BEFORE /help, because telling a
++        # real subscriber they have no account is the same lie in a nicer tone.
++        lapsed = get_any_user_by_chat_id(chat_id)
++        if lapsed:
++            send_message(
++                chat_id,
++                "🔒 *Your RelayShield account is inactive.*\n\n"
++                "Monitoring is paused, so alerts are not being delivered and "
++                "commands will not run.\n\n"
++                "Type /start to choose a plan and reactivate, or email "
++                "support@relayshield.net if you believe this is wrong.",
++                parse_mode="Markdown",
++            )
++            return
++        # /help must never dead-end. It is the discovery command, it is in the
++        # native "/" menu for every chat, and answering it costs nothing — so
++        # bouncing an unknown chat to /start makes the bot look broken to
++        # exactly the person trying to work out how to use it.
++        if text.lower().lstrip("/").split()[:1] == ["help"]:
++            handle_help_no_account(chat_id)
++            return
+         send_message(
+             chat_id,
+             "Welcome to RelayShield! Type /start to begin.",
+@@ -5922,6 +6246,25 @@
+ 
+     state = user.get("onboarding_state", "ACTIVE")
+ 
++    # /help answers in EVERY state, before the onboarding chain gets a look.
++    # Two reasons. First, "/help" is never a valid email, wallet, domain or
++    # YES/NO, so no awaiting-input state loses anything by not consuming it.
++    # Second, the chain below ends in a catch-all that tells the user to type
++    # /start — so any state without a handler silently bricks the account, and
++    # /start does not recover it because handle_start's _ACTIVE_STATES will not
++    # match the orphan either. That is not hypothetical: a live business_basic
++    # account sat in AWAITING_EMPLOYEE_EMAIL_1, a state with no handler
++    # anywhere in this file, and every command answered "Type /start".
++    if text.lower().lstrip("/").split()[:1] == ["help"]:
++        if state not in _KNOWN_ONBOARDING_STATES:
++            logger.error(
++                "orphaned onboarding_state=%r on user_id=%s — no handler exists; "
++                "every non-/help command will dead-end for this account",
++                state, user.get("user_id"),
++            )
++        handle_help(chat_id, user)
++        return
++
+     if state == "AWAITING_WALLET_CONFIRM":
+         # Text fallback for users who type YES/NO instead of tapping inline buttons
+         t = text.strip().upper()
+@@ -6404,40 +6747,15 @@
+         tier = (user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)) if user else TIER_PERSONAL
+         send_message(chat_id, msg_help(tier))
+ 
+-    elif data.startswith("scamhub_"):
+-        answer_callback(cq_id)
+-        sub = data[len("scamhub_"):]
+-        if sub == "vishing":
+-            handle_vishing(chat_id)
+-        elif sub == "verifybot":
+-            handle_verify_bot(chat_id)
+-        elif sub == "botcheck":
+-            # No argument to hand over from a button press, so ask for one the
+-            # same way every other argument-taking command does.
+-            handle_botcheck(chat_id, None)
+-
+-    elif data.startswith("stealhub_"):
+-        answer_callback(cq_id)
+-        sub = data[len("stealhub_"):]
+-        if sub == "extensions":
+-            handle_extensions(chat_id)
+-        elif sub == "email":
+-            handle_infostealer_check(chat_id, None, user or {})
+-
++    # Category shortcut from the Quick Start card. Falls back to the full
++    # list if the section is missing for this tier, so a stale button can
++    # never produce an empty reply.
+     elif data.startswith("help_cat_"):
+         answer_callback(cq_id)
+         tier = (user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)) if user else TIER_PERSONAL
+-        key = data[len("help_cat_"):]
+-        entry = next((e for e in HELP_CATEGORIES if e[0] == key), None)
+-        if entry and _help_category_available(entry[2], tier):
+-            section = _help_section(entry[1], tier)
+-            # Keep the keyboard attached so the user can move between
+-            # categories without running /help again -- the whole point of a
+-            # shortcut is not having to go back to the top each time.
+-            send_message(chat_id, section or msg_help(tier),
+-                         reply_markup=help_expand_keyboard(tier))
+-        else:
+-            send_message(chat_id, msg_help(tier))
++        body = msg_help_section(tier, data[len("help_cat_"):])
++        send_message(chat_id, body or msg_help(tier),
++                     reply_markup=help_expand_keyboard(tier))
+ 
+     elif data == "wallet_confirm_yes" and user:
+         answer_callback(cq_id)
+@@ -6620,6 +6938,207 @@
+     return "signal_handled"
+ 
+ 
++# ---------------------------------------------------------------------------
++# Inline mode — added 2026-08-10
++#
++# `@relayshield_bot <address or link>` typed inside ANY chat. The group installs
++# nothing, and Telegram stamps every posted result with "via @relayshield_bot",
++# so each use is an impression for everyone in that chat. This is the only
++# surface where usage produces distribution rather than consuming it.
++#
++# Three constraints that make this different from every other handler here:
++#
++# 1. NO ACCOUNT. An inline query arrives from someone who has never pressed
++#    Start. There is no user record, no tier, no onboarding state. Nothing in
++#    this path may call get_user_record or assume one exists.
++# 2. NEVER FALSELY CLEAN. This is the most public thing the product does, so
++#    "we could not check" must never render as "safe". Same defect class as the
++#    sim-swap false-clean and the asset-intel sweep.
++# 3. PUBLIC BY CONSTRUCTION. The result may be posted into a group chat, so it
++#    may only ever contain what the user typed and a verdict on it. No stored
++#    data, no account details, nothing about the sender.
++# ---------------------------------------------------------------------------
++
++INLINE_CACHE_SECONDS = 300
++_INLINE_RATE: dict = {}          # {chat_hash: [epoch, ...]} per warm container
++INLINE_MAX_PER_MIN = 12
++
++
++def _inline_rate_ok(user_id) -> bool:
++    """Crude per-container throttle. Inline queries come from strangers at
++    unbounded volume and there is no other rate limit anywhere in this file.
++    Not exact across concurrent containers, and does not need to be: it exists
++    to stop one actor hammering the upstreams, not to meter billing."""
++    now = time.time()
++    key = _hash_id(user_id)
++    hits = [t for t in _INLINE_RATE.get(key, []) if now - t < 60]
++    hits.append(now)
++    _INLINE_RATE[key] = hits
++    if len(_INLINE_RATE) > 500:                     # bound container memory
++        for k in list(_INLINE_RATE)[:250]:
++            _INLINE_RATE.pop(k, None)
++    return len(hits) <= INLINE_MAX_PER_MIN
++
++
++def _inline_article(rid: str, title: str, desc: str, body: str) -> dict:
++    return {
++        "type": "article", "id": rid, "title": title, "description": desc,
++        "input_message_content": {
++            "message_text": body, "parse_mode": "Markdown",
++            "disable_web_page_preview": True,
++        },
++    }
++
++
++# The one line that carries the funnel. A wallet address is public by nature so
++# screening it in a group is fine; a breach or stealer-log result is private by
++# nature, so the user has to leave the group and DM the bot to get it. The
++# medium enforces the split, which is why no detail belongs here.
++_INLINE_UPSELL = (
++    "\n\n_Addresses are only half of it. Most drains start with a leaked "
++    "credential, not a bad contract. DM_ @relayshield\\_bot _to check whether "
++    "your email or phone is exposed._"
++)
++
++
++def handle_inline_query(update: dict) -> None:
++    iq       = update.get("inline_query") or {}
++    query_id = iq.get("id")
++    raw      = (iq.get("query") or "").strip()
++    user_id  = (iq.get("from") or {}).get("id")
++    if not query_id:
++        return
++
++    def answer(results, placeholder=None):
++        payload = {
++            "inline_query_id": query_id,
++            "results": json.dumps(results),
++            "cache_time": INLINE_CACHE_SECONDS,
++            "is_personal": False,
++        }
++        if placeholder:
++            payload["button"] = json.dumps(
++                {"text": placeholder, "start_parameter": "inline"})
++        try:
++            tg_api("answerInlineQuery", payload)
++        except Exception as exc:
++            logger.warning("answerInlineQuery failed: %s", exc)
++
++    if not raw:
++        answer([_inline_article(
++            "empty", "Paste a wallet address or link",
++            "I'll check it and post the result here",
++            "Type `@relayshield_bot` followed by a wallet address or a link, "
++            "and I'll check it before you act on it.")],
++            placeholder="Open RelayShield")
++        return
++
++    if not _inline_rate_ok(user_id):
++        answer([_inline_article(
++            "rate", "Too many checks, one moment",
++            "Rate limited, try again shortly",
++            "⏳ Too many checks in a short window. Try again in a minute.")])
++        return
++
++    if len(raw) > 200:
++        answer([_inline_article("toolong", "That input is too long",
++                                "Paste a single address or link",
++                                "That is longer than a single address or link.")])
++        return
++
++    normalized = _normalize_scan_url(raw)
++    try:
++        if normalized and " " not in raw:
++            title, desc, body = _inline_check_url(normalized)
++        elif _looks_like_wallet_address(raw):
++            title, desc, body = _inline_check_address(raw)
++        else:
++            answer([_inline_article(
++                "unknown", "Not an address or a link",
++                "Paste a wallet address or a URL",
++                "I check wallet addresses and links. That did not look like "
++                "either. For suspicious emails and texts, DM me and use /scan.")])
++            return
++    except Exception as exc:
++        # Constraint 2. An upstream failure is reported as a failure.
++        logger.warning("inline check failed: %s", exc)
++        answer([_inline_article(
++            "err", "Could not complete the check",
++            "Upstream unavailable, this is NOT an all-clear",
++            "⚠️ *Check did not complete.* An upstream source was unavailable, "
++            "so this is *not* an all-clear. Try again shortly.")])
++        return
++
++    answer([_inline_article("res", title, desc, body + _INLINE_UPSELL)],
++           placeholder="Check your own exposure")
++    logger.info("inline query answered user=%s kind=%s qlen=%d",
++                _hash_id(user_id), "url" if normalized else "address", len(raw))
++
++
++def _looks_like_wallet_address(s: str) -> bool:
++    if " " in s:
++        return False
++    if re.fullmatch(r"0x[a-fA-F0-9]{40}", s):                       return True   # EVM
++    if re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", s):             return True   # Solana
++    if re.fullmatch(r"(EQ|UQ)[A-Za-z0-9_-]{46}", s):                return True   # TON
++    if re.fullmatch(r"(bc1[a-z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})", s): return True
++    if re.fullmatch(r"r[1-9A-HJ-NP-Za-km-z]{24,34}", s):            return True   # XRP
++    return False
++
++
++def _inline_check_url(url: str):
++    res = _heuristic_url_check(url)
++    short = url if len(url) <= 60 else url[:57] + "..."
++    if res.get("flagged"):
++        return ("⚠️ Flagged", "; ".join(res.get("reasons", []))[:80],
++                f"⚠️ *Flagged:* `{short}`\n\n" + "\n".join(f"• {r}" for r in res.get("reasons", []))
++                + "\n\nDo not enter credentials or connect a wallet.")
++    # Deliberately not the word "safe". This path is IOC corpus + Safe Browsing
++    # + domain age, which is real but not a multi-engine verdict, and a new
++    # phishing domain can be hours old and in no database yet.
++    return ("No known flags", "Not a guarantee, see the note",
++            f"🔍 *No known flags:* `{short}`\n\nNot found in criminal IOC feeds "
++            "or Safe Browsing, and the domain is not brand new. That is not the "
++            "same as safe: new phishing domains take hours to appear anywhere.")
++
++
++def _inline_check_address(addr: str):
++    chain_id = 101 if not addr.startswith("0x") else 1
++    goplus   = _goplus_risk_check(addr, chain_id) if re.fullmatch(r"0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}", addr) else {}
++    abuse    = _chainabuse_risk(addr)
++    short    = addr[:10] + "..." + addr[-6:]
++
++    flags = []
++    for k, label in (("honeypot_related_address", "linked to honeypot contracts"),
++                     ("phishing_activities",      "phishing activity"),
++                     ("blacklist_doubt",          "on a blacklist"),
++                     ("stealing_attack",          "stealing attack activity"),
++                     ("fake_kyc",                 "fake KYC"),
++                     ("darkweb_transactions",     "dark web transactions"),
++                     ("money_laundering",         "money laundering signals"),
++                     ("sanctioned",               "sanctioned")):
++        if str(goplus.get(k, "0")) not in ("0", "", "None"):
++            flags.append(label)
++    if abuse.get("count"):
++        cats = ", ".join(abuse.get("categories", [])[:3])
++        flags.append(f"{abuse['count']} community scam report(s)"
++                     + (f" ({cats})" if cats else ""))
++
++    if flags:
++        return ("⚠️ Risk found", "; ".join(flags)[:80],
++                f"⚠️ *Risk found:* `{short}`\n\n" + "\n".join(f"• {f}" for f in flags)
++                + "\n\nDo not send funds or approve this address.")
++
++    # Constraint 2: if BOTH sources failed, that is not clean.
++    if not goplus and not abuse:
++        raise RuntimeError("no upstream returned data")
++
++    return ("No known flags", "Not a guarantee, see the note",
++            f"🔍 *No known flags:* `{short}`\n\nNot in the scam-address databases "
++            "we check. A clean record is not proof of safety, and a new address "
++            "has no history to check at all.")
++
++
+ def lambda_handler(event, context):
+     try:
+         # Direct Lambda invoke (monitors calling us without API Gateway wrapping)
+@@ -6635,7 +7154,7 @@
+             return {"statusCode": 200, "body": "ok"}
+ 
+         body = json.loads(event.get("body", "{}"))
+-        logger.info("Telegram update: %s", json.dumps(body)[:500])
++        logger.info("Telegram update: %s", _summarise_update(body))
+ 
+         # Internal signal injection from monitors via API Gateway path
+         if body.get("source") == "relayshield_internal":
+@@ -6650,6 +7169,14 @@
+                 handle_message(body)
+         elif "callback_query" in body:
+             handle_callback_query(body)
++        elif "inline_query" in body:
++            handle_inline_query(body)
++        elif "chosen_inline_result" in body:
++            # Inline Feedback is at 100%, so this fires whenever someone
++            # actually POSTS a result rather than merely seeing one. It is the
++            # single metric that distinguishes the flywheel working from not.
++            logger.info("inline result chosen user=%s",
++                        _hash_id((body["chosen_inline_result"].get("from") or {}).get("id")))
+         else:
+             logger.info("Unhandled update type: %s", list(body.keys()))
+ 

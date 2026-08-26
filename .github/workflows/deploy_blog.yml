@@ -109,7 +109,12 @@ jobs:
               sys.exit(1)
           new = sorted(repo - live)
           print("this deploy adds: " + (", ".join(new) if new else "nothing new"))
-          io.open("new_slugs.txt", "w").write("\n".join(new))
+          # The trailing newline is load-bearing. `while read` drops a final
+          # line that has none, so without it the verify step below iterates
+          # zero times and passes without checking anything. That is exactly
+          # what happened on run #2, 2026-08-26: a real deploy, a silent
+          # no-op verification.
+          io.open("new_slugs.txt", "w").write("".join(s + "\n" for s in new))
           PY
 
       - name: Deploy the Worker
@@ -131,8 +136,15 @@ jobs:
       - name: Verify every new post actually renders
         if: inputs.dry_run != true
         run: |
+          COUNT=$(grep -c . new_slugs.txt || true)
+          echo "posts to verify: $COUNT"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "no new posts in this deploy, nothing to verify"
+            exit 0
+          fi
           FAILED=""
-          while read -r SLUG; do
+          # `|| [ -n "$SLUG" ]` belts-and-braces the same missing-newline case.
+          while read -r SLUG || [ -n "$SLUG" ]; do
             [ -n "$SLUG" ] || continue
             URL="https://blog.relayshield.net/$SLUG"
             OK=""

@@ -9,7 +9,7 @@ DO NOT hand-edit. Regenerate with:
 
     python3 tools/sync_patterns.py
 
-Sync digest: 4ead14eafffd20e1
+Sync digest: a7f269a3522e46a8
 `tools/sync_patterns.py --check` fails if this drifts from relayshield_api.py,
 so a pattern fixed server-side cannot silently go stale in the client.
 """
@@ -46,9 +46,24 @@ NHI_PATTERNS = [
     ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}",              "CRITICAL", "GitHub Personal Access Token", None),
     ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}",             "CRITICAL", "GitHub Fine-Grained PAT", None),
     ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}",                "CRITICAL", "Stripe Secret Key", None),
+    # Our own key format. Added 2026-08-18 after a live rs_live_ key reached a
+    # public commit and was caught by GitGuardian, not by us. rsscan carried 33
+    # patterns and none of them matched the credential this product issues,
+    # which is the first thing a security audience tests.
+    ("relayshield_key",  r"rs_(?:live|demo)_[a-f0-9]{32,}",           "CRITICAL", "RelayShield API Key", None),
     ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Cryptographic Key", None),
     ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+",        "HIGH",     "Slack Bot Token", None),
     ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+","HIGH",     "Slack User Token", None),
+    # A webhook URL is a credential in its own right: anyone holding it can post
+    # into the channel. Distinct shape from xoxb/xoxp, so the token patterns above
+    # never matched it. GitHub push protection caught one we shipped; we did not.
+    ("slack_webhook",    r"https://hooks\.slack\.com/services/T[A-Za-z0-9_]+/B[A-Za-z0-9_]+/[A-Za-z0-9_]{16,}",
+                                                                     "HIGH",     "Slack Incoming Webhook URL", None),
+    # Same shape, same reasoning: a Zapier catch hook fires the Zap for anyone
+    # holding the URL. Found 2026-08-18 on an internal key record while auditing
+    # the rs_live_ exposure.
+    ("zapier_webhook",   r"https://hooks\.zapier\.com/hooks/(?:catch|standard)/[0-9]+/[a-zA-Z0-9]{16,}",
+                                                                     "HIGH",     "Zapier Webhook URL", None),
     # LLM/AI provider keys — bumped to CRITICAL 2026-07-26 (LLMjacking):
     # a leaked key here isn't just data exposure, it's a live, uncapped
     # billing liability — real incidents range from $46K/day (Sysdig, AWS
@@ -84,16 +99,15 @@ NHI_PATTERNS = [
     ("groq_key",         r"gsk_[a-zA-Z0-9]{52}",                     "CRITICAL", "Groq API Key", "groq"),
     ("xai_key",          r"xai-[a-zA-Z0-9]{80}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
     ("replicate_key",    r"r8_[a-zA-Z0-9]{37}",                      "CRITICAL", "Replicate API Key", "replicate"),
-    # --- added 2026-08-26 ----------------------------------------------------
-    # OpenRouter is a router, not a model vendor, and that is exactly why it
-    # matters here: one leaked key is standing access to every model the
-    # account can reach, billed to the account owner, with no per-vendor key to
-    # revoke. For LLMjacking that is the highest-leverage single credential in
-    # this list. Format confirmed against TruffleHog's own detector
-    # (pkg/detectors/openrouter): sk-or-v1- then exactly 64 lowercase hex.
-    # Note the generic sk- catch-all below CANNOT match these: its body class is
-    # [a-zA-Z0-9] with no hyphen, so it stops at "sk-" and every OpenRouter key
-    # in the corpus has been invisible until now.
+    # --- added 2026-08-26, re-applied onto the reconciled live base ----------
+    # OpenRouter is a router, not a model vendor, and that is why one leaked key
+    # outranks every single-vendor key above it: standing access to every model
+    # the account can reach, billed to the account owner, with no per-vendor key
+    # to revoke. The generic sk- catch-all below CANNOT match these -- its body
+    # class is [a-zA-Z0-9] with no hyphen, so it stops at "sk-" -- which means
+    # every OpenRouter key in the corpus has been invisible until now. Format
+    # confirmed against TruffleHog's own detector: sk-or-v1- then exactly 64
+    # lowercase hex.
     ("openrouter_key",   r"sk-or-v1-[0-9a-f]{64}",                   "CRITICAL", "OpenRouter API Key (multi-model router)", "openrouter"),
     # --- added 2026-07-28 (TODO item 77) -------------------------------------
     # Amazon Bedrock now issues dedicated API keys used as bearer tokens via

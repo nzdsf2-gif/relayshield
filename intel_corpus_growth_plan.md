@@ -263,8 +263,8 @@ column proves nothing yet — read the digest's new `X of Y` line instead.
 This could not be done from the dev sandbox — no AWS credentials, and the backlog lives in
 DynamoDB. `tools/triage_channels.py` answers both questions from the founder's Mac:
 
-    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py --pending
+    python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --pending
 
 Read-only by default; `--apply` is required to write. It prints the active/failing split (the
 122-vs-95 answer), the category breakdown, and the pending backlog **sorted by member count**, then
@@ -299,13 +299,13 @@ shaped; a large off-theme room is noise that costs a Telegram fetch every run.
 
     cd "$HOME/Side SaaS Hustle"
     git pull origin main
-    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3   # once
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py --pending
+    python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3   # once
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --pending
 
 That prints the active/failing split (the 122-vs-95 answer), the category breakdown, and the 75
 pending channels sorted by member count. Then activate the worthwhile ones:
 
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py \
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py \
       --activate name1,name2,name3 --apply
 
 **Read-only without `--apply`.** Run it once without to see what it would do.
@@ -371,3 +371,77 @@ Seeding anything for ToxicPanda specifically off the back of the blog post. The 
 in writing. Zimperium's published IOC set is a legitimate ingestion candidate on its own merits, as
 a decision made deliberately and separately, and if it is ingested the post's measurement stays true
 as written because it is dated 2026-08-25.
+
+---
+
+# 2026-08-26 — the channel count is a public claim, and four surfaces disagree with each other
+
+## What prompted this
+
+The 2026-08-26 13:50 UTC digest reported **`Channels checked: 12`**. The founder's reaction is the
+correct one: we market the monitored-channel count, the number quoted recently was 99, and 12 is not
+a rounding error against 99. Channel attrition is real, Telegram channels get banned and go private
+constantly, but attrition is an explanation for a declining number, not for a number four surfaces
+disagree about.
+
+## The claims, as they stand today
+
+| Surface | Claim | Where |
+|---|---|---|
+| **Production API** | "collected from **95 monitored channels** and 20 authoritative feeds" | `relayshield_api.py`, TAXII 2.1 discovery description |
+| **Production API** | "from **95 monitored channels** and 20 authoritative threat feeds" | `relayshield_api.py`, collection description |
+| Twilio marketplace listing | "**87** Telegram channels", re-counted live 2026-08-06 | `twilio_marketplace_listing_request.md` |
+| SOCRadar benchmark | "**122** channels, **95** reachable" | `socradar_competitive_benchmark.md` |
+| PDF generator | "**37+** monitored channels" | `generate_pdfs.py` |
+| Live digest | **12** checked | Telegram, 2026-08-26 |
+
+The first two are the serious ones. They are **served by the production API to customers and to any
+TAXII client that connects**, and if the true actively-polled number is 12, they are wrong right now,
+in production, in a machine-readable feed description. This is the 511K headline failure mode with a
+different number in it: a figure that a prospect can check, quoted on a surface we control.
+
+## Before changing any of them: measure, and settle what the word means
+
+Nothing here gets edited to a new number until it is measured, per the standing rule. But the
+measurement is not one number, it is three, and conflating them is what produced the disagreement:
+
+1. **Channels in the collection set** — rows in `relayshield_intel_channels`. Was 122.
+2. **Channels active** — `active == True`, which is the only set the monitor ever scans.
+3. **Channels successfully polled in the last 7 days** — what "monitored" honestly means to a buyer.
+
+A public claim should quote **3**, and should say so in words: "N channels polled in the last 7
+days" beats a bare "N monitored channels" precisely because it cannot be read as a stock figure that
+never decays. Then a channel dying reduces the number honestly instead of silently making the claim
+false.
+
+Command (his Mac, zsh, needs AWS):
+
+    cd ~/"Side SaaS Hustle"
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --pending
+
+That prints the active/failing split and the pending backlog. Read-only.
+
+## A second thing the digest is telling us: the deployed monitor is older than the repo
+
+The repo's digest line reads:
+
+    f"Channels checked: {stats['channels_checked']} of {stats['channels_attempted']} active"
+
+The screenshot reads `Channels checked: 12`, with no "of N active" and no unreachable count. That
+format was added on 2026-08-20 specifically because "Channels checked: 95" on its own looks healthy
+while "95 of 122 active, 27 unreachable" tells you the collection surface is degrading.
+
+**The live Lambda appears to predate that change**, which means it is running code older than the
+repo, and it also means the 12 cannot be interpreted yet: we do not know from that message whether
+12 is the whole active set or 12 out of a larger attempted set. Check `lambda_drift_check.yml` and
+any open `lambda-drift` issues for `relayshield-intel-monitor` before drawing conclusions from the
+digest, and recover the live handler into git first if it has drifted.
+
+## Order of work
+
+1. Check intel-monitor drift; recover the live artifact into git if it has drifted.
+2. Run the triage script. Get the three numbers.
+3. Activate the worthwhile part of the pending backlog. This is Top 10 item 3, and it is what
+   actually raises the number rather than restating it.
+4. Only then, correct every surface in the table above to the measured 7-day figure, production API
+   first, and use the same wording on all of them.

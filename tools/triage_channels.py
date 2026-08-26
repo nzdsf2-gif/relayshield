@@ -21,8 +21,8 @@ USAGE (on the founder's Mac)
 Needs boto3. Homebrew Python is PEP 668 externally-managed, so use the throwaway
 venv the handoff describes:
 
-    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py
+    python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py
 """
 
 import argparse

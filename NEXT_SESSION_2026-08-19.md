@@ -86,10 +86,10 @@ Re-cut on the founder's Mac:
     rm -rf "$HOME/Side SaaS Hustle/dist/intel_sample"
     git -C "$HOME/Side SaaS Hustle" fetch -q origin main
     git -C "$HOME/Side SaaS Hustle" show origin/main:tools/export_intel_sample.py > /tmp/rsexport.py
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python /tmp/rsexport.py --out "$HOME/Side SaaS Hustle/dist/intel_sample"
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python /tmp/rsexport.py --out "$HOME/Side SaaS Hustle/dist/intel_sample"
 
-`/tmp/rsvenv` is a throwaway venv with boto3 (Homebrew Python 3.14 is PEP 668 externally-managed,
-so a plain `pip install` fails). Recreate with `python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3`.
+`~/.rsvenv` is a throwaway venv with boto3 (Homebrew Python 3.14 is PEP 668 externally-managed,
+so a plain `pip install` fails). Recreate with `python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3`.
 
 ### 2. Microsoft Sentinel PR #14924 — CLA accepted, arm-ttk fix pushed, awaiting review
 

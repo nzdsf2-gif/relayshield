@@ -1,5 +1,46 @@
 # RelayShield — Open Items
 
+## 🟦 ANDROID-CORPUS-1: identify sources to build an Android malware category — added 2026-08-25
+
+Follow-up to the ToxicPanda post's finding: the corpus has zero Android banking trojan coverage
+today (checked via `malware-index` GSI + an 80k-item sample, see `blog-toxicpanda-android-banking-trojan.md`).
+An empty taxonomy category was deliberately NOT seeded with fake data — this item is the real
+follow-through: find actual collectible sources before the category means anything. Candidates to
+evaluate: abuse.ch MalwareBazaar (Android-tagged samples, same family as existing AgentTesla/
+ClearFake public-feed ingestion), Koodous (Android-specific sample/YARA community), VirusTotal's
+Android-focused hunting rules (already have a VT integration — check if it can be scoped to mobile),
+and any live Telegram channels dedicated to Android/mobile malware sample-sharing (distinct from the
+general infostealer/ransomware channels already monitored). Scope: identify 2-3 real, currently-
+active sources before writing any extraction code — do not repeat tonight's pattern of building a
+pipe with nothing to feed it. | ⬜ Not started
+
+## 🟦 CS-MOBILE-SEEKER-1: token-risk warnings are too aggressive and too presumptuous — Arjen, 2026-08-25
+
+Direct quote: "Something that bugs me a little bit on the SEEKER app is that every time I open it up
+it warns me about the same 2 tokens being high risk and wants me to swap them out on JITO. I have
+these tokens for my own reasons. They might not be good investments, but they are not outright
+scams and as a user, I don't need to be continuously warned about them. It would be fine to have a
+warning that they have high concentrations among a few holders, but I don't want to be told to swap
+out of it. A warning is fine, especially if it's only initially. Taking a client directly to JITO to
+make a swap is being presumptuous on several levels. First the client may not want to make a swap
+and second if they did, they might not want to use JITO."
+
+Two real, located defects, not just a tone complaint:
+
+1. **No persistent per-token dismiss.** `DashboardScreen.tsx`'s `scanAllWallets()` regenerates
+   `TOKEN_RISK` alerts fresh (`acknowledged: false`) on every scan/app-open — there's no stored
+   "user has seen and accepted this specific token's risk" state, so an already-acknowledged risky
+   holding re-alerts every session forever. Needs a persisted per-mint acknowledgment (SecureStore,
+   same pattern as `cs_gas_threshold`) that suppresses re-alerting once dismissed, or downgrades to
+   a passive indicator rather than a fresh alert card.
+2. **Hardcoded directive CTA on every alert.** `AlertCard.tsx` line ~40: `TOKEN_RISK: { label:
+   "Swap out via Jupiter", url: "https://jup.ag" }` — applied uniformly to every token-risk alert
+   regardless of severity, with no way to view risk info without also being pushed toward a specific
+   swap venue. Per Arjen: presumptuous twice over (assumes the user wants to swap at all; assumes
+   Jupiter/Jito specifically if they did). Fix: make the remediation informational by default
+   (concentration/holder-distribution detail, no action button), with "swap" as an optional
+   secondary action a user opts into, not the primary CTA. | ⬜ Not started
+
 ## 🟦 BUNDLE-B: revisit, founder-flagged 2026-08-25
 
 Founder wants this back on the radar. Substantial prior work already exists in this file, dated

@@ -1,0 +1,248 @@
+--- relayshield_whatsapp_webhook.py	2026-08-26 17:38:31.010695887 +0000
++++ recovered/relayshield_whatsapp_webhook.py	2026-08-26 00:49:28.000000000 +0000
+@@ -78,6 +78,8 @@
+ # GSI name for phone number hash lookup
+ PHONE_HASH_INDEX = "phone_hash-index"
+ 
++import relayshield_sim_swap_consent as simswap_consent
++
+ USERS_TABLE = "relayshield_users"
+ MONITORED_EMAILS_TABLE = "relayshield_monitored_emails"
+ 
+@@ -240,6 +242,7 @@
+ STATE_EMAIL_1 = "AWAITING_EMAIL_1"
+ STATE_MORE_EMAILS = "AWAITING_MORE_EMAILS"
+ STATE_PASSWORD_MANAGER = "AWAITING_PASSWORD_MANAGER"
++STATE_SIMSWAP_CONSENT = "AWAITING_SIMSWAP_CONSENT"
+ STATE_ACTIVE = "ACTIVE"
+ 
+ # Commands that should always break out of mid-onboarding states and route normally
+@@ -1804,7 +1807,24 @@
+         "onboarding_state": STATE_EMP_EMAIL_1,
+         "emails_added": 0,
+         "password_manager_user": False,
+-        "sim_swap_monitoring": True,
++        # CHANGED 2026-08-14. This used to be True, which meant an admin adding
++        # an employee silently enrolled SOMEONE ELSE's phone number for carrier
++        # SIM swap lookups. That contradicts our published Terms 1a ("You may
++        # not enroll a number belonging to anyone else") and Privacy section 2
++        # ("we never accept a number submitted by one person about another"),
++        # and it is not covered by the carrier consent clause, which reads "YOU
++        # authorize your wireless carrier" and therefore means the subscriber.
++        #
++        # The invariant now enforced across the whole service:
++        #   sim_swap_monitoring == True MEANS this number's own owner consented.
++        # Nothing else may set it. scan_sim_swap_users() needs no change because
++        # a PENDING record simply does not match its filter.
++        #
++        # To enable monitoring for an employee, run the double opt-in in
++        # relayshield_api.handle_sim_swap_enroll(enrollment_type="third_party")
++        # and let the employee confirm on their own number.
++        "sim_swap_monitoring": False,
++        "consent_state": "PENDING",
+         "active": True,
+         "created_at": now,
+         "updated_at": now,
+@@ -2625,15 +2645,15 @@
+         "✅ *Steps 2, 4 and 5 work on any device — phone, tablet, or computer.*\n\n"
+         "*Step 2 — Check recovery email and phone*\n"
+         "Gmail: myaccount.google.com/security\n"
+-        "Yahoo: myaccount.yahoo.com/security\n"
++        "Yahoo: login.yahoo.com/account/security\n"
+         "→ Remove any recovery contact you do not recognise.\n\n"
+         "*Step 4 — Review connected apps*\n"
+         "Gmail: myaccount.google.com/permissions\n"
+-        "Yahoo: myaccount.yahoo.com/security/connected-apps\n"
++        "Yahoo: login.yahoo.com/account/security → \"External connections\"\n"
+         "→ Revoke anything unrecognised.\n\n"
+         "*Step 5 — Check active sessions*\n"
+         "Gmail: myaccount.google.com/device-activity\n"
+-        "Yahoo: myaccount.yahoo.com/activity\n"
++        "Yahoo: login.yahoo.com/account/security → \"Recent activity\"\n"
+         "→ Sign out of all unknown sessions.\n\n"
+         "_(Steps 1 & 3 follow in the next message)_"
+     )
+@@ -3304,8 +3324,13 @@
+         return "invalid_response"
+ 
+     pm_user = body == "YES"
++    # Onboarding now ends at the SIM swap consent step rather than ACTIVE.
++    # Added 2026-08-14: the Stripe checkout that creates these accounts captures
++    # no consent of any kind, so this is the first and only point where the
++    # person is actually asked. Until they answer, sim_swap_monitoring stays
++    # False and no carrier lookup can happen for their number.
+     update_user(user_id, {
+-        "onboarding_state": STATE_ACTIVE,
++        "onboarding_state": STATE_SIMSWAP_CONSENT,
+         "password_manager_user": pm_user,
+     })
+ 
+@@ -3320,11 +3345,109 @@
+         )
+ 
+     send_whatsapp(to_number, completion_msg, account_sid, auth_token, from_number)
++    send_whatsapp(to_number, msg_simswap_consent(), account_sid, auth_token, from_number)
+     logger.info(
+-        "Onboarding complete — user_id=%s tier=%s pm_user=%s",
++        "Onboarding complete, awaiting SIM swap consent — user_id=%s tier=%s pm_user=%s",
+         user_id, tier, pm_user,
+     )
+-    return "onboarding_complete"
++    return "awaiting_simswap_consent"
++
++
++def msg_simswap_consent() -> str:
++    """The consent prompt. Carrier wording is quoted verbatim from the shared
++    module so all four surfaces show identical text and it cannot drift."""
++    return (
++        "*One last thing: SIM swap monitoring*\n\n"
++        "A SIM swap lets an attacker receive your SMS one-time passcodes, which is "
++        "how most account takeovers start. We can watch this number for SIM and "
++        "carrier changes and alert you.\n\n"
++        "To do that we need your permission:\n\n"
++        f"_{simswap_consent.CARRIER_CONSENT_TEXT}_\n\n"
++        "Full terms: https://terms.relayshield.net\n\n"
++        "Reply *YES* to turn it on, or *NO* to skip. You can change your mind "
++        "any time by replying STOPSIM."
++    )
++
++
++def handle_awaiting_simswap_consent(
++    user: dict,
++    message_body: str,
++    twilio_creds: tuple,
++) -> str:
++    """YES/NO consent for SIM swap monitoring.
++
++    The number enrolled is the one this WhatsApp message arrived FROM, which is
++    the strongest consent provenance available: the person is replying from the
++    handset whose carrier we would query. That is a self enrollment by any
++    reasonable reading, and it is what the carrier clause means by "you".
++    """
++    account_sid, auth_token, from_number = twilio_creds
++    user_id   = user["user_id"]
++    to_number = get_user_whatsapp_number(user)
++    body      = message_body.strip().upper()
++
++    if body not in ("YES", "NO"):
++        send_whatsapp(
++            to_number,
++            "Please reply *YES* to enable SIM swap monitoring, or *NO* to skip it.",
++            account_sid, auth_token, from_number,
++        )
++        return "invalid_response"
++
++    if body == "NO":
++        update_user(user_id, {
++            "onboarding_state":    STATE_ACTIVE,
++            "sim_swap_monitoring": False,
++            "consent_state":       "DECLINED",
++        })
++        send_whatsapp(
++            to_number,
++            "No problem, SIM swap monitoring is off. Everything else is active.\n\n"
++            "Reply SIMSWAP at any time if you change your mind.",
++            account_sid, auth_token, from_number,
++        )
++        return "simswap_declined"
++
++    phone = simswap_consent.normalise_e164(to_number)
++    try:
++        # Consent belongs to the NUMBER, session state belongs to THIS record,
++        # and they are not always the same row. Found 2026-08-14 during the
++        # Twilio evidence capture: this used to pass onboarding_state through
++        # enroll(), which applies attributes to whichever record the phone_hash
++        # lookup returns. The founder's number is on two records, so the state
++        # advanced on the enrolled one while his WhatsApp session stayed in
++        # AWAITING_SIMSWAP_CONSENT and the next command fell through to the
++        # YES/NO branch. Update the session record explicitly instead.
++        simswap_consent.enroll(
++            phone,
++            enrollment_type="self",
++            consent_source="whatsapp",
++            consent_acknowledged=True,
++        )
++        update_user(user_id, {"onboarding_state": STATE_ACTIVE})
++    except Exception as exc:
++        logger.error("whatsapp simswap consent enrollment failed user=%s: %s", user_id, exc)
++        update_user(user_id, {"onboarding_state": STATE_ACTIVE})
++        # Never claim protection that was not switched on.
++        send_whatsapp(
++            to_number,
++            "⚠️ We couldn't switch SIM swap monitoring on just now, and we won't tell "
++            "you it's active when it isn't. Our team has been alerted. Everything else "
++            "is working. Reply SIMSWAP to try again.",
++            account_sid, auth_token, from_number,
++        )
++        return "simswap_enroll_failed"
++
++    send_whatsapp(
++        to_number,
++        "✅ SIM swap monitoring is on for this number.\n\n"
++        "We'll alert you if your SIM or carrier changes unexpectedly. "
++        "Reply STOPSIM at any time to turn it off.",
++        account_sid, auth_token, from_number,
++    )
++    logger.info("simswap consent granted — user_id=%s phone=%s",
++                user_id, simswap_consent.redact(phone))
++    return "simswap_enrolled"
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -4221,6 +4344,46 @@
+             )
+         return "sim_status_sent"
+ 
++    # --- SIMSWAP / STOPSIM ---
++    # Added 2026-08-14. These were referenced in five user-facing messages
++    # ("Reply SIMSWAP...", "Reply STOPSIM...") before they existed, which is the
++    # same false-promise defect this whole workstream is about. They are also
++    # the supported way to re-show the consent prompt, which is what makes the
++    # flow reproducible for a carrier evidence capture.
++    if body in ("SIMSWAP", "SIM SWAP", "SIMON"):
++        update_user(user_id, {"onboarding_state": STATE_SIMSWAP_CONSENT})
++        send_whatsapp(to_number, msg_simswap_consent(), account_sid, auth_token, from_number)
++        return "simswap_consent_prompt_sent"
++
++    if body in ("STOPSIM", "STOP SIM"):
++        try:
++            simswap_consent.withdraw(simswap_consent.normalise_e164(to_number))
++            send_whatsapp(
++                to_number,
++                "SIM swap monitoring is now *off* for this number and we've stopped "
++                "all carrier lookups for it.\n\nReply SIMSWAP if you want it back on.",
++                account_sid, auth_token, from_number,
++            )
++            return "simswap_withdrawn"
++        except LookupError:
++            send_whatsapp(
++                to_number,
++                "SIM swap monitoring isn't currently on for this number.\n\n"
++                "Reply SIMSWAP if you'd like to enable it.",
++                account_sid, auth_token, from_number,
++            )
++            return "simswap_not_enrolled"
++        except Exception as exc:
++            logger.error("STOPSIM withdrawal failed user=%s: %s", user_id, exc)
++            send_whatsapp(
++                to_number,
++                "⚠️ We couldn't turn it off just now and we won't pretend we did. "
++                "Our team has been alerted. Email support@relayshield.net and we'll "
++                "stop it manually.",
++                account_sid, auth_token, from_number,
++            )
++            return "simswap_withdraw_failed"
++
+     # --- HELP ---
+     if body == "HELP":
+         send_wa_menu(to_number, wa_menu_tier_key(is_business, tier in DOMAIN_TIERS), account_sid, auth_token, from_number)
+@@ -5281,6 +5444,9 @@
+     elif onboarding_state == STATE_PASSWORD_MANAGER:
+         result = handle_awaiting_password_manager(user, message_body, twilio_creds)
+ 
++    elif onboarding_state == STATE_SIMSWAP_CONSENT:
++        result = handle_awaiting_simswap_consent(user, message_body, twilio_creds)
++
+     elif onboarding_state == STATE_EMP_EMAIL_1:
+         result = handle_employee_email_1(user, message_body, twilio_creds)
+ 

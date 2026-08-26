@@ -7073,6 +7073,17 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     ("groq_key",         r"gsk_[a-zA-Z0-9]{52}",                     "CRITICAL", "Groq API Key", "groq"),
     ("xai_key",          r"xai-[a-zA-Z0-9]{80}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
     ("replicate_key",    r"r8_[a-zA-Z0-9]{37}",                      "CRITICAL", "Replicate API Key", "replicate"),
+    # --- added 2026-08-26 ----------------------------------------------------
+    # OpenRouter is a router, not a model vendor, and that is exactly why it
+    # matters here: one leaked key is standing access to every model the
+    # account can reach, billed to the account owner, with no per-vendor key to
+    # revoke. For LLMjacking that is the highest-leverage single credential in
+    # this list. Format confirmed against TruffleHog's own detector
+    # (pkg/detectors/openrouter): sk-or-v1- then exactly 64 lowercase hex.
+    # Note the generic sk- catch-all below CANNOT match these: its body class is
+    # [a-zA-Z0-9] with no hyphen, so it stops at "sk-" and every OpenRouter key
+    # in the corpus has been invisible until now.
+    ("openrouter_key",   r"sk-or-v1-[0-9a-f]{64}",                   "CRITICAL", "OpenRouter API Key (multi-model router)", "openrouter"),
     # --- added 2026-07-28 (TODO item 77) -------------------------------------
     # Amazon Bedrock now issues dedicated API keys used as bearer tokens via
     # AWS_BEARER_TOKEN_BEDROCK, distinct from IAM credentials. Because they are

@@ -312,3 +312,62 @@ pending channels sorted by member count. Then activate the worthwhile ones:
 
 **The `consecutive_failures` column is empty until the patched monitor has run at least once.** An
 all-zero column right now means "no data yet", not "no attrition".
+
+---
+
+# Session 2026-08-26 — the Android category, and why the obvious way to build it is wrong
+
+## Where this came from
+
+The ToxicPanda 2.0 post published today reports a measurement: we searched the `malware-index` for
+ToxicPanda and five other major Android banking trojan families (Octo, Cerberus, Anubis, Hook,
+Medusa), plus an 80,000-record sample of every distinct family label the corpus carries, and found
+**zero hits on all of them**. The 42 families in that sample are Windows infostealers, RATs,
+Mirai-class botnets and ransomware loaders. Android banking trojans are not a thin category here.
+They are an absent one.
+
+Having published that, we now have a public, dated, checkable claim that the gap exists. Closing it
+is a ToDo, not an emergency, but leaving it open indefinitely while quoting the post is worse than
+never having measured.
+
+## ToDo: build the Android category
+
+Four sources, in the order they should be evaluated:
+
+1. **MalwareBazaar** — abuse.ch, already an ingested source family for other categories. Filter on
+   Android tags (`apk`, `android`, family tags). Cheapest possible start: the ingestion path exists.
+2. **Koodous** — Android-specific, community rulesets and APK analyses. New integration.
+3. **VirusTotal mobile-focused rules** — Retrohunt/LiveHunt on Android-specific YARA. Requires the
+   VT tier that permits hunting, which is the cost question to answer before design.
+4. **Dedicated Telegram channels** — Android malware and mobile-fraud rooms, added to the intel
+   channel table like any other collection channel.
+
+## Read this before building any of it
+
+**The first three are public feeds. The doctrine in CLAUDE.md says growing total volume by
+ingesting another public feed makes the headline better and the product worse, and that nearly
+killed the Segment 1 outreach.** That warning applies here in full, with one qualification worth
+being precise about.
+
+The KPI is `measured_exclusive_share`, per category. An Android category built entirely from
+MalwareBazaar, Koodous and VT would land at or near **0% exclusive share**: every indicator in it is
+one a target buyer already has, and the only honest thing we could say is "we carry the same Android
+IOCs everyone else does." That is a coverage checkbox, not a product claim, and it must never be
+quoted as one.
+
+Source 4 is the one that can produce exclusive share, for the same structural reason the corpus is
+strong on infostealer credential material: closed and semi-closed rooms are where material appears
+before it reaches a public feed. So:
+
+- Build 1 and 2 for **coverage**, so the honest answer to "do you cover Android" stops being no.
+- Build 4 for **exclusivity**, and measure it separately from day one.
+- Do not quote an Android number of any kind until `tools/exclusive_share_by_category.py` has run on
+  the category and it clears **100 collected indicators**, per the standing rule.
+- 3 is gated on the VT tier question. Answer the cost before designing around it.
+
+## Explicitly not part of this
+
+Seeding anything for ToxicPanda specifically off the back of the blog post. The post commits to that
+in writing. Zimperium's published IOC set is a legitimate ingestion candidate on its own merits, as
+a decision made deliberately and separately, and if it is ingested the post's measurement stays true
+as written because it is dated 2026-08-25.

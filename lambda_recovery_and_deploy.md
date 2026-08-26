@@ -138,12 +138,12 @@ Then import-probe it, the same way CI does — a successful upload only means th
 ## 4. Triage the 75 pending channels
 
     cd "$HOME/Side SaaS Hustle" && git pull origin main
-    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3     # once
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py --pending
+    python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3     # once
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --pending
 
 Read-only. Then activate the worthwhile ones:
 
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py \
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py \
       --activate name1,name2,name3 --apply
 
 ## 5. How this stops happening — `lambda_drift_check.yml`

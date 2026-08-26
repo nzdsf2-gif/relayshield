@@ -102,8 +102,16 @@ just asked ourselves.
 ### Publication status
 
 Staged for `blog.relayshield.net` on 2026-08-26 as
-`hashnode_export/toxicpanda-2-android-banking-trojan-corpus-check.md`; `blog_posts.js` rebuilt.
-**Not live yet.** The container has no Cloudflare credentials, so the deploy runs on the Mac:
+`blog_content/toxicpanda-2-android-banking-trojan-corpus-check.json`, the frozen snapshot that is
+the source of truth, exactly where `685e295` put the last published post. `blog_posts.js` rebuilt:
+21 posts, zero removals.
+
+**Nothing was ever sent to Hashnode.** The builder's old RSS fallback has been deleted and
+`hashnode_export/` renamed to `blog_markdown/`, so no part of the publish path is named after or
+talks to a platform we retired on 2026-07-29.
+
+**Not live yet.** The container has no Cloudflare credentials and the egress proxy denies
+`api.cloudflare.com`, so the deploy runs on the Mac:
 
     python3 build_blog.py
     npx wrangler deploy --config wrangler.blog.toml

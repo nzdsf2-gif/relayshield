@@ -2316,11 +2316,11 @@ def handle_sweep(chat_id: int) -> None:
         "✅ *Steps 2, 4 and 5 work on any device — phone, tablet, or computer.*\n\n"
         "*Step 2 — Check recovery email and phone*\n"
         "Gmail: myaccount.google.com/security\n"
-        "Yahoo: account.yahoo.com/security\n"
+        "Yahoo: login.yahoo.com/account/security\n"
         "→ Remove any recovery contact you don't recognise.\n\n"
         "*Step 4 — Review connected apps*\n"
         "Gmail: myaccount.google.com/permissions\n"
-        "Yahoo: account.yahoo.com/security/connected-apps\n"
+        "Yahoo: login.yahoo.com/account/security → \"External connections\"\n"
         "→ Revoke anything unrecognised.\n\n"
         # /sessions was merged in here 2026-08-11. Its provider list was wider
         # than this step's Gmail/Yahoo pair, and a user with a hijacked session
@@ -2330,7 +2330,7 @@ def handle_sweep(chat_id: int) -> None:
         "A stolen session cookie survives a password change, so this step is the one\n"
         "that actually ends an intruder's access.\n"
         "Gmail: myaccount.google.com/device-activity\n"
-        "Yahoo: account.yahoo.com/security/recent-activity\n"
+        "Yahoo: login.yahoo.com/account/security → \"Recent activity\"\n"
         "Google (all devices): myaccount.google.com → Security → Your devices\n"
         "Microsoft: mysignins.microsoft.com\n"
         "Apple: Settings → Your name → scroll to devices\n"

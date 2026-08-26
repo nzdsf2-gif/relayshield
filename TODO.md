@@ -1,22 +1,31 @@
 # RelayShield — Open Items
 
-## 🟦 BLOG-TOXICPANDA: on deck, drafted 2026-08-25, not time-sensitive to the news cycle
+## 🟦 BUNDLE-B: revisit, founder-flagged 2026-08-25
 
-Full research done, not yet written to file. Real facts pulled from the Malwarebytes source
-(sideload via AWS-hosted buckets, VPN + Accessibility Service abuse, on-device fraud using the
-victim's own IP/session/behavioral context to evade bank fraud detection). **No real IOCs exist in
-the source** — checked explicitly, only two vendor detection-signature names, no domains/hashes/
-packages. Checked our own corpus via the `malware-index` GSI for ToxicPanda and every major Android
-banking trojan family (Octo, Cerberus, Anubis, Hook, Medusa, BRATA) plus an 80,000-item sample of
-distinct family labels — **zero Android banking trojan coverage anywhere in the corpus today.**
+Founder wants this back on the radar. Substantial prior work already exists in this file, dated
+2026-07-30/31 (search `BUNDLE-B-1` through `BUNDLE-B-5` below) — per
+[[feedback_todo_and_snapshots_are_history]], treat those sections as history to verify against
+live state, not current status, before resuming. Start by checking what's actually shipped vs.
+still open rather than trusting the month-old notes at face value.
 
-**The angle** (mirrors the Agent Tesla post's honesty pattern): we checked, we don't have it, and
-here's structurally why no IOC feed will — both Agent Tesla (in-memory injection) and ToxicPanda
-(on-device fraud on the victim's own session) are built to defeat exactly what an indicator feed
-catches. What actually sees the downstream damage is `check_infostealer` / `check_session_risk` —
-stolen credentials and session material, not a malware signature.
+## 🟩 BLOG-TOXICPANDA: DRAFTED IN FULL 2026-08-25, ready to review and publish
 
-Unlike the Agent Tesla draft, this one is not tied to a decaying news window — publish whenever. | ⬜ On deck
+**File: `blog-toxicpanda-android-banking-trojan.md`** — full post plus complete distribution
+package (LinkedIn/Telegram/Farcaster/Mastodon/Show HN, all within their real char/byte limits,
+no em-dashes) below a NOT FOR PUBLICATION line, same structure as the secret-scanning post.
+
+The angle: we checked our own corpus for ToxicPanda 2.0 and 5 other major Android banking trojan
+families (Octo, Cerberus, Anubis, Hook, Medusa, BRATA) via the `malware-index` GSI plus an
+80,000-item sample of distinct family labels. Zero hits on any of them. No real IOCs exist in the
+Malwarebytes source either (checked explicitly). The honest claim: both Agent Tesla (in-memory
+injection) and ToxicPanda (on-device fraud on the victim's own session) are built to defeat exactly
+what an indicator feed catches; what actually sees the downstream damage is `check_infostealer` /
+`check_session_risk`, not a malware signature.
+
+**Before publishing**, run the pre-publication checklist inside the file itself: re-run the
+`malware-index` query to confirm still zero (not stale from 2026-08-25), and confirm no IOCs have
+since been published for this campaign. Not time-sensitive to the news cycle like the Agent Tesla
+draft — the finding is "absence, explained," which stays true whenever it publishes. | ⬜ Ready for review
 
 ---
 
@@ -39,8 +48,24 @@ never added to the RapidAPI listing, same gap pattern as AGENTIC-7a.
 `relayshield_api.py` / `PAYG_PRICE_UNITS` to find every gap, not just LLMjacking; (2) add all
 missing endpoints, including LLMjacking; (3) decide whether the underlying "developer discovery"
 problem needs more than an endpoint-count fix (positioning, pricing display, description copy) or
-whether it's a lost-cause channel now that Apify is live for agent discovery. | ⬜ Pending — needs
-founder RapidAPI dashboard login
+whether it's a lost-cause channel now that Apify is live for agent discovery. This step needs the
+founder's own RapidAPI dashboard login; I can't automate it (no API for providers editing their own
+listings, dashboard-only).
+
+**The complete, current, verified checklist to reconcile against the dashboard** (pulled directly
+from `metered_routes` in `relayshield_api.py`, 2026-08-25 — 29 security-check endpoints):
+`breach`, `sim-swap`, `infostealer`, `domain`, `oauth-watchlist`, `crypto-intel`, `supply-chain`,
+`dependency-risk`, `session-risk`, `identity-graph`, `ransomware-risk`, `nhi-exposure`,
+`llm-credential-exposure`, `secret-scan`, `secret-scan-text`, `target-risk`, `asset-intel`,
+`threat-actor`, `cve-identity-risk`, `identity-risk-score`, `bulk-ioc`, `ioc-pivot`,
+`brand-monitor`, `bulk-identity-risk`, `tech-stack-cve`, `cert-expiry`, `ip-intel`,
+`card-exposure`, `wallet-risk`.
+
+**Two cannot be added no matter what's fixed in the dashboard:** `mcp-registry-risk` and
+`prompt-injection-breach` are PAYG-only (`/v1/payg/` on the separate `relayshield_agentic_api.py`
+Lambda) — per AGENTIC-7a, no flat-subscription (`x-api-key`) route exists for either yet, and
+RapidAPI's model requires one. Building those metered routes is a separate, smaller prerequisite
+task if these two should ever be RapidAPI-listable. | ⬜ Pending — needs founder RapidAPI dashboard login
 
 **Do NOT delete the storage account after submitting.** The reviewer fetches the package from the
 SAS URL through review, preview testing and go-live, which is **3 to 4 weeks**. Deleting it after

@@ -92,6 +92,34 @@ SEARCH_KEYWORDS = [
     ("play ransomware",     "ransomware"),
     ("cl0p",                "ransomware"),
 
+    # Android banking trojans, added 2026-08-26. The corpus carries ZERO
+    # indicators for this class: measured 2026-08-25 against the malware-index
+    # for ToxicPanda plus Octo, Cerberus, Anubis, Hook and Medusa, and again
+    # across an 80,000-record sample of every distinct family label. All zero.
+    # That measurement is now published, so the gap is a public, dated claim.
+    #
+    # Family brand names rather than generic phrases, for the reason proved on
+    # 2026-07-24: a channel bio containing "Cerberus" is a far stronger signal
+    # than one containing "android malware". These land as pending_review like
+    # any other discovery and still need triage before they are ever polled.
+    ("toxicpanda",          "android_banking"),
+    ("octo android",        "android_banking"),
+    ("cerberus android",    "android_banking"),
+    ("anubis android",      "android_banking"),
+    ("hook android",        "android_banking"),
+    ("ermac",               "android_banking"),
+    ("godfather android",   "android_banking"),
+    ("anatsa",              "android_banking"),
+    ("teabot",              "android_banking"),
+    ("vultur android",      "android_banking"),
+    ("xenomorph android",   "android_banking"),
+    ("brata android",       "android_banking"),
+    ("spynote",             "android_banking"),
+    ("craxs rat",           "android_banking"),
+    ("android banking overlay", "android_banking"),
+    ("apk crypter",         "android_banking"),
+    ("android botnet",      "android_banking"),
+
     ("credential dump",     "credential_dump"),
     ("data breach",         "credential_dump"),
     ("leaked database",     "credential_dump"),

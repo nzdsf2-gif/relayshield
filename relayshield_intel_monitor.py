@@ -1544,6 +1544,15 @@ def _parse_passwords_file(text: str) -> list[dict]:
         ("groq_key",         r"gsk_[a-zA-Z0-9]{52}", "CRITICAL", "Groq API Key", "groq"),
         ("xai_key",          r"xai-[a-zA-Z0-9]{80}", "CRITICAL", "xAI (Grok) API Key", "xai"),
         ("replicate_key",    r"r8_[a-zA-Z0-9]{37}", "CRITICAL", "Replicate API Key", "replicate"),
+        # OpenRouter is a router, not a model vendor, which is what makes one
+        # leaked key worth more than any single-vendor key above it: standing
+        # access to every model the account can reach, billed to the owner, with
+        # no per-vendor key anywhere to revoke. The generic sk- catch-all below
+        # cannot match these -- its body class is [a-zA-Z0-9] with no hyphen, so
+        # it stops dead at "sk-" -- which means every OpenRouter key that has
+        # passed through this collection surface was dropped silently. Format
+        # confirmed against TruffleHog's own detector, not guessed.
+        ("openrouter_key",   r"sk-or-v1-[0-9a-f]{64}", "CRITICAL", "OpenRouter API Key (multi-model router)", "openrouter"),
         ("bedrock_key_long", r"ABSKQmVkcm9ja0FQSUtleS[A-Za-z0-9+/]{80,250}={0,2}", "CRITICAL", "Amazon Bedrock API Key (long-lived)", "bedrock"),
         ("bedrock_key_short", r"bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t[A-Za-z0-9+/=]*", "CRITICAL", "Amazon Bedrock API Key (short-lived)", "bedrock"),
         ("huggingface_token", r"hf_[a-zA-Z]{34}", "CRITICAL", "Hugging Face User Access Token", "huggingface"),

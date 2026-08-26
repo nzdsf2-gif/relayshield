@@ -1,0 +1,141 @@
+name: Deploy Blog Worker to Cloudflare
+
+# Publishing used to require a Mac: the Cloudflare deploy runs `wrangler`, and
+# the Claude Code container has no Cloudflare credentials and cannot reach
+# api.cloudflare.com through its egress proxy. This workflow moves the deploy to
+# CI so a post can be published from anywhere.
+#
+# Requires one repository secret: CLOUDFLARE_API_TOKEN, scoped to
+# "Edit Cloudflare Workers" on the relayshield.net zone. CLOUDFLARE_ACCOUNT_ID
+# is only needed if the token can see more than one account.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'blog_content/**'
+      - 'blog_markdown/**'
+      - 'blog_posts.js'
+      - 'build_blog.py'
+      - 'cloudflare_worker_blog.js'
+      - 'blog_og_image.js'
+      - 'developers_og_image.js'
+      - 'wrangler.blog.toml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every check but do not deploy'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-blog
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy blog.relayshield.net
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # blog_posts.js is generated. If the committed copy does not match what
+      # the builder produces from blog_content/ and blog_markdown/, then either
+      # someone hand-edited the generated file or someone added a post without
+      # rebuilding. Deploying either way ships content that no source in this
+      # repo describes, which is the drift rule in miniature.
+      - name: Rebuild blog_posts.js and require it to match the commit
+        run: |
+          python3 build_blog.py
+          if ! git diff --quiet -- blog_posts.js; then
+            echo "::error::blog_posts.js does not match its sources."
+            echo "Run 'python3 build_blog.py' locally and commit the result."
+            git --no-pager diff --stat -- blog_posts.js
+            exit 1
+          fi
+          echo "blog_posts.js is in sync with its sources"
+
+      # THE DRIFT GUARD. Cloudflare has no equivalent of recover_live_handler.yml
+      # for Workers, so a deploy is destructive by default: whatever is live and
+      # not in this repo is gone, with no error anywhere. That has already cost
+      # this project three times. Before uploading anything, compare the live
+      # sitemap against the repo and refuse if the live site is serving a post
+      # this deploy would delete.
+      - name: Refuse to deploy if the live blog has posts this repo does not
+        id: drift
+        run: |
+          set -o pipefail
+          if ! curl -fsS --max-time 30 https://blog.relayshield.net/sitemap.xml -o live_sitemap.xml; then
+            echo "::error::Could not fetch the live sitemap. Refusing to deploy blind."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, re, sys, io
+          live = set(re.findall(r"<loc>https://blog\.relayshield\.net/([^<]+)</loc>",
+                                io.open("live_sitemap.xml", encoding="utf-8").read()))
+          live.discard("")
+          repo = set(re.findall(r'"slug": "([^"]+)"',
+                                io.open("blog_posts.js", encoding="utf-8").read()))
+          orphans = sorted(s for s in live - repo if s not in {"rss.xml", "sitemap.xml"})
+          print("live posts: %d | repo posts: %d" % (len(live), len(repo)))
+          if orphans:
+              print("::error::These posts are live but absent from this repo. "
+                    "Recover them into blog_content/ BEFORE deploying, or this "
+                    "deploy deletes them: " + ", ".join(orphans))
+              sys.exit(1)
+          new = sorted(repo - live)
+          print("this deploy adds: " + (", ".join(new) if new else "nothing new"))
+          io.open("new_slugs.txt", "w").write("\n".join(new))
+          PY
+
+      - name: Deploy the Worker
+        if: inputs.dry_run != true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set on this repository."
+            echo "Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          npx --yes wrangler@4 deploy --config wrangler.blog.toml
+
+      # A successful upload is not a published post. Cloudflare caches for about
+      # five minutes, so poll rather than asserting once, and check the rendered
+      # page rather than the API response.
+      - name: Verify every new post actually renders
+        if: inputs.dry_run != true
+        run: |
+          FAILED=""
+          while read -r SLUG; do
+            [ -n "$SLUG" ] || continue
+            URL="https://blog.relayshield.net/$SLUG"
+            OK=""
+            for ATTEMPT in 1 2 3 4 5 6; do
+              CODE=$(curl -s -o page.html -w '%{http_code}' --max-time 30 "$URL" || echo 000)
+              if [ "$CODE" = "200" ] && grep -q "<article" page.html; then OK=1; break; fi
+              echo "attempt $ATTEMPT: $URL -> $CODE, retrying in 30s"
+              sleep 30
+            done
+            if [ -n "$OK" ]; then echo "live: $URL"; else
+              echo "::error::$URL did not render after 3 minutes"; FAILED="$FAILED $SLUG"; fi
+          done < new_slugs.txt
+          [ -z "$FAILED" ] || exit 1
+
+      - name: Confirm nothing was dropped
+        if: inputs.dry_run != true
+        run: |
+          curl -fsS --max-time 30 https://blog.relayshield.net/sitemap.xml -o after.xml
+          BEFORE=$(grep -c "<loc>" live_sitemap.xml || echo 0)
+          AFTER=$(grep -c "<loc>" after.xml || echo 0)
+          echo "sitemap entries: $BEFORE -> $AFTER"
+          [ "$AFTER" -ge "$BEFORE" ] || { echo "::error::the live blog lost posts"; exit 1; }

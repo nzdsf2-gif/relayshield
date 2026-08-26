@@ -21,6 +21,15 @@ on:
       - 'blog_og_image.js'
       - 'developers_og_image.js'
       - 'wrangler.blog.toml'
+  # A push made by recover_live_blog.yml cannot trigger the block above: GitHub
+  # does not fire workflows for pushes authenticated with the default
+  # GITHUB_TOKEN, to stop workflows triggering themselves forever. That left the
+  # recovery committing four posts on 2026-08-26 and no deploy following it.
+  # workflow_run is exempt from that rule, so chain off the recovery completing
+  # instead of off the commit it makes.
+  workflow_run:
+    workflows: ["Recover Live Blog Posts Into Git"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -36,12 +45,19 @@ jobs:
   deploy:
     name: Deploy blog.relayshield.net
     runs-on: ubuntu-latest
+    # A failed recovery must not deploy. workflow_run fires on completion
+    # regardless of outcome, so the conclusion is checked here.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:

@@ -445,3 +445,54 @@ digest, and recover the live handler into git first if it has drifted.
    actually raises the number rather than restating it.
 4. Only then, correct every surface in the table above to the measured 7-day figure, production API
    first, and use the same wording on all of them.
+
+---
+
+# 2026-08-26 — decided: the live operator-identities function supersedes the pivot module
+
+## The collision
+
+Two independent implementations of one idea exist:
+
+- **`relayshield_intel_pivot.py`**, committed 2026-08-23 with tests. Imported by nothing, listed in
+  no deploy map, absent from every deployed package, invoked by no workflow. **It has never run.**
+- **`_store_operator_identities()`**, inlined in the deployed intel monitor, dated A4 2026-08-25.
+  Runs hourly. Existed in no repository until it was recovered today.
+
+The live function's own docstring records how this happened: its author went looking for
+`relayshield_intel_pivot.py` because a roadmap described it as "module merged", could not find it,
+and rebuilt the capability. Whatever the sequencing, the outcome is two of the same thing.
+
+## The decision, founder's call, 2026-08-26
+
+**The live `_store_operator_identities()` wins.** It was written to fix what the earlier approach
+never did, and unlike the module it is actually running against live channel traffic. It stays as
+it is, and gets a few days to prove it is collecting real data rather than empty leads.
+
+`relayshield_intel_pivot.py` is **superseded, not deleted**. It keeps its tests and stays in the
+repo as a reference implementation of the delayed-recheck logic, which the live function does not
+have. It must not be wired in: importing it would put a second writer on
+`relayshield_operator_identities` and double-count sightings, which is worse than either design
+alone.
+
+## Verification before this is called done
+
+Watch the digest line **`Operator identity sightings recorded (A4)`** over several runs. It has
+been 0 in the runs seen so far, which is consistent with either "working, nothing to record yet" or
+"silently not working". Two things separate those:
+
+- A non-zero count on any run settles it affirmatively.
+- A continuing zero means checking `relayshield_operator_identities` directly for row count and
+  most recent write, on the Mac, since the sightings are written even when no alert fires.
+
+If it is still zero after a few days of hourly runs while channels are producing messages, that is
+a bug to find, not a quiet feature. Note the live function's own stated stance: `_RE_TG_CHANNEL`
+matches ANY @mention, so this is a lead list rather than a verdict, and the value is cross-channel
+correlation over time. Expect noise; measure the correlations, not the raw count.
+
+## The reason this is worth the care
+
+The cross-category correlation it produces is exclusive by derivation: the same handle appearing in
+a ransomware channel one month and a phaas channel the next is a cluster no single-sighting feed can
+produce. That is the kind of indicator `measured_exclusive_share` is supposed to reward, unlike
+another public feed ingest.

@@ -157,3 +157,55 @@ Not "corpus size". These:
 
 The first two are the ones that decide whether the benchmark can be published aimed at their
 customers rather than at ourselves.
+
+---
+
+# ToDo added 2026-08-26 — scope the Solana agentic-payments integration angle
+
+## Why this is on the list
+
+Two things landed on 2026-08-18, the same day, and together they describe a market that exists now
+rather than one being announced:
+
+- **Rain launched the Agentic Payments Alliance**, 25+ organisations, founding members including
+  Visa, Mastercard, Fiserv, Circle, Solana and Remitly. Its stated purpose is standardising
+  **authorisation and risk management for agentic commerce**. That is our product category, named by
+  a coalition that includes the card networks.
+- **Arthur Hayes took the CEO role at Flop Labs** (Flop Network, FLOP token, proof-of-useful-
+  inference). Airdrop planned Q4 2026, genesis block targeted Q1 2027.
+
+Separately, roughly **65% of agentic AI payments already run on Solana**, with Solana Pay as the
+default settlement layer for several agent marketplaces.
+
+## The call
+
+**Flop is not an integration target yet and should not be scoped as one.** The token ships a full
+quarter before the chain it powers exists, so there is no settlement, no counterparties and no
+transaction flow to screen. Revisit near genesis.
+
+**The Alliance and Solana Pay agent marketplaces are the real target**, because payments are
+settling there this quarter.
+
+## What we already have pointed at this
+
+Not a new product, a positioning exercise on shipped capability:
+
+- `check_wallet_risk` and `wallet-screen-batch`, the counterparty screening endpoints
+- The x402 counterparty work and its published post, whose thesis is precisely that nothing in the
+  agent payment flow asks who is being paid
+- Address-poisoning detection, which is an agent-payment failure mode as much as a human one
+
+## Scope this ToDo as
+
+1. Read the Alliance's published scope and membership terms. Determine whether membership is open,
+   what it costs, and whether "risk management" there means fraud scoring, authorisation policy, or
+   both. Do not assume a fit before reading it.
+2. Identify which Solana Pay agent marketplaces expose a pre-payment hook a counterparty check could
+   sit in. An integration needs a place in the flow, not just a shared topic.
+3. Only then decide between: join the Alliance, integrate with one marketplace as a reference, or
+   publish into the category and let inbound find us. All three are cheaper than building for a
+   chain that does not exist yet.
+
+**Measurement rule applies.** Any claim we make in this category about our own coverage of agent or
+wallet risk must come from `exclusive_share_by_category.py`, not from the 511K headline, and not
+from the number of endpoints we happen to expose.

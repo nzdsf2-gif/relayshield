@@ -115,13 +115,29 @@ is what produced the error.
 
 ### Deploy it (after the check says layers)
 
+**Correction, 2026-08-24: the single-file zip below is wrong and will break the
+function.** `relayshield_intel_monitor.py` imports `relayshield_siem_connector`
+-- a local module, not part of the telethon layer. A `zip -j` of the handler
+alone ships a package missing that import; `update-function-code` reports
+success and the Lambda then dies on every invocation with
+`Runtime.ImportModuleError: No module named 'relayshield_siem_connector'`.
+This is the exact failure class `deploy_lambdas.yml` was hardened against on
+2026-08-05 (see its `resolve_deps` comment) -- CI walks each handler's
+`relayshield_*` imports transitively and zips the whole set. A hand-deploy
+must do the same:
+
     cd "$HOME/Side SaaS Hustle"
     git pull origin main
-    zip -j /tmp/intel.zip relayshield_intel_monitor.py
+    zip -j /tmp/intel.zip relayshield_intel_monitor.py relayshield_siem_connector.py
     AWS_PROFILE=relayshield aws lambda update-function-code \
       --function-name relayshield-intel-monitor \
       --zip-file fileb:///tmp/intel.zip --region us-east-1
     AWS_PROFILE=relayshield aws lambda wait function-updated --function-name relayshield-intel-monitor --region us-east-1
+
+Before zipping anything by hand, check what a handler actually imports rather
+than trusting this list to still be complete:
+
+    grep -hoE '^[[:space:]]*(import|from) relayshield_[a-z0-9_]+' relayshield_intel_monitor.py
 
 Then import-probe it, the same way CI does — a successful upload only means the bytes landed:
 

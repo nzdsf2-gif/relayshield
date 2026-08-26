@@ -84,7 +84,18 @@ logger.setLevel(logging.INFO)
 INTEL_SEEN_TABLE      = "relayshield_intel_seen"
 LOCK_TABLE            = "relayshield_intel_monitor_lock"
 LOCK_ID               = "singleton"
-LOCK_TTL_SECONDS      = 280  # just under the 300s Lambda timeout
+# Was 280s, "just under" this Lambda's own 300s timeout -- backwards. A lock
+# that expires BEFORE Lambda's hard kill opens a window where a run still
+# alive (mid FloodWaitError sleep, slow channel, etc.) has its lock stolen by
+# the next invocation while its own TelegramClient connection is still open,
+# producing two live sessions on two IPs -- Telegram's AuthKeyDuplicatedError.
+# relayshield_intel_discovery.py now shares this same LOCK_ID (2026-08-24,
+# see its comment) after that exact race fired via a different function
+# holding a different lock_id in this same table. TTL must exceed the LONGER
+# of the two Lambda timeouts sharing this lock -- discovery's 600s, not this
+# function's own 300s -- plus a safety margin. Keep both files' constants in
+# sync.
+LOCK_TTL_SECONDS      = 620
 INTEL_ALERTS_TABLE    = "relayshield_intel_alerts"
 INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
 # Ransomware leak-site victims live in their OWN table, never in the IOC table.
@@ -298,10 +309,28 @@ _RE_SHA1    = re.compile(r"\b[a-fA-F0-9]{40}\b")
 _RE_URL     = re.compile(r"https?://[^\s<>\"']{10,}")
 _RE_ONION   = re.compile(r"\b[a-z2-7]{16,56}\.onion\b", re.IGNORECASE)
 _RE_CVE     = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+
+# Corrected 2026-08-24: this produced garbage like "rs Remote Control." and
+# "d Linux Machines Into SOCKS5 Proxies..." on the TI demo's Ransomware
+# Victims tab. Two compounding bugs. First, global re.IGNORECASE made the
+# capture group's [A-Z] match ANY case, so it no longer required a real
+# capitalised word to start the name. Second, "hacked?"/"leaked?"/
+# "compromised?" had no required separator (\s+) before the capture and made
+# their own final letter optional, so the engine could match just "hacke"
+# inside "Hackers" or "compromise" inside "compromised" and push the leftover
+# letter ("rs", "d") into the capture as if it were the start of a victim
+# name -- reproduced exactly against "Hackers shut down a UK power plant..."
+# and "...group compromised the recovery process...". Fixed by requiring the
+# keyword as a whole word (\b, no trailing "?"), a real \s+ separator before
+# the capture, and keeping [A-Z] case-sensitive (only the keyword itself is
+# case-folded, via the scoped (?i:...) group) so the capture only starts on
+# an actual capitalised word. The capture itself is now a bounded run of
+# capitalised words (optionally joined by "of"/"and"/"the"/"&") rather than a
+# raw character count, which also stops it running on into the rest of the
+# sentence the way the old {3,50}-char version did.
 _RE_RANSOM_VICTIM = re.compile(
-    r"(?:hacked?|leaked?|compromised?|victim[s]?[:,]?\s*|added to our blog[:\s]*)"
-    r"([A-Z][A-Za-z0-9\s&\-\.]{3,50}(?:Inc\.?|LLC|Ltd\.?|Corp\.?|Group|Co\.?)?)",
-    re.IGNORECASE,
+    r"\b(?i:hacked|leaked|compromised|victims?[:,]?|added to our blog[:,]?)\s+"
+    r"([A-Z][A-Za-z0-9&\-\.]*(?:(?:\s+(?:of|and|the|&))*\s+[A-Z][A-Za-z0-9&\-\.]*){0,6})"
 )
 _RE_TG_CHANNEL = re.compile(r"@([a-zA-Z][a-zA-Z0-9_]{4,31})")  # @mention discovery
 

@@ -85,3 +85,43 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 7. Guard: new TelegramClient(StringSession(...)) construction must go
+      #    through the shared relayshield_intel_monitor_lock singleton.
+      #
+      #    2026-07-23 and 2026-08-24: two separate incidents where a second
+      #    code path built its own TelegramClient from the same
+      #    relayshield/telethon_session StringSession, concurrently with an
+      #    already-running one. Two live sessions on two IPs is exactly what
+      #    triggers Telegram's AuthKeyDuplicatedError and revokes the session
+      #    outright -- each incident needed an interactive re-login through a
+      #    human's phone to recover, which is why this is a build-time check
+      #    and not just a comment: the failure mode is expensive enough (see
+      #    2026-08-24's session state) that it should not depend on the next
+      #    person noticing the two already-locked files before adding a third.
+      #
+      #    The two production files below already share one LOCK_ID
+      #    ("singleton") in relayshield_intel_monitor_lock, acquired before
+      #    any Telegram work and released in a finally block -- see the
+      #    comment on LOCK_ID in relayshield_intel_monitor.py for the pattern
+      #    to copy. The other two are one-time local scripts a human runs by
+      #    hand, never automated infra that can overlap a scheduled run.
+      # -----------------------------------------------------------------------
+      - name: Guard against unlocked Telegram sessions
+        run: |
+          ALLOWED="relayshield_intel_monitor.py relayshield_intel_discovery.py intel_setup_telethon.py regenerate_telethon_session.py"
+          OFFENDERS=""
+          for f in $(grep -rl "StringSession(" --include="*.py" . 2>/dev/null | sed 's|^\./||'); do
+            case " $ALLOWED " in
+              *" $f "*) ;;
+              *) OFFENDERS="$OFFENDERS $f" ;;
+            esac
+          done
+          if [ -n "$OFFENDERS" ]; then
+            echo "::error::New file(s) construct a TelegramClient(StringSession(...)) without going through the shared relayshield_intel_monitor_lock: $OFFENDERS"
+            echo "This is exactly the bug behind the 2026-07-23 and 2026-08-24 AuthKeyDuplicatedError incidents -- a second code path opening the same Telegram session concurrently with relayshield-intel-monitor or relayshield-intel-discovery gets it revoked again."
+            echo "Either route this through the same lock (LOCK_ID = \"singleton\" in relayshield_intel_monitor_lock, see relayshield_intel_monitor.py), or add the file to ALLOWED in this workflow step with a comment explaining why it cannot overlap the other two."
+            exit 1
+          fi
+          echo "OK: no new unlocked TelegramClient(StringSession(...)) construction found."

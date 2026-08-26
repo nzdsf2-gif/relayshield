@@ -166,10 +166,29 @@ _dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 # monthly rule + the GH Actions weekly workflow, both targeting this same
 # function) triggered AuthKeyDuplicatedError — same failure class as
 # INCIDENT-4, which is why intel_monitor.py already has this pattern and this
-# file didn't. TTL kept just under this Lambda's own 600s timeout.
+# file didn't.
+#
+# Corrected 2026-08-24: LOCK_ID used to be "discovery_singleton", a different
+# partition key from relayshield_intel_monitor.py's "singleton" in the same
+# table. That only serialised this function against itself -- it did nothing
+# to stop this function and relayshield-intel-monitor running at the same
+# time, and both build a TelegramClient from the identical StringSession.
+# That is exactly what happened: intel-discovery was invoked by hand at
+# 08:50:18 UTC while intel-monitor's scheduled run was still finishing,
+# giving two live sessions on two different Lambda execution environments
+# (two IPs) and triggering Telegram's "used under two different IP addresses
+# simultaneously" revocation. Sharing the same LOCK_ID makes the two
+# functions mutually exclusive, at the cost of a monitor run occasionally
+# seeing lock_held and skipping one hourly poll while a discovery run is in
+# progress -- an acceptable trade against losing the session again.
+#
+# TTL must exceed the LONGER of the two Lambda timeouts now sharing this
+# lock (this function's 600s, intel-monitor's 300s) -- see the matching
+# constant and comment in relayshield_intel_monitor.py, which must be kept
+# in sync with this one.
 LOCK_TABLE       = "relayshield_intel_monitor_lock"
-LOCK_ID          = "discovery_singleton"
-LOCK_TTL_SECONDS = 580
+LOCK_ID          = "singleton"
+LOCK_TTL_SECONDS = 620
 
 
 def _acquire_lock() -> bool:

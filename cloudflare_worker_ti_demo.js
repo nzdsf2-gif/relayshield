@@ -486,6 +486,62 @@ function renderTrending(data) {
     </div>`;
 }
 
+function renderRansomware(data) {
+  if (data.error) return `<div class="error">${data.error}</div>`;
+
+  // Domain mode: handle_ransomware_risk answers from the leak-site table.
+  if (data.mode !== "corpus_listing") {
+    const level = String(data.risk_level || "CLEAN").toUpperCase();
+    const colour = {CRITICAL:"#ef4444", HIGH:"#f97316", MEDIUM:"#facc15", CLEAN:"#22c55e"}[level] || "#94a3b8";
+    const groups = (data.victim_groups || []).filter(Boolean);
+    const cards = `<div class="corpus-stats">
+      <div class="stat-card"><div class="stat-num" style="color:${colour}">${level}</div><div class="stat-label">Risk level</div></div>
+      <div class="stat-card"><div class="stat-num">${data.on_victim_list ? "YES" : "NO"}</div><div class="stat-label">On a leak site</div></div>
+      <div class="stat-card"><div class="stat-num">${data.pre_ransomware_ioc_count || 0}</div><div class="stat-label">Pre-ransomware creds</div></div>
+    </div>`;
+    const groupRow = groups.length ? `<div style="padding:10px 0;border-bottom:1px solid #1e3a5f">
+      <span style="color:#94a3b8;font-size:13px">Claimed by</span>
+      <div style="color:#e2e8f0;font-weight:600;margin-top:3px">${groups.join(", ")}</div>
+      ${data.first_seen ? `<div style="color:#64748b;font-size:12px;margin-top:3px">First listed ${String(data.first_seen).slice(0,10)}</div>` : ""}
+    </div>` : "";
+    return cards + groupRow
+      + `<div style="color:#94a3b8;font-size:13px;padding:12px 0;line-height:1.55">${data.recommendation || ""}</div>`
+      + `<div style="color:#64748b;font-size:12px;margin-top:12px">Checked ${String(data.checked_at || "").slice(0,19).replace("T"," ")} · domain: ${data.domain || ""}</div>`;
+  }
+
+  // Corpus-wide listing mode — every row here is an unverified lead, not a
+  // confirmed breach, per the API's disclaimer field (fa83bb5).
+  const days = data.window_days || 30;
+  if (!data.listing_available) {
+    return `<div class="no-result">${data.reason || "Nothing collected yet for this corpus."}</div>`;
+  }
+  const disclaimer = `<div style="background:#7f1d1d20;border:1px solid #7f1d1d;border-left:3px solid #ef4444;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#fca5a5">
+    <strong>Unverified leads.</strong> ${data.disclaimer || "Names are pattern-matched from criminal Telegram channels and were never confirmed against a leak site. Confirm independently before acting on any entry."}
+  </div>`;
+  const victims = data.victims || [];
+  if (!victims.length) {
+    const scope = data.org ? ` matching "${data.org}"` : "";
+    return disclaimer + `<div class="no-result">No victims recorded in the last ${days} days${scope}.</div>`;
+  }
+  const stats = `<div class="corpus-stats">
+    <div class="stat-card"><div class="stat-num">${data.count}</div><div class="stat-label">Organisations named</div></div>
+    <div class="stat-card"><div class="stat-num">${days}d</div><div class="stat-label">Window</div></div>
+    <div class="stat-card"><div class="stat-num">${data.truncated ? "Yes" : "No"}</div><div class="stat-label">List truncated</div></div>
+  </div>`;
+  const rows = victims.map(v => `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-bottom:1px solid #1e3a5f">
+      <div style="min-width:0">
+        <div style="font-weight:600;color:#e2e8f0">${v.name || "—"}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">${v.channel || "—"} · ${v.category || "—"}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:12px;color:#94a3b8">${String(v.seen_ts || "").slice(0,19).replace("T"," ")}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px">${v.confidence || "unverified"}</div>
+      </div>
+    </div>`).join("");
+  return disclaimer + stats + rows;
+}
+
 function renderSupplyChain(data) {
   if (data.error) return `<div class="error">Error: ${data.error}</div>`;
   const results = data.results || [];
@@ -616,23 +672,39 @@ footer a{color:#00B5A5;text-decoration:none}
 <div class="container">
   <div class="hero">
     <h1>Live Threat Intelligence</h1>
-    <p>Query 5,400,000+ indicators, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
+    <p>Query 500,000+ distinct indicators drawn from 5,800,000+ citations, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
   </div>
 
   <div class="corpus-stats">
-    <!-- Metrics verified live against DynamoDB 2026-08-12:
-         intel_iocs 5,483,159 · malpedia_families 3,802 · intel_channels active=true 89 ·
-         mitre_attack sk=info 193. Re-verify before quoting these anywhere. -->
-    <div class="stat-card"><div class="stat-num">5.4M+</div><div class="stat-label">IOC indicators</div></div>
+    <!-- CORRECTED 2026-08-22. The old cards read "5.4M+ IOC indicators" and
+         "89 Active criminal Telegram channels".
+
+         5.4M was CITATIONS (sightings: this domain, in this channel, on this
+         date) presented as indicators. The deduplicated corpus is ~500K. Both
+         numbers are real and they measure different things, so the cards now
+         show both and label them — a technical buyer asks which one you mean,
+         and quoting the bigger number as though it were the smaller is the
+         mistake that nearly went out to the blockchain-analytics segment.
+
+         The channel count was measured 2026-08-12 and was already wrong by
+         2026-08-20, when the digest read "95 of 122 active, 27 unreachable".
+         A number that decays between measurements does not belong on a page
+         nobody re-measures, so it is replaced by the collection-lead claim,
+         which is durable and is the thing that actually differentiates.
+
+         Malware families (3,802) and MITRE groups (193) measured 2026-08-12.
+         Re-measure with tools/export_intel_sample.py before quoting anywhere. -->
+    <div class="stat-card"><div class="stat-num">500K+</div><div class="stat-label">Distinct indicators</div></div>
+    <div class="stat-card"><div class="stat-num">5.8M+</div><div class="stat-label">Citations (sightings)</div></div>
     <div class="stat-card"><div class="stat-num">3,800+</div><div class="stat-label">Malware families</div></div>
-    <div class="stat-card"><div class="stat-num">89</div><div class="stat-label">Active criminal Telegram channels</div></div>
-    <div class="stat-card"><div class="stat-num">193</div><div class="stat-label">MITRE ATT&CK groups</div></div>
+    <div class="stat-card"><div class="stat-num">24-72h</div><div class="stat-label">Typical lead over public feeds</div></div>
   </div>
 
   <div class="tabs">
     <div class="tab active" onclick="switchTab('identity',this)">Identity Risk</div>
     <div class="tab" onclick="switchTab('actor',this)">Threat Actor</div>
     <div class="tab" onclick="switchTab('trending',this)">Trending Threats</div>
+    <div class="tab" onclick="switchTab('ransomware',this)">Ransomware Victims</div>
     <div class="tab" onclick="switchTab('supply',this)">Agentic Identity Risk</div>
     <div class="tab" onclick="switchTab('nhi',this)">NHI Exposure</div>
     <div class="tab" onclick="switchTab('llmjacking',this)">LLM Credential Exposure</div>
@@ -669,6 +741,20 @@ footer a{color:#00B5A5;text-decoration:none}
       <button onclick="runTrending()">Load Trending</button>
     </div>
     <div id="trending-result"></div>
+  </div>
+
+  <div id="ransomware" class="panel">
+    <p class="panel-desc">Check whether an organisation — or a supplier you depend on — has been named on a ransomware gang leak site. <strong>Enter a domain</strong> (e.g. <code>acme.com</code>) for a full risk assessment against the leak-site corpus and pre-ransomware credential exposure. An organisation name or an empty box returns the recent corpus-wide listing collected from criminal Telegram channels, where every row is an <strong>unverified lead</strong> rather than a confirmed breach.</p>
+    <div class="input-row">
+      <input type="text" id="ransomware-input" placeholder="A domain (e.g. acme.com) — or an organisation name, or leave empty" />
+      <select id="ransomware-days" style="background:#0F1F3D;border:1px solid #1e3a5f;color:#e2e8f0;padding:10px 14px;border-radius:6px;font-size:14px">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button onclick="runRansomware()">Search Leak Sites</button>
+    </div>
+    <div id="ransomware-result"></div>
   </div>
 
   <div id="nhi" class="panel">
@@ -864,6 +950,18 @@ async function runTrending() {
   document.getElementById('trending-result').innerHTML = renderTrending(data);
 }
 
+async function runRansomware() {
+  const query = document.getElementById('ransomware-input').value.trim();
+  const days = document.getElementById('ransomware-days').value;
+  setLoading('ransomware-result');
+  const resp = await fetch('/demo/ransomware', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({query: query, days: parseInt(days, 10)})
+  });
+  const data = await resp.json();
+  document.getElementById('ransomware-result').innerHTML = renderRansomware(data);
+}
+
 async function runNHI() {
   const domain = document.getElementById('nhi-input').value.trim();
   if (!domain) return;
@@ -1025,6 +1123,7 @@ ${renderAttackTimeline.toString()}
 ${downloadReport.toString()}
 ${renderActor.toString()}
 ${renderTrending.toString()}
+${renderRansomware.toString()}
 ${renderNHI.toString()}
 ${renderLLMJacking.toString()}
 ${riskGaugeSvg.toString()}
@@ -1103,6 +1202,20 @@ export default {
     if (path === "/demo/trending" && request.method === "POST") {
       const body = await request.json();
       const data = await callAPI(env, "/v1/intel/trending", { hours: body.hours || 24 });
+      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (path === "/demo/ransomware" && request.method === "POST") {
+      const body = await request.json();
+      const query = String(body.query || "").trim();
+      const cleaned = query.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const isDomain = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(cleaned);
+      // Same endpoint for both modes: handle_ransomware_risk treats an empty
+      // or non-domain input as a corpus-wide listing request (fa83bb5).
+      const params = isDomain
+        ? { domain: cleaned.toLowerCase() }
+        : { org: query, days: body.days || 30 };
+      const data = await callAPI(env, "/v1/metered/ransomware-risk", params);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 

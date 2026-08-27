@@ -76,6 +76,7 @@ from decimal import Decimal
 import boto3
 from botocore.exceptions import ClientError
 
+from relayshield_intel_labels import normalise_malware
 import relayshield_siem_connector as siem_connector
 
 logger = logging.getLogger()
@@ -1141,8 +1142,12 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "",
                     item["posted_ts"] = posted_ts
                 # Only set when non-empty -- "malware" is the malware-index GSI
                 # hash key, and writing "" would index every untagged IOC.
-                if malware:
-                    item["malware"] = malware
+                # A7: normalise at the write, never at the read. The GSI key is
+                # whatever was stored, so a reader cannot repair a split
+                # namespace after the fact.
+                _mw = normalise_malware(malware)
+                if _mw:
+                    item["malware"] = _mw
                 table.put_item(Item=item)
             except Exception as exc:
                 logger.warning("IOC store failed value=%s: %s", value[:20], exc)

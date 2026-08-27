@@ -5884,9 +5884,15 @@ def handle_threat_actor(params: dict) -> dict:
                 continue
             checked_names.add(key)
             try:
+                # A7: query the canonical form. Writers normalise from
+                # 2026-08-27, so a raw "ClearFake" here would miss every row
+                # written after that date. Until the backfill has run, older
+                # rows in the other casing remain unmatched -- that is the
+                # backfill's job, not something a reader can paper over.
                 hits = ioc_table.query(
                     IndexName="malware-index",
-                    KeyConditionExpression=boto3.dynamodb.conditions.Key("malware").eq(key),
+                    KeyConditionExpression=boto3.dynamodb.conditions.Key("malware").eq(
+                        normalise_malware_query(key)),
                     Limit=20,
                 ).get("Items", [])
                 iocs.extend(hits)
@@ -11109,6 +11115,7 @@ def handle_xrp_address(params: dict) -> dict:
 #   sim_swap_monitoring == True MEANS this number's own owner consented.
 # ---------------------------------------------------------------------------
 
+from relayshield_intel_labels import normalise_malware_query
 import relayshield_sim_swap_consent as simswap_consent
 
 CONSENT_TERMS_VERSION = simswap_consent.CONSENT_TERMS_VERSION

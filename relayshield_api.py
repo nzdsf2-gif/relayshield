@@ -5496,16 +5496,37 @@ def handle_report_view(report_id: str) -> dict:
 #   "recommendation": "..."
 # }
 
-RANSOMWARE_TABLE_API  = "relayshield_intel_ransomware"
-# Distinct from the table above, and deliberately so. relayshield_intel_ransomware
-# is the leak-site scrape: PK domain, SK group, a domain the gang NAMED. This one
-# is the INTEL-2 Telegram sweep: PK victim_name, SK seen_ts, regex-extracted org
-# names carrying confidence="unverified". They are different evidence with
-# different standing, they must never be merged into one list, and only the
-# leak-site table may be spoken about as a claim by a named group.
-RANSOM_VICTIMS_TABLE_API = "relayshield_ransomware_victims"
+RANSOMWARE_TABLE_API       = "relayshield_intel_ransomware"
+RANSOMWARE_VICTIMS_LIVE_TABLE = "relayshield_ransomware_victims"
 MITRE_ATTACK_TABLE    = "relayshield_mitre_attack"
 WEBHOOK_MAX_TIMEOUT   = 5   # seconds — webhook delivery must not block main response
+
+
+def _query_ransomware_victims(domain: str) -> list[dict]:
+    """Check both ransomware-victim sources for a domain and merge results.
+
+    A5, 2026-08-25. RANSOMWARE_TABLE_API (`relayshield_intel_ransomware`) is
+    the original table -- 5,235 items, real historical breadth, but its
+    last genuinely new victim was 2025-06-16 (checked: full scan sorted by
+    `discovered`). The Telegram channels that fed it are all confirmed
+    dead. RANSOMWARE_VICTIMS_LIVE_TABLE (`relayshield_ransomware_victims`)
+    is the live replacement, polled hourly from the ransomware.live Pro API
+    by relayshield_intel_monitor.py's _poll_ransomware_live(). Querying
+    both gives historical depth plus current freshness; either alone gives
+    up one or the other. Both tables use `domain` as the partition key.
+    """
+    items = []
+    for table_name in (RANSOMWARE_TABLE_API, RANSOMWARE_VICTIMS_LIVE_TABLE):
+        try:
+            resp = dynamodb.Table(table_name).query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
+                Limit=10,
+            )
+            items.extend(resp.get("Items", []))
+        except Exception as exc:
+            logger.warning("ransomware victim query failed table=%s domain=%s: %s",
+                            table_name, domain, exc)
+    return items
 
 
 def _build_threat_graph(malware_family: str) -> dict | None:
@@ -5920,7 +5941,6 @@ def handle_cve_identity_risk(params: dict) -> dict:
 
     cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
     ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
-    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
     chatter_tbl    = dynamodb.Table(EXPLOIT_CHATTER_TABLE)
 
     # 1. Get CVE baseline data (EPSS + KEV)
@@ -5964,18 +5984,9 @@ def handle_cve_identity_risk(params: dict) -> dict:
                 pass
 
     # 4. Post-CVE breach velocity — ransomware victim check for domain
-    on_victim_list = False
-    victim_groups = []
-    try:
-        resp = ransomware_tbl.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
-            Limit=5,
-        )
-        items = resp.get("Items", [])
-        on_victim_list = bool(items)
-        victim_groups = [i.get("group", "") for i in items]
-    except Exception:
-        pass
+    items = _query_ransomware_victims(domain)
+    on_victim_list = bool(items)
+    victim_groups = [i.get("group", "") for i in items]
 
     # 5. Exploit chatter check
     chatter_count = 0
@@ -6061,7 +6072,6 @@ def handle_identity_risk_score(params: dict) -> dict:
 
     ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
     cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
-    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
     sessions_tbl   = dynamodb.Table("relayshield_stolen_sessions")
     base_name      = domain.split(".")[0]  # adobe.com -> adobe
     company        = base_name.capitalize()  # adobe -> Adobe
@@ -6158,18 +6168,11 @@ def handle_identity_risk_score(params: dict) -> dict:
 
     # Dimension 4: Ransomware victim listing (0-20)
     ransomware_score = 0
-    try:
-        rw_resp = ransomware_tbl.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
-            Limit=5,
-        )
-        rw_items = rw_resp.get("Items", [])
-        if rw_items:
-            ransomware_score = 20
-            groups = list({i.get("group", "") for i in rw_items if i.get("group")})
-            factors.append(f"Ransomware victim: {domain} listed by {', '.join(groups[:3])} ransomware group(s)")
-    except Exception:
-        pass
+    rw_items = _query_ransomware_victims(domain)
+    if rw_items:
+        ransomware_score = 20
+        groups = list({i.get("group", "") for i in rw_items if i.get("group")})
+        factors.append(f"Ransomware victim: {domain} listed by {', '.join(groups[:3])} ransomware group(s)")
     dim_scores["ransomware_victim"] = ransomware_score
 
     # Dimension 5: Active session exposure (0-10)
@@ -6557,18 +6560,12 @@ def handle_target_risk(params: dict) -> dict:
     signals = []
 
     # Signal 1: Ransomware victim listing (+40)
-    try:
-        victim_resp  = dynamodb.Table(RANSOMWARE_TABLE_API).query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
-        )
-        victims = victim_resp.get("Items", [])
-        if victims:
-            groups = [v.get("group", "") for v in victims]
-            score += 40
-            signals.append({"signal": "ransomware_victim", "weight": 40,
-                             "detail": f"Listed by {', '.join(groups[:3])}"})
-    except Exception as exc:
-        logger.warning("target-risk ransomware check failed: %s", exc)
+    victims = _query_ransomware_victims(domain)
+    if victims:
+        groups = [v.get("group", "") for v in victims]
+        score += 40
+        signals.append({"signal": "ransomware_victim", "weight": 40,
+                         "detail": f"Listed by {', '.join(groups[:3])}"})
 
     # Signal 2+3: Infostealer hits + pre-ransomware credentials
     try:
@@ -6807,141 +6804,13 @@ def _ioc_confidence(source: str, seen_ts: str) -> float:
     return round(max(0.40, base - decay), 2)
 
 
-def _normalise_victim_key(raw: str) -> str:
-    """Match key for a victim name, identical in shape to the collector's.
-
-    Must stay in step with _victim_keys() in relayshield_intel_monitor.py: the
-    collector writes match_keys with that normalisation, and a lookup that
-    normalises differently silently matches nothing.
-    """
-    return re.sub(r"[^a-z0-9]+", "", (raw or "").lower())
-
-
-def _ransomware_corpus_listing(org: str, days: int, limit: int) -> dict:
-    """Recent corpus-wide victim listing from the INTEL-2 Telegram sweep.
-
-    Every row here is an UNVERIFIED LEAD. The names are regex-extracted from
-    criminal channel posts and were never confirmed against a leak site, so
-    this is the one ransomware surface that must not be phrased as a breach.
-    The domain path keeps that distinction: it answers from the leak-site
-    table, where a named group actually claimed the domain.
-    """
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    want   = _normalise_victim_key(org)
-
-    scan_kwargs: dict = {
-        "FilterExpression": boto3.dynamodb.conditions.Attr("seen_ts").gte(cutoff),
-    }
-
-    # Bounded like every other scan in this file: a corpus sweep is unbounded by
-    # nature and the read cost of a deep page runs away without a ceiling.
-    MAX_SCAN_PAGES = 8
-    POOL_TARGET    = 2000
-    unique: dict[str, dict] = {}
-    pages    = 0
-    complete = True
-    try:
-        while pages < MAX_SCAN_PAGES:
-            resp = dynamodb.Table(RANSOM_VICTIMS_TABLE_API).scan(**scan_kwargs)
-            pages += 1
-            for item in resp.get("Items", []):
-                name = item.get("victim_name", "")
-                if not name:
-                    continue
-                if want:
-                    keys = {str(k) for k in item.get("match_keys", [])}
-                    if want not in keys and want != _normalise_victim_key(name):
-                        continue
-                prev = unique.get(name)
-                if prev is None or str(item.get("seen_ts", "")) > str(prev.get("seen_ts", "")):
-                    unique[name] = item
-            nxt = resp.get("LastEvaluatedKey")
-            if len(unique) >= POOL_TARGET or not nxt:
-                complete = not nxt
-                break
-            scan_kwargs["ExclusiveStartKey"] = nxt
-        else:
-            complete = False
-    except Exception as exc:
-        # The collector's table is created out of band. Until it exists this is
-        # an empty corpus, not a server fault -- say so plainly so the caller
-        # can render "nothing collected yet" instead of an error, and so the
-        # endpoint starts working the moment the table appears.
-        code = getattr(exc, "response", {}).get("Error", {}).get("Code")
-        if code == "ResourceNotFoundException":
-            logger.warning("ransomware corpus listing: %s does not exist yet",
-                           RANSOM_VICTIMS_TABLE_API)
-            return _ok({
-                "mode":              "corpus_listing",
-                "listing_available": False,
-                "reason":            "victim corpus is not yet collecting — no listing available",
-                "org":               org or None,
-                "window_days":       days,
-                "count":             0,
-                "victims":           [],
-                "confidence":        "unverified",
-                "checked_at":        datetime.now(timezone.utc).isoformat(),
-            })
-        logger.exception("ransomware corpus listing failed org=%s: %s", org, exc)
-        return _err("ransomware corpus listing failed — internal error", 500)
-
-    rows = sorted(unique.values(), key=lambda i: str(i.get("seen_ts", "")), reverse=True)[:limit]
-    victims = [{
-        "name":       r.get("display_name") or r.get("victim_name", ""),
-        "seen_ts":    r.get("seen_ts", ""),
-        "channel":    r.get("channel", ""),
-        "category":   r.get("category", ""),
-        "confidence": r.get("confidence", "unverified"),
-    } for r in rows]
-
-    logger.info("ransomware corpus listing org=%s days=%d rows=%d complete=%s",
-                org or "-", days, len(victims), complete)
-    return _ok({
-        "mode":              "corpus_listing",
-        "listing_available": True,
-        "org":               org or None,
-        "window_days":       days,
-        "count":             len(victims),
-        "truncated":         not complete,
-        "victims":           victims,
-        "confidence":        "unverified",
-        "disclaimer": (
-            "Every row is an unverified lead extracted from criminal Telegram channels, "
-            "not a confirmed breach. Names are matched by regex and were never checked "
-            "against a leak site. Confirm independently before acting on any entry. "
-            "For a claim by a named ransomware group, query a specific domain instead."
-        ),
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-    })
-
-
 def handle_ransomware_risk(params: dict) -> dict:
     domain = (params.get("domain") or "").strip().lower().removeprefix("www.")
-
-    # An empty box or a bare organisation name is a corpus-wide listing request,
-    # not a malformed domain. Rejecting it was the whole reason the demo's
-    # Ransomware Victims tab could only answer domain lookups.
     if not domain or "." not in domain:
-        org = (params.get("org") or "").strip() or domain
-        try:
-            days = int(params.get("days") or 30)
-        except (TypeError, ValueError):
-            days = 30
-        try:
-            limit = int(params.get("limit") or 100)
-        except (TypeError, ValueError):
-            limit = 100
-        return _ransomware_corpus_listing(org, max(1, min(days, 180)), max(1, min(limit, 500)))
+        return _err("domain is required (e.g. acme.com)")
 
-    # Check victim list
-    try:
-        resp         = dynamodb.Table(RANSOMWARE_TABLE_API).query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain),
-        )
-        victim_items = resp.get("Items", [])
-    except Exception as exc:
-        logger.exception("ransomware-risk victim query failed domain=%s: %s", domain, exc)
-        return _err("ransomware risk query failed — internal error", 500)
+    # Check victim list (both the historical table and the live-polled one)
+    victim_items = _query_ransomware_victims(domain)
 
     # Count pre-ransomware tagged IOCs for this domain
     pre_ransomware_count = 0
@@ -7035,9 +6904,24 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}",              "CRITICAL", "GitHub Personal Access Token", None),
     ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}",             "CRITICAL", "GitHub Fine-Grained PAT", None),
     ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}",                "CRITICAL", "Stripe Secret Key", None),
+    # Our own key format. Added 2026-08-18 after a live rs_live_ key reached a
+    # public commit and was caught by GitGuardian, not by us. rsscan carried 33
+    # patterns and none of them matched the credential this product issues,
+    # which is the first thing a security audience tests.
+    ("relayshield_key",  r"rs_(?:live|demo)_[a-f0-9]{32,}",           "CRITICAL", "RelayShield API Key", None),
     ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Cryptographic Key", None),
     ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+",        "HIGH",     "Slack Bot Token", None),
     ("slack_user",       r"xoxp-[0-9]+-[0-9]+-[0-9]+-[a-zA-Z0-9]+","HIGH",     "Slack User Token", None),
+    # A webhook URL is a credential in its own right: anyone holding it can post
+    # into the channel. Distinct shape from xoxb/xoxp, so the token patterns above
+    # never matched it. GitHub push protection caught one we shipped; we did not.
+    ("slack_webhook",    r"https://hooks\.slack\.com/services/T[A-Za-z0-9_]+/B[A-Za-z0-9_]+/[A-Za-z0-9_]{16,}",
+                                                                     "HIGH",     "Slack Incoming Webhook URL", None),
+    # Same shape, same reasoning: a Zapier catch hook fires the Zap for anyone
+    # holding the URL. Found 2026-08-18 on an internal key record while auditing
+    # the rs_live_ exposure.
+    ("zapier_webhook",   r"https://hooks\.zapier\.com/hooks/(?:catch|standard)/[0-9]+/[a-zA-Z0-9]{16,}",
+                                                                     "HIGH",     "Zapier Webhook URL", None),
     # LLM/AI provider keys — bumped to CRITICAL 2026-07-26 (LLMjacking):
     # a leaked key here isn't just data exposure, it's a live, uncapped
     # billing liability — real incidents range from $46K/day (Sysdig, AWS
@@ -7073,6 +6957,16 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     ("groq_key",         r"gsk_[a-zA-Z0-9]{52}",                     "CRITICAL", "Groq API Key", "groq"),
     ("xai_key",          r"xai-[a-zA-Z0-9]{80}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
     ("replicate_key",    r"r8_[a-zA-Z0-9]{37}",                      "CRITICAL", "Replicate API Key", "replicate"),
+    # --- added 2026-08-26, re-applied onto the reconciled live base ----------
+    # OpenRouter is a router, not a model vendor, and that is why one leaked key
+    # outranks every single-vendor key above it: standing access to every model
+    # the account can reach, billed to the account owner, with no per-vendor key
+    # to revoke. The generic sk- catch-all below CANNOT match these -- its body
+    # class is [a-zA-Z0-9] with no hyphen, so it stops at "sk-" -- which means
+    # every OpenRouter key in the corpus has been invisible until now. Format
+    # confirmed against TruffleHog's own detector: sk-or-v1- then exactly 64
+    # lowercase hex.
+    ("openrouter_key",   r"sk-or-v1-[0-9a-f]{64}",                   "CRITICAL", "OpenRouter API Key (multi-model router)", "openrouter"),
     # --- added 2026-07-28 (TODO item 77) -------------------------------------
     # Amazon Bedrock now issues dedicated API keys used as bearer tokens via
     # AWS_BEARER_TOKEN_BEDROCK, distinct from IAM credentials. Because they are
@@ -7469,9 +7363,12 @@ _GITHUB_SEARCH_LITERALS: dict[str, tuple[str, ...]] = {
     "github_pat":            ("ghp_",),
     "github_pat_fine":       ("github_pat_",),
     "stripe_secret":         ("sk_live_",),
+    "relayshield_key":       ("rs_live_",),
     "private_key":           ("BEGIN RSA PRIVATE KEY",),
     "slack_bot":             ("xoxb-",),
     "slack_user":            ("xoxp-",),
+    "slack_webhook":         ("hooks.slack.com/services",),
+    "zapier_webhook":        ("hooks.zapier.com/hooks",),
     "google_api":            ("AIza",),
     # Every modern OpenAI key embeds T3BlbkFJ -- base64("OpenAI") -- which is a
     # far more selective literal than the shared sk- prefix.
@@ -10421,7 +10318,6 @@ def handle_brand_monitor(params: dict) -> dict:
 def _domain_risk_fast(domain: str) -> dict:
     """Run all 6 identity risk dimensions for one domain. Returns score dict."""
     ioc_table      = dynamodb.Table(INTEL_IOCS_TABLE)
-    ransomware_tbl = dynamodb.Table("relayshield_intel_ransomware")
     sessions_tbl   = dynamodb.Table("relayshield_stolen_sessions")
     cve_table      = dynamodb.Table(INTEL_CVE_TABLE)
     base_name      = domain.split(".")[0]
@@ -10466,13 +10362,9 @@ def _domain_risk_fast(domain: str) -> dict:
         dim["ioc_presence"] = 0
 
     # D4: Ransomware victim (0-20)
-    try:
-        resp = ransomware_tbl.query(KeyConditionExpression=boto3.dynamodb.conditions.Key("domain").eq(domain), Limit=3)
-        items = resp.get("Items", [])
-        dim["ransomware_victim"] = 20 if items else 0
-        if items: factors.append(f"Ransomware victim: {', '.join(i.get('group','') for i in items)}")
-    except Exception:
-        dim["ransomware_victim"] = 0
+    items = _query_ransomware_victims(domain)
+    dim["ransomware_victim"] = 20 if items else 0
+    if items: factors.append(f"Ransomware victim: {', '.join(i.get('group','') for i in items)}")
 
     # D5: Session exposure (0-15)
     try:

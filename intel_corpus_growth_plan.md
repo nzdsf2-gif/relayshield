@@ -263,8 +263,8 @@ column proves nothing yet — read the digest's new `X of Y` line instead.
 This could not be done from the dev sandbox — no AWS credentials, and the backlog lives in
 DynamoDB. `tools/triage_channels.py` answers both questions from the founder's Mac:
 
-    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py --pending
+    python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --pending
 
 Read-only by default; `--apply` is required to write. It prints the active/failing split (the
 122-vs-95 answer), the category breakdown, and the pending backlog **sorted by member count**, then
@@ -299,16 +299,200 @@ shaped; a large off-theme room is noise that costs a Telegram fetch every run.
 
     cd "$HOME/Side SaaS Hustle"
     git pull origin main
-    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3   # once
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py --pending
+    python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3   # once
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --pending
 
 That prints the active/failing split (the 122-vs-95 answer), the category breakdown, and the 75
 pending channels sorted by member count. Then activate the worthwhile ones:
 
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py \
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py \
       --activate name1,name2,name3 --apply
 
 **Read-only without `--apply`.** Run it once without to see what it would do.
 
 **The `consecutive_failures` column is empty until the patched monitor has run at least once.** An
 all-zero column right now means "no data yet", not "no attrition".
+
+---
+
+# Session 2026-08-26 — the Android category, and why the obvious way to build it is wrong
+
+## Where this came from
+
+The ToxicPanda 2.0 post published today reports a measurement: we searched the `malware-index` for
+ToxicPanda and five other major Android banking trojan families (Octo, Cerberus, Anubis, Hook,
+Medusa), plus an 80,000-record sample of every distinct family label the corpus carries, and found
+**zero hits on all of them**. The 42 families in that sample are Windows infostealers, RATs,
+Mirai-class botnets and ransomware loaders. Android banking trojans are not a thin category here.
+They are an absent one.
+
+Having published that, we now have a public, dated, checkable claim that the gap exists. Closing it
+is a ToDo, not an emergency, but leaving it open indefinitely while quoting the post is worse than
+never having measured.
+
+## ToDo: build the Android category
+
+Four sources, in the order they should be evaluated:
+
+1. **MalwareBazaar** — abuse.ch, already an ingested source family for other categories. Filter on
+   Android tags (`apk`, `android`, family tags). Cheapest possible start: the ingestion path exists.
+2. **Koodous** — Android-specific, community rulesets and APK analyses. New integration.
+3. **VirusTotal mobile-focused rules** — Retrohunt/LiveHunt on Android-specific YARA. Requires the
+   VT tier that permits hunting, which is the cost question to answer before design.
+4. **Dedicated Telegram channels** — Android malware and mobile-fraud rooms, added to the intel
+   channel table like any other collection channel.
+
+## Read this before building any of it
+
+**The first three are public feeds. The doctrine in CLAUDE.md says growing total volume by
+ingesting another public feed makes the headline better and the product worse, and that nearly
+killed the Segment 1 outreach.** That warning applies here in full, with one qualification worth
+being precise about.
+
+The KPI is `measured_exclusive_share`, per category. An Android category built entirely from
+MalwareBazaar, Koodous and VT would land at or near **0% exclusive share**: every indicator in it is
+one a target buyer already has, and the only honest thing we could say is "we carry the same Android
+IOCs everyone else does." That is a coverage checkbox, not a product claim, and it must never be
+quoted as one.
+
+Source 4 is the one that can produce exclusive share, for the same structural reason the corpus is
+strong on infostealer credential material: closed and semi-closed rooms are where material appears
+before it reaches a public feed. So:
+
+- Build 1 and 2 for **coverage**, so the honest answer to "do you cover Android" stops being no.
+- Build 4 for **exclusivity**, and measure it separately from day one.
+- Do not quote an Android number of any kind until `tools/exclusive_share_by_category.py` has run on
+  the category and it clears **100 collected indicators**, per the standing rule.
+- 3 is gated on the VT tier question. Answer the cost before designing around it.
+
+## Explicitly not part of this
+
+Seeding anything for ToxicPanda specifically off the back of the blog post. The post commits to that
+in writing. Zimperium's published IOC set is a legitimate ingestion candidate on its own merits, as
+a decision made deliberately and separately, and if it is ingested the post's measurement stays true
+as written because it is dated 2026-08-25.
+
+---
+
+# 2026-08-26 — the channel count is a public claim, and four surfaces disagree with each other
+
+## What prompted this
+
+The 2026-08-26 13:50 UTC digest reported **`Channels checked: 12`**. The founder's reaction is the
+correct one: we market the monitored-channel count, the number quoted recently was 99, and 12 is not
+a rounding error against 99. Channel attrition is real, Telegram channels get banned and go private
+constantly, but attrition is an explanation for a declining number, not for a number four surfaces
+disagree about.
+
+## The claims, as they stand today
+
+| Surface | Claim | Where |
+|---|---|---|
+| **Production API** | "collected from **95 monitored channels** and 20 authoritative feeds" | `relayshield_api.py`, TAXII 2.1 discovery description |
+| **Production API** | "from **95 monitored channels** and 20 authoritative threat feeds" | `relayshield_api.py`, collection description |
+| Twilio marketplace listing | "**87** Telegram channels", re-counted live 2026-08-06 | `twilio_marketplace_listing_request.md` |
+| SOCRadar benchmark | "**122** channels, **95** reachable" | `socradar_competitive_benchmark.md` |
+| PDF generator | "**37+** monitored channels" | `generate_pdfs.py` |
+| Live digest | **12** checked | Telegram, 2026-08-26 |
+
+The first two are the serious ones. They are **served by the production API to customers and to any
+TAXII client that connects**, and if the true actively-polled number is 12, they are wrong right now,
+in production, in a machine-readable feed description. This is the 511K headline failure mode with a
+different number in it: a figure that a prospect can check, quoted on a surface we control.
+
+## Before changing any of them: measure, and settle what the word means
+
+Nothing here gets edited to a new number until it is measured, per the standing rule. But the
+measurement is not one number, it is three, and conflating them is what produced the disagreement:
+
+1. **Channels in the collection set** — rows in `relayshield_intel_channels`. Was 122.
+2. **Channels active** — `active == True`, which is the only set the monitor ever scans.
+3. **Channels successfully polled in the last 7 days** — what "monitored" honestly means to a buyer.
+
+A public claim should quote **3**, and should say so in words: "N channels polled in the last 7
+days" beats a bare "N monitored channels" precisely because it cannot be read as a stock figure that
+never decays. Then a channel dying reduces the number honestly instead of silently making the claim
+false.
+
+Command (his Mac, zsh, needs AWS):
+
+    cd ~/"Side SaaS Hustle"
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --pending
+
+That prints the active/failing split and the pending backlog. Read-only.
+
+## A second thing the digest is telling us: the deployed monitor is older than the repo
+
+The repo's digest line reads:
+
+    f"Channels checked: {stats['channels_checked']} of {stats['channels_attempted']} active"
+
+The screenshot reads `Channels checked: 12`, with no "of N active" and no unreachable count. That
+format was added on 2026-08-20 specifically because "Channels checked: 95" on its own looks healthy
+while "95 of 122 active, 27 unreachable" tells you the collection surface is degrading.
+
+**The live Lambda appears to predate that change**, which means it is running code older than the
+repo, and it also means the 12 cannot be interpreted yet: we do not know from that message whether
+12 is the whole active set or 12 out of a larger attempted set. Check `lambda_drift_check.yml` and
+any open `lambda-drift` issues for `relayshield-intel-monitor` before drawing conclusions from the
+digest, and recover the live handler into git first if it has drifted.
+
+## Order of work
+
+1. Check intel-monitor drift; recover the live artifact into git if it has drifted.
+2. Run the triage script. Get the three numbers.
+3. Activate the worthwhile part of the pending backlog. This is Top 10 item 3, and it is what
+   actually raises the number rather than restating it.
+4. Only then, correct every surface in the table above to the measured 7-day figure, production API
+   first, and use the same wording on all of them.
+
+---
+
+# 2026-08-26 — decided: the live operator-identities function supersedes the pivot module
+
+## The collision
+
+Two independent implementations of one idea exist:
+
+- **`relayshield_intel_pivot.py`**, committed 2026-08-23 with tests. Imported by nothing, listed in
+  no deploy map, absent from every deployed package, invoked by no workflow. **It has never run.**
+- **`_store_operator_identities()`**, inlined in the deployed intel monitor, dated A4 2026-08-25.
+  Runs hourly. Existed in no repository until it was recovered today.
+
+The live function's own docstring records how this happened: its author went looking for
+`relayshield_intel_pivot.py` because a roadmap described it as "module merged", could not find it,
+and rebuilt the capability. Whatever the sequencing, the outcome is two of the same thing.
+
+## The decision, founder's call, 2026-08-26
+
+**The live `_store_operator_identities()` wins.** It was written to fix what the earlier approach
+never did, and unlike the module it is actually running against live channel traffic. It stays as
+it is, and gets a few days to prove it is collecting real data rather than empty leads.
+
+`relayshield_intel_pivot.py` is **superseded, not deleted**. It keeps its tests and stays in the
+repo as a reference implementation of the delayed-recheck logic, which the live function does not
+have. It must not be wired in: importing it would put a second writer on
+`relayshield_operator_identities` and double-count sightings, which is worse than either design
+alone.
+
+## Verification before this is called done
+
+Watch the digest line **`Operator identity sightings recorded (A4)`** over several runs. It has
+been 0 in the runs seen so far, which is consistent with either "working, nothing to record yet" or
+"silently not working". Two things separate those:
+
+- A non-zero count on any run settles it affirmatively.
+- A continuing zero means checking `relayshield_operator_identities` directly for row count and
+  most recent write, on the Mac, since the sightings are written even when no alert fires.
+
+If it is still zero after a few days of hourly runs while channels are producing messages, that is
+a bug to find, not a quiet feature. Note the live function's own stated stance: `_RE_TG_CHANNEL`
+matches ANY @mention, so this is a lead list rather than a verdict, and the value is cross-channel
+correlation over time. Expect noise; measure the correlations, not the raw count.
+
+## The reason this is worth the care
+
+The cross-category correlation it produces is exclusive by derivation: the same handle appearing in
+a ransomware channel one month and a phaas channel the next is a cluster no single-sighting feed can
+produce. That is the kind of indicator `measured_exclusive_share` is supposed to reward, unlike
+another public feed ingest.

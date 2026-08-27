@@ -241,7 +241,7 @@ future Lambda added to CI needs the same consideration.
 
 **Sandbox has no `boto3` and no PowerShell.** `tools/triage_channels.py` and the arm-ttk port are
 written to run on the Mac; use the throwaway venv
-(`python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3`) because Homebrew Python is
+(`python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3`) because Homebrew Python is
 PEP 668 externally-managed.
 
 **Watch on the next real intel run:** `relayshield_intel_monitor.py` imports

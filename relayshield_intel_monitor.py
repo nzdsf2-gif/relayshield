@@ -92,6 +92,20 @@ LOCK_ID               = "singleton"
 LOCK_TTL_SECONDS      = 280  # just under the 300s Lambda timeout
 INTEL_ALERTS_TABLE    = "relayshield_intel_alerts"
 INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
+# A6, 2026-08-27. One row per INDICATOR, not per sighting. relayshield_intel_iocs
+# is keyed (ioc_value, seen_ts), so every sighting is its own row and "when did
+# we first see this" is a min() over a query rather than a stored fact. That is
+# the number A4's lead-time claim rests on, so it needs to be recorded, not
+# recomputed.
+#
+# Written with attribute_not_exists so the FIRST writer wins and every later one
+# is a no-op costing a single conditional write. No read-before-write: this path
+# handles hundreds of IOCs per message and a read per IOC would double the
+# request count and add a race between concurrent runs.
+#
+# THIS TABLE MUST HAVE NO TTL. Sightings expire; first-seen must not, or the
+# lead-time claim erases itself as the evidence ages out.
+FIRST_SEEN_TABLE      = "relayshield_intel_first_seen"
 INTEL_CHANNELS_TABLE  = "relayshield_intel_channels"
 STOLEN_SESSIONS_TABLE  = "relayshield_stolen_sessions"
 OPERATORS_TABLE        = "relayshield_operator_identities"
@@ -1093,6 +1107,41 @@ def detect_malware_families(text: str) -> str:
     return ",".join(sorted(found))
 
 
+# Per-run count of indicators seen for the FIRST time, so the digest can show
+# genuinely new coverage rather than only sighting volume.
+_FIRST_SEEN_NEW: list = []
+
+
+def _record_first_seen(ioc_value: str, channel: str, category: str, when: str) -> bool:
+    """Record the first time this indicator was ever seen. Idempotent.
+
+    Returns True only when this call actually created the row, so the caller can
+    count genuinely new indicators, which is a different and more interesting
+    number than sightings.
+
+    Failure is deliberately quiet at debug level: first-seen is an enrichment,
+    and a missing table or a denied write must never stop IOC collection, which
+    is the primary job. The absence shows up in the digest counter instead.
+    """
+    try:
+        _dynamodb.Table(FIRST_SEEN_TABLE).put_item(
+            Item={
+                "ioc_value":      ioc_value,
+                "first_seen":     when,
+                "first_channel":  channel,
+                "first_category": category,
+            },
+            ConditionExpression="attribute_not_exists(ioc_value)",
+        )
+        return True
+    except Exception as exc:
+        # ConditionalCheckFailedException is the expected, overwhelmingly common
+        # case: we have seen this indicator before. It is not an error.
+        if type(exc).__name__ != "ConditionalCheckFailedException":
+            logger.debug("first-seen write failed value=%s: %s", ioc_value[:24], exc)
+        return False
+
+
 def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "",
                 posted_ts: str = "") -> None:
     """Persist one message's IOCs as sightings.
@@ -1149,6 +1198,9 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "",
                 if _mw:
                     item["malware"] = _mw
                 table.put_item(Item=item)
+                # A6: one conditional write per IOC, first writer wins.
+                if _record_first_seen(value.lower(), channel, category, now):
+                    _FIRST_SEEN_NEW.append(1)
             except Exception as exc:
                 logger.warning("IOC store failed value=%s: %s", value[:20], exc)
 
@@ -2668,6 +2720,7 @@ def _send_admin_digest(stats: dict) -> None:
            if stats.get("supplier_alerts") else "")
         + f"Ransomware victims stored (ransomware.live, A5): {stats.get('ransomware_victims_stored', 0)}\n"
         + _operator_line(stats)
+        + f"Indicators seen for the first time (A6): {len(_FIRST_SEEN_NEW)}\n"
         + f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
         f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
         f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n"

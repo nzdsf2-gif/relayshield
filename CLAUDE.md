@@ -99,6 +99,48 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ---
 
+## OPEN TODOS THAT MUST NOT BE FORGOTTEN
+
+Added 2026-08-27. These are blocked on a wait, not on a decision, which is exactly the kind of item
+that gets lost between sessions.
+
+### A7 follow-through — two Lambdas with no deploy path
+
+`relayshield_intel_feed.py` and `relayshield_intel_kev.py` were in NEITHER `deploy_lambdas.yml` NOR
+`lambda_drift_check.yml`: source in the repo, no automated deploy, no drift detection. That is the
+same combination that produced ~1,900 undeployed lines across four handlers on 2026-08-26.
+
+They are now in the **drift check only**. The sequence, and it must be in this order:
+
+1. **Watch `lambda_drift_check.yml` for `relayshield-intel-feed` and `relayshield-intel-kev`.** It
+   runs daily. A red run naming either is drift, not a broken check.
+2. **If either has drifted**, recover it with `recover_live_handler.yml` and reconcile, exactly as
+   the four handlers were on 2026-08-26. Do not skip to step 3.
+3. **Only once the check is green on both**, add them to `deploy_lambdas.yml` and deploy.
+
+**Until step 3, the feed and KEV halves of A7 (malware label normalisation) are inert.** The code is
+in the repo and is not running.
+
+### A8 — grow `tg_handle`, but only after the filter
+
+Sequenced behind a two-week measurement, deliberately. The evidence for waiting is already in:
+`relayshield_operator_identities` holds 7 rows, every one at `sightings=1`, several of them English
+words (`catching`, `normanonrock`) caught because `_RE_TG_CHANNEL` matches any `@mention`.
+
+**Growing collection before filtering multiplies the noise, not the signal.**
+
+- Watch `tools/check_operator_identities.py`'s cross-channel number. Handles seen in 2+ channels are
+  the exclusive asset; a row count is not.
+- If it is still 0 after two weeks of hourly runs while channels are producing messages, the problem
+  is extraction and the fix is a filter, not more collection. Strongest option: require a SECOND
+  sighting before writing the row at all, which filters on repetition rather than guessing what a
+  handle looks like.
+- **Do not quote a `tg_handle` exclusive-share number until the category clears 100 collected
+  indicators and `exclusive_share_by_category.py` has run on it.** This is the number most likely to
+  be quoted at a competitor, so the standing rule applies with extra force.
+
+---
+
 ## MEASUREMENT DOCTRINE — non-negotiable
 
 **Never quote the ~511K corpus headline.** Most of it is ingested public feeds (abuse.ch URLhaus /

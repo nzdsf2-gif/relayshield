@@ -1380,6 +1380,12 @@ def _poll_ransomware_live() -> int:
     return written
 
 
+# Per-run accumulator of (failures, attempted, first_error) from
+# _store_operator_identities(), so _send_admin_digest() can report a broken
+# write path instead of printing a 0 that looks like an empty result.
+_OPERATOR_WRITE_FAILURES: list = []
+
+
 def _store_operator_identities(handles: list[str], channel: str, category: str) -> int:
     """Automated counterpart to tools/import_channels.py's import_operators().
 
@@ -1408,6 +1414,23 @@ def _store_operator_identities(handles: list[str], channel: str, category: str) 
     now = datetime.now(timezone.utc).isoformat()
     ttl = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
     stored = 0
+    # FIXED 2026-08-27. This function reported 0 on every run since it shipped,
+    # and 0 was unreadable: it meant "no mentions seen", "every write failed",
+    # and "wrote nothing new" identically, because each failure was swallowed
+    # per-handle at warning level and the count came back 0 either way. A
+    # collector that cannot report its own failure is indistinguishable from a
+    # collector with nothing to collect, which is how this sat unnoticed.
+    #
+    # The most likely cause is not visible from the repo: nothing here creates
+    # relayshield_operator_identities, tools/import_channels.py (named in the
+    # docstring above as the manual counterpart) does not exist in this
+    # repository, and the Key below assumes a composite schema of
+    # (handle, platform). If the table's real key differs, or the table is
+    # absent, or the execution role lacks UpdateItem on it, then every call
+    # raises, every exception is caught here, and the digest prints 0.
+    # tools/check_operator_identities.py answers that against the live table.
+    failures = 0
+    first_error = ""
     for handle in handles:
         try:
             table.update_item(
@@ -1429,7 +1452,22 @@ def _store_operator_identities(handles: list[str], channel: str, category: str) 
             )
             stored += 1
         except Exception as exc:
-            logger.warning("operator identity store failed handle=%s: %s", handle, exc)
+            failures += 1
+            if not first_error:
+                # Once per call, at ERROR, with the exception CLASS and the key
+                # shape actually used. A per-handle warning that says only
+                # "failed" cannot tell a ValidationException from an
+                # AccessDeniedException, and those have opposite fixes.
+                first_error = type(exc).__name__
+                logger.error(
+                    "operator identity store failing: table=%s key={handle,platform} "
+                    "error=%s: %s (suppressing further errors this call; %d handle(s) queued)",
+                    OPERATORS_TABLE, first_error, exc, len(handles),
+                )
+    if failures:
+        logger.error("operator identity store: %d/%d write(s) failed (%s)",
+                     failures, len(handles), first_error)
+    _OPERATOR_WRITE_FAILURES.append((failures, len(handles), first_error))
     return stored
 
 
@@ -2544,6 +2582,27 @@ def _format_mimes(mimes: dict | None) -> str:
     return "".join("  %s: %d\n" % (m, c) for m, c in top)
 
 
+def _operator_line(stats: dict) -> str:
+    """Render the A4 sightings line so a 0 says WHICH zero it is.
+
+    Three different situations printed the same "0" until 2026-08-27: no
+    @mentions in anything collected, mentions found but every write rejected,
+    and mentions found and written. The first is normal on a quiet run, the
+    second is a broken collector, and telling them apart is the whole point of
+    reporting the number at all.
+    """
+    stored   = stats.get("operator_identities_stored", 0)
+    seen     = stats.get("operator_mentions_seen", 0)
+    failures = sum(f for f, _a, _e in _OPERATOR_WRITE_FAILURES)
+    err      = next((e for _f, _a, e in _OPERATOR_WRITE_FAILURES if e), "")
+    line = f"Operator identity sightings recorded (A4): {stored}"
+    if failures:
+        return line + f"  \u26a0\ufe0f {failures} write(s) REJECTED ({err})\n"
+    if not seen:
+        return line + "  (no @mentions seen this run)\n"
+    return line + f" from {seen} mention(s)\n"
+
+
 def _send_admin_digest(stats: dict) -> None:
     # Suppress only when there was genuinely nothing to check (e.g. the
     # Telethon-not-configured path, which already sends its own message).
@@ -2608,8 +2667,8 @@ def _send_admin_digest(stats: dict) -> None:
         + (f"Supplier-breach alerts: {stats['supplier_alerts']}\n"
            if stats.get("supplier_alerts") else "")
         + f"Ransomware victims stored (ransomware.live, A5): {stats.get('ransomware_victims_stored', 0)}\n"
-        f"Operator identity sightings recorded (A4): {stats.get('operator_identities_stored', 0)}\n"
-        f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
+        + _operator_line(stats)
+        + f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
         f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
         f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n"
         f"Discord channels discovered: {stats.get('discord_channels_discovered', 0)}\n"
@@ -3061,6 +3120,8 @@ async def _poll_channels(stats: dict, tier: str = "") -> None:
 
                     # Auto-discover new Telegram channels from @mentions
                     if iocs.get("tg_mentions"):
+                        stats["operator_mentions_seen"] = (
+                            stats.get("operator_mentions_seen", 0) + len(iocs["tg_mentions"]))
                         discovered = _queue_discovered_channels(iocs["tg_mentions"], username)
                         stats["channels_discovered"] += discovered
 
@@ -3269,6 +3330,7 @@ def lambda_handler(event, context):
         "alerts_fired":           0,
         "ransomware_victims":     0,
         "supplier_alerts":        0,
+        "operator_mentions_seen": 0,
         "ransomware_victims_stored": 0,
         "operator_identities_stored": 0,
         "cves_extracted":         0,

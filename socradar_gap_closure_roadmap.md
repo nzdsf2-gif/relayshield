@@ -293,60 +293,112 @@ started now.
 
 ---
 
-# 2026-08-27 — Solana agentic payments: scoped
+# 2026-08-27 — Rain's Agentic Payments Alliance: integration exploration
 
-Follows the ToDo filed earlier. This is the scope, not a build.
+Replaces an earlier, thinner version of this section that treated the Alliance as a
+publish-or-join marketing question. It is not. Rain has shipped agent payment infrastructure, and
+the question worth answering is where our endpoints sit inside it.
 
-## What is actually true today, and what is not
+## What Rain actually is, and why that matters to us
 
-**True and current:** roughly 65% of agentic AI payments settle on Solana, with Solana Pay as the
-default settlement layer for several agent marketplaces. The Agentic Payments Alliance launched
-2026-08-18 with 25+ members including Visa, Mastercard, Fiserv, Circle, Solana and Remitly, formed
-to standardise **authorisation and risk management for agentic commerce**. That last phrase is our
-product category, named by a coalition that includes the card networks.
+Rain is a **Visa principal member** that sponsors card programmes end to end without a bank partner,
+issuing stablecoin-funded cards accepted at ~150M merchants across 150 countries, used by 200+
+organisations. Not a standards body with a press release: live payment rails.
 
-**Not yet true:** Flop Network does not exist. FLOP's airdrop is planned Q4 2026 and genesis Q1
-2027, so the token ships a quarter before the chain it powers. There is no settlement, no
-counterparties and no flow to screen. **Not a target this quarter.** Revisit near genesis.
+The part that matters: Rain has launched an **Agent Control Layer** making its payments
+infrastructure agent-compatible, including **real-time issuance of single-use virtual cards created
+programmatically by authorised AI agents**, tied to a verified account, with defined spend limits
+inside compliance and risk controls.
 
-## The asset we already have
+## The gap in that, stated precisely
 
-Nothing new needs building to evaluate this. `check_wallet_risk`, `wallet-screen-batch`, the x402
-counterparty work and its published post (whose thesis is exactly that nothing in the agent payment
-flow asks who is being paid), and address-poisoning detection, which is an agent-payment failure
-mode as much as a human one.
+Rain's controls answer **"is this agent allowed to spend this much?"** — identity of the spender,
+limits, compliance. They do not answer **"is the thing this agent is about to pay legitimate?"**
 
-## Phase 0 — answer three questions before writing any code (1 to 2 days)
+That second question is our entire product surface:
 
-1. **Read the Alliance's published scope and membership terms.** Is membership open, what does it
-   cost, and does "risk management" there mean fraud scoring, authorisation policy, or both? Do not
-   assume a fit before reading it. A coalition founded by card networks may define risk management
-   as chargeback and dispute mechanics, which is not what we do.
-2. **Find a marketplace with a pre-payment hook.** An integration needs a place in the flow, not a
-   shared topic. Concretely: does any Solana Pay agent marketplace expose a callback, webhook or
-   policy check between "agent decides to pay" and "transaction is signed"? If none does, there is
-   no integration to build regardless of how good the fit sounds.
-3. **Establish what we can honestly claim about Solana coverage.** We screen addresses. Run
-   `exclusive_share_by_category.py` on the wallet/address categories and find out what our
-   Solana-specific exclusive share actually is. **If it is under 100 collected indicators the
-   category is not defensible and must not be quoted**, which would make "join the Alliance" the
-   wrong move and "publish into the category" the right one.
+| Their control answers | Ours answers |
+|---|---|
+| Is the agent authorised | Is the counterparty a typosquat or newly registered |
+| Is it within spend limits | Is the endpoint in a criminal IOC corpus |
+| Is the account verified | Is the operator's credential in a stealer log |
+| Is the transaction compliant | Is this MCP server impersonating a known one |
 
-## Phase 1 — pick exactly one of three, based on Phase 0 (effort varies)
+An agent with a valid card, inside its limits, paying a fraudulent API is a fully authorised
+transaction. Every control in the Alliance's stated scope passes it.
 
-- **Join the Alliance.** Cheapest in engineering, most expensive in credibility risk: a 25+ member
-  coalition with Visa in it will ask what we bring, and the answer must survive Q3 above.
-- **Integrate with one marketplace as a reference.** Highest proof value. Requires Q2 to have found
-  a real hook. One named integration is worth more than membership in a list.
-- **Publish into the category.** Lowest cost, no dependency on anyone answering an email, and it is
-  the motion we are demonstrably good at. The x402 post already argued the thesis; a follow-up
-  aimed at agent payments on Solana writes itself and can carry a measurement.
+**The Alliance's own workstream names the gap.** Its stated initial activities are agent identity
+and authorisation standards, and how fraud gets caught. Authorisation is the seat Rain occupies.
+Counterparty legitimacy is unoccupied.
 
-**Recommendation if Phase 0 is inconclusive:** publish. It is the only one of the three that cannot
-be blocked by someone else's roadmap, and it generates the inbound that makes the other two easier.
+## The 26 founding members, read as a map rather than a list
 
-## Measurement rule
+Avalanche, Basis Theory, Chainalysis, Circle, Coinflow, Crossmint, delta Network, Episode Six,
+Evertec, Fireblocks, Fiserv, Kala, Lithic, Mastercard, Monad, PayOS, Rain, Remitly, Rialo, Sardine,
+Shift4, Solana, Turnkey, Uniswap Labs, Visa, Yuno.
 
-Any claim in this category about our coverage of agent or wallet risk comes from
-`exclusive_share_by_category.py`, per category, never from a corpus total and never from the number
-of endpoints we expose. This is a market where the other participants can check.
+**Where a pre-payment counterparty check could actually sit:**
+
+- **Rain itself (Agent Control Layer).** The single-use card is issued *at the moment of intent*,
+  which is the natural hook: check the counterparty before the card exists rather than after the
+  charge. Best fit on the list.
+- **Turnkey, Crossmint, Fireblocks.** Agent wallet and key infrastructure. The hook is pre-signing:
+  the wallet is the last component that can refuse.
+- **Coinflow, PayOS, Yuno, Lithic, Shift4.** Payment orchestration. A risk call before authorisation
+  is an existing pattern for all of them, so we are asking for a new provider in a slot that exists,
+  not a new slot.
+
+**Where we must be careful, and the honest read:**
+
+- **Sardine** is fraud and AML for fintech, **Chainalysis** is blockchain analytics. Both already
+  hold a "risk" seat. Do not pitch against either. The distinction that holds up: they score the
+  **user and the funds**; we score the **counterparty and the tool**. Chainalysis will tell you the
+  wallet is sanctioned; it will not tell you the MCP server is a three-day-old typosquat of a real
+  one. If we cannot make that distinction in two sentences, we are a worse version of a member.
+
+## Why x402 is the strongest card we hold here
+
+Our endpoints are already priced per call and payable by an agent **with no account at all**, in
+USDC on Base. That is precisely the model the Alliance is forming to standardise. We do not need to
+build agent-native commerce to participate: `wallet-risk` ($0.05), `scan-wallet` ($0.10),
+`token-security` ($0.05), `wallet-screen-batch` ($0.50) and `mcp-registry-risk` ($0.35) already work
+that way, and a published post already argues the thesis that nothing in the agent payment flow asks
+who is being paid.
+
+**That is a demo, not a deck.** An agent calling our endpoint and paying for it, unattended, is the
+thing the Alliance exists to make normal, and we can show it working today.
+
+## The door, which is not "join a coalition with Visa"
+
+Two, in order:
+
+1. **Rain's Agentic Startup Program.** An accelerator for early-stage companies building for agentic
+   commerce, which is a door sized for us in a way that a 26-member coalition founded by card
+   networks is not.
+2. **apa@rain.xyz**, the Alliance's stated contact for organisations interested in joining. Approach
+   it with the counterparty-risk gap and the working x402 demo, not with a request to be added to a
+   list.
+
+## Next actions, concrete
+
+1. **Read Rain's Agent Control Layer API docs** and find the exact point where a single-use card is
+   requested. If there is a pre-issuance hook or webhook, that is the integration and everything
+   else is detail. If there is not, the ask becomes "add one", which is a harder conversation and
+   should be known before opening it.
+2. **Build the demo before the email.** An agent that discovers an endpoint, checks the counterparty
+   with `mcp-registry-risk`, refuses a typosquatted one, and pays for the legitimate one over x402.
+   That is a two-minute video and it answers "who are you" better than any paragraph.
+3. **Write the one-paragraph distinction from Sardine and Chainalysis** and test it on someone
+   outside the project. If it does not survive a first read, it will not survive their evaluation.
+4. **Then** apply to the Agentic Startup Program, and mail apa@rain.xyz referencing it.
+
+**Measurement rule.** Any coverage claim in this category comes from
+`exclusive_share_by_category.py` per category, never a corpus total, never the endpoint count. Every
+member of this Alliance can check.
+
+## Flop Labs, for contrast
+
+Still not a target. FLOP's airdrop is planned Q4 2026 and genesis Q1 2027, so the token ships a
+quarter before the chain it powers. No settlement, no counterparties, nothing to screen. Rain is
+live infrastructure with 200+ organisations on it. Spend the effort where transactions already
+settle.

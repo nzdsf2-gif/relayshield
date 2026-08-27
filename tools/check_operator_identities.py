@@ -84,6 +84,35 @@ def main() -> int:
     for i in items[:5]:
         print(f"  {i.get('handle',{}).get('S','?'):<28} "
               f"sightings={i.get('sightings',{}).get('N','?'):<5} last_seen={ts(i)}")
+    # The KPI is not the row count. A4's stated value is cross-channel, cross-
+    # category correlation over time: the same handle in a ransomware room one
+    # month and a phaas room the next. Every row at sightings=1 means the table
+    # is filling with leads and producing no correlations yet, which is a
+    # different problem from "it is not writing" and needs a different fix.
+    def n(i, k):
+        try:
+            return int(i.get(k, {}).get("N", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    repeats   = [i for i in items if n(i, "sightings") >= 2]
+    multi_ch  = [i for i in items if len(i.get("channels", {}).get("SS", [])) >= 2]
+    multi_cat = [i for i in items if len(i.get("categories", {}).get("SS", [])) >= 2]
+    print("\ncorrelation, which is what this table is FOR:")
+    print(f"  seen more than once      : {len(repeats)}/{len(items)}")
+    print(f"  seen in 2+ channels      : {len(multi_ch)}/{len(items)}")
+    print(f"  seen in 2+ categories    : {len(multi_cat)}/{len(items)}")
+    if multi_ch:
+        print("\n  cross-channel handles (the exclusive signal):")
+        for i in sorted(multi_ch, key=lambda x: -n(x, "sightings"))[:10]:
+            print(f"    {i.get('handle',{}).get('S','?'):<26} "
+                  f"sightings={n(i,'sightings'):<4} "
+                  f"channels={sorted(i.get('channels',{}).get('SS',[]))}")
+    else:
+        print("\n  No handle has yet been seen in two different channels, so the")
+        print("  table currently holds leads rather than correlations. Judge A4 on")
+        print("  this number over weeks, not on the row count.")
+
     if newest:
         try:
             age = datetime.now(timezone.utc) - datetime.fromisoformat(newest)

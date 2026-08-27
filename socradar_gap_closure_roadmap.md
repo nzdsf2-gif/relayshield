@@ -209,3 +209,144 @@ Not a new product, a positioning exercise on shipped capability:
 **Measurement rule applies.** Any claim we make in this category about our own coverage of agent or
 wallet risk must come from `exclusive_share_by_category.py`, not from the 511K headline, and not
 from the number of endpoints we happen to expose.
+
+---
+
+# 2026-08-27 — A6, A7, A8 scoped; A7 built
+
+## A7, DONE (deployed pending, see the caveat)
+
+`relayshield_intel_labels.normalise_malware()` is applied at every write and the
+malware-index query. `tools/backfill_malware_labels.py` collapses existing rows, read-only until
+`--apply`. Full reasoning in the commit; the two things to carry forward:
+
+- **KEV was worse than case-inconsistent.** It wrote `vendorProject + " " + product` into `malware`,
+  so `Microsoft Windows` was indexed as a malware family. Moved to `affected_product`; `malware` now
+  unset for KEV rows. Reversible if any surface depended on it.
+- **The feed and KEV halves are inert.** Neither `relayshield_intel_feed.py` nor
+  `relayshield_intel_kev.py` is in `deploy_lambdas.yml`. They are now in `lambda_drift_check.yml`
+  only. Check drift, recover if drifted, then add them to the deployer.
+
+## A6 — first-seen on every indicator
+
+**The obstacle, stated first.** `relayshield_intel_iocs` is keyed `(ioc_value, seen_ts)`, so every
+sighting is its own row and `seen_ts` is that sighting's ingest time. There is no per-indicator
+record, which means "first seen" today is `min(seen_ts)` over a query, and `_store_iocs` uses
+`put_item`, which cannot express "write this only if absent".
+
+**Rejected: make `_store_iocs` read-then-write.** A read before every IOC write, on a path that
+handles hundreds of IOCs per message, doubles the request count and adds a race between concurrent
+runs. The cost is real and the correctness is worse.
+
+**Proposed: a separate first-seen projection, one row per indicator.**
+
+    relayshield_intel_first_seen
+      PK  ioc_value (S)
+      first_seen (S)    ISO8601
+      first_channel (S) where we first saw it
+      first_category (S)
+
+Written with `update_item` and `attribute_not_exists(ioc_value)` on the condition, so the first
+writer wins and every subsequent one is a no-op that costs one conditional write. No read, no race.
+
+**Backfill** is a single pass over the existing corpus taking `min(seen_ts)` per `ioc_value`, which
+is exactly the value a live query would compute today, so the backfilled rows are correct rather
+than approximate. Runs on the Mac, one-off.
+
+**Why it enhances A4:** A4's lead-time claim is currently "we saw this N days before the public
+feed", computed per query. With a first-seen row it becomes a stored, auditable per-indicator fact
+that survives TTL expiry of individual sightings. **That is also the risk:** sightings carry a TTL
+and first-seen must not, or the claim erases itself. Give this table no TTL, deliberately.
+
+**Estimate:** half a day for the writer, half a day for the backfill, plus the table and an IAM
+statement. Both need AWS, so both run from the Mac or a workflow.
+
+## A8 — grow `tg_handle` deliberately
+
+**Do the filtering pass first, and the evidence for that is now on the table.** A4's
+`relayshield_operator_identities` has 7 rows after two days and every one is at `sightings=1`.
+Several are English words (`catching`, `normanonrock`) caught because `_RE_TG_CHANNEL` matches any
+`@mention`. Growing collection before filtering multiplies the noise rather than the signal.
+
+**The measurement that decides this, and it is already built.** `tools/check_operator_identities.py`
+now reports handles seen more than once, in 2+ channels, and in 2+ categories. Cross-channel
+handles are the exclusive asset: a handle in a ransomware room one month and a phaas room the next
+is a correlation no single-sighting feed can produce. A count of rows is not.
+
+**Sequence:**
+
+1. Watch the cross-channel number for two weeks. If it stays at 0 while channels are producing, the
+   problem is extraction, not volume.
+2. Filter. Options, cheapest first: drop mentions matching a common-word list; require the mention to
+   appear near contact-intent language (`dm`, `contact`, `@admin`, `escrow`); require a second
+   sighting before the row is written at all. The third is the strongest and the least destructive,
+   because it filters on repetition rather than on a guess about what a handle looks like.
+3. Only then grow collection, via the `otp_vouches` and marketplace categories where operators
+   actually advertise.
+
+**Do not quote a `tg_handle` exclusive-share number until the category clears 100 collected
+indicators and `exclusive_share_by_category.py` has been run on it.** The standing rule applies with
+extra force here, because this is the number most likely to be quoted at a competitor.
+
+**Estimate:** 2 days, unchanged, but sequenced after a two-week measurement window rather than
+started now.
+
+---
+
+# 2026-08-27 — Solana agentic payments: scoped
+
+Follows the ToDo filed earlier. This is the scope, not a build.
+
+## What is actually true today, and what is not
+
+**True and current:** roughly 65% of agentic AI payments settle on Solana, with Solana Pay as the
+default settlement layer for several agent marketplaces. The Agentic Payments Alliance launched
+2026-08-18 with 25+ members including Visa, Mastercard, Fiserv, Circle, Solana and Remitly, formed
+to standardise **authorisation and risk management for agentic commerce**. That last phrase is our
+product category, named by a coalition that includes the card networks.
+
+**Not yet true:** Flop Network does not exist. FLOP's airdrop is planned Q4 2026 and genesis Q1
+2027, so the token ships a quarter before the chain it powers. There is no settlement, no
+counterparties and no flow to screen. **Not a target this quarter.** Revisit near genesis.
+
+## The asset we already have
+
+Nothing new needs building to evaluate this. `check_wallet_risk`, `wallet-screen-batch`, the x402
+counterparty work and its published post (whose thesis is exactly that nothing in the agent payment
+flow asks who is being paid), and address-poisoning detection, which is an agent-payment failure
+mode as much as a human one.
+
+## Phase 0 — answer three questions before writing any code (1 to 2 days)
+
+1. **Read the Alliance's published scope and membership terms.** Is membership open, what does it
+   cost, and does "risk management" there mean fraud scoring, authorisation policy, or both? Do not
+   assume a fit before reading it. A coalition founded by card networks may define risk management
+   as chargeback and dispute mechanics, which is not what we do.
+2. **Find a marketplace with a pre-payment hook.** An integration needs a place in the flow, not a
+   shared topic. Concretely: does any Solana Pay agent marketplace expose a callback, webhook or
+   policy check between "agent decides to pay" and "transaction is signed"? If none does, there is
+   no integration to build regardless of how good the fit sounds.
+3. **Establish what we can honestly claim about Solana coverage.** We screen addresses. Run
+   `exclusive_share_by_category.py` on the wallet/address categories and find out what our
+   Solana-specific exclusive share actually is. **If it is under 100 collected indicators the
+   category is not defensible and must not be quoted**, which would make "join the Alliance" the
+   wrong move and "publish into the category" the right one.
+
+## Phase 1 — pick exactly one of three, based on Phase 0 (effort varies)
+
+- **Join the Alliance.** Cheapest in engineering, most expensive in credibility risk: a 25+ member
+  coalition with Visa in it will ask what we bring, and the answer must survive Q3 above.
+- **Integrate with one marketplace as a reference.** Highest proof value. Requires Q2 to have found
+  a real hook. One named integration is worth more than membership in a list.
+- **Publish into the category.** Lowest cost, no dependency on anyone answering an email, and it is
+  the motion we are demonstrably good at. The x402 post already argued the thesis; a follow-up
+  aimed at agent payments on Solana writes itself and can carry a measurement.
+
+**Recommendation if Phase 0 is inconclusive:** publish. It is the only one of the three that cannot
+be blocked by someone else's roadmap, and it generates the inbound that makes the other two easier.
+
+## Measurement rule
+
+Any claim in this category about our coverage of agent or wallet risk comes from
+`exclusive_share_by_category.py`, per category, never from a corpus total and never from the number
+of endpoints we expose. This is a market where the other participants can check.

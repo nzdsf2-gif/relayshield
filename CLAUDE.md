@@ -47,8 +47,34 @@ Fix, in that directory:
 | Egress | Blocked: `*.workers.dev`, `discord.com`, all `zapier.com`, `catalogapi.azure.com`, `powershellgallery.com`, arbitrary vendor sites. Reachable: GitHub, `raw.githubusercontent.com`, PyPI, WebSearch |
 | Python | No `boto3`, no PowerShell. Use a throwaway venv in the scratchpad |
 
-**macOS zsh does not treat `#` as a comment interactively.** Never append a trailing comment to a
-command handed to Andrew — it becomes an argument and errors.
+---
+
+## COMMANDS HANDED TO ANDREW — his shell is zsh, on macOS
+
+Every command written for him must run **exactly as pasted, in zsh**. Not bash, not "close enough".
+Check each one against all five before sending it:
+
+1. **No trailing `#` comments.** zsh does not treat `#` as a comment interactively, so it becomes an
+   argument and the command errors.
+2. **Quote the space in the repo path.** The clone root is `~/Side SaaS Hustle`, so:
+   `cd ~/"Side SaaS Hustle"`. Unquoted, zsh sees three arguments.
+3. **The repo root is `~/Side SaaS Hustle`, not `~/Side SaaS Hustle/relayshield`.** `relayshield/`
+   is a subdirectory *inside* the repo holding only `README.md` and `mcp-server/`. `build_blog.py`,
+   `wrangler.blog.toml` and every tool live at the root. He has landed in the subdirectory and hit
+   "No such file or directory" more than once.
+4. **Never hand him a `/tmp` path from an earlier session.** macOS clears `/tmp`, and a container's
+   `/tmp` never existed on his Mac at all. `/tmp/rsvenv/bin/python` failed on 2026-08-26 for exactly
+   this reason, copied out of a repo doc that assumed the venv from the session that wrote it. The
+   durable venv is **`~/.rsvenv`**, and any command using it must be preceded by the one-time
+   creation line or a check that it exists.
+5. **No bash-only syntax.** No `declare -A`, no `<(...)` process substitution in a one-liner, no
+   `source` of a bashrc. Anything more involved than a pipeline belongs in a committed script he
+   runs, not a pasted one-liner.
+
+The durable venv, created once, because Homebrew Python is PEP 668 externally-managed:
+
+    python3 -m venv ~/.rsvenv
+    ~/.rsvenv/bin/pip install boto3
 
 ---
 

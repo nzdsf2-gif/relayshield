@@ -21,8 +21,8 @@ USAGE (on the founder's Mac)
 Needs boto3. Homebrew Python is PEP 668 externally-managed, so use the throwaway
 venv the handoff describes:
 
-    python3 -m venv /tmp/rsvenv && /tmp/rsvenv/bin/pip install boto3
-    AWS_PROFILE=relayshield /tmp/rsvenv/bin/python tools/triage_channels.py
+    python3 -m venv ~/.rsvenv && ~/.rsvenv/bin/pip install boto3
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py
 """
 
 import argparse
@@ -78,19 +78,59 @@ def summarize(rows):
 
 def show_pending(rows, limit):
     pending = [r for r in rows if str(r.get("category")) == "pending_review"]
-    print(f"\n{len(pending)} channels in pending_review\n")
-    # Members first: a bigger room is likelier to carry real traffic, and this
-    # is a manual-review list, so ordering by the one signal we have beats
-    # alphabetical.
+
     def members(r):
         try:
             return int(r.get("approximate_member_count") or r.get("member_count") or 0)
         except (TypeError, ValueError):
             return 0
-    for r in sorted(pending, key=members, reverse=True)[:limit]:
-        print(f"@{r['username']:<30} members={members(r) or '?':<9}"
+
+    def provenance(r):
+        via   = str(r.get("discovery_method", "") or "").strip()
+        found = str(r.get("found_via", "") or "").strip()
+        return (via and via != "?") or bool(found)
+
+    # Bucketing added 2026-08-26. The flat list was 117 rows and mostly
+    # unreviewable: @google, @anthropic, @deepmind, @moscow, @finance,
+    # @thousands, @approximately. Those are English words and company names
+    # extracted as usernames, and they never resolved -- no member count, no
+    # discovery method, no found_via. Asking a human to read 117 rows to find
+    # the eight that resolved is why this backlog has not been triaged.
+    #
+    # The split is on evidence, not on a word list: a row either resolved
+    # against Telegram (it has a member count), or it has provenance saying
+    # where it came from, or it has neither and cannot be judged at all.
+    reviewable = [r for r in pending if members(r) > 0]
+    unresolved = [r for r in pending if members(r) == 0 and provenance(r)]
+    orphaned   = [r for r in pending if members(r) == 0 and not provenance(r)]
+
+    print(f"\n{len(pending)} channels in pending_review")
+    print(f"  {len(reviewable):>3} resolved, judge these        (member count known)")
+    print(f"  {len(unresolved):>3} unresolved but traceable    (has provenance, never resolved)")
+    print(f"  {len(orphaned):>3} orphaned                    (no members, no provenance)")
+
+    print("\n--- REVIEW THESE: resolved, sorted by size ---\n")
+    for r in sorted(reviewable, key=members, reverse=True)[:limit]:
+        print(f"@{r['username']:<30} members={members(r):<9}"
               f" via={str(r.get('discovery_method','?'))[:22]:<22}"
-              f" found_via={str(r.get('found_via','') or '—')[:22]}")
+              f" found_via={str(r.get('found_via','') or '-')[:22]}")
+
+    if unresolved:
+        print("\n--- UNRESOLVED: came from somewhere, never resolved ---")
+        print("Re-resolve before judging. A dead handle here is normal attrition.\n")
+        for r in sorted(unresolved, key=lambda r: r["username"])[:limit]:
+            print(f"@{r['username']:<30} via={str(r.get('discovery_method','?'))[:22]:<22}"
+                  f" found_via={str(r.get('found_via','') or '-')[:22]}")
+
+    if orphaned:
+        print(f"\n--- ORPHANED: {len(orphaned)} rows with no evidence of any kind ---")
+        print("Almost certainly @word extracted from message text rather than a real")
+        print("handle. They cannot be judged and they inflate this queue on every run.")
+        print("Fix the extractor before purging, or the next run recreates them.\n")
+        names = sorted(r["username"] for r in orphaned)
+        for i in range(0, len(names), 6):
+            print("  " + "  ".join(f"@{n}"[:22].ljust(22) for n in names[i:i + 6]))
+
     print("\nActivate the ones worth monitoring:")
     print("  ... --activate name1,name2 --apply")
     print("\nJudge by what the room is FOR, not by size. The active set is")

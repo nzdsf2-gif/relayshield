@@ -121,6 +121,26 @@ They are now in the **drift check only**. The sequence, and it must be in this o
 **Until step 3, the feed and KEV halves of A7 (malware label normalisation) are inert.** The code is
 in the repo and is not running.
 
+### Rain Agentic Startup Program — record the demo, then submit
+
+Not blocked on anything. The reason it is here is that it is the one item where a two-minute video
+beats every paragraph we could write, and video is the kind of task that slips.
+
+**Record a 2-minute unattended demo:** an agent discovers an endpoint, calls `mcp-registry-risk`,
+**refuses a typosquatted one**, then pays the legitimate one over x402 (USDC on Base) with no human
+in the loop and no account.
+
+**Then submit to both:** Rain's **Agentic Startup Program**, and **apa@rain.xyz**, the Agentic
+Payments Alliance's stated contact for organisations wanting to join.
+
+Why this framing and not a deck: Rain's Agent Control Layer already answers "is this agent allowed
+to spend this much". Nothing in it answers "is the thing it is about to pay legitimate". An agent
+with a valid card, inside its limits, paying a fraudulent API is a fully authorised transaction. The
+demo shows that gap being closed in the only way that is not arguable.
+
+Full analysis, including where a pre-payment check could sit across the 26 Alliance members and why
+Sardine and Chainalysis must not be pitched against, is in `socradar_gap_closure_roadmap.md`.
+
 ### A8 — grow `tg_handle`, but only after the filter
 
 Sequenced behind a two-week measurement, deliberately. The evidence for waiting is already in:

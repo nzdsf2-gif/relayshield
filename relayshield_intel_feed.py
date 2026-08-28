@@ -36,6 +36,8 @@ from decimal import Decimal
 
 import boto3
 
+from relayshield_intel_labels import normalise_malware
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
@@ -191,7 +193,7 @@ def _write_ioc(table, ioc_value: str, ioc_type: str, source: str, malware: str =
     # doesn't participate in that GSI, which is correct here anyway (there's
     # nothing to index when there's no malware family).
     if malware:
-        item["malware"] = malware
+        item["malware"] = normalise_malware(malware)
     try:
         table.put_item(Item=item, ConditionExpression="attribute_not_exists(ioc_value)")
         return True
@@ -240,7 +242,7 @@ def _batch_write_iocs(table, items: list) -> int:
                     "ttl":       ttl,
                 }
                 if malware:  # same empty-string GSI key fix as _write_ioc above
-                    item["malware"] = malware
+                    item["malware"] = normalise_malware(malware)
                 batch.put_item(Item=item)
                 written += 1
     except Exception as exc:

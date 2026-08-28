@@ -54,6 +54,17 @@ jobs:
             ["relayshield_telegram_webhook.py"]="relayshield-telegram-webhook"
             ["relayshield_whatsapp_webhook.py"]="relayshield-whatsapp-webhook"
             ["relayshield_intel_monitor.py"]="relayshield-intel-monitor"
+            # Added 2026-08-27. These two were in NEITHER this map nor
+            # deploy_lambdas.yml, so their source sat in the repo with no
+            # automated deploy and no drift detection: the exact combination
+            # that produced ~1,900 undeployed lines across four other handlers.
+            # Watched here FIRST, deliberately. They are still absent from
+            # deploy_lambdas.yml, because adding them there before knowing
+            # whether they have drifted would redeploy over any hand-deployed
+            # work in them, which is the mistake this whole exercise exists to
+            # avoid. Add them to the deployer once this check reports clean.
+            ["relayshield_intel_feed.py"]="relayshield-intel-feed"
+            ["relayshield_intel_kev.py"]="relayshield-intel-kev"
             ["relayshield_api.py"]="relayshield-api"
             ["relayshield_breach_monitor.py"]="relayshield-breach-monitor"
           )

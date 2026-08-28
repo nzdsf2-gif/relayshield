@@ -157,7 +157,23 @@ def _write_ransomware_ioc(table, entry: dict) -> bool:
                 "ioc_type":   "cve",
                 "channel":    "cisa_kev",
                 "category":   "ransomware_active_exploitation",
-                "malware":    entry.get("vendorProject", "") + " " + entry.get("product", ""),
+                # A7, 2026-08-27. This used to write vendorProject + product
+                # into "malware", so CISA KEV rows indexed values like
+                # "Microsoft Windows" as malware families. "malware" is the
+                # malware-index GSI hash key, which is what a customer's
+                # hunting query matches on, so every KEV row was adding a
+                # vendor name to a namespace of malware names. A query for a
+                # real family never matches these, and browsing the namespace
+                # shows vendors sitting among families.
+                #
+                # The affected product is worth keeping, so it moves to its own
+                # attribute. "malware" is left unset: KEV publishes an exploited
+                # product, and does not name the malware exploiting it.
+                # knownRansomwareCampaignUse says only Known/Unknown, which is
+                # not a family name either.
+                "affected_product": " ".join(
+                    (entry.get("vendorProject", "") + " " + entry.get("product", "")).split()
+                ),
                 "ttl":        ttl,
             },
             ConditionExpression="attribute_not_exists(ioc_value)",

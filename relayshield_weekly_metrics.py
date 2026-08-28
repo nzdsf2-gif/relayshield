@@ -214,13 +214,41 @@ def _api_key_stats() -> dict:
     intel      = sum(1 for i in items if i.get("intel_access"))
     new_week   = sum(1 for i in items if (i.get("created_at") or "") >= cutoff)
     intel_calls= sum(int(i.get("intel_period_calls") or 0) for i in items)
-    by_source  = {s: sum(1 for i in items if (i.get("source") or "direct") == s) for s in SOURCES}
+    # 2026-08-27. This counted only the four names in SOURCES, so every other
+    # key was invisible: a campaign could run, attribute correctly, and report
+    # nothing. Count what is actually present instead, and keep SOURCES as the
+    # set that always shows even at zero, so a channel going quiet is visible
+    # rather than absent.
+    counted: dict[str, int] = {s: 0 for s in SOURCES}
+    week_counted: dict[str, int] = {}
+    for i in items:
+        src = (i.get("source") or "direct").strip().lower() or "direct"
+        counted[src] = counted.get(src, 0) + 1
+        if (i.get("created_at") or "") >= cutoff:
+            week_counted[src] = week_counted.get(src, 0) + 1
+
+    # Apify arrives under several per-surface keys (apify-store, apify-actor,
+    # apify-readme, apify-run) that all mean Apify. Roll them up for the
+    # headline while leaving the raw keys in by_source.
+    apify_total = sum(n for k, n in counted.items() if k == "apify" or k.startswith("apify-"))
+    apify_week  = sum(n for k, n in week_counted.items() if k == "apify" or k.startswith("apify-"))
+
+    # An unregistered key logs as unmatched:X. That means a link went out with a
+    # source nobody registered in _SOURCE_BANNERS: it renders no banner and
+    # attributes to nothing. It is a bug in a PUBLISHED link and stays invisible
+    # unless something prints it, which is how unmatched:rsscan survived.
+    unmatched = {k: n for k, n in counted.items() if k.startswith("unmatched:")}
+
     return {
         "total":              total,
         "intel_enabled":      intel,
         "new_this_week":      new_week,
         "intel_calls_period": intel_calls,
-        "by_source":          by_source,
+        "by_source":          dict(sorted(counted.items(), key=lambda kv: -kv[1])),
+        "by_source_week":     dict(sorted(week_counted.items(), key=lambda kv: -kv[1])),
+        "apify_total":        apify_total,
+        "apify_week":         apify_week,
+        "unmatched_sources":  unmatched,
     }
 
 
@@ -286,6 +314,8 @@ def _cs_mobile_stats() -> dict:
 
         # ── Activations: count subscriptions on CS Mobile's prices, by created date ──
         activations_month, activations_ytd = 0, 0
+        week_start = int(now.timestamp()) - 7 * 86400
+        trials_started_week = trials_active = trials_converted = trials_lapsed = 0
         for price_id in CS_MOBILE_PRICE_IDS:
             starting_after = None
             while True:
@@ -302,6 +332,26 @@ def _cs_mobile_stats() -> dict:
                         activations_ytd += 1
                     if created >= month_start:
                         activations_month += 1
+
+                    # ── 7-day trial cohort, added 2026-08-27 ──────────────
+                    # Activations alone cannot answer the only question that
+                    # matters about a trial: how many of them paid. Stripe
+                    # keeps that in the subscription's own lifecycle, so read
+                    # it rather than infer it. A subscription that trialled and
+                    # then charged has trial_end in the past AND a status of
+                    # active; one that trialled and left is canceled with a
+                    # trial_end it never passed while active.
+                    status    = sub.get("status", "")
+                    trial_end = sub.get("trial_end") or 0
+                    if trial_end:
+                        if created >= week_start:
+                            trials_started_week += 1
+                        if status == "trialing":
+                            trials_active += 1
+                        elif status in ("active", "past_due"):
+                            trials_converted += 1
+                        elif status in ("canceled", "incomplete_expired"):
+                            trials_lapsed += 1
                 if not data.get("has_more") or not items:
                     break
                 starting_after = items[-1]["id"]
@@ -331,15 +381,28 @@ def _cs_mobile_stats() -> dict:
                 break
             starting_after = items[-1]["id"]
 
+        converted_total = trials_converted + trials_lapsed
         return {
-            "activations_month": activations_month,
-            "activations_ytd":   activations_ytd,
-            "revenue_month":     round(revenue_month_cents / 100, 2),
-            "revenue_ytd":       round(revenue_ytd_cents / 100, 2),
+            "activations_month":   activations_month,
+            "activations_ytd":     activations_ytd,
+            "revenue_month":       round(revenue_month_cents / 100, 2),
+            "revenue_ytd":         round(revenue_ytd_cents / 100, 2),
+            "trials_started_week": trials_started_week,
+            "trials_active":       trials_active,
+            "trials_converted":    trials_converted,
+            "trials_lapsed":       trials_lapsed,
+            # Rate over DECIDED trials only. Dividing by every trial ever
+            # started would count people still inside their 7 days as failures
+            # and report a conversion rate that can only ever drift downward.
+            "trial_conversion_pct": (
+                round(100.0 * trials_converted / converted_total, 1) if converted_total else None
+            ),
         }
     except Exception as exc:
         logger.warning("CS Mobile stats fetch failed: %s", exc)
-        return {"activations_month": 0, "activations_ytd": 0, "revenue_month": 0.0, "revenue_ytd": 0.0}
+        return {"activations_month": 0, "activations_ytd": 0, "revenue_month": 0.0,
+                "revenue_ytd": 0.0, "trials_started_week": 0, "trials_active": 0,
+                "trials_converted": 0, "trials_lapsed": 0, "trial_conversion_pct": None}
 
 
 def _stripe_ytd_revenue(stripe_key: str) -> float:
@@ -646,6 +709,15 @@ def _build_email(metrics: dict) -> str:
   <tr><td>&nbsp;&nbsp;HF (smolagents)</td><td><b>${s['stripe']['mrr_by_source']['hf-smolagents']}</b></td></tr>
 </table>
 
+<h3 style="color: #e94560;">Signup attribution</h3>
+<table border="0" cellpadding="4">
+  <tr><td>Apify signups (all time)</td><td><b>{s['api_keys']['apify_total']}</b></td></tr>
+  <tr><td>Apify signups (this week)</td><td><b>{s['api_keys']['apify_week']}</b></td></tr>
+  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">All sources, all time</td></tr>
+  {_rows(s['api_keys']['by_source'])}
+  {_unmatched_rows(s['api_keys']['unmatched_sources'])}
+</table>
+
 <h3 style="color: #e94560;">x402 PAYG Calls & Revenue</h3>
 <table border="0" cellpadding="4">
   <tr><td>Total calls</td><td><b>{s['x402']['total_calls']}</b></td></tr>
@@ -681,6 +753,12 @@ def _build_email(metrics: dict) -> str:
 <table border="0" cellpadding="4">
   <tr><td>New subscriber activations (this month)</td><td><b>{s['cs_mobile_stats']['activations_month']}</b></td></tr>
   <tr><td>New subscriber activations (YTD)</td><td><b>{s['cs_mobile_stats']['activations_ytd']}</b></td></tr>
+  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">7-day trial cohort</td></tr>
+  <tr><td>&nbsp;&nbsp;Trials started this week</td><td><b>{s['cs_mobile_stats']['trials_started_week']}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;Currently in trial</td><td><b>{s['cs_mobile_stats']['trials_active']}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;Trial converted to paid</td><td><b>{s['cs_mobile_stats']['trials_converted']}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;Trial lapsed</td><td><b>{s['cs_mobile_stats']['trials_lapsed']}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;Conversion rate (decided trials)</td><td><b>{_pct(s['cs_mobile_stats']['trial_conversion_pct'])}</b></td></tr>
   <tr><td>Revenue (this month)</td><td><b>${s['cs_mobile_stats']['revenue_month']}</b></td></tr>
   <tr><td>Revenue (YTD)</td><td><b>${s['cs_mobile_stats']['revenue_ytd']}</b></td></tr>
 </table>
@@ -834,6 +912,36 @@ def _lambda_health_html(h: dict) -> str:
             '<p style="color: #888; font-size: 11px;">ALL RUNS FAILED usually means a broken deploy '
             '(a missing module fails at import, so there are no application logs). NO INVOCATIONS '
             'means the schedule fired nothing, so the trigger itself is the problem.</p>')
+
+
+def _pct(v) -> str:
+    """A conversion rate with no decided trials is unknown, not zero percent."""
+    return "n/a" if v is None else f"{v}%"
+
+
+def _rows(by_source: dict) -> str:
+    return "".join(
+        f'<tr><td>&nbsp;&nbsp;{k}</td><td><b>{v}</b></td></tr>'
+        for k, v in by_source.items() if not k.startswith("unmatched:")
+    )
+
+
+def _unmatched_rows(unmatched: dict) -> str:
+    """Unregistered source keys, called out in red because each one is a bug.
+
+    An unmatched: key means a link was published carrying a source nobody
+    registered in _SOURCE_BANNERS. It renders no banner and attributes to
+    nothing, and it stays invisible unless something prints it, which is how
+    unmatched:rsscan survived unnoticed.
+    """
+    if not unmatched:
+        return ""
+    rows = "".join(
+        f'<tr><td>&nbsp;&nbsp;{k}</td><td><b>{v}</b></td></tr>' for k, v in unmatched.items()
+    )
+    return ('<tr><td colspan="2" style="padding-top:6px;color:#e94560;font-size:12px">'
+            'UNREGISTERED source keys, each is a published link attributing to nothing'
+            '</td></tr>' + rows)
 
 
 def lambda_handler(event, context):

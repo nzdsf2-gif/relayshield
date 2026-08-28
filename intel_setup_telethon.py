@@ -26,15 +26,33 @@ After this runs successfully, the Lambda will authenticate using the
 stored session string on every invocation.
 """
 
+import argparse
 import asyncio
 import json
+import sys
+
 import boto3
 
-TELETHON_SECRET = "relayshield/telethon_session"
+# The secret this writes to. It is a PARAMETER, not a constant, as of
+# 2026-08-28, and the reason matters: this script used to hardcode
+# relayshield/telethon_session, which is the session relayshield-intel-monitor
+# authenticates with. Running it to set up a SECOND account, for prospecting
+# discovery, would have silently overwritten the collection session and stopped
+# all 99 channels. The default is unchanged, so the original use still works
+# exactly as before.
+#
+#   intel collection (existing):  relayshield/telethon_session
+#   prospecting discovery (new):  relayshield/telethon_session_prospecting
+#
+# Never point two different Telegram accounts at one secret, and never run
+# prospecting discovery on the collection session: the per-session flood limits
+# are tight enough that a large discovery sweep would rate-limit or ban the
+# account collection depends on.
+DEFAULT_SECRET  = "relayshield/telethon_session"
 REGION          = "us-east-1"
 
 
-async def _setup():
+async def _setup(secret_name: str):
     try:
         from telethon import TelegramClient
         from telethon.sessions import StringSession
@@ -87,16 +105,33 @@ async def _setup():
     })
 
     sm.update_secret(
-        SecretId     = TELETHON_SECRET,
+        SecretId     = secret_name,
         SecretString = secret_value,
     )
 
     print("✅ Session stored in Secrets Manager")
-    print(f"   Secret: {TELETHON_SECRET}")
+    print(f"   Secret: {secret_name}")
     print("\n🛡️  INTEL-2 setup complete — Lambda is ready to deploy")
     print("   The phone number is NOT stored — only the session string")
     print("   You can discard the OTP SIM after this step\n")
 
 
 if __name__ == "__main__":
-    asyncio.run(_setup())
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--secret", default=DEFAULT_SECRET,
+                    help=f"Secrets Manager secret to write the session to "
+                         f"(default: {DEFAULT_SECRET})")
+    args = ap.parse_args()
+
+    # Overwriting the collection session is the one mistake this script can make
+    # that is both easy and expensive, so it has to be typed out on purpose.
+    if args.secret == DEFAULT_SECRET:
+        print(f"\nThis will OVERWRITE {DEFAULT_SECRET}, the session")
+        print("relayshield-intel-monitor uses to collect from 99 channels.")
+        print("For a SECOND account (prospecting discovery), stop and re-run with:")
+        print("  --secret relayshield/telethon_session_prospecting\n")
+        if input("Overwrite the collection session? Type OVERWRITE to continue: ").strip() != "OVERWRITE":
+            print("Aborted. Nothing was written.")
+            sys.exit(1)
+
+    asyncio.run(_setup(args.secret))

@@ -7,10 +7,12 @@
 1. **Stripe agreed to acquire OpenRouter for $7B+**, announced 2026-08-16, confirmed on Stripe's own
    newsroom. OpenRouter routes across 400+ models from 80+ providers. The price is roughly 5.4x the
    $1.3B Series B valuation from three months earlier.
-2. **We can now detect stolen OpenRouter keys.** `sk-or-v1-[0-9a-f]{64}`, CRITICAL, provider
-   `openrouter`, added 2026-08-27 to the monitor, the API and the rsscan mirror. Before that the
-   corpus could not see them at all: the generic `sk-` catch-all has no hyphen in its body class, so
-   it stopped at `sk-` and every router key that crossed our collection surface was dropped silently.
+2. **We detect stolen OpenRouter keys, and it is LIVE.** `sk-or-v1-[0-9a-f]{64}`, CRITICAL,
+   provider `openrouter`. Commit `844a2c3`, deployed to `relayshield-intel-monitor` and
+   `relayshield-api` at **11:11 UTC on 2026-08-27**, verified as an ancestor of `main` and present in
+   the deploy that ran on that merge. Before it, the corpus could not see these keys at all: the
+   generic `sk-` catch-all has no hyphen in its body class, so it stopped at `sk-` and every router
+   key that crossed our collection surface was dropped silently.
 
 Our standing: **we are a customer**, and we want to partner with Stripe. That is a better opening
 than a cold vendor email, and it is true.
@@ -68,9 +70,10 @@ a tool they may already run.**
 
 ## What we must not say
 
-- **No number.** We have detected zero OpenRouter keys, because the pattern is not deployed yet.
-  Any implication that we hold a corpus of router keys is false and checkable. The claim is
-  capability and collection surface, not volume.
+- **No number.** The detector is live, but it has been live for hours, and it is forward-only: it
+  matches what is collected after the deploy and does not re-scan history. So the corpus holds no
+  OpenRouter keys yet, and any implication otherwise is false and checkable. The claim is capability
+  and collection surface, not volume. This stays true until a measurement says otherwise.
 - **No "we would have caught X".** We have no such case.
 - Do not describe this as fraud detection for Stripe's core payments business. It is credential
   exposure upstream of spend on one specific product they just bought.
@@ -79,11 +82,11 @@ a tool they may already run.**
 
 ## Sequence
 
-1. **Deploy the pattern.** It is committed and not yet live. Until then this is a design, not a
-   capability. Forward-only once deployed: it matches what is collected after the deploy and does
-   not re-scan history.
-2. **Let it run.** Two to four weeks. Either router keys appear in the collection surface or they do
-   not, and both answers are worth having before any conversation.
+1. **Done: the detector is live** as of 2026-08-27 11:11 UTC. Forward-only, so the clock on
+   evidence starts there rather than at the first line of code.
+2. **Let it run.** Two to four weeks from that deploy. Either router keys appear in the collection
+   surface or they do not, and both answers are worth having before any conversation. A clean zero
+   after a month is itself publishable, in the same shape as the ToxicPanda post.
 3. **Build the revocation loop as a reference implementation.** Small: a webhook that takes our alert
    and calls `DELETE /api/v1/keys/{hash}`. It is the difference between selling a feed and shipping
    an outcome, and it is a weekend of work.

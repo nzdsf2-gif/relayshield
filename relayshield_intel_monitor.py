@@ -76,6 +76,7 @@ from decimal import Decimal
 import boto3
 from botocore.exceptions import ClientError
 
+from relayshield_intel_labels import normalise_malware
 import relayshield_siem_connector as siem_connector
 
 logger = logging.getLogger()
@@ -91,6 +92,20 @@ LOCK_ID               = "singleton"
 LOCK_TTL_SECONDS      = 280  # just under the 300s Lambda timeout
 INTEL_ALERTS_TABLE    = "relayshield_intel_alerts"
 INTEL_IOCS_TABLE      = "relayshield_intel_iocs"
+# A6, 2026-08-27. One row per INDICATOR, not per sighting. relayshield_intel_iocs
+# is keyed (ioc_value, seen_ts), so every sighting is its own row and "when did
+# we first see this" is a min() over a query rather than a stored fact. That is
+# the number A4's lead-time claim rests on, so it needs to be recorded, not
+# recomputed.
+#
+# Written with attribute_not_exists so the FIRST writer wins and every later one
+# is a no-op costing a single conditional write. No read-before-write: this path
+# handles hundreds of IOCs per message and a read per IOC would double the
+# request count and add a race between concurrent runs.
+#
+# THIS TABLE MUST HAVE NO TTL. Sightings expire; first-seen must not, or the
+# lead-time claim erases itself as the evidence ages out.
+FIRST_SEEN_TABLE      = "relayshield_intel_first_seen"
 INTEL_CHANNELS_TABLE  = "relayshield_intel_channels"
 STOLEN_SESSIONS_TABLE  = "relayshield_stolen_sessions"
 OPERATORS_TABLE        = "relayshield_operator_identities"
@@ -1092,6 +1107,41 @@ def detect_malware_families(text: str) -> str:
     return ",".join(sorted(found))
 
 
+# Per-run count of indicators seen for the FIRST time, so the digest can show
+# genuinely new coverage rather than only sighting volume.
+_FIRST_SEEN_NEW: list = []
+
+
+def _record_first_seen(ioc_value: str, channel: str, category: str, when: str) -> bool:
+    """Record the first time this indicator was ever seen. Idempotent.
+
+    Returns True only when this call actually created the row, so the caller can
+    count genuinely new indicators, which is a different and more interesting
+    number than sightings.
+
+    Failure is deliberately quiet at debug level: first-seen is an enrichment,
+    and a missing table or a denied write must never stop IOC collection, which
+    is the primary job. The absence shows up in the digest counter instead.
+    """
+    try:
+        _dynamodb.Table(FIRST_SEEN_TABLE).put_item(
+            Item={
+                "ioc_value":      ioc_value,
+                "first_seen":     when,
+                "first_channel":  channel,
+                "first_category": category,
+            },
+            ConditionExpression="attribute_not_exists(ioc_value)",
+        )
+        return True
+    except Exception as exc:
+        # ConditionalCheckFailedException is the expected, overwhelmingly common
+        # case: we have seen this indicator before. It is not an error.
+        if type(exc).__name__ != "ConditionalCheckFailedException":
+            logger.debug("first-seen write failed value=%s: %s", ioc_value[:24], exc)
+        return False
+
+
 def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "",
                 posted_ts: str = "") -> None:
     """Persist one message's IOCs as sightings.
@@ -1141,9 +1191,16 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "",
                     item["posted_ts"] = posted_ts
                 # Only set when non-empty -- "malware" is the malware-index GSI
                 # hash key, and writing "" would index every untagged IOC.
-                if malware:
-                    item["malware"] = malware
+                # A7: normalise at the write, never at the read. The GSI key is
+                # whatever was stored, so a reader cannot repair a split
+                # namespace after the fact.
+                _mw = normalise_malware(malware)
+                if _mw:
+                    item["malware"] = _mw
                 table.put_item(Item=item)
+                # A6: one conditional write per IOC, first writer wins.
+                if _record_first_seen(value.lower(), channel, category, now):
+                    _FIRST_SEEN_NEW.append(1)
             except Exception as exc:
                 logger.warning("IOC store failed value=%s: %s", value[:20], exc)
 
@@ -1375,6 +1432,12 @@ def _poll_ransomware_live() -> int:
     return written
 
 
+# Per-run accumulator of (failures, attempted, first_error) from
+# _store_operator_identities(), so _send_admin_digest() can report a broken
+# write path instead of printing a 0 that looks like an empty result.
+_OPERATOR_WRITE_FAILURES: list = []
+
+
 def _store_operator_identities(handles: list[str], channel: str, category: str) -> int:
     """Automated counterpart to tools/import_channels.py's import_operators().
 
@@ -1403,6 +1466,23 @@ def _store_operator_identities(handles: list[str], channel: str, category: str) 
     now = datetime.now(timezone.utc).isoformat()
     ttl = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
     stored = 0
+    # FIXED 2026-08-27. This function reported 0 on every run since it shipped,
+    # and 0 was unreadable: it meant "no mentions seen", "every write failed",
+    # and "wrote nothing new" identically, because each failure was swallowed
+    # per-handle at warning level and the count came back 0 either way. A
+    # collector that cannot report its own failure is indistinguishable from a
+    # collector with nothing to collect, which is how this sat unnoticed.
+    #
+    # The most likely cause is not visible from the repo: nothing here creates
+    # relayshield_operator_identities, tools/import_channels.py (named in the
+    # docstring above as the manual counterpart) does not exist in this
+    # repository, and the Key below assumes a composite schema of
+    # (handle, platform). If the table's real key differs, or the table is
+    # absent, or the execution role lacks UpdateItem on it, then every call
+    # raises, every exception is caught here, and the digest prints 0.
+    # tools/check_operator_identities.py answers that against the live table.
+    failures = 0
+    first_error = ""
     for handle in handles:
         try:
             table.update_item(
@@ -1424,7 +1504,22 @@ def _store_operator_identities(handles: list[str], channel: str, category: str) 
             )
             stored += 1
         except Exception as exc:
-            logger.warning("operator identity store failed handle=%s: %s", handle, exc)
+            failures += 1
+            if not first_error:
+                # Once per call, at ERROR, with the exception CLASS and the key
+                # shape actually used. A per-handle warning that says only
+                # "failed" cannot tell a ValidationException from an
+                # AccessDeniedException, and those have opposite fixes.
+                first_error = type(exc).__name__
+                logger.error(
+                    "operator identity store failing: table=%s key={handle,platform} "
+                    "error=%s: %s (suppressing further errors this call; %d handle(s) queued)",
+                    OPERATORS_TABLE, first_error, exc, len(handles),
+                )
+    if failures:
+        logger.error("operator identity store: %d/%d write(s) failed (%s)",
+                     failures, len(handles), first_error)
+    _OPERATOR_WRITE_FAILURES.append((failures, len(handles), first_error))
     return stored
 
 
@@ -2539,6 +2634,27 @@ def _format_mimes(mimes: dict | None) -> str:
     return "".join("  %s: %d\n" % (m, c) for m, c in top)
 
 
+def _operator_line(stats: dict) -> str:
+    """Render the A4 sightings line so a 0 says WHICH zero it is.
+
+    Three different situations printed the same "0" until 2026-08-27: no
+    @mentions in anything collected, mentions found but every write rejected,
+    and mentions found and written. The first is normal on a quiet run, the
+    second is a broken collector, and telling them apart is the whole point of
+    reporting the number at all.
+    """
+    stored   = stats.get("operator_identities_stored", 0)
+    seen     = stats.get("operator_mentions_seen", 0)
+    failures = sum(f for f, _a, _e in _OPERATOR_WRITE_FAILURES)
+    err      = next((e for _f, _a, e in _OPERATOR_WRITE_FAILURES if e), "")
+    line = f"Operator identity sightings recorded (A4): {stored}"
+    if failures:
+        return line + f"  \u26a0\ufe0f {failures} write(s) REJECTED ({err})\n"
+    if not seen:
+        return line + "  (no @mentions seen this run)\n"
+    return line + f" from {seen} mention(s)\n"
+
+
 def _send_admin_digest(stats: dict) -> None:
     # Suppress only when there was genuinely nothing to check (e.g. the
     # Telethon-not-configured path, which already sends its own message).
@@ -2603,8 +2719,9 @@ def _send_admin_digest(stats: dict) -> None:
         + (f"Supplier-breach alerts: {stats['supplier_alerts']}\n"
            if stats.get("supplier_alerts") else "")
         + f"Ransomware victims stored (ransomware.live, A5): {stats.get('ransomware_victims_stored', 0)}\n"
-        f"Operator identity sightings recorded (A4): {stats.get('operator_identities_stored', 0)}\n"
-        f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
+        + _operator_line(stats)
+        + f"Indicators seen for the first time (A6): {len(_FIRST_SEEN_NEW)}\n"
+        + f"CVEs extracted: {stats.get('cves_extracted', 0)}\n"
         f"Onion addresses: {stats.get('onions_extracted', 0)}\n"
         f"Channels auto-discovered: {stats.get('channels_discovered', 0)}\n"
         f"Discord channels discovered: {stats.get('discord_channels_discovered', 0)}\n"
@@ -3056,6 +3173,8 @@ async def _poll_channels(stats: dict, tier: str = "") -> None:
 
                     # Auto-discover new Telegram channels from @mentions
                     if iocs.get("tg_mentions"):
+                        stats["operator_mentions_seen"] = (
+                            stats.get("operator_mentions_seen", 0) + len(iocs["tg_mentions"]))
                         discovered = _queue_discovered_channels(iocs["tg_mentions"], username)
                         stats["channels_discovered"] += discovered
 
@@ -3264,6 +3383,7 @@ def lambda_handler(event, context):
         "alerts_fired":           0,
         "ransomware_victims":     0,
         "supplier_alerts":        0,
+        "operator_mentions_seen": 0,
         "ransomware_victims_stored": 0,
         "operator_identities_stored": 0,
         "cves_extracted":         0,

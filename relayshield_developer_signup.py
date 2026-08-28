@@ -2182,8 +2182,20 @@ def _p(text: str) -> str:
 # Matched on the Referer host, or forced with ?src=<key> so a link we control can
 # select its own framing even when the referrer is stripped (which is what happens
 # with most Slack, Discord and native app clicks).
+_APIFY_BANNER = _banner("Arriving from Apify", _p(
+    "The RelayShield actor runs breach, infostealer and SIM-swap checks as an Apify task, so a "
+    "list of employee emails or phone numbers can be screened on a schedule and the results pushed "
+    "into whatever the rest of your Apify pipeline already feeds. Same API underneath, no "
+    "integration code."))
+
+
 _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     "langchain": (("langchain.com",), _LANGCHAIN_BANNER),
+    # Apify, registered 2026-08-27 BEFORE any listing link goes out. An
+    # unregistered key logs unmatched: and renders no banner, which is exactly
+    # how ?source=rsscan shipped broken. Referer hosts included so an arrival
+    # that loses the query parameter still attributes.
+    "apify": (("apify.com", "console.apify.com"), _APIFY_BANNER),
     "n8n": (
         ("n8n.io", "creators.n8n.io"),
         _banner("Arriving from n8n", _p(
@@ -2328,6 +2340,14 @@ _SOURCE_ALIASES = {
     "linkedin": "llmjacking",
     "telegram": "llmjacking",
     "post": "llmjacking",
+    # Apify, 2026-08-27. One key per surface, same banner, so the store listing,
+    # the actor README and the run output stay distinguishable in the logs and
+    # in the Monday report's source breakdown.
+    "apify":         "apify",
+    "apify-store":   "apify",
+    "apify-actor":   "apify",
+    "apify-readme":  "apify",
+    "apify-run":     "apify",
     # Secret-scanning post, 2026-08-03. One key per syndication channel: the raw
     # parameter is what gets logged, so these stay distinguishable in CloudWatch
     # while all rendering the same banner. Registered BEFORE the post is

@@ -67,13 +67,30 @@ consumer product, a developer portal and a partner centre at once will be bad at
 developer surface belongs on the website (which already serves `/developers`), and the Mini App
 should do one consumer thing well.
 
-### 4. Crypto Shield Mobile inside a Telegram Mini App: unverified and load-bearing
+### 4. Crypto Shield Mobile inside a Telegram Mini App — RESOLVED 2026-08-29
 
-You flagged this yourself. Telegram has rules about payments, Stars, and crypto in Mini Apps, and
-the TON relationship is not neutral. **This must be checked against current Telegram Mini App and
-Stars policy before any CS Mobile tie-in is designed**, not after. If multi-chain is restricted, the
-whole "three businesses under one Mini App" idea loses a leg, and it is better to know that in week
-one. I could not verify it from the container: telegram.org is outside the egress allowlist.
+I had this framed as one blocking question. It is two, and separating them removes the block.
+
+**What is actually restricted is promotion of a competing multi-chain wallet or storefront.** The
+CS Mobile app cannot be pointed to, linked, or sold from inside the Mini App, and that is settled:
+no CS Mobile tie-in, no exceptions, no "just a link".
+
+**Crypto security analysis is not that.** A wallet or token scan that returns a risk verdict is a
+security tool, not a wallet and not a store, and TON is Telegram's own chain. So v1 ships:
+
+- **Free TON wallet and token scans**, as the freemium hook. Address in, counterparty and token risk
+  out. This is the single most native thing we can offer inside Telegram.
+- **Wallet counterparty scans for other chains** as a paid or signed-in step. The scan is a verdict
+  on an address, not a wallet product, and it never routes a transaction.
+- **Links to the RelayShield Telegram bot, the Telegram blog channel, and the API developer page.**
+  All three are our own Telegram-native or web surfaces, all three are attributed.
+
+**What stays out:** any CS Mobile reference, any in-app swap, transfer or bridge, and any payment
+rail that competes with Stars inside the Mini App itself. Payments for the paid scan tier go through
+the existing web checkout, opened outside the Mini App.
+
+That leaves the Mini App with a real front door to everything except CS Mobile, which is what was
+wanted, and it removes the dependency on a policy reading I could not verify from this container.
 
 ---
 
@@ -183,7 +200,8 @@ App is a better interface to a capability we have, not a new capability.
 
 ## What v1 must not be
 
-- Not a CS Mobile storefront, until the policy question above is answered.
+- Not a CS Mobile storefront, and not a CS Mobile link. Settled 2026-08-29, see §4. TON and
+  multi-chain wallet risk **scans** are in scope; the CS Mobile app is not, in any form.
 - Not a partner centre. That is a website page, and the study agrees.
 - Not gated behind Telegram Stars until we know how Stars revenue interacts with our existing Stripe
   and x402 paths. Two payment rails in one product is a support problem before it is a revenue one.
@@ -198,9 +216,10 @@ reuses the existing scan endpoints and adds no new backend capability.
 
 # Recommended sequence, and the one thing to do first
 
-1. **Answer the two blocking questions this week.** (a) Telegram policy on multi-chain crypto and
-   payments in Mini Apps, which decides whether CS Mobile can ever live here. (b) Set up the second
-   Telegram account, because everything in Item 16 is blocked on it and it costs half a day.
+1. **One blocking question left, not two.** (a) is answered — see §4: CS Mobile is out permanently,
+   TON and multi-chain wallet **scans** are in, and the Mini App is the front door to everything
+   else. (b) still stands: set up the second Telegram account on a dedicated prepaid SIM, because
+   everything in Item 16 is blocked on it and it costs half a day.
 2. **Build the GitHub half of Item 16 first.** No Telegram session, best contact data, immediate
    output. If the first 200 scored prospects produce nothing, that is a cheap and early answer about
    the whole thesis, and it arrives before the Mini App is built.

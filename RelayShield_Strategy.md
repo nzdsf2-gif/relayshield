@@ -3572,6 +3572,45 @@ When SMB revenue justifies a separate buyer journey:
 
 *Added May 2026 — channel strategy for MSP, consultant, and affiliate partners.*
 
+### DECIDED 2026-08-29 — the number the Partner Center publishes is 20%
+
+The Partner Center at `relayshield.net/partners` publishes **one** headline: **20% recurring
+commission for 12 months.** That is Tier 2 below, unchanged. Self-serve partners get the affiliate
+link and that rate; Tier 1 and Tier 3 stay as negotiated arrangements, not published prices.
+
+**Why 20% does not break the bank.** Phase 1 fixed costs are ~$32/month total and the marginal cost
+of one more subscriber is cents — HIBP, Twilio and Lambda all sit far inside their steps. Gross
+margin is above 90% at every tier, so a 20% recurring payout still leaves ~70% after Stripe's
+~2.9% + $0.30. The constraint on this business is distribution, not margin, and 20% is the rate the
+partner has heard from every other SaaS affiliate program, so it needs no explaining.
+
+**Why not higher.** 30%+ recurring is reseller pricing, and a reseller brings a book of customers
+and owns the support relationship. A self-serve affiliate link brings neither. Tier 3 already pays
+30–40% for exactly that, negotiated, and publishing 40% would price away the ability to offer it as
+a real concession to an MSP who has earned it.
+
+**Why not lower.** Below 20% the program stops being worth an accountant's or consultant's time to
+set up, and we get the worst outcome: a page that exists, and nobody using it.
+
+**Three conditions attached, all of which cost nothing and prevent the predictable problems:**
+
+1. **12-month cap, stated on the page.** Not lifetime. Lifetime recurring is the commitment that
+   looks cheap at 5 partners and is unrepricable at 50.
+2. **Clawback on refund or chargeback within 60 days**, and no commission on a self-referral.
+3. **The commission is paid on the subscription tiers only** — Personal Shield, Business Starter,
+   Business Basic, Business Shield Pro. **Not on PAYG/x402 per-call revenue, and not on the TI
+   subscription**, until those have a churn history to price against.
+
+**One correction to Tier 1 below.** The flat $25 bounty is 167% of the first month of Personal
+Shield at $14.99 and 125% of Business Starter at $19.99. On a consumer tier with no churn history
+that pays back only if the subscriber stays two to three months, and it is the tier most likely to
+be gamed. **Restrict the $25/$75 flat bounty to the business tiers.** Consumer referrals go on the
+20% recurring, where the payout tracks retention automatically.
+
+**Do not buy affiliate-tracking software yet.** Rewardful at $49/month costs more than 20% of the
+first ~17 referred Personal Shield subscribers. Run Phase 1 on UTM-tracked Stripe payment links and
+manual payout, exactly as sequenced below, until there are 3–5 partners producing consistently.
+
 ### Bounty & Revenue Share Model
 
 Three tiers scaled by partner commitment and volume.

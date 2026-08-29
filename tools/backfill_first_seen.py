@@ -16,14 +16,20 @@ Read-only without --apply. Writes are conditional on attribute_not_exists, so
 re-running is safe and a row already written by the live monitor is never
 overwritten by an older scan.
 
-CREATE THE TABLE FIRST, with NO TTL:
+CREATE THE TABLE FIRST, with NO TTL. Use the script, not a hand-typed command:
 
-    aws dynamodb create-table \\
-      --table-name relayshield_intel_first_seen \\
-      --attribute-definitions AttributeName=ioc_value,AttributeType=S \\
-      --key-schema AttributeName=ioc_value,KeyType=HASH \\
-      --billing-mode PAY_PER_REQUEST \\
-      --region us-east-1
+    sh tools/setup_first_seen.sh
+
+It creates the table AND grants the intel monitor permission to write to it,
+and it asserts the AWS account before doing either.
+
+The command that used to be printed here was missing AWS_PROFILE=relayshield.
+On 2026-08-29 it was copied out of this docstring and run as-is. It did not
+error -- it PRINTED A SUCCESS BLOCK and created the table in 620534471984, the
+pre-audit account, where relayshield-intel-monitor does not exist and will
+never see it. A read against the wrong account is a confusing error; a write
+against the wrong account is a resource that exists, looks correct in the
+output, and is invisible to everything that needs it.
 
 A TTL here would delete the evidence the lead-time claim rests on.
 """

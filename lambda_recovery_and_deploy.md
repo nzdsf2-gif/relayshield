@@ -104,7 +104,7 @@ is what produced the error.
 
 ### Then check the packaging
 
-    aws lambda get-function-configuration \
+    AWS_PROFILE=relayshield aws lambda get-function-configuration \
       --function-name relayshield-intel-monitor --region us-east-1 \
       --query '{Layers:Layers[].Arn, Runtime:Runtime, CodeSize:CodeSize}'
 

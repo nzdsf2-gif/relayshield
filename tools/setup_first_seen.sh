@@ -71,7 +71,43 @@ ROLE=${ROLE_ARN##*/}
 echo "   $ROLE"
 
 echo
-echo "== 4. Grant PutItem on $TABLE to $ROLE"
+echo "== 4. Does $ROLE already have PutItem on $TABLE?"
+# Ask this BEFORE trying to grant anything. The role carries a
+# relayshield-intel-dynamodb policy already, and if its Resource is a
+# relayshield_intel_* wildcard then the permission exists and there is nothing
+# to do. The first version of this script skipped straight to put-role-policy,
+# which is the wrong first question and led to a lot of work on a limit that
+# may not need to be worked around at all.
+COVERED=""
+for P in $(aws iam list-role-policies --role-name "$ROLE" --query 'PolicyNames[]' --output text); do
+  BODY=$(aws iam get-role-policy --role-name "$ROLE" --policy-name "$P" \
+           --query 'PolicyDocument' --output json 2>/dev/null || echo "")
+  # A statement covers us if it allows PutItem (or dynamodb:*) on this exact
+  # table, on a relayshield_intel_ prefix wildcard, or on table/*.
+  case "$BODY" in
+    *"$TABLE"*|*'table/relayshield_intel_*'*|*'table/*'*|*'"dynamodb:*"'*)
+      case "$BODY" in
+        *PutItem*|*'dynamodb:*'*)
+          echo "   $P looks like it already covers this table:"
+          printf '%s\n' "$BODY" | grep -iE 'PutItem|dynamodb:\*|Resource' | head -6 | sed 's/^/     /'
+          COVERED="$P"
+          ;;
+      esac
+      ;;
+  esac
+  if [ -n "$COVERED" ]; then break; fi
+done
+
+if [ -n "$COVERED" ]; then
+  echo
+  echo "   Already granted via $COVERED. Nothing to add."
+  echo "   If the monitor still cannot write, the policy matched loosely above --"
+  echo "   read it in full and re-run with FORCE_GRANT=1 to add an explicit grant."
+  GRANT="existing inline policy $COVERED"
+fi
+
+if [ -z "$COVERED" ] || [ "${FORCE_GRANT:-0}" = "1" ]; then
+echo "   No existing grant found — adding one"
 DOC="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:PutItem\"],\"Resource\":\"arn:aws:dynamodb:${REGION}:${ACCOUNT}:table/${TABLE}\"}]}"
 
 # This role already carries 20-odd inline policies. IAM caps the AGGREGATE size
@@ -85,6 +121,14 @@ DOC="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\"
 # back to managed when the budget is spent -- which is the expected path here.
 INLINE_COUNT=$(aws iam list-role-policies --role-name "$ROLE" --query 'length(PolicyNames)' --output text)
 echo "   role currently has $INLINE_COUNT inline policies (IAM caps their total size at 10,240 chars)"
+
+# The grant is the one step that can legitimately fail on somebody else's
+# account setup, and `set -e` would abort here -- taking the verify step and the
+# backfill instructions with it. That is what turned one IAM error into "I
+# cannot backfill". The backfill does not need this grant at all: it runs as the
+# operator, not as the Lambda role. So a failure here reports and continues.
+set +e
+GRANT_FAILED=""
 
 if aws iam put-role-policy --role-name "$ROLE" --policy-name "$POLICY" --policy-document "$DOC" 2>/tmp/rs_iam_err; then
   GRANT="inline policy $POLICY"
@@ -113,11 +157,18 @@ else
       --query 'Policy.Arn' --output text
   fi
 
-  aws iam attach-role-policy --role-name "$ROLE" --policy-arn "$ARN"
-  GRANT="managed policy $ARN"
-  echo "   attached $ARN to $ROLE"
+  if aws iam attach-role-policy --role-name "$ROLE" --policy-arn "$ARN" 2>/tmp/rs_iam_err; then
+    GRANT="managed policy $ARN"
+    echo "   attached $ARN to $ROLE"
+  else
+    sed 's/^/     /' /tmp/rs_iam_err
+    GRANT="NOT GRANTED"
+    GRANT_FAILED=1
+  fi
 fi
 rm -f /tmp/rs_iam_err
+set -e
+fi
 
 echo
 echo "== 5. Verify"
@@ -135,6 +186,15 @@ case "$GRANT" in
               --version-id "$(aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT}:policy/${POLICY}" --query 'Policy.DefaultVersionId' --output text)" \
               --query 'PolicyVersion.Document.Statement[0].Resource' --output text ;;
 esac
+
+if [ -n "${GRANT_FAILED:-}" ]; then
+  echo
+  echo "!! The IAM grant did NOT succeed. Read the error above."
+  echo "!! This does NOT block the backfill. The backfill runs as YOU, not as the"
+  echo "!! Lambda role, so it can populate the table right now. What it blocks is"
+  echo "!! the LIVE monitor recording first-seen for anything collected from here"
+  echo "!! on -- so the table would freeze at whatever the backfill writes."
+fi
 
 echo
 echo "Done. Next, backfill from the existing corpus -- dry run first:"

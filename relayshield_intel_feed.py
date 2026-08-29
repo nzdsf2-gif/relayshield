@@ -1198,6 +1198,14 @@ def _ingest_paste_sites(table) -> dict:
 
 
 def lambda_handler(event, context):
+    # See the identical guard in relayshield_intel_kev.py. This handler walks
+    # roughly two dozen external feeds and alerts users on what is new, so the
+    # deploy workflow's import probe must not be allowed to trigger a second
+    # full pass minutes after the scheduled one.
+    if isinstance(event, dict) and event.get("source") == "ci.import-probe":
+        logger.info("ci.import-probe — module imported, returning without ingesting")
+        return {"statusCode": 200, "probe": "ok"}
+
     logger.info("INTEL-FEED starting")
     table     = _dynamodb.Table(INTEL_IOCS_TABLE)
     bot_token = _get_bot_token()

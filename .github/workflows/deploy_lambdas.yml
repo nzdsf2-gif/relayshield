@@ -65,7 +65,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Need previous commit to detect changes
+          # Full history. Depth 2 was enough only while every push to main was a
+          # single commit; the moment a merge lands, the base this job needs is
+          # github.event.before, which can be any distance back.
+          fetch-depth: 0
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -82,8 +85,32 @@ jobs:
             CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py relayshield_intel_feed.py relayshield_intel_kev.py"
             echo "Manual trigger — deploying all Lambdas"
           else
-            # Push trigger — deploy only files changed in this commit
-            CHANGED=$(git diff --name-only HEAD~1 HEAD | grep '^relayshield_.*\.py$' | tr '\n' ' ' | sed 's/ $//' || true)
+            # Push trigger — deploy every handler this PUSH changed.
+            #
+            # This used to diff HEAD~1..HEAD, which is wrong for a merge commit
+            # and wrong in a way that fails silently. HEAD~1 on a merge is the
+            # FIRST parent, so the diff shows only what the second parent
+            # contributed, and every change that arrived down the first-parent
+            # line looks unchanged. On 2026-08-29 that would have shipped
+            # nothing for relayshield-intel-feed and relayshield-intel-kev on
+            # the very merge that was meant to deploy them, and reported
+            # success.
+            #
+            # github.event.before is where main actually pointed before this
+            # push, so diffing from it covers every commit the push introduced
+            # regardless of shape. Falls back to HEAD~1 when it is absent or
+            # unreachable (a brand-new branch pushes the all-zero SHA).
+            BEFORE="${{ github.event.before }}"
+            if [ -n "$BEFORE" ] \
+               && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              BASE="$BEFORE"
+            else
+              BASE="HEAD~1"
+              echo "github.event.before unusable — falling back to HEAD~1"
+            fi
+            echo "Diffing $BASE..HEAD"
+            CHANGED=$(git diff --name-only "$BASE" HEAD | grep '^relayshield_.*\.py$' | tr '\n' ' ' | sed 's/ $//' || true)
             echo "Changed files: $CHANGED"
           fi
           echo "files=$CHANGED" >> $GITHUB_OUTPUT

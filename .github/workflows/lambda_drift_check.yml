@@ -65,6 +65,16 @@ jobs:
             # avoid. Add them to the deployer once this check reports clean.
             ["relayshield_intel_feed.py"]="relayshield-intel-feed"
             ["relayshield_intel_kev.py"]="relayshield-intel-kev"
+            # Added 2026-08-29, same story a third time. TODO.md records
+            # relayshield-feed-maintainer as "Live on the stream", and its
+            # source has been in the repo since TAXII-PAGINATION-2, but it was
+            # in neither map. Watched here only, for the same reason as the two
+            # above: nobody has ever compared it against its deployed package,
+            # so adding it to the deployer now could overwrite hand-deployed
+            # work with no error anywhere. Read the first red diff before
+            # deciding -- live-only content means recover it, main's own
+            # commits in reverse means simply add it to deploy_lambdas.yml.
+            ["relayshield_feed_maintainer.py"]="relayshield-feed-maintainer"
             ["relayshield_api.py"]="relayshield-api"
             ["relayshield_breach_monitor.py"]="relayshield-breach-monitor"
           )

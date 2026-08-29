@@ -271,9 +271,30 @@ async def _authenticate(TelegramClient, StringSession, api_id, api_hash, phone,
 
     print("✅ Session stored in Secrets Manager")
     print(f"   Secret: {secret_name}")
-    print("\n🛡️  INTEL-2 setup complete — Lambda is ready to deploy")
-    print("   The phone number is NOT stored — only the session string")
-    print("   You can discard the OTP SIM after this step\n")
+    print("\n🛡️  Setup complete. The phone number is NOT stored — only the session.")
+    print()
+    print("   KEEP THE SIM. Do not discard it, do not let it lapse.")
+    print()
+    print("   This line used to say the SIM could be discarded, which was written")
+    print("   when the instructions still recommended a rented number. It is wrong")
+    print("   for a number you own and it is dangerous:")
+    print()
+    print("     - Telegram re-verifies periodically, and on a new device always.")
+    print("       Without the number the account cannot be recovered, and the")
+    print("       session string alone will not get it back.")
+    print("     - A lapsed number is recycled by the carrier. Whoever gets it next")
+    print("       can request a login code and take the account.")
+    print()
+    print("   Keep it active, keep it in a handset you control, and set a Telegram")
+    print("   2FA password on the account so a SIM alone is not enough to take it.")
+    print()
+    if secret_name == DEFAULT_SECRET:
+        print("   relayshield-intel-monitor reads this secret. Nothing to deploy.")
+    else:
+        print(f"   NOTE: nothing reads {secret_name} yet.")
+        print("   This session exists but is not wired to anything, and no")
+        print("   discovery sweep has been run on it. That is deliberate.")
+    print()
 
 
 if __name__ == "__main__":

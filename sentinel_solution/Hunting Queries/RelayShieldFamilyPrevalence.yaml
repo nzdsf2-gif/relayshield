@@ -1,0 +1,74 @@
+id: bbf3841e-c0fc-42f4-a473-f3c0ae6f53ab
+name: RelayShield - Malware family prevalence in the feed
+description: |
+  'Ranks the malware families RelayShield is currently observing, by indicator volume. This is a view of
+  the threat landscape rather than of your environment, and it needs no log source other than the feed
+  itself, so it works from the moment the connector is configured.'
+description-detailed: |
+  'RelayShield tags indicators with a malware:<family> label aggregated from abuse.ch (MalwareBazaar,
+  URLhaus, Feodo Tracker) and OpenPhish. Ranking those labels tells you which families are most
+  prevalent across those sources right now, and is the input to deciding which are worth hunting for
+  in your own logs. It is an aggregation and normalisation convenience, not private collection.
+  Label values are not normalised at source. Casing is inconsistent, some labels carry several comma-joined
+  values in a single string, and the same namespace also holds behaviours, platforms and vendor names. This
+  query folds case, splits joined values and separates the non-family tags into their own column, because an
+  exact-match grouping silently under-counts: measured against a live workspace on 2026-08-15, "clearfake"
+  returned 196 indicators exactly matched and 608 once folded and split, so roughly two thirds of the
+  matches were missing with no indication they were missing.'
+requiredDataConnectors:
+  - connectorId: ThreatIntelligenceTaxii
+    dataTypes:
+      - ThreatIntelIndicators
+tactics:
+  - Reconnaissance
+query: |
+  let starttime = todatetime('{{StartTimeISO}}');
+  let endtime = todatetime('{{EndTimeISO}}');
+  // Behaviours, platforms and vendor names all share the malware: namespace.
+  // "connectwise" was observed classified as a family on 2026-08-16; it is a
+  // vendor whose remote-access tooling gets abused, not a malware family.
+  let not_families = dynamic([
+    "phishing", "coinminer", "cryptominer", "spam", "scam", "ransomware", "loader",
+    "stealer", "botnet", "trojan", "backdoor", "downloader", "malware", "apt",
+    "windows", "linux", "macos", "android", "ios",
+    "connectwise", "screenconnect", "anydesk", "teamviewer", "rmm", "generic",
+    "unknown", "suspicious", "test"
+  ]);
+  ThreatIntelIndicators
+  | where TimeGenerated between (starttime .. endtime)
+  | where SourceSystem has "RelayShield" or tostring(Data.external_references) has "relayshield"
+  | summarize arg_max(TimeGenerated, *) by Id
+  | where IsActive and (isnull(ValidUntil) or ValidUntil > now())
+  | mv-expand Label = Data.labels
+  | where tostring(Label) startswith "malware:"
+  | extend Tag = tolower(replace_string(tostring(Label), "malware:", ""))
+  | mv-expand Tag = split(Tag, ",")
+  | extend Tag = trim(" ", tostring(Tag))
+  | where isnotempty(Tag)
+  // Well-formed names only. Hash fragments and other malformed identifiers occur in
+  // this namespace and are not family names.
+  | extend IsWellFormed = Tag matches regex @"^[a-z]{3,}[a-z0-9._-]*$" and Tag !contains "0x" and not(Tag matches regex @"[0-9]{4,}")
+  | extend Kind = case(
+        Tag in (not_families), "behaviour or platform",
+        IsWellFormed == false,  "malformed",
+        "family")
+  | summarize
+      Indicators   = dcount(Id),
+      IPs          = dcountif(ObservableValue, ObservableKey == "ipv4-addr:value"),
+      Domains      = dcountif(ObservableValue, ObservableKey == "domain-name:value"),
+      URLs         = dcountif(ObservableValue, ObservableKey == "url:value"),
+      FileHashes   = dcountif(ObservableValue, ObservableKey has "file:hashes"),
+      AvgConfidence = round(avg(Confidence), 1),
+      FirstSeen    = min(TimeGenerated),
+      LastSeen     = max(TimeGenerated)
+      by Tag, Kind
+  | order by Indicators desc
+  | project Tag, Kind, Indicators, IPs, Domains, URLs, FileHashes, AvgConfidence, FirstSeen, LastSeen
+entityMappings:
+  - entityType: Malware
+    fieldMappings:
+      - identifier: Name
+        columnName: Tag
+      - identifier: Category
+        columnName: Kind
+version: 1.0.0

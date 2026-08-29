@@ -1,0 +1,83 @@
+id: 191e51b4-ee0d-45e1-862f-23dcf9ac0ce8
+name: RelayShield - Newly emerging malware families
+description: |
+  'Surfaces malware families that appeared in the RelayShield feed in the last 24 hours but were absent
+  from the preceding 7 days, plus families whose indicator volume has jumped sharply. New and surging
+  families are where detection coverage is thinnest, because signatures and vendor reporting lag the
+  marketplace by days.'
+description-detailed: |
+  'Family labels in this feed are aggregated from abuse.ch (MalwareBazaar, URLhaus, Feodo Tracker) and
+  OpenPhish. Measured 2026-08-16, those four sources account for 99.8% of all family-labelled
+  indicators, so treat emergence here as "newly prevalent across those sources", not as evidence of
+  private or exclusive collection. A family that appears today with no history in the previous week
+  is worth attention because your existing detections were probably not written with it in mind.
+  Interpret volume changes with care. The feed republishes every unexpired indicator on a 7 to 10 day
+  cycle, so this query compares distinct indicator identities rather than raw row counts, and a family
+  landing on its republish day will still show an increase. Treat the "new" list as the higher-confidence
+  half of the output.'
+requiredDataConnectors:
+  - connectorId: ThreatIntelligenceTaxii
+    dataTypes:
+      - ThreatIntelIndicators
+tactics:
+  - Reconnaissance
+  - ResourceDevelopment
+query: |
+  let starttime = todatetime('{{StartTimeISO}}');
+  let endtime = todatetime('{{EndTimeISO}}');
+  // "Recent" is the last day of whatever range you select; everything earlier in
+  // that range is the baseline. Select at least 8 days for the comparison to mean
+  // anything. The baseline length is measured rather than assumed, so widening the
+  // range in the picker does not silently inflate the growth factor.
+  let recent_window = 1d;
+  let baseline_days = max_of(1.0, (endtime - recent_window - starttime) / 1d);
+  // Behaviours, platforms and vendor names all share the malware: namespace.
+  // "connectwise" was observed classified as a family on 2026-08-16; it is a
+  // vendor whose remote-access tooling gets abused, not a malware family.
+  let not_families = dynamic([
+    "phishing", "coinminer", "cryptominer", "spam", "scam", "ransomware", "loader",
+    "stealer", "botnet", "trojan", "backdoor", "downloader", "malware", "apt",
+    "windows", "linux", "macos", "android", "ios",
+    "connectwise", "screenconnect", "anydesk", "teamviewer", "rmm", "generic",
+    "unknown", "suspicious", "test"
+  ]);
+  let Labelled =
+      ThreatIntelIndicators
+      | where TimeGenerated between (starttime .. endtime)
+      | where SourceSystem has "RelayShield" or tostring(Data.external_references) has "relayshield"
+      | mv-expand Label = Data.labels
+      | where tostring(Label) startswith "malware:"
+      | extend Family = tolower(replace_string(tostring(Label), "malware:", ""))
+      | mv-expand Family = split(Family, ",")
+      | extend Family = trim(" ", tostring(Family))
+      | where isnotempty(Family) and Family !in (not_families)
+      | where Family matches regex @"^[a-z]{3,}[a-z0-9._-]*$" and Family !contains "0x" and not(Family matches regex @"[0-9]{4,}")
+      | extend Period = iff(TimeGenerated > endtime - recent_window, "recent", "baseline");
+  Labelled
+  | summarize
+      RecentIndicators   = dcountif(Id, Period == "recent"),
+      BaselineIndicators = dcountif(Id, Period == "baseline"),
+      FirstSeen          = min(TimeGenerated),
+      LastSeen           = max(TimeGenerated),
+      SampleIndicators   = make_set_if(ObservableValue, Period == "recent", 5)
+      by Family
+  | where RecentIndicators > 0
+  // Per-day rates, because the baseline covers many more days than the recent window.
+  | extend RecentPerDay   = RecentIndicators * 1.0,
+           BaselinePerDay = BaselineIndicators / baseline_days
+  | extend Status = iff(BaselineIndicators == 0, "new", "surging")
+  | extend GrowthFactor = iff(BaselineIndicators == 0, real(null), round(RecentPerDay / BaselinePerDay, 1))
+  // Keep families that are new, or at least three times their usual daily rate with
+  // enough volume that the ratio is not noise.
+  | where Status == "new" or (GrowthFactor >= 3.0 and RecentIndicators >= 10)
+  | extend Samples = strcat_array(SampleIndicators, ", ")
+  | order by Status asc, RecentIndicators desc
+  | project Family, Status, RecentIndicators, BaselineIndicators, GrowthFactor, FirstSeen, LastSeen, Samples
+entityMappings:
+  - entityType: Malware
+    fieldMappings:
+      - identifier: Name
+        columnName: Family
+      - identifier: Category
+        columnName: Status
+version: 1.0.0

@@ -1,0 +1,149 @@
+id: 9cdec0e5-78e1-4a9e-9031-3a15835ccfc3
+name: RelayShield - Host contacted infrastructure from multiple malware families
+description: |
+  'Identifies an internal host that contacted RelayShield network indicators attributed to two or more
+  distinct malware families within the lookback window. The shipped Threat Intelligence templates raise
+  one alert per indicator type per log source, so a host touching a stealer domain and a loader IP
+  produces two unrelated low-signal alerts. This rule correlates them into a single incident and reports
+  which families converged, which is a far stronger indication of an actual compromise than any single
+  indicator match. The contribution here is the correlation, not the underlying feed: family labels are
+  aggregated from abuse.ch and OpenPhish, and the value this rule adds is joining them across entity
+  types so that one incident carries the whole picture.'
+severity: High
+requiredDataConnectors:
+  - connectorId: ThreatIntelligenceTaxii
+    dataTypes:
+      - ThreatIntelIndicators
+  - connectorId: CEF
+    dataTypes:
+      - CommonSecurityLog
+queryFrequency: 1h
+queryPeriod: 14d
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - CommandAndControl
+  - CredentialAccess
+relevantTechniques:
+  - T1071
+  - T1571
+  - T1555
+query: |
+  let dt_lookBack = 1h;
+  let ioc_lookBack = 14d;
+  // Two distinct families is the point of the rule. Raise this if your environment
+  // is noisy enough that two is not interesting.
+  let min_families = 2;
+  // The malware: namespace is not purely malware families. It also carries
+  // behaviours, platforms and vendor names, and a host trivially reaches two
+  // "families" if those are counted, which on a High severity rule is a false
+  // positive. Excluded here so the family count means what the alert says it
+  // means. "connectwise" was observed being classified as a family on
+  // 2026-08-16; it is a vendor whose remote-access tooling gets abused.
+  let not_families = dynamic([
+    "phishing", "coinminer", "cryptominer", "spam", "scam", "ransomware", "loader",
+    "stealer", "botnet", "trojan", "backdoor", "downloader", "malware", "apt",
+    "windows", "linux", "macos", "android", "ios",
+    "connectwise", "screenconnect", "anydesk", "teamviewer", "rmm", "generic",
+    "unknown", "suspicious", "test"
+  ]);
+  let RelayShield_Indicators = materialize(
+      ThreatIntelIndicators
+      | where TimeGenerated >= ago(ioc_lookBack)
+      | where SourceSystem has "RelayShield" or tostring(Data.external_references) has "relayshield"
+      // RESOLVED 2026-08-16 by measuring ObservableKey per family. An earlier version
+      // restricted this to IP and domain, which dropped the stealer families entirely,
+      // and I first guessed the missing ones were URLs. They are not: measured in the
+      // live workspace, vidar is 1,024 hashes to 4 domains, agenttesla 642 to 17 and
+      // efimer 743 to 0, with ZERO url:value rows for any of them. Matching only
+      // network observables made this structurally incapable of seeing 97% of the
+      // stealer intel it claims to hunt for.
+      | where ObservableKey in ("ipv4-addr:value", "domain-name:value", "url:value",
+                               "file:hashes.'SHA-256'")
+      // The feed republishes every unexpired indicator on a 7 to 10 day cycle, so
+      // without this the same indicator is counted many times.
+      | summarize arg_max(TimeGenerated, *) by Id
+      | where IsActive and (isnull(ValidUntil) or ValidUntil > now())
+      | mv-expand Label = Data.labels
+      | where tostring(Label) startswith "malware:"
+      // Labels are not normalised at source: ClearFake and clearfake both occur, and
+      // some labels carry several comma-joined values in one string. Fold case and
+      // split before grouping, or one family lands in two buckets and the count is
+      // understated. Measured 2026-08-15: exact matching on "clearfake" returned 196
+      // of 608 matching indicators, silently.
+      | extend Family = tolower(replace_string(tostring(Label), "malware:", ""))
+      | mv-expand Family = split(Family, ",")
+      | extend Family = trim(" ", tostring(Family))
+      | where isnotempty(Family) and Family !in (not_families)
+      // Drop malformed identifiers. "win-0x4679" passed an earlier, looser check
+      // because it starts with a letter and uses only permitted characters, so the
+      // hex marker and long digit runs are now rejected explicitly. This costs any
+      // real family whose name starts with a digit, such as 8base; that is accepted
+      // here for precision on a High severity rule, and the prevalence hunting query
+      // still surfaces those tags rather than hiding them.
+      | where Family matches regex @"^[a-z]{3,}[a-z0-9._-]*$" and Family !contains "0x" and not(Family matches regex @"[0-9]{4,}")
+      | project IndicatorId = Id, IndicatorValue = tolower(ObservableValue), Family,
+                Confidence, ValidUntil, ThreatDescription = tostring(Data.description)
+  );
+  let Traffic = materialize(
+      CommonSecurityLog
+      | extend IngestionTime = ingestion_time()
+      | where IngestionTime > ago(dt_lookBack)
+      | extend RequestUrl = tostring(column_ifexists("RequestURL", ""))
+      | extend DestinationHost = tolower(tostring(column_ifexists("DestinationHostName", "")))
+      | extend UrlHost = tolower(tostring(parse_url(RequestUrl).Host))
+      | extend FileHashValue = tostring(column_ifexists("FileHash", ""))
+      | extend Traffic_TimeGenerated = TimeGenerated
+  );
+  // One indicator column to join on, whether the log recorded the destination as an
+  // address, a hostname or inside a URL.
+  let TrafficKeys = union
+      (Traffic | where isnotempty(DestinationIP)   | extend MatchKey = tolower(DestinationIP)),
+      (Traffic | where isnotempty(DestinationHost) | extend MatchKey = DestinationHost),
+      (Traffic | where isnotempty(UrlHost)         | extend MatchKey = UrlHost),
+      // Full-URL branch, for url:value indicators. The host-only branch above still
+      // catches the case where the indicator is the bare domain.
+      (Traffic | where isnotempty(RequestUrl)      | extend MatchKey = tolower(RequestUrl)),
+      // File-hash branch. Without this the stealer families cannot match at all,
+      // because their indicators are hashes. CommonSecurityLog carries FileHash on
+      // products that report file events; the column is read defensively because
+      // many CEF sources never populate it.
+      (Traffic | where isnotempty(FileHashValue)   | extend MatchKey = tolower(FileHashValue));
+  RelayShield_Indicators
+  | join kind=innerunique (TrafficKeys) on $left.IndicatorValue == $right.MatchKey
+  | where isnull(ValidUntil) or Traffic_TimeGenerated < ValidUntil
+  | summarize
+      Families        = make_set(Family, 20),
+      FamilyCount     = dcount(Family),
+      MatchedIOCs     = make_set(IndicatorValue, 20),
+      IndicatorCount  = dcount(IndicatorValue),
+      MaxConfidence   = max(Confidence),
+      FirstSeen       = min(Traffic_TimeGenerated),
+      LastSeen        = max(Traffic_TimeGenerated)
+      by SourceIP, DeviceName
+  | where FamilyCount >= min_families
+  | extend FamilyList = strcat_array(Families, ", "),
+           IOCList    = strcat_array(MatchedIOCs, ", ")
+  | extend timestamp = LastSeen
+  | project timestamp, FirstSeen, LastSeen, SourceIP, DeviceName, FamilyCount, FamilyList,
+            IndicatorCount, IOCList, MaxConfidence
+entityMappings:
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: SourceIP
+  - entityType: Host
+    fieldMappings:
+      - identifier: HostName
+        columnName: DeviceName
+customDetails:
+  MalwareFamilies: FamilyList
+  FamilyCount: FamilyCount
+  MatchedIndicators: IOCList
+  IndicatorCount: IndicatorCount
+  HighestConfidence: MaxConfidence
+alertDetailsOverride:
+  alertDisplayNameFormat: 'RelayShield - {{DeviceName}} contacted {{FamilyCount}} malware families'
+  alertDescriptionFormat: 'Host {{SourceIP}} contacted RelayShield indicators attributed to {{FamilyList}}. Matched indicators: {{IOCList}}.'
+version: 1.0.0
+kind: Scheduled

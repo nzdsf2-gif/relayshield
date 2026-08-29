@@ -1,0 +1,56 @@
+id: 6baf24d1-78bd-4b5f-851f-884c0140780d
+name: RelayShield - Threat intelligence ingestion has stopped
+description: |
+  'Raises an incident when no RelayShield indicators have arrived in the workspace for longer than the
+  configured staleness window. A TAXII connector that stops polling does not fail loudly: every detection
+  built on the feed simply stops matching, and a query that returns nothing is indistinguishable from a
+  clean environment. That is the worst failure mode a detection control has, and it is invisible without
+  a rule that looks for the absence. The query deliberately alerts when the feed has produced nothing at
+  all in the lookback window, which is the case a naive freshness check misses because a null timestamp
+  fails every comparison silently.'
+severity: Medium
+requiredDataConnectors:
+  - connectorId: ThreatIntelligenceTaxii
+    dataTypes:
+      - ThreatIntelIndicators
+queryFrequency: 1h
+queryPeriod: 14d
+triggerOperator: gt
+triggerThreshold: 0
+tactics:
+  - Impact
+relevantTechniques:
+  - T1562
+query: |
+  // Alert if nothing has arrived for this long. The connector's minimum polling
+  // frequency is one hour, so 6h tolerates a few missed polls without flapping.
+  let stale_after = 6h;
+  let lookback = 14d;
+  ThreatIntelIndicators
+  | where TimeGenerated > ago(lookback)
+  | where SourceSystem has "RelayShield" or tostring(Data.external_references) has "relayshield"
+  | summarize LastIndicator = max(TimeGenerated), IndicatorsInWindow = count()
+  // An empty table still returns one row here, with a null timestamp and a count of
+  // zero. Testing only "LastIndicator < ago(stale_after)" would evaluate null to
+  // false and go quiet exactly when the feed is most broken, so the null case is
+  // tested explicitly and first.
+  | where isnull(LastIndicator) or LastIndicator < ago(stale_after)
+  | extend HoursSinceLastIndicator =
+      iff(isnull(LastIndicator), real(null), round(datetime_diff('minute', now(), LastIndicator) / 60.0, 1))
+  | extend FeedStatus = iff(isnull(LastIndicator),
+        "No RelayShield indicators have been received in the last 14 days",
+        strcat("No RelayShield indicators received for ", tostring(HoursSinceLastIndicator), " hours"))
+  | extend RemediationSteps =
+        "Check Configuration > Data connectors > Threat intelligence - TAXII. Confirm the RelayShield API root URL, that the API key is present in BOTH the username and password fields, and that the key still has an active Threat Intelligence subscription."
+  | extend timestamp = coalesce(LastIndicator, now())
+  | project timestamp, FeedStatus, HoursSinceLastIndicator, LastIndicator, IndicatorsInWindow, RemediationSteps
+customDetails:
+  FeedStatus: FeedStatus
+  HoursSinceLastIndicator: HoursSinceLastIndicator
+  IndicatorsInWindow: IndicatorsInWindow
+  RemediationSteps: RemediationSteps
+alertDetailsOverride:
+  alertDisplayNameFormat: 'RelayShield - threat intelligence ingestion has stopped'
+  alertDescriptionFormat: '{{FeedStatus}}. {{RemediationSteps}}'
+version: 1.0.0
+kind: Scheduled

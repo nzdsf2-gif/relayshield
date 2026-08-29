@@ -293,6 +293,32 @@ Known completed after that handoff was written:
 
   Neither blocks the other. The pack is a public contribution and does not need the Alliance. Do not
   report either as complete without checking the refs above.
+
+  **VERIFIED 2026-08-29 by content, not just by refs.** A blobless sparse clone of `demisto/content`
+  at master (`2c87a93`) holds **1,350 packs and zero files matching "relayshield" anywhere in the
+  tree**, while `refs/pull/45206/head` carries all 13 files of `Packs/RelayShield/`. The pack exists
+  only on the branch. **`sh tools/check_xsoar_pack.sh`** runs both checks; run it before "our pack
+  ships with Cortex XSOAR" goes into any deck, email or landing page, because that is a claim a
+  prospect can check in ten seconds.
+
+---
+
+## PARTNER COMMISSION — decided 2026-08-29, do not re-open
+
+**20% recurring for 12 months**, on the six monitored subscription plans only. Not PAYG/x402 per-call
+revenue, not the TI subscription. 60-day clawback on refund or chargeback, no self-referrals, and the
+flat $25/$75 Tier 1 bounty is restricted to the business tiers.
+
+Live at **`partners.relayshield.net`** (`cloudflare_worker_partners.js`, `wrangler.partners.toml`).
+Full reasoning, including why not 30-40% and why not lifetime, is in `RelayShield_Strategy.md` §18.
+
+**The attribution is `client_reference_id=p_<code>`, and the prefix is load-bearing.**
+`client_reference_id` already carries the Telegram chat_id, and `relayshield_stripe_webhook.py`
+branched on `if client_ref:` — any non-empty value entered the Telegram flow, failed to find a
+pre-payment record and returned **200**, so Stripe never retries. A partner-referred customer would
+have paid and never been onboarded. The webhook now requires a numeric value for the Telegram path,
+routes `p_`-prefixed values to `referred_by` on the user record, and logs anything else loudly.
+Never put a bare partner code in that field.
 - **DFK outreach** (Top-10 item 7) — done 2026-08-22.
 - **Ronin `ronin:` prefix normalise** (Top-10 item 8) — done.
 

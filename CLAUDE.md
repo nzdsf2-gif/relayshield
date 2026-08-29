@@ -76,6 +76,27 @@ The durable venv, created once, because Homebrew Python is PEP 668 externally-ma
     python3 -m venv ~/.rsvenv
     ~/.rsvenv/bin/pip install boto3
 
+### 7. A fenced code block in a chat reply is a RUNNABLE zsh command block, or it is labelled.
+
+There is no third kind. On 2026-08-29 a YAML fragment from `deploy_lambdas.yml`:
+
+    role-to-assume: arn:aws:iam::239677749008:role/relayshield-github-deploy
+
+was pasted into a bare fence as *evidence* about how the workflow authenticates. Andrew pasted it
+into zsh, because that is what a fenced block means, and got `zsh: command not found: role-to-assume:`.
+
+So:
+
+- A block he is meant to run: fence it as ```zsh, and every line in it must be a real command that
+  runs as pasted. Nothing else goes in that block.
+- A block he is NOT meant to run — file contents, YAML, a log excerpt, JSON, a diff — gets a plain
+  English sentence immediately before it saying what it is and that it is not a command, and is
+  fenced with its real language (```yaml, ```json, ```text).
+- Never mix the two in one block. Never put a `$` prompt prefix in a runnable block, and never put
+  output and input in the same fence.
+
+This is the same class of failure as rules 1-5: the command was not wrong, it was not a command.
+
 ### 6. Every `aws` command starts with `AWS_PROFILE=relayshield`. No exceptions.
 
 **`620534471984` is NEVER the target of a RelayShield command.** It is the pre-audit account, kept

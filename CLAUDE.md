@@ -76,6 +76,15 @@ The durable venv, created once, because Homebrew Python is PEP 668 externally-ma
     python3 -m venv ~/.rsvenv
     ~/.rsvenv/bin/pip install boto3
 
+### 8. Every `git` command in a pasted block uses `--no-pager`.
+
+`git log`, `git diff`, `git show` and `git branch` open `less` when stdout is a terminal. In a
+multi-command block that means execution STOPS at the first one, the rest of the block never runs,
+and what comes back is a truncated screenful ending in `:`. That happened on 2026-08-29 to a
+diagnostic block: 24 of 35 commits came back and three of the four sections never executed.
+
+Write `git --no-pager log ...`, not `git log ...`. The flag goes before the subcommand.
+
 ### 7. A fenced code block in a chat reply is a RUNNABLE zsh command block, or it is labelled.
 
 There is no third kind. On 2026-08-29 a YAML fragment from `deploy_lambdas.yml`:

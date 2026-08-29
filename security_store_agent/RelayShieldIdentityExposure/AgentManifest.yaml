@@ -1,0 +1,122 @@
+# RelayShield identity exposure triage agent for Microsoft Security Copilot.
+#
+# Shape of the problem it solves: an analyst mid-incident holds one identifier,
+# usually an email address, and needs to know whether that identity is already
+# compromised before deciding whether to force a reset, revoke sessions, or
+# close the alert. Answering that today means four separate lookups. This agent
+# runs them in one pass and returns a triage verdict.
+#
+# Schema source: Microsoft's agent manifest reference, read 2026-08-16. The
+# three top-level keys are Descriptor, SkillGroups and AgentDefinitions.
+
+Descriptor:
+  # No whitespace, and none of / , \ ? # @
+  Name: RelayShield.IdentityExposure
+  DisplayName: RelayShield Identity Exposure
+  Description: >-
+    Checks whether an identity is exposed in breach records, infostealer logs,
+    stolen session data and exposed OAuth tokens, then returns a triage verdict
+    with the evidence behind it.
+  SupportedAuthTypes:
+    - ApiKey
+  Authorization:
+    Type: ApiKey
+    # Our API accepts the key in a custom header. Verified case-insensitive on
+    # the live endpoint, so the exact casing here is not load-bearing.
+    Key: X-RS-API-KEY
+    Location: Header
+    # Empty scheme: the header carries the raw key, not "Bearer <key>".
+    AuthScheme: ""
+
+SkillGroups:
+  # The API tools. Operation IDs below are the real ones in the live spec, not
+  # invented: metered_breach, metered_infostealer, metered_session_risk,
+  # metered_oauth_watchlist, metered_identity_graph, metered_sim_swap.
+  - Format: API
+    Settings:
+      OpenApiSpecUrl: https://api.relayshield.net/openapi.json
+
+  - Format: AGENT
+    Skills:
+      - Name: RelayShieldIdentityExposureEntrypoint
+        DisplayName: Triage an identity for exposure
+        Description: >-
+          Takes an email address or phone number and reports whether that
+          identity appears in breach records, infostealer logs, stolen session
+          data or exposed OAuth tokens.
+        Inputs:
+          - Name: Identity
+            Description: >-
+              An email address, or a phone number in E.164 format, to triage.
+            Required: true
+        Settings:
+          Model: gpt-4.1
+          Instructions: |
+            <|im_start|>system
+            You are a triage assistant for a security analyst investigating a
+            possible account compromise. You are given a single identity: either
+            an email address or a phone number.
+
+            Decide which checks apply and run them:
+
+            If the input is an EMAIL ADDRESS, call all four of:
+              1) metered_breach          - has it appeared in known breaches
+              2) metered_infostealer     - is it in infostealer malware logs
+              3) metered_session_risk    - are there stolen session cookies
+              4) metered_oauth_watchlist - are there exposed OAuth or SaaS tokens
+
+            If the input is a PHONE NUMBER, call metered_sim_swap instead.
+
+            Then report, in this order:
+
+            - A one-line verdict: EXPOSED or NO EXPOSURE FOUND.
+            - The specific evidence for each check that returned a finding,
+              naming the source and date where the response provides them.
+            - The recommended next action. A stolen session finding means the
+              session must be revoked, because resetting the password alone does
+              not invalidate a stolen cookie and multi-factor authentication does
+              not protect an already-authenticated session. An infostealer
+              finding means the endpoint itself should be treated as compromised,
+              not just the account.
+
+            Rules you must follow:
+
+            - Report only what the tools returned. Do not infer exposure that no
+              tool reported, and do not soften a finding that one did.
+            - If a check fails or returns an error, say which one failed and that
+              its result is unknown. Never present an unknown as a clean result:
+              an analyst reading "no exposure found" must be able to trust that
+              every check actually ran.
+            - If every check returns clean, say so plainly and state which checks
+              were run, so the analyst knows what the clean result covers.
+            <|im_end|>
+            <|im_start|>user
+            {{Identity}}
+            <|im_end|>
+        ChildSkills:
+          - metered_breach
+          - metered_infostealer
+          - metered_session_risk
+          - metered_oauth_watchlist
+          - metered_sim_swap
+
+AgentDefinitions:
+  - Name: RelayShieldIdentityExposure
+    # Security Store truncates over 30 characters. This is 29.
+    DisplayName: RelayShield Identity Exposure
+    Description: >-
+      Triage an email address or phone number against breach records,
+      infostealer logs, stolen session data and exposed OAuth tokens, and get a
+      verdict with the evidence and a recommended next action.
+    Publisher: RelayShield
+    Product: RelayShield
+    RequiredSkillsets:
+      - RelayShield.IdentityExposure
+    AgentSingleInstanceConstraint: None
+    Triggers:
+      # Analyst-invoked, not scheduled. DefaultPeriodSeconds 0 disables
+      # scheduled execution, which is what we want: this agent answers a
+      # question an analyst asks, it does not poll for work.
+      - Name: Default
+        DefaultPeriodSeconds: 0
+        ProcessSkill: RelayShield.IdentityExposure.RelayShieldIdentityExposureEntrypoint

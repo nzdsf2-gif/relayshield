@@ -194,9 +194,32 @@ def md_to_html(md):
                 out.append("<p>%s</p>" % _inline(" | ".join(r)))
             continue
 
-        if line.startswith("> "):
-            out.append("<blockquote>%s</blockquote>" % _inline(line[2:]))
-            i += 1
+        if line.startswith(">"):
+            # Gather the whole quote, not one <blockquote> per source line. The
+            # sources are hard-wrapped at ~100 chars, so emitting a blockquote
+            # per line turned every multi-line callout into a stack of
+            # separately-bordered boxes with gaps between them, and stopped
+            # **bold** spanning a line break from rendering at all -- the same
+            # failure the paragraph gatherer below already fixes. A bare ">"
+            # separates paragraphs inside a quote; it previously fell through
+            # to the paragraph branch and rendered as a literal "&gt;".
+            # Caught on the Sentinel guide 2026-08-16.
+            if in_list:
+                out.append("</%s>" % in_list)
+                in_list = None
+            para, paras = [], []
+            while i < len(lines) and lines[i].startswith(">"):
+                content = lines[i][1:].strip()
+                if content:
+                    para.append(content)
+                elif para:
+                    paras.append(para)
+                    para = []
+                i += 1
+            if para:
+                paras.append(para)
+            for p in paras:
+                out.append("<blockquote>%s</blockquote>" % _inline(" ".join(p)))
             continue
 
         m_li = re.match(r"^([-*]|\d+\.)\s+", line)

@@ -1,0 +1,8 @@
+# Security Store package manifest. Must sit at the ROOT of the zip, with the
+# agent folder beside it rather than nested inside a parent directory.
+manifest:
+  - id: "relayshield_identity_exposure"
+    description: "RelayShield identity exposure triage agent"
+    type: CopilotAgent
+schema:
+  version: "1.0.0"

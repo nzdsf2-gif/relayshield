@@ -25,7 +25,13 @@ TABLE=relayshield_intel_first_seen
 FUNC=relayshield-intel-monitor
 POLICY=relayshield-first-seen-write
 
-aws() { command aws --profile "$PROFILE" --region "$REGION" "$@"; }
+# AWS CLI v2 pipes output through a pager when stdout is a terminal, exactly
+# like git. In a multi-step script that means execution stops at the first
+# command with more than a screenful of output and the rest never runs. Empty
+# AWS_PAGER turns it off.
+export AWS_PAGER=""
+
+aws() { command aws --profile "$PROFILE" --region "$REGION" --no-cli-pager "$@"; }
 
 echo "== 1. Which account are we actually talking to?"
 GOT=$(aws sts get-caller-identity --query Account --output text)
@@ -66,11 +72,52 @@ echo "   $ROLE"
 
 echo
 echo "== 4. Grant PutItem on $TABLE to $ROLE"
-aws iam put-role-policy \
-  --role-name "$ROLE" \
-  --policy-name "$POLICY" \
-  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:PutItem\"],\"Resource\":\"arn:aws:dynamodb:${REGION}:${ACCOUNT}:table/${TABLE}\"}]}"
-echo "   inline policy $POLICY attached"
+DOC="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:PutItem\"],\"Resource\":\"arn:aws:dynamodb:${REGION}:${ACCOUNT}:table/${TABLE}\"}]}"
+
+# This role already carries 20-odd inline policies. IAM caps the AGGREGATE size
+# of a role's inline policies at 10,240 characters, and that cap is the reason
+# an ordinary put-role-policy fails here with LimitExceeded. Adding a 20-somethingth
+# inline policy is the wrong shape anyway.
+#
+# A customer-managed policy does not count against that budget at all: a role
+# may attach 10 of them, each up to 6,144 characters, tracked separately. So try
+# inline first, because it keeps the grant visible right on the role, and fall
+# back to managed when the budget is spent -- which is the expected path here.
+INLINE_COUNT=$(aws iam list-role-policies --role-name "$ROLE" --query 'length(PolicyNames)' --output text)
+echo "   role currently has $INLINE_COUNT inline policies (IAM caps their total size at 10,240 chars)"
+
+if aws iam put-role-policy --role-name "$ROLE" --policy-name "$POLICY" --policy-document "$DOC" 2>/tmp/rs_iam_err; then
+  GRANT="inline policy $POLICY"
+  echo "   attached as an inline policy"
+else
+  echo "   inline failed:"
+  sed 's/^/     /' /tmp/rs_iam_err
+  echo "   falling back to a customer-managed policy, which has its own budget"
+
+  ARN="arn:aws:iam::${ACCOUNT}:policy/${POLICY}"
+  if aws iam get-policy --policy-arn "$ARN" >/dev/null 2>&1; then
+    echo "   managed policy already exists -- adding a new default version"
+    # Five versions is the hard limit, so drop the oldest non-default before
+    # adding one. Re-running this script must not eventually start failing.
+    OLD=$(aws iam list-policy-versions --policy-arn "$ARN" \
+            --query 'sort_by(Versions[?IsDefaultVersion==`false`], &CreateDate)[0].VersionId' \
+            --output text)
+    if [ -n "$OLD" ] && [ "$OLD" != "None" ]; then
+      COUNT=$(aws iam list-policy-versions --policy-arn "$ARN" --query 'length(Versions)' --output text)
+      [ "$COUNT" -ge 5 ] && aws iam delete-policy-version --policy-arn "$ARN" --version-id "$OLD" && echo "   pruned version $OLD"
+    fi
+    aws iam create-policy-version --policy-arn "$ARN" --policy-document "$DOC" --set-as-default \
+      --query 'PolicyVersion.VersionId' --output text
+  else
+    aws iam create-policy --policy-name "$POLICY" --policy-document "$DOC" \
+      --query 'Policy.Arn' --output text
+  fi
+
+  aws iam attach-role-policy --role-name "$ROLE" --policy-arn "$ARN"
+  GRANT="managed policy $ARN"
+  echo "   attached $ARN to $ROLE"
+fi
+rm -f /tmp/rs_iam_err
 
 echo
 echo "== 5. Verify"
@@ -78,9 +125,16 @@ echo -n "   table status : "
 aws dynamodb describe-table --table-name "$TABLE" --query 'Table.TableStatus' --output text
 echo -n "   item count   : "
 aws dynamodb describe-table --table-name "$TABLE" --query 'Table.ItemCount' --output text
-echo -n "   policy       : "
-aws iam get-role-policy --role-name "$ROLE" --policy-name "$POLICY" \
-  --query 'PolicyDocument.Statement[0].Resource' --output text
+echo "   grant        : $GRANT"
+echo -n "   resource     : "
+case "$GRANT" in
+  inline*)  aws iam get-role-policy --role-name "$ROLE" --policy-name "$POLICY" \
+              --query 'PolicyDocument.Statement[0].Resource' --output text ;;
+  *)        aws iam get-policy-version \
+              --policy-arn "arn:aws:iam::${ACCOUNT}:policy/${POLICY}" \
+              --version-id "$(aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT}:policy/${POLICY}" --query 'Policy.DefaultVersionId' --output text)" \
+              --query 'PolicyVersion.Document.Statement[0].Resource' --output text ;;
+esac
 
 echo
 echo "Done. Next, backfill from the existing corpus -- dry run first:"

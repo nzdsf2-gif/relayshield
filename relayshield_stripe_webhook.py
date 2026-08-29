@@ -344,6 +344,7 @@ def create_user_record(
     subscription_tier: str,
     stripe_customer_id: str,
     stripe_subscription_id: str,
+    referred_by: str = "",
 ) -> str:
     """
     Create a new user record in relayshield_users.
@@ -354,7 +355,7 @@ def create_user_record(
     now = datetime.now(timezone.utc).isoformat()
 
     table = dynamodb.Table(USERS_TABLE)
-    table.put_item(Item={
+    item = {
         "user_id": user_id,
         "phone_encrypted": encrypt_phone(phone_number),
         "phone_hash": hash_phone(phone_number),
@@ -368,11 +369,20 @@ def create_user_record(
         "active": True,
         "created_at": now,
         "updated_at": now,
-    })
+    }
+    # PARTNER-1, 2026-08-29. Set only when a partner actually referred this
+    # subscriber, never as an empty string: an unset attribute stays out of any
+    # index built on it later, and an empty string does not, which is the same
+    # GSI-key trap the malware attribute hit in the intel feed.
+    if referred_by:
+        item["referred_by"] = referred_by
+        item["referred_at"] = now
+
+    table.put_item(Item=item)
 
     logger.info(
-        "User record created — user_id=%s tier=%s (phone encrypted)",
-        user_id, subscription_tier,
+        "User record created — user_id=%s tier=%s referred_by=%s (phone encrypted)",
+        user_id, subscription_tier, referred_by or "-",
     )
     return user_id
 
@@ -825,6 +835,32 @@ def lambda_handler(event, context):
     # --- 4. Telegram-first flow (client_reference_id = telegram chat_id) ---
     # Check this BEFORE phone extraction — Telegram users have no phone in session
     client_ref = session.get("client_reference_id", "")
+
+    # PARTNER-1, 2026-08-29. client_reference_id now carries two different
+    # things, so it has to be discriminated rather than assumed.
+    #
+    # A Telegram chat_id is always numeric. A partner referral code is written
+    # "p_<code>" by the Partner Center links. Before this guard the test was
+    # `if client_ref:` — ANY non-empty value entered the Telegram branch, so the
+    # first partner-attributed checkout would have found no pre-payment record,
+    # returned 200, and stopped. 200 means Stripe never retries, so the customer
+    # would have paid and then never been onboarded at all. Attribution was the
+    # smaller half of this bug.
+    partner_code = ""
+    if client_ref.startswith("p_"):
+        partner_code = client_ref[2:][:64]
+        logger.info("Partner referral on this checkout — code=%s", partner_code)
+        client_ref = ""
+    elif client_ref and not client_ref.isdigit():
+        # Neither a chat_id nor a partner code. Do not guess: fall through to the
+        # ordinary flow rather than into an onboarding path built for something
+        # else, and say so loudly enough to be found.
+        logger.warning(
+            "Unrecognised client_reference_id=%r — not numeric and not p_-prefixed; "
+            "treating as an ordinary checkout", client_ref,
+        )
+        client_ref = ""
+
     if client_ref:
         logger.info("Telegram payment flow detected — client_reference_id=%s", client_ref)
         pre_payment = get_pre_payment_record(client_ref)
@@ -992,6 +1028,7 @@ def lambda_handler(event, context):
             subscription_tier=subscription_tier,
             stripe_customer_id=stripe_customer_id,
             stripe_subscription_id=stripe_subscription_id,
+            referred_by=partner_code,
         )
     except Exception as exc:
         logger.exception("Failed to create user record for phone %s: %s", phone, exc)

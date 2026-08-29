@@ -202,7 +202,12 @@ App is a better interface to a capability we have, not a new capability.
 
 - Not a CS Mobile storefront, and not a CS Mobile link. Settled 2026-08-29, see §4. TON and
   multi-chain wallet risk **scans** are in scope; the CS Mobile app is not, in any form.
-- Not a partner centre. That is a website page, and the study agrees.
+- Not a partner centre. That is a website page, and the study agrees. **Built and settled
+  2026-08-29:** `partners.relayshield.net` publishes **20% recurring for 12 months** on the six
+  monitored subscription plans, with a 60-day clawback and no self-referrals. The Mini App may link
+  to it; it must not reimplement it. Attribution is `client_reference_id=p_<code>` through the
+  Stripe payment links, so any partner link the Mini App ever surfaces has to carry that exact form
+  — a bare code in that field routes the customer into the Telegram onboarding flow and drops them.
 - Not gated behind Telegram Stars until we know how Stars revenue interacts with our existing Stripe
   and x402 paths. Two payment rails in one product is a support problem before it is a revenue one.
 

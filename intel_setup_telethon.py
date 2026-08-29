@@ -71,11 +71,45 @@ async def _setup(secret_name: str, walk_channels: bool):
     print("Get your API credentials from: https://my.telegram.org")
     print("Log in → API Development Tools → Create new application\n")
 
-    api_id   = input("Enter api_id (integer from my.telegram.org): ").strip()
-    api_hash = input("Enter api_hash (string from my.telegram.org): ").strip()
-    phone    = input("Enter monitoring phone number (e.g. +12025551234): ").strip()
+    # Validate before connecting. On 2026-08-29 the my.telegram.org LOGIN CODE
+    # was entered at the api_id prompt -- an understandable mistake, because
+    # getting these two values requires logging in first and the code is the
+    # thing most recently on screen. Three distinct values are involved and
+    # only two of them belong here:
+    #
+    #   login code  one-time secret, 5-6 digits, expires in minutes. Goes in the
+    #               my.telegram.org login box and NOWHERE else, ever.
+    #   api_id      integer, roughly 6-8 digits, from API Development Tools
+    #   api_hash    32 lowercase hex characters, from the same page
+    #
+    # Failing here costs nothing. Failing after the OTP burns a code and needs
+    # another one, so these checks come first.
+    print("These come from my.telegram.org -> API Development Tools, AFTER you")
+    print("log in. The one-time code you used to LOG IN is not either of them.\n")
+
+    api_id = input("Enter api_id (an integer, e.g. 2040123): ").strip()
+    if not api_id.isdigit():
+        print(f"\nThat is not an api_id. Got {api_id!r}, which is not a number.")
+        print("If it was the code Telegram just sent you, that is the LOGIN CODE:")
+        print("it goes in the my.telegram.org login box. Log in, open API")
+        print("Development Tools, create an app, and copy api_id from there.")
+        return
+
+    api_hash = input("Enter api_hash (32 hex characters): ").strip()
+    if len(api_hash) != 32 or any(c not in "0123456789abcdef" for c in api_hash.lower()):
+        print(f"\nThat is not an api_hash. It must be exactly 32 characters using")
+        print(f"only 0-9 and a-f; got {len(api_hash)} character(s).")
+        print("It is on the same API Development Tools page as the api_id.")
+        return
+
+    phone = input("Enter the phone number for THIS account (e.g. +12025551234): ").strip()
+    if not phone.startswith("+") or not phone[1:].replace(" ", "").isdigit():
+        print(f"\nThat does not look like a phone number in international format.")
+        print("It must start with + and a country code, e.g. +12025551234.")
+        return
 
     print(f"\nConnecting to Telegram with phone {phone}...")
+    print("Telegram will send a login code to that number's Telegram app.")
 
     client = TelegramClient(StringSession(), int(api_id), api_hash)
     await client.start(phone=phone)

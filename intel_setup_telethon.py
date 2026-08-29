@@ -11,8 +11,15 @@ Steps:
      - App title: RelayShield Intel (or any name)
      - Copy api_id (integer) and api_hash (string)
 
-  2. Have your monitoring phone number ready (sms-activate.org number
-     or dedicated prepaid SIM)
+  2. Have a DEDICATED PREPAID SIM ready, in a real handset you control.
+
+     Do NOT use an SMS-rental service. The original version of this file
+     recommended sms-activate.org; that recommendation is withdrawn as of
+     2026-08-29. Rented numbers are recycled to the next renter, who can
+     then request a login code and take the account, and Telegram bans the
+     number ranges these services use in bulk. An account that collects
+     from 99 criminal channels, or one that will be used for prospecting
+     under the RelayShield name, must sit on a number only we control.
 
   3. Run: AWS_PROFILE=relayshield python3 intel_setup_telethon.py
 
@@ -52,7 +59,7 @@ DEFAULT_SECRET  = "relayshield/telethon_session"
 REGION          = "us-east-1"
 
 
-async def _setup(secret_name: str):
+async def _setup(secret_name: str, walk_channels: bool):
     try:
         from telethon import TelegramClient
         from telethon.sessions import StringSession
@@ -77,21 +84,37 @@ async def _setup(secret_name: str):
     print("\n✅ Authentication successful")
 
     # Join monitoring channels
-    print("\nJoining monitored channels...")
-    from relayshield_intel_monitor import MONITORED_CHANNELS
-    joined = 0
-    skipped = 0
-    for username, category, desc in MONITORED_CHANNELS:
-        try:
-            await client.get_entity(username)
-            print(f"  ✅ @{username} — accessible")
-            joined += 1
-        except Exception as exc:
-            print(f"  ⚠️  @{username} — {exc}")
-            skipped += 1
+    # The channel walk resolves ~100 usernames back to back. Every one of them is
+    # a ResolveUsernameRequest, which carries the tightest per-session flood limit
+    # Telegram applies, and it runs on an account that is minutes old. That is a
+    # reliable way to get a fresh account flood-waited or banned outright.
+    #
+    # For the COLLECTION account it is still worth doing once: the whole point of
+    # that account is to reach those channels, and confirming access at setup is
+    # cheaper than discovering a dead channel from a silent Lambda later.
+    #
+    # For any OTHER account it is both dangerous and pointless -- the prospecting
+    # account has no business touching the collection channel list at all -- so it
+    # is skipped unless explicitly asked for.
+    if walk_channels:
+        print("\nChecking access to monitored channels...")
+        from relayshield_intel_monitor import MONITORED_CHANNELS
+        joined = 0
+        skipped = 0
+        for username, category, desc in MONITORED_CHANNELS:
+            try:
+                await client.get_entity(username)
+                print(f"  ✅ @{username} — accessible")
+                joined += 1
+            except Exception as exc:
+                print(f"  ⚠️  @{username} — {exc}")
+                skipped += 1
+        print(f"\nChannels: {joined} accessible, {skipped} unavailable")
+    else:
+        print("\nSkipping the monitored-channel walk (not the collection account).")
+        print("~100 username resolves on a new account is how new accounts get banned.")
 
     await client.disconnect()
-    print(f"\nChannels: {joined} accessible, {skipped} unavailable")
 
     # Store in Secrets Manager
     print("\nStoring session in Secrets Manager...")
@@ -104,10 +127,16 @@ async def _setup(secret_name: str):
         "session_string": session_str,
     })
 
-    sm.update_secret(
-        SecretId     = secret_name,
-        SecretString = secret_value,
-    )
+    # update_secret raises ResourceNotFoundException on a secret that does not
+    # exist yet, which is exactly the case when setting up a SECOND account. The
+    # failure would land AFTER the phone auth, so the OTP is spent and the session
+    # string is lost -- and a second attempt needs a second OTP. Create it here
+    # instead of asking for a console step that is easy to forget.
+    try:
+        sm.update_secret(SecretId=secret_name, SecretString=secret_value)
+    except sm.exceptions.ResourceNotFoundException:
+        print(f"   {secret_name} does not exist yet — creating it")
+        sm.create_secret(Name=secret_name, SecretString=secret_value)
 
     print("✅ Session stored in Secrets Manager")
     print(f"   Secret: {secret_name}")
@@ -121,11 +150,18 @@ if __name__ == "__main__":
     ap.add_argument("--secret", default=DEFAULT_SECRET,
                     help=f"Secrets Manager secret to write the session to "
                          f"(default: {DEFAULT_SECRET})")
+    ap.add_argument("--walk-channels", action="store_true",
+                    help="Resolve every MONITORED_CHANNELS username to confirm "
+                         "access. On by default for the collection secret only; "
+                         "~100 resolves will flood-wait or ban a fresh account.")
     args = ap.parse_args()
+
+    is_collection = args.secret == DEFAULT_SECRET
+    walk_channels = args.walk_channels or is_collection
 
     # Overwriting the collection session is the one mistake this script can make
     # that is both easy and expensive, so it has to be typed out on purpose.
-    if args.secret == DEFAULT_SECRET:
+    if is_collection:
         print(f"\nThis will OVERWRITE {DEFAULT_SECRET}, the session")
         print("relayshield-intel-monitor uses to collect from 99 channels.")
         print("For a SECOND account (prospecting discovery), stop and re-run with:")
@@ -134,4 +170,4 @@ if __name__ == "__main__":
             print("Aborted. Nothing was written.")
             sys.exit(1)
 
-    asyncio.run(_setup(args.secret))
+    asyncio.run(_setup(args.secret, walk_channels))

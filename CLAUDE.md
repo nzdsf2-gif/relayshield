@@ -42,7 +42,7 @@ Fix, in that directory:
 | | Status |
 |---|---|
 | AWS credentials | **None usable.** The `AWS_*` env vars are placeholders; STS returns `InvalidClientTokenId`. Anything touching DynamoDB or Lambda runs on the Mac with `AWS_PROFILE=relayshield` |
-| AWS account | **239677749008.** A command without `AWS_PROFILE=relayshield` resolves to `620534471984`. **Reads** there return `ResourceNotFoundException`, which looks like a missing resource and is not. **Writes there SUCCEED** — see below |
+| AWS account | **239677749008 is the ONLY RelayShield account.** Every table, Lambda, secret and role lives there. `620534471984` is a SEPARATE account used solely to pre-audit new AWS workflows before they touch production — **no RelayShield resource is ever meant to exist in it.** It is the shell default, so an `aws` command with no `AWS_PROFILE=relayshield` silently resolves to it. **Reads** there return `ResourceNotFoundException`, which looks like a missing resource and is not. **Writes there SUCCEED** — see below |
 | GitHub | Read/write via MCP. **Workflow dispatch is blocked** (`403 Resource not accessible by integration`) — Andrew must click *Run workflow* in the UI |
 | Egress | Blocked: `*.workers.dev`, `discord.com`, all `zapier.com`, `catalogapi.azure.com`, `powershellgallery.com`, arbitrary vendor sites. Reachable: GitHub, `raw.githubusercontent.com`, PyPI, WebSearch |
 | Python | No `boto3`, no PowerShell. Use a throwaway venv in the scratchpad |
@@ -78,8 +78,14 @@ The durable venv, created once, because Homebrew Python is PEP 668 externally-ma
 
 ### 6. Every `aws` command starts with `AWS_PROFILE=relayshield`. No exceptions.
 
+**`620534471984` is NEVER the target of a RelayShield command.** It is the pre-audit account, kept
+deliberately separate so a new AWS workflow can be trialled without touching production. It is also
+the shell's default profile, which is the entire problem: omitting `AWS_PROFILE=relayshield` does
+not error, it aims at the audit account. If a command in this repo, in a doc, or in a chat reply
+targets `620534471984`, that command is wrong. There is no RelayShield resource there to talk to.
+
 Rule 6 exists because the table above was read as "a missing profile is a harmless error". It is
-not, and 2026-08-29 proved it:
+not, and 2026-08-29 proved it — for the **third** time across sessions:
 
     aws dynamodb create-table --table-name relayshield_intel_first_seen ...
 
@@ -153,6 +159,31 @@ on the first line of `lambda_handler`, and the deployer invokes everything it de
 package imports. Both now return early on `{"source": "ci.import-probe"}`. Any future handler that
 does real work on invoke needs the same three lines.
 
+### NEXT SESSION, TOP OF THE LIST — record the Rain demo video
+
+Carried explicitly to 2026-08-30 at Andrew's instruction. It has slipped once already. It is not
+blocked on anything: no code, no AWS, no approval. Details in the section below.
+
+### OpenRouter key-revocation webhook — build it when the corpus has OR tokens
+
+Sequenced behind data, like A8, and for the same reason.
+
+The LLMjacking detector's OpenRouter pattern shipped in `844a2c3` (deployed 2026-08-27 11:11). It
+has been live two days, so **there is no corpus of captured `sk-or-v1-*` keys yet** and nothing to
+notify anyone about.
+
+When there is, the integration is the revocation webhook: RelayShield detects a leaked OpenRouter
+key in a criminal Telegram channel and calls OpenRouter to revoke it, before the key is drained.
+That is the thing their own tooling cannot do, because they cannot see the channel.
+
+**Trigger to build:** the first non-zero count of `sk-or-v1-*` in `relayshield_intel_iocs`. Check it
+before writing any of it. Do not build the webhook against zero rows, and **do not quote a captured
+OpenRouter key count to OpenRouter, Stripe, or anyone else until the category clears 100** — the
+standing measurement rule applies here with force, because this is a number that would be checked.
+
+Rationale, and why this is the right ask of Stripe post-acquisition, is in
+`openrouter_stripe_integration_angle.md`.
+
 ### Rain Agentic Startup Program — record the demo, then submit
 
 Not blocked on anything. The reason it is here is that it is the one item where a two-minute video
@@ -216,8 +247,22 @@ was not updated. **Ask before treating anything in its "carried forward" list as
 
 Known completed after that handoff was written:
 
-- **XSOAR PR #45206 / Tech Alliance (roadmap D3)** — **DONE**, completed weeks ago. Do not
-  re-raise it as blocked on "2 named joint customers".
+- **XSOAR PR #45206 / Tech Alliance (roadmap D3)** — **THIS ENTRY IS WRONG. Re-checked 2026-08-29.**
+  `git ls-remote https://github.com/demisto/content 'refs/pull/45206/*'` returns **both**
+  `refs/pull/45206/head` and `refs/pull/45206/merge`. GitHub deletes the `/merge` ref once a PR is
+  merged or closed, so its presence means **#45206 is still open**. The contrib branch
+  `refs/heads/contrib/nzdsf2-gif_add-relayshield-pack` is also still live in their repo, and their
+  "Auto Merge Docker Update" workflow was still firing against it on 2026-08-29. Automation does not
+  run on a branch that merged weeks ago.
+
+  Two separate things were being conflated under "DONE", and they must stay separate:
+
+  1. **The content pack PR (#45206)** — technical, in `demisto/content`, **still open**.
+  2. **The Palo Alto Tech Alliance partnership** — commercial, and now gated on Palo Alto's new
+     requirement of **3 named joint customers**.
+
+  Neither blocks the other. The pack is a public contribution and does not need the Alliance. Do not
+  report either as complete without checking the refs above.
 - **DFK outreach** (Top-10 item 7) — done 2026-08-22.
 - **Ronin `ronin:` prefix normalise** (Top-10 item 8) — done.
 

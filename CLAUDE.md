@@ -76,6 +76,15 @@ The durable venv, created once, because Homebrew Python is PEP 668 externally-ma
     python3 -m venv ~/.rsvenv
     ~/.rsvenv/bin/pip install boto3
 
+### 9. Every `aws` command in a pasted block uses `--no-cli-pager`.
+
+Same failure as rule 8, different tool. AWS CLI **v2 pipes output through a pager** when stdout is
+a terminal. On 2026-08-29 an `iam list-role-policies` on a role with 20-odd policies stopped a
+four-command diagnostic block dead at the third command, ending in `:`, and the fourth never ran.
+
+Either `--no-cli-pager` on each command, or `export AWS_PAGER=""` as the first line of the block.
+Committed scripts should do both, as `tools/setup_first_seen.sh` does.
+
 ### 8. Every `git` command in a pasted block uses `--no-pager`.
 
 `git log`, `git diff`, `git show` and `git branch` open `less` when stdout is a terminal. In a

@@ -225,6 +225,17 @@ def _fetch_epss_scores(cve_ids: list[str]) -> dict[str, dict]:
 
 
 def lambda_handler(event, context):
+    # deploy_lambdas.yml invokes every function it deploys to prove the module
+    # imported — update-function-code reports success even when the package is
+    # missing a module, and the failure only shows up as Runtime.ImportModuleError
+    # on the next real invocation. Reaching this line already proves the import
+    # worked, so return before doing any work: a full KEV+NVD+OSV pass takes long
+    # enough that the CLI's read timeout would fire, and the probe swallows that,
+    # which would make the check pass without asserting anything.
+    if isinstance(event, dict) and event.get("source") == "ci.import-probe":
+        logger.info("ci.import-probe — module imported, returning without ingesting")
+        return {"statusCode": 200, "probe": "ok"}
+
     logger.info("INTEL-FEED-4 (CISA KEV + EPSS + NVD + OSV + GitHub Advisory) starting")
 
     cve_table  = _dynamodb.Table(INTEL_CVE_TABLE)

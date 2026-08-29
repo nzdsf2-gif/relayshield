@@ -36,6 +36,18 @@ on:
       - 'relayshield_liquidation_monitor.py'
       - 'relayshield_tgmonthly_digest.py'
       - 'relayshield_stablecoin_monitor.py'
+      # Added 2026-08-29. These two had source in the repo, no deploy path and,
+      # until 2026-08-27, no drift detection either — the exact combination that
+      # produced ~1,900 undeployed lines across four handlers on 2026-08-26. The
+      # 2026-08-28 drift run confirmed the drift here is one-directional: live is
+      # main minus the A7 commit, with nothing live-only to recover. That means
+      # the check cannot go green until a deploy path exists. It does now.
+      - 'relayshield_intel_feed.py'
+      - 'relayshield_intel_kev.py'
+      # Shared module. relayshield_intel_feed.py imports it, so the import walk
+      # maps it to relayshield-intel-feed on its own; this entry only makes a
+      # change to it trigger the workflow at all.
+      - 'relayshield_intel_labels.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
@@ -67,7 +79,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Manual trigger — deploy all mapped Lambda files
-            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py"
+            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py relayshield_intel_feed.py relayshield_intel_kev.py"
             echo "Manual trigger — deploying all Lambdas"
           else
             # Push trigger — deploy only files changed in this commit
@@ -102,6 +114,8 @@ jobs:
             ["relayshield_tgmonthly_digest.py"]="relayshield_tgmonthly_digest"
             ["relayshield_stablecoin_monitor.py"]="relayshield-stablecoin-monitor"
             ["relayshield_openapi_spec.py"]="relayshield-api"
+            ["relayshield_intel_feed.py"]="relayshield-intel-feed"
+            ["relayshield_intel_kev.py"]="relayshield-intel-kev"
           )
 
           # Resolve a handler's local dependencies from its own imports, rather
@@ -204,7 +218,7 @@ jobs:
         run: |
           [ -f deployed_funcs.txt ] || { echo "nothing deployed"; exit 0; }
           FAILED=""
-          while read -r FUNC; do
+          while read -r FUNC || [ -n "$FUNC" ]; do
             [ -n "$FUNC" ] || continue
             echo "→ Import probe: $FUNC"
 
@@ -212,11 +226,29 @@ jobs:
             # or returns its own error, which is fine — the only thing being
             # asserted is that the module loaded at all. An import failure shows
             # up as Runtime.ImportModuleError regardless of payload.
+            #
+            # relayshield_intel_feed.py and relayshield_intel_kev.py additionally
+            # recognise this exact source string and return immediately, because
+            # they start ingesting the moment they are invoked and a full pass
+            # outruns the read timeout below.
+            #
+            # Delete the response file first. It used to be reused across
+            # iterations, so a function whose invoke failed outright was checked
+            # against the PREVIOUS function's response and reported as clean.
+            rm -f out.json
+            RC=0
             aws lambda invoke --function-name "$FUNC" --region us-east-1 \
               --payload '{"source":"ci.import-probe"}' \
-              --cli-binary-format raw-in-base64-out out.json >/dev/null 2>&1 || true
+              --cli-read-timeout 120 --cli-connect-timeout 20 \
+              --cli-binary-format raw-in-base64-out out.json >invoke.log 2>&1 || RC=$?
 
-            if grep -qi "ImportModuleError\|No module named" out.json 2>/dev/null; then
+            if [ "$RC" -ne 0 ] || [ ! -s out.json ]; then
+              # Not proof of an import failure, but it is proof the probe did not
+              # run, and a probe that did not run must never read as a pass.
+              echo "::error::$FUNC could not be probed (aws invoke rc=$RC, response empty)"
+              cat invoke.log || true
+              FAILED="$FAILED $FUNC"
+            elif grep -qi "ImportModuleError\|No module named" out.json; then
               echo "::error::$FUNC failed to import after deploy"
               cat out.json
               FAILED="$FAILED $FUNC"

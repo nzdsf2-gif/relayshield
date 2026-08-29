@@ -42,7 +42,7 @@ Fix, in that directory:
 | | Status |
 |---|---|
 | AWS credentials | **None usable.** The `AWS_*` env vars are placeholders; STS returns `InvalidClientTokenId`. Anything touching DynamoDB or Lambda runs on the Mac with `AWS_PROFILE=relayshield` |
-| AWS account | **239677749008.** A command without `AWS_PROFILE=relayshield` resolves to `620534471984` and returns `ResourceNotFoundException`, which looks like a missing resource and is not |
+| AWS account | **239677749008.** A command without `AWS_PROFILE=relayshield` resolves to `620534471984`. **Reads** there return `ResourceNotFoundException`, which looks like a missing resource and is not. **Writes there SUCCEED** — see below |
 | GitHub | Read/write via MCP. **Workflow dispatch is blocked** (`403 Resource not accessible by integration`) — Andrew must click *Run workflow* in the UI |
 | Egress | Blocked: `*.workers.dev`, `discord.com`, all `zapier.com`, `catalogapi.azure.com`, `powershellgallery.com`, arbitrary vendor sites. Reachable: GitHub, `raw.githubusercontent.com`, PyPI, WebSearch |
 | Python | No `boto3`, no PowerShell. Use a throwaway venv in the scratchpad |
@@ -75,6 +75,24 @@ The durable venv, created once, because Homebrew Python is PEP 668 externally-ma
 
     python3 -m venv ~/.rsvenv
     ~/.rsvenv/bin/pip install boto3
+
+### 6. Every `aws` command starts with `AWS_PROFILE=relayshield`. No exceptions.
+
+Rule 6 exists because the table above was read as "a missing profile is a harmless error". It is
+not, and 2026-08-29 proved it:
+
+    aws dynamodb create-table --table-name relayshield_intel_first_seen ...
+
+ran without the profile and **printed a success block**. It created the table in `620534471984`,
+the wrong account, where the Lambda will never see it — and the next command, a read, then failed
+with `ResourceNotFoundException`, which is what finally exposed it.
+
+A read against the wrong account is a confusing error. **A write against the wrong account is a
+resource that exists, looks right in the output, and is invisible to everything that needs it.**
+So prefix every command, including the ones that look read-only, and prefer verifying with:
+
+    AWS_PROFILE=relayshield aws sts get-caller-identity --query Account --output text
+    # must print 239677749008
 
 ---
 
@@ -110,16 +128,30 @@ that gets lost between sessions.
 `lambda_drift_check.yml`: source in the repo, no automated deploy, no drift detection. That is the
 same combination that produced ~1,900 undeployed lines across four handlers on 2026-08-26.
 
-They are now in the **drift check only**. The sequence, and it must be in this order:
+**RESOLVED 2026-08-29.** Run 9 of `lambda_drift_check.yml` (2026-08-28 22:49, red, 2 annotations)
+named both functions. The diffs were read in full and were **one-directional**: the live code is
+`main` minus the A7 commit and nothing else. No live-only symbol, no live-only import, nothing to
+recover. That is not the 2026-08-26 hand-deploy pattern, it is "the repo is ahead and there is no
+deploy path" — so the check could never have gone green on its own, and the original step 3
+("only once the check is green") was unreachable by construction.
 
-1. **Watch `lambda_drift_check.yml` for `relayshield-intel-feed` and `relayshield-intel-kev`.** It
-   runs daily. A red run naming either is drift, not a broken check.
-2. **If either has drifted**, recover it with `recover_live_handler.yml` and reconcile, exactly as
-   the four handlers were on 2026-08-26. Do not skip to step 3.
-3. **Only once the check is green on both**, add them to `deploy_lambdas.yml` and deploy.
+Both are now in `deploy_lambdas.yml`, with `relayshield_intel_labels.py` mapped alongside them.
+**The next merge to `main` touching either file deploys them and the drift goes away.** Until that
+merge lands, the feed and KEV halves of A7 (malware label normalisation) are still inert.
 
-**Until step 3, the feed and KEV halves of A7 (malware label normalisation) are inert.** The code is
-in the repo and is not running.
+The general rule this replaces it with, for the next handler that turns up unmapped:
+
+1. A red drift run is the alarm, always. Read the diff before doing anything.
+2. **Only if the live side contains something `main` does not** — a symbol, an import, a whole file
+   — recover it with `recover_live_handler.yml` and reconcile, exactly as the four handlers were on
+   2026-08-26.
+3. If the diff is only `main`'s own commits appearing in reverse, live is simply stale. Add the
+   function to `deploy_lambdas.yml` and deploy; there is nothing to recover.
+
+Note on the deploy probe: `relayshield_intel_feed.py` and `relayshield_intel_kev.py` begin ingesting
+on the first line of `lambda_handler`, and the deployer invokes everything it deploys to prove the
+package imports. Both now return early on `{"source": "ci.import-probe"}`. Any future handler that
+does real work on invoke needs the same three lines.
 
 ### Rain Agentic Startup Program — record the demo, then submit
 

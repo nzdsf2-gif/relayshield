@@ -29,6 +29,35 @@ rather than pasting a section into the wrong box.
 
 **Company.** RelayShield
 
+**Stage / raised.** Pre-seed, nothing raised. Keep it accurate. The programme reads as aimed at
+VC-backed companies and this may filter, but being caught trimming it in front of a Visa principal
+member is a worse outcome than the filter. The description below is what carries the application:
+most applicants to an agentic-commerce accelerator arrive with a deck, and "not funded" is a very
+different thing from "not built".
+
+**"Please briefly describe your startup and core offerings" (verbatim, for the form).**
+
+    RelayShield answers the question agent payment infrastructure leaves open. Not
+    whether an agent is allowed to spend, but whether the counterparty it is about to
+    pay is legitimate. An agent with a valid card, inside its limits, on a verified
+    account, paying a typosquatted API is a fully authorised transaction. Every
+    control in that path passes it, because every control is about the spender.
+
+    We score the counterparty instead. Is this MCP server a near-miss of a real one.
+    Was the domain registered last week. Does it appear in a criminal indicator
+    corpus. The checks are priced per call and payable over x402 in USDC on Base, so
+    an agent calls and pays for them itself, with no account and no API key.
+
+    This is live, not planned: the endpoints are running, listed in the CDP Bazaar,
+    and reachable from agent frameworks through a published MCP server. We have a two
+    minute recording of an agent discovering two MCP servers, paying $0.35 to check
+    each one before connecting, refusing the typosquat and proceeding with the
+    legitimate one, with no human in the loop and no account anywhere. Both payments
+    are verifiable on Base.
+
+If the field is short, the first two paragraphs plus "Live today, with a two minute unattended demo
+and payments verifiable on Base." carries the same argument.
+
 **What you build, in one line.**
 Counterparty risk checks that an AI agent can call and pay for itself, before it connects to a tool
 or pays an API.

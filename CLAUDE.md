@@ -132,6 +132,40 @@ So prefix every command, including the ones that look read-only, and prefer veri
 
 ---
 
+## IAM — one role per Lambda, not one role for all of them
+
+`relayshield-breach-check-role-1sapnwdl` is the console-generated role from the
+first Lambda ever created, and it became the answer to every "which role?"
+question since. It carries **26 inline policies** — one per table, by convention —
+which fill the 10,240-byte inline budget. That is a hard IAM limit. On 2026-08-29
+a single `PutItem` grant could not be added and had to fall back to a customer-
+managed policy; a role may have only 10 of those attached, so the fallback is the
+next cap, not a fix.
+
+**Do not add another policy to that role.** The tooling to move a function onto
+its own role is in the repo, the derived policies are all under 1,900 bytes
+against a 10,240-byte budget, and the runbook is `iam_role_split.md`:
+
+- `tools/iam_snapshot_role.py` — read-only, run this FIRST and commit the output.
+  The 26 inline policies exist only in AWS. The DRIFT RULE applies to IAM harder
+  than it applies to code: a missing permission does not fail at deploy time, it
+  fails on whichever code path needs it, whenever that path next runs.
+- `tools/iam_scan_sources.py` — no AWS. Which resources each Lambda touches.
+- `tools/iam_split_roles.py` — derives a per-function role from the shared role's
+  own statements. Dry-run by default; `--apply` requires `--only <function>`.
+
+Actions are never inferred from source — they are taken from the shared role,
+which is what is running today. Only resources come from the source, and only for
+services whose resources appear there as names. Step one is a pure move with
+identical permissions; narrowing is `--narrow-wildcards`, separately, afterwards.
+
+Nothing deletes from the shared role until the snapshot's
+`functions_using_this_role` list is empty. That list is authoritative and
+`deploy_lambdas.yml`'s `LAMBDA_MAP` is not — 46 `relayshield_*.py` sources are
+not in it.
+
+---
+
 ## THE DRIFT RULE — the most expensive lesson in this repo
 
 **Anything not in the repo is erased by the next deploy of that component.**

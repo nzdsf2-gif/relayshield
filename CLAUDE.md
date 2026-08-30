@@ -139,6 +139,36 @@ So prefix every command, including the ones that look read-only, and prefer veri
     AWS_PROFILE=relayshield aws sts get-caller-identity --query Account --output text
     # must print 239677749008
 
+### 9. EVERY instruction says WHO does it. Andrew must never have to guess.
+
+Asked for explicitly on 2026-08-30, after a reply said "Run **Recover Live Lambda Handler** with
+function: ..., handler: ..." and there was no way to tell whether that was a note-to-self, something
+already done, or a thing he was meant to go and do. He should not have to work that out. A reply
+that leaves him guessing has not delivered anything.
+
+**Every** step in a chat reply carries one of these labels, in bold, on its own line, immediately
+before the block or sentence it governs. No step is unlabelled.
+
+- **`ANDREW RUNS THIS:`** — followed by a ```zsh block, and nothing but real commands in it
+  (rules 1-8 all apply). This is the only label that may precede a ```zsh block.
+- **`ANDREW CLICKS THIS:`** — a browser action. GitHub Actions dispatch, a Cloudflare dashboard, a
+  Stripe setting. Say the page, the exact control, and the exact field values. Workflow dispatch is
+  403 for Claude, so every workflow run is this label, never "run the workflow".
+- **`CLAUDE ALREADY DID THIS:`** — finished work being reported. No action for him. Say it in the
+  past tense.
+- **`FOR INFORMATION, DO NOT RUN:`** — file contents, YAML, JSON, logs, a diff. Fence it with its
+  real language, never ```zsh. This is rule 7 restated as a label.
+
+An imperative sentence with no label — "run the backfill", "check the drift issue", "recover the
+live handler" — is the bug this rule exists to stop. If a reply contains one, it is not finished.
+
+### 10. `git merge` and `git commit` open vim. Always pass `--no-edit`.
+
+Same failure as rule 8, one command over. On 2026-08-30 a pasted `git merge` dropped him into a vim
+buffer on the merge message with no way out that he knew, and the rest of the block never ran.
+`git merge --no-edit`, `git commit --no-edit` when concluding a merge. This is also the fix for the
+`MERGE_HEAD exists` recovery at the top of this file.
+
 ---
 
 ## IAM — one role per Lambda, not one role for all of them

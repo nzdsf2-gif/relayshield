@@ -45,24 +45,70 @@ echo "   Open in a browser:"
 echo "     $REPO/tree/master/$PACK"
 echo "   404 means NOT merged. A file listing means merged."
 echo
+# Two mechanisms, tried in order, because the first one does not work
+# everywhere. api.github.com answers 403 from inside a Claude Code container:
+# the agent proxy scopes API access to the session's allowed repositories, and
+# demisto/content is not one of them. That 403 is indistinguishable from a rate
+# limit by status code alone, which is why this used to stop at "NOT an answer"
+# and leave the question open in exactly the session that needed it answered.
+#
+# raw.githubusercontent.com is not scoped that way and does answer. It cannot
+# list a directory, so it asks for a file that every pack must have --
+# pack_metadata.json is mandatory in the XSOAR pack format.
+#
+# A bare 404 from raw is not trusted on its own. A blocked or misrouted request
+# can 404 just as easily as an absent file, so a CONTROL pack known to be on
+# master is fetched first. Control 200 + target 404 means absent. Control 404
+# means the mechanism is broken and the run is not an answer.
+CONTROL=Packs/Malware/pack_metadata.json
+TARGET=$PACK/pack_metadata.json
+RAW=https://raw.githubusercontent.com/demisto/content/master
+
+http() { curl -sS -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo "000"; }
+
+VERDICT=""
+
 if command -v curl >/dev/null 2>&1; then
   # The API, not the HTML tree page. The tree page can answer 403 from a proxy
   # or a rate limiter and that is indistinguishable from a real answer; the
   # contents API returns a clean 200 or 404 and needs no token for a public repo.
   API="https://api.github.com/repos/demisto/content/contents/$PACK?ref=master"
-  CODE=$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept: application/vnd.github+json' "$API" || echo "000")
-  echo "   GET $API"
-  echo "   HTTP $CODE"
+  CODE=$(http "$API")
+  echo "   [api]  GET $API"
+  echo "   [api]  HTTP $CODE"
   case "$CODE" in
-    200) echo "   -> MERGED. The pack is on master. The claim is safe to make." ;;
-    404) echo "   -> NOT MERGED. Do not claim the pack ships with XSOAR." ;;
-    403) echo "   -> rate limited or blocked. This is NOT an answer -- retry later." ;;
-    000) echo "   -> could not reach GitHub. This is NOT an answer." ;;
-    *)   echo "   -> unexpected status. This is NOT an answer -- check by hand." ;;
+    200) VERDICT=merged ;;
+    404) VERDICT=absent ;;
+    *)   echo "   [api]  not an answer -- falling back to raw.githubusercontent.com" ;;
   esac
+
+  if [ -z "$VERDICT" ]; then
+    CCODE=$(http "$RAW/$CONTROL")
+    TCODE=$(http "$RAW/$TARGET")
+    echo "   [raw]  control $CONTROL -> HTTP $CCODE"
+    echo "   [raw]  target  $TARGET -> HTTP $TCODE"
+    if [ "$CCODE" != "200" ]; then
+      echo "   [raw]  control did not return 200, so a 404 on the target proves"
+      echo "          nothing. This run is NOT an answer."
+    else
+      case "$TCODE" in
+        200) VERDICT=merged ;;
+        404) VERDICT=absent ;;
+        *)   echo "   [raw]  unexpected status on the target. NOT an answer." ;;
+      esac
+    fi
+  fi
 else
   echo "   curl not found -- open the URL above by hand."
 fi
+
+echo
+case "$VERDICT" in
+  merged) echo "   -> MERGED. The pack is on master. The claim is safe to make." ;;
+  absent) echo "   -> NOT MERGED. Do not claim the pack ships with XSOAR." ;;
+  *)      echo "   -> UNDETERMINED. Neither mechanism answered. Do not treat this"
+          echo "      as evidence either way -- open the tree URL above by hand." ;;
+esac
 
 echo
 echo "Note: the pack landing on master and the Palo Alto Tech Alliance are two"

@@ -18,7 +18,7 @@ No corpus total. No endpoint count as a coverage claim. Nothing from
 member of this Alliance can check a number, and several of them do this for a living.
 
 Everything quantitative below is a thing that happened on-chain and can be verified by a stranger:
-two payments of $0.35 in USDC on Base, and their transaction hashes.
+two payments of $0.35 in USDC on Base, visible as ERC-20 transfers from the agent's wallet.
 
 ---
 
@@ -102,8 +102,8 @@ recipient's gateway.
 > The two most recent outbound transfers are the ones in the recording. The earlier ones are
 > rehearsals of the same flow, and the recipient, cybersec24.base.eth, is our receiving address.
 >
-> Worth noting where those payments appear: the agent signs an EIP-3009 authorisation and the facilitator
-> broadcasts it, so the wallet holds no ETH and has sent no transactions of its own. The payments
+> Worth noting where those payments appear: the agent signs an EIP-3009 authorisation and the
+> facilitator broadcasts it, so the wallet holds no ETH and has sent no transactions of its own. The payments
 > show up as USDC transfer events rather than as outbound transactions. An agent paying for
 > something without ever holding gas is, I think, close to the point.
 >
@@ -132,8 +132,8 @@ recipient's gateway.
   x402's exact EVM scheme has the agent sign an EIP-3009 transferWithAuthorization and the
   facilitator broadcast it, so the wallet never sends a transaction and never needs gas. The
   payments are ERC-20 transfer events, and Basescan labels their action "Transfer With
-  Authorization", which confirms the mechanism rather than leaving it inferred. The first version of this email linked the bare address and
-  would have sent Rain to an apparently empty page.
+  Authorization", which confirms the mechanism rather than leaving it inferred. The first version
+  of this email linked the bare address and would have sent Rain to an apparently empty page.
 
 - **Confirm the Basescan page shows both transfers.** The 2026-08-30 take produced no settlement
   lines: no X-PAYMENT-RESPONSE header reached the client, so no transaction hash is on screen. The

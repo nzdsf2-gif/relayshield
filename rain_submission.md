@@ -48,8 +48,9 @@ an agent can use them autonomously at the moment of intent.
 **Demo.**
 Two minutes, unattended, no human in the loop and no account anywhere. An agent discovers two MCP
 servers. It pays $0.35 over x402 to check each one before connecting. It refuses the typosquat and
-proceeds with the legitimate one. The 402 challenge, the rail it selects, and the settled Base
-transaction are all on screen, so the payments can be verified independently after the video ends.
+proceeds with the legitimate one. The 402 challenge and the selected rail are on screen, and both
+payments are verifiable on Base at
+basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d.
 
 **Why Rain specifically.**
 The Agent Control Layer issues a single-use virtual card at the moment of intent. That moment is the
@@ -91,8 +92,13 @@ recipient's gateway.
 > Rather than describe it, here is a two minute recording of an agent doing it. It discovers two MCP
 > servers, pays $0.35 over x402 to check each one before connecting, refuses the typosquat, and
 > proceeds with the legitimate one. No human approves anything and no account is created. The 402
-> challenge, the selected rail and the settled Base transactions are all visible, so the payments can
-> be verified on-chain independently of the video.
+> challenge and the rail it selects are on screen.
+>
+> The two payments are real and you can verify them without taking my word for anything. The agent
+> paid from 0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d, and both transfers of 0.35 USDC on Base are
+> visible here:
+>
+> https://basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d
 >
 > The reason I am writing to Rain and not more generally: the Agent Control Layer issues a single-use
 > card at the moment of intent, and that moment is the natural hook for a counterparty check. It is
@@ -108,9 +114,11 @@ recipient's gateway.
 
 ## Before this goes out
 
-- **Confirm the recording is legible end to end**, particularly the 402 lines and the settled
-  transaction hashes. They are the only claims in the email a reader can check, so they are the ones
-  that must be readable.
+- **Confirm the Basescan page shows both transfers.** The 2026-08-30 take produced no settlement
+  lines: no X-PAYMENT-RESPONSE header reached the client, so no transaction hash is on screen. The
+  email was corrected to point at the paying wallet instead, which means that page, not the video,
+  now carries the only claim a reader can check. The video itself is good and does not need
+  re-recording.
 - **Decide the sending address.** The Gmail account is a personal one. `support@relayshield.net`
   exists and reads better to a payments company, but only if it is a mailbox that will see a reply.
 - **Test the Sardine and Chainalysis paragraph on someone outside the project**, per the roadmap's

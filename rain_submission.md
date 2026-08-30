@@ -81,6 +81,57 @@ proceeds with the legitimate one. The 402 challenge and the selected rail are on
 payments are verifiable on Base at
 basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d#tokentxns.
 
+**Note on the form's shape.** The later fields ask about engineers dedicated to the implementation,
+and "the core benefit your program provides to them" with examples like treasury management and
+cross-border payments. That is card-programme onboarding language, not accelerator language, so this
+is likely a shared intake form. The answers below are written as an integration story rather than a
+product pitch, which is what those questions ask for and which works either way.
+
+**"Please describe your intended use case in detail" (verbatim, for the form).**
+
+    Autonomous agents that pay for things with no human in the loop. Today an agent
+    can hold a valid card, stay inside its limits, sit on a verified account, and pay
+    a fraudulent counterparty: a typosquatted API, an MCP server registered last week,
+    an endpoint already in a criminal indicator corpus. Every authorisation control
+    passes, because every one of them assesses the spender.
+
+    RelayShield is the check on the other side of the transaction. Our endpoints
+    answer whether the counterparty is legitimate, are priced per call, and are
+    payable over x402 in USDC on Base, so an agent calls and pays for them itself with
+    no account and no API key.
+
+    The integration we want with Rain is a counterparty check at the moment a
+    single-use virtual card is requested. That moment is the last point at which
+    declining is free, before the card exists rather than after the charge is
+    disputed. If the Agent Control Layer exposes a pre-issuance hook we would call it
+    there. If not, the same check runs as a pre-authorisation step in the agent's own
+    flow, and we would want to talk about where it best belongs.
+
+    This is running today. A two minute recording shows an agent discovering two MCP
+    servers, paying $0.35 over x402 to check each one before connecting, refusing the
+    typosquat and proceeding with the legitimate one, unattended. Both payments are
+    verifiable on Base.
+
+**"How many engineers will be dedicated to the implementation?"** The true number, lowest bracket
+that is accurate. Same reasoning as the funding field: a solo builder with a working integration is
+a known quantity to an accelerator, and an inflated number turns awkward the moment implementation
+starts.
+
+**"Which best describes your primary target audience?"** Web3 / Crypto-native users, Business SMB,
+and Other, with Other as "AI agents and the developers deploying them" — the honest primary for this
+application, which no listed box covers. Consumer B2C left unchecked despite the consumer tiers
+existing: in a Rain agentic-commerce context it muddies the story, and the question is about this
+programme rather than the whole book.
+
+**"What is the core benefit your program provides to them?" (verbatim, for the form).**
+
+    Pre-payment counterparty verification. Before the money moves, an agent can find
+    out whether the endpoint, tool or merchant it is about to pay is a typosquat of a
+    real one, was registered days ago, or already appears in a criminal indicator
+    corpus. Existing controls confirm the agent is authorised to spend. Ours confirms
+    the payee is real. Cheap enough to call on every payment, at $0.35, and payable by
+    the agent itself.
+
 **Why Rain specifically.**
 The Agent Control Layer issues a single-use virtual card at the moment of intent. That moment is the
 natural place for a counterparty check, because it is the last point at which refusing is free.

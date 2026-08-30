@@ -37,6 +37,8 @@ run costs $0.70: two checks at $0.35.
 """
 
 import argparse
+import base64
+import getpass
 import json
 import os
 import sys
@@ -114,6 +116,26 @@ def rehearse_check(target):
             return exc.code, {"raw": body.decode("utf-8", "replace")[:400]}
 
 
+def _print_settlement(resp):
+    """Surface the on-chain settlement so a viewer can verify it afterwards.
+
+    The facilitator returns X-PAYMENT-RESPONSE, base64 JSON carrying the
+    transaction hash. Best-effort by design: a missing or reshaped header must
+    never take down a take that is otherwise fine.
+    """
+    raw = resp.headers.get("X-PAYMENT-RESPONSE") or resp.headers.get("x-payment-response")
+    if not raw:
+        return
+    try:
+        info = json.loads(base64.b64decode(raw + "=" * (-len(raw) % 4)))
+    except Exception:
+        return
+    tx = info.get("transaction") or info.get("txHash") or info.get("transactionHash")
+    if tx:
+        say("  <- settled on Base: %s" % tx)
+        say("     basescan.org/tx/%s" % tx)
+
+
 def build_session():
     """The same x402 client x402_test_settlement.py uses, for the same reason:
     it is the mechanism already verified working against these endpoints."""
@@ -132,10 +154,13 @@ def build_session():
 
     key = os.environ.get(PRIVATE_KEY_ENV_VAR)
     if not key:
-        sys.exit(
-            "Set %s to the funded Base-mainnet wallet key before a real run.\n"
-            "Rehearse with --rehearse first; it needs no wallet." % PRIVATE_KEY_ENV_VAR
-        )
+        # Prompted, never echoed, never in shell history. The env var is still
+        # the better path FOR A RECORDING -- export it before you press record
+        # and the take has zero human input, which is the claim the demo makes.
+        # This exists so a forgotten export does not mean a lost take.
+        key = getpass.getpass("Base wallet private key (hidden, not echoed): ")
+    if not key.strip():
+        sys.exit("No key given. Rehearse with --rehearse; it needs no wallet.")
     # The Anaconda base environment reinjects whitespace and quotes around env
     # vars exported before the venv is activated, which surfaces as
     # binascii.Error: Non-hexadecimal digit found. Same strip as the settlement
@@ -200,7 +225,22 @@ def main():
             say("", BEAT)
             continue
 
+        # Show the challenge before paying it. This is not theatre: it is
+        # literally what an x402 client does internally -- request, get 402,
+        # sign, retry with the X-PAYMENT header. A payments audience wants to
+        # see the price quoted and the rail chosen, not just "Paid."
+        code, challenge = rehearse_check(target)
+        if code == 402:
+            say("  <- HTTP 402 Payment Required")
+            say("     price %s" % challenge.get("price", "(not quoted)"))
+            for rail in (challenge.get("x402", {}).get("accepts") or [])[:1]:
+                say("     paying %s units USDC on %s"
+                    % (rail.get("amount"), rail.get("network")))
+                say("     to     %s" % rail.get("payTo"))
+            say("  -> signing and retrying with X-PAYMENT", BEAT)
+
         resp = session.post(API_BASE + PATH, json={"server_url": target["url"]}, timeout=60)
+        _print_settlement(resp)
         payload = resp.json()
         data = payload.get("data", {})
         verdict = data.get("verdict", "UNKNOWN")

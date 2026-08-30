@@ -50,7 +50,7 @@ Two minutes, unattended, no human in the loop and no account anywhere. An agent 
 servers. It pays $0.35 over x402 to check each one before connecting. It refuses the typosquat and
 proceeds with the legitimate one. The 402 challenge and the selected rail are on screen, and both
 payments are verifiable on Base at
-basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d.
+basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d#tokentxns.
 
 **Why Rain specifically.**
 The Agent Control Layer issues a single-use virtual card at the moment of intent. That moment is the
@@ -94,11 +94,15 @@ recipient's gateway.
 > proceeds with the legitimate one. No human approves anything and no account is created. The 402
 > challenge and the rail it selects are on screen.
 >
-> The two payments are real and you can verify them without taking my word for anything. The agent
-> paid from 0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d, and both transfers of 0.35 USDC on Base are
-> visible here:
+> The payments are real and verifiable without taking my word for anything. The agent paid from
+> 0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d, and the 0.35 USDC transfers are here:
 >
-> https://basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d
+> https://basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d#tokentxns
+>
+> Worth noting where they appear: the agent signs an EIP-3009 authorisation and the facilitator
+> broadcasts it, so the wallet holds no ETH and has sent no transactions of its own. The payments
+> show up as USDC transfer events rather than as outbound transactions. An agent paying for
+> something without ever holding gas is, I think, close to the point.
 >
 > The reason I am writing to Rain and not more generally: the Agent Control Layer issues a single-use
 > card at the moment of intent, and that moment is the natural hook for a counterparty check. It is
@@ -113,6 +117,13 @@ recipient's gateway.
 ---
 
 ## Before this goes out
+
+- **Link to the #tokentxns tab, never the bare address.** The bare address page shows "Transactions
+  Sent: N/A", 0 ETH and an empty transaction list, which looks like nothing happened. It is not:
+  x402's exact EVM scheme has the agent sign an EIP-3009 transferWithAuthorization and the
+  facilitator broadcast it, so the wallet never sends a transaction and never needs gas. The
+  payments are ERC-20 transfer events. The first version of this email linked the bare address and
+  would have sent Rain to an apparently empty page.
 
 - **Confirm the Basescan page shows both transfers.** The 2026-08-30 take produced no settlement
   lines: no X-PAYMENT-RESPONSE header reached the client, so no transaction hash is on screen. The

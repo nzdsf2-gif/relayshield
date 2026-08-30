@@ -99,7 +99,10 @@ recipient's gateway.
 >
 > https://basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d#tokentxns
 >
-> Worth noting where they appear: the agent signs an EIP-3009 authorisation and the facilitator
+> The two most recent outbound transfers are the ones in the recording. The earlier ones are
+> rehearsals of the same flow, and the recipient, cybersec24.base.eth, is our receiving address.
+>
+> Worth noting where those payments appear: the agent signs an EIP-3009 authorisation and the facilitator
 > broadcasts it, so the wallet holds no ETH and has sent no transactions of its own. The payments
 > show up as USDC transfer events rather than as outbound transactions. An agent paying for
 > something without ever holding gas is, I think, close to the point.
@@ -118,11 +121,18 @@ recipient's gateway.
 
 ## Before this goes out
 
+- **Two details on that page a reader will notice, both now preempted in the email.** There are
+  five outbound transfers, not two, because rehearsals used the same wallet; and the recipient
+  renders as `cybersec24.base.eth` rather than the raw `0x002CfD89...` address, because a Basename
+  resolves it. Neither is a problem, but an unexplained "why five" or "who is cybersec24" is exactly
+  the wobble to avoid in an email whose whole pitch is "verify this yourself".
+
 - **Link to the #tokentxns tab, never the bare address.** The bare address page shows "Transactions
   Sent: N/A", 0 ETH and an empty transaction list, which looks like nothing happened. It is not:
   x402's exact EVM scheme has the agent sign an EIP-3009 transferWithAuthorization and the
   facilitator broadcast it, so the wallet never sends a transaction and never needs gas. The
-  payments are ERC-20 transfer events. The first version of this email linked the bare address and
+  payments are ERC-20 transfer events, and Basescan labels their action "Transfer With
+  Authorization", which confirms the mechanism rather than leaving it inferred. The first version of this email linked the bare address and
   would have sent Rain to an apparently empty page.
 
 - **Confirm the Basescan page shows both transfers.** The 2026-08-30 take produced no settlement

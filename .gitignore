@@ -104,3 +104,17 @@ backups/
 /llamaindex-relayshield/
 /openai-agents-relayshield/
 /plugin-relayshield/
+
+# ── Sibling repos that live in this working tree but are NOT part of it ──────
+# relayshield-mcp is its own repository and its own release
+# (github.com/relayshield/relayshield-mcp, published to PyPI as relayshield-mcp).
+# On 2026-08-05 the bulk "track 305 production sources" commit ran git add over a
+# working tree where that directory already had its own .git, so git recorded a
+# GITLINK -- commit 70f36dc -- instead of the files. With no .gitmodules to go
+# with it, that gitlink is inert: git submodule sees nothing, actions/checkout
+# never populates it, and the directory is empty in every CI run and every fresh
+# clone. It only ever produced noise in git status.
+#
+# Ignoring the path is what keeps it quiet, because the directory is still there
+# on the Mac. Work on the MCP server in its own clone and release it from there.
+/relayshield-mcp/

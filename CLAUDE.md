@@ -169,6 +169,39 @@ buffer on the merge message with no way out that he knew, and the rest of the bl
 `git merge --no-edit`, `git commit --no-edit` when concluding a merge. This is also the fix for the
 `MERGE_HEAD exists` recovery at the top of this file.
 
+### 11. No placeholders in a runnable block. Ever. Especially not for a secret.
+
+On 2026-08-30 a ```zsh block contained:
+
+    export BP_PRIVATE_KEY=<paste the key>
+
+Andrew pasted it, because rule 7 says a ```zsh block is a thing you paste, and got:
+
+    zsh: parse error near `\n'
+
+`<` is an input redirection in zsh, so `<paste` redirects from a file named `paste`, `the` is an
+argument, and `key>` opens a redirection with nothing after it. The line was never a command. This
+is rule 7's "every line must be a real command that runs as pasted" and it was broken anyway,
+because a placeholder LOOKS like an instruction to a writer and IS a syntax error to a shell.
+
+So: **no `<...>`, no `YOUR_KEY_HERE`, no `/path/to/thing` inside a ```zsh block.** If a value has
+to come from Andrew, the command must ASK for it at runtime.
+
+For a secret, this is the pattern, and it is zsh-specific — `read -rsp` is bash and is wrong here:
+
+    read -rs "BP_PRIVATE_KEY?Paste the Base wallet private key, then press Enter: "
+    export BP_PRIVATE_KEY
+
+`-s` suppresses the echo, so the value never appears on screen, never lands in a screen recording,
+and never enters shell history. Verified in zsh 2026-08-30, along with the failure above.
+
+For a non-secret, ask the same way without `-s`, or have him edit a committed file rather than a
+pasted line.
+
+**A secret must never be assigned inline in a block that will be pasted, recorded, or committed.**
+The Rain demo was going to be screen-recorded and sent to a third party, so an echoed key would
+have been in a file leaving the building.
+
 ---
 
 ## IAM — one role per Lambda, not one role for all of them

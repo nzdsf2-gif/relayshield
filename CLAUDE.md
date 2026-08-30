@@ -196,6 +196,68 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ---
 
+## WHERE 2026-08-29 LEFT THINGS — read before starting anything
+
+`main` is at the merge of everything below. **One branch is unmerged:
+`feat/partner-center-and-aws-setup`.** It carries the Partner Center, the Stripe attribution fix,
+`tools/setup_first_seen.sh`, `tools/check_xsoar_pack.sh` and the Telethon simplification. Merging it
+deploys `relayshield-stripe-webhook`, which is in the deploy map.
+
+### Done and verified this session
+
+- **The 35/46 local-vs-GitHub divergence is closed.** Andrew's clone held 36 unpushed commits
+  (Microsoft Security Copilot MS-3/MS-4, the Sentinel Content Hub solution, TAXII dedup, CORPUS-1/2,
+  the XSOAR email). Merged with only three contested files, resolved hunk by hunk, and
+  `tools/reconcile_guard.py` run against **both** parents: `relayshield_api.py` 349/349,
+  `relayshield_intel_monitor.py` 156/156, `build_blog.py` with `RSS`/`from_rss` as named drops.
+  Backup branches `backup-main-20260829` and `origin/local-main-20260829` still exist.
+- **intel-feed and intel-kev now have a deploy path**, plus `ci.import-probe` early-returns so the
+  deployer's probe cannot trigger a full ingest.
+- **`deploy_lambdas.yml` change detection was broken for merges** and would have shipped nothing on
+  the very merge meant to ship those two. Now diffs from `github.event.before`.
+- **The prospecting Telegram account is live.** Session in
+  `relayshield/telethon_session_prospecting`. **Nothing reads it yet, and that is deliberate** — per
+  `telegram_miniapp_and_app_inventory_scope.md`, Item 16's GitHub half is built first. The
+  collection session was never touched.
+- **XSOAR PR #45206 is NOT merged.** Verified by content, not just refs. See STATUS CORRECTIONS.
+- **Partner commission decided: 20% / 12 months.** See PARTNER COMMISSION below.
+
+### BLOCKED — A6 first-seen, the only thing left hanging
+
+`relayshield_intel_first_seen` **exists in the right account** (239677749008). What fails is granting
+the Lambda write access.
+
+`relayshield-intel-monitor` runs as **`relayshield-breach-check-role-1sapnwdl`** — one shared role
+carrying 22+ inline policies spanning Rekognition, Bedrock, marketplace metering and a dozen
+DynamoDB tables. IAM caps the **aggregate size of a role's inline policies at 10,240 characters**,
+and that budget is spent, so `put-role-policy` fails.
+
+**Ask the cheap question first, which the first version of the script did not:** the role already
+has a `relayshield-intel-dynamodb` policy. If its Resource is a `relayshield_intel_*` wildcard, the
+permission already exists and there is nothing to grant. `tools/setup_first_seen.sh` now checks that
+before trying anything, and falls back to a **customer-managed policy** (separate budget: 10 per
+role, 6,144 chars each) if a real grant is needed.
+
+**The backfill is NOT blocked by this and never was.** `tools/backfill_first_seen.py` runs as
+`relayshield-deployer`, the operator, not as the Lambda role. It can populate the table today. What
+the missing grant blocks is the LIVE monitor recording first-seen for anything collected from here
+on, so the table would freeze at whatever the backfill writes. The script's grant step is now
+non-fatal for exactly this reason: `set -e` was aborting before the backfill instructions printed,
+which is what turned one IAM error into "I cannot backfill".
+
+### Also outstanding
+
+- **`relayshield-feed-maintainer`** — live on the stream, source in the repo since
+  TAXII-PAGINATION-2, and was in NEITHER map. Third instance of that combination. Added to the
+  **drift check only**. Read its first red diff before mapping it in the deployer.
+- **An empty `relayshield_intel_first_seen` sits in `620534471984`** from the wrong-account write.
+  Costs nothing on PAY_PER_REQUEST with no items. No delete command has been written for it on
+  purpose.
+- **The `relayshield-mcp` submodule is broken**: a gitlink in the index with no `.gitmodules` entry,
+  which is why CI logs `fatal: No url found for submodule path`. Pre-existing, harmless, unfixed.
+
+---
+
 ## OPEN TODOS THAT MUST NOT BE FORGOTTEN
 
 Added 2026-08-27. These are blocked on a wait, not on a decision, which is exactly the kind of item

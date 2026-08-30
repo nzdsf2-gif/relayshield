@@ -125,6 +125,11 @@ def _print_settlement(resp):
     """
     raw = resp.headers.get("X-PAYMENT-RESPONSE") or resp.headers.get("x-payment-response")
     if not raw:
+        # Silence here cost the 2026-08-30 take its on-camera transaction
+        # hashes, and nothing said why. stderr, not stdout, so a diagnostic
+        # never appears mid-take in the recorded transcript.
+        print("  [diag] no X-PAYMENT-RESPONSE header; headers seen: %s"
+              % ", ".join(sorted(resp.headers.keys())), file=sys.stderr)
         return
     try:
         info = json.loads(base64.b64decode(raw + "=" * (-len(raw) % 4)))
@@ -189,6 +194,7 @@ def main():
     say("  is the endpoint I am about to trust the real one?", THINK)
 
     session = None
+    wallet = None
     if not args.rehearse:
         session, wallet = build_session()
         say()
@@ -277,6 +283,10 @@ def main():
     say("  Human approvals    : 0")
     say("  Accounts created   : 0", BEAT)
     say()
+    if wallet:
+        say("  Verify these payments on-chain, independently of this video:")
+        say("    basescan.org/address/%s" % wallet, BEAT)
+        say()
     say("  A spending control would have approved both of these payments.")
     say("  Both were inside budget. Both were correctly authorised.")
     say("  One of them was a typosquat.", THINK)

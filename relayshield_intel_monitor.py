@@ -1665,6 +1665,19 @@ def _parse_passwords_file(text: str) -> list[dict]:
         ("jwt_token",        r"eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}", "MEDIUM", "JWT Token", None),
         ("mcp_token_generic", r"mcp_(?:live|sk|pat)_[a-zA-Z0-9]{20,}", "MEDIUM", "Possible MCP Server Auth Token", None),
         # Unattributed OpenAI-compatible catch-all -- MUST stay last.
+        # Venice AI. Format taken from a real key, not guessed: a literal
+        # VENICE_INFERENCE_KEY_ prefix followed by a base62 body (42 chars in the
+        # sample, 63 total). The body length is one observation, so it is matched
+        # permissively -- the 21-character literal prefix carries the precision, and
+        # a too-tight length is how the OpenRouter keys above were silently dropped
+        # for months. Venice is an OpenAI-compatible endpoint, so without this the
+        # generic sk- catch-all would not match these at all: they do not start sk-.
+        ("venice_inference_key", r"VENICE_INFERENCE_KEY_[A-Za-z0-9]{32,64}", "CRITICAL", "Venice AI Inference Key", "venice"),
+        # Not confirmed against a real key. Venice separates inference keys from
+        # admin keys, and the inference prefix is explicit about which it is, so an
+        # admin equivalent almost certainly exists and would be worth more. Cheap to
+        # carry, and it fires only on an equally distinctive literal prefix.
+        ("venice_admin_key",     r"VENICE_ADMIN_KEY_[A-Za-z0-9]{32,64}",     "CRITICAL", "Venice AI Admin Key (format inferred)", "venice"),
         ("llm_key_generic_sk", r"sk-[a-zA-Z0-9]{32,64}", "HIGH", "OpenAI-compatible LLM API Key (provider unattributed)", "unknown_openai_compatible"),
     ]
     for line in text.splitlines():

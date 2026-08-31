@@ -77,6 +77,20 @@ jobs:
             ["relayshield_feed_maintainer.py"]="relayshield-feed-maintainer"
             ["relayshield_api.py"]="relayshield-api"
             ["relayshield_breach_monitor.py"]="relayshield-breach-monitor"
+            # Added 2026-08-30. Source in the repo since 2026-07-07, live and
+            # serving mcp-registry-risk and prompt-injection-breach, and in
+            # NEITHER map until now -- the fourth instance of that combination.
+            # It is the Lambda the Rain demo ran against, so it has been taking
+            # real traffic the whole time it was invisible here.
+            #
+            # Drift check ONLY, deliberately. Per the rule this repo learned the
+            # hard way: a red diff is the alarm, read it before doing anything,
+            # and only add the function to deploy_lambdas.yml once the diff shows
+            # live is merely stale. If live carries something main does not, that
+            # is recovered first with recover_live_handler.yml. Mapping it in the
+            # deployer now would risk overwriting live-only code with no error
+            # anywhere, which is exactly what cost 2,583 lines on 2026-08-17.
+            ["relayshield_agentic_api.py"]="relayshield-agentic-api"
           )
 
           DRIFTED=""

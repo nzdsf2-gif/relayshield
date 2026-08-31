@@ -357,10 +357,26 @@ on the first line of `lambda_handler`, and the deployer invokes everything it de
 package imports. Both now return early on `{"source": "ci.import-probe"}`. Any future handler that
 does real work on invoke needs the same three lines.
 
-### NEXT SESSION, TOP OF THE LIST — record the Rain demo video
+### Rain — DONE 2026-08-30. Demo recorded, both submissions sent.
 
-Carried explicitly to 2026-08-30 at Andrew's instruction. It has slipped once already. It is not
-blocked on anything: no code, no AWS, no approval. Details in the section below.
+Carried across four sessions and closed. The demo is `tools/rain_demo.py`: one command, an agent
+discovers two MCP servers, pays $0.35 over x402 to check each before connecting, refuses
+`modelcontextprotoco1.io` on an edit-distance-1 typosquat finding, connects to `mcp.so`. Unattended,
+no account.
+
+The payments are real and are the artifact that outlasts the video:
+`basescan.org/address/0xa26054A4188e6D5c31A4DcdFcA27b0FfE247228d#tokentxns`. **Link that tab, never
+the bare address** — the address page shows "Transactions Sent: N/A" and an empty list, because
+x402's exact EVM scheme has the agent sign an EIP-3009 authorisation and the facilitator broadcast
+it. The wallet never sends a transaction and never holds gas.
+
+Agentic Startup Program form submitted, and the email sent to `apa@rain.xyz` from
+`andrew@relayshield.net` with the recording attached. Both answer sets are in `rain_submission.md`,
+verbatim, including the target-audience and stage decisions and why they were made.
+
+Two things left open, and both are the reply's problem now: whether the Agent Control Layer has a
+pre-issuance hook (the email asks rather than assumes), and the Sardine/Chainalysis paragraph never
+got its outside read.
 
 ### OpenRouter key-revocation webhook — build it when the corpus has OR tokens
 
@@ -382,25 +398,15 @@ standing measurement rule applies here with force, because this is a number that
 Rationale, and why this is the right ask of Stripe post-acquisition, is in
 `openrouter_stripe_integration_angle.md`.
 
-### Rain Agentic Startup Program — record the demo, then submit
+### Rain Agentic Startup Program — SUBMITTED 2026-08-30
 
-Not blocked on anything. The reason it is here is that it is the one item where a two-minute video
-beats every paragraph we could write, and video is the kind of task that slips.
+See the Rain entry above. Kept only for the framing, which still applies to any follow-up: Rain's
+Agent Control Layer already answers "is this agent allowed to spend this much". Nothing in it
+answers "is the thing it is about to pay legitimate". An agent with a valid card, inside its limits,
+paying a fraudulent API is a fully authorised transaction.
 
-**Record a 2-minute unattended demo:** an agent discovers an endpoint, calls `mcp-registry-risk`,
-**refuses a typosquatted one**, then pays the legitimate one over x402 (USDC on Base) with no human
-in the loop and no account.
-
-**Then submit to both:** Rain's **Agentic Startup Program**, and **apa@rain.xyz**, the Agentic
-Payments Alliance's stated contact for organisations wanting to join.
-
-Why this framing and not a deck: Rain's Agent Control Layer already answers "is this agent allowed
-to spend this much". Nothing in it answers "is the thing it is about to pay legitimate". An agent
-with a valid card, inside its limits, paying a fraudulent API is a fully authorised transaction. The
-demo shows that gap being closed in the only way that is not arguable.
-
-Full analysis, including where a pre-payment check could sit across the 26 Alliance members and why
-Sardine and Chainalysis must not be pitched against, is in `socradar_gap_closure_roadmap.md`.
+**Do not pitch against Sardine or Chainalysis.** They score the user and the funds; we score the
+counterparty and the tool. Full analysis in `socradar_gap_closure_roadmap.md`.
 
 ### A8 — grow `tg_handle`, but only after the filter
 

@@ -219,16 +219,23 @@ def md_to_html(md):
             if para:
                 paras.append(para)
             for p in paras:
-                # The <p> inside is not decoration. A bare
-                # <blockquote>text</blockquote> is valid HTML, but Medium's
-                # importer treats the block as having no paragraph of its own and
-                # inserts an empty one, which renders on Medium as a quote with a
-                # large blank gap under it and the quote bar running past the
-                # text. Seen on all three quotes in the 2026-08-30 post.
-                # <blockquote><p>...</p></blockquote> is the shape every importer
-                # expects, and it changes nothing about how the canonical page
-                # looks.
-                out.append("<blockquote><p>%s</p></blockquote>" % _inline(" ".join(p)))
+                # Quoted text renders as an ORDINARY PARAGRAPH, not a
+                # <blockquote>. That is a house style decision made 2026-08-30,
+                # not an oversight.
+                #
+                # The quote bar is visually loud and, on Medium, unreliable: it
+                # imported with an empty paragraph inside every quote, showing as
+                # a gap with the bar running past the text, and removing it after
+                # the fact means editing each quote by hand in the Medium editor.
+                # A `> ` block in the source still means "this is quoted", it just
+                # does not get a bar.
+                #
+                # Attribution therefore lives in the PROSE, in the lead-in
+                # sentence before the quote ("Anthropic is explicit about what
+                # that means:"). That is more robust anyway: prose survives every
+                # formatting change and importer, and a dropped blockquote
+                # silently turns a vendor's words into our own assertion.
+                out.append("<p>%s</p>" % _inline(" ".join(p)))
             continue
 
         m_li = re.match(r"^([-*]|\d+\.)\s+", line)

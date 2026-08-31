@@ -171,6 +171,29 @@ revoke second, rotate third.
 
 Import, with the canonical URL set. Never paste, Medium has no Markdown paste.
 
+**Topics, in this order.** Medium allows five and weights the FIRST most heavily for distribution
+into that topic's feed, so the order is not cosmetic.
+
+1. Cybersecurity
+2. AI
+3. Malware
+4. Incident Response
+5. Infostealer
+
+Two broad for reach, two mid for ranking, one narrow where we can actually be found by search.
+
+Threat Intelligence is deliberately not on the list, despite being our category: this post is a
+remediation-order argument, not a TI post, and Incident Response fits what it actually says. The
+counter-argument is real, though. Using the same category tag on every post compounds into a topic
+presence, so if that is being built deliberately, swap Malware out for Threat Intelligence.
+
+Anthropic and Claude are not worth a slot. Narrow, and their attention is tied to this news cycle
+rather than to a feed anyone follows.
+
+**Remove the quote bars after import.** House style is no quote bars (see CLAUDE.md). Select each
+quoted paragraph and click the quotation mark on the floating toolbar until the bar is gone. Three
+of them in this post.
+
 Tags: Cybersecurity, Infostealer, AI, Threat Intelligence, Incident Response
 
 ---

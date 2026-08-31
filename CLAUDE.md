@@ -504,6 +504,22 @@ Never put a bare partner code in that field.
 - Blog files carry a `NOT FOR PUBLICATION` line; everything below it is internal plan and checklist.
 - **Do NOT post to X** (`@RelayShieldHQ` suspended) or **Hashnode** (abandoned 2026-07-29).
 - Medium: **import with the canonical URL, never paste** — Medium has no Markdown paste.
+- **A blockquote must generate `<blockquote><p>...</p></blockquote>`, never a bare
+  `<blockquote>text</blockquote>`.** Both are valid HTML and the canonical page renders them
+  identically, so this is invisible until it reaches Medium: Medium's importer reads a `<p>`-less
+  block as having no paragraph of its own and inserts an empty one. On the page that is a quote with
+  a large blank gap under it and the quote bar running past the text. It hit all three Anthropic
+  quotes in the 2026-08-30 LLMjacking post, after publishing, and the only fix at that point is a
+  forward-delete inside each quote by hand or a re-import. `build_blog.py` emits the right shape
+  now; do not regress it, and check the shape before importing anything hand-authored.
+- **A Medium import is a snapshot.** Editing the canonical post afterwards does not propagate. Any
+  correction means editing the Medium copy by hand or deleting and re-importing, so get the
+  canonical right BEFORE the import rather than publishing and fixing forward.
+- **A post built on someone else's reporting links to it, in the first paragraph.** The 2026-08-30
+  post quoted a vendor email at length and rested entirely on BleepingComputer's write-up, and
+  shipped with no links at all. On our own page that is an editorial gap; on Medium it reads as if
+  the reporting were ours. Say explicitly where the quotes come from too, in prose, because prose
+  survives a formatting change and blockquote styling does not.
 - Channel order: `blog.relayshield.net` canonical → Medium → LinkedIn → Telegram → Farcaster →
   Mastodon.
 - Length limits: Mastodon 500 chars · Farcaster ~1024 bytes · LinkedIn 3000 · Telegram 4096.

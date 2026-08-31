@@ -504,14 +504,23 @@ Never put a bare partner code in that field.
 - Blog files carry a `NOT FOR PUBLICATION` line; everything below it is internal plan and checklist.
 - **Do NOT post to X** (`@RelayShieldHQ` suspended) or **Hashnode** (abandoned 2026-07-29).
 - Medium: **import with the canonical URL, never paste** — Medium has no Markdown paste.
-- **A blockquote must generate `<blockquote><p>...</p></blockquote>`, never a bare
-  `<blockquote>text</blockquote>`.** Both are valid HTML and the canonical page renders them
-  identically, so this is invisible until it reaches Medium: Medium's importer reads a `<p>`-less
-  block as having no paragraph of its own and inserts an empty one. On the page that is a quote with
-  a large blank gap under it and the quote bar running past the text. It hit all three Anthropic
-  quotes in the 2026-08-30 LLMjacking post, after publishing, and the only fix at that point is a
-  forward-delete inside each quote by hand or a re-import. `build_blog.py` emits the right shape
-  now; do not regress it, and check the shape before importing anything hand-authored.
+- **No quote bars. Quoted text renders as an ordinary paragraph.** House style, decided
+  2026-08-30. A `> ` block in the source still means "this is quoted"; `build_blog.py` renders it as
+  a plain `<p>`. Do not regress this to `<blockquote>`.
+
+  Two reasons. The bar is visually loud and does not suit these posts. And on Medium it is
+  unreliable: the 2026-08-30 LLMjacking post imported with an empty paragraph inside every quote,
+  showing as a gap with the bar running past the text, and the only fix after import is a
+  forward-delete inside each quote by hand. Rendering `<blockquote><p>...</p></blockquote>` instead
+  of a bare `<blockquote>` did NOT fix it, which is worth recording because it looked like it should.
+
+  **So attribution lives in the prose, in the lead-in sentence before the quote** ("Anthropic is
+  explicit about what that means:"). That is more robust regardless: prose survives every importer
+  and every formatting change, and a dropped bar silently turns a vendor's words into our own
+  assertion.
+
+  Posts already frozen in `blog_content/` keep whatever html they were published with. Do not
+  rewrite them to match; they are live pages.
 - **A Medium import is a snapshot.** Editing the canonical post afterwards does not propagate. Any
   correction means editing the Medium copy by hand or deleting and re-importing, so get the
   canonical right BEFORE the import rather than publishing and fixing forward.

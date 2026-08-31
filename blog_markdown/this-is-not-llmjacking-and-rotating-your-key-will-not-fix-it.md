@@ -8,7 +8,9 @@ date: 2026-08-30
 
 Anthropic has begun emailing Claude users to tell them that infostealer malware on their machines
 stole their active login sessions, and that somebody has been using those sessions to sign in and
-burn through their usage.
+burn through their usage. The email was
+[reported by BleepingComputer](https://www.bleepingcomputer.com/news/artificial-intelligence/anthropic-warns-infostealer-malware-is-hijacking-claude-sessions-to-drain-usage/),
+and every quote below is from it.
 
 The company is signing affected users out, removing saved payment methods, and refunding charges it
 can identify as unauthorised. Its own summary of the tell is worth quoting, because it is the part
@@ -19,7 +21,8 @@ most people will recognise before they recognise anything else:
 
 The families named are the ordinary ones. Vidar, LummaC2, StealC, RedLine and Acreed on Windows,
 Atomic Stealer on a smaller number of Macs. Nothing bespoke, nothing targeted at Anthropic. The
-user who first published the email had installed a pirated game.
+user who [first published the email](https://www.reddit.com/r/ClaudeAI/comments/1w1jqsh/thank_you_anthropic_really/)
+had installed a pirated game.
 
 ## The distinction that decides the fix
 
@@ -64,8 +67,9 @@ The order that works is the reverse of the instinct:
 4. **Then audit what the session could reach.** Saved payment methods, connected apps, OAuth grants,
    API keys created while the attacker had access.
 
-We have argued this ordering before and it is the thing we would most like security guidance to
-adopt: session revocation belongs before password reset, not after.
+We [argued this ordering in August](https://blog.relayshield.net/the-malware-stopped-stealing-passwords-it-started-stealing-you),
+before any of this surfaced, and it is the thing we would most like security guidance to adopt:
+session revocation belongs before password reset, not after.
 
 ## Why it was Claude that noticed
 

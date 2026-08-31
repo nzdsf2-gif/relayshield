@@ -219,7 +219,16 @@ def md_to_html(md):
             if para:
                 paras.append(para)
             for p in paras:
-                out.append("<blockquote>%s</blockquote>" % _inline(" ".join(p)))
+                # The <p> inside is not decoration. A bare
+                # <blockquote>text</blockquote> is valid HTML, but Medium's
+                # importer treats the block as having no paragraph of its own and
+                # inserts an empty one, which renders on Medium as a quote with a
+                # large blank gap under it and the quote bar running past the
+                # text. Seen on all three quotes in the 2026-08-30 post.
+                # <blockquote><p>...</p></blockquote> is the shape every importer
+                # expects, and it changes nothing about how the canonical page
+                # looks.
+                out.append("<blockquote><p>%s</p></blockquote>" % _inline(" ".join(p)))
             continue
 
         m_li = re.match(r"^([-*]|\d+\.)\s+", line)

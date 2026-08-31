@@ -1,0 +1,935 @@
+{
+  "_generated_by": "tools/iam_snapshot_role.py",
+  "_read_only": true,
+  "account": "239677749008",
+  "role": {
+    "name": "relayshield-breach-check-role-1sapnwdl",
+    "arn": "arn:aws:iam::239677749008:role/service-role/relayshield-breach-check-role-1sapnwdl",
+    "created": "2026-03-28T01:18:53+00:00",
+    "trust_policy": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Principal": {
+            "Service": "lambda.amazonaws.com"
+          },
+          "Action": "sts:AssumeRole"
+        }
+      ]
+    },
+    "permissions_boundary": null
+  },
+  "budget": {
+    "inline_bytes_used": 10127,
+    "inline_bytes_limit": 10240,
+    "inline_bytes_free": 113,
+    "inline_policy_count": 26,
+    "managed_attached": 10,
+    "managed_attach_limit": 10,
+    "per_policy_bytes": {
+      "InvokeTelegramWebhook": 179,
+      "RekognitionOCR": 129,
+      "relayshield-address-first-seen-dynamodb": 196,
+      "relayshield-api-keys-access": 320,
+      "relayshield-badge-cache-dynamodb": 189,
+      "relayshield-bedrock-classifier": 467,
+      "relayshield-breach-check-policy": 1691,
+      "relayshield-day3-dynamodb": 187,
+      "relayshield-demo-quota-dynamodb": 176,
+      "relayshield-deny-wallet-key": 228,
+      "relayshield-digest-scan": 344,
+      "relayshield-intel-dynamodb": 1769,
+      "relayshield-invoke-marketplace-lambda": 178,
+      "relayshield-ip-intel-cache-dynamodb": 192,
+      "relayshield-kms-field-encryption": 257,
+      "relayshield-lambda-health-digest": 200,
+      "relayshield-marketplace-metering": 174,
+      "relayshield-marketplace-resolve-customer": 115,
+      "relayshield-rsscan-installs-dynamodb": 210,
+      "relayshield-secret-scan-cache-dynamodb": 195,
+      "relayshield-telegram-self-invoke": 179,
+      "relayshield-tool-repos-dynamodb": 251,
+      "relayshield-verdict-watches-dynamodb": 356,
+      "relayshield-weekly-metrics-policy": 807,
+      "RelayShieldSecretsPolicy": 1007,
+      "TextractOCR": 131
+    }
+  },
+  "inline_policies": {
+    "InvokeTelegramWebhook": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "lambda:InvokeFunction",
+          "Resource": "arn:aws:lambda:us-east-1:620534471984:function:relayshield-telegram-webhook"
+        }
+      ]
+    },
+    "RekognitionOCR": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "RekognitionOCR",
+          "Effect": "Allow",
+          "Action": "rekognition:DetectText",
+          "Resource": "*"
+        }
+      ]
+    },
+    "relayshield-address-first-seen-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:PutItem",
+            "dynamodb:GetItem"
+          ],
+          "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_address_first_seen"
+        }
+      ]
+    },
+    "relayshield-api-keys-access": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:Query",
+            "dynamodb:Scan"
+          ],
+          "Resource": [
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_api_keys",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_api_keys/index/*"
+          ]
+        }
+      ]
+    },
+    "relayshield-badge-cache-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem"
+          ],
+          "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_badge_cache"
+        }
+      ]
+    },
+    "relayshield-bedrock-classifier": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "bedrock:InvokeModel"
+          ],
+          "Resource": [
+            "arn:aws:bedrock:us-east-1:239677749008:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+            "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+            "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+          ]
+        }
+      ]
+    },
+    "relayshield-breach-check-policy": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "DynamoDBAccess",
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:Query",
+            "dynamodb:Scan"
+          ],
+          "Resource": [
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_users",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_users/index/*",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_monitored_emails",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_breach_alerts",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_sim_swap_state",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_monitored_wallets",
+            "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/alchemy_api_key-*",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_wallet_activity_log",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_gas_state",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_monitor_seen",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_monitor_drafts",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_known_addresses",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_api_keys",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_push_tokens",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_crypto_alert_suppress"
+          ]
+        },
+        {
+          "Sid": "SecretsManagerAccess",
+          "Effect": "Allow",
+          "Action": "secretsmanager:GetSecretValue",
+          "Resource": [
+            "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield*",
+            "arn:aws:secretsmanager:us-east-1:620534471984:secret:relayshield/virustotal_api_key*",
+            "arn:aws:secretsmanager:us-east-1:620534471984:secret:relayshield/google_safe_browsing*"
+          ]
+        }
+      ]
+    },
+    "relayshield-day3-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "Day3DynamoDBRead",
+          "Effect": "Allow",
+          "Action": "dynamodb:GetItem",
+          "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_users"
+        }
+      ]
+    },
+    "relayshield-demo-quota-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:UpdateItem"
+          ],
+          "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_demo_key_usage"
+        }
+      ]
+    },
+    "relayshield-deny-wallet-key": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "DenyWalletPrivateKey",
+          "Effect": "Deny",
+          "Action": "secretsmanager:GetSecretValue",
+          "Resource": "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/rs_wallet_private_key-*"
+        }
+      ]
+    },
+    "relayshield-digest-scan": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "RelayShieldDigestScan",
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:Scan"
+          ],
+          "Resource": [
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_users",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_monitored_emails",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_breach_alerts"
+          ]
+        }
+      ]
+    },
+    "relayshield-intel-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:Query",
+            "dynamodb:Scan",
+            "dynamodb:BatchWriteItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem"
+          ],
+          "Resource": [
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_seen",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_alerts",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_iocs",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_iocs/index/malware-index",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_cve",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_stolen_sessions",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_stolen_sessions/index/email-index",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_identity_graph",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_ransomware",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_channels",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_mitre_attack",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_packages",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_shared_reports",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_malpedia_families",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_mitre_atlas",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_payg_settlements",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_discord_channels",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_monitor_lock",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_stolen_cards",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_stolen_cards/index/bin-index"
+          ]
+        }
+      ]
+    },
+    "relayshield-invoke-marketplace-lambda": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "lambda:InvokeFunction",
+          "Resource": "arn:aws:lambda:us-east-1:239677749008:function:relayshield-aws-marketplace"
+        }
+      ]
+    },
+    "relayshield-ip-intel-cache-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem"
+          ],
+          "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_ip_intel_cache"
+        }
+      ]
+    },
+    "relayshield-kms-field-encryption": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "KMSFieldLevelEncryption",
+          "Effect": "Allow",
+          "Action": [
+            "kms:Encrypt",
+            "kms:Decrypt",
+            "kms:GenerateDataKey",
+            "kms:DescribeKey"
+          ],
+          "Resource": "arn:aws:kms:us-east-1:239677749008:key/1479c3fa-88e9-4096-a736-32968ba5812f"
+        }
+      ]
+    },
+    "relayshield-lambda-health-digest": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ScheduledLambdaHealthDigestReadOnly",
+          "Effect": "Allow",
+          "Action": [
+            "cloudwatch:GetMetricData",
+            "events:ListRules",
+            "events:ListTargetsByRule"
+          ],
+          "Resource": "*"
+        }
+      ]
+    },
+    "relayshield-marketplace-metering": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "MarketplaceMetering",
+          "Effect": "Allow",
+          "Action": [
+            "aws-marketplace:BatchMeterUsage",
+            "aws-marketplace:MeterUsage"
+          ],
+          "Resource": "*"
+        }
+      ]
+    },
+    "relayshield-marketplace-resolve-customer": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "aws-marketplace:ResolveCustomer",
+          "Resource": "*"
+        }
+      ]
+    },
+    "relayshield-rsscan-installs-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:PutItem",
+            "dynamodb:Query",
+            "dynamodb:GetItem"
+          ],
+          "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_rsscan_installs"
+        }
+      ]
+    },
+    "relayshield-secret-scan-cache-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem"
+          ],
+          "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_secret_scan_cache"
+        }
+      ]
+    },
+    "relayshield-telegram-self-invoke": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "lambda:InvokeFunction",
+          "Resource": "arn:aws:lambda:us-east-1:239677749008:function:relayshield-telegram-webhook"
+        }
+      ]
+    },
+    "relayshield-tool-repos-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:Query",
+            "dynamodb:Scan",
+            "dynamodb:UpdateItem"
+          ],
+          "Resource": [
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_tool_repos"
+          ]
+        }
+      ]
+    },
+    "relayshield-verdict-watches-dynamodb": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:Query",
+            "dynamodb:Scan"
+          ],
+          "Resource": [
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_verdict_watches",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_verdict_watches/index/*"
+          ]
+        }
+      ]
+    },
+    "relayshield-weekly-metrics-policy": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:Scan",
+            "dynamodb:GetItem",
+            "dynamodb:Query"
+          ],
+          "Resource": [
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_users",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_monitored_emails",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_api_keys",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_breach_alerts",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_sim_swap_alerts",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_alerts",
+            "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_wallet_activity_log"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "secretsmanager:GetSecretValue"
+          ],
+          "Resource": "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/stripe_secret_key*"
+        }
+      ]
+    },
+    "RelayShieldSecretsPolicy": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "secretsmanager:GetSecretValue",
+          "Resource": [
+            "arn:aws:secretsmanager:us-east-1:620534471984:secret:relayshield/hibp_api_key*",
+            "arn:aws:secretsmanager:us-east-1:620534471984:secret:relayshield/twilio_account_sid*",
+            "arn:aws:secretsmanager:us-east-1:620534471984:secret:relayshield/twilio_whatsapp_number*",
+            "arn:aws:secretsmanager:us-east-1:620534471984:secret:relayshield/twilio_auth_token*",
+            "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/anthropic_api_key-1C5sDG",
+            "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/stripe_secret_key-eRia25",
+            "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/alchemy_api_key-*",
+            "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/github_search_token-eHhko0",
+            "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/virustotal_api_key-9bWOgi",
+            "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/google_safe_browsing-7bdTKQ"
+          ]
+        }
+      ]
+    },
+    "TextractOCR": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "TextractOCR",
+          "Effect": "Allow",
+          "Action": "textract:DetectDocumentText",
+          "Resource": "*"
+        }
+      ]
+    }
+  },
+  "attached_policies": {
+    "arn:aws:iam::aws:policy/AWSMarketplaceMeteringFullAccess": {
+      "name": "AWSMarketplaceMeteringFullAccess",
+      "default_version": "v1",
+      "aws_managed": true,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Action": [
+              "aws-marketplace:MeterUsage"
+            ],
+            "Effect": "Allow",
+            "Resource": "*"
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole": {
+      "name": "AWSLambdaBasicExecutionRole",
+      "default_version": "v1",
+      "aws_managed": true,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:CreateLogGroup",
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+            ],
+            "Resource": "*"
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::aws:policy/AWSMarketplaceGetEntitlements": {
+      "name": "AWSMarketplaceGetEntitlements",
+      "default_version": "v2",
+      "aws_managed": true,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AWSMarketplaceGetEntitlements",
+            "Effect": "Allow",
+            "Action": [
+              "aws-marketplace:GetEntitlements"
+            ],
+            "Resource": "*"
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::239677749008:policy/service-role/AWSLambdaBasicExecutionRole-7c2780fe-ba49-49e4-9f4a-6e71eecf6f8b": {
+      "name": "AWSLambdaBasicExecutionRole-7c2780fe-ba49-49e4-9f4a-6e71eecf6f8b",
+      "default_version": "v2",
+      "aws_managed": false,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "logs:CreateLogGroup",
+            "Resource": "arn:aws:logs:us-east-1:239677749008:*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+            ],
+            "Resource": [
+              "arn:aws:logs:us-east-1:239677749008:log-group:/aws/lambda/relayshield-*:*"
+            ]
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::239677749008:policy/RelayShieldIntelTables": {
+      "name": "RelayShieldIntelTables",
+      "default_version": "v1",
+      "aws_managed": false,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "IntelTablesWrite",
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:PutItem",
+              "dynamodb:UpdateItem",
+              "dynamodb:GetItem",
+              "dynamodb:Query",
+              "dynamodb:Scan",
+              "dynamodb:DeleteItem"
+            ],
+            "Resource": [
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_ransomware_victims",
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_operator_identities",
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_scan_submissions"
+            ]
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::239677749008:policy/RelayShieldSESSendPolicy": {
+      "name": "RelayShieldSESSendPolicy",
+      "default_version": "v1",
+      "aws_managed": false,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ses:SendEmail",
+              "ses:SendRawEmail"
+            ],
+            "Resource": "*"
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::239677749008:policy/relayshield-intel-feed-read": {
+      "name": "relayshield-intel-feed-read",
+      "default_version": "v1",
+      "aws_managed": false,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadFeedTableAndIndex",
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:Query",
+              "dynamodb:GetItem",
+              "dynamodb:DescribeTable"
+            ],
+            "Resource": [
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_feed_current",
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_feed_current/index/*"
+            ]
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::239677749008:policy/relayshield-marketplace-listings-write": {
+      "name": "relayshield-marketplace-listings-write",
+      "default_version": "v2",
+      "aws_managed": false,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "WriteListings",
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:PutItem",
+              "dynamodb:UpdateItem",
+              "dynamodb:GetItem",
+              "dynamodb:Query",
+              "dynamodb:DescribeTable"
+            ],
+            "Resource": [
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_marketplace_listings",
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_marketplace_listings/index/*"
+            ]
+          },
+          {
+            "Sid": "WriteIntelMessageArchive",
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:PutItem",
+              "dynamodb:BatchWriteItem",
+              "dynamodb:GetItem",
+              "dynamodb:Query",
+              "dynamodb:DescribeTable"
+            ],
+            "Resource": [
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_messages",
+              "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_messages/index/*"
+            ]
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::239677749008:policy/relayshield-discord-installs-access": {
+      "name": "relayshield-discord-installs-access",
+      "default_version": "v1",
+      "aws_managed": false,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:GetItem",
+              "dynamodb:PutItem",
+              "dynamodb:UpdateItem",
+              "dynamodb:Scan"
+            ],
+            "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_discord_installs"
+          },
+          {
+            "Effect": "Allow",
+            "Action": "secretsmanager:GetSecretValue",
+            "Resource": "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/discord_bot_token-vop874"
+          }
+        ]
+      }
+    },
+    "arn:aws:iam::239677749008:policy/relayshield-first-seen-write": {
+      "name": "relayshield-first-seen-write",
+      "default_version": "v3",
+      "aws_managed": false,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:PutItem"
+            ],
+            "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_intel_first_seen"
+          }
+        ]
+      }
+    }
+  },
+  "functions_using_this_role": [
+    {
+      "name": "relayshield-alchemy-webhook",
+      "last_modified": "2026-08-14T01:44:12.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-api",
+      "last_modified": "2026-08-28T11:56:45.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-approval-monitor",
+      "last_modified": "2026-05-19T14:50:23.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-aws-marketplace",
+      "last_modified": "2026-07-18T01:15:46.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-brand-sweep",
+      "last_modified": "2026-06-25T00:14:05.998+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-breach-monitor",
+      "last_modified": "2026-08-05T12:51:02.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-cert-monitor",
+      "last_modified": "2026-07-21T11:26:24.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-crypto-monitor",
+      "last_modified": "2026-07-02T02:17:18.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-day3-sender",
+      "last_modified": "2026-05-19T14:49:40.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-day3-tgdigest",
+      "last_modified": "2026-05-14T17:23:28.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-developer-signup",
+      "last_modified": "2026-08-17T19:50:51.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-digest-sender",
+      "last_modified": "2026-08-05T10:59:44.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-domain-monitor",
+      "last_modified": "2026-08-05T12:51:09.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-gas-monitor",
+      "last_modified": "2026-05-19T14:50:30.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-helio-webhook",
+      "last_modified": "2026-05-26T00:29:21.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-atlas",
+      "last_modified": "2026-07-13T00:17:21.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-attack",
+      "last_modified": "2026-07-16T11:35:01.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-classifier",
+      "last_modified": "2026-07-24T15:55:19.868+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-discovery",
+      "last_modified": "2026-08-24T13:57:56.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-feed",
+      "last_modified": "2026-08-29T22:06:20.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-kev",
+      "last_modified": "2026-08-29T22:06:13.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-malpedia",
+      "last_modified": "2026-07-10T23:39:19.684+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-monitor",
+      "last_modified": "2026-08-28T11:56:52.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-ransomware",
+      "last_modified": "2026-08-01T02:23:10.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-intel-substack",
+      "last_modified": "2026-08-01T13:33:56.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-liquidation-monitor",
+      "last_modified": "2026-05-19T14:50:38.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-monthly-oauth-reminder",
+      "last_modified": "2026-05-19T14:49:55.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-monthly-team-report",
+      "last_modified": "2026-05-24T14:27:06.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-msp-digest",
+      "last_modified": "2026-06-21T01:22:11.742+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-oauth-watchlist-monitor",
+      "last_modified": "2026-08-05T12:51:16.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-push",
+      "last_modified": "2026-08-01T02:19:19.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-quarterly-sweep-sender",
+      "last_modified": "2026-05-19T14:50:02.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-signup-api",
+      "last_modified": "2026-05-26T00:32:43.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-sms-fallback-sender",
+      "last_modified": "2026-05-01T01:22:56.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-social-monitor",
+      "last_modified": "2026-07-16T14:33:17.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-solana-monitor",
+      "last_modified": "2026-05-13T15:58:20.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-superfluid-webhook",
+      "last_modified": "2026-06-05T23:20:03.832+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-telegram-webhook",
+      "last_modified": "2026-08-27T11:11:47.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-ton-monitor",
+      "last_modified": "2026-05-13T16:03:05.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-weekly-metrics",
+      "last_modified": "2026-08-13T19:28:47.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield-weekly-status",
+      "last_modified": "2026-06-26T17:26:05.000+0000",
+      "vpc": false
+    },
+    {
+      "name": "relayshield_infostealer_monitor",
+      "last_modified": "2026-07-21T11:33:56.000+0000",
+      "vpc": false
+    }
+  ]
+}

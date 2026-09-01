@@ -48,6 +48,14 @@ on:
       # maps it to relayshield-intel-feed on its own; this entry only makes a
       # change to it trigger the workflow at all.
       - 'relayshield_intel_labels.py'
+      # Added 2026-09-01. Shared module, and the FIRST one imported by both bot
+      # handlers: the forward-provenance core and the Quickstart card. The
+      # import walk maps it to relayshield-telegram-webhook AND
+      # relayshield-whatsapp-webhook on its own, so both get repackaged; this
+      # entry only makes a change to it trigger the workflow at all. Without
+      # it, editing only this file would change what both bots say to users and
+      # deploy nothing.
+      - 'relayshield_forward_analysis.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:

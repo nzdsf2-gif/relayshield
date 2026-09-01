@@ -1,5 +1,78 @@
 # RelayShield — Open Items
 
+## 🚪 FRONT-DOORS — discovery surfaces, added 2026-09-01
+
+*Founder direction: distribution for the Telegram bot is nascent and outreach does not scale. A
+front door is a directory people already SEARCH, carrying a listing we control, that yields a
+self-serve first use with attribution. Ranked by (available installs x fit) / effort. FD-1 to FD-3
+are this session's work.*
+
+**Attribution is not optional on any of these.** Every outbound link needs its `source=` key
+registered in `_SOURCE_BANNERS` in `relayshield_developer_signup.py` BEFORE the listing goes live.
+An unregistered key logs `unmatched:` and renders no banner, which has bitten this project three
+times, and a front door whose attribution is broken cannot be measured — so it cannot be defended
+when deciding what to build next.
+
+| ID | Front door | Feeds | Status |
+|---|---|---|---|
+| **FD-1** | GitHub Marketplace Action (rsscan) | API / developer | 🟨 Blocked on a version-pin fix in the OTHER repo — see below |
+| **FD-2** | pre-commit.com hooks index | rsscan | 🟩 Ready to submit, needs one PR |
+| **FD-3** | MCP server registries (mcp.so, Smithery, `modelcontextprotocol/servers`) | Agentic bundle, TI | 🟩 Manifests written, needs accounts |
+| **FD-4** | Splunkbase app | TI corpus licences | ⬜ Not started. Biggest untouched enterprise TI directory |
+| **FD-5** | OpenCTI connector (Filigran) | TI corpus licences | ⬜ Not started. Was DISTRIB-FILIGRAN-1, gated on OpenCTI-1 |
+| **FD-6** | Chrome Web Store extension | Consumer bots, CS Mobile | ⬜ Not started. Only front door that reaches non-Telegram consumers |
+| **FD-7** | Slack App Directory | Business tiers | ⬜ Not started. Biggest business directory; the Zapier Slack template is only a proxy for it |
+
+### FD-1 — GitHub Marketplace Action. BLOCKED, and on a bug that has now happened twice.
+
+`rsscan/action.yml` in THIS repo pins `rsscan==0.1.3`. **PyPI is at 0.2.1** (verified live
+2026-09-01). So the Action installs a version two releases behind, and `rsscan/orb/rsscan.yml` has
+the same pin.
+
+`rsscan/RELEASE_0.1.3.md` records this exact defect once already: "the GitHub Action and CircleCI
+orb both pinned `rsscan==0.1.0` while PyPI was at 0.1.3". It recurred because nothing asserts the
+pin matches the published version.
+
+**Do not fix it in this repo.** The live Action is served from `github.com/RelayShield/rsscan`,
+a SEPARATE repository, and `rsscan/` here is a snapshot that has drifted from it — `pyproject.toml`
+here says 0.1.3, PyPI says 0.2.1. Editing this copy changes nothing a user can install and creates
+a second source of truth for the same file. This is the DRIFT RULE in a place the drift check does
+not look.
+
+Order of work:
+1. Decide which repo is authoritative for `rsscan/` and record it at the top of `rsscan/README.md`.
+   If it is `RelayShield/rsscan`, this directory should be deleted or reduced to a pointer.
+2. In that repo: bump the pin in `action.yml` and `orb/rsscan.yml` to the published version, and add
+   a test that fails when the pin and `pyproject.toml`'s version disagree. Without the test this
+   recurs a third time.
+3. Only then publish to Marketplace: Releases -> Draft a new release -> tick *Publish this Action to
+   the GitHub Marketplace*. `action.yml` already has the required `branding:` block (shield/purple),
+   so nothing else blocks the listing itself.
+
+### FD-2 — pre-commit.com hooks index. Ready.
+
+`rsscan/.pre-commit-hooks.yaml` is present and correct: `id: rsscan`, `language: python`,
+`pass_filenames: false` (deliberate — the hook reads the staged diff itself so it scans only ADDED
+lines, which is what stops legacy secrets making the hook unbypassable).
+
+The index is a curated Markdown list, so listing is one PR to `pre-commit/pre-commit.com`, adding a
+row to `sections/hooks.md` pointing at `https://github.com/RelayShield/rsscan`. Requires the repo to
+be public with a tag matching the `rev:` in our own README. **Depends on FD-1 step 1** only insofar
+as the URL must be the authoritative repo.
+
+### FD-3 — MCP registries. Manifests written this session.
+
+We ship an MCP server AND sell `mcp-registry-risk`, so this is the strongest thematic fit on the
+list, and `RelayShield_Strategy.md` has flagged `modelcontextprotocol/servers` as
+"highest-priority new candidate" without it being done.
+
+Manifests are committed at `mcp_registry/`. Three destinations, in increasing effort:
+- **mcp.so** — web submission form, uses `mcp_registry/listing.md`.
+- **Smithery** — needs `smithery.yaml` at the repo root of the server's own repo.
+- **`modelcontextprotocol/servers`** — a PR adding a row to their README's community list.
+
+None can be completed from the container: all three need accounts or a PR from an account we hold.
+
 ## 🟦 MICROSOFT SURFACES — added 2026-08-15, founder-approved
 
 **The shape differs per surface and this is the thing to get right.** Researched 2026-08-15.

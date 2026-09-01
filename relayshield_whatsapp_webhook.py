@@ -2570,8 +2570,12 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
         # does not exist. "from your contacts" is the load-bearing half — the
         # instinct is to forward only messages from strangers, but a hijacked
         # contact is where the victim's own judgement is weakest.
-        "*📨 Forward me anything that looks off* — a text, a link, or a message "
-        "from someone in your contacts. No command needed. A hijacked account "
+        # WhatsApp has no @handle to name, so the concrete instruction is the
+        # gesture plus "this chat". Saying "forward me" without saying HOW is the
+        # same defect the Telegram card had: it assumes the reader already knows.
+        "*📨 Forward anything that looks off into this chat* — a text, a link, "
+        "or a message from someone in your contacts. Press and hold the message, "
+        "tap Forward, and pick RelayShield. No command needed. A hijacked account "
         "still shows up as your friend, so those are worth forwarding too.\n"
         "_WhatsApp does not tell me who originally sent a forwarded message, so "
         "I analyse the text but can never check the sender._\n"

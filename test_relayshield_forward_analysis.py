@@ -300,7 +300,20 @@ class TestQuickstart(unittest.TestCase):
             self.assertIn("still shows up as your friend", text)
 
     def test_telegram_names_the_bot(self):
-        self.assertIn("@relayshield_bot", fwd.quickstart_text(fwd.PLATFORM_TELEGRAM))
+        """Escaped, because send_message parses Markdown and a lone _ opens an
+        italic entity that never closes -- a 400 that drops the whole card."""
+        self.assertIn("@relayshield\\_bot", fwd.quickstart_text(fwd.PLATFORM_TELEGRAM))
+
+    def test_both_say_HOW_to_forward(self):
+        """"Forward me" is not an instruction if the reader does not know the
+        gesture or the destination. Telegram needs the handle to search for;
+        WhatsApp has no handle, so it needs the gesture and "this chat"."""
+        tg = fwd.quickstart_text(fwd.PLATFORM_TELEGRAM)
+        self.assertIn("choose *Forward*", tg)
+        self.assertIn("@relayshield\\_bot", tg)
+        wa = fwd.quickstart_text(fwd.PLATFORM_WHATSAPP)
+        self.assertIn("Press and hold", wa)
+        self.assertIn("tap *Forward*", wa)
 
     def test_whatsapp_quickstart_states_the_limit(self):
         text = fwd.quickstart_text(fwd.PLATFORM_WHATSAPP)
@@ -324,12 +337,18 @@ class TestHelpCardsCarryTheHints(unittest.TestCase):
 
     def test_telegram_quick_start_card_has_both_hints(self):
         src = self._src("relayshield_telegram_webhook.py")
-        self.assertIn("Forward me anything that looks off", src)
+        self.assertIn("Forward anything that looks off to @relayshield", src)
         self.assertIn("Paste a screenshot of a suspicious text", src)
+
+    def test_telegram_cards_name_the_bot_escaped(self):
+        """All three Telegram surfaces name the handle, and every one of them
+        escapes the underscore. One unescaped occurrence is a 400 on that card."""
+        src = self._src("relayshield_telegram_webhook.py")
+        self.assertGreaterEqual(src.count("@relayshield\\\\_bot"), 3)
 
     def test_whatsapp_help_has_both_hints(self):
         src = self._src("relayshield_whatsapp_webhook.py")
-        self.assertIn("Forward me anything that looks off", src)
+        self.assertIn("Forward anything that looks off into this chat", src)
         self.assertIn("Paste a screenshot of a suspicious text", src)
 
 

@@ -1386,10 +1386,12 @@ def msg_help(tier: str) -> str:
     if tier == TIER_FREE:
         return (
             "🛡️ *RelayShield Free — Commands*\n\n"
-            "📨 *Forward me anything that looks off* — a text, a link, or a "
-            "message from someone in your contacts. No command needed.\n"
+            "📨 *Forward anything that looks off to @relayshield\\_bot* — a "
+            "text, a link, or a message from someone in your contacts. Tap the "
+            "message, choose Forward, search *@relayshield\\_bot*. No command "
+            "needed.\n"
             "📸 *Paste a screenshot of a suspicious text* — just send the "
-            "picture.\n\n"
+            "picture here.\n\n"
             "• /quickstart — Three things you can do right now\n"
             "• /verify — Callback rule, OTP rule, family safe word\n"
             "• /otp — Unexpected OTP guidance\n"
@@ -1414,9 +1416,11 @@ def msg_help(tier: str) -> str:
         # this text from one header to the next, so anything here belongs to no
         # category and shows only in the full list — which is what an
         # orientation line should do.
-        "📨 *Forward me anything that looks off* — a text, a link, or a message "
-        "from someone in your contacts. No command needed.\n"
-        "📸 *Paste a screenshot of a suspicious text* — just send the picture.\n"
+        "📨 *Forward anything that looks off to @relayshield\\_bot* — a text, "
+        "a link, or a message from someone in your contacts. Tap the message, "
+        "choose Forward, search *@relayshield\\_bot*. No command needed.\n"
+        "📸 *Paste a screenshot of a suspicious text* — just send the picture "
+        "here.\n"
         "• /quickstart — Three things you can do right now\n\n"
 
         "*🔐 Breach Response*\n"
@@ -2108,11 +2112,24 @@ def msg_help_top(tier: str) -> str:
         # The instinct is to forward only messages from strangers, but a
         # hijacked contact is the single case where the victim's own judgement
         # is weakest, because the name is one they trust.
-        "📨 *Forward me anything that looks off* — a text, a link, or a message "
-        "from someone in your contacts. No command needed. A hijacked account "
-        "still shows up as your friend, so those are worth forwarding too",
-        "📸 *Paste a screenshot of a suspicious text* — send the picture, no "
-        "caption needed. Best for an SMS you cannot forward into Telegram",
+        # NAMES THE BOT, on founder direction 2026-09-01. "Forward me" assumes
+        # the reader already knows what "me" is called. Telegram forwarding works
+        # by picking a destination from a search list, so without the @handle
+        # there is nothing to type and the instruction is unusable to exactly the
+        # new user this card exists for.
+        #
+        # The underscore is BACKSLASH-ESCAPED. send_message defaults to
+        # parse_mode="Markdown", where a lone _ opens an italic entity; unescaped,
+        # @relayshield_bot leaves it unclosed, Telegram answers 400, and the whole
+        # card fails to send.
+        "📨 *Forward anything that looks off to @relayshield\\_bot* — a text, "
+        "a link, or a message from someone in your contacts. Tap the message, "
+        "choose Forward, then search *@relayshield\\_bot*. No command needed. "
+        "A hijacked account still shows up as your friend, so those are worth "
+        "forwarding too",
+        "📸 *Paste a screenshot of a suspicious text* — send the picture to "
+        "@relayshield\\_bot, no caption needed. Best for an SMS you cannot forward "
+        "into Telegram",
         "",
         "• /scan <url> — Scan a suspicious link for malware or phishing",
         "• /otp — Unexpected OTP? Get guidance now",

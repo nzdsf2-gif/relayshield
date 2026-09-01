@@ -1,0 +1,37 @@
+# Copy this to the ROOT of the MCP server's own repository, not here.
+# Smithery reads it from the repo it is listing.
+name: relayshield
+displayName: RelayShield
+description: >-
+  Check a wallet, email, URL or credential against identity-compromise and
+  criminal-source threat intelligence before an agent acts on it.
+homepage: https://api.relayshield.net/developers?source=mcp-registry
+license: MIT
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - relayshieldApiKey
+    properties:
+      relayshieldApiKey:
+        type: string
+        title: RelayShield API key
+        description: >-
+          Free key from api.relayshield.net/developers. Sent as the x-api-key
+          header. Never logged and never returned in a tool response.
+  # Passed via the environment, never as an argv element: argv is visible to
+  # anything that can read the process table on the host.
+  commandFunction: |
+    (config) => ({
+      command: 'node',
+      args: ['dist/index.js'],
+      env: { RELAYSHIELD_API_KEY: config.relayshieldApiKey }
+    })
+
+tools:
+  - relayshield_check_wallet
+  - relayshield_check_breach
+  - relayshield_check_infostealer
+  - relayshield_scan_url

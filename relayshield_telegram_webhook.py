@@ -1386,6 +1386,10 @@ def msg_help(tier: str) -> str:
     if tier == TIER_FREE:
         return (
             "🛡️ *RelayShield Free — Commands*\n\n"
+            "📨 *Forward me anything that looks off* — a text, a link, or a "
+            "message from someone in your contacts. No command needed.\n"
+            "📸 *Paste a screenshot of a suspicious text* — just send the "
+            "picture.\n\n"
             "• /quickstart — Three things you can do right now\n"
             "• /verify — Callback rule, OTP rule, family safe word\n"
             "• /otp — Unexpected OTP guidance\n"
@@ -1410,6 +1414,9 @@ def msg_help(tier: str) -> str:
         # this text from one header to the next, so anything here belongs to no
         # category and shows only in the full list — which is what an
         # orientation line should do.
+        "📨 *Forward me anything that looks off* — a text, a link, or a message "
+        "from someone in your contacts. No command needed.\n"
+        "📸 *Paste a screenshot of a suspicious text* — just send the picture.\n"
         "• /quickstart — Three things you can do right now\n\n"
 
         "*🔐 Breach Response*\n"
@@ -2092,10 +2099,21 @@ def msg_help_top(tier: str) -> str:
     a follow-up message is the closest equivalent)."""
     lines = [
         "🛡️ *RelayShield — Quick Start*\n",
-        # First, and not a command, because it is the fastest useful action
-        # and the only one that needs nothing typed. /quickstart expands it.
-        "• *Forward me a suspicious message* — no command needed. I check the "
-        "text, any link in it, and who sent it",
+        # The two no-command actions come FIRST, and they are phrased as things
+        # you DO, not as commands. Founder direction 2026-09-01: a feature the
+        # user is never told about does not exist, and the first version of this
+        # card mentioned forwarding once and never mentioned screenshots at all.
+        #
+        # "from people in your contacts" is deliberate and is the whole point.
+        # The instinct is to forward only messages from strangers, but a
+        # hijacked contact is the single case where the victim's own judgement
+        # is weakest, because the name is one they trust.
+        "📨 *Forward me anything that looks off* — a text, a link, or a message "
+        "from someone in your contacts. No command needed. A hijacked account "
+        "still shows up as your friend, so those are worth forwarding too",
+        "📸 *Paste a screenshot of a suspicious text* — send the picture, no "
+        "caption needed. Best for an SMS you cannot forward into Telegram",
+        "",
         "• /scan <url> — Scan a suspicious link for malware or phishing",
         "• /otp — Unexpected OTP? Get guidance now",
         "• /sweep — Close email backdoors and sign out hijacked sessions",

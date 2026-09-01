@@ -3,6 +3,55 @@ name: Monthly INTEL-2 Channel Review
 # Runs on the 1st of every month at 09:00 UTC.
 # Pulls hit-rate stats from CloudWatch for each monitored Telegram channel,
 # then opens a GitHub Issue with the report so the channel list can be reviewed.
+#
+# ---------------------------------------------------------------------------
+# FIXED 2026-09-01, after this workflow failed on ALL 29 runs since 2026-06-14.
+# It had never once succeeded, so the monthly channel review has never actually
+# been opened, and INTEL-2 has gone un-reviewed for two and a half months.
+#
+# Three separate defects, only the first of which was fatal:
+#
+# 1. `gh issue create --label "intel,monthly-review"` -- NEITHER LABEL EXISTS
+#    in this repo. gh validates labels and exits 1 on an unknown one, so the
+#    issue was never created. This is the whole of the red.
+#      could not add label: 'intel' not found
+#    Note lambda_drift_check.yml gets away with `labels: ['lambda-drift']`
+#    because it goes through the REST API via actions/github-script, which
+#    CREATES a missing label instead of rejecting it. gh does not. The two are
+#    not interchangeable, which is why one workflow works and this one never
+#    has. Fixed by creating both labels idempotently first.
+#
+# 2. Both `aws` calls passed `--profile default`. configure-aws-credentials
+#    exports environment variables; it does not write a profile, so there is no
+#    profile named `default` on the runner and every call failed with
+#    "The config profile (default) could not be found". Each was wrapped in
+#    `2>/dev/null || true`, so this failed SILENTLY: even once the label bug is
+#    fixed, the issue body would have been empty with nothing saying why.
+#    Removed, and the outcome of each pull is now REPORTED IN THE ISSUE rather
+#    than swallowed -- a report that cannot say whether its own data arrived is
+#    worse than no report.
+#
+# 3. The "dry-run stats" step invoked relayshield-intel-monitor with
+#    `{"action":"stats_only"}`. **relayshield_intel_monitor.py has no such
+#    branch.** Its lambda_handler reads only event["tier"] and then goes
+#    straight into _acquire_lock() and a full collection pass. So that payload
+#    never meant "give me stats" -- it meant "run a complete Telegram ingest",
+#    monthly, on top of the hourly schedule. Defect 2 is the only reason it
+#    never fired: a broken --profile was holding the pin in.
+#    The step is REMOVED rather than repaired. The digest lines pulled in the
+#    step above already carry channels_checked / iocs_extracted, which is the
+#    data the review actually wants, and getting it by reading logs cannot
+#    have a side effect on production. If a real stats_only mode is ever
+#    wanted, it belongs in the handler behind an early return like the
+#    ci.import-probe guard, and it is a Lambda change under the DRIFT RULE,
+#    not a workflow change.
+#
+# Auth is deliberately LEFT ALONE. Every other AWS workflow here uses the OIDC
+# role relayshield-github-deploy, and this one uses long-lived secrets, which
+# is worth converting -- but iam_github_deploy_invoke.json grants that role
+# lambda:InvokeFunction and no logs:FilterLogEvents, so switching now would
+# trade a fixed workflow for a 403. Tracked separately; not bundled into a fix.
+# ---------------------------------------------------------------------------
 
 on:
   schedule:
@@ -25,88 +74,98 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            us-east-1
 
-      # Pull last 30 days of intel-monitor CloudWatch logs and extract per-channel hit counts
+      # Pull the last 30 days of intel-monitor run digests from CloudWatch.
+      # Read-only by construction: filter-log-events cannot touch production.
       - name: Fetch channel stats from CloudWatch
         id: stats
         run: |
+          set -uo pipefail
+          export AWS_PAGER=""
+
           END=$(date -u +%s)000
           START=$(( END - 30*24*3600*1000 ))
 
-          # Query the log group for channel-level match lines
-          aws logs filter-log-events \
-            --log-group-name /aws/lambda/relayshield-intel-monitor \
-            --start-time $START \
-            --end-time $END \
-            --filter-pattern '"IOC store"' \
-            --profile default \
-            --output text \
-            --query 'events[*].message' 2>/dev/null | head -500 > /tmp/raw_logs.txt || true
+          # Captured, not swallowed. The outcome goes into the issue body below,
+          # so a stats pull that failed says so in the artifact instead of
+          # rendering as "no activity this month".
+          STATS_NOTE="ok"
 
-          # Also grab the admin digest lines which include channels_checked / iocs_extracted
-          aws logs filter-log-events \
-            --log-group-name /aws/lambda/relayshield-intel-monitor \
-            --start-time $START \
-            --end-time $END \
-            --filter-pattern '"INTEL-2 Monitor Run"' \
-            --profile default \
-            --output text \
-            --query 'events[*].message' 2>/dev/null | tail -20 > /tmp/digests.txt || true
-
-          echo "STATS_READY=true" >> $GITHUB_OUTPUT
-
-      # Invoke the Lambda directly to get the current channel list + last run summary
-      - name: Invoke intel-monitor for dry-run stats
-        id: invoke
-        run: |
-          RESULT=$(aws lambda invoke \
-            --function-name relayshield-intel-monitor \
-            --payload '{"action":"stats_only"}' \
-            --cli-binary-format raw-in-base64-out \
-            /tmp/lambda_out.json \
-            --profile default \
-            --query 'StatusCode' \
-            --output text 2>/dev/null) || RESULT="error"
-
-          if [ -f /tmp/lambda_out.json ]; then
-            cat /tmp/lambda_out.json >> /tmp/digests.txt
+          if ! aws logs filter-log-events \
+                --log-group-name /aws/lambda/relayshield-intel-monitor \
+                --start-time "$START" \
+                --end-time "$END" \
+                --filter-pattern '"INTEL-2 Monitor Run"' \
+                --output text \
+                --query 'events[*].message' > /tmp/digests_raw.txt 2>/tmp/digest_err.txt; then
+            STATS_NOTE="FAILED — $(head -c 300 /tmp/digest_err.txt | tr '\n' ' ')"
+            : > /tmp/digests_raw.txt
           fi
 
-          echo "INVOKE_STATUS=$RESULT" >> $GITHUB_OUTPUT
+          tail -40 /tmp/digests_raw.txt > /tmp/digests.txt || : > /tmp/digests.txt
+
+          if [ ! -s /tmp/digests.txt ] && [ "$STATS_NOTE" = "ok" ]; then
+            STATS_NOTE="no matching log lines in the last 30 days"
+          fi
+
+          echo "note=$STATS_NOTE" >> "$GITHUB_OUTPUT"
+          echo "CloudWatch pull: $STATS_NOTE"
+
+      # Labels must exist before gh will attach them. --force makes this
+      # idempotent, so the step is a no-op on every run after the first.
+      - name: Ensure the issue labels exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create intel \
+            --description "INTEL-2 threat intelligence collection" \
+            --color 1D76DB --force --repo "${{ github.repository }}"
+          gh label create monthly-review \
+            --description "Recurring monthly review task" \
+            --color 5319E7 --force --repo "${{ github.repository }}"
+
+      # Checkout is needed only for the body template committed alongside
+      # this workflow. Keeping the static prose in a file rather than in a
+      # heredoc inside a YAML block scalar removes a whole class of quoting
+      # bug: the previous version interpolated CloudWatch text straight into a
+      # double-quoted shell string, so a backtick in a scraped channel line was
+      # a command-substitution surface, not just a formatting problem.
+      - name: Check out the body template
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/intel_channel_review_body.md
+          sparse-checkout-cone-mode: false
 
       - name: Build issue body
-        id: issue
+        # Passed through env, never interpolated into the script body. A
+        # ${{ }} expansion is textual substitution INTO the shell source, so a
+        # quote inside an AWS error string would break out of the echo. env is
+        # the only safe way to move a step output into a run block.
+        env:
+          STATS_NOTE: ${{ steps.stats.outputs.note }}
         run: |
-          MONTH=$(date -u +"%B %Y")
-          DIGESTS=$(cat /tmp/digests.txt 2>/dev/null | head -80 || echo "No digest data found.")
+          set -uo pipefail
+          cp .github/intel_channel_review_body.md /tmp/issue_body.txt
 
-          BODY="## INTEL-2 Monthly Channel Review: $MONTH
+          {
+            echo ""
+            echo "### Last 30-day monitor digests"
+            echo ""
+            echo "CloudWatch pull status: **${STATS_NOTE}**"
+            echo ""
+            echo '```text'
+          } >> /tmp/issue_body.txt
 
-          This issue is auto-generated on the 1st of every month. Review channel performance and update \`MONITORED_CHANNELS\` in \`relayshield_intel_monitor.py\` before closing.
+          if [ -s /tmp/digests.txt ]; then
+            cat /tmp/digests.txt >> /tmp/issue_body.txt
+          else
+            echo "(no digest lines retrieved - see the status line above)" >> /tmp/issue_body.txt
+          fi
 
-          ### Checklist
-          - [ ] Review channels with zero IOC hits last 30 days, consider replacing
-          - [ ] Check if any channels went private or were deleted (Telethon join errors in logs)
-          - [ ] Search for newly active criminal channels to add (sim swap, credential dumps, infostealers, crypto drainers)
-          - [ ] Verify the 4 confirmed-accessible channels are still live: \`@exposed_vc\`, \`@logsmarket\`, \`@cloudsek_alerts\`, \`@vxunderground\`
-          - [ ] Update \`MONITORED_CHANNELS\` list if needed, commit, and redeploy
-
-          ### Last 30-Day Lambda Digest
-          \`\`\`
-          $DIGESTS
-          \`\`\`
-
-          ### Resources
-          - [CloudWatch Logs](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/\$252Faws\$252Flambda\$252Frelayshield-intel-monitor)
-          - [relayshield_intel_monitor.py](../blob/main/relayshield_intel_monitor.py)
-          - [DynamoDB intel_iocs table](https://us-east-1.console.aws.amazon.com/dynamodbv2/home?region=us-east-1#table?name=relayshield_intel_iocs)
-
-          _Auto-opened by GitHub Actions · intel_channel_review.yml_"
-
-          # Indented above so the YAML block scalar stays valid; strip it back out
-          # or every line renders as a Markdown code block in the issue.
-          echo "$BODY" | sed 's/^          //' > /tmp/issue_body.txt
-
-          echo "MONTH=$MONTH" >> $GITHUB_OUTPUT
+          {
+            echo '```'
+            echo ""
+            echo "_Auto-opened by GitHub Actions, intel_channel_review.yml_"
+          } >> /tmp/issue_body.txt
 
       - name: Open GitHub Issue
         env:
@@ -116,5 +175,6 @@ jobs:
           gh issue create \
             --title "INTEL-2 Channel Review — $MONTH" \
             --body-file /tmp/issue_body.txt \
-            --label "intel,monthly-review" \
-            --repo ${{ github.repository }}
+            --label intel \
+            --label monthly-review \
+            --repo "${{ github.repository }}"

@@ -2565,12 +2565,18 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
     commands = (
         "*🛡️ RelayShield — Commands*\n\n"
 
-        # First, and not a command, because it is the fastest useful action and
-        # the only one that needs nothing typed.
-        "*📨 Forward me a suspicious message* — no command needed. I analyse the "
-        "text and check any link in it.\n"
+        # The two no-command actions come FIRST, phrased as things you DO.
+        # Founder direction 2026-09-01: a feature the user is never told about
+        # does not exist. "from your contacts" is the load-bearing half — the
+        # instinct is to forward only messages from strangers, but a hijacked
+        # contact is where the victim's own judgement is weakest.
+        "*📨 Forward me anything that looks off* — a text, a link, or a message "
+        "from someone in your contacts. No command needed. A hijacked account "
+        "still shows up as your friend, so those are worth forwarding too.\n"
         "_WhatsApp does not tell me who originally sent a forwarded message, so "
-        "I can never check the sender._\n"
+        "I analyse the text but can never check the sender._\n"
+        "*📸 Paste a screenshot of a suspicious text* — send the picture with the "
+        "caption *MSGSCAN*. Best for an SMS you cannot forward into WhatsApp.\n"
         "• *QUICKSTART* — Three things you can do right now\n\n"
 
         "*🔍 Identity Monitoring*\n"

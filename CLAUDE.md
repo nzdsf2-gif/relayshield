@@ -444,6 +444,47 @@ Segment 1 outreach in front of people who would have checked.
 
 ---
 
+## WHERE THE CURRENT WORK LIST LIVES — read this before answering "what's next"
+
+**Added 2026-09-01, after a session answered "summarise the Top 10" by reciting the numbered list
+in `NEXT_SESSION_2026-08-20.md` — twelve days stale, with at least three items already done and one
+recorded as done that was never built.** The list was found by grepping for "Top 10", which is
+exactly how a stale list gets promoted back to current: it is the only thing in the repo wearing
+that name.
+
+**There is no file called "the Top 10". Do not go looking for one.** The ordered list in
+`NEXT_SESSION_2026-08-20.md` is a snapshot of one day in August and nothing has updated it since.
+Any `NEXT_SESSION_*.md` is a historical record of the session that wrote it, never a live queue.
+
+**The current state of the work is, in this order:**
+
+1. **This file.** The "WHERE 2026-08-29 LEFT THINGS", "BLOCKED", "Also outstanding" and "OPEN TODOS"
+   sections are maintained; a dated handoff file is not.
+2. **`git --no-pager log --oneline -40`,** and the diff of anything it names. What was actually
+   committed beats what a doc says was planned.
+3. **Open GitHub issues, and the last run of every workflow** — `lambda_drift_check.yml` and
+   `intel_channel_review.yml` especially. A red run that nobody has read is an open item whether or
+   not any document mentions it.
+4. **The roadmap files for a specific programme** — `socradar_gap_closure_roadmap.md` (A1-A8),
+   `intel_corpus_growth_plan.md`, `telegram_miniapp_and_app_inventory_scope.md`. These carry IDs and
+   are kept closer to current than the handoffs.
+
+**Then say where each answer came from, and how old it is.** A status line with no source is
+unverifiable, and this repo has now been bitten three times by a doc that said "done".
+
+**A doc claiming something is done is a lead, not a fact — VERIFY IT IN THE CODE.** Two proven cases:
+the XSOAR entry below, which needed `git ls-remote` to disprove, and **Top-10 item 8, "Ronin
+`ronin:` prefix normalise", recorded in this file as done on 2026-08-29 and never written** —
+`_looks_like_wallet_address` in `relayshield_telegram_webhook.py` tests EVM, Solana, TON, Bitcoin
+and XRP, and `ronin:0x…` fails all five. One grep would have caught it. Grep before repeating a
+"done".
+
+**If asked to summarise the priorities and the sources disagree, say so rather than picking one.**
+"The only list named Top 10 is twelve days old and these four items have moved since" is the useful
+answer. Reciting the stale list as if it were current is not.
+
+---
+
 ## STATUS CORRECTIONS — docs that are stale
 
 `NEXT_SESSION_2026-08-20.md` is the last full handoff, but items have completed since and the file
@@ -494,7 +535,11 @@ have paid and never been onboarded. The webhook now requires a numeric value for
 routes `p_`-prefixed values to `referred_by` on the user record, and logs anything else loudly.
 Never put a bare partner code in that field.
 - **DFK outreach** (Top-10 item 7) — done 2026-08-22.
-- **Ronin `ronin:` prefix normalise** (Top-10 item 8) — done.
+- **Ronin `ronin:` prefix normalise** (Top-10 item 8) — **NOT DONE. This line was wrong.**
+  Corrected 2026-09-01 by grep: there is no `ronin` string anywhere in any `.py` file except two
+  unrelated comments in `relayshield_api.py` about the Ronin bridge exploiter.
+  `_looks_like_wallet_address` (`relayshield_telegram_webhook.py`) accepts EVM, Solana, TON, Bitcoin
+  and XRP; `ronin:0x…` matches none of them and is rejected. Still blocks any Ronin-game pitch.
 
 ---
 

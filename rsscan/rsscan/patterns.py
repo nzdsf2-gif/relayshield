@@ -9,7 +9,7 @@ DO NOT hand-edit. Regenerate with:
 
     python3 tools/sync_patterns.py
 
-Sync digest: ed796789acc101f0
+Sync digest: f5766790eae8ce26
 `tools/sync_patterns.py --check` fails if this drifts from relayshield_api.py,
 so a pattern fixed server-side cannot silently go stale in the client.
 """
@@ -109,7 +109,7 @@ NHI_PATTERNS = [
     ("anthropic_session_token", r"sk-ant-sid01-[A-Za-z0-9_\-]{40,}", "CRITICAL", "Anthropic Session Token (revoke sessions, a key rotation does nothing)", "anthropic"),
     ("anthropic_key",    r"sk-ant-[a-zA-Z0-9_\-]{90,}",              "CRITICAL", "Anthropic API Key", "anthropic"),
     ("groq_key",         r"gsk_[a-zA-Z0-9]{52}",                     "CRITICAL", "Groq API Key", "groq"),
-    ("xai_key",          r"xai-[a-zA-Z0-9]{80}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
+    ("xai_key",          r"xai-[a-zA-Z0-9]{64,}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
     ("replicate_key",    r"r8_[a-zA-Z0-9]{37}",                      "CRITICAL", "Replicate API Key", "replicate"),
     # --- added 2026-08-26, re-applied onto the reconciled live base ----------
     # OpenRouter is a router, not a model vendor, and that is why one leaked key

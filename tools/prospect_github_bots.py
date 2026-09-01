@@ -123,6 +123,17 @@ def readme_text(full_name, token):
 
 _HANDLE = re.compile(r"(?:t\.me/|@)([A-Za-z0-9_]{4,32}[Bb]ot)\b")
 
+# Evidence the repo is a DEPLOYED Telegram bot rather than a library, a link
+# list, or a dotfiles repo that happens to mention Telegram. The first run
+# without this returned nix-config, awesome-nestjs, vector.dev and two personal
+# profile READMEs in its top 20, because capability keywords in a long README
+# scored as well as a real bot.
+_BOT_EVIDENCE = re.compile(r"t\.me/[A-Za-z0-9_]{4,}|@[A-Za-z0-9_]{4,32}[Bb]ot\b")
+
+# Repos that are catalogues or profiles, never products. An awesome-list mentions
+# every capability by construction, which is exactly why it used to win.
+_NOT_A_PRODUCT = re.compile(r"^(awesome[-_]|.*[-_]awesome$|dotfiles$|nix-config$)", re.I)
+
 
 def classify(text):
     low = text.lower()
@@ -138,7 +149,10 @@ def score(repo, tags, handle, contact_count):
     than being passed off as reach.
     """
     import math
-    capability_fit = min(50, len(tags) * 12)
+    # Capped at three tags. A project claiming six capabilities is describing a
+    # framework or a catalogue, not a bot, and uncapped this was the single
+    # biggest source of false positives in the first run.
+    capability_fit = min(50, min(len(tags), 3) * 16)
     stars = repo.get("stargazers_count", 0)
     reach = min(20, int(math.log10(stars + 1) * 8))
     contactability = min(20, contact_count * 7 + (5 if handle else 0))
@@ -182,6 +196,16 @@ def harvest(token, limit, per_query):
             tags = classify(body)
             if not tags:
                 continue  # nothing of ours maps onto what they say they do
+
+            # Two gates, both added after the first run returned mostly noise.
+            if _NOT_A_PRODUCT.match(repo.get("name") or ""):
+                continue
+            # A profile README: owner and repo share a name. Always a person,
+            # never a product.
+            if (repo.get("name") or "").lower() == ((repo.get("owner") or {}).get("login") or "").lower():
+                continue
+            if not _BOT_EVIDENCE.search(body):
+                continue  # no t.me link and no @handle: not a bot we can point at
 
             m = _HANDLE.search(body)
             handle = ("@" + m.group(1)) if m else ""

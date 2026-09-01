@@ -4107,7 +4107,7 @@ _LLM_KEY_PATTERNS = [
     ("anthropic", _llm_re.compile(r"sk-ant-[a-zA-Z0-9\-]{90,}"),      "Anthropic"),
     ("google",    _llm_re.compile(r"AIza[0-9A-Za-z\-_]{35}"),         "Google AI (Gemini)"),
     ("groq",      _llm_re.compile(r"gsk_[a-zA-Z0-9]{52}"),            "Groq"),
-    ("xai",       _llm_re.compile(r"xai-[a-zA-Z0-9]{80}"),            "xAI (Grok)"),
+    ("xai",       _llm_re.compile(r"xai-[a-zA-Z0-9]{64,}"),            "xAI (Grok)"),
     ("replicate", _llm_re.compile(r"r8_[a-zA-Z0-9]{37}"),             "Replicate"),
     # Everything below was missing until 2026-08-30. This table is what the
     # customer-facing /checkllm reports on, and it had drifted well behind the

@@ -128,6 +128,40 @@ jobs:
             else
               echo "::warning::$FILE not found inside $FUNC's package (different layout?)"
             fi
+
+            # SHARED MODULES, added 2026-09-01, WARNING-ONLY on purpose.
+            #
+            # The diff above compares exactly one file per function: the mapped
+            # handler. Every OTHER relayshield_*.py inside the deployed package
+            # -- relayshield_sim_swap_consent.py, relayshield_siem_connector.py,
+            # relayshield_openapi_spec.py, and now relayshield_forward_analysis.py
+            # in both bot packages -- has never been compared against main by
+            # anything. A hand-deploy that touched only a shared module has
+            # therefore always been invisible here, which is the precise blind
+            # spot the DRIFT RULE exists to close. relayshield_sim_swap_consent.py
+            # is the proof it is not hypothetical: it reached production as a
+            # live-only file and was recovered on 2026-08-23 by accident, not by
+            # this check.
+            #
+            # WARNINGS, NOT ERRORS, for exactly the reason every other addition
+            # to this file was watched before it was enforced: nobody has ever
+            # compared these, so the first run may go red on drift that predates
+            # this change and has not been read yet. Read the first diffs, act on
+            # them per the rule (live-only content is RECOVERED, never
+            # overwritten), and only then promote this to feed $DRIFTED.
+            for MOD in $(unzip -Z1 live.zip 2>/dev/null | grep '^relayshield_.*\.py$' || true); do
+              [ "$MOD" = "$FILE" ] && continue
+              [ -f "$MOD" ] || { echo "::warning::$FUNC ships $MOD, which is NOT in the repo — live-only file, recover it"; continue; }
+              unzip -p live.zip "$MOD" > live_mod.py 2>/dev/null || continue
+              if ! diff -q "$MOD" live_mod.py >/dev/null; then
+                echo "::warning::shared-module drift — $FUNC ships a $MOD that differs from main"
+                diff -u "$MOD" live_mod.py | head -40 || true
+              else
+                echo "ok — $FUNC's $MOD matches main"
+              fi
+              rm -f live_mod.py
+            done
+
             rm -f live.zip live_handler.py
           done
 

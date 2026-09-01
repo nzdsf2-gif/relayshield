@@ -163,6 +163,38 @@ SEARCH_KEYWORDS = [
     ("phishing como servico", "phaas"),         # PT: phishing as a service
     ("sim swap fraude",     "sim_swap"),        # PT/ES: SIM swap fraud
 
+    # --- OSINT sweep 003, 2026-08-30 (rebuilt) -------------------------------
+    # Reconstructed after the original commit (a08104f) was stranded in a
+    # session that could not push. See the push-path rule in CLAUDE.md.
+    #
+    # WHY BRAND NAMES. sim_swap, phaas, card_shop and hacktivist still held zero
+    # channels after two sweeps whose keywords were all generic ("sim swap",
+    # "phishing kit"). Operators do not advertise the category, they advertise
+    # the product, so this sweep targets the named kits and shops that current
+    # TI reporting says are actually trading. Sources: Intel 471, Proofpoint,
+    # Microsoft, Netcraft, DomainTools, Bitsight.
+    #
+    # NOTE ON THE COUNT: the original commit message said 17 new keywords. The
+    # surviving record of it names 16, listed below. The 17th is not recoverable
+    # and is deliberately NOT invented -- a keyword nobody can cite is exactly
+    # what the measurement doctrine forbids.
+    ("astro otp",                    "sim_swap"),
+    ("sms buster",                   "sim_swap"),
+    ("smsranger",                    "sim_swap"),
+    ("tycoon 2fa",                   "phaas"),
+    ("lucid panel",                  "phaas"),
+    ("lighthouse phishing",          "phaas"),
+    ("evilproxy",                    "phaas"),
+    ("sneaky 2fa",                   "phaas"),
+    ("xinxin group",                 "phaas"),
+    ("brians club",                  "card_shop"),
+    ("b1acks stash",                 "card_shop"),
+    ("serverkillers",                "hacktivist"),
+    ("cyb3rdrag0nz",                 "hacktivist"),
+    ("cyber fattah team",            "hacktivist"),
+    ("handala hack team",            "hacktivist"),
+    ("conquerors electronic army",   "hacktivist"),
+
     # Chinese + Korean keywords, added 2026-07-24 — same "first pass, not an
     # authoritative slang lexicon" caveat as the RU/PT/ES batch above. Chinese
     # is the stronger addition: a real, documented overseas/diaspora criminal

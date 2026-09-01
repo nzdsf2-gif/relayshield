@@ -1649,7 +1649,7 @@ def _parse_passwords_file(text: str) -> list[dict]:
         ("anthropic_session_token", r"sk-ant-sid01-[A-Za-z0-9_\-]{40,}", "CRITICAL", "Anthropic Session Token (revoke sessions, a key rotation does nothing)", "anthropic"),
         ("anthropic_key",    r"sk-ant-[a-zA-Z0-9_\-]{90,}", "CRITICAL", "Anthropic API Key", "anthropic"),
         ("groq_key",         r"gsk_[a-zA-Z0-9]{52}", "CRITICAL", "Groq API Key", "groq"),
-        ("xai_key",          r"xai-[a-zA-Z0-9]{80}", "CRITICAL", "xAI (Grok) API Key", "xai"),
+        ("xai_key",          r"xai-[a-zA-Z0-9]{64,}", "CRITICAL", "xAI (Grok) API Key", "xai"),
         ("replicate_key",    r"r8_[a-zA-Z0-9]{37}", "CRITICAL", "Replicate API Key", "replicate"),
         # OpenRouter is a router, not a model vendor, which is what makes one
         # leaked key worth more than any single-vendor key above it: standing

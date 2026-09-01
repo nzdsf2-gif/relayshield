@@ -272,13 +272,35 @@ class TestRendering(unittest.TestCase):
 
 
 class TestQuickstart(unittest.TestCase):
+    """The three hints the founder asked for, pinned.
+
+    The first version of this card shipped with the forward hint only: no
+    screenshot hint at all, and nothing about messages from known contacts.
+    A capability users are never told about does not exist, so these assertions
+    are on the copy itself rather than on any behaviour behind it.
+    """
 
     def test_forwarding_is_the_first_action_on_both(self):
         for platform in (fwd.PLATFORM_TELEGRAM, fwd.PLATFORM_WHATSAPP):
             text = fwd.quickstart_text(platform)
-            self.assertIn("Forward me the message", text)
-            self.assertLess(text.index("Forward me the message"),
+            self.assertIn("Forward me anything that looks off", text)
+            self.assertLess(text.index("Forward me anything"),
                             text.index("screenshot"))
+
+    def test_screenshot_hint_is_present_on_both(self):
+        for platform in (fwd.PLATFORM_TELEGRAM, fwd.PLATFORM_WHATSAPP):
+            text = fwd.quickstart_text(platform)
+            self.assertIn("screenshot of a suspicious text", text)
+
+    def test_contacts_hint_is_present_on_both(self):
+        """A hijacked contact is the case the user is least able to judge."""
+        for platform in (fwd.PLATFORM_TELEGRAM, fwd.PLATFORM_WHATSAPP):
+            text = fwd.quickstart_text(platform)
+            self.assertIn("in your contacts", text)
+            self.assertIn("still shows up as your friend", text)
+
+    def test_telegram_names_the_bot(self):
+        self.assertIn("@relayshield_bot", fwd.quickstart_text(fwd.PLATFORM_TELEGRAM))
 
     def test_whatsapp_quickstart_states_the_limit(self):
         text = fwd.quickstart_text(fwd.PLATFORM_WHATSAPP)
@@ -288,6 +310,27 @@ class TestQuickstart(unittest.TestCase):
         """It may promise a sender check, but only with the privacy caveat."""
         text = fwd.quickstart_text(fwd.PLATFORM_TELEGRAM)
         self.assertIn("forward privacy", text)
+
+
+class TestHelpCardsCarryTheHints(unittest.TestCase):
+    """The hints must be on the surfaces users actually open, not only behind
+    /quickstart. Reads the handler sources as text rather than importing them:
+    both pull in boto3, and a copy assertion that only runs where boto3 is
+    installed is a copy assertion that stops running."""
+
+    def _src(self, name):
+        from pathlib import Path
+        return Path(__file__).with_name(name).read_text()
+
+    def test_telegram_quick_start_card_has_both_hints(self):
+        src = self._src("relayshield_telegram_webhook.py")
+        self.assertIn("Forward me anything that looks off", src)
+        self.assertIn("Paste a screenshot of a suspicious text", src)
+
+    def test_whatsapp_help_has_both_hints(self):
+        src = self._src("relayshield_whatsapp_webhook.py")
+        self.assertIn("Forward me anything that looks off", src)
+        self.assertIn("Paste a screenshot of a suspicious text", src)
 
 
 if __name__ == "__main__":

@@ -6959,6 +6959,18 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     # chars -- a silent false negative of the same class as the OpenAI one above.
     # Kept looser than gitleaks' sk-ant-api03-...{93}AA so it survives a future
     # version bump past api03.
+    # Anthropic issues three token shapes under one sk-ant- prefix and they need
+    # DIFFERENT remediation, which is why they are split rather than left under
+    # one "Anthropic API Key" label. An api03 key is rotated. An oat01 OAuth
+    # token or an sid01 session token is REVOKED, and rotating a key does
+    # nothing to either -- that is the whole argument of the 2026-08-30 post on
+    # Claude session theft, and reporting a stolen session as a "key" would tell
+    # the customer to do the one thing that cannot help them.
+    #
+    # Anchored on the infix, with a permissive body: the infix carries the
+    # precision and a too-tight length is how OpenRouter keys were missed.
+    ("anthropic_oauth_token", r"sk-ant-oat01-[A-Za-z0-9_\-]{40,}", "CRITICAL", "Anthropic OAuth Token (revoke, do not rotate)", "anthropic"),
+    ("anthropic_session_token", r"sk-ant-sid01-[A-Za-z0-9_\-]{40,}", "CRITICAL", "Anthropic Session Token (revoke sessions, a key rotation does nothing)", "anthropic"),
     ("anthropic_key",    r"sk-ant-[a-zA-Z0-9_\-]{90,}",              "CRITICAL", "Anthropic API Key", "anthropic"),
     ("groq_key",         r"gsk_[a-zA-Z0-9]{52}",                     "CRITICAL", "Groq API Key", "groq"),
     ("xai_key",          r"xai-[a-zA-Z0-9]{80}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
@@ -7394,6 +7406,8 @@ _GITHUB_SEARCH_LITERALS: dict[str, tuple[str, ...]] = {
     "openai_key":            ("T3BlbkFJ",),
     "openai_key_v1":         ("T3BlbkFJ",),
     "openai_key_legacy":     (),
+    "anthropic_oauth_token":  ("sk-ant-oat01-",),
+    "anthropic_session_token": ("sk-ant-sid01-",),
     "anthropic_key":         ("sk-ant-",),
     "groq_key":              ("gsk_",),
     "xai_key":               ("xai-",),

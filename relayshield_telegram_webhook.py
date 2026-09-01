@@ -4102,6 +4102,8 @@ import re as _llm_re
 
 _LLM_KEY_PATTERNS = [
     ("openai",    _llm_re.compile(r"sk-[a-zA-Z0-9]{48}"),             "OpenAI"),
+    ("ant_oauth", _llm_re.compile(r"sk-ant-oat01-[A-Za-z0-9_\-]{40,}"), "Anthropic OAuth token (revoke)"),
+    ("ant_sess",  _llm_re.compile(r"sk-ant-sid01-[A-Za-z0-9_\-]{40,}"), "Anthropic session token (revoke sessions)"),
     ("anthropic", _llm_re.compile(r"sk-ant-[a-zA-Z0-9\-]{90,}"),      "Anthropic"),
     ("google",    _llm_re.compile(r"AIza[0-9A-Za-z\-_]{35}"),         "Google AI (Gemini)"),
     ("groq",      _llm_re.compile(r"gsk_[a-zA-Z0-9]{52}"),            "Groq"),

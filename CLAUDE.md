@@ -204,6 +204,56 @@ have been in a file leaving the building.
 
 ---
 
+## A SESSION THAT CANNOT PUSH HAS NOT DELIVERED ANYTHING
+
+Added 2026-08-30, after intel sweep 003 was written, committed locally as `a08104f`, and then could
+not be pushed: that session's environment did not carry `nzdsf2-gif/relayshield` as an authorised
+repo source. The commit exists only inside a container that will be reclaimed. **The work is gone
+unless it is recovered as text.**
+
+Two rules, and they apply to every session.
+
+**1. Prove the push path BEFORE doing the work, not after.** The first git operation of any session
+that will produce commits is a reachability check, not a commit:
+
+    git ls-remote --heads origin >/dev/null && echo "push path OK"
+
+If that fails, say so immediately and STOP. Do not write half a day of work into a container that
+cannot hand it back.
+
+**2. If a push is impossible, the deliverable is a patch in the chat, not a commit.** Any session
+that finds itself unable to push must emit the full diff as a fenced block for Andrew to save, the
+same way the CHAT PASTE rule at the top of this file works for `.md` files. A commit nobody can
+fetch is not a deliverable.
+
+To recover stranded work from a session that is still open, ask it for:
+
+    git format-patch --stdout origin/main..HEAD
+
+and paste the output into a session that can push. `git am` applies it.
+
+---
+
+## "NO AWS IN THIS SANDBOX" IS NEVER A REASON TO SKIP A CHECK
+
+Also 2026-08-30. Sweep 002's keywords went unverified against `relayshield_intel_channels` because
+the session had no AWS, and it was recorded as a limitation and left there. That is the wrong
+conclusion every time.
+
+The container not having credentials is a fact about the container, not about the check. The check
+still has to happen, so it moves rather than disappearing:
+
+- **Write it as a committed script** that runs on the Mac with `AWS_PROFILE=relayshield`, exactly as
+  `tools/setup_first_seen.sh`, `tools/iam_snapshot_role.py` and `tools/backfill_first_seen.py` all
+  do. Then hand Andrew the one command, labelled `ANDREW RUNS THIS`.
+- **Or run it in Actions**, which has the OIDC role, exactly as `lambda_drift_check.yml` and
+  `recover_live_handler.yml` do.
+
+A session may never close an item as done, or report a number, on the basis of a check it skipped
+for want of credentials. Say which check did not run, and ship the script that runs it.
+
+---
+
 ## IAM — one role per Lambda, not one role for all of them
 
 `relayshield-breach-check-role-1sapnwdl` is the console-generated role from the

@@ -309,6 +309,54 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ---
 
+## WHERE 2026-08-30 LEFT THINGS — read this first
+
+### TOP 10 FOR THE NEXT SESSION, in order
+
+1. **Telegram + WhatsApp forward handler and compromised-contact check.** Designed, decided, NOT
+   built. Integration points already located: `handle_message` (`relayshield_telegram_webhook.py`
+   ~6072) for the `forward_origin` branch, `handle_scan_dispatch` for the URL path,
+   `handle_infostealer_check` and the `relayshield_stolen_sessions` lookup for the contact check.
+   Decisions made: a clean result says so plainly with the "not proof of safety" caveat; the contact
+   stolen-session lookup runs ONLY when text, URL or first-time-sender has already flagged
+   something, so no social graph accumulates. Forwarding needs no command; `/wascam` becomes the
+   discovery path that explains it.
+2. **Quickstart guide hints**, same build: tell users they can paste screenshots (already works, OCR
+   via Rekognition since 2026-08-11) and forward suspicious messages to `@relayshield_bot`.
+3. **IAM split, step 2.** The snapshot is committed and it is worse than assumed: 26 inline policies
+   at 10,127/10,240 bytes AND 10/10 managed slots, both budgets full, with **42 Lambdas** on the
+   role rather than the 22 in `LAMBDA_MAP`. `tools/iam_scan_sources.py` must read the snapshot's
+   `functions_using_this_role` before any migration, or 20 functions get no derived policy.
+4. **Re-run the prospector** with the new gates: `python3 tools/prospect_github_bots.py --limit 200`.
+   The first run was mostly noise; the gates are tested against that exact output but not yet against
+   live data.
+5. **`relayshield_agentic_api.py` deploy path.** In the drift check since 2026-08-30, deliberately
+   NOT in the deploy map. Read its first red diff, then map it.
+6. **Sweep 003's 17th keyword** is unrecoverable. Either accept 16 or re-derive from TI reporting.
+7. **XSOAR PR #45206** waits on Moshe re a demo environment. The demo is a MERGE requirement, not a
+   partnership one: `.github/project_conf/contributions.ini` has Pending Demo and Post Demo Changes
+   as pipeline stages.
+8. **Rain** waits on a reply. Two open questions carried: whether the Agent Control Layer has a
+   pre-issuance hook, and the Sardine/Chainalysis paragraph never got its outside read.
+9. **Medium quote bars**: house style is now none. `build_blog.py` renders `> ` as a plain `<p>`.
+10. **OpenRouter revocation webhook** still gated on the first non-zero `sk-or-v1-` count.
+
+### Done 2026-08-30
+
+- **Rain closed after four sessions.** `tools/rain_demo.py`, recorded, both submissions sent.
+- **LLMjacking coverage materially widened.** Venice (`VENICE_INFERENCE_KEY_` + base62, taken from a
+  real key), Anthropic OAuth and session tokens split from API keys because they need REVOCATION not
+  rotation and the old `{90,}` pattern likely missed them entirely, and `/checkllm` brought from 6
+  providers to 14 — it had been silently behind the corpus, with OpenRouter missing.
+- **Four pattern tables must agree**: `relayshield_api.py` (source of truth), `rsscan/rsscan/patterns.py`
+  (generated, `tools/sync_patterns.py`), `relayshield_intel_monitor.py` (collection), and
+  `_LLM_KEY_PATTERNS` in `relayshield_telegram_webhook.py` (customer-facing). The last one is the one
+  that drifts unnoticed, because nothing checks it.
+- IAM per-role tooling and runbook; `relayshield-mcp` gitlink removed; deploy-role invoke policy
+  applied and the Lambda deploy green; the LLMjacking blog published; CLAUDE.md rules 9, 10, 11.
+
+---
+
 ## WHERE 2026-08-29 LEFT THINGS — read before starting anything
 
 `main` is at the merge of everything below. **One branch is unmerged:

@@ -4102,11 +4102,33 @@ import re as _llm_re
 
 _LLM_KEY_PATTERNS = [
     ("openai",    _llm_re.compile(r"sk-[a-zA-Z0-9]{48}"),             "OpenAI"),
+    ("ant_oauth", _llm_re.compile(r"sk-ant-oat01-[A-Za-z0-9_\-]{40,}"), "Anthropic OAuth token (revoke)"),
+    ("ant_sess",  _llm_re.compile(r"sk-ant-sid01-[A-Za-z0-9_\-]{40,}"), "Anthropic session token (revoke sessions)"),
     ("anthropic", _llm_re.compile(r"sk-ant-[a-zA-Z0-9\-]{90,}"),      "Anthropic"),
     ("google",    _llm_re.compile(r"AIza[0-9A-Za-z\-_]{35}"),         "Google AI (Gemini)"),
     ("groq",      _llm_re.compile(r"gsk_[a-zA-Z0-9]{52}"),            "Groq"),
-    ("xai",       _llm_re.compile(r"xai-[a-zA-Z0-9]{80}"),            "xAI (Grok)"),
+    ("xai",       _llm_re.compile(r"xai-[a-zA-Z0-9]{64,}"),            "xAI (Grok)"),
     ("replicate", _llm_re.compile(r"r8_[a-zA-Z0-9]{37}"),             "Replicate"),
+    # Everything below was missing until 2026-08-30. This table is what the
+    # customer-facing /checkllm reports on, and it had drifted well behind the
+    # collection-side table in relayshield_intel_monitor.py: a key format the
+    # corpus records is worthless if the command that answers customers cannot
+    # name it. Only prefix-distinctive formats are listed here. The
+    # context-anchored ones (DeepSeek, Moonshot, Qwen) need the _ctx helper this
+    # module does not have, so they stay out rather than being approximated by a
+    # bare sk- match that would fire on every OpenAI key.
+    #
+    # OpenRouter first because it is the worst one to have been missing: a
+    # router key is standing access to every model the account can reach, billed
+    # to the owner, with no per-vendor key anywhere to revoke.
+    ("openrouter", _llm_re.compile(r"sk-or-v1-[0-9a-f]{64}"),         "OpenRouter (multi-model router)"),
+    ("venice",     _llm_re.compile(r"VENICE_INFERENCE_KEY_[A-Za-z0-9]{32,64}"), "Venice AI"),
+    ("venice_adm", _llm_re.compile(r"VENICE_ADMIN_KEY_[A-Za-z0-9]{32,64}"),     "Venice AI (admin)"),
+    ("bedrock_l",  _llm_re.compile(r"ABSKQmVkcm9ja0FQSUtleS[A-Za-z0-9+/]{80,250}={0,2}"), "Amazon Bedrock"),
+    ("hf_token",   _llm_re.compile(r"hf_[a-zA-Z]{34}"),               "Hugging Face"),
+    ("hf_org",     _llm_re.compile(r"api_org_[a-zA-Z]{34}"),          "Hugging Face (org)"),
+    ("nvidia",     _llm_re.compile(r"nvapi-[A-Za-z0-9_\-]{40,}"),     "NVIDIA NIM"),
+    ("langsmith",  _llm_re.compile(r"lsv2_(?:pt|sk)_[a-f0-9]{32,}"),  "LangSmith"),
 ]
 
 
@@ -4169,9 +4191,10 @@ def handle_checkllm(chat_id: int, user: dict) -> None:
         send_message(
             chat_id,
             f"✅ No exposed LLM/AI provider API keys found for `{domain}`.\n\n"
-            "This checks OpenAI, Anthropic, Google, Groq, xAI, and Replicate key formats "
-            "specifically. An AWS key exposure (see infostealer checks) can also enable "
-            "LLMjacking if it has Bedrock access — this check doesn't cover that route.",
+            "This checks OpenAI, Anthropic, Google, Groq, xAI, Replicate, OpenRouter, "
+            "Venice, Amazon Bedrock, Hugging Face, NVIDIA NIM and LangSmith key formats. "
+            "An AWS access key exposure (see infostealer checks) can also enable LLMjacking "
+            "if it carries Bedrock permissions, and this check doesn't cover that route.",
             parse_mode="Markdown",
         )
         return

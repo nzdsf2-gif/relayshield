@@ -204,6 +204,56 @@ have been in a file leaving the building.
 
 ---
 
+## A SESSION THAT CANNOT PUSH HAS NOT DELIVERED ANYTHING
+
+Added 2026-08-30, after intel sweep 003 was written, committed locally as `a08104f`, and then could
+not be pushed: that session's environment did not carry `nzdsf2-gif/relayshield` as an authorised
+repo source. The commit exists only inside a container that will be reclaimed. **The work is gone
+unless it is recovered as text.**
+
+Two rules, and they apply to every session.
+
+**1. Prove the push path BEFORE doing the work, not after.** The first git operation of any session
+that will produce commits is a reachability check, not a commit:
+
+    git ls-remote --heads origin >/dev/null && echo "push path OK"
+
+If that fails, say so immediately and STOP. Do not write half a day of work into a container that
+cannot hand it back.
+
+**2. If a push is impossible, the deliverable is a patch in the chat, not a commit.** Any session
+that finds itself unable to push must emit the full diff as a fenced block for Andrew to save, the
+same way the CHAT PASTE rule at the top of this file works for `.md` files. A commit nobody can
+fetch is not a deliverable.
+
+To recover stranded work from a session that is still open, ask it for:
+
+    git format-patch --stdout origin/main..HEAD
+
+and paste the output into a session that can push. `git am` applies it.
+
+---
+
+## "NO AWS IN THIS SANDBOX" IS NEVER A REASON TO SKIP A CHECK
+
+Also 2026-08-30. Sweep 002's keywords went unverified against `relayshield_intel_channels` because
+the session had no AWS, and it was recorded as a limitation and left there. That is the wrong
+conclusion every time.
+
+The container not having credentials is a fact about the container, not about the check. The check
+still has to happen, so it moves rather than disappearing:
+
+- **Write it as a committed script** that runs on the Mac with `AWS_PROFILE=relayshield`, exactly as
+  `tools/setup_first_seen.sh`, `tools/iam_snapshot_role.py` and `tools/backfill_first_seen.py` all
+  do. Then hand Andrew the one command, labelled `ANDREW RUNS THIS`.
+- **Or run it in Actions**, which has the OIDC role, exactly as `lambda_drift_check.yml` and
+  `recover_live_handler.yml` do.
+
+A session may never close an item as done, or report a number, on the basis of a check it skipped
+for want of credentials. Say which check did not run, and ship the script that runs it.
+
+---
+
 ## IAM — one role per Lambda, not one role for all of them
 
 `relayshield-breach-check-role-1sapnwdl` is the console-generated role from the
@@ -256,6 +306,54 @@ It has happened three times:
 **Before redeploying anything, check `lambda_drift_check.yml` and open `lambda-drift` issues.
 Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this for Lambdas
 (dispatch from the Actions UI). Nothing does it for Workers yet.
+
+---
+
+## WHERE 2026-08-30 LEFT THINGS — read this first
+
+### TOP 10 FOR THE NEXT SESSION, in order
+
+1. **Telegram + WhatsApp forward handler and compromised-contact check.** Designed, decided, NOT
+   built. Integration points already located: `handle_message` (`relayshield_telegram_webhook.py`
+   ~6072) for the `forward_origin` branch, `handle_scan_dispatch` for the URL path,
+   `handle_infostealer_check` and the `relayshield_stolen_sessions` lookup for the contact check.
+   Decisions made: a clean result says so plainly with the "not proof of safety" caveat; the contact
+   stolen-session lookup runs ONLY when text, URL or first-time-sender has already flagged
+   something, so no social graph accumulates. Forwarding needs no command; `/wascam` becomes the
+   discovery path that explains it.
+2. **Quickstart guide hints**, same build: tell users they can paste screenshots (already works, OCR
+   via Rekognition since 2026-08-11) and forward suspicious messages to `@relayshield_bot`.
+3. **IAM split, step 2.** The snapshot is committed and it is worse than assumed: 26 inline policies
+   at 10,127/10,240 bytes AND 10/10 managed slots, both budgets full, with **42 Lambdas** on the
+   role rather than the 22 in `LAMBDA_MAP`. `tools/iam_scan_sources.py` must read the snapshot's
+   `functions_using_this_role` before any migration, or 20 functions get no derived policy.
+4. **Re-run the prospector** with the new gates: `python3 tools/prospect_github_bots.py --limit 200`.
+   The first run was mostly noise; the gates are tested against that exact output but not yet against
+   live data.
+5. **`relayshield_agentic_api.py` deploy path.** In the drift check since 2026-08-30, deliberately
+   NOT in the deploy map. Read its first red diff, then map it.
+6. **Sweep 003's 17th keyword** is unrecoverable. Either accept 16 or re-derive from TI reporting.
+7. **XSOAR PR #45206** waits on Moshe re a demo environment. The demo is a MERGE requirement, not a
+   partnership one: `.github/project_conf/contributions.ini` has Pending Demo and Post Demo Changes
+   as pipeline stages.
+8. **Rain** waits on a reply. Two open questions carried: whether the Agent Control Layer has a
+   pre-issuance hook, and the Sardine/Chainalysis paragraph never got its outside read.
+9. **Medium quote bars**: house style is now none. `build_blog.py` renders `> ` as a plain `<p>`.
+10. **OpenRouter revocation webhook** still gated on the first non-zero `sk-or-v1-` count.
+
+### Done 2026-08-30
+
+- **Rain closed after four sessions.** `tools/rain_demo.py`, recorded, both submissions sent.
+- **LLMjacking coverage materially widened.** Venice (`VENICE_INFERENCE_KEY_` + base62, taken from a
+  real key), Anthropic OAuth and session tokens split from API keys because they need REVOCATION not
+  rotation and the old `{90,}` pattern likely missed them entirely, and `/checkllm` brought from 6
+  providers to 14 — it had been silently behind the corpus, with OpenRouter missing.
+- **Four pattern tables must agree**: `relayshield_api.py` (source of truth), `rsscan/rsscan/patterns.py`
+  (generated, `tools/sync_patterns.py`), `relayshield_intel_monitor.py` (collection), and
+  `_LLM_KEY_PATTERNS` in `relayshield_telegram_webhook.py` (customer-facing). The last one is the one
+  that drifts unnoticed, because nothing checks it.
+- IAM per-role tooling and runbook; `relayshield-mcp` gitlink removed; deploy-role invoke policy
+  applied and the Lambda deploy green; the LLMjacking blog published; CLAUDE.md rules 9, 10, 11.
 
 ---
 

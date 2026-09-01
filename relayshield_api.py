@@ -6959,9 +6959,21 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     # chars -- a silent false negative of the same class as the OpenAI one above.
     # Kept looser than gitleaks' sk-ant-api03-...{93}AA so it survives a future
     # version bump past api03.
+    # Anthropic issues three token shapes under one sk-ant- prefix and they need
+    # DIFFERENT remediation, which is why they are split rather than left under
+    # one "Anthropic API Key" label. An api03 key is rotated. An oat01 OAuth
+    # token or an sid01 session token is REVOKED, and rotating a key does
+    # nothing to either -- that is the whole argument of the 2026-08-30 post on
+    # Claude session theft, and reporting a stolen session as a "key" would tell
+    # the customer to do the one thing that cannot help them.
+    #
+    # Anchored on the infix, with a permissive body: the infix carries the
+    # precision and a too-tight length is how OpenRouter keys were missed.
+    ("anthropic_oauth_token", r"sk-ant-oat01-[A-Za-z0-9_\-]{40,}", "CRITICAL", "Anthropic OAuth Token (revoke, do not rotate)", "anthropic"),
+    ("anthropic_session_token", r"sk-ant-sid01-[A-Za-z0-9_\-]{40,}", "CRITICAL", "Anthropic Session Token (revoke sessions, a key rotation does nothing)", "anthropic"),
     ("anthropic_key",    r"sk-ant-[a-zA-Z0-9_\-]{90,}",              "CRITICAL", "Anthropic API Key", "anthropic"),
     ("groq_key",         r"gsk_[a-zA-Z0-9]{52}",                     "CRITICAL", "Groq API Key", "groq"),
-    ("xai_key",          r"xai-[a-zA-Z0-9]{80}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
+    ("xai_key",          r"xai-[a-zA-Z0-9]{64,}",                     "CRITICAL", "xAI (Grok) API Key", "xai"),
     ("replicate_key",    r"r8_[a-zA-Z0-9]{37}",                      "CRITICAL", "Replicate API Key", "replicate"),
     # --- added 2026-08-26, re-applied onto the reconciled live base ----------
     # OpenRouter is a router, not a model vendor, and that is why one leaked key
@@ -7020,6 +7032,19 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     # services; the billing liability if it is real is identical.
     # MUST stay last in this list -- _detect_nhi_in_text suppresses it for any
     # value an attributed pattern already claimed, so it never double-reports.
+    # Venice AI. Format taken from a real key, not guessed: a literal
+    # VENICE_INFERENCE_KEY_ prefix followed by a base62 body (42 chars in the
+    # sample, 63 total). The body length is one observation, so it is matched
+    # permissively -- the 21-character literal prefix carries the precision, and
+    # a too-tight length is how the OpenRouter keys above were silently dropped
+    # for months. Venice is an OpenAI-compatible endpoint, so without this the
+    # generic sk- catch-all would not match these at all: they do not start sk-.
+    ("venice_inference_key", r"VENICE_INFERENCE_KEY_[A-Za-z0-9]{32,64}", "CRITICAL", "Venice AI Inference Key", "venice"),
+    # Not confirmed against a real key. Venice separates inference keys from
+    # admin keys, and the inference prefix is explicit about which it is, so an
+    # admin equivalent almost certainly exists and would be worth more. Cheap to
+    # carry, and it fires only on an equally distinctive literal prefix.
+    ("venice_admin_key",     r"VENICE_ADMIN_KEY_[A-Za-z0-9]{32,64}",     "CRITICAL", "Venice AI Admin Key (format inferred)", "venice"),
     ("llm_key_generic_sk", r"sk-[a-zA-Z0-9]{32,64}",                 "HIGH",     "OpenAI-compatible LLM API Key (provider unattributed)", "unknown_openai_compatible"),
     # Cohere and Azure OpenAI keys are opaque tokens with no verifiable
     # standardized prefix -- deliberately not pattern-matched rather than
@@ -7381,6 +7406,8 @@ _GITHUB_SEARCH_LITERALS: dict[str, tuple[str, ...]] = {
     "openai_key":            ("T3BlbkFJ",),
     "openai_key_v1":         ("T3BlbkFJ",),
     "openai_key_legacy":     (),
+    "anthropic_oauth_token":  ("sk-ant-oat01-",),
+    "anthropic_session_token": ("sk-ant-sid01-",),
     "anthropic_key":         ("sk-ant-",),
     "groq_key":              ("gsk_",),
     "xai_key":               ("xai-",),
@@ -7394,6 +7421,8 @@ _GITHUB_SEARCH_LITERALS: dict[str, tuple[str, ...]] = {
     "deepseek_key":          (),
     "moonshot_key":          (),
     "qwen_key":              (),
+    "venice_inference_key":  ("VENICE_INFERENCE_KEY_",),
+    "venice_admin_key":      ("VENICE_ADMIN_KEY_",),
     "llm_key_generic_sk":    (),
     "sendgrid_key":          ("SG.",),
     "twilio_sid":            (),   # "AC" + 32 hex is far too short/common to query

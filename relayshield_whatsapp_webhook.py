@@ -4512,6 +4512,17 @@ def handle_active_message(
 
     # --- HELP ---
     if body == "HELP":
+        # The hint goes FIRST, as its own message, and this is the only place it
+        # can go. The menu below is a Twilio Content resource -- its "Page 1 of 4
+        # - tap a command" wording lives in Twilio and cannot be changed from
+        # this repo. Before this, HELP sent that card and nothing else, so every
+        # word in msg_help() was unreachable: it is shown only by HELPTEXT,
+        # behind a button on the LAST page of the menu. A user typing HELP saw a
+        # command list and was never told the fastest thing they can do.
+        send_whatsapp(
+            to_number, fwd.paste_hint(fwd.PLATFORM_WHATSAPP),
+            account_sid, auth_token, from_number,
+        )
         send_wa_menu(to_number, wa_menu_tier_key(is_business, tier in DOMAIN_TIERS), account_sid, auth_token, from_number)
         return "help_sent"
 

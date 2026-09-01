@@ -84,6 +84,12 @@ KMS_KEY_ALIAS = "alias/relayshield-data-key"
 PHONE_HASH_INDEX = "phone_hash-index"
 
 import relayshield_sim_swap_consent as simswap_consent
+# Shared with relayshield_whatsapp_webhook.py. Provenance analysis for
+# forwarded messages plus the Quickstart card. The CONTENT analysis stays in
+# handle_analyze below -- see that module's docstring for why the split is
+# drawn there, and for why the sender lookup runs on Telegram and cannot run
+# on WhatsApp.
+import relayshield_forward_analysis as fwd
 
 USERS_TABLE             = "relayshield_users"
 MONITORED_EMAILS_TABLE  = "relayshield_monitored_emails"
@@ -1380,6 +1386,7 @@ def msg_help(tier: str) -> str:
     if tier == TIER_FREE:
         return (
             "🛡️ *RelayShield Free — Commands*\n\n"
+            "• /quickstart — Three things you can do right now\n"
             "• /verify — Callback rule, OTP rule, family safe word\n"
             "• /otp — Unexpected OTP guidance\n"
             "• /scan <url> — Scan a suspicious link for malware or phishing\n"
@@ -1398,6 +1405,12 @@ def msg_help(tier: str) -> str:
 
     text = (
         "🛡️ *RelayShield — Commands*\n\n"
+
+        # Above the first section header on purpose: msg_help_section() slices
+        # this text from one header to the next, so anything here belongs to no
+        # category and shows only in the full list — which is what an
+        # orientation line should do.
+        "• /quickstart — Three things you can do right now\n\n"
 
         "*🔐 Breach Response*\n"
         "• /breach — Breach monitoring status\n"
@@ -2079,6 +2092,10 @@ def msg_help_top(tier: str) -> str:
     a follow-up message is the closest equivalent)."""
     lines = [
         "🛡️ *RelayShield — Quick Start*\n",
+        # First, and not a command, because it is the fastest useful action
+        # and the only one that needs nothing typed. /quickstart expands it.
+        "• *Forward me a suspicious message* — no command needed. I check the "
+        "text, any link in it, and who sent it",
         "• /scan <url> — Scan a suspicious link for malware or phishing",
         "• /otp — Unexpected OTP? Get guidance now",
         "• /sweep — Close email backdoors and sign out hijacked sessions",
@@ -2086,6 +2103,7 @@ def msg_help_top(tier: str) -> str:
     if tier in CRYPTO_TIERS:
         lines.append("• /riskcheck — Risk score for all your monitored wallets")
     lines.append("• /plan — Your license type and upgrade options")
+    lines.append("\n/quickstart for the three-step version.")
     return "\n".join(lines)
 
 
@@ -2160,6 +2178,7 @@ def help_expand_keyboard(tier: str = TIER_PERSONAL) -> dict:
 # Telegram's per-chat command scope (BotCommandScopeChat) so each user's
 # native menu only ever lists what their plan actually has.
 _BOT_COMMANDS_FREE = [
+    ("quickstart", "Three things you can do right now"),
     ("help", "This menu"),
     ("verify", "Callback rule, OTP rule, family safe word"),
     ("otp", "Unexpected OTP guidance"),
@@ -2168,6 +2187,7 @@ _BOT_COMMANDS_FREE = [
 ]
 
 _BOT_COMMANDS_BASE = [
+    ("quickstart", "Three things you can do right now"),
     ("breach", "Breach monitoring status"),
     # Merged 2026-08-11, all on one test: would a real user fail to tell these
     # apart? /sessions into /sweep (sweep's own description already claimed
@@ -3153,8 +3173,20 @@ def handle_deferred_url_scan(chat_id: int, target: str) -> None:
 
 
 def handle_analyze(chat_id: int, content: str | None = None,
-                   from_image: bool = False) -> None:
-    """Analyze suspicious message text — Telegram equivalent of SMS/EMAIL."""
+                   from_image: bool = False, forward_note: str = "") -> None:
+    """Analyze suspicious message text — Telegram equivalent of SMS/EMAIL.
+
+    forward_note carries the provenance block built by
+    relayshield_forward_analysis when this text arrived as a forward. It is
+    prepended to the verdict rather than sent as its own message: two replies
+    to one forward reads as the bot answering twice, and the provenance is
+    context for the verdict, not a separate finding.
+
+    It is prepended in BOTH branches deliberately. The no-flags branch is
+    exactly where provenance matters most — "no red flags in the text" plus a
+    sender who has turned up across several criminal channels is not a clean
+    result, and dropping the note there would make it look like one.
+    """
     if not content:
         send_message(
             chat_id,
@@ -3440,6 +3472,8 @@ def handle_analyze(chat_id: int, content: str | None = None,
     severity = "HIGH" if (len(flags) >= 3 or link_flagged or fee_lure) else "MEDIUM" if flags else "LOW"
     icon = "🚨" if severity == "HIGH" else "⚠️" if severity == "MEDIUM" else "✅"
 
+    fwd_block = f"{forward_note}\n\n———\n\n" if forward_note else ""
+
     if flags:
         flag_text = "\n".join(flags)
         callback_warn = ""
@@ -3450,6 +3484,7 @@ def handle_analyze(chat_id: int, content: str | None = None,
             )
         send_message(
             chat_id,
+            f"{fwd_block}"
             f"🧠 *Message Analysis — {severity} RISK*\n\n"
             f"{icon} *{len(flags)} social engineering signal(s) detected:*\n{flag_text}\n"
             f"{callback_warn}"
@@ -3463,6 +3498,7 @@ def handle_analyze(chat_id: int, content: str | None = None,
     else:
         send_message(
             chat_id,
+            f"{fwd_block}"
             "🧠 *Message Analysis*\n\n"
             "✅ No automatic red flags detected in the text.\n"
             f"{checked_clean_note}"
@@ -5889,7 +5925,11 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         # tier silently breaks for anyone who learned the old command name.
         # /scan and its aliases all reach the same dispatcher.
         _FREE_ALLOWED = {"help", "verify", "otp", "scan", "msgscan", "analyze", "analyse",
-                         "sweep", "checktoken", "plan", "license", "lictype"}
+                         "sweep", "checktoken", "plan", "license", "lictype",
+                         # quickstart is orientation, not a remediation tool.
+                         # Gating it would paywall the explanation of what the
+                         # free tier can already do.
+                         "quickstart"}
         base_cmd = cmd.split()[0] if cmd else ""
         if base_cmd not in _FREE_ALLOWED:
             send_message(
@@ -5908,6 +5948,13 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
 
     if cmd == "help":
         handle_help(chat_id, user)
+    elif cmd in ("quickstart", "quick start", "start here"):
+        # Deliberately separate from /help. /help answers "what commands are
+        # there"; this answers "what do I do with the thing in my hand right
+        # now", and its first line is the one action that needs no command at
+        # all. Without it the forward handler is a feature nobody is told
+        # about, which is the same as not having built it.
+        send_message(chat_id, fwd.quickstart_text(fwd.PLATFORM_TELEGRAM))
     elif cmd == "verify":
         handle_verify(chat_id)
     elif cmd == "otp":
@@ -6079,6 +6126,27 @@ def handle_message(update: dict) -> None:
     if not chat_id:
         return
 
+    # --- Forwarded message provenance ---
+    # Parsed ONCE here, before any routing, because a forward can arrive as
+    # text or as a photo and both paths below want the note. Returns None for
+    # an ordinary message, which leaves every existing path untouched.
+    #
+    # This is the half WhatsApp cannot do. Telegram's forward_origin carries
+    # the original sender, so the note can name them and check the account;
+    # Twilio gives the WhatsApp side two booleans and no sender at all. Both
+    # bots call the same builder and it words each case for what that platform
+    # actually knows -- see relayshield_forward_analysis.
+    forward_note = ""
+    fwd_origin = fwd.parse_telegram_forward(message)
+    if fwd_origin:
+        try:
+            forward_note = fwd.render_forward_note(fwd.analyze_forward(fwd_origin))
+        except Exception as exc:
+            # Provenance is an enrichment. It must never cost the user the
+            # content verdict, which is the part that says do not click.
+            logger.warning("Forward provenance failed chat_id=%s: %s", chat_id, exc)
+            forward_note = ""
+
     # --- Photo + /analyze caption → Rekognition OCR + fraud analysis ---
     # User sends a screenshot of a suspicious email/message with caption /analyze
     photo = message.get("photo")
@@ -6113,7 +6181,8 @@ def handle_message(update: dict) -> None:
             image_bytes = download_telegram_file(document["file_id"])
         extracted_text = run_textract_ocr(image_bytes) if image_bytes else None
         if extracted_text:
-            handle_analyze(chat_id, extracted_text, from_image=True)
+            handle_analyze(chat_id, extracted_text, from_image=True,
+                           forward_note=forward_note)
         else:
             send_message(
                 chat_id,
@@ -6123,6 +6192,37 @@ def handle_message(update: dict) -> None:
                 parse_mode="Markdown",
             )
         return
+
+    # --- Forwarded text → straight to the fraud analyser ---
+    # Forwarding the message IS the request. Nobody who has just been sent
+    # something frightening forwards it and then types /scan, and until this
+    # existed a forwarded scam landed in route_active_command and came back
+    # "I didn't recognise that" — the worst possible answer to the one action
+    # a worried person takes without being told to.
+    #
+    # Gated on the two states that reach route_active_command, so a forward
+    # arriving mid-onboarding still feeds the step the user is actually on
+    # rather than being swallowed here. Anything else falls through untouched.
+    #
+    # A forward that IS a command ("/help" forwarded from somewhere) still
+    # routes as a command: that is a person showing the bot a command, and
+    # running it is the less surprising of the two readings.
+    # The single-token codes below (WA link code, team invite, Coinbase order
+    # ID) are excluded by shape. The Coinbase block in particular has no
+    # existing-user check on purpose -- a Personal Shield user can also
+    # subscribe to Crypto Shield -- so intercepting a bare order ID here would
+    # answer a paying customer's onboarding with a fraud verdict. A forwarded
+    # order confirmation is prose and does not match any of these.
+    _fwd_is_code = bool(
+        re.match(r"^\d{6}$", text)
+        or re.match(r"^[A-Z0-9]{8}$", text)
+        or re.match(r"^[A-Z0-9_]{10,}$", text, re.IGNORECASE)
+    )
+    if fwd_origin and text and not text.startswith("/") and not _fwd_is_code:
+        _fwd_user = get_user_by_chat_id(chat_id)
+        if _fwd_user and _fwd_user.get("onboarding_state", "ACTIVE") in ("ACTIVE", "FREE_ACTIVE"):
+            handle_analyze(chat_id, text, forward_note=forward_note)
+            return
 
     # Reply to any ForceReply prompt above — treat the plain text as that
     # command's argument directly, no need to retype "/command <arg>".

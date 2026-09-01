@@ -55,6 +55,17 @@ from datetime import datetime, timedelta, timezone
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
+# Shared with relayshield_telegram_webhook.py. Provenance analysis for
+# forwarded messages plus the Quickstart card.
+#
+# READ ITS DOCSTRING BEFORE CHANGING ANYTHING HERE. The two bots are NOT
+# symmetric and the module exists to stop that asymmetry being papered over:
+# Telegram hands us the original sender, WhatsApp hands us two booleans and no
+# sender at all. The WhatsApp reply must therefore SAY it cannot identify the
+# sender, and that wording lives in the shared renderer rather than in this
+# file precisely so it cannot be edited away on one platform only.
+import relayshield_forward_analysis as fwd
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -135,6 +146,12 @@ WA_MENU_COMMAND_IDS = frozenset({
     "RESET", "REUSE", "MANAGER", "RESOLVED", "CALL", "PHONE", "VISHING",
     "PLAN", "ADD", "REMOVE", "DOMAIN", "DOMAIN SCAN", "DOMAIN REGISTER",
     "SETDOMAIN", "DELEGATE", "REVOKE", "HELPTEXT",
+    # Routes a QUICKSTART tap the moment such an item exists. The list-picker
+    # items themselves live in Twilio Content resources (WA_MENU_PAGES below is
+    # just their SIDs), so putting QUICKSTART on a menu page is a Twilio-side
+    # change nobody can make from this repo. Typed QUICKSTART works today
+    # either way; this line only means the tap will not be dropped later.
+    "QUICKSTART",
 })
 
 # First token of every recognized WhatsApp command — used to tell a fresh
@@ -146,6 +163,7 @@ ALL_COMMAND_KEYWORDS = frozenset({
     "PLAN", "LICENSE", "LICTYPE", "ADD", "REMOVE", "STATUS", "DOMAIN",
     "SETDOMAIN", "DELEGATE", "REVOKE", "HELP", "HELPTEXT", "YES", "NO", "DONE", "ACK",
     "ADDTECH", "MYTECH", "REMOVETECH", "LINKEDDEVICES", "SAFE",
+    "QUICKSTART",
 })
 GSB_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 VT_BASE_URL = "https://www.virustotal.com/api/v3"
@@ -756,11 +774,17 @@ def _analyze_sms_text(text: str) -> dict:
     }
 
 
-def _build_msgscan_response(source_text: str) -> str:
+def _build_msgscan_response(source_text: str, forward_note: str = "") -> str:
     """
     Shared response builder for MSGSCAN/EMAILSCAN — used by both the
     text-paste and screenshot-OCR paths, which previously duplicated the
     same incomplete logic independently.
+
+    forward_note is the provenance block from relayshield_forward_analysis,
+    set when this text arrived as a WhatsApp forward. It is prepended in BOTH
+    branches on purpose. The no-signals branch is where it matters most: on
+    WhatsApp that branch is one message away from reading as "checked, and the
+    sender is fine", when in fact no sender was ever visible to check.
 
     Added 2026-07-22: prior versions of both call sites ran only
     _analyze_sms_text() (keyword patterns) and never checked any URL found
@@ -774,6 +798,8 @@ def _build_msgscan_response(source_text: str) -> str:
     since a same-day-registered throwaway domain is exactly the case GSB
     alone is slowest to catch.
     """
+    fwd_block = f"{forward_note}\n\n———\n\n" if forward_note else ""
+
     analysis = _analyze_sms_text(source_text)
     flags = list(analysis["flags"])
     severity = analysis["severity"]
@@ -805,6 +831,7 @@ def _build_msgscan_response(source_text: str) -> str:
                 "take hours to appear in any threat database.\n"
             )
         return (
+            f"{fwd_block}"
             "📧 *Message Analysis*\n\n"
             "✅ No automatic fraud signals detected in the message.\n"
             f"{no_link_note}\n"
@@ -835,6 +862,7 @@ def _build_msgscan_response(source_text: str) -> str:
         link_warn = "\n*Do NOT click any links in this message* — one or more were flagged above.\n"
 
     return (
+        f"{fwd_block}"
         f"📧 *Message Analysis — {severity} RISK* {icon}\n\n"
         f"*{total_signals} fraud signal(s) detected:*\n{combined_lines}\n"
         f"{callback_warn}"
@@ -2537,6 +2565,14 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
     commands = (
         "*🛡️ RelayShield — Commands*\n\n"
 
+        # First, and not a command, because it is the fastest useful action and
+        # the only one that needs nothing typed.
+        "*📨 Forward me a suspicious message* — no command needed. I analyse the "
+        "text and check any link in it.\n"
+        "_WhatsApp does not tell me who originally sent a forwarded message, so "
+        "I can never check the sender._\n"
+        "• *QUICKSTART* — Three things you can do right now\n\n"
+
         "*🔍 Identity Monitoring*\n"
         "• *BREACH* — Check emails for data breach exposure\n"
         "• *SIM* — Check SIM swap / carrier monitoring status\n"
@@ -3576,8 +3612,16 @@ def handle_active_message(
     message_body: str,
     twilio_creds: tuple,
     media_info: dict | None = None,
+    forward_origin=None,
 ) -> str:
-    """Route commands for fully onboarded users."""
+    """Route commands for fully onboarded users.
+
+    forward_origin is a relayshield_forward_analysis.ForwardOrigin when Twilio
+    flagged this inbound message as forwarded, else None. It carries no sender
+    — WhatsApp does not provide one — so it is used for two things only: to
+    treat a bare forward as a scan request, and to attach the provenance note
+    that says so out loud.
+    """
     account_sid, auth_token, from_number = twilio_creds
     user_id = user["user_id"]
     tier = user.get("subscription_tier", TIER_PERSONAL)
@@ -3587,6 +3631,17 @@ def handle_active_message(
     body = message_body.strip().upper()
     media_info = media_info or {}
     num_media = int(media_info.get("num_media", 0))
+
+    # Built once here so both the image path and the bare-forward path below
+    # attach the same note. Never fatal: provenance is an enrichment, and the
+    # content verdict is the part that says do not click.
+    forward_note = ""
+    if forward_origin is not None:
+        try:
+            forward_note = fwd.render_forward_note(fwd.analyze_forward(forward_origin))
+        except Exception as exc:
+            logger.warning("Forward provenance failed user_id=%s: %s", user_id, exc)
+            forward_note = ""
 
     # --- Pending Claude analysis delivery ---
     # If the breach monitor stored an analysis that couldn't be sent due to
@@ -3646,7 +3701,7 @@ def handle_active_message(
             file_bytes = download_twilio_media(media_url, account_sid, auth_token)
             extracted_text = run_textract_ocr(file_bytes) if file_bytes else None
             if extracted_text:
-                response = _build_msgscan_response(extracted_text)
+                response = _build_msgscan_response(extracted_text, forward_note=forward_note)
             else:
                 response = (
                     "⚠️ *Could not read text from that image.*\n\n"
@@ -3689,6 +3744,46 @@ def handle_active_message(
             media_content_type, stats,
         )
         return "vt_file_scanned"
+
+    # --- QUICKSTART ---
+    # Separate from HELP on purpose. HELP answers "what commands are there";
+    # this answers "what do I do with the thing in my hand right now", and its
+    # first line is the one action that needs no command at all. Without it the
+    # forward handling below is a feature nobody is told about.
+    if body == "QUICKSTART":
+        send_whatsapp(
+            to_number, fwd.quickstart_text(fwd.PLATFORM_WHATSAPP),
+            account_sid, auth_token, from_number,
+        )
+        return "quickstart_sent"
+
+    # --- Bare forwarded message → fraud analysis ---
+    # Forwarding the message IS the request. Before this, a forwarded scam with
+    # no command word hit the unknown-command reply at the bottom of this
+    # function -- "I didn't recognise that command" in answer to the single
+    # most common thing a worried person does.
+    #
+    # Ordered AFTER command dispatch would be wrong (the analysis would never
+    # run); ordered before it without the keyword guard would also be wrong,
+    # since someone forwarding the literal word "SWEEP" from a previous chat
+    # should still get SWEEP. So: only when the body is not a command.
+    #
+    # This is the WhatsApp half of the asymmetry. There is no sender to check
+    # here and never will be, so unlike Telegram this path analyses text only,
+    # and the note prepended to it says exactly that.
+    if forward_origin is not None and message_body.strip() and body.split()[0] not in ALL_COMMAND_KEYWORDS:
+        send_whatsapp(
+            to_number,
+            "🔍 *Checking that forwarded message...* This may take a few seconds.",
+            account_sid, auth_token, from_number,
+        )
+        send_whatsapp(
+            to_number,
+            _build_msgscan_response(message_body.strip(), forward_note=forward_note),
+            account_sid, auth_token, from_number,
+        )
+        logger.info("Forwarded message analysed user_id=%s", user_id)
+        return "forwarded_message_analysed"
 
     # --- SWEEP ---
     if body == "LINKEDDEVICES":
@@ -5328,6 +5423,17 @@ def handler(event, context):
     # Quick-reply button taps — Twilio sends ButtonPayload for interactive messages
     button_payload = params.get("ButtonPayload", "").strip().upper()
 
+    # Forwarded-message metadata. Twilio adds Forwarded / FrequentlyForwarded
+    # to the inbound callback, each as the STRING "true", and OMITS the
+    # parameter entirely when false. Parsing lives in the shared module so the
+    # "absence means false" and case handling cannot diverge from the Telegram
+    # side's own parser.
+    #
+    # This is everything WhatsApp gives us about a forward: two booleans. No
+    # original sender, no id, no name. Not withheld by a privacy setting the
+    # way Telegram's hidden_user is -- simply not carried by the API.
+    forward_origin = fwd.parse_whatsapp_forward(params)
+
     logger.info(
         "Inbound WhatsApp from=%s body_len=%d num_media=%d",
         from_number, len(message_body), num_media,
@@ -5461,6 +5567,7 @@ def handler(event, context):
                 "media_url": media_url,
                 "media_content_type": media_content_type,
             },
+            forward_origin=forward_origin,
         )
 
     else:
@@ -5477,6 +5584,7 @@ def handler(event, context):
                 "media_url": media_url,
                 "media_content_type": media_content_type,
             },
+            forward_origin=forward_origin,
         )
 
     logger.info(

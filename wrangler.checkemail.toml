@@ -1,16 +1,34 @@
 name = "relayshield-checkemail"
 main = "cloudflare_worker_checkemail.js"
 compatibility_date = "2026-09-01"
-compatibility_flags = ["nodejs_compat"]
 
-# Per-sender rate limiting, and the indicators extracted from flagged links.
-# NOT message bodies -- see the privacy note at the top of the Worker. Create
-# with:  npx wrangler kv namespace create CHECKEMAIL_RL
-[[kv_namespaces]]
-binding = "CHECKEMAIL_RL"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+# NO npm dependencies and NO node_modules: the Worker imports only
+# "cloudflare:email" from the runtime itself. Nothing to install before deploy.
 
-# RS_API_KEY is a SECRET and is deliberately not in this file. Set it with:
+# ---------------------------------------------------------------------------
+# KV IS OPTIONAL AND IS DELIBERATELY COMMENTED OUT FOR THE FIRST DEPLOY.
+#
+# A binding that names a namespace id which does not exist makes `wrangler
+# deploy` fail outright, so requiring it up front turned a working Worker into
+# a blocked one. The code fails OPEN without it -- rateLimited() returns false
+# when the binding is absent -- so scanning works from the first deploy and
+# rate limiting is switched on afterwards by uncommenting these three lines.
+#
+# Create the namespace in the dashboard (Workers & Pages -> KV -> Create),
+# because `wrangler kv namespace create` needs a token carrying
+# "Workers KV Storage: Edit", which the deploy token does not have. Paste the
+# id it shows, uncomment, and redeploy.
+#
+# UNTIL THIS IS ENABLED THE FREE TIER IS NOT RATE LIMITED. That is fine for a
+# private test against your own mailbox and is not fine once the address is
+# published anywhere.
+# ---------------------------------------------------------------------------
+# [[kv_namespaces]]
+# binding = "CHECKEMAIL_RL"
+# id = "paste-the-namespace-id-here"
+
+# RS_API_KEY is a SECRET and is deliberately not in this file:
 #   npx wrangler secret put RS_API_KEY --config wrangler.checkemail.toml
-# Without it the Worker still runs and still does header analysis; link checks
-# degrade to "unknown" rather than silently reading as clean.
+# Without it the Worker still runs and still does the header analysis, which is
+# the stronger half. Link checks degrade to "unknown" rather than silently
+# reading as clean.

@@ -977,6 +977,31 @@ export default {
         "checkemail: FAILED for", message.from, "--",
         err && err.stack ? err.stack : String(err)
       );
+      // ADDED 2026-09-02, after a forwarded spam message produced no reply at
+      // all. The comment above this handler already said silence is the worst
+      // of the three outcomes; it was not actually preventing one. A person who
+      // forwarded something frightening and hears nothing back does not know
+      // whether we are still looking, whether it was safe, or whether the
+      // address works.
+      //
+      // Best effort, and deliberately last: if the reply itself is what failed,
+      // this fails too, and then the rethrow below gives the sender a bounce --
+      // which is at least a signal.
+      try {
+        await message.reply(makeReply(message,
+          "RelayShield could not finish checking that message.\n\n" +
+          "This is a fault at our end, not a verdict on the email. Treat it as " +
+          "UNCHECKED: do not click links in it and do not enter a password or " +
+          "payment detail from it until you have confirmed it another way.\n\n" +
+          "It often helps to forward it again as an attachment. From the message " +
+          "LIST (not the opened message): tick the checkbox, then the three-dot " +
+          "More button in the toolbar above the list, then Forward as " +
+          "attachment.\n\n" +
+          "RelayShield: https://relayshield.net?source=email-scan"));
+      } catch (replyErr) {
+        console.error("checkemail: fallback reply also failed --",
+                      replyErr && replyErr.stack ? replyErr.stack : String(replyErr));
+      }
       throw err;
     }
   },
@@ -1112,7 +1137,16 @@ async function scanAndReply(message, env, ctx) {
     (autoSubmitted && autoSubmitted.toLowerCase() !== "no") ||
     precedence === "bulk" || precedence === "list" || precedence === "junk"
   ) {
-    return;   // accept and drop, silently and deliberately
+    // LOGGED as of 2026-09-02. Dropping was always deliberate; being unable to
+    // tell a drop from a crash was not. A forwarded spam message can easily
+    // carry Precedence: bulk or an Auto-Submitted header from the original,
+    // and when that happened the sender got silence and the log said nothing.
+    console.log(
+      "checkemail: DROPPED by loop guard --",
+      "from=", sender || "(empty)",
+      "auto-submitted=", autoSubmitted || "(none)",
+      "precedence=", precedence || "(none)");
+    return;
   }
 
   if (await rateLimited(env.CHECKEMAIL_RL, sender)) {
@@ -1187,6 +1221,8 @@ async function scanAndReply(message, env, ctx) {
 
   const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120), forwarded);
   await message.reply(makeReply(message, reply));
+  console.log("checkemail: REPLIED to", message.from, "risk=",
+              reply.split(" RISK")[0].replace("RelayShield email check: ", ""));
 
   // Indicators only. No body, no subject, no addresses beyond the flagged
   // domains -- see the privacy note at the top of this file.

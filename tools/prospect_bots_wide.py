@@ -236,6 +236,13 @@ def gh(path, token, params=None):
                 # Search refused the query, usually "only the first 1000 results
                 # are available". Treat as an exhausted shard, not a failure.
                 return None
+            if exc.code == 404:
+                # A repository with no README returns 404 from /readme, and that
+                # is the COMMON case in the low-star shards this tool sweeps.
+                # Raising killed the whole run on the very first shard
+                # (stars:0..1) after a single repo without a README -- a sweep
+                # designed for thousands died on prospect number one.
+                return None
             raise
         except (urllib.error.URLError, TimeoutError):
             time.sleep(2 ** attempt * 5)

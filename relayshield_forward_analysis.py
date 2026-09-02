@@ -600,6 +600,41 @@ def render_forward_note(findings: ForwardFindings) -> str:
 # Quickstart hints
 # ---------------------------------------------------------------------------
 
+def paste_hint(platform: str) -> str:
+    """The one-line "you do not need a command" hint.
+
+    Sent as its OWN message immediately before the WhatsApp tappable menu,
+    because that menu is a Twilio Content resource: its "Page 1 of 4 - tap a
+    command" text lives in Twilio, not in this repo, and cannot be edited from
+    here. HELP previously sent only that card, so every word of help copy in
+    msg_help() was unreachable -- it is only shown by HELPTEXT, behind a button
+    on the last page of the menu.
+
+    Leads with PASTE, not forward. Forwarding is a gesture the user has to know
+    AND it needs RelayShield already saved as a contact, or the final "pick
+    RelayShield" step has nothing to pick. Pasting needs neither, works
+    identically for a text copied out of email or SMS, and is one instruction
+    long.
+    """
+    if platform == PLATFORM_WHATSAPP:
+        return (
+            "\U0001F4E8 *Before the menu - you do not need a command.*\n\n"
+            "*Copy any suspicious message and paste it here.* That is the whole "
+            "thing: copy, paste, send. It works for a text, an email, a link, or "
+            "a message from someone already in your contacts.\n\n"
+            "Forwarding works too if you know how, and so does a screenshot. "
+            "Pasting is the one that always works.\n\n"
+            "_WhatsApp does not tell me who originally sent a forwarded message, "
+            "so I read the text but can never check the sender._"
+        )
+    return (
+        "\U0001F4E8 *You do not need a command.*\n\n"
+        "*Copy any suspicious message and paste it here*, or forward it to "
+        "@relayshield\\_bot. Works for a text, an email, a link, or a message "
+        "from someone already in your contacts."
+    )
+
+
 def quickstart_text(platform: str) -> str:
     """The Quickstart card.
 

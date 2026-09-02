@@ -2,7 +2,7 @@
 
 ## 🚪 FRONT-DOORS — discovery surfaces, added 2026-09-01
 
-*Founder direction: distribution for the Telegram bot is nascent and outreach does not scale. A
+*FD-8 added 2026-09-02. Founder direction: distribution for the Telegram bot is nascent and outreach does not scale. A
 front door is a directory people already SEARCH, carrying a listing we control, that yields a
 self-serve first use with attribution. Ranked by (available installs x fit) / effort. FD-1 to FD-3
 are this session's work.*
@@ -22,6 +22,26 @@ when deciding what to build next.
 | **FD-5** | OpenCTI connector (Filigran) | TI corpus licences | ⬜ Not started. Was DISTRIB-FILIGRAN-1, gated on OpenCTI-1 |
 | **FD-6** | Chrome Web Store extension | Consumer bots, CS Mobile | ⬜ Not started. Only front door that reaches non-Telegram consumers |
 | **FD-7** | Slack App Directory | Business tiers | ⬜ Not started. Biggest business directory; the Zapier Slack template is only a proxy for it |
+| **FD-8** | **Forward-an-email scan address** (`scan@relayshield.net`) | Consumer bots, all tiers | ⬜ Scoped 2026-09-02 in `email_forward_scan_scope.md`. 3.5 days |
+
+### FD-8 — the only front door needing no app, no install and no new gesture
+
+Added on founder direction 2026-09-02. Forwarding an email is a one-tap action every email user
+already knows, and email is where phishing actually lands. Cloudflare Email Routing is already live
+and audited on `relayshield.net` (TODO item 23: 45/45 delivered over 30 days), so this is a routing
+rule plus a Worker, not a mail stack.
+
+It also produces **better provenance than either bot**: a forwarded email carries the full envelope,
+the `Received:` chain, and `Authentication-Results` — a DMARC verdict computed by the user's own
+provider. Telegram's `forward_origin` is the best signal the bots have and this is strictly
+stronger. WhatsApp gives no sender at all.
+
+The analyser is NOT rewritten: this is an input adapter and an output adapter around
+`_build_msgscan_response()` and `relayshield_forward_analysis`, the same one-core-two-adapters shape
+as the bot forward handlers.
+
+Five decisions must be made before the first commit, and one of them is hard to reverse: **store the
+verdict and extracted IOCs, never the body.** Forwarded mail is somebody else's correspondence.
 
 ### FD-1 — GitHub Marketplace Action. BLOCKED, and on a bug that has now happened twice.
 

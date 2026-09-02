@@ -120,7 +120,12 @@ jobs:
             if unzip -p live.zip "$FILE" > live_handler.py 2>/dev/null && [ -s live_handler.py ]; then
               if ! diff -q "$FILE" live_handler.py >/dev/null; then
                 echo "::error::DRIFT — $FUNC does not match $FILE on main"
-                diff -u "$FILE" live_handler.py | head -60 || true
+                # 400, not 60. Raised 2026-09-02: relayshield-agentic-api's first red
+      # diff was cut off at 60 lines, so there was no way to tell from the run
+      # whether the two visible hunks were the whole drift or the start of it.
+      # A truncated diff makes the alarm unreadable, and the rule this check
+      # enforces is "read the diff before doing anything".
+      diff -u "$FILE" live_handler.py | head -400 || true
                 DRIFTED="$DRIFTED $FUNC"
               else
                 echo "ok — $FUNC matches $FILE"
@@ -155,7 +160,7 @@ jobs:
               unzip -p live.zip "$MOD" > live_mod.py 2>/dev/null || continue
               if ! diff -q "$MOD" live_mod.py >/dev/null; then
                 echo "::warning::shared-module drift — $FUNC ships a $MOD that differs from main"
-                diff -u "$MOD" live_mod.py | head -40 || true
+                diff -u "$MOD" live_mod.py | head -200 || true
               else
                 echo "ok — $FUNC's $MOD matches main"
               fi

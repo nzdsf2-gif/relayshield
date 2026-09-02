@@ -22,7 +22,7 @@ when deciding what to build next.
 | **FD-5** | OpenCTI connector (Filigran) | TI corpus licences | ⬜ Not started. Was DISTRIB-FILIGRAN-1, gated on OpenCTI-1 |
 | **FD-6** | Chrome Web Store extension | Consumer bots, CS Mobile | ⬜ Not started. Only front door that reaches non-Telegram consumers |
 | **FD-7** | Slack App Directory | Business tiers | ⬜ Not started. Biggest business directory; the Zapier Slack template is only a proxy for it |
-| **FD-8** | **Forward-an-email scan address** (`scan@relayshield.net`) | Consumer bots, all tiers | ⬜ Scoped 2026-09-02 in `email_forward_scan_scope.md`. 3.5 days |
+| **FD-8** | **Forward-an-email scan** — `checkemail@relayshield.net` | Consumer bots, all tiers | 🟩 **BUILT 2026-09-02.** `cloudflare_worker_checkemail.js`. Needs a KV id, a secret and a routing rule |
 
 ### FD-8 — the only front door needing no app, no install and no new gesture
 

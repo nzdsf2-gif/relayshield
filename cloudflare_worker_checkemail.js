@@ -1,0 +1,387 @@
+/**
+ * checkemail@relayshield.net — forward-an-email scanning (FD-8).
+ *
+ * A Cloudflare Email Worker. A user forwards a suspicious email; this parses it,
+ * scores it, and replies in plain text with a verdict.
+ *
+ * WHY THIS IS A WORKER AND NOT A LAMBDA
+ * ------------------------------------
+ * Cloudflare Email Routing already terminates mail for relayshield.net and is
+ * audited working (TODO item 23: 45/45 delivered over 30 days). Routing the
+ * address to a Worker is a rule plus this file. Doing it in Lambda would mean
+ * SES inbound, an S3 bucket, a rule set, an IAM policy and a deploy-map entry --
+ * five new pieces of production surface for the same result.
+ *
+ * WHAT IT DOES THAT THE BOTS CANNOT
+ * ---------------------------------
+ * The bots see a message body. A forwarded email carries the envelope, the
+ * Received: chain, and Authentication-Results -- an SPF/DKIM/DMARC verdict
+ * already computed by the user's own provider. A DMARC fail on mail claiming to
+ * be from a bank is the strongest single signal available anywhere in this
+ * product, and it is stronger than Telegram's forward_origin, which is the best
+ * the bots have. WhatsApp carries no sender at all.
+ *
+ * So the header analysis here is NOT a port of the bot analyser. It is the part
+ * only email can do. Links still go to /v1/scan-url, which is the same corpus +
+ * Google Safe Browsing + VirusTotal path every other surface uses -- one source
+ * of truth for link verdicts.
+ *
+ * PRIVACY, DECIDED BEFORE THE FIRST COMMIT
+ * ----------------------------------------
+ * Forwarded mail is somebody else's correspondence. **The body is never stored.**
+ * What leaves this Worker is the verdict and the extracted indicators. There is
+ * no code path here that persists a body, and there must never be one -- adding
+ * it later is the kind of change that is easy to make and impossible to undo for
+ * mail already received.
+ *
+ * DEPLOY
+ *   npx wrangler deploy --config wrangler.checkemail.toml
+ *   Then: Cloudflare dashboard -> Email -> Email Routing -> Routing rules ->
+ *   checkemail@relayshield.net -> Send to a Worker -> relayshield-checkemail
+ *
+ * Requires the RS_API_KEY secret and the CHECKEMAIL_RL KV namespace; see
+ * wrangler.checkemail.toml.
+ */
+
+import PostalMime from "postal-mime";
+import { EmailMessage } from "cloudflare:email";
+
+const API_BASE = "https://api.relayshield.net";
+
+// Free tier. Deliberately generous per day and tight per hour: a worried person
+// checks two or three things in a burst, an abuser sends hundreds.
+const RATE_LIMIT_PER_HOUR = 5;
+const RATE_LIMIT_PER_DAY = 20;
+
+const MAX_LINKS_CHECKED = 5;      // an email can carry hundreds; check the first few
+const MAX_BODY_CHARS = 20000;     // parse ceiling, never a storage ceiling
+
+// ---------------------------------------------------------------------------
+// Header analysis — the part only email can do
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the provider's own SPF/DKIM/DMARC verdict.
+ *
+ * Authentication-Results is written by the RECEIVING provider (Gmail,
+ * Microsoft), not by the sender, so it cannot be forged by whoever sent the
+ * mail. When a user forwards, their provider's header comes along with it.
+ * That makes it the highest-confidence signal in the whole message.
+ */
+function parseAuthResults(headers) {
+  const raw = (headers.get("authentication-results") || "").toLowerCase();
+  if (!raw) return { present: false };
+  const grab = (mech) => {
+    const m = raw.match(new RegExp(`\\b${mech}=(\\w+)`));
+    return m ? m[1] : null;
+  };
+  return {
+    present: true,
+    spf: grab("spf"),
+    dkim: grab("dkim"),
+    dmarc: grab("dmarc"),
+  };
+}
+
+function domainOf(addr) {
+  const m = (addr || "").match(/@([^\s>@]+)/);
+  return m ? m[1].toLowerCase().replace(/\.$/, "") : "";
+}
+
+/**
+ * Signals computed from headers alone. Each returns a flag string or null, and
+ * every one of them says WHY rather than just naming a rule -- the reply is read
+ * by someone deciding whether to click, not by an analyst.
+ */
+function headerSignals(email, headers) {
+  const flags = [];
+  const auth = parseAuthResults(headers);
+
+  if (auth.present) {
+    if (auth.dmarc === "fail") {
+      flags.push(
+        "DMARC FAILED. Your own email provider checked whether this message was " +
+        "really authorised by the domain it claims to come from, and the answer " +
+        "was no. That is the strongest single signal here."
+      );
+    }
+    if (auth.spf === "fail" || auth.spf === "softfail") {
+      flags.push(
+        "SPF " + auth.spf.toUpperCase() + ". The server that sent this is not one " +
+        "the claimed domain lists as its own."
+      );
+    }
+    if (auth.dkim === "fail") {
+      flags.push("DKIM FAILED. The message signature does not verify, so the content may have been altered in transit.");
+    }
+  }
+
+  const fromAddr = (email.from && email.from.address) || "";
+  const fromName = (email.from && email.from.name) || "";
+  const fromDomain = domainOf(fromAddr);
+
+  // Reply-To pointing somewhere else is the classic BEC setup: the display and
+  // the From look right, and the reply quietly goes to the attacker.
+  const replyTo = (email.replyTo && email.replyTo[0] && email.replyTo[0].address) || "";
+  if (replyTo && domainOf(replyTo) && domainOf(replyTo) !== fromDomain) {
+    flags.push(
+      `Reply-To mismatch. It appears to come from ${fromAddr}, but a reply would go ` +
+      `to ${replyTo} instead. That is a different domain, and it is how business ` +
+      "email compromise usually works."
+    );
+  }
+
+  // Return-Path is the envelope sender. A mismatch is normal for mailing lists
+  // and legitimate forwarders, so this is worded as a question, not a verdict.
+  const returnPath = headers.get("return-path") || "";
+  const rpDomain = domainOf(returnPath);
+  if (rpDomain && fromDomain && rpDomain !== fromDomain) {
+    flags.push(
+      `Envelope sender is ${rpDomain} but the message claims to be from ${fromDomain}. ` +
+      "That can be legitimate for newsletters and forwarders, but on a message asking " +
+      "you to act it is worth checking."
+    );
+  }
+
+  // A display name that names a person or brand, on a webmail address, with no
+  // relationship between the two.
+  const WEBMAIL = new Set([
+    "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
+    "aol.com", "live.com", "protonmail.com", "proton.me", "mail.com",
+  ]);
+  if (fromName && WEBMAIL.has(fromDomain)) {
+    const tokens = fromName.toLowerCase().match(/[a-z]{3,}/g) || [];
+    const local = (fromAddr.split("@")[0] || "").toLowerCase();
+    if (tokens.length && !tokens.some((t) => local.includes(t))) {
+      flags.push(
+        `The sender calls themselves "${fromName}" but writes from a free ${fromDomain} ` +
+        "address unrelated to that name. Anyone can set a display name; it is not identity."
+      );
+    }
+  }
+
+  return { flags, auth, fromAddr, fromName, fromDomain };
+}
+
+// ---------------------------------------------------------------------------
+// Link checking — one source of truth, the existing API
+// ---------------------------------------------------------------------------
+
+function extractLinks(text) {
+  const found = new Set();
+  const re = /https?:\/\/[^\s<>"')\]]+/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    found.add(m[0].replace(/[.,;:!?)]+$/, ""));
+    if (found.size >= 50) break;
+  }
+  return [...found];
+}
+
+async function scanLink(url, apiKey) {
+  try {
+    const resp = await fetch(`${API_BASE}/v1/scan-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({ url }),
+    });
+    if (!resp.ok) return { url, status: "unknown", detail: `check unavailable (${resp.status})` };
+    const data = await resp.json();
+    return { url, status: data.status || "unknown", detail: data.detail || "" };
+  } catch (err) {
+    // A link check that failed must never render as a link that passed.
+    return { url, status: "unknown", detail: "check unavailable" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+
+async function rateLimited(kv, sender) {
+  if (!kv) return false;                 // fail open: a broken KV must not break scanning
+  const now = Date.now();
+  const hourKey = `h:${sender}:${Math.floor(now / 3600000)}`;
+  const dayKey = `d:${sender}:${Math.floor(now / 86400000)}`;
+  const [h, d] = await Promise.all([kv.get(hourKey), kv.get(dayKey)]);
+  const hourCount = parseInt(h || "0", 10);
+  const dayCount = parseInt(d || "0", 10);
+  if (hourCount >= RATE_LIMIT_PER_HOUR || dayCount >= RATE_LIMIT_PER_DAY) return true;
+  await Promise.all([
+    kv.put(hourKey, String(hourCount + 1), { expirationTtl: 3700 }),
+    kv.put(dayKey, String(dayCount + 1), { expirationTtl: 86500 }),
+  ]);
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Reply
+// ---------------------------------------------------------------------------
+
+function buildReply(sig, linkResults, subject) {
+  const bad = linkResults.filter((l) => l.status === "malicious" || l.status === "suspicious");
+  const unknown = linkResults.filter((l) => l.status === "unknown");
+  const clean = linkResults.filter((l) => l.status === "clean");
+
+  const dmarcFailed = sig.auth.present && sig.auth.dmarc === "fail";
+  const risk = (bad.length || dmarcFailed) ? "HIGH"
+             : sig.flags.length ? "MEDIUM"
+             : "LOW";
+
+  const out = [];
+  out.push(`RelayShield — email check: ${risk} RISK`);
+  out.push("");
+  if (subject) out.push(`Subject checked: ${subject}`);
+  out.push(`Claimed sender: ${sig.fromAddr || "not stated"}`);
+  out.push("");
+
+  if (sig.flags.length) {
+    out.push(`WHAT IS WRONG WITH THE SENDER (${sig.flags.length}):`);
+    sig.flags.forEach((f) => out.push(`  - ${f}`));
+  } else if (sig.auth.present) {
+    out.push(
+      "SENDER CHECKS PASSED. SPF, DKIM and DMARC as recorded by your own email " +
+      "provider show nothing wrong. That means the message really was sent by the " +
+      "domain it claims -- it does NOT mean the domain is trustworthy. A scammer " +
+      "who registers their own domain passes all three."
+    );
+  } else {
+    out.push(
+      "NO AUTHENTICATION HEADERS. This forward did not carry your provider's " +
+      "SPF/DKIM/DMARC results, so the sender could not be verified either way. " +
+      "Forwarding as an attachment usually preserves them."
+    );
+  }
+  out.push("");
+
+  if (linkResults.length) {
+    out.push("LINKS:");
+    bad.forEach((l) => out.push(`  FLAGGED  ${l.url}${l.detail ? " — " + l.detail : ""}`));
+    unknown.forEach((l) => out.push(`  UNKNOWN  ${l.url} — ${l.detail || "no reputation data"}`));
+    clean.forEach((l) => out.push(`  no match ${l.url}`));
+    if (clean.length && !bad.length) {
+      out.push("");
+      out.push(
+        "  A clean result is not a guarantee. New phishing domains can take hours " +
+        "to appear in any threat database."
+      );
+    }
+  } else {
+    out.push("LINKS: none found in the text.");
+  }
+  out.push("");
+
+  out.push("WHAT TO DO:");
+  if (risk === "HIGH") {
+    out.push("  - Do not click anything in that email and do not reply to it.");
+    out.push("  - If it claims to be a company you use, go to their site yourself and log in there.");
+    out.push("  - If it names a person you know, contact them another way before acting.");
+  } else if (risk === "MEDIUM") {
+    out.push("  - Treat it as unverified. Do not enter a password or payment detail from a link in it.");
+    out.push("  - Confirm through a channel you already trust before acting.");
+  } else {
+    out.push("  - Nothing automatic flagged, but no scan proves a message is safe.");
+    out.push("  - An unexpected request for money, credentials or urgency is a warning sign regardless.");
+  }
+  out.push("");
+  out.push("---");
+  out.push("Forward anything suspicious to checkemail@relayshield.net.");
+  out.push("We store the verdict and the indicators we extract. We do not store your email.");
+  out.push("RelayShield — https://relayshield.net?source=email-scan");
+  return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+export default {
+  async email(message, env, ctx) {
+    const sender = (message.from || "").toLowerCase();
+
+    // Loop guards, before anything else. Replying to an auto-responder or to a
+    // forwarder that points back at us ping-pongs forever and looks like an
+    // attack from our own domain.
+    const autoSubmitted = message.headers.get("auto-submitted") || "";
+    const precedence = (message.headers.get("precedence") || "").toLowerCase();
+    if (
+      !sender ||
+      sender.endsWith("@relayshield.net") ||
+      sender.startsWith("no-reply@") ||
+      sender.startsWith("noreply@") ||
+      sender.startsWith("mailer-daemon@") ||
+      (autoSubmitted && autoSubmitted.toLowerCase() !== "no") ||
+      precedence === "bulk" || precedence === "list" || precedence === "junk"
+    ) {
+      return;   // accept and drop, silently and deliberately
+    }
+
+    if (await rateLimited(env.CHECKEMAIL_RL, sender)) {
+      await message.reply(
+        makeReply(message,
+          "RelayShield — rate limit reached\n\n" +
+          `The free email check allows ${RATE_LIMIT_PER_HOUR} messages an hour and ` +
+          `${RATE_LIMIT_PER_DAY} a day. Try again shortly.\n\n` +
+          "For continuous monitoring rather than one-off checks, see " +
+          "https://relayshield.net?source=email-scan")
+      );
+      return;
+    }
+
+    let email;
+    try {
+      email = await new PostalMime().parse(message.raw);
+    } catch (err) {
+      await message.reply(
+        makeReply(message,
+          "RelayShield could not read that message. Forwarding it as an attachment, " +
+          "or pasting the text to our Telegram or WhatsApp bot, usually works.")
+      );
+      return;
+    }
+
+    const body = ((email.text || email.html || "") + "").slice(0, MAX_BODY_CHARS);
+    const sig = headerSignals(email, message.headers);
+
+    const links = extractLinks(body).slice(0, MAX_LINKS_CHECKED);
+    const linkResults = env.RS_API_KEY
+      ? await Promise.all(links.map((u) => scanLink(u, env.RS_API_KEY)))
+      : links.map((u) => ({ url: u, status: "unknown", detail: "link checking unavailable" }));
+
+    const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120));
+    await message.reply(makeReply(message, reply));
+
+    // Indicators only. No body, no subject, no addresses beyond the flagged
+    // domains -- see the privacy note at the top of this file.
+    if (env.CHECKEMAIL_RL) {
+      const iocs = linkResults.filter((l) => l.status === "malicious" || l.status === "suspicious")
+                              .map((l) => l.url);
+      if (iocs.length) {
+        ctx.waitUntil(env.CHECKEMAIL_RL.put(
+          `ioc:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+          JSON.stringify({ iocs, dmarc: sig.auth.dmarc || null, at: new Date().toISOString() }),
+          { expirationTtl: 7776000 }
+        ));
+      }
+    }
+  },
+};
+
+/** Build a plain-text reply message. Plain text on purpose: it renders
+ *  everywhere, cannot carry a tracking pixel, and cannot itself look like the
+ *  thing we are warning people about. */
+function makeReply(message, text) {
+  const headers = [
+    `From: checkemail@relayshield.net`,
+    `To: ${message.from}`,
+    `In-Reply-To: ${message.headers.get("message-id") || ""}`,
+    `Subject: Re: ${(message.headers.get("subject") || "your email check").slice(0, 120)}`,
+    `Content-Type: text/plain; charset=utf-8`,
+    `MIME-Version: 1.0`,
+  ].join("\r\n");
+  return new EmailMessage(
+    "checkemail@relayshield.net",
+    message.from,
+    `${headers}\r\n\r\n${text}\r\n`
+  );
+}

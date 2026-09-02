@@ -333,9 +333,9 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 5. **`relayshield_agentic_api.py` deploy path.** In the drift check since 2026-08-30, deliberately
    NOT in the deploy map. Read its first red diff, then map it.
 6. **Sweep 003's 17th keyword** is unrecoverable. Either accept 16 or re-derive from TI reporting.
-7. **XSOAR PR #45206** waits on Moshe re a demo environment. The demo is a MERGE requirement, not a
-   partnership one: `.github/project_conf/contributions.ini` has Pending Demo and Post Demo Changes
-   as pipeline stages.
+7. **XSOAR PR #45206 is MERGED (2026-09-02)** and no demo was required after all. The work is now
+   in Palo Alto's internal PR #45742, which is open and approved. Nothing for us to do; the pack is
+   not on master yet, so the marketing claim is still gated. See STATUS CORRECTIONS.
 8. **Rain** waits on a reply. Two open questions carried: whether the Agent Control Layer has a
    pre-issuance hook, and the Sardine/Chainalysis paragraph never got its outside read.
 9. **Medium quote bars**: house style is now none. `build_blog.py` renders `> ` as a plain `<p>`.
@@ -630,13 +630,38 @@ was not updated. **Ask before treating anything in its "carried forward" list as
 
 Known completed after that handoff was written:
 
-- **XSOAR PR #45206 / Tech Alliance (roadmap D3)** — **THIS ENTRY IS WRONG. Re-checked 2026-08-29.**
-  `git ls-remote https://github.com/demisto/content 'refs/pull/45206/*'` returns **both**
-  `refs/pull/45206/head` and `refs/pull/45206/merge`. GitHub deletes the `/merge` ref once a PR is
-  merged or closed, so its presence means **#45206 is still open**. The contrib branch
-  `refs/heads/contrib/nzdsf2-gif_add-relayshield-pack` is also still live in their repo, and their
-  "Auto Merge Docker Update" workflow was still firing against it on 2026-08-29. Automation does not
-  run on a branch that merged weeks ago.
+- **XSOAR PR #45206 / Tech Alliance (roadmap D3)** — **MOVED 2026-09-02. #45206 IS MERGED; THE
+  PACK IS STILL NOT ON MASTER.** Both facts matter and neither replaces the other.
+
+  demisto/content does not merge an external contribution straight to master. A bot merges it into
+  an INTERNAL PR, which then runs their own pipeline. On 2026-09-02 `#45206` had lost its `/merge`
+  ref (merged), and the bot comment named the successor: **#45742**, which is OPEN, has an
+  approving review, and carries `Packs/RelayShield/`. Verified by content, not by refs alone:
+  `pack_metadata.json` returns 200 on both PR heads and **404 on master**, with a control pack
+  returning 200 so the 404 is real and not a blocked request.
+
+  So the state is a three-stage pipeline and the claim only becomes safe at stage three:
+
+  1. Contribution PR #45206 — **merged.** It has left our hands.
+  2. Internal PR #45742 — **open**, approved, 1 failing check (`ci/gitlab/gitlab.xdr.pan.local`).
+     That is Palo Alto's own internal GitLab pipeline, inside their infrastructure, on a PR authored
+     by their `content-bot`. **We cannot see it and cannot fix it. There is no action for us.**
+  3. `Packs/RelayShield` on master — **not there yet.** This is what a prospect checks.
+
+  **Do NOT write "ships with Cortex XSOAR", "in the XSOAR Marketplace", or "available to XSOAR
+  customers" anywhere yet.** What is true and checkable today: *"RelayShield's Cortex XSOAR content
+  pack has been contributed to Palo Alto Networks' content repository and accepted; it is
+  progressing through their internal release pipeline."*
+
+  Moshe Eichler confirmed on the PR, in writing, that on merge the pack **gets a Marketplace listing
+  page** and **is named in their Release Notes**. That is the moment the stronger claim unlocks, and
+  it is worth a blog post and a landing-page line when it lands.
+
+  `sh tools/check_xsoar_pack.sh` now tracks all three stages and prints the exact wording that is
+  safe at the current one. Run it before the claim goes in any deck, email or landing page.
+
+  Note also: the demo requirement recorded under OPEN TODOS as gating the merge did **not** block
+  #45206 — it merged without one. Do not carry that as a blocker again without re-checking.
 
   Two separate things were being conflated under "DONE", and they must stay separate:
 

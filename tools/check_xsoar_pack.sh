@@ -13,17 +13,29 @@
 # is a marketing claim a prospect can check in ten seconds, and it was false.
 # Run this before the claim goes in any deck, email or landing page.
 #
-# Two independent checks, because either one alone can mislead:
+# UPDATED 2026-09-02. The contribution reached a NEW state that the original
+# two checks describe wrongly, and the wrong description is the pessimistic one.
 #
-#   1. The /merge ref. GitHub creates refs/pull/N/merge for an OPEN, mergeable
-#      PR and deletes it when the PR merges or closes. Present means still open.
-#      Cheap, no clone, but it says nothing about what landed.
-#   2. The pack path on master. This is the one that decides the claim.
+# demisto/content does not merge an external PR straight to master. A bot merges
+# it into an INTERNAL PR, which then goes through their own pipeline. On
+# 2026-09-02 #45206 lost its /merge ref -- which check 1 alone reads as "merged
+# or closed", the same as abandoned -- while the work actually moved forward
+# into #45742, which is open, approved, and carries the pack. Reporting that as
+# "not merged, nothing happened" would understate real progress, and reporting
+# it as "ships with XSOAR" would overstate it. Both are wrong.
+#
+# So there are THREE stages, and the claim only becomes safe at the third:
+#
+#   1. The contribution PR (#45206). /merge gone means it left our hands.
+#   2. The internal PR (#45742). Open means Palo Alto is still processing it.
+#   3. The pack path on master. THIS is what a prospect checks, and it is the
+#      only thing that licenses "our pack ships with Cortex XSOAR".
 
 set -eu
 
 REPO=https://github.com/demisto/content
 PR=45206
+INTERNAL_PR=45742
 PACK=Packs/RelayShield
 
 echo "== 1. PR #$PR refs on $REPO"
@@ -36,6 +48,22 @@ elif printf '%s\n' "$REFS" | grep -q "refs/pull/$PR/head"; then
   echo "      Merged and closed look identical here. Check 2 tells them apart."
 else
   echo "   -> no refs at all. Wrong PR number, or the repo moved."
+fi
+
+echo
+echo "== 1b. Internal PR #$INTERNAL_PR refs"
+echo "   demisto/content merges an external contribution into an internal PR"
+echo "   rather than straight to master, so #$PR going quiet is not the end of"
+echo "   the story. This is where the work actually is."
+IREFS=$(git ls-remote "$REPO" "refs/pull/$INTERNAL_PR/*" || true)
+printf '%s\n' "$IREFS" | sed 's/^/   /'
+if printf '%s\n' "$IREFS" | grep -q "refs/pull/$INTERNAL_PR/merge"; then
+  echo "   -> STILL OPEN. In Palo Alto's pipeline, not yet on master."
+elif printf '%s\n' "$IREFS" | grep -q "refs/pull/$INTERNAL_PR/head"; then
+  echo "   -> merged or closed. Check 2 says which."
+else
+  echo "   -> no refs. The internal PR number may have changed; re-read the"
+  echo "      bot comment on #$PR for the current one."
 fi
 
 echo
@@ -104,8 +132,18 @@ fi
 
 echo
 case "$VERDICT" in
-  merged) echo "   -> MERGED. The pack is on master. The claim is safe to make." ;;
-  absent) echo "   -> NOT MERGED. Do not claim the pack ships with XSOAR." ;;
+  merged) echo "   -> ON MASTER. \"RelayShield ships with Cortex XSOAR\" is now"
+          echo "      true and safe to publish." ;;
+  absent) echo "   -> NOT ON MASTER. Do NOT claim the pack ships with XSOAR, is"
+          echo "      in the Marketplace, or is available to XSOAR customers."
+          echo
+          echo "      What IS true and checkable while the internal PR is open:"
+          echo "        \"RelayShield's Cortex XSOAR content pack has been"
+          echo "         contributed to Palo Alto Networks' content repository"
+          echo "         and accepted; it is progressing through their internal"
+          echo "         release pipeline.\""
+          echo "      That distinction is not pedantry. The first version is one"
+          echo "      browser tab away from being disproved by a prospect." ;;
   *)      echo "   -> UNDETERMINED. Neither mechanism answered. Do not treat this"
           echo "      as evidence either way -- open the tree URL above by hand." ;;
 esac

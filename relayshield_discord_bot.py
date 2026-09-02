@@ -266,6 +266,25 @@ WALLET_UPSELL_FOOTER = (
     "credentials or session are already in a stealer log. `/exposure` checks that, privately._"
 )
 
+# The email-check address. ADDED 2026-09-02.
+#
+# Discord has no help surface at all -- this bot is three slash commands and
+# nothing else -- and adding a /help means registering a new command in the
+# Discord developer portal, which cannot be done from code. So the line rides on
+# the /scan footer, which is where someone already worried about a link is
+# looking.
+#
+# It is checkemail@, not emailcheck@. See CHECKEMAIL_ADDRESS in
+# relayshield_forward_analysis.py: the two transpose easily and the wrong one
+# bounces at the sender's provider, so they see a delivery failure from us
+# rather than a scan.
+EMAIL_CHECK_FOOTER = (
+    "\n_Got a suspicious email? Forward it from your email account to "
+    "checkemail@relayshield.net for a plain-text verdict. An email carries "
+    "delivery records that say whether it really came from the domain it "
+    "claims, which no chat app can see._"
+)
+
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.I)
 _API_KEY_SECRET = "relayshield/discord_bot_api_key"
 _api_key_cache: str | None = None
@@ -560,7 +579,7 @@ def _run_deferred(body: dict) -> None:
     res = check_url(url)
     rendered = render_result(url, res)
     _followup_patch(token, {
-        "content": rendered["text"] + UPSELL_FOOTER,
+        "content": rendered["text"] + UPSELL_FOOTER + EMAIL_CHECK_FOOTER,
         "components": _post_button(url, res["level"]),
     })
 

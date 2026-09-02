@@ -385,7 +385,61 @@ class TestHelpCardsCarryTheHints(unittest.TestCase):
         for platform in (fwd.PLATFORM_TELEGRAM, fwd.PLATFORM_WHATSAPP):
             hint = fwd.paste_hint(platform)
             self.assertIn("paste", hint.lower())
-            self.assertIn("do not need a command", hint)
+
+    def test_email_address_is_checkemail_not_emailcheck_everywhere(self):
+        """The two transpose easily and the wrong one BOUNCES.
+
+        emailcheck@relayshield.net does not exist. A user who forwards a
+        frightening email to it gets a delivery failure from us instead of a
+        verdict, which is worse than never having offered the feature. It was
+        written the wrong way round twice on 2026-09-02, in the message asking
+        for it to be added to four surfaces at once.
+
+        Every surface must read the constant, and no file may contain the
+        transposition.
+        """
+        self.assertEqual(fwd.CHECKEMAIL_ADDRESS, "checkemail@relayshield.net")
+        for name in ("relayshield_forward_analysis.py",
+                     "relayshield_telegram_webhook.py",
+                     "relayshield_whatsapp_webhook.py",
+                     "relayshield_discord_bot.py"):
+            src = self._src(name)
+            # The full transposed ADDRESS, not the bare "emailcheck@" prefix:
+            # several of these files carry a comment explaining the
+            # transposition, and that comment is the reason this test exists.
+            self.assertNotIn("emailcheck@relayshield.net", src,
+                             f"{name} carries the transposed address")
+
+    def test_every_user_facing_surface_names_the_email_address(self):
+        """A capability nobody is told about does not exist.
+
+        The email check went live on 2026-09-02 and no bot mentioned it. That
+        is the same failure as the forward handler being undiscoverable, which
+        is what this whole module was written to fix.
+        """
+        for platform in (fwd.PLATFORM_TELEGRAM, fwd.PLATFORM_WHATSAPP):
+            self.assertIn(fwd.CHECKEMAIL_ADDRESS, fwd.paste_hint(platform))
+            self.assertIn(fwd.CHECKEMAIL_ADDRESS, fwd.quickstart_text(platform))
+        self.assertIn("checkemail@relayshield.net",
+                      self._src("relayshield_discord_bot.py"))
+
+    def test_email_hint_says_forward_from_the_email_account(self):
+        """Copying an email's TEXT into a chat throws away the only thing that
+        makes the email path stronger than the bots: Authentication-Results,
+        written by the recipient's own provider and unforgeable by the sender.
+        The copy must send people down the path that keeps it."""
+        self.assertIn("from your email account", fwd.EMAIL_HINT)
+
+    def test_whatsapp_hint_states_the_sender_limitation_without_hedging(self):
+        """Founder wording, 2026-09-02. The previous line said forwarding
+        "works too if you know how", which is vague enough to be useless, and
+        "that is the whole thing" read as filler. What must survive every edit
+        is the sender caveat: WhatsApp never passes on who sent a forward, and
+        implying otherwise is the one thing this adapter must not do."""
+        hint = fwd.paste_hint(fwd.PLATFORM_WHATSAPP)
+        self.assertIn("never check the sender", hint)
+        self.assertNotIn("That is the whole thing", hint)
+        self.assertNotIn("if you know how", hint)
 
 
 if __name__ == "__main__":

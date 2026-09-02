@@ -118,3 +118,14 @@ backups/
 # Ignoring the path is what keeps it quiet, because the directory is still there
 # on the Mac. Work on the MCP server in its own clone and release it from there.
 /relayshield-mcp/
+
+# Generated test shims. test_checkemail_reply.mjs and test_checkemail_verdict.mjs
+# each write a copy of cloudflare_worker_checkemail.js with "cloudflare:email"
+# stubbed out, import it, then delete it. A run that fails part-way leaves one
+# behind, and it is a byte-for-byte copy of a source file -- committing one
+# creates a second, silently stale copy of the Worker, which is the DRIFT RULE
+# in miniature. Added 2026-09-02 after an ad-hoc debug script left mm_shim.mjs
+# in the repo root.
+*_shim.mjs
+.checkemail_shim.mjs
+.checkemail_verdict_shim.mjs

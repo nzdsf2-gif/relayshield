@@ -18,26 +18,26 @@ workers_dev = true
 # "cloudflare:email" from the runtime itself. Nothing to install before deploy.
 
 # ---------------------------------------------------------------------------
-# KV IS OPTIONAL AND IS DELIBERATELY COMMENTED OUT FOR THE FIRST DEPLOY.
+# RATE LIMITING. ENABLED 2026-09-02.
 #
-# A binding that names a namespace id which does not exist makes `wrangler
-# deploy` fail outright, so requiring it up front turned a working Worker into
-# a blocked one. The code fails OPEN without it -- rateLimited() returns false
-# when the binding is absent -- so scanning works from the first deploy and
-# rate limiting is switched on afterwards by uncommenting these three lines.
+# This was commented out for the first deploy, because a binding naming a
+# namespace id that does not exist makes `wrangler deploy` fail outright, and
+# requiring it up front turned a working Worker into a blocked one. The code
+# fails OPEN without it -- rateLimited() returns false when the binding is
+# absent -- so scanning worked from the first deploy and this was switched on
+# afterwards.
 #
-# Create the namespace in the dashboard (Workers & Pages -> KV -> Create),
-# because `wrangler kv namespace create` needs a token carrying
-# "Workers KV Storage: Edit", which the deploy token does not have. Paste the
-# id it shows, uncomment, and redeploy.
+# The namespace `checkemail-rl` was created in the dashboard under
+# Storage & Databases -> KV. Not Workers & Pages: KV used to live there, and an
+# instruction pointing there cost a round trip. `wrangler kv namespace create`
+# is not an option either -- it needs a token carrying "Workers KV Storage:
+# Edit", which the deploy token does not have.
 #
-# UNTIL THIS IS ENABLED THE FREE TIER IS NOT RATE LIMITED. That is fine for a
-# private test against your own mailbox and is not fine once the address is
-# published anywhere.
+# Verify after deploy: GET /health reports CHECKEMAIL_RL: true.
 # ---------------------------------------------------------------------------
-# [[kv_namespaces]]
-# binding = "CHECKEMAIL_RL"
-# id = "paste-the-namespace-id-here"
+[[kv_namespaces]]
+binding = "CHECKEMAIL_RL"
+id = "6fa845aba9e94df5854d64bdc668aafa"
 
 # RS_API_KEY is a SECRET and is deliberately not in this file:
 #   npx wrangler secret put RS_API_KEY --config wrangler.checkemail.toml

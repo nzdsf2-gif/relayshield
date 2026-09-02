@@ -600,6 +600,27 @@ def render_forward_note(findings: ForwardFindings) -> str:
 # Quickstart hints
 # ---------------------------------------------------------------------------
 
+# The email-check address, in ONE place.
+#
+# It is checkemail@, not emailcheck@. Those two transpose easily and the wrong
+# one bounces silently at the sender's provider -- they see a delivery failure
+# from us, not a scan. It was written the wrong way round twice on 2026-09-02,
+# in a message asking for it to be added to every bot, which is exactly how a
+# typo reaches four surfaces at once. Every surface reads this constant.
+CHECKEMAIL_ADDRESS = "checkemail@relayshield.net"
+
+# One sentence, used verbatim everywhere. Says FORWARD FROM YOUR EMAIL ACCOUNT
+# rather than "forward it to us": the whole point is that the mail arrives with
+# its own Authentication-Results header, which is the one signal no bot surface
+# can ever see. Copying the text into a bot loses that and is a worse check.
+EMAIL_HINT = (
+    "To check a suspicious *email*, forward it from your email account "
+    "straight to " + CHECKEMAIL_ADDRESS + ". Do not copy the text into a chat: "
+    "a forwarded email carries its own delivery records, and those are the "
+    "strongest evidence available anywhere in this product."
+)
+
+
 def paste_hint(platform: str) -> str:
     """The one-line "you do not need a command" hint.
 
@@ -618,20 +639,22 @@ def paste_hint(platform: str) -> str:
     """
     if platform == PLATFORM_WHATSAPP:
         return (
-            "\U0001F4E8 *Before the menu - you do not need a command.*\n\n"
-            "*Copy any suspicious message and paste it here.* That is the whole "
-            "thing: copy, paste, send. It works for a text, an email, a link, or "
-            "a message from someone already in your contacts.\n\n"
-            "Forwarding works too if you know how, and so does a screenshot. "
-            "Pasting is the one that always works.\n\n"
-            "_WhatsApp does not tell me who originally sent a forwarded message, "
-            "so I read the text but can never check the sender._"
+            "\U0001F4E8 *Before checking the menu, try these steps to bypass "
+            "sending commands.*\n\n"
+            "*Copy any suspicious message and paste it here: copy, paste or "
+            "send.* It works for a text, a link or a message from someone "
+            "already in your contacts.\n\n"
+            "Or paste screenshots here.\n\n"
+            + EMAIL_HINT + "\n\n"
+            "_WhatsApp doesn't tell you who sent a forwarded message, so I can "
+            "review the text but never check the sender._"
         )
     return (
         "\U0001F4E8 *You do not need a command.*\n\n"
         "*Copy any suspicious message and paste it here*, or forward it to "
-        "@relayshield\\_bot. Works for a text, an email, a link, or a message "
-        "from someone already in your contacts."
+        "@relayshield\\_bot. Works for a text, a link, or a message from "
+        "someone already in your contacts. Screenshots work too.\n\n"
+        + EMAIL_HINT
     )
 
 
@@ -644,8 +667,15 @@ def quickstart_text(platform: str) -> str:
     and it gets analysed. That is the fastest useful action available and it
     was undiscoverable, which also made the forward handler undiscoverable.
 
-    Kept to three actions on purpose. A fourth turns a card someone reads in a
-    panic into a list they skim.
+    Kept to three actions for as long as they were three ways of doing the same
+    thing -- a fourth phrasing of "send me the message" turns a card someone
+    reads in a panic into a list they skim.
+
+    A FOURTH was added 2026-09-02 because email is not a fourth phrasing. It is
+    a different capability: a forwarded email carries Authentication-Results
+    written by the recipient's own provider, which is unforgeable by the sender
+    and is the strongest single signal anywhere in this product. No chat surface
+    can ever see it. That earns the line.
     """
     if platform == PLATFORM_WHATSAPP:
         return (
@@ -668,6 +698,11 @@ def quickstart_text(platform: str) -> str:
             "*3. Check a link before you click it.*\n"
             "*SCAN* <link> — checked against our own criminal-source corpus, "
             "Google Safe Browsing and VirusTotal.\n\n"
+            "*4. Forward a suspicious EMAIL to " + CHECKEMAIL_ADDRESS + ".*\n"
+            "Send it from your own email account, not from here. An email "
+            "carries delivery records that say whether it really came from the "
+            "domain it claims, and that is the one check no chat app can do. "
+            "You get a plain-text verdict back by reply.\n\n"
             "Reply *HELP* for the full command list."
         )
 
@@ -690,5 +725,10 @@ def quickstart_text(platform: str) -> str:
         "*3. Check a link before you click it.*\n"
         "`/scan <link>` — checked against our own criminal-source corpus, "
         "Google Safe Browsing and VirusTotal.\n\n"
+        "*4. Forward a suspicious email to " + CHECKEMAIL_ADDRESS + ".*\n"
+        "Send it from your own email account, not from here. An email carries "
+        "delivery records that say whether it really came from the domain it "
+        "claims, and that is the one check no chat app can do. You get a "
+        "plain-text verdict back by reply.\n\n"
         "Type /help for the full command list."
     )

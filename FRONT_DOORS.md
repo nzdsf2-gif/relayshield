@@ -22,9 +22,9 @@ when deciding what to build next — it just becomes an opinion.
 
 | ID | Front door | Feeds | Effort | Status |
 |---|---|---|---|---|
-| FD-1 | GitHub Marketplace Action (rsscan) | API / developer | Hours | Blocked — version-pin defect, see below |
-| FD-2 | pre-commit.com hooks index | rsscan | Hours | Ready, needs one PR |
-| FD-3 | MCP registries (mcp.so, Smithery, `modelcontextprotocol/servers`) | Agentic bundle, TI | 1 day | Manifests written, needs accounts |
+| FD-1 | GitHub Marketplace Action (rsscan) | API / developer | Hours | In progress — `--check` run, pins NOT yet rewritten |
+| FD-2 | pre-commit.com hooks index | rsscan | Hours | File confirmed: `sections/hooks.md`. Needs one PR |
+| FD-3 | MCP registries (mcp.so, Smithery, `modelcontextprotocol/servers`) | Agentic bundle, TI | 1 day | Manifests written. FD-3a is ten minutes and needs no repo |
 | FD-4 | Splunkbase app | TI corpus licences | 3-5 days | Not started |
 | FD-5 | OpenCTI connector (Filigran) | TI corpus licences | 2-3 days | Not started |
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
@@ -81,81 +81,108 @@ cd ~/rsscan-live && git add -A && git commit -m "chore: sync version references 
 
 ---
 
-## FD-2 — pre-commit.com hooks index. STEP BY STEP.
+## FD-2 — pre-commit.com hooks index. FILE CONFIRMED: `sections/hooks.md`.
 
-**Why it is not done:** I could not reach `github.com/pre-commit/pre-commit.com` from this
-container to confirm which file lists the hooks, and guessing a path is how an earlier URL in this
-file came to 404. The check below takes ten seconds and removes the guess.
+The grep on 2026-09-02 returned seven files. `sections/hooks.md` is the index that renders at
+<https://pre-commit.com/hooks.html>. The others mention the phrase for unrelated reasons:
+`new-hooks.md` is the how-to-write-a-hook guide, `.pre-commit-config.yaml` is the site's own config.
+**Edit `sections/hooks.md` and nothing else.**
 
-**Prerequisite:** the rsscan repo must be public and carry the tag from FD-1. Do FD-1 first.
+**Prerequisite:** FD-1 finished — repo public, versions synced, tag pushed. The index links to a
+repo, and a broken link is a rejected PR.
 
-**ANDREW RUNS THIS** — find the exact file, so we edit the right one:
+**ANDREW RUNS THIS** — see the exact shape of a neighbouring entry, so the new one matches:
 
 ```zsh
-cd ~ && git clone --depth 1 https://github.com/pre-commit/pre-commit.com pc-site && grep -rl "pre-commit-hooks" ~/pc-site --include="*.md" --include="*.yaml" --include="*.yml" | head
+cd ~/pc-site && head -30 sections/hooks.md && echo "=== entries near where R goes ===" && grep -n -i -B 1 -A 3 "github.com/re" sections/hooks.md | head -40
 ```
 
-Paste me the output. The list of hooks lives in one of those files, and it is either
-`sections/hooks.md` or a YAML file that generates it. **Do not edit before we know which.**
+Paste that back and I will write the exact line. The file is ordered, and matching the neighbours'
+punctuation exactly is what gets a one-line PR merged without discussion.
 
-**ANDREW CLICKS THIS** — once we know the file, on `github.com/pre-commit/pre-commit.com`:
+**ANDREW CLICKS THIS** — on <https://github.com/pre-commit/pre-commit.com>:
 
-1. Open that file → the **pencil** icon → GitHub offers to fork; accept.
-2. Add one entry in the same shape as its neighbours, keeping alphabetical order if the file is
-   ordered. The entry is:
-   `https://github.com/RelayShield/rsscan` with the description
-   **"Blocks commits that add API keys, cloud credentials and LLM provider keys, scanning only added lines."**
+1. Open `sections/hooks.md` → the **pencil** icon → GitHub offers to fork; accept.
+2. Paste the line I give you, in the right alphabetical position.
 3. **Commit changes** → *Create a new branch* → **Propose changes**.
-4. PR title: `Add rsscan hook`. Body: one sentence saying what it does and that it scans added lines
-   only. Nothing else; that index takes small PRs.
+4. PR title: `Add rsscan`. Body, one sentence:
+   *"Adds rsscan, which blocks commits that add API keys, cloud credentials and LLM provider keys, scanning only added lines."*
+   Nothing else. That index takes small PRs and rejects essays.
 
 ---
 
-## FD-3 — MCP registries. STEP BY STEP.
+## FD-3 — MCP registries. STEP BY STEP, per destination.
 
-**Why it is not done:** the manifests are written and committed at `mcp_registry/`; nothing has been
-submitted. Three destinations, do them in this order.
+The copy and the four real tool names are in `mcp_registry/listing.md`. **Read the tool names from
+that file, never from memory** — a registry entry naming a tool the server does not implement is a
+support ticket from every agent that calls it.
 
-### FD-3a — mcp.so. Fastest, no PR.
+### FD-3a — mcp.so. Do this first: no repo access, no PR, ten minutes.
+
+**ANDREW RUNS THIS** — print the copy you will paste into the form:
+
+```zsh
+cd ~/"Side SaaS Hustle" && cat mcp_registry/listing.md
+```
 
 **ANDREW CLICKS THIS:**
 
-1. Go to <https://mcp.so> → **Submit** (top navigation).
-2. Fill the form from `mcp_registry/listing.md`, which has the copy and the four real tool names
-   read from the server's own source. **Do not retype the tool names from memory** — a registry
-   entry naming a tool the server does not implement is a support ticket from every agent that
-   calls it.
-3. Submit. It is reviewed by hand, so expect days not minutes.
+1. Go to <https://mcp.so>.
+2. Top navigation → **Submit** (it may read *Submit Server*, or be a **+** button).
+3. Sign in with GitHub if asked.
+4. Fill the form from the file you just printed:
+   - **Repository URL** — the MCP server's GitHub URL.
+   - **Name** — `RelayShield`.
+   - **Description** — the one-paragraph description from `listing.md`.
+   - **Category / Tags** — `security`, `threat-intelligence`.
+5. **Submit.** Reviewed by a human, so expect days.
 
-### FD-3b — Smithery. One file in the server's own repo.
+### FD-3b — Smithery. One file, in the SERVER's repo.
 
-`mcp_registry/smithery.yaml` goes in the **root of the MCP server's repo**, not this one.
+`mcp_registry/smithery.yaml` belongs in the root of the MCP server's own repository, **not** this
+one.
 
-**ANDREW RUNS THIS** — tell me where that repo is first if it is not `RelayShield/relayshield-mcp`:
+**ANDREW RUNS THIS** — confirm the server repo first. If this does not clone, stop and tell me the
+real repo name:
 
 ```zsh
-cd ~ && git clone https://github.com/RelayShield/relayshield-mcp mcp-live && cp ~/"Side SaaS Hustle"/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml && cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml for the Smithery registry" && git push origin main
+cd ~ && git clone https://github.com/RelayShield/relayshield-mcp mcp-live && ls ~/mcp-live
 ```
 
-**ANDREW CLICKS THIS:** then <https://smithery.ai> → **Sign in with GitHub** → **Add Server** →
-pick the repo. Smithery reads `smithery.yaml` from the default branch.
+Then, only if that cloned cleanly:
+
+```zsh
+cp ~/"Side SaaS Hustle"/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml && cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml for the Smithery registry" && git push origin main
+```
+
+**ANDREW CLICKS THIS:**
+
+1. Go to <https://smithery.ai>.
+2. **Sign in** (top right) → **Continue with GitHub** → authorise.
+3. **Deploy** or **Add Server** in the top navigation.
+4. Choose the `relayshield-mcp` repository. If it is not listed, click **Configure GitHub App**,
+   grant access to that repo, then come back.
+5. Smithery reads `smithery.yaml` from the default branch. Confirm and deploy.
 
 ### FD-3c — modelcontextprotocol/servers. Highest value, slowest.
 
-A maintainer reviews it, so it takes the longest and is worth the most.
+A maintainer reviews this one, which is why it is worth the most.
 
 **ANDREW CLICKS THIS:**
 
 1. Go to <https://github.com/modelcontextprotocol/servers>.
-2. Open `README.md` → **pencil** icon → accept the fork.
-3. Find the **Third-Party Servers → Community Servers** list. Add one row in the same format as its
-   neighbours, alphabetically. Content comes from `mcp_registry/listing.md`.
-4. **Commit changes** → *Create a new branch* → **Propose changes**.
-5. PR title: `Add RelayShield MCP server`. Body: two sentences. What it does, and the fact that it
-   is live and versioned. No marketing.
+2. Open `README.md` → the **pencil** icon → accept the fork.
+3. Find (**Cmd-F**) **Community Servers**. That is the section for third-party servers. Do NOT add
+   to *Reference Servers* or *Official Integrations* — different admission rules, instant rejection.
+4. Add one row in the exact format of its neighbours, alphabetically. Content from
+   `mcp_registry/listing.md`.
+5. **Commit changes** → *Create a new branch* → **Propose changes**.
+6. PR title: `Add RelayShield MCP server`. Body: two sentences — what it does, and that it is live
+   and versioned. No marketing.
 
-**Do not claim a corpus number in any of the three.** MEASUREMENT DOCTRINE applies: these listings
-are read by people who will check.
+**Do not put a corpus number in any of the three.** MEASUREMENT DOCTRINE applies with force: these
+listings are read by people who check.
+
 
 ## FD-4 — Splunkbase. Not started.
 

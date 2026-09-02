@@ -273,14 +273,23 @@ def contacts_from(repo, body):
     return found
 
 
-def sweep(token, limit, per_page=100):
-    """Shard every query across star buckets so each slice is under the 1000 cap."""
+def sweep(token, limit, per_page=100, stars=None):
+    """Shard every query across star buckets so each slice is under the 1000 cap.
+
+    `stars` restricts the sweep to ONE bucket, e.g. "5..50". Added 2026-09-02
+    because the default sweep spends its whole --limit inside the FIRST shard
+    (stars:0..1) and never reaches the others -- so the results describe
+    brand-new repos only. That population is real, and it is where new Mini Apps
+    appear, but it also correlates with abandonment, and there was no way to ask
+    the same question of projects with traction without editing this file.
+    """
     seen, rows = set(), []
     queries = [(q, "topic") for q in TOPIC_QUERIES] + \
               [(q, "framework") for q in FRAMEWORK_QUERIES]
+    shards = [f"stars:{stars}"] if stars else STAR_SHARDS
 
     for base_q, source in queries:
-        for shard in STAR_SHARDS:
+        for shard in shards:
             if len(rows) >= limit:
                 return rows
             q = f"{base_q} {shard} {PUSHED_FLOOR}"
@@ -342,6 +351,11 @@ def main():
     ap.add_argument("--min-score", type=int, default=0)
     ap.add_argument("--out", default="prospects_wide.jsonl")
     ap.add_argument("--top", type=int, default=25)
+    ap.add_argument("--stars", metavar="RANGE",
+                    help="restrict to ONE star bucket, GitHub syntax without the "
+                         "'stars:' prefix -- 5..50, >=100, 0..1. Without it the "
+                         "sweep spends the whole --limit inside stars:0..1 and "
+                         "never reaches the other buckets.")
     args = ap.parse_args()
 
     token = os.environ.get("GITHUB_TOKEN", "")
@@ -356,7 +370,7 @@ def main():
               "unauthenticated, which cannot finish a sweep.", file=sys.stderr)
         return 1
 
-    rows = [r for r in sweep(token, args.limit)
+    rows = [r for r in sweep(token, args.limit, stars=args.stars)
             if r["opportunity_score"] >= args.min_score]
     rows.sort(key=lambda r: r["opportunity_score"], reverse=True)
 

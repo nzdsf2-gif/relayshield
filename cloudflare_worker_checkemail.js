@@ -555,11 +555,27 @@ function detectForwardedOriginal(bodyText) {
   if (!hit) return null;
 
   const after = bodyText.slice(bodyText.search(hit));
+
   // "From: Display Name <addr@example.com>" inside the quoted block.
-  const m = after.match(/^\s*(?:>\s*)?From:\s*(.+)$/im);
+  //
+  // Line-anchored FIRST, because that is what a well-formed quoted block looks
+  // like and it bounds the match tightly. Then unanchored, because a quoted
+  // block is drawn by the forwarding client rather than being a real header:
+  // it can arrive wrapped, entity-encoded, or (before the stripHtml fix above)
+  // flattened onto a single line. The unanchored form stops at the next header
+  // keyword so it cannot swallow the rest of the message.
+  const m = after.match(/^\s*(?:>\s*)?From:\s*(.+)$/im)
+         || after.match(/From:\s*(.+?)(?:\s+(?:Date|Sent|Subject|To|Cc|Reply-To):|$)/is);
   if (!m) return { address: "", name: "", parseFailed: true };
   const parsed = parseAddress(m[1].trim());
-  return { address: parsed.address || "", name: parsed.name || "", parseFailed: false };
+  return {
+    address: parsed.address || "",
+    name: parsed.name || "",
+    // parseFailed means "we could not read a sender", which is what the reply
+    // copy keys on. A From: line we found but could not turn into an address
+    // is the same outcome for the reader as no From: line at all.
+    parseFailed: !parsed.address,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -644,23 +660,100 @@ function stripHtml(html) {
     // href values are kept: a link is the thing being checked, and dropping the
     // markup must not drop the URL inside it.
     .replace(/<a\s[^>]*href=["']?([^"'\s>]+)/gi, " $1 ")
+    // BLOCK STRUCTURE, FIXED 2026-09-02. Every tag used to become a space, so
+    // an HTML message collapsed into ONE line -- and a quoted forward header
+    // block ("From: ... Date: ... Subject: ...") stopped being lines at all.
+    // detectForwardedOriginal anchors on a line starting with From:, so on any
+    // HTML forward it found the marker, failed to find a sender, and reported a
+    // forward with nobody in it. Turning block boundaries into newlines is what
+    // keeps a quoted header block readable as a header block.
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|tr|li|h[1-6]|blockquote|table)\s*>/gi, "\n")
+    .replace(/<(div|p|tr|li|h[1-6]|blockquote|table)\b[^>]*>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
+    // ENTITIES, FIXED 2026-09-02. Only &nbsp; and &amp; were decoded, so &lt;
+    // and &gt; survived into the extracted text. A Gmail forward of an HTML
+    // message quotes the original header block as markup, so the line
+    //     From: nzdsf2 &lt;alert-9626@ydxla.abn&gt;
+    // reached parseAddress with entities still in it, matched no angle
+    // brackets, and yielded no address at all. detectForwardedOriginal
+    // therefore reported "this is a forward" with an empty sender, every
+    // sender-based check silently had nothing to work on, and a message with a
+    // nonexistent TLD scored zero. Decoding is not cosmetic here; it is the
+    // difference between analysing the sender and analysing nothing.
     .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/&#(\d{1,7});/g, (_, d) => {
+      const n = parseInt(d, 10);
+      return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : " ";
+    })
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, h) => {
+      const n = parseInt(h, 16);
+      return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : " ";
+    })
+    // &amp; LAST, so "&amp;lt;" does not become "<" in two passes.
     .replace(/&amp;/gi, "&")
-    .replace(/\s+/g, " ");
+    // Collapse horizontal runs only. A blanket /\s+/ would undo the newlines
+    // that were just so carefully introduced.
+    .replace(/[ \t\f\v\u00a0]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
-/** From: / Reply-To: style header -> { address, name }. */
+/**
+ * From: / Reply-To: style value -> { address, name }.
+ *
+ * HARDENED 2026-09-02. This used to take whatever sat between the first pair of
+ * angle brackets and call it an address. That is fine for a real header, which
+ * Cloudflare hands us already parsed -- and wrong for the other caller, which is
+ * detectForwardedOriginal reading a quoted forward block out of a message BODY.
+ *
+ * A quoted block is not a header. It is whatever the forwarding client drew,
+ * and after stripHtml a Gmail forward of an HTML message yields:
+ *
+ *   From: nzdsf2 < mailto:alert-9626@ydxla.abn alert-9626@ydxla.abn >
+ *
+ * because the <a href="mailto:..."> is unwrapped to its href plus its text. The
+ * old regex returned that entire run as the address, which matches no domain
+ * and quietly disables every sender-based check.
+ *
+ * So: locate the angle brackets if present, then find the thing that is
+ * actually shaped like an address INSIDE them, and fall back to scanning the
+ * whole value. Returning no address is a valid answer and is better than
+ * returning a wrong one -- a wrong one is what produces a confident verdict
+ * about a sender that does not exist.
+ */
 function parseAddress(value) {
   if (!value) return { address: "", name: "" };
-  const angled = value.match(/^\s*(.*?)\s*<([^>]+)>/);
+  const EMAIL = /[^\s<>@,;:"']+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+
+  const angled = value.match(/^\s*(.*?)\s*<([^>]*)>/);
   if (angled) {
+    const inner = angled[2].replace(/^mailto:/i, "");
+    const hit = inner.match(EMAIL);
+    if (hit) {
+      return {
+        address: hit[0].replace(/^mailto:/i, "").toLowerCase(),
+        name: angled[1].replace(/^["']|["']$/g, "").trim(),
+      };
+    }
+  }
+
+  const bare = value.match(EMAIL);
+  if (bare) {
     return {
-      address: angled[2].trim().toLowerCase(),
-      name: angled[1].replace(/^["']|["']$/g, "").trim(),
+      address: bare[0].replace(/^mailto:/i, "").toLowerCase(),
+      // Everything before the address, with the punctuation a quoted block
+      // leaves lying around removed.
+      name: value.slice(0, value.indexOf(bare[0]))
+                 .replace(/["'<>]/g, "").replace(/mailto:/gi, "").trim(),
     };
   }
-  return { address: value.trim().toLowerCase(), name: "" };
+  return { address: "", name: value.trim() };
 }
 
 // ---------------------------------------------------------------------------
@@ -970,8 +1063,15 @@ export default {
   // a bounce rather than silence, because a message that vanishes with no reply
   // and no bounce is the worst of the three outcomes.
   async email(message, env, ctx) {
+    // Cloudflare allows exactly ONE reply per message, and it counts an
+    // ATTEMPT, not a success. On 2026-09-02 the real reply threw on a bad
+    // References header and the fallback below then failed with "mail has
+    // already been replied to", turning one clear error into two confusing
+    // ones. This flag makes the fallback fire only when no reply was ever
+    // attempted -- which is the only case where it can actually work.
+    const replyState = { attempted: false };
     try {
-      await scanAndReply(message, env, ctx);
+      await scanAndReply(message, env, ctx, replyState);
     } catch (err) {
       console.error(
         "checkemail: FAILED for", message.from, "--",
@@ -987,6 +1087,13 @@ export default {
       // Best effort, and deliberately last: if the reply itself is what failed,
       // this fails too, and then the rethrow below gives the sender a bounce --
       // which is at least a signal.
+      if (replyState.attempted) {
+        console.error(
+          "checkemail: no fallback sent -- a reply was already attempted for",
+          message.from, "and Cloudflare permits only one. The sender gets a",
+          "bounce from the rethrow below.");
+        throw err;
+      }
       try {
         await message.reply(makeReply(message,
           "RelayShield could not finish checking that message.\n\n" +
@@ -1079,6 +1186,26 @@ function makeReply(message, text) {
 
   const originalId = (message.headers.get("message-id") || "")
     .replace(/[\r\n]+/g, "").trim().slice(0, 320);
+
+  // References is NOT just the message we are replying to.
+  //
+  // FIXED 2026-09-02, and this crash was self-inflicted: References was added
+  // earlier the same day as part of "make the reply a valid RFC 5322 message",
+  // set to the original Message-ID alone. Cloudflare validates it against the
+  // thread and rejected the reply outright:
+  //
+  //   Error: provided References header is invalid; expected
+  //   <51977-nzdsf2@sH994It.abn> <CAA5...@mail.gmail.com> <CAA5...@mail.gmail.com>
+  //
+  // The correct value is the INCOMING message's own References chain with the
+  // incoming Message-ID appended -- that is what continues a thread rather than
+  // starting a new one. A forwarded message almost always carries a chain
+  // already (the original's id, plus the forward), which is exactly why this
+  // never showed up on a freshly composed test message and did show up on the
+  // first real forward.
+  const priorRefs = (message.headers.get("references") || "")
+    .replace(/\s+/g, " ").trim();
+  const references = [priorRefs, originalId].filter(Boolean).join(" ").slice(0, 900);
   const ourId = `<${Date.now()}.${Math.random().toString(36).slice(2, 12)}@relayshield.net>`;
 
   const headers = [
@@ -1087,7 +1214,8 @@ function makeReply(message, text) {
     `Message-ID: ${ourId}`,
     `Date: ${new Date().toUTCString()}`,
     // Only when the original actually had one. An empty value is malformed.
-    ...(originalId ? [`In-Reply-To: ${originalId}`, `References: ${originalId}`] : []),
+    ...(originalId ? [`In-Reply-To: ${originalId}`] : []),
+    ...(references ? [`References: ${references}`] : []),
     `Subject: Re: ${subject}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/plain; charset=utf-8`,
@@ -1112,7 +1240,7 @@ function makeReply(message, text) {
 /** The actual scan. Split out of the email handler so that a throw here is
  *  logged with a stack rather than surfacing only as an error count on the
  *  Cloudflare dashboard. */
-async function scanAndReply(message, env, ctx) {
+async function scanAndReply(message, env, ctx, replyState) {
   const sender = (message.from || "").toLowerCase();
 
   // Loop guards, before anything else. Replying to an auto-responder or to a
@@ -1150,6 +1278,7 @@ async function scanAndReply(message, env, ctx) {
   }
 
   if (await rateLimited(env.CHECKEMAIL_RL, sender)) {
+    if (replyState) replyState.attempted = true;
     await message.reply(
       makeReply(message,
         "RelayShield: rate limit reached\n\n" +
@@ -1220,6 +1349,7 @@ async function scanAndReply(message, env, ctx) {
     "links=", linkResults.map((l) => l.status).join(",") || "none");
 
   const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120), forwarded);
+  if (replyState) replyState.attempted = true;
   await message.reply(makeReply(message, reply));
   console.log("checkemail: REPLIED to", message.from, "risk=",
               reply.split(" RISK")[0].replace("RelayShield email check: ", ""));

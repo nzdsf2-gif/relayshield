@@ -22,10 +22,10 @@ let src = readFileSync(
   new URL("./cloudflare_worker_checkemail.js", import.meta.url), "utf8");
 src = src.replace('import { EmailMessage } from "cloudflare:email";',
   'class EmailMessage { constructor(f,t,raw){ this.from=f; this.to=t; this.raw=raw; } }');
-src += "\nexport { buildReply, headerSignals, detectForwardedOriginal, parseAddress, extractAttachmentNames, attachmentSignals, pressureSignals };\n";
+src += "\nexport { buildReply, headerSignals, detectForwardedOriginal, parseAddress, extractAttachmentNames, attachmentSignals, pressureSignals, stripHtml };\n";
 const shim = new URL("./.checkemail_verdict_shim.mjs", import.meta.url);
 writeFileSync(shim, src);
-const { buildReply, headerSignals, detectForwardedOriginal, extractAttachmentNames, attachmentSignals } = await import(shim.href);
+const { buildReply, headerSignals, detectForwardedOriginal, extractAttachmentNames, attachmentSignals, parseAddress: parseAddr, stripHtml } = await import(shim.href);
 
 const hdrs = (o) => ({ get: (k) => o[k.toLowerCase()] ?? null });
 
@@ -280,6 +280,48 @@ expect("an RFC 2231 encoded filename is decoded",
 const noAtt = verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {} });
 expect("the reply always states the attachment position",
   noAtt.text.includes("ATTACHMENTS: none."), true);
+
+console.log("\n-- an HTML forward must still yield a sender (the score=0 bug) --");
+
+// The live run on 2026-09-02 logged: forwarded=true score=0 flags=0, on the
+// SAME .abn message that the plain-text test above rates HIGH. The forward was
+// detected and then analysed against nothing, because Gmail quotes the original
+// header block as HTML and stripHtml decoded only &nbsp; and &amp;. So the line
+//     From: nzdsf2 &lt;alert-9626@ydxla.abn&gt;
+// reached parseAddress with its angle brackets still entity-encoded, matched
+// nothing, and every sender-based check silently had no sender to check.
+const htmlFwdBody = stripHtml(
+  '<div>FYI</div><div class="gmail_quote">' +
+  '<div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>' +
+  'From: <b>nzdsf2</b> &lt;<a href="mailto:alert-9626@ydxla.abn">alert-9626@ydxla.abn</a>&gt;<br>' +
+  'Date: Mon, Aug 31, 2026 at 12:11&nbsp;AM<br>' +
+  'Subject: Action Required: Storage 100% Full<br>' +
+  'To: &lt;me@aol.com&gt;<br></div><br>' +
+  '<div>Update your payment details within 24 hours or your files will be ' +
+  'permanently deleted.</div></div>');
+
+expect("entities are decoded, so the angle brackets survive as characters",
+  htmlFwdBody.includes("&lt;"), false);
+expect("  ...and the address itself is in the extracted text",
+  htmlFwdBody.includes("alert-9626@ydxla.abn"), true);
+
+const htmlFwd = verdict({
+  from: '"Andrew Gibbs" <nzdsf2@gmail.com>',
+  to: "nzdsf2@gmail.com",
+  headers: { subject: "Fwd: Action Required: Storage 100% Full",
+             "authentication-results": "spf=pass; dkim=pass; dmarc=pass" },
+  body: htmlFwdBody,
+  links: [{ url: "https://cloud-billing-update.ydxla.abn/renew", status: "unknown",
+            detail: "no security vendor has published a verdict on this link yet" }],
+});
+expect("the HTML forward recovers the original sender",
+  htmlFwd.forwarded.address, "alert-9626@ydxla.abn");
+expect("  ...and rates HIGH, not zero", htmlFwd.risk, "HIGH");
+
+expect("an address with no angle brackets is still recovered",
+  parseAddr("From: alert-9626@ydxla.abn").address, "alert-9626@ydxla.abn");
+expect("a line with no address at all yields no address",
+  parseAddr("Sender unknown").address, "");
 
 console.log("\n--- the reply Andrew would now receive for his spam forward ---\n");
 console.log(realPhish.text);

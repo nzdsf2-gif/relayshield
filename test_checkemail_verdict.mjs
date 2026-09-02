@@ -22,10 +22,10 @@ let src = readFileSync(
   new URL("./cloudflare_worker_checkemail.js", import.meta.url), "utf8");
 src = src.replace('import { EmailMessage } from "cloudflare:email";',
   'class EmailMessage { constructor(f,t,raw){ this.from=f; this.to=t; this.raw=raw; } }');
-src += "\nexport { buildReply, headerSignals, detectForwardedOriginal, parseAddress, extractAttachmentNames, attachmentSignals, pressureSignals, stripHtml, decodeEncodedWords, unwrap, publicHostSignal };\n";
+src += "\nexport { buildReply, headerSignals, detectForwardedOriginal, parseAddress, extractAttachmentNames, attachmentSignals, pressureSignals, stripHtml, decodeEncodedWords, unwrap, publicHostSignal, impersonatedBrand };\n";
 const shim = new URL("./.checkemail_verdict_shim.mjs", import.meta.url);
 writeFileSync(shim, src);
-const { buildReply, headerSignals, detectForwardedOriginal, extractAttachmentNames, attachmentSignals, parseAddress: parseAddr, stripHtml, decodeEncodedWords, unwrap, publicHostSignal } = await import(shim.href);
+const { buildReply, headerSignals, detectForwardedOriginal, extractAttachmentNames, attachmentSignals, parseAddress: parseAddr, stripHtml, decodeEncodedWords, unwrap, publicHostSignal, impersonatedBrand } = await import(shim.href);
 
 const hdrs = (o) => ({ get: (k) => o[k.toLowerCase()] ?? null });
 
@@ -391,6 +391,47 @@ expect("plain ASCII passes through untouched",
   decodeEncodedWords("Your invoice"), "Your invoice");
 expect("a malformed encoded word is left alone rather than lost",
   decodeEncodedWords("=?UTF-8?X?whatever?="), "=?UTF-8?X?whatever?=");
+
+console.log("\n-- brand impersonation on ANY domain, not just free webmail --");
+
+// The live miss: "ApplyAML Meta Mask Details" <system@phrase.com> scored ZERO.
+// The brand check was gated on free webmail, and phrase.com is a real company's
+// domain, so nothing ran. The webmail gate was never the rule; the rule is that
+// the display name claims a brand the sending domain does not belong to.
+const metamask = verdict({
+  from: '"Andrew Gibbs" <nzdsf2@gmail.com>', to: "nzdsf2@gmail.com",
+  headers: { subject: "Fwd: Add your email to stay updated",
+             "authentication-results": "spf=pass; dkim=pass; dmarc=pass" },
+  body: "---------- Forwarded message ---------\n" +
+        "From: ApplyAML Meta Mask Details <system@phrase.com>\n" +
+        "Subject: Add your email to stay updated\n\n" +
+        "We need your email address on file. Soon, we'll be moving to " +
+        "email-based sign-in. To make that change smooth, please add your email " +
+        "now. It only takes about 30 seconds, just click the button.\n",
+});
+expect("the MetaMask forward is HIGH", metamask.risk, "HIGH");
+expect("  ...naming the domain that does not belong to the brand",
+  metamask.text.includes("does not belong to Metamask"), true);
+
+expect("a brand on a corporate domain that is not the brand's",
+  impersonatedBrand("PayPal Service", "mailer.acme-hosting.com"), "paypal");
+expect("a brand on its OWN domain is never flagged",
+  impersonatedBrand("PayPal", "paypal.com"), "");
+expect("a subdomain of the brand's own domain is fine",
+  impersonatedBrand("PayPal", "email.paypal.com"), "");
+expect("a spaced brand name still matches",
+  impersonatedBrand("Meta Mask Support", "phrase.com"), "metamask");
+expect("an unrelated business whose name contains a brand word is NOT flagged",
+  impersonatedBrand("Apple Tree Nursery", "appletreenursery.com"), "");
+expect("a person's name is never a brand",
+  impersonatedBrand("Andrew Gibbs", "gmail.com"), "");
+expect("a bare address with no display name is never a brand",
+  impersonatedBrand("", "phrase.com"), "");
+
+expect("a real newsletter from its own domain stays LOW",
+  verdict({ from: '"Netflix" <info@netflix.com>', to: "andrew@x.com",
+            headers: { "authentication-results": "spf=pass; dkim=pass; dmarc=pass" },
+            body: "Your monthly statement is ready." }).risk, "LOW");
 
 console.log("\n--- the reply Andrew would now receive for his spam forward ---\n");
 console.log(realPhish.text);

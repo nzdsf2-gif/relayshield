@@ -378,6 +378,19 @@ Two things left open, and both are the reply's problem now: whether the Agent Co
 pre-issuance hook (the email asks rather than assumes), and the Sardine/Chainalysis paragraph never
 got its outside read.
 
+### Routavo — registered for early access 2026-09-02
+
+`routavo.com`. "Connect your API once. Agents find it, call it, and pay for it." Metered per call,
+settled the moment the API returns 2xx, 1% of what settles capped at a cent, no per-call fee, failed
+calls cost nothing. Points at an OpenAPI spec rather than needing a rewrite.
+
+Directly relevant: 28 live x402 endpoints priced $0.05-$0.35, already settling on Base, and
+`relayshield_openapi_spec.py` is the artefact they want. **Founder registered for early access.**
+
+Their "Control" pillar is SPEND control on the buy side -- allow, deny, rate-limit, cap per agent.
+It answers "is this agent allowed to spend", not "is the thing it is about to pay legitimate". That
+is the same gap as Rain, and it is the pitch TO them, not a conflict with them.
+
 ### OpenRouter key-revocation webhook — build it when the corpus has OR tokens
 
 Sequenced behind data, like A8, and for the same reason.
@@ -390,7 +403,9 @@ When there is, the integration is the revocation webhook: RelayShield detects a 
 key in a criminal Telegram channel and calls OpenRouter to revoke it, before the key is drained.
 That is the thing their own tooling cannot do, because they cannot see the channel.
 
-**Trigger to build:** the first non-zero count of `sk-or-v1-*` in `relayshield_intel_iocs`. Check it
+**Trigger to build:** the first non-zero count of `sk-or-v1-*` in **`relayshield_stolen_sessions`**, NOT `relayshield_intel_iocs`.
+
+**Corrected 2026-09-02.** A scan of `relayshield_intel_iocs` for `sk-or-v1-` returned 0 of 6,712,425 rows and was briefly read as "no OpenRouter keys collected". It is not: `_NHI_PATS` in `relayshield_intel_monitor.py` writes credential findings to `relayshield_stolen_sessions` (`type: nhi`), and `relayshield_intel_iocs` never receives them. A zero from the wrong table is not evidence of absence, and this one nearly became a recorded fact. Check it
 before writing any of it. Do not build the webhook against zero rows, and **do not quote a captured
 OpenRouter key count to OpenRouter, Stripe, or anyone else until the category clears 100** — the
 standing measurement rule applies here with force, because this is a number that would be checked.

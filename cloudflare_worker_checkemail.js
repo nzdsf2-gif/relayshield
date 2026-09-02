@@ -490,6 +490,36 @@ export default {
       }
     }
   },
+
+  // A health endpoint, because the email path gives no way to tell a Worker
+  // that is not deployed from one that is deployed and silently dropping mail.
+  // The 554 on 2026-09-02 was Cloudflare's inbound parser rejecting a malformed
+  // MIME header before the Worker ran at all, and there was no way to see that
+  // from the outside. GET this URL and you know the deploy is live and which
+  // bindings it actually has. It reveals no secret -- only whether each binding
+  // is present, never its value.
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname !== "/health") {
+      return new Response("checkemail worker. GET /health\n", {
+        status: 404,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return Response.json({
+      ok: true,
+      worker: "relayshield-checkemail",
+      address: "checkemail@relayshield.net",
+      bindings: {
+        // Rate limiting is off until this KV namespace exists. Publishing the
+        // address before then means the free tier is unrated.
+        CHECKEMAIL_RL: Boolean(env.CHECKEMAIL_RL),
+        // Without this, links are reported "unknown" rather than scanned.
+        RS_API_KEY: Boolean(env.RS_API_KEY),
+      },
+      at: new Date().toISOString(),
+    });
+  },
 };
 
 /** Build a plain-text reply message. Plain text on purpose: it renders

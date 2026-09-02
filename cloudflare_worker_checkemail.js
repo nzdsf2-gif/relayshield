@@ -342,7 +342,7 @@ function buildReply(sig, linkResults, subject) {
              : "LOW";
 
   const out = [];
-  out.push(`RelayShield — email check: ${risk} RISK`);
+  out.push(`RelayShield email check: ${risk} RISK`);
   out.push("");
   if (subject) out.push(`Subject checked: ${subject}`);
   out.push(`Claimed sender: ${sig.fromAddr || "not stated"}`);
@@ -369,8 +369,8 @@ function buildReply(sig, linkResults, subject) {
 
   if (linkResults.length) {
     out.push("LINKS:");
-    bad.forEach((l) => out.push(`  FLAGGED  ${l.url}${l.detail ? " — " + l.detail : ""}`));
-    unknown.forEach((l) => out.push(`  UNKNOWN  ${l.url} — ${l.detail || "no reputation data"}`));
+    bad.forEach((l) => out.push(`  FLAGGED  ${l.url}${l.detail ? ": " + l.detail : ""}`));
+    unknown.forEach((l) => out.push(`  UNKNOWN  ${l.url}: ${l.detail || "no reputation data"}`));
     clean.forEach((l) => out.push(`  no match ${l.url}`));
     if (clean.length && !bad.length) {
       out.push("");
@@ -400,7 +400,7 @@ function buildReply(sig, linkResults, subject) {
   out.push("---");
   out.push("Forward anything suspicious to checkemail@relayshield.net.");
   out.push("We store the verdict and the indicators we extract. We do not store your email.");
-  out.push("RelayShield — https://relayshield.net?source=email-scan");
+  out.push("RelayShield: https://relayshield.net?source=email-scan");
   return out.join("\n");
 }
 
@@ -409,87 +409,27 @@ function buildReply(sig, linkResults, subject) {
 // ---------------------------------------------------------------------------
 
 export default {
+  // Thin wrapper. All the work is in scanAndReply, so that a throw anywhere in
+  // it gets logged with a stack before it propagates.
+  //
+  // ADDED 2026-09-02. The dashboard showed 6 errors across 8 requests and there
+  // was no way to see what any of them were: an email handler that throws
+  // produces a number on a card and nothing else. `npx wrangler tail --config
+  // wrangler.checkemail.toml` now shows the actual failure, and the sender gets
+  // a bounce rather than silence, because a message that vanishes with no reply
+  // and no bounce is the worst of the three outcomes.
   async email(message, env, ctx) {
-    const sender = (message.from || "").toLowerCase();
-
-    // Loop guards, before anything else. Replying to an auto-responder or to a
-    // forwarder that points back at us ping-pongs forever and looks like an
-    // attack from our own domain.
-    const autoSubmitted = message.headers.get("auto-submitted") || "";
-    const precedence = (message.headers.get("precedence") || "").toLowerCase();
-    if (
-      !sender ||
-      // NARROWED 2026-09-02. This used to drop anything from @relayshield.net,
-      // which is far wider than the loop it was guarding against. Our reply is
-      // From: checkemail@relayshield.net, so THAT address is the only one that
-      // can loop -- and blocking the whole domain silently swallowed mail from
-      // andrew@relayshield.net (the founder's own send-as alias, the first
-      // account that would ever test this) and would block every colleague and
-      // every customer on the domain. A guard that also drops your own users is
-      // not a guard.
-      sender === "checkemail@relayshield.net" ||
-      sender.startsWith("no-reply@") ||
-      sender.startsWith("noreply@") ||
-      sender.startsWith("mailer-daemon@") ||
-      (autoSubmitted && autoSubmitted.toLowerCase() !== "no") ||
-      precedence === "bulk" || precedence === "list" || precedence === "junk"
-    ) {
-      return;   // accept and drop, silently and deliberately
-    }
-
-    if (await rateLimited(env.CHECKEMAIL_RL, sender)) {
-      await message.reply(
-        makeReply(message,
-          "RelayShield — rate limit reached\n\n" +
-          `The free email check allows ${RATE_LIMIT_PER_HOUR} messages an hour and ` +
-          `${RATE_LIMIT_PER_DAY} a day. Try again shortly.\n\n` +
-          "For continuous monitoring rather than one-off checks, see " +
-          "https://relayshield.net?source=email-scan")
-      );
-      return;
-    }
-
-    // Headers come from Cloudflare already parsed. Only the body needs reading,
-    // and a body we cannot read still yields a header-only verdict -- which is
-    // the strongest half anyway -- so this never aborts the scan.
-    let bodyText = "";
     try {
-      const raw = await new Response(message.raw).text();
-      bodyText = extractText(raw).slice(0, MAX_BODY_CHARS);
+      await scanAndReply(message, env, ctx);
     } catch (err) {
-      bodyText = "";
-    }
-
-    const email = {
-      from: parseAddress(message.headers.get("from")),
-      replyTo: [parseAddress(message.headers.get("reply-to"))],
-      subject: message.headers.get("subject") || "",
-    };
-    const body = bodyText;
-    const sig = headerSignals(email, message.headers);
-
-    const links = extractLinks(body).slice(0, MAX_LINKS_CHECKED);
-    const linkResults = env.RS_API_KEY
-      ? await Promise.all(links.map((u) => scanLink(u, env.RS_API_KEY)))
-      : links.map((u) => ({ url: u, status: "unknown", detail: "link checking unavailable" }));
-
-    const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120));
-    await message.reply(makeReply(message, reply));
-
-    // Indicators only. No body, no subject, no addresses beyond the flagged
-    // domains -- see the privacy note at the top of this file.
-    if (env.CHECKEMAIL_RL) {
-      const iocs = linkResults.filter((l) => l.status === "malicious" || l.status === "suspicious")
-                              .map((l) => l.url);
-      if (iocs.length) {
-        ctx.waitUntil(env.CHECKEMAIL_RL.put(
-          `ioc:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
-          JSON.stringify({ iocs, dmarc: sig.auth.dmarc || null, at: new Date().toISOString() }),
-          { expirationTtl: 7776000 }
-        ));
-      }
+      console.error(
+        "checkemail: FAILED for", message.from, "--",
+        err && err.stack ? err.stack : String(err)
+      );
+      throw err;
     }
   },
+
 
   // A health endpoint, because the email path gives no way to tell a Worker
   // that is not deployed from one that is deployed and silently dropping mail.
@@ -524,19 +464,156 @@ export default {
 
 /** Build a plain-text reply message. Plain text on purpose: it renders
  *  everywhere, cannot carry a tracking pixel, and cannot itself look like the
- *  thing we are warning people about. */
+ *  thing we are warning people about.
+ *
+ *  REWRITTEN 2026-09-02, after the Worker logged 6 errors across 8 requests and
+ *  no reply ever arrived. The first version built a message that is not a valid
+ *  RFC 5322 message, and Cloudflare validates the raw bytes handed to
+ *  EmailMessage before it will send them. Four separate defects, any one of
+ *  which is fatal on its own:
+ *
+ *  1. NO Message-ID. Every message needs its own. Cloudflare rejects a reply
+ *     without one.
+ *  2. NO Date. Also mandatory in RFC 5322.
+ *  3. `In-Reply-To: ` with an empty value when the original carried no
+ *     Message-ID. An empty header value is malformed -- better to omit the
+ *     header entirely.
+ *  4. HEADERS JOINED WITH CRLF, BODY JOINED WITH BARE LF. A MIME message is
+ *     CRLF throughout. buildReply() joins its lines with "\n", so the body
+ *     went out with bare newlines inside a CRLF message.
+ *
+ *  It also now strips non-ASCII from the echoed subject rather than putting raw
+ *  UTF-8 bytes in a header, which needs RFC 2047 encoding to be legal. The
+ *  subject we echo is attacker-controlled text from the mail being scanned, so
+ *  it is the single most likely place to receive bytes that break the header
+ *  block. */
 function makeReply(message, text) {
+  const rawSubject = message.headers.get("subject") || "your email check";
+  // Header-safe: ASCII printable only, no CR or LF (header injection), capped.
+  const subject = rawSubject
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[^\x20-\x7E]/g, "")
+    .slice(0, 120)
+    .trim() || "your email check";
+
+  // message.from is the envelope sender. Cloudflare parses it before we see it,
+  // but it still originates outside, and it goes straight into a header line --
+  // so strip anything that could start a new one.
+  const to = String(message.from || "").replace(/[\r\n]+/g, "").slice(0, 320);
+
+  const originalId = (message.headers.get("message-id") || "")
+    .replace(/[\r\n]+/g, "").trim().slice(0, 320);
+  const ourId = `<${Date.now()}.${Math.random().toString(36).slice(2, 12)}@relayshield.net>`;
+
   const headers = [
-    `From: checkemail@relayshield.net`,
-    `To: ${message.from}`,
-    `In-Reply-To: ${message.headers.get("message-id") || ""}`,
-    `Subject: Re: ${(message.headers.get("subject") || "your email check").slice(0, 120)}`,
-    `Content-Type: text/plain; charset=utf-8`,
+    `From: RelayShield <checkemail@relayshield.net>`,
+    `To: ${to}`,
+    `Message-ID: ${ourId}`,
+    `Date: ${new Date().toUTCString()}`,
+    // Only when the original actually had one. An empty value is malformed.
+    ...(originalId ? [`In-Reply-To: ${originalId}`, `References: ${originalId}`] : []),
+    `Subject: Re: ${subject}`,
     `MIME-Version: 1.0`,
+    `Content-Type: text/plain; charset=utf-8`,
+    `Content-Transfer-Encoding: 7bit`,
+    `Auto-Submitted: auto-replied`,
   ].join("\r\n");
+
+  // CRLF throughout, and 7bit means the body must be ASCII to match the
+  // encoding we just declared.
+  const body = text
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n/g, "\r\n");
+
   return new EmailMessage(
     "checkemail@relayshield.net",
-    message.from,
-    `${headers}\r\n\r\n${text}\r\n`
+    to,
+    `${headers}\r\n\r\n${body}\r\n`
   );
+}
+
+/** The actual scan. Split out of the email handler so that a throw here is
+ *  logged with a stack rather than surfacing only as an error count on the
+ *  Cloudflare dashboard. */
+async function scanAndReply(message, env, ctx) {
+  const sender = (message.from || "").toLowerCase();
+
+  // Loop guards, before anything else. Replying to an auto-responder or to a
+  // forwarder that points back at us ping-pongs forever and looks like an
+  // attack from our own domain.
+  const autoSubmitted = message.headers.get("auto-submitted") || "";
+  const precedence = (message.headers.get("precedence") || "").toLowerCase();
+  if (
+    !sender ||
+    // NARROWED 2026-09-02. This used to drop anything from @relayshield.net,
+    // which is far wider than the loop it was guarding against. Our reply is
+    // From: checkemail@relayshield.net, so THAT address is the only one that
+    // can loop -- and blocking the whole domain silently swallowed mail from
+    // andrew@relayshield.net (the founder's own send-as alias, the first
+    // account that would ever test this) and would block every colleague and
+    // every customer on the domain. A guard that also drops your own users is
+    // not a guard.
+    sender === "checkemail@relayshield.net" ||
+    sender.startsWith("no-reply@") ||
+    sender.startsWith("noreply@") ||
+    sender.startsWith("mailer-daemon@") ||
+    (autoSubmitted && autoSubmitted.toLowerCase() !== "no") ||
+    precedence === "bulk" || precedence === "list" || precedence === "junk"
+  ) {
+    return;   // accept and drop, silently and deliberately
+  }
+
+  if (await rateLimited(env.CHECKEMAIL_RL, sender)) {
+    await message.reply(
+      makeReply(message,
+        "RelayShield: rate limit reached\n\n" +
+        `The free email check allows ${RATE_LIMIT_PER_HOUR} messages an hour and ` +
+        `${RATE_LIMIT_PER_DAY} a day. Try again shortly.\n\n` +
+        "For continuous monitoring rather than one-off checks, see " +
+        "https://relayshield.net?source=email-scan")
+    );
+    return;
+  }
+
+  // Headers come from Cloudflare already parsed. Only the body needs reading,
+  // and a body we cannot read still yields a header-only verdict -- which is
+  // the strongest half anyway -- so this never aborts the scan.
+  let bodyText = "";
+  try {
+    const raw = await new Response(message.raw).text();
+    bodyText = extractText(raw).slice(0, MAX_BODY_CHARS);
+  } catch (err) {
+    bodyText = "";
+  }
+
+  const email = {
+    from: parseAddress(message.headers.get("from")),
+    replyTo: [parseAddress(message.headers.get("reply-to"))],
+    subject: message.headers.get("subject") || "",
+  };
+  const body = bodyText;
+  const sig = headerSignals(email, message.headers);
+
+  const links = extractLinks(body).slice(0, MAX_LINKS_CHECKED);
+  const linkResults = env.RS_API_KEY
+    ? await Promise.all(links.map((u) => scanLink(u, env.RS_API_KEY)))
+    : links.map((u) => ({ url: u, status: "unknown", detail: "link checking unavailable" }));
+
+  const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120));
+  await message.reply(makeReply(message, reply));
+
+  // Indicators only. No body, no subject, no addresses beyond the flagged
+  // domains -- see the privacy note at the top of this file.
+  if (env.CHECKEMAIL_RL) {
+    const iocs = linkResults.filter((l) => l.status === "malicious" || l.status === "suspicious")
+                            .map((l) => l.url);
+    if (iocs.length) {
+      ctx.waitUntil(env.CHECKEMAIL_RL.put(
+        `ioc:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+        JSON.stringify({ iocs, dmarc: sig.auth.dmarc || null, at: new Date().toISOString() }),
+        { expirationTtl: 7776000 }
+      ));
+    }
+  }
 }

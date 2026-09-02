@@ -2,6 +2,18 @@ name = "relayshield-checkemail"
 main = "cloudflare_worker_checkemail.js"
 compatibility_date = "2026-09-01"
 
+# The Worker has a fetch handler serving GET /health, so it needs its
+# workers.dev subdomain. This is the default, but it is stated explicitly
+# because it is load-bearing: without it there is no way to tell a Worker that
+# failed to deploy from one that deployed and is silently dropping mail. After
+# deploy, open in a browser:
+#
+#   https://relayshield-checkemail.<your-subdomain>.workers.dev/health
+#
+# It returns which bindings are present -- never their values -- so it is safe
+# to leave public. The email path itself is unaffected by it.
+workers_dev = true
+
 # NO npm dependencies and NO node_modules: the Worker imports only
 # "cloudflare:email" from the runtime itself. Nothing to install before deploy.
 

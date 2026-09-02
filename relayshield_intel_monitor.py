@@ -2756,7 +2756,15 @@ def _send_admin_digest(stats: dict) -> None:
         f"IOCs extracted: {stats['iocs_extracted']}\n"
         f"Images OCR'd: {stats.get('images_ocrd', 0)}\n"
         f"Paste URLs followed: {stats.get('pastes_fetched', 0)}\n"
-        f"ZIP/RAR archives parsed: {stats.get('archives_parsed', 0)}\n"
+        # The archive FUNNEL, not just its last stage. Added 2026-09-02:
+        # "archives parsed: 0" was the only number reported, and it cannot
+        # distinguish "no document was posted" from "documents were posted and
+        # every one was rejected by the extension/mime filter". Those are
+        # different bugs. Two more numbers make the run report answer it.
+        f"Documents seen: {stats.get('documents_seen', 0)}"
+        + (f" ({stats.get('documents_skipped', 0)} not archive-shaped)\n"
+           if stats.get("documents_skipped") else "\n")
+        + f"ZIP/RAR archives parsed: {stats.get('archives_parsed', 0)}\n"
         f"Identity correlations: {stats.get('correlations_stored', 0)}\n"
         f"User matches: {stats['user_matches']}\n"
         f"Alerts fired: {stats['alerts_fired']}\n"
@@ -3046,17 +3054,58 @@ async def _poll_channels(stats: dict, tier: str = "") -> None:
                         for attr in (message.document.attributes or []):
                             if hasattr(attr, "file_name"):
                                 fname = (attr.file_name or "").lower()
-                        if fname.endswith((".zip", ".rar", ".7z", ".tar", ".gz", ".tgz")) or (
-                            not fname and getattr(message.document, "mime_type", "") in (
-                                "application/zip", "application/x-zip-compressed", "application/octet-stream",
-                                "application/x-rar-compressed", "application/vnd.rar", "application/x-7z-compressed",
-                            )
-                        ):
+                        mime = (getattr(message.document, "mime_type", "") or "").lower()
+                        dsize = getattr(message.document, "size", 0) or 0
+                        stats["documents_seen"] = stats.get("documents_seen", 0) + 1
+
+                        # ARCHIVE-FUNNEL-1, 2026-09-02.
+                        #
+                        # The mime check used to be gated on `not fname`, so it
+                        # applied ONLY to a document with no filename at all. A
+                        # document carrying mime application/zip and a name the
+                        # extension list does not recognise -- "logs_12.08.zip.001",
+                        # a split volume, a name with a trailing space, an emoji,
+                        # or any of the decorated names resellers actually use --
+                        # was rejected even though its own mime type said archive.
+                        # The two signals are independent evidence and either one
+                        # is enough to be worth a look.
+                        ARCHIVE_MIMES = (
+                            "application/zip", "application/x-zip-compressed",
+                            "application/x-rar-compressed", "application/vnd.rar",
+                            "application/x-7z-compressed", "application/x-tar",
+                            "application/gzip", "application/x-gzip",
+                            "application/octet-stream",
+                        )
+                        by_name = fname.endswith((".zip", ".rar", ".7z", ".tar", ".gz", ".tgz"))
+                        by_mime = mime in ARCHIVE_MIMES
+                        if by_name or by_mime:
                             try:
                                 await _process_stealer_archive(client, message, username, email_domain_map, stats)
                                 stats["archives_parsed"] = stats.get("archives_parsed", 0) + 1
                             except Exception as arch_exc:
                                 logger.warning("INTEL-5 archive failed @%s msg=%d: %s", username, message.id, arch_exc)
+                        else:
+                            # LOGGED, and this is the point of the change.
+                            #
+                            # A rejected document produced NOTHING: no counter, no
+                            # log line, no trace anywhere. So on 2026-09-02, when
+                            # relayshield_stolen_sessions was found holding 9 rows
+                            # (all of them source "demo", none written since the
+                            # CORPUS-1 fix shipped), every INTEL-5 log probe came
+                            # back zero and there was no way to tell "no channel
+                            # posted a document" from "documents were posted and
+                            # silently discarded here". Those are different bugs
+                            # with different fixes and the logs could not separate
+                            # them.
+                            #
+                            # A funnel you cannot see the middle of cannot be
+                            # debugged. One line per skipped document is cheap and
+                            # makes the next run answer the question outright.
+                            stats["documents_skipped"] = stats.get("documents_skipped", 0) + 1
+                            logger.info(
+                                "INTEL-5: document SKIPPED @%s msg=%d name=%r mime=%r size=%d "
+                                "-- neither the extension nor the mime type says archive",
+                                username, message.id, fname[:120], mime[:60], dsize)
 
                     # MOAT-1: archive before the text guard, so a media-only
                     # post is still part of the channel's record.

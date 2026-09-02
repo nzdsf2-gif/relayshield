@@ -155,17 +155,30 @@ def report_logs(days):
 
     # Each of these is a DIFFERENT bug with a different fix, which is the whole
     # reason for reading them separately rather than counting archives_parsed.
+    # Ordered as the funnel runs, so the first probe that reads zero is where
+    # it stops. Updated 2026-09-02 to match ARCHIVE-FUNNEL-1's instrumentation:
+    # before that, a document rejected by the extension/mime filter produced no
+    # log line at all, so every probe here read zero whether documents were
+    # arriving or not. A funnel whose middle is invisible cannot be debugged.
     probes = [
+        ("documents skipped, not archive-shaped",
+         "document SKIPPED",
+         "documents ARE arriving. The filter rejected them -- read the name= "
+         "and mime= on these lines and widen it if they are really archives"),
         ("archives dispatched to the parser",
-         "INTEL-5: archive", "the monitor saw a document and tried to handle it"),
+         "INTEL-5: archive", "the monitor saw an archive and tried to handle it"),
         ("skipped, oversized",
          "skipping oversized archive", "raise the INTEL-5 size cap"),
         ("download failed",
-         "archive download failed", "Telegram/session problem, not a parsing one"),
+         "archive download failed", "a Telegram/session problem, not a parsing one"),
         ("rejected, neither ZIP nor RAR",
-         "neither ZIP nor RAR", "the format filter is too narrow (7z? password-protected?)"),
+         "neither ZIP nor RAR", "the bytes are not a ZIP or RAR (7z? password-protected?)"),
         ("archive handler raised",
          "INTEL-5 archive failed", "an exception inside _process_stealer_archive"),
+        ("archives that parsed, with a session count",
+         "unique sessions parsed",
+         "parsing WORKS. If the count is 0 the archive layout is unrecognised; "
+         "if it is non-zero the sessions should be in the table above"),
     ]
     any_hit = False
     for label, needle, meaning in probes:
@@ -189,11 +202,17 @@ def report_logs(days):
 
     print()
     if not any_hit:
-        print("  NOTHING MATCHED. The monitor is not reaching the archive path at")
-        print("  all in this window. That points upstream of INTEL-5: either no")
-        print("  channel posted a document, or the run is not getting that far.")
-        print("  Check the run digest numbers next (messages_processed,")
-        print("  archives_parsed) in the same log group.")
+        print("  NOTHING MATCHED, which now means something specific.")
+        print()
+        print("  Since ARCHIVE-FUNNEL-1 (2026-09-02) every document the monitor")
+        print("  sees produces a line: either it is dispatched to the parser or it")
+        print("  is logged as SKIPPED with its name, mime type and size. Zero of")
+        print("  BOTH means no channel posted a document at all in this window.")
+        print()
+        print("  If the deploy carrying that change has not run yet, this section")
+        print("  cannot tell you anything and the run is not an answer. Check the")
+        print("  most recent run digest for the 'Documents seen' line -- if it is")
+        print("  absent, the instrumentation is not live yet.")
 
 
 def main():

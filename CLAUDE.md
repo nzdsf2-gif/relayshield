@@ -660,6 +660,21 @@ Known completed after that handoff was written:
   `sh tools/check_xsoar_pack.sh` now tracks all three stages and prints the exact wording that is
   safe at the current one. Run it before the claim goes in any deck, email or landing page.
 
+  **TODO, TRIGGERED BY THE MERGE, NOT BY A DATE.** When `check_xsoar_pack.sh` reports ON MASTER:
+
+  1. **Blog post**, canonical on `blog.relayshield.net`, then the usual channel order. The angle is
+     not "we shipped an integration" -- it is what the pack DOES that a Cortex XSOAR customer cannot
+     do today: enrich an incident with indicators collected from criminal Telegram channels, which
+     is the exclusive half of the corpus rather than the public-feed half. Do not quote a corpus
+     number in it; MEASUREMENT DOCTRINE applies, and this is a post a competitor will read.
+  2. **Landing-page line on the API site**, and only then. Wording once it is true:
+     *"Available as a Cortex XSOAR content pack."* Link the Marketplace listing page directly, since
+     Moshe confirmed in writing that one is created on merge.
+  3. **Link their Release Notes entry** from the blog post. Also confirmed in writing. It is
+     third-party proof, which is worth more than our own claim about ourselves.
+  4. Re-run `check_xsoar_pack.sh` immediately BEFORE publishing either. The gap between writing and
+     publishing is exactly where a false claim gets in.
+
   Note also: the demo requirement recorded under OPEN TODOS as gating the merge did **not** block
   #45206 — it merged without one. Do not carry that as a blocker again without re-checking.
 

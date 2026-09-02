@@ -24,7 +24,7 @@ let src = readFileSync(
   new URL("./cloudflare_worker_checkemail.js", import.meta.url), "utf8");
 src = src.replace('import { EmailMessage } from "cloudflare:email";',
   'class EmailMessage { constructor(f,t,raw){ this.from=f; this.to=t; this.raw=raw; } }');
-src += "\nexport { makeReply, buildReply };\n";
+src += "\nexport { makeReply, buildReply, headerSignals, detectForwardedOriginal, parseAddress };\n";
 const shim = new URL("./.checkemail_shim.mjs", import.meta.url);
 writeFileSync(shim, src);
 const { makeReply } = await import(shim.href);

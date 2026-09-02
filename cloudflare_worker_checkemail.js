@@ -68,6 +68,12 @@ const RATE_LIMIT_PER_DAY = 20;
 const MAX_LINKS_CHECKED = 5;      // an email can carry hundreds; check the first few
 const MAX_BODY_CHARS = 20000;     // parse ceiling, never a storage ceiling
 
+// Every link shares one wall-clock budget for the VirusTotal poll. A reply that
+// arrives is worth more than a verdict that is twenty seconds more complete,
+// and an email handler that runs long is an email handler that gets killed.
+const LINK_SCAN_BUDGET_MS = 12000;
+const LINK_POLL_INTERVAL_MS = 2500;
+
 // ---------------------------------------------------------------------------
 // Header analysis — the part only email can do
 // ---------------------------------------------------------------------------
@@ -100,79 +106,203 @@ function domainOf(addr) {
   return m ? m[1].toLowerCase().replace(/\.$/, "") : "";
 }
 
+// ---------------------------------------------------------------------------
+// Brand impersonation: the display-name check that is actually a signal
+// ---------------------------------------------------------------------------
+//
+// REWRITTEN 2026-09-02, after a genuine message from the founder's own Gmail
+// came back MEDIUM RISK on a single flag: the display name "Andrew Gibbs" did
+// not appear in the local part "nzdsf2".
+//
+// That rule fires on almost every real Gmail user. The good addresses went
+// years ago, so most people's address has nothing to do with their name, and
+// the flag reduced to "this person has a Gmail account" -- dressed up as a
+// finding. A verdict a user can dismiss with one glance at their own inbox is
+// worse than no verdict, because it teaches them to ignore the next one.
+//
+// The distinction that IS worth making is not name-versus-address. It is
+// whether the display name claims to be an INSTITUTION while the address is
+// free webmail. "Andrew Gibbs" from gmail.com is a person. "PayPal Support"
+// from gmail.com is an attack, because PayPal does not send from gmail.com and
+// never will. That asymmetry is the whole value of the check.
+const IMPERSONATED_BRANDS = [
+  // Payments and banking
+  "paypal", "stripe", "venmo", "cash app", "zelle", "wise", "revolut", "monzo",
+  "chase", "wells fargo", "bank of america", "citibank", "citi", "capital one",
+  "hsbc", "barclays", "lloyds", "natwest", "santander", "halifax", "amex",
+  "american express", "visa", "mastercard",
+  // Crypto, where the loss is irreversible
+  "coinbase", "binance", "kraken", "gemini", "metamask", "ledger", "trezor",
+  "phantom", "uniswap", "opensea", "blockchain.com",
+  // Big tech account takeover
+  "microsoft", "office 365", "outlook", "apple", "icloud", "google", "gmail",
+  "amazon", "aws", "meta", "facebook", "instagram", "whatsapp", "linkedin",
+  "netflix", "spotify", "dropbox", "docusign", "adobe", "ebay", "paypal inc",
+  // Government and tax, the classic urgency lever
+  "irs", "hmrc", "social security", "medicare", "dvla", "gov.uk",
+  // Couriers, the classic pretext
+  "dhl", "fedex", "ups", "usps", "royal mail", "evri", "hermes", "dpd",
+  // Security brands, used to sell fake remediation
+  "norton", "mcafee", "geek squad", "best buy",
+];
+
+// A display name claiming a ROLE rather than a person. "Security Team" from a
+// free webmail address is the same trick with the brand left implicit.
+const AUTHORITY_WORDS = [
+  "support", "security", "helpdesk", "help desk", "billing", "accounts",
+  "account services", "service desk", "customer service", "customer care",
+  "fraud", "verification", "no-reply", "noreply", "administrator", "admin team",
+  "it department", "payroll", "hr department",
+];
+
+const WEBMAIL = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk", "outlook.com",
+  "hotmail.com", "hotmail.co.uk", "icloud.com", "me.com", "aol.com",
+  "live.com", "live.co.uk", "protonmail.com", "proton.me", "mail.com",
+  "gmx.com", "yandex.com", "zoho.com", "msn.com",
+]);
+
 /**
- * Signals computed from headers alone. Each returns a flag string or null, and
- * every one of them says WHY rather than just naming a rule -- the reply is read
- * by someone deciding whether to click, not by an analyst.
+ * Signals computed from headers alone.
+ *
+ * Returns { flags, notes, score, ... }. The split matters:
+ *
+ *   flags  raise the risk score. Each one is something that should not be true
+ *          of a legitimate message.
+ *   notes  are stated in the reply but score ZERO. They are observations a
+ *          reader benefits from, that are also true of masses of ordinary mail.
+ *
+ * Before this split every observation was a flag, and any single one of them
+ * produced MEDIUM RISK. Weighting them means the word MEDIUM keeps meaning
+ * something.
  */
-function headerSignals(email, headers) {
-  const flags = [];
+function headerSignals(email, headers, forwarded) {
+  const flags = [];      // { text, weight }
+  const notes = [];      // strings, weight zero by construction
   const auth = parseAuthResults(headers);
 
-  if (auth.present) {
+  // WHOSE authentication is this? On an inline forward, Authentication-Results
+  // describes the FORWARDER, not the original sender -- see detectForwardedOriginal.
+  const authIsAboutOriginal = !forwarded;
+
+  if (auth.present && authIsAboutOriginal) {
     if (auth.dmarc === "fail") {
-      flags.push(
+      flags.push({ weight: 3, text:
         "DMARC FAILED. Your own email provider checked whether this message was " +
         "really authorised by the domain it claims to come from, and the answer " +
-        "was no. That is the strongest single signal here."
-      );
+        "was no. That is the strongest single signal available here." });
     }
-    if (auth.spf === "fail" || auth.spf === "softfail") {
-      flags.push(
-        "SPF " + auth.spf.toUpperCase() + ". The server that sent this is not one " +
-        "the claimed domain lists as its own."
-      );
+    if (auth.spf === "fail") {
+      flags.push({ weight: 2, text:
+        "SPF FAILED. The server that sent this is not one the claimed domain " +
+        "lists as its own." });
+    } else if (auth.spf === "softfail") {
+      flags.push({ weight: 1, text:
+        "SPF SOFTFAIL. The claimed domain does not list this sending server, but " +
+        "stops short of saying the mail is forged. Common on forwarded mail." });
     }
     if (auth.dkim === "fail") {
-      flags.push("DKIM FAILED. The message signature does not verify, so the content may have been altered in transit.");
+      flags.push({ weight: 2, text:
+        "DKIM FAILED. The message signature does not verify, so the content may " +
+        "have been altered after it was sent." });
     }
   }
 
-  const fromAddr = (email.from && email.from.address) || "";
-  const fromName = (email.from && email.from.name) || "";
+  // On a forward, analyse the address the forward claims the mail came FROM,
+  // not the friend who forwarded it to us.
+  const fromAddr = forwarded ? forwarded.address
+                             : ((email.from && email.from.address) || "");
+  const fromName = forwarded ? forwarded.name
+                             : ((email.from && email.from.name) || "");
   const fromDomain = domainOf(fromAddr);
 
   // Reply-To pointing somewhere else is the classic BEC setup: the display and
-  // the From look right, and the reply quietly goes to the attacker.
+  // the From look right, and the reply quietly goes to the attacker. Only
+  // meaningful on a direct message; a forward's Reply-To is the forwarder's.
   const replyTo = (email.replyTo && email.replyTo[0] && email.replyTo[0].address) || "";
-  if (replyTo && domainOf(replyTo) && domainOf(replyTo) !== fromDomain) {
-    flags.push(
-      `Reply-To mismatch. It appears to come from ${fromAddr}, but a reply would go ` +
-      `to ${replyTo} instead. That is a different domain, and it is how business ` +
-      "email compromise usually works."
-    );
+  if (!forwarded && replyTo && domainOf(replyTo) && domainOf(replyTo) !== fromDomain) {
+    flags.push({ weight: 2, text:
+      `Reply-To mismatch. It appears to come from ${fromAddr}, but a reply would ` +
+      `go to ${replyTo} instead, on a different domain. That is how business ` +
+      "email compromise usually works." });
   }
 
-  // Return-Path is the envelope sender. A mismatch is normal for mailing lists
-  // and legitimate forwarders, so this is worded as a question, not a verdict.
+  // Return-Path is the envelope sender. A mismatch is completely normal for
+  // mailing lists, newsletters and every legitimate forwarder, so it is a NOTE.
+  // Scoring it was part of what made the first verdict undefendable.
   const returnPath = headers.get("return-path") || "";
   const rpDomain = domainOf(returnPath);
-  if (rpDomain && fromDomain && rpDomain !== fromDomain) {
-    flags.push(
-      `Envelope sender is ${rpDomain} but the message claims to be from ${fromDomain}. ` +
-      "That can be legitimate for newsletters and forwarders, but on a message asking " +
-      "you to act it is worth checking."
-    );
+  const headerFromDomain = domainOf((email.from && email.from.address) || "");
+  if (rpDomain && headerFromDomain && rpDomain !== headerFromDomain) {
+    notes.push(
+      `The envelope sender is ${rpDomain} while the message header says ` +
+      `${headerFromDomain}. That is normal for newsletters, mailing lists and ` +
+      "forwarded mail, so on its own it means nothing.");
   }
 
-  // A display name that names a person or brand, on a webmail address, with no
-  // relationship between the two.
-  const WEBMAIL = new Set([
-    "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com",
-    "aol.com", "live.com", "protonmail.com", "proton.me", "mail.com",
-  ]);
+  // The narrowed impersonation check.
   if (fromName && WEBMAIL.has(fromDomain)) {
-    const tokens = fromName.toLowerCase().match(/[a-z]{3,}/g) || [];
-    const local = (fromAddr.split("@")[0] || "").toLowerCase();
-    if (tokens.length && !tokens.some((t) => local.includes(t))) {
-      flags.push(
-        `The sender calls themselves "${fromName}" but writes from a free ${fromDomain} ` +
-        "address unrelated to that name. Anyone can set a display name; it is not identity."
-      );
+    const nameLower = fromName.toLowerCase();
+    const brand = IMPERSONATED_BRANDS.find((b) => nameLower.includes(b));
+    const authority = AUTHORITY_WORDS.find((w) => nameLower.includes(w));
+    if (brand) {
+      flags.push({ weight: 3, text:
+        `The sender's display name claims to be "${fromName}", but the address is ` +
+        `a free ${fromDomain} account. ${brand.replace(/\b\w/g, (c) => c.toUpperCase())} ` +
+        "does not send mail from free webmail, and neither does any bank, tax " +
+        "office or courier. This is the single most common shape of a phishing " +
+        "message." });
+    } else if (authority) {
+      flags.push({ weight: 2, text:
+        `The display name "${fromName}" presents as a department or a support ` +
+        `desk, but the address is a free ${fromDomain} account. A real ` +
+        "organisation writes from its own domain." });
     }
   }
 
-  return { flags, auth, fromAddr, fromName, fromDomain };
+  const score = flags.reduce((n, f) => n + f.weight, 0);
+  return { flags, notes, score, auth, authIsAboutOriginal, fromAddr, fromName, fromDomain };
+}
+
+// ---------------------------------------------------------------------------
+// Inline forwards: whose message are we actually looking at?
+// ---------------------------------------------------------------------------
+//
+// ADDED 2026-09-02, and it is the most important honesty fix in this file.
+//
+// When someone hits Forward in Gmail, Gmail composes a NEW message from them,
+// quoting the original as text. Cloudflare therefore hands us headers belonging
+// to the forwarder. Authentication-Results says Gmail authenticated the
+// forwarder, which it did -- and the first version of this Worker reported that
+// as "SENDER CHECKS PASSED", which reads as a verdict on the suspicious message.
+// It is not. It is a verdict on the person asking us about it.
+//
+// That is the same failure the WhatsApp adapter is written to avoid: never
+// imply we identified a sender we did not. So on an inline forward we say
+// plainly that the authentication results are not the original's, and we tell
+// the user how to get an answer that is (forward as an attachment).
+//
+// The original sender's ADDRESS is still recoverable, because every mail client
+// quotes it in the body. That address cannot be authenticated -- anyone can type
+// any address into a forwarded block -- but it is what the impersonation check
+// needs, and it is far better than analysing the forwarder.
+function detectForwardedOriginal(bodyText) {
+  if (!bodyText) return null;
+  const markers = [
+    /-{2,}\s*Forwarded message\s*-{2,}/i,     // Gmail
+    /Begin forwarded message:/i,               // Apple Mail
+    /-{2,}\s*Original Message\s*-{2,}/i,       // Outlook, older
+    /^\s*_{10,}\s*$/m,                         // Outlook, newer
+  ];
+  const hit = markers.find((re) => re.test(bodyText));
+  if (!hit) return null;
+
+  const after = bodyText.slice(bodyText.search(hit));
+  // "From: Display Name <addr@example.com>" inside the quoted block.
+  const m = after.match(/^\s*(?:>\s*)?From:\s*(.+)$/im);
+  if (!m) return { address: "", name: "", parseFailed: true };
+  const parsed = parseAddress(m[1].trim());
+  return { address: parsed.address || "", name: parsed.name || "", parseFailed: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -291,20 +421,101 @@ function extractLinks(text) {
   return [...found];
 }
 
-async function scanLink(url, apiKey) {
+/**
+ * Check one link through the same pipeline every other RelayShield surface uses.
+ *
+ * REWRITTEN 2026-09-02. The first version read `data.status` from
+ * POST /v1/scan-url and treated anything that was not "malicious"/"suspicious"/
+ * "clean" as unknown. That endpoint ALWAYS returns status "pending": it submits
+ * to VirusTotal and hands back an analysis_id to poll. So the field was never
+ * a verdict, every link came back "no reputation data", and the link half of
+ * the product had never worked at all. It looked like a link nobody had heard
+ * of; it was a field that does not carry what was being read out of it.
+ *
+ * The response does carry an immediate answer, in `immediate_signal` --
+ * RelayShield's own criminal IOC corpus, Google Safe Browsing, and RDAP
+ * registration age, all computed before the call returns. That is the part
+ * VirusTotal cannot tell you, so it is used first and always.
+ *
+ * The VirusTotal verdict then needs a poll, which is what /v1/result is for.
+ * All links share one wall-clock budget, because a reply that arrives is worth
+ * more than a verdict that is 20 seconds more complete.
+ */
+async function scanLink(url, apiKey, deadline) {
+  let submitted;
   try {
     const resp = await fetch(`${API_BASE}/v1/scan-url`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": apiKey },
       body: JSON.stringify({ url }),
     });
-    if (!resp.ok) return { url, status: "unknown", detail: `check unavailable (${resp.status})` };
-    const data = await resp.json();
-    return { url, status: data.status || "unknown", detail: data.detail || "" };
+    if (!resp.ok) {
+      return { url, status: "unknown", detail: `check unavailable (HTTP ${resp.status})` };
+    }
+    submitted = await resp.json();
   } catch (err) {
     // A link check that failed must never render as a link that passed.
     return { url, status: "unknown", detail: "check unavailable" };
   }
+
+  // Signal one, available immediately, and the one nobody else has.
+  const reasons = Array.isArray(submitted.immediate_reasons) ? submitted.immediate_reasons : [];
+  if (submitted.immediate_signal === "flagged" && reasons.length) {
+    const corroborated = reasons.some(
+      (r) => /IOC corpus|Safe Browsing/i.test(r));
+    return {
+      url,
+      status: corroborated ? "malicious" : "suspicious",
+      detail: reasons.join("; "),
+    };
+  }
+
+  // Signal two: VirusTotal, which needs the poll the first version never did.
+  const analysisId = submitted.analysis_id;
+  if (!analysisId) {
+    return { url, status: "unknown", detail: "no analysis was started for this link" };
+  }
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, LINK_POLL_INTERVAL_MS));
+    try {
+      const resp = await fetch(
+        `${API_BASE}/v1/result/${encodeURIComponent(analysisId)}`,
+        { headers: { "x-api-key": apiKey } });
+      if (!resp.ok) break;
+      const data = await resp.json();
+      if (data.status === "pending") continue;
+      if (data.verdict === "malicious" || data.verdict === "suspicious") {
+        const n = data.malicious || data.suspicious || 0;
+        const total = data.total_engines || 0;
+        return {
+          url,
+          status: data.verdict,
+          detail: total ? `${n} of ${total} security vendors flag this` : data.verdict,
+        };
+      }
+      if (data.verdict === "clean") {
+        return {
+          url,
+          status: "clean",
+          detail: data.total_engines
+            ? `no detections from ${data.total_engines} security vendors`
+            : "no detections",
+        };
+      }
+      break;   // "timeout" or anything unrecognised
+    } catch (err) {
+      break;
+    }
+  }
+
+  // Honest, and deliberately not dressed up as a result. "No reputation data"
+  // is the truthful answer for most links, and it must not read as either a
+  // pass or a fail.
+  return {
+    url,
+    status: "unknown",
+    detail: "no security vendor has published a verdict on this link yet",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -331,15 +542,33 @@ async function rateLimited(kv, sender) {
 // Reply
 // ---------------------------------------------------------------------------
 
-function buildReply(sig, linkResults, subject) {
-  const bad = linkResults.filter((l) => l.status === "malicious" || l.status === "suspicious");
+/**
+ * Turn the signals into a reply a worried non-specialist can act on.
+ *
+ * RISK IS SCORED, NOT COUNTED. Rewritten 2026-09-02: the first version was
+ * `bad.length || dmarcFailed ? HIGH : sig.flags.length ? MEDIUM : LOW`, so any
+ * single observation -- including ones true of most ordinary mail -- produced
+ * MEDIUM RISK. A genuine message from the founder's own Gmail came back MEDIUM
+ * on the strength of his display name not appearing in his email address.
+ *
+ * A verdict the reader can dismiss by glancing at their own inbox is worse than
+ * no verdict, because it trains them to ignore the next one. So:
+ *
+ *   HIGH    score 3+   something is wrong that should not be true of real mail
+ *   MEDIUM  score 2     one solid anomaly, worth checking before acting
+ *   LOW     score 0-1   nothing found, stated as nothing found
+ *
+ * and observations that are ALSO true of newsletters and forwards are printed
+ * under WORTH KNOWING, where they inform without inflating the verdict.
+ */
+function buildReply(sig, linkResults, subject, forwarded) {
+  const bad = linkResults.filter((l) => l.status === "malicious");
+  const sus = linkResults.filter((l) => l.status === "suspicious");
   const unknown = linkResults.filter((l) => l.status === "unknown");
   const clean = linkResults.filter((l) => l.status === "clean");
 
-  const dmarcFailed = sig.auth.present && sig.auth.dmarc === "fail";
-  const risk = (bad.length || dmarcFailed) ? "HIGH"
-             : sig.flags.length ? "MEDIUM"
-             : "LOW";
+  const score = sig.score + bad.length * 3 + sus.length * 2;
+  const risk = score >= 3 ? "HIGH" : score === 2 ? "MEDIUM" : "LOW";
 
   const out = [];
   out.push(`RelayShield email check: ${risk} RISK`);
@@ -348,41 +577,78 @@ function buildReply(sig, linkResults, subject) {
   out.push(`Claimed sender: ${sig.fromAddr || "not stated"}`);
   out.push("");
 
+  // WHOSE MESSAGE IS THIS. Said before any verdict, because on an inline
+  // forward every authentication result below belongs to the reader's own
+  // forward and not to the message they are worried about.
+  if (forwarded) {
+    out.push("ABOUT THIS FORWARD:");
+    if (forwarded.address) {
+      out.push(`  You forwarded this inline, so the original sender shows in the quoted`);
+      out.push(`  text as ${forwarded.address}. We analysed that address, not yours.`);
+    } else {
+      out.push("  You forwarded this inline, and we could not read the original sender");
+      out.push("  out of the quoted text.");
+    }
+    out.push("  BUT: forwarding inline strips the original SPF, DKIM and DMARC results.");
+    out.push("  Your provider re-signed the forward as coming from you, which it does");
+    out.push("  honestly, so we CANNOT tell you whether the original was really sent by");
+    out.push("  the domain it claims. An address typed into a quoted block proves nothing.");
+    out.push("  To get that answer, forward it AS AN ATTACHMENT instead:");
+    out.push("    Gmail: open the message, three-dot menu, Forward as attachment.");
+    out.push("    Outlook: More, Forward as attachment.");
+    out.push("    Apple Mail: hold Shift and choose Forward as Attachment.");
+    out.push("");
+  }
+
   if (sig.flags.length) {
-    out.push(`WHAT IS WRONG WITH THE SENDER (${sig.flags.length}):`);
-    sig.flags.forEach((f) => out.push(`  - ${f}`));
-  } else if (sig.auth.present) {
+    out.push(`WHAT IS WRONG (${sig.flags.length}):`);
+    sig.flags.forEach((f) => out.push(`  - ${f.text}`));
+  } else if (sig.auth.present && sig.authIsAboutOriginal) {
     out.push(
       "SENDER CHECKS PASSED. SPF, DKIM and DMARC as recorded by your own email " +
-      "provider show nothing wrong. That means the message really was sent by the " +
-      "domain it claims -- it does NOT mean the domain is trustworthy. A scammer " +
-      "who registers their own domain passes all three."
-    );
+      "provider show nothing wrong. That means the message really was sent by " +
+      "the domain it claims. It does NOT mean the domain is trustworthy: a " +
+      "scammer who registers their own domain passes all three.");
+  } else if (!sig.authIsAboutOriginal) {
+    out.push(
+      "NOTHING WRONG FOUND IN WHAT WE CAN SEE. On an inline forward that is a " +
+      "weak statement, for the reason above.");
   } else {
     out.push(
-      "NO AUTHENTICATION HEADERS. This forward did not carry your provider's " +
-      "SPF/DKIM/DMARC results, so the sender could not be verified either way. " +
-      "Forwarding as an attachment usually preserves them."
-    );
+      "NO AUTHENTICATION HEADERS. This message did not carry your provider's " +
+      "SPF/DKIM/DMARC results, so the sender could not be verified either way.");
   }
   out.push("");
 
   if (linkResults.length) {
     out.push("LINKS:");
-    bad.forEach((l) => out.push(`  FLAGGED  ${l.url}${l.detail ? ": " + l.detail : ""}`));
-    unknown.forEach((l) => out.push(`  UNKNOWN  ${l.url}: ${l.detail || "no reputation data"}`));
-    clean.forEach((l) => out.push(`  no match ${l.url}`));
-    if (clean.length && !bad.length) {
+    bad.forEach((l) => out.push(`  DANGEROUS  ${l.url}${l.detail ? " -- " + l.detail : ""}`));
+    sus.forEach((l) => out.push(`  SUSPICIOUS ${l.url}${l.detail ? " -- " + l.detail : ""}`));
+    clean.forEach((l) => out.push(`  no match   ${l.url}${l.detail ? " -- " + l.detail : ""}`));
+    unknown.forEach((l) => out.push(`  UNKNOWN    ${l.url} -- ${l.detail}`));
+    if (unknown.length) {
       out.push("");
       out.push(
-        "  A clean result is not a guarantee. New phishing domains can take hours " +
-        "to appear in any threat database."
-      );
+        "  UNKNOWN is not a finding. Most links are unknown, including almost");
+      out.push(
+        "  every legitimate one, and it did not count towards the rating above.");
+    }
+    if (clean.length && !bad.length && !sus.length) {
+      out.push("");
+      out.push(
+        "  A clean result is not a guarantee. A brand new phishing domain can");
+      out.push("  take hours to appear in any threat database.");
     }
   } else {
     out.push("LINKS: none found in the text.");
   }
   out.push("");
+
+  if (sig.notes.length) {
+    out.push("WORTH KNOWING (this did not affect the rating):");
+    sig.notes.forEach((n) => out.push(`  - ${n}`));
+    out.push("");
+  }
 
   out.push("WHAT TO DO:");
   if (risk === "HIGH") {
@@ -393,8 +659,10 @@ function buildReply(sig, linkResults, subject) {
     out.push("  - Treat it as unverified. Do not enter a password or payment detail from a link in it.");
     out.push("  - Confirm through a channel you already trust before acting.");
   } else {
-    out.push("  - Nothing automatic flagged, but no scan proves a message is safe.");
-    out.push("  - An unexpected request for money, credentials or urgency is a warning sign regardless.");
+    out.push("  - We found nothing wrong. That is not the same as proving it is safe,");
+    out.push("    and no scan anywhere can prove that.");
+    out.push("  - An unexpected request for money, credentials or urgency is a warning");
+    out.push("    sign regardless of what any checker says.");
   }
   out.push("");
   out.push("---");
@@ -593,14 +861,30 @@ async function scanAndReply(message, env, ctx) {
     subject: message.headers.get("subject") || "",
   };
   const body = bodyText;
-  const sig = headerSignals(email, message.headers);
+
+  // Whose message is this? Must be decided BEFORE the signals, because on an
+  // inline forward the authentication headers describe the person asking us
+  // rather than the message they are asking about.
+  const forwarded = detectForwardedOriginal(body);
+  const sig = headerSignals(email, message.headers, forwarded);
 
   const links = extractLinks(body).slice(0, MAX_LINKS_CHECKED);
+  const deadline = Date.now() + LINK_SCAN_BUDGET_MS;
   const linkResults = env.RS_API_KEY
-    ? await Promise.all(links.map((u) => scanLink(u, env.RS_API_KEY)))
-    : links.map((u) => ({ url: u, status: "unknown", detail: "link checking unavailable" }));
+    ? await Promise.all(links.map((u) => scanLink(u, env.RS_API_KEY, deadline)))
+    : links.map((u) => ({
+        url: u, status: "unknown",
+        detail: "link checking is not configured on this deployment",
+      }));
 
-  const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120));
+  console.log(
+    "checkemail: scanned", message.from,
+    "forwarded=", Boolean(forwarded),
+    "score=", sig.score,
+    "flags=", sig.flags.length,
+    "links=", linkResults.map((l) => l.status).join(",") || "none");
+
+  const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120), forwarded);
   await message.reply(makeReply(message, reply));
 
   // Indicators only. No body, no subject, no addresses beyond the flagged

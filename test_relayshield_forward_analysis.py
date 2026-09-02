@@ -332,8 +332,19 @@ class TestHelpCardsCarryTheHints(unittest.TestCase):
     installed is a copy assertion that stops running."""
 
     def _src(self, name):
+        """Source with adjacent string literals JOINED.
+
+        Python concatenates `"a " \n "b"` at compile time, so a phrase wrapped
+        across two source lines never appears in the raw text as one string --
+        "in your contacts" really is in the WhatsApp help and a naive
+        assertIn still failed on it. Collapsing the `" ... "` join here makes
+        these assertions test the copy the user sees rather than the line
+        wrapping the author happened to choose.
+        """
+        import re
         from pathlib import Path
-        return Path(__file__).with_name(name).read_text()
+        raw = Path(__file__).with_name(name).read_text()
+        return re.sub(r'"\s*\n\s*"', "", raw)
 
     def test_telegram_quick_start_card_has_both_hints(self):
         src = self._src("relayshield_telegram_webhook.py")
@@ -346,10 +357,35 @@ class TestHelpCardsCarryTheHints(unittest.TestCase):
         src = self._src("relayshield_telegram_webhook.py")
         self.assertGreaterEqual(src.count("@relayshield\\\\_bot"), 3)
 
-    def test_whatsapp_help_has_both_hints(self):
+    # Asserted as CONCEPTS, not exact sentences. The first version pinned literal
+    # copy, so every wording change broke it -- and one such break sat unnoticed
+    # through a whole commit. What must not regress is that the surface offers a
+    # route needing NO command, not the specific phrasing of it.
+
+    def test_whatsapp_help_offers_a_no_command_route(self):
         src = self._src("relayshield_whatsapp_webhook.py")
-        self.assertIn("Forward anything that looks off into this chat", src)
-        self.assertIn("Paste a screenshot of a suspicious text", src)
+        self.assertIn("looks off", src)
+        self.assertIn("screenshot of a suspicious text", src)
+        self.assertIn("in your contacts", src)
+
+    def test_whatsapp_help_sends_the_hint_before_the_menu(self):
+        """HELP used to send ONLY the Twilio menu card, which made every word of
+        msg_help() unreachable -- it is shown only by HELPTEXT, behind a button
+        on the last menu page. The hint must go first, because the card's own
+        text lives in Twilio and cannot be edited from this repo."""
+        src = self._src("relayshield_whatsapp_webhook.py")
+        block = src[src.index('if body == "HELP":'):]
+        block = block[:block.index('return "help_sent"')]
+        self.assertIn("paste_hint", block)
+        self.assertLess(block.index("paste_hint"), block.index("send_wa_menu"))
+
+    def test_paste_hint_leads_with_pasting_on_both(self):
+        """Pasting needs no gesture and no saved contact; forwarding needs both.
+        Whichever is named first is the one users will actually try."""
+        for platform in (fwd.PLATFORM_TELEGRAM, fwd.PLATFORM_WHATSAPP):
+            hint = fwd.paste_hint(platform)
+            self.assertIn("paste", hint.lower())
+            self.assertIn("do not need a command", hint)
 
 
 if __name__ == "__main__":

@@ -1176,6 +1176,27 @@ def _store_iocs(iocs: dict, channel: str, category: str, malware: str = "",
         # it starts accumulating from this deploy forward, not backfilled,
         # since the raw past messages were never stored.
         ("cves", "cve"),
+        # THIRD OCCURRENCE, fixed 2026-09-01. md5, sha1, onions and tg_mentions
+        # were extracted from every monitored message, counted in stats, and
+        # then dropped on the floor because this list never named them --
+        # exactly the defect the "cves" comment above records, and exactly what
+        # test_relayshield_intel_monitor_contract.py exists to catch. That test
+        # has been RED on main; nothing was running it.
+        #
+        # tg_mentions is the one that matters commercially. A8 calls tg_handle
+        # the highest-uniqueness category we have, because public feeds publish
+        # infrastructure and not people, and the plan has been to measure it
+        # after a two-week wait. It would have measured ZERO forever: the
+        # extractor was feeding a mapping that discarded it.
+        #
+        # On the noise objection, which is real: _RE_TG_CHANNEL matches any
+        # @mention, so ordinary English words land here. That is handled at
+        # CONSUMPTION, not by refusing to collect -- relayshield_forward_analysis
+        # requires >=2 sightings across >=2 channels before a handle is ever
+        # shown to a user. Collect the lead, filter at the point of use; a
+        # category that is never collected cannot be measured or filtered later.
+        ("md5", "hash_md5"), ("sha1", "hash_sha1"),
+        ("onions", "onion"), ("tg_mentions", "tg_handle"),
     ]
     for field, ioc_type in type_map:
         for value in iocs.get(field, []):

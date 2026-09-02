@@ -2573,10 +2573,11 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
         # WhatsApp has no @handle to name, so the concrete instruction is the
         # gesture plus "this chat". Saying "forward me" without saying HOW is the
         # same defect the Telegram card had: it assumes the reader already knows.
-        "*📨 Forward anything that looks off into this chat* — a text, a link, "
-        "or a message from someone in your contacts. Press and hold the message, "
-        "tap Forward, and pick RelayShield. No command needed. A hijacked account "
-        "still shows up as your friend, so those are worth forwarding too.\n"
+        "*📨 Just send me anything that looks off* — paste it, forward it, or "
+        "screenshot it. A text, a link, or a message from someone in your "
+        "contacts. No command needed, and pasting is easiest: copy the message, "
+        "paste it here, send. A hijacked account still shows up as your friend, "
+        "so messages from people you know are worth checking too.\n"
         "_WhatsApp does not tell me who originally sent a forwarded message, so "
         "I analyse the text but can never check the sender._\n"
         "*📸 Paste a screenshot of a suspicious text* — send the picture with the "
@@ -3202,8 +3203,9 @@ def msg_sessions() -> str:
 
 def msg_unknown_command() -> str:
     return (
-        "I didn't recognise that command.\n\n"
-        "Reply *HELP* to see everything I can do."
+        "I didn't recognise that.\n\n"
+        "If you wanted a message checked, *paste the whole thing* and send it — "
+        "no command needed. Or reply *HELP* to see everything I can do."
     )
 
 
@@ -3781,7 +3783,25 @@ def handle_active_message(
     # This is the WhatsApp half of the asymmetry. There is no sender to check
     # here and never will be, so unlike Telegram this path analyses text only,
     # and the note prepended to it says exactly that.
-    if forward_origin is not None and message_body.strip() and body.split()[0] not in ALL_COMMAND_KEYWORDS:
+    # A PASTED message counts too, not only a forwarded one. Founder direction
+    # 2026-09-01, and it is the fix that makes this usable by a non-technical
+    # user at all.
+    #
+    # Teaching someone to forward is teaching a gesture AND requiring RelayShield
+    # to already be in their contacts, or "pick RelayShield" fails at the last
+    # step. Copy-and-paste needs neither. Before this, a pasted scam text hit the
+    # unknown-command reply at the bottom of this function -- "I didn't recognise
+    # that command" in answer to someone pasting the thing that frightened them.
+    #
+    # Telegram has behaved this way since 810d9e0 via _looks_like_message. This
+    # is that same rule, on the platform that needed it more.
+    _looks_like_a_message = (
+        len(message_body.strip()) >= 40
+        or bool(re.search(r"https?://|\bwww\.", message_body, re.I))
+    )
+    if (message_body.strip()
+            and body.split()[0] not in ALL_COMMAND_KEYWORDS
+            and (forward_origin is not None or _looks_like_a_message)):
         send_whatsapp(
             to_number,
             "🔍 *Checking that forwarded message...* This may take a few seconds.",
@@ -3792,8 +3812,9 @@ def handle_active_message(
             _build_msgscan_response(message_body.strip(), forward_note=forward_note),
             account_sid, auth_token, from_number,
         )
-        logger.info("Forwarded message analysed user_id=%s", user_id)
-        return "forwarded_message_analysed"
+        logger.info("Inbound message analysed user_id=%s forwarded=%s",
+                    user_id, forward_origin is not None)
+        return "forwarded_message_analysed" if forward_origin else "pasted_message_analysed"
 
     # --- SWEEP ---
     if body == "LINKEDDEVICES":
@@ -4491,6 +4512,17 @@ def handle_active_message(
 
     # --- HELP ---
     if body == "HELP":
+        # The hint goes FIRST, as its own message, and this is the only place it
+        # can go. The menu below is a Twilio Content resource -- its "Page 1 of 4
+        # - tap a command" wording lives in Twilio and cannot be changed from
+        # this repo. Before this, HELP sent that card and nothing else, so every
+        # word in msg_help() was unreachable: it is shown only by HELPTEXT,
+        # behind a button on the LAST page of the menu. A user typing HELP saw a
+        # command list and was never told the fastest thing they can do.
+        send_whatsapp(
+            to_number, fwd.paste_hint(fwd.PLATFORM_WHATSAPP),
+            account_sid, auth_token, from_number,
+        )
         send_wa_menu(to_number, wa_menu_tier_key(is_business, tier in DOMAIN_TIERS), account_sid, auth_token, from_number)
         return "help_sent"
 

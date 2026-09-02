@@ -22,22 +22,33 @@ let src = readFileSync(
   new URL("./cloudflare_worker_checkemail.js", import.meta.url), "utf8");
 src = src.replace('import { EmailMessage } from "cloudflare:email";',
   'class EmailMessage { constructor(f,t,raw){ this.from=f; this.to=t; this.raw=raw; } }');
-src += "\nexport { buildReply, headerSignals, detectForwardedOriginal, parseAddress };\n";
+src += "\nexport { buildReply, headerSignals, detectForwardedOriginal, parseAddress, extractAttachmentNames, attachmentSignals, pressureSignals };\n";
 const shim = new URL("./.checkemail_verdict_shim.mjs", import.meta.url);
 writeFileSync(shim, src);
-const { buildReply, headerSignals, detectForwardedOriginal } = await import(shim.href);
+const { buildReply, headerSignals, detectForwardedOriginal, extractAttachmentNames, attachmentSignals } = await import(shim.href);
 
 const hdrs = (o) => ({ get: (k) => o[k.toLowerCase()] ?? null });
 
 /** Run the real pipeline the way scanAndReply does. */
-function verdict({ from, replyTo = "", headers = {}, body = "", links = [] }) {
+// A small stand-in for the real IANA list. The Worker fetches ~1,450 entries
+// and caches them in KV; the check only needs a Set, so the tests supply one.
+const TLDS = new Set(["com", "net", "org", "co", "uk", "io", "gmail", "aol",
+                      "info", "biz", "de", "fr", "tld", "ru", "xyz", "top"]);
+
+function verdict({ from, to = "", replyTo = "", headers = {}, body = "",
+                   links = [], raw = "", tlds = TLDS }) {
   const email = {
     from: parseFrom(from),
     replyTo: [parseFrom(replyTo)],
     subject: headers.subject || "",
   };
   const forwarded = detectForwardedOriginal(body);
-  const sig = headerSignals(email, hdrs({ ...headers, "reply-to": replyTo }), forwarded);
+  const sig = headerSignals(email, hdrs({ ...headers, "reply-to": replyTo }), forwarded, {
+    bodyText: body,
+    tlds,
+    attachments: attachmentSignals(extractAttachmentNames(raw)),
+    recipientLocal: (to || "").split("@")[0],
+  });
   const text = buildReply(sig, links, email.subject, forwarded);
   return { risk: text.split(" RISK")[0].replace("RelayShield email check: ", ""), text, sig, forwarded };
 }
@@ -173,6 +184,105 @@ const withUnknown = verdict({
 expect("three unknown links still LOW", withUnknown.risk, "LOW");
 expect("  ...and the reply says UNKNOWN is not a finding",
   withUnknown.text.includes("UNKNOWN is not a finding"), true);
+
+console.log("\n-- a TLD that does not exist (the 2026-09-02 false negative) --");
+
+// The real message, from the founder's spam folder, forwarded inline. Before
+// this suite it scored 0 and came back LOW RISK.
+const realPhish = verdict({
+  from: '"Andrew Gibbs" <nzdsf2@gmail.com>',
+  to: "nzdsf2@gmail.com",
+  headers: { subject: "Fwd: Action Required: Storage 100% Full",
+             "authentication-results": "spf=pass; dkim=pass; dmarc=pass" },
+  body: "---------- Forwarded message ---------\n" +
+        "From: nzdsf2 <alert-9626@ydxla.abn>\n" +
+        "Date: Mon, Aug 31, 2026 at 12:11AM\n" +
+        "Subject: Action Required: Storage 100% Full\nTo: <me@aol.com>\n\n" +
+        "Payment failed for your Cloud storage renewal. We couldn't renew your\n" +
+        "Cloud storage subscription. Update your payment details within 24 hours\n" +
+        "or your files will be permanently deleted.\n" +
+        "https://cloud-billing-update.ydxla.abn/renew\n",
+  links: [{ url: "https://cloud-billing-update.ydxla.abn/renew", status: "unknown",
+            detail: "no security vendor has published a verdict on this link yet" }],
+});
+expect("the real spam message is now HIGH", realPhish.risk, "HIGH");
+expect("  ...it names the nonexistent TLD",
+  realPhish.text.includes('There is no ".abn" on the internet'), true);
+expect("  ...it names the ask-plus-pressure pattern",
+  realPhish.text.includes("two halves of almost every"), true);
+expect("  ...it spots the display name copying the recipient's own account name",
+  realPhish.text.includes("which is your own account"), true);
+
+expect("a real TLD is never called nonexistent",
+  verdict({ from: '"Acme" <billing@acme.co.uk>', to: "andrew@x.com",
+            headers: { "authentication-results": "spf=pass; dkim=pass; dmarc=pass" } }).risk, "LOW");
+
+expect("with no TLD list the check fails OPEN, not closed",
+  verdict({ from: '"X" <a@thing.abn>', to: "andrew@x.com", tlds: null,
+            headers: { "authentication-results": "spf=pass; dkim=pass; dmarc=pass" } }).risk, "LOW");
+
+console.log("\n-- ask plus pressure, but never either alone --");
+
+expect("an ask with no deadline or threat stays LOW",
+  verdict({ from: '"Shop" <a@shop.com>', to: "andrew@x.com", headers: {},
+            body: "Please click here to view your receipt." }).risk, "LOW");
+
+expect("a deadline with no ask stays LOW",
+  verdict({ from: '"Shop" <a@shop.com>', to: "andrew@x.com", headers: {},
+            body: "Your invoice is due within 48 hours. Thanks for your business." }).risk, "LOW");
+
+expect("ask plus threat is MEDIUM",
+  verdict({ from: '"Shop" <a@shop.com>', to: "andrew@x.com", headers: {},
+            body: "Verify your account or your account will be suspended." }).risk, "MEDIUM");
+
+console.log("\n-- attachments, by name and type only --");
+
+const att = (name) => "Content-Disposition: attachment; filename=\"" + name + "\"\r\n";
+
+expect("a plain PDF is not flagged",
+  verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {},
+            raw: att("invoice.pdf") }).risk, "LOW");
+
+expect("an .exe is HIGH",
+  verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {},
+            raw: att("setup.exe") }).risk, "HIGH");
+
+const dbl = verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {},
+                      raw: att("Invoice_2026.pdf.scr") });
+expect("a double extension is HIGH", dbl.risk, "HIGH");
+expect("  ...and is explained as a disguise",
+  dbl.text.includes("wearing"), true);
+
+expect("a macro-enabled Office file is MEDIUM",
+  verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {},
+            raw: att("Statement.xlsm") }).risk, "MEDIUM");
+
+expect("an .iso is MEDIUM",
+  verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {},
+            raw: att("delivery.iso") }).risk, "MEDIUM");
+
+const zip = verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {},
+                      raw: att("photos.zip") });
+expect("a plain archive is a note, not a flag", zip.risk, "LOW");
+expect("  ...and says we cannot see inside it",
+  zip.text.includes("cannot tell you what is inside"), true);
+
+expect("a folded, unquoted filename is still read",
+  extractAttachmentNames(
+    "Content-Disposition: attachment;\r\n\tfilename=aRsVr-Carrier Requested Details.pdf\r\n")[0],
+  "aRsVr-Carrier Requested Details.pdf");
+
+expect("an RFC 2231 encoded filename is decoded",
+  extractAttachmentNames(
+    "Content-Disposition: attachment; filename*=UTF-8''fact%C3%BAra.pdf\r\n")[0],
+  "fact\u00fara.pdf");
+
+const noAtt = verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {} });
+expect("the reply always states the attachment position",
+  noAtt.text.includes("ATTACHMENTS: none."), true);
+
+console.log("\n--- the reply Andrew would now receive for his spam forward ---\n");
+console.log(realPhish.text);
 
 console.log("\n--- the reply Andrew would now receive for his test message ---\n");
 console.log(andrew.text);

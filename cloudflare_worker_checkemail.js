@@ -34,6 +34,12 @@
  * it later is the kind of change that is easy to make and impossible to undo for
  * mail already received.
  *
+ * Attachments are read by NAME AND TYPE ONLY. Nothing here opens, decodes,
+ * downloads or stores an attachment; a filename is metadata that arrives in
+ * headers we already parse, and the file itself is untouched. Attachment names
+ * are not persisted either -- they are printed back to the person who forwarded
+ * the mail and then discarded with the request.
+ *
  * ZERO NPM DEPENDENCIES, DELIBERATELY
  * -----------------------------------
  * The first version imported postal-mime and would not build: Wrangler could not
@@ -162,6 +168,212 @@ const WEBMAIL = new Set([
   "gmx.com", "yandex.com", "zoho.com", "msn.com",
 ]);
 
+// ---------------------------------------------------------------------------
+// Attachments, by name and type only
+// ---------------------------------------------------------------------------
+//
+// ADDED 2026-09-02. This was scoped for v1 and then not built, and the reply
+// said nothing about attachments at all -- which reads as "we checked them and
+// they were fine". It was not checking them.
+//
+// Name and type ONLY, deliberately. Nothing here opens, decodes or executes an
+// attachment, and nothing stores one. A filename is metadata that arrives in
+// the headers we already parse; the file itself is somebody else's document and
+// stays untouched. That boundary is the same one the privacy note at the top of
+// this file draws around the body.
+//
+// What a filename alone genuinely tells you is more than it sounds:
+//   - an extension that is executable code, whatever it claims to be
+//   - a DOUBLE extension, which exists for exactly one reason: to look like a
+//     document in a file manager that hides known extensions
+//   - a macro-enabled Office format, which is a document that can run code
+//   - a disk image or a shortcut, the standard ways to smuggle the above past
+//     a mail gateway that only inspects archives
+
+// Extensions that are executable code or that run code on open. An attachment
+// with one of these is not a document, whatever its icon suggests.
+const EXECUTABLE_EXT = new Set([
+  "exe", "scr", "com", "pif", "bat", "cmd", "msi", "msp", "cpl", "dll",
+  "js", "jse", "vbs", "vbe", "wsf", "wsh", "hta", "ps1", "psm1", "reg",
+  "jar", "apk", "app", "dmg", "pkg", "sh", "py", "scpt",
+]);
+// Containers whose whole purpose in phishing is to carry one of the above past
+// a gateway, or to mount as a drive when double-clicked.
+const CONTAINER_EXT = new Set(["iso", "img", "vhd", "vhdx", "lnk", "url"]);
+// Office formats that can carry macros.
+const MACRO_EXT = new Set(["docm", "xlsm", "xlsb", "pptm", "dotm", "xltm", "potm"]);
+// Ordinary archives. Common in legitimate mail, so a NOTE, never a flag.
+const ARCHIVE_EXT = new Set(["zip", "rar", "7z", "gz", "tar", "cab", "ace"]);
+// What a double extension pretends to be.
+const DOCUMENT_EXT = new Set([
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv",
+  "jpg", "jpeg", "png", "gif", "htm", "html",
+]);
+
+/**
+ * Pull attachment filenames out of a raw MIME message.
+ *
+ * Reads only the header lines -- Content-Disposition and Content-Type -- and
+ * never the encoded content that follows them. Handles quoted and unquoted
+ * filenames and RFC 2231 continuations, and unfolds first, because a long
+ * filename is routinely folded across lines with a CRLF and a tab. (That
+ * folding is what produced the 554 bounce on 2026-09-02: an unquoted filename
+ * containing spaces, which Cloudflare's own inbound parser rejected outright.)
+ */
+function extractAttachmentNames(raw) {
+  if (!raw) return [];
+  const unfolded = raw.replace(/\r?\n[ \t]+/g, " ");
+  const names = [];
+  const re = /(?:file)?name\*?\s*=\s*(?:"([^"]*)"|([^;\r\n]+))/gi;
+  let m;
+  while ((m = re.exec(unfolded)) !== null && names.length < 25) {
+    let v = (m[1] || m[2] || "").trim();
+    if (!v) continue;
+    // RFC 2231: charset'lang'percent-encoded-value
+    if (/^[\w-]*'[\w-]*'/.test(v)) {
+      v = v.replace(/^[\w-]*'[\w-]*'/, "");
+      try { v = decodeURIComponent(v); } catch (err) { /* leave as-is */ }
+    }
+    v = v.replace(/[\r\n]/g, "").trim();
+    if (v && !names.includes(v)) names.push(v);
+  }
+  return names;
+}
+
+/** Judge attachments on name and type alone. Returns { flags, notes, names }. */
+function attachmentSignals(names) {
+  const flags = [];
+  const notes = [];
+  for (const name of names) {
+    const parts = name.toLowerCase().split(".");
+    const ext = parts.length > 1 ? parts[parts.length - 1] : "";
+    const prev = parts.length > 2 ? parts[parts.length - 2] : "";
+
+    if (prev && DOCUMENT_EXT.has(prev) && (EXECUTABLE_EXT.has(ext) || CONTAINER_EXT.has(ext))) {
+      flags.push({ weight: 3, text:
+        `The attachment "${name}" has two extensions. It is a .${ext} file wearing ` +
+        `a .${prev} name, and the only reason to do that is to look like a ` +
+        "document in a file manager that hides known extensions." });
+      continue;
+    }
+    if (EXECUTABLE_EXT.has(ext)) {
+      flags.push({ weight: 3, text:
+        `The attachment "${name}" is a .${ext} file, which is a program, not a ` +
+        "document. Opening it runs code on your computer." });
+      continue;
+    }
+    if (CONTAINER_EXT.has(ext)) {
+      flags.push({ weight: 2, text:
+        `The attachment "${name}" is a .${ext}, which mounts as a drive or opens a ` +
+        "target when double-clicked. It is a common way to carry a program past a " +
+        "mail filter." });
+      continue;
+    }
+    if (MACRO_EXT.has(ext)) {
+      flags.push({ weight: 2, text:
+        `The attachment "${name}" is a macro-enabled Office file (.${ext}). It is a ` +
+        "document that can run code. Do not enable content if it asks you to." });
+      continue;
+    }
+    if (ARCHIVE_EXT.has(ext)) {
+      notes.push(
+        `"${name}" is an archive. We check attachments by name and type only and ` +
+        "do not open them, so we cannot tell you what is inside this one.");
+    }
+  }
+  return { flags, notes, names };
+}
+
+// ---------------------------------------------------------------------------
+// Does the sender's TLD exist at all?
+// ---------------------------------------------------------------------------
+//
+// ADDED 2026-09-02, after a real phishing message forwarded from the founder's
+// spam folder came back LOW RISK. It was from alert-9626@ydxla.abn. There is no
+// .abn in the IANA root zone: that address cannot receive mail, cannot be
+// registered, and cannot belong to any real organisation.
+//
+// This is the rarest kind of signal -- one with no legitimate explanation. A
+// display name can be anything, a domain can be newly registered for good
+// reasons, SPF can fail on honest forwarded mail. A TLD that does not exist is
+// simply not a real address.
+//
+// The list is fetched from IANA and cached in KV for a day, rather than pinned
+// in this file. A hardcoded list rots silently: new TLDs get delegated, and the
+// failure mode of a stale list is calling a real company's mail forged, which
+// is the worst error this Worker can make. Everything here FAILS OPEN -- no KV,
+// no network, a bad response, and the check simply does not fire.
+const IANA_TLD_URL = "https://data.iana.org/TLD/tlds-alpha-by-domain.txt";
+const TLD_CACHE_KEY = "iana:tlds";
+const TLD_CACHE_TTL = 86400;
+
+async function knownTlds(kv) {
+  if (!kv) return null;                      // fail open
+  try {
+    const cached = await kv.get(TLD_CACHE_KEY);
+    if (cached) return new Set(JSON.parse(cached));
+  } catch (err) {
+    // fall through to a fetch
+  }
+  try {
+    const resp = await fetch(IANA_TLD_URL, { cf: { cacheTtl: TLD_CACHE_TTL } });
+    if (!resp.ok) return null;
+    const list = (await resp.text())
+      .split("\n")
+      .map((l) => l.trim().toLowerCase())
+      .filter((l) => l && !l.startsWith("#"));
+    // A truncated or error response must never become "every TLD is invalid".
+    if (list.length < 1000) return null;
+    try {
+      await kv.put(TLD_CACHE_KEY, JSON.stringify(list), { expirationTtl: TLD_CACHE_TTL });
+    } catch (err) { /* caching is best effort */ }
+    return new Set(list);
+  } catch (err) {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// What the message is actually asking for
+// ---------------------------------------------------------------------------
+//
+// Also added 2026-09-02 from the same message. Its body read: "Payment failed
+// for your Cloud storage renewal ... Update your payment details within 24
+// hours or your files will be permanently deleted."
+//
+// That is the entire mechanism of phishing in one sentence: an ASK, a DEADLINE
+// and a THREAT. Any one alone is ordinary -- real companies do say "action
+// required", real invoices do have due dates. The combination is not. So the
+// flag needs an ask AND pressure, never either on its own, which is what keeps
+// it off legitimate billing mail.
+const ASK_PHRASES = [
+  "update your payment", "update your billing", "update your card",
+  "verify your account", "verify your identity", "confirm your identity",
+  "confirm your account", "validate your account", "reactivate your account",
+  "update your details", "update your information", "confirm your password",
+  "sign in to continue", "log in to continue", "click here to", "click below to",
+  "re-enter your", "reconfirm your", "restore your account",
+];
+const DEADLINE_PHRASES = [
+  "within 24 hours", "within 48 hours", "within 72 hours", "in the next 24",
+  "expires today", "expires tomorrow", "final notice", "last warning",
+  "final reminder", "immediately to avoid", "act now", "urgent action",
+];
+const THREAT_PHRASES = [
+  "permanently deleted", "will be deleted", "will be suspended",
+  "will be closed", "will be terminated", "will be locked", "lose access",
+  "loss of access", "legal action", "account has been suspended",
+  "unauthorized access", "unauthorised access", "unusual activity",
+];
+
+function pressureSignals(bodyText) {
+  const t = (bodyText || "").toLowerCase();
+  const ask = ASK_PHRASES.find((p) => t.includes(p));
+  const deadline = DEADLINE_PHRASES.find((p) => t.includes(p));
+  const threat = THREAT_PHRASES.find((p) => t.includes(p));
+  return { ask, deadline, threat };
+}
+
 /**
  * Signals computed from headers alone.
  *
@@ -176,7 +388,8 @@ const WEBMAIL = new Set([
  * produced MEDIUM RISK. Weighting them means the word MEDIUM keeps meaning
  * something.
  */
-function headerSignals(email, headers, forwarded) {
+function headerSignals(email, headers, forwarded, ctx2) {
+  const { bodyText = "", tlds = null, attachments = null } = ctx2 || {};
   const flags = [];      // { text, weight }
   const notes = [];      // strings, weight zero by construction
   const auth = parseAuthResults(headers);
@@ -260,8 +473,52 @@ function headerSignals(email, headers, forwarded) {
     }
   }
 
+  // A TLD that does not exist. No legitimate explanation, so this outranks
+  // every other header signal here.
+  const tld = fromDomain.includes(".") ? fromDomain.split(".").pop() : "";
+  if (tlds && tld && !tlds.has(tld)) {
+    flags.push({ weight: 3, text:
+      `There is no ".${tld}" on the internet. ${fromAddr} cannot be a real ` +
+      "address: that suffix is not in the global list of domain endings, so no " +
+      "one can register it and no mail can be delivered to it. A real company " +
+      "cannot have this address by mistake." });
+  }
+
+  // The display name is the RECIPIENT's own account name, on somebody else's
+  // domain. That is impersonating you to you, and it is what the 2026-09-02
+  // sample did: "nzdsf2 <alert-9626@ydxla.abn>" landing in nzdsf2's mailbox.
+  const recipientLocal = (ctx2 && ctx2.recipientLocal ? ctx2.recipientLocal : "").toLowerCase();
+  if (recipientLocal.length >= 4 && fromName &&
+      fromName.toLowerCase().trim() === recipientLocal &&
+      !fromAddr.toLowerCase().startsWith(recipientLocal + "@")) {
+    flags.push({ weight: 2, text:
+      `The sender's display name is "${fromName}", which is your own account ` +
+      `name, but the address behind it is ${fromAddr}. Showing you your own ` +
+      "name is meant to make the message feel like it belongs in your mailbox." });
+  }
+
+  // Ask plus pressure. Either alone is ordinary; together they are the
+  // mechanism of phishing stated outright.
+  const pressure = pressureSignals(bodyText);
+  if (pressure.ask && (pressure.deadline || pressure.threat)) {
+    const lever = pressure.threat
+      ? `and pressures you with the phrase "${pressure.threat}"`
+      : `and puts a deadline on it: "${pressure.deadline}"`;
+    flags.push({ weight: 2, text:
+      `The message asks you to "${pressure.ask}" ${lever}. Being asked to act on ` +
+      "your account AND being hurried are the two halves of almost every " +
+      "phishing message. A real company that needs something from you can wait " +
+      "for you to go to their site yourself." });
+  }
+
+  if (attachments) {
+    attachments.flags.forEach((f) => flags.push(f));
+    attachments.notes.forEach((n) => notes.push(n));
+  }
+
   const score = flags.reduce((n, f) => n + f.weight, 0);
-  return { flags, notes, score, auth, authIsAboutOriginal, fromAddr, fromName, fromDomain };
+  return { flags, notes, score, auth, authIsAboutOriginal, fromAddr, fromName,
+           fromDomain, attachmentNames: attachments ? attachments.names : [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -593,10 +850,19 @@ function buildReply(sig, linkResults, subject, forwarded) {
     out.push("  Your provider re-signed the forward as coming from you, which it does");
     out.push("  honestly, so we CANNOT tell you whether the original was really sent by");
     out.push("  the domain it claims. An address typed into a quoted block proves nothing.");
-    out.push("  To get that answer, forward it AS AN ATTACHMENT instead:");
-    out.push("    Gmail: open the message, three-dot menu, Forward as attachment.");
-    out.push("    Outlook: More, Forward as attachment.");
-    out.push("    Apple Mail: hold Shift and choose Forward as Attachment.");
+    out.push("  To get that answer, forward it AS AN ATTACHMENT instead. Do this from");
+    out.push("  the message LIST, not from the opened message, because the option is");
+    out.push("  missing from the menu inside an open message:");
+    out.push("    Gmail: go back to the list, tick the checkbox beside the message,");
+    out.push("      then the three-dot More button in the toolbar ABOVE the list,");
+    out.push("      then Forward as attachment.");
+    out.push("    Outlook on the web: tick the message in the list, then the three-dot");
+    out.push("      menu in the toolbar, then Forward as attachment.");
+    out.push("    Apple Mail: click the message in the list once, then the Message menu");
+    out.push("      at the top of the screen, then Forward as Attachment.");
+    out.push("  If you cannot find it, forward it inline as you did. We still read the");
+    out.push("  sender, the links and the attachment names. We just cannot verify the");
+    out.push("  original's authentication.");
     out.push("");
   }
 
@@ -641,6 +907,23 @@ function buildReply(sig, linkResults, subject, forwarded) {
     }
   } else {
     out.push("LINKS: none found in the text.");
+  }
+  out.push("");
+
+  // Always stated, including when there are none. Saying nothing about
+  // attachments reads as "we checked them and they were fine", and until
+  // 2026-09-02 that is exactly what the silence meant while nothing was
+  // being checked at all.
+  const names = sig.attachmentNames || [];
+  if (names.length) {
+    out.push(`ATTACHMENTS (${names.length}), checked by name and type only:`);
+    names.forEach((n) => out.push(`  ${n}`));
+    out.push("");
+    out.push("  We do not open attachments. We look at what the file claims to be,");
+    out.push("  which catches a program dressed as a document but cannot tell you");
+    out.push("  what is inside a file that is what it says it is.");
+  } else {
+    out.push("ATTACHMENTS: none.");
   }
   out.push("");
 
@@ -848,9 +1131,12 @@ async function scanAndReply(message, env, ctx) {
   // and a body we cannot read still yields a header-only verdict -- which is
   // the strongest half anyway -- so this never aborts the scan.
   let bodyText = "";
+  let attachmentNames = [];
   try {
     const raw = await new Response(message.raw).text();
     bodyText = extractText(raw).slice(0, MAX_BODY_CHARS);
+    // Names and types only. The raw text is read once here and never stored.
+    attachmentNames = extractAttachmentNames(raw);
   } catch (err) {
     bodyText = "";
   }
@@ -866,7 +1152,20 @@ async function scanAndReply(message, env, ctx) {
   // inline forward the authentication headers describe the person asking us
   // rather than the message they are asking about.
   const forwarded = detectForwardedOriginal(body);
-  const sig = headerSignals(email, message.headers, forwarded);
+
+  // The IANA list is cached in KV and fails open: without the binding, or if
+  // the fetch fails, tlds is null and the check simply does not fire. It must
+  // never be possible for a network problem to call a real domain forged.
+  const tlds = await knownTlds(env.CHECKEMAIL_RL);
+
+  const sig = headerSignals(email, message.headers, forwarded, {
+    bodyText: body,
+    tlds,
+    attachments: attachmentSignals(attachmentNames),
+    // Who is asking us. Used to spot a display name that copies their own
+    // account name onto somebody else's address.
+    recipientLocal: (sender.split("@")[0] || ""),
+  });
 
   const links = extractLinks(body).slice(0, MAX_LINKS_CHECKED);
   const deadline = Date.now() + LINK_SCAN_BUDGET_MS;
@@ -882,6 +1181,8 @@ async function scanAndReply(message, env, ctx) {
     "forwarded=", Boolean(forwarded),
     "score=", sig.score,
     "flags=", sig.flags.length,
+    "attachments=", attachmentNames.length,
+    "tldlist=", tlds ? tlds.size : "unavailable",
     "links=", linkResults.map((l) => l.status).join(",") || "none");
 
   const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120), forwarded);

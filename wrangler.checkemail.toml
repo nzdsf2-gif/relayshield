@@ -39,6 +39,12 @@ workers_dev = true
 binding = "CHECKEMAIL_RL"
 id = "6fa845aba9e94df5854d64bdc668aafa"
 
+# CHECKEMAIL_UNLIMITED is an optional SECRET: a comma-separated list of
+# addresses exempt from the free-tier rate limit, for testing and for anyone we
+# have a reason to exempt.
+#   npx wrangler secret put CHECKEMAIL_UNLIMITED --config wrangler.checkemail.toml
+# Absent means nobody is exempt, which is the correct default.
+
 # RS_API_KEY is a SECRET and is deliberately not in this file:
 #   npx wrangler secret put RS_API_KEY --config wrangler.checkemail.toml
 # Without it the Worker still runs and still does the header analysis, which is

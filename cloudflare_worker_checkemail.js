@@ -66,10 +66,21 @@ import { EmailMessage } from "cloudflare:email";
 
 const API_BASE = "https://api.relayshield.net";
 
-// Free tier. Deliberately generous per day and tight per hour: a worried person
-// checks two or three things in a burst, an abuser sends hundreds.
-const RATE_LIMIT_PER_HOUR = 5;
-const RATE_LIMIT_PER_DAY = 20;
+// Free tier.
+//
+// RAISED 2026-09-02 from 5/hour, which was wrong in both directions. The
+// premise -- "a worried person checks two or three things in a burst" -- is
+// exactly backwards: someone who has just realised they are being targeted goes
+// through their inbox and forwards everything suspicious in it, which is the
+// single most valuable session this product will ever have, and 5 cut them off
+// mid-way. It blocked the founder inside one testing session. Meanwhile it does
+// not stop an abuser, who has as many free addresses as they want.
+//
+// The per-day cap is what limits cost. The per-hour cap only needs to stop one
+// address hammering the Worker, and 15 does that while leaving room for a real
+// inbox sweep.
+const RATE_LIMIT_PER_HOUR = 15;
+const RATE_LIMIT_PER_DAY = 40;
 
 const MAX_LINKS_CHECKED = 5;      // an email can carry hundreds; check the first few
 const MAX_BODY_CHARS = 20000;     // parse ceiling, never a storage ceiling
@@ -285,6 +296,61 @@ function attachmentSignals(names) {
 }
 
 // ---------------------------------------------------------------------------
+// A legitimate host carrying somebody else's page
+// ---------------------------------------------------------------------------
+//
+// ADDED 2026-09-02, from a real forward whose only links were:
+//   https://storage.googleapis.com/midfielders/midfielders.html?act=cl&pid=...
+//
+// Domain reputation is useless here and always will be. The domain is Google's.
+// It has perfect DNS history, a valid certificate, no threat-feed presence, and
+// it never will have any, because blocking storage.googleapis.com would break a
+// large part of the internet. Every reputation system in the product returns
+// "clean" or "unknown" for it, correctly, and the page is still a phishing page.
+//
+// What is anomalous is not the host but the COMBINATION: a bare .html file
+// served out of a public object store or a free site host, arriving in mail that
+// asks you to act on an account. Real companies send you to their own domain.
+// They have one. That is what a company is.
+//
+// Deliberately weight 2 (MEDIUM on its own) and not 3. Plenty of legitimate
+// things live on these hosts -- a status page, a shared document, an install
+// script. It is the pairing with an ask that makes it a finding, and the ask
+// already carries its own weight, so together they reach HIGH without either
+// having to overclaim alone.
+const PUBLIC_PAGE_HOSTS = [
+  // Object stores: anyone with an account can serve any HTML from these.
+  "storage.googleapis.com", "s3.amazonaws.com", "amazonaws.com",
+  "blob.core.windows.net", "web.core.windows.net", "digitaloceanspaces.com",
+  "r2.dev", "backblazeb2.com", "wasabisys.com",
+  // Free hosting and site builders, the other half of the same pattern.
+  "firebaseapp.com", "web.app", "pages.dev", "workers.dev", "netlify.app",
+  "vercel.app", "github.io", "gitlab.io", "glitch.me", "repl.co",
+  "weeblysite.com", "wixsite.com", "square.site", "godaddysites.com",
+  "000webhostapp.com", "herokuapp.com", "onrender.com", "surge.sh",
+  // Document and form services used to host a fake login step.
+  "forms.gle", "docs.google.com/forms",
+];
+
+function publicHostSignal(links) {
+  const hits = [];
+  for (const l of links) {
+    let host = "";
+    try {
+      host = new URL(l.url).hostname.toLowerCase();
+    } catch (err) {
+      continue;
+    }
+    const match = PUBLIC_PAGE_HOSTS.find(
+      (h) => host === h || host.endsWith("." + h));
+    if (match && !hits.some((x) => x.host === host)) {
+      hits.push({ host, url: l.url, service: match });
+    }
+  }
+  return hits;
+}
+
+// ---------------------------------------------------------------------------
 // Does the sender's TLD exist at all?
 // ---------------------------------------------------------------------------
 //
@@ -389,7 +455,7 @@ function pressureSignals(bodyText) {
  * something.
  */
 function headerSignals(email, headers, forwarded, ctx2) {
-  const { bodyText = "", tlds = null, attachments = null } = ctx2 || {};
+  const { bodyText = "", tlds = null, attachments = null, links = [] } = ctx2 || {};
   const flags = [];      // { text, weight }
   const notes = [];      // strings, weight zero by construction
   const auth = parseAuthResults(headers);
@@ -511,6 +577,15 @@ function headerSignals(email, headers, forwarded, ctx2) {
       "for you to go to their site yourself." });
   }
 
+  for (const hit of publicHostSignal(links)) {
+    flags.push({ weight: 2, text:
+      `The link goes to ${hit.host}, which is a public file-hosting service, not ` +
+      "a company's own website. Anyone can upload a page there, and the page " +
+      "borrows the host's good reputation: no threat database will ever flag " +
+      `${hit.service}, because blocking it would break a large part of the ` +
+      "internet. A real company sends you to its own domain, because it has one." });
+  }
+
   if (attachments) {
     attachments.flags.forEach((f) => flags.push(f));
     attachments.notes.forEach((n) => notes.push(n));
@@ -543,7 +618,7 @@ function headerSignals(email, headers, forwarded, ctx2) {
 // quotes it in the body. That address cannot be authenticated -- anyone can type
 // any address into a forwarded block -- but it is what the impersonation check
 // needs, and it is far better than analysing the forwarder.
-function detectForwardedOriginal(bodyText) {
+function detectForwardedOriginal(bodyText, forwarderAddress) {
   if (!bodyText) return null;
   const markers = [
     /-{2,}\s*Forwarded message\s*-{2,}/i,     // Gmail
@@ -568,6 +643,24 @@ function detectForwardedOriginal(bodyText) {
          || after.match(/From:\s*(.+?)(?:\s+(?:Date|Sent|Subject|To|Cc|Reply-To):|$)/is);
   if (!m) return { address: "", name: "", parseFailed: true };
   const parsed = parseAddress(m[1].trim());
+
+  // The forwarder's own address is NEVER the original sender.
+  //
+  // ADDED 2026-09-02, after a reply told the reader "the original sender shows
+  // in the quoted text as nzdsf2@gmail.com" -- which is the address of the
+  // person who forwarded it to us. Whatever went wrong upstream, reporting
+  // someone their own address as the suspicious sender is worse than reporting
+  // nothing: it is confidently wrong, and it silently points every
+  // sender-based check at an innocent account, which is how a message with a
+  // nonexistent TLD came back scoring zero.
+  //
+  // "We could not read the original sender" is an honest answer the reply copy
+  // already handles. This is the cheap, certain rule that keeps us in it.
+  const forwarder = (forwarderAddress || "").toLowerCase();
+  if (parsed.address && forwarder && parsed.address === forwarder) {
+    return { address: "", name: "", parseFailed: true, selfMatch: true };
+  }
+
   return {
     address: parsed.address || "",
     name: parsed.name || "",
@@ -705,6 +798,54 @@ function stripHtml(html) {
 }
 
 /**
+ * Decode an RFC 2047 encoded-word header ("=?UTF-8?Q?...?=" / "=?UTF-8?B?...?=").
+ *
+ * ADDED 2026-09-02. The reply printed a subject back to the reader as
+ *
+ *   Subject checked: =?UTF-8?Q?Fwd=3A_=F0=9F=9A=A8_Action_Required=3A_Storage_100=25_Full?=
+ *
+ * Any subject with a non-ASCII character -- an emoji, an accent, a currency
+ * symbol -- arrives encoded like that, and phishing subjects are full of emoji,
+ * so this hits precisely the messages the product exists for. It is not a small
+ * cosmetic problem: it is the first line the reader sees, and it says we did not
+ * understand their email.
+ */
+function decodeEncodedWords(value) {
+  if (!value || !value.includes("=?")) return value || "";
+  return value
+    // Adjacent encoded words join with the whitespace between them dropped,
+    // per RFC 2047. Done first so the decode below sees one continuous run.
+    .replace(/\?=\s+=\?/g, "?==?")
+    .replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g, (whole, charset, enc, text) => {
+      try {
+        let bytes;
+        if (enc.toUpperCase() === "B") {
+          const bin = atob(text.replace(/\s+/g, ""));
+          bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        } else {
+          // Q encoding: "_" is a space, "=XX" is a hex byte.
+          const q = text.replace(/_/g, " ");
+          const out = [];
+          for (let i = 0; i < q.length; i++) {
+            if (q[i] === "=" && /^[0-9A-Fa-f]{2}$/.test(q.slice(i + 1, i + 3))) {
+              out.push(parseInt(q.slice(i + 1, i + 3), 16));
+              i += 2;
+            } else {
+              out.push(q.charCodeAt(i) & 0xff);
+            }
+          }
+          bytes = Uint8Array.from(out);
+        }
+        // An unknown charset falls back to UTF-8 rather than failing the
+        // decode: a slightly wrong character beats raw encoding at the reader.
+        return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      } catch (err) {
+        return whole;   // undecodable: keep the text rather than lose it
+      }
+    });
+}
+
+/**
  * From: / Reply-To: style value -> { address, name }.
  *
  * HARDENED 2026-09-02. This used to take whatever sat between the first pair of
@@ -772,6 +913,33 @@ function extractLinks(text) {
 }
 
 /**
+ * Every RelayShield API endpoint answers through _ok() in relayshield_api.py,
+ * which returns { ok: true, data: { ... } }. The payload is one level down.
+ *
+ * FIXED 2026-09-02. scanLink read `data.analysis_id` and `data.immediate_signal`
+ * off the TOP level, where neither exists -- the top level holds only `ok` and
+ * `data`. So analysis_id was always undefined and every link came back
+ * "no analysis was started for this link", while immediate_signal was always
+ * undefined too, meaning the RelayShield IOC corpus, Google Safe Browsing and
+ * domain-age checks were never consulted at all.
+ *
+ * This is the SECOND bug in this function with the same shape. The first read a
+ * field that exists but never carries a verdict; this one read fields that were
+ * never at that level. Both produced a confident-looking "UNKNOWN" that was
+ * really "we did not look". A checker that cannot check must say so, and this
+ * one was saying nothing.
+ *
+ * Tolerant on purpose: a bare payload passes through untouched, so this keeps
+ * working if an endpoint is ever served without the envelope.
+ */
+function unwrap(body) {
+  if (body && typeof body === "object" && body.data && typeof body.data === "object") {
+    return body.data;
+  }
+  return body || {};
+}
+
+/**
  * Check one link through the same pipeline every other RelayShield surface uses.
  *
  * REWRITTEN 2026-09-02. The first version read `data.status` from
@@ -802,7 +970,7 @@ async function scanLink(url, apiKey, deadline) {
     if (!resp.ok) {
       return { url, status: "unknown", detail: `check unavailable (HTTP ${resp.status})` };
     }
-    submitted = await resp.json();
+    submitted = unwrap(await resp.json());
   } catch (err) {
     // A link check that failed must never render as a link that passed.
     return { url, status: "unknown", detail: "check unavailable" };
@@ -832,7 +1000,7 @@ async function scanLink(url, apiKey, deadline) {
         `${API_BASE}/v1/result/${encodeURIComponent(analysisId)}`,
         { headers: { "x-api-key": apiKey } });
       if (!resp.ok) break;
-      const data = await resp.json();
+      const data = unwrap(await resp.json());
       if (data.status === "pending") continue;
       if (data.verdict === "malicious" || data.verdict === "suspicious") {
         const n = data.malicious || data.suspicious || 0;
@@ -1171,7 +1339,8 @@ export default {
  *  it is the single most likely place to receive bytes that break the header
  *  block. */
 function makeReply(message, text) {
-  const rawSubject = message.headers.get("subject") || "your email check";
+  const rawSubject = decodeEncodedWords(message.headers.get("subject") || "")
+                     || "your email check";
   // Header-safe: ASCII printable only, no CR or LF (header injection), capped.
   const subject = rawSubject
     .replace(/[\r\n]+/g, " ")
@@ -1277,13 +1446,29 @@ async function scanAndReply(message, env, ctx, replyState) {
     return;
   }
 
-  if (await rateLimited(env.CHECKEMAIL_RL, sender)) {
+  // An allowlist for testing and for anyone we have a reason to exempt. Set with
+  //   npx wrangler secret put CHECKEMAIL_UNLIMITED --config wrangler.checkemail.toml
+  // as a comma-separated list of addresses. Absent means nobody is exempt.
+  const exempt = (env.CHECKEMAIL_UNLIMITED || "")
+    .toLowerCase().split(",").map((a) => a.trim()).filter(Boolean)
+    .includes(sender);
+
+  if (!exempt && await rateLimited(env.CHECKEMAIL_RL, sender)) {
     if (replyState) replyState.attempted = true;
+    // Says WHEN, not "shortly". A person told to wait an unspecified time by an
+    // automated system assumes it is broken, and the one thing this reply must
+    // not do is look like a failure -- they forwarded something because they
+    // were worried about it.
+    const mins = 60 - new Date().getMinutes();
     await message.reply(
       makeReply(message,
         "RelayShield: rate limit reached\n\n" +
         `The free email check allows ${RATE_LIMIT_PER_HOUR} messages an hour and ` +
-        `${RATE_LIMIT_PER_DAY} a day. Try again shortly.\n\n` +
+        `${RATE_LIMIT_PER_DAY} a day. Your hourly allowance resets in about ` +
+        `${mins} minute${mins === 1 ? "" : "s"}.\n\n` +
+        "Nothing was checked, so treat that message as unchecked: do not click " +
+        "links in it and do not enter a password or payment detail from it until " +
+        "you have confirmed it another way.\n\n" +
         "For continuous monitoring rather than one-off checks, see " +
         "https://relayshield.net?source=email-scan")
     );
@@ -1307,29 +1492,23 @@ async function scanAndReply(message, env, ctx, replyState) {
   const email = {
     from: parseAddress(message.headers.get("from")),
     replyTo: [parseAddress(message.headers.get("reply-to"))],
-    subject: message.headers.get("subject") || "",
+    subject: decodeEncodedWords(message.headers.get("subject") || ""),
   };
   const body = bodyText;
 
   // Whose message is this? Must be decided BEFORE the signals, because on an
   // inline forward the authentication headers describe the person asking us
   // rather than the message they are asking about.
-  const forwarded = detectForwardedOriginal(body);
+  const forwarded = detectForwardedOriginal(body, sender);
 
   // The IANA list is cached in KV and fails open: without the binding, or if
   // the fetch fails, tlds is null and the check simply does not fire. It must
   // never be possible for a network problem to call a real domain forged.
   const tlds = await knownTlds(env.CHECKEMAIL_RL);
 
-  const sig = headerSignals(email, message.headers, forwarded, {
-    bodyText: body,
-    tlds,
-    attachments: attachmentSignals(attachmentNames),
-    // Who is asking us. Used to spot a display name that copies their own
-    // account name onto somebody else's address.
-    recipientLocal: (sender.split("@")[0] || ""),
-  });
-
+  // Links are scanned BEFORE the signals, because one of the signals is about
+  // where the links point -- a page served from a public object store cannot be
+  // judged from the headers alone.
   const links = extractLinks(body).slice(0, MAX_LINKS_CHECKED);
   const deadline = Date.now() + LINK_SCAN_BUDGET_MS;
   const linkResults = env.RS_API_KEY
@@ -1339,14 +1518,31 @@ async function scanAndReply(message, env, ctx, replyState) {
         detail: "link checking is not configured on this deployment",
       }));
 
+  const sig = headerSignals(email, message.headers, forwarded, {
+    bodyText: body,
+    links: linkResults,
+    tlds,
+    attachments: attachmentSignals(attachmentNames),
+    // Who is asking us. Used to spot a display name that copies their own
+    // account name onto somebody else's address.
+    recipientLocal: (sender.split("@")[0] || ""),
+  });
+
+  // The forward parse is logged in full because it is where every wrong verdict
+  // so far has originated, and each time it was diagnosed by guessing rather
+  // than by reading. A one-line record of what was actually extracted turns the
+  // next wrong answer into a five-second read.
   console.log(
     "checkemail: scanned", message.from,
-    "forwarded=", Boolean(forwarded),
+    "forwarded=", forwarded
+      ? `yes(sender=${forwarded.address || "UNPARSED"}${forwarded.selfMatch ? ",selfMatch" : ""})`
+      : "no",
     "score=", sig.score,
     "flags=", sig.flags.length,
     "attachments=", attachmentNames.length,
     "tldlist=", tlds ? tlds.size : "unavailable",
-    "links=", linkResults.map((l) => l.status).join(",") || "none");
+    "links=", linkResults.map((l) => `${l.status}:${l.detail}`).join(" | ") || "none",
+    "bodyhead=", JSON.stringify(body.slice(0, 300)));
 
   const reply = buildReply(sig, linkResults, (email.subject || "").slice(0, 120), forwarded);
   if (replyState) replyState.attempted = true;

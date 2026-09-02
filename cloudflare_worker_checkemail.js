@@ -419,7 +419,15 @@ export default {
     const precedence = (message.headers.get("precedence") || "").toLowerCase();
     if (
       !sender ||
-      sender.endsWith("@relayshield.net") ||
+      // NARROWED 2026-09-02. This used to drop anything from @relayshield.net,
+      // which is far wider than the loop it was guarding against. Our reply is
+      // From: checkemail@relayshield.net, so THAT address is the only one that
+      // can loop -- and blocking the whole domain silently swallowed mail from
+      // andrew@relayshield.net (the founder's own send-as alias, the first
+      // account that would ever test this) and would block every colleague and
+      // every customer on the domain. A guard that also drops your own users is
+      // not a guard.
+      sender === "checkemail@relayshield.net" ||
       sender.startsWith("no-reply@") ||
       sender.startsWith("noreply@") ||
       sender.startsWith("mailer-daemon@") ||

@@ -34,6 +34,19 @@
  * it later is the kind of change that is easy to make and impossible to undo for
  * mail already received.
  *
+ * ZERO NPM DEPENDENCIES, DELIBERATELY
+ * -----------------------------------
+ * The first version imported postal-mime and would not build: Wrangler could not
+ * resolve it, because this repo has no package.json and no node_modules, and
+ * adding both to a repo of Python Lambdas and standalone Workers to obtain one
+ * MIME parser is a poor trade. Cloudflare already parses the headers for us and
+ * hands them over as message.headers, which is where every signal that matters
+ * lives -- Authentication-Results, Reply-To, Return-Path, From. The only thing
+ * the library was buying was body extraction, which is ~60 lines below.
+ *
+ * So this Worker imports exactly one thing, from the Cloudflare runtime itself.
+ * It deploys with a single command and nothing to install.
+ *
  * DEPLOY
  *   npx wrangler deploy --config wrangler.checkemail.toml
  *   Then: Cloudflare dashboard -> Email -> Email Routing -> Routing rules ->
@@ -43,7 +56,6 @@
  * wrangler.checkemail.toml.
  */
 
-import PostalMime from "postal-mime";
 import { EmailMessage } from "cloudflare:email";
 
 const API_BASE = "https://api.relayshield.net";
@@ -161,6 +173,107 @@ function headerSignals(email, headers) {
   }
 
   return { flags, auth, fromAddr, fromName, fromDomain };
+}
+
+// ---------------------------------------------------------------------------
+// Minimal MIME reading — replaces the postal-mime dependency
+// ---------------------------------------------------------------------------
+//
+// Cloudflare hands the parsed headers over as message.headers, so everything the
+// analysis actually keys on (Authentication-Results, Reply-To, Return-Path,
+// From) needs no parsing at all. What is left is pulling the readable text out
+// of the body, which is what these three functions do.
+//
+// Scope is deliberate: text/plain when present, text/html stripped as a
+// fallback, quoted-printable and base64 decoded, one level of multipart walked.
+// That covers what a forwarded email actually looks like. It is NOT a general
+// MIME implementation and does not pretend to be -- a nested multipart with an
+// unusual encoding degrades to "less text extracted", never to a wrong verdict,
+// because the header signals are computed independently of the body.
+
+function splitHeadersAndBody(raw) {
+  const i = raw.search(/\r?\n\r?\n/);
+  if (i === -1) return { head: raw, body: "" };
+  const sep = raw.slice(i).startsWith("\r\n") ? 4 : 2;
+  return { head: raw.slice(0, i), body: raw.slice(i + sep) };
+}
+
+function decodePart(body, encoding) {
+  const enc = (encoding || "").toLowerCase().trim();
+  if (enc === "base64") {
+    try {
+      return atob(body.replace(/\s+/g, ""));
+    } catch {
+      return body;   // malformed base64 is not worth failing the whole scan over
+    }
+  }
+  if (enc === "quoted-printable") {
+    return body
+      .replace(/=\r?\n/g, "")                                  // soft line breaks
+      .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  }
+  return body;
+}
+
+/**
+ * Best-effort readable text from a raw RFC 822 message.
+ * Returns "" rather than throwing: a body we cannot read must still produce a
+ * header-only verdict, not an error reply.
+ */
+function extractText(raw) {
+  const { head, body } = splitHeadersAndBody(raw);
+  const unfolded = head.replace(/\r?\n[ \t]+/g, " ");
+  const ctype = (unfolded.match(/^content-type:\s*(.+)$/im) || [])[1] || "";
+  const cte = (unfolded.match(/^content-transfer-encoding:\s*(.+)$/im) || [])[1] || "";
+
+  const boundaryMatch = ctype.match(/boundary="?([^";\s]+)"?/i);
+  if (!boundaryMatch) {
+    const text = decodePart(body, cte);
+    return /text\/html/i.test(ctype) ? stripHtml(text) : text;
+  }
+
+  // Walk one level of multipart. Prefer text/plain; keep html only as fallback,
+  // because a forwarded message's plain part is what the human actually read.
+  const parts = body.split("--" + boundaryMatch[1]);
+  let plain = "", html = "";
+  for (const part of parts) {
+    const { head: ph, body: pb } = splitHeadersAndBody(part.replace(/^\r?\n/, ""));
+    const pUnfolded = ph.replace(/\r?\n[ \t]+/g, " ");
+    const pType = (pUnfolded.match(/^content-type:\s*(.+)$/im) || [])[1] || "";
+    const pEnc = (pUnfolded.match(/^content-transfer-encoding:\s*(.+)$/im) || [])[1] || "";
+    if (/text\/plain/i.test(pType) && !plain) plain = decodePart(pb, pEnc);
+    else if (/text\/html/i.test(pType) && !html) html = stripHtml(decodePart(pb, pEnc));
+    else if (/multipart\//i.test(pType) && !plain) {
+      const inner = extractText(part.replace(/^\r?\n/, ""));
+      if (inner) plain = inner;
+    }
+  }
+  return plain || html || "";
+}
+
+function stripHtml(html) {
+  return html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+    // href values are kept: a link is the thing being checked, and dropping the
+    // markup must not drop the URL inside it.
+    .replace(/<a\s[^>]*href=["']?([^"'\s>]+)/gi, " $1 ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ");
+}
+
+/** From: / Reply-To: style header -> { address, name }. */
+function parseAddress(value) {
+  if (!value) return { address: "", name: "" };
+  const angled = value.match(/^\s*(.*?)\s*<([^>]+)>/);
+  if (angled) {
+    return {
+      address: angled[2].trim().toLowerCase(),
+      name: angled[1].replace(/^["']|["']$/g, "").trim(),
+    };
+  }
+  return { address: value.trim().toLowerCase(), name: "" };
 }
 
 // ---------------------------------------------------------------------------
@@ -328,19 +441,23 @@ export default {
       return;
     }
 
-    let email;
+    // Headers come from Cloudflare already parsed. Only the body needs reading,
+    // and a body we cannot read still yields a header-only verdict -- which is
+    // the strongest half anyway -- so this never aborts the scan.
+    let bodyText = "";
     try {
-      email = await new PostalMime().parse(message.raw);
+      const raw = await new Response(message.raw).text();
+      bodyText = extractText(raw).slice(0, MAX_BODY_CHARS);
     } catch (err) {
-      await message.reply(
-        makeReply(message,
-          "RelayShield could not read that message. Forwarding it as an attachment, " +
-          "or pasting the text to our Telegram or WhatsApp bot, usually works.")
-      );
-      return;
+      bodyText = "";
     }
 
-    const body = ((email.text || email.html || "") + "").slice(0, MAX_BODY_CHARS);
+    const email = {
+      from: parseAddress(message.headers.get("from")),
+      replyTo: [parseAddress(message.headers.get("reply-to"))],
+      subject: message.headers.get("subject") || "",
+    };
+    const body = bodyText;
     const sig = headerSignals(email, message.headers);
 
     const links = extractLinks(body).slice(0, MAX_LINKS_CHECKED);

@@ -22,10 +22,10 @@ let src = readFileSync(
   new URL("./cloudflare_worker_checkemail.js", import.meta.url), "utf8");
 src = src.replace('import { EmailMessage } from "cloudflare:email";',
   'class EmailMessage { constructor(f,t,raw){ this.from=f; this.to=t; this.raw=raw; } }');
-src += "\nexport { buildReply, headerSignals, detectForwardedOriginal, parseAddress, extractAttachmentNames, attachmentSignals, pressureSignals, stripHtml };\n";
+src += "\nexport { buildReply, headerSignals, detectForwardedOriginal, parseAddress, extractAttachmentNames, attachmentSignals, pressureSignals, stripHtml, decodeEncodedWords, unwrap, publicHostSignal };\n";
 const shim = new URL("./.checkemail_verdict_shim.mjs", import.meta.url);
 writeFileSync(shim, src);
-const { buildReply, headerSignals, detectForwardedOriginal, extractAttachmentNames, attachmentSignals, parseAddress: parseAddr, stripHtml } = await import(shim.href);
+const { buildReply, headerSignals, detectForwardedOriginal, extractAttachmentNames, attachmentSignals, parseAddress: parseAddr, stripHtml, decodeEncodedWords, unwrap, publicHostSignal } = await import(shim.href);
 
 const hdrs = (o) => ({ get: (k) => o[k.toLowerCase()] ?? null });
 
@@ -42,9 +42,10 @@ function verdict({ from, to = "", replyTo = "", headers = {}, body = "",
     replyTo: [parseFrom(replyTo)],
     subject: headers.subject || "",
   };
-  const forwarded = detectForwardedOriginal(body);
+  const forwarded = detectForwardedOriginal(body, (from.match(/<([^>]+)>/) || [])[1] || from);
   const sig = headerSignals(email, hdrs({ ...headers, "reply-to": replyTo }), forwarded, {
     bodyText: body,
+    links,
     tlds,
     attachments: attachmentSignals(extractAttachmentNames(raw)),
     recipientLocal: (to || "").split("@")[0],
@@ -322,6 +323,74 @@ expect("an address with no angle brackets is still recovered",
   parseAddr("From: alert-9626@ydxla.abn").address, "alert-9626@ydxla.abn");
 expect("a line with no address at all yields no address",
   parseAddr("Sender unknown").address, "");
+
+console.log("\n-- the API envelope: link checking had never returned a verdict --");
+
+// relayshield_api.py's _ok() returns { ok: true, data: { ... } }. scanLink read
+// analysis_id and immediate_signal off the TOP level, where neither exists, so
+// every link came back "no analysis was started" and the RelayShield IOC
+// corpus, Google Safe Browsing and domain-age checks were never consulted.
+expect("the envelope is unwrapped",
+  unwrap({ ok: true, data: { analysis_id: "abc", immediate_signal: "flagged" } }).analysis_id, "abc");
+expect("a bare payload passes through untouched",
+  unwrap({ analysis_id: "xyz" }).analysis_id, "xyz");
+expect("a null body does not throw", typeof unwrap(null), "object");
+
+console.log("\n-- a legitimate host carrying somebody else's page --");
+
+// The real forward's only links were storage.googleapis.com/midfielders/*.
+// Domain reputation is useless: the domain is Google's and always will be.
+const gcs = publicHostSignal([
+  { url: "https://storage.googleapis.com/midfielders/midfielders.html?act=cl&pid=12406_md" },
+]);
+expect("storage.googleapis.com is recognised", gcs.length, 1);
+expect("  ...and named by service", gcs[0].service, "storage.googleapis.com");
+expect("a company's own domain is not flagged",
+  publicHostSignal([{ url: "https://www.acme.com/invoice" }]).length, 0);
+expect("an unparseable URL does not throw",
+  publicHostSignal([{ url: "not a url" }]).length, 0);
+
+const hostedPhish = verdict({
+  from: '"Cloud Services" <billing@notify-cloud.com>', to: "andrew@x.com",
+  headers: {},
+  body: "Update your payment details within 24 hours or your files will be permanently deleted.",
+  links: [{ url: "https://storage.googleapis.com/midfielders/midfielders.html?act=cl",
+            status: "unknown", detail: "no verdict yet" }],
+});
+expect("public host + an ask under pressure reaches HIGH", hostedPhish.risk, "HIGH");
+expect("  ...and explains why reputation cannot see it",
+  hostedPhish.text.includes("borrows the host's good reputation"), true);
+expect("the public host alone, with no ask, is only MEDIUM",
+  verdict({ from: '"A" <a@b.com>', to: "andrew@x.com", headers: {},
+            body: "Here are the slides from today.",
+            links: [{ url: "https://storage.googleapis.com/x/y.html", status: "unknown", detail: "" }]
+          }).risk, "MEDIUM");
+
+console.log("\n-- never report the reader their own address as the sender --");
+
+const selfFwd = verdict({
+  from: '"Andrew Gibbs" <nzdsf2@gmail.com>', to: "nzdsf2@gmail.com",
+  headers: { "authentication-results": "spf=pass; dkim=pass; dmarc=pass" },
+  body: "---------- Forwarded message ---------\nFrom: Andrew Gibbs <nzdsf2@gmail.com>\nDate: x\n",
+});
+expect("a quoted From: matching the forwarder is treated as a parse failure",
+  selfFwd.forwarded.parseFailed, true);
+expect("  ...and is flagged as a self-match, not reported as a sender",
+  selfFwd.forwarded.selfMatch, true);
+expect("  ...so the reply never prints their own address as the original",
+  selfFwd.text.includes("original sender shows in the quoted"), false);
+
+console.log("\n-- RFC 2047 subjects must not reach the reader encoded --");
+
+expect("a Q-encoded subject with an emoji is decoded",
+  decodeEncodedWords("=?UTF-8?Q?Fwd=3A_=F0=9F=9A=A8_Action_Required?="),
+  "Fwd: \u{1F6A8} Action Required");
+expect("a B-encoded subject is decoded",
+  decodeEncodedWords("=?UTF-8?B?SGVsbG8gd29ybGQ=?="), "Hello world");
+expect("plain ASCII passes through untouched",
+  decodeEncodedWords("Your invoice"), "Your invoice");
+expect("a malformed encoded word is left alone rather than lost",
+  decodeEncodedWords("=?UTF-8?X?whatever?="), "=?UTF-8?X?whatever?=");
 
 console.log("\n--- the reply Andrew would now receive for his spam forward ---\n");
 console.log(realPhish.text);

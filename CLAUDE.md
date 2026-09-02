@@ -504,7 +504,32 @@ That is the thing their own tooling cannot do, because they cannot see the chann
 **Trigger to build:** the first non-zero count of `sk-or-v1-*` in **`relayshield_stolen_sessions`**, NOT `relayshield_intel_iocs`.
 
 **Corrected 2026-09-02.** A scan of `relayshield_intel_iocs` for `sk-or-v1-` returned 0 of 6,712,425 rows and was briefly read as "no OpenRouter keys collected". It is not: `_NHI_PATS` in `relayshield_intel_monitor.py` writes credential findings to `relayshield_stolen_sessions` (`type: nhi`), and `relayshield_intel_iocs` never receives them. A zero from the wrong table is not evidence of absence, and this one nearly became a recorded fact. Check it
-before writing any of it. Do not build the webhook against zero rows, and **do not quote a captured
+before writing any of it.
+
+**Then the RIGHT table was scanned, same day, and the answer was worse.**
+`relayshield_stolen_sessions` returned `Count: 0, ScannedCount: 9`. Nine rows is
+the WHOLE TABLE. And nine is a number this repo has seen before: the docstring of
+`_store_observed_session` records "the table held 9 rows on 2026-08-16, all of
+them source `demo`, after months of collection" -- the CORPUS-1 finding that
+`_store_stolen_session` required a `matched_email` and so discarded every session
+not already belonging to a customer.
+
+If it is still nine, and still the demo rows, **the CORPUS-1 fix has written
+nothing since it shipped**. `_store_observed_session` is only ever called from
+the archive-parsing path, so "no observed rows" and "no archive was parsed" are
+the same finding. A matching count is a LEAD, not a fact -- settle it with:
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/diagnose_stolen_sessions.py
+
+It reports the table by `source`, says whether the observed path has ever fired,
+and reads the INTEL-5 log lines to say WHERE the pipeline stops -- archives never
+seen, oversized, download failed, wrong format, or handler raised. Each is a
+different bug with a different fix, which is why `archives_parsed` as a single
+number cannot tell you.
+
+**Until that is fixed, no count out of this table means anything about the
+criminal market.** It measures our collection. Do not read a zero here as absence
+of OpenRouter keys in the wild, and do not quote any number from it. Do not build the webhook against zero rows, and **do not quote a captured
 OpenRouter key count to OpenRouter, Stripe, or anyone else until the category clears 100** — the
 standing measurement rule applies here with force, because this is a number that would be checked.
 

@@ -1,0 +1,16 @@
+name = "relayshield-checkemail"
+main = "cloudflare_worker_checkemail.js"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Per-sender rate limiting, and the indicators extracted from flagged links.
+# NOT message bodies -- see the privacy note at the top of the Worker. Create
+# with:  npx wrangler kv namespace create CHECKEMAIL_RL
+[[kv_namespaces]]
+binding = "CHECKEMAIL_RL"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# RS_API_KEY is a SECRET and is deliberately not in this file. Set it with:
+#   npx wrangler secret put RS_API_KEY --config wrangler.checkemail.toml
+# Without it the Worker still runs and still does header analysis; link checks
+# degrade to "unknown" rather than silently reading as clean.

@@ -73,6 +73,45 @@ ok &= check("em-dash inside reply body",
   mk({ "message-id": "<x@y>", subject: "s" }, "a@b.com"),
   "RelayShield — verdict\n");
 
+// THREADING. These are the cases that took down the first real forward.
+//
+// Cloudflare validates References against the thread and rejects the reply if
+// it disagrees. The value it wants is the INCOMING message's References chain
+// with the incoming Message-ID appended -- not the Message-ID alone, which is
+// what an earlier version of makeReply sent:
+//
+//   Error: provided References header is invalid; expected
+//   <51977-nzdsf2@sH994It.abn> <CAA5...@mail.gmail.com> <CAA5...@mail.gmail.com>
+//
+// It never showed on a freshly composed test message, because one has no chain.
+// It showed on the first forward, because every forward has one.
+function refsOf(raw) {
+  const line = raw.split("\r\n\r\n")[0].split("\r\n")
+    .find((l) => l.toLowerCase().startsWith("references:"));
+  return line ? line.slice("References:".length).trim() : null;
+}
+
+const chain = "<51977-nzdsf2@sH994It.abn> <CAA5aaa@mail.gmail.com>";
+const own = "<CAA5bbb@mail.gmail.com>";
+const threaded = makeReply(
+  mk({ "message-id": own, references: chain, subject: "Fwd: spam" }, "nzdsf2@gmail.com"), "b\n").raw;
+const gotRefs = refsOf(threaded);
+const wantRefs = `${chain} ${own}`;
+console.log((gotRefs === wantRefs ? "ok   " : "FAIL ") +
+  "References = incoming chain + incoming Message-ID" +
+  (gotRefs === wantRefs ? "" : `\n       got:  ${gotRefs}\n       want: ${wantRefs}`));
+ok &= gotRefs === wantRefs;
+
+const noChain = refsOf(makeReply(mk({ "message-id": own }, "a@b.com"), "b\n").raw);
+console.log((noChain === own ? "ok   " : "FAIL ") +
+  "no incoming chain: References is just the Message-ID");
+ok &= noChain === own;
+
+const noId = refsOf(makeReply(mk({ subject: "x" }, "a@b.com"), "b\n").raw);
+console.log((noId === null ? "ok   " : "FAIL ") +
+  "no Message-ID at all: References is omitted, never sent empty");
+ok &= noId === null;
+
 // Explicit: the injected Bcc must not have become a header.
 const inj = makeReply(mk({ "message-id": "<x@y>", subject: "hi\r\nBcc: victim@example.com" }, "a@b.com"), "b\n");
 const headBlock = inj.raw.split("\r\n\r\n")[0];

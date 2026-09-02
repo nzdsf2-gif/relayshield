@@ -142,26 +142,126 @@ function domainOf(addr) {
 // free webmail. "Andrew Gibbs" from gmail.com is a person. "PayPal Support"
 // from gmail.com is an attack, because PayPal does not send from gmail.com and
 // never will. That asymmetry is the whole value of the check.
-const IMPERSONATED_BRANDS = [
+//
+// WIDENED AGAIN 2026-09-02, same day, after a MetaMask phishing message scored
+// ZERO. It was "ApplyAML Meta Mask Details" <system@phrase.com>. The check
+// above was gated on the sending domain being FREE WEBMAIL, and phrase.com is
+// not webmail -- it is a real company's domain (Phrase, the localisation
+// platform) being used to send mail claiming to be MetaMask. So no check ran at
+// all, and the single loudest signal in the message went unexamined.
+//
+// The webmail gate was never the real rule. The real rule is:
+//
+//   the display name claims to be a brand, and the sending domain does not
+//   belong to that brand.
+//
+// gmail.com is one way for that to be true. A compromised SaaS account, a
+// hijacked ESP, a lookalike domain and a bulk sender are all the others, and
+// they are the ones a competent attacker actually uses.
+//
+// So each brand carries the domains that legitimately send its mail. Anything
+// else claiming that brand is flagged, webmail or not.
+//
+// FALSE-POSITIVE GUARD, deliberate: if the brand string appears in the sending
+// domain itself, no flag. "Apple Tree Nursery" <hello@appletreenursery.com>
+// contains "apple" and is a garden centre, not an impersonator. A name that
+// happens to contain a brand word, on a domain built from the same word, is
+// what an unrelated small business looks like.
+const BRAND_DOMAINS = {
   // Payments and banking
-  "paypal", "stripe", "venmo", "cash app", "zelle", "wise", "revolut", "monzo",
-  "chase", "wells fargo", "bank of america", "citibank", "citi", "capital one",
-  "hsbc", "barclays", "lloyds", "natwest", "santander", "halifax", "amex",
-  "american express", "visa", "mastercard",
-  // Crypto, where the loss is irreversible
-  "coinbase", "binance", "kraken", "gemini", "metamask", "ledger", "trezor",
-  "phantom", "uniswap", "opensea", "blockchain.com",
+  "paypal": ["paypal.com", "paypal.co.uk", "paypal-communication.com"],
+  "stripe": ["stripe.com"],
+  "venmo": ["venmo.com"],
+  "cash app": ["cash.app", "square.com", "block.xyz"],
+  "wise": ["wise.com", "transferwise.com"],
+  "revolut": ["revolut.com"],
+  "monzo": ["monzo.com"],
+  "chase": ["chase.com", "jpmorgan.com"],
+  "wells fargo": ["wellsfargo.com"],
+  "bank of america": ["bankofamerica.com", "bofa.com"],
+  "citibank": ["citi.com", "citibank.com"],
+  "capital one": ["capitalone.com"],
+  "hsbc": ["hsbc.com", "hsbc.co.uk"],
+  "barclays": ["barclays.co.uk", "barclays.com"],
+  "lloyds": ["lloydsbank.com", "lloydsbank.co.uk"],
+  "natwest": ["natwest.com"],
+  "santander": ["santander.co.uk", "santander.com"],
+  "american express": ["americanexpress.com", "aexp.com"],
+  "amex": ["americanexpress.com", "aexp.com"],
+  // Crypto, where the loss is irreversible and there is no chargeback
+  "coinbase": ["coinbase.com"],
+  "binance": ["binance.com"],
+  "kraken": ["kraken.com"],
+  "gemini": ["gemini.com"],
+  "metamask": ["metamask.io", "consensys.net", "consensys.io"],
+  "ledger": ["ledger.com"],
+  "trezor": ["trezor.io"],
+  "phantom": ["phantom.app"],
+  "uniswap": ["uniswap.org"],
+  "opensea": ["opensea.io"],
   // Big tech account takeover
-  "microsoft", "office 365", "outlook", "apple", "icloud", "google", "gmail",
-  "amazon", "aws", "meta", "facebook", "instagram", "whatsapp", "linkedin",
-  "netflix", "spotify", "dropbox", "docusign", "adobe", "ebay", "paypal inc",
+  "microsoft": ["microsoft.com", "office.com", "office365.com", "live.com", "outlook.com"],
+  "office 365": ["microsoft.com", "office.com", "office365.com"],
+  "apple": ["apple.com", "icloud.com"],
+  "icloud": ["apple.com", "icloud.com"],
+  "google": ["google.com", "gmail.com", "youtube.com"],
+  "gmail": ["google.com", "gmail.com"],
+  "amazon": ["amazon.com", "amazon.co.uk", "aws.amazon.com"],
+  "meta": ["meta.com", "facebook.com", "facebookmail.com"],
+  "facebook": ["facebook.com", "facebookmail.com", "meta.com"],
+  "instagram": ["instagram.com", "mail.instagram.com", "meta.com"],
+  "whatsapp": ["whatsapp.com", "meta.com"],
+  "linkedin": ["linkedin.com"],
+  "netflix": ["netflix.com"],
+  "spotify": ["spotify.com"],
+  "dropbox": ["dropbox.com", "dropboxmail.com"],
+  "docusign": ["docusign.com", "docusign.net"],
+  "adobe": ["adobe.com"],
+  "ebay": ["ebay.com", "ebay.co.uk"],
   // Government and tax, the classic urgency lever
-  "irs", "hmrc", "social security", "medicare", "dvla", "gov.uk",
+  "irs": ["irs.gov"],
+  "hmrc": ["hmrc.gov.uk", "gov.uk"],
+  "social security": ["ssa.gov"],
+  "medicare": ["medicare.gov", "cms.gov"],
+  "dvla": ["dvla.gov.uk", "gov.uk"],
   // Couriers, the classic pretext
-  "dhl", "fedex", "ups", "usps", "royal mail", "evri", "hermes", "dpd",
+  "dhl": ["dhl.com", "dhl.co.uk"],
+  "fedex": ["fedex.com"],
+  "ups": ["ups.com"],
+  "usps": ["usps.com", "usps.gov"],
+  "royal mail": ["royalmail.com", "royalmail.co.uk"],
+  "evri": ["evri.com"],
+  "dpd": ["dpd.co.uk", "dpd.com"],
   // Security brands, used to sell fake remediation
-  "norton", "mcafee", "geek squad", "best buy",
-];
+  "norton": ["norton.com", "nortonlifelock.com", "gendigital.com"],
+  "mcafee": ["mcafee.com"],
+  "geek squad": ["bestbuy.com", "geeksquad.com"],
+};
+
+/** Normalise a display name for brand matching: "Meta Mask" -> "metamask". */
+function normaliseBrandText(text) {
+  return (text || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Does this display name claim a brand the sending domain does not belong to?
+ * Returns the brand name, or "" if there is nothing to say.
+ */
+function impersonatedBrand(displayName, fromDomain) {
+  const name = normaliseBrandText(displayName);
+  const domain = (fromDomain || "").toLowerCase();
+  if (!name || !domain) return "";
+  for (const [brand, domains] of Object.entries(BRAND_DOMAINS)) {
+    const key = normaliseBrandText(brand);
+    if (!name.includes(key)) continue;
+    // The brand's own domains, and any subdomain of them.
+    if (domains.some((d) => domain === d || domain.endsWith("." + d))) return "";
+    // The unrelated-small-business guard described above.
+    if (normaliseBrandText(domain).includes(key)) return "";
+    return brand;
+  }
+  return "";
+}
 
 // A display name claiming a ROLE rather than a person. "Security Team" from a
 // free webmail address is the same trick with the brand left implicit.
@@ -419,6 +519,14 @@ const ASK_PHRASES = [
   "update your details", "update your information", "confirm your password",
   "sign in to continue", "log in to continue", "click here to", "click below to",
   "re-enter your", "reconfirm your", "restore your account",
+  // ADDED 2026-09-02 from a live MetaMask-impersonating message. Its ask was
+  // "please add your email now", with no deadline and no threat -- a softer
+  // shape than the classic "verify or lose access", and increasingly the common
+  // one, because it reads as helpful housekeeping rather than an emergency.
+  "add your email", "add your email address", "confirm your email",
+  "verify your email", "update your email", "email-based sign-in",
+  "email based sign in", "link your email", "we need your email",
+  "just click the button", "click the button below",
 ];
 const DEADLINE_PHRASES = [
   "within 24 hours", "within 48 hours", "within 72 hours", "in the next 24",
@@ -519,19 +627,24 @@ function headerSignals(email, headers, forwarded, ctx2) {
       "forwarded mail, so on its own it means nothing.");
   }
 
-  // The narrowed impersonation check.
-  if (fromName && WEBMAIL.has(fromDomain)) {
+  // Brand impersonation, on ANY domain. This no longer requires free webmail:
+  // see the note on BRAND_DOMAINS for why that gate was the wrong rule.
+  const brand = impersonatedBrand(fromName, fromDomain);
+  if (brand) {
+    const Brand = brand.replace(/\b\w/g, (c) => c.toUpperCase());
+    flags.push({ weight: 3, text:
+      `The display name says "${fromName}", but the message was sent from ` +
+      `${fromDomain}. That domain does not belong to ${Brand}. A display name is ` +
+      "typed by whoever sent the message and is not checked by anything, so it " +
+      "is the cheapest thing in an email to fake. If you have an account with " +
+      `${Brand}, go to their site or app yourself and look there. Nothing in ` +
+      "this message should be clicked to get to it." });
+  } else if (fromName && WEBMAIL.has(fromDomain)) {
+    // The role-name case only makes sense on webmail: a department name on a
+    // company's own domain is just a department.
     const nameLower = fromName.toLowerCase();
-    const brand = IMPERSONATED_BRANDS.find((b) => nameLower.includes(b));
     const authority = AUTHORITY_WORDS.find((w) => nameLower.includes(w));
-    if (brand) {
-      flags.push({ weight: 3, text:
-        `The sender's display name claims to be "${fromName}", but the address is ` +
-        `a free ${fromDomain} account. ${brand.replace(/\b\w/g, (c) => c.toUpperCase())} ` +
-        "does not send mail from free webmail, and neither does any bank, tax " +
-        "office or courier. This is the single most common shape of a phishing " +
-        "message." });
-    } else if (authority) {
+    if (authority) {
       flags.push({ weight: 2, text:
         `The display name "${fromName}" presents as a department or a support ` +
         `desk, but the address is a free ${fromDomain} account. A real ` +

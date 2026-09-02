@@ -75,6 +75,93 @@ def assert_account():
     return acct
 
 
+MARKER = "ARCHIVE-FUNNEL-1"
+
+
+def report_build():
+    """Is the instrumented build actually deployed?
+
+    ADDED 2026-09-02. The previous version ended section 3 with "if the deploy
+    carrying that change has not run yet, this run is not an answer" -- and then
+    gave the reader no way to find out which it was. That is the same defect as
+    the one it was written to diagnose: a check that cannot distinguish its own
+    two outcomes.
+
+    The deployed package is the authority. Downloading it and looking for the
+    marker settles it in one step, with no guessing from timestamps.
+    """
+    print("=" * 72)
+    print("0. IS THE INSTRUMENTED BUILD LIVE?")
+    print("=" * 72)
+    lam = boto3.client("lambda")
+    try:
+        url = lam.get_function(FunctionName="relayshield-intel-monitor")["Code"]["Location"]
+    except Exception as exc:
+        print(f"\n  could not read the function: {exc}")
+        return None
+    try:
+        import io
+        import urllib.request
+        import zipfile
+        with urllib.request.urlopen(url, timeout=60) as resp:
+            blob = resp.read()
+        with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            src = z.read("relayshield_intel_monitor.py").decode("utf-8", "replace")
+    except Exception as exc:
+        print(f"\n  could not read the deployed package: {exc}")
+        return None
+
+    live = MARKER in src
+    print(f"\n  {MARKER} present in the DEPLOYED code: {live}")
+    if live:
+        print("  The document funnel is instrumented. Section 3 is meaningful.")
+    else:
+        print("  NOT DEPLOYED. Section 3 below cannot tell you anything: before")
+        print("  this change a document rejected by the filter left no trace, so")
+        print("  zero everywhere is the expected reading whether documents are")
+        print("  arriving or not. Merge/deploy relayshield_intel_monitor.py first,")
+        print("  wait for one monitor run, then re-run this script.")
+    return live
+
+
+def report_activity(days):
+    """Is the monitor doing anything at all in this window?
+
+    Zero documents can mean the pipeline is broken OR that the collection
+    surface itself is quiet. Those need different work, and the archive probes
+    cannot separate them, so the run totals are read directly.
+    """
+    print("\n" + "=" * 72)
+    print(f"3b. IS THE MONITOR COLLECTING AT ALL? (last {days}d)")
+    print("=" * 72)
+    logs = boto3.client("logs")
+    start = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
+    for label, needle in [
+        ("monitor runs that logged a summary", "Monitor run"),
+        ("channel resolution failures", "0 of"),
+        ("messages seen", "messages_processed"),
+        ("flood waits", "FloodWait"),
+        ("session/auth errors", "AuthKey"),
+    ]:
+        try:
+            resp = logs.filter_log_events(
+                logGroupName=LOG_GROUP, startTime=start,
+                filterPattern=f'"{needle}"', limit=50)
+            n = len(resp.get("events", []))
+        except Exception as exc:
+            print(f"\n  {label}: query failed ({exc})")
+            continue
+        print(f"\n  {n:5d}  {label}")
+        for ev in resp.get("events", [])[:2]:
+            print(f"         {ev['message'].strip()[:160]}")
+    print()
+    print("  If the monitor is running but seeing no documents, the honest")
+    print("  conclusion is that the CHANNELS are not posting archives -- which is")
+    print("  a collection-surface problem (which channels we watch), not a")
+    print("  parsing one. That is a different fix and belongs in")
+    print("  intel_corpus_growth_plan.md, not here.")
+
+
 def scan_table():
     ddb = boto3.resource("dynamodb")
     table = ddb.Table(TABLE)
@@ -228,11 +315,19 @@ def main():
               "resource. Re-run with AWS_PROFILE=relayshield.\n")
     assert_account()
 
+    instrumented = report_build()
+    print()
+
     rows = scan_table()
     by_source = report_table(rows)
     if by_source:
         report_corpus1(by_source)
     report_logs(args.days)
+    report_activity(args.days)
+
+    if instrumented is False:
+        print("\n  REMINDER: the instrumented build is NOT deployed, so section 3")
+        print("  above is not evidence. Deploy first, then re-run.")
 
     print("\n" + "=" * 72)
     print("WHAT THIS MEANS FOR THE OPENROUTER WEBHOOK")

@@ -32,66 +32,130 @@ when deciding what to build next — it just becomes an opinion.
 
 ---
 
-## FD-1 — GitHub Marketplace Action. BLOCKED on a bug that has happened twice.
+## FD-1 — GitHub Marketplace Action. STEP BY STEP.
 
-`rsscan/action.yml` pins `rsscan==0.1.3`. **PyPI is at 0.2.1**, verified live 2026-09-01. The
-Action therefore installs a version two releases behind, and `rsscan/orb/rsscan.yml` carries the
-same stale pin.
+**Why it is not done:** `rsscan/` in THIS repo is a stale snapshot. PyPI is at 0.2.1 and its Source
+link points at `github.com/RelayShield/rsscan`, which is the authoritative copy. Editing the pin
+here changes nothing anyone can install. The work has to happen in the other repo, on the Mac,
+because this container cannot reach it.
 
-`rsscan/RELEASE_0.1.3.md` records this exact defect once already: *"the GitHub Action and CircleCI
-orb both pinned `rsscan==0.1.0` while PyPI was at 0.1.3"*. It recurred because nothing asserts the
-pin matches the published version.
+`tools/rsscan_sync_version.py` and `rsscan/tests/test_version_pin.py` are written and committed
+here. Step 2 copies them across.
 
-**There are two copies of rsscan and they have diverged.** `pyproject.toml` in this repo says
-0.1.3; PyPI says 0.2.1 and points its Source link at `github.com/RelayShield/rsscan`. So the
-authoritative source is the other repo, and `rsscan/` here is a stale snapshot. Fixing the pin here
-changes nothing anyone can install, and creates a second source of truth for the same file. This is
-the DRIFT RULE in a place `lambda_drift_check.yml` does not look.
+**ANDREW RUNS THIS** — clone the real repo and see what is stale:
 
-Order of work:
+```zsh
+cd ~ && git clone https://github.com/RelayShield/rsscan rsscan-live && cd ~/rsscan-live && python3 tools/rsscan_sync_version.py --check
+```
 
-1. Decide which repo is authoritative and record it in the first line of `rsscan/README.md`. If it
-   is `RelayShield/rsscan`, this directory should become a pointer or be deleted.
-2. In the authoritative repo: bump the pin in `action.yml` and `orb/rsscan.yml` to the published
-   version, **and add a test that fails when the pin and `pyproject.toml` disagree.** Without the
-   test this recurs a third time.
-3. Then publish: Releases → Draft a new release → tick *Publish this Action to the GitHub
-   Marketplace*. `action.yml` already has the required `branding:` block (shield / purple), so
-   nothing else blocks the listing itself.
+That will fail with "no such file" for the tool, because the tool lives in the other repo. So first:
 
-## FD-2 — pre-commit.com hooks index. Ready.
+```zsh
+mkdir -p ~/rsscan-live/tools ~/rsscan-live/tests && cp ~/"Side SaaS Hustle"/tools/rsscan_sync_version.py ~/rsscan-live/tools/ && cp ~/"Side SaaS Hustle"/rsscan/tests/test_version_pin.py ~/rsscan-live/tests/ && cd ~/rsscan-live && python3 tools/rsscan_sync_version.py --check
+```
 
-`rsscan/.pre-commit-hooks.yaml` is present and correct: `id: rsscan`, `language: python`,
-`pass_filenames: false`. That last one is deliberate — the hook reads the staged diff itself so it
-scans only **added** lines, which is what stops pre-existing secrets making the hook unbypassable
-on a repo with legacy findings.
+It prints the version from `pyproject.toml` and every file that disagrees. Then rewrite them:
 
-The listing at <https://pre-commit.com/hooks.html> is generated from the repo
-<https://github.com/pre-commit/pre-commit.com>. **Read that repo's contributing notes for the exact
-file to edit before opening the PR** — I could not reach it from the container to confirm the
-filename, and guessing it is how the first URL in this file came to 404.
+```zsh
+cd ~/rsscan-live && python3 tools/rsscan_sync_version.py && python3 -m unittest tests.test_version_pin
+```
 
-Prerequisite: the hooks repo must be public and carry a tag matching the `rev:` in our own README.
+Commit and tag. The tag matters: the README's pre-commit `rev:` points at it, so a missing tag
+makes the documented install fail.
 
-## FD-3 — MCP registries. Manifests written.
+```zsh
+cd ~/rsscan-live && git add -A && git commit -m "chore: sync version references to pyproject.toml, add a test that keeps them synced" && git push origin main
+```
 
-Strongest thematic fit on the list: we ship an MCP server **and** sell `mcp-registry-risk`, an
-endpoint whose entire subject is which MCP servers are safe to connect to. Being absent from the
-registries our own product scores is the weakest position available.
-`RelayShield_Strategy.md` has flagged `modelcontextprotocol/servers` as the "highest-priority new
-candidate" for some time without it being done.
+**ANDREW CLICKS THIS** — publish the Action. On `github.com/RelayShield/rsscan`:
 
-Material is committed at `mcp_registry/`:
+1. **Releases** (right-hand sidebar) → **Draft a new release**.
+2. **Choose a tag** → type `v0.2.1` → **Create new tag: v0.2.1 on publish**.
+3. Release title: `v0.2.1`.
+4. Tick **Publish this Action to the GitHub Marketplace**. It appears only because `action.yml`
+   already has a `branding:` block. If the tick box is greyed out, the reason is printed next to it.
+5. Primary category: **Code quality**. Secondary: **Security**.
+6. **Publish release**.
 
-- `listing.md` — the copy, with the four real tools read from the server's own source rather than
-  from a description. A registry entry naming a tool the server does not implement is a support
-  ticket from every agent that calls it.
-- `smithery.yaml` — copy to the **root of the MCP server's own repo**, not this one.
-- `README.md` — the three destinations and what each needs.
+**Then paste me the URL of the Marketplace listing** so it can go in the repo.
 
-Three destinations, increasing effort: **mcp.so** (web form), **Smithery** (`smithery.yaml` in the
-server repo), **`modelcontextprotocol/servers`** (a PR adding one row to their community list —
-highest value, slowest, because a maintainer reviews it).
+---
+
+## FD-2 — pre-commit.com hooks index. STEP BY STEP.
+
+**Why it is not done:** I could not reach `github.com/pre-commit/pre-commit.com` from this
+container to confirm which file lists the hooks, and guessing a path is how an earlier URL in this
+file came to 404. The check below takes ten seconds and removes the guess.
+
+**Prerequisite:** the rsscan repo must be public and carry the tag from FD-1. Do FD-1 first.
+
+**ANDREW RUNS THIS** — find the exact file, so we edit the right one:
+
+```zsh
+cd ~ && git clone --depth 1 https://github.com/pre-commit/pre-commit.com pc-site && grep -rl "pre-commit-hooks" ~/pc-site --include="*.md" --include="*.yaml" --include="*.yml" | head
+```
+
+Paste me the output. The list of hooks lives in one of those files, and it is either
+`sections/hooks.md` or a YAML file that generates it. **Do not edit before we know which.**
+
+**ANDREW CLICKS THIS** — once we know the file, on `github.com/pre-commit/pre-commit.com`:
+
+1. Open that file → the **pencil** icon → GitHub offers to fork; accept.
+2. Add one entry in the same shape as its neighbours, keeping alphabetical order if the file is
+   ordered. The entry is:
+   `https://github.com/RelayShield/rsscan` with the description
+   **"Blocks commits that add API keys, cloud credentials and LLM provider keys, scanning only added lines."**
+3. **Commit changes** → *Create a new branch* → **Propose changes**.
+4. PR title: `Add rsscan hook`. Body: one sentence saying what it does and that it scans added lines
+   only. Nothing else; that index takes small PRs.
+
+---
+
+## FD-3 — MCP registries. STEP BY STEP.
+
+**Why it is not done:** the manifests are written and committed at `mcp_registry/`; nothing has been
+submitted. Three destinations, do them in this order.
+
+### FD-3a — mcp.so. Fastest, no PR.
+
+**ANDREW CLICKS THIS:**
+
+1. Go to <https://mcp.so> → **Submit** (top navigation).
+2. Fill the form from `mcp_registry/listing.md`, which has the copy and the four real tool names
+   read from the server's own source. **Do not retype the tool names from memory** — a registry
+   entry naming a tool the server does not implement is a support ticket from every agent that
+   calls it.
+3. Submit. It is reviewed by hand, so expect days not minutes.
+
+### FD-3b — Smithery. One file in the server's own repo.
+
+`mcp_registry/smithery.yaml` goes in the **root of the MCP server's repo**, not this one.
+
+**ANDREW RUNS THIS** — tell me where that repo is first if it is not `RelayShield/relayshield-mcp`:
+
+```zsh
+cd ~ && git clone https://github.com/RelayShield/relayshield-mcp mcp-live && cp ~/"Side SaaS Hustle"/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml && cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml for the Smithery registry" && git push origin main
+```
+
+**ANDREW CLICKS THIS:** then <https://smithery.ai> → **Sign in with GitHub** → **Add Server** →
+pick the repo. Smithery reads `smithery.yaml` from the default branch.
+
+### FD-3c — modelcontextprotocol/servers. Highest value, slowest.
+
+A maintainer reviews it, so it takes the longest and is worth the most.
+
+**ANDREW CLICKS THIS:**
+
+1. Go to <https://github.com/modelcontextprotocol/servers>.
+2. Open `README.md` → **pencil** icon → accept the fork.
+3. Find the **Third-Party Servers → Community Servers** list. Add one row in the same format as its
+   neighbours, alphabetically. Content comes from `mcp_registry/listing.md`.
+4. **Commit changes** → *Create a new branch* → **Propose changes**.
+5. PR title: `Add RelayShield MCP server`. Body: two sentences. What it does, and the fact that it
+   is live and versioned. No marketing.
+
+**Do not claim a corpus number in any of the three.** MEASUREMENT DOCTRINE applies: these listings
+are read by people who will check.
 
 ## FD-4 — Splunkbase. Not started.
 

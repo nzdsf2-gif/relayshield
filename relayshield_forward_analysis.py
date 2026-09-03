@@ -698,6 +698,24 @@ def quickstart_text(platform: str) -> str:
     thing -- a fourth phrasing of "send me the message" turns a card someone
     reads in a panic into a list they skim.
 
+    NAMED VENDORS REMOVED 2026-09-02. The card used to say "Google Safe
+    Browsing and VirusTotal". Three reasons not to, in ascending order of how
+    much they cost:
+
+      - It dates. Naming a supplier in product copy means every supplier change
+        is also a copy change on four surfaces, and the copy is what drifts.
+      - It advertises for them, in our card, to our user.
+      - It invites the wrong comparison. "Checked against VirusTotal" tells a
+        reader they could have gone to VirusTotal themselves. The corpus
+        collected from criminal channels is the half nobody else has, and
+        naming the commodity half louder than the exclusive half sells the
+        wrong thing.
+
+    "The major link-reputation services" says the same thing, stays true
+    through any supplier change, and keeps our own corpus first in the
+    sentence. This is the same discipline as MEASUREMENT DOCTRINE: do not lead
+    with the part every competitor also has.
+
     A FOURTH was added 2026-09-02 because email is not a fourth phrasing. It is
     a different capability: a forwarded email carries Authentication-Results
     written by the recipient's own provider, which is unforgeable by the sender
@@ -723,8 +741,8 @@ def quickstart_text(platform: str) -> str:
             "screenshot hides where its buttons really link, so send the link "
             "itself too if you can.\n\n"
             "*3. Check a link before you click it.*\n"
-            "*SCAN* <link> — checked against our own criminal-source corpus, "
-            "Google Safe Browsing and VirusTotal.\n\n"
+            "*SCAN* <link> — checked against our own criminal-source corpus and "
+            "the major link-reputation services.\n\n"
             "*4. Forward a suspicious EMAIL to " + CHECKEMAIL_ADDRESS + ".*\n"
             "Send it from your own email account, not from here. An email "
             "carries delivery records that say whether it really came from the "
@@ -762,8 +780,8 @@ def quickstart_text(platform: str) -> str:
         "cannot forward into Telegram. A screenshot hides where its buttons "
         "really link, so send the link itself too if you can.\n\n"
         "<b>3. Check a link before you click it.</b>\n"
-        "/scan &lt;link&gt; — checked against our own criminal-source corpus, "
-        "Google Safe Browsing and VirusTotal.\n\n"
+        "/scan &lt;link&gt; — checked against our own criminal-source corpus and "
+        "the major link-reputation services.\n\n"
         "<b>4. Forward a suspicious email to " + CHECKEMAIL_ADDRESS + ".</b>\n"
         "Send it from your own email account, not from here. An email carries "
         "delivery records that say whether it really came from the domain it "

@@ -7354,8 +7354,9 @@ def _inline_check_url(url: str):
     # phishing domain can be hours old and in no database yet.
     return ("No known flags", "Not a guarantee, see the note",
             f"🔍 *No known flags:* `{short}`\n\nNot found in criminal IOC feeds "
-            "or Safe Browsing, and the domain is not brand new. That is not the "
-            "same as safe: new phishing domains take hours to appear anywhere.")
+            "or the major reputation services, and the domain is not brand new. "
+            "That is not the same as safe: new phishing domains take hours to "
+            "appear anywhere.")
 
 
 def _inline_check_address(addr: str):

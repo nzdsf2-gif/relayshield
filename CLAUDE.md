@@ -288,6 +288,30 @@ not in it.
 
 ---
 
+## A BROKEN WORKFLOW FAILS SILENTLY. VALIDATE AFTER EVERY EDIT.
+
+Added 2026-09-02, the same day it cost a day of drift detection.
+
+A comment was inserted into `lambda_drift_check.yml` at the wrong indentation. The lines dedented
+out of the `run: |` block and broke the YAML. GitHub's response to a workflow it cannot parse is:
+
+    .github/workflows/lambda_drift_check.yml: No jobs were run
+
+**That is quieter than a failure.** A red run gets read. A run that did not happen reads like
+nothing happened, so the check that exists to catch silent drift became silently dead itself and
+stayed that way across scheduled runs.
+
+**After ANY edit to a file under `.github/workflows/`, run:**
+
+    python3 test_workflows_parse.py
+
+It checks every workflow parses AND defines jobs — a file that parses but has no `jobs:` also runs
+nothing and looks identical from the outside. It is deliberately a standalone script and NOT a
+workflow: a workflow that validates workflows fails the same way it is meant to detect.
+
+The general form, which is the part worth remembering: **the alarm you must check hardest is the one
+that goes quiet, not the one that goes red.**
+
 ## THE DRIFT RULE — the most expensive lesson in this repo
 
 **Anything not in the repo is erased by the next deploy of that component.**

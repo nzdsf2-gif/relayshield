@@ -25,13 +25,26 @@
 # reads like a permissions problem.
 #
 # So this script resolves the name from AWS rather than trusting the map, and
-# prints the diff in the direction that decides what happens next:
+# then answers the one question that decides what happens next:
 #
-#   lines present in LIVE but not in main  -> hand-deployed work. RECOVER IT
-#                                             FIRST with recover_live_handler.yml.
-#                                             Do not map it in the deployer.
-#   only main's own commits missing live   -> live is merely stale. Safe to add
-#                                             to deploy_lambdas.yml and deploy.
+#   IS THE LIVE FILE EXACTLY SOME COMMIT'S VERSION OF IT?
+#
+#   yes -> live is merely STALE. There is nothing to recover, because every byte
+#          of it is already in git. Safe to add to deploy_lambdas.yml and deploy.
+#   no  -> live holds content NO COMMIT EVER HELD: hand-deployed work. RECOVER
+#          IT FIRST with recover_live_handler.yml.
+#
+# THE FIRST VERSION OF THIS SCRIPT GOT THAT WRONG, on 2026-09-03, on its first
+# real run. It classified by counting diff lines -- any '+' line meant "live
+# carries something main does not" -- and a MODIFIED line produces a '+' and a
+# '-' both. The one '+' in the Discord diff was
+#
+#     "content": rendered["text"] + UPSELL_FOOTER,
+#
+# which is not live-only work at all: it is main's own line as it stood one
+# commit ago. The heuristic said RECOVER on a function that needed nothing of
+# the sort. Counting is not the test. Matching a historical version is, and it
+# is exact rather than heuristic, so this asks git directly.
 
 set -eu
 
@@ -132,15 +145,31 @@ if diff -q "$FILE" "$WORK/live_handler.py" >/dev/null; then
   exit 0
 fi
 
-# diff -u repo live: '+' lines exist only in LIVE, '-' lines only in main.
 diff -u "$FILE" "$WORK/live_handler.py" > "$WORK/handler.diff" || true
-LIVE_ONLY=$(grep -c '^+[^+]' "$WORK/handler.diff" || true)
-MAIN_ONLY=$(grep -c '^-[^-]' "$WORK/handler.diff" || true)
-
-echo "   DRIFT. $LIVE_ONLY line(s) exist only in LIVE, $MAIN_ONLY only in main."
-echo "   ('+' is live, '-' is main. The whole diff follows -- read it.)"
+echo "   DRIFT. ('+' is live, '-' is main. The whole diff follows -- read it.)"
 echo
 cat "$WORK/handler.diff"
+echo
+
+# Is the live file EXACTLY some commit's version of this file? Every distinct
+# content this file has ever had in git is the version at a commit that touched
+# it, so walking those is exhaustive. An exact match means every byte of live is
+# already committed and there is nothing to recover, whatever the diff's shape.
+echo "== 4b. Is live exactly a committed version of $FILE?"
+STALE_AT=""
+for REV in $(git log --format=%H -- "$FILE"); do
+  if git show "$REV:$FILE" 2>/dev/null | diff -q - "$WORK/live_handler.py" >/dev/null 2>&1; then
+    STALE_AT="$REV"
+    break
+  fi
+done
+if [ -n "$STALE_AT" ]; then
+  echo "   YES -- live is byte-identical to $FILE as of $(git log -1 --format='%h %ad %s' --date=short "$STALE_AT")"
+  echo "   Commits to this file since then, which live is missing:"
+  git --no-pager log --format='     %h %ad %s' --date=short "$STALE_AT"..HEAD -- "$FILE"
+else
+  echo "   NO -- live holds content that no commit of $FILE has ever held."
+fi
 echo
 
 echo "== 5. Every other relayshield_*.py in the package"
@@ -164,10 +193,10 @@ done
 echo
 
 echo "== 6. What to do with that"
-if [ "$LIVE_ONLY" -gt 0 ]; then
+if [ -z "$STALE_AT" ]; then
   cat <<'VERDICT'
-   LIVE CARRIES LINES MAIN DOES NOT. Treat that as hand-deployed work until the
-   diff above proves otherwise, and RECOVER IT FIRST:
+   LIVE HOLDS CONTENT NO COMMIT EVER HELD. That is hand-deployed work, so
+   RECOVER IT FIRST:
 
      Actions -> Recover Live Lambda Handler -> Run workflow
        function: (the name printed in step 2)
@@ -179,11 +208,12 @@ if [ "$LIVE_ONLY" -gt 0 ]; then
 VERDICT
 else
   cat <<'VERDICT'
-   LIVE IS MERELY STALE -- it is main minus main's own commits, with nothing
-   live-only in it. There is nothing to recover, so the next step is to give the
-   function a deploy path: add it to the FUNCS map in
-   .github/workflows/deploy_lambdas.yml alongside the other handlers, run
-   python3 test_workflows_parse.py, commit, and merge. The next merge touching
-   relayshield_discord_bot.py then ships the email-check footer.
+   LIVE IS MERELY STALE -- every byte of it is already committed, so there is
+   nothing to recover. The next step is a deploy path: the function belongs in
+   LAMBDA_MAP and in the paths: trigger of .github/workflows/deploy_lambdas.yml.
+   Note what that does NOT do on its own -- the deployer ships a function only
+   when the PUSH changed its source, so mapping it in a push that touches only
+   workflow files deploys nothing. The push that maps it must also touch
+   relayshield_discord_bot.py.
 VERDICT
 fi

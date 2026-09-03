@@ -44,6 +44,25 @@ NOTE ON DUPLICATION: this mirrors `_heuristic_url_check` in
 relayshield_telegram_webhook.py rather than importing it, because the two run in
 separate Lambdas. That is a drift risk and it is logged as its own task to
 extract into a shared module both zips can include.
+
+DEPLOY PATH, ADDED 2026-09-03 -- IT DID NOT HAVE ONE BEFORE
+------------------------------------------------------------
+For its whole life this file was in the deploy map of nothing. Every change to
+it was hand-deployed or not deployed at all, so main being right and live being
+wrong was the NORMAL state, not an anomaly: the email-check footer merged on
+2026-09-02 was correct on main and absent from Discord, and merging it again
+would have changed nothing.
+
+It is now in deploy_lambdas.yml, after its first drift diff was read rather than
+assumed. tools/discord_bot_drift.sh found the live package byte-identical to
+this file as of 0c429e0 -- stale by exactly one commit, with nothing live-only
+in it -- which is the only condition under which mapping a function in the
+deployer is safe. Live carrying something main does not is what cost 2,583 lines
+on 2026-08-17, and that is recovered first, never overwritten.
+
+One consequence worth knowing before editing this file again: the deployer ships
+a function only when the PUSH changed its source. A push that touches only
+workflows deploys nothing here, however correct the map is.
 """
 
 import base64

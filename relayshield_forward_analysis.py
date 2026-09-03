@@ -639,8 +639,7 @@ def paste_hint(platform: str) -> str:
     """
     if platform == PLATFORM_WHATSAPP:
         return (
-            "\U0001F4E8 *Before checking the menu, try these steps to bypass "
-            "sending commands.*\n\n"
+            "\U0001F4E8 *Before checking the menu, try these steps first.*\n\n"
             "*Copy any suspicious message and paste it here: copy, paste or "
             "send.* It works for a text, a link or a message from someone "
             "already in your contacts.\n\n"

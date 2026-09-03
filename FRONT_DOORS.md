@@ -22,9 +22,9 @@ when deciding what to build next — it just becomes an opinion.
 
 | ID | Front door | Feeds | Effort | Status |
 |---|---|---|---|---|
-| FD-1 | GitHub Marketplace Action (rsscan) | API / developer | Hours | In progress — `--check` run, pins NOT yet rewritten |
-| FD-2 | pre-commit.com hooks index | rsscan | Hours | File confirmed: `sections/hooks.md`. Needs one PR |
-| FD-3 | MCP registries (mcp.so, Smithery, `modelcontextprotocol/servers`) | Agentic bundle, TI | 1 day | Manifests written. FD-3a is ten minutes and needs no repo |
+| FD-1 | GitHub Marketplace Action (rsscan) | API / developer | Hours | **DONE 2026-09-02.** v0.2.1 published, Marketplace badge live |
+| FD-2 | pre-commit.com hooks index | rsscan | — | **DEAD AS SCOPED.** Curated page, >500 stars AND must operate on files. rsscan fails both |
+| FD-3 | MCP registries (Smithery, `modelcontextprotocol/servers`) | Agentic bundle, TI | 1 day | mcp.so now charges $39 — skip. FD-3b and FD-3c are free and next |
 | FD-4 | Splunkbase app | TI corpus licences | 3-5 days | Not started |
 | FD-5 | OpenCTI connector (Filigran) | TI corpus licences | 2-3 days | Not started |
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
@@ -81,35 +81,52 @@ cd ~/rsscan-live && git add -A && git commit -m "chore: sync version references 
 
 ---
 
-## FD-2 — pre-commit.com hooks index. FILE CONFIRMED: `sections/hooks.md`.
+## FD-2 — pre-commit.com hooks index. **DEAD AS SCOPED. Do not open the PR.**
 
-The grep on 2026-09-02 returned seven files. `sections/hooks.md` is the index that renders at
-<https://pre-commit.com/hooks.html>. The others mention the phrase for unrelated reasons:
-`new-hooks.md` is the how-to-write-a-hook guide, `.pre-commit-config.yaml` is the site's own config.
-**Edit `sections/hooks.md` and nothing else.**
+**Corrected 2026-09-02 by reading the file, which is what should have happened before any
+instruction was given.** The earlier entry described this as "ready, needs one PR". It is not, and
+that PR would have been closed without comment.
 
-**Prerequisite:** FD-1 finished — repo public, versions synced, tag pushed. The index links to a
-repo, and a broken link is a rejected PR.
+`sections/hooks.md` is not an open index. It is a hand-picked **featured hooks** page, and its last
+section states the rules outright:
 
-**ANDREW RUNS THIS** — see the exact shape of a neighbouring entry, so the new one matches:
+```text
+this page is not intended to be exhaustive
 
-```zsh
-cd ~/pc-site && head -30 sections/hooks.md && echo "=== entries near where R goes ===" && grep -n -i -B 1 -A 3 "github.com/re" sections/hooks.md | head -40
+you may send a pull request to expand this list however there are a few
+requirements you *must* follow or your PR will be closed without comment:
+
+- the tool must already be fairly popular (>500 stars)
+- the tool must use a managed language
+- the tool must operate on files
 ```
 
-Paste that back and I will write the exact line. The file is ordered, and matching the neighbours'
-punctuation exactly is what gets a one-line PR merged without discussion.
+rsscan fails two of the three:
 
-**ANDREW CLICKS THIS** — on <https://github.com/pre-commit/pre-commit.com>:
+1. **>500 stars.** Not close. This is a gate on popularity, so it cannot be worked around; it can
+   only be outgrown.
+2. **"must operate on files".** rsscan sets `pass_filenames: false` and reads the staged diff
+   itself. That is deliberate and it is the best thing about the hook -- scanning only ADDED lines
+   is what stops pre-existing secrets making it unbypassable on a repo with legacy findings. The
+   design choice that makes it good is the one that disqualifies it here. That trade is worth
+   keeping; the listing is not worth losing it for.
 
-1. Open `sections/hooks.md` → the **pencil** icon → GitHub offers to fork; accept.
-2. Paste the line I give you, in the right alphabetical position.
-3. **Commit changes** → *Create a new branch* → **Propose changes**.
-4. PR title: `Add rsscan`. Body, one sentence:
-   *"Adds rsscan, which blocks commits that add API keys, cloud credentials and LLM provider keys, scanning only added lines."*
-   Nothing else. That index takes small PRs and rejects essays.
+(It passes the third: `language: python` is a managed language.)
 
----
+**What to do instead, in order of value:**
+
+- **Nothing, for now.** Revisit only if rsscan passes 500 stars, at which point requirement 2 still
+  needs an answer.
+- **The GitHub search path the page itself recommends.** It points readers at
+  `path:.pre-commit-hooks.yaml language:YAML`. rsscan is already discoverable there for free, as
+  long as the file stays in the public repo. Nothing to do, but it means "absent from the index" is
+  not the same as "invisible to someone looking for hooks".
+- **Add the `pre-commit-hooks` topic to the rsscan repo** (Settings -> topics). Free, and it is how
+  the awesome-* lists and third-party aggregators find candidates.
+
+**Effort saved: the PR, and the follow-up when it was closed.** Recorded here so no future session
+re-derives "ready, needs one PR" from the old note.
+
 
 ## FD-3 — MCP registries. STEP BY STEP, per destination.
 
@@ -117,25 +134,26 @@ The copy and the four real tool names are in `mcp_registry/listing.md`. **Read t
 that file, never from memory** — a registry entry naming a tool the server does not implement is a
 support ticket from every agent that calls it.
 
-### FD-3a — mcp.so. Do this first: no repo access, no PR, ten minutes.
+### FD-3a — mcp.so. **PAID NOW ($39). Skip it.**
 
-**ANDREW RUNS THIS** — print the copy you will paste into the form:
+**Corrected 2026-09-02.** The submit form now offers only a **$39 one-time publishing fee**:
+"publish immediately without review", verified badge, featured placement, dofollow link. The free
+review queue that made this the ten-minute first step is either gone or no longer surfaced on that
+page.
 
-```zsh
-cd ~/"Side SaaS Hustle" && cat mcp_registry/listing.md
-```
+**Do not pay it**, for two reasons that are about measurement rather than the money:
 
-**ANDREW CLICKS THIS:**
+1. A paid listing on a directory measures nothing. The whole point of the front-door programme is
+   that a channel which cannot be attributed becomes an opinion, and "we bought placement" tells us
+   nothing about whether the channel works.
+2. FD-3b and FD-3c are free, carry more weight with the audience that matters, and are not yet
+   done. Paying to jump a queue we have not tested is the wrong order.
 
-1. Go to <https://mcp.so>.
-2. Top navigation → **Submit** (it may read *Submit Server*, or be a **+** button).
-3. Sign in with GitHub if asked.
-4. Fill the form from the file you just printed:
-   - **Repository URL** — the MCP server's GitHub URL.
-   - **Name** — `RelayShield`.
-   - **Description** — the one-paragraph description from `listing.md`.
-   - **Category / Tags** — `security`, `threat-intelligence`.
-5. **Submit.** Reviewed by a human, so expect days.
+**If you want to check for a free path anyway:** on the submit page, look above and below the paid
+card for a "free", "community" or "submit for review" option, and check the **Discover** or
+**Servers** pages for a "submit yours" link that skips the paid form. If the only route is the $39
+one, close the tab. Revisit if FD-3b and FD-3c land and the traffic justifies it.
+
 
 ### FD-3b — Smithery. One file, in the SERVER's repo.
 

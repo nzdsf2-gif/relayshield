@@ -123,6 +123,17 @@ ${body}
 <footer><div class="wrap">
   <p>${esc(NAME)} &mdash; <a href="https://api.relayshield.net/developers">API documentation</a> &middot; <a href="/rss.xml">RSS</a></p>
   <p>Questions: <a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
+  <!-- The email check, on every page. ADDED 2026-09-02.
+       This belongs on the blog and NOT on the API landing site: the blog is
+       read by people who arrived worried about something, and forwarding an
+       email needs no account, no signup and no API key. It is the only
+       zero-friction entry point in the product, and it was live for a day with
+       nowhere pointing at it. Deliberately phrased as a thing you can do, not
+       as a product line. -->
+  <p>Got a suspicious email? Forward it to
+     <a href="mailto:checkemail@relayshield.net">checkemail@relayshield.net</a>
+     and you get a plain-text verdict back by reply. No account needed. We store
+     the verdict and the indicators we extract, never your email.</p>
 </div></footer>
 </body></html>`;
 }

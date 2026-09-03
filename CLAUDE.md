@@ -457,8 +457,10 @@ someone else's product, in front of users who never chose us.
 **`relayshield_developer_signup.py` is the SIXTH handler with source in the repo, live traffic and
 no deploy path** — found while registering the `tg-widget` key in its `_SOURCE_BANNERS` table. It
 serves api.relayshield.net/developers: pricing, the signup form, free-tier key issue, every landing
-banner. So a registered attribution key reaches nobody until that function deploys. **Its first diff
-was read the same day and it is the RECOVER-FIRST case — see the section above. Do not map it.**
+banner. So a registered attribution key reached nobody until that function deployed. **Its first
+diff was read, recovered and reconciled the same day — see the section above. It is now in
+`deploy_lambdas.yml`, and `iam_github_deploy_invoke.json` gained it too, so its first CI deploy does
+not repeat run 134's denied probe.**
 
 ### relayshield_developer_signup.py IS THE 2026-08-17 CASE AGAIN, and this time the code takes money
 
@@ -491,17 +493,32 @@ What is live and not in git, in the order it would hurt to lose:
 - Corrected corpus figures throughout: 494K distinct indicators, 5.8M sightings, 95 channels, where
   main still says 5.0M IOCs and 85 channels.
 
-**IT IS SAFE TODAY ONLY BECAUSE THE FUNCTION IS IN NO DEPLOY MAP.** Merging main does not touch it.
-The moment it is added to `deploy_lambdas.yml`, the next merge deletes all of the above with no
-error anywhere. Do not map it. The `tg-widget` banner registered this session sits in main's copy
-and is inert until the reconcile, which is the correct order: recover first, then re-apply.
+**IT WAS SAFE ONLY BECAUSE THE FUNCTION WAS IN NO DEPLOY MAP.** Until the reconcile below landed,
+adding it to `deploy_lambdas.yml` would have deleted all of the above on the next merge with no
+error anywhere. That order — recover, reconcile, only then map — is the whole rule.
 
-**Recovery, and it is the whole package, not the handler:** dispatch `recover_live_handler.yml` with
-function `relayshield-developer-signup`, handler `relayshield_developer_signup.py`, branch
-`claude/recovered-live-relayshield-developer-signup`. Reconcile onto main hunk by hunk the way the
-2026-08-26 recovery was, then re-apply `tg-widget` on top, then re-run
-`sh tools/handler_drift.sh relayshield_developer_signup.py` and expect it to say live matches the
-recovery commit and is missing only the tg-widget commit. That is the self-verifying end state.
+**RECOVERED AND RECONCILED THE SAME DAY.** `recover_live_handler.yml` pushed the live package to
+`claude/recovered-live-relayshield-developer-signup` (`dfe60a2`), and it is now on main as two
+commits, deliberately not one:
+
+1. `93310e3` — the live bytes, verbatim, at the handler's own path. A pure move, no edits.
+2. `4690b85` — the three registrations main had and live did not: `apify` (2026-08-27),
+   `mcp-registry` (2026-09-02), `tg-widget` (2026-09-03), re-applied verbatim.
+
+**Splitting it in two is what makes the result checkable.** Live is byte-identical to `93310e3` and
+missing exactly `4690b85`, which is the ordinary stale case, so the function could finally be mapped
+in `deploy_lambdas.yml`. One squashed commit would have left live matching nothing and the drift
+check crying wolf forever.
+
+**One thing from main was deliberately dropped: the alias `"rsscan" -> "github"`.** Live gives
+`rsscan` its own banner and removes that alias, and `_resolve_source` applies aliases BEFORE the
+banner table, so with the alias in place rsscan's own banner is unreachable. A key that exists,
+resolves, and renders the wrong thing is worse than a missing key, because nothing looks broken.
+
+The reconcile was verified structurally rather than by eye: comparing the two files' top-level
+symbols and both attribution tables showed 15 live-only symbols, 8 live-only banners and 42
+live-only aliases, all preserved, and exactly 3 banners plus 5 aliases re-added.
+`test_developer_signup_banners.py` now pins those invariants with `ast` and no boto3.
 
 **The general form, for the third time: a handler with source in the repo, live traffic and no
 deploy path accumulates hand-deployed work silently, and the longer it goes unread the more

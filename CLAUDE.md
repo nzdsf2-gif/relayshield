@@ -335,7 +335,7 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ## WHERE 2026-09-02 LEFT THINGS — read this first
 
-### TOP 10 FOR THE NEXT SESSION, in order
+### THE LIST FOR THE NEXT SESSION, in order (11 items)
 
 1. **Scope and build the widget.** Decided this session, not started. An embeddable
    "check this link / check this address" widget for third-party Telegram bots and Mini Apps. The
@@ -357,9 +357,22 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
    uses `scheme: "exact"` on Base — identical to our 28 live x402 endpoints.
 5. **Aduna — Reggie Daniels.** Founder's former colleague works there and will text him. Outreach
    messaging is written in `aduna_outreach.md`.
-6. **FD-8 finish: one edit, one publish.** `server.json` websiteUrl -> `?source=mcp-registry`, then
-   re-publish. See FD-8.
-7. **FD-9: check Glama by hand.** glama.ai is blocked from the container. Status genuinely unknown.
+6. **FD-8 finish — official MCP registry attribution. ONE EDIT, ONE PUBLISH.**
+   `registry.modelcontextprotocol.io` has carried RelayShield since 2026-05-10 (six versions, latest
+   0.2.7, status active) with a bare `https://relayshield.net` as its `websiteUrl` — so four months
+   of arrivals from the canonical MCP directory logged `unmatched:` and rendered no banner. The
+   `mcp-registry` key is now registered in `_SOURCE_BANNERS`, so the only remaining steps are:
+   change `websiteUrl` in `~/mcp-live/server.json` to `https://relayshield.net?source=mcp-registry`,
+   then re-publish with `mcp-publisher` (the registry is versioned, so this is a new version, not an
+   edit — read that repo's README for the established command rather than inventing one). While
+   there: the record's `repository.url` says `github.com/relayshield/...` while the namespace is
+   `io.github.nzdsf2-gif/`. Probably harmless, worth a look.
+7. **FD-9 — verify Glama by hand.** `glama.json` is present in the MCP server repo, but `glama.ai`
+   is rejected by the container's egress policy, so the listing status is genuinely UNKNOWN, not
+   absent. Open <https://glama.ai/mcp/servers>, search RelayShield. If listed, get
+   `?source=mcp-registry` onto the link it points at — the key is registered and `glama.ai` is
+   already a referer host. If not listed, Glama indexes from GitHub, so the route is making sure
+   `glama.json` is on the default branch, not a submission form.
 8. **relayshield-agentic-api drift.** Recovered onto `claude/recovered-live-relayshield-agentic-api`
    by `recover_live_handler.yml`. **NOT yet reconciled into main.** Live carries a branded
    `API_BASE_URL` and a Bundle D Stripe billing branch that main does not; deploying main over it
@@ -369,6 +382,14 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
    section 0 now says outright whether that build is live.
 10. **XSOAR blog + landing line**, triggered by `check_xsoar_pack.sh` reporting ON MASTER, never by
     a date.
+11. **`relayshield_discord_bot.py` — read its first drift diff, then decide.** FIFTH instance of
+    source-in-repo, live, and in NEITHER map. It was added to `lambda_drift_check.yml` ONLY on
+    2026-09-02, deliberately: a red diff is the alarm and gets read before anything is mapped in the
+    deployer, because live may carry hand-deployed code a repo-sourced deploy would delete with no
+    error anywhere. **The function name in the map is UNVERIFIED** — if the check reports "not
+    readable", fix the name, do not drop the entry. Only when the diff shows live is merely stale
+    does it go into `deploy_lambdas.yml`. Until then no edit to that file ships automatically, which
+    is why the email-check footer added this session is not visible in Discord.
 
 ### Done and verified 2026-09-02
 
@@ -409,7 +430,7 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ## WHERE 2026-08-30 LEFT THINGS — read this first
 
-### TOP 10 FOR THE NEXT SESSION, in order
+### The list that session left, as of 2026-08-30 (HISTORY, not a queue)
 
 1. **Telegram + WhatsApp forward handler and compromised-contact check.** Designed, decided, NOT
    built. Integration points already located: `handle_message` (`relayshield_telegram_webhook.py`

@@ -539,6 +539,40 @@ The bare `/developers` URL will never show it, by design.
 That is also the check: `curl -sS "…?source=tg-widget" | grep -c "Arriving from a Telegram bot"`
 returns 1 when it is live, and the same command on the bare URL returns 0.
 
+### Two things this session got wrong, and the founder caught both
+
+**I claimed the MetaMask Snap was a live surface. It is not.** The integration request was submitted
+and there has been no response. The repo already recorded that in three places
+(`victim_side_outreach_messages.md`, `xcitium_outreach.md`, `NEXT_SESSION_2026-08-19.md`), and I
+wrote "we already have the plugin-shaped surface that matters" without checking any of them. That is
+CLAUDE.md's own rule broken by CLAUDE.md's own author: **a doc claiming something is done is a lead,
+not a fact.** A `metamask-snap` key exists in `_SOURCE_BANNERS`, registered before shipping exactly
+as the rule requires, and a registered key is not a live integration.
+
+**I ranked the bot's menu button as the top Mini App discovery lever.** The bot has a tiny number of
+users, so a Mini App hung off it inherits a tiny number of users. The ranking was right in general
+and wrong for us, which is how a plan ends up describing somebody else's company. Re-ranked in
+`miniapp_discovery_and_stripe_choice.md`: the Telegram blog channel first, then Mini App announcement
+channels, then directories, then attributed deep links, and the menu button fifth because it costs
+almost nothing rather than because it reaches anyone.
+
+### The first real prospect sweep was mostly unusable, and it was the extractor
+
+216 rows, and the top 25 included `root@203.0.113.4` (an RFC 5737 documentation IP),
+`trial@telegram.bot`, `k7m2q9x1a3@yourdomain.com`, a YouTube demo link and several `t.me` links, all
+counted as reachable contacts. `contacts_from` filtered exactly one thing, `example.com`.
+
+That is not cosmetic. **Contactability is 20 of the 100 score points**, so the ranking was partly
+measuring bad extraction, and mailing a documentation example is how a sending domain earns a spam
+reputation. `tools/contact_hygiene.py` now screens both fields, in the extractor AND again in the
+generator, because a `prospects_wide.jsonl` produced before the fix still holds those rows and the
+generator is the last thing standing before a message goes out. Seven tests, every case taken from
+that sweep.
+
+**Also re-run it with `--stars 5..50`.** Without the flag the sweep spends its whole `--limit` inside
+`stars:0..1`, which is why the results were dominated by brand-new repos: the script's own docstring
+says so and the run log shows the single `stars:0..1` line.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -557,8 +591,14 @@ returns 1 when it is live, and the same command on the bare URL returns 0.
 - **`tools/generate_outreach.py`** + `test_generate_outreach.py` — item 2's generator, and the ten
   tests that stop a draft ever diagnosing a prospect.
 - **`miniapp_discovery_and_stripe_choice.md`** — why the widget must not carry a Mini App link, what
-  actually drives Mini App discovery, why a browser extension is not the play, and which Stripe
-  agentic product to select.
+  actually drives Mini App discovery, why a browser extension is not the play, which Stripe agentic
+  product to select, and the four questions to put to Jake while access is in review.
+- **`tools/contact_hygiene.py`** + `test_contact_hygiene.py` — the screen that stops a README
+  example becoming an outreach recipient. Wired into both the prospector and the generator.
+- **`tools/find_miniapp_channels.py`** — searches for channels that announce new Mini Apps and
+  reports measured member counts, ON THE PROSPECTING SESSION. It refuses to run against
+  `relayshield/telethon_session` at all: 99 channels of collection depend on that account, and a
+  prospecting sweep is how it gets flood-limited.
 - **`iam_github_deploy_invoke.json` gained `relayshield-discord-bot`**, plus the checker, the
   applier and the validator wiring described above.
 - **An unreadable function now fails the drift run.** It previously emitted a `::warning::` inside

@@ -524,6 +524,21 @@ live-only aliases, all preserved, and exactly 3 banners plus 5 aliases re-added.
 deploy path accumulates hand-deployed work silently, and the longer it goes unread the more
 expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and grew a billing path.
 
+### The tg-widget banner is not missing. It is a per-arrival banner.
+
+Asked on 2026-09-03 after all three runs went green: "I do not see the tg-widget banner on
+api.relayshield.net/developers." It is not supposed to be there.
+
+`_SOURCE_BANNERS` entries render into the `<!--REFERRER_BANNER-->` placeholder, which sits directly
+under the nav and above the hero, and ONLY when the arrival carries `?source=`/`?src=` or a matching
+Referer host. `tg-widget` deliberately claims no referer hosts, so the parameter is the only way in.
+The bare `/developers` URL will never show it, by design.
+
+    https://api.relayshield.net/developers?source=tg-widget
+
+That is also the check: `curl -sS "…?source=tg-widget" | grep -c "Arriving from a Telegram bot"`
+returns 1 when it is live, and the same command on the bare URL returns 0.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -539,6 +554,11 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
   needed the same three questions the same day. `tools/discord_bot_drift.sh` is now a wrapper, so
   every reference to it in this file and in the workflow comments still works.
 - **`xsoar_pack_watch.yml`** — the XSOAR gate is watched daily instead of remembered.
+- **`tools/generate_outreach.py`** + `test_generate_outreach.py` — item 2's generator, and the ten
+  tests that stop a draft ever diagnosing a prospect.
+- **`miniapp_discovery_and_stripe_choice.md`** — why the widget must not carry a Mini App link, what
+  actually drives Mini App discovery, why a browser extension is not the play, and which Stripe
+  agentic product to select.
 - **`iam_github_deploy_invoke.json` gained `relayshield-discord-bot`**, plus the checker, the
   applier and the validator wiring described above.
 - **An unreadable function now fails the drift run.** It previously emitted a `::warning::` inside
@@ -565,10 +585,17 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
    an email**, and 19 of the top 25 tagged `wallets` or `payments` — bots already handling other
    people's money. **Register the `source=` keys in `_SOURCE_BANNERS` BEFORE any widget ships**;
    FD-8 below is what happens when that is skipped.
-2. **Tailored outreach to the 109.** Founder wants it; agreed approach is a GENERATED DRAFT PER
-   PROSPECT that he reviews and sends, keyed on what each repo actually does. Not mass mail: volume
-   is not the lever, relevance is, and blasting maintainers who never asked is how a domain gets
-   blocked.
+2. **Tailored outreach to the 109. THE GENERATOR IS BUILT, 2026-09-03: `tools/generate_outreach.py`.**
+   It reads `prospects_wide.jsonl` and writes `outreach_bot_prospects.md`: one draft per prospect
+   keyed on the capability their own README asserts, the contact channel, the evidence line the
+   draft rests on, and a tracking table. **It cannot run in a container** — the prospect file is
+   generated output and lives on the Mac. Ten tests pin the rule that matters: the drafts never
+   assert anything about a prospect's security, because we can read a README and cannot see anyone's
+   backend, and "we analysed your app and found exposures" from an unknown security vendor is one
+   word away from an extortion email. Original entry follows. Founder wants it; agreed approach is a
+   GENERATED DRAFT PER PROSPECT that he reviews and sends, keyed on what each repo actually does.
+   Not mass mail: volume is not the lever, relevance is, and blasting maintainers who never asked is
+   how a domain gets blocked.
 3. **Apify: "your Actor as a tool for AI agents" post.** Their content programme pays **$500 per
    article** on the Apify/Crawlee blog and $100 credits for dev.to under their org. The July call
    closed 2026-08-16; it is QUARTERLY, so the next call is the target. Theme 2 fits
@@ -577,6 +604,11 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
 4. **Stripe MPP follow-up with Jake Lamoine.** Open question carried: does x402 settlement count
    toward early-adopter status. Card via SPT minimum is $0.50, stablecoin $0.01 USDC, and the sample
    uses `scheme: "exact"` on Base — identical to our 28 live x402 endpoints.
+   **DECIDED 2026-09-03, of the four cards in the Agentic Commerce console: select ACCEPT MACHINE
+   PAYMENTS.** It is the productised version of the rail we already run. Retail is a product
+   catalogue and we have no SKUs; the agent wallet is spend control on the BUY side and we are the
+   sell side; Projects is infrastructure we have. Reasoning, including why the agent wallet is the
+   pitch TO Stripe rather than a fit for us, is in `miniapp_discovery_and_stripe_choice.md`.
 5. **Aduna — Reggie Daniels.** Founder's former colleague works there and will text him. Outreach
    messaging is written in `aduna_outreach.md`.
 6. **FD-8 finish — official MCP registry attribution. ONE EDIT, ONE PUBLISH.**

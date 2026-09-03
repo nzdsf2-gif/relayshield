@@ -76,6 +76,22 @@ The durable venv, created once, because Homebrew Python is PEP 668 externally-ma
     python3 -m venv ~/.rsvenv
     ~/.rsvenv/bin/pip install boto3
 
+### 12. Vendor documentation can contain YOUR OWN API KEY. Read before pasting.
+
+Added 2026-09-03. A Stripe docs page was pasted into chat with its "Copy for LLM" content, and the
+curl samples had the account's **live test secret key interpolated into them** — Stripe personalises
+`sk_test_...` into the examples for a signed-in reader. Nobody typed a credential; copying the page
+carried one.
+
+It was a test-mode key, so no real money is reachable, but test data includes real email addresses
+whenever a real address was used to test. Roll it in the Dashboard under Developers, API keys, and
+treat the class as: **any vendor doc page read while signed in may be personalised with your
+credentials.** Skim what you are pasting for `sk_`, `rk_`, `Bearer `, `api_key=` and long opaque
+strings before it leaves the machine.
+
+Nothing in this repo should ever carry one either: `tools/` scripts read secrets from Secrets
+Manager at runtime, and that is the pattern to follow rather than an env var in a doc.
+
 ### 9. Every `aws` command in a pasted block uses `--no-cli-pager`.
 
 Same failure as rule 8, different tool. AWS CLI **v2 pipes output through a pager** when stdout is
@@ -538,6 +554,29 @@ The bare `/developers` URL will never show it, by design.
 
 That is also the check: `curl -sS "…?source=tg-widget" | grep -c "Arriving from a Telegram bot"`
 returns 1 when it is live, and the same command on the bare URL returns 0.
+
+### MINI APP DISCOVERY — the ranking, decided 2026-09-03
+
+Recorded here because the founder asked for it to be, and because the first version of this ranking
+was wrong in a way that is easy to repeat.
+
+**Re-ranked: blog channel first, then Mini App announcement channels, then directories, then
+attributed deep links, with the menu button fifth because it is cheap rather than because it reaches
+anyone.**
+
+The error worth not repeating: the menu button on `@relayshield_bot` is the top lever for a bot with
+an audience, and ours has a tiny number of users, so a Mini App hung off it inherits a tiny number of
+users. **Rank a surface by how it performs for US, not by how it performs in general.** Reasoning and
+the full list are in `miniapp_discovery_and_stripe_choice.md` §2.
+
+**Four channels measured on the prospecting account** by `tools/find_miniapp_channels.py`:
+`@swoptoky_news` (205,055, Cyrillic), `@web3telegrambotx` (72,742), `@findminiapp` (56,380),
+`@telegtapps` (9,673). Three are usable; the Cyrillic one needs a Russian-language submission or a
+skip, which is what `--latin-only` and the new `script` column are for.
+
+**SEQUENCING, and it decides when any of this happens: WE DO NOT HAVE A MINI APP YET.** These
+channels announce Mini Apps, and each will give us exactly one first impression. Submitting before
+the thing exists spends it. The list is the target for the day v1 ships.
 
 ### Two things this session got wrong, and the founder caught both
 

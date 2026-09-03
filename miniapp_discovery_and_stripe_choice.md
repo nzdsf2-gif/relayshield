@@ -170,3 +170,33 @@ The framing that has worked in every one of these conversations, and that is wor
 agent wallet answers "is this agent allowed to spend this much". Nothing in the stack answers "is
 the thing it is about to pay legitimate". An agent with a valid card, inside its limits, paying a
 fraudulent API is a fully authorised transaction.
+
+## 6. Payment method configurations are not the MPP, and the page carries a credential
+
+Asked 2026-09-03, from the Payment method configurations page: is this a way to build the MPP
+configuration?
+
+**No. Different layer entirely.** A payment method configuration decides WHICH PAYMENT METHODS a
+customer sees in Checkout or the Payment Element: card, Link, Klarna, iDEAL, and so on, per
+scenario. It is a presentation and conversion setting on checkout flows we already run. The Merchant
+Partner Programme and agentic commerce access are an ACCOUNT-LEVEL programme gated on Stripe's
+review of the request Jake shared, and clicking through to Accept machine payments returning that
+same request is the proof: no dashboard configuration opens that gate.
+
+Where a payment method configuration IS worth ten minutes, separately from any of this: the direct
+Stripe doors for Bundle A ($150/mo) and Bundle D ($299/mo) are B2B subscriptions, and buy-now-pay-
+later methods on a business subscription are noise at best. One configuration for the subscription
+flows and the default for everything else is a tidy-up, not a strategy, and it changes nothing about
+machine payments.
+
+Two practical notes from that page:
+
+- **It said "You're integrating in Test mode."** Anything configured there applies to test mode
+  only. The live-mode equivalent is a separate configuration.
+- **The pasted docs contained the account's own `sk_test_` secret key**, because Stripe interpolates
+  the signed-in reader's key into its curl samples. Nobody typed a credential; copying the page
+  carried one. Test mode limits the damage, but test data holds real email addresses whenever a real
+  address was used to test. Roll the test key in the Dashboard under Developers, API keys. The
+  general rule is now CLAUDE.md rule 12: a vendor doc page read while signed in may be personalised
+  with your credentials, so skim for `sk_`, `rk_`, `Bearer ` and long opaque strings before pasting
+  anything anywhere.

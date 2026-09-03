@@ -61,9 +61,38 @@ KEYWORDS = [
     "new mini app",
     "ton apps",
     "web apps telegram",
+    # Added after the first run, 2026-09-03. The founder had seen a channel
+    # called "Trending Apps" that the first keyword set did not reach: the
+    # catalogues do not all describe themselves as "mini apps", and several
+    # index by what is popular rather than what is new.
+    "trending apps",
+    "app of the day",
+    "best mini apps",
+    "tma apps",
+    "telegram app store",
 ]
 
 MAX_PER_KEYWORD = 40
+
+# Enough Cyrillic in the title or description and the channel publishes in
+# Russian. Not a judgement about the channel: a submission written in English to
+# a Russian-language audience converts badly and reads as spam, which is worth
+# knowing BEFORE writing it rather than after. The founder flagged exactly this
+# on the first run.
+_CYRILLIC = set(range(0x0400, 0x0500))
+
+
+def _script_hint(text):
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return "unknown"
+    cyr = sum(1 for c in letters if ord(c) in _CYRILLIC)
+    share = cyr / len(letters)
+    if share > 0.5:
+        return "cyrillic"
+    if share > 0.1:
+        return "mixed"
+    return "latin"
 
 
 def _secret(name):
@@ -72,7 +101,7 @@ def _secret(name):
     return json.loads(sm.get_secret_value(SecretId=name)["SecretString"])
 
 
-async def _sweep(session_data, min_members, pause):
+async def _sweep(session_data, min_members, pause, latin_only):
     from telethon import TelegramClient
     from telethon.sessions import StringSession
     from telethon.tl.functions.contacts import SearchRequest
@@ -111,15 +140,35 @@ async def _sweep(session_data, min_members, pause):
                 continue
 
             if members >= min_members:
+                title = getattr(chat, "title", username)
+                script = _script_hint(f"{title} {about}")
+                if latin_only and script == "cyrillic":
+                    print(f"  @{username}: skipped, publishes in Cyrillic")
+                    await asyncio.sleep(pause)
+                    continue
+
+                # A catalogue that stopped posting is worth nothing whatever its
+                # member count says, and the count alone cannot tell you.
+                last_post = ""
+                try:
+                    msgs = await client.get_messages(entity, limit=1)
+                    if msgs:
+                        last_post = msgs[0].date.strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+
                 rows.append({
                     "username": username,
-                    "title": getattr(chat, "title", username),
+                    "title": title,
                     "members": members,
+                    "script": script,
+                    "last_post": last_post,
                     "about": about[:300],
                     "found_via": keyword,
                     "url": f"https://t.me/{username}",
                 })
-                print(f"  @{username}  {members:,}  {getattr(chat, 'title', '')[:50]}")
+                print(f"  @{username}  {members:,}  {script:<8} last post {last_post or '?'}  "
+                      f"{title[:40]}")
             await asyncio.sleep(pause)
         await asyncio.sleep(pause)
 
@@ -139,16 +188,27 @@ def write_report(rows, path, min_members):
         "channel, through whatever route that channel actually publishes. Do not DM the "
         "members and do not post into the channels.",
         "",
-        "**Member count is the only measured number here.** It is not engagement, and a large "
-        "channel full of bots is worth less than a small one people read. Check the recent posts "
-        "before submitting: a channel that has not posted in months is dead whatever its count "
-        "says.",
+        "**Member count and last-post date are the measured numbers here. Engagement is not.** A "
+        "large channel full of bots is worth less than a small one people read, and no API call "
+        "tells you which this is. Read the recent posts before submitting.",
         "",
-        "| Channel | Members | Found via | Title |",
-        "|---|---:|---|---|",
+        "**Script is a routing signal, not a verdict.** A channel marked `cyrillic` publishes in "
+        "Russian, and an English submission to a Russian-language audience converts badly and "
+        "reads as spam. Either write the submission in the channel's language or skip it; "
+        "`--latin-only` drops them for you.",
+        "",
+        "**Sequencing, which matters more than the list.** These channels announce MINI APPS, and "
+        "we do not have one yet. Submitting before it exists wastes the only first impression "
+        "each channel will give us. The list is the target for the day the Mini App ships. Some "
+        "of these cover bots too, and `@relayshield_bot` could be submitted today, but that is a "
+        "different pitch and a weaker one.",
+        "",
+        "| Channel | Members | Script | Last post | Found via | Title |",
+        "|---|---:|---|---|---|---|",
     ]
     for r in rows:
         lines.append(f"| [@{r['username']}]({r['url']}) | {r['members']:,} | "
+                     f"{r.get('script', '?')} | {r.get('last_post') or '?'} | "
                      f"{r['found_via']} | {r['title'][:60]} |")
     lines += ["", "## What each one says about itself", ""]
     for r in rows:
@@ -167,6 +227,10 @@ def main():
                          "on an account Item 16 depends on.")
     ap.add_argument("--out", default="miniapp_channels.md")
     ap.add_argument("--secret", default=PROSPECTING_SECRET)
+    ap.add_argument("--latin-only", action="store_true",
+                    help="skip channels that publish in Cyrillic. An English "
+                         "submission to a Russian-language audience converts "
+                         "badly and reads as spam.")
     args = ap.parse_args()
 
     if args.secret == COLLECTION_SECRET:
@@ -181,7 +245,7 @@ def main():
                  f"Set it up first:  python3 intel_setup_telethon.py --secret {args.secret}")
 
     rows = asyncio.get_event_loop().run_until_complete(
-        _sweep(session_data, args.min_members, args.pause))
+        _sweep(session_data, args.min_members, args.pause, args.latin_only))
 
     write_report(rows, args.out, args.min_members)
     with open(args.out.replace(".md", ".json"), "w") as fh:

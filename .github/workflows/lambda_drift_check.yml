@@ -111,6 +111,23 @@ jobs:
             # telegram and whatsapp handlers: having a deploy path is not the
             # same as never being hand-deployed again.
             ["relayshield_discord_bot.py"]="relayshield-discord-bot"
+            # Added 2026-09-03. SIXTH instance of source-in-repo, live, and in
+            # NEITHER map -- found while registering the tg-widget key in its
+            # _SOURCE_BANNERS table. This is the Lambda behind
+            # api.relayshield.net/developers: the pricing, the signup form, the
+            # free-tier key issue and every per-source landing banner. So a
+            # registered attribution key does not reach a single visitor until
+            # this function deploys, which is the same shape as the Discord
+            # footer being correct on main and absent in Discord.
+            #
+            # DRIFT CHECK ONLY, as every addition here starts. Read the first
+            # diff with:  sh tools/handler_drift.sh relayshield_developer_signup.py
+            # Live carrying something main does not is RECOVERED first; only a
+            # merely-stale diff earns a place in deploy_lambdas.yml.
+            #
+            # The name is a guess from convention and is UNVERIFIED. A wrong
+            # name now reddens the run rather than passing quietly.
+            ["relayshield_developer_signup.py"]="relayshield-developer-signup"
           )
 
           DRIFTED=""

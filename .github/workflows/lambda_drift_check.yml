@@ -99,20 +99,17 @@ jobs:
             # automatically. Every change to the Discord bot since it was
             # written has been hand-deployed or not deployed at all.
             #
-            # Drift check ONLY, as with every other addition here. A red diff
-            # is the alarm: read it before doing anything. Add it to
-            # deploy_lambdas.yml only once the diff shows live is merely
-            # stale. If live carries something main does not, recover it first
-            # with recover_live_handler.yml -- mapping it in the deployer now
-            # would risk overwriting hand-deployed work with no error
-            # anywhere, which is what cost 2,583 lines on 2026-08-17.
+            # 2026-09-03: THE DIFF HAS NOW BEEN READ, and the function is in
+            # deploy_lambdas.yml as a result. tools/discord_bot_drift.sh found
+            # the live package byte-identical to this file as of 0c429e0 --
+            # every byte already committed, missing only 4a688e8 -- so live was
+            # merely stale, there was nothing to recover, and case 2 of the
+            # rule applied: map it and deploy. The name is verified against
+            # AWS, not convention.
             #
-            # The function name here was written from convention and is
-            # UNVERIFIED against AWS. If it is wrong this run now goes RED
-            # ("not readable, so not checked at all") rather than warning
-            # inside a green run: fix the name, do not drop the entry.
-            # `sh tools/discord_bot_drift.sh` resolves the real name from
-            # AWS and prints this diff on demand, without waiting for 13:00.
+            # It stays here as well as in the deployer, exactly like the
+            # telegram and whatsapp handlers: having a deploy path is not the
+            # same as never being hand-deployed again.
             ["relayshield_discord_bot.py"]="relayshield-discord-bot"
           )
 

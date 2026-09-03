@@ -13,6 +13,7 @@
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-approval-monitor",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-breach-monitor",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-day3-sender",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-developer-signup",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-digest-sender",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-discord-bot",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-domain-monitor",

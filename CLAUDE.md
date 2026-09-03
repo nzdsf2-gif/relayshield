@@ -400,6 +400,42 @@ which commit live matches and which commits it is missing.
 Worth carrying to the next drift diff of any kind: **a diff's shape does not tell you which
 direction drift runs. Matching a committed version does.**
 
+### Run 134 was RED and the deploy SUCCEEDED. Read which step failed.
+
+The merge shipped it. The log says so:
+
+    → Packaging relayshield_discord_bot.py → relayshield-discord-bot
+    ✅ relayshield-discord-bot deployed
+
+What went red is the step AFTER it, the import probe:
+
+    AccessDeniedException ... relayshield-github-deploy is not authorized to
+    perform: lambda:InvokeFunction on ... function:relayshield-discord-bot
+
+**`deploy_lambdas.yml` invokes what it deploys, and that grant is an EXPLICIT ARN LIST** in
+`iam_github_deploy_invoke.json` — 22 functions, applied by hand on 2026-08-30, with nothing checking
+it against `LAMBDA_MAP`. So mapping a 23rd function guaranteed a red run on its first deploy, and
+the failure looks exactly like a broken deploy while being the opposite: the code is live and only
+the verification was refused.
+
+Two files that must agree with nothing checking that they do — the same shape as the four pattern
+tables. Now closed three ways:
+
+- **`tools/check_deploy_invoke_policy.py`** parses `LAMBDA_MAP` out of the deployer and fails if any
+  function is missing from the policy file. `--write` adds them.
+- **`test_workflows_parse.py` runs it**, because that is already the command this repo runs after
+  every workflow edit. A workflow that parses can still be guaranteed to fail.
+- **`tools/apply_deploy_invoke_policy.sh`** pushes the file to AWS, which the repo half does not do
+  on its own. It LOOKS for where the policy lives (inline, then attached managed, matching on the
+  Sid) rather than assuming, because 2026-08-30 recorded no location, and it proves the result with
+  `simulate-principal-policy` against the ROLE — invoking from the operator's own shell would test
+  the wrong identity entirely.
+- The probe's error now says outright that the function was deployed and names the two commands.
+
+**The general form: a red run names a step, not an outcome.** "The deploy failed" and "the check
+after the deploy failed" are different facts with different fixes, and the second one costs nothing
+if it is read correctly and a rollback if it is not.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -411,6 +447,8 @@ direction drift runs. Matching a committed version does.**
 - **`relayshield_discord_bot.py` now has a deploy path** — `deploy_lambdas.yml`, after the diff
   above was read. It stays in the drift check too: having a deploy path is not the same as never
   being hand-deployed again.
+- **`iam_github_deploy_invoke.json` gained `relayshield-discord-bot`**, plus the checker, the
+  applier and the validator wiring described above.
 - **An unreadable function now fails the drift run.** It previously emitted a `::warning::` inside
   an otherwise green run, so a wrong name in the map was indistinguishable from a clean check —
   the quiet-alarm failure again, and the Discord entry's name is exactly the case that would have

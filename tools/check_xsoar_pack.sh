@@ -149,6 +149,11 @@ case "$VERDICT" in
 esac
 
 echo
+# Machine-readable last line, added 2026-09-03 so a scheduled job can watch this
+# gate instead of a human remembering to. The prose above is for a person; this
+# is for xsoar_pack_watch.yml. Keep the token spelling stable.
+echo "XSOAR_PACK_STATUS=${VERDICT:-undetermined}"
+echo
 echo "Note: the pack landing on master and the Palo Alto Tech Alliance are two"
 echo "separate things. The pack is a public contribution and needs no Alliance."
 echo "The Alliance is commercial and is gated on 3 named joint customers."

@@ -676,6 +676,11 @@ KEYLESS_SCAN_ENDPOINTS = frozenset({
     "/v1/wallet-risk",
     "/v1/scan-wallet",
     "/v1/wallet-inbound",
+    # Added 2026-09-03 for the Telegram bot widget. Unlike the wallet
+    # endpoints above, this one has no paid upstream at all: DynamoDB, Safe
+    # Browsing's free tier and RDAP. The per-IP cap is here to stop it becoming
+    # an open proxy, not to protect a vendor bill.
+    "/v1/link-check",
 })
 
 # Deliberately generous. These are MOBILE clients, and carrier-grade NAT puts
@@ -2410,8 +2415,16 @@ def _heuristic_url_check(url: str) -> dict:
         domain = ""
 
     reasons: list[str] = []
+    # Structured mirror of `reasons`, added 2026-09-03 for /v1/link-check.
+    # The three signals are NOT equivalent: a hit in the IOC corpus or on Safe
+    # Browsing is blocklist grade, while a young domain is a soft signal that
+    # every legitimate new project also trips. A caller that wants to grade the
+    # verdict had to substring-match the prose to tell them apart, which breaks
+    # the moment the wording is improved. Additive: `flagged` and `reasons` are
+    # unchanged, so every existing caller is untouched.
+    signals = {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}
     if not domain:
-        return {"flagged": False, "reasons": reasons}
+        return {"flagged": False, "reasons": reasons, "signals": signals}
 
     try:
         table = dynamodb.Table(INTEL_IOCS_TABLE)
@@ -2422,20 +2435,106 @@ def _heuristic_url_check(url: str) -> dict:
         )
         if resp.get("Items"):
             reasons.append("this domain appears in RelayShield's criminal IOC corpus")
+            signals["ioc_corpus"] = True
     except Exception as exc:
         logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
 
     try:
         if _check_gsb(domain, _gsb_api_key()):
             reasons.append("Google Safe Browsing flags this domain")
+            signals["safe_browsing"] = True
     except Exception as exc:
         logger.warning("Heuristic GSB check failed for %s: %s", domain, exc)
 
     age_days = _rdap_registration_age_days(domain)
+    signals["domain_age_days"] = age_days
     if age_days is not None and age_days < 30:
         reasons.append(f"the domain was registered only {age_days} day{'s' if age_days != 1 else ''} ago")
 
-    return {"flagged": bool(reasons), "reasons": reasons}
+    return {"flagged": bool(reasons), "reasons": reasons, "signals": signals}
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/link-check          (KEYLESS, added 2026-09-03)
+# ---------------------------------------------------------------------------
+# Request:  { "url": "https://example.com/path", "source": "tg-widget" }
+# Response: { "level": "high|medium|unknown", "flagged": bool,
+#             "reasons": [str], "signals": {...}, "target": str }
+#
+# WHY A SECOND URL ENDPOINT, WHEN /v1/scan-url EXISTS
+# --------------------------------------------------
+# /v1/scan-url submits to VirusTotal and returns "pending" with a poll
+# endpoint. That is the right shape for a security tool and the wrong shape for
+# a Telegram bot: the bot has to answer a user in a message, now, and polling a
+# third party for ten to thirty seconds inside a handler is exactly the kind of
+# integration a maintainer removes a week later. It also costs money per call on
+# our VirusTotal account, which is why it needs a key.
+#
+# This endpoint returns the three signals we can produce IMMEDIATELY and at
+# effectively no marginal cost: our own criminal IOC corpus (one DynamoDB
+# query), Google Safe Browsing (free tier) and RDAP registration age (free).
+# That is the same evidence Telegram's /scan shows first, and the corpus half is
+# the part no competitor has.
+#
+# Because the marginal cost is ~0 it is KEYLESS, capped per source IP by the
+# same machinery as the wallet endpoints. A keyless first call is the whole
+# premise of the widget ladder: an integration that requires a signup before the
+# first response is not a one-line integration.
+#
+# NEVER RETURNS "low" OR "safe". A heuristic-only pass is an absence of evidence
+# across three sources, not proof of safety, and a widget that renders "safe" on
+# our behalf would put that word in a third party's product where we cannot take
+# it back. The honest ceiling is "unknown", which is what the clients render.
+
+
+def _link_check_level(signals: dict) -> str:
+    """Grade a heuristic-only URL verdict. Pure, so it can be tested alone.
+
+    The three signals are not equal and must not be added up:
+
+      ioc_corpus / safe_browsing -> "high". Both are blocklist grade: a domain
+          named in criminal channel traffic, or on Google's live blocklist.
+      domain_age_days < 30 only  -> "medium". A young domain is a real signal
+          in fraud and also describes every legitimate project launched this
+          month, so on its own it warns and never blocks.
+      nothing                    -> "unknown", never "low". See above.
+    """
+    if signals.get("ioc_corpus") or signals.get("safe_browsing"):
+        return "high"
+    age = signals.get("domain_age_days")
+    if age is not None and age < 30:
+        return "medium"
+    return "unknown"
+
+
+def handle_link_check(params: dict) -> dict:
+    url = (params.get("url") or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return _err("url is required and must start with http:// or https://")
+
+    heuristics = _heuristic_url_check(url)
+    signals    = heuristics.get("signals") or {}
+    level      = _link_check_level(signals)
+
+    # Which integration this call came from. Free measurement: without it a
+    # widget install is indistinguishable from any other keyless caller, and
+    # "we cannot measure the channel" is how a front door stays open for four
+    # months with nobody knowing (see FRONT_DOORS.md).
+    source = (params.get("source") or "")[:40]
+    logger.info("link-check url=%s level=%s signals=%s source=%s",
+                _redact(url, "url"), level, signals, source or "unattributed")
+
+    return _ok({
+        "target":  url,
+        "level":   level,
+        "flagged": bool(heuristics.get("flagged")),
+        "reasons": heuristics.get("reasons") or [],
+        "signals": signals,
+        "note":    "Heuristic verdict from RelayShield's IOC corpus, Google Safe "
+                   "Browsing and domain registration age. An absence of flags is "
+                   "not proof of safety. POST /v1/scan-url with an API key adds a "
+                   "multi-engine VirusTotal analysis.",
+    })
 
 
 def _check_ct(domain: str) -> dict:
@@ -11998,6 +12097,7 @@ def handle_wallet_inbound(params: dict) -> dict:
 ROUTES = {
     "/v1/breach":           handle_breach,
     "/v1/scan-url":         handle_scan_url,
+    "/v1/link-check":       handle_link_check,      # keyless, heuristic-only, widget front door
     "/v1/scan-file":        handle_scan_file,
     "/v1/sim-swap":         handle_sim_swap,
     "/v1/domain":           handle_domain,

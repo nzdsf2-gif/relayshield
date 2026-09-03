@@ -436,6 +436,30 @@ tables. Now closed three ways:
 after the deploy failed" are different facts with different fixes, and the second one costs nothing
 if it is read correctly and a rollback if it is not.
 
+### The widget shipped, and the cheap half was already built
+
+`telegram_widget_scope.md` has the whole thing. The three findings worth carrying:
+
+- **The prospect list is bot REPOSITORIES, not websites**, so a `<script>` embed is the wrong
+  artefact for almost every prospect on it. v1 is a file you copy into your bot.
+- **`/v1/wallet-risk` has been KEYLESS since Crypto Shield Mobile**, capped per source IP, so the
+  address half of the widget needed no new product decision at all.
+- **`/v1/scan-url` was the wrong shape and the new `/v1/link-check` is the right one.** VirusTotal
+  submits and then needs polling, which a Telegram handler cannot do, and costs money per call,
+  which is why it needs a key. The new endpoint returns the three signals that are immediate and
+  free: IOC corpus, Safe Browsing, RDAP age. Keyless for the same reason the wallet ones are.
+
+Two rules are pinned by 39 offline tests rather than by intent: **it never throws** (every failure
+is `ok=false, level="unknown"`) and **it never says "safe"** (a heuristic pass is an absence of
+evidence, and the ceiling is "nothing known against it"). Both exist because this code runs inside
+someone else's product, in front of users who never chose us.
+
+**`relayshield_developer_signup.py` is the SIXTH handler with source in the repo, live traffic and
+no deploy path** — found while registering the `tg-widget` key in its `_SOURCE_BANNERS` table. It
+serves api.relayshield.net/developers: pricing, the signup form, free-tier key issue, every landing
+banner. So a registered attribution key reaches nobody until that function deploys. Drift check
+only, as always; read its first diff before mapping it.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -447,6 +471,10 @@ if it is read correctly and a rollback if it is not.
 - **`relayshield_discord_bot.py` now has a deploy path** — `deploy_lambdas.yml`, after the diff
   above was read. It stays in the drift check too: having a deploy path is not the same as never
   being hand-deployed again.
+- **`tools/handler_drift.sh`** — the Discord drift script, generalised, because a sixth handler
+  needed the same three questions the same day. `tools/discord_bot_drift.sh` is now a wrapper, so
+  every reference to it in this file and in the workflow comments still works.
+- **`xsoar_pack_watch.yml`** — the XSOAR gate is watched daily instead of remembered.
 - **`iam_github_deploy_invoke.json` gained `relayshield-discord-bot`**, plus the checker, the
   applier and the validator wiring described above.
 - **An unreadable function now fails the drift run.** It previously emitted a `::warning::` inside
@@ -459,7 +487,15 @@ if it is read correctly and a rollback if it is not.
 
 ### THE LIST FOR THE NEXT SESSION, in order (11 items)
 
-1. **Scope and build the widget.** Decided this session, not started. An embeddable
+1. **Scope and build the widget. BUILT 2026-09-03 — see `telegram_widget_scope.md`.** v1 is a
+   copy-in file rather than a `<script>` embed, because the prospect list is bot REPOSITORIES and a
+   bot is not a web page. `POST /v1/link-check` is new and KEYLESS: IOC corpus, Safe Browsing and
+   domain age, no VirusTotal, so no marginal cost and no signup before the first call. The wallet
+   half needed nothing new, because `/v1/wallet-risk` has been keyless since Crypto Shield Mobile.
+   Clients in Python and JavaScript, 39 offline tests, `tg-widget` registered in `_SOURCE_BANNERS`
+   first. **Not live until two more steps: the merge deploys the API, then
+   `sh tools/create_link_check_endpoint.sh` adds the gateway route.** The original entry follows.
+   An embeddable
    "check this link / check this address" widget for third-party Telegram bots and Mini Apps. The
    prospect list exists: `prospects_wide.jsonl`, 206 rows at `stars:5..50`, **109 with a website or
    an email**, and 19 of the top 25 tagged `wallets` or `payments` — bots already handling other
@@ -503,7 +539,13 @@ if it is read correctly and a rollback if it is not.
    `tools/diagnose_stolen_sessions.py` after the monitor has run on the instrumented build; its
    section 0 now says outright whether that build is live.
 10. **XSOAR blog + landing line**, triggered by `check_xsoar_pack.sh` reporting ON MASTER, never by
-    a date.
+    a date. **Checked 2026-09-03: still NOT on master.** `#45206` has lost its `/merge` ref,
+    `#45742` still has one so it is open in Palo Alto's pipeline, and
+    `Packs/RelayShield/pack_metadata.json` is 404 on master while the control pack is 200, so the
+    absence is real rather than a blocked request. Nothing to publish yet. **The gate is now
+    watched rather than remembered:** `xsoar_pack_watch.yml` runs the check daily and opens an
+    issue the day it flips, and the script's last line is a machine-readable
+    `XSOAR_PACK_STATUS=merged|absent|undetermined`.
 11. **`relayshield_discord_bot.py` — read its first drift diff, then decide.** FIFTH instance of
     source-in-repo, live, and in NEITHER map. It was added to `lambda_drift_check.yml` ONLY on
     2026-09-02, deliberately: a red diff is the alarm and gets read before anything is mapped in the
@@ -512,10 +554,12 @@ if it is read correctly and a rollback if it is not.
     readable", fix the name, do not drop the entry. Only when the diff shows live is merely stale
     does it go into `deploy_lambdas.yml`. Until then no edit to that file ships automatically, which
     is why the email-check footer added this session is not visible in Discord.
-    **2026-09-03: DONE.** The diff was read with `sh tools/discord_bot_drift.sh`. Live was
-    byte-identical to `0c429e0`, stale by exactly one commit and holding nothing of its own, so the
-    function is now in `deploy_lambdas.yml`. See the 2026-09-03 section above, including why the
-    mapping commit had to touch the handler itself.
+    **2026-09-03: COMPLETE. The footer is live in Discord.** The diff was read with
+    `sh tools/handler_drift.sh relayshield_discord_bot.py`: live was byte-identical to `0c429e0`,
+    stale by exactly one commit and holding nothing of its own, so the function went into
+    `deploy_lambdas.yml` and run 134 shipped it (`✅ relayshield-discord-bot deployed`). That run is
+    RED, and the red is the import probe being denied `lambda:InvokeFunction`, not the deploy. See
+    the 2026-09-03 section above for all three findings and what closed each.
 
 ### Done and verified 2026-09-02
 

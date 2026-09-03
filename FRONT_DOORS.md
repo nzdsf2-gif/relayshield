@@ -29,6 +29,8 @@ when deciding what to build next — it just becomes an opinion.
 | FD-5 | OpenCTI connector (Filigran) | TI corpus licences | 2-3 days | Not started |
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
 | FD-7 | Slack App Directory | Business tiers | 1 week | Not started |
+| FD-8 | Official MCP Registry | Agentic bundle, TI | Done, needs attribution | **ALREADY LISTED since 2026-05-10.** `source=` key now registered; `server.json` websiteUrl still to update |
+| FD-9 | Glama | Agentic bundle | Unknown | `glama.json` present. Listing status UNVERIFIED — glama.ai blocked from the container |
 
 ---
 
@@ -201,6 +203,65 @@ A maintainer reviews this one, which is why it is worth the most.
 **Do not put a corpus number in any of the three.** MEASUREMENT DOCTRINE applies with force: these
 listings are read by people who check.
 
+
+## FD-8 — Official MCP Registry. **ALREADY OPEN. WAS UNATTRIBUTED.**
+
+**Found 2026-09-02, by querying it rather than assuming.** RelayShield is listed at
+`registry.modelcontextprotocol.io` and has been since **2026-05-10**:
+
+```text
+name        io.github.nzdsf2-gif/relayshield-mcp
+title       RelayShield Security Intelligence
+version     0.2.7   (six versions published; 0.2.7 is isLatest, 2026-07-19)
+repository  https://github.com/relayshield/relayshield-mcp
+websiteUrl  https://relayshield.net
+package     relayshield-mcp (pypi, stdio)
+status      active
+```
+
+This is the canonical MCP directory — the one clients read — and it was a live front door nobody in
+this repo knew about. `mcp.so` was being treated as the priority while the registry that actually
+matters was already answering.
+
+**The defect: `websiteUrl` is a bare `https://relayshield.net`, with no `?source=` key.** Nearly four
+months of arrivals from the canonical MCP directory have logged `unmatched:` and rendered no banner.
+That is precisely the failure the rule at the top of this file exists to prevent, on a door nobody
+opened deliberately.
+
+**Done:** `mcp-registry` is now registered in `_SOURCE_BANNERS`
+(`relayshield_developer_signup.py`), with `registry.modelcontextprotocol.io`, `glama.ai`,
+`smithery.ai` and `mcp.so` as referer hosts so an arrival that loses the query parameter still
+attributes. Registered BEFORE the URL changes, in that order, per the rule.
+
+**Left to do, one edit and one publish:**
+
+1. In `~/mcp-live/server.json`, change `websiteUrl` to
+   `https://relayshield.net?source=mcp-registry`.
+2. Re-publish with the `mcp-publisher` CLI (the registry is versioned, so this is a new version
+   rather than an edit). Check the repo's own README first — it already publishes, so the command
+   is established there; do not invent one.
+
+Also worth a look while in there: the registry record's `repository.url` says
+`github.com/relayshield/relayshield-mcp` while the namespace is `io.github.nzdsf2-gif/`. GitHub is
+case-insensitive on owner, so this probably resolves, but it is the kind of mismatch that reads as
+someone else's project.
+
+---
+
+## FD-9 — Glama. Manifest present, listing status UNVERIFIED.
+
+`~/mcp-live/glama.json` exists, so the repo is prepared for Glama. **Whether it is actually listed
+could not be checked from the container:** `glama.ai:443` is rejected by the egress policy. Not
+"absent" — unchecked. Do not record it either way until someone opens the site.
+
+**ANDREW CLICKS THIS:** open <https://glama.ai/mcp/servers> and search RelayShield.
+
+- If listed: check the link it points at, and get `?source=mcp-registry` onto it. The key is already
+  registered and `glama.ai` is already a referer host.
+- If not listed: Glama indexes from GitHub, so the usual route is to make sure `glama.json` is on
+  the default branch and let it pick the repo up, rather than a submission form.
+
+---
 
 ## FD-4 — Splunkbase. Not started.
 

@@ -525,6 +525,55 @@ live-only aliases, all preserved, and exactly 3 banners plus 5 aliases re-added.
 deploy path accumulates hand-deployed work silently, and the longer it goes unread the more
 expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and grew a billing path.
 
+### The tg-widget banner is not missing. It is a per-arrival banner.
+
+Asked on 2026-09-03 after all three runs went green: "I do not see the tg-widget banner on
+api.relayshield.net/developers." It is not supposed to be there.
+
+`_SOURCE_BANNERS` entries render into the `<!--REFERRER_BANNER-->` placeholder, which sits directly
+under the nav and above the hero, and ONLY when the arrival carries `?source=`/`?src=` or a matching
+Referer host. `tg-widget` deliberately claims no referer hosts, so the parameter is the only way in.
+The bare `/developers` URL will never show it, by design.
+
+    https://api.relayshield.net/developers?source=tg-widget
+
+That is also the check: `curl -sS "…?source=tg-widget" | grep -c "Arriving from a Telegram bot"`
+returns 1 when it is live, and the same command on the bare URL returns 0.
+
+### Two things this session got wrong, and the founder caught both
+
+**I claimed the MetaMask Snap was a live surface. It is not.** The integration request was submitted
+and there has been no response. The repo already recorded that in three places
+(`victim_side_outreach_messages.md`, `xcitium_outreach.md`, `NEXT_SESSION_2026-08-19.md`), and I
+wrote "we already have the plugin-shaped surface that matters" without checking any of them. That is
+CLAUDE.md's own rule broken by CLAUDE.md's own author: **a doc claiming something is done is a lead,
+not a fact.** A `metamask-snap` key exists in `_SOURCE_BANNERS`, registered before shipping exactly
+as the rule requires, and a registered key is not a live integration.
+
+**I ranked the bot's menu button as the top Mini App discovery lever.** The bot has a tiny number of
+users, so a Mini App hung off it inherits a tiny number of users. The ranking was right in general
+and wrong for us, which is how a plan ends up describing somebody else's company. Re-ranked in
+`miniapp_discovery_and_stripe_choice.md`: the Telegram blog channel first, then Mini App announcement
+channels, then directories, then attributed deep links, and the menu button fifth because it costs
+almost nothing rather than because it reaches anyone.
+
+### The first real prospect sweep was mostly unusable, and it was the extractor
+
+216 rows, and the top 25 included `root@203.0.113.4` (an RFC 5737 documentation IP),
+`trial@telegram.bot`, `k7m2q9x1a3@yourdomain.com`, a YouTube demo link and several `t.me` links, all
+counted as reachable contacts. `contacts_from` filtered exactly one thing, `example.com`.
+
+That is not cosmetic. **Contactability is 20 of the 100 score points**, so the ranking was partly
+measuring bad extraction, and mailing a documentation example is how a sending domain earns a spam
+reputation. `tools/contact_hygiene.py` now screens both fields, in the extractor AND again in the
+generator, because a `prospects_wide.jsonl` produced before the fix still holds those rows and the
+generator is the last thing standing before a message goes out. Seven tests, every case taken from
+that sweep.
+
+**Also re-run it with `--stars 5..50`.** Without the flag the sweep spends its whole `--limit` inside
+`stars:0..1`, which is why the results were dominated by brand-new repos: the script's own docstring
+says so and the run log shows the single `stars:0..1` line.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -540,6 +589,17 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
   needed the same three questions the same day. `tools/discord_bot_drift.sh` is now a wrapper, so
   every reference to it in this file and in the workflow comments still works.
 - **`xsoar_pack_watch.yml`** — the XSOAR gate is watched daily instead of remembered.
+- **`tools/generate_outreach.py`** + `test_generate_outreach.py` — item 2's generator, and the ten
+  tests that stop a draft ever diagnosing a prospect.
+- **`miniapp_discovery_and_stripe_choice.md`** — why the widget must not carry a Mini App link, what
+  actually drives Mini App discovery, why a browser extension is not the play, which Stripe agentic
+  product to select, and the four questions to put to Jake while access is in review.
+- **`tools/contact_hygiene.py`** + `test_contact_hygiene.py` — the screen that stops a README
+  example becoming an outreach recipient. Wired into both the prospector and the generator.
+- **`tools/find_miniapp_channels.py`** — searches for channels that announce new Mini Apps and
+  reports measured member counts, ON THE PROSPECTING SESSION. It refuses to run against
+  `relayshield/telethon_session` at all: 99 channels of collection depend on that account, and a
+  prospecting sweep is how it gets flood-limited.
 - **`iam_github_deploy_invoke.json` gained `relayshield-discord-bot`**, plus the checker, the
   applier and the validator wiring described above.
 - **An unreadable function now fails the drift run.** It previously emitted a `::warning::` inside
@@ -566,10 +626,17 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
    an email**, and 19 of the top 25 tagged `wallets` or `payments` — bots already handling other
    people's money. **Register the `source=` keys in `_SOURCE_BANNERS` BEFORE any widget ships**;
    FD-8 below is what happens when that is skipped.
-2. **Tailored outreach to the 109.** Founder wants it; agreed approach is a GENERATED DRAFT PER
-   PROSPECT that he reviews and sends, keyed on what each repo actually does. Not mass mail: volume
-   is not the lever, relevance is, and blasting maintainers who never asked is how a domain gets
-   blocked.
+2. **Tailored outreach to the 109. THE GENERATOR IS BUILT, 2026-09-03: `tools/generate_outreach.py`.**
+   It reads `prospects_wide.jsonl` and writes `outreach_bot_prospects.md`: one draft per prospect
+   keyed on the capability their own README asserts, the contact channel, the evidence line the
+   draft rests on, and a tracking table. **It cannot run in a container** — the prospect file is
+   generated output and lives on the Mac. Ten tests pin the rule that matters: the drafts never
+   assert anything about a prospect's security, because we can read a README and cannot see anyone's
+   backend, and "we analysed your app and found exposures" from an unknown security vendor is one
+   word away from an extortion email. Original entry follows. Founder wants it; agreed approach is a
+   GENERATED DRAFT PER PROSPECT that he reviews and sends, keyed on what each repo actually does.
+   Not mass mail: volume is not the lever, relevance is, and blasting maintainers who never asked is
+   how a domain gets blocked.
 3. **Apify: "your Actor as a tool for AI agents" post.** Their content programme pays **$500 per
    article** on the Apify/Crawlee blog and $100 credits for dev.to under their org. The July call
    closed 2026-08-16; it is QUARTERLY, so the next call is the target. Theme 2 fits
@@ -578,6 +645,11 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
 4. **Stripe MPP follow-up with Jake Lamoine.** Open question carried: does x402 settlement count
    toward early-adopter status. Card via SPT minimum is $0.50, stablecoin $0.01 USDC, and the sample
    uses `scheme: "exact"` on Base — identical to our 28 live x402 endpoints.
+   **DECIDED 2026-09-03, of the four cards in the Agentic Commerce console: select ACCEPT MACHINE
+   PAYMENTS.** It is the productised version of the rail we already run. Retail is a product
+   catalogue and we have no SKUs; the agent wallet is spend control on the BUY side and we are the
+   sell side; Projects is infrastructure we have. Reasoning, including why the agent wallet is the
+   pitch TO Stripe rather than a fit for us, is in `miniapp_discovery_and_stripe_choice.md`.
 5. **Aduna — Reggie Daniels.** Founder's former colleague works there and will text him. Outreach
    messaging is written in `aduna_outreach.md`.
 6. **FD-8 finish — official MCP registry attribution. ONE EDIT, ONE PUBLISH.**

@@ -19,10 +19,17 @@ class TestEmails(unittest.TestCase):
             self.assertFalse(ch.usable_email(bad), bad)
             self.assertTrue(ch.reject_reason(bad, "email"))
 
+    def test_the_three_that_survived_the_first_filter(self):
+        # Second sweep, 2026-09-03: a real domain with a stand-in local part, a
+        # package version, and the textbook example domain.
+        for bad in ("you@gmail.com", "esbuild@0.24.0", "john@acme.com"):
+            self.assertFalse(ch.usable_email(bad), bad)
+
     def test_real_addresses_survive(self):
-        for good in ("chirag@oriz.in", "andrew@relayshield.net", "a.b+tag@sub.example.io"):
-            if "example.io" in good:
-                continue
+        # Every one of these is from a real sweep row that we DO want to keep.
+        for good in ("chirag@oriz.in", "andrew@relayshield.net",
+                     "devmainulislam@gmail.com", "mail@matteosillitti.com",
+                     "info@cubevps.ir"):
             self.assertTrue(ch.usable_email(good), good)
 
     def test_noreply_is_not_a_person(self):

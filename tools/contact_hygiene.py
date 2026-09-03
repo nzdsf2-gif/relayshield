@@ -10,6 +10,9 @@ WHY THIS EXISTS, and every example below is from a real sweep on 2026-09-03:
     root@203.0.113.4          an RFC 5737 documentation IP out of a README
     trial@telegram.bot        a placeholder in an example config
     k7m2q9x1a3@yourdomain.com a fill-in-your-own-domain line
+    esbuild@0.24.0            a package version, which is email-shaped to a regex
+    you@gmail.com             a real domain and a local part meaning "put yours here"
+    john@acme.com             the textbook example domain
     https://t.me/d2_schedule_bot        the bot itself, not a contact channel
     https://youtu.be/M-IRuWRrVUg        a demo video
     https://github.com/owner/repo       the repo, which is the GitHub channel
@@ -36,6 +39,19 @@ _PLACEHOLDER_DOMAINS = {
     "example.com", "example.org", "example.net", "domain.com", "yourdomain.com",
     "email.com", "mail.example", "test.com", "telegram.bot", "bot.local",
     "localhost", "sentry.io",
+    # acme.com is the textbook example domain in half the world's READMEs, and
+    # the 2026-09-03 sweep duly offered john@acme.com as a contact.
+    "acme.com", "acme.org", "company.com", "mysite.com", "site.com",
+    "gmail.example", "abc.com",
+}
+
+# Local parts that are a role or a stand-in rather than a person. "you@gmail.com"
+# came back as a top-25 contact on the second sweep: a real domain, so every
+# domain-based rule passed it, and a local part that means "put yours here".
+_PLACEHOLDER_LOCALS = {
+    "you", "me", "your", "youremail", "yourname", "john", "jane", "johndoe",
+    "janedoe", "someone", "somebody", "username", "user", "name", "firstname",
+    "lastname", "foo", "bar", "baz", "abc", "xyz",
 }
 # An email whose domain is an IP literal is a config example every time.
 _IP_DOMAIN = re.compile(r"@\d{1,3}(?:\.\d{1,3}){3}$")
@@ -62,9 +78,17 @@ def reject_reason(value, kind):
             return "not an address"
         if _IP_DOMAIN.search(low):
             return "IP-literal domain, so a documentation example"
-        domain = low.rsplit("@", 1)[-1]
+        local, domain = low.rsplit("@", 1)[0], low.rsplit("@", 1)[-1]
         if domain in _PLACEHOLDER_DOMAINS:
             return f"placeholder domain {domain}"
+        if local in _PLACEHOLDER_LOCALS:
+            return f"placeholder local part {local!r}"
+        # A version string swallowed out of a README reads as an address to any
+        # regex: "esbuild@0.24.0" was offered as a contact on the second sweep.
+        # A real TLD is alphabetic, so this is exact rather than a heuristic.
+        tld = domain.rsplit(".", 1)[-1]
+        if not tld.isalpha() or len(tld) < 2:
+            return f"'{domain}' has no alphabetic TLD, so it is a version string or a path"
         for token in _PLACEHOLDER_TOKENS:
             if token in low:
                 return f"placeholder token {token!r}"

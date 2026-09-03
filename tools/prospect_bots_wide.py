@@ -56,6 +56,11 @@ import json
 import math
 import os
 import re
+import sys as _sys
+import os as _os
+
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import contact_hygiene as hygiene  # noqa: E402
 import sys
 import time
 import urllib.error
@@ -262,13 +267,31 @@ def readme_text(full_name, token):
 
 def contacts_from(repo, body):
     """Non-Telegram channels we can actually reach. A GitHub issue is the floor;
-    a website or an email is what makes a prospect worth ranking."""
+    a website or an email is what makes a prospect worth ranking.
+
+    Everything here is screened by tools/contact_hygiene.py, because the
+    2026-09-03 sweep proved the naive version wrong in both fields. It took
+    root@203.0.113.4 and trial@telegram.bot as addresses -- README examples,
+    both of them -- and counted t.me links, a YouTube demo and the repo's own
+    GitHub URL as websites. Every one of those inflates contactability, which
+    is 20 of the 100 score points, so the ranking was partly measuring bad
+    extraction.
+
+    The email is now the first USABLE match rather than the first match: a
+    README that shows a placeholder before giving a real address used to score
+    the placeholder.
+    """
     found = {}
-    if repo.get("homepage"):
-        found["contact_site"] = repo["homepage"]
-    m = re.search(r"[\w.+-]+@[\w-]+\.[\w.]{2,}", body)
-    if m and "example.com" not in m.group(0):
-        found["contact_email"] = m.group(0)
+
+    site = repo.get("homepage") or ""
+    if hygiene.usable_site(site):
+        found["contact_site"] = site
+
+    for m in re.finditer(r"[\w.+-]+@[\w-]+\.[\w.]{2,}", body):
+        if hygiene.usable_email(m.group(0)):
+            found["contact_email"] = m.group(0)
+            break
+
     found["contact_github"] = repo.get("html_url", "")
     return found
 

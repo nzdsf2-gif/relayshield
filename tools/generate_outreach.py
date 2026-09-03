@@ -36,6 +36,9 @@ import os
 import sys
 from collections import Counter
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import contact_hygiene as hygiene  # noqa: E402
+
 IN_DEFAULT = "prospects_wide.jsonl"
 OUT_DEFAULT = "outreach_bot_prospects.md"
 
@@ -141,14 +144,36 @@ def channel(row):
     """Best contact channel, and why. Email beats a website form beats a GitHub
     issue, and a GitHub issue is last on purpose: an unsolicited issue on a
     stranger's repo is public, permanent and read as noise by everyone watching
-    the repo, not just the maintainer."""
-    if row.get("contact_email"):
-        return "email", row["contact_email"]
-    if row.get("contact_site"):
-        return "website", row["contact_site"]
+    the repo, not just the maintainer.
+
+    Screened again here even though prospect_bots_wide.py screens at extraction
+    time, because a prospects_wide.jsonl generated before that fix still holds
+    root@203.0.113.4 and t.me links, and this is the last thing standing before
+    a message is sent. A stale input file must not be able to produce a draft
+    addressed to a documentation example.
+    """
+    email = row.get("contact_email") or ""
+    if email and hygiene.usable_email(email):
+        return "email", email
+    site = row.get("contact_site") or ""
+    if site and hygiene.usable_site(site):
+        return "website", site
     if row.get("contact_github"):
         return "github (last resort)", row["contact_github"]
     return "none", ""
+
+
+def rejected(row):
+    """Contacts this row carried that were not usable, and why. Reported so a
+    dropped prospect is visible rather than silently absent."""
+    out = []
+    for field, kind in (("contact_email", "email"), ("contact_site", "site")):
+        value = row.get(field) or ""
+        if value:
+            why = hygiene.reject_reason(value, kind)
+            if why:
+                out.append(f"{value} ({why})")
+    return out
 
 
 def main():
@@ -188,6 +213,8 @@ def main():
 
     kept.sort(key=lambda r: r.get("opportunity_score", 0), reverse=True)
     kept = kept[:args.limit]
+
+    screened = [(r["repo"], why) for r in rows for why in rejected(r)]
 
     tally = Counter(channel(r)[0] for r in kept)
     tags = Counter(t for r in kept for t in (r.get("capability_tags") or []))
@@ -262,6 +289,12 @@ def main():
     with open(args.out, "w") as fh:
         fh.write("\n".join(out) + "\n")
     print(f"wrote {args.out}: {len(kept)} drafts from {len(rows)} prospects")
+    if screened:
+        print(f"screened out {len(screened)} unusable contact(s), first few:")
+        for repo, why in screened[:5]:
+            print(f"  {repo}: {why}")
+        print("  (README examples and links to the product itself. See "
+              "tools/contact_hygiene.py.)")
     if tally.get("github (last resort)"):
         print("note: GitHub-only prospects were skipped. --include-github-only adds them, "
               "but an unsolicited issue on a stranger's repo is public and permanent.")

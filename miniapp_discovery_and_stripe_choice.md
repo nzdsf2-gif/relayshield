@@ -30,48 +30,70 @@ enough that a curious user searches the name, not so much that it reads as a poa
 So the widget stays a developer surface. Mini App discovery is a separate problem with its own
 routes.
 
-## 2. What actually drives Mini App discovery
+## 2. What actually drives Mini App discovery, corrected
 
-In rough order of cost to value, and the first one is worth more than the rest combined.
+**The first version of this section was wrong, and the founder corrected it the same day.** It
+ranked the menu button on `@relayshield_bot` above everything else. That is right for a bot with an
+audience and wrong for ours: the bot has a tiny number of users, so a Mini App hung off it inherits
+a tiny number of users. Ranking a surface by how well it works in general, rather than by how well
+it works for us, is how a plan ends up describing somebody else's company.
 
-1. **The menu button on `@relayshield_bot`.** This is in the scope doc as a requirement and it
-   remains the strongest lever: the bot has users today, and a Mini App attached to a bot people
-   already talk to needs no new audience. Everything else on this list is an attempt to buy what
-   this gives away.
-2. **Deep links with attribution.** `t.me/relayshield_bot/app?startapp=<source>` carries a
-   parameter into the Mini App, so every placement is measurable. Register those `source=` keys in
-   `_SOURCE_BANNERS` BEFORE the links go out. The MCP registry cost four months of unattributed
-   arrivals by getting that order wrong.
-3. **Telegram's own catalogues and the third-party Mini App directories** (tApps Center and
-   similar). Worth a submission each, and worth exactly one afternoon: they are directories, and a
-   directory listing converts like a directory listing. Check each one's terms before scraping
-   anything from it, per the source-ranking table in the scope doc.
-4. **The blog and the Telegram channel**, which we already publish to, plus the developers page.
-   These cost nothing because the channels exist.
-5. **TON app catalogues**, only if the TON wallet and token scans ship in v1, since that is the
-   only part of the product that is TON-native.
+Re-ranked for the audience we actually have.
 
-What none of these change: a Mini App with one job done well is discoverable because people
-recommend it. A Mini App that is a consumer product, a developer portal and a partner centre at
-once is bad at all three and gets recommended by nobody. That constraint is in the scope doc and it
-survives this question.
+1. **The Telegram blog channel, linked from every post.** Agreed the same day. It is ours, it
+   already publishes, and it costs one line per post. Small, but it is the only surface on this list
+   where the audience already chose to hear from us.
+2. **Channels that announce new Mini Apps.** The founder has seen them; the question was which ones.
+   `tools/find_miniapp_channels.py` searches for them on the prospecting account and reports each
+   one's member count, description and how it was found, because a list of channel names written
+   from memory is unverifiable and this repo has been bitten three times by exactly that. These are
+   SUBMISSION targets: one polite submission each, through whatever route the channel publishes.
+   Not a DM campaign, and not posting into them.
+3. **Mini App directories and catalogues**, tApps Center and the others in the same family. Worth
+   one afternoon of submissions. They convert like directories convert, which is to say modestly and
+   forever.
+4. **Deep links with attribution, everywhere we already appear.** `t.me/<bot>/app?startapp=<source>`
+   carries the parameter into the Mini App, so blog posts, the developers page, the widget's README
+   and any directory listing each get their own key. Register those keys in `_SOURCE_BANNERS` BEFORE
+   the links go out. The official MCP registry cost four months of unattributed arrivals by getting
+   that order wrong.
+5. **The menu button on `@relayshield_bot`.** Still worth doing, because it costs almost nothing and
+   converts the users we do have at a high rate. It is simply not a growth channel at our size, and
+   calling it one was the error.
+6. **TON app catalogues**, only if the TON wallet and token scans ship in v1, since that is the only
+   part of the product that is TON-native.
+
+Two things worth saying plainly about all of it. Every route here is small, and the honest framing
+is that Mini App discovery is a portfolio of small routes rather than one lever. And a Mini App with
+one job done well is the only version that gets recommended onward, which is the one channel that
+compounds.
 
 ## 3. Is a browser extension worth building as a discovery surface?
 
-**Not now, and probably not at all as a discovery play.**
+**No, and one leg of the first version of this argument was wrong.**
 
-- We already have the plugin-shaped surface that matters: the **MetaMask Snap**, which screens the
-  counterparty at signing time. That is a moment of real intent. A general link-checking extension
-  is the same capability at a moment of much lower intent.
-- A security extension asks for permission to read every page the user visits. That is the single
-  hardest permission to justify in a store review, and the justification does not get easier
-  because our intentions are good.
-- Extensions carry a permanent update treadmill across two stores and Manifest churn, for an
-  audience that overlaps almost entirely with people who could use the bot.
-- A Telegram Web specific extension is a real niche, but it is a niche of a niche: Telegram Web
-  users, who are a minority of Telegram users, and the bot already covers them.
+I wrote that "we already have the plugin-shaped surface that matters" in the MetaMask Snap. **We do
+not.** The founder submitted an integration request and has had no response, and the repo already
+said so in three places: `victim_side_outreach_messages.md` records that Segment 2 is not the warm
+thread because the Snap is not approved, and `xcitium_outreach.md` and `NEXT_SESSION_2026-08-19.md`
+gate on the same fact. A `metamask-snap` key exists in `_SOURCE_BANNERS`, registered before shipping
+exactly as the rule requires, and a registered key is not a live integration.
 
-The same effort spent on the widget or the Snap converts better, and both are already built.
+**A doc claiming something is done is a lead, not a fact.** That is CLAUDE.md's own rule, and the
+first draft of this file broke it.
+
+The conclusion survives without that leg, on the reasons that do not depend on the Snap:
+
+- A security extension asks permission to read every page the user visits. That is the hardest
+  permission to justify in a store review, and it does not get easier because our intentions are
+  good.
+- Two stores, permanent manifest churn, and a review queue we do not control, for an audience that
+  overlaps almost entirely with people who could use the bot or the Mini App.
+- Nothing about an extension is Telegram-native, and the Mini App's whole argument is that it is.
+
+The Snap remains the better version of this idea precisely because it fires at signing time, which
+is a moment of real intent. It is also sitting in someone else's queue with no reply, which is worth
+remembering before building a second thing that will also sit in a queue.
 
 ## 4. Which Stripe agentic commerce product to select
 
@@ -118,3 +140,33 @@ selling is permitted and we already do it: AWS Marketplace and direct Stripe bot
 Bundle D. The rule that matters there is the one already written into
 `relayshield_developer_signup.py`: never migrate a customer who arrived through AWS onto a Stripe
 key, and never steer a Marketplace-originated lead to the Stripe door.
+
+## 5. What else to ask Jake, now that access is back in review
+
+Clicking through to Accept machine payments returned the same access request Jake shared, so the
+programme is gated on their review rather than on a product choice, and the extra detail they asked
+for has already been sent. Four questions worth putting to him while it sits, chosen because each
+one changes what we do next rather than being nice to know.
+
+1. **Does x402 settlement count toward early-adopter status, and if not, what does?** Carried since
+   the first conversation and still unanswered. We have 28 endpoints settling in USDC on Base today.
+   If that counts, we are already qualified and the review is a formality. If it does not, the
+   qualifying activity is card or SPT volume, and we should know that before building toward it.
+2. **What is the actual gate on this review, and what is the queue?** Not a nudge: a named criterion
+   and a rough timeline. "In review" with no criterion is indistinguishable from declined, and three
+   other distribution routes are competing for the same week of work.
+3. **Can machine payments settle against an account that already runs metered subscriptions and an
+   AWS Marketplace fulfilment path?** We already sell the same bundles through two doors, and the
+   disintermediation rules we follow are strict. If accepting machine payments creates a third
+   billing surface over the same customers, we need the shape before turning it on, not after.
+4. **Is there a design-partner or early-access track for the SELL side specifically?** Every public
+   example of agentic commerce so far is a buyer paying a merchant for goods. We are an API that
+   agents pay in order to check a counterparty, which is a different shape, and vendors usually want
+   exactly that kind of example. Offer the Rain demo as the artefact: an agent discovers two MCP
+   servers, pays to check each before connecting, and refuses one on an edit-distance-1 typosquat
+   finding, with the payments verifiable on Basescan.
+
+The framing that has worked in every one of these conversations, and that is worth repeating: their
+agent wallet answers "is this agent allowed to spend this much". Nothing in the stack answers "is
+the thing it is about to pay legitimate". An agent with a valid card, inside its limits, paying a
+fraudulent API is a fully authorised transaction.

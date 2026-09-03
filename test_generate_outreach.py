@@ -29,7 +29,7 @@ def row(**kw):
         "repo": "acme/example-bot", "url": "https://github.com/acme/example-bot",
         "stars": 30, "pushed_at": "2026-08-20T00:00:00Z", "handle": "examplebot",
         "capability_tags": ["links"], "source_query": "python-telegram-bot",
-        "opportunity_score": 70, "contact_email": "dev@example.com",
+        "opportunity_score": 70, "contact_email": "dev@acmebots.dev",
     }
     base.update(kw)
     return base
@@ -86,6 +86,17 @@ class TestOutreach(unittest.TestCase):
         self.assertIn("Evidence the draft rests on", text)
         self.assertIn("wallets, payments", text)
 
+    def test_screened_contacts_are_reported_not_silently_dropped(self):
+        import subprocess as sp, tempfile as tf, json as js
+        d = tf.mkdtemp()
+        src, out = os.path.join(d, "p.jsonl"), os.path.join(d, "o.md")
+        with open(src, "w") as fh:
+            fh.write(js.dumps(row(contact_email="root@203.0.113.4")) + "\n")
+        proc = sp.run([sys.executable, TOOL, "--in", src, "--out", out],
+                      capture_output=True, text=True)
+        self.assertIn("screened out", proc.stdout)
+        self.assertIn("203.0.113.4", proc.stdout)
+
     def test_javascript_repos_get_the_javascript_snippet(self):
         self.assertIn("await check(", run([row(source_query="grammy telegram bot")]))
         self.assertIn("check(message.text)", run([row(source_query="python-telegram-bot")]))
@@ -97,8 +108,20 @@ class TestOutreach(unittest.TestCase):
         self.assertIn("acme/gh-only", run([gh], "--include-github-only"))
 
     def test_email_beats_website(self):
-        text = run([row(contact_email="dev@example.com", contact_site="https://example.com")])
-        self.assertIn("**Contact** email: dev@example.com", text)
+        text = run([row(contact_email="dev@acmebots.dev", contact_site="https://acmebots.dev")])
+        self.assertIn("**Contact** email: dev@acmebots.dev", text)
+
+    def test_a_placeholder_contact_never_becomes_a_draft(self):
+        # The exact values the 2026-09-03 sweep put in the top 25. A stale
+        # prospects_wide.jsonl must not be able to address a draft to them.
+        for bad in ("root@203.0.113.4", "trial@telegram.bot", "k7m2q9x1a3@yourdomain.com"):
+            text = run([row(repo="acme/placeholder", contact_email=bad, contact_site="")])
+            self.assertNotIn(bad, text, bad)
+            self.assertNotIn("acme/placeholder", text, bad)
+
+    def test_a_t_me_link_is_not_treated_as_a_website(self):
+        text = run([row(repo="acme/tme", contact_email="", contact_site="https://t.me/somebot")])
+        self.assertNotIn("acme/tme", text)
 
     def test_low_scores_are_dropped(self):
         self.assertNotIn("acme/weak", run([row(repo="acme/weak", opportunity_score=10)]))
@@ -111,7 +134,7 @@ class TestOutreach(unittest.TestCase):
             self.assertIn("no key", drafts_only(run([row(capability_tags=[tag])])).lower(), tag)
 
     def test_tracking_table_lists_each_prospect(self):
-        text = run([row(repo="acme/one"), row(repo="acme/two", contact_email="b@example.com")])
+        text = run([row(repo="acme/one"), row(repo="acme/two", contact_email="b@othersite.dev")])
         self.assertIn("| acme/one | email |", text)
         self.assertIn("| acme/two | email |", text)
 

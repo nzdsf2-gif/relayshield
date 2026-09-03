@@ -107,13 +107,25 @@ jobs:
             # would risk overwriting hand-deployed work with no error
             # anywhere, which is what cost 2,583 lines on 2026-08-17.
             #
-            # The function name here is UNVERIFIED. If it is wrong the check
-            # emits a "not readable" warning rather than a false clean, which
-            # is the right failure mode: fix the name, do not drop the entry.
+            # The function name here was written from convention and is
+            # UNVERIFIED against AWS. If it is wrong this run now goes RED
+            # ("not readable, so not checked at all") rather than warning
+            # inside a green run: fix the name, do not drop the entry.
+            # `sh tools/discord_bot_drift.sh` resolves the real name from
+            # AWS and prints this diff on demand, without waiting for 13:00.
             ["relayshield_discord_bot.py"]="relayshield-discord-bot"
           )
 
           DRIFTED=""
+          # A function we could not read is NOT a function that is fine. Until
+          # 2026-09-03 an unreadable name produced a warning inside an otherwise
+          # green run, so a wrong name in the map above looked exactly like a
+          # clean check -- the quiet alarm this repo keeps getting caught by.
+          # relayshield_discord_bot.py made that concrete: its function name was
+          # written from convention and verified against nothing. Unreadable
+          # functions now fail the run, separately from real drift, so the map
+          # gets fixed instead of silently checking nothing.
+          UNREADABLE=""
           for FILE in "${!FUNCS[@]}"; do
             FUNC="${FUNCS[$FILE]}"
             [ -f "$FILE" ] || { echo "skip $FILE (not in repo)"; continue; }
@@ -122,7 +134,8 @@ jobs:
                      --function-name "$FUNC" --region us-east-1 \
                      --query 'CodeSha256' --output text 2>/dev/null || echo "MISSING")
             if [ "$LIVE" = "MISSING" ]; then
-              echo "::warning::$FUNC not readable — check the role has lambda:GetFunctionConfiguration"
+              echo "::error::$FUNC not readable — wrong name in this map, or the role is missing lambda:GetFunctionConfiguration. NOTHING was checked for $FILE."
+              UNREADABLE="$UNREADABLE $FUNC"
               continue
             fi
 
@@ -133,7 +146,8 @@ jobs:
             URL=$(aws lambda get-function --function-name "$FUNC" --region us-east-1 \
                     --query 'Code.Location' --output text 2>/dev/null || echo "")
             if [ -z "$URL" ]; then
-              echo "::warning::could not read package URL for $FUNC"
+              echo "::error::could not read package URL for $FUNC — NOTHING was checked for $FILE."
+              UNREADABLE="$UNREADABLE $FUNC"
               continue
             fi
             curl -sS -o live.zip "$URL"
@@ -192,7 +206,12 @@ jobs:
           done
 
           echo "drifted=$DRIFTED" >> "$GITHUB_OUTPUT"
-          [ -z "$DRIFTED" ] || exit 1
+          if [ -n "$UNREADABLE" ]; then
+            echo "::error::not readable, so not checked at all:$UNREADABLE"
+          fi
+          if [ -n "$DRIFTED" ] || [ -n "$UNREADABLE" ]; then
+            exit 1
+          fi
 
       - name: Open an issue on drift
         if: failure() && steps.compare.outputs.drifted != ''

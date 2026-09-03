@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every .github/workflows/*.yml must parse.
+"""Every .github/workflows/*.yml must parse, and the deployer's probe must be allowed to run.
 
     python3 test_workflows_parse.py
 
@@ -26,6 +26,8 @@ session, with no dependency on the thing it is checking.
 """
 
 import glob
+import os
+import subprocess
 import sys
 
 try:
@@ -70,6 +72,20 @@ def main() -> int:
               f"'No jobs were run', which is quieter than a failure.")
         return 1
     print(f"All {len(files)} workflows parse and define jobs.")
+
+    # A workflow that parses can still be guaranteed to fail. deploy_lambdas.yml
+    # invokes what it deploys, and that grant is an explicit ARN list in
+    # iam_github_deploy_invoke.json: map a function without listing it and the
+    # deploy SUCCEEDS, then the run goes red on AccessDeniedException. Run 134
+    # on 2026-09-03 was exactly that. Checked here because this is the command
+    # the repo already runs after every workflow edit.
+    print()
+    checker = os.path.join("tools", "check_deploy_invoke_policy.py")
+    if not os.path.exists(checker):
+        print(f"  note    {checker} missing -- deploy-role invoke grants unchecked")
+        return 0
+    if subprocess.run([sys.executable, checker]).returncode != 0:
+        return 1
     return 0
 
 

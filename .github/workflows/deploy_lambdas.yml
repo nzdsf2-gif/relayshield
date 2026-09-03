@@ -304,6 +304,13 @@ jobs:
               # run, and a probe that did not run must never read as a pass.
               echo "::error::$FUNC could not be probed (aws invoke rc=$RC, response empty)"
               cat invoke.log || true
+              # The commonest cause, and the one that reads as a failed deploy
+              # when it is not: the code shipped fine and the deploy role simply
+              # has no invoke grant on this function. The grant is an explicit
+              # ARN list, so every newly mapped function hits this once.
+              if grep -qi "AccessDeniedException" invoke.log; then
+                echo "::error::$FUNC WAS DEPLOYED. Only the probe was denied — the deploy role has no lambda:InvokeFunction on it. Fix: python3 tools/check_deploy_invoke_policy.py --write, then sh tools/apply_deploy_invoke_policy.sh"
+              fi
               FAILED="$FAILED $FUNC"
             elif grep -qi "ImportModuleError\|No module named" out.json; then
               echo "::error::$FUNC failed to import after deploy"

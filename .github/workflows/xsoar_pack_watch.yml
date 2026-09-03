@@ -1,0 +1,94 @@
+name: XSOAR Pack Watch
+
+# WHY THIS EXISTS
+# ---------------
+# The Cortex XSOAR blog post and the "Available as a Cortex XSOAR content pack"
+# line on the API landing page are gated on ONE fact: Packs/RelayShield existing
+# on demisto/content's master branch. Not on a date, and not on our own PR
+# being merged -- #45206 merged on 2026-09-02 and the pack was still not on
+# master, because Palo Alto merges an external contribution into an internal PR
+# that then goes through their own pipeline.
+#
+# Until 2026-09-03 the only way to learn that it had landed was for somebody to
+# remember to run tools/check_xsoar_pack.sh. A gate nobody re-checks is not a
+# gate, it is a delay of unknown length: the moment the pack lands is the moment
+# a competitor-readable claim becomes true and publishable, and every day
+# between that and noticing is wasted.
+#
+# So this asks daily and opens an issue on the day it flips. It needs no AWS
+# credentials and no secrets: the check is two public HTTP requests.
+#
+# It deliberately does NOT go red when the pack is absent. Absent is the normal
+# state and a red run every day for weeks is an alarm nobody reads. The run goes
+# red only when the check cannot answer at all -- which is the case where a 404
+# would otherwise be mistaken for "not merged yet".
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  watch:
+    name: Is Packs/RelayShield on demisto/content master yet?
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the three-stage check
+        id: check
+        run: |
+          set -uo pipefail
+          sh tools/check_xsoar_pack.sh | tee xsoar.txt
+          STATUS=$(grep '^XSOAR_PACK_STATUS=' xsoar.txt | tail -1 | cut -d= -f2)
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "status: $STATUS"
+          if [ "$STATUS" = "undetermined" ]; then
+            echo "::error::Neither mechanism answered. This run is not evidence either way."
+            exit 1
+          fi
+
+      - name: Open the publish issue on the day it lands
+        if: steps.check.outputs.status == 'merged'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'XSOAR pack is ON MASTER — publish the blog and the landing line';
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'xsoar',
+            });
+            if (existing.data.some(i => i.title === title)) return;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title,
+              labels: ['xsoar'],
+              body: [
+                '`Packs/RelayShield/pack_metadata.json` now returns 200 on demisto/content master.',
+                '',
+                'The stronger claim is now true and checkable, so the two gated items unlock:',
+                '',
+                '1. **Blog post**, canonical on blog.relayshield.net, then Medium, dev.to, LinkedIn,',
+                '   Telegram, Farcaster, Mastodon. The angle is what the pack DOES that a Cortex',
+                '   XSOAR customer cannot do today: enrich an incident with indicators collected',
+                '   from criminal Telegram channels. Do NOT quote a corpus number in it.',
+                '2. **Landing-page line on the API site**: "Available as a Cortex XSOAR content',
+                '   pack." Link the Marketplace listing page, which Moshe Eichler confirmed in',
+                '   writing is created on merge. Link their Release Notes entry from the post too.',
+                '',
+                '**Re-run `sh tools/check_xsoar_pack.sh` immediately before publishing either.**',
+                'The gap between writing and publishing is exactly where a false claim gets in.',
+              ].join('\n'),
+            });
+
+      - name: Say where it is when it has not landed
+        if: steps.check.outputs.status == 'absent'
+        run: |
+          echo "Still not on master. The safe wording remains:"
+          echo "  RelayShield's Cortex XSOAR content pack has been contributed to Palo Alto"
+          echo "  Networks' content repository and accepted; it is progressing through their"
+          echo "  internal release pipeline."

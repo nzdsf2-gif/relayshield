@@ -2225,6 +2225,29 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "in an agent's own reasoning rather than a separate system someone has "
             "to remember to consult.")),
     ),
+    # The Telegram bot widget, registered 2026-09-03 BEFORE the widget ships,
+    # which is the whole point of this rule. Four months of arrivals from the
+    # official MCP registry logged unmatched: because the key was created after
+    # the link went out; this one exists first.
+    #
+    # NO REFERER HOSTS, deliberately, and that is a departure from every other
+    # entry here. The widget writes its own links and always appends
+    # ?source=tg-widget, so referer matching adds nothing it needs. Adding t.me
+    # would be actively wrong: every un-keyed click from our OWN Telegram bot
+    # and blog channel would then be attributed to third-party widget installs,
+    # and the number we most want from this channel is how many installs are
+    # real. An empty tuple means "explicit parameter only".
+    "tg-widget": (
+        (),
+        _banner("Arriving from a Telegram bot", _p(
+            "Someone added RelayShield to the bot you were just using. The same check "
+            'runs from one function call &mdash; <code style="background:var(--bg);border-radius:5px;'
+            'padding:.15rem .4rem">check(text)</code> returns a verdict and a ready-to-send reply for '
+            "any link or wallet address a user pastes, across EVM, Solana, TON and Bitcoin. "
+            "The first calls need no key, no card and no signup: link checking and address "
+            "screening are open endpoints, capped per address rather than billed. A key raises "
+            "the cap and adds multi-engine URL analysis.")),
+    ),
     "n8n": (
         ("n8n.io", "creators.n8n.io"),
         _banner("Arriving from n8n", _p(

@@ -490,31 +490,52 @@ _NO_MATCH = (
 )
 
 
-def _md(value) -> str:
-    """Escape a value that came from the platform, not from us.
+def _md(value, platform: str = PLATFORM_TELEGRAM) -> str:
+    """Render a value that came from the platform, not from us, so it cannot
+    break the message it is embedded in.
 
-    The Telegram adapter sends with parse_mode="Markdown", and a display name
-    or username is attacker-controlled text. Telegram usernames legitimately
-    contain underscores, so `@john_doe` alone is enough to leave an unclosed
-    italic entity, and Telegram answers an unparseable message with a 400 —
-    which drops the ENTIRE reply, verdict included. A scam analysis that fails
-    to send because of a character in the scammer's own display name is a
-    denial of exactly the answer the user needed, triggerable on demand.
+    REWRITTEN 2026-09-02. The previous version backslash-escaped `_ * ` [` for
+    Telegram, and that DOES NOT WORK: Telegram's legacy "Markdown" parse mode
+    has no escape syntax, so a backslash before an underscore renders as a
+    VISIBLE backslash. Confirmed from a live screenshot of the Quickstart card,
+    where the bot handle appeared to the user with backslashes in it.
+
+    The old code therefore traded one failure for another. It did prevent the
+    400 that an unclosed italic entity causes -- which drops the entire reply,
+    verdict included, and is triggerable on demand through a scammer's own
+    display name -- but it did so by printing broken text.
+
+    The fix must differ by platform, because they disagree about what is safe:
+
+      Telegram   legacy Markdown, no escape syntax. A code span IS literal, so
+                 backticks preserve the value exactly and cannot open an
+                 entity. Renders monospace, which reads fine for a handle.
+      WhatsApp   italic needs a matched _pair_. A lone underscore renders as an
+                 underscore and nothing errors, so the value passes through
+                 untouched. Backticks would render literally here, which is
+                 exactly why this cannot be one shared implementation.
+
+    Either way the exact characters survive. Stripping them was considered and
+    rejected: "john_doe" becoming "johndoe" is data corruption, and in a scam
+    analysis the precise handle is what the reader has to match against what
+    they actually saw.
     """
     text = str(value or "")
-    for ch in ("\\", "_", "*", "`", "["):
-        text = text.replace(ch, "\\" + ch)
-    return text
+    if platform == PLATFORM_WHATSAPP:
+        return text
+    # A backtick inside a code span closes it early, so it is the one character
+    # that cannot survive verbatim.
+    return "`" + text.replace("`", "'") + "`"
 
 
-def _render_lead(lead: OperatorLead) -> str:
+def _render_lead(lead: OperatorLead, platform: str = PLATFORM_TELEGRAM) -> str:
     times = "once" if lead.sightings == 1 else f"{lead.sightings} times"
     line = (
-        f"⚠️ *{_md(lead.handle)}* has come up {times}, across {lead.channels} different "
+        f"⚠️ *{_md(lead.handle, platform)}* has come up {times}, across {lead.channels} different "
         "criminal channels we monitor."
     )
     if lead.categories:
-        line += f" Channels dealing in: {', '.join(_md(c) for c in lead.categories)}."
+        line += f" Channels dealing in: {', '.join(_md(c, platform) for c in lead.categories)}."
     line += (
         "\n\nTreat that as a lead, not proof. Handles are collected loosely from "
         "channel chatter, so a match can be a coincidence — but a repeat match "
@@ -523,7 +544,8 @@ def _render_lead(lead: OperatorLead) -> str:
     return line
 
 
-def render_forward_note(findings: ForwardFindings) -> str:
+def render_forward_note(findings: ForwardFindings,
+                        platform: str = PLATFORM_TELEGRAM) -> str:
     """The provenance block, prepended to whatever the platform's own content
     analysis produces.
 
@@ -539,11 +561,11 @@ def render_forward_note(findings: ForwardFindings) -> str:
     parts: list[str] = ["📨 *Forwarded message*"]
 
     if attribution == ATTR_SENDER_KNOWN:
-        who = _md(origin.sender_display_name) if origin.sender_display_name else "someone"
-        handle = f" (@{_md(origin.sender_username)})" if origin.sender_username else ""
+        who = _md(origin.sender_display_name, platform) if origin.sender_display_name else "someone"
+        handle = f" (@{_md(origin.sender_username, platform)})" if origin.sender_username else ""
         parts.append(f"Telegram says this was originally sent by *{who}*{handle}.")
         if findings.leads:
-            parts.append("\n\n".join(_render_lead(l) for l in findings.leads))
+            parts.append("\n\n".join(_render_lead(l, platform) for l in findings.leads))
         elif findings.sender_checked:
             parts.append(_NO_MATCH)
         # lookup_failed: say nothing about the sender. A check that errored is
@@ -554,7 +576,7 @@ def render_forward_note(findings: ForwardFindings) -> str:
         if name:
             parts.append(
                 f"The original sender has forward privacy switched on, so Telegram passes "
-                f"on the name *{_md(name)}* and no account behind it. Anyone can set that "
+                f"on the name *{_md(name, platform)}* and no account behind it. Anyone can set that "
                 "name, so there is nothing here I can check."
             )
         else:
@@ -564,8 +586,8 @@ def render_forward_note(findings: ForwardFindings) -> str:
             )
 
     elif attribution == ATTR_CHANNEL:
-        title = _md(origin.origin_title) if origin.origin_title else "a channel"
-        handle = f" (@{_md(origin.origin_username)})" if origin.origin_username else ""
+        title = _md(origin.origin_title, platform) if origin.origin_title else "a channel"
+        handle = f" (@{_md(origin.origin_username, platform)})" if origin.origin_username else ""
         parts.append(
             f"This came from *{title}*{handle}, not from a person. Anything posted to a "
             "channel was written for everyone in it, so a message that seems to know "
@@ -657,6 +679,12 @@ def paste_hint(platform: str) -> str:
     )
 
 
+# The parse mode quickstart_text() emits for Telegram. Exported so the caller
+# cannot send HTML as Markdown -- which is how the handle broke in the first
+# place, a renderer and a sender disagreeing with nothing tying them together.
+QUICKSTART_PARSE_MODE = {PLATFORM_TELEGRAM: "HTML", PLATFORM_WHATSAPP: None}
+
+
 def quickstart_text(platform: str) -> str:
     """The Quickstart card.
 
@@ -705,26 +733,38 @@ def quickstart_text(platform: str) -> str:
             "Reply *HELP* for the full command list."
         )
 
+    # TELEGRAM RENDERS AS HTML, NOT MARKDOWN. Changed 2026-09-02.
+    #
+    # This card names the bot handle three times, and @relayshield_bot contains
+    # an underscore. Under legacy Markdown that is unsolvable: leaving it bare
+    # opens an italic entity that never closes, and escaping it prints a visible
+    # backslash, because legacy Markdown has no escape syntax. A screenshot
+    # showed the user exactly that -- two handles with backslashes in them and a
+    # third rendered correctly, in the same message.
+    #
+    # In HTML mode the underscore has no meaning at all, so the handle is just
+    # the handle. The caller must send this with parse_mode="HTML"; see
+    # QUICKSTART_PARSE_MODE, which exists so the two cannot drift apart.
     return (
-        "🚀 *Quick start — three things you can do right now*\n\n"
-        "*1. Forward me anything that looks off.*\n"
+        "🚀 <b>Quick start — four things you can do right now</b>\n\n"
+        "<b>1. Forward me anything that looks off.</b>\n"
         "A text, a link, a Telegram message — including one from someone already "
-        "in your contacts. Tap the message, choose *Forward*, and search for "
-        "*@relayshield\\_bot*. No command needed. *A message from a name you know "
-        "is exactly the case worth forwarding*: a hijacked account still shows up "
-        "as your friend.\n"
+        "in your contacts. Tap the message, choose Forward, and search for "
+        "@relayshield_bot. No command needed. <b>A message from a name you know "
+        "is exactly the case worth forwarding</b>: a hijacked account still shows "
+        "up as your friend.\n"
         "I read it for impersonation, urgency tactics and credential lures, I "
         "check every link in it, and — because Telegram passes on who sent a "
         "forward — I check that account too, unless they have forward privacy "
         "switched on.\n\n"
-        "*2. Paste a screenshot of a suspicious text.*\n"
+        "<b>2. Paste a screenshot of a suspicious text.</b>\n"
         "Send the picture on its own, no caption needed. Best for an SMS you "
         "cannot forward into Telegram. A screenshot hides where its buttons "
         "really link, so send the link itself too if you can.\n\n"
-        "*3. Check a link before you click it.*\n"
-        "`/scan <link>` — checked against our own criminal-source corpus, "
+        "<b>3. Check a link before you click it.</b>\n"
+        "/scan &lt;link&gt; — checked against our own criminal-source corpus, "
         "Google Safe Browsing and VirusTotal.\n\n"
-        "*4. Forward a suspicious email to " + CHECKEMAIL_ADDRESS + ".*\n"
+        "<b>4. Forward a suspicious email to " + CHECKEMAIL_ADDRESS + ".</b>\n"
         "Send it from your own email account, not from here. An email carries "
         "delivery records that say whether it really came from the domain it "
         "claims, and that is the one check no chat app can do. You get a "

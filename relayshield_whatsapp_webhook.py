@@ -3650,7 +3650,8 @@ def handle_active_message(
     forward_note = ""
     if forward_origin is not None:
         try:
-            forward_note = fwd.render_forward_note(fwd.analyze_forward(forward_origin))
+            forward_note = fwd.render_forward_note(
+                fwd.analyze_forward(forward_origin), fwd.PLATFORM_WHATSAPP)
         except Exception as exc:
             logger.warning("Forward provenance failed user_id=%s: %s", user_id, exc)
             forward_note = ""

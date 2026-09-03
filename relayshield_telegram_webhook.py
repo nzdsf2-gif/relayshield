@@ -6012,7 +6012,14 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         # now", and its first line is the one action that needs no command at
         # all. Without it the forward handler is a feature nobody is told
         # about, which is the same as not having built it.
-        send_message(chat_id, fwd.quickstart_text(fwd.PLATFORM_TELEGRAM))
+        # HTML, not the default Markdown. The card names @relayshield_bot three
+        # times and that underscore is unsolvable in Telegram's legacy Markdown:
+        # bare it opens an italic entity that never closes, escaped it prints a
+        # visible backslash, because legacy Markdown has no escape syntax. The
+        # parse mode comes from the module that produced the text so the two
+        # cannot drift apart.
+        send_message(chat_id, fwd.quickstart_text(fwd.PLATFORM_TELEGRAM),
+                     parse_mode=fwd.QUICKSTART_PARSE_MODE[fwd.PLATFORM_TELEGRAM])
     elif cmd == "verify":
         handle_verify(chat_id)
     elif cmd == "otp":
@@ -6198,7 +6205,8 @@ def handle_message(update: dict) -> None:
     fwd_origin = fwd.parse_telegram_forward(message)
     if fwd_origin:
         try:
-            forward_note = fwd.render_forward_note(fwd.analyze_forward(fwd_origin))
+            forward_note = fwd.render_forward_note(
+                fwd.analyze_forward(fwd_origin), fwd.PLATFORM_TELEGRAM)
         except Exception as exc:
             # Provenance is an enrichment. It must never cost the user the
             # content verdict, which is the part that says do not click.

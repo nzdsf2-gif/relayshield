@@ -243,7 +243,7 @@ class TestRendering(unittest.TestCase):
         note = fwd.render_forward_note(fwd.analyze_forward(o, operator_lookup=lambda h: None))
         self.assertIn("not a clean bill of health", note)
 
-    def test_markdown_is_escaped_in_platform_supplied_names(self):
+    def test_platform_supplied_names_survive_intact_on_both(self):
         """A username with an underscore must not break Telegram's parser.
 
         Unescaped, `@john_doe` leaves an unclosed italic entity, Telegram
@@ -255,10 +255,32 @@ class TestRendering(unittest.TestCase):
                               origin_type=fwd.ORIGIN_USER,
                               sender_id="1", sender_username="john_doe",
                               sender_display_name="John *Doe* [x]")
-        note = fwd.render_forward_note(fwd.analyze_forward(o, operator_lookup=lambda h: None))
-        self.assertIn("john\\_doe", note)
-        self.assertIn("\\*Doe\\*", note)
-        self.assertIn("\\[x]", note)
+        analysis = fwd.analyze_forward(o, operator_lookup=lambda h: None)
+
+        # TELEGRAM: a code span. Legacy Markdown has no escape syntax, so
+        # backslashes would be PRINTED; inside backticks the characters are
+        # literal and cannot open an entity.
+        tg = fwd.render_forward_note(analysis, fwd.PLATFORM_TELEGRAM)
+        self.assertIn("`john_doe`", tg)
+        self.assertIn("`John *Doe* [x]`", tg)
+        self.assertNotIn("john\\_doe", tg)
+
+        # WHATSAPP: no code spans, and no need for them. Italic requires a
+        # matched pair, so a lone underscore is harmless and nothing errors.
+        # Backticks here would render as literal backticks.
+        wa = fwd.render_forward_note(analysis, fwd.PLATFORM_WHATSAPP)
+        self.assertIn("john_doe", wa)
+        self.assertNotIn("`", wa)
+
+    def test_no_platform_value_is_ever_corrupted(self):
+        """Stripping the markup characters was the other option and is wrong.
+
+        "john_doe" becoming "johndoe" is data corruption, and in a scam
+        analysis the precise handle is the thing the reader has to match
+        against what they actually saw."""
+        for platform in (fwd.PLATFORM_TELEGRAM, fwd.PLATFORM_WHATSAPP):
+            out = fwd._md("john_doe", platform)
+            self.assertIn("john_doe", out)
 
     def test_platform_command_vocabulary(self):
         tg = fwd.render_forward_note(fwd.analyze_forward(
@@ -299,18 +321,44 @@ class TestQuickstart(unittest.TestCase):
             self.assertIn("in your contacts", text)
             self.assertIn("still shows up as your friend", text)
 
-    def test_telegram_names_the_bot(self):
-        """Escaped, because send_message parses Markdown and a lone _ opens an
-        italic entity that never closes -- a 400 that drops the whole card."""
-        self.assertIn("@relayshield\\_bot", fwd.quickstart_text(fwd.PLATFORM_TELEGRAM))
+    def test_telegram_quickstart_is_html_with_a_clean_handle(self):
+        """The handle must appear EXACTLY as @relayshield_bot, with no backslash.
+
+        Under legacy Markdown this was unsolvable: bare, the underscore opens an
+        italic entity that never closes and Telegram 400s, dropping the whole
+        card; escaped, legacy Markdown has no escape syntax so the user SEES the
+        backslash. A live screenshot on 2026-09-02 showed two handles with
+        backslashes and a third without, in one message.
+
+        HTML mode removes the choice -- the underscore has no meaning there.
+        """
+        tg = fwd.quickstart_text(fwd.PLATFORM_TELEGRAM)
+        self.assertIn("@relayshield_bot", tg)
+        self.assertNotIn("\\_", tg)
+        self.assertNotIn("\\", tg)
+        self.assertIn("<b>", tg)
+        self.assertEqual(fwd.QUICKSTART_PARSE_MODE[fwd.PLATFORM_TELEGRAM], "HTML")
+
+    def test_telegram_quickstart_escapes_html_metacharacters(self):
+        """In HTML mode a bare < would be read as a tag. The only one in the
+        copy is the /scan placeholder, and it must be entity-encoded."""
+        tg = fwd.quickstart_text(fwd.PLATFORM_TELEGRAM)
+        self.assertIn("&lt;link&gt;", tg)
+        self.assertNotIn("<link>", tg)
+
+    def test_whatsapp_quickstart_is_not_html(self):
+        """WhatsApp has no HTML mode. Tags would render as literal text."""
+        wa = fwd.quickstart_text(fwd.PLATFORM_WHATSAPP)
+        self.assertNotIn("<b>", wa)
+        self.assertIsNone(fwd.QUICKSTART_PARSE_MODE[fwd.PLATFORM_WHATSAPP])
 
     def test_both_say_HOW_to_forward(self):
         """"Forward me" is not an instruction if the reader does not know the
         gesture or the destination. Telegram needs the handle to search for;
         WhatsApp has no handle, so it needs the gesture and "this chat"."""
         tg = fwd.quickstart_text(fwd.PLATFORM_TELEGRAM)
-        self.assertIn("choose *Forward*", tg)
-        self.assertIn("@relayshield\\_bot", tg)
+        self.assertIn("choose Forward", tg)
+        self.assertIn("@relayshield_bot", tg)
         wa = fwd.quickstart_text(fwd.PLATFORM_WHATSAPP)
         self.assertIn("Press and hold", wa)
         self.assertIn("tap *Forward*", wa)

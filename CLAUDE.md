@@ -362,6 +362,45 @@ Two separate reasons, both now closed:
   tell: since `9c87348`, three pushes have produced no run at all, which is the positive evidence
   the file parses again.
 
+### The Discord diff was read, and it was case 2: live was merely stale
+
+`sh tools/discord_bot_drift.sh` ran on the Mac at 07:20. Findings, in the order
+they matter:
+
+- The function name **`relayshield-discord-bot` is CORRECT** — resolved against AWS in
+  239677749008, python3.14, `CodeSize` 10021, **`LastModified` 2026-08-13T15:25**. Three weeks
+  untouched, which is what "no deploy path" looks like from the AWS side.
+- The live handler is **byte-identical to `relayshield_discord_bot.py` as of `0c429e0`**, missing
+  exactly one commit: `4a688e8`, the email-check footer. Nothing live-only. **Nothing to recover.**
+- No other `relayshield_*.py` in the package at all, so no shared-module drift either.
+
+So the footer was never a merge problem and never a recovery problem. It was a function with no
+deploy path, and it now has one: `relayshield_discord_bot.py` is in `deploy_lambdas.yml` — the
+`paths:` trigger, `LAMBDA_MAP`, and the manual-dispatch list. No import-probe early return is
+needed; the probe payload falls through the deferred branch, finds no Discord signature headers and
+returns 401, which is a real response and all the probe asserts.
+
+**The trap in mapping it, which nearly wasted the whole fix:** the deployer ships a function only
+when the PUSH changed its source. A push that maps a function while touching only workflow files
+deploys nothing. That is why the commit that maps it also writes the deploy path into the handler's
+own docstring — the push has to touch the `.py`.
+
+### The drift script's first verdict was WRONG, and the lesson generalises
+
+It printed RECOVER FIRST on a function that needed nothing of the sort. It classified by **counting
+diff lines** — any `+` line meant live carried something main did not — and **a modified line
+produces a `+` and a `-` both**. The single `+` was `"content": rendered["text"] + UPSELL_FOOTER,`:
+main's own line as it stood one commit earlier.
+
+The fix is not a better heuristic, it is an exact question, and git can answer it directly: **is the
+live file byte-identical to some commit's version of this file?** Yes means every byte is already
+committed and there is nothing to recover, whatever shape the diff has. No means live holds content
+no commit ever held, which is hand-deployed work. The script now walks `git log -- <file>` and says
+which commit live matches and which commits it is missing.
+
+Worth carrying to the next drift diff of any kind: **a diff's shape does not tell you which
+direction drift runs. Matching a committed version does.**
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -370,6 +409,9 @@ Two separate reasons, both now closed:
   `relayshield_*.py` in it, and classifies the result the only way that matters: lines present in
   LIVE and not in main mean hand-deployed work that is RECOVERED first; only main's own commits
   missing means live is merely stale and the function can be mapped in `deploy_lambdas.yml`.
+- **`relayshield_discord_bot.py` now has a deploy path** — `deploy_lambdas.yml`, after the diff
+  above was read. It stays in the drift check too: having a deploy path is not the same as never
+  being hand-deployed again.
 - **An unreadable function now fails the drift run.** It previously emitted a `::warning::` inside
   an otherwise green run, so a wrong name in the map was indistinguishable from a clean check —
   the quiet-alarm failure again, and the Discord entry's name is exactly the case that would have
@@ -433,9 +475,10 @@ Two separate reasons, both now closed:
     readable", fix the name, do not drop the entry. Only when the diff shows live is merely stale
     does it go into `deploy_lambdas.yml`. Until then no edit to that file ships automatically, which
     is why the email-check footer added this session is not visible in Discord.
-    **2026-09-03: the diff no longer has to be waited for.** `sh tools/discord_bot_drift.sh` runs
-    it on the Mac, resolves the real function name from AWS rather than trusting the map, and says
-    which of the two cases the diff is. See the 2026-09-03 section below.
+    **2026-09-03: DONE.** The diff was read with `sh tools/discord_bot_drift.sh`. Live was
+    byte-identical to `0c429e0`, stale by exactly one commit and holding nothing of its own, so the
+    function is now in `deploy_lambdas.yml`. See the 2026-09-03 section above, including why the
+    mapping commit had to touch the handler itself.
 
 ### Done and verified 2026-09-02
 

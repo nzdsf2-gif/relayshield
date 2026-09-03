@@ -56,6 +56,18 @@ on:
       # it, editing only this file would change what both bots say to users and
       # deploy nothing.
       - 'relayshield_forward_analysis.py'
+      # Added 2026-09-03, after its first drift diff was finally read. It had
+      # been the FIFTH handler with source in the repo, live traffic, and no
+      # deploy path -- so no edit to it had ever shipped automatically, and the
+      # email-check footer merged on 2026-09-02 was invisible in Discord while
+      # main was entirely correct.
+      #
+      # The diff was read before this entry was written, as the rule requires.
+      # tools/discord_bot_drift.sh established the live package is BYTE-
+      # IDENTICAL to this file as of 0c429e0 (live LastModified 2026-08-13),
+      # missing exactly one commit: 4a688e8, the footer. Nothing live-only, so
+      # nothing to recover, so a repo-sourced deploy destroys nothing.
+      - 'relayshield_discord_bot.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
@@ -90,7 +102,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Manual trigger — deploy all mapped Lambda files
-            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py relayshield_intel_feed.py relayshield_intel_kev.py"
+            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py relayshield_intel_feed.py relayshield_intel_kev.py relayshield_discord_bot.py"
             echo "Manual trigger — deploying all Lambdas"
           else
             # Push trigger — deploy every handler this PUSH changed.
@@ -151,6 +163,16 @@ jobs:
             ["relayshield_openapi_spec.py"]="relayshield-api"
             ["relayshield_intel_feed.py"]="relayshield-intel-feed"
             ["relayshield_intel_kev.py"]="relayshield-intel-kev"
+            # Verified against AWS on 2026-09-03, not assumed: the function
+            # exists under this exact name, python3.14, and the drift script
+            # resolved it rather than trusting the string.
+            #
+            # No import-probe early return is needed here. The probe payload
+            # {"source":"ci.import-probe"} falls through this handler's
+            # deferred-invocation branch, finds no Discord signature headers
+            # and returns 401 without doing any work -- a real response, which
+            # is all the probe asserts.
+            ["relayshield_discord_bot.py"]="relayshield-discord-bot"
           )
 
           # Resolve a handler's local dependencies from its own imports, rather

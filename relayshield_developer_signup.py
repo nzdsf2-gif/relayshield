@@ -2723,6 +2723,13 @@ def _p(text: str) -> str:
 # Matched on the Referer host, or forced with ?src=<key> so a link we control can
 # select its own framing even when the referrer is stripped (which is what happens
 # with most Slack, Discord and native app clicks).
+_APIFY_BANNER = _banner("Arriving from Apify", _p(
+    "The RelayShield actor runs breach, infostealer and SIM-swap checks as an Apify task, so a "
+    "list of employee emails or phone numbers can be screened on a schedule and the results pushed "
+    "into whatever the rest of your Apify pipeline already feeds. Same API underneath, no "
+    "integration code."))
+
+
 _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     "discord-bot": (
         ("top.gg", "discordbotlist.com", "discord.bots.gg"),
@@ -2798,6 +2805,63 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "playbook can refuse to onboard an identity that is already in a stealer log. Every module needs an "
             "API key, which is what this page issues. <b>Pay per call, no monthly minimum</b>, and the same key "
             "works across REST, MCP and STIX/TAXII.")),
+    ),
+    # Apify, registered 2026-08-27 BEFORE any listing link goes out. An
+    # unregistered key logs unmatched: and renders no banner, which is exactly
+    # how ?source=rsscan shipped broken. Referer hosts included so an arrival
+    # that loses the query parameter still attributes.
+    "apify": (("apify.com", "console.apify.com"), _APIFY_BANNER),
+    # MCP registries, registered 2026-09-02, and this one is a CORRECTION
+    # rather than a precaution.
+    #
+    # RelayShield has been listed in the official MCP registry
+    # (registry.modelcontextprotocol.io) since 2026-05-10 -- six versions,
+    # latest 0.2.7 on 2026-07-19, status active. Nobody in this repo knew. Its
+    # websiteUrl is a bare https://relayshield.net with NO ?source= key, so
+    # nearly four months of arrivals from the canonical MCP directory have
+    # logged unmatched: and rendered no banner.
+    #
+    # That is the exact failure the rule at the top of FRONT_DOORS.md exists to
+    # prevent, and it happened on a front door nobody opened deliberately. A
+    # channel that cannot be measured cannot be defended when deciding what to
+    # build next; it just becomes an opinion.
+    #
+    # Registered BEFORE the server.json websiteUrl is updated, in that order,
+    # so the key exists the moment the first attributed arrival lands.
+    "mcp-registry": (
+        ("registry.modelcontextprotocol.io", "modelcontextprotocol.io",
+         "glama.ai", "smithery.ai", "mcp.so"),
+        _banner("Arriving from an MCP registry", _p(
+            "The RelayShield MCP server is published to the official registry and "
+            "installs with your client's usual command. It exposes the same checks "
+            "the REST API documents below &mdash; breach exposure, infostealer "
+            "credentials, SIM swap, domain lookalikes and URL scanning &mdash; as "
+            "tools an agent can call directly, so a security check becomes a step "
+            "in an agent's own reasoning rather than a separate system someone has "
+            "to remember to consult.")),
+    ),
+    # The Telegram bot widget, registered 2026-09-03 BEFORE the widget ships,
+    # which is the whole point of this rule. Four months of arrivals from the
+    # official MCP registry logged unmatched: because the key was created after
+    # the link went out; this one exists first.
+    #
+    # NO REFERER HOSTS, deliberately, and that is a departure from every other
+    # entry here. The widget writes its own links and always appends
+    # ?source=tg-widget, so referer matching adds nothing it needs. Adding t.me
+    # would be actively wrong: every un-keyed click from our OWN Telegram bot
+    # and blog channel would then be attributed to third-party widget installs,
+    # and the number we most want from this channel is how many installs are
+    # real. An empty tuple means "explicit parameter only".
+    "tg-widget": (
+        (),
+        _banner("Arriving from a Telegram bot", _p(
+            "Someone added RelayShield to the bot you were just using. The same check "
+            'runs from one function call &mdash; <code style="background:var(--bg);border-radius:5px;'
+            'padding:.15rem .4rem">check(text)</code> returns a verdict and a ready-to-send reply for '
+            "any link or wallet address a user pastes, across EVM, Solana, TON and Bitcoin. "
+            "The first calls need no key, no card and no signup: link checking and address "
+            "screening are open endpoints, capped per address rather than billed. A key raises "
+            "the cap and adds multi-engine URL analysis.")),
     ),
     "langchain": (("langchain.com",), _LANGCHAIN_BANNER),
     "n8n": (
@@ -3177,6 +3241,14 @@ _SOURCE_ALIASES = {
     # just watched a secret scanner block their commit is not asking which client
     # library to install. The remaining catalogs stay on github, since a Docker
     # Hub or pre-commit arrival really is a generic integration visit.
+    # Apify, 2026-08-27. One key per surface, same banner, so the store listing,
+    # the actor README and the run output stay distinguishable in the logs and
+    # in the Monday report's source breakdown.
+    "apify":         "apify",
+    "apify-store":   "apify",
+    "apify-actor":   "apify",
+    "apify-readme":  "apify",
+    "apify-run":     "apify",
     "dockerhub":  "github",
     "docker":     "github",
     "circleci":   "github",

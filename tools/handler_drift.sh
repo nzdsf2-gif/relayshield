@@ -207,17 +207,23 @@ echo
 
 echo "== 6. What to do with that"
 if [ -z "$STALE_AT" ]; then
-  cat <<'VERDICT'
+  # Unquoted heredoc: the three input values are filled in, so the workflow
+  # form can be completed from this output without going back to look them up.
+  # It was quoted until 2026-09-03 and printed a literal $FILE.
+  cat <<VERDICT
    LIVE HOLDS CONTENT NO COMMIT EVER HELD. That is hand-deployed work, so
-   RECOVER IT FIRST:
+   RECOVER IT FIRST, before anything deploys over it:
 
      Actions -> Recover Live Lambda Handler -> Run workflow
-       function: (the name printed in step 2)
+       function: $FUNC
        handler:  $FILE
+       branch:   claude/recovered-live-$FUNC
 
-   That opens a branch with the live file on it. Reconcile it into main, and
-   only then map the function in deploy_lambdas.yml. Deploying main over live
-   before that is exactly how 2,583 lines were nearly lost on 2026-08-17.
+   That pushes the WHOLE live package to that branch. Reconcile it into main,
+   and only then consider a deploy path. Until it is reconciled, $FILE must
+   stay out of deploy_lambdas.yml: a repo-sourced deploy would delete every
+   line above that main does not have, with no error anywhere. That is exactly
+   how 2,583 lines were nearly lost on 2026-08-17.
 VERDICT
 else
   cat <<'VERDICT'

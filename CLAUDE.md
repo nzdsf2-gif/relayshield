@@ -457,8 +457,55 @@ someone else's product, in front of users who never chose us.
 **`relayshield_developer_signup.py` is the SIXTH handler with source in the repo, live traffic and
 no deploy path** — found while registering the `tg-widget` key in its `_SOURCE_BANNERS` table. It
 serves api.relayshield.net/developers: pricing, the signup form, free-tier key issue, every landing
-banner. So a registered attribution key reaches nobody until that function deploys. Drift check
-only, as always; read its first diff before mapping it.
+banner. So a registered attribution key reaches nobody until that function deploys. **Its first diff
+was read the same day and it is the RECOVER-FIRST case — see the section above. Do not map it.**
+
+### relayshield_developer_signup.py IS THE 2026-08-17 CASE AGAIN, and this time the code takes money
+
+The sixth handler's first drift diff was read the same day it was added, and it is not the stale
+case. **Live holds roughly 700 lines that NO COMMIT OF THAT FILE HAS EVER HELD.** `handler_drift.sh`
+settled it exactly rather than by counting: no version in `git log -- relayshield_developer_signup.py`
+is byte-identical to the live file.
+
+What is live and not in git, in the order it would hurt to lose:
+
+- **The Bundle A and Bundle D direct-Stripe doors**, ~400 lines: `handle_bundle_checkout`, the
+  `/developer/bundle-checkout` route, provisioning and revocation for both bundles, and both key
+  emails. This is a second revenue path for products otherwise sold only on AWS Marketplace.
+- **`_get_subscription_price_ids`.** A bundle subscription carries TWO Stripe items and Stripe does
+  not guarantee order, so the old `items[0]` read was a coin flip: when the metered price came back
+  first the bundle branch never fired and the customer was charged $150 or $299 a month and handed
+  an ordinary pay-as-you-go key. Live has the fix. Main has the coin flip.
+- **The `_find_key_by_customer` projection fix.** The AWS-disintermediation guards read
+  `aws_license_arn` and `bundle_?_access`; a projection that omits them does not raise, it returns
+  None, so both guards silently evaluate false. Live projects them. Main does not.
+- **`_strip_html_comments`**, which stops engineering notes shipping to public View Source. One of
+  them recorded a third party's rejection of our work.
+- **The mobile media query**, the fix for the signup CTA overflowing its box on a phone. That button
+  is the primary conversion action on the page.
+- **`FREE_TIER_CALLS = 100`.** Main still says 20, while main's own `relayshield_api.py` says
+  `FREE_TIER_CALLS_LABEL = 100`. The two halves of the free tier disagree in main and agree in live.
+- **Eight source banners** main has never seen: `discord-bot`, `npm-worm`, `fourth-party`,
+  `ansible-galaxy`, `bluenoroff`, `rsscan`, `rsscan-deps`, `metamask-snap`, with their alias tables.
+  Note that `rsscan` has its OWN banner live, where main still aliases it to `github`.
+- Corrected corpus figures throughout: 494K distinct indicators, 5.8M sightings, 95 channels, where
+  main still says 5.0M IOCs and 85 channels.
+
+**IT IS SAFE TODAY ONLY BECAUSE THE FUNCTION IS IN NO DEPLOY MAP.** Merging main does not touch it.
+The moment it is added to `deploy_lambdas.yml`, the next merge deletes all of the above with no
+error anywhere. Do not map it. The `tg-widget` banner registered this session sits in main's copy
+and is inert until the reconcile, which is the correct order: recover first, then re-apply.
+
+**Recovery, and it is the whole package, not the handler:** dispatch `recover_live_handler.yml` with
+function `relayshield-developer-signup`, handler `relayshield_developer_signup.py`, branch
+`claude/recovered-live-relayshield-developer-signup`. Reconcile onto main hunk by hunk the way the
+2026-08-26 recovery was, then re-apply `tg-widget` on top, then re-run
+`sh tools/handler_drift.sh relayshield_developer_signup.py` and expect it to say live matches the
+recovery commit and is missing only the tg-widget commit. That is the self-verifying end state.
+
+**The general form, for the third time: a handler with source in the repo, live traffic and no
+deploy path accumulates hand-deployed work silently, and the longer it goes unread the more
+expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and grew a billing path.
 
 ### Changed 2026-09-03
 

@@ -1,0 +1,6 @@
+Archive:  live.zip
+  Length      Date    Time    Name
+---------  ---------- -----   ----
+   212007  2026-08-17 19:50   relayshield_developer_signup.py
+---------                     -------
+   212007                     1 file

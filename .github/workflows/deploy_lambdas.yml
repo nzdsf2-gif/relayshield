@@ -68,6 +68,18 @@ on:
       # missing exactly one commit: 4a688e8, the footer. Nothing live-only, so
       # nothing to recover, so a repo-sourced deploy destroys nothing.
       - 'relayshield_discord_bot.py'
+      # Added 2026-09-03, AFTER its recovery was reconciled and not before.
+      # This is the sixth handler that had source in the repo, live traffic and
+      # no deploy path, and its first drift diff was the expensive kind: ~700
+      # live-only lines including the Bundle A and Bundle D direct-Stripe
+      # doors. Mapping it while that was outstanding would have deleted a
+      # revenue path on the next merge, with no error anywhere.
+      #
+      # It is safe now because the recovery landed first, verbatim, and the
+      # only thing main adds on top is three attribution registrations. Live is
+      # byte-identical to the recovery commit and missing exactly the
+      # registration commit, which is the ordinary stale case.
+      - 'relayshield_developer_signup.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
@@ -102,7 +114,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Manual trigger — deploy all mapped Lambda files
-            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py relayshield_intel_feed.py relayshield_intel_kev.py relayshield_discord_bot.py"
+            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py relayshield_intel_feed.py relayshield_intel_kev.py relayshield_discord_bot.py relayshield_developer_signup.py"
             echo "Manual trigger — deploying all Lambdas"
           else
             # Push trigger — deploy every handler this PUSH changed.
@@ -173,6 +185,10 @@ jobs:
             # and returns 401 without doing any work -- a real response, which
             # is all the probe asserts.
             ["relayshield_discord_bot.py"]="relayshield-discord-bot"
+            # Name verified against AWS 2026-09-03 by tools/handler_drift.sh,
+            # not assumed: python3.12, and untouched since 2026-08-17 because
+            # nothing has ever deployed it automatically.
+            ["relayshield_developer_signup.py"]="relayshield-developer-signup"
           )
 
           # Resolve a handler's local dependencies from its own imports, rather

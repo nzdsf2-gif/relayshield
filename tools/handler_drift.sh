@@ -164,11 +164,25 @@ echo
 cat "$WORK/handler.diff"
 echo
 
-# Is the live file EXACTLY some commit's version of this file? Every distinct
-# content this file has ever had in git is the version at a commit that touched
-# it, so walking those is exhaustive. An exact match means every byte of live is
-# already committed and there is nothing to recover, whatever the diff's shape.
+# Is every byte of the live file already in git? Asked in two ways, because
+# there are two ways for the answer to be yes and only one of them is a match
+# on this path.
+#
+# FIRST, the exact object question. git names a blob by the hash of its
+# contents, so if hash-object's answer already exists in this repository then
+# these exact bytes are committed SOMEWHERE, whatever path they are under.
+# That case is not hypothetical: a reconcile leaves live matching the file
+# recovered under recovered/<name>.py and matching no version of the handler's
+# own path, and the first version of this check called that "content no commit
+# ever held" and demanded a recovery that had already happened.
+#
+# SECOND, the walk, which names WHICH commit of this file live is, and what it
+# is missing. That is the useful output when live is merely stale.
 echo "== 4b. Is live exactly a committed version of $FILE?"
+LIVE_BLOB=$(git hash-object "$WORK/live_handler.py")
+COMMITTED_SOMEWHERE=no
+git cat-file -e "$LIVE_BLOB" 2>/dev/null && COMMITTED_SOMEWHERE=yes
+
 STALE_AT=""
 for REV in $(git log --format=%H -- "$FILE"); do
   if git show "$REV:$FILE" 2>/dev/null | diff -q - "$WORK/live_handler.py" >/dev/null 2>&1; then
@@ -176,12 +190,20 @@ for REV in $(git log --format=%H -- "$FILE"); do
     break
   fi
 done
+
 if [ -n "$STALE_AT" ]; then
   echo "   YES -- live is byte-identical to $FILE as of $(git log -1 --format='%h %ad %s' --date=short "$STALE_AT")"
   echo "   Commits to this file since then, which live is missing:"
   git --no-pager log --format='     %h %ad %s' --date=short "$STALE_AT"..HEAD -- "$FILE"
+elif [ "$COMMITTED_SOMEWHERE" = yes ]; then
+  echo "   YES, but under a different path. Blob $LIVE_BLOB is in this repository"
+  echo "   already -- almost certainly recovered/ on a recovery branch. So every"
+  echo "   byte of live IS committed and there is NOTHING LEFT TO RECOVER; what"
+  echo "   remains is reconciling that recovery into $FILE and deploying it."
+  echo "   (If you have not fetched the recovery branch, this check cannot see"
+  echo "   the blob and will understate the situation.)"
 else
-  echo "   NO -- live holds content that no commit of $FILE has ever held."
+  echo "   NO -- live holds content that no commit anywhere in this repository holds."
 fi
 echo
 
@@ -206,18 +228,33 @@ done
 echo
 
 echo "== 6. What to do with that"
-if [ -z "$STALE_AT" ]; then
-  cat <<'VERDICT'
+if [ -z "$STALE_AT" ] && [ "$COMMITTED_SOMEWHERE" = yes ]; then
+  cat <<VERDICT
+   ALREADY RECOVERED, NOT YET RECONCILED. The live bytes are in this repository
+   under another path, so nothing is at risk of being lost. Finish the job:
+   reconcile that recovered file into $FILE, keeping every live-only symbol,
+   then re-run this. It should then say live is byte-identical to the reconcile
+   commit's parent and missing only the reconcile itself, which is the ordinary
+   stale case and the point at which a deploy path is safe.
+VERDICT
+elif [ -z "$STALE_AT" ]; then
+  # Unquoted heredoc: the three input values are filled in, so the workflow
+  # form can be completed from this output without going back to look them up.
+  # It was quoted until 2026-09-03 and printed a literal $FILE.
+  cat <<VERDICT
    LIVE HOLDS CONTENT NO COMMIT EVER HELD. That is hand-deployed work, so
-   RECOVER IT FIRST:
+   RECOVER IT FIRST, before anything deploys over it:
 
      Actions -> Recover Live Lambda Handler -> Run workflow
-       function: (the name printed in step 2)
+       function: $FUNC
        handler:  $FILE
+       branch:   claude/recovered-live-$FUNC
 
-   That opens a branch with the live file on it. Reconcile it into main, and
-   only then map the function in deploy_lambdas.yml. Deploying main over live
-   before that is exactly how 2,583 lines were nearly lost on 2026-08-17.
+   That pushes the WHOLE live package to that branch. Reconcile it into main,
+   and only then consider a deploy path. Until it is reconciled, $FILE must
+   stay out of deploy_lambdas.yml: a repo-sourced deploy would delete every
+   line above that main does not have, with no error anywhere. That is exactly
+   how 2,583 lines were nearly lost on 2026-08-17.
 VERDICT
 else
   cat <<'VERDICT'

@@ -458,8 +458,72 @@ someone else's product, in front of users who never chose us.
 **`relayshield_developer_signup.py` is the SIXTH handler with source in the repo, live traffic and
 no deploy path** — found while registering the `tg-widget` key in its `_SOURCE_BANNERS` table. It
 serves api.relayshield.net/developers: pricing, the signup form, free-tier key issue, every landing
-banner. So a registered attribution key reaches nobody until that function deploys. Drift check
-only, as always; read its first diff before mapping it.
+banner. So a registered attribution key reached nobody until that function deployed. **Its first
+diff was read, recovered and reconciled the same day — see the section above. It is now in
+`deploy_lambdas.yml`, and `iam_github_deploy_invoke.json` gained it too, so its first CI deploy does
+not repeat run 134's denied probe.**
+
+### relayshield_developer_signup.py IS THE 2026-08-17 CASE AGAIN, and this time the code takes money
+
+The sixth handler's first drift diff was read the same day it was added, and it is not the stale
+case. **Live holds roughly 700 lines that NO COMMIT OF THAT FILE HAS EVER HELD.** `handler_drift.sh`
+settled it exactly rather than by counting: no version in `git log -- relayshield_developer_signup.py`
+is byte-identical to the live file.
+
+What is live and not in git, in the order it would hurt to lose:
+
+- **The Bundle A and Bundle D direct-Stripe doors**, ~400 lines: `handle_bundle_checkout`, the
+  `/developer/bundle-checkout` route, provisioning and revocation for both bundles, and both key
+  emails. This is a second revenue path for products otherwise sold only on AWS Marketplace.
+- **`_get_subscription_price_ids`.** A bundle subscription carries TWO Stripe items and Stripe does
+  not guarantee order, so the old `items[0]` read was a coin flip: when the metered price came back
+  first the bundle branch never fired and the customer was charged $150 or $299 a month and handed
+  an ordinary pay-as-you-go key. Live has the fix. Main has the coin flip.
+- **The `_find_key_by_customer` projection fix.** The AWS-disintermediation guards read
+  `aws_license_arn` and `bundle_?_access`; a projection that omits them does not raise, it returns
+  None, so both guards silently evaluate false. Live projects them. Main does not.
+- **`_strip_html_comments`**, which stops engineering notes shipping to public View Source. One of
+  them recorded a third party's rejection of our work.
+- **The mobile media query**, the fix for the signup CTA overflowing its box on a phone. That button
+  is the primary conversion action on the page.
+- **`FREE_TIER_CALLS = 100`.** Main still says 20, while main's own `relayshield_api.py` says
+  `FREE_TIER_CALLS_LABEL = 100`. The two halves of the free tier disagree in main and agree in live.
+- **Eight source banners** main has never seen: `discord-bot`, `npm-worm`, `fourth-party`,
+  `ansible-galaxy`, `bluenoroff`, `rsscan`, `rsscan-deps`, `metamask-snap`, with their alias tables.
+  Note that `rsscan` has its OWN banner live, where main still aliases it to `github`.
+- Corrected corpus figures throughout: 494K distinct indicators, 5.8M sightings, 95 channels, where
+  main still says 5.0M IOCs and 85 channels.
+
+**IT WAS SAFE ONLY BECAUSE THE FUNCTION WAS IN NO DEPLOY MAP.** Until the reconcile below landed,
+adding it to `deploy_lambdas.yml` would have deleted all of the above on the next merge with no
+error anywhere. That order — recover, reconcile, only then map — is the whole rule.
+
+**RECOVERED AND RECONCILED THE SAME DAY.** `recover_live_handler.yml` pushed the live package to
+`claude/recovered-live-relayshield-developer-signup` (`dfe60a2`), and it is now on main as two
+commits, deliberately not one:
+
+1. `93310e3` — the live bytes, verbatim, at the handler's own path. A pure move, no edits.
+2. `4690b85` — the three registrations main had and live did not: `apify` (2026-08-27),
+   `mcp-registry` (2026-09-02), `tg-widget` (2026-09-03), re-applied verbatim.
+
+**Splitting it in two is what makes the result checkable.** Live is byte-identical to `93310e3` and
+missing exactly `4690b85`, which is the ordinary stale case, so the function could finally be mapped
+in `deploy_lambdas.yml`. One squashed commit would have left live matching nothing and the drift
+check crying wolf forever.
+
+**One thing from main was deliberately dropped: the alias `"rsscan" -> "github"`.** Live gives
+`rsscan` its own banner and removes that alias, and `_resolve_source` applies aliases BEFORE the
+banner table, so with the alias in place rsscan's own banner is unreachable. A key that exists,
+resolves, and renders the wrong thing is worse than a missing key, because nothing looks broken.
+
+The reconcile was verified structurally rather than by eye: comparing the two files' top-level
+symbols and both attribution tables showed 15 live-only symbols, 8 live-only banners and 42
+live-only aliases, all preserved, and exactly 3 banners plus 5 aliases re-added.
+`test_developer_signup_banners.py` now pins those invariants with `ast` and no boto3.
+
+**The general form, for the third time: a handler with source in the repo, live traffic and no
+deploy path accumulates hand-deployed work silently, and the longer it goes unread the more
+expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and grew a billing path.
 
 ### Changed 2026-09-03
 

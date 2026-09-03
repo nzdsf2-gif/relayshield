@@ -120,13 +120,27 @@ jobs:
             # this function deploys, which is the same shape as the Discord
             # footer being correct on main and absent in Discord.
             #
-            # DRIFT CHECK ONLY, as every addition here starts. Read the first
-            # diff with:  sh tools/handler_drift.sh relayshield_developer_signup.py
-            # Live carrying something main does not is RECOVERED first; only a
-            # merely-stale diff earns a place in deploy_lambdas.yml.
+            # THE FIRST DIFF WAS READ THE SAME DAY, and it is the bad case.
+            # relayshield-developer-signup exists under this exact name
+            # (python3.12, LastModified 2026-08-17), and live holds ~700 lines
+            # NO COMMIT EVER HELD: the Bundle A and Bundle D direct-Stripe
+            # doors and their /developer/bundle-checkout route, the two-item
+            # subscription fix (_get_subscription_price_ids -- reading items[0]
+            # on a bundle was a coin flip that could charge $299/mo and grant
+            # nothing), the _find_key_by_customer projection fix that made two
+            # AWS-disintermediation guards silently evaluate false,
+            # _strip_html_comments, the mobile media query, FREE_TIER_CALLS
+            # raised to 100, and eight source banners including ansible-galaxy,
+            # discord-bot, npm-worm and rsscan.
             #
-            # The name is a guess from convention and is UNVERIFIED. A wrong
-            # name now reddens the run rather than passing quietly.
+            # SO THIS FUNCTION MUST NOT GO IN deploy_lambdas.yml UNTIL THAT IS
+            # RECONCILED. A repo-sourced deploy would delete live revenue code
+            # with no error anywhere -- the 2026-08-17 shape exactly, and this
+            # time the code takes money.
+            #
+            # It is red here on purpose until then. Recovery is
+            # recover_live_handler.yml onto
+            # claude/recovered-live-relayshield-developer-signup.
             ["relayshield_developer_signup.py"]="relayshield-developer-signup"
           )
 

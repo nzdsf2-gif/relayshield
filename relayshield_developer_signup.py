@@ -2196,6 +2196,35 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     # how ?source=rsscan shipped broken. Referer hosts included so an arrival
     # that loses the query parameter still attributes.
     "apify": (("apify.com", "console.apify.com"), _APIFY_BANNER),
+    # MCP registries, registered 2026-09-02, and this one is a CORRECTION
+    # rather than a precaution.
+    #
+    # RelayShield has been listed in the official MCP registry
+    # (registry.modelcontextprotocol.io) since 2026-05-10 -- six versions,
+    # latest 0.2.7 on 2026-07-19, status active. Nobody in this repo knew. Its
+    # websiteUrl is a bare https://relayshield.net with NO ?source= key, so
+    # nearly four months of arrivals from the canonical MCP directory have
+    # logged unmatched: and rendered no banner.
+    #
+    # That is the exact failure the rule at the top of FRONT_DOORS.md exists to
+    # prevent, and it happened on a front door nobody opened deliberately. A
+    # channel that cannot be measured cannot be defended when deciding what to
+    # build next; it just becomes an opinion.
+    #
+    # Registered BEFORE the server.json websiteUrl is updated, in that order,
+    # so the key exists the moment the first attributed arrival lands.
+    "mcp-registry": (
+        ("registry.modelcontextprotocol.io", "modelcontextprotocol.io",
+         "glama.ai", "smithery.ai", "mcp.so"),
+        _banner("Arriving from an MCP registry", _p(
+            "The RelayShield MCP server is published to the official registry and "
+            "installs with your client's usual command. It exposes the same checks "
+            "the REST API documents below &mdash; breach exposure, infostealer "
+            "credentials, SIM swap, domain lookalikes and URL scanning &mdash; as "
+            "tools an agent can call directly, so a security check becomes a step "
+            "in an agent's own reasoning rather than a separate system someone has "
+            "to remember to consult.")),
+    ),
     "n8n": (
         ("n8n.io", "creators.n8n.io"),
         _banner("Arriving from n8n", _p(

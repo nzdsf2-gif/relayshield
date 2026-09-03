@@ -333,6 +333,80 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ---
 
+## WHERE 2026-09-02 LEFT THINGS — read this first
+
+### TOP 10 FOR THE NEXT SESSION, in order
+
+1. **Scope and build the widget.** Decided this session, not started. An embeddable
+   "check this link / check this address" widget for third-party Telegram bots and Mini Apps. The
+   prospect list exists: `prospects_wide.jsonl`, 206 rows at `stars:5..50`, **109 with a website or
+   an email**, and 19 of the top 25 tagged `wallets` or `payments` — bots already handling other
+   people's money. **Register the `source=` keys in `_SOURCE_BANNERS` BEFORE any widget ships**;
+   FD-8 below is what happens when that is skipped.
+2. **Tailored outreach to the 109.** Founder wants it; agreed approach is a GENERATED DRAFT PER
+   PROSPECT that he reviews and sends, keyed on what each repo actually does. Not mass mail: volume
+   is not the lever, relevance is, and blasting maintainers who never asked is how a domain gets
+   blocked.
+3. **Apify: "your Actor as a tool for AI agents" post.** Their content programme pays **$500 per
+   article** on the Apify/Crawlee blog and $100 credits for dev.to under their org. The July call
+   closed 2026-08-16; it is QUARTERLY, so the next call is the target. Theme 2 fits
+   `mcp-registry-risk` exactly. Also **put dev.to back in the channel order** — it is missing
+   entirely and costs nothing.
+4. **Stripe MPP follow-up with Jake Lamoine.** Open question carried: does x402 settlement count
+   toward early-adopter status. Card via SPT minimum is $0.50, stablecoin $0.01 USDC, and the sample
+   uses `scheme: "exact"` on Base — identical to our 28 live x402 endpoints.
+5. **Aduna — Reggie Daniels.** Founder's former colleague works there and will text him. Outreach
+   messaging is written in `aduna_outreach.md`.
+6. **FD-8 finish: one edit, one publish.** `server.json` websiteUrl -> `?source=mcp-registry`, then
+   re-publish. See FD-8.
+7. **FD-9: check Glama by hand.** glama.ai is blocked from the container. Status genuinely unknown.
+8. **relayshield-agentic-api drift.** Recovered onto `claude/recovered-live-relayshield-agentic-api`
+   by `recover_live_handler.yml`. **NOT yet reconciled into main.** Live carries a branded
+   `API_BASE_URL` and a Bundle D Stripe billing branch that main does not; deploying main over it
+   would make the direct Stripe door free.
+9. **INTEL-5 funnel.** Instrumented but the answer is not in yet. Re-run
+   `tools/diagnose_stolen_sessions.py` after the monitor has run on the instrumented build; its
+   section 0 now says outright whether that build is live.
+10. **XSOAR blog + landing line**, triggered by `check_xsoar_pack.sh` reporting ON MASTER, never by
+    a date.
+
+### Done and verified 2026-09-02
+
+- **`checkemail@relayshield.net` is LIVE and returns correct HIGH verdicts.** It took nine distinct
+  defects to get there, and every one was found by the founder testing rather than by me:
+  a malformed `References` header, a fallback that fired a second reply Cloudflare forbids, HTML
+  entities left undecoded, `stripHtml` collapsing a message to one line, `parseAddress` trusting the
+  first angle brackets, the API's `{ok, data}` envelope read at the wrong level, a scoring model that
+  counted flags instead of weighing them, brand impersonation gated on free webmail, and RFC 2047
+  subjects printed raw. 78 verdict tests and 11 reply tests now pin all of it.
+- **The email check is on every surface**: WhatsApp hint, Telegram hint, both Quickstart cards,
+  Discord `/scan` footer, and the blog footer on every page.
+- **Telegram Markdown escaping never worked.** Legacy Markdown has NO escape syntax, so `\_`
+  rendered a visible backslash. Quickstart is HTML now; the forward note uses code spans.
+- **The drift check was silently dead** for a day, from a YAML indentation error of mine.
+  `test_workflows_parse.py` guards the class.
+- FD-1 done (rsscan v0.2.1 on the Marketplace). FD-2 killed on their published rules. mcp.so now
+  charges $39 — skipped.
+
+### Things this session got WRONG, recorded so they are not repeated
+
+- **Handed over commands that did not exist** (`--stars`) and instructions written without reading
+  the target (FD-2's PR would have been closed without comment; the mcp.so form is paid). **Read the
+  destination before writing the instruction.**
+- **Diagnosed by guessing** three times before adding logging. The logging found it in one round
+  each time. Instrument first.
+- **Wrote `emailcheck@` for `checkemail@` twice**, in the message asking to put it on four surfaces.
+  One constant now, and a test.
+
+### Two open items with no owner yet
+
+- **`relayshield_discord_bot.py` is in the deploy map of nothing.** Fifth instance of that
+  combination. Added to the drift check only; read its first red diff before mapping it.
+- **`relayshield_stolen_sessions` still holds 9 rows, all `demo`.** The CORPUS-1 storage fix is
+  correct and has never been reached.
+
+---
+
 ## WHERE 2026-08-30 LEFT THINGS — read this first
 
 ### TOP 10 FOR THE NEXT SESSION, in order
@@ -776,7 +850,13 @@ Never put a bare partner code in that field.
   shipped with no links at all. On our own page that is an editorial gap; on Medium it reads as if
   the reporting were ours. Say explicitly where the quotes come from too, in prose, because prose
   survives a formatting change and blockquote styling does not.
-- Channel order: `blog.relayshield.net` canonical → Medium → LinkedIn → Telegram → Farcaster →
-  Mastodon.
+- Channel order: `blog.relayshield.net` canonical → Medium → **dev.to** → LinkedIn → Telegram →
+  Farcaster → Mastodon.
+- **dev.to was missing from this list entirely and was restored 2026-09-02.** It costs nothing, it
+  accepts a canonical URL properly (unlike Medium, which snapshots), and it is where the developer
+  audience for the API and the MCP server actually reads. It also unlocks the Apify content
+  programme's second payout: $100 in Apify credits per article published on dev.to under their
+  organisation, on top of $500 for the blog piece.
 - Length limits: Mastodon 500 chars · Farcaster ~1024 bytes · LinkedIn 3000 · Telegram 4096.
-  Write each short version to its own limit.
+  Write each short version to its own limit. dev.to has no practical limit; publish the full post
+  with `canonical_url` set to the blog.relayshield.net URL.

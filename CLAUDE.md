@@ -333,6 +333,48 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ---
 
+## WHERE 2026-09-03 LEFT THINGS — read this first
+
+### The founder could not see the Discord email-check footer. The diagnosis in the room was wrong.
+
+It was reported as "not merged to main yet". **It is on main** — commit `4a688e8`, merged, and
+`EMAIL_CHECK_FOOTER` is concatenated onto the `/scan` reply in `relayshield_discord_bot.py`. Merging
+changed nothing, because **`relayshield_discord_bot.py` is in the deploy map of nothing.** No edit
+to that file has ever shipped automatically. Main being right and live being wrong is the normal
+state for this function, not an anomaly, and it stays that way until the function gets a deploy
+path.
+
+Worth keeping as a general correction: "it is not merged" and "it is not deployed" produce the
+identical symptom, and only one of them is fixed by merging. Check which before promising a merge
+will fix it.
+
+### The drift check has still never run with the Discord bot in it
+
+Two separate reasons, both now closed:
+
+- The entry was added in `6a2bae7` at 00:56 on 2026-09-03. The last run that actually executed is
+  **run 14, the scheduled run of 2026-09-02 16:56**, which predates it. The next scheduled run is
+  13:00 UTC.
+- Runs **15 to 24 are not drift runs at all.** They are `push`-event runs with **zero jobs** — the
+  invalid-workflow failures from the YAML break that `9c87348` fixed. The workflow only triggers on
+  `schedule` and `workflow_dispatch`, so a valid file produces NO run on a push. That is the useful
+  tell: since `9c87348`, three pushes have produced no run at all, which is the positive evidence
+  the file parses again.
+
+### Changed 2026-09-03
+
+- **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
+  asserts account 239677749008, **resolves the Discord function's real name from AWS instead of
+  trusting the map**, downloads the live package, diffs the handler AND every shared
+  `relayshield_*.py` in it, and classifies the result the only way that matters: lines present in
+  LIVE and not in main mean hand-deployed work that is RECOVERED first; only main's own commits
+  missing means live is merely stale and the function can be mapped in `deploy_lambdas.yml`.
+- **An unreadable function now fails the drift run.** It previously emitted a `::warning::` inside
+  an otherwise green run, so a wrong name in the map was indistinguishable from a clean check —
+  the quiet-alarm failure again, and the Discord entry's name is exactly the case that would have
+  hit it. `UNREADABLE` is tracked separately from `DRIFTED`, so it reddens the run without opening
+  a `lambda-drift` issue about drift that was never measured.
+
 ## WHERE 2026-09-02 LEFT THINGS — read this first
 
 ### THE LIST FOR THE NEXT SESSION, in order (11 items)
@@ -390,6 +432,9 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
     readable", fix the name, do not drop the entry. Only when the diff shows live is merely stale
     does it go into `deploy_lambdas.yml`. Until then no edit to that file ships automatically, which
     is why the email-check footer added this session is not visible in Discord.
+    **2026-09-03: the diff no longer has to be waited for.** `sh tools/discord_bot_drift.sh` runs
+    it on the Mac, resolves the real function name from AWS rather than trusting the map, and says
+    which of the two cases the diff is. See the 2026-09-03 section below.
 
 ### Done and verified 2026-09-02
 

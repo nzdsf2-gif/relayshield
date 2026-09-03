@@ -91,6 +91,26 @@ jobs:
             # deployer now would risk overwriting live-only code with no error
             # anywhere, which is exactly what cost 2,583 lines on 2026-08-17.
             ["relayshield_agentic_api.py"]="relayshield-agentic-api"
+            # Added 2026-09-02. FIFTH instance of the same combination: source
+            # in the repo, live and serving three slash commands, and in
+            # NEITHER map. Found only because a one-line copy change was made
+            # to it and the founder reported not seeing the change -- there is
+            # no deploy path, so no edit to this file has ever shipped
+            # automatically. Every change to the Discord bot since it was
+            # written has been hand-deployed or not deployed at all.
+            #
+            # Drift check ONLY, as with every other addition here. A red diff
+            # is the alarm: read it before doing anything. Add it to
+            # deploy_lambdas.yml only once the diff shows live is merely
+            # stale. If live carries something main does not, recover it first
+            # with recover_live_handler.yml -- mapping it in the deployer now
+            # would risk overwriting hand-deployed work with no error
+            # anywhere, which is what cost 2,583 lines on 2026-08-17.
+            #
+            # The function name here is UNVERIFIED. If it is wrong the check
+            # emits a "not readable" warning rather than a false clean, which
+            # is the right failure mode: fix the name, do not drop the entry.
+            ["relayshield_discord_bot.py"]="relayshield-discord-bot"
           )
 
           DRIFTED=""

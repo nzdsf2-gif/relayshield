@@ -370,6 +370,76 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ---
 
+## WHERE 2026-09-04 LEFT THINGS — read this first
+
+### The MPP settlement endpoint is BUILT. Item 1 of the 2026-09-03 list, second half.
+
+`relayshield_mpp_settlement.py`, one endpoint, `POST /v1/mpp/mcp-registry-risk` at $0.35 on Base,
+settled through Stripe with a fallback to the rail that already collects. 30 offline tests. Full
+write-up in `mpp_settlement_endpoint.md`.
+
+**It is NOT live yet and needs two commands on the Mac**, in this order and no other:
+
+1. `sh tools/create_mpp_settlement_lambda.sh` — creates the function, its own IAM role, both gateway
+   routes, and proves the 402.
+2. `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/mpp_settlement_selftest.py` — settles whether
+   the Stripe parameter shapes are right.
+
+**Three things in it worth carrying:**
+
+- **It is a NEW FILE and not a branch in `relayshield_agentic_api.py`, on purpose.** That file still
+  carries unreconciled live drift (item 8 below). Adding an endpoint there and giving it a deploy
+  path is the 2026-08-17 mistake exactly. A new file has no live counterpart, so it cannot drift
+  from one. The detector is IMPORTED from agentic_api rather than copied, because this repo already
+  has four copies of one pattern table and does not need a fifth. The deployer's `resolve_deps` grep
+  is `^[[:space:]]*(import|from) relayshield_`, so a function-level indented import is still
+  packaged — checked against that grep, not assumed.
+- **It is not in `deploy_lambdas.yml`, and must not be until the function exists in AWS.** The
+  deployer calls `update-function-code` on whatever `LAMBDA_MAP` names, so mapping a function that
+  does not exist turns the first push red with a `ResourceNotFoundException` that reads exactly like
+  a broken deploy. Create first, map second. `relayshield-mpp-settlement` IS already in
+  `iam_github_deploy_invoke.json`, so the first CI deploy will not repeat run 134's denied probe.
+  **`sh tools/apply_deploy_invoke_policy.sh` still has to push that file to AWS** — the repo half
+  does not do it on its own.
+- **Two Stripe wire shapes in it are DERIVED, not verified**, because `docs.stripe.com` is blocked
+  from the container. Both are isolated in single builder functions with no branching so a
+  correction is one line, and `tools/mpp_settlement_selftest.py` exists to have Stripe name the
+  wrong parameter rather than guessing again. The `mpp` block in the 402 body says
+  `"version": "unverified"` in its own payload for the same reason. **Derived is not verified, and
+  saying so in the artefact is cheaper than being wrong in production.**
+
+### Andrew's merge failed, and BOTH halves of the failure came from one cause
+
+    error: The following untracked working tree files would be overwritten by merge:
+        agent_baiting_scope.md
+        outreach_bot_prospects_curated.md
+
+Both files are on `claude/top-10-todos-discord-lambda-vn4583` AND were saved by hand into
+`~/Side SaaS Hustle` from a chat paste — the delivery process at the top of this file, working. Git
+will not clobber an untracked file it did not write, so the copies collided and the merge aborted.
+`tools/stripe_machine_payments_probe.py` and `tools/fd8_prepare_republish.py` were then "missing"
+only because the merge that would have delivered them never completed.
+
+**The general form, and it will recur:** the chat-paste delivery rule and `git merge` collide by
+design. Anything pasted into chat AND committed blocks a later merge. The fix is to delete the
+hand-saved copy immediately before merging — the branch copy is identical, so nothing is lost.
+
+### The drift check RAN with the Discord bot in it, and the bot is clean
+
+Run 25, scheduled 2026-09-03 16:56, executed and went red. It opened issue #23, naming
+**relayshield-agentic-api and relayshield-developer-signup** — and NOT relayshield-discord-bot.
+That is the positive evidence 2026-09-03 was waiting for: the bot deployed, and live matches main.
+Closes the "the drift check has still never run with the Discord bot in it" item below.
+
+Deploy runs 135 and 136 are both GREEN, so the invoke-policy fix took and run 134's red probe is
+behind us.
+
+**Do not close #23's developer-signup half without re-checking.** Run 25 fired at 16:56 and deploy
+run 136 shipped at 17:57, an hour later, so the drift it names may already be gone. The next
+scheduled drift run answers it; a stale issue is not a finding.
+
+---
+
 ## WHERE 2026-09-03 LEFT THINGS — read this first
 
 ### THE LIST FOR THE NEXT SESSION, in order (10 items)

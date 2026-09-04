@@ -5,20 +5,40 @@
 **Claude Code on the web runs in a remote container. It cannot write to
 `~/Side SaaS Hustle`. Committing and merging to `main` does NOT put a file on Andrew's Mac.**
 
-This has now cost time in more than one session: a document was written, committed, merged, and
-reported as "delivered", and Andrew could not read a word of it. A file he cannot open is not a
-deliverable, and describing its contents to him is worse than useless — it reads as sections of a
-document that, to him, does not exist.
+**UPDATED 2026-09-03, and this SUPERSEDES the old "paste it into the chat" rule.** Andrew's
+instruction, in his words: *"When you cite a file it means I expect you to provide a .md I can
+download. I don't want you to paste the content inline."*
 
-**So: whenever a session produces a `.md` deliverable — a benchmark, a roadmap, a blog draft, a
-brief, a handoff — PASTE THE FULL FILE CONTENTS INTO THE CHAT, inside a fenced code block, in the
-same reply that announces it.** Commit it as well, but the chat paste is the delivery. Do not
-substitute a summary, a file path, a PR link, or "run `git pull`". Do not wait to be asked.
+So: **whenever a session produces or updates a `.md` deliverable, SEND THE FILE so he can download
+it, in the same reply that mentions it.** Use the file-sending mechanism, not a fenced code block.
+A 400-line document pasted inline is unreadable in a chat window and he cannot save it.
 
-Andrew saves them into `~/Side SaaS Hustle` by hand. That is the established, working process.
+- **Send the file. Do not paste it.** Mentioning a filename without sending it is the failure this
+  rule exists to stop, and it happened three times on 2026-09-03 alone.
+- Commit it as well. The commit is the durable copy; the sent file is the delivery.
+- If he asks for the content inline, paste it. Otherwise send.
+- A file path, a PR link, or "run `git pull`" is not a deliverable.
 
-If the file is genuinely too large to paste, say so explicitly and paste it in parts — do not
-silently downgrade to a summary.
+## EVERY COMMAND BLOCK STARTS WITH THE MERGE. NO EXCEPTIONS.
+
+Added 2026-09-03 after the same failure three times in one session:
+
+    python3: can't open file '/Users/andrewgibbs/Side SaaS Hustle/tools/x.py': No such file
+
+Nothing was wrong with the script. **It was on the branch and not on his Mac**, because a push from
+this container puts a file on GitHub and nothing else. Handing him a command that runs a tool
+written this session, without the merge in front of it, guarantees that error.
+
+So every ```zsh block that runs anything from this repo begins with these four lines, verbatim:
+
+    cd ~/"Side SaaS Hustle"
+    git checkout main
+    git --no-pager fetch origin claude/<this session's branch>
+    git -c pull.rebase=false merge --no-edit FETCH_HEAD
+
+Then the actual command. It is four wasted lines when he is already up to date, and it is the
+difference between a working instruction and a broken one when he is not. **He is never up to date
+by default: the branch is pushed, and merging is a thing he does, not a thing the push does.**
 
 ### When `git pull` fails on his Mac
 
@@ -76,6 +96,22 @@ The durable venv, created once, because Homebrew Python is PEP 668 externally-ma
 
     python3 -m venv ~/.rsvenv
     ~/.rsvenv/bin/pip install boto3
+
+### 12. Vendor documentation can contain YOUR OWN API KEY. Read before pasting.
+
+Added 2026-09-03. A Stripe docs page was pasted into chat with its "Copy for LLM" content, and the
+curl samples had the account's **live test secret key interpolated into them** — Stripe personalises
+`sk_test_...` into the examples for a signed-in reader. Nobody typed a credential; copying the page
+carried one.
+
+It was a test-mode key, so no real money is reachable, but test data includes real email addresses
+whenever a real address was used to test. Roll it in the Dashboard under Developers, API keys, and
+treat the class as: **any vendor doc page read while signed in may be personalised with your
+credentials.** Skim what you are pasting for `sk_`, `rk_`, `Bearer `, `api_key=` and long opaque
+strings before it leaves the machine.
+
+Nothing in this repo should ever carry one either: `tools/` scripts read secrets from Secrets
+Manager at runtime, and that is the pattern to follow rather than an env var in a doc.
 
 ### 9. Every `aws` command in a pasted block uses `--no-cli-pager`.
 
@@ -336,6 +372,60 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ## WHERE 2026-09-03 LEFT THINGS — read this first
 
+### THE LIST FOR THE NEXT SESSION, in order (10 items)
+
+Written at the end of 2026-09-03. Everything above item 1 that used to be on the 2026-09-02 list is
+either done or has moved into these.
+
+1. **Stripe machine payments: probe, then build ONE endpoint.** The email to Jake is SENT with the
+   four questions. The next move does not wait on his reply: run
+   `tools/stripe_machine_payments_probe.py` (read-only) to learn whether the account can call the
+   x402 surface at all. Enabled means build one endpoint settling to Stripe alongside the existing
+   PayAI rail, which is the artefact their team responds to. Not enabled means that error text is a
+   better follow-up to Jake than a second nudge. **Settlement question answered: stablecoin payments
+   settle into the Stripe balance in USD, on the normal payout schedule.** Crypto in, dollars out,
+   same balance as the subscriptions.
+2. **Send the twelve.** `outreach_bot_prospects_curated.md` is written and hand-picked: five real
+   inboxes first, then the seven websites where the page has to carry a form. Track replies per 100
+   by channel. `TegroTON/ai-telegram-pay-miniapp` is the one worth the most care.
+3. **Apify article: submit to `#apify-writers` at the next quarterly call.** Draft is
+   `blog-apify-actor-as-agent-tool.md`. Three facts to confirm with the console open first, listed
+   in its own NOT FOR PUBLICATION section. **It must not appear on blog.relayshield.net first:**
+   originality is a programme rule and publishing early disqualifies it.
+4. **FD-8, FD-9 and FD-10 in one publish.** `tools/fd8_prepare_republish.py --dir ~/mcp-live
+   --write` makes all the edits, including the `?source=pypi` link in pyproject.toml, and refuses
+   to invent the publish command. Then FD-11: submit the Smithery LISTING, decline hosting.
+5. **Build `agent-bait-scan`.** Recommended, 3.5 days, scoped in `agent_baiting_scope.md`. Island's
+   research names a gap our catalogue genuinely has: we screen the name and the domain, and nothing
+   of ours reads the INSTRUCTIONS an agent is given. The differentiator is signal 4, joining those
+   instructions to the criminal corpus, which nobody replicating this can do.
+6. **Mini App v1**, then the channel submissions. The discovery list is measured and waiting:
+   `@trendingapps` (3.9M, and `@twa_apps` is the SAME channel), `@web3telegrambotx` (72,742),
+   `@findminiapp` (56,380), `@onclicka_tma_en` (33,723), `@telegtapps` (9,671). Each gives one first
+   impression and we spend it by submitting before the Mini App exists.
+7. **Measure the widget.** It is live and keyless. The number that matters is installs making a
+   SECOND day of calls, not total calls, and `source=tg-widget` is on every request.
+8. **`relayshield-agentic-api` drift.** Still recovered-but-unreconciled on
+   `claude/recovered-live-relayshield-agentic-api`. Live carries a branded API_BASE_URL and a Bundle
+   D Stripe branch main does not. Same shape as the developer-signup recovery that worked.
+9. **INTEL-5 funnel.** `tools/diagnose_stolen_sessions.py` on the Mac. Until it runs, no count out
+   of `relayshield_stolen_sessions` means anything about the criminal market.
+10. **XSOAR.** Nothing to do. `xsoar_pack_watch.yml` runs daily and opens an issue the day the pack
+    lands on master. Checked 2026-09-03: still not on master.
+
+### What this session shipped
+
+- **The Discord footer is live**, after the drift diff was read, the function mapped, and run 134's
+  red probe understood as a denied `lambda:InvokeFunction` rather than a failed deploy.
+- **`relayshield_developer_signup.py` recovered and reconciled** — 700 live-only lines including two
+  Stripe revenue doors — then mapped in the deployer, in that order.
+- **The Telegram widget**, keyless end to end, with `/v1/link-check` new and the gateway route live.
+- **The prospecting pipeline**, now with contact hygiene that screens README examples out of both
+  the extractor and the generator.
+- **Attribution keys** for `tg-widget` and `pypi`, both registered BEFORE the links that use them.
+
+
+
 ### The founder could not see the Discord email-check footer. The diagnosis in the room was wrong.
 
 It was reported as "not merged to main yet". **It is on main** — commit `4a688e8`, merged, and
@@ -525,6 +615,114 @@ live-only aliases, all preserved, and exactly 3 banners plus 5 aliases re-added.
 deploy path accumulates hand-deployed work silently, and the longer it goes unread the more
 expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and grew a billing path.
 
+### The tg-widget banner is not missing. It is a per-arrival banner.
+
+Asked on 2026-09-03 after all three runs went green: "I do not see the tg-widget banner on
+api.relayshield.net/developers." It is not supposed to be there.
+
+`_SOURCE_BANNERS` entries render into the `<!--REFERRER_BANNER-->` placeholder, which sits directly
+under the nav and above the hero, and ONLY when the arrival carries `?source=`/`?src=` or a matching
+Referer host. `tg-widget` deliberately claims no referer hosts, so the parameter is the only way in.
+The bare `/developers` URL will never show it, by design.
+
+    https://api.relayshield.net/developers?source=tg-widget
+
+That is also the check: `curl -sS "…?source=tg-widget" | grep -c "Arriving from a Telegram bot"`
+returns 1 when it is live, and the same command on the bare URL returns 0.
+
+### MINI APP DISCOVERY — the ranking, decided 2026-09-03
+
+Recorded here because the founder asked for it to be, and because the first version of this ranking
+was wrong in a way that is easy to repeat.
+
+**Re-ranked: blog channel first, then Mini App announcement channels, then directories, then
+attributed deep links, with the menu button fifth because it is cheap rather than because it reaches
+anyone.**
+
+The error worth not repeating: the menu button on `@relayshield_bot` is the top lever for a bot with
+an audience, and ours has a tiny number of users, so a Mini App hung off it inherits a tiny number of
+users. **Rank a surface by how it performs for US, not by how it performs in general.** Reasoning and
+the full list are in `miniapp_discovery_and_stripe_choice.md` §2.
+
+**Four channels measured on the prospecting account** by `tools/find_miniapp_channels.py`:
+`@swoptoky_news` (205,055, Cyrillic), `@web3telegrambotx` (72,742), `@findminiapp` (56,380),
+`@telegtapps` (9,673). Three are usable; the Cyrillic one needs a Russian-language submission or a
+skip, which is what `--latin-only` and the new `script` column are for.
+
+**SEQUENCING, and it decides when any of this happens: WE DO NOT HAVE A MINI APP YET.** These
+channels announce Mini Apps, and each will give us exactly one first impression. Submitting before
+the thing exists spends it. The list is the target for the day v1 ships.
+
+### Two things this session got wrong, and the founder caught both
+
+**I claimed the MetaMask Snap was a live surface. It is not.** The integration request was submitted
+and there has been no response. The repo already recorded that in three places
+(`victim_side_outreach_messages.md`, `xcitium_outreach.md`, `NEXT_SESSION_2026-08-19.md`), and I
+wrote "we already have the plugin-shaped surface that matters" without checking any of them. That is
+CLAUDE.md's own rule broken by CLAUDE.md's own author: **a doc claiming something is done is a lead,
+not a fact.** A `metamask-snap` key exists in `_SOURCE_BANNERS`, registered before shipping exactly
+as the rule requires, and a registered key is not a live integration.
+
+**I ranked the bot's menu button as the top Mini App discovery lever.** The bot has a tiny number of
+users, so a Mini App hung off it inherits a tiny number of users. The ranking was right in general
+and wrong for us, which is how a plan ends up describing somebody else's company. Re-ranked in
+`miniapp_discovery_and_stripe_choice.md`: the Telegram blog channel first, then Mini App announcement
+channels, then directories, then attributed deep links, and the menu button fifth because it costs
+almost nothing rather than because it reaches anyone.
+
+### The first real prospect sweep was mostly unusable, and it was the extractor
+
+216 rows, and the top 25 included `root@203.0.113.4` (an RFC 5737 documentation IP),
+`trial@telegram.bot`, `k7m2q9x1a3@yourdomain.com`, a YouTube demo link and several `t.me` links, all
+counted as reachable contacts. `contacts_from` filtered exactly one thing, `example.com`.
+
+That is not cosmetic. **Contactability is 20 of the 100 score points**, so the ranking was partly
+measuring bad extraction, and mailing a documentation example is how a sending domain earns a spam
+reputation. `tools/contact_hygiene.py` now screens both fields, in the extractor AND again in the
+generator, because a `prospects_wide.jsonl` produced before the fix still holds those rows and the
+generator is the last thing standing before a message goes out. Seven tests, every case taken from
+that sweep.
+
+**Also re-run it with `--stars 5..50`.** Without the flag the sweep spends its whole `--limit` inside
+`stars:0..1`, which is why the results were dominated by brand-new repos: the script's own docstring
+says so and the run log shows the single `stars:0..1` line.
+
+### FD-8 re-publish now closes three things, not one
+
+Checked live against the registry API on 2026-09-03, rather than from the doc:
+
+- `websiteUrl` on the latest version is still the bare `https://relayshield.net`. The defect is real
+  and current.
+- **The registry is TWO VERSIONS BEHIND PyPI.** Registry latest is 0.2.7 (2026-07-19); PyPI is on
+  0.2.9. Whatever 0.2.8 and 0.2.9 changed has never reached the canonical directory.
+- `repository.url` says `github.com/relayshield/relayshield-mcp` on every published version, and
+  Glama's listing path mirrors it, so if that repo does not exist the mismatch is a broken link on
+  two live surfaces rather than a cosmetic oddity.
+
+So the single `mcp-publisher` re-publish fixes the attribution key, the version lag and the
+repository URL together. Do all three in one version rather than three.
+
+### The Apify Actor exists, and the session that could not find it was the one that was wrong
+
+`relayshieldadmin/relayshield-security-tools` is public on Apify Store, pay per usage, 154 runs, an
+MCP server over Streamable HTTP. `_APIFY_BANNER` was accurate all along. Two lessons, and the second
+is the useful one:
+
+- **Absence of evidence from a blocked container is not evidence of absence.** apify.com is egress
+  blocked here and a web search found nothing, and the honest conclusion was "unresolved", which is
+  what was recorded. Had it been recorded as "the Actor does not exist", the next session would have
+  deleted a true claim from a live page.
+- **The Actor's Dockerfile carries the best technical story we have written down this quarter**, and
+  it was invisible to this repo because the Actor's source lives on Apify rather than here. Worth
+  asking what else is like that.
+
+### The developers page now points AT Apify, not just away from it
+
+`_APIFY_BANNER` handles arrivals FROM Apify. Nothing on the page mentioned the Actor, so the only
+way to find it was to already be on Apify. Added as a card in the SDK grid, linking the Store
+listing, with no run count on it: numbers on a landing page are a maintenance burden and the listing
+carries the real one.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -540,6 +738,31 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
   needed the same three questions the same day. `tools/discord_bot_drift.sh` is now a wrapper, so
   every reference to it in this file and in the workflow comments still works.
 - **`xsoar_pack_watch.yml`** — the XSOAR gate is watched daily instead of remembered.
+- **`outreach_bot_prospects_curated.md`** — the twelve worth sending first, hand-picked from the
+  generated 40, each with the contact, the rationale, and a message written to that prospect rather
+  than to its tag. Includes the three that are deliberately NOT on it and why.
+- **`tools/stripe_machine_payments_probe.py`** — read-only. Answers "is this account enabled for
+  machine payments" before anybody writes an endpoint against it.
+- **`tools/fd8_prepare_republish.py`** — makes the server.json edits for FD-8, FD-9 and FD-10 and
+  refuses to invent a publish command: it greps the repo's own README for the one that already
+  works.
+- **`agent_baiting_scope.md`** — what Island's AgentBaiting research means for us, what
+  `mcp-registry-risk` already covers, and the one endpoint worth building.
+- **`blog-apify-actor-as-agent-tool.md`** — the Apify content-programme draft.
+- **`tools/generate_outreach.py`** + `test_generate_outreach.py` — item 2's generator, and the ten
+  tests that stop a draft ever diagnosing a prospect.
+- **`miniapp_discovery_and_stripe_choice.md`** — why the widget must not carry a Mini App link, what
+  actually drives Mini App discovery, why a browser extension is not the play, which Stripe agentic
+  product to select, and the four questions to put to Jake while access is in review.
+- **`tools/contact_hygiene.py`** + `test_contact_hygiene.py` — the screen that stops a README
+  example becoming an outreach recipient. Wired into both the prospector and the generator.
+- **`tools/find_miniapp_channels.py`** — searches for channels that announce new Mini Apps and
+  reports measured member counts, ON THE PROSPECTING SESSION. Now also takes SEED_CHANNELS
+  (`@trendingapps`, `@twa_apps`, and `@tapps_bot` as the submission route the first names in its own
+  description), because search does not reach everything and a channel a human named should be
+  measured rather than argued about. It refuses to run against
+  `relayshield/telethon_session` at all: 99 channels of collection depend on that account, and a
+  prospecting sweep is how it gets flood-limited.
 - **`iam_github_deploy_invoke.json` gained `relayshield-discord-bot`**, plus the checker, the
   applier and the validator wiring described above.
 - **An unreadable function now fails the drift run.** It previously emitted a `::warning::` inside
@@ -566,18 +789,48 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
    an email**, and 19 of the top 25 tagged `wallets` or `payments` — bots already handling other
    people's money. **Register the `source=` keys in `_SOURCE_BANNERS` BEFORE any widget ships**;
    FD-8 below is what happens when that is skipped.
-2. **Tailored outreach to the 109.** Founder wants it; agreed approach is a GENERATED DRAFT PER
-   PROSPECT that he reviews and sends, keyed on what each repo actually does. Not mass mail: volume
-   is not the lever, relevance is, and blasting maintainers who never asked is how a domain gets
-   blocked.
-3. **Apify: "your Actor as a tool for AI agents" post.** Their content programme pays **$500 per
-   article** on the Apify/Crawlee blog and $100 credits for dev.to under their org. The July call
-   closed 2026-08-16; it is QUARTERLY, so the next call is the target. Theme 2 fits
-   `mcp-registry-risk` exactly. Also **put dev.to back in the channel order** — it is missing
-   entirely and costs nothing.
+2. **Tailored outreach to the 109. THE GENERATOR IS BUILT, 2026-09-03: `tools/generate_outreach.py`.**
+   It reads `prospects_wide.jsonl` and writes `outreach_bot_prospects.md`: one draft per prospect
+   keyed on the capability their own README asserts, the contact channel, the evidence line the
+   draft rests on, and a tracking table. **It cannot run in a container** — the prospect file is
+   generated output and lives on the Mac. Ten tests pin the rule that matters: the drafts never
+   assert anything about a prospect's security, because we can read a README and cannot see anyone's
+   backend, and "we analysed your app and found exposures" from an unknown security vendor is one
+   word away from an extortion email. Original entry follows. Founder wants it; agreed approach is a
+   GENERATED DRAFT PER PROSPECT that he reviews and sends, keyed on what each repo actually does.
+   Not mass mail: volume is not the lever, relevance is, and blasting maintainers who never asked is
+   how a domain gets blocked.
+3. **Apify post. UNBLOCKED 2026-09-03: THE ACTOR EXISTS AND THE DRAFT IS WRITTEN.**
+   `relayshieldadmin/relayshield-security-tools`, public, pay-per-usage, an MCP server over
+   Streamable HTTP in Standby mode, 154 runs, last build 0.1.7. So the banner was true and the
+   session that could not find it was wrong, which is the right way round for once.
+   `blog-apify-actor-as-agent-tool.md` is the draft: ~1,300 publishable words on why Standby rather
+   than run-per-request, and the dependency conflict that crash-looped every real run
+   (`apify>=2,<3` pulls a Crawlee whose `HttpHeaders` model dies against the Pydantic FastMCP
+   needs, with "cannot specify both default and default_factory" at import time; `apify>=4,<5`
+   fixes it by going FORWARD, not back). **Its NOT FOR PUBLICATION section carries the three facts
+   to verify with the console open before submitting, and the one rule that would disqualify it:
+   originality, so it must NOT go on blog.relayshield.net first.** That inverts our usual
+   canonical-first order. Original entry follows. **BLOCKED ON A QUESTION NOBODY HAD ASKED:
+   DOES OUR APIFY ACTOR EXIST?** The programme's own rule is that articles are "written by
+   developers who've actually built the thing they're writing about", 1,000 to 5,000 words,
+   original, submitted through their Discord, $500 on publication. Both halves of the theme
+   ("Actors that plug into your stack", "your Actor as a tool for AI agents") require an Actor.
+   **`_APIFY_BANNER` on the live developers page asserts one exists** — "The RelayShield actor runs
+   breach, infostealer and SIM-swap checks as an Apify task" — and 2026-09-03 could find no
+   evidence of it: no Actor code anywhere in this repo, and no store listing in a web search.
+   apify.com is blocked from the container, so this is UNRESOLVED rather than disproved. It is the
+   same shape as the MetaMask Snap claim, on a live page, and it gates the post either way. The
+   July call closed 2026-08-16 and it is QUARTERLY, so there is time to settle it. Also **put
+   dev.to back in the channel order** — it is missing entirely and costs nothing.
 4. **Stripe MPP follow-up with Jake Lamoine.** Open question carried: does x402 settlement count
    toward early-adopter status. Card via SPT minimum is $0.50, stablecoin $0.01 USDC, and the sample
    uses `scheme: "exact"` on Base — identical to our 28 live x402 endpoints.
+   **DECIDED 2026-09-03, of the four cards in the Agentic Commerce console: select ACCEPT MACHINE
+   PAYMENTS.** It is the productised version of the rail we already run. Retail is a product
+   catalogue and we have no SKUs; the agent wallet is spend control on the BUY side and we are the
+   sell side; Projects is infrastructure we have. Reasoning, including why the agent wallet is the
+   pitch TO Stripe rather than a fit for us, is in `miniapp_discovery_and_stripe_choice.md`.
 5. **Aduna — Reggie Daniels.** Founder's former colleague works there and will text him. Outreach
    messaging is written in `aduna_outreach.md`.
 6. **FD-8 finish — official MCP registry attribution. ONE EDIT, ONE PUBLISH.**
@@ -590,7 +843,14 @@ expensive the diff.** This one went unread from 2026-08-17 to 2026-09-03 and gre
    edit — read that repo's README for the established command rather than inventing one). While
    there: the record's `repository.url` says `github.com/relayshield/...` while the namespace is
    `io.github.nzdsf2-gif/`. Probably harmless, worth a look.
-7. **FD-9 — verify Glama by hand.** `glama.json` is present in the MCP server repo, but `glama.ai`
+7. **FD-9 — VERIFIED 2026-09-03: WE ARE LISTED.** `glama.ai/mcp/servers/relayshield/relayshield-mcp`,
+   found by web search because glama.ai is still egress-blocked here. The listing path is
+   `relayshield/…`, matching the registry's `repository.url`, so Glama indexed from there — which
+   turns the "probably harmless" owner mismatch in item 6 into a possible broken link on a live
+   listing. **Two more doors found the same day:** PyPI's project page links to the developers page
+   with no `?source=` (FD-10), and Smithery has no RelayShield entry at all (FD-11). Both are
+   written up in `FRONT_DOORS.md`, including why a Smithery LISTING is fine and Smithery HOSTING
+   deserves a decision. Original entry follows. **FD-9 — verify Glama by hand.** `glama.json` is present in the MCP server repo, but `glama.ai`
    is rejected by the container's egress policy, so the listing status is genuinely UNKNOWN, not
    absent. Open <https://glama.ai/mcp/servers>, search RelayShield. If listed, get
    `?source=mcp-registry` onto the link it points at — the key is registered and `glama.ai` is

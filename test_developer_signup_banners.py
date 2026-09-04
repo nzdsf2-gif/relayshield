@@ -35,7 +35,7 @@ SOURCE = "relayshield_developer_signup.py"
 REQUIRED = {
     "langchain", "apify", "mcp-registry", "tg-widget", "n8n", "x402",
     "discord-bot", "npm-worm", "fourth-party", "ansible-galaxy", "bluenoroff",
-    "rsscan", "rsscan-deps", "metamask-snap",
+    "rsscan", "rsscan-deps", "metamask-snap", "pypi",
 }
 
 

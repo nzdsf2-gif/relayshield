@@ -627,6 +627,27 @@ Checked live against the registry API on 2026-09-03, rather than from the doc:
 So the single `mcp-publisher` re-publish fixes the attribution key, the version lag and the
 repository URL together. Do all three in one version rather than three.
 
+### The Apify Actor exists, and the session that could not find it was the one that was wrong
+
+`relayshieldadmin/relayshield-security-tools` is public on Apify Store, pay per usage, 154 runs, an
+MCP server over Streamable HTTP. `_APIFY_BANNER` was accurate all along. Two lessons, and the second
+is the useful one:
+
+- **Absence of evidence from a blocked container is not evidence of absence.** apify.com is egress
+  blocked here and a web search found nothing, and the honest conclusion was "unresolved", which is
+  what was recorded. Had it been recorded as "the Actor does not exist", the next session would have
+  deleted a true claim from a live page.
+- **The Actor's Dockerfile carries the best technical story we have written down this quarter**, and
+  it was invisible to this repo because the Actor's source lives on Apify rather than here. Worth
+  asking what else is like that.
+
+### The developers page now points AT Apify, not just away from it
+
+`_APIFY_BANNER` handles arrivals FROM Apify. Nothing on the page mentioned the Actor, so the only
+way to find it was to already be on Apify. Added as a card in the SDK grid, linking the Store
+listing, with no run count on it: numbers on a landing page are a maintenance burden and the listing
+carries the real one.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -642,6 +663,17 @@ repository URL together. Do all three in one version rather than three.
   needed the same three questions the same day. `tools/discord_bot_drift.sh` is now a wrapper, so
   every reference to it in this file and in the workflow comments still works.
 - **`xsoar_pack_watch.yml`** — the XSOAR gate is watched daily instead of remembered.
+- **`outreach_bot_prospects_curated.md`** — the twelve worth sending first, hand-picked from the
+  generated 40, each with the contact, the rationale, and a message written to that prospect rather
+  than to its tag. Includes the three that are deliberately NOT on it and why.
+- **`tools/stripe_machine_payments_probe.py`** — read-only. Answers "is this account enabled for
+  machine payments" before anybody writes an endpoint against it.
+- **`tools/fd8_prepare_republish.py`** — makes the server.json edits for FD-8, FD-9 and FD-10 and
+  refuses to invent a publish command: it greps the repo's own README for the one that already
+  works.
+- **`agent_baiting_scope.md`** — what Island's AgentBaiting research means for us, what
+  `mcp-registry-risk` already covers, and the one endpoint worth building.
+- **`blog-apify-actor-as-agent-tool.md`** — the Apify content-programme draft.
 - **`tools/generate_outreach.py`** + `test_generate_outreach.py` — item 2's generator, and the ten
   tests that stop a draft ever diagnosing a prospect.
 - **`miniapp_discovery_and_stripe_choice.md`** — why the widget must not carry a Mini App link, what
@@ -693,7 +725,18 @@ repository URL together. Do all three in one version rather than three.
    GENERATED DRAFT PER PROSPECT that he reviews and sends, keyed on what each repo actually does.
    Not mass mail: volume is not the lever, relevance is, and blasting maintainers who never asked is
    how a domain gets blocked.
-3. **Apify: "your Actor as a tool for AI agents" post. BLOCKED ON A QUESTION NOBODY HAS ASKED:
+3. **Apify post. UNBLOCKED 2026-09-03: THE ACTOR EXISTS AND THE DRAFT IS WRITTEN.**
+   `relayshieldadmin/relayshield-security-tools`, public, pay-per-usage, an MCP server over
+   Streamable HTTP in Standby mode, 154 runs, last build 0.1.7. So the banner was true and the
+   session that could not find it was wrong, which is the right way round for once.
+   `blog-apify-actor-as-agent-tool.md` is the draft: ~1,300 publishable words on why Standby rather
+   than run-per-request, and the dependency conflict that crash-looped every real run
+   (`apify>=2,<3` pulls a Crawlee whose `HttpHeaders` model dies against the Pydantic FastMCP
+   needs, with "cannot specify both default and default_factory" at import time; `apify>=4,<5`
+   fixes it by going FORWARD, not back). **Its NOT FOR PUBLICATION section carries the three facts
+   to verify with the console open before submitting, and the one rule that would disqualify it:
+   originality, so it must NOT go on blog.relayshield.net first.** That inverts our usual
+   canonical-first order. Original entry follows. **BLOCKED ON A QUESTION NOBODY HAD ASKED:
    DOES OUR APIFY ACTOR EXIST?** The programme's own rule is that articles are "written by
    developers who've actually built the thing they're writing about", 1,000 to 5,000 words,
    original, submitted through their Discord, $500 on publication. Both halves of the theme

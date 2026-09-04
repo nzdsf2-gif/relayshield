@@ -2395,6 +2395,22 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
       <code style="display:block;color:var(--muted);font-size:.8rem;background:var(--surface);border-radius:5px;padding:.4rem .55rem;margin-bottom:.5rem">pip install llamaindex-relayshield</code>
       <span style="color:var(--accent);font-size:.82rem;font-weight:600">View on GitHub &rarr;</span>
     </a>
+    <!--
+      Apify, added 2026-09-03. The Actor has been public and taking real runs
+      since August and this page has never mentioned it, so the only way to
+      find it was to already be on Apify. An _APIFY_BANNER exists for arrivals
+      FROM Apify; this is the other direction, and it is the cheaper one.
+
+      Hosted rather than installed, so no pip line: the card links straight to
+      the Store listing. Nothing here claims a run count. Numbers on a landing
+      page are a maintenance burden and a prospect can read the real one on the
+      listing itself.
+    -->
+    <a href="https://apify.com/relayshieldadmin/relayshield-security-tools" target="_blank" rel="noopener" style="text-decoration:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem">
+      <p style="color:var(--text);font-size:.9rem;font-weight:600;margin:0 0 .35rem">Apify Actor (MCP)</p>
+      <code style="display:block;color:var(--muted);font-size:.8rem;background:var(--surface);border-radius:5px;padding:.4rem .55rem;margin-bottom:.5rem">relayshield-security-tools</code>
+      <span style="color:var(--accent);font-size:.82rem;font-weight:600">Hosted MCP server, pay per usage &rarr;</span>
+    </a>
   </div>
 </div>
 
@@ -2862,6 +2878,26 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "The first calls need no key, no card and no signup: link checking and address "
             "screening are open endpoints, capped per address rather than billed. A key raises "
             "the cap and adds multi-engine URL analysis.")),
+    ),
+    # PyPI, registered 2026-09-03 BEFORE the package's project_urls change, in
+    # that order, because that order is the whole rule. Found while verifying
+    # FD-8: relayshield-mcp's PyPI page links "Documentation" straight at this
+    # page with no ?source= at all, so every arrival from the place the MCP
+    # server is actually installed from has been logging unattributed.
+    #
+    # Referer hosts included: pypi.org sends a referer on an outbound click,
+    # unlike most of the app surfaces, so this one attributes even when the
+    # query string is lost.
+    "pypi": (
+        ("pypi.org", "files.pythonhosted.org"),
+        _banner("Arriving from PyPI", _p(
+            "You found the package. The same checks it wraps are a REST API, and the key "
+            "works across both: "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">relayshield-mcp</code> '
+            "is a client for the endpoints documented below, not a separate product. Breach "
+            "exposure, infostealer credentials, SIM swap, domain lookalikes, MCP registry risk "
+            "and prompt-injection exposure, priced per call with 100 free and no card. The "
+            "pay-as-you-go endpoints need no key at all.")),
     ),
     "langchain": (("langchain.com",), _LANGCHAIN_BANNER),
     "n8n": (

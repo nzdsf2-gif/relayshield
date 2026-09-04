@@ -18,7 +18,10 @@ WHAT ONE RE-PUBLISH FIXES, and why it is three things rather than one:
          somebody else built for us.
   FD-10  the registry's latest version is 0.2.7 while PyPI is on 0.2.9, so a
          client installing from the registry record gets an older package than
-         one installing from PyPI.
+         one installing from PyPI. And pyproject.toml's Documentation link
+         points at the developers page with no ?source= at all, so every
+         arrival from the place the package is actually installed from logs
+         unattributed. Both are fixed here.
 
 The registry is versioned, so all three land in a single new version.
 """
@@ -161,8 +164,43 @@ def main():
     print(f"   written. previous file kept as {sj}.bak")
     print()
 
+    # FD-10's other half: the package's own links.
+    print("== 4. pyproject.toml links (FD-10)")
+    pyproj = os.path.join(d, "pyproject.toml")
+    if not os.path.exists(pyproj):
+        print("   no pyproject.toml here. Skipping; it may live in a subdirectory.")
+    else:
+        with open(pyproj) as fh:
+            text = fh.read()
+        want = "https://api.relayshield.net/developers?source=pypi"
+        current = re.search(r'Documentation\s*=\s*"([^"]+)"', text)
+        print(f"   Documentation  {current.group(1) if current else '(not set)'}")
+        if current and current.group(1) == want:
+            print("   already attributed.")
+        elif not args.write:
+            print(f"   should be     {want}")
+            print("   --write will change it.")
+        else:
+            if current:
+                text = text.replace(current.group(0), f'Documentation = "{want}"')
+            else:
+                # No Documentation key: add one under [project.urls] if present.
+                if "[project.urls]" in text:
+                    text = text.replace("[project.urls]",
+                                        f'[project.urls]\nDocumentation = "{want}"', 1)
+                else:
+                    print("   no [project.urls] section. Add one by hand:")
+                    print(f'     [project.urls]\n     Documentation = "{want}"')
+                    text = None
+            if text is not None:
+                with open(pyproj, "w") as fh:
+                    fh.write(text)
+                print(f"   written -> {want}")
+                print("   This ships with the NEXT PyPI release, not with the registry publish.")
+    print()
+
     where, cmd = publish_command(d)
-    print("== 4. Publish")
+    print("== 5. Publish")
     print("   Read the diff first:  git -C %s --no-pager diff server.json" % args.dir)
     if cmd:
         print(f"   The command this repo already documents, from {where}:")

@@ -5,20 +5,40 @@
 **Claude Code on the web runs in a remote container. It cannot write to
 `~/Side SaaS Hustle`. Committing and merging to `main` does NOT put a file on Andrew's Mac.**
 
-This has now cost time in more than one session: a document was written, committed, merged, and
-reported as "delivered", and Andrew could not read a word of it. A file he cannot open is not a
-deliverable, and describing its contents to him is worse than useless — it reads as sections of a
-document that, to him, does not exist.
+**UPDATED 2026-09-03, and this SUPERSEDES the old "paste it into the chat" rule.** Andrew's
+instruction, in his words: *"When you cite a file it means I expect you to provide a .md I can
+download. I don't want you to paste the content inline."*
 
-**So: whenever a session produces a `.md` deliverable — a benchmark, a roadmap, a blog draft, a
-brief, a handoff — PASTE THE FULL FILE CONTENTS INTO THE CHAT, inside a fenced code block, in the
-same reply that announces it.** Commit it as well, but the chat paste is the delivery. Do not
-substitute a summary, a file path, a PR link, or "run `git pull`". Do not wait to be asked.
+So: **whenever a session produces or updates a `.md` deliverable, SEND THE FILE so he can download
+it, in the same reply that mentions it.** Use the file-sending mechanism, not a fenced code block.
+A 400-line document pasted inline is unreadable in a chat window and he cannot save it.
 
-Andrew saves them into `~/Side SaaS Hustle` by hand. That is the established, working process.
+- **Send the file. Do not paste it.** Mentioning a filename without sending it is the failure this
+  rule exists to stop, and it happened three times on 2026-09-03 alone.
+- Commit it as well. The commit is the durable copy; the sent file is the delivery.
+- If he asks for the content inline, paste it. Otherwise send.
+- A file path, a PR link, or "run `git pull`" is not a deliverable.
 
-If the file is genuinely too large to paste, say so explicitly and paste it in parts — do not
-silently downgrade to a summary.
+## EVERY COMMAND BLOCK STARTS WITH THE MERGE. NO EXCEPTIONS.
+
+Added 2026-09-03 after the same failure three times in one session:
+
+    python3: can't open file '/Users/andrewgibbs/Side SaaS Hustle/tools/x.py': No such file
+
+Nothing was wrong with the script. **It was on the branch and not on his Mac**, because a push from
+this container puts a file on GitHub and nothing else. Handing him a command that runs a tool
+written this session, without the merge in front of it, guarantees that error.
+
+So every ```zsh block that runs anything from this repo begins with these four lines, verbatim:
+
+    cd ~/"Side SaaS Hustle"
+    git checkout main
+    git --no-pager fetch origin claude/<this session's branch>
+    git -c pull.rebase=false merge --no-edit FETCH_HEAD
+
+Then the actual command. It is four wasted lines when he is already up to date, and it is the
+difference between a working instruction and a broken one when he is not. **He is never up to date
+by default: the branch is pushed, and merging is a thing he does, not a thing the push does.**
 
 ### When `git pull` fails on his Mac
 
@@ -350,6 +370,60 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 ---
 
 ## WHERE 2026-09-03 LEFT THINGS — read this first
+
+### THE LIST FOR THE NEXT SESSION, in order (10 items)
+
+Written at the end of 2026-09-03. Everything above item 1 that used to be on the 2026-09-02 list is
+either done or has moved into these.
+
+1. **Stripe machine payments: probe, then build ONE endpoint.** The email to Jake is SENT with the
+   four questions. The next move does not wait on his reply: run
+   `tools/stripe_machine_payments_probe.py` (read-only) to learn whether the account can call the
+   x402 surface at all. Enabled means build one endpoint settling to Stripe alongside the existing
+   PayAI rail, which is the artefact their team responds to. Not enabled means that error text is a
+   better follow-up to Jake than a second nudge. **Settlement question answered: stablecoin payments
+   settle into the Stripe balance in USD, on the normal payout schedule.** Crypto in, dollars out,
+   same balance as the subscriptions.
+2. **Send the twelve.** `outreach_bot_prospects_curated.md` is written and hand-picked: five real
+   inboxes first, then the seven websites where the page has to carry a form. Track replies per 100
+   by channel. `TegroTON/ai-telegram-pay-miniapp` is the one worth the most care.
+3. **Apify article: submit to `#apify-writers` at the next quarterly call.** Draft is
+   `blog-apify-actor-as-agent-tool.md`. Three facts to confirm with the console open first, listed
+   in its own NOT FOR PUBLICATION section. **It must not appear on blog.relayshield.net first:**
+   originality is a programme rule and publishing early disqualifies it.
+4. **FD-8, FD-9 and FD-10 in one publish.** `tools/fd8_prepare_republish.py --dir ~/mcp-live
+   --write` makes all the edits, including the `?source=pypi` link in pyproject.toml, and refuses
+   to invent the publish command. Then FD-11: submit the Smithery LISTING, decline hosting.
+5. **Build `agent-bait-scan`.** Recommended, 3.5 days, scoped in `agent_baiting_scope.md`. Island's
+   research names a gap our catalogue genuinely has: we screen the name and the domain, and nothing
+   of ours reads the INSTRUCTIONS an agent is given. The differentiator is signal 4, joining those
+   instructions to the criminal corpus, which nobody replicating this can do.
+6. **Mini App v1**, then the channel submissions. The discovery list is measured and waiting:
+   `@trendingapps` (3.9M, and `@twa_apps` is the SAME channel), `@web3telegrambotx` (72,742),
+   `@findminiapp` (56,380), `@onclicka_tma_en` (33,723), `@telegtapps` (9,671). Each gives one first
+   impression and we spend it by submitting before the Mini App exists.
+7. **Measure the widget.** It is live and keyless. The number that matters is installs making a
+   SECOND day of calls, not total calls, and `source=tg-widget` is on every request.
+8. **`relayshield-agentic-api` drift.** Still recovered-but-unreconciled on
+   `claude/recovered-live-relayshield-agentic-api`. Live carries a branded API_BASE_URL and a Bundle
+   D Stripe branch main does not. Same shape as the developer-signup recovery that worked.
+9. **INTEL-5 funnel.** `tools/diagnose_stolen_sessions.py` on the Mac. Until it runs, no count out
+   of `relayshield_stolen_sessions` means anything about the criminal market.
+10. **XSOAR.** Nothing to do. `xsoar_pack_watch.yml` runs daily and opens an issue the day the pack
+    lands on master. Checked 2026-09-03: still not on master.
+
+### What this session shipped
+
+- **The Discord footer is live**, after the drift diff was read, the function mapped, and run 134's
+  red probe understood as a denied `lambda:InvokeFunction` rather than a failed deploy.
+- **`relayshield_developer_signup.py` recovered and reconciled** — 700 live-only lines including two
+  Stripe revenue doors — then mapped in the deployer, in that order.
+- **The Telegram widget**, keyless end to end, with `/v1/link-check` new and the gateway route live.
+- **The prospecting pipeline**, now with contact hygiene that screens README examples out of both
+  the extractor and the generator.
+- **Attribution keys** for `tg-widget` and `pypi`, both registered BEFORE the links that use them.
+
+
 
 ### The founder could not see the Discord email-check footer. The diagnosis in the room was wrong.
 

@@ -86,24 +86,72 @@ pins each of the three, including that the pinned facilitator makes **zero** Str
 
 An endpoint that 500s because a preview product is not switched on is worse than no endpoint.
 
-## Two shapes that are DERIVED, not verified, and the script that settles them
+## The two derived shapes are now VERIFIED, and one of them was wrong
 
-`docs.stripe.com` is blocked from the container. So the parameter names for
-`POST /v1/crypto/deposit_addresses` and for the `transaction_verification` PaymentIntent come from
-the reading in `miniapp_discovery_and_stripe_choice.md` section 7 of Stripe's published pages, not
-from the API reference. **A derived name is a guess with good manners.**
+Updated 2026-09-04. `docs.stripe.com` is still blocked from the container, but two
+better sources are not, and neither had been tried:
 
-Both are isolated in single builder functions -- `stripe_deposit_address_params` and
-`stripe_payment_intent_params` -- with no branching, so correcting one is a one-line edit.
-`tools/mpp_settlement_selftest.py` posts exactly those dicts and prints Stripe's own reply. Stripe
-names a rejected parameter precisely, so one run either confirms the shape or hands over the
-corrections.
+- **`mppx` is on the npm registry**, which is reachable. It is Stripe's own reference
+  implementation of MPP, shipped with readable source.
+- **`github.com/tempoxyz/payment-auth-spec` is on raw.githubusercontent.com**, also reachable.
+  It is the IETF draft `mppx` cites, co-authored by Tempo and Stripe.
 
-The same honesty applies to the `mpp` block in the 402 body: the MPP specification is not reachable
-from the container either, so that block reports `"version": "unverified"` and says in its own
-`note` that the `x402` block beside it is authoritative. A test asserts it does not claim a version
-it has not read, and another asserts the two blocks quote the same price -- two blocks disagreeing
-about a price in one 402 is worse than one block.
+Reading an implementation beats reading a blog. It settled every open question, and one of
+the two derived shapes was wrong in three separate places.
+
+| Thing | Derived (wrong) | Verified against mppx 0.9.2 |
+|---|---|---|
+| API version | `2026-05-27.preview` | **`2026-07-29.preview`** |
+| PaymentIntent mode | absent | `payment_method_options[crypto][mode]` |
+| PaymentIntent sub-object | `transaction_verification` | **`transaction_verification_options`** |
+| Payment method types | absent | `payment_method_types: ["crypto"]` |
+| Machine-payment tag | absent | `metadata[machine_payment] = "true"` |
+| Deposit address | POST every time | **LIST first**, create only if none exists |
+| Unit conversion | `round(units / 10^4)` | identical, independently confirmed |
+
+The API version matters more than it looks: **a probe on the wrong preview version reports
+"not enabled" for an account that is enabled.** `tools/stripe_machine_payments_probe.py`
+carried the same wrong date, so its answer was never going to be trustworthy either. Both
+are corrected.
+
+The deposit-address fix is not cosmetic. POSTing unconditionally mints a fresh address every
+time the in-process cache expires, and on Lambda that is every cold start, scattering machine
+revenue across a growing set of addresses for no reason.
+
+## MPP is not a JSON block. It is an HTTP authentication scheme.
+
+The first version of this file emitted an invented `mpp` object in the 402 body and labelled it
+`"version": "unverified"`. It was not merely unverified. It was **structurally wrong**: MPP does
+not put its challenge in the response body at all.
+
+MPP uses the `Payment` authentication scheme under RFC 7235. The challenge rides
+`WWW-Authenticate`, the credential comes back in `Authorization`, and the receipt goes out in
+`Payment-Receipt`:
+
+    WWW-Authenticate: Payment id="<hmac>", realm="api.relayshield.net", method="stripe",
+                      intent="charge", request="<base64url canonical JSON>"
+
+The `id` is **HMAC-SHA256 bound to the challenge's own contents** — seven fixed pipe-delimited
+slots, `realm | method | intent | request | expires | digest | opaque`, with absent fields as
+empty strings so the slot count never moves. That binding is the difference between a payment
+challenge and a suggestion: a client cannot alter the amount and still present an id we would
+accept. The invented block had no binding at all. All of this is now implemented and pinned by
+tests that assert the id changes when the amount, the realm or the secret changes.
+
+## What is deliberately NOT implemented, and why the challenge is switched off
+
+**We can issue a compliant MPP challenge. We cannot yet redeem an MPP credential.** The
+credential is a Shared Payment Token, redeemed through Stripe, and SPTs are in private preview
+on top of the crypto gate.
+
+So `RELAYSHIELD_MPP_CHALLENGE` defaults to `off` and the 402 advertises only x402, which is the
+rail we can actually honour. **Advertising a payment method we would then reject is worse for
+the agent than never offering it** — it spends the agent's authorisation on a route that cannot
+complete. Two tests pin this: MPP absent by default, and an unreachable Stripe never costing us
+the x402 challenge.
+
+`npx mppx@latest validate <url>` is the objective test of MPP compliance, it runs on the Mac,
+and it is the acceptance criterion rather than our own reading of the spec.
 
 ## The money arithmetic, which has its own test class
 
@@ -150,9 +198,20 @@ reads as a broken deploy.
 
 ## Open questions this does not answer
 
-1. **Does x402 settlement count toward early-adopter status?** Still carried, still Jake Lamoine's to
-   answer. This endpoint makes the question concrete rather than hypothetical: there is now a live
-   endpoint to point at.
-2. **Can machine payments settle against an account that already runs metered subscriptions?**
-   Unanswered. The endpoint is built so that finding out costs an environment-variable flip.
-3. **The exact MPP wire schema.** Unverified, flagged in the code and in the response body.
+1. **Does x402 or MPP settlement count toward early-adopter status?** Still Jake's to answer.
+   The endpoint makes it concrete rather than hypothetical: there is a URL to point at.
+2. **Can machine payments settle against an account that already runs metered subscriptions
+   and an aggregate meter?** Unanswered, and it costs an environment-variable flip to find out.
+3. **Redeeming a Shared Payment Token from Python.** The reference implementation is Node. This
+   is the one genuine build left, and it is not a one-line fix.
+
+## What the drift work alongside it closed
+
+`relayshield_agentic_api.py` was reconciled the same session, and it was much smaller than
+feared: **+22 / -1**, both hunks live-only. The branded `API_BASE_URL` with its reasoning, and
+the Bundle D "Door 2" direct-Stripe billing branch that must sit above the `has_subscription`
+test or the direct door bills nothing while the AWS door bills per call.
+
+Main has been moved to the live bytes verbatim — a pure move, no edits — so live is now
+byte-identical to main, and the function is mapped in `deploy_lambdas.yml` for the first time.
+That ordering is the whole rule: recover, read, reconcile, then map.

@@ -8,6 +8,7 @@
         "lambda:InvokeFunction"
       ],
       "Resource": [
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-agentic-api",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-alchemy-webhook",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-api",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-approval-monitor",

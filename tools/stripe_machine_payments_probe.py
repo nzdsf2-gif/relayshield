@@ -28,10 +28,15 @@ import urllib.error
 import urllib.request
 
 SECRET = "relayshield/stripe_secret_key"
-# The preview version the x402 documentation uses. A preview version is a moving
-# target: if this probe starts failing on parameters that used to work, check
-# whether the date has moved before assuming an entitlement changed.
-PREVIEW = "2026-05-27.preview"
+# CORRECTED 2026-09-04. This was 2026-05-27.preview, derived from a blog reading.
+# The real value is pinned in Stripe's own reference implementation, mppx 0.9.2,
+# at dist/stripe/internal/constants.js, which also says it is REQUIRED for
+# shared_payment_granted_token because SPTs are in private preview. A probe on
+# the wrong API version reports "not enabled" for an account that is.
+#
+# Still a moving target: if this starts failing on parameters that used to work,
+# check whether mppx has bumped it before assuming an entitlement changed.
+PREVIEW = "2026-07-29.preview"
 
 
 def _key():

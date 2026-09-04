@@ -125,31 +125,192 @@ class MppChallengeTests(unittest.TestCase):
 
 
 class StripeParamsTests(unittest.TestCase):
+    """The PaymentIntent shape, verified against mppx 0.9.2
+    (dist/stripe/server/internal/record-payment.js). Every assertion here is a
+    key that was WRONG when this shape was derived from prose instead."""
 
-    def test_payment_intent_carries_the_network_and_hash(self):
-        p = mpp.stripe_payment_intent_params(35, "base", "0xabc")
-        self.assertEqual(p["amount"], 35)
-        self.assertEqual(p["currency"], "usd")
+    def setUp(self):
+        self.p = mpp.stripe_payment_intent_params(35, "base", "0xabc")
+
+    def test_mode_is_its_own_key(self):
+        # Was missing entirely in the derived version.
+        self.assertEqual(self.p["payment_method_options[crypto][mode]"],
+                         "transaction_verification")
+
+    def test_the_sub_object_is_transaction_verification_OPTIONS(self):
+        # The derived version wrote [transaction_verification][...], which is a
+        # different key and would have been rejected outright.
         self.assertEqual(
-            p["payment_method_options[crypto][transaction_verification][network]"], "base")
+            self.p["payment_method_options[crypto][transaction_verification_options][network]"],
+            "base")
         self.assertEqual(
-            p["payment_method_options[crypto][transaction_verification][transaction_hash]"],
+            self.p["payment_method_options[crypto][transaction_verification_options][transaction_hash]"],
             "0xabc")
-        self.assertEqual(p["payment_method_data[type]"], "crypto")
+        self.assertNotIn(
+            "payment_method_options[crypto][transaction_verification][network]", self.p)
 
-    def test_metadata_is_flattened_and_stringified(self):
+    def test_payment_method_types_is_present_and_a_list(self):
+        # Also missing from the derived version.
+        self.assertEqual(self.p["payment_method_types[]"], ["crypto"])
+        self.assertEqual(self.p["payment_method_data[type]"], "crypto")
+
+    def test_it_is_tagged_as_a_machine_payment(self):
+        # How machine revenue is queried on the Stripe side.
+        self.assertEqual(self.p["metadata[machine_payment]"], "true")
+
+    def test_amount_and_currency(self):
+        self.assertEqual(self.p["amount"], 35)
+        self.assertEqual(self.p["currency"], "usd")
+        self.assertEqual(self.p["confirm"], "true")
+
+    def test_caller_metadata_does_not_displace_the_machine_payment_tag(self):
         p = mpp.stripe_payment_intent_params(35, "base", "0xabc",
                                              metadata={"usdc_units": 350000})
         self.assertEqual(p["metadata[usdc_units]"], "350000")
+        self.assertEqual(p["metadata[machine_payment]"], "true")
 
     def test_every_value_survives_form_encoding(self):
         import urllib.parse
-        p = mpp.stripe_payment_intent_params(35, "base", "0xabc",
-                                             metadata={"path": mpp.MPP_PATH})
-        urllib.parse.urlencode(p, doseq=True)
+        urllib.parse.urlencode(
+            mpp.stripe_payment_intent_params(35, "base", "0xabc",
+                                             metadata={"path": mpp.MPP_PATH}),
+            doseq=True)
 
-    def test_deposit_address_asks_for_base(self):
-        self.assertEqual(mpp.stripe_deposit_address_params()["network"], "base")
+    def test_deposit_address_defaults_to_the_configured_network(self):
+        self.assertEqual(mpp.stripe_deposit_address_params()["network"], mpp.MPP_NETWORK)
+        self.assertEqual(mpp.stripe_deposit_address_params("tempo")["network"], "tempo")
+
+    def test_the_api_version_is_the_one_the_reference_implementation_pins(self):
+        self.assertEqual(mpp.STRIPE_PREVIEW_VERSION, "2026-07-29.preview")
+
+    def test_stripe_records_on_base_and_it_is_six_decimals(self):
+        self.assertEqual(mpp.STRIPE_NETWORKS["base"], 6)
+        self.assertIn(mpp.MPP_NETWORK, mpp.STRIPE_NETWORKS)
+
+
+class DepositAddressTests(unittest.TestCase):
+    """List before create. Creating unconditionally scatters revenue across a
+    new address on every Lambda cold start."""
+
+    def setUp(self):
+        self._req = mpp._stripe_request
+        mpp._deposit_cache.clear()
+
+    def tearDown(self):
+        mpp._stripe_request = self._req
+        mpp._deposit_cache.clear()
+
+    def _record(self, responses):
+        calls = []
+
+        def fake(path, params, key, idempotency_key=""):
+            calls.append((path, params))
+            return responses.pop(0)
+
+        mpp._stripe_request = fake
+        return calls
+
+    def test_an_existing_address_is_reused_and_nothing_is_created(self):
+        calls = self._record([(200, {"data": [{"address": "0xdead", "id": "cda_1"}]})])
+        got = mpp._stripe_deposit_address("sk_test_x", "base")
+        self.assertEqual(got["address"], "0xdead")
+        self.assertEqual(len(calls), 1, "a reusable address must not trigger a create")
+        self.assertIn("network=base", calls[0][0])
+        self.assertIsNone(calls[0][1], "the list call is a GET")
+
+    def test_an_empty_list_creates_one(self):
+        calls = self._record([(200, {"data": []}),
+                              (200, {"address": "0xnew", "id": "cda_2"})])
+        got = mpp._stripe_deposit_address("sk_test_x", "base")
+        self.assertEqual(got["address"], "0xnew")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1][1], {"network": "base"})
+
+    def test_not_enabled_returns_none_rather_than_raising(self):
+        self._record([(403, {"error": {"message": "crypto is not enabled"}})])
+        self.assertIsNone(mpp._stripe_deposit_address("sk_test_x", "base"))
+
+
+class MppChallengeTests(unittest.TestCase):
+    """MPP is an HTTP authentication scheme, not a JSON body key. Verified
+    against mppx 0.9.2 dist/Challenge.js and the payment-auth-spec draft."""
+
+    REALM  = "api.relayshield.net"
+    PROF   = "profile_123"
+    SECRET = "s3cret"
+
+    def test_base64url_is_unpadded_and_url_safe(self):
+        self.assertEqual(mpp._b64url(b"\xff\xfe\xfd"), "__79")
+        self.assertNotIn("=", mpp._b64url(b"abcde"))
+
+    def test_canonical_json_is_sorted_and_tight(self):
+        self.assertEqual(mpp._canonical_json({"b": 1, "a": 2}), '{"a":2,"b":1}')
+
+    def test_the_request_puts_networkid_under_methoddetails(self):
+        # mppx's zod transform moves it there; a networkId at the top level is
+        # the shape BEFORE the transform and is not what goes on the wire.
+        r = mpp.mpp_payment_request(350000, self.PROF)
+        self.assertEqual(r["amount"], "350000")
+        self.assertIsInstance(r["amount"], str)
+        self.assertEqual(r["methodDetails"]["networkId"], self.PROF)
+        self.assertEqual(r["methodDetails"]["paymentMethodTypes"], ["crypto"])
+        self.assertNotIn("networkId", r)
+
+    def test_the_challenge_is_a_www_authenticate_value_not_a_dict(self):
+        h = mpp.build_mpp_challenge(self.REALM, self.PROF, self.SECRET)
+        self.assertTrue(h.startswith("Payment "))
+        for field in ("id=", "realm=", "method=", "intent=", "request="):
+            self.assertIn(field, h)
+        self.assertIn('method="stripe"', h)
+        self.assertIn('intent="charge"', h)
+
+    def test_the_id_is_bound_to_the_amount(self):
+        # The property that makes this a challenge rather than a suggestion:
+        # change the price and the id must change.
+        a = mpp.mpp_challenge_id(self.REALM, "stripe", "charge",
+                                 mpp.mpp_payment_request(350000, self.PROF), self.SECRET)
+        b = mpp.mpp_challenge_id(self.REALM, "stripe", "charge",
+                                 mpp.mpp_payment_request(1, self.PROF), self.SECRET)
+        self.assertNotEqual(a, b)
+
+    def test_the_id_is_bound_to_the_realm_and_the_secret(self):
+        req = mpp.mpp_payment_request(350000, self.PROF)
+        base = mpp.mpp_challenge_id(self.REALM, "stripe", "charge", req, self.SECRET)
+        self.assertNotEqual(base, mpp.mpp_challenge_id("evil.example", "stripe", "charge",
+                                                       req, self.SECRET))
+        self.assertNotEqual(base, mpp.mpp_challenge_id(self.REALM, "stripe", "charge",
+                                                       req, "other"))
+
+    def test_the_id_slot_count_is_stable(self):
+        # Absent optional fields occupy empty slots, so (expires set, no digest)
+        # can never collide with (no expires, digest set).
+        req = mpp.mpp_payment_request(350000, self.PROF)
+        with_exp = mpp.mpp_challenge_id(self.REALM, "stripe", "charge", req,
+                                        self.SECRET, expires="2026-01-01T00:00:00Z")
+        with_dig = mpp.mpp_challenge_id(self.REALM, "stripe", "charge", req,
+                                        self.SECRET, digest="sha-256=abc")
+        self.assertNotEqual(with_exp, with_dig)
+
+    def test_the_default_credential_header_is_not_advertised(self):
+        # mppx treats Authorization as the implicit default and omits it, so
+        # passing it explicitly must not change the binding.
+        req = mpp.mpp_payment_request(350000, self.PROF)
+        self.assertEqual(
+            mpp.mpp_challenge_id(self.REALM, "stripe", "charge", req, self.SECRET),
+            mpp.mpp_challenge_id(self.REALM, "stripe", "charge", req, self.SECRET,
+                                 header="Authorization"))
+
+    def test_the_server_secret_is_never_the_raw_api_key(self):
+        derived = mpp.mpp_secret_key("sk_test_supersecret")
+        self.assertNotIn("sk_test_supersecret", derived)
+        self.assertEqual(derived, mpp.mpp_secret_key("sk_test_supersecret"),
+                         "must be stable across Lambda instances")
+
+    def test_a_description_above_latin1_cannot_break_the_header(self):
+        h = mpp.build_mpp_challenge(self.REALM, self.PROF, self.SECRET,
+                                    description="risk check \u2014 MCP registry")
+        h.encode("latin-1")   # must not raise
+        self.assertNotIn("\n", h)
 
 
 class RailSelectionTests(unittest.TestCase):
@@ -258,8 +419,45 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(header, body["x402"],
                          "the header and the body must quote the same price")
         self.assertEqual(body["rail"], "facilitator")
-        self.assertEqual(body["price"], "$0.35 USDC (Base)")
-        self.assertIn("mpp", body)
+        # MPP is off by default, so no WWW-Authenticate and no mpp block. The
+        # x402 challenge must stand entirely on its own.
+        self.assertNotIn("WWW-Authenticate", resp["headers"])
+        self.assertNotIn("mpp", body)
+        self.assertEqual(body["price"], f"$0.35 USDC ({mpp.MPP_NETWORK})")
+
+    def test_when_mpp_is_switched_on_the_challenge_rides_www_authenticate(self):
+        real_flag, real_key, real_prof = (mpp.MPP_CHALLENGE_ENABLED,
+                                          mpp._stripe_secret_key, mpp._stripe_profile_id)
+        mpp.MPP_CHALLENGE_ENABLED = True
+        mpp._stripe_secret_key = lambda: "sk_test_x"
+        mpp._stripe_profile_id = lambda key: "profile_123"
+        try:
+            resp = mpp.lambda_handler(
+                {"path": mpp.MPP_PATH, "httpMethod": "POST", "headers": {}}, None)
+        finally:
+            (mpp.MPP_CHALLENGE_ENABLED, mpp._stripe_secret_key,
+             mpp._stripe_profile_id) = real_flag, real_key, real_prof
+        self.assertEqual(resp["statusCode"], 402)
+        self.assertTrue(resp["headers"]["WWW-Authenticate"].startswith("Payment "))
+        # and the x402 challenge is still there beside it, untouched
+        self.assertIn("PAYMENT-REQUIRED", resp["headers"])
+
+    def test_an_unreachable_stripe_never_costs_us_the_x402_challenge(self):
+        real_flag, real_key = mpp.MPP_CHALLENGE_ENABLED, mpp._stripe_secret_key
+
+        def boom():
+            raise RuntimeError("secrets manager is down")
+
+        mpp.MPP_CHALLENGE_ENABLED = True
+        mpp._stripe_secret_key = boom
+        try:
+            resp = mpp.lambda_handler(
+                {"path": mpp.MPP_PATH, "httpMethod": "POST", "headers": {}}, None)
+        finally:
+            mpp.MPP_CHALLENGE_ENABLED, mpp._stripe_secret_key = real_flag, real_key
+        self.assertEqual(resp["statusCode"], 402)
+        self.assertIn("PAYMENT-REQUIRED", resp["headers"])
+        self.assertNotIn("WWW-Authenticate", resp["headers"])
 
     def test_no_usable_payto_is_503_not_a_free_call(self):
         mpp.X402_PAYTO_ADDRESS = ""

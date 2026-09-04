@@ -29,12 +29,28 @@ Nothing was wrong with the script. **It was on the branch and not on his Mac**, 
 this container puts a file on GitHub and nothing else. Handing him a command that runs a tool
 written this session, without the merge in front of it, guarantees that error.
 
-So every ```zsh block that runs anything from this repo begins with these four lines, verbatim:
+So every ```zsh block that runs anything from this repo begins with these five lines, verbatim:
 
     cd ~/"Side SaaS Hustle"
     git checkout main
     git --no-pager fetch origin claude/<this session's branch>
+    git stash push --include-untracked -m "pre-merge untracked"
     git -c pull.rebase=false merge --no-edit FETCH_HEAD
+
+**THE STASH LINE IS NOT OPTIONAL, AND IT WAS ADDED 2026-09-04 AFTER THE SAME MERGE FAILED THREE
+TIMES ACROSS TWO SESSIONS.** The delivery rule at the top of this file and `git merge` collide by
+design: any `.md` sent to Andrew and saved into `~/Side SaaS Hustle` is an untracked file, and git
+refuses to clobber an untracked file it did not write. So the merge aborts, and every command after
+it in the block fails with "No such file or directory" — which reads like a broken script and is a
+blocked merge.
+
+Naming the colliding files does not fix it, because the NEXT delivery collides too. That is exactly
+what happened: a block that deleted `agent_baiting_scope.md` and `outreach_bot_prospects_curated.md`
+then aborted on `mpp_settlement_endpoint.md`, the file the same reply had just sent him.
+
+`git stash push --include-untracked` clears the tree unconditionally, so the block works whatever he
+saved. **Stash, never `rm`**: the copies are recoverable with `git stash pop` if one turns out to
+have been his own work rather than a paste of ours.
 
 Then the actual command. It is four wasted lines when he is already up to date, and it is the
 difference between a working instruction and a broken one when he is not. **He is never up to date
@@ -372,13 +388,90 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ## WHERE 2026-09-04 LEFT THINGS — read this first
 
+### THE BLOCKED SOURCE WAS REACHABLE ALL ALONG, AND IT MADE A DERIVED SHAPE WRONG
+
+The single most useful thing this session found, and it generalises well past Stripe.
+
+Two sessions recorded `docs.stripe.com` as egress-blocked and derived Stripe's wire shapes from
+prose instead, labelling them "derived, not verified". Both statements were true. The conclusion
+drawn from them was not: **that the shapes could not be verified from this container.**
+
+They could. Nobody had tried the two obvious neighbours:
+
+- **`registry.npmjs.org` is reachable**, and `mppx` — Stripe's OWN reference implementation of MPP —
+  is published there with readable source. `npm view` needs no browser.
+- **`raw.githubusercontent.com` is reachable**, and `github.com/tempoxyz/payment-auth-spec` is the
+  IETF draft that mppx cites, co-authored by Tempo and Stripe.
+
+Reading the implementation settled every open question in an hour, and **one of the two derived
+shapes was wrong in three separate places** — a missing `mode` key, `transaction_verification`
+where the real name is `transaction_verification_options`, and a missing
+`payment_method_types: ["crypto"]`. The pinned API version was wrong too: `2026-05-27.preview`
+where mppx pins `2026-07-29.preview`, which matters because **a probe on the wrong preview version
+reports "not enabled" for an account that is enabled.**
+
+**The general form, and it belongs next to "NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A
+CHECK": a blocked documentation site is not a blocked FACT.** Before recording anything as
+underived, try the package registry, the vendor's own SDK source, the spec repository, and
+raw.githubusercontent.com. A vendor that documents a protocol almost always ships an
+implementation of it somewhere fetchable, and the implementation is better evidence than the docs
+anyway.
+
+### MPP is an HTTP AUTHENTICATION SCHEME, not a JSON block in a response body
+
+The invented `mpp` block this endpoint shipped with on 2026-09-04 was not merely unverified, it was
+structurally wrong. MPP uses the `Payment` scheme under RFC 7235: the challenge rides
+**`WWW-Authenticate`**, the credential comes back in `Authorization`, the receipt goes out in
+`Payment-Receipt`. The challenge `id` is **HMAC-SHA256 bound to the challenge's own contents** over
+seven fixed pipe-delimited slots, which is what stops a client altering the amount and presenting an
+id we would still accept.
+
+That is implemented and tested now. **The credential side is not**, and the challenge is therefore
+switched OFF by default (`RELAYSHIELD_MPP_CHALLENGE=off`): redeeming a Shared Payment Token is a
+Stripe call this module does not make, and SPTs are in private preview on top of the crypto gate.
+**Advertising a payment method we would then reject is worse for the agent than never offering it**
+— it spends the agent's authorisation on a route that cannot complete.
+
+`npx mppx@latest validate <url>` is the objective compliance test and it runs on the Mac. It is the
+acceptance criterion, not our own reading.
+
+### relayshield_agentic_api.py IS RECONCILED. Item 8 is closed.
+
+It was far smaller than four sessions of carrying it implied: **+22 / -1**, both hunks live-only,
+fully readable in one screen.
+
+- **The branded `API_BASE_URL`** (`https://api.relayshield.net`, not the execute-api host), with a
+  five-line comment explaining that this URL is advertised as the resource in every 402 and is what
+  x402 indexers persist.
+- **The Bundle D "Door 2" branch**: a direct-Stripe bundle key must be metered ABOVE the
+  `has_subscription` test, or it is classed "unlimited under an existing subscription" and billed
+  nothing while the AWS door bills per call.
+
+Main has been moved to the live bytes VERBATIM — a pure move, no edits — so live is byte-identical
+to main, and `relayshield_agentic_api.py` is now in `deploy_lambdas.yml`: the `paths:` trigger, the
+`LAMBDA_MAP`, and `iam_github_deploy_invoke.json`. Recover, read, reconcile, then map, in that
+order and no other.
+
+### RULE 12 FIRED AGAIN, THE DAY AFTER IT WAS WRITTEN
+
+Stripe documentation was pasted into the session on 2026-09-04 with the account's **live
+`sk_test_` secret key interpolated into the curl samples**, exactly as on 2026-09-03. Stripe
+personalises examples for a signed-in reader; nobody typed a credential and one arrived anyway.
+
+**Roll it in the Dashboard under Developers, API keys.** And read rule 12 as what it is: not a
+one-off, a property of every vendor doc page read while signed in. Screenshots carry it too — the
+key is rendered into the image, so "I only sent a picture" is not a mitigation.
+
+
 ### The MPP settlement endpoint is BUILT. Item 1 of the 2026-09-03 list, second half.
 
 `relayshield_mpp_settlement.py`, one endpoint, `POST /v1/mpp/mcp-registry-risk` at $0.35 on Base,
 settled through Stripe with a fallback to the rail that already collects. 30 offline tests. Full
 write-up in `mpp_settlement_endpoint.md`.
 
-**It is NOT live yet and needs two commands on the Mac**, in this order and no other:
+**It is NOT live yet and needs two commands on the Mac**, in this order and no other. Note the
+shapes below were CORRECTED on 2026-09-04 against Stripe's own reference implementation — see
+"THE BLOCKED SOURCE WAS REACHABLE ALL ALONG" above:
 
 1. `sh tools/create_mpp_settlement_lambda.sh` — creates the function, its own IAM role, both gateway
    routes, and proves the 402.

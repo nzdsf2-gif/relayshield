@@ -200,3 +200,76 @@ Two practical notes from that page:
   general rule is now CLAUDE.md rule 12: a vendor doc page read while signed in may be personalised
   with your credentials, so skim for `sk_`, `rk_`, `Bearer ` and long opaque strings before pasting
   anything anywhere.
+
+## 7. Can we implement MPP or x402 in code? YES, and both are documented
+
+Asked 2026-09-03. Answered by reading Stripe's own material rather than the console, because the
+console kept returning the access request. **Both protocols have public Stripe documentation and a
+seller-side code path.** `docs.stripe.com` is blocked from the container, so this is assembled from
+Stripe's published pages and blog rather than fetched directly; the URLs are listed at the end so
+each claim can be checked in a browser.
+
+### What the two protocols are
+
+**MPP, the Machine Payments Protocol**, is an open standard co-authored by Stripe and Tempo,
+released 2026-03-18. It standardises HTTP 402 as a Challenge, Credential, Receipt flow: an agent
+requests a paid resource, the service answers with a payment request, the agent authorises, the
+resource is delivered. It carries stablecoins AND fiat, the latter through Shared Payment Tokens,
+so a card-funded agent and a USDC-funded agent hit the same endpoint.
+
+**x402** is the Coinbase-originated protocol we already run: 402, payment requirements, pay, retry
+with proof. Stripe supports it, starting with USDC on Base, settling through the Coinbase Developer
+Platform facilitator.
+
+### The seller-side code path, which is the actual answer
+
+For MPP, Stripe's position is that a seller accepts payments "in a few lines of code using the
+PaymentIntents API", and the payments then behave like any other Stripe transaction: they appear in
+the API and Dashboard, settle to the existing balance in the default currency on the normal payout
+schedule, and inherit tax, fraud, reporting and refunds.
+
+For x402 the documented shape is:
+
+1. Create a crypto deposit address for the transaction through the `/crypto/deposit_addresses`
+   endpoint with `network=base`.
+2. Return HTTP 402 with the payment requirements, including that deposit address.
+3. The facilitator settles the payment on-chain.
+4. Record the settled transaction as a PaymentIntent with the crypto payment method type and
+   `transaction_verification` mode, carrying the network and the transaction hash. USDC atomic
+   units are 6 decimals and Stripe wants cents, so there is a conversion.
+
+It uses a preview API version, `2026-05-27.preview`, which is worth noting: a preview version is a
+moving target and pinning it is not optional.
+
+### What this changes for us, and what it does not
+
+**It does not make the access request unnecessary.** Stablecoin acceptance is documented as
+available to US businesses in every state except New York, and businesses outside the US are told to
+**email `machine-payments@stripe.com` with their Stripe account ID** to request access. That is a
+second, named route into the same programme, and it is worth using alongside Jake rather than
+instead of him: a dashboard request with no criterion and no timeline is exactly the thing an email
+to the owning team can unstick.
+
+**The substantive difference from what we run today is where the money lands.** Our 28 endpoints
+settle USDC on Base through the PayAI facilitator into a Coinbase deposit address. Stripe's x402
+settles through the CDP facilitator into the Stripe balance, which puts machine revenue in the same
+place as the subscriptions, with the same reporting and refunds. That is a real operational
+improvement and it is also a migration, not a toggle.
+
+**So the sequencing is: keep the existing rail, add the Stripe one where it earns its keep.** A
+sensible first move is a SINGLE endpoint accepting Stripe-settled x402 alongside the existing
+facilitator, proving the deposit-address and PaymentIntent recording path end to end, before
+touching the other 27. Nothing about that requires abandoning what already works, and it produces
+the concrete artefact Stripe's own team responds to: a live endpoint on their rail rather than a
+description of one.
+
+Sources, all checkable in a browser:
+
+- `https://docs.stripe.com/payments/machine` and `.../machine/x402` and `.../machine/x402/quickstart`
+- `https://docs.stripe.com/payments/machine/mpp`
+- `https://stripe.com/blog/machine-payments-protocol`
+- `https://docs.stripe.com/agentic-commerce` and `https://stripe.com/use-cases/agentic-commerce`
+
+One caution on a lookalike: `github.com/stripe402/stripe402` is a third-party project by an
+individual, Apache-2.0, that bolts HTTP 402 onto ordinary Stripe card charges. It is not Stripe's
+MPP or x402 support and should not be mistaken for it.

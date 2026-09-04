@@ -74,6 +74,21 @@ KEYWORDS = [
 
 MAX_PER_KEYWORD = 40
 
+# Channels named by a person rather than found by a keyword. Search does not
+# reach everything: @trendingapps and @twa_apps were both given by the founder
+# on 2026-09-03 after the second sweep missed them, and a seed is how a human
+# observation gets measured instead of argued about. Resolved and reported like
+# any other row, so their member counts and last-post dates are comparable.
+SEED_CHANNELS = [
+    "trendingapps",
+    "twa_apps",
+    # Not a channel: the submission bot @trendingapps names in its own
+    # description ("We handpick and showcase top tApps submitted via
+    # @tapps_bot"). Resolving it confirms it exists and is the route in;
+    # it will report as a user rather than a channel and that is expected.
+    "tapps_bot",
+]
+
 # Enough Cyrillic in the title or description and the channel publishes in
 # Russian. Not a judgement about the channel: a submission written in English to
 # a Russian-language audience converts badly and reads as spam, which is worth
@@ -106,6 +121,7 @@ async def _sweep(session_data, min_members, pause, latin_only):
     from telethon.sessions import StringSession
     from telethon.tl.functions.contacts import SearchRequest
     from telethon.tl.functions.channels import GetFullChannelRequest
+    # GetFullChannelRequest is used for seeds too, hence the import order.
 
     client = TelegramClient(StringSession(session_data["session_string"]),
                             int(session_data["api_id"]), session_data["api_hash"])
@@ -115,6 +131,44 @@ async def _sweep(session_data, min_members, pause, latin_only):
           f"(prospecting account)\n")
 
     seen, rows = set(), []
+
+    # Seeds first, so a channel a human named is never crowded out by the
+    # per-keyword cap.
+    for username in SEED_CHANNELS:
+        username = username.lower()
+        seen.add(username)
+        try:
+            entity = await client.get_entity(username)
+        except Exception as exc:
+            print(f"  seed @{username}: unreadable ({type(exc).__name__})")
+            await asyncio.sleep(pause)
+            continue
+        title = getattr(entity, "title", None) or getattr(entity, "username", username)
+        members, about = 0, ""
+        try:
+            full = await client(GetFullChannelRequest(entity))
+            members = getattr(full.full_chat, "participants_count", 0) or 0
+            about = (getattr(full.full_chat, "about", "") or "").replace("\n", " ")
+        except Exception:
+            # A bot resolves to a User, which has no full channel. Still worth
+            # reporting: it is the submission route, not an audience.
+            about = "resolves as a user or bot, not a channel: this is a submission route"
+        last_post = ""
+        try:
+            msgs = await client.get_messages(entity, limit=1)
+            if msgs:
+                last_post = msgs[0].date.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+        rows.append({
+            "username": username, "title": title, "members": members,
+            "script": _script_hint(f"{title} {about}"), "last_post": last_post,
+            "about": about[:300], "found_via": "seed (named by hand)",
+            "url": f"https://t.me/{username}",
+        })
+        print(f"  seed @{username}  {members:,}  last post {last_post or '?'}  {title[:40]}")
+        await asyncio.sleep(pause)
+
     for keyword in KEYWORDS:
         print(f"searching: {keyword}")
         try:

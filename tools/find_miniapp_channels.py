@@ -81,6 +81,10 @@ MAX_PER_KEYWORD = 40
 # any other row, so their member counts and last-post dates are comparable.
 SEED_CHANNELS = [
     "trendingapps",
+    # @twa_apps resolves to the SAME channel as @trendingapps: identical title,
+    # identical member count, measured 2026-09-03. Kept in the list so the next
+    # person does not re-add it as a separate target; the dedup below reports it
+    # rather than counting it twice.
     "twa_apps",
     # Not a channel: the submission bot @trendingapps names in its own
     # description ("We handpick and showcase top tApps submitted via
@@ -131,6 +135,7 @@ async def _sweep(session_data, min_members, pause, latin_only):
           f"(prospecting account)\n")
 
     seen, rows = set(), []
+    seen_ids = set()
 
     # Seeds first, so a channel a human named is never crowded out by the
     # per-keyword cap.
@@ -143,7 +148,26 @@ async def _sweep(session_data, min_members, pause, latin_only):
             print(f"  seed @{username}: unreadable ({type(exc).__name__})")
             await asyncio.sleep(pause)
             continue
-        title = getattr(entity, "title", None) or getattr(entity, "username", username)
+        # A bot resolves to a User, which has no .title at all, and getattr's
+        # default does not help when the attribute EXISTS and is None. That
+        # crashed the first seeded run on title[:40].
+        title = (getattr(entity, "title", None)
+                 or getattr(entity, "username", None)
+                 or " ".join(x for x in (getattr(entity, "first_name", None),
+                                         getattr(entity, "last_name", None)) if x)
+                 or username)
+
+        # Two usernames can be the same channel: @trendingapps and @twa_apps
+        # both resolved to "Trending Apps" with an identical member count on the
+        # first seeded run, which is one channel counted twice and would have
+        # been two submissions to the same admin.
+        entity_id = getattr(entity, "id", None)
+        if entity_id is not None and entity_id in seen_ids:
+            print(f"  seed @{username}: same channel as one already listed, skipping")
+            await asyncio.sleep(pause)
+            continue
+        if entity_id is not None:
+            seen_ids.add(entity_id)
         members, about = 0, ""
         try:
             full = await client(GetFullChannelRequest(entity))
@@ -185,6 +209,11 @@ async def _sweep(session_data, min_members, pause, latin_only):
             seen.add(username)
             try:
                 entity = await client.get_entity(username)
+                entity_id = getattr(entity, "id", None)
+                if entity_id is not None and entity_id in seen_ids:
+                    continue
+                if entity_id is not None:
+                    seen_ids.add(entity_id)
                 full = await client(GetFullChannelRequest(entity))
                 members = getattr(full.full_chat, "participants_count", 0) or 0
                 about = (getattr(full.full_chat, "about", "") or "").replace("\n", " ")

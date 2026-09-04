@@ -613,6 +613,21 @@ that sweep.
 `stars:0..1`, which is why the results were dominated by brand-new repos: the script's own docstring
 says so and the run log shows the single `stars:0..1` line.
 
+### FD-8 re-publish now closes three things, not one
+
+Checked live against the registry API on 2026-09-03, rather than from the doc:
+
+- `websiteUrl` on the latest version is still the bare `https://relayshield.net`. The defect is real
+  and current.
+- **The registry is TWO VERSIONS BEHIND PyPI.** Registry latest is 0.2.7 (2026-07-19); PyPI is on
+  0.2.9. Whatever 0.2.8 and 0.2.9 changed has never reached the canonical directory.
+- `repository.url` says `github.com/relayshield/relayshield-mcp` on every published version, and
+  Glama's listing path mirrors it, so if that repo does not exist the mismatch is a broken link on
+  two live surfaces rather than a cosmetic oddity.
+
+So the single `mcp-publisher` re-publish fixes the attribution key, the version lag and the
+repository URL together. Do all three in one version rather than three.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -636,7 +651,10 @@ says so and the run log shows the single `stars:0..1` line.
 - **`tools/contact_hygiene.py`** + `test_contact_hygiene.py` — the screen that stops a README
   example becoming an outreach recipient. Wired into both the prospector and the generator.
 - **`tools/find_miniapp_channels.py`** — searches for channels that announce new Mini Apps and
-  reports measured member counts, ON THE PROSPECTING SESSION. It refuses to run against
+  reports measured member counts, ON THE PROSPECTING SESSION. Now also takes SEED_CHANNELS
+  (`@trendingapps`, `@twa_apps`, and `@tapps_bot` as the submission route the first names in its own
+  description), because search does not reach everything and a channel a human named should be
+  measured rather than argued about. It refuses to run against
   `relayshield/telethon_session` at all: 99 channels of collection depend on that account, and a
   prospecting sweep is how it gets flood-limited.
 - **`iam_github_deploy_invoke.json` gained `relayshield-discord-bot`**, plus the checker, the
@@ -676,11 +694,18 @@ says so and the run log shows the single `stars:0..1` line.
    GENERATED DRAFT PER PROSPECT that he reviews and sends, keyed on what each repo actually does.
    Not mass mail: volume is not the lever, relevance is, and blasting maintainers who never asked is
    how a domain gets blocked.
-3. **Apify: "your Actor as a tool for AI agents" post.** Their content programme pays **$500 per
-   article** on the Apify/Crawlee blog and $100 credits for dev.to under their org. The July call
-   closed 2026-08-16; it is QUARTERLY, so the next call is the target. Theme 2 fits
-   `mcp-registry-risk` exactly. Also **put dev.to back in the channel order** — it is missing
-   entirely and costs nothing.
+3. **Apify: "your Actor as a tool for AI agents" post. BLOCKED ON A QUESTION NOBODY HAS ASKED:
+   DOES OUR APIFY ACTOR EXIST?** The programme's own rule is that articles are "written by
+   developers who've actually built the thing they're writing about", 1,000 to 5,000 words,
+   original, submitted through their Discord, $500 on publication. Both halves of the theme
+   ("Actors that plug into your stack", "your Actor as a tool for AI agents") require an Actor.
+   **`_APIFY_BANNER` on the live developers page asserts one exists** — "The RelayShield actor runs
+   breach, infostealer and SIM-swap checks as an Apify task" — and 2026-09-03 could find no
+   evidence of it: no Actor code anywhere in this repo, and no store listing in a web search.
+   apify.com is blocked from the container, so this is UNRESOLVED rather than disproved. It is the
+   same shape as the MetaMask Snap claim, on a live page, and it gates the post either way. The
+   July call closed 2026-08-16 and it is QUARTERLY, so there is time to settle it. Also **put
+   dev.to back in the channel order** — it is missing entirely and costs nothing.
 4. **Stripe MPP follow-up with Jake Lamoine.** Open question carried: does x402 settlement count
    toward early-adopter status. Card via SPT minimum is $0.50, stablecoin $0.01 USDC, and the sample
    uses `scheme: "exact"` on Base — identical to our 28 live x402 endpoints.
@@ -701,7 +726,14 @@ says so and the run log shows the single `stars:0..1` line.
    edit — read that repo's README for the established command rather than inventing one). While
    there: the record's `repository.url` says `github.com/relayshield/...` while the namespace is
    `io.github.nzdsf2-gif/`. Probably harmless, worth a look.
-7. **FD-9 — verify Glama by hand.** `glama.json` is present in the MCP server repo, but `glama.ai`
+7. **FD-9 — VERIFIED 2026-09-03: WE ARE LISTED.** `glama.ai/mcp/servers/relayshield/relayshield-mcp`,
+   found by web search because glama.ai is still egress-blocked here. The listing path is
+   `relayshield/…`, matching the registry's `repository.url`, so Glama indexed from there — which
+   turns the "probably harmless" owner mismatch in item 6 into a possible broken link on a live
+   listing. **Two more doors found the same day:** PyPI's project page links to the developers page
+   with no `?source=` (FD-10), and Smithery has no RelayShield entry at all (FD-11). Both are
+   written up in `FRONT_DOORS.md`, including why a Smithery LISTING is fine and Smithery HOSTING
+   deserves a decision. Original entry follows. **FD-9 — verify Glama by hand.** `glama.json` is present in the MCP server repo, but `glama.ai`
    is rejected by the container's egress policy, so the listing status is genuinely UNKNOWN, not
    absent. Open <https://glama.ai/mcp/servers>, search RelayShield. If listed, get
    `?source=mcp-registry` onto the link it points at — the key is registered and `glama.ai` is

@@ -51,50 +51,51 @@ SNIPPET_JS = "const v = await check(ctx.message.text);"
 #
 # Length is a decision, not an accident: a maintainer reads about five lines of
 # an unsolicited message. Everything that is not the offer is cut.
+# The subject is the only line most maintainers read, so it names the thing that
+# is actually relevant to them. Writing "a link and address check" to a
+# wallet-only bot advertises that the message is a template.
+SUBJECTS = {
+    "links": "A link check for {name}",
+    "wallets": "An address check for {name}",
+    "payments": "A link and address check for {name}",
+    "ugc": "A link check for {name}",
+    "files": "A link check for {name}",
+    "identity": "A breach and exposure check for {name}",
+}
+
+# Paragraphs are single lines on purpose. Hard-wrapping at 80 columns looks
+# tidy in the generator's output and ragged in a mail client, which re-wraps to
+# its own width and leaves the seams showing.
 BODIES = {
-    "links": """Your bot takes links from users. We publish a check for exactly that
-case: one function call, and you get back a verdict plus a ready-to-send reply for
-a link that is in a criminal IOC corpus, on Google Safe Browsing, or on a domain
-registered days ago.
+    "links": """Your bot takes links from users. We publish a check for exactly that case: one function call, and you get back a verdict plus a ready-to-send reply for a link that is in a criminal IOC corpus, on Google Safe Browsing, or on a domain registered days ago.
 
     {snippet}
 
-No signup, no key and no card for the first calls. It never throws, and it never
-tells your users something is safe, only that nothing is known against it.
+No signup, no key and no card for the first calls. It never throws, and it never tells your users something is safe, only that nothing is known against it.
 
 {link}""",
-    "wallets": """Your bot handles wallet addresses. We publish an address check that
-covers EVM, Solana, TON and Bitcoin in one call, and returns a verdict plus a
-ready-to-send reply.
+    "wallets": """Your bot handles wallet addresses. We publish an address check that covers EVM, Solana, TON and Bitcoin in one call, and returns a verdict plus a ready-to-send reply.
 
     {snippet}
 
-No signup, no key and no card for the first calls. It never throws, and a failed
-check reports as unchecked rather than as safe.
+No signup, no key and no card for the first calls. It never throws, and a failed check reports as unchecked rather than as safe.
 
 {link}""",
-    "payments": """Your bot moves money for people. The check we publish screens the two
-things a user pastes right before they lose some: a link, or a wallet address.
-One call, a verdict, and a reply you can send as is.
+    "payments": """Your bot moves money for people. The check we publish screens the two things a user pastes right before they lose some: a link, or a wallet address. One call, a verdict, and a reply you can send as is.
 
     {snippet}
 
-No signup, no key and no card for the first calls, so it costs a few minutes to
-find out whether it is useful to you.
+No signup, no key and no card for the first calls, so it costs a few minutes to find out whether it is useful to you.
 
 {link}""",
-    "ugc": """Your bot carries links posted by other users, which is the case our link
-check exists for. One call returns a verdict and a ready-to-send reply for a
-domain that is in a criminal IOC corpus, on Safe Browsing, or newly registered.
+    "ugc": """Your bot carries links posted by other users, which is the case our link check exists for. One call returns a verdict and a ready-to-send reply for a domain that is in a criminal IOC corpus, on Safe Browsing, or newly registered.
 
     {snippet}
 
 No signup, no key and no card for the first calls.
 
 {link}""",
-    "identity": """Your bot signs users up. Alongside that, our free tier covers checking
-whether an address given at signup is already in a breach corpus or in stealer
-malware logs, which is a different question from whether the address is valid.
+    "identity": """Your bot signs users up. Alongside that, our free tier covers checking whether an address given at signup is already in a breach corpus or in stealer malware logs, which is a different question from whether the address is valid.
 
 The link and address checks need no key at all:
 
@@ -103,20 +104,18 @@ The link and address checks need no key at all:
 100 free calls, no card, for the rest.
 
 {link}""",
-    "files": """Your bot takes files and links from users. The link half of our check is
-open: one call, a verdict, and a ready-to-send reply.
+    "files": """Your bot takes files and links from users. The link half of our check is open: one call, a verdict, and a ready-to-send reply.
 
     {snippet}
 
-File scanning is a separate endpoint and does need a key, with 100 free calls and
-no card. The link and address checks need no key at all.
+File scanning is a separate endpoint and does need a key, with 100 free calls and no card. The link and address checks need no key at all.
 
 {link}""",
 }
 
-CLOSER_PR = ("If it looks useful and you would rather see it than wire it up, say so and "
-             "I will open a PR against {repo} with the handler wired in, and you can close "
-             "it if you hate it.")
+CLOSER_PR = ("If it looks useful and you would rather see it than wire it up, say so and I will "
+             "open a PR against {repo} with the handler wired in, and you can close it if you "
+             "hate it.")
 
 LINK = "https://github.com/nzdsf2-gif/relayshield/tree/main/widget"
 
@@ -265,14 +264,17 @@ def main():
             "",
             f"- **Score** {row.get('opportunity_score')} · **Stars** {row.get('stars')} · "
             f"**Last push** {(row.get('pushed_at') or '')[:10]}",
-            f"- **Contact** {kind}: {where}",
+            f"- **Contact** {kind}: {where}"
+            + ("  \n  *No inbox. Find the contact form or an address on that page "
+               "before sending, and if there is neither, skip the prospect rather "
+               "than opening a GitHub issue.*" if kind == "website" else ""),
             f"- **Repo** {row.get('url')}" + (f" · **Bot** @{handle}" if handle else ""),
             f"- **Evidence the draft rests on**: their README asserts "
             f"`{', '.join(row.get('capability_tags') or [])}`; the draft is written to "
             f"`{tag}`.",
             "",
             "```text",
-            f"Subject: A link and address check for {row['repo'].split('/')[-1]}",
+            f"Subject: {SUBJECTS[tag].format(name=row['repo'].split('/')[-1])}",
             "",
             "Hi,",
             "",

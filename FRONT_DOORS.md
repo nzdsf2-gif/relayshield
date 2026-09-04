@@ -29,8 +29,10 @@ when deciding what to build next — it just becomes an opinion.
 | FD-5 | OpenCTI connector (Filigran) | TI corpus licences | 2-3 days | Not started |
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
 | FD-7 | Slack App Directory | Business tiers | 1 week | Not started |
-| FD-8 | Official MCP Registry | Agentic bundle, TI | Done, needs attribution | **ALREADY LISTED since 2026-05-10.** `source=` key now registered; `server.json` websiteUrl still to update |
-| FD-9 | Glama | Agentic bundle | Unknown | `glama.json` present. Listing status UNVERIFIED — glama.ai blocked from the container |
+| FD-8 | Official MCP Registry | Agentic bundle, TI | Done, needs attribution | **ALREADY LISTED since 2026-05-10.** `source=` key now registered; `server.json` websiteUrl still to update. **Registry is on 0.2.7 while PyPI is on 0.2.9** |
+| FD-9 | Glama | Agentic bundle | **LISTED, needs attribution** | Verified 2026-09-03: `glama.ai/mcp/servers/relayshield/relayshield-mcp` |
+| FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **OPEN AND UNATTRIBUTED** | Its `Documentation` link points at the developers page with no `?source=`. Found 2026-09-03 |
+| FD-11 | Smithery | Agentic bundle | Not listed | Searched 2026-09-03, no RelayShield entry. `mcp_registry/smithery.yaml` is written and unshipped. See the note below before submitting |
 
 ---
 
@@ -248,7 +250,32 @@ someone else's project.
 
 ---
 
-## FD-9 — Glama. Manifest present, listing status UNVERIFIED.
+## FD-9 — Glama. **LISTED. VERIFIED 2026-09-03.**
+
+The listing exists at **`https://glama.ai/mcp/servers/relayshield/relayshield-mcp`**, found through
+web search because `glama.ai` itself is still blocked by the container's egress policy. So the
+question the section below leaves open is answered: we are listed, and `glama.json` did its job.
+
+**Two things follow, and the second is the interesting one.**
+
+1. `glama.ai` is already a referer host on the `mcp-registry` banner, so an arrival that clicks
+   through from that listing already attributes. Nothing more is needed for measurement unless we
+   want Glama distinguished from the other registries, which needs its own key rather than a shared
+   one.
+2. **The listing path is `relayshield/relayshield-mcp`, not `nzdsf2-gif/…`.** That is the same owner
+   the MCP registry record carries in `repository.url`, so Glama almost certainly indexed it from
+   there. If `github.com/relayshield/relayshield-mcp` does not exist, the listing links at a
+   repository that is not ours and possibly at nothing at all. **This is now the reason to fix
+   `repository.url`, and it is a better reason than tidiness.** It could not be checked from the
+   container: `github.com` returns 403 to the agent proxy for HTML.
+
+**ANDREW CLICKS THIS:** open <https://github.com/relayshield/relayshield-mcp>. A 404 means the
+registry record and the Glama listing both point at nothing, and the FD-8 re-publish below should
+correct `repository.url` at the same time as `websiteUrl`.
+
+---
+
+## FD-9 (original text, kept) — Glama. Manifest present, listing status UNVERIFIED.
 
 `~/mcp-live/glama.json` exists, so the repo is prepared for Glama. **Whether it is actually listed
 could not be checked from the container:** `glama.ai:443` is rejected by the egress policy. Not
@@ -300,3 +327,58 @@ attribution keys are proven to be recording.
 
 **FD-6 is the one that matters if consumer distribution stays the priority**, because it is the
 only consumer surface here that does not depend on someone already using a messenger bot.
+
+
+---
+
+## FD-10 — PyPI. The package page is a front door and it is unattributed.
+
+Found 2026-09-03 while verifying FD-8, by querying PyPI's own JSON rather than assuming:
+
+```text
+relayshield-mcp  version 0.2.9
+  Homepage       https://relayshield.net
+  Documentation  https://api.relayshield.net/developers
+```
+
+**Neither link carries a `?source=` key.** The Documentation link goes straight to the page whose
+whole attribution system we have spent two sessions fixing, and every arrival through it logs as
+unattributed. PyPI is where the MCP server is actually installed from, so this is not a minor door:
+anyone who finds the package, reads its page and clicks through is invisible.
+
+It is also the same failure as FD-8, on a second surface, found the same way. Worth assuming there
+is a third.
+
+**Two steps, in this order, and the order is the rule:**
+
+1. Register a `pypi` key in `_SOURCE_BANNERS` (`relayshield_developer_signup.py`) BEFORE the links
+   change. `pypi.org` and `files.pythonhosted.org` are the referer hosts.
+2. Update `project_urls` in the MCP server repo's `pyproject.toml` to
+   `https://api.relayshield.net/developers?source=pypi` and publish the next release. The link
+   changes when a version ships, not before, so this rides the FD-8 re-publish rather than needing
+   its own.
+
+**While there: the registry is two versions behind PyPI.** The MCP registry's latest is 0.2.7
+(2026-07-19) and PyPI is on 0.2.9. Whatever 0.2.8 and 0.2.9 changed has never reached the canonical
+directory, so a client installing from the registry record gets an older package than a client
+installing from PyPI. The FD-8 re-publish fixes that too, which makes one publish close three
+things: `websiteUrl`, `repository.url` and the version lag.
+
+---
+
+## FD-11 — Smithery. Not listed, and worth a deliberate decision rather than a reflex.
+
+Searched 2026-09-03: no RelayShield entry on `smithery.ai`. `mcp_registry/smithery.yaml` has been
+written and never shipped, and FD-3b already has the steps.
+
+**Read this before submitting.** Smithery does not just list a server, it can BUILD and HOST it, and
+in June 2025 a path-traversal flaw in that build pipeline let a researcher escape the build
+directory and read an authentication token with control over more than 3,000 hosted MCP servers.
+Smithery rotated the token and fixed the flaw within two days, and there is no evidence it was
+exploited. It is a reasonable outcome for a young platform, and it is still a fact a security vendor
+should weigh before handing over a build.
+
+The distinction that resolves it: **being listed is not the same as being hosted.** A listing that
+points at our PyPI package, which users install themselves, carries none of that risk. A hosted
+build does. So submit the listing, do not opt into hosting, and do not put any RelayShield
+credential into a Smithery-side configuration.

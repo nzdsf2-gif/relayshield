@@ -57,9 +57,39 @@ falls back to the existing wallet:
 An endpoint that 500s because a preview product is not switched on is worse
 than no endpoint. This one degrades to today's behaviour and says which rail it
 used, in the response and in the row.
+
+WHAT IS VERIFIED, AND WHAT IS NOT (updated 2026-09-04)
+-------------------------------------------------------
+The first version of this file shipped two Stripe wire shapes DERIVED from prose
+and labelled as such. docs.stripe.com is still blocked from this container, but
+two better sources are not: `mppx`, Stripe's own reference implementation, is on
+the npm registry, and `github.com/tempoxyz/payment-auth-spec`, the IETF draft it
+cites, is on raw.githubusercontent.com. Reading the implementation settled every
+open question, and one of the two derived shapes was wrong in three places.
+
+VERIFIED against mppx 0.9.2 and cited at each function:
+  * the API version, 2026-07-29.preview -- the derived 2026-05-27 was wrong
+  * the PaymentIntent transaction_verification shape, wrong in three keys
+  * deposit addresses are LISTED before being created
+  * the unit conversion, which the reference implementation computes identically
+  * the MPP challenge: it is a WWW-Authenticate header under the `Payment` auth
+    scheme with an HMAC-bound id, NOT a JSON block in the response body
+
+NOT IMPLEMENTED, and the endpoint says so by staying quiet about it: redeeming
+an MPP credential. We can issue a bound challenge and verify our own binding on
+what comes back, but a Shared Payment Token has to be redeemed through Stripe,
+and SPTs are in private preview on top of the crypto gate. So
+RELAYSHIELD_MPP_CHALLENGE defaults to "off" and the 402 advertises only x402,
+which is the rail we can actually honour. Advertising a payment method we would
+then reject spends the agent's authorisation on a route that cannot complete.
+
+`npx mppx@latest validate <url>` is the objective test of MPP compliance and it
+runs on the Mac. It is the acceptance criterion, not our own reading.
 """
 
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -91,6 +121,8 @@ PRICE_UNITS = 350000          # $0.35 in USDC atomic units (6 decimals)
 X402_PAYTO_ADDRESS = os.environ.get("RELAYSHIELD_X402_WALLET", "")
 USDC_BASE_ADDRESS  = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 BASE_CHAIN_ID_V2   = "eip155:8453"
+# Kept for the fallback rail's own wording. The Stripe-side network is
+# MPP_NETWORK, which may differ (Stripe also records on tempo and solana).
 BASE_NETWORK_NAME  = "base"
 
 X402_FACILITATOR_URL = "https://facilitator.payai.network"
@@ -105,12 +137,39 @@ API_BASE_URL = os.environ.get(
 STRIPE_SECRET_NAME = "relayshield/stripe_secret_key"
 STRIPE_API         = "https://api.stripe.com"
 
-# The preview API version Stripe's machine-payments documentation uses. Pinned
-# on purpose and duplicated in tools/stripe_machine_payments_probe.py: a
-# preview version is a MOVING TARGET. If calls that used to work start failing
-# on parameter names, check whether this date has moved before concluding an
-# entitlement changed.
-STRIPE_PREVIEW_VERSION = "2026-05-27.preview"
+# VERIFIED 2026-09-04 against mppx 0.9.2, Stripe's own reference implementation:
+# dist/stripe/internal/constants.js sets stripePreviewVersion = '2026-07-29.preview'
+# and says it is REQUIRED for shared_payment_granted_token, since SPTs are in
+# private preview. The 2026-05-27 date this file shipped with yesterday was
+# derived from a blog reading and was wrong.
+#
+# A preview version is still a MOVING TARGET. If calls that used to work start
+# failing on parameter names, check whether mppx has bumped this before
+# concluding an entitlement changed.
+STRIPE_PREVIEW_VERSION = "2026-07-29.preview"
+
+# Networks Stripe records crypto payments on, with the token decimals each uses.
+# Verified from mppx dist/stripe/server/internal/record-payment.js NETWORK_CONFIG,
+# which lists exactly these three, all at 6 decimals. Base is ours: it is where
+# the 28 live endpoints already settle.
+STRIPE_NETWORKS = {"tempo": 6, "base": 6, "solana": 6}
+MPP_NETWORK = os.environ.get("RELAYSHIELD_MPP_NETWORK", "base").strip().lower()
+
+# Marks a PaymentIntent as a machine payment. Verified: mppx sets exactly
+# {machine_payment: 'true'} on every recorded crypto payment, so a Stripe-side
+# query for machine revenue finds ours alongside anyone else's.
+MACHINE_PAYMENT_METADATA = {"machine_payment": "true"}
+
+# The Stripe business profile id (profile_...), used as `networkId` in an MPP
+# challenge. Read from GET /v2/network/business_profiles/me when not pinned.
+STRIPE_PROFILE_ID = os.environ.get("STRIPE_PROFILE_ID", "").strip()
+
+# Whether to advertise an MPP challenge alongside the x402 one. OFF by default,
+# and the reason is in build_mpp_challenge: we can ISSUE a compliant challenge
+# and verify our own binding on it, but we cannot yet REDEEM a Shared Payment
+# Token credential. Advertising a payment method we cannot honour is worse than
+# not advertising it.
+MPP_CHALLENGE_ENABLED = os.environ.get("RELAYSHIELD_MPP_CHALLENGE", "off").strip().lower() == "on"
 
 SETTLEMENTS_TABLE = "relayshield_payg_settlements"
 
@@ -245,31 +304,55 @@ def _stripe_request(path: str, params: dict | None, key: str,
         return 0, {"error": {"message": str(exc)}}
 
 
-def stripe_deposit_address_params(network: str = BASE_NETWORK_NAME) -> dict:
+def stripe_deposit_address_params(network: str = "") -> dict:
     """Parameters for POST /v1/crypto/deposit_addresses.
 
-    Isolated in its own function so the wire shape is testable offline and
-    correctable in one place. See the note on stripe_payment_intent_params
-    about how these names were derived and how to settle them.
+    VERIFIED 2026-09-04 against mppx 0.9.2
+    (dist/stripe/server/internal/deposit-address.js): the create call takes
+    exactly {network}. The same file also shows the read path, which this file
+    got wrong yesterday -- see _stripe_deposit_address.
     """
-    return {"network": network}
+    return {"network": network or MPP_NETWORK}
 
 
-def _stripe_deposit_address(key: str, network: str = BASE_NETWORK_NAME) -> dict | None:
-    """Mints (or reuses) a Stripe crypto deposit address for `network`.
+def _stripe_deposit_address(key: str, network: str = "") -> dict | None:
+    """Finds an existing Stripe crypto deposit address for `network`, and only
+    creates one if there is none.
 
-    Returns {"address": ..., "id": ..., "network": ...} or None when the account
-    is not enabled for the product, which is the expected answer today. A None
-    here is not an error condition -- it is the signal to quote the existing
-    wallet in the 402 instead."""
+    LIST FIRST. Verified from mppx's findOrCreateDepositAddress, which does
+    `GET /v1/crypto/deposit_addresses?network=X&limit=1` and reuses data[0]
+    before it will POST. Yesterday's version here POSTed unconditionally, which
+    mints a fresh address every time the in-process cache expires -- on Lambda
+    that is every cold start, and it scatters machine revenue across a growing
+    set of addresses for no reason.
+
+    Returns {"address", "id", "network"} or None when the account is not enabled
+    for the product, which is the expected answer today. None is not an error
+    condition: it is the signal to quote the existing wallet in the 402 instead.
+    """
+    network = network or MPP_NETWORK
     cached = _deposit_cache.get(network)
     if cached and (time.time() - cached[0]) < _DEPOSIT_ADDRESS_TTL:
         return cached[1]
 
     status, body = _stripe_request(
-        "/v1/crypto/deposit_addresses", stripe_deposit_address_params(network), key
+        f"/v1/crypto/deposit_addresses?network={urllib.parse.quote(network)}&limit=1",
+        None, key,
     )
-    if status != 200:
+    record = None
+    if status == 200 and (body.get("data") or []):
+        first = body["data"][0]
+        record = {"address": first.get("address", ""), "id": first.get("id", ""),
+                  "network": network}
+    elif status == 200:
+        status, body = _stripe_request(
+            "/v1/crypto/deposit_addresses", stripe_deposit_address_params(network), key
+        )
+        if status == 200:
+            record = {"address": body.get("address", ""), "id": body.get("id", ""),
+                      "network": network}
+
+    if not record or not record["address"]:
         # 401/403/404 all mean the same thing from outside: not granted. Log the
         # message verbatim, because that exact text is the thing worth putting in
         # front of Stripe -- "the console returns the access request" is a
@@ -280,16 +363,32 @@ def _stripe_deposit_address(key: str, network: str = BASE_NETWORK_NAME) -> dict 
         )
         return None
 
-    address = body.get("address") or (body.get("data") or [{}])[0].get("address", "")
-    if not address:
-        logger.warning("Stripe deposit address response carried no address — keys=%s",
-                       sorted(body.keys()))
-        return None
-
-    record = {"address": address, "id": body.get("id", ""), "network": network}
     _deposit_cache[network] = (time.time(), record)
     logger.info("Stripe deposit address ready — network=%s id=%s", network, record["id"])
     return record
+
+
+def _stripe_profile_id(key: str) -> str:
+    """The Stripe business profile id (profile_...), which MPP uses as networkId.
+
+    Stripe's quickstart says to create a profile in the Dashboard and read it
+    from GET /v2/network/business_profiles/me. Pin it with STRIPE_PROFILE_ID to
+    skip the call. Returns "" when unavailable, which disables the MPP challenge
+    rather than emitting one with a field missing.
+    """
+    if STRIPE_PROFILE_ID:
+        return STRIPE_PROFILE_ID
+    cached = _deposit_cache.get("__profile__")
+    if cached and (time.time() - cached[0]) < _DEPOSIT_ADDRESS_TTL:
+        return cached[1].get("id", "")
+    status, body = _stripe_request("/v2/network/business_profiles/me", None, key)
+    if status != 200:
+        logger.warning("Stripe business profile unavailable — HTTP %s message=%s",
+                       status, (body.get("error") or {}).get("message", ""))
+        return ""
+    pid = body.get("id", "")
+    _deposit_cache["__profile__"] = (time.time(), {"id": pid})
+    return pid
 
 
 def stripe_payment_intent_params(cents: int, network: str, tx_hash: str,
@@ -298,25 +397,37 @@ def stripe_payment_intent_params(cents: int, network: str, tx_hash: str,
     """Parameters for POST /v1/payment_intents recording an already-settled
     on-chain payment in transaction_verification mode.
 
-    ⚠ THE PARAMETER NAMES HERE ARE DERIVED, NOT VERIFIED. `docs.stripe.com` is
-    blocked from the build container, so this shape comes from the reading in
-    `miniapp_discovery_and_stripe_choice.md` section 7 of Stripe's published
-    pages, not from the API reference. It is isolated in one function, with no
-    branching, precisely so that correcting it is a one-line change.
+    VERIFIED 2026-09-04 against mppx 0.9.2, Stripe's own reference
+    implementation (dist/stripe/server/internal/record-payment.js). The shape
+    this file shipped with yesterday was DERIVED from a prose reading and was
+    wrong in three ways, every one of which would have produced a rejected
+    parameter rather than a wrong charge:
 
-    The check that settles it is `tools/mpp_settlement_selftest.py`, which posts
-    exactly this dict against a TEST key and prints Stripe's own parameter
-    errors. Run that before believing any of these names.
+      * `mode` is its own key under `crypto`. It was missing entirely.
+      * The sub-object is `transaction_verification_options`, not
+        `transaction_verification`.
+      * `payment_method_types: ["crypto"]` is required alongside
+        `payment_method_data[type]`. It was missing.
+
+    Also added from the same source: metadata {machine_payment: "true"}, which
+    is how machine revenue is queried on the Stripe side, and which mppx sets on
+    every recorded crypto payment.
+
+    Form encoding, not JSON: Stripe's REST API takes bracketed keys, so the
+    nesting mppx expresses as objects is flattened here. urlencode(doseq=True)
+    handles the list.
     """
     params = {
         "amount":   cents,
         "currency": currency,
         "confirm":  "true",
-        "payment_method_data[type]": "crypto",
-        "payment_method_options[crypto][transaction_verification][network]":          network,
-        "payment_method_options[crypto][transaction_verification][transaction_hash]": tx_hash,
+        "payment_method_data[type]":   "crypto",
+        "payment_method_types[]":      ["crypto"],
+        "payment_method_options[crypto][mode]": "transaction_verification",
+        "payment_method_options[crypto][transaction_verification_options][network]":          network,
+        "payment_method_options[crypto][transaction_verification_options][transaction_hash]": tx_hash,
     }
-    for k, v in (metadata or {}).items():
+    for k, v in {**MACHINE_PAYMENT_METADATA, **(metadata or {})}.items():
         params[f"metadata[{k}]"] = str(v)
     return params
 
@@ -325,14 +436,15 @@ def _record_stripe_payment_intent(key: str, cents: int, network: str, tx_hash: s
                                   metadata: dict) -> str:
     """Records the settled transaction. Returns the PaymentIntent id, or "".
 
-    The transaction hash is the idempotency key. A settlement retried by the
-    facilitator, or a client that pays once and calls twice with the same proof,
-    must not produce two PaymentIntents for one movement of money."""
+    The transaction hash is the idempotency key, bare, matching mppx's
+    `idempotencyKey: reference`. A settlement retried by the facilitator, or a
+    client that pays once and calls twice with the same proof, must not produce
+    two PaymentIntents for one movement of money."""
     status, body = _stripe_request(
         "/v1/payment_intents",
         stripe_payment_intent_params(cents, network, tx_hash, metadata=metadata),
         key,
-        idempotency_key=f"mpp-{tx_hash}",
+        idempotency_key=tx_hash,   # mppx uses the bare reference; match it
     )
     if status != 200:
         logger.error(
@@ -380,55 +492,193 @@ def build_payment_requirements(pay_to: str, price_units: int = PRICE_UNITS,
     }
 
 
-def build_mpp_challenge(pay_to: str, price_units: int = PRICE_UNITS,
-                        path: str = MPP_PATH) -> dict:
-    """The MPP half of the 402: Challenge, in MPP's Challenge/Credential/Receipt
-    flow.
+# ---------------------------------------------------------------------------
+# The MPP challenge, implemented from the protocol rather than guessed at.
+#
+# Yesterday this file emitted an invented `mpp` JSON block in the 402 body and
+# labelled it "unverified". It was not merely unverified, it was structurally
+# wrong: MPP does not put its challenge in the response body at all. It uses the
+# `Payment` HTTP authentication scheme -- a WWW-Authenticate header, per
+# RFC 7235 -- and the credential comes back in Authorization.
+#
+# Everything below is verified against mppx 0.9.2 (dist/Challenge.js,
+# dist/PaymentRequest.js, dist/Constants.js, dist/stripe/Methods.js), which is
+# Stripe's own reference implementation, and against
+# github.com/tempoxyz/payment-auth-spec, the IETF draft those files cite. Both
+# are reachable from this container even though docs.stripe.com is not.
+# ---------------------------------------------------------------------------
 
-    ⚠ UNVERIFIED AGAINST THE SPEC, for the same reason as the PaymentIntent
-    shape: the MPP specification is not reachable from the build container. This
-    is assembled from the protocol description in
-    `miniapp_discovery_and_stripe_choice.md` section 7 and is advisory.
+def _b64url(raw: bytes) -> str:
+    """Base64url, unpadded. What mppx's Base64.fromBytes({url:true, pad:false})
+    produces, and what every field in a challenge is encoded with."""
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
-    The `x402` block in the same response is the authoritative one and is what
-    any client should pay against today. This block is emitted alongside it so
-    an MPP-native agent has something to read, and so the field names are in one
-    reviewable place when the spec can be checked. It is deliberately additive:
-    removing it changes nothing for an x402 client.
+
+def _canonical_json(obj: dict) -> str:
+    """RFC 8785 (JCS) canonical JSON, which is what mppx's Json.canonicalize
+    emits before base64url-encoding a payment request.
+
+    Sorted keys, no whitespace, and no unicode escaping of non-ASCII. For the
+    ASCII string/integer payloads this module builds, Python's json.dumps with
+    these arguments is byte-identical to JCS. It is NOT a general JCS
+    implementation -- floats in particular serialise differently -- so do not
+    reach for this with arbitrary data.
+    """
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def mpp_payment_request(price_units: int, network_id: str,
+                        payment_method_types: list[str] | None = None,
+                        currency: str = "usd") -> dict:
+    """The `request` object of a Stripe-method charge challenge.
+
+    Shape from mppx dist/stripe/Methods.js: after its zod transform, `amount` is
+    atomic units as a STRING, and networkId plus paymentMethodTypes move under
+    `methodDetails`. networkId is the Stripe business profile id, not a chain.
     """
     return {
-        "version":  "unverified",
-        "amount":   {"value": str(price_units), "currency": "USDC", "decimals": 6},
-        "accepts":  ["stablecoin"],
-        "resource": f"{API_BASE_URL}{path}",
-        "network":  BASE_CHAIN_ID_V2,
-        "payTo":    pay_to,
-        "note": (
-            "Advisory. The x402 block in this response is authoritative. See "
-            "build_mpp_challenge in relayshield_mpp_settlement.py."
-        ),
+        "amount":   str(price_units),
+        "currency": currency,
+        "methodDetails": {
+            "networkId":           network_id,
+            "paymentMethodTypes":  payment_method_types or ["crypto"],
+        },
     }
+
+
+def mpp_challenge_id(realm: str, method: str, intent: str, request: dict,
+                     secret: str, expires: str = "", digest: str = "",
+                     header: str = "", opaque: str = "") -> str:
+    """The HMAC-bound challenge id, per §5.1.2.1.1 of the spec.
+
+    Seven fixed positional slots, pipe-delimited, absent fields as empty strings
+    so the slot count never moves:
+
+        realm | method | intent | serialize(request) | expires | digest | opaque
+
+    with the credential header inserted immediately before the final opaque slot
+    when, and only when, a non-default one is advertised.
+
+    Binding matters. The id covers every field, so a client cannot alter the
+    amount, the recipient or the expiry and still present an id we would accept:
+    any change produces a different HMAC. Yesterday's version had no binding at
+    all, which is the difference between a payment challenge and a suggestion.
+    """
+    values = [realm, method, intent, _b64url(_canonical_json(request).encode()),
+              expires, digest]
+    if header and header.lower() != "authorization":
+        values.append(header)
+    values.append(opaque)
+    mac = hmac.new(secret.encode(), "|".join(values).encode(), hashlib.sha256).digest()
+    return _b64url(mac)
+
+
+def _auth_param(name: str, value: str) -> str:
+    """One quoted auth-param. Header values must be ByteStrings, so anything
+    above Latin-1 is escaped rather than allowed to break the header -- mppx
+    does the same, and an em dash in a description is the realistic way it
+    happens here."""
+    if "\r" in value or "\n" in value:
+        raise ValueError("invalid quoted-string value")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = "".join(c if ord(c) <= 0xFF else "\\u%04x" % ord(c) for c in escaped)
+    return f'{name}="{escaped}"'
+
+
+def build_mpp_challenge(realm: str, network_id: str, secret: str,
+                        price_units: int = PRICE_UNITS,
+                        description: str = "") -> str:
+    """The full `WWW-Authenticate: Payment ...` value.
+
+    Returns the header VALUE, not a dict, because that is what MPP is: an HTTP
+    authentication scheme. Parameter order follows mppx's serialize() so a
+    byte-comparison against its output is meaningful.
+
+    NOT ADVERTISED BY DEFAULT. RELAYSHIELD_MPP_CHALLENGE gates it, and it is off
+    until the credential side exists. We can issue a bound challenge and verify
+    our own binding on what comes back, but redeeming a Shared Payment Token is
+    a Stripe call this module does not yet make, and SPTs are in private preview
+    besides. A 402 that advertises a payment method we would then reject is
+    worse for the agent than one that never offered it -- it spends the agent's
+    authorisation on a route that cannot complete.
+    """
+    request = mpp_payment_request(price_units, network_id)
+    cid = mpp_challenge_id(realm, "stripe", "charge", request, secret)
+    parts = [
+        _auth_param("id", cid),
+        _auth_param("realm", realm),
+        _auth_param("method", "stripe"),
+        _auth_param("intent", "charge"),
+        _auth_param("request", _b64url(_canonical_json(request).encode())),
+    ]
+    if description:
+        parts.append(_auth_param("description", description))
+    return "Payment " + ", ".join(parts)
+
+
+def mpp_secret_key(stripe_key: str) -> str:
+    """The server secret that binds our challenges.
+
+    Stripe's quickstart derives one as an HMAC over the account's secret key.
+    The exact label it hashes is cut off in the published snippet, and it does
+    not matter for correctness: this secret is ours alone, used to sign
+    challenges we issue and to verify what comes back to us. Stripe never checks
+    it. What matters is that it is stable across Lambda instances, secret, and
+    not the raw API key -- so a leaked challenge id cannot be walked back to the
+    credential that reads our account.
+    """
+    return _b64url(hmac.new(stripe_key.encode(), b"mppx.challenge", hashlib.sha256).digest())
+
+
+def _mpp_challenge_header() -> str:
+    """The WWW-Authenticate value, or "" when MPP is not being advertised.
+
+    Never raises and never blocks the 402: if the profile id or the key cannot
+    be read, the x402 challenge still goes out on its own. An agent that can pay
+    us today must not lose that ability because a preview product is unreachable.
+    """
+    if not MPP_CHALLENGE_ENABLED:
+        return ""
+    try:
+        key = _stripe_secret_key()
+        network_id = _stripe_profile_id(key)
+        if not network_id:
+            return ""
+        realm = urllib.parse.urlparse(API_BASE_URL).netloc or "api.relayshield.net"
+        return build_mpp_challenge(
+            realm, network_id, mpp_secret_key(key),
+            description="RelayShield MCP registry risk check",
+        )
+    except Exception as exc:
+        logger.warning("MPP challenge not built: %s", exc)
+        return ""
 
 
 def _payment_required(pay_to: str, rail: str) -> dict:
     requirements = build_payment_requirements(pay_to)
     encoded      = base64.b64encode(json.dumps(requirements).encode()).decode()
-    return {
-        "statusCode": 402,
-        "headers": {
-            "Content-Type":                  "application/json",
-            "PAYMENT-REQUIRED":              encoded,
-            "Access-Control-Expose-Headers": "PAYMENT-REQUIRED",
-        },
-        "body": json.dumps({
-            "ok":    False,
-            "error": "Payment required",
-            "price": f"${PRICE_UNITS / 1_000_000:.2f} USDC (Base)",
-            "rail":  rail,
-            "x402":  requirements,
-            "mpp":   build_mpp_challenge(pay_to),
-        }),
+    headers = {
+        "Content-Type":                  "application/json",
+        "PAYMENT-REQUIRED":              encoded,
+        "Access-Control-Expose-Headers": "PAYMENT-REQUIRED",
     }
+    body = {
+        "ok":    False,
+        "error": "Payment required",
+        "price": f"${PRICE_UNITS / 1_000_000:.2f} USDC ({MPP_NETWORK})",
+        "rail":  rail,
+        "x402":  requirements,
+    }
+
+    challenge = _mpp_challenge_header()
+    if challenge:
+        # RFC 7235: a 402 offering more than one scheme lists them all here.
+        # x402 does not use WWW-Authenticate, so there is nothing to merge with.
+        headers["WWW-Authenticate"] = challenge
+        headers["Access-Control-Expose-Headers"] = "PAYMENT-REQUIRED, WWW-Authenticate"
+        body["mpp"] = {"scheme": "Payment", "header": "WWW-Authenticate"}
+
+    return {"statusCode": 402, "headers": headers, "body": json.dumps(body)}
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +762,7 @@ def _log_settlement(rail: str, settlement: dict, cents: int,
             "amount_cents":   cents,
             "amount_units":   PRICE_UNITS,
             "rail":           rail,
-            "network":        settlement.get("network", BASE_NETWORK_NAME),
+            "network":        settlement.get("network", MPP_NETWORK),
             "tx_hash":        settlement.get("transaction", ""),
             "payer":          settlement.get("payer", ""),
             "payment_intent": payment_intent,
@@ -597,6 +847,8 @@ def lambda_handler(event: dict, context) -> dict:
             "price":    f"${PRICE_UNITS / 1_000_000:.2f} USDC",
             "network":  BASE_CHAIN_ID_V2,
             "rail":     MPP_RAIL,
+            "stripe_network": MPP_NETWORK,
+            "mpp_challenge":  "advertised" if MPP_CHALLENGE_ENABLED else "not advertised",
             "note": (
                 "Stripe-settled machine payments. Falls back to the existing "
                 "facilitator wallet while the account is not enabled for crypto."
@@ -636,7 +888,7 @@ def lambda_handler(event: dict, context) -> dict:
             try:
                 payment_intent = _record_stripe_payment_intent(
                     _stripe_secret_key(), cents,
-                    settlement.get("network", BASE_NETWORK_NAME),
+                    settlement.get("network", MPP_NETWORK),
                     settlement.get("transaction", ""),
                     {"path": MPP_PATH, "payer": settlement.get("payer", ""),
                      "usdc_units": str(PRICE_UNITS)},

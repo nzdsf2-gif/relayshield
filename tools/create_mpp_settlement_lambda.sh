@@ -29,6 +29,16 @@
 # means the endpoint never calls Stripe at all, so it is live and collecting on
 # the rail that already works while the access request is outstanding. Flip it to
 # "auto" only after tools/mpp_settlement_selftest.py returns 200s.
+#
+# RELAYSHIELD_MPP_CHALLENGE=off for a separate reason, and do not flip the two
+# together: we can ISSUE a compliant MPP challenge but cannot yet REDEEM a
+# Shared Payment Token credential. Advertising a payment method we would then
+# reject spends an agent's authorisation on a route that cannot complete.
+#
+# RELAYSHIELD_API_BASE_URL is the BRANDED host, not the execute-api one. That URL
+# is advertised as the resource in every 402 and is what x402 indexers persist,
+# so a raw AWS hostname pins callers to something that breaks if the gateway id
+# changes -- the same reasoning as the live agentic-api handler's own comment.
 
 set -eu
 
@@ -135,7 +145,7 @@ else
     --zip-file fileb:///tmp/mpp_deploy.zip \
     --timeout 30 --memory-size 256 \
     --description "MPP settlement endpoint -- machine payments on Stripe's rail" \
-    --environment "Variables={RELAYSHIELD_MPP_RAIL=facilitator,RELAYSHIELD_X402_WALLET=$WALLET,RELAYSHIELD_API_BASE_URL=https://$API_ID.execute-api.$REGION.amazonaws.com/$STAGE}" \
+    --environment "Variables={RELAYSHIELD_MPP_RAIL=facilitator,RELAYSHIELD_MPP_NETWORK=base,RELAYSHIELD_MPP_CHALLENGE=off,RELAYSHIELD_X402_WALLET=$WALLET,RELAYSHIELD_API_BASE_URL=https://api.relayshield.net}" \
     --query 'FunctionName' --output text
   aws lambda wait function-active --function-name "$FUNC"
   echo "   created $FUNC (rail pinned to facilitator -- see the header of this script)"

@@ -5,16 +5,20 @@
 
 WHY THIS EXISTS
 ---------------
-`docs.stripe.com` is blocked from the build container, so the parameter names in
-`relayshield_mpp_settlement.py` -- the crypto deposit address call and the
-transaction_verification PaymentIntent -- were DERIVED from Stripe's published
-pages rather than read from the API reference. Derived names are a guess with
-good manners.
+The shapes in `relayshield_mpp_settlement.py` are now VERIFIED against mppx
+0.9.2, Stripe's own reference implementation, rather than derived from prose --
+and that verification found three wrong keys in the PaymentIntent and a wrong
+API version. Reading an implementation is much better than reading a blog, and
+it is still not the same as the account answering.
 
-This script sends the exact dicts those two builder functions produce and prints
-Stripe's own reply. Stripe names a wrong parameter precisely, so one run either
-confirms the shape or hands over the corrections, and the fix is a one-line edit
-to the builder rather than a hunt through a handler.
+So this script sends the exact dicts those builders produce and prints Stripe's
+own reply. It answers three questions in order, and they are different
+questions: is the account enabled, does it have a business profile (MPP needs
+one as `networkId`), and does a transaction_verification PaymentIntent record.
+
+A 403 on the first is the expected answer today and is NOT evidence the shapes
+are wrong -- an ungranted resource and a misspelt one look identical from out
+here. That distinction is why the report below separates them.
 
 SAFETY
 ------
@@ -124,10 +128,37 @@ def main():
 
     deposit_params = mpp.stripe_deposit_address_params()
     print(f"   posting {deposit_params}")
-    status, body = call("/v1/crypto/deposit_addresses", deposit_params, key,
+    # List first, exactly as the handler does. A create when one already exists
+    # is a new address for no reason, and on Lambda that is every cold start.
+    net = deposit_params["network"]
+    status, body = call(f"/v1/crypto/deposit_addresses?network={net}&limit=1", None, key,
                         mpp.STRIPE_PREVIEW_VERSION)
-    report("1. stripe_deposit_address_params() -> POST /v1/crypto/deposit_addresses",
+    report(f"1a. GET /v1/crypto/deposit_addresses?network={net} (list before create)",
            status, body)
+    if status == 200 and not (body.get("data") or []):
+        status, body = call("/v1/crypto/deposit_addresses", deposit_params, key,
+                            mpp.STRIPE_PREVIEW_VERSION)
+        report("1b. stripe_deposit_address_params() -> POST /v1/crypto/deposit_addresses",
+               status, body)
+
+    # MPP uses the business profile id as `networkId`. Without it a challenge
+    # cannot be built at all, so it is worth knowing separately from the
+    # crypto gate -- the two are granted independently.
+    status, body = call("/v2/network/business_profiles/me", None, key,
+                        mpp.STRIPE_PREVIEW_VERSION)
+    profile_id = body.get("id", "") if status == 200 else ""
+    report("1c. GET /v2/network/business_profiles/me (MPP networkId)", status, body)
+    if profile_id:
+        print(f"   STRIPE_PROFILE_ID={profile_id}")
+        realm = "api.relayshield.net"
+        header = mpp.build_mpp_challenge(realm, profile_id,
+                                         mpp.mpp_secret_key(key),
+                                         description="RelayShield MCP registry risk check")
+        print("   The challenge this account can now issue:")
+        print(f"     WWW-Authenticate: {header[:160]}...")
+        print("   Objective check, on this machine, against a deployed URL:")
+        print("     npx mppx@latest validate https://api.relayshield.net/v1/mpp/mcp-registry-risk")
+    print()
 
     cents = mpp.usdc_units_to_cents(mpp.PRICE_UNITS)
     print(f"   conversion check: {mpp.PRICE_UNITS} USDC atomic units -> {cents} cents "
@@ -147,13 +178,21 @@ def main():
            status, body)
 
     print("WHAT TO DO WITH THIS")
-    print("  Both 200      -> the rail works. Set RELAYSHIELD_MPP_RAIL=auto on the")
-    print("                   Lambda and pay the endpoint once for real.")
+    print("  All 200       -> the rail works. Set RELAYSHIELD_MPP_RAIL=auto and, if a")
+    print("                   profile id came back, STRIPE_PROFILE_ID, then pay the")
+    print("                   endpoint once for real and check the PaymentIntent lands.")
     print("  A rejected    -> correct that one key in the named builder function in")
-    print("  parameter        relayshield_mpp_settlement.py, re-run, repeat.")
-    print("  401/403/404   -> the account is not enabled. Send the message text above")
-    print("                   to machine-payments@stripe.com with the account id, and")
-    print("                   leave RELAYSHIELD_MPP_RAIL=facilitator until it clears.")
+    print("  parameter        relayshield_mpp_settlement.py, re-run, repeat. These are")
+    print("                   verified against mppx 0.9.2, so a rejection here means")
+    print("                   mppx has moved -- check its version before editing.")
+    print("  401/403/404   -> the account is not enabled. That message text is the")
+    print("                   thing to send machine-payments@stripe.com with the")
+    print("                   account id. Leave RELAYSHIELD_MPP_RAIL=facilitator.")
+    print()
+    print("  NOTE ON EVIDENCE: a 200 here proves STRIPE enabled the account. It is")
+    print("  not evidence about us, and it is not the artefact to send anyone. The")
+    print("  artefact is a live URL that returns a 402, `npx mppx@latest validate`")
+    print("  passing against it, and a settled PaymentIntent id in the account.")
 
 
 if __name__ == "__main__":

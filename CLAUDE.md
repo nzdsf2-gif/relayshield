@@ -45,6 +45,32 @@ about git again.
 because `cd ~/Side SaaS Hustle` unquoted is three arguments. That whole class of failure is gone for
 the clone. Keep the quoting rule anyway for the documents folder, which still has the space.
 
+**MOVING THE CLONE BREAKS ABSOLUTE PATHS THAT LIVE OUTSIDE IT, AND THE REPO CANNOT SEE THEM.**
+Found within hours on 2026-09-05: the RelayShield MCP server went dead in Claude Desktop AND Claude
+Code, because both configs launch it by absolute path —
+
+    /Users/andrewgibbs/anaconda3/bin/python3 \
+      /Users/andrewgibbs/Side SaaS Hustle/relayshield_mcp_server.py
+
+— and the client reported "disconnected", not "the path moved". The log said it plainly, every few
+minutes for hours, and nobody was reading the log:
+
+    can't open file '.../Side SaaS Hustle/relayshield_mcp_server.py': [Errno 2] No such file
+
+Deriving paths from `Path(__file__)` fixed everything INSIDE the repo and could never have reached
+these: they live in application-support directories the repo does not own. **So the move checklist
+has a second half.** After relocating the clone, fix the places outside it that name it:
+
+    python3 tools/fix_mcp_config_paths.py            # dry run
+    python3 tools/fix_mcp_config_paths.py --write    # apply, with a backup
+
+It rewrites strings AND dict keys, because Claude Code files its MCP servers under the project's
+absolute path, so the key itself names the old location. Then QUIT AND REOPEN the client: an MCP
+config is read at startup, so editing the file changes nothing until the app restarts.
+
+Other places an absolute path to the clone can hide, none of which the repo can check for itself:
+launchd plists, cron, shell aliases and functions, IDE run configurations.
+
 **Never hardcode either path in a committed script.** `generate_pdfs.py` and `rsscan/test_verify.py`
 both carried `/Users/andrewgibbs/Side SaaS Hustle/...` and would have broken silently on the move.
 Both now derive the repo root from `Path(__file__).resolve().parent`, which is correct wherever the

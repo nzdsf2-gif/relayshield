@@ -198,6 +198,32 @@ strings before it leaves the machine.
 Nothing in this repo should ever carry one either: `tools/` scripts read secrets from Secrets
 Manager at runtime, and that is the pattern to follow rather than an env var in a doc.
 
+### 13. A CLAUDE CODE SLASH COMMAND IS NOT A SHELL COMMAND. Label it.
+
+Added 2026-09-05, the same day it fired. A reply handed over:
+
+    /plugin marketplace add nzdsf2-gif/relayshield
+    /plugin install relayshield@relayshield
+
+in a fenced block. Andrew pasted it into zsh, because rules 7 and 9 say that is
+what a fenced block under **ANDREW RUNS THIS** means, and got:
+
+    zsh: no such file or directory: /plugin
+
+`/plugin`, `/mcp`, `/agents`, `/skill` and every other slash command are typed
+INSIDE the Claude Code TUI, at its prompt. They are not executables and there is
+no `/plugin` binary on any machine. Same class as rule 7's `role-to-assume:` and
+rule 11's `<paste the key>`: the text was not wrong, it was not a command.
+
+So slash commands get their own label, and never share a block with shell:
+
+- **`ANDREW TYPES THIS IN CLAUDE CODE:`** followed by a ```text block. Never
+  ```zsh, because that fence means "paste me into a terminal".
+
+The general form, for the fourth time: **every block a reader might paste needs
+to say which interpreter it is for.** zsh, the Claude Code prompt, a browser
+address bar and a Python REPL all look identical inside a fence.
+
 ### 9. Every `aws` command in a pasted block uses `--no-cli-pager`.
 
 Same failure as rule 8, different tool. AWS CLI **v2 pipes output through a pager** when stdout is
@@ -515,12 +541,16 @@ because the misreading is more instructive than the item.
    releases `DEFER` only -- a check that could not be COMPLETED -- while a completed `REVIEW`
    still blocks and a `FINDING` always blocks. There is deliberately no setting that lets a
    known-bad target through, and a test asserts that.
-8. **FD-8/9/10 in one re-publish.** Four defects in the live registry record, read on 2026-09-05:
+8. **FD-8/9/10 AND THE `mcp<2` PIN in one re-publish.** The pin is now the urgent half: the
+   published package is broken for every new install (see THE PUBLISHED MCP PACKAGE IS BROKEN
+   above), and it is one line in `~/mcp-live`'s pyproject plus a version bump to 0.2.10. Four
+   further defects in the live registry record, read on 2026-09-05:
    pinned at 0.2.7 while PyPI is 0.2.9, `websiteUrl` with no `?source=mcp-registry`,
    `repository.url` naming `github.com/relayshield/...` against an `io.github.nzdsf2-gif/`
    namespace, and `RELAYSHIELD_API_URL` pinned to the raw execute-api hostname rather than
    `api.relayshield.net`. One `mcp-publisher` run fixes all four.
-   `tools/fd8_prepare_republish.py --dir ~/mcp-live --write`.
+   `tools/fd8_prepare_republish.py --dir ~/mcp-live --write`. Verify with
+   `python3 tools/mcp_selftest.py --pypi` AFTER publishing: it installs what a new user gets.
 9. **The agent-bait-scan blog post (ABS-2 in TODO.md).** Gated on item 3. Third-party research to
    cite, a demonstrable gap, a live endpoint to link, and now a shipped skill to link as well.
    Island's numbers are theirs: cite them as theirs or leave them out.
@@ -547,6 +577,41 @@ because the misreading is more instructive than the item.
     (`outreach_bot_prospects_curated.md`) and **INTEL-5** (`tools/diagnose_stolen_sessions.py`).
     ABS-1 waits on a measured false-positive rate, not a date. The other two are founder-side or one
     command and have been carried long enough to belong at the bottom until something changes.
+
+### THE PUBLISHED MCP PACKAGE IS BROKEN FOR EVERY NEW INSTALL. FOUND 2026-09-05.
+
+**This is the most serious finding of the day and it was not on any list.** It came out of a
+question about bundling the MCP server into the Claude Code plugin, which is the only reason anyone
+looked.
+
+`relayshield-mcp` declares its dependency as **`mcp>=1.0.0`, with no upper bound**, on 0.2.9 AND on
+the 0.2.7 that the official registry still pins. A resolver picks the newest thing allowed, so a
+fresh `pip install relayshield-mcp` today installs **mcp 2.1.1** and the server dies at import:
+
+    AttributeError: 'Server' object has no attribute 'list_tools'
+
+Reproduced end to end in a clean venv, not inferred from the metadata. **The wheel is fine. The
+dependency range is not.**
+
+**Why nothing caught it, and this is the part worth carrying.** Every check in this repo tests the
+code we WROTE. Nothing tested the thing users INSTALL, and on this date those were different. A
+developer's venv already holds a working `mcp` pinned months ago, so it passes forever; the resolver
+would never choose that version for a new user. **The failure also needs no change on our side at
+all** -- somebody else published a major version and our shipped package broke, silently, for new
+installs only. That is the quiet-alarm rule applied to packaging.
+
+`python3 tools/mcp_selftest.py --pypi` now builds a throwaway venv, installs the published package
+the way a new user would, prints what the resolver actually chose, and handshakes it. Exit 1 on
+DEAD. It reproduces this in about a minute.
+
+**The fix is founder-side and it is one line**, because the package source lives in `~/mcp-live`,
+not in this repo: change the pin to `mcp>=1.0.0,<2` and publish 0.2.10. Do it in the SAME
+`mcp-publisher` run as item 8, which was already going to re-publish for four other defects -- that
+turns five defects into one release.
+
+**Do not bundle the MCP server into the Claude Code plugin until this ships.** A plugin that
+installs a server which dies at import would fail on first use for everyone, and it would fail that
+way inside a submission to Anthropic's directory.
 
 ### "THE DEPLOY SUCCEEDED" IS NOT "THE ITEM IS CLOSED"
 
@@ -623,11 +688,26 @@ one pattern table.
 Recorded 2026-09-05 because "submit to Discord" left every real question unanswered, and an
 instruction nobody can act on is how this item fell off the list in the first place.
 
-**Where.** Apify's community Discord, channel **`#apify-writers`** -- and there IS a form, which
-this file previously said there was not. Corrected 2026-09-05 from Apify's own programme page: join
-the Discord, go to `#apify-writers`, check the quarterly theme, read the guide, and **fill out the
-form with the article**. The channel is where the call and the guide live; the form is the actual
-submission.
+**Where, corrected TWICE on 2026-09-05, and the second correction came from the channel itself.**
+
+The programme page says to join the Discord, go to `#apify-writers`, check the quarterly theme, read
+the guide and fill out the form. Andrew then looked at the actual channel and there was **no theme,
+no guide and no form** -- because those only exist while a call is OPEN. A writer in the channel
+that day stated it plainly: *"the July Typeform is closed and the next call opens in November."*
+
+So the submission mechanism is a **Typeform that appears per call**, and today there is nothing to
+fill in. **The next call is NOVEMBER.** That is the date this item waits on, and reading the
+programme page alone would have had us hunting a form that does not currently exist.
+
+**Posting in the channel while the call is closed is fine and is what other people do.** An observed
+example from 2026-09-04: a developer introduced their Actor, described their finished Theme 2
+article, noted the Typeform was closed, asked how to get dev.to publishing access, and linked the
+draft. Nobody was penalised for it. So a pre-call introduction is available to us now if we want the
+contact, and it is not a submission.
+
+**The lesson, which is the FD-2 lesson with the label already read:** the programme page describes
+the process in the abstract; the channel shows its current state. Both were needed, and only the
+second one carried the date.
 
 **SUBMITTING EARLY DOES NOT COST THE $500. PUBLISHING EARLY DOES.** Asked directly on 2026-09-05,
 and the distinction is the whole risk. The rule is *"only original, previously unpublished
@@ -638,9 +718,9 @@ disqualifies it. Their guidelines do not address republishing AFTER they publish
 programme's own $100 dev.to bonus is a post-publication republish under their organisation, so the
 canonical-first channel order resumes once the article is live on their blog.
 
-**Cadence, and it decides the date.** The programme is QUARTERLY. The July call closed 2026-08-16,
-so the next call is the target and there is nothing to submit into today. Use the wait for the three
-verifications below rather than treating the wait as the blocker.
+**Cadence, and it decides the date.** The programme is QUARTERLY. The July call closed 2026-08-16
+and the next opens in NOVEMBER, per the channel. Use the wait for the three verifications below
+rather than treating the wait as the blocker.
 
 **The three facts to confirm with the Apify console open**, because the draft asserts them and no
 session has verified them directly:

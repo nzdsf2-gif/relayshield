@@ -459,60 +459,130 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ### THE TOP 15 FOR THE NEXT SESSION, in order
 
-Written at the end of 2026-09-05. Items 1 to 4 are unblocking things half-shipped THIS session and
-should be done before anything new is started.
+**Rewritten at the very end of 2026-09-05, replacing the list written earlier the same day.** Four
+items on that earlier list closed during the session and two new ones appeared, so it is regenerated
+rather than annotated — a list with strikethroughs is how a stale list gets recited as current.
 
-1. **~~Finish agent-bait-scan's routes.~~ RESOLVED 2026-09-05, same day, by the diagnostic.** It was
-   cause B: the routes were always correct, the code was stale. `diagnose_agent_bait_routes.sh`
-   settled it in one run — both resources integrate with `relayshield-agentic-api`, and once the
-   push landed that function (deployed 15:23 UTC) answers `/v1/payg/agent-bait-scan` with
-   `x402Version: 2` and this endpoint's own description. The `$0.25` was `relayshield-api`'s
-   fallback for a path it does not know, which the gateway no longer sends it. **Left here as the
-   record of why the diagnostic exists, not as an open item.** Still worth doing once: confirm the
-   PUBLIC url quotes 500000, because a direct Lambda invoke and a gateway call are different tests.
-2. **~~Push local main to GitHub.~~ DONE** — both `relayshield-agentic-api` and `relayshield-api`
-   show `LastModified 2026-09-05T15:23`, so the push landed and `deploy_lambdas.yml` ran. That also
-   shipped the reconciled agentic handler and `_SECRET_TTL` in three handlers.
-3. **Create the MPP Lambda.** `sh tools/create_mpp_settlement_lambda.sh` failed on
-   `InvalidParameterValueException: The role defined for the function cannot be assumed by Lambda`
-   — IAM eventual consistency on a role created seconds earlier, not a broken trust policy. The
-   script now retries six times at 10s. The role already exists, so a re-run picks up where it
-   stopped.
-4. **Then the MPP selftest, in reads-only mode.** The key in Secrets Manager is LIVE, and the
-   selftest refuses a live key because `confirm=true` is a real charge attempt. Use
-   `--reads-only`: it skips the PaymentIntent and still answers the question that actually blocks
-   us — is this account enabled for crypto deposit addresses, and does it have a business profile
-   (`profile_...`, which MPP needs as `networkId`).
-5. **Rotate the Stripe key and revoke the old one.** The preflight found
-   `lambda:UpdateFunctionConfiguration` is an implicitDeny for the operator identity. **That no
-   longer blocks anything**: `_get_secret` now carries a 300-second TTL in `relayshield_api.py`,
-   `relayshield_agentic_api.py` and `relayshield_mpp_settlement.py`, so a rotated secret is picked
-   up on its own. Write the secret, wait six minutes, revoke. Requires item 2 first.
-6. **Publish `crewai-relayshield` to PyPI.** The download numbers came back and they justify it —
-   see the section below for the honest reading. The tool code already exists in
-   `crewAIInc/crewAI#6550`, smoke-tested. Same standalone-package model as the other two.
-7. **The agent-bait-scan blog post.** Best post in the queue: third-party research to cite
-   (Island's), a demonstrable gap, and a live endpoint to link instead of a description. **Publish
-   only AFTER item 1 makes it answer a 402 in public**, per the XSOAR rule, and cite Island's
-   numbers as theirs or not at all.
-8. **Extend the Rain demo to the merchant-agent shape.** Ranked above the Commerce Agents blog post
-   on purpose: the demo is evidence, a post is argument. `tools/rain_demo.py` already does the hard
-   part with verifiable on-chain payments.
-9. **A RelayShield Claude Code skill.** Puts the check where the builder is working, which is a
-   better discovery surface than a blog for this audience. `relayshield-skills-fork` and
-   `relayshield-venice-skill` are the existing shapes to copy.
-10. **Rewrite the MCP directory listing copy** to lead with counterparty authorization — official
-    registry, Glama, PyPI, HF Space, Apify. Someone browsing MCP servers is at the moment of
-    decision; an afternoon's work reaching higher-intent readers than a blog.
-11. **The Commerce Agents blog post.** `commerce_agents_integration.md` has the whole argument.
-    Register `?source=commerce-agents` in `_SOURCE_BANNERS` BEFORE it ships.
-12. **ABS-1: the Bundle D usage dimension for agent-bait-scan.** In TODO.md. Waits on a measured
-    false-positive rate, not a date — a Marketplace change set is a bad place to discover a fresh
-    heuristic needs tuning.
-13. **Send the twelve.** `outreach_bot_prospects_curated.md`, unchanged and still founder-side.
-14. **FD-8/9/10 in one publish**, then FD-11. `tools/fd8_prepare_republish.py` is on the Mac now.
-15. **INTEL-5 funnel.** `tools/diagnose_stolen_sessions.py`. Until it runs, no count out of
-    `relayshield_stolen_sessions` means anything.
+**Items 1 to 3 are verifications of work already done. Do them first: each is one command, and each
+one closes a question that is currently open rather than starting anything new.**
+
+1. **Confirm the MCP server came back.** The configs were repointed at `~/dev/relayshield` and Claude
+   Desktop was restarted. Verify rather than assume: `sh tools/mcp_inventory.sh` and read section 3.
+   A clean run shows no new ENOENT lines after the restart timestamp. If it is still failing, the
+   cause has changed and the log will say so.
+2. **Apply the deploy-role invoke policy to AWS.** `sh tools/apply_deploy_invoke_policy.sh`. The last
+   deploy run is RED and **the deploy itself succeeded** — only the import probe was denied, because
+   `relayshield-agentic-api` was added to `iam_github_deploy_invoke.json` and that file has never
+   been pushed to AWS. Until this runs, every deploy touching that function goes red for a reason
+   that has nothing to do with the code.
+3. **Confirm agent-bait-scan quotes $0.50 on the PUBLIC url.** A direct Lambda invoke already proves
+   the handler is current; a gateway call is a different test.
+   `curl -sS -X POST https://api.relayshield.net/v1/payg/agent-bait-scan -H 'Content-Type: application/json' -d '{"repository":"nzdsf2-gif/relayshield"}'`
+   — you want `500000` and `x402Version: 2`. A `250000` means the gateway is still sending it to
+   `relayshield-api`.
+4. **Create the MPP Lambda.** `sh tools/create_mpp_settlement_lambda.sh`. It failed on
+   `InvalidParameterValueException: The role defined for the function cannot be assumed by Lambda` —
+   IAM eventual consistency on a role created seconds earlier, not a broken trust policy. The script
+   now retries six times at 10s, and the role already exists, so a re-run picks up where it stopped.
+5. **Then the MPP selftest, reads-only.**
+   `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/mpp_settlement_selftest.py --reads-only`.
+   The stored key is LIVE and `confirm=true` on a live key is a real charge attempt, so the
+   PaymentIntent is skipped. It still answers the question that actually blocks us: is this account
+   enabled for crypto deposit addresses, and does it have a business profile (`profile_...`, which
+   MPP needs as `networkId`). A 403 there is the text to send `machine-payments@stripe.com`.
+6. **Rotate the Stripe key and revoke the old one.**
+   `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/rotate_stripe_key.py`. The
+   `lambda:UpdateFunctionConfiguration` implicitDeny no longer blocks it: `_get_secret` now carries a
+   300-second TTL in the three caching handlers, so write the secret, **wait six minutes**, revoke.
+7. **Publish `crewai-relayshield` to PyPI.** The numbers justify it — see the honest reading below.
+   The tool code exists and is smoke-tested in `crewAIInc/crewAI#6550`; same standalone-package model
+   as the other two. Half a day.
+8. **FD-8/9/10 in one re-publish.** Upgraded in priority because the registry record was read live on
+   2026-09-05 and carries **four** defects, not three: pinned at 0.2.7 while PyPI is 0.2.9,
+   `websiteUrl` with no `?source=mcp-registry`, `repository.url` naming `github.com/relayshield/...`
+   against an `io.github.nzdsf2-gif/` namespace (which is what Glama indexed from), and
+   `RELAYSHIELD_API_URL` pinned to the raw execute-api hostname rather than `api.relayshield.net`.
+   One `mcp-publisher` run fixes all four. `tools/fd8_prepare_republish.py --dir ~/mcp-live --write`.
+9. **The agent-bait-scan blog post (ABS-2 in TODO.md).** Best post in the queue: third-party research
+   to cite, a demonstrable gap, and a live endpoint to link. Gated on item 3. Island's numbers are
+   theirs — cite them as theirs or leave them out.
+10. **Extend the Rain demo to the merchant-agent shape.** Ranked above the Commerce Agents post on
+    purpose: a demo is evidence, a post is argument. `tools/rain_demo.py` already does the hard part
+    with verifiable on-chain payments.
+11. **A RelayShield Claude Code skill.** Puts the check where the builder is working, which is a
+    better discovery surface than a blog for this audience. `relayshield-skills-fork` and
+    `relayshield-venice-skill` are the shapes to copy.
+12. **Rewrite the MCP directory listing copy** to lead with counterparty authorization — official
+    registry, Glama, PyPI, HF Space, Apify. Someone browsing MCP servers is at the moment of decision.
+    Do it in the same pass as item 8, since both touch the registry record.
+13. **The Commerce Agents blog post.** `commerce_agents_integration.md` has the argument. Register
+    `?source=commerce-agents` in `_SOURCE_BANNERS` BEFORE it ships.
+14. **ABS-1: the Bundle D usage dimension for agent-bait-scan.** In TODO.md. Waits on a measured
+    false-positive rate, not a date.
+15. **Send the twelve** (`outreach_bot_prospects_curated.md`), and **INTEL-5**
+    (`tools/diagnose_stolen_sessions.py`). Both unchanged, both founder-side or one command, and both
+    have been carried long enough that they belong at the bottom until something changes.
+
+### THE MOVE BROKE SOMETHING THE REPO COULD NOT SEE, AND THE LOG HAD BEEN SAYING SO FOR HOURS
+
+The most instructive failure of the session, because the fix that was supposed to prevent it was
+already in place and could never have worked.
+
+Moving the clone to `~/dev/relayshield` was made safe INSIDE the repo by deriving paths from
+`Path(__file__).resolve().parent`. It killed the RelayShield MCP server anyway, in both Claude
+Desktop and Claude Code, because both configs launch it by absolute path into `~/Side SaaS Hustle`.
+Those files live in `~/Library/Application Support` and `~/.claude.json` — **directories the repo
+does not own and cannot enumerate**, so no amount of discipline inside the repo reaches them.
+
+Two things made it invisible for hours:
+
+- **The client says "disconnected", which describes the symptom and not the cause.** The actual
+  cause was in the log, repeating every few minutes since 04:24 UTC: `can't open file
+  '.../Side SaaS Hustle/relayshield_mcp_server.py': [Errno 2] No such file or directory`.
+- **Nobody was reading the log**, because the config is the thing you look at when a server will not
+  start, and the config looked fine. It WAS fine, for a machine layout that no longer existed.
+
+`tools/mcp_inventory.sh` reads every client config path AND the client's own logs, redacting every
+credential-looking value first. `tools/fix_mcp_config_paths.py` repoints them, rewriting dict KEYS as
+well as strings because Claude Code files its MCP servers under the project's absolute path.
+
+**The general form, and it is the second half of the move checklist: an absolute path to the clone
+can exist anywhere on the machine.** After relocating it, fix what names it from outside — MCP client
+configs, launchd plists, cron, shell aliases, IDE run configurations. And when a process "will not
+start", read its log before re-reading its config: the config says what was attempted, the log says
+what happened, and they are usually different problems.
+
+### THE DEPLOY WENT RED AND THE DEPLOY SUCCEEDED. AGAIN.
+
+Run 134's lesson, second occurrence, and this time the improved error message did its job:
+
+    relayshield-agentic-api WAS DEPLOYED. Only the probe was denied — the deploy
+    role has no lambda:InvokeFunction on it.
+
+`iam_github_deploy_invoke.json` gained `relayshield-agentic-api` when that function was mapped, and
+**the repo half does not push the policy to AWS**. `sh tools/apply_deploy_invoke_policy.sh` does, and
+until it runs every deploy touching that function is red for a reason unrelated to the code.
+
+Worth restating because it keeps costing time: **a red run names a step, not an outcome.** "The
+deploy failed" and "the check after the deploy failed" are different facts with different fixes, and
+the second one costs nothing if read correctly and a rollback if it is not.
+
+### THERE ARE FIVE MCP SURFACES, NOT ONE
+
+Asked as "I think I only have one MCP server, can you check". Inventoried 2026-09-05:
+
+| Surface | What it is | State |
+|---|---|---|
+| `relayshield-mcp` on PyPI | stdio, the one that appears in a client | live, 0.2.9 |
+| MCP registry entry | the canonical directory listing | active, pinned 0.2.7 |
+| HuggingFace Space | hosted MCP over HTTP | egress-blocked from the container |
+| Apify Actor | MCP over Streamable HTTP, Standby | egress-blocked from the container |
+| `@relayshield/bankr-mcp` | a TypeScript stdio server built for Bankr | never published |
+
+**Only the first can show "disconnected" in a client.** The hosted two would present as a failing
+URL, and the Bankr one has never shipped. Knowing which surface is which is what turned an
+open-ended "the MCP server is down" into one log line. Full detail in `mcp_surfaces_inventory.md`.
+
 
 ### THE DIAGNOSTIC PAID FOR ITSELF ON ITS FIRST RUN
 

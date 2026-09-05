@@ -24,6 +24,27 @@ x402 PAYG pricing (USDC on Base):
   check_infostealer       $0.15
   check_scan_result       $0.00  (free — poll a paid scan result)
   scan_url / scan_file    coming soon (VT commercial licensing pending)
+
+REQUIRES `mcp` 1.x. THIS IS NOT A PREFERENCE.
+--------------------------------------------
+Tools are registered below with the decorator API (`@app.list_tools()`), which
+the `mcp` SDK REMOVED in 2.x. Verified 2026-09-05 by running this file against
+both: on mcp 1.29.1 it completes the handshake and hands over all 8 tools; on
+mcp 2.1.1 it dies at IMPORT with
+
+    AttributeError: 'Server' object has no attribute 'list_tools'
+
+The danger is not the error, it is how it arrives. A client launches this file
+by absolute path with whatever interpreter its config names, so an unrelated
+`pip install -U mcp` into that interpreter kills the server with no config
+change and no commit here -- and the client reports "disconnected", which is
+character-for-character what the 2026-09-05 path outage looked like. Two
+different causes, one symptom, and the config looks fine in both.
+
+So pin `mcp<2` for the interpreter the config names, and settle which cause you
+have before touching anything:
+
+    python3 tools/mcp_selftest.py --name relayshield
 """
 
 import asyncio

@@ -138,7 +138,14 @@ if aws lambda get-function --function-name "$FUNC" >/dev/null 2>&1; then
     --zip-file fileb:///tmp/mpp_deploy.zip --query 'FunctionName' --output text
   aws lambda wait function-updated --function-name "$FUNC"
 else
-  aws lambda create-function --function-name "$FUNC" \
+  # IAM is eventually consistent, and a role created seconds ago is routinely
+  # not yet assumable: CreateFunction fails with
+  #   InvalidParameterValueException: The role defined for the function cannot
+  #   be assumed by Lambda
+  # which reads like a broken trust policy and is a race. Retry rather than
+  # making the operator re-run and wonder which it was. Seen 2026-09-05.
+  ATTEMPT=1
+  until aws lambda create-function --function-name "$FUNC" \
     --runtime "$RUNTIME" \
     --role "arn:aws:iam::$ACCOUNT:role/$ROLE" \
     --handler relayshield_mpp_settlement.lambda_handler \
@@ -147,6 +154,18 @@ else
     --description "MPP settlement endpoint -- machine payments on Stripe's rail" \
     --environment "Variables={RELAYSHIELD_MPP_RAIL=facilitator,RELAYSHIELD_MPP_NETWORK=base,RELAYSHIELD_MPP_CHALLENGE=off,RELAYSHIELD_X402_WALLET=$WALLET,RELAYSHIELD_API_BASE_URL=https://api.relayshield.net}" \
     --query 'FunctionName' --output text
+  do
+    if [ "$ATTEMPT" -ge 6 ]; then
+      echo "STOP: still cannot create $FUNC after $ATTEMPT attempts." >&2
+      echo "If the error is 'cannot be assumed by Lambda' this stopped being a" >&2
+      echo "race a minute ago -- check the role's trust policy names" >&2
+      echo "lambda.amazonaws.com. Any other error is not a race at all." >&2
+      exit 1
+    fi
+    echo "   attempt $ATTEMPT failed (IAM is eventually consistent); waiting 10s"
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep 10
+  done
   aws lambda wait function-active --function-name "$FUNC"
   echo "   created $FUNC (rail pinned to facilitator -- see the header of this script)"
 fi

@@ -67,9 +67,30 @@ echo "== 3. Has the handler actually been deployed since agent-bait-scan was add
 LAST=$(aws lambda get-function-configuration --function-name "$FUNC" \
          --query 'LastModified' --output text)
 echo "   $FUNC last modified $LAST"
-echo "   If that predates the merge that added agent-bait-scan, STOP and let the"
-echo "   deploy workflow run first. relayshield_agentic_api.py is in LAMBDA_MAP"
-echo "   as of 2026-09-04, so a push touching it deploys automatically."
+# Asked of the LIVE function rather than inferred from a date, because a date
+# comparison in shell is fragile and the real question is "does the deployed
+# code know this path". A stale function returns 404 for it.
+PROBE=$(aws lambda invoke --function-name "$FUNC" \
+          --cli-binary-format raw-in-base64-out \
+          --payload '{"path":"/v1/mpp-probe-nonexistent","httpMethod":"POST"}' \
+          /tmp/abs_probe.json --query 'StatusCode' --output text 2>/dev/null || echo 0)
+KNOWN=$(aws lambda invoke --function-name "$FUNC" \
+          --cli-binary-format raw-in-base64-out \
+          --payload '{"path":"/v1/payg/agent-bait-scan","httpMethod":"POST","headers":{},"body":"{}"}' \
+          /tmp/abs_known.json --query 'StatusCode' --output text 2>/dev/null || echo 0)
+if [ "$KNOWN" = "200" ] && grep -q '500000' /tmp/abs_known.json; then
+  echo "   the deployed code KNOWS agent-bait-scan and prices it at 500000 units"
+else
+  echo "STOP: the deployed $FUNC does not know /v1/payg/agent-bait-scan at its" >&2
+  echo "own price. What it returned:" >&2
+  head -c 300 /tmp/abs_known.json >&2; echo >&2
+  echo >&2
+  echo "PUSH your local main to GitHub so deploy_lambdas.yml runs, wait for it" >&2
+  echo "to go green, then re-run this script. Creating gateway routes to a" >&2
+  echo "handler that does not know the path produces a confusing answer from" >&2
+  echo "whichever Lambda does." >&2
+  exit 1
+fi
 echo
 
 LAMBDA_ARN="arn:aws:lambda:$REGION:$ACCOUNT:function:$FUNC"
@@ -155,21 +176,40 @@ MCODE=$(curl -sS -o /tmp/abs_metered.json -w '%{http_code}' \
 echo "   HTTP $MCODE"
 echo
 
+# A 402 is NOT proof this worked. relayshield-api answers /v1/payg/* too, and
+# its unknown-path default is 250000 ($0.25) against this Lambda's 350000. So a
+# route accidentally wired to the wrong function returns a perfectly well-formed
+# 402 at the wrong price, and the first version of this script called that
+# success. Assert the PRICE, which is the only thing that differs.
+#
+# This is run 134's lesson again: a green step is not a green outcome.
+EXPECTED='"price": "$0.50'
 case "$CODE" in
   402)
-    echo "LIVE. The x402 door challenges for payment at \$0.50."
-    echo
-    echo "NEXT:"
-    echo "  1. Register a ?source= key for it if it gets its own landing link."
-    echo "  2. Bundle D dimension: NEXT SESSION, see TODO.md. It is an AWS change"
-    echo "     set and it waits on a measured false-positive rate."
-    echo "  3. Blog post: publish only AFTER this returns 402 in public, per the"
-    echo "     XSOAR rule. Do not quote Island's numbers as ours."
+    if grep -q '500000' /tmp/abs_payg.json; then
+      echo "LIVE, and it is the right Lambda: the challenge quotes 500000 units."
+      echo
+      echo "NEXT:"
+      echo "  1. Bundle D dimension: NEXT SESSION, see ABS-1 in TODO.md."
+      echo "  2. Blog post: only AFTER this answers in public. Do not quote"
+      echo "     Island's numbers as ours."
+    elif grep -q '250000' /tmp/abs_payg.json; then
+      echo "STOP: that 402 quotes \$0.25, which is relayshield-api's default for" >&2
+      echo "an unknown /v1/payg path -- NOT this endpoint's \$0.50. The route is" >&2
+      echo "answering from the wrong Lambda, or agent-bait-scan is not deployed." >&2
+      echo >&2
+      echo "Diagnose it, do not guess:" >&2
+      echo "  sh tools/diagnose_agent_bait_routes.sh" >&2
+      exit 1
+    else
+      echo "STOP: 402 at an unexpected price. Read the body above." >&2
+      exit 1
+    fi
     ;;
   404)
     echo "STOP: 404 from our own handler means the LIVE Lambda predates" >&2
-    echo "agent-bait-scan. The route is fine; the code is old. Let the deploy" >&2
-    echo "workflow run, then re-run step 7 only." >&2
+    echo "agent-bait-scan. The route is fine; the code is old. PUSH to main so" >&2
+    echo "deploy_lambdas.yml runs, then re-run this script." >&2
     exit 1
     ;;
   403)

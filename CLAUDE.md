@@ -429,6 +429,141 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ---
 
+## WHERE 2026-09-05 LEFT THINGS — read this first
+
+### THE TOP 15 FOR THE NEXT SESSION, in order
+
+Written at the end of 2026-09-05. Items 1 to 4 are unblocking things half-shipped THIS session and
+should be done before anything new is started.
+
+1. **Finish agent-bait-scan's routes.** The endpoint is built and both gateway routes exist, but the
+   402 that came back quoted **$0.25**, which is `relayshield_api.py`'s default for an unknown
+   `/v1/payg` path — not this endpoint's $0.50. So a well-formed 402 came from a Lambda that has
+   never heard of agent-bait-scan. **Do not guess between the two causes: run
+   `sh tools/diagnose_agent_bait_routes.sh`.** It asks the gateway which function each route is
+   integrated with, and invokes both Lambdas directly with the gateway taken out of the path. The
+   likeliest cause is simply that local main was never pushed, so `deploy_lambdas.yml` never ran and
+   `relayshield-agentic-api` is still on its 2026-08-15 build.
+2. **Push local main to GitHub.** Several things are waiting on it: the agentic-api deploy that
+   carries agent-bait-scan, the reconciled agentic handler, and the `_SECRET_TTL` change in three
+   handlers. A merge on the Mac deploys nothing; only a push does.
+3. **Create the MPP Lambda.** `sh tools/create_mpp_settlement_lambda.sh` failed on
+   `InvalidParameterValueException: The role defined for the function cannot be assumed by Lambda`
+   — IAM eventual consistency on a role created seconds earlier, not a broken trust policy. The
+   script now retries six times at 10s. The role already exists, so a re-run picks up where it
+   stopped.
+4. **Then the MPP selftest, in reads-only mode.** The key in Secrets Manager is LIVE, and the
+   selftest refuses a live key because `confirm=true` is a real charge attempt. Use
+   `--reads-only`: it skips the PaymentIntent and still answers the question that actually blocks
+   us — is this account enabled for crypto deposit addresses, and does it have a business profile
+   (`profile_...`, which MPP needs as `networkId`).
+5. **Rotate the Stripe key and revoke the old one.** The preflight found
+   `lambda:UpdateFunctionConfiguration` is an implicitDeny for the operator identity. **That no
+   longer blocks anything**: `_get_secret` now carries a 300-second TTL in `relayshield_api.py`,
+   `relayshield_agentic_api.py` and `relayshield_mpp_settlement.py`, so a rotated secret is picked
+   up on its own. Write the secret, wait six minutes, revoke. Requires item 2 first.
+6. **Publish `crewai-relayshield` to PyPI.** The download numbers came back and they justify it —
+   see the section below for the honest reading. The tool code already exists in
+   `crewAIInc/crewAI#6550`, smoke-tested. Same standalone-package model as the other two.
+7. **The agent-bait-scan blog post.** Best post in the queue: third-party research to cite
+   (Island's), a demonstrable gap, and a live endpoint to link instead of a description. **Publish
+   only AFTER item 1 makes it answer a 402 in public**, per the XSOAR rule, and cite Island's
+   numbers as theirs or not at all.
+8. **Extend the Rain demo to the merchant-agent shape.** Ranked above the Commerce Agents blog post
+   on purpose: the demo is evidence, a post is argument. `tools/rain_demo.py` already does the hard
+   part with verifiable on-chain payments.
+9. **A RelayShield Claude Code skill.** Puts the check where the builder is working, which is a
+   better discovery surface than a blog for this audience. `relayshield-skills-fork` and
+   `relayshield-venice-skill` are the existing shapes to copy.
+10. **Rewrite the MCP directory listing copy** to lead with counterparty authorization — official
+    registry, Glama, PyPI, HF Space, Apify. Someone browsing MCP servers is at the moment of
+    decision; an afternoon's work reaching higher-intent readers than a blog.
+11. **The Commerce Agents blog post.** `commerce_agents_integration.md` has the whole argument.
+    Register `?source=commerce-agents` in `_SOURCE_BANNERS` BEFORE it ships.
+12. **ABS-1: the Bundle D usage dimension for agent-bait-scan.** In TODO.md. Waits on a measured
+    false-positive rate, not a date — a Marketplace change set is a bad place to discover a fresh
+    heuristic needs tuning.
+13. **Send the twelve.** `outreach_bot_prospects_curated.md`, unchanged and still founder-side.
+14. **FD-8/9/10 in one publish**, then FD-11. `tools/fd8_prepare_republish.py` is on the Mac now.
+15. **INTEL-5 funnel.** `tools/diagnose_stolen_sessions.py`. Until it runs, no count out of
+    `relayshield_stolen_sessions` means anything.
+
+### A 402 IS NOT PROOF THE RIGHT LAMBDA ANSWERED
+
+The most useful mistake of the session, and it is run 134's lesson in a new costume.
+
+`create_agent_bait_scan_routes.sh` printed **"LIVE. The x402 door challenges for payment at $0.50"**
+over a response body that plainly said `"price": "$0.25 USDC"`. The script asserted the status code
+and never looked at the body.
+
+**`relayshield_api.py` answers `/v1/payg/*` too, and its unknown-path default is 250000 units.
+`relayshield_agentic_api.py`'s is 350000.** So a route wired to the wrong function, or a stale
+deployment, returns a perfectly well-formed 402 at the wrong price, and every structural check
+passes. The price is the only discriminator, and nothing was checking it.
+
+Both scripts now assert the price. **The general form: when two components can produce the same
+shape of success, verify the field that differs between them, not the shape.**
+
+### THE PYPI NUMBERS CAME BACK, AND THE HONEST READING IS MIXED
+
+    langchain-relayshield       last_day 2   last_week 4    last_month 137
+    openai-agents-relayshield   last_day 2   last_week 6    last_month 143
+    relayshield-mcp             last_day 6   last_week 44   last_month 322
+
+**`relayshield-mcp` is the real one.** 44 a week and 6 a day is a steady rate consistent with actual
+use, and it is the package with the least marketing behind it.
+
+**The two framework packages are a burst plus a trickle, and the monthly number flatters them.** 137
+a month against 4 a week is not a rate — 4 a week annualises to about 17 a month, so most of that
+137 landed at once. That shape is a mirror scrape or a CI matrix, not adoption.
+
+**It still justifies `crewai-relayshield`**, because the marginal cost is half a day against code
+that already exists, and because a trickle from a package nobody has promoted is a better base rate
+than zero. It does NOT justify treating framework packages as a growth channel. Rank the work
+accordingly, and quote none of these numbers externally — MEASUREMENT DOCTRINE applies to our own
+download counts exactly as it does to the corpus.
+
+### A MODULE-LEVEL SECRET CACHE WITH NO TTL WAS A SILENT BILLING RISK
+
+Found while answering "can I delete the old Stripe key". Three handlers cached the Stripe secret for
+the life of the execution environment with no expiry, while `relayshield_stripe_webhook.py` re-read
+it every call. So the two halves disagreed for minutes to hours after any rotation.
+
+That would be a harmless race except for what fails in it: `_record_stripe_meter_event` is
+fire-and-forget and never raises, so a 401 from a revoked key is caught, logged at WARNING, and the
+customer is served the paid response anyway. **Revoking early produced no outage and no red alarm.
+It produced silent under-billing.**
+
+`_get_secret` now carries `_SECRET_TTL = 300` in `relayshield_api.py`, `relayshield_agentic_api.py`
+and `relayshield_mpp_settlement.py`, and falls back to the last known good value if a refresh fails.
+Rotation is now: write the secret, wait six minutes, revoke. **It also removed an IAM dependency
+rather than adding one** — the operator identity's implicitDeny on
+`lambda:UpdateFunctionConfiguration` stopped mattering, because nothing needs to force a recycle any
+more. Fixing the cause beat granting the permission.
+
+### THE DEMO'S AUDIENCE, since it was asked
+
+Ranked by whether the recipient has a DISTRIBUTION interest, not just interest:
+
+1. **Routavo.** Their "Control" pillar is spend control on the buy side; we are the sell side and
+   the counterparty question is the gap they do not cover. Already registered for early access, so
+   it is a follow-up rather than a cold approach.
+2. **Rain, `apa@rain.xyz`.** The first demo is what they responded to. A merchant-agent version is
+   new information rather than a nudge, and the two open questions from that submission are still
+   unanswered.
+3. **Stripe, Jake Lamoine.** The MPP conversation is live and stuck on eligibility. A working demo
+   is the concrete artefact, and it pairs with the carried question about early-adopter status.
+4. **Coinbase CDP / the x402 Foundation.** We are in the Bazaar, we have filed on their repo, and
+   they run a community show-and-tell — see `cdp_discord_show_and_tell_post.md` for the format that
+   worked last time.
+5. **Aduna, via Reggie Daniels.** Warm intro pending; `aduna_outreach.md` has the messaging.
+
+**Not Anthropic.** `anthropics/commerce-agents` says in its own README that it is unmaintained and
+does not accept contributions. There is no channel there, and sending a demo to a repo that says it
+takes nothing is the CrewAI mistake with the label already read.
+
+---
+
 ## WHERE 2026-09-04 LEFT THINGS — read this first
 
 ### THE BLOCKED SOURCE WAS REACHABLE ALL ALONG, AND IT MADE A DERIVED SHAPE WRONG

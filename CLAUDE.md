@@ -436,17 +436,17 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 Written at the end of 2026-09-05. Items 1 to 4 are unblocking things half-shipped THIS session and
 should be done before anything new is started.
 
-1. **Finish agent-bait-scan's routes.** The endpoint is built and both gateway routes exist, but the
-   402 that came back quoted **$0.25**, which is `relayshield_api.py`'s default for an unknown
-   `/v1/payg` path — not this endpoint's $0.50. So a well-formed 402 came from a Lambda that has
-   never heard of agent-bait-scan. **Do not guess between the two causes: run
-   `sh tools/diagnose_agent_bait_routes.sh`.** It asks the gateway which function each route is
-   integrated with, and invokes both Lambdas directly with the gateway taken out of the path. The
-   likeliest cause is simply that local main was never pushed, so `deploy_lambdas.yml` never ran and
-   `relayshield-agentic-api` is still on its 2026-08-15 build.
-2. **Push local main to GitHub.** Several things are waiting on it: the agentic-api deploy that
-   carries agent-bait-scan, the reconciled agentic handler, and the `_SECRET_TTL` change in three
-   handlers. A merge on the Mac deploys nothing; only a push does.
+1. **~~Finish agent-bait-scan's routes.~~ RESOLVED 2026-09-05, same day, by the diagnostic.** It was
+   cause B: the routes were always correct, the code was stale. `diagnose_agent_bait_routes.sh`
+   settled it in one run — both resources integrate with `relayshield-agentic-api`, and once the
+   push landed that function (deployed 15:23 UTC) answers `/v1/payg/agent-bait-scan` with
+   `x402Version: 2` and this endpoint's own description. The `$0.25` was `relayshield-api`'s
+   fallback for a path it does not know, which the gateway no longer sends it. **Left here as the
+   record of why the diagnostic exists, not as an open item.** Still worth doing once: confirm the
+   PUBLIC url quotes 500000, because a direct Lambda invoke and a gateway call are different tests.
+2. **~~Push local main to GitHub.~~ DONE** — both `relayshield-agentic-api` and `relayshield-api`
+   show `LastModified 2026-09-05T15:23`, so the push landed and `deploy_lambdas.yml` ran. That also
+   shipped the reconciled agentic handler and `_SECRET_TTL` in three handlers.
 3. **Create the MPP Lambda.** `sh tools/create_mpp_settlement_lambda.sh` failed on
    `InvalidParameterValueException: The role defined for the function cannot be assumed by Lambda`
    — IAM eventual consistency on a role created seconds earlier, not a broken trust policy. The
@@ -487,6 +487,29 @@ should be done before anything new is started.
 14. **FD-8/9/10 in one publish**, then FD-11. `tools/fd8_prepare_republish.py` is on the Mac now.
 15. **INTEL-5 funnel.** `tools/diagnose_stolen_sessions.py`. Until it runs, no count out of
     `relayshield_stolen_sessions` means anything.
+
+### THE DIAGNOSTIC PAID FOR ITSELF ON ITS FIRST RUN
+
+Written the same day as the script it describes, because the result is the argument for the habit.
+
+Two candidate causes with different fixes: the gateway resource wired to the wrong function, or the
+route right and the deployed code stale. Guessing would have been a coin flip, and the wrong guess
+means deleting and recreating gateway methods on a live API for no reason.
+
+`diagnose_agent_bait_routes.sh` answered it in one run and left nothing to interpret:
+
+- Step 3: **both** resources integrate with `relayshield-agentic-api`. The routes were never wrong.
+- Step 5: that function, invoked DIRECTLY with the gateway taken out of the path, returns
+  `x402Version: 2` and this endpoint's own description — so the handler is current.
+- The `$0.25` was `relayshield-api`'s fallback for a path it does not know, reached only because the
+  gateway had been sending it there before the deploy.
+
+**Cause B, and the fix was a push rather than anything touching AWS.** A `/{proxy+}` at the API root
+turned up in step 4 and is not a factor: an explicit resource beats a greedy proxy. Recorded so
+nobody re-opens that question.
+
+The habit worth keeping: **when two causes produce the same symptom, the cheap read-only script that
+separates them is worth writing before the first guess, not after the third.**
 
 ### A 402 IS NOT PROOF THE RIGHT LAMBDA ANSWERED
 

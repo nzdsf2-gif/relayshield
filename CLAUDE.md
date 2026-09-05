@@ -457,71 +457,140 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ## WHERE 2026-09-05 LEFT THINGS — read this first
 
-### THE TOP 15 FOR THE NEXT SESSION, in order
+### THE TOP 15, REGENERATED 2026-09-05 EVENING
 
-**Rewritten at the very end of 2026-09-05, replacing the list written earlier the same day.** Four
-items on that earlier list closed during the session and two new ones appeared, so it is regenerated
-rather than annotated — a list with strikethroughs is how a stale list gets recited as current.
+**Regenerated, not annotated.** Three items closed and one was added back, and CLAUDE.md's own rule
+is that a list with strikethroughs is how a stale list gets recited as current.
 
-**Items 1 to 3 are verifications of work already done. Do them first: each is one command, and each
-one closes a question that is currently open rather than starting anything new.**
+**Items 1, 6 and 11 are CLOSED. Item 2 is NOT closed and was nearly recorded as closed** on the
+basis of a status line that said the opposite of what it was read to say. See the correction below,
+because the misreading is more instructive than the item.
 
-1. **Confirm the MCP server came back.** The configs were repointed at `~/dev/relayshield` and Claude
-   Desktop was restarted. Verify rather than assume: `sh tools/mcp_inventory.sh` and read section 3.
-   A clean run shows no new ENOENT lines after the restart timestamp. If it is still failing, the
-   cause has changed and the log will say so.
-2. **Apply the deploy-role invoke policy to AWS.** `sh tools/apply_deploy_invoke_policy.sh`. The last
-   deploy run is RED and **the deploy itself succeeded** — only the import probe was denied, because
-   `relayshield-agentic-api` was added to `iam_github_deploy_invoke.json` and that file has never
-   been pushed to AWS. Until this runs, every deploy touching that function goes red for a reason
-   that has nothing to do with the code.
-3. **Confirm agent-bait-scan quotes $0.50 on the PUBLIC url.** A direct Lambda invoke already proves
-   the handler is current; a gateway call is a different test.
-   `curl -sS -X POST https://api.relayshield.net/v1/payg/agent-bait-scan -H 'Content-Type: application/json' -d '{"repository":"nzdsf2-gif/relayshield"}'`
-   — you want `500000` and `x402Version: 2`. A `250000` means the gateway is still sending it to
-   `relayshield-api`.
-4. **Create the MPP Lambda.** `sh tools/create_mpp_settlement_lambda.sh`. It failed on
-   `InvalidParameterValueException: The role defined for the function cannot be assumed by Lambda` —
-   IAM eventual consistency on a role created seconds earlier, not a broken trust policy. The script
-   now retries six times at 10s, and the role already exists, so a re-run picks up where it stopped.
+1. ~~Confirm the MCP server came back.~~ **DONE 2026-09-05.** Both servers show active in the
+   terminal. The server file was independently proven to complete an MCP handshake and serve all 8
+   tools. `tools/mcp_selftest.py` now answers this question with a verdict rather than a log tail,
+   so the next occurrence is one command. **Carry forward the second cause it found:** this server
+   needs `mcp<2` and dies at import on 2.x with `AttributeError: 'Server' object has no attribute
+   'list_tools'`, which presents as "disconnected" exactly like the path bug did.
+2. **Apply the deploy-role invoke policy to AWS. STILL OPEN.** `sh tools/apply_deploy_invoke_policy.sh`.
+   Deploy run 137 (2026-09-05 15:22 UTC) is red and its log says
+   `relayshield-agentic-api WAS DEPLOYED. Only the probe was denied`. **That the deploy succeeded is
+   exactly why this stays open**: the policy has never been pushed to AWS, so every future deploy
+   touching that function goes red for a reason unrelated to the code, and a permanently red deploy
+   is a red that stops being read. One command on the Mac.
+3. **Confirm agent-bait-scan quotes $0.50 on the PUBLIC url.** Command handed over 2026-09-05.
+   `api.relayshield.net` is egress-blocked from the container, so this cannot move from a session.
+   You want `500000` and `x402Version: 2`; a `250000` means the gateway is still routing to
+   `relayshield-api`, and the price is the only field that discriminates between the two.
+4. **Create the MPP Lambda.** `sh tools/create_mpp_settlement_lambda.sh`. Command handed over
+   2026-09-05. It previously failed on IAM eventual consistency, the script now retries six times at
+   10s, the role already exists, and every step checks for what it is about to create, so a re-run
+   resumes rather than duplicating.
 5. **Then the MPP selftest, reads-only.**
    `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/mpp_settlement_selftest.py --reads-only`.
-   The stored key is LIVE and `confirm=true` on a live key is a real charge attempt, so the
-   PaymentIntent is skipped. It still answers the question that actually blocks us: is this account
-   enabled for crypto deposit addresses, and does it have a business profile (`profile_...`, which
-   MPP needs as `networkId`). A 403 there is the text to send `machine-payments@stripe.com`.
-6. **Rotate the Stripe key and revoke the old one.**
-   `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/rotate_stripe_key.py`. The
-   `lambda:UpdateFunctionConfiguration` implicitDeny no longer blocks it: `_get_secret` now carries a
-   300-second TTL in the three caching handlers, so write the secret, **wait six minutes**, revoke.
-7. **Publish `crewai-relayshield` to PyPI.** The numbers justify it — see the honest reading below.
-   The tool code exists and is smoke-tested in `crewAIInc/crewAI#6550`; same standalone-package model
-   as the other two. Half a day.
-8. **FD-8/9/10 in one re-publish.** Upgraded in priority because the registry record was read live on
-   2026-09-05 and carries **four** defects, not three: pinned at 0.2.7 while PyPI is 0.2.9,
-   `websiteUrl` with no `?source=mcp-registry`, `repository.url` naming `github.com/relayshield/...`
-   against an `io.github.nzdsf2-gif/` namespace (which is what Glama indexed from), and
-   `RELAYSHIELD_API_URL` pinned to the raw execute-api hostname rather than `api.relayshield.net`.
-   One `mcp-publisher` run fixes all four. `tools/fd8_prepare_republish.py --dir ~/mcp-live --write`.
-9. **The agent-bait-scan blog post (ABS-2 in TODO.md).** Best post in the queue: third-party research
-   to cite, a demonstrable gap, and a live endpoint to link. Gated on item 3. Island's numbers are
-   theirs — cite them as theirs or leave them out.
-10. **Extend the Rain demo to the merchant-agent shape.** Ranked above the Commerce Agents post on
-    purpose: a demo is evidence, a post is argument. `tools/rain_demo.py` already does the hard part
-    with verifiable on-chain payments.
-11. **A RelayShield Claude Code skill.** Puts the check where the builder is working, which is a
-    better discovery surface than a blog for this audience. `relayshield-skills-fork` and
-    `relayshield-venice-skill` are the shapes to copy.
-12. **Rewrite the MCP directory listing copy** to lead with counterparty authorization — official
-    registry, Glama, PyPI, HF Space, Apify. Someone browsing MCP servers is at the moment of decision.
-    Do it in the same pass as item 8, since both touch the registry record.
-13. **The Commerce Agents blog post.** `commerce_agents_integration.md` has the argument. Register
-    `?source=commerce-agents` in `_SOURCE_BANNERS` BEFORE it ships.
-14. **ABS-1: the Bundle D usage dimension for agent-bait-scan.** In TODO.md. Waits on a measured
-    false-positive rate, not a date.
-15. **Send the twelve** (`outreach_bot_prospects_curated.md`), and **INTEL-5**
-    (`tools/diagnose_stolen_sessions.py`). Both unchanged, both founder-side or one command, and both
-    have been carried long enough that they belong at the bottom until something changes.
+   Gated on 4. The stored key is LIVE, so the PaymentIntent is skipped; it still answers the
+   question that blocks us, which is whether the account has crypto deposit addresses and a business
+   profile. A 403 there is the text to send `machine-payments@stripe.com`.
+6. ~~Rotate the Stripe key and revoke the old one.~~ **DONE, previous session.** The key was rotated
+   by hand. The `_SECRET_TTL = 300` fix that made revocation safe is in all three caching handlers.
+7. **Publish `crewai-relayshield` to PyPI.** Half a day. Tool code exists and is smoke-tested in
+   `crewAIInc/crewAI#6550`; same standalone-package model as the other two.
+8. **FD-8/9/10 in one re-publish.** Four defects in the live registry record, read on 2026-09-05:
+   pinned at 0.2.7 while PyPI is 0.2.9, `websiteUrl` with no `?source=mcp-registry`,
+   `repository.url` naming `github.com/relayshield/...` against an `io.github.nzdsf2-gif/`
+   namespace, and `RELAYSHIELD_API_URL` pinned to the raw execute-api hostname rather than
+   `api.relayshield.net`. One `mcp-publisher` run fixes all four.
+   `tools/fd8_prepare_republish.py --dir ~/mcp-live --write`.
+9. **The agent-bait-scan blog post (ABS-2 in TODO.md).** Gated on item 3. Third-party research to
+   cite, a demonstrable gap, a live endpoint to link, and now a shipped skill to link as well.
+   Island's numbers are theirs: cite them as theirs or leave them out.
+10. **SUBMIT THE APIFY ARTICLE TO `#apify-writers`.** Re-added 2026-09-05 at Andrew's request after
+    it fell off the regenerated list. Draft is `blog-apify-actor-as-agent-tool.md`, ~1,300 words,
+    clearing the 1,000-word floor. Full submission mechanics are in ITEM 10, APIFY SUBMISSION below,
+    because "submit it to Discord" is not an instruction anyone can act on.
+    **The disqualifier to remember: it must NOT appear on blog.relayshield.net first.** Originality
+    is a programme rule and publishing early kills the submission. That inverts our usual
+    canonical-first channel order, and it is the single easiest way to lose the $500.
+11. ~~A RelayShield Claude Code skill.~~ **BUILT 2026-09-05.**
+    `.claude/skills/relayshield-agent-bait/`, 11 tests. **It is built and it is not yet
+    DISTRIBUTED, and only the second one is discovery** - see A SKILL IN OUR OWN REPO REACHES NOBODY
+    below. Choosing the distribution route is the live half of this item.
+12. **Rewrite the MCP directory listing copy** to lead with counterparty authorization: official
+    registry, Glama, PyPI, HF Space, Apify. Do it in the same pass as item 8, since both touch the
+    registry record.
+13. **Extend the Rain demo to the merchant-agent shape.** A demo is evidence, a post is argument.
+    `tools/rain_demo.py` already does the hard part with verifiable on-chain payments.
+14. **The Commerce Agents blog post.** `commerce_agents_integration.md` has the argument. Register
+    `?source=commerce-agents` in `_SOURCE_BANNERS` BEFORE it ships, exactly as `claude-skill` was
+    registered before the skill that links to it.
+15. **ABS-1 Bundle D usage dimension**, then **send the twelve**
+    (`outreach_bot_prospects_curated.md`) and **INTEL-5** (`tools/diagnose_stolen_sessions.py`).
+    ABS-1 waits on a measured false-positive rate, not a date. The other two are founder-side or one
+    command and have been carried long enough to belong at the bottom until something changes.
+
+### "THE DEPLOY SUCCEEDED" IS NOT "THE ITEM IS CLOSED"
+
+Recorded 2026-09-05 because it nearly cost the item. A status line reading *"Item 2: still open, and
+confirmed from run 137's log — relayshield-agentic-api WAS DEPLOYED, only the probe was denied"* was
+read as evidence the item could be closed.
+
+It is the opposite, and the sentence contains both halves. "The deploy succeeded" is the reason the
+failure is survivable; **"only the probe was denied" is the open item**, because the policy that
+would authorise the probe has still never been pushed to AWS. Nothing about run 137 changed that,
+and nothing will until `apply_deploy_invoke_policy.sh` runs.
+
+The general form, and it is the counterpart to "a red run names a step, not an outcome": **reading a
+red run correctly tells you what did NOT break. It does not close anything.** The diagnosis and the
+fix are separate events, and only the second one is a state change.
+
+### A SKILL IN OUR OWN REPO REACHES NOBODY
+
+The honest answer to "this increases our discovery surface, right?", recorded because the optimistic
+version is very easy to write.
+
+**Building it does not increase discovery. Distributing it does.** A skill at
+`.claude/skills/` in this repo is available to people who have cloned this repo, which is us. The
+artefact is real and it is a prerequisite; it is not the channel.
+
+What makes it a discovery surface is that it puts the check **at the moment of the decision** -- a
+developer in Claude Code about to add an MCP server -- which is a far better moment than a blog post
+read later by someone with no pending decision. That is why item 11 ranked above two posts. But the
+moment is only reachable if the skill is somewhere they can install it from.
+
+**Do not write submission instructions for any route before reading its rules.** That is the FD-2
+lesson (a PR that would have been closed without comment, against a page whose own last section said
+so) and the CrewAI lesson (a repo whose README says it is unmaintained and accepts nothing). Both
+cost real effort against destinations that were never open. The route matters more than the artefact
+here, and it is unresolved on purpose rather than guessed at.
+
+### ITEM 10, APIFY SUBMISSION: the mechanics, so it is actionable
+
+Recorded 2026-09-05 because "submit to Discord" left every real question unanswered, and an
+instruction nobody can act on is how this item fell off the list in the first place.
+
+**Where.** Apify's community Discord, channel **`#apify-writers`**. It is the programme's stated
+submission route; there is no form and no email path.
+
+**Cadence, and it decides the date.** The programme is QUARTERLY. The July call closed 2026-08-16,
+so the next call is the target and there is nothing to submit into today. Use the wait for the three
+verifications below rather than treating the wait as the blocker.
+
+**The three facts to confirm with the Apify console open**, because the draft asserts them and no
+session has verified them directly:
+
+1. **The 154 runs figure**, and whether to quote it at all. It is small enough that a reviewer may
+   read it as a toy. Consider dropping the number and keeping "in production since August".
+2. **The exact Standby configuration** (memory, timeout), if we want to quote it. The draft
+   deliberately does not.
+3. **The dependency versions as they stand today.** The draft says `apify>=2,<3` crash-looped and
+   `apify>=4,<5` fixed it, taken from a Dockerfile comment dated 2026-08-25. If the pin has moved,
+   the article moves with it.
+
+**What is actually at stake:** $500 on publication, plus $100 in Apify credits for a dev.to version
+under their organisation. The money is not the point. It is a technical article on a platform
+developers read, about a category we sell into, written from work we actually did, and both the
+Actor and the API get a link carrying `?source=apify`, which is already a registered key.
+
 
 ### THE MOVE BROKE SOMETHING THE REPO COULD NOT SEE, AND THE LOG HAD BEEN SAYING SO FOR HOURS
 

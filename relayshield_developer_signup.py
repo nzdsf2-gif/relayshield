@@ -2868,6 +2868,28 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     # and blog channel would then be attributed to third-party widget installs,
     # and the number we most want from this channel is how many installs are
     # real. An empty tuple means "explicit parameter only".
+    # Claude Code skill, registered 2026-09-05 BEFORE the skill that links here
+    # was written, in that order, because that order is the whole rule. FD-8 is
+    # four months of arrivals from the canonical MCP directory logging
+    # "unmatched:" because a live link shipped ahead of its key.
+    #
+    # No referer hosts, deliberately. A skill runs inside someone's terminal and
+    # sends no Referer at all, so the ?source= parameter is the ONLY way in --
+    # the same per-arrival shape as tg-widget, and the bare /developers URL will
+    # never render this banner. That is by design, not a defect to chase.
+    "claude-skill": (
+        (),
+        _banner("Arriving from a Claude Code skill", _p(
+            "Your agent just ran an agent-bait scan. It reads the instructions a "
+            "repository gives an agent &mdash; README, AGENTS.md, CLAUDE.md, "
+            ".cursorrules, MCP manifests &mdash; and reports what those instructions "
+            "would cause an agent to DO: fetch and execute a remote script, ignore "
+            "prior instructions, or read credential files. Every domain the "
+            "instructions reference is then checked against indicators collected "
+            "from criminal channels, which is the half of the corpus no public feed "
+            "carries. Screening what an agent is TOLD, rather than what it is, is "
+            "the gap most tool-vetting leaves open.")),
+    ),
     "tg-widget": (
         (),
         _banner("Arriving from a Telegram bot", _p(

@@ -703,6 +703,37 @@ See [[reference-relayshield-scale-metrics]] for the canonical figures and re-che
 
 ---
 
+## 🟩 ABS-2: the agent-bait-scan blog post — NEXT SESSION, added 2026-09-05
+
+**Gated on the endpoint answering a 402 in public at its own price**, which is item 1 of the
+2026-09-05 top 15. Publishing before that is the XSOAR mistake: the gap between writing and
+publishing is exactly where a false claim gets in.
+
+**Why it is the best post in the queue.** It rests on third-party research we can cite rather than
+on our own assertion, the gap it names is demonstrable in ten seconds, and once item 1 is done there
+is a live URL to link instead of a description of one.
+
+**The angle, and it is not "we shipped an endpoint".** A repository can be prepared to be found by an
+agent rather than a person: the code is clean, every scanner passes it, and what is hostile is the
+English. "We scanned it and it was clean" is a true statement about a malicious repository. That
+sentence is the post.
+
+**Hard rules:**
+
+- **Island's numbers are Island's.** 7,600 malicious repositories and 30,000 MCP servers are their
+  finding from their scan. Cite them as theirs, in a sentence that names them, or leave them out.
+  MEASUREMENT DOCTRINE forbids adopting them.
+- **No number of our own** in this category until `exclusive_share_by_category.py` has run on it and
+  it clears 100 collected indicators.
+- **Link the primary sources in the first paragraph**, per house convention: Island's research, and
+  `anthropics/commerce-agents` for the merchant-agent framing if that half is included.
+- **Do not say "safe" anywhere**, including about our own endpoint. It never says safe; the post must
+  not either.
+
+Canonical on `blog.relayshield.net`, then Medium, dev.to, LinkedIn, Telegram, Farcaster, Mastodon.
+
+---
+
 ## 🟩 ABS-1: add agent-bait-scan as a Bundle D usage dimension — NEXT SESSION, added 2026-09-05
 
 **The endpoint is BUILT and both doors are wired.** `relayshield_agent_bait_scan.py`,

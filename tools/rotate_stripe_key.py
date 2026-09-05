@@ -145,7 +145,16 @@ def main():
             mark = "OK  " if verdict == "allowed" else "FAIL"
             print(f"   {mark}  {r.get('EvalActionName')} -> {verdict}")
             if verdict != "allowed":
-                denied.append((r.get("EvalActionName"), "(simulated)", verdict))
+                if r.get("EvalActionName") == "lambda:UpdateFunctionConfiguration":
+                    # NOT fatal since 2026-09-05. _get_secret now carries a
+                    # _SECRET_TTL of 300s in every caching consumer, so a rotated
+                    # secret is picked up on its own within five minutes. The
+                    # recycle was only ever a way to make that immediate.
+                    print("         ^ not fatal: the handlers now re-read the secret")
+                    print("           every 300s on their own. Step 4 will skip and")
+                    print("           step 5 will tell you how long to wait.")
+                else:
+                    denied.append((r.get("EvalActionName"), "(simulated)", verdict))
     except Exception as exc:
         print(f"   ?     could not simulate the write permissions ({type(exc).__name__}).")
         print("         Not fatal: the simulator itself needs iam:SimulatePrincipalPolicy.")
@@ -291,9 +300,15 @@ def main():
     print(f"   The stored secret authenticates as {acct_body.get('id')}.\n")
 
     print("NOW, AND NOT BEFORE:")
+    if recycled:
+        print(f"  {len(recycled)} function(s) were recycled and are already on the new key.")
+    if missing or len(recycled) < len(CONSUMERS):
+        print("  Some functions were NOT recycled. That is fine and no longer")
+        print("  requires a permission: every caching consumer re-reads the secret")
+        print("  on a 300-second TTL. WAIT SIX MINUTES from the write above, then")
+        print("  revoke. Waiting is the whole cost of not holding")
+        print("  lambda:UpdateFunctionConfiguration.")
     print("  Revoke the OLD key in the Stripe Dashboard, Developers -> API keys.")
-    print("  Everything that reads it has been recycled, so nothing is still")
-    print("  holding it.")
     print()
     print("  Then confirm the billing chain still works end to end rather than")
     print("  assuming it survived -- one metered API call, and check the usage")

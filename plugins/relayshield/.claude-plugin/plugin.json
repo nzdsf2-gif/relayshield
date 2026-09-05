@@ -1,0 +1,15 @@
+{
+  "name": "relayshield",
+  "displayName": "RelayShield",
+  "description": "Screen what a repository tells an agent to do before you connect one to it. Reads README, AGENTS.md, CLAUDE.md, .cursorrules and MCP manifests for instructions that would make an agent fetch and execute remote code, ignore prior instructions, or read credential files, then checks every referenced domain against a corpus of indicators collected from criminal channels.",
+  "version": "0.1.0",
+  "author": {
+    "name": "RelayShield",
+    "url": "https://relayshield.net"
+  },
+  "homepage": "https://api.relayshield.net/developers?source=claude-skill",
+  "repository": "https://github.com/nzdsf2-gif/relayshield",
+  "license": "MIT",
+  "keywords": ["security", "mcp", "prompt-injection", "supply-chain", "agent-safety"],
+  "skills": ["./skills/"]
+}

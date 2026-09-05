@@ -1,0 +1,21 @@
+{
+  "name": "relayshield",
+  "owner": {
+    "name": "RelayShield",
+    "url": "https://relayshield.net"
+  },
+  "description": "Security checks for agents, at the moment an agent is about to trust something.",
+  "plugins": [
+    {
+      "name": "relayshield",
+      "source": "./plugins/relayshield",
+      "displayName": "RelayShield",
+      "description": "Screen a repository's agent-facing instructions before connecting an agent, installing its MCP server, or following its setup steps.",
+      "category": "security",
+      "keywords": ["security", "mcp", "prompt-injection", "supply-chain", "agent-safety"],
+      "license": "MIT",
+      "homepage": "https://api.relayshield.net/developers?source=claude-skill",
+      "repository": "https://github.com/nzdsf2-gif/relayshield"
+    }
+  ]
+}

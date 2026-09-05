@@ -16,12 +16,17 @@ Both are invisible in review and both are one grep to catch.
 """
 
 import ast
+import json
+import os
 import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SKILL = ROOT / ".claude" / "skills" / "relayshield-agent-bait" / "SKILL.md"
+PLUGIN = ROOT / "plugins" / "relayshield"
+SKILL = PLUGIN / "skills" / "relayshield-agent-bait" / "SKILL.md"
+MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
+MANIFEST = PLUGIN / ".claude-plugin" / "plugin.json"
 SIGNUP = ROOT / "relayshield_developer_signup.py"
 
 TEXT = SKILL.read_text(encoding="utf-8")
@@ -121,6 +126,77 @@ class TestMatchesTheEndpoint(unittest.TestCase):
         self.assertIsNotNone(m, "price not found in the PAYG table")
         self.assertEqual(m.group(1), "500000", "handler price changed")
         self.assertIn("$0.50", TEXT, "skill quotes a price the handler does not charge")
+
+
+
+
+class TestPluginPackaging(unittest.TestCase):
+    """The skill is only a discovery surface if it is installable. These pin the
+    two manifests that make it so, and the fact that they must agree with each
+    other and with the tree -- the same shape as LAMBDA_MAP and
+    iam_github_deploy_invoke.json, which cost a red run because nothing checked
+    that two files naming the same things actually did."""
+
+    def test_manifests_are_valid_json(self):
+        for path in (MARKETPLACE, MANIFEST):
+            with self.subTest(path=path.name):
+                json.loads(path.read_text(encoding="utf-8"))
+
+    def test_marketplace_required_fields(self):
+        m = json.loads(MARKETPLACE.read_text(encoding="utf-8"))
+        self.assertIn("name", m)
+        self.assertIn("name", m.get("owner", {}), "owner.name is required")
+        self.assertTrue(m.get("plugins"), "marketplace must list at least one plugin")
+        for entry in m["plugins"]:
+            self.assertIn("name", entry)
+            self.assertIn("source", entry)
+
+    def test_manifest_required_fields(self):
+        d = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        for field in ("name", "description", "version", "author"):
+            self.assertIn(field, d, f"plugin.json must carry {field}")
+        self.assertIn("name", d["author"], "author.name is required")
+        self.assertRegex(d["name"], r"^[a-z0-9-]+$", "plugin name must be kebab-case")
+        self.assertRegex(d["version"], r"^\d+\.\d+\.\d+$", "version must be semver")
+
+    def test_marketplace_source_resolves_to_the_plugin(self):
+        """A source path that does not exist installs nothing, and the failure
+        lands on the user rather than on us."""
+        m = json.loads(MARKETPLACE.read_text(encoding="utf-8"))
+        entry = m["plugins"][0]
+        src = entry["source"]
+        self.assertTrue(isinstance(src, str) and src.startswith("./"),
+                        "a relative source must start with ./")
+        target = (ROOT / src).resolve()
+        self.assertTrue(target.is_dir(), f"source {src} is not a directory")
+        self.assertTrue((target / ".claude-plugin" / "plugin.json").is_file(),
+                        f"{src} has no .claude-plugin/plugin.json")
+
+    def test_marketplace_and_manifest_agree_on_the_plugin_name(self):
+        m = json.loads(MARKETPLACE.read_text(encoding="utf-8"))
+        d = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(m["plugins"][0]["name"], d["name"],
+                         "the marketplace entry and the plugin manifest name the "
+                         "same plugin, and nothing else checks that they do")
+
+    def test_declared_skills_dir_actually_holds_the_skill(self):
+        d = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        dirs = d.get("skills") or ["./skills/"]
+        found = []
+        for rel in dirs:
+            base = (PLUGIN / rel.lstrip("./")).resolve()
+            if base.is_dir():
+                found += [p for p in base.rglob("SKILL.md")]
+        self.assertIn(SKILL.resolve(), [f.resolve() for f in found],
+                      "plugin.json's skills paths do not reach the skill")
+
+    def test_repo_local_skill_is_a_symlink_to_the_canonical_copy(self):
+        """One file, two places it must appear. A copy would drift, and this repo
+        already carries four copies of one pattern table."""
+        link = ROOT / ".claude" / "skills" / "relayshield-agent-bait"
+        self.assertTrue(link.is_symlink(),
+                        ".claude/skills entry must be a symlink, never a second copy")
+        self.assertEqual(link.resolve(), (PLUGIN / "skills" / "relayshield-agent-bait").resolve())
 
 
 if __name__ == "__main__":

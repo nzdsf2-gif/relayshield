@@ -244,16 +244,100 @@ def first_cause(stderr_text):
     return last
 
 
+
+def check_published(package: str, timeout: float) -> int:
+    """Install the package the way a new user would and see if it starts.
+
+    WHY THIS IS A SEPARATE MODE, AND WHY IT MATTERS MOST
+    ----------------------------------------------------
+    Every other check in this repo tests the code we WROTE. This tests the thing
+    our users INSTALL, and on 2026-09-05 those were different: relayshield-mcp
+    0.2.9 declares `mcp>=1.0.0` with no upper bound, so a fresh install resolved
+    mcp 2.1.1 and the server died at import with
+
+        AttributeError: 'Server' object has no attribute 'list_tools'
+
+    The wheel was fine. The dependency range was not, and nothing we ran locally
+    would ever have caught it, because a developer's venv already has a working
+    mcp pinned in it from months ago. A resolver picks the newest thing allowed,
+    and "allowed" is the field nobody was reading.
+
+    This is the quiet-alarm rule applied to packaging: the failure needs no
+    change on our side at all. Someone else publishes a major version and our
+    published package breaks, silently, for new installs only.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    print(f"== Published-package check: {package}")
+    print("   installing into a throwaway venv, exactly as a new user would")
+    tmp = tempfile.mkdtemp(prefix="mcp-pypi-")
+    try:
+        rc = subprocess.run([sys.executable, "-m", "venv", tmp],
+                            capture_output=True, text=True)
+        if rc.returncode:
+            print(f"   could not create a venv: {rc.stderr.strip()[:200]}")
+            return 1
+        py = os.path.join(tmp, "bin", "python")
+        if not os.path.exists(py):
+            py = os.path.join(tmp, "Scripts", "python.exe")
+        pip = subprocess.run([py, "-m", "pip", "install", "-q", package],
+                             capture_output=True, text=True)
+        if pip.returncode:
+            print(f"   VERDICT : DEAD — pip install failed:\n{pip.stdout[-500:]}{pip.stderr[-500:]}")
+            return 1
+
+        vers = subprocess.run(
+            [py, "-c",
+             "import importlib.metadata as m,json;"
+             "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions()}))"],
+            capture_output=True, text=True)
+        try:
+            installed = json.loads(vers.stdout or "{}")
+        except ValueError:
+            installed = {}
+        for name in sorted(installed):
+            if name and name.lower() in (package.lower(), "mcp", "httpx"):
+                print(f"      resolved: {name} {installed[name]}")
+
+        # Prefer the console script, since that is what a client config names.
+        script = os.path.join(tmp, "bin", package)
+        if os.path.exists(script):
+            ok, detail, tools = handshake(script, [], {}, timeout)
+        else:
+            mod = package.replace("-", "_")
+            ok, detail, tools = handshake(py, ["-m", mod], {}, timeout)
+
+        if ok:
+            print(f"   VERDICT : ACTIVE — {detail}, {len(tools)} tools")
+            print(f"   tools   : {', '.join(tools)}")
+            return 0
+        print(f"   VERDICT : DEAD — {detail}")
+        print()
+        print("   THIS IS WHAT A NEW USER GETS. Our own venv passing proves nothing")
+        print("   here: it holds an older pin that the resolver would never choose.")
+        return 1
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="", help="only servers whose name contains this")
     ap.add_argument("--script", default="", help="test a server script directly, ignoring configs")
     ap.add_argument("--python", default=sys.executable, help="interpreter for --script")
     ap.add_argument("--timeout", type=float, default=25.0)
+    ap.add_argument("--pypi", metavar="PKG", nargs="?", const="relayshield-mcp",
+                    help="install the PUBLISHED package into a throwaway venv and "
+                         "handshake it, i.e. test what a new user actually gets")
     args = ap.parse_args()
 
     print("== MCP selftest — spawn each server and speak MCP to it")
     print()
+
+    if args.pypi:
+        return check_published(args.pypi, args.timeout)
 
     results = []
 

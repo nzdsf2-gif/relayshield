@@ -551,14 +551,33 @@ PHISHING_SUFFIXES = ["-secure", "-login", "-online", "-support", "-portal", "-ve
 # Secrets helpers
 # ---------------------------------------------------------------------------
 
-_secret_cache: dict[str, str] = {}
+# Secrets are cached for the life of the execution environment, which meant a
+# rotated key was not picked up until a container recycled -- minutes to hours.
+# Worse, _record_stripe_meter_event swallows its own errors, so a revoked key
+# produced SILENT UNDER-BILLING rather than an alarm. A TTL fixes that at source
+# and removes the need for anyone to hold lambda:UpdateFunctionConfiguration
+# just to force a recycle. Added 2026-09-05.
+_SECRET_TTL = 300
+_secret_cache: dict[str, tuple[float, str]] = {}
 
 
 def _get_secret(secret_name: str) -> str:
-    if secret_name not in _secret_cache:
+    """Cached with a TTL. A rotated secret is picked up within _SECRET_TTL with
+    no redeploy and no forced recycle. On a refresh failure the last known good
+    value is returned rather than raising: a Secrets Manager blip must not take
+    the endpoint down, and the old value is almost always still valid."""
+    cached = _secret_cache.get(secret_name)
+    if cached and (time.time() - cached[0]) < _SECRET_TTL:
+        return cached[1]
+    try:
         raw = secrets_client.get_secret_value(SecretId=secret_name)["SecretString"].strip()
-        _secret_cache[secret_name] = raw
-    return _secret_cache[secret_name]
+    except Exception:
+        if cached:
+            logger.warning("secret refresh failed for %s, using the cached value", secret_name)
+            return cached[1]
+        raise
+    _secret_cache[secret_name] = (time.time(), raw)
+    return raw
 
 
 def _get_secret_json(secret_name: str, key: str) -> str:

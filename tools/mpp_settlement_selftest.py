@@ -104,6 +104,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true",
                     help="permit running against a live key (creates a real PaymentIntent)")
+    ap.add_argument("--reads-only", action="store_true",
+                    help="skip the PaymentIntent entirely. Safe on a live key, and it "
+                         "still answers the question that actually blocks us: is this "
+                         "account enabled for crypto deposit addresses and does it have "
+                         "a business profile.")
     ap.add_argument("--tx", default="0x" + "11" * 32,
                     help="transaction hash to record; defaults to an obvious dummy")
     args = ap.parse_args()
@@ -116,9 +121,13 @@ def main():
     print(f"Stripe-Version pinned to {mpp.STRIPE_PREVIEW_VERSION} "
           "(a preview version moves -- check this first if a working call breaks).\n")
 
-    if live and not args.live:
-        sys.exit("Refusing to run against a live key without --live. "
-                 "confirm=true on a live key is a real charge attempt.")
+    if live and not args.live and not args.reads_only:
+        sys.exit("Refusing to run against a live key without --live.\n"
+                 "confirm=true on a live key is a real charge attempt.\n\n"
+                 "Use --reads-only instead. It skips the PaymentIntent and still\n"
+                 "answers the question that actually blocks us: whether this account\n"
+                 "is enabled for crypto deposit addresses and has a business profile.\n"
+                 "Both of those are GETs and are safe on a live key.")
 
     status, acct = call("/v1/account", None, key, mpp.STRIPE_PREVIEW_VERSION)
     if status != 200:
@@ -165,6 +174,18 @@ def main():
           f"(${cents / 100:.2f})")
     if cents != 35:
         print("   ⚠ that is not 35. The price or the conversion has changed.")
+    if args.reads_only:
+        print("== 2. PaymentIntent SKIPPED (--reads-only)")
+        print("   The shape is verified against mppx 0.9.2 and is unchanged; what")
+        print("   this run could not confirm is that THIS account accepts it.")
+        print("   Re-run with --live once the reads above return 200.\n")
+        print("WHAT TO DO WITH THIS")
+        print("  Step 1a/1b 200 -> the crypto rail is open. Set")
+        print("                    RELAYSHIELD_MPP_RAIL=auto and re-run with --live.")
+        print("  Step 1c 200    -> STRIPE_PROFILE_ID above unlocks the MPP challenge.")
+        print("  401/403/404    -> not enabled. Send that message text to")
+        print("                    machine-payments@stripe.com with the account id.")
+        return
     pi_params = mpp.stripe_payment_intent_params(
         cents, "base", args.tx,
         currency=acct.get("default_currency") or "usd",

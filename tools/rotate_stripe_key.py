@@ -109,6 +109,61 @@ def main():
     sm     = boto3.client("secretsmanager", region_name=REGION)
     lam    = boto3.client("lambda", region_name=REGION)
 
+    # PREFLIGHT, added 2026-09-05 after a run reported "permission denied" with
+    # no way to tell WHICH permission or WHOSE. Two entirely different systems
+    # can say that here -- AWS refusing this operator identity, and Stripe
+    # refusing a restricted key -- and they have different fixes. Ask both,
+    # before the key is even typed, and name the layer in the answer.
+    print("== 0. Can this AWS identity do the three things this script needs?")
+    who = sts.get_caller_identity().get("Arn", "")
+    print(f"   identity {who}")
+    denied = []
+    try:
+        sm.get_secret_value(SecretId=SECRET_ID)
+        print(f"   OK    secretsmanager:GetSecretValue on {SECRET_ID}")
+    except Exception as exc:
+        denied.append(("secretsmanager:GetSecretValue", SECRET_ID, exc))
+        print(f"   FAIL  secretsmanager:GetSecretValue on {SECRET_ID}")
+    try:
+        sm.describe_secret(SecretId=SECRET_ID)
+        print(f"   OK    secretsmanager:DescribeSecret on {SECRET_ID}")
+    except Exception as exc:
+        denied.append(("secretsmanager:DescribeSecret", SECRET_ID, exc))
+        print(f"   FAIL  secretsmanager:DescribeSecret on {SECRET_ID}")
+    # PutSecretValue cannot be tested without writing, so it is checked with the
+    # policy simulator against this identity rather than by trying it. A write
+    # that fails halfway is the one outcome this script must never produce.
+    try:
+        iam = boto3.client("iam", region_name=REGION)
+        sim = iam.simulate_principal_policy(
+            PolicySourceArn=who,
+            ActionNames=["secretsmanager:PutSecretValue", "lambda:UpdateFunctionConfiguration"],
+            ResourceArns=[f"arn:aws:secretsmanager:{REGION}:{ACCOUNT}:secret:{SECRET_ID}-??????"],
+        )
+        for r in sim.get("EvaluationResults", []):
+            verdict = r.get("EvalDecision")
+            mark = "OK  " if verdict == "allowed" else "FAIL"
+            print(f"   {mark}  {r.get('EvalActionName')} -> {verdict}")
+            if verdict != "allowed":
+                denied.append((r.get("EvalActionName"), "(simulated)", verdict))
+    except Exception as exc:
+        print(f"   ?     could not simulate the write permissions ({type(exc).__name__}).")
+        print("         Not fatal: the simulator itself needs iam:SimulatePrincipalPolicy.")
+        print("         The writes below will still report their own errors clearly.")
+
+    if denied:
+        print()
+        print("   AWS DENIED SOMETHING, AND THIS IS AN AWS PROBLEM, NOT A STRIPE ONE.")
+        print("   Nothing was asked for and nothing was written. What failed:")
+        for action, resource, exc in denied:
+            print(f"     {action} on {resource}")
+            print(f"       {exc}")
+        print()
+        print("   Grant the missing action to the identity above, then re-run. If the")
+        print("   identity is not the one you expected, check AWS_PROFILE.")
+        sys.exit(1)
+    print()
+
     print("== 1. The new key")
     print("   Paste it. It is not echoed, does not enter shell history, and is")
     print("   never printed back.")
@@ -135,6 +190,12 @@ def main():
         print()
         for path, why, msg in failed:
             print(f"   {path}: {msg}")
+        print()
+        print("   STRIPE DENIED THIS, AND IT IS A STRIPE PROBLEM, NOT AN AWS ONE.")
+        print("   The AWS preflight above passed, so this is about the key itself.")
+        print("   'Permission denied' from Stripe on a key that works in the Dashboard")
+        print("   almost always means a RESTRICTED key (rk_...) with a permission")
+        print("   switched off, not an invalid key. Stripe names the missing one above.")
         print()
         print("   STOP. Nothing was written. A key that cannot do one of these")
         print("   fails ONLY on the code path that needs it, and the metering path")
@@ -168,7 +229,14 @@ def main():
     if payload == current:
         print("   The stored value is already this key. Nothing to write.\n")
     else:
-        sm.put_secret_value(SecretId=SECRET_ID, SecretString=payload)
+        try:
+            sm.put_secret_value(SecretId=SECRET_ID, SecretString=payload)
+        except Exception as exc:
+            sys.exit(f"AWS refused the write to {SECRET_ID}, and the key is unchanged:\n"
+                     f"  {exc}\n"
+                     "This is an AWS permission problem (secretsmanager:PutSecretValue), "
+                     "not a problem with the Stripe key -- the key passed every Stripe "
+                     "probe above.")
         print(f"   Written as a {shape}. The previous version is retained by")
         print("   Secrets Manager as AWSPREVIOUS if you need to roll back.\n")
 
@@ -186,8 +254,15 @@ def main():
             print(f"   NOT FOUND  {fn}")
             continue
         desc = (cfg.get("Description") or "").split(" [stripe-key ")[0]
-        lam.update_function_configuration(
-            FunctionName=fn, Description=f"{desc} [stripe-key {stamp}]".strip())
+        try:
+            lam.update_function_configuration(
+                FunctionName=fn, Description=f"{desc} [stripe-key {stamp}]".strip())
+        except Exception as exc:
+            print(f"   DENIED     {fn}: {exc}")
+            print("   The secret IS updated. This function was not recycled, so it will")
+            print("   hold the old key until it cold-starts on its own. DO NOT REVOKE")
+            print("   the old key until this is resolved or that function has recycled.")
+            continue
         lam.get_waiter("function_updated_v2").wait(FunctionName=fn)
         recycled.append(fn)
         print(f"   recycled   {fn}")

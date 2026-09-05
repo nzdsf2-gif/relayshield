@@ -1041,8 +1041,8 @@ formula is `sevenzip`, NOT `p7zip` — p7zip is an abandoned fork stuck at 17.06
 
 ```
 7zz a -p -mhe=on ~/cs-mobile-signing-2026-08.7z \
-  "/Users/andrewgibbs/Side SaaS Hustle/crypto-shield-app/android/app/cryptoshield-release.keystore" \
-  "/Users/andrewgibbs/Side SaaS Hustle/crypto-shield-app/android/keystore.properties"
+  "~/dev/relayshield/crypto-shield-app/android/app/cryptoshield-release.keystore" \
+  "~/dev/relayshield/crypto-shield-app/android/keystore.properties"
 7zz t ~/cs-mobile-signing-2026-08.7z
 ```
 

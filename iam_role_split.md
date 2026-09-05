@@ -88,7 +88,7 @@ exist only in AWS. Nothing is in git, no workflow checks them, and nothing would
 notice if one were deleted — the DRIFT RULE, applied to IAM. This is read-only.
 
 ```zsh
-cd ~/"Side SaaS Hustle"
+cd ~/dev/relayshield
 AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/iam_snapshot_role.py
 ```
 
@@ -105,14 +105,14 @@ map in `deploy_lambdas.yml` is not: 46 `relayshield_*.py` sources are not in
 `LAMBDA_MAP`, and some of them are deployed handlers.
 
 ```zsh
-cd ~/"Side SaaS Hustle"
+cd ~/dev/relayshield
 git add iam/snapshots && git commit -m "chore(iam): snapshot the shared Lambda role before splitting it"
 ```
 
 **2. Dry-run the whole fleet.** No credentials needed.
 
 ```zsh
-cd ~/"Side SaaS Hustle"
+cd ~/dev/relayshield
 python3 tools/iam_split_roles.py --from-snapshot iam/snapshots/relayshield-breach-check-role-1sapnwdl.json --write-policies /tmp/rs-policies
 ```
 
@@ -125,7 +125,7 @@ fix goes in `tools/iam_scan_sources.py`, not in the policy.
 one so a mistake surfaces on a monitor rather than on the API.
 
 ```zsh
-cd ~/"Side SaaS Hustle"
+cd ~/dev/relayshield
 AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/iam_split_roles.py --from-snapshot iam/snapshots/relayshield-breach-check-role-1sapnwdl.json --apply --only relayshield-gas-monitor
 ```
 
@@ -152,7 +152,7 @@ function's own role, where there are 8,000 spare bytes.
 `iam/required_resources.json` is generated. After changing any handler:
 
 ```zsh
-cd ~/"Side SaaS Hustle"
+cd ~/dev/relayshield
 python3 tools/iam_scan_sources.py --print
 ```
 

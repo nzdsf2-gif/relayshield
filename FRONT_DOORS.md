@@ -55,7 +55,7 @@ cd ~ && git clone https://github.com/RelayShield/rsscan rsscan-live && cd ~/rssc
 That will fail with "no such file" for the tool, because the tool lives in the other repo. So first:
 
 ```zsh
-mkdir -p ~/rsscan-live/tools ~/rsscan-live/tests && cp ~/"Side SaaS Hustle"/tools/rsscan_sync_version.py ~/rsscan-live/tools/ && cp ~/"Side SaaS Hustle"/rsscan/tests/test_version_pin.py ~/rsscan-live/tests/ && cd ~/rsscan-live && python3 tools/rsscan_sync_version.py --check
+mkdir -p ~/rsscan-live/tools ~/rsscan-live/tests && cp ~/dev/relayshield/tools/rsscan_sync_version.py ~/rsscan-live/tools/ && cp ~/dev/relayshield/rsscan/tests/test_version_pin.py ~/rsscan-live/tests/ && cd ~/rsscan-live && python3 tools/rsscan_sync_version.py --check
 ```
 
 It prints the version from `pyproject.toml` and every file that disagrees. Then rewrite them:
@@ -174,7 +174,7 @@ cd ~ && git clone https://github.com/RelayShield/relayshield-mcp mcp-live && ls 
 Then, only if that cloned cleanly:
 
 ```zsh
-cp ~/"Side SaaS Hustle"/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml && cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml for the Smithery registry" && git push origin main
+cp ~/dev/relayshield/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml && cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml for the Smithery registry" && git push origin main
 ```
 
 **ANDREW CLICKS THIS:**
@@ -349,14 +349,28 @@ anyone who finds the package, reads its page and clicks through is invisible.
 It is also the same failure as FD-8, on a second surface, found the same way. Worth assuming there
 is a third.
 
-**Two steps, in this order, and the order is the rule:**
+**Step 1 is DONE: the `pypi` key is registered** in `_SOURCE_BANNERS`
+(`relayshield_developer_signup.py`), with `pypi.org` and `files.pythonhosted.org` as referer hosts,
+registered before the link changes because that order is the rule.
 
-1. Register a `pypi` key in `_SOURCE_BANNERS` (`relayshield_developer_signup.py`) BEFORE the links
-   change. `pypi.org` and `files.pythonhosted.org` are the referer hosts.
-2. Update `project_urls` in the MCP server repo's `pyproject.toml` to
-   `https://api.relayshield.net/developers?source=pypi` and publish the next release. The link
-   changes when a version ships, not before, so this rides the FD-8 re-publish rather than needing
-   its own.
+**Step 2, concretely.** `tools/fd8_prepare_republish.py --dir ~/mcp-live --write` rewrites the
+`Documentation` entry under `[project.urls]` in `~/mcp-live/pyproject.toml` to
+`https://api.relayshield.net/developers?source=pypi`, and prints what it changed. If there is no
+`[project.urls]` section it says so and prints the two lines to add rather than guessing at the file
+layout.
+
+**The link goes live when a PyPI release ships, not when the registry publishes.** Those are two
+different publishes and the registry one does not carry it. So the sequence is: run the script,
+publish the new version to the MCP registry (which fixes FD-8 and FD-9), and let the pyproject
+change ride the next PyPI release.
+
+**Verify afterwards, without a browser:**
+
+```text
+python3 -c "import json,urllib.request; d=json.load(urllib.request.urlopen('https://pypi.org/pypi/relayshield-mcp/json')); print(d['info']['project_urls'])"
+```
+
+The `Documentation` value should carry `?source=pypi`.
 
 **While there: the registry is two versions behind PyPI.** The MCP registry's latest is 0.2.7
 (2026-07-19) and PyPI is on 0.2.9. Whatever 0.2.8 and 0.2.9 changed has never reached the canonical
@@ -382,3 +396,30 @@ The distinction that resolves it: **being listed is not the same as being hosted
 points at our PyPI package, which users install themselves, carries none of that risk. A hosted
 build does. So submit the listing, do not opt into hosting, and do not put any RelayShield
 credential into a Smithery-side configuration.
+
+### FD-11, step by step
+
+**1. Put the manifest in the SERVER's repo, not this one.** `mcp_registry/smithery.yaml` lives here
+for version control; Smithery reads it from the default branch of the repo it indexes.
+
+```text
+cp ~/dev/relayshield/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml
+cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml" && git push origin main
+```
+
+**2. Sign in at <https://smithery.ai> with GitHub**, using the account that owns the MCP server
+repo. Smithery indexes what that account can see.
+
+**3. Add the server**, choosing the repository, and when it offers to build or deploy a hosted
+version, **decline it.** The listing is the goal. See the reason above.
+
+**4. Point the listing at the PyPI package.** The install line users should see is the ordinary one:
+`pip install relayshield-mcp`. If the form asks for a hosted endpoint, leave it empty.
+
+**5. Set the website link to `https://relayshield.net?source=mcp-registry`.** That key already
+exists and `smithery.ai` is already one of its referer hosts, so arrivals attribute either way, but
+the explicit parameter is what survives a referrer being stripped.
+
+**6. Do not paste any RelayShield API key into a Smithery configuration field.** Users bring their
+own key or use the keyless endpoints. Nothing about a listing needs a credential from us, and the
+2025 incident is the reason to keep it that way.

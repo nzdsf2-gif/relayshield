@@ -5,24 +5,101 @@
 **Claude Code on the web runs in a remote container. It cannot write to
 `~/Side SaaS Hustle`. Committing and merging to `main` does NOT put a file on Andrew's Mac.**
 
-This has now cost time in more than one session: a document was written, committed, merged, and
-reported as "delivered", and Andrew could not read a word of it. A file he cannot open is not a
-deliverable, and describing its contents to him is worse than useless — it reads as sections of a
-document that, to him, does not exist.
+**UPDATED 2026-09-03, and this SUPERSEDES the old "paste it into the chat" rule.** Andrew's
+instruction, in his words: *"When you cite a file it means I expect you to provide a .md I can
+download. I don't want you to paste the content inline."*
 
-**So: whenever a session produces a `.md` deliverable — a benchmark, a roadmap, a blog draft, a
-brief, a handoff — PASTE THE FULL FILE CONTENTS INTO THE CHAT, inside a fenced code block, in the
-same reply that announces it.** Commit it as well, but the chat paste is the delivery. Do not
-substitute a summary, a file path, a PR link, or "run `git pull`". Do not wait to be asked.
+So: **whenever a session produces or updates a `.md` deliverable, SEND THE FILE so he can download
+it, in the same reply that mentions it.** Use the file-sending mechanism, not a fenced code block.
+A 400-line document pasted inline is unreadable in a chat window and he cannot save it.
 
-Andrew saves them into `~/Side SaaS Hustle` by hand. That is the established, working process.
+- **Send the file. Do not paste it.** Mentioning a filename without sending it is the failure this
+  rule exists to stop, and it happened three times on 2026-09-03 alone.
+- **He saves it to `~/Side SaaS Hustle`, which is no longer the clone.** See the next section.
+  Saving a delivered `.md` into the clone is what blocked three merges; the two directories are
+  now separate so it cannot happen again.
+- Commit it as well. The commit is the durable copy; the sent file is the delivery.
+- If he asks for the content inline, paste it. Otherwise send.
+- A file path, a PR link, or "run `git pull`" is not a deliverable.
 
-If the file is genuinely too large to paste, say so explicitly and paste it in parts — do not
-silently downgrade to a summary.
+## THE CLONE LIVES AT `~/dev/relayshield`. `~/Side SaaS Hustle` IS NOW A DOCUMENTS FOLDER.
+
+**Changed 2026-09-05, at Andrew's request, and it SUPERSEDES every earlier statement in this file
+that the repo root is `~/Side SaaS Hustle`.**
+
+    ~/dev/relayshield        the git clone. Nothing is ever saved here by hand.
+    ~/Side SaaS Hustle       a plain folder, NOT a git repo. Every .md sent to Andrew goes here.
+
+**Why, and it is structural rather than a habit to remember.** The delivery rule above says send
+every `.md` deliverable so he can download it. Git refuses to overwrite an untracked file it did not
+write. So for as long as the download folder and the clone were the same directory, every file
+delivered was a file that would block the next merge — and it did, three times across two sessions,
+including once on the very file the same reply had just sent him.
+
+Naming the colliding files never fixed it, because the next delivery collides too. Stashing works
+but is a workaround applied forever. **Separating the two directories removes the collision instead
+of managing it**, and he can save anything he likes into `~/Side SaaS Hustle` without ever thinking
+about git again.
+
+**Second benefit, free: `~/dev/relayshield` has no space in it.** Rule 2 below exists entirely
+because `cd ~/Side SaaS Hustle` unquoted is three arguments. That whole class of failure is gone for
+the clone. Keep the quoting rule anyway for the documents folder, which still has the space.
+
+**Never hardcode either path in a committed script.** `generate_pdfs.py` and `rsscan/test_verify.py`
+both carried `/Users/andrewgibbs/Side SaaS Hustle/...` and would have broken silently on the move.
+Both now derive the repo root from `Path(__file__).resolve().parent`, which is correct wherever the
+clone lives and makes the next move free. A script that needs the repo root computes it; it does not
+know Andrew's home directory.
+
+Historical `NEXT_SESSION_*.md` files and other dated records still say the old path. Leave them —
+they are records of a day, not instructions, exactly as the WHERE THE CURRENT WORK LIST LIVES
+section says.
+
+## EVERY COMMAND BLOCK STARTS WITH THE MERGE. NO EXCEPTIONS.
+
+Added 2026-09-03 after the same failure three times in one session:
+
+    python3: can't open file '/Users/andrewgibbs/Side SaaS Hustle/tools/x.py': No such file
+
+Nothing was wrong with the script. **It was on the branch and not on his Mac**, because a push from
+this container puts a file on GitHub and nothing else. Handing him a command that runs a tool
+written this session, without the merge in front of it, guarantees that error.
+
+So every ```zsh block that runs anything from this repo begins with these five lines, verbatim:
+
+    cd ~/dev/relayshield
+    git checkout main
+    git --no-pager fetch origin claude/<this session's branch>
+    git stash push --include-untracked -m "pre-merge untracked"
+    git -c pull.rebase=false merge --no-edit FETCH_HEAD
+
+**THE STASH LINE IS NOT OPTIONAL, AND IT WAS ADDED 2026-09-04 AFTER THE SAME MERGE FAILED THREE
+TIMES ACROSS TWO SESSIONS.** The delivery rule at the top of this file and `git merge` collide by
+design: any `.md` sent to Andrew and saved into `~/Side SaaS Hustle` is an untracked file, and git
+refuses to clobber an untracked file it did not write. So the merge aborts, and every command after
+it in the block fails with "No such file or directory" — which reads like a broken script and is a
+blocked merge.
+
+Naming the colliding files does not fix it, because the NEXT delivery collides too. That is exactly
+what happened: a block that deleted `agent_baiting_scope.md` and `outreach_bot_prospects_curated.md`
+then aborted on `mpp_settlement_endpoint.md`, the file the same reply had just sent him.
+
+`git stash push --include-untracked` clears the tree unconditionally, so the block works whatever he
+saved. **Stash, never `rm`**: the copies are recoverable with `git stash pop` if one turns out to
+have been his own work rather than a paste of ours.
+
+**The stash line stays even though the clone moved out of the download folder on 2026-09-05.** The
+move removes the cause of the collision; the stash removes the consequence of any other untracked
+file, from a half-finished experiment to a stray build artefact. Belt and braces, and it costs one
+line.
+
+Then the actual command. It is four wasted lines when he is already up to date, and it is the
+difference between a working instruction and a broken one when he is not. **He is never up to date
+by default: the branch is pushed, and merging is a thing he does, not a thing the push does.**
 
 ### When `git pull` fails on his Mac
 
-`~/Side SaaS Hustle` is the local clone. A known recurring failure:
+`~/dev/relayshield` is the local clone. A known recurring failure:
 
     error: You have not concluded your merge (MERGE_HEAD exists).
 
@@ -57,9 +134,11 @@ Check each one against all five before sending it:
 
 1. **No trailing `#` comments.** zsh does not treat `#` as a comment interactively, so it becomes an
    argument and the command errors.
-2. **Quote the space in the repo path.** The clone root is `~/Side SaaS Hustle`, so:
-   `cd ~/"Side SaaS Hustle"`. Unquoted, zsh sees three arguments.
-3. **The repo root is `~/Side SaaS Hustle`, not `~/Side SaaS Hustle/relayshield`.** `relayshield/`
+2. **Quote any path with a space in it.** **Superseded in part 2026-09-05**: the clone is now
+   `~/dev/relayshield`, which has no space, so `cd ~/dev/relayshield` needs no quoting. The rule
+   still applies to `~/Side SaaS Hustle`, which is now the documents folder: unquoted, zsh sees
+   three arguments.
+3. **The repo root is `~/dev/relayshield`, not `~/dev/relayshield/relayshield`.** `relayshield/`
    is a subdirectory *inside* the repo holding only `README.md` and `mcp-server/`. `build_blog.py`,
    `wrangler.blog.toml` and every tool live at the root. He has landed in the subdirectory and hit
    "No such file or directory" more than once.
@@ -350,7 +429,208 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 
 ---
 
+## WHERE 2026-09-04 LEFT THINGS — read this first
+
+### THE BLOCKED SOURCE WAS REACHABLE ALL ALONG, AND IT MADE A DERIVED SHAPE WRONG
+
+The single most useful thing this session found, and it generalises well past Stripe.
+
+Two sessions recorded `docs.stripe.com` as egress-blocked and derived Stripe's wire shapes from
+prose instead, labelling them "derived, not verified". Both statements were true. The conclusion
+drawn from them was not: **that the shapes could not be verified from this container.**
+
+They could. Nobody had tried the two obvious neighbours:
+
+- **`registry.npmjs.org` is reachable**, and `mppx` — Stripe's OWN reference implementation of MPP —
+  is published there with readable source. `npm view` needs no browser.
+- **`raw.githubusercontent.com` is reachable**, and `github.com/tempoxyz/payment-auth-spec` is the
+  IETF draft that mppx cites, co-authored by Tempo and Stripe.
+
+Reading the implementation settled every open question in an hour, and **one of the two derived
+shapes was wrong in three separate places** — a missing `mode` key, `transaction_verification`
+where the real name is `transaction_verification_options`, and a missing
+`payment_method_types: ["crypto"]`. The pinned API version was wrong too: `2026-05-27.preview`
+where mppx pins `2026-07-29.preview`, which matters because **a probe on the wrong preview version
+reports "not enabled" for an account that is enabled.**
+
+**The general form, and it belongs next to "NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A
+CHECK": a blocked documentation site is not a blocked FACT.** Before recording anything as
+underived, try the package registry, the vendor's own SDK source, the spec repository, and
+raw.githubusercontent.com. A vendor that documents a protocol almost always ships an
+implementation of it somewhere fetchable, and the implementation is better evidence than the docs
+anyway.
+
+### MPP is an HTTP AUTHENTICATION SCHEME, not a JSON block in a response body
+
+The invented `mpp` block this endpoint shipped with on 2026-09-04 was not merely unverified, it was
+structurally wrong. MPP uses the `Payment` scheme under RFC 7235: the challenge rides
+**`WWW-Authenticate`**, the credential comes back in `Authorization`, the receipt goes out in
+`Payment-Receipt`. The challenge `id` is **HMAC-SHA256 bound to the challenge's own contents** over
+seven fixed pipe-delimited slots, which is what stops a client altering the amount and presenting an
+id we would still accept.
+
+That is implemented and tested now. **The credential side is not**, and the challenge is therefore
+switched OFF by default (`RELAYSHIELD_MPP_CHALLENGE=off`): redeeming a Shared Payment Token is a
+Stripe call this module does not make, and SPTs are in private preview on top of the crypto gate.
+**Advertising a payment method we would then reject is worse for the agent than never offering it**
+— it spends the agent's authorisation on a route that cannot complete.
+
+`npx mppx@latest validate <url>` is the objective compliance test and it runs on the Mac. It is the
+acceptance criterion, not our own reading.
+
+### relayshield_agentic_api.py IS RECONCILED. Item 8 is closed.
+
+It was far smaller than four sessions of carrying it implied: **+22 / -1**, both hunks live-only,
+fully readable in one screen.
+
+- **The branded `API_BASE_URL`** (`https://api.relayshield.net`, not the execute-api host), with a
+  five-line comment explaining that this URL is advertised as the resource in every 402 and is what
+  x402 indexers persist.
+- **The Bundle D "Door 2" branch**: a direct-Stripe bundle key must be metered ABOVE the
+  `has_subscription` test, or it is classed "unlimited under an existing subscription" and billed
+  nothing while the AWS door bills per call.
+
+Main has been moved to the live bytes VERBATIM — a pure move, no edits — so live is byte-identical
+to main, and `relayshield_agentic_api.py` is now in `deploy_lambdas.yml`: the `paths:` trigger, the
+`LAMBDA_MAP`, and `iam_github_deploy_invoke.json`. Recover, read, reconcile, then map, in that
+order and no other.
+
+### RULE 12 FIRED AGAIN, THE DAY AFTER IT WAS WRITTEN
+
+Stripe documentation was pasted into the session on 2026-09-04 with the account's **live
+`sk_test_` secret key interpolated into the curl samples**, exactly as on 2026-09-03. Stripe
+personalises examples for a signed-in reader; nobody typed a credential and one arrived anyway.
+
+**Roll it in the Dashboard under Developers, API keys.** And read rule 12 as what it is: not a
+one-off, a property of every vendor doc page read while signed in. Screenshots carry it too — the
+key is rendered into the image, so "I only sent a picture" is not a mitigation.
+
+
+### The MPP settlement endpoint is BUILT. Item 1 of the 2026-09-03 list, second half.
+
+`relayshield_mpp_settlement.py`, one endpoint, `POST /v1/mpp/mcp-registry-risk` at $0.35 on Base,
+settled through Stripe with a fallback to the rail that already collects. 30 offline tests. Full
+write-up in `mpp_settlement_endpoint.md`.
+
+**It is NOT live yet and needs two commands on the Mac**, in this order and no other. Note the
+shapes below were CORRECTED on 2026-09-04 against Stripe's own reference implementation — see
+"THE BLOCKED SOURCE WAS REACHABLE ALL ALONG" above:
+
+1. `sh tools/create_mpp_settlement_lambda.sh` — creates the function, its own IAM role, both gateway
+   routes, and proves the 402.
+2. `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/mpp_settlement_selftest.py` — settles whether
+   the Stripe parameter shapes are right.
+
+**Three things in it worth carrying:**
+
+- **It is a NEW FILE and not a branch in `relayshield_agentic_api.py`, on purpose.** That file still
+  carries unreconciled live drift (item 8 below). Adding an endpoint there and giving it a deploy
+  path is the 2026-08-17 mistake exactly. A new file has no live counterpart, so it cannot drift
+  from one. The detector is IMPORTED from agentic_api rather than copied, because this repo already
+  has four copies of one pattern table and does not need a fifth. The deployer's `resolve_deps` grep
+  is `^[[:space:]]*(import|from) relayshield_`, so a function-level indented import is still
+  packaged — checked against that grep, not assumed.
+- **It is not in `deploy_lambdas.yml`, and must not be until the function exists in AWS.** The
+  deployer calls `update-function-code` on whatever `LAMBDA_MAP` names, so mapping a function that
+  does not exist turns the first push red with a `ResourceNotFoundException` that reads exactly like
+  a broken deploy. Create first, map second. `relayshield-mpp-settlement` IS already in
+  `iam_github_deploy_invoke.json`, so the first CI deploy will not repeat run 134's denied probe.
+  **`sh tools/apply_deploy_invoke_policy.sh` still has to push that file to AWS** — the repo half
+  does not do it on its own.
+- **Two Stripe wire shapes in it are DERIVED, not verified**, because `docs.stripe.com` is blocked
+  from the container. Both are isolated in single builder functions with no branching so a
+  correction is one line, and `tools/mpp_settlement_selftest.py` exists to have Stripe name the
+  wrong parameter rather than guessing again. The `mpp` block in the 402 body says
+  `"version": "unverified"` in its own payload for the same reason. **Derived is not verified, and
+  saying so in the artefact is cheaper than being wrong in production.**
+
+### Andrew's merge failed, and BOTH halves of the failure came from one cause
+
+    error: The following untracked working tree files would be overwritten by merge:
+        agent_baiting_scope.md
+        outreach_bot_prospects_curated.md
+
+Both files are on `claude/top-10-todos-discord-lambda-vn4583` AND were saved by hand into
+`~/Side SaaS Hustle` from a chat paste — the delivery process at the top of this file, working. Git
+will not clobber an untracked file it did not write, so the copies collided and the merge aborted.
+`tools/stripe_machine_payments_probe.py` and `tools/fd8_prepare_republish.py` were then "missing"
+only because the merge that would have delivered them never completed.
+
+**The general form, and it will recur:** the chat-paste delivery rule and `git merge` collide by
+design. Anything pasted into chat AND committed blocks a later merge. The fix is to delete the
+hand-saved copy immediately before merging — the branch copy is identical, so nothing is lost.
+
+### The drift check RAN with the Discord bot in it, and the bot is clean
+
+Run 25, scheduled 2026-09-03 16:56, executed and went red. It opened issue #23, naming
+**relayshield-agentic-api and relayshield-developer-signup** — and NOT relayshield-discord-bot.
+That is the positive evidence 2026-09-03 was waiting for: the bot deployed, and live matches main.
+Closes the "the drift check has still never run with the Discord bot in it" item below.
+
+Deploy runs 135 and 136 are both GREEN, so the invoke-policy fix took and run 134's red probe is
+behind us.
+
+**Do not close #23's developer-signup half without re-checking.** Run 25 fired at 16:56 and deploy
+run 136 shipped at 17:57, an hour later, so the drift it names may already be gone. The next
+scheduled drift run answers it; a stale issue is not a finding.
+
+---
+
 ## WHERE 2026-09-03 LEFT THINGS — read this first
+
+### THE LIST FOR THE NEXT SESSION, in order (10 items)
+
+Written at the end of 2026-09-03. Everything above item 1 that used to be on the 2026-09-02 list is
+either done or has moved into these.
+
+1. **Stripe machine payments: probe, then build ONE endpoint.** The email to Jake is SENT with the
+   four questions. The next move does not wait on his reply: run
+   `tools/stripe_machine_payments_probe.py` (read-only) to learn whether the account can call the
+   x402 surface at all. Enabled means build one endpoint settling to Stripe alongside the existing
+   PayAI rail, which is the artefact their team responds to. Not enabled means that error text is a
+   better follow-up to Jake than a second nudge. **Settlement question answered: stablecoin payments
+   settle into the Stripe balance in USD, on the normal payout schedule.** Crypto in, dollars out,
+   same balance as the subscriptions.
+2. **Send the twelve.** `outreach_bot_prospects_curated.md` is written and hand-picked: five real
+   inboxes first, then the seven websites where the page has to carry a form. Track replies per 100
+   by channel. `TegroTON/ai-telegram-pay-miniapp` is the one worth the most care.
+3. **Apify article: submit to `#apify-writers` at the next quarterly call.** Draft is
+   `blog-apify-actor-as-agent-tool.md`. Three facts to confirm with the console open first, listed
+   in its own NOT FOR PUBLICATION section. **It must not appear on blog.relayshield.net first:**
+   originality is a programme rule and publishing early disqualifies it.
+4. **FD-8, FD-9 and FD-10 in one publish.** `tools/fd8_prepare_republish.py --dir ~/mcp-live
+   --write` makes all the edits, including the `?source=pypi` link in pyproject.toml, and refuses
+   to invent the publish command. Then FD-11: submit the Smithery LISTING, decline hosting.
+5. **Build `agent-bait-scan`.** Recommended, 3.5 days, scoped in `agent_baiting_scope.md`. Island's
+   research names a gap our catalogue genuinely has: we screen the name and the domain, and nothing
+   of ours reads the INSTRUCTIONS an agent is given. The differentiator is signal 4, joining those
+   instructions to the criminal corpus, which nobody replicating this can do.
+6. **Mini App v1**, then the channel submissions. The discovery list is measured and waiting:
+   `@trendingapps` (3.9M, and `@twa_apps` is the SAME channel), `@web3telegrambotx` (72,742),
+   `@findminiapp` (56,380), `@onclicka_tma_en` (33,723), `@telegtapps` (9,671). Each gives one first
+   impression and we spend it by submitting before the Mini App exists.
+7. **Measure the widget.** It is live and keyless. The number that matters is installs making a
+   SECOND day of calls, not total calls, and `source=tg-widget` is on every request.
+8. **`relayshield-agentic-api` drift.** Still recovered-but-unreconciled on
+   `claude/recovered-live-relayshield-agentic-api`. Live carries a branded API_BASE_URL and a Bundle
+   D Stripe branch main does not. Same shape as the developer-signup recovery that worked.
+9. **INTEL-5 funnel.** `tools/diagnose_stolen_sessions.py` on the Mac. Until it runs, no count out
+   of `relayshield_stolen_sessions` means anything about the criminal market.
+10. **XSOAR.** Nothing to do. `xsoar_pack_watch.yml` runs daily and opens an issue the day the pack
+    lands on master. Checked 2026-09-03: still not on master.
+
+### What this session shipped
+
+- **The Discord footer is live**, after the drift diff was read, the function mapped, and run 134's
+  red probe understood as a denied `lambda:InvokeFunction` rather than a failed deploy.
+- **`relayshield_developer_signup.py` recovered and reconciled** — 700 live-only lines including two
+  Stripe revenue doors — then mapped in the deployer, in that order.
+- **The Telegram widget**, keyless end to end, with `/v1/link-check` new and the gateway route live.
+- **The prospecting pipeline**, now with contact hygiene that screens README examples out of both
+  the extractor and the generator.
+- **Attribution keys** for `tg-widget` and `pypi`, both registered BEFORE the links that use them.
+
+
 
 ### The founder could not see the Discord email-check footer. The diagnosis in the room was wrong.
 
@@ -628,6 +908,27 @@ Checked live against the registry API on 2026-09-03, rather than from the doc:
 So the single `mcp-publisher` re-publish fixes the attribution key, the version lag and the
 repository URL together. Do all three in one version rather than three.
 
+### The Apify Actor exists, and the session that could not find it was the one that was wrong
+
+`relayshieldadmin/relayshield-security-tools` is public on Apify Store, pay per usage, 154 runs, an
+MCP server over Streamable HTTP. `_APIFY_BANNER` was accurate all along. Two lessons, and the second
+is the useful one:
+
+- **Absence of evidence from a blocked container is not evidence of absence.** apify.com is egress
+  blocked here and a web search found nothing, and the honest conclusion was "unresolved", which is
+  what was recorded. Had it been recorded as "the Actor does not exist", the next session would have
+  deleted a true claim from a live page.
+- **The Actor's Dockerfile carries the best technical story we have written down this quarter**, and
+  it was invisible to this repo because the Actor's source lives on Apify rather than here. Worth
+  asking what else is like that.
+
+### The developers page now points AT Apify, not just away from it
+
+`_APIFY_BANNER` handles arrivals FROM Apify. Nothing on the page mentioned the Actor, so the only
+way to find it was to already be on Apify. Added as a card in the SDK grid, linking the Store
+listing, with no run count on it: numbers on a landing page are a maintenance burden and the listing
+carries the real one.
+
 ### Changed 2026-09-03
 
 - **`tools/discord_bot_drift.sh`** — read-only, runs on the Mac, needs no waiting for 13:00 UTC. It
@@ -643,6 +944,17 @@ repository URL together. Do all three in one version rather than three.
   needed the same three questions the same day. `tools/discord_bot_drift.sh` is now a wrapper, so
   every reference to it in this file and in the workflow comments still works.
 - **`xsoar_pack_watch.yml`** — the XSOAR gate is watched daily instead of remembered.
+- **`outreach_bot_prospects_curated.md`** — the twelve worth sending first, hand-picked from the
+  generated 40, each with the contact, the rationale, and a message written to that prospect rather
+  than to its tag. Includes the three that are deliberately NOT on it and why.
+- **`tools/stripe_machine_payments_probe.py`** — read-only. Answers "is this account enabled for
+  machine payments" before anybody writes an endpoint against it.
+- **`tools/fd8_prepare_republish.py`** — makes the server.json edits for FD-8, FD-9 and FD-10 and
+  refuses to invent a publish command: it greps the repo's own README for the one that already
+  works.
+- **`agent_baiting_scope.md`** — what Island's AgentBaiting research means for us, what
+  `mcp-registry-risk` already covers, and the one endpoint worth building.
+- **`blog-apify-actor-as-agent-tool.md`** — the Apify content-programme draft.
 - **`tools/generate_outreach.py`** + `test_generate_outreach.py` — item 2's generator, and the ten
   tests that stop a draft ever diagnosing a prospect.
 - **`miniapp_discovery_and_stripe_choice.md`** — why the widget must not carry a Mini App link, what
@@ -694,7 +1006,18 @@ repository URL together. Do all three in one version rather than three.
    GENERATED DRAFT PER PROSPECT that he reviews and sends, keyed on what each repo actually does.
    Not mass mail: volume is not the lever, relevance is, and blasting maintainers who never asked is
    how a domain gets blocked.
-3. **Apify: "your Actor as a tool for AI agents" post. BLOCKED ON A QUESTION NOBODY HAS ASKED:
+3. **Apify post. UNBLOCKED 2026-09-03: THE ACTOR EXISTS AND THE DRAFT IS WRITTEN.**
+   `relayshieldadmin/relayshield-security-tools`, public, pay-per-usage, an MCP server over
+   Streamable HTTP in Standby mode, 154 runs, last build 0.1.7. So the banner was true and the
+   session that could not find it was wrong, which is the right way round for once.
+   `blog-apify-actor-as-agent-tool.md` is the draft: ~1,300 publishable words on why Standby rather
+   than run-per-request, and the dependency conflict that crash-looped every real run
+   (`apify>=2,<3` pulls a Crawlee whose `HttpHeaders` model dies against the Pydantic FastMCP
+   needs, with "cannot specify both default and default_factory" at import time; `apify>=4,<5`
+   fixes it by going FORWARD, not back). **Its NOT FOR PUBLICATION section carries the three facts
+   to verify with the console open before submitting, and the one rule that would disqualify it:
+   originality, so it must NOT go on blog.relayshield.net first.** That inverts our usual
+   canonical-first order. Original entry follows. **BLOCKED ON A QUESTION NOBODY HAD ASKED:
    DOES OUR APIFY ACTOR EXIST?** The programme's own rule is that articles are "written by
    developers who've actually built the thing they're writing about", 1,000 to 5,000 words,
    original, submitted through their Discord, $500 on publication. Both halves of the theme

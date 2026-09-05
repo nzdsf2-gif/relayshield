@@ -9,7 +9,7 @@ canonical: (fill in after Hashnode publish)
 
 Over the past two weeks we've been getting RelayShield's two agentic-security checks — MCP server registry risk and AI-agent-sourced credential breach detection — into the hands of developers building agents, not just people running our dashboard. Today the third and final piece lands: **[`openai-agents-relayshield`](https://github.com/nzdsf2-gif/openai-agents-relayshield)**, live on PyPI right now.
 
-That completes the set: [CrewAI](https://github.com/crewAIInc/crewAI/pull/6550), [LangChain](https://github.com/nzdsf2-gif/langchain-relayshield), and now the OpenAI Agents SDK — the three frameworks most people are actually building agents on top of today.
+Alongside [`langchain-relayshield`](https://github.com/nzdsf2-gif/langchain-relayshield), that is two of the three frameworks most people are actually building agents on top of today, both installable right now. The CrewAI integration is written and [submitted upstream](https://github.com/crewAIInc/crewAI/pull/6550), and it is not merged yet.
 
 ```bash
 pip install openai-agents-relayshield
@@ -59,3 +59,21 @@ pip install openai-agents-relayshield
 ```
 
 Get a RelayShield API key at [api.relayshield.net/developers](https://api.relayshield.net/developers). Source, tests, and the full gate design writeup: [github.com/nzdsf2-gif/openai-agents-relayshield](https://github.com/nzdsf2-gif/openai-agents-relayshield).
+
+## NOT FOR PUBLICATION
+
+**Corrected 2026-09-05, before publishing, and the correction is the XSOAR rule applied to a
+different claim.** The draft said "that completes the set: CrewAI, LangChain, and now the OpenAI
+Agents SDK", linking CrewAI to a pull request while linking the other two to published packages. A
+reader spots that asymmetry in ten seconds, and the PR it points at has now been open 45 days with
+CodeRabbit green and **no human review ever** — a stale-bot comment arrived 2026-09-05. If it is
+auto-closed, that link becomes a live citation of a rejected contribution on our own blog.
+
+"Submitted a PR" is not "covers CrewAI", the same way "contributed a content pack" was not "ships
+with Cortex XSOAR". Reworded to say exactly what is true.
+
+**The stronger fix is to make the original sentence true**: publish `crewai-relayshield` to PyPI as
+a standalone package, which is precisely what LangChain and the OpenAI Agents SDK both ended up
+doing after the monorepo-PR route turned out to be the wrong model. CrewAI is the only one of the
+three still betting on a merge we do not control. Once that package is live, restore the
+"completes the set" line and link the package rather than the PR.

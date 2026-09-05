@@ -111,7 +111,12 @@ X402_V2_ENABLED_PATHS: set[str] = {
     "/v1/payg/prompt-injection-breach",
 }
 
-API_BASE_URL = "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod"
+# Branded host on purpose. This is the resource URL advertised in every 402
+# challenge, which is what x402 indexers (CDP Bazaar, x402scan) persist and
+# what agents call from then on. The raw execute-api hostname pinned callers to
+# an AWS-internal URL that breaks if the API Gateway ID changes, and carried no
+# "relayshield" string, making the Bazaar entries unfindable by name.
+API_BASE_URL = "https://api.relayshield.net"
 
 PAYG_PRICE_UNITS = {
     "/v1/payg/mcp-registry-risk":       350000,   # $0.35 — mirrors metered price
@@ -1183,6 +1188,22 @@ def lambda_handler(event: dict, context) -> dict:
                 key_record["aws_account_id"], key_record["aws_license_arn"], AWS_DIMENSION_NAMES.get(path, "")
             )
             rail, account_ref = "aws", key_record["aws_account_id"]
+        elif (key_record.get("bundle_d_access")
+              and not key_record.get("aws_customer_id")
+              and key_record.get("stripe_customer_id")):
+            # Bundle D "Door 2": the same bundle bought directly on Stripe.
+            # Added 2026-08-11, and it MUST sit above the has_subscription
+            # branch below. A direct bundle key carries stripe_subscription_id,
+            # so without this it would be classed "unlimited under an existing
+            # subscription" and billed nothing, making the direct door free
+            # where the AWS door charges per call. Same parity bug as the one
+            # fixed in relayshield_api.py the same day, opposite symptom:
+            # there it 402'd, here it undercharges.
+            #
+            # The $299 monthly is a MINIMUM, exactly as on AWS, not an
+            # all-you-can-eat allowance.
+            _record_stripe_meter_event(key_record["stripe_customer_id"], path)
+            rail, account_ref = "stripe", key_record["stripe_customer_id"]
         else:
             has_subscription = bool(key_record.get("stripe_subscription_id")) or bool(key_record.get("intel_plan_tier"))
             if not has_subscription:

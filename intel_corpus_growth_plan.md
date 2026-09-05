@@ -416,7 +416,7 @@ false.
 
 Command (his Mac, zsh, needs AWS):
 
-    cd ~/"Side SaaS Hustle"
+    cd ~/dev/relayshield
     AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --pending
 
 That prints the active/failing split and the pending backlog. Read-only.

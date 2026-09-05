@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crewai-relayshield"
+version = "0.1.0"
+description = "Pre-execution gate for CrewAI: check an MCP server or package with RelayShield before an agent connects to it"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "RelayShield", email = "support@relayshield.net" }]
+keywords = ["crewai", "mcp", "security", "agent", "supply-chain", "prompt-injection"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+]
+# No hard dependency on crewai, on purpose. The gate core and decide() are pure
+# stdlib and testable alone; only install() needs the framework, and it imports
+# it lazily with a message that says so. Pinning crewai here would make this
+# package uninstallable next to a different crewai version for no gain.
+dependencies = []
+
+[project.optional-dependencies]
+crewai = ["crewai>=1.15"]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://api.relayshield.net/developers?source=pypi"
+Documentation = "https://api.relayshield.net/developers?source=pypi"
+Source = "https://github.com/nzdsf2-gif/relayshield"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crewai_relayshield"]

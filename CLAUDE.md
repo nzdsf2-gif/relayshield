@@ -494,8 +494,27 @@ because the misreading is more instructive than the item.
    profile. A 403 there is the text to send `machine-payments@stripe.com`.
 6. ~~Rotate the Stripe key and revoke the old one.~~ **DONE, previous session.** The key was rotated
    by hand. The `_SECRET_TTL = 300` fix that made revocation safe is in all three caching handlers.
-7. **Publish `crewai-relayshield` to PyPI.** Half a day. Tool code exists and is smoke-tested in
-   `crewAIInc/crewAI#6550`; same standalone-package model as the other two.
+7. **`crewai-relayshield` is BUILT and needs ONE command to publish.** 2026-09-05.
+   `crewai-relayshield/`, 22 offline tests, wheel and sdist both build clean. Publishing needs a
+   PyPI token, so it is founder-side: `python3 -m build` then `twine upload dist/*`.
+
+   **The premise of this item was out of date, and checking it changed the design.** These notes
+   carried `crewAIInc/crewAI#6550` as "still awaiting maintainer review", and a gate written
+   against an unmerged PR is a gate nobody can install. Read from the `crewai` 1.15.20 wheel on
+   2026-09-05: **the hook SHIPPED.** `crewai.hooks` exports `before_tool_call`,
+   `register_before_tool_call_hook` and `ToolCallHookContext`, and returning `False` from a
+   before-hook aborts the tool call. So the package binds to a released API, and that was proven
+   end to end in a venv with the real framework: the hook registers, returns `False` on a finding,
+   `None` on a clean answer, and ignores tools it does not protect.
+
+   Two design decisions worth not re-litigating. **It declares no hard dependency on crewai**: the
+   gate core is pure stdlib, `install()` imports the framework lazily, and pinning crewai would
+   make the package uninstallable next to a different crewai version for no gain. And it is
+   **fail-closed**: only `no_known_finding` proceeds, because a gate that lets the call through
+   when the check times out is a gate anyone can remove by causing a timeout. `fail_open=True`
+   releases `DEFER` only -- a check that could not be COMPLETED -- while a completed `REVIEW`
+   still blocks and a `FINDING` always blocks. There is deliberately no setting that lets a
+   known-bad target through, and a test asserts that.
 8. **FD-8/9/10 in one re-publish.** Four defects in the live registry record, read on 2026-09-05:
    pinned at 0.2.7 while PyPI is 0.2.9, `websiteUrl` with no `?source=mcp-registry`,
    `repository.url` naming `github.com/relayshield/...` against an `io.github.nzdsf2-gif/`
@@ -560,8 +579,14 @@ moment is only reachable if the skill is somewhere they can install it from.
 
 **Do not write submission instructions for any route before reading its rules.** That is the FD-2
 lesson (a PR that would have been closed without comment, against a page whose own last section said
-so) and the CrewAI lesson (a repo whose README says it is unmaintained and accepts nothing). Both
-cost real effort against destinations that were never open.
+so) and the CrewAI lesson (PR #6550, opened against a live repo and still unreviewed months later:
+open is not the same as responsive). Both cost real effort against destinations that never took it.
+
+**CORRECTION, 2026-09-05.** An earlier draft of this line described CrewAI as "a repo whose README
+says it is unmaintained and accepts nothing". That is `anthropics/commerce-agents`, not CrewAI, and
+the two were conflated in a single sentence. **CrewAI is actively maintained** -- `crewai` 1.15.20
+was published to PyPI on 2026-09-04, the day before this was written. The lesson from #6550 is about
+an unreviewed PR, not a dead framework, and the difference decides whether item 7 is worth doing.
 
 ### THE ROUTE WAS CHECKED, 2026-09-05, AND IT IS OPEN
 

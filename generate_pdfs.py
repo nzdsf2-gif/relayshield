@@ -1134,7 +1134,11 @@ def build_solana_grant(output_path):
 
 
 if __name__ == '__main__':
-    base = '/Users/andrewgibbs/Side SaaS Hustle'
+    # Derived from this file's own location, never hardcoded. The clone moved
+    # from ~/Side SaaS Hustle to ~/dev/relayshield on 2026-09-05 and an
+    # absolute path here would have silently broken; the next move costs
+    # nothing.
+    base = str(Path(__file__).resolve().parent)
     build_msp(f'{base}/RelayShield_MSP_Solution_Brief.pdf')
     build_exec(f'{base}/RelayShield_Executive_Briefing.pdf')
     build_solana_grant(f'{base}/crypto-shield-app/RelayShield_Solana_Grant_Pitch_Deck.pdf')

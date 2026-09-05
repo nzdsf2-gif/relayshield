@@ -10,7 +10,7 @@ copy. Try these before accepting the reconstruction.
 
 ### (a) The Mac's own working tree — most likely, check first
 
-`~/Side SaaS Hustle` **is** the local clone. If the enhancements were edited there and never
+`~/dev/relayshield` **is** the local clone. If the enhancements were edited there and never
 committed, the changes may literally still be sitting in the working tree, a stash, or a dangling
 commit.
 
@@ -57,7 +57,7 @@ Lambda has nothing older and this route is closed.
 ### (c) Time Machine / local backups on the Mac
 
 If (a) and (b) come up empty, a Time Machine snapshot of
-`~/Side SaaS Hustle/relayshield_telegram_webhook.py` from before 2026-08-19 is the last copy that
+`~/dev/relayshield/relayshield_telegram_webhook.py` from before 2026-08-19 is the last copy that
 could exist.
 
 **If all three are empty, the reconstruction now on `main` is the only version there is** — which is

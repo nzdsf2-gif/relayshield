@@ -80,6 +80,12 @@ on:
       # byte-identical to the recovery commit and missing exactly the
       # registration commit, which is the ordinary stale case.
       - 'relayshield_developer_signup.py'
+      # Mapped 2026-09-04 after its recovered diff was read and main was moved
+      # to the live bytes verbatim. The path entry matters as much as the map
+      # entry: the deployer only ships a function when the PUSH touched its
+      # source, so a commit that maps a handler while editing only workflow
+      # files deploys nothing at all.
+      - 'relayshield_agentic_api.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
@@ -185,6 +191,16 @@ jobs:
             # and returns 401 without doing any work -- a real response, which
             # is all the probe asserts.
             ["relayshield_discord_bot.py"]="relayshield-discord-bot"
+            # Reconciled 2026-09-04, in the order the DRIFT RULE requires: the
+            # live artifact was recovered onto
+            # claude/recovered-live-relayshield-agentic-api, its diff read in
+            # full (+22/-1, both hunks live-only: the branded API_BASE_URL and
+            # the Bundle D direct-Stripe billing branch), and main was moved to
+            # the live bytes VERBATIM before this line was written. main is now
+            # byte-identical to what is deployed, so this deploy is a no-op that
+            # proves the path rather than a change that erases 22 lines of
+            # billing logic.
+            ["relayshield_agentic_api.py"]="relayshield-agentic-api"
             # Name verified against AWS 2026-09-03 by tools/handler_drift.sh,
             # not assumed: python3.12, and untouched since 2026-08-17 because
             # nothing has ever deployed it automatically.

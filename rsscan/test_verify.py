@@ -5,7 +5,12 @@ the real shipped patterns, not a copy that can drift.
 """
 import re as _re
 
-SRC = "/Users/andrewgibbs/Side SaaS Hustle/relayshield_api.py"
+from pathlib import Path
+
+# Derived from this file's own location rather than hardcoded: rsscan/ sits
+# inside the clone, so the source is one directory up whatever the clone is
+# called or wherever it lives.
+SRC = str(Path(__file__).resolve().parent.parent / "relayshield_api.py")
 src = open(SRC).read().split("\n")
 
 

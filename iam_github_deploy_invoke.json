@@ -8,6 +8,7 @@
         "lambda:InvokeFunction"
       ],
       "Resource": [
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-agentic-api",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-alchemy-webhook",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-api",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-approval-monitor",
@@ -23,6 +24,7 @@
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-intel-monitor",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-liquidation-monitor",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-monthly-oauth-reminder",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-mpp-settlement",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-oauth-watchlist-monitor",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-quarterly-sweep-sender",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-sim-swap-monitor",

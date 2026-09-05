@@ -72,6 +72,13 @@ STRIPE_METER_EVENTS = {
 PRICE_CENTS = {
     "/v1/metered/mcp-registry-risk":      35,   # $0.35/call
     "/v1/metered/prompt-injection-breach": 35,   # $0.35/call
+    # $0.50 because it does more work than a lookup: several bounded fetches to
+    # GitHub, then every signal mcp-registry-risk runs. Priced level with
+    # /v1/payg/domain, which does the same kind of external work. Deliberately
+    # NOT $1.00 -- the realistic caller triages several candidate servers before
+    # connecting to one, and a price that makes them pre-filter means they call
+    # mcp-registry-risk alone and skip the check that matters.
+    "/v1/metered/agent-bait-scan":        50,   # $0.50/call
 }
 
 _secret_cache: dict[str, str] = {}
@@ -109,6 +116,7 @@ SOL_FEE_PAYER        = "EwWqGE4ZFKLofuestmU4LDdK7XM1N4ALgdZccwYugwGd"
 X402_V2_ENABLED_PATHS: set[str] = {
     "/v1/payg/mcp-registry-risk",
     "/v1/payg/prompt-injection-breach",
+    "/v1/payg/agent-bait-scan",
 }
 
 # Branded host on purpose. This is the resource URL advertised in every 402
@@ -121,6 +129,7 @@ API_BASE_URL = "https://api.relayshield.net"
 PAYG_PRICE_UNITS = {
     "/v1/payg/mcp-registry-risk":       350000,   # $0.35 — mirrors metered price
     "/v1/payg/prompt-injection-breach": 350000,   # $0.35 — mirrors metered price
+    "/v1/payg/agent-bait-scan":         500000,   # $0.50 — mirrors metered price
 }
 
 # AWS Marketplace Bundle D usage dimensions — API identifiers must match
@@ -129,6 +138,14 @@ BUNDLE_D_PRODUCT_CODE = os.environ.get("BUNDLE_D_PRODUCT_CODE", "")
 AWS_DIMENSION_NAMES = {
     "/v1/metered/mcp-registry-risk":       "mcp_registry_risk",
     "/v1/metered/prompt-injection-breach": "prompt_injection_breach",
+    # agent-bait-scan is deliberately ABSENT, and this comment is the reason.
+    # Adding a third usage dimension to a PUBLISHED AWS Marketplace product is a
+    # change set against the listing with AWS's own review latency on their side
+    # of it -- a bad place to discover a fresh heuristic needs tuning. It goes in
+    # once the endpoint has run against real traffic long enough to have a
+    # measured false-positive rate. Until then an AWS-licensed caller falls
+    # through to the branches below and is metered on the Stripe rail, which is
+    # correct: it is billed, just not through a Marketplace dimension.
 }
 
 RDAP_URL = "https://rdap.org/domain/{domain}"
@@ -431,6 +448,14 @@ def handle_mcp_registry_risk(params: dict) -> dict:
         "domain":   domain,
         "verdict":  verdict,
         "findings": findings,
+        # Names this endpoint's blind spot rather than leaving a caller to assume
+        # it has none. Two endpoints means an integrator calls one and believes
+        # they are covered, which is the "we scanned it and it was clean" failure
+        # recreated at our own API surface. No latency, no network call: this
+        # endpoint checks the NAME and the DOMAIN; it never reads the
+        # INSTRUCTIONS the server gives an agent.
+        "instructions_checked": False,
+        "see_also": "/v1/metered/agent-bait-scan",
         "note": (
             "No red flags found — this is not proof of safety. MCP registry security tooling "
             "coverage is minimal industry-wide as of 2026-07; treat absence of findings as "
@@ -689,6 +714,14 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "to it or grants it tool-calling access — flags unverified publishers, known-malicious "
         "servers, and other trust signals. Call before an autonomous agent adds a new MCP server "
         "to its toolset."
+    ),
+    "/v1/payg/agent-bait-scan": (
+        "Reads the instructions an agent is given -- README, AGENTS.md, CLAUDE.md, "
+        ".cursorrules, MCP manifests and tool descriptions -- and reports what they "
+        "would cause an agent to do: fetch and execute remote scripts, ignore prior "
+        "instructions, or touch credential files. Every referenced domain is checked "
+        "against RelayShield's criminal indicator corpus. Call before connecting an "
+        "agent to an MCP server or installing a tool it found on its own."
     ),
     "/v1/payg/prompt-injection-breach": (
         "Check whether an email address tied to an AI agent session has an active stolen "
@@ -1102,9 +1135,16 @@ def handle_payg_request(path: str, event: dict) -> dict:
         return _err("Invalid or expired payment proof, or settlement failed — pay again and retry.", 402)
     _log_payg_settlement(path, PAYG_PRICE_UNITS.get(path, 0), settlement)
 
+    # Imported inside the function, matching the pattern relayshield_mpp_settlement
+    # established: module import stays cheap and probe-safe, and the deployer's
+    # resolve_deps grep is `^[[:space:]]*(import|from) relayshield_`, so an
+    # indented import is still packaged. Checked against that grep, not assumed.
+    from relayshield_agent_bait_scan import handle_agent_bait_scan
+
     payg_routes = {
         "/v1/payg/mcp-registry-risk":       handle_mcp_registry_risk,
         "/v1/payg/prompt-injection-breach": handle_prompt_injection_breach,
+        "/v1/payg/agent-bait-scan":         handle_agent_bait_scan,
     }
     handler = payg_routes.get(path)
     if not handler:
@@ -1126,9 +1166,16 @@ def handle_payg_request(path: str, event: dict) -> dict:
 # with relayshield_api.py.
 # ---------------------------------------------------------------------------
 
+def _route_agent_bait_scan(params: dict) -> dict:
+    """Metered door. Same one-way import as the PAYG door above."""
+    from relayshield_agent_bait_scan import handle_agent_bait_scan
+    return handle_agent_bait_scan(params)
+
+
 ROUTES = {
     "/v1/metered/mcp-registry-risk":       handle_mcp_registry_risk,
     "/v1/metered/prompt-injection-breach": handle_prompt_injection_breach,
+    "/v1/metered/agent-bait-scan":         _route_agent_bait_scan,
 }
 
 

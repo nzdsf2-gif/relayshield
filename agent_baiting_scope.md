@@ -165,3 +165,55 @@ unmeasured heuristic into the response of an endpoint AWS Marketplace customers 
 
 The test corpus decides whether any of this is worth having. Build it first, as this document
 already says.
+
+## PRICING AND BUNDLE PLACEMENT — decided 2026-09-05
+
+**Not built. This document is a scope and a decision, and no code exists yet.** Saying so plainly
+because "did you build it?" had to be asked, which means the previous entry read like a build report.
+
+### It belongs in Bundle D. That was never the question.
+
+The founder's instinct is right and it does not conflict with the decision above. Two different
+questions were being answered:
+
+- **Same ENDPOINT as `mcp-registry-risk`?** No. Different latency profile, different failure modes,
+  different unit of work, on a path that is already earning.
+- **Same BUNDLE as `mcp-registry-risk`?** **Yes.** Bundle D is "Agentic Attack Surface". An endpoint
+  that reads the instructions an agent is given is the most on-theme thing that could be added to
+  it, and it strengthens a $299/mo minimum that currently rests on two metered dimensions.
+
+### Price: $0.50 per call
+
+| Endpoint | Price | Work it does |
+|---|---|---|
+| `wallet-risk`, `token-security` | $0.05 | one corpus lookup |
+| `tech-stack-cve` | $0.20 | corpus join, no fetch |
+| `mcp-registry-risk` | $0.35 | corpus lookup, one RDAP call |
+| **`agent-bait-scan`** | **$0.50** | **six-ish third-party fetches, then every signal above** |
+| `domain` | $0.50 | external lookups |
+| `bulk-identity-risk` | $2.00 | hierarchical, many subjects |
+
+$0.50 sits exactly where the work does: more than `mcp-registry-risk` because it makes real network
+calls to GitHub and a package registry, the same as `domain` which does the same kind of work, and
+far below `bulk-identity-risk` which is a different unit entirely.
+
+**Do not go to $1.00.** The realistic caller is an agent triaging several candidate MCP servers
+before connecting to one. Ten candidates at $0.50 is $5.00 and defensible; at $1.00 the buyer starts
+pre-filtering, which means calling `mcp-registry-risk` alone and skipping the check that matters.
+Pricing that discourages the second call recreates the coverage gap this endpoint exists to close.
+
+### Sequencing, because one of the three doors has a gate
+
+1. **`POST /v1/payg/agent-bait-scan` first, on x402.** No gate, no review, ships the day it is built,
+   and it is the door an agent actually arrives at.
+2. **`POST /v1/metered/agent-bait-scan` second**, for API-key callers, same build.
+3. **The AWS Bundle D dimension LAST, and it is not free.** Bundle D today has exactly two metered
+   dimensions in `AWS_DIMENSION_NAMES` — `mcp_registry_risk` and `prompt_injection_breach`. Adding a
+   third to a PUBLISHED Marketplace product is a change set against the listing, with AWS's own
+   review latency on their side of it. Worth doing, and worth doing after the endpoint has run
+   against real traffic long enough to have a measured false-positive rate, because a change set is
+   a bad place to discover the heuristic needs tuning.
+
+Bundle D subscribers are billed the $299 monthly minimum either way, so the per-call price mainly
+governs the PAYG/x402 door and the AWS metered dimension. It is still the number that decides
+whether an agent calls it twice.

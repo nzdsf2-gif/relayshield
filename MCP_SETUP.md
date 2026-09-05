@@ -60,7 +60,7 @@ Open (or create) `~/Library/Application Support/Claude/claude_desktop_config.jso
   "mcpServers": {
     "relayshield": {
       "command": "/Users/andrewgibbs/anaconda3/bin/python3",
-      "args": ["/Users/andrewgibbs/Side SaaS Hustle/relayshield_mcp_server.py"],
+      "args": ["~/dev/relayshield/relayshield_mcp_server.py"],
       "env": {
         "RELAYSHIELD_API_URL": "https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod",
         "RELAYSHIELD_API_KEY": "YOUR_API_KEY_VALUE_HERE"
@@ -86,7 +86,7 @@ Add the MCP server to your Claude Code project settings:
 ```bash
 claude mcp add relayshield \
   --command python3 \
-  --args "/Users/andrewgibbs/Side SaaS Hustle/relayshield_mcp_server.py" \
+  --args "~/dev/relayshield/relayshield_mcp_server.py" \
   --env RELAYSHIELD_API_URL=https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod \
   --env RELAYSHIELD_API_KEY=YOUR_API_KEY_VALUE_HERE
 ```
@@ -128,7 +128,7 @@ Scan this URL for malware: https://google.com
 Before trusting it in Claude, verify the server launches cleanly:
 
 ```bash
-cd "/Users/andrewgibbs/Side SaaS Hustle"
+cd "~/dev/relayshield"
 RELAYSHIELD_API_URL="https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod" \
 RELAYSHIELD_API_KEY="YOUR_KEY" \
 python3 relayshield_mcp_server.py

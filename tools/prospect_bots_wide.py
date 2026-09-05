@@ -45,7 +45,7 @@ extortion email.
 
 USAGE (on the Mac -- this needs a GitHub token and outbound HTTPS)
 
-    cd ~/"Side SaaS Hustle"
+    cd ~/dev/relayshield
     python3 tools/prospect_bots_wide.py --limit 3000
 
 Writes prospects_wide.jsonl. Compare with --min-score to tighten.

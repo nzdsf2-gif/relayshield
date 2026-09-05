@@ -25,7 +25,7 @@ them, and changing a name after publishing means a version bump everywhere.
 ## 1. GitHub repo (everything else references it)
 
 ```bash
-cd "/Users/andrewgibbs/Side SaaS Hustle/rsscan"
+cd "~/dev/relayshield/rsscan"
 git init && git add -A
 git commit -m "rsscan 0.1.0"
 gh repo create RelayShield/rsscan --public --source=. --push \

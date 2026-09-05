@@ -76,7 +76,7 @@ aws() { command aws --profile "$PROFILE" --region "$REGION" --no-cli-pager "$@";
 
 if [ ! -f "$FILE" ]; then
   echo "STOP: $FILE not found. Run this from the repo root:" >&2
-  echo "  cd ~/\"Side SaaS Hustle\" && sh tools/handler_drift.sh $FILE" >&2
+  echo "  cd ~/dev/relayshield && sh tools/handler_drift.sh $FILE" >&2
   exit 1
 fi
 

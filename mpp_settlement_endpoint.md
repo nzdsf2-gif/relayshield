@@ -16,7 +16,7 @@ The command was right and the clone was not. `git merge` refused with:
         agent_baiting_scope.md
         outreach_bot_prospects_curated.md
 
-Both files are ON the branch, and both were ALSO saved by hand into `~/Side SaaS Hustle` from a chat
+Both files are ON the branch, and both were ALSO saved by hand into `~/dev/relayshield` from a chat
 paste -- which is the delivery process working exactly as CLAUDE.md describes it. Git will not
 clobber an untracked file it did not write, so the two copies collided. The branch copies are
 identical to what was pasted, so deleting the local ones loses nothing.

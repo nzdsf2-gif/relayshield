@@ -16,7 +16,7 @@
 ### 1a. Zip and upload
 
 ```bash
-cd "/Users/andrewgibbs/Side SaaS Hustle"
+cd "~/dev/relayshield"
 zip relayshield_api.zip relayshield_api.py
 ```
 

@@ -103,3 +103,65 @@ indicators in a category gets quoted anywhere.
 
 The test corpus is the part that decides whether it is any good, and it is the part most likely to
 be skipped. Build it from real repositories, hostile and benign, before writing a single pattern.
+
+---
+
+## DECIDED 2026-09-05: its own endpoint, sharing code, with one field added to the live one
+
+Asked by the founder: should this ship as part of the existing MCP server typosquat check rather
+than as a new endpoint?
+
+**No, and yes, in that order.** Separate endpoint, shared implementation, and one cheap change to
+`mcp-registry-risk` that closes the gap a second endpoint would otherwise open.
+
+### Why not fold it into `/v1/metered/mcp-registry-risk`
+
+That endpoint is live, in Bundle D, on AWS Marketplace, and exposed through the HF Space and the
+Apify Actor. Today it answers from DynamoDB and at most one RDAP lookup. `agent-bait-scan` fetches
+a README, an `AGENTS.md`, a manifest and package metadata from GitHub and a registry — several
+network calls to third parties, with rate limits, timeouts and partial failures of its own.
+
+Bolting that into the live endpoint changes its latency profile and its failure modes, on a path
+that is already earning and already listed. That is the isolation mandate `relayshield_agentic_api.py`
+states for itself, and the reason the MPP endpoint was a new file rather than a branch in it.
+
+Pricing points the same way. `mcp-registry-risk` is $0.35 for a lookup. A scan doing half a dozen
+remote fetches is not the same unit of work and should not be forced to share a price.
+
+### Why it must still share the code
+
+Signal 4 — joining referenced domains and packages to the criminal IOC corpus, the typosquat
+distance check and the registration-age check — is *already implemented*, in
+`handle_mcp_registry_risk`. That is why the estimate for signal 4 is half a day.
+
+**Import it, do not copy it.** This repo already carries four copies of one pattern table that must
+agree with nothing checking that they do, and `relayshield_mpp_settlement.py` set the precedent on
+2026-09-04 by importing the detector rather than reimplementing it. One implementation, two callers,
+dependency pointing one way only.
+
+### The one change to the live endpoint, and it is the important part
+
+Two endpoints means an integrator calls one and believes they are covered. That is the exact failure
+this document opens with — "we scanned it and it was clean" being a true statement about a malicious
+repository — recreated at our own API surface, by us.
+
+The fix costs no latency and no network call: `mcp-registry-risk` gains a field saying what it did
+**not** check.
+
+    "instructions_checked": false,
+    "see_also": "/v1/metered/agent-bait-scan"
+
+The endpoint already refuses to say "safe", and already returns a note explaining that an absence of
+findings means unknown rather than verified. Naming the specific blind spot is the same rule applied
+one level down, and it is the honest way to sell a second endpoint: the first one tells you it is
+not the whole answer.
+
+### Sequencing
+
+Compose them later, not now. An `include_instructions=true` parameter on `mcp-registry-risk` that
+runs both server-side and prices accordingly is a good idea **once `agent-bait-scan` has a real test
+corpus and a measured false-positive rate**, and a bad idea before that, because it would put an
+unmeasured heuristic into the response of an endpoint AWS Marketplace customers are already buying.
+
+The test corpus decides whether any of this is worth having. Build it first, as this document
+already says.

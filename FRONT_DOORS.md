@@ -55,7 +55,7 @@ cd ~ && git clone https://github.com/RelayShield/rsscan rsscan-live && cd ~/rssc
 That will fail with "no such file" for the tool, because the tool lives in the other repo. So first:
 
 ```zsh
-mkdir -p ~/rsscan-live/tools ~/rsscan-live/tests && cp ~/"Side SaaS Hustle"/tools/rsscan_sync_version.py ~/rsscan-live/tools/ && cp ~/"Side SaaS Hustle"/rsscan/tests/test_version_pin.py ~/rsscan-live/tests/ && cd ~/rsscan-live && python3 tools/rsscan_sync_version.py --check
+mkdir -p ~/rsscan-live/tools ~/rsscan-live/tests && cp ~/dev/relayshield/tools/rsscan_sync_version.py ~/rsscan-live/tools/ && cp ~/dev/relayshield/rsscan/tests/test_version_pin.py ~/rsscan-live/tests/ && cd ~/rsscan-live && python3 tools/rsscan_sync_version.py --check
 ```
 
 It prints the version from `pyproject.toml` and every file that disagrees. Then rewrite them:
@@ -174,7 +174,7 @@ cd ~ && git clone https://github.com/RelayShield/relayshield-mcp mcp-live && ls 
 Then, only if that cloned cleanly:
 
 ```zsh
-cp ~/"Side SaaS Hustle"/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml && cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml for the Smithery registry" && git push origin main
+cp ~/dev/relayshield/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml && cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml for the Smithery registry" && git push origin main
 ```
 
 **ANDREW CLICKS THIS:**
@@ -403,7 +403,7 @@ credential into a Smithery-side configuration.
 for version control; Smithery reads it from the default branch of the repo it indexes.
 
 ```text
-cp ~/"Side SaaS Hustle"/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml
+cp ~/dev/relayshield/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml
 cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml" && git push origin main
 ```
 

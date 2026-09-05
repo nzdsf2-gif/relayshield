@@ -15,9 +15,45 @@ A 400-line document pasted inline is unreadable in a chat window and he cannot s
 
 - **Send the file. Do not paste it.** Mentioning a filename without sending it is the failure this
   rule exists to stop, and it happened three times on 2026-09-03 alone.
+- **He saves it to `~/Side SaaS Hustle`, which is no longer the clone.** See the next section.
+  Saving a delivered `.md` into the clone is what blocked three merges; the two directories are
+  now separate so it cannot happen again.
 - Commit it as well. The commit is the durable copy; the sent file is the delivery.
 - If he asks for the content inline, paste it. Otherwise send.
 - A file path, a PR link, or "run `git pull`" is not a deliverable.
+
+## THE CLONE LIVES AT `~/dev/relayshield`. `~/Side SaaS Hustle` IS NOW A DOCUMENTS FOLDER.
+
+**Changed 2026-09-05, at Andrew's request, and it SUPERSEDES every earlier statement in this file
+that the repo root is `~/Side SaaS Hustle`.**
+
+    ~/dev/relayshield        the git clone. Nothing is ever saved here by hand.
+    ~/Side SaaS Hustle       a plain folder, NOT a git repo. Every .md sent to Andrew goes here.
+
+**Why, and it is structural rather than a habit to remember.** The delivery rule above says send
+every `.md` deliverable so he can download it. Git refuses to overwrite an untracked file it did not
+write. So for as long as the download folder and the clone were the same directory, every file
+delivered was a file that would block the next merge — and it did, three times across two sessions,
+including once on the very file the same reply had just sent him.
+
+Naming the colliding files never fixed it, because the next delivery collides too. Stashing works
+but is a workaround applied forever. **Separating the two directories removes the collision instead
+of managing it**, and he can save anything he likes into `~/Side SaaS Hustle` without ever thinking
+about git again.
+
+**Second benefit, free: `~/dev/relayshield` has no space in it.** Rule 2 below exists entirely
+because `cd ~/Side SaaS Hustle` unquoted is three arguments. That whole class of failure is gone for
+the clone. Keep the quoting rule anyway for the documents folder, which still has the space.
+
+**Never hardcode either path in a committed script.** `generate_pdfs.py` and `rsscan/test_verify.py`
+both carried `/Users/andrewgibbs/Side SaaS Hustle/...` and would have broken silently on the move.
+Both now derive the repo root from `Path(__file__).resolve().parent`, which is correct wherever the
+clone lives and makes the next move free. A script that needs the repo root computes it; it does not
+know Andrew's home directory.
+
+Historical `NEXT_SESSION_*.md` files and other dated records still say the old path. Leave them —
+they are records of a day, not instructions, exactly as the WHERE THE CURRENT WORK LIST LIVES
+section says.
 
 ## EVERY COMMAND BLOCK STARTS WITH THE MERGE. NO EXCEPTIONS.
 
@@ -31,7 +67,7 @@ written this session, without the merge in front of it, guarantees that error.
 
 So every ```zsh block that runs anything from this repo begins with these five lines, verbatim:
 
-    cd ~/"Side SaaS Hustle"
+    cd ~/dev/relayshield
     git checkout main
     git --no-pager fetch origin claude/<this session's branch>
     git stash push --include-untracked -m "pre-merge untracked"
@@ -52,13 +88,18 @@ then aborted on `mpp_settlement_endpoint.md`, the file the same reply had just s
 saved. **Stash, never `rm`**: the copies are recoverable with `git stash pop` if one turns out to
 have been his own work rather than a paste of ours.
 
+**The stash line stays even though the clone moved out of the download folder on 2026-09-05.** The
+move removes the cause of the collision; the stash removes the consequence of any other untracked
+file, from a half-finished experiment to a stray build artefact. Belt and braces, and it costs one
+line.
+
 Then the actual command. It is four wasted lines when he is already up to date, and it is the
 difference between a working instruction and a broken one when he is not. **He is never up to date
 by default: the branch is pushed, and merging is a thing he does, not a thing the push does.**
 
 ### When `git pull` fails on his Mac
 
-`~/Side SaaS Hustle` is the local clone. A known recurring failure:
+`~/dev/relayshield` is the local clone. A known recurring failure:
 
     error: You have not concluded your merge (MERGE_HEAD exists).
 
@@ -93,9 +134,11 @@ Check each one against all five before sending it:
 
 1. **No trailing `#` comments.** zsh does not treat `#` as a comment interactively, so it becomes an
    argument and the command errors.
-2. **Quote the space in the repo path.** The clone root is `~/Side SaaS Hustle`, so:
-   `cd ~/"Side SaaS Hustle"`. Unquoted, zsh sees three arguments.
-3. **The repo root is `~/Side SaaS Hustle`, not `~/Side SaaS Hustle/relayshield`.** `relayshield/`
+2. **Quote any path with a space in it.** **Superseded in part 2026-09-05**: the clone is now
+   `~/dev/relayshield`, which has no space, so `cd ~/dev/relayshield` needs no quoting. The rule
+   still applies to `~/Side SaaS Hustle`, which is now the documents folder: unquoted, zsh sees
+   three arguments.
+3. **The repo root is `~/dev/relayshield`, not `~/dev/relayshield/relayshield`.** `relayshield/`
    is a subdirectory *inside* the repo holding only `README.md` and `mcp-server/`. `build_blog.py`,
    `wrangler.blog.toml` and every tool live at the root. He has landed in the subdirectory and hit
    "No such file or directory" more than once.

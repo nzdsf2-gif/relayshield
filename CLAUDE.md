@@ -472,20 +472,21 @@ because the misreading is more instructive than the item.
    so the next occurrence is one command. **Carry forward the second cause it found:** this server
    needs `mcp<2` and dies at import on 2.x with `AttributeError: 'Server' object has no attribute
    'list_tools'`, which presents as "disconnected" exactly like the path bug did.
-2. **Apply the deploy-role invoke policy to AWS. STILL OPEN.** `sh tools/apply_deploy_invoke_policy.sh`.
-   Deploy run 137 (2026-09-05 15:22 UTC) is red and its log says
-   `relayshield-agentic-api WAS DEPLOYED. Only the probe was denied`. **That the deploy succeeded is
-   exactly why this stays open**: the policy has never been pushed to AWS, so every future deploy
-   touching that function goes red for a reason unrelated to the code, and a permanently red deploy
-   is a red that stops being read. One command on the Mac.
-3. **Confirm agent-bait-scan quotes $0.50 on the PUBLIC url.** Command handed over 2026-09-05.
-   `api.relayshield.net` is egress-blocked from the container, so this cannot move from a session.
-   You want `500000` and `x402Version: 2`; a `250000` means the gateway is still routing to
-   `relayshield-api`, and the price is the only field that discriminates between the two.
-4. **Create the MPP Lambda.** `sh tools/create_mpp_settlement_lambda.sh`. Command handed over
-   2026-09-05. It previously failed on IAM eventual consistency, the script now retries six times at
-   10s, the role already exists, and every step checks for what it is about to create, so a re-run
-   resumes rather than duplicating.
+2. ~~Apply the deploy-role invoke policy.~~ **DONE 2026-09-05.** `put-role-policy` landed and the
+   simulate step proved it rather than assuming propagation: all 26 mapped functions report
+   `allowed`. The next deploy of any of them gets past the import probe.
+3. ~~Confirm agent-bait-scan quotes $0.50 on the public URL.~~ **DONE 2026-09-05.** Live response
+   carries `amount: 500000` and `x402Version: 2` on the branded host, so the gateway is routing to
+   `relayshield-agentic-api` and not falling through to `relayshield-api`'s $0.25 default. The 402
+   also advertises a **Solana** rail alongside Base, which nothing in this file had recorded.
+4. **The MPP Lambda EXISTS and its routes are WRONG. Step 8 failed.** The function, its role and
+   both gateway resources were created; the proof step then got HTTP 404 and this body:
+   `{"ok": false, "error": "unknown endpoint: /v1/mpp"}`. **That string is in exactly one file in
+   this repo, `relayshield_api.py`, and that file is NOT in the MPP package** -- the MPP handler's
+   own miss returns `"Not found"`. So a different Lambda answered and the request never reached the
+   function the script had just created. Next step, read-only:
+   `sh tools/diagnose_mpp_routes.sh`, which separates the four causes (wrong integration URI, no
+   method so a greedy proxy wins, stage never redeployed, duplicate resource).
 5. **Then the MPP selftest, reads-only.**
    `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/mpp_settlement_selftest.py --reads-only`.
    Gated on 4. The stored key is LIVE, so the PaymentIntent is skipped; it still answers the
@@ -560,16 +561,57 @@ moment is only reachable if the skill is somewhere they can install it from.
 **Do not write submission instructions for any route before reading its rules.** That is the FD-2
 lesson (a PR that would have been closed without comment, against a page whose own last section said
 so) and the CrewAI lesson (a repo whose README says it is unmaintained and accepts nothing). Both
-cost real effort against destinations that were never open. The route matters more than the artefact
-here, and it is unresolved on purpose rather than guessed at.
+cost real effort against destinations that were never open.
+
+### THE ROUTE WAS CHECKED, 2026-09-05, AND IT IS OPEN
+
+Unlike FD-2 and CrewAI. Read from the destination's own files rather than assumed:
+
+**`anthropics/claude-plugins-official` accepts third-party submissions.** Its README says so in
+those words -- *"Third-party partners can submit plugins for inclusion in the marketplace"* -- and
+names a formal route, the plugin directory submission form at
+<https://clau.de/plugin-directory-submission>. The bar it states is *"External plugins must meet
+quality and security standards for approval"*, and it does not enumerate them. So this is a real
+door, and the first one in this programme that did not turn out to be shut.
+
+**The unit of distribution is a PLUGIN, not a skill**, which is why the skill alone was never
+installable by anyone. A plugin is `.claude-plugin/plugin.json` plus a `skills/` directory; a
+marketplace is `.claude-plugin/marketplace.json` at a repo root listing plugins by source. Both now
+exist here, so this repo IS a marketplace and the skill is installable today:
+
+    /plugin marketplace add nzdsf2-gif/relayshield
+    /plugin install relayshield@relayshield
+
+That is the prerequisite for the directory submission, not a substitute for it. **Our own
+marketplace reaches people we tell; the directory is the part that reaches people we do not.**
+
+`test_agent_bait_skill.py` pins both manifests, that they agree on the plugin name, that the source
+path resolves, and that the declared `skills/` reaches the SKILL.md. Two files that must agree with
+nothing checking that they do is the shape that produced run 134's red probe.
+
+**The skill lives at `plugins/relayshield/skills/` and `.claude/skills/` is a SYMLINK to it.** One
+file, two places it has to appear. A copy would drift, and this repo already carries four copies of
+one pattern table.
 
 ### ITEM 10, APIFY SUBMISSION: the mechanics, so it is actionable
 
 Recorded 2026-09-05 because "submit to Discord" left every real question unanswered, and an
 instruction nobody can act on is how this item fell off the list in the first place.
 
-**Where.** Apify's community Discord, channel **`#apify-writers`**. It is the programme's stated
-submission route; there is no form and no email path.
+**Where.** Apify's community Discord, channel **`#apify-writers`** -- and there IS a form, which
+this file previously said there was not. Corrected 2026-09-05 from Apify's own programme page: join
+the Discord, go to `#apify-writers`, check the quarterly theme, read the guide, and **fill out the
+form with the article**. The channel is where the call and the guide live; the form is the actual
+submission.
+
+**SUBMITTING EARLY DOES NOT COST THE $500. PUBLISHING EARLY DOES.** Asked directly on 2026-09-05,
+and the distinction is the whole risk. The rule is *"only original, previously unpublished
+content"* -- it is about PRIOR PUBLICATION, and a submission is not a publication. So sending the
+draft into `#apify-writers` or the form is the intended action and carries no downside. Putting the
+same article on `blog.relayshield.net`, Medium or dev.to before Apify publishes it is what
+disqualifies it. Their guidelines do not address republishing AFTER they publish, and the
+programme's own $100 dev.to bonus is a post-publication republish under their organisation, so the
+canonical-first channel order resumes once the article is live on their blog.
 
 **Cadence, and it decides the date.** The programme is QUARTERLY. The July call closed 2026-08-16,
 so the next call is the target and there is nothing to submit into today. Use the wait for the three

@@ -215,7 +215,22 @@ wire() {          # $1 = resource id, $2 = method, $3 = full path, $4 = statemen
     --principal apigateway.amazonaws.com \
     --source-arn "arn:aws:execute-api:$REGION:$ACCOUNT:$API_ID/*/$2$3" \
     --query 'Statement' --output text >/dev/null 2>&1 || true
-  echo "   $2 $3 wired to $FUNC"
+
+  # VERIFY, rather than assert the call we just made returned 200. Reporting
+  # "wired to relayshield-mpp-settlement" over an integration that names some
+  # other function is the same defect as reporting LIVE over a 402 that quoted
+  # the wrong price: the step asserted its own action and never read the result.
+  # Cost one failed run on 2026-09-05, where both routes reported wired and
+  # relayshield-api answered both.
+  GOT_URI=$(aws apigateway get-integration --rest-api-id "$API_ID" \
+              --resource-id "$1" --http-method "$2" --query 'uri' --output text 2>/dev/null || echo "")
+  GOT=$(printf '%s' "$GOT_URI" | sed -n 's#.*:function:\([^/]*\)/invocations#\1#p')
+  if [ "$GOT" != "$FUNC" ]; then
+    echo "STOP: $2 $3 integration points at '${GOT:-nothing}', not $FUNC." >&2
+    echo "Nothing further will work. sh tools/diagnose_mpp_routes.sh" >&2
+    exit 1
+  fi
+  echo "   $2 $3 -> $FUNC (integration read back and confirmed)"
 }
 
 # No API key on either route. An agent that discovers the endpoint has to be
@@ -285,8 +300,16 @@ case "$CODE" in
     exit 1
     ;;
   *)
-    echo "STOP: expected 402, got $CODE. The route exists but the handler did not" >&2
-    echo "challenge. Read the body above and the function's CloudWatch log." >&2
+    echo "STOP: expected 402, got $CODE." >&2
+    echo >&2
+    echo "READ THE BODY ABOVE BEFORE THE LOG. It names the responder:" >&2
+    echo "  \"unknown endpoint: ...\"  is relayshield_api.py, which is NOT in this" >&2
+    echo "      package. A different Lambda answered and the routing is wrong." >&2
+    echo "  \"Not found\"              is THIS handler, so the route is right and" >&2
+    echo "      the path it matched on is not MPP_PATH." >&2
+    echo >&2
+    echo "Either way the next step is the same, and it is read-only:" >&2
+    echo "  sh tools/diagnose_mpp_routes.sh" >&2
     exit 1
     ;;
 esac

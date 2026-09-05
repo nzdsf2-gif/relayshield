@@ -86,6 +86,11 @@ on:
       # source, so a commit that maps a handler while editing only workflow
       # files deploys nothing at all.
       - 'relayshield_agentic_api.py'
+      # Shared module, not a handler: relayshield_agentic_api.py imports it for
+      # both agent-bait-scan doors, so the job's import walk packages it on its
+      # own. This entry exists only so a change to it TRIGGERS the workflow --
+      # without it, editing the scanner alone deploys nothing at all.
+      - 'relayshield_agent_bait_scan.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:

@@ -703,6 +703,37 @@ See [[reference-relayshield-scale-metrics]] for the canonical figures and re-che
 
 ---
 
+## 🟩 ABS-1: add agent-bait-scan as a Bundle D usage dimension — NEXT SESSION, added 2026-09-05
+
+**The endpoint is BUILT and both doors are wired.** `relayshield_agent_bait_scan.py`,
+`POST /v1/payg/agent-bait-scan` at $0.50 on x402 and `POST /v1/metered/agent-bait-scan` at
+$0.50/call, routed from `relayshield_agentic_api.py`, 30 offline tests including a benign corpus.
+Gateway routes: `sh tools/create_agent_bait_scan_routes.sh`.
+
+**What is deliberately NOT done: the AWS Marketplace Bundle D usage dimension.**
+`AWS_DIMENSION_NAMES` still holds exactly two entries, and the comment above it says why.
+
+**Why it waits, and it is not laziness.** Adding a third usage dimension to a PUBLISHED Marketplace
+product is a change set against the listing, with AWS's own review latency on their side of it. A
+change set is a bad place to discover that a fresh heuristic needs tuning — the false-positive rate
+is unmeasured today, and the benign corpus is eleven documents rather than a population.
+
+**The trigger is a number, not a date.** Run it against real traffic on the x402 door first. When
+the endpoint has enough calls to state a false-positive rate, and the patterns have stopped moving,
+open the change set. Concretely:
+
+1. Add `"/v1/metered/agent-bait-scan": "agent_bait_scan"` to `AWS_DIMENSION_NAMES`.
+2. Add the matching dimension to the Bundle D listing in AWS Marketplace Management Portal
+   (**ANDREW CLICKS THIS** — a change set, not an API call).
+3. `test_agent_bait_scan.py::test_the_aws_dimension_is_deliberately_absent` will fail. That is the
+   test doing its job: update it with the change-set id rather than deleting it.
+
+**Do NOT ship the blog post before the endpoint answers a 402 in public.** Same rule as XSOAR: the
+gap between writing and publishing is exactly where a false claim gets in. And Island's numbers
+(7,600 malicious repositories, 30,000 MCP servers) are THEIRS — cite them as theirs or not at all.
+
+---
+
 ## 🟨 ENTITY-1: change the Stripe account from `individual` to company — added 2026-08-15
 
 **Founder-requested. Do it on its own merits, and read the warning before starting.**

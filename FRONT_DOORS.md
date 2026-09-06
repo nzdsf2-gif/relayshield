@@ -29,7 +29,7 @@ when deciding what to build next — it just becomes an opinion.
 | FD-5 | OpenCTI connector (Filigran) | TI corpus licences | 2-3 days | Not started |
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
 | FD-7 | Slack App Directory | Business tiers | 1 week | Not started |
-| FD-8 | Official MCP Registry | Agentic bundle, TI | **STILL OPEN 2026-09-05** | Registry latest is **0.2.7** while PyPI is 0.2.11; `websiteUrl` is still bare `https://relayshield.net`; repo still `github.com/relayshield/...`. Read live from the registry API. The `mcp-publisher` run has not happened |
+| FD-8 | Official MCP Registry | Agentic bundle, TI | **HALF DONE 2026-09-05** | Published: version lag closed, registry now serves **0.2.11**. NOT done: `websiteUrl` is still bare `https://relayshield.net` and repo casing is still `relayshield/`, so the attribution this door exists for is still missing. Needs a second publish at a NEW version string |
 | FD-9 | Glama | Agentic bundle | **LISTED, gated on FD-8** | Glama mirrors the registry record, so its attribution is fixed by the FD-8 publish and by nothing else |
 | FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **DONE 2026-09-05** | 0.2.11's published metadata carries `Documentation: https://api.relayshield.net/developers?source=pypi`. Read from PyPI, not from the local file |
 | FD-11 | Smithery | Agentic bundle | Not listed | Searched 2026-09-03, no RelayShield entry. `mcp_registry/smithery.yaml` is written and unshipped. See the note below before submitting |
@@ -283,6 +283,68 @@ this repo's own tooling on 2026-09-05:
   a version.
 - `websiteUrl` must carry `?source=mcp-registry`.
 - `repository.url` casing must match the git remote.
+
+---
+
+## FD-8, SECOND HALF: REGISTRY RECORDS ARE IMMUTABLE, so the fix needs a NEW version
+
+Found 2026-09-05, after the first publish landed 0.2.11 with the attribution still missing.
+
+**What happened, and it traces back to this repo's own bug.** `fd8_prepare_republish.py --write`
+made three correct edits, then also wrote a version DOWNGRADE. Restoring `server.json.bak` undid the
+downgrade AND the two good edits with it, so the publish shipped a correct version number and a bare
+`websiteUrl`. **A backup restore is not selective**, and that is the cost of a tool that makes a
+wrong edit alongside right ones.
+
+**The registry will not let that record be edited.** From the registry's own FAQ:
+*"Submit a new `server.json` with a unique version string. Once published, version metadata is
+immutable (similar to npm)."*
+
+**BUT IT DOES NOT NEED A NEW PYPI RELEASE.** The server entry's `version` and the `packages[].version`
+are INDEPENDENT fields, and the registry's own `generic-server-json.md` example shows a server at
+`1.0.2` carrying one package at `1.0.2` and another at `1.0.1`. So:
+
+    server.json  "version": "0.2.12"            <- registry entry only, bumped
+    packages[0]  "version": "0.2.11"            <- stays, and must stay: it names the real PyPI release
+
+That closes FD-8 with a registry publish and no PyPI upload at all.
+
+**The three edits, and `fd8_prepare_republish.py --write` still makes two of them:**
+
+1. `websiteUrl` -> `https://relayshield.net?source=mcp-registry`
+2. `repository.url` casing -> matches the git remote
+3. `version` -> `0.2.12` **by hand**, because the script sets it from PyPI's latest and PyPI has no
+   0.2.12. Bump it after running the script, and leave `packages[].version` at 0.2.11.
+
+Then `mcp-publisher publish`. Ownership verification passes: the `mcp-name:` marker is in 0.2.11's
+README and unchanged.
+
+---
+
+## FD-13 — xAI's Grok Build plugin marketplace. **A DIRECT PARALLEL, and the route is a PR.**
+
+Added 2026-09-05, prompted by the Grok Bot agentic-payments story. It is the same shape as FD-12 and
+the same artefact fits it.
+
+`xai-org/plugin-marketplace` on GitHub is an OPEN catalog for Grok Build, xAI's terminal coding
+agent, launched 2026-06-11 with six plugins (MongoDB, Vercel, Sentry, Chrome DevTools, Cloudflare,
+Superpowers). It carries an `external_plugins/` directory for third-party plugins, and a catalog
+entry in `.grok-plugin/marketplace.json`. Its structure mirrors Claude Code's closely: `skills/` with
+`SKILL.md`, plus commands, agents, hooks, MCP servers.
+
+**Read from the repo, 2026-09-05, and the honest version:** the contribution instruction is
+*"Open a PR. CI runs the validator and code-owner review is required."* There is **no stated
+eligibility policy, no quality bar and no security vetting process**, and xAI disclaims that it
+*"does not author, control, endorse, or verify third-party plugins."* So the route is real and it is
+a PR, but nobody has written down what gets accepted. That is a thinner door than FD-12's, where the
+bar is at least named.
+
+**Why it is worth doing anyway:** the port is small. Our plugin is a `SKILL.md` plus an MCP server
+declaration, which is exactly what their structure takes, and the catalog being six plugins deep is
+the argument for going early rather than against it.
+
+**Do FD-12 first.** Same artefact, a documented review process, and a submission that has been
+prepared. FD-13 is the second copy of the same work, not a different piece of work.
 
 ---
 

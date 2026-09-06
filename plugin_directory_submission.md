@@ -1,15 +1,34 @@
-# Anthropic plugin directory submission: RelayShield
+# Claude Code plugin directory submission: RelayShield
 
-**Form:** <https://clau.de/plugin-directory-submission>
+**CORRECTED 2026-09-05.** An earlier version of this file named
+`clau.de/plugin-directory-submission` and said the destination was
+`anthropics/claude-plugins-official`. That came from that repo's README, and the
+current documentation is more specific and partly contradicts it. The corrected
+facts:
 
-**The field list below is UNVERIFIED.** `clau.de` is egress-blocked from the
-container, so I could not read the form and these are the fields any such
-submission asks for, not fields I have seen. Open the form first and map these
-answers onto whatever it actually asks. If it wants something not covered here,
-say so and I will draft it.
+- **Submissions land in `anthropics/claude-plugins-community`**, the public
+  community marketplace, after review. Users add it with
+  `claude plugin marketplace add anthropics/claude-plugins-community`.
+- **`claude-plugins-official` is curated separately, at Anthropic's discretion.
+  There is no application process, and the submission form does not add plugins
+  to it.** So the realistic target is the community marketplace, and the
+  official one is not something to plan around.
+- **There are two forms, and which one applies depends on the account:**
+  - claude.ai: `claude.ai/admin-settings/directory/submissions/plugins/new`
+    **requires a Team or Enterprise organization and directory management
+    access.**
+  - Console: `platform.claude.com/plugins/submit` is the route for individual
+    authors not in a Team or Enterprise org. **This is almost certainly ours.**
+- **Approved plugins are pinned to a specific commit SHA**, and CI bumps the pin
+  as new commits are pushed. The public catalog syncs nightly, so there is a
+  delay between approval and appearing in `marketplace.json`.
+- **Run `claude plugin validate ./plugins/relayshield --strict` before
+  submitting.** The review pipeline runs the same check, plus automated safety
+  screening. `--strict` turns warnings into errors, which is what to submit
+  against.
 
-**What IS verified** is everything in the "Evidence" section: those came from
-running the commands, not from reading documentation.
+**Verified 2026-09-05:** `claude plugin validate ./plugins/relayshield --strict`
+prints `Validation passed`, with no warnings.
 
 ---
 
@@ -23,10 +42,10 @@ immediately. This is currently the case, and it is the fail-closed behaviour
 working, not a defect.
 
 **2. `.claude-plugin/marketplace.json` must be on GitHub's `main`.**
-Verified 2026-09-05: it is not. `git ls-tree origin/main --name-only | grep
-claude-plugin` returns nothing. The `owner/repo` source form clones the DEFAULT
-BRANCH, so a reviewer running `claude plugin marketplace add nzdsf2-gif/relayshield`
-gets "Marketplace file not found" until `main` is pushed.
+The reviewer clones the DEFAULT BRANCH, and approved plugins are pinned to a
+commit SHA in the community catalog, so whatever is on `main` at submission time
+is what gets reviewed. Confirm with
+`git ls-tree origin/main --name-only | grep claude-plugin` before submitting.
 
 ---
 
@@ -43,10 +62,15 @@ gets "Marketplace file not found" until `main` is pushed.
 **Keywords:** security, mcp, prompt-injection, supply-chain, agent-safety
 **Author:** RelayShield, <https://relayshield.net>
 
-**Install commands:**
+**Install commands (from our own marketplace, which works today):**
 
     claude plugin marketplace add nzdsf2-gif/relayshield
     claude plugin install relayshield@relayshield
+
+Once accepted into the community catalog, users would instead run:
+
+    claude plugin marketplace add anthropics/claude-plugins-community
+    claude plugin install relayshield@claude-community
 
 ### Short description (one line)
 
@@ -128,7 +152,8 @@ so discovery is free and nothing is charged silently.
 
 ## Evidence, all of it from running the commands
 
-- `claude plugin validate plugins/relayshield` -> Validation passed
+- `claude plugin validate ./plugins/relayshield --strict` -> Validation passed,
+  no warnings. This is the check the review pipeline itself runs.
 - `claude plugin validate .` -> Validation passed
 - `claude plugin marketplace add` then `install` then `details` -> Skills (1),
   MCP servers (1)

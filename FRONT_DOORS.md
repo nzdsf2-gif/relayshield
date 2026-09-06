@@ -418,14 +418,28 @@ there is a perfectly good shell CLI that does the same job. Verified against `cl
 `claude plugin marketplace add ./` also works for a local path -- note the trailing slash, because a
 bare `.` is rejected as an invalid source format.
 
-### Before submitting to the directory
+### The submission is PREPARED. `plugin_directory_submission.md` holds it.
 
-1. **The MCP server must NOT be bundled until `relayshield-mcp` 0.2.10 ships.** The published
-   package currently resolves `mcp` 2.x and dies at import, so a plugin that installs it would fail
-   on first use for every reviewer. See CLAUDE.md, THE PUBLISHED MCP PACKAGE IS BROKEN.
-2. Once it does ship, `plugin.json` gains an `mcpServers` block and the plugin becomes
-   "install this and the server is wired up too", which is the version worth submitting.
-3. Re-run `claude plugin validate` on both manifests immediately before submitting.
+Written 2026-09-05: every answer a directory form asks for, plus the security answers worth
+volunteering against an unenumerated bar, plus the evidence, all of it from running the commands
+rather than reading documentation. **The field list in it is UNVERIFIED** because `clau.de` is
+egress-blocked from the container; open the form and map the answers onto what it actually asks.
+
+**The server IS bundled now**, in `plugins/relayshield/.mcp.json` and NOT in `plugin.json`, where
+the key is silently ignored. See CLAUDE.md, A PLUGIN'S MCP SERVER GOES IN `.mcp.json`.
+
+### Two blocking prerequisites, and neither is optional
+
+1. **`relayshield-mcp` 0.2.11 must be on PyPI.** The plugin pins `>=0.2.10` because 0.2.9 and
+   earlier resolve `mcp` 2.x and die at import. Until the release ships the plugin installs and its
+   server fails to start, which a reviewer sees immediately. `tools/mcp_release_check.py` says what
+   to publish; `tools/mcp_selftest.py --pypi` confirms it afterwards.
+2. **`.claude-plugin/marketplace.json` must be on GitHub's `main`.** Verified 2026-09-05: it is
+   not. `git ls-tree origin/main --name-only | grep claude-plugin` returns nothing, and the
+   `owner/repo` form clones the DEFAULT BRANCH, so a reviewer gets "Marketplace file not found".
+
+Re-run `claude plugin validate` on both manifests immediately before submitting, and
+`claude plugin details` after installing, because validate only says the file is well formed.
 
 ---
 

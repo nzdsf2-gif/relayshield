@@ -27,6 +27,7 @@ PLUGIN = ROOT / "plugins" / "relayshield"
 SKILL = PLUGIN / "skills" / "relayshield-agent-bait" / "SKILL.md"
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 MANIFEST = PLUGIN / ".claude-plugin" / "plugin.json"
+MCP_JSON = PLUGIN / ".mcp.json"
 SIGNUP = ROOT / "relayshield_developer_signup.py"
 
 TEXT = SKILL.read_text(encoding="utf-8")
@@ -197,6 +198,57 @@ class TestPluginPackaging(unittest.TestCase):
         self.assertTrue(link.is_symlink(),
                         ".claude/skills entry must be a symlink, never a second copy")
         self.assertEqual(link.resolve(), (PLUGIN / "skills" / "relayshield-agent-bait").resolve())
+
+
+
+
+class TestBundledMcpServer(unittest.TestCase):
+    """The floor on relayshield-mcp is a safety property, not a version number.
+
+    0.2.9 and earlier declare `mcp>=1.0.0` unbounded, resolve mcp 2.x, and die at
+    import. A plugin that can install one of those ships a server that presents
+    as "disconnected" with a config that looks correct -- the exact outage this
+    repo spent a day on. The floor makes that unreachable, so it is pinned here.
+    """
+
+    MIN = (0, 2, 10)
+
+    def _servers(self):
+        return json.loads(MCP_JSON.read_text(encoding="utf-8")).get("mcpServers") or {}
+
+    def test_plugin_json_does_not_carry_an_ignored_mcpServers_key(self):
+        """Measured 2026-09-05: an `mcpServers` block inside plugin.json is
+        SILENTLY IGNORED -- `claude plugin details` reported "MCP servers (0)"
+        with one declared. Moving it to .mcp.json at the plugin root registered
+        it immediately. A field that looks right and does nothing is the quiet
+        alarm again, so this fails if anyone puts it back."""
+        d = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        self.assertNotIn("mcpServers", d,
+                         "plugin.json's mcpServers is not read; declare servers in "
+                         "plugins/relayshield/.mcp.json instead")
+
+    def test_declares_the_relayshield_server(self):
+        self.assertIn("relayshield", self._servers())
+
+    def test_dependency_carries_a_floor_at_or_above_the_fixed_release(self):
+        spec = " ".join(self._servers()["relayshield"].get("args", []))
+        m = re.search(r"relayshield-mcp\s*>=\s*(\d+)\.(\d+)\.(\d+)", spec)
+        self.assertIsNotNone(
+            m, "the relayshield-mcp requirement must carry an explicit >= floor; "
+               "an unpinned name can resolve to 0.2.9, which cannot start")
+        self.assertGreaterEqual(tuple(int(g) for g in m.groups()), self.MIN,
+                                "floor must be >= 0.2.10, the first release whose "
+                                "own mcp pin is bounded below 2.x")
+
+    def test_no_credential_is_baked_into_the_manifest(self):
+        """A plugin manifest is public. Rule 12, applied to a file we publish."""
+        raw = MANIFEST.read_text(encoding="utf-8") + MCP_JSON.read_text(encoding="utf-8")
+        for needle in ("sk_", "sk-", "pypi-", "Bearer ", "api_key="):
+            self.assertNotIn(needle, raw, f"possible credential in plugin.json: {needle}")
+        env = self._servers()["relayshield"].get("env") or {}
+        for k, v in env.items():
+            self.assertFalse(str(v).strip() and not str(v).startswith("${"),
+                             f"env {k} carries a literal value; use ${{VAR}} or omit it")
 
 
 if __name__ == "__main__":

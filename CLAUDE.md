@@ -691,6 +691,35 @@ the two were conflated in a single sentence. **CrewAI is actively maintained** -
 was published to PyPI on 2026-09-04, the day before this was written. The lesson from #6550 is about
 an unreviewed PR, not a dead framework, and the difference decides whether item 7 is worth doing.
 
+### A LOCAL MERGE IS NOT A PUSH, AND `owner/repo` READS THE DEFAULT BRANCH
+
+Found 2026-09-05 when `claude plugin marketplace add nzdsf2-gif/relayshield` failed with
+
+    Marketplace file not found at
+    ~/.claude/plugins/marketplaces/nzdsf2-gif-relayshield/.claude-plugin/marketplace.json
+
+Nothing was wrong with the manifest. **`.claude-plugin/` was on the feature branch and not on
+`origin/main`**, and the `owner/repo` source form clones GitHub's DEFAULT BRANCH. Confirmed with
+`git ls-tree origin/main --name-only | grep claude-plugin`, which returned nothing.
+
+This is the DRIFT RULE's mirror image and it is worth stating in both directions:
+
+- A push from the container puts a file on GitHub and **not** on Andrew's Mac. That is why every
+  command block starts with the merge.
+- A merge on Andrew's Mac puts a file in his clone and **not** on GitHub. That is why anything
+  fetched by `owner/repo` -- a plugin marketplace, a raw.githubusercontent URL, a CI checkout --
+  keeps failing until `main` is actually pushed.
+
+**Two routes, and the local one needs no push:**
+
+    claude plugin marketplace add ~/dev/relayshield        # works right after the merge
+    claude plugin install relayshield@relayshield
+
+Verified end to end. Note `claude plugin marketplace add .` is REJECTED as an invalid source
+format; use an absolute path or `./` with the trailing slash. The `nzdsf2-gif/relayshield` form
+starts working the moment `main` carries `.claude-plugin/marketplace.json` on GitHub, and that is
+the form to put in any published copy, because a reader has no local clone.
+
 ### THE ROUTE WAS CHECKED, 2026-09-05, AND IT IS OPEN
 
 Unlike FD-2 and CrewAI. Read from the destination's own files rather than assumed:

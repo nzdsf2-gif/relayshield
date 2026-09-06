@@ -691,6 +691,48 @@ the two were conflated in a single sentence. **CrewAI is actively maintained** -
 was published to PyPI on 2026-09-04, the day before this was written. The lesson from #6550 is about
 an unreviewed PR, not a dead framework, and the difference decides whether item 7 is worth doing.
 
+### A PLUGIN'S MCP SERVER GOES IN `.mcp.json`, NOT IN `plugin.json`
+
+Measured 2026-09-05, and found only because the install was VERIFIED rather than
+declared done.
+
+An `mcpServers` block written into `plugins/relayshield/.claude-plugin/plugin.json`
+is **silently ignored**. The plugin installs, `claude plugin validate` passes, and
+`claude plugin details` reports:
+
+    MCP servers (0)
+
+Moving the identical block into `plugins/relayshield/.mcp.json` at the plugin
+root registered it immediately:
+
+    MCP servers (1)  relayshield
+
+Nothing errors in the wrong configuration. A validator that passes and a field
+that does nothing look exactly like a working plugin, which is the quiet-alarm
+shape again -- and the first version of the test asserted the ignored key, so it
+went green while the plugin shipped no server at all. **A test that reads the
+same wrong file as the code proves nothing.** `test_agent_bait_skill.py` now
+reads `.mcp.json` AND fails if `mcpServers` reappears in `plugin.json`.
+
+The general form, for the third time this session: `claude plugin details` is the
+check, not `claude plugin validate`. Validation says the file is well formed;
+details says what the plugin actually contributes.
+
+### THE FLOOR ON `relayshield-mcp` IS A SAFETY PROPERTY
+
+`.mcp.json` pins `relayshield-mcp>=0.2.10`, and that is not tidiness. 0.2.9 and
+earlier declare `mcp>=1.0.0` unbounded, resolve mcp 2.x, and die at import. The
+floor makes it impossible for the plugin to install a version that cannot start.
+
+Verified today that it fails CLOSED: `pip install 'relayshield-mcp>=0.2.10'`
+returns `No matching distribution found`, because 0.2.10 is not published yet. A
+loud failure at install time is much better than the alternative, which is a
+server that installs, starts, dies, and presents to the user as "disconnected"
+with a configuration that looks perfectly correct.
+
+**So the plugin is complete and the MCP half is inert until the release ships.**
+That is deliberate and it is the right way round.
+
 ### A LOCAL MERGE IS NOT A PUSH, AND `owner/repo` READS THE DEFAULT BRANCH
 
 Found 2026-09-05 when `claude plugin marketplace add nzdsf2-gif/relayshield` failed with

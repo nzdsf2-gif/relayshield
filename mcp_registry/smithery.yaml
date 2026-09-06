@@ -1,5 +1,12 @@
-# Copy this to the ROOT of the MCP server's own repository (~/mcp-live), not here.
-# Smithery reads it from the repo it is listing.
+# Smithery listing manifest for relayshield-mcp.
+#
+# This file belongs at the ROOT of the MCP server's own repository, which is
+# where Smithery reads it from. The copy in this repo is the source of truth;
+# see FRONT_DOORS.md FD-11 for the copy step. Do not leave a "copy this
+# elsewhere" instruction in the header: once copied, it sits in the server repo
+# telling a reader to move a file that is already where it belongs, and an
+# agent-facing file carrying a stale instruction is precisely what
+# agent-bait-scan exists to flag.
 #
 # CORRECTED 2026-09-05. The previous version of this file described a DIFFERENT
 # SERVER and copying it would have made the listing worse, not better:

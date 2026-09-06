@@ -562,6 +562,16 @@ credential into a Smithery-side configuration.
 **1. Put the manifest in the SERVER's repo, not this one.** `mcp_registry/smithery.yaml` lives here
 for version control; Smithery reads it from the default branch of the repo it indexes.
 
+**Done 2026-09-05.** Verified live at
+`raw.githubusercontent.com/RelayShield/relayshield-mcp/main/smithery.yaml`: the corrected file, uvx
+command, sixteen tool names, no required config. Note GitHub owner names are case-insensitive, so
+`RelayShield/` and `relayshield/` are one repo, which is worth knowing before chasing a "missing"
+file that is actually there.
+
+**A GIT PUSH DOES NOT RE-SCAN THE LISTING.** Smithery re-reads the manifest when a new release is
+PUBLISHED, not when the repo changes. After the push the score stayed at 60 and the Logs tab showed
+nothing new, which is what "no scan ran" looks like rather than "the scan failed".
+
 ```text
 cp ~/dev/relayshield/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml
 cd ~/mcp-live && git add smithery.yaml && git commit -m "chore: add smithery.yaml" && git push origin main
@@ -572,6 +582,14 @@ repo. Smithery indexes what that account can see.
 
 **3. Add the server**, choosing the repository, and when it offers to build or deploy a hosted
 version, **decline it.** The listing is the goal. See the reason above.
+
+**THE 40 POINTS MAY NOT BE OBTAINABLE WITHOUT HOSTING, AND THAT IS AN ACCEPTABLE PLACE TO STOP.**
+Smithery's Quality Score splits into Server Metadata (35), Configuration UX (25) and Capability
+Quality (40). The first two are ours to fill in and are at full marks. The last needs Smithery to
+CONNECT to a running server and enumerate its tools, parameters and output schemas. If that requires
+a hosted build, then buying those points means opting into exactly the thing FD-11 declined on
+security grounds, and 60/100 with a correct, honest listing is the better trade. Publish once with
+the corrected manifest; if Capability Quality stays at 0, stop rather than escalating.
 
 **4. Point the listing at the PyPI package.** The install line users should see is the ordinary one:
 `pip install relayshield-mcp`. If the form asks for a hosted endpoint, leave it empty.

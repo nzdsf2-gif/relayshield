@@ -239,6 +239,75 @@ The general form, for the fourth time: **every block a reader might paste needs
 to say which interpreter it is for.** zsh, the Claude Code prompt, a browser
 address bar and a Python REPL all look identical inside a fence.
 
+### 14. A COMMAND IS NOT VERIFIED UNTIL IT HAS RUN IN *HIS* STATE. And every block says what success looks like.
+
+Written 2026-09-05 at Andrew's request, after a session burned several rounds on
+commands that were wrong in ways rules 1 to 13 do not cover. His words: this
+"burns time and my scarce tokens". Rules 1-13 each fix ONE syntax defect. This
+one fixes the process that keeps producing new ones.
+
+**THE ACTUAL CAUSE, from five failures in one session.** Not one of them was a
+typo. Every one was a command that worked in the container and could not work on
+his Mac, because the STATE differed:
+
+| What was sent | Why it failed | What would have caught it |
+|---|---|---|
+| `/plugin marketplace add ...` in a ```zsh block | slash command, not a shell command | rule 13 |
+| "slash commands are TUI-only" | a `claude plugin` CLI exists | running `claude plugin --help` |
+| `claude plugin marketplace add nzdsf2-gif/relayshield` | `owner/repo` reads GitHub's DEFAULT BRANCH; the files were only on a feature branch | checking `git ls-tree origin/main` |
+| `fd8_prepare_republish.py --write` | wrote a version DOWNGRADE and missed the real pin | running it against real data, not a fixture I wrote to match my own assumption |
+| `mcpServers` in `plugin.json` | silently ignored; the working key is `.mcp.json` | running `claude plugin details`, not `validate` |
+
+**The container is not his Mac, and the differences are knowable.** Before sending
+any command, check it against this list:
+
+- **Files on disk here are not files on GitHub, and not files on his Mac.** A
+  push reaches GitHub only. A merge reaches his clone only. Anything resolved by
+  `owner/repo`, a raw.githubusercontent URL, or a CI checkout reads GitHub's
+  DEFAULT BRANCH, so it fails until `main` is pushed.
+- **Credentials.** No AWS, no PyPI token, no Stripe. Anything needing one is his.
+- **Egress.** apify.com, clau.de, glama.ai, api.relayshield.net and more are
+  blocked here. "I could not check" is a fact about the container, never about
+  the thing (see NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK).
+- **Installed tooling.** `claude`, `git` and `python3` exist here. `uv`, `~/.rsvenv`
+  and `AWS_PROFILE=relayshield` are his side.
+
+**THE RULE, in three parts.**
+
+**1. Run it, or label it.** Every line of a ```zsh block must have been executed
+in this container in a state equivalent to his, OR carry an explicit
+`UNVERIFIED:` note saying what could differ. Presenting an unrun command as
+verified is the failure. There is no third option, and "it is obviously right" is
+how four of the five above were sent.
+
+**2. Every block states its expected output.** This is the half that turns a
+wasted round into a self-diagnosing one. The expensive failures above were not
+merely wrong -- they gave him no way to tell "this failed because the branch is
+not pushed" from "this failed because you are wrong", so the only move left was
+another round trip. Each block ends with:
+
+    EXPECT: <the exact line or shape that means success>
+    STOP IF: <the specific failure, and what it means>
+
+**3. One block, one outcome.** Never mix diagnosis with a fix in the same block:
+he cannot act on step 5 before reading step 3's output. Diagnose, get the output,
+then send the fix.
+
+**Worked example of the required shape:**
+
+    ANDREW RUNS THIS:
+    ```zsh
+    cd ~/dev/relayshield
+    git --no-pager log --oneline -1
+    ```
+    EXPECT: one commit line.
+    STOP IF: "not a git repository" -- the clone is somewhere else, say where.
+
+**And the check that would have caught the worst one:** when a command depends on
+a file being somewhere, verify the file is THERE, in that state, not merely that
+it exists locally. `git ls-tree origin/main --name-only | grep <path>` is one
+command and it would have saved two rounds.
+
 ### 9. Every `aws` command in a pasted block uses `--no-cli-pager`.
 
 Same failure as rule 8, different tool. AWS CLI **v2 pipes output through a pager** when stdout is

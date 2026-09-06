@@ -656,7 +656,15 @@ because the misreading is more instructive than the item.
    releases `DEFER` only -- a check that could not be COMPLETED -- while a completed `REVIEW`
    still blocks and a `FINDING` always blocks. There is deliberately no setting that lets a
    known-bad target through, and a test asserts that.
-8. **FD-8 AND FD-9: one `mcp-publisher` run. The pin and FD-10 are CLOSED.**
+8. ~~FD-8/9/10 and the pin.~~ **ALL CLOSED 2026-09-05.** Registry entry 0.2.12 carries
+   `?source=mcp-registry`, the repo casing is fixed, the package pins 0.2.11, and PyPI's metadata
+   carries `?source=pypi`. FD-9 follows from the same record. **The lesson from the two failed
+   attempts is worth keeping:** a registry record is IMMUTABLE once published, so a metadata fix
+   needs a new version STRING, and the server entry's version is independent of
+   `packages[].version` -- 0.2.12 pointing at package 0.2.11 is legal and is what closed it, with no
+   PyPI release. Superseded entry follows.
+
+   **FD-8 AND FD-9: one `mcp-publisher` run. The pin and FD-10 are CLOSED.**
    0.2.11 is on PyPI, `mcp_selftest --pypi` says ACTIVE with 16 tools, and the published metadata
    carries `?source=pypi`, so FD-10 is done and the outage is over. **FD-8 is not.** Read live from
    the registry API on 2026-09-05: latest is **0.2.7** against PyPI's 0.2.11, `websiteUrl` is still

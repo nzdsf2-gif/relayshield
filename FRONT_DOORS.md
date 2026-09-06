@@ -29,10 +29,10 @@ when deciding what to build next — it just becomes an opinion.
 | FD-5 | OpenCTI connector (Filigran) | TI corpus licences | 2-3 days | Not started |
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
 | FD-7 | Slack App Directory | Business tiers | 1 week | Not started |
-| FD-8 | Official MCP Registry | Agentic bundle, TI | **HALF DONE 2026-09-05** | Published: version lag closed, registry now serves **0.2.11**. NOT done: `websiteUrl` is still bare `https://relayshield.net` and repo casing is still `relayshield/`, so the attribution this door exists for is still missing. Needs a second publish at a NEW version string |
-| FD-9 | Glama | Agentic bundle | **LISTED, gated on FD-8** | Glama mirrors the registry record, so its attribution is fixed by the FD-8 publish and by nothing else |
+| FD-8 | Official MCP Registry | Agentic bundle, TI | **DONE 2026-09-05** | Server entry 0.2.12 serves `websiteUrl: https://relayshield.net?source=mcp-registry`, repo casing `RelayShield/`, package pinned 0.2.11. Read live from the registry API |
+| FD-9 | Glama | Agentic bundle | **DONE upstream, pending their sync** | Glama mirrors the registry record, which now carries the attribution. Nothing further to do on our side; re-check the listing in a few days |
 | FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **DONE 2026-09-05** | 0.2.11's published metadata carries `Documentation: https://api.relayshield.net/developers?source=pypi`. Read from PyPI, not from the local file |
-| FD-11 | Smithery | Agentic bundle | Not listed | Searched 2026-09-03, no RelayShield entry. `mcp_registry/smithery.yaml` is written and unshipped. See the note below before submitting |
+| FD-11 | Smithery | Agentic bundle | **LISTED, 60/100, tools not introspected** | Server metadata and config UX are full marks. Capability Quality is 0/40 because the deployment cannot start the server. `mcp_registry/smithery.yaml` was CORRECTED 2026-09-05 and still needs copying to `~/mcp-live` |
 | FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
 
 ---

@@ -1,10 +1,25 @@
-# Copy this to the ROOT of the MCP server's own repository, not here.
+# Copy this to the ROOT of the MCP server's own repository (~/mcp-live), not here.
 # Smithery reads it from the repo it is listing.
+#
+# CORRECTED 2026-09-05. The previous version of this file described a DIFFERENT
+# SERVER and copying it would have made the listing worse, not better:
+#   * it ran `node dist/index.js`, but relayshield-mcp is a PYTHON package on
+#     PyPI. That command cannot start it.
+#   * it listed four tools named `relayshield_check_wallet` and similar. The
+#     server actually serves sixteen, named `check_breach`, `scan_url` and so on.
+#   * it made the API key REQUIRED. The server runs keyless in discovery mode,
+#     and requiring a key stops anyone trying it, which is the whole point of a
+#     directory listing.
+# Written before the server was published to PyPI, never reconciled with it, and
+# caught only because the tool names were checked against a live handshake.
+
 name: relayshield
 displayName: RelayShield
 description: >-
-  Check a wallet, email, URL or credential against identity-compromise and
-  criminal-source threat intelligence before an agent acts on it.
+  Screen what an agent is about to trust. Breach, SIM-swap, infostealer,
+  domain-lookalike, OAuth-watchlist and MCP-registry-risk checks, plus URL,
+  file and wallet scanning, against identity-compromise and criminal-source
+  threat intelligence.
 homepage: https://api.relayshield.net/developers?source=mcp-registry
 license: MIT
 
@@ -12,26 +27,45 @@ startCommand:
   type: stdio
   configSchema:
     type: object
-    required:
-      - relayshieldApiKey
+    # NOTHING is required. The server answers keyless with its payment
+    # requirements, which is a usable discovery mode rather than an error, so a
+    # listing that demands a key before the first call would block every trial.
     properties:
       relayshieldApiKey:
         type: string
-        title: RelayShield API key
+        title: RelayShield API key (optional)
         description: >-
-          Free key from api.relayshield.net/developers. Sent as the x-api-key
-          header. Never logged and never returned in a tool response.
-  # Passed via the environment, never as an argv element: argv is visible to
-  # anything that can read the process table on the host.
+          Optional. Free tier at api.relayshield.net/developers. Sent as the
+          x-api-key header. Never logged and never returned in a tool response.
+          Without it the server still starts and returns pricing.
+  # uvx resolves and runs the published console script in its own environment,
+  # so the only prerequisite is uv. The >=0.2.10 floor is load-bearing: 0.2.9 and
+  # earlier declare `mcp` with no upper bound, resolve mcp 2.x and die at import.
   commandFunction: |
     (config) => ({
-      command: 'node',
-      args: ['dist/index.js'],
-      env: { RELAYSHIELD_API_KEY: config.relayshieldApiKey }
+      command: 'uvx',
+      args: ['--from', 'relayshield-mcp>=0.2.10', 'relayshield-mcp'],
+      env: config.relayshieldApiKey
+        ? { RELAYSHIELD_API_KEY: config.relayshieldApiKey }
+        : {}
     })
 
+# The sixteen tools the published 0.2.11 actually serves, taken from a live
+# initialize/tools-list handshake rather than from memory.
 tools:
-  - relayshield_check_wallet
-  - relayshield_check_breach
-  - relayshield_check_infostealer
-  - relayshield_scan_url
+  - check_breach
+  - check_sim_swap
+  - check_domain_lookalikes
+  - check_oauth_watchlist
+  - check_infostealer
+  - scan_url
+  - scan_file
+  - scan_wallet
+  - check_mcp_registry_risk
+  - check_prompt_injection_breach
+  - check_supply_chain
+  - check_session_risk
+  - check_nhi_exposure
+  - check_secret_scan
+  - check_llm_credential_exposure
+  - check_scan_result

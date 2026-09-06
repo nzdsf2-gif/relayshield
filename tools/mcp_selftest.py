@@ -336,7 +336,17 @@ def check_published(package: str, timeout: float) -> int:
             ok, detail, tools = handshake(py, ["-m", mod], {}, timeout)
 
         if ok:
-            print(f"   VERDICT : ACTIVE — {detail}, {len(tools)} tools")
+            # LEAD WITH THE PACKAGE VERSION. `detail` is serverInfo from the
+            # handshake, and this server fills serverInfo.version with the `mcp`
+            # SDK's version rather than its own -- so the verdict used to read
+            # "relayshield v1.29.1" for package 0.2.11, which looks like the
+            # check tested the wrong thing. Rule 14: a number printed here is
+            # evidence the reader acts on.
+            print(f"   VERDICT : ACTIVE — {package} {got or '?'}, {len(tools)} tools")
+            print(f"   handshake serverInfo: {detail}")
+            if got and detail and got not in str(detail):
+                print("      (serverInfo reports the mcp SDK version, not the package")
+                print("       version. Cosmetic, and it lives in the server's own source.)")
             print(f"   tools   : {', '.join(tools)}")
             return 0
         print(f"   VERDICT : DEAD — {detail}")

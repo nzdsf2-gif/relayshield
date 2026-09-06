@@ -643,14 +643,13 @@ because the misreading is more instructive than the item.
    releases `DEFER` only -- a check that could not be COMPLETED -- while a completed `REVIEW`
    still blocks and a `FINDING` always blocks. There is deliberately no setting that lets a
    known-bad target through, and a test asserts that.
-8. **FD-8/9/10 AND THE `mcp<2` PIN in one re-publish.** The pin is now the urgent half: the
-   published package is broken for every new install (see THE PUBLISHED MCP PACKAGE IS BROKEN
-   above), and it is one line in `~/mcp-live`'s pyproject plus a version bump to 0.2.10. Four
-   further defects in the live registry record, read on 2026-09-05:
-   pinned at 0.2.7 while PyPI is 0.2.9, `websiteUrl` with no `?source=mcp-registry`,
-   `repository.url` naming `github.com/relayshield/...` against an `io.github.nzdsf2-gif/`
-   namespace, and `RELAYSHIELD_API_URL` pinned to the raw execute-api hostname rather than
-   `api.relayshield.net`. One `mcp-publisher` run fixes all four.
+8. **FD-8 AND FD-9: one `mcp-publisher` run. The pin and FD-10 are CLOSED.**
+   0.2.11 is on PyPI, `mcp_selftest --pypi` says ACTIVE with 16 tools, and the published metadata
+   carries `?source=pypi`, so FD-10 is done and the outage is over. **FD-8 is not.** Read live from
+   the registry API on 2026-09-05: latest is **0.2.7** against PyPI's 0.2.11, `websiteUrl` is still
+   the bare `https://relayshield.net`, and `repository.url` still says `github.com/relayshield/...`
+   against an `io.github.nzdsf2-gif/` namespace. FD-9 (Glama) mirrors that record and is fixed by
+   the same publish and by nothing else. One `mcp-publisher` run closes both.
    `tools/fd8_prepare_republish.py --dir ~/mcp-live --write`. Verify with
    `python3 tools/mcp_selftest.py --pypi` AFTER publishing: it installs what a new user gets.
 9. **The agent-bait-scan blog post (ABS-2 in TODO.md).** Gated on item 3. Third-party research to

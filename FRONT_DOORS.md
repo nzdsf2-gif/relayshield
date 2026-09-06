@@ -29,9 +29,9 @@ when deciding what to build next — it just becomes an opinion.
 | FD-5 | OpenCTI connector (Filigran) | TI corpus licences | 2-3 days | Not started |
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
 | FD-7 | Slack App Directory | Business tiers | 1 week | Not started |
-| FD-8 | Official MCP Registry | Agentic bundle, TI | Done, needs attribution | **ALREADY LISTED since 2026-05-10.** `source=` key now registered; `server.json` websiteUrl still to update. **Registry is on 0.2.7 while PyPI is on 0.2.9** |
-| FD-9 | Glama | Agentic bundle | **LISTED, needs attribution** | Verified 2026-09-03: `glama.ai/mcp/servers/relayshield/relayshield-mcp` |
-| FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **OPEN AND UNATTRIBUTED** | Its `Documentation` link points at the developers page with no `?source=`. Found 2026-09-03 |
+| FD-8 | Official MCP Registry | Agentic bundle, TI | **STILL OPEN 2026-09-05** | Registry latest is **0.2.7** while PyPI is 0.2.11; `websiteUrl` is still bare `https://relayshield.net`; repo still `github.com/relayshield/...`. Read live from the registry API. The `mcp-publisher` run has not happened |
+| FD-9 | Glama | Agentic bundle | **LISTED, gated on FD-8** | Glama mirrors the registry record, so its attribution is fixed by the FD-8 publish and by nothing else |
+| FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **DONE 2026-09-05** | 0.2.11's published metadata carries `Documentation: https://api.relayshield.net/developers?source=pypi`. Read from PyPI, not from the local file |
 | FD-11 | Smithery | Agentic bundle | Not listed | Searched 2026-09-03, no RelayShield entry. `mcp_registry/smithery.yaml` is written and unshipped. See the note below before submitting |
 | FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
 

@@ -260,10 +260,32 @@ echo "   $DESC"
 echo
 
 echo "   POST $BASE/v1/mpp/mcp-registry-risk  (no payment -- expecting 402)"
-CODE=$(curl -sS -o /tmp/mpp_402.json -w '%{http_code}' \
-         -X POST "$BASE/v1/mpp/mcp-registry-risk" \
-         -H 'Content-Type: application/json' \
-         -d '{"server_url":"https://modelcontextprotoco1.io"}' || true)
+# RETRY, because a stage deployment is not instant and this curl used to fire
+# milliseconds after create-deployment returned. On 2026-09-05 that produced a
+# 404 from relayshield-api on routes that a read-only diagnostic then showed
+# were entirely correct: right resources, right methods, right integrations,
+# stage serving the right deployment. Everything was fine; the proof was early.
+#
+# A propagation race that reports as a hard failure is worse than a slow script:
+# it sends someone diagnosing a routing bug that does not exist.
+CODE=000
+ATTEMPT=1
+while [ "$ATTEMPT" -le 6 ]; do
+  CODE=$(curl -sS -o /tmp/mpp_402.json -w '%{http_code}' \
+           -X POST "$BASE/v1/mpp/mcp-registry-risk" \
+           -H 'Content-Type: application/json' \
+           -d '{"server_url":"https://modelcontextprotoco1.io"}' || true)
+  [ "$CODE" = "402" ] && break
+  # Only a 404/403 is worth waiting on -- those are what an undeployed route
+  # returns. Any other code is a real answer and retrying just hides it.
+  case "$CODE" in
+    404|403) ;;
+    *) break ;;
+  esac
+  echo "   HTTP $CODE -- stage may not have propagated, retrying ($ATTEMPT/6)"
+  sleep 5
+  ATTEMPT=$((ATTEMPT + 1))
+done
 echo "   HTTP $CODE"
 head -c 600 /tmp/mpp_402.json; echo; echo
 

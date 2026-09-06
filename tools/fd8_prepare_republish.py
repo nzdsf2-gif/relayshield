@@ -137,12 +137,31 @@ def main():
         print(f"   {field}\n      was  {was}\n      now  {now}")
     print()
 
-    if not changes:
-        return
-    if not args.write:
+    # NOT a return. Sections 4, 4b and 5 are independent of server.json, and the
+    # pin in 4b is the one that decides whether the published package starts at
+    # all. Returning here because server.json happened to be correct is how the
+    # urgent fix silently never runs -- the quiet-alarm shape, in this file.
+    if changes and not args.write:
         print("Report only. Re-run with --write to apply, then read the diff before publishing.")
-        return
+    if changes and args.write:
+        _apply_server_json(doc, changes, sj, remote, pypi)
+    print()
 
+    _pyproject_sections(d, args)
+
+    where, cmd = publish_command(d)
+    print("== 5. Publish")
+    print("   Read the diff first:  git -C %s --no-pager diff server.json" % args.dir)
+    if cmd:
+        print(f"   The command this repo already documents, from {where}:")
+        print(f"     {cmd}")
+    else:
+        print("   No mcp-publisher command found in README.md, PUBLISHING.md, CONTRIBUTING.md")
+        print("   or Makefile. Do NOT invent one: find how the last version was published")
+        print("   before running anything.")
+
+
+def _apply_server_json(doc, changes, sj, remote, pypi):
     if "websiteUrl" in changes:
         doc["websiteUrl"] = WEBSITE
     if "repository.url" in changes:
@@ -162,8 +181,9 @@ def main():
         json.dump(doc, fh, indent=2)
         fh.write("\n")
     print(f"   written. previous file kept as {sj}.bak")
-    print()
 
+
+def _pyproject_sections(d, args):
     # FD-10's other half: the package's own links.
     print("== 4. pyproject.toml links (FD-10)")
     pyproj = os.path.join(d, "pyproject.toml")
@@ -197,18 +217,45 @@ def main():
                     fh.write(text)
                 print(f"   written -> {want}")
                 print("   This ships with the NEXT PyPI release, not with the registry publish.")
-    print()
-
-    where, cmd = publish_command(d)
-    print("== 5. Publish")
-    print("   Read the diff first:  git -C %s --no-pager diff server.json" % args.dir)
-    if cmd:
-        print(f"   The command this repo already documents, from {where}:")
-        print(f"     {cmd}")
+    # THE URGENT ONE, added 2026-09-05. Not a link, a live outage.
+    print("== 4b. The `mcp` dependency pin — THE PACKAGE IS BROKEN WITHOUT THIS")
+    print("   relayshield-mcp declares `mcp>=1.0.0` with NO UPPER BOUND, so a fresh")
+    print("   `pip install relayshield-mcp` resolves mcp 2.x and the server dies at")
+    print("   import with: AttributeError: 'Server' object has no attribute 'list_tools'.")
+    print("   Reproduced in a clean venv 2026-09-05. The wheel is fine; the range is not.")
+    if not os.path.exists(pyproj):
+        print("   no pyproject.toml here, so this cannot be fixed from this directory.")
     else:
-        print("   No mcp-publisher command found in README.md, PUBLISHING.md, CONTRIBUTING.md")
-        print("   or Makefile. Do NOT invent one: find how the last version was published")
-        print("   before running anything.")
+        with open(pyproj) as fh:
+            text = fh.read()
+        # Match the dependency however it is quoted or spaced, but only the mcp
+        # one -- a substring match would also hit relayshield-mcp's own name.
+        pat = re.compile(r'(["\'])mcp\s*>=\s*([0-9][^"\',]*?)(["\'])')
+        m = pat.search(text)
+        if not m:
+            print("   no bare `mcp>=` dependency found. Check by hand before publishing:")
+            print("   the pin must have an upper bound of <2.")
+        elif "<2" in m.group(0) or "<2" in text[m.start():m.start() + 60]:
+            print(f"   already bounded: {m.group(0)}")
+        elif not args.write:
+            print(f"   currently     {m.group(0)}")
+            print(f"   should be     \"mcp>={m.group(2)},<2\"")
+            print("   --write will change it.")
+        else:
+            fixed = f'{m.group(1)}mcp>={m.group(2)},<2{m.group(3)}'
+            text = text[:m.start()] + fixed + text[m.end():]
+            with open(pyproj, "w") as fh:
+                fh.write(text)
+            print(f"   written -> {fixed}")
+            print()
+            print("   THIS NEEDS A NEW PYPI RELEASE, NOT THE REGISTRY PUBLISH. Bump the")
+            print("   package version (0.2.9 -> 0.2.10), build, and upload to PyPI FIRST;")
+            print("   then publish the registry record so it pins a version that works.")
+            print("   Verify after uploading, and not before:")
+            print("     python3 tools/mcp_selftest.py --pypi")
+            print("   That installs what a NEW USER gets. Our own venv passing proves")
+            print("   nothing: it holds an older pin the resolver would never choose.")
+    print()
 
 
 if __name__ == "__main__":

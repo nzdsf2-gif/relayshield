@@ -33,6 +33,7 @@ when deciding what to build next — it just becomes an opinion.
 | FD-9 | Glama | Agentic bundle | **LISTED, needs attribution** | Verified 2026-09-03: `glama.ai/mcp/servers/relayshield/relayshield-mcp` |
 | FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **OPEN AND UNATTRIBUTED** | Its `Documentation` link points at the developers page with no `?source=`. Found 2026-09-03 |
 | FD-11 | Smithery | Agentic bundle | Not listed | Searched 2026-09-03, no RelayShield entry. `mcp_registry/smithery.yaml` is written and unshipped. See the note below before submitting |
+| FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
 
 ---
 
@@ -377,6 +378,54 @@ The `Documentation` value should carry `?source=pypi`.
 directory, so a client installing from the registry record gets an older package than a client
 installing from PyPI. The FD-8 re-publish fixes that too, which makes one publish close three
 things: `websiteUrl`, `repository.url` and the version lag.
+
+---
+
+## FD-12 — Anthropic's Claude Code plugin directory. **The route was READ, and it is open.**
+
+Added 2026-09-05. This is the first door in this programme that turned out not to be shut, and it
+was checked the FD-2 way -- from the destination's own files, before anything was written for it.
+
+`anthropics/claude-plugins-official`'s README says, in these words: *"Third-party partners can
+submit plugins for inclusion in the marketplace"*, and names the route: the plugin directory
+submission form at <https://clau.de/plugin-directory-submission>. The stated bar is *"External
+plugins must meet quality and security standards for approval"*, unenumerated.
+
+**Why this ranks above another blog post.** It puts the check at the moment of the decision -- a
+developer in Claude Code about to add an MCP server -- rather than in an article read later by
+someone with no pending decision.
+
+### What exists already
+
+- `.claude-plugin/marketplace.json` at the repo root, so **this repo IS a marketplace**.
+- `plugins/relayshield/` with `.claude-plugin/plugin.json` and the agent-bait skill.
+- `.claude/settings.json` declaring the marketplace and enabling the plugin, so anyone who clones
+  and trusts the folder gets it with no command at all.
+- Both manifests pass `claude plugin validate`, and the full install was run end to end
+  (`marketplace add` -> `install` -> `list` -> `details`) rather than assumed.
+
+### Installing it, and the correction that goes with it
+
+**`/plugin` is the in-TUI form and it is NOT the only one.** A previous reply asserted that slash
+commands are typed inside Claude Code, full stop, and handed over `/plugin marketplace add`. That
+answer was incomplete and cost a round: `/plugin` was unavailable in the environment being used, and
+there is a perfectly good shell CLI that does the same job. Verified against `claude` 2.1.263:
+
+    claude plugin marketplace add nzdsf2-gif/relayshield
+    claude plugin install relayshield@relayshield
+    claude plugin list
+
+`claude plugin marketplace add ./` also works for a local path -- note the trailing slash, because a
+bare `.` is rejected as an invalid source format.
+
+### Before submitting to the directory
+
+1. **The MCP server must NOT be bundled until `relayshield-mcp` 0.2.10 ships.** The published
+   package currently resolves `mcp` 2.x and dies at import, so a plugin that installs it would fail
+   on first use for every reviewer. See CLAUDE.md, THE PUBLISHED MCP PACKAGE IS BROKEN.
+2. Once it does ship, `plugin.json` gains an `mcpServers` block and the plugin becomes
+   "install this and the server is wired up too", which is the version worth submitting.
+3. Re-run `claude plugin validate` on both manifests immediately before submitting.
 
 ---
 

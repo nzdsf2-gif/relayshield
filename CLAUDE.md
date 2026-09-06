@@ -210,15 +210,30 @@ what a fenced block under **ANDREW RUNS THIS** means, and got:
 
     zsh: no such file or directory: /plugin
 
-`/plugin`, `/mcp`, `/agents`, `/skill` and every other slash command are typed
-INSIDE the Claude Code TUI, at its prompt. They are not executables and there is
-no `/plugin` binary on any machine. Same class as rule 7's `role-to-assume:` and
-rule 11's `<paste the key>`: the text was not wrong, it was not a command.
+`/plugin`, `/mcp`, `/agents` and every other slash command are typed INSIDE the
+Claude Code TUI. They are not executables and there is no `/plugin` binary. Same
+class as rule 7's `role-to-assume:` and rule 11's `<paste the key>`: the text was
+not wrong, it was not a command.
 
 So slash commands get their own label, and never share a block with shell:
 
 - **`ANDREW TYPES THIS IN CLAUDE CODE:`** followed by a ```text block. Never
   ```zsh, because that fence means "paste me into a terminal".
+
+**AND THE SECOND HALF, which cost a further round on the same day.** The reply
+that got the label right then asserted the TUI was the ONLY place, and it is not.
+`/plugin` turned out to be unavailable in the environment Andrew was using, and
+he was left with no route at all. There is a shell CLI that does the same job,
+verified against `claude` 2.1.263:
+
+    claude plugin marketplace add nzdsf2-gif/relayshield
+    claude plugin install relayshield@relayshield
+
+So the rule has two parts. Label which interpreter a block is for, AND **when a
+capability has both a TUI and a CLI form, give the CLI form** -- it works in more
+places, it is pasteable, and it is the one that can go in a ```zsh block under
+ANDREW RUNS THIS. Check `claude <thing> --help` before claiming something is
+TUI-only; that is one command and it would have settled this the first time.
 
 The general form, for the fourth time: **every block a reader might paste needs
 to say which interpreter it is for.** zsh, the Claude Code prompt, a browser
@@ -505,7 +520,20 @@ because the misreading is more instructive than the item.
    carries `amount: 500000` and `x402Version: 2` on the branded host, so the gateway is routing to
    `relayshield-agentic-api` and not falling through to `relayshield-api`'s $0.25 default. The 402
    also advertises a **Solana** rail alongside Base, which nothing in this file had recorded.
-4. **The MPP Lambda EXISTS and its routes are WRONG. Step 8 failed.** The function, its role and
+4. **MPP: every route reads CORRECT. Re-test before diagnosing further.** The read-only
+   diagnostic ruled out all four candidate causes on 2026-09-05: one resource per path (not D),
+   `GET /v1/mpp` and `POST /v1/mpp/mcp-registry-risk` both integrated with
+   `relayshield-mpp-settlement` (not A, not B), the stage serving `qk439m` which IS the deployment
+   that added them (not C), and a direct invoke returning the descriptor (the function is healthy).
+   **Nothing is left to be wrong, which points at the one thing the diagnostic cannot see: step 8
+   curled milliseconds after `create-deployment` returned.** A stage deployment is not instant.
+   The script now retries a 404/403 six times at 5s before failing, and only for those codes, since
+   any other status is a real answer that retrying would hide. Re-run the proof, or just
+   `curl -sS -X POST https://atq6wtkp6k.execute-api.us-east-1.amazonaws.com/prod/v1/mpp/mcp-registry-risk
+   -H 'Content-Type: application/json' -d '{"server_url":"https://x"}'` and expect a 402.
+
+   Superseded entry, kept because the diagnosis method is the reusable part:
+   **The MPP Lambda EXISTS and its routes looked WRONG. Step 8 failed.** The function, its role and
    both gateway resources were created; the proof step then got HTTP 404 and this body:
    `{"ok": false, "error": "unknown endpoint: /v1/mpp"}`. **That string is in exactly one file in
    this repo, `relayshield_api.py`, and that file is NOT in the MPP package** -- the MPP handler's
@@ -520,7 +548,12 @@ because the misreading is more instructive than the item.
    profile. A 403 there is the text to send `machine-payments@stripe.com`.
 6. ~~Rotate the Stripe key and revoke the old one.~~ **DONE, previous session.** The key was rotated
    by hand. The `_SECRET_TTL = 300` fix that made revocation safe is in all three caching handlers.
-7. **`crewai-relayshield` is BUILT and needs ONE command to publish.** 2026-09-05.
+7. ~~Publish `crewai-relayshield`.~~ **DONE 2026-09-05. It is LIVE on PyPI at 0.1.0.**
+   Verified the way today's `relayshield-mcp` lesson says to: installed from PyPI into a clean venv
+   with NO crewai present (the case the package claims to support), and a failed check still
+   BLOCKED. Original entry follows, because its two design decisions are worth not re-litigating.
+
+   **`crewai-relayshield` was BUILT and needed ONE command to publish.** 2026-09-05.
    `crewai-relayshield/`, 22 offline tests, wheel and sdist both build clean. Publishing needs a
    PyPI token, so it is founder-side: `python3 -m build` then `twine upload dist/*`.
 
@@ -554,8 +587,13 @@ because the misreading is more instructive than the item.
 9. **The agent-bait-scan blog post (ABS-2 in TODO.md).** Gated on item 3. Third-party research to
    cite, a demonstrable gap, a live endpoint to link, and now a shipped skill to link as well.
    Island's numbers are theirs: cite them as theirs or leave them out.
-10. **SUBMIT THE APIFY ARTICLE TO `#apify-writers`.** Re-added 2026-09-05 at Andrew's request after
-    it fell off the regenerated list. Draft is `blog-apify-actor-as-agent-tool.md`, ~1,300 words,
+10. **APIFY, TWO STEPS WITH DIFFERENT DATES.**
+    **(a) POST THE PRE-CALL INTRO NOW.** `apify_writers_intro_post.md` is written and ready to
+    paste into `#apify-writers`. It is not a submission and spends nothing; it asks the dev.to
+    access question and puts a name in front of the reviewers before the call. It deliberately does
+    NOT link the draft and does NOT quote the run count -- see the file for why.
+    **(b) SUBMIT THE ARTICLE IN NOVEMBER**, when the Typeform reopens. Re-added 2026-09-05 at
+    Andrew's request after it fell off the regenerated list. Draft is `blog-apify-actor-as-agent-tool.md`, ~1,300 words,
     clearing the 1,000-word floor. Full submission mechanics are in ITEM 10, APIFY SUBMISSION below,
     because "submit it to Discord" is not an instruction anyone can act on.
     **The disqualifier to remember: it must NOT appear on blog.relayshield.net first.** Originality

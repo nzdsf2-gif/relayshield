@@ -293,6 +293,19 @@ another round trip. Each block ends with:
 he cannot act on step 5 before reading step 3's output. Diagnose, get the output,
 then send the fix.
 
+**THE FAILURE MODE RULE 14 DID NOT PREVENT, added the same day it fired again.**
+A block was sent as `cd ~/mcp-live` then `mcp-publisher publish`, and it returned
+401 `token is expired`. The command was correct and the block was not, because it
+omitted the `login` step. Rule 14 says run it or label it, and this could not be
+run here (no registry credential) so it owed an UNVERIFIED label and did not get
+one.
+
+So, concretely: **a block that drives an authenticated CLI includes the auth step
+every time.** Not "you already logged in earlier" -- tokens expire, and the cost
+of a redundant `login` is three seconds while the cost of omitting it is a round
+trip. The same applies to `aws sso login`, `gh auth login`, `twine` and
+`mcp-publisher`.
+
 **Worked example of the required shape:**
 
     ANDREW RUNS THIS:

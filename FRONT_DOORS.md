@@ -251,6 +251,41 @@ someone else's project.
 
 ---
 
+## FD-8, THE PUBLISH COMMAND. Read from the registry's own docs, 2026-09-05.
+
+`~/mcp-live` carries no Makefile, no PUBLISHING.md and no reference to `mcp-publisher` anywhere, so
+`fd8_prepare_republish.py` correctly refused to invent one. These come from
+`modelcontextprotocol/registry`'s own `docs/reference/cli/commands.md`, read from the repository
+rather than guessed.
+
+    brew install mcp-publisher
+    mcp-publisher login github          # browser OAuth; grants io.github.{user}/*
+    mcp-publisher validate server.json
+    mcp-publisher publish               # defaults to ./server.json
+
+`login` is the only subcommand that takes `--registry`; passing it to `publish` would be read as the
+server.json PATH.
+
+**PACKAGE OWNERSHIP VERIFICATION, and it is the step most likely to reject a publish.** The registry
+proves we control the PyPI package by looking for an `mcp-name: <server name>` string **in the
+package README**, which becomes the PyPI description. It may sit inside an HTML comment, and the
+name must match `server.json` exactly.
+
+**Checked on the published 0.2.11 and it is PRESENT:**
+`mcp-name: io.github.nzdsf2-gif/relayshield-mcp`, both as an HTML comment and as a code span. So
+ownership verification will pass, and nothing needs adding to the README before publishing.
+
+**Three fields must be right in `server.json` before the publish**, and one of them was damaged by
+this repo's own tooling on 2026-09-05:
+
+- `version` must be **0.2.11**, matching the package on PyPI. An earlier `--write` run wrote a
+  DOWNGRADE to 0.2.9; `server.json.bak` holds the pre-edit copy and the script now refuses to lower
+  a version.
+- `websiteUrl` must carry `?source=mcp-registry`.
+- `repository.url` casing must match the git remote.
+
+---
+
 ## FD-9 — Glama. **LISTED. VERIFIED 2026-09-03.**
 
 The listing exists at **`https://glama.ai/mcp/servers/relayshield/relayshield-mcp`**, found through

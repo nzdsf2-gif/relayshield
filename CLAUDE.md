@@ -711,10 +711,26 @@ installs only. That is the quiet-alarm rule applied to packaging.
 the way a new user would, prints what the resolver actually chose, and handshakes it. Exit 1 on
 DEAD. It reproduces this in about a minute.
 
-**The fix is founder-side and it is one line**, because the package source lives in `~/mcp-live`,
-not in this repo: change the pin to `mcp>=1.0.0,<2` and publish 0.2.10. Do it in the SAME
-`mcp-publisher` run as item 8, which was already going to re-publish for four other defects -- that
-turns five defects into one release.
+**RESOLVED 2026-09-05. `relayshield-mcp` 0.2.11 is on PyPI and the check is green:**
+`resolved: mcp 1.29.1, relayshield-mcp 0.2.11 -- ACTIVE, 16 tools`. The source in `~/mcp-live`
+already carried `mcp>=1.0.0,<2.0.0`; it had simply never been released, so this was always "ship
+the fix that exists" rather than "fix the pin".
+
+**TWO WAYS THE VERIFICATION LOOKED LIKE A FAILURE WHEN IT WAS NOT, and both were mine.**
+
+First, the check run minutes after the upload resolved **0.2.9**, because a just-published version
+takes time to reach the index pip reads. Identical output to a genuinely broken release. The
+checker now compares what the resolver took against PyPI's latest and says outright when they
+differ, so "the new release is broken" and "the index has not served it yet" stop looking the same.
+
+Second, and worse because it was a throwaway diagnostic presented as evidence: a one-off command
+printed `all versions` using `sorted(releases)[-6:]`, and **`sorted()` on version STRINGS puts
+"0.2.11" before "0.2.4"**, so the slice cut off the very version being checked. It read as "0.2.11
+is not on PyPI" when 0.2.11 was there the whole time. Andrew stopped the session over it, correctly.
+
+The lesson is rule 14 applied to my own output, not just to commands: **a number I print is evidence
+the reader will act on, so a sloppy one-liner is as expensive as a wrong command.** Version strings
+are never sorted lexically; compare them as tuples or do not print an ordering at all.
 
 **Do not bundle the MCP server into the Claude Code plugin until this ships.** A plugin that
 installs a server which dies at import would fail on first use for everyone, and it would fail that

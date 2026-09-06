@@ -301,6 +301,32 @@ def check_published(package: str, timeout: float) -> int:
             if name and name.lower() in (package.lower(), "mcp", "httpx"):
                 print(f"      resolved: {name} {installed[name]}")
 
+        # Say whether the resolver actually took the newest release. Without this
+        # line, "resolved 0.2.9" after publishing 0.2.11 reads as "the new release
+        # is broken", when it means the index had not served it yet or a wheel was
+        # cached. Two very different problems, one identical-looking output, and
+        # on 2026-09-05 it cost a round.
+        got = next((v for k, v in installed.items()
+                    if k and k.lower() == package.lower()), None)
+        latest = None
+        try:
+            import urllib.request
+            with urllib.request.urlopen(
+                    f"https://pypi.org/pypi/{package}/json", timeout=15) as r:
+                latest = json.load(r)["info"]["version"]
+        except Exception:
+            pass
+        if latest and got and latest != got:
+            print()
+            print(f"      NOTE: PyPI's latest is {latest}, but the resolver took {got}.")
+            print("      This verdict is about "
+                  f"{got}, NOT about {latest}. A just-published version can take a")
+            print("      few minutes to reach the index. Re-run before concluding")
+            print("      anything about the new release, and force it directly with:")
+            print(f"        pip install '{package}=={latest}'")
+        elif latest and got:
+            print(f"      (this IS PyPI's latest, {latest})")
+
         # Prefer the console script, since that is what a client config names.
         script = os.path.join(tmp, "bin", package)
         if os.path.exists(script):

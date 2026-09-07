@@ -57,7 +57,14 @@ coverage/
 .coverage
 
 # ── Claude Code local settings ─────────────────────────────────────
-.claude/
+# Local Claude Code state (settings.local.json, caches) stays out. The skills
+# symlink does NOT: `.claude/skills/relayshield-agent-bait` points at the
+# canonical copy under plugins/, CLAUDE.md documents it as the one-file-two-places
+# arrangement, and test_agent_bait_skill.py asserts it is a symlink. With a blanket
+# `.claude/` ignore that test asserted a path the repo forbade, so it had been
+# failing since it was written. Narrow the ignore, do not weaken the test.
+.claude/*
+!.claude/skills/
 
 # ── Lambda deployment packages (build artifacts — not source) ────────
 *.zip

@@ -277,6 +277,36 @@ Full post, published with `canonical_url` set to the blog URL. dev.to handles
 canonical properly, unlike Medium, so this one is a live copy rather than a
 snapshot.
 
+**Do not retype the front matter. `blog-agent-bait-scan-devto.md` in this repo is
+the paste-ready file**, front matter and body together, with the dev.to lead-in
+already in place and the API link carrying `?source=agent-bait-devto`. It exists
+because a front matter block retyped out of a chat reply is how the first attempt
+failed on 2026-09-07.
+
+**Three things that break dev.to's front matter, in the order they actually bite:**
+
+1. **Anything before the opening `---`.** It must be the first three characters of
+   the body, at column zero, with no blank line and no leading spaces. Whitespace
+   in front of it is the single commonest cause, and the symptom is the front
+   matter rendering as visible text in the post rather than an error.
+2. **An unquoted `title` or `description`.** Legal YAML in most cases and not
+   worth the risk: both are quoted in the committed file.
+3. **dev.to's own template comments left in the block.** The `# cover_image:` and
+   `# published_at:` lines their editor pre-fills are comments and are harmless,
+   but delete them anyway so what is in the box is only what you meant to put
+   there.
+
+**The keys are not the problem. Verified 2026-09-07:** `title`, `published`,
+`description`, `tags` (four maximum, comma separated) and `canonical_url` are all
+supported by the markdown editor.
+
+**And the ordering rule that outranks all of it: the canonical must be LIVE and
+returning 200 before this is published.** dev.to is a live copy pointing at our
+URL, and a `canonical_url` that 404s tells every crawler the canonical does not
+exist, which hands dev.to the canonical position for our own post. The committed
+file therefore ships `published: false` deliberately. Flip it to `true` only after
+the blog URL answers.
+
 **Front matter:**
 
 ```yaml

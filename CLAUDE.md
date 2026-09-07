@@ -293,6 +293,19 @@ another round trip. Each block ends with:
 he cannot act on step 5 before reading step 3's output. Diagnose, get the output,
 then send the fix.
 
+**THE FAILURE MODE RULE 14 DID NOT PREVENT, added the same day it fired again.**
+A block was sent as `cd ~/mcp-live` then `mcp-publisher publish`, and it returned
+401 `token is expired`. The command was correct and the block was not, because it
+omitted the `login` step. Rule 14 says run it or label it, and this could not be
+run here (no registry credential) so it owed an UNVERIFIED label and did not get
+one.
+
+So, concretely: **a block that drives an authenticated CLI includes the auth step
+every time.** Not "you already logged in earlier" -- tokens expire, and the cost
+of a redundant `login` is three seconds while the cost of omitting it is a round
+trip. The same applies to `aws sso login`, `gh auth login`, `twine` and
+`mcp-publisher`.
+
 **Worked example of the required shape:**
 
     ANDREW RUNS THIS:
@@ -564,51 +577,76 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 (dispatch from the Actions UI). Nothing does it for Workers yet.
 
 
-## SAYING IT IN CHAT IS NOT RECORDING IT. WRITE THE DECISION DOWN IN THE SAME SESSION.
+## "IT IS NOT IN THE REPO" IS A CLAIM ABOUT ORIGIN, NOT ABOUT THE REPO
 
-**Added 2026-09-07, after I failed it and then compounded the failure by describing the result as
-somebody else's omission.**
+**Added 2026-09-07, after I made exactly this mistake and billed it to somebody else.**
 
-An earlier session wrote, in a chat reply, *"Added as FD-13."* It was a real decision, correctly
-reasoned, with the destination named. **It was never written into `FRONT_DOORS.md` or into this
-file.** A later session grepped the repo for `FD-13`, found nothing, and told Andrew there was no
-FD-13, forcing him to paste the whole decision back in from his own notes.
+I grepped this repo for `FD-13`, got nothing, and told Andrew there was no FD-13 and that an earlier
+session had said *"Added as FD-13"* without ever writing it down. **All of that was wrong.** FD-13
+was written properly, as a full section in `FRONT_DOORS.md`, by commit `63fc78d`. That session did
+its job. The commit was sitting on Andrew's local `main`, unpushed, and this container reads GitHub.
 
-**Two things went wrong and only one of them is the missing commit.**
+So the sequence was: a correct session, a correct commit, an unpushed clone, a container that can
+only see `origin`, and then me converting "absent from origin" into "never written" and asking
+Andrew to re-paste a decision the repo already held. He had to do the work twice because I read my
+own blind spot as his omission.
 
-**The first is the miss itself.** A statement in a chat reply that something *has been* added is a
-claim about the repository. If the repository does not carry it when the session ends, the statement
-was false when it was made, and the container that held the context is reclaimed.
+**This is the LOCAL MERGE IS NOT A PUSH rule, running in the direction nobody wrote down.** That
+section already says a merge on his Mac puts a file in his clone and NOT on GitHub. The unstated
+corollary is what bites: **a grep in this container therefore proves nothing about his clone.** It
+proves the file is not on `origin/main`, which is a different and much weaker statement.
 
-**The second is worse, and it is the reason this rule is phrased as it is.** The session that found
-the gap wrote that FD-13 *"was never committed to `FRONT_DOORS.md`"* -- phrasing that reports the
-omission as a discovered condition of the repo, as though weather. It was not weather. It was mine.
-Continuity across sessions is not a property Andrew maintains by re-pasting decisions; it is the
-whole purpose of these files. **Never report a gap in this repo's own memory as a finding about the
-repo. It is a finding about the session that made it, and it is written in the first person.**
+**THE RULE, in two halves.**
 
-**THE RULE.** Any of these verbs, said in a chat reply, is a promise that the commit exists in the
-same session: added, registered, recorded, decided, noted, created, documented, closed, opened,
-scoped, ranked. Before the reply goes out, the change is in a file, and the file is committed and
-pushed. Where it goes:
+**1. Say what you actually checked.** `git grep` here answers "is it on origin". It does not answer
+"was it ever written", "is it on his Mac", or "did a session do its job". Report the first. Never
+report the second, third or fourth on the evidence of the first:
 
-- **A new front door, or a status change to one** goes in `FRONT_DOORS.md`, both the table row and
-  the section. A row with no section is half a record.
-- **A change to what is next** goes in this file's Top 15, which is regenerated rather than
-  annotated.
-- **A decision with reasoning worth keeping** goes in this file, under a heading that states the
-  finding rather than the topic.
-- **A fact learned about a destination, a vendor, or an environment** goes next to the rule it
-  modifies, in this file.
+    git --no-pager grep -n "FD-13" origin/main -- '*.md'     # answers: is it on origin/main
+    git --no-pager log --all --oneline -S "FD-13"            # answers: has any FETCHED branch held it
 
-**And the cheap check, which costs one command.** Before saying a thing is recorded, grep for it:
+Neither reaches an unpushed commit on his machine. Nothing in this container can. **When something
+expected is missing, the first hypothesis is that it is unpushed, not that it was never done** --
+and the way to settle it costs him one command:
 
-    git --no-pager grep -n "FD-13" -- '*.md'
+    cd ~/dev/relayshield && git --no-pager log --oneline origin/main..main
 
-Empty output means it is not recorded, whatever any reply said. That is the same instruction the
-WHERE THE CURRENT WORK LIST LIVES section already gives for reading a "done" -- *a doc claiming
-something is done is a lead, not a fact* -- turned around and pointed at my own output. **Grep
-before repeating a "done", and grep before claiming an "added".**
+Empty output means his clone holds nothing we cannot see, and only THEN is "not written" supported.
+
+**2. A gap in this repo's memory is written in the first person, and only after that check.** If it
+really is missing, it is mine, and it is fixed in the same reply rather than reported as a condition
+of the repo. Continuity across sessions is the entire purpose of these files; it is not a thing
+Andrew maintains by re-pasting decisions into a prompt.
+
+**And the part that survives regardless of who was at fault.** A statement in a chat reply that
+something *has been* added -- added, registered, recorded, decided, noted, created, documented,
+closed, scoped -- is a promise that a commit exists in the same session. The container is reclaimed;
+the chat reply is not the record. New front doors and status changes go in `FRONT_DOORS.md`, both
+the table row and the section, because a row with no section is half a record. Changes to what is
+next go in this file's Top 15, regenerated rather than annotated.
+
+---
+
+## TWO THINGS RESCUED FROM THE SUPERSEDED 2026-09-05 LIST
+
+Kept because regenerating a list deletes the reasoning inside it, and both of these are decisions
+rather than status.
+
+**A REGISTRY RECORD IS IMMUTABLE ONCE PUBLISHED, AND ITS VERSION IS NOT THE PACKAGE'S VERSION.**
+That is what closed FD-8 after two failed attempts. A metadata fix needs a NEW VERSION STRING,
+because the existing record cannot be edited. And the server entry's version is independent of
+`packages[].version`: **0.2.12 pointing at package 0.2.11 is legal**, and is exactly what shipped,
+with no PyPI release needed. Worth reading twice, because on 2026-09-07 I saw that same 0.2.12
+against PyPI's 0.2.11 and called it a live breakage before checking the field that decides. The
+record's own version and the version it PINS are different fields.
+
+**`crewai-relayshield` IS FAIL-CLOSED, AND DECLARES NO HARD DEPENDENCY ON CREWAI. Do not
+re-litigate either.** The gate core is pure stdlib and `install()` imports the framework lazily;
+pinning crewai would make the package uninstallable next to a different crewai version for no gain.
+Only `no_known_finding` proceeds, because a gate that lets a call through when the check times out
+is a gate anyone can remove by causing a timeout. `fail_open=True` releases `DEFER` only, a check
+that could not be COMPLETED, while a completed `REVIEW` still blocks and a `FINDING` always blocks.
+There is deliberately no setting that lets a known-bad target through, and a test asserts it.
 
 ---
 

@@ -76,10 +76,20 @@ def parse_front_matter(text):
     return fields, body.lstrip("\n")
 
 
+# dev.to sits behind Cloudflare, which 403s urllib's default `Python-urllib/3.x`
+# agent before the request ever reaches the API. That is the same cause that made
+# the canonical probe report 403 on a page a browser loads fine, and it was fixed
+# there first and not generalised, which cost a round. Every outbound request in
+# this file sends a real agent.
+_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
 def _request(method, url, key, payload=None):
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("api-key", key)
+    req.add_header("User-Agent", _UA)
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/vnd.forem.api-v1+json")
     try:
@@ -91,6 +101,10 @@ def _request(method, url, key, payload=None):
             f"ERROR: DEV returned {e.code} for {method} {url}\n{detail}\n\n"
             + ("       401 means DEVTO_API_KEY is missing, wrong or revoked.\n"
                if e.code == 401 else "")
+            + ("       403 from dev.to is usually Cloudflare rejecting the client\n"
+               "       rather than the API rejecting the key. If it persists, the key\n"
+               "       may lack scope: regenerate it at dev.to/settings/extensions.\n"
+               if e.code == 403 else "")
             + ("       422 usually means a tag does not exist on DEV, or there are\n"
                "       more than four of them.\n" if e.code == 422 else "")
         )
@@ -122,9 +136,7 @@ def canonical_is_live(url):
     Those warn and continue.
     """
     req = urllib.request.Request(url, method="GET")
-    req.add_header("User-Agent",
-                   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    req.add_header("User-Agent", _UA)
     req.add_header("Accept", "text/html,application/xhtml+xml")
     try:
         with urllib.request.urlopen(req, timeout=30) as fh:
@@ -211,9 +223,17 @@ def main():
         )
 
     # Never create a second copy of a post that is already there.
-    existing, page = None, 1
+    existing, page, lookup_failed = None, 1, None
     while page <= 5:
-        batch = _request("GET", f"{API}/articles/me/all?per_page=100&page={page}", key)
+        try:
+            batch = _request("GET", f"{API}/articles/me/all?per_page=100&page={page}", key)
+        except SystemExit as e:
+            # A probe that cannot tell must not stop the work: that is the rule
+            # this file's own canonical check broke earlier today. Worst case is a
+            # duplicate, which is visible on the dashboard and deletable. Blocking
+            # a finished post is worse.
+            lookup_failed = str(e).split("\n")[0]
+            break
         if not batch:
             break
         for a in batch:
@@ -223,6 +243,12 @@ def main():
         if existing:
             break
         page += 1
+
+    if lookup_failed:
+        print(f"NOTE: could not list existing articles ({lookup_failed}).\n"
+              f"      Posting anyway. If this post already existed, there will now be\n"
+              f"      TWO on dev.to: delete the older one from the dashboard.",
+              file=sys.stderr)
 
     if existing:
         out = _request("PUT", f"{API}/articles/{existing['id']}", key, {"article": article})

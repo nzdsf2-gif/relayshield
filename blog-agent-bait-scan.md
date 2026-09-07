@@ -277,11 +277,15 @@ Full post, published with `canonical_url` set to the blog URL. dev.to handles
 canonical properly, unlike Medium, so this one is a live copy rather than a
 snapshot.
 
-**Do not retype the front matter. `blog-agent-bait-scan-devto.md` in this repo is
-the paste-ready file**, front matter and body together, with the dev.to lead-in
-already in place and the API link carrying `?source=agent-bait-devto`. It exists
-because a front matter block retyped out of a chat reply is how the first attempt
-failed on 2026-09-07.
+**Do not paste anything. Publish it with one command:**
+
+    python3 tools/publish_devto.py blog-agent-bait-scan-devto.md --dry-run
+    python3 tools/publish_devto.py blog-agent-bait-scan-devto.md --publish
+
+Pasting front matter into their web editor failed twice on 2026-09-07 and neither
+attempt produced an error, because the front matter just renders as visible text.
+The full procedure, and the Cloudflare user-agent trap that cost three rounds, is
+in CLAUDE.md under PUBLISHING TO DEV.TO. Do not re-derive it.
 
 **Three things that break dev.to's front matter, in the order they actually bite:**
 

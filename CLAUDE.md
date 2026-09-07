@@ -577,6 +577,87 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 (dispatch from the Actions UI). Nothing does it for Workers yet.
 
 
+## PUBLISHING TO DEV.TO. ONE COMMAND. DO NOT RE-DERIVE THIS.
+
+**Written 2026-09-07 after ONE post took FOUR ROUNDS, every one of them my fault and none of them
+about the writing.** Andrew's words: *"I'm frustrated and wasting way too much time."* He was right,
+and the cost was not any single bug. It was that each round fixed one symptom and the next round
+found the same cause somewhere else in the same file.
+
+**THE PROCEDURE. Two commands, and nothing else.**
+
+    python3 tools/publish_devto.py <file>.md --dry-run     # sends nothing
+    python3 tools/publish_devto.py <file>.md --publish     # needs DEVTO_API_KEY
+
+The key is read from the environment, never an argument, and is prompted with
+`read -rs "DEVTO_API_KEY?..."` so it never echoes and never enters shell history. Get one at
+<https://dev.to/settings/extensions>, under "DEV Community API Keys".
+
+**NEVER PASTE FRONT MATTER INTO THEIR WEB EDITOR AGAIN.** Two attempts failed on 2026-09-07 and
+neither produced an error: the front matter simply rendered as visible text. Retyping a structured
+document into a web form is a step that fails silently, and the API is a step that fails with an
+HTTP status and a message. The syndication file is generated and committed, and the script sends it.
+
+**The keys are not the problem, and checking them again is a wasted round.** Verified 2026-09-07:
+`title`, `published`, `description`, `tags` (four maximum, comma separated) and `canonical_url` are
+all supported by the markdown editor. If a paste fails it is the paste, not the schema.
+
+### THE ONE CAUSE BEHIND THREE OF THE FOUR ROUNDS: dev.to is behind Cloudflare
+
+**Cloudflare 403s urllib's default `Python-urllib/3.x` user agent before the request reaches
+anything.** That single fact produced, in order:
+
+1. The canonical liveness probe reporting **403** on a page that a browser and `curl` both load at
+   200, which blocked a finished post from publishing.
+2. My first diagnosis of it, *"the Worker does not answer HEAD"*, which was wrong: a grep of
+   `cloudflare_worker_blog.js` shows it does not branch on `request.method` at all.
+3. `GET /api/articles/me/all` returning **403**, one function further on, **because I fixed the
+   probe and did not generalise the fix.**
+
+**So: every outbound request in `tools/publish_devto.py` sends a browser user agent, and any new
+one must too.** A 403 from dev.to is Cloudflare rejecting the client far more often than the API
+rejecting the key; a bad key gives 401.
+
+**The general rule, which is now its own CLAUDE.md section:** a status code is a fact about the
+REQUEST you made, not about the resource you asked about. And when a fix turns out to be about the
+CLIENT rather than the endpoint, apply it to every call in the file in the same commit, because the
+next call will have the same problem and finding that out is another round trip.
+
+### THE DESIGN RULE THAT COST THE MOST: no probe may block the publish
+
+Two checks in this script are probes rather than facts, and **both warn and continue** now:
+
+- **Is the canonical live?** Only **404 and 410** block, because only those unambiguously mean "not
+  published". 403, 405, 429, any 5xx and a refused connection mean *this probe could not tell*.
+- **Does this post already exist?** If listing the account's articles fails, it posts anyway and
+  says so. Worst case is a duplicate, which is visible on the dashboard and deletable. Blocking a
+  finished post is worse than a duplicate.
+
+Both behaviours are tested by triggering them, the second with the network faked so the POST is
+observed to still happen.
+
+### THE ORDERING RULE THAT IS REAL, AND IS THE ONLY HARD ONE
+
+**The canonical must be live before dev.to publishes.** dev.to is a LIVE copy carrying
+`canonical_url`, unlike Medium which takes a snapshot. A canonical that 404s tells every crawler our
+canonical does not exist and hands dev.to the canonical position for our own post. Syndication files
+therefore ship `published: false`, and `--publish` flips it.
+
+That is the ONE thing worth stopping for. Everything else warns.
+
+### The file, and how to make the next one
+
+`blog-agent-bait-scan-devto.md` is the pattern: DEV front matter, then a short runnable lead-in
+because their readers want the thing before the thesis, then the canonical post body with the API
+link switched to that channel's own `?source=` key. Generate it from `blog_markdown/`, never by
+hand, and register the `?source=` key BEFORE it ships.
+
+**Tags: four maximum and they must already exist on DEV.** `ai`, `security`, `devops`, `opensource`
+are the safe set. `mcp` and `aiagents` are worth trying first for anything agent-shaped; a tag that
+does not exist comes back as a 422 naming it.
+
+---
+
 ## A STATUS CODE DESCRIBES YOUR REQUEST, NOT THE RESOURCE. AND A PROBE THAT CANNOT TELL MUST NOT BLOCK.
 
 **Added 2026-09-07, after a check I wrote stopped a finished post from publishing over a page that

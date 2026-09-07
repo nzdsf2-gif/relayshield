@@ -389,11 +389,47 @@ Claude-ecosystem plugins)."*
 and a remote source vendors nothing and only pins a SHA, so the submission is a catalog entry rather
 than a port.
 
-One thing to check rather than assume: whether the MCP server declared in our `.mcp.json` is picked
-up by their loader the way Claude Code picks it up. That exact question cost a round on FD-12, where
-`claude plugin details` was the check that settled it and `validate` was not. There is no verified
-equivalent command here, so **do not claim the server is wired up on Grok until something reports
-it**.
+**MEASURED 2026-09-07, not assumed, by running their own scripts against our entry.** The open
+question was whether the MCP server declared in our `.mcp.json` is picked up by their loader the way
+Claude Code picks it up. That question cost a round on FD-12, where `claude plugin details` settled
+it and `validate` did not, so it was worth answering the same way here rather than reasoning about
+it. Their catalog was cloned, our entry appended, and both CI scripts run:
+
+    python3 scripts/validate-catalog.py          ->  Catalog OK
+    python3 scripts/generate-plugin-index.py     ->  Wrote .grok-plugin/plugin-index.json
+    python3 scripts/generate-plugin-index.py --check  ->  Plugin index OK
+
+And what their generator recorded for us, which is the actual answer:
+
+```json
+"relayshield": {
+  "version": "0.2.0",
+  "components": {
+    "mcpServers": [{"name": "relayshield", "description": "stdio"}],
+    "skills":     [{"name": "relayshield-agent-bait", ...}]
+  }
+}
+```
+
+**Both components are detected. The MCP server IS wired up, and no manifest rewrite is needed.**
+Their generator clones the pinned SHA and reads the plugin itself, so this is their loader's own
+report rather than our reading of it.
+
+**Two schema details that would have failed CI if guessed**, and both were taken from their repo:
+
+1. **The inner key is `source`, not `type`.** The shape is
+   `"source": {"source": "url", "url": ..., "sha": ...}`. Writing `"type": "remote"` is the obvious
+   guess and is wrong.
+2. **A url source accepts an optional relative `path`,** which is the only reason this works at all:
+   our plugin lives at `plugins/relayshield` inside a monorepo rather than at a repo root, and
+   without `path` their loader would look for a plugin manifest beside our MARKETPLACE manifest and
+   read the wrong file. Their validator rejects a `path` that is absolute, contains `..`, or uses
+   backslashes.
+
+`tools/fd13_grok_entry.py` emits the entry with the SHA READ rather than typed, and refuses to emit
+one for a commit that is not an ancestor of `origin/main` or that does not carry the plugin at that
+path. Both refusals were tested by triggering them. A SHA pasted from a document is stale the moment
+`main` moves, and that failure surfaces as a red CI run on somebody else's repository.
 
 ### Our pitch there is one that is already written
 

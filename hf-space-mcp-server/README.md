@@ -37,7 +37,16 @@ Each tool call takes your own RelayShield API key as an argument — this Space 
 
 ## Using this as an MCP tool
 
-This Space is MCP-compatible — add it to your MCP client from [huggingface.co/settings/mcp](https://huggingface.co/settings/mcp), or connect directly to its MCP endpoint (`/gradio_api/mcp/sse`).
+This Space is MCP-compatible. Add it to your MCP client from [huggingface.co/settings/mcp](https://huggingface.co/settings/mcp), or connect directly to its MCP endpoint at `/gradio_api/mcp/` over **Streamable HTTP**.
+
+**Corrected 2026-09-06.** This line previously said `/gradio_api/mcp/sse`. The Space's own container log on startup says otherwise, and the log is authoritative:
+
+```text
+Launching MCP server:
+* Streamable HTTP URL: http://localhost:7860/gradio_api/mcp/
+```
+
+Gradio moved this endpoint from SSE to Streamable HTTP, and the README was never updated. The distinction is not cosmetic: a directory or client that speaks Streamable HTTP and is handed the `/sse` path gets a transport mismatch rather than a clean failure. Note also that `localhost:7860` in that log is the address INSIDE the Space's container. The public endpoint is the Space's own `*.hf.space` host plus that path.
 
 ## Learn more
 

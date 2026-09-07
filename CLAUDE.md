@@ -666,13 +666,24 @@ Three options, and the recommendation is the third:
    manifest is live at `RelayShield/relayshield-mcp/main/smithery.yaml` (uvx, sixteen real tool
    names, no required config). **UNVERIFIED whether Smithery introspects a stdio server without
    building it** -- if it does not, this earns metadata points and no capability points.
-2. **Point it at one of our OWN hosted MCP surfaces.** The HF Space serves MCP at
-   `/gradio_api/mcp/sse`, and the Apify Actor serves MCP over Streamable HTTP in Standby. Either is
-   a real HTTP MCP endpoint. **This does NOT re-open the FD-11 security objection**, and the
-   distinction matters: that objection was about Smithery BUILDING and HOSTING our server in their
-   pipeline, not about us pointing at an endpoint we already run. **UNVERIFIED**: both are
-   egress-blocked from the container, so neither the Space's exact URL nor whether Smithery accepts
-   SSE has been checked.
+2. **Point it at one of our OWN hosted MCP surfaces.** **This does NOT re-open the FD-11 security
+   objection**, and the distinction matters: that objection was about Smithery BUILDING and HOSTING
+   our server in their pipeline, not about us naming an endpoint we already run.
+
+   **The HF Space serves `/gradio_api/mcp/` over STREAMABLE HTTP, not `/sse`.** Read from the
+   Space's own startup log on 2026-09-06, which is authoritative over our README -- that README said
+   `/sse` and was stale, because Gradio moved the endpoint. **This is the good news for Smithery:**
+   its failure message was a *Streamable HTTP* error, so Streamable HTTP is exactly what it speaks.
+
+   **Do not confuse the log's `localhost:7860` with a public URL.** That is the bind address inside
+   the Space's container. The public endpoint is the Space's `*.hf.space` host plus the path.
+   **UNVERIFIED**: huggingface.co is egress-blocked from the container, so the exact host string has
+   never been confirmed from here, and it must be opened in a browser before being pasted anywhere.
+
+   **One cost to weigh before listing it:** a directory listing points strangers at OUR hosted
+   Space, so every call runs on our HF quota rather than on the caller's machine. The Space is
+   already public, so this is a volume question rather than a new exposure, but it is a real
+   difference from listing the PyPI package, which costs us nothing per call.
 3. **Stop at 60/100.** The listing is live, correct, honest, and points at the PyPI package. The
    remaining 40 points are a directory badge. Nothing about them reaches a user who installs the
    server, and two of the three routes to them are unverified.

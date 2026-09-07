@@ -30,9 +30,9 @@ when deciding what to build next — it just becomes an opinion.
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
 | FD-7 | Slack App Directory | Business tiers | 1 week | Not started |
 | FD-8 | Official MCP Registry | Agentic bundle, TI | **DONE 2026-09-06, verified live 2026-09-07** | Latest record is 0.2.12, published 2026-09-06. `websiteUrl` carries `?source=mcp-registry`, `repository.url` is corrected to the `RelayShield` org, and the record pins `pypi relayshield-mcp==0.2.11`, which resolves. Read live from the registry API, package pin included |
-| FD-9 | Glama | Agentic bundle | **LISTED, unblocked by the FD-8 publish** | Glama mirrors the registry record, so the 2026-09-06 publish is what fixes its attribution. Glama is egress-blocked from the container, so confirm the listing shows the new record before closing it |
+| FD-9 | Glama | Agentic bundle | **DONE upstream, pending their sync** | Glama mirrors the registry record, which now carries the attribution. Nothing further to do on our side; re-check the listing in a few days |
 | FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **DONE 2026-09-05** | 0.2.11's published metadata carries `Documentation: https://api.relayshield.net/developers?source=pypi`. Read from PyPI, not from the local file |
-| FD-11 | Smithery | Agentic bundle | Not listed | Searched 2026-09-03, no RelayShield entry. `mcp_registry/smithery.yaml` is written and unshipped. See the note below before submitting |
+| FD-11 | Smithery | Agentic bundle | **LISTED, 60/100, tools not introspected** | Server metadata and config UX are full marks. Capability Quality is 0/40 because the deployment cannot start the server. `mcp_registry/smithery.yaml` was CORRECTED 2026-09-05 and still needs copying to `~/mcp-live` |
 | FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
 | FD-13 | xAI Grok Build plugin marketplace | Agentic bundle, API | **ROUTE OPEN, ARTEFACT ALMOST PORTABLE** | Added 2026-09-07. `xai-org/plugin-marketplace`, an open PR-route catalog. It accepts `.claude-plugin/plugin.json` verbatim, so our plugin ports with no rewrite. Its bar is NOT thinner than FD-12's, which is the correction below. Do FD-12 first |
 
@@ -249,6 +249,200 @@ Also worth a look while in there: the registry record's `repository.url` says
 `github.com/relayshield/relayshield-mcp` while the namespace is `io.github.nzdsf2-gif/`. GitHub is
 case-insensitive on owner, so this probably resolves, but it is the kind of mismatch that reads as
 someone else's project.
+
+---
+
+## FD-8, THE PUBLISH COMMAND. Read from the registry's own docs, 2026-09-05.
+
+`~/mcp-live` carries no Makefile, no PUBLISHING.md and no reference to `mcp-publisher` anywhere, so
+`fd8_prepare_republish.py` correctly refused to invent one. These come from
+`modelcontextprotocol/registry`'s own `docs/reference/cli/commands.md`, read from the repository
+rather than guessed.
+
+    brew install mcp-publisher
+    mcp-publisher login github          # browser OAuth; grants io.github.{user}/*
+    mcp-publisher validate server.json
+    mcp-publisher publish               # defaults to ./server.json
+
+`login` is the only subcommand that takes `--registry`; passing it to `publish` would be read as the
+server.json PATH.
+
+**PACKAGE OWNERSHIP VERIFICATION, and it is the step most likely to reject a publish.** The registry
+proves we control the PyPI package by looking for an `mcp-name: <server name>` string **in the
+package README**, which becomes the PyPI description. It may sit inside an HTML comment, and the
+name must match `server.json` exactly.
+
+**Checked on the published 0.2.11 and it is PRESENT:**
+`mcp-name: io.github.nzdsf2-gif/relayshield-mcp`, both as an HTML comment and as a code span. So
+ownership verification will pass, and nothing needs adding to the README before publishing.
+
+**Three fields must be right in `server.json` before the publish**, and one of them was damaged by
+this repo's own tooling on 2026-09-05:
+
+- `version` must be **0.2.11**, matching the package on PyPI. An earlier `--write` run wrote a
+  DOWNGRADE to 0.2.9; `server.json.bak` holds the pre-edit copy and the script now refuses to lower
+  a version.
+- `websiteUrl` must carry `?source=mcp-registry`.
+- `repository.url` casing must match the git remote.
+
+---
+
+## FD-8, SECOND HALF: REGISTRY RECORDS ARE IMMUTABLE, so the fix needs a NEW version
+
+Found 2026-09-05, after the first publish landed 0.2.11 with the attribution still missing.
+
+**What happened, and it traces back to this repo's own bug.** `fd8_prepare_republish.py --write`
+made three correct edits, then also wrote a version DOWNGRADE. Restoring `server.json.bak` undid the
+downgrade AND the two good edits with it, so the publish shipped a correct version number and a bare
+`websiteUrl`. **A backup restore is not selective**, and that is the cost of a tool that makes a
+wrong edit alongside right ones.
+
+**The registry will not let that record be edited.** From the registry's own FAQ:
+*"Submit a new `server.json` with a unique version string. Once published, version metadata is
+immutable (similar to npm)."*
+
+**BUT IT DOES NOT NEED A NEW PYPI RELEASE.** The server entry's `version` and the `packages[].version`
+are INDEPENDENT fields, and the registry's own `generic-server-json.md` example shows a server at
+`1.0.2` carrying one package at `1.0.2` and another at `1.0.1`. So:
+
+    server.json  "version": "0.2.12"            <- registry entry only, bumped
+    packages[0]  "version": "0.2.11"            <- stays, and must stay: it names the real PyPI release
+
+That closes FD-8 with a registry publish and no PyPI upload at all.
+
+**The three edits, and `fd8_prepare_republish.py --write` still makes two of them:**
+
+1. `websiteUrl` -> `https://relayshield.net?source=mcp-registry`
+2. `repository.url` casing -> matches the git remote
+3. `version` -> `0.2.12` **by hand**, because the script sets it from PyPI's latest and PyPI has no
+   0.2.12. Bump it after running the script, and leave `packages[].version` at 0.2.11.
+
+Then `mcp-publisher publish`. Ownership verification passes: the `mcp-name:` marker is in 0.2.11's
+README and unchanged.
+
+---
+
+## FD-13 — xAI's Grok Build plugin marketplace. **A DIRECT PARALLEL, and the route is a PR.**
+
+Added 2026-09-05, prompted by the Grok Bot agentic-payments story. It is the same shape as FD-12 and
+the same artefact fits it.
+
+`xai-org/plugin-marketplace` on GitHub is an OPEN catalog for Grok Build, xAI's terminal coding
+agent, launched 2026-06-11 with six plugins (MongoDB, Vercel, Sentry, Chrome DevTools, Cloudflare,
+Superpowers). It carries an `external_plugins/` directory for third-party plugins, and a catalog
+entry in `.grok-plugin/marketplace.json`. Its structure mirrors Claude Code's closely: `skills/` with
+`SKILL.md`, plus commands, agents, hooks, MCP servers.
+
+**CORRECTED 2026-09-07, and the correction is the reason to re-read this entry.** The paragraph
+that stood here said there was *"no stated eligibility policy, no quality bar and no security
+vetting process"*, and concluded FD-13 was a thinner door than FD-12. **That was read from
+`README.md`. The rules are in `CONTRIBUTING.md`, and they are extensive.** Verified 2026-09-07 by
+cloning the repo: live, last commit `b73728b` of 2026-09-04, `external_plugins/` holding exactly one
+third-party entry so far (`neon`).
+
+What `CONTRIBUTING.md` actually states:
+
+- A **Security expectations** section enumerating five rejection classes: arbitrary code execution
+  including `curl | bash`, secret or data exfiltration, over-broad hooks or MCP scope, obfuscation,
+  and **prompt injection planted in a `SKILL.md` or in descriptions aimed at the installing agent**.
+- A **What review checks** table with five named dimensions: source legitimacy, security,
+  components, duplication, conventions and CI.
+- Review is **code-owner review plus CI**, and submissions are *"statically reviewed for
+  supply-chain and execution risk"*.
+
+So the bar is **not thinner than FD-12's, it is more explicitly specified**: Anthropic says "quality
+and security standards" without enumerating them; xAI enumerates. What xAI disclaims is *authoring
+and verifying* third-party plugins, which is a liability statement rather than an absence of review,
+and reading it as the latter is how a submission gets sent back. The only genuinely thinner thing is
+the mechanism: a PR against a public repo, versus a form.
+
+**The general form, for the third time in this file: read the destination's CONTRIBUTING, not just
+its README.** FD-2 was scoped from a landing page whose own last section said the PR would be closed
+without comment. This entry was scoped from a README while the rules sat one file over.
+
+### The requirement that actually blocks us, and it is not the security bar
+
+> **"Source from your official org, not a personal account.** A branded plugin (`acme`) sourced from
+> `some-personal-account/acme-thing` reads as a possible impersonation and *will* be questioned."
+
+Their guide calls this *"the single biggest thing that speeds up review"*. **Our marketplace is
+`nzdsf2-gif/relayshield`**, a personal account, for a plugin branded RelayShield. That names our
+exact shape. A `RelayShield` org exists and is already authoritative for the MCP registry record and
+for rsscan.
+
+**It cannot be fixed from a `nzdsf2-gif/*` session.** Repo sources are one owner, fixed at session
+creation, and a cross-tier `add_repo` for `relayshield/*` is refused. Moving the plugin to the org is
+a SEPARATE SESSION, decided in the repository picker before the prompt is typed.
+
+**And it reaches FD-12, which is already submitted.** That submission carries
+`nzdsf2-gif/relayshield` as its install path. Moving the plugin to the org afterwards changes the
+install path of a listing that may by then be live, which is a worse problem than deciding it now.
+FD-12 states no org requirement so it was not blocked, but the decision is no longer free.
+
+### What ports as-is, and it is more than expected
+
+`CONTRIBUTING.md`, requirements checklist: *"Local plugins include a `README.md` and a valid
+`.grok-plugin/plugin.json` manifest (`.claude-plugin/plugin.json` is also accepted for
+Claude-ecosystem plugins)."*
+
+**No manifest rewrite.** Our `plugins/relayshield/.claude-plugin/plugin.json` is accepted verbatim,
+and a remote source vendors nothing and only pins a SHA, so the submission is a catalog entry rather
+than a port.
+
+One thing to check rather than assume: whether the MCP server declared in our `.mcp.json` is picked
+up by their loader the way Claude Code picks it up. That exact question cost a round on FD-12, where
+`claude plugin details` was the check that settled it and `validate` was not. There is no verified
+equivalent command here, so **do not claim the server is wired up on Grok until something reports
+it**.
+
+### Our pitch there is one that is already written
+
+The Grok Bot payments story runs on Stripe Link minting a single-use virtual card, scoped to that
+merchant and that amount, with the user approving the spend. **That controls how much the agent
+spends, not whether the counterparty is legitimate.** An agent inside its limits paying a fraudulent
+API is a fully authorised transaction. That is the Rain gap and the Routavo gap word for word, and
+the argument is already in `socradar_gap_closure_roadmap.md`. Do not re-derive it, and note it is
+the pitch TO them rather than a conflict with them.
+
+**Why it is worth doing anyway:** the port is small. Our plugin is a `SKILL.md` plus an MCP server
+declaration, which is exactly what their structure takes, and the catalog being six plugins deep is
+the argument for going early rather than against it.
+
+**Do FD-12 first.** Same artefact, a documented review process, and a submission that has been
+prepared. FD-13 is the second copy of the same work, not a different piece of work.
+
+**That ranking stands after the correction**, and for a better reason than before: the artefact is
+built, the manifest is accepted as-is and the argument is written, so the marginal cost of FD-13
+after FD-12 is small. **FD-12's form was submitted 2026-09-06.**
+
+### The eight submission steps, from their own guide
+
+1. **Settle the org question first.** See above. If the plugin moves to `RelayShield/`, that is a
+   separate session and it changes FD-12's install path too.
+2. Fork `xai-org/plugin-marketplace`, branch from `main`.
+3. Add ONE entry to `.grok-plugin/marketplace.json`. Remote source recommended for third-party:
+   point `source.url` at our public repo and pin a **full 40-character lowercase commit SHA**.
+   Nothing is vendored.
+4. Get the SHA with `git ls-remote <repo> HEAD`. **`main`, a tag and an abbreviated SHA are all
+   rejected by their validator**, because a moving ref would let a later force-push ship new code to
+   every user silently.
+5. Keep `keywords` and `domains` **brand-scoped**. They power Grok Build's proactive plugin CTA, and
+   their guide names `postgres`, `database`, `api`, `cli` and `deploy` as terms that get pushed back
+   for mis-firing the CTA on unrelated requests. Ours are `relayshield`, `mcp registry risk`,
+   `agent bait scan`, and only `relayshield.net` as a domain.
+6. **Regenerate the component index, never hand-edit it:** `python3 scripts/generate-plugin-index.py`.
+   CI fails on a stale `.grok-plugin/plugin-index.json`.
+7. **Validate exactly what their CI runs**, before opening anything:
+   `python3 scripts/validate-catalog.py` and `python3 scripts/generate-plugin-index.py --check`.
+8. **Declare the network endpoints the plugin calls and the credentials it needs, in the README.**
+   Their guide says outright this speeds review. Then open the PR against their template and wait
+   for CI plus code-owner review.
+
+**Self-check against their five rejection classes before opening it.** Two points are in our favour
+and neither states itself: our skill is a DETECTOR for prompt injection planted in a `SKILL.md`,
+which is one of the five classes by name, and `.mcp.json` pins `relayshield-mcp>=0.2.10` as a safety
+property rather than tidiness, because 0.2.9 and earlier resolve `mcp` 2.x and die at import. Say
+both in the PR body.
 
 ---
 
@@ -487,119 +681,3 @@ the explicit parameter is what survives a referrer being stripped.
 **6. Do not paste any RelayShield API key into a Smithery configuration field.** Users bring their
 own key or use the keyless endpoints. Nothing about a listing needs a credential from us, and the
 2025 incident is the reason to keep it that way.
-
----
-
-## FD-13 — xAI's Grok Build plugin marketplace. **ROUTE OPEN. AND ITS RULES WERE READ.**
-
-Added 2026-09-07. **It had been decided in an earlier session and never written down here**, which
-is the drift rule applied to documents: a front door that exists only in a chat reply is a front
-door the next session cannot act on. A grep for `FD-13` across this repo returned nothing before
-this entry. That is the reason to write it in, whatever else changes.
-
-**The destination, verified rather than assumed.** `xai-org/plugin-marketplace`, cloned through the
-proxy on 2026-09-07: live, last commit `b73728b` on 2026-09-04, and it carries `CONTRIBUTING.md`,
-`README.md`, `scripts/`, `plugins/`, `.grok-plugin/` and `external_plugins/`. That last directory
-holds exactly one third-party entry today, `neon`. **A catalog with one external plugin in it is a
-door that is genuinely open and genuinely untrodden**, which cuts both ways: little competition for
-attention, and no worked example to copy beyond a single vendor.
-
-### The correction, and it is the whole reason to read this section
-
-The note this entry was written from said the route had **"no stated eligibility bar, no quality
-criteria, no security vetting"**. `CONTRIBUTING.md` says the opposite, in its own headings, and the
-FD-2 lesson is that you read the destination before you write the instruction:
-
-- There is a **Security expectations** section that enumerates five rejection classes: arbitrary
-  code execution including `curl | bash`, secret or data exfiltration, over-broad hooks or MCP
-  scope, obfuscation, and **prompt injection planted in `SKILL.md` or descriptions aimed at the
-  installing agent**.
-- There is a **What review checks** table with five named dimensions: source legitimacy, security,
-  components, duplication, conventions and CI.
-- Review is **code-owner review plus CI**, and submissions are **"statically reviewed for
-  supply-chain and execution risk"**.
-
-So FD-13's bar is not thinner than FD-12's. It is **more explicitly specified**: Anthropic states
-"quality and security standards" without enumerating them, while xAI enumerates. What xAI does
-disclaim is *authorship and verification* of third-party plugins, which is a liability statement
-rather than an absence of review, and reading it as the latter is how a submission gets sent back.
-
-The one thing genuinely thinner is the mechanism: a PR against a public repo, versus a form.
-
-### The requirement that actually blocks us, and it is not the security bar
-
-> **"Source from your official org, not a personal account.** A branded plugin (`acme`) sourced
-> from `some-personal-account/acme-thing` reads as a possible impersonation and *will* be
-> questioned."
-
-**Our marketplace is `nzdsf2-gif/relayshield`. That is a personal account, for a plugin branded
-RelayShield.** By their own stated tip this is the single biggest thing that slows a review, and it
-names our exact shape. A `RelayShield` org exists and is already authoritative elsewhere: the MCP
-registry record now points at `github.com/RelayShield/relayshield-mcp`, and FD-1's rsscan work
-happens in `RelayShield/rsscan`.
-
-**And this cannot be fixed from a `nzdsf2-gif/*` session.** Session repo sources are one owner,
-fixed at session creation, and a cross-tier `add_repo` for `relayshield/*` is refused. So hosting
-the plugin under the org is a SEPARATE SESSION, decided before the work starts, exactly as the
-environment table at the top of CLAUDE.md says.
-
-That also gives FD-12 a dependency nobody had written down: the Anthropic submission installs from
-`nzdsf2-gif/relayshield` too. FD-12 states no org requirement, so it is not blocked. But if the
-plugin moves to the org for FD-13, FD-12's marketplace source moves with it, and doing that AFTER
-submitting to Anthropic means a changed install path on a live directory listing. **Decide the org
-question before FD-12 is submitted, not between the two.**
-
-### What ports as-is, and it is more than expected
-
-`CONTRIBUTING.md`, requirements checklist: *"Local plugins include a `README.md` and a valid
-`.grok-plugin/plugin.json` manifest (`.claude-plugin/plugin.json` is also accepted for
-Claude-ecosystem plugins)."*
-
-So there is **no manifest rewrite**. Our `plugins/relayshield/.claude-plugin/plugin.json` is
-accepted verbatim. Combined with the remote-source option, which vendors nothing and only pins a
-SHA, the submission is a catalog entry rather than a port.
-
-One thing to check rather than assume: whether the MCP server declared in our `.mcp.json` is picked
-up by their loader the way Claude Code picks it up. That question cost a round on FD-12 already, and
-`claude plugin details` was the check that settled it. There is no equivalent verified command here
-yet, so **do not claim the server is wired up on Grok until something reports it**.
-
-### Our pitch there is one we have already written
-
-The Grok Bot payments story runs on Stripe Link minting a single-use virtual card, scoped to that
-merchant and that amount, with the user approving the spend. **That controls how much the agent
-spends, not whether the counterparty is legitimate.** An agent inside its limits paying a fraudulent
-API is a fully authorised transaction.
-
-That is the Rain gap and the Routavo gap, word for word, and the argument is already written in
-`socradar_gap_closure_roadmap.md`. Do not re-derive it. Note that this is the pitch TO them, not a
-conflict with them, exactly as it was for Rain.
-
-### Ranking: do FD-12 first, and this is not a tie
-
-FD-13 is a **second copy of the same work, not new work**. The artefact is built, the manifest is
-accepted as-is, and the argument is written. That is precisely why it goes second: the marginal cost
-of FD-13 after FD-12 is small, and the marginal cost of FD-12 after FD-13 is the same, so do the one
-whose audience is already using the artefact.
-
-### Steps, when it is time
-
-1. **Settle the org question first.** See above. If the plugin moves to `RelayShield/`, that is a
-   separate session and it changes FD-12's install path too.
-2. Fork `xai-org/plugin-marketplace`, branch from `main`.
-3. Add one entry to `.grok-plugin/marketplace.json`, remote source, pinning a full 40-char lowercase
-   commit SHA. `main`, a tag, and an abbreviated SHA are all rejected by their validator.
-4. Keep `keywords` and `domains` **brand-scoped**. They power Grok Build's proactive plugin CTA, and
-   their guide names generic terms like `api` and `cli` as pushed back. Ours are `relayshield`,
-   `mcp registry risk`, `agent bait scan`, and only `relayshield.net`.
-5. Regenerate the index, never hand-edit it: `python3 scripts/generate-plugin-index.py`.
-6. Validate exactly what their CI runs: `python3 scripts/validate-catalog.py` and
-   `python3 scripts/generate-plugin-index.py --check`.
-7. Declare the network endpoints the plugin calls and the credentials it needs, in the README. Their
-   guide says outright this speeds review.
-8. Open the PR against the template, then wait for CI and code-owner review.
-
-**Self-check against their five rejection classes before opening it.** Our skill is a detector for
-prompt injection planted in `SKILL.md`, which makes shipping any of it a particularly bad look, and
-`.mcp.json` pins `relayshield-mcp>=0.2.10` for the safety reason recorded in CLAUDE.md rather than
-for tidiness. Both are points in our favour if the README says so, and neither says itself.

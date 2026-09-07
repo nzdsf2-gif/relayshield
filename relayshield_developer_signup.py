@@ -2890,6 +2890,39 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "carries. Screening what an agent is TOLD, rather than what it is, is "
             "the gap most tool-vetting leaves open.")),
     ),
+    # Agent-bait post (ABS-2), "Your agent reads the README. That is the attack
+    # surface nobody scans." Registered 2026-09-07 BEFORE the post ships, which is
+    # the whole rule: an unregistered key logs unmatched: and renders no banner, so
+    # every syndicated link would look fine and attribute nothing. FD-8 is four
+    # months of exactly that.
+    #
+    # This is a SEPARATE key from claude-skill on purpose. claude-skill is an
+    # arrival from inside the plugin, mid-decision, and its copy assumes a scan has
+    # just run. This one is an arrival from an article, where the reader has read
+    # the argument and not yet run anything. Same endpoint, different sentence.
+    #
+    # The last three entries are the ARTICLE SLUG, not a domain, following the
+    # npm-worm pattern: _resolve_source substring-matches the whole Referer, and
+    # Medium strips the query string from the rendered anchor href, so the slug is
+    # the only thing that survives that platform.
+    "agent-bait": (
+        ("your-agent-reads-the-readme-that-is-the-attack-surface-nobody-scans",
+         "your-agent-reads-the-readme",
+         "agent-reads-the-readme"),
+        _banner("Arriving from the agent-bait post", _p(
+            "The check in that post is one call. "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/payg/agent-bait-scan</code> '
+            "takes a GitHub repository and reads the surfaces an agent reads &mdash; README, "
+            "AGENTS.md, CLAUDE.md, .cursorrules, copilot-instructions, MCP manifests &mdash; then "
+            "reports what those instructions would cause an agent to DO: fetch and execute remote "
+            "code, ignore prior instructions, or open credential files. Hidden text counts, and a "
+            "finding inside a zero-width or Unicode-tag region is escalated on its own. Every domain "
+            "the instructions reference is checked against indicators collected from criminal "
+            "channels. $0.50 a call, and it takes x402 so discovery needs no account: call it with "
+            "no payment header and the 402 carries the full requirements. It never returns "
+            "&quot;safe&quot; &mdash; the ceiling is &quot;nothing known against it&quot;, and the "
+            "response says so itself.")),
+    ),
     "tg-widget": (
         (),
         _banner("Arriving from a Telegram bot", _p(
@@ -3179,6 +3212,20 @@ _SOURCE_ALIASES = {
     # Ansible Galaxy collection relayshield.security, published 2026-08-17.
     # Registered at publish time: an unregistered key logs unmatched: and renders
     # no banner, so the link looks fine and attributes nothing.
+    # Agent-bait post (ABS-2), 2026-09-07. Nine aliases, one per syndication
+    # channel plus the endpoint's own name, all resolving to the agent-bait
+    # banner. They stay distinguishable because _resolve_source logs the RAW
+    # parameter, so CloudWatch can still separate dev.to from Mastodon while the
+    # page renders one thing. Registered BEFORE the first link goes out.
+    "agent-bait-medium":     "agent-bait",
+    "agent-bait-devto":      "agent-bait",
+    "agent-bait-hf":         "agent-bait",
+    "agent-bait-linkedin":   "agent-bait",
+    "agent-bait-telegram":   "agent-bait",
+    "agent-bait-farcaster":  "agent-bait",
+    "agent-bait-mastodon":   "agent-bait",
+    "agent-bait-reddit":     "agent-bait",
+    "agent-bait-scan":       "agent-bait",
     "galaxy":              "ansible-galaxy",
     "ansible":             "ansible-galaxy",
     "ansible-galaxy":      "ansible-galaxy",

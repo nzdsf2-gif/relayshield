@@ -99,9 +99,36 @@ def _request(method, url, key, payload=None):
 
 
 def canonical_is_live(url):
-    req = urllib.request.Request(url, method="HEAD")
+    """Answer "is the canonical there", as robustly as this can be answered.
+
+    THIS BLOCKED A PUBLISH ON 2026-09-07 OVER A PAGE THAT WAS FINE, and the
+    diagnosis took two wrong turns worth recording.
+
+    The first version used HEAD and reported 403 on a canonical that a browser and
+    curl both load. The obvious reading was "the Cloudflare Worker does not answer
+    HEAD" -- but `cloudflare_worker_blog.js` does not branch on `request.method`
+    anywhere, so that was wrong too. The likelier cause is Cloudflare refusing
+    urllib's default `Python-urllib/3.x` user agent, which is a fact about the
+    REQUEST rather than about the page.
+
+    That is the whole lesson, and it is the 402-price lesson again: a status code
+    describes the request you made, not the resource you asked about. So this now
+    sends a GET with a real user agent, and, far more importantly, it DOES NOT
+    BLOCK on an ambiguous answer.
+
+    Only 404 and 410 mean "not published". Everything else -- 403, 405, 429, any
+    5xx, a refused connection -- means "this probe could not tell", and a probe
+    that cannot tell must not stand between a finished post and its publication.
+    Those warn and continue.
+    """
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("User-Agent",
+                   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    req.add_header("Accept", "text/html,application/xhtml+xml")
     try:
         with urllib.request.urlopen(req, timeout=30) as fh:
+            fh.read(64)
             return fh.status, None
     except urllib.error.HTTPError as e:
         return e.code, None
@@ -159,20 +186,21 @@ def main():
 
     if published and not args.no_canonical_check:
         code, err = canonical_is_live(fm["canonical_url"])
-        if err is not None:
+        if code in (404, 410):
             raise SystemExit(
-                f"ERROR: could not reach the canonical ({err}).\n"
-                f"       Publishing against a canonical that does not answer hands DEV\n"
-                f"       the canonical position for our own post. Re-run with --draft,\n"
-                f"       or with --no-canonical-check if you have confirmed it by hand."
+                f"ERROR: the canonical returned {code}. It is not published:\n"
+                f"       {fm['canonical_url']}\n"
+                f"       Publish the canonical first. A live DEV copy pointing at a\n"
+                f"       canonical that does not exist hands DEV the canonical position\n"
+                f"       for our own post, which is the one thing this ordering prevents."
             )
         if code != 200:
-            raise SystemExit(
-                f"ERROR: the canonical returned {code}, not 200:\n"
-                f"       {fm['canonical_url']}\n"
-                f"       Publish the canonical first. That ordering is the whole point\n"
-                f"       of a canonical link."
-            )
+            what = err if err is not None else f"HTTP {code}"
+            print(f"NOTE: could not confirm the canonical ({what}).\n"
+                  f"      That is a fact about this probe, not proof the page is missing:\n"
+                  f"      bot protection and edge rules reject scripted requests that a\n"
+                  f"      browser sails through. Continuing. Open it yourself if unsure:\n"
+                  f"      {fm['canonical_url']}", file=sys.stderr)
 
     key = os.environ.get("DEVTO_API_KEY", "").strip()
     if not key:

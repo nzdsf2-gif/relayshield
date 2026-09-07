@@ -577,6 +577,41 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 (dispatch from the Actions UI). Nothing does it for Workers yet.
 
 
+## A STATUS CODE DESCRIBES YOUR REQUEST, NOT THE RESOURCE. AND A PROBE THAT CANNOT TELL MUST NOT BLOCK.
+
+**Added 2026-09-07, after a check I wrote stopped a finished post from publishing over a page that
+was perfectly fine, and after I then misdiagnosed it twice in a row.**
+
+`tools/publish_devto.py` refused to publish because the canonical returned **403**. The canonical
+loads in a browser and returned **200** to Andrew's own `curl` minutes earlier.
+
+**First wrong diagnosis: "the Worker does not answer HEAD."** Plausible, since the probe used HEAD.
+`cloudflare_worker_blog.js` does not branch on `request.method` anywhere, so it was wrong. **Second
+wrong diagnosis avoided only by grepping the Worker before asserting it.** The likelier cause is
+Cloudflare refusing urllib's default `Python-urllib/3.x` user agent, which curl and a browser do not
+send.
+
+**The lesson is the 402-price lesson in a new costume.** That one: two components can return the
+same shape of success, so verify the field that differs. This one: **a status code is a fact about
+the REQUEST you made, not about the resource you asked about.** A 403 answered "is a scripted
+request from this client allowed", which nobody asked. Probe with the method, headers and user agent
+a real reader would send, or accept that you have not asked the question you think you asked.
+
+**And the half that actually cost the time, which is a design rule rather than a diagnosis.** The
+check was a GATE, so an inconclusive probe became a hard stop between a finished post and its
+publication. That is a worse failure than the thing it was guarding against.
+
+**Only an unambiguous answer may block. Everything else warns and continues.** For "is this page
+published", 404 and 410 are unambiguous. 403, 405, 429, every 5xx and a refused connection all mean
+*this probe could not tell*, and a probe that cannot tell has no standing to stop the work. The
+warning says so in those words and names the URL to open.
+
+Applies to every guard in this repo, not just this one: **before writing a check that blocks, ask
+what its inconclusive answer looks like, and make sure that answer does not read as failure.** A
+check that cries wolf gets disabled, and then it is not a check at all.
+
+---
+
 ## "IT IS NOT IN THE REPO" IS A CLAIM ABOUT ORIGIN, NOT ABOUT THE REPO
 
 **Added 2026-09-07, after I made exactly this mistake and billed it to somebody else.**

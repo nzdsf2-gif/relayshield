@@ -33,11 +33,12 @@ Seven items closed, four of them permanently.
 Regenerated, not annotated. Eight of the previous fifteen are closed, so this is mostly new work
 rather than the same list with strikethroughs.
 
-1. **Smithery, ONE decision then one click (FD-11).** The listing is live at 60/100 with metadata and
-   config UX at full marks. Capability Quality is 0/40 because Smithery cannot enumerate the tools.
-   **Do NOT use "Publish via URL" with `https://relayshield.net`** -- that is a website, it returns
-   HTML, and it is the exact cause of the current zero. See the section below for the three options
-   and the recommendation.
+1. **WATCH THE HF SPACE. It is now a production surface and nothing checks it.** FD-11 closed at
+   82/100 on 2026-09-06 by pointing Smithery at the Space's Streamable HTTP endpoint, so a public
+   directory listing now depends on that Space staying up. If it goes down, a live front door breaks
+   silently. `check_server_status` is already a tool on the Space, so the cheap fix is a scheduled
+   call against the public endpoint that opens an issue when it stops answering. This is the
+   quiet-alarm rule applied to a surface we just made load-bearing.
 2. **Publish the agent-bait blog post (ABS-2).** `blog-agent-bait-scan.md` is written, ~1,600 words,
    no corpus numbers, Island's figures attributed to Island. **Add the link to Island's write-up in
    the first paragraph before publishing** -- the 2026-08-30 LLMjacking post shipped resting on
@@ -77,7 +78,16 @@ rather than the same list with strikethroughs.
     unscoped: nobody has read its contribution rules. Read the destination first. That is the FD-2
     lesson and it has already cost this programme a wasted day once.
 
-### SMITHERY: THE "PUBLISH VIA URL" TRAP, AND THE THREE OPTIONS
+### SMITHERY IS DONE, 82/100. Kept because the three wrong turns are the reusable part.
+
+**Closed 2026-09-06** with "Publish via URL" against
+`https://relayshieldadmin-relayshield-agentic-attack-surface.hf.space/gradio_api/mcp/`. Smithery
+speaks Streamable HTTP and the Space serves it, so once it connected, the tools enumerated.
+
+**Founder decision, settled:** the listing sends callers to our hosted Space and that traffic is
+wanted. Flat $9/month, no per-call charge. Do not re-open the cost question.
+
+### SMITHERY: THE "PUBLISH VIA URL" TRAP, AND THE THREE OPTIONS (superseded, kept for the traps)
 
 Smithery's Publish dialog asks for an **MCP Server URL**, described as "the HTTP URL where your MCP
 server is accessible". `https://relayshield.net?source=mcp-registry` was entered there. That is a
@@ -92,13 +102,24 @@ Three options, and the recommendation is the third:
    manifest is live at `RelayShield/relayshield-mcp/main/smithery.yaml` (uvx, sixteen real tool
    names, no required config). **UNVERIFIED whether Smithery introspects a stdio server without
    building it** -- if it does not, this earns metadata points and no capability points.
-2. **Point it at one of our OWN hosted MCP surfaces.** The HF Space serves MCP at
-   `/gradio_api/mcp/sse`, and the Apify Actor serves MCP over Streamable HTTP in Standby. Either is
-   a real HTTP MCP endpoint. **This does NOT re-open the FD-11 security objection**, and the
-   distinction matters: that objection was about Smithery BUILDING and HOSTING our server in their
-   pipeline, not about us pointing at an endpoint we already run. **UNVERIFIED**: both are
-   egress-blocked from the container, so neither the Space's exact URL nor whether Smithery accepts
-   SSE has been checked.
+2. **Point it at one of our OWN hosted MCP surfaces.** **This does NOT re-open the FD-11 security
+   objection**, and the distinction matters: that objection was about Smithery BUILDING and HOSTING
+   our server in their pipeline, not about us naming an endpoint we already run.
+
+   **The HF Space serves `/gradio_api/mcp/` over STREAMABLE HTTP, not `/sse`.** Read from the
+   Space's own startup log on 2026-09-06, which is authoritative over our README -- that README said
+   `/sse` and was stale, because Gradio moved the endpoint. **This is the good news for Smithery:**
+   its failure message was a *Streamable HTTP* error, so Streamable HTTP is exactly what it speaks.
+
+   **Do not confuse the log's `localhost:7860` with a public URL.** That is the bind address inside
+   the Space's container. The public endpoint is the Space's `*.hf.space` host plus the path.
+   **UNVERIFIED**: huggingface.co is egress-blocked from the container, so the exact host string has
+   never been confirmed from here, and it must be opened in a browser before being pasted anywhere.
+
+   **One cost to weigh before listing it:** a directory listing points strangers at OUR hosted
+   Space, so every call runs on our HF quota rather than on the caller's machine. The Space is
+   already public, so this is a volume question rather than a new exposure, but it is a real
+   difference from listing the PyPI package, which costs us nothing per call.
 3. **Stop at 60/100.** The listing is live, correct, honest, and points at the PyPI package. The
    remaining 40 points are a directory badge. Nothing about them reaches a user who installs the
    server, and two of the three routes to them are unverified.

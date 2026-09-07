@@ -8,7 +8,7 @@
     "url": "https://relayshield.net"
   },
   "homepage": "https://api.relayshield.net/developers?source=claude-skill",
-  "repository": "https://github.com/nzdsf2-gif/relayshield",
+  "repository": "https://github.com/RelayShield/relayshield-plugin",
   "license": "MIT",
   "keywords": [
     "security",

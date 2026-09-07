@@ -451,6 +451,57 @@ prepared. FD-13 is the second copy of the same work, not a different piece of wo
 built, the manifest is accepted as-is and the argument is written, so the marginal cost of FD-13
 after FD-12 is small. **FD-12's form was submitted 2026-09-06.**
 
+### THE ORG MOVE. Decided 2026-09-07, and it is a SYNC rather than a move.
+
+Andrew called it: the plugin gets an official-org home. What follows is the shape,
+and the reason it is not the obvious one.
+
+**`RelayShield/relayshield-plugin` becomes the canonical plugin**, with its files
+at the repo ROOT, which is what a remote catalog source wants and removes the need
+for a `path` field entirely.
+
+**The monorepo KEEPS its copy, and that is deliberate.** The published agent-bait
+post tells readers, on a live page:
+
+    claude plugin marketplace add nzdsf2-gif/relayshield
+    claude plugin install relayshield@relayshield
+
+`.claude-plugin/marketplace.json` sources `./plugins/relayshield`, so deleting the
+monorepo copy would make a published instruction false. Nothing that works stops
+working: the monorepo stays a marketplace, the org repo becomes what FD-13
+submits.
+
+**Which means two copies, which is the rsscan trap.** FD-1's own entry has to warn
+that `rsscan/` here is a stale snapshot and that editing the pin changes nothing
+anyone can install. A second copy with nothing comparing them drifts silently.
+So:
+
+- `plugins/relayshield/.claude-plugin/plugin.json` now declares
+  `"repository": "https://github.com/RelayShield/relayshield-plugin"`, so the two
+  copies can be BYTE-IDENTICAL rather than nearly so.
+- **`tools/sync_plugin_repo.py`** mirrors and, with `--check`, compares. It fails
+  on a file that differs, on a file missing over there, AND on a file present over
+  there that this repo does not know about. That last case **refuses to write**
+  rather than overwriting, because a file only in the other copy is the 2026-08-17
+  hand-deploy shape in a second repository. Every one of those was tested by
+  triggering it.
+- A `LICENSE` was added. `plugin.json` declared MIT while no LICENSE file existed
+  anywhere in the repo, and xAI's checklist requires the plugin be licensed **and**
+  the license stated.
+
+**What is verified and what is not, precisely.** The root layout is confirmed
+correct: `.claude-plugin/plugin.json`, `.mcp.json`, `skills/`, `README.md` and
+`LICENSE` at the top level of a real git repo. What could NOT be checked here is
+their generator indexing that repo, because `generate-plugin-index.py` rejects
+anything that is not an `https://` URL and refuses a local path stand-in:
+
+    ERROR: url source must be an https:// url, got '/tmp/.../orgsim'
+
+So **the root-source index run is UNVERIFIED until the org repo exists**, and it
+is one command after the first push. The harder case, a monorepo source with a
+`path`, IS verified and indexed both components, so this is the simpler shape of a
+thing already known to work.
+
 ### The eight submission steps, from their own guide
 
 1. **Settle the org question first.** See above. If the plugin moves to `RelayShield/`, that is a

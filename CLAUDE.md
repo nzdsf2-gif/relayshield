@@ -563,6 +563,53 @@ It has happened three times:
 Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this for Lambdas
 (dispatch from the Actions UI). Nothing does it for Workers yet.
 
+
+## SAYING IT IN CHAT IS NOT RECORDING IT. WRITE THE DECISION DOWN IN THE SAME SESSION.
+
+**Added 2026-09-07, after I failed it and then compounded the failure by describing the result as
+somebody else's omission.**
+
+An earlier session wrote, in a chat reply, *"Added as FD-13."* It was a real decision, correctly
+reasoned, with the destination named. **It was never written into `FRONT_DOORS.md` or into this
+file.** A later session grepped the repo for `FD-13`, found nothing, and told Andrew there was no
+FD-13, forcing him to paste the whole decision back in from his own notes.
+
+**Two things went wrong and only one of them is the missing commit.**
+
+**The first is the miss itself.** A statement in a chat reply that something *has been* added is a
+claim about the repository. If the repository does not carry it when the session ends, the statement
+was false when it was made, and the container that held the context is reclaimed.
+
+**The second is worse, and it is the reason this rule is phrased as it is.** The session that found
+the gap wrote that FD-13 *"was never committed to `FRONT_DOORS.md`"* -- phrasing that reports the
+omission as a discovered condition of the repo, as though weather. It was not weather. It was mine.
+Continuity across sessions is not a property Andrew maintains by re-pasting decisions; it is the
+whole purpose of these files. **Never report a gap in this repo's own memory as a finding about the
+repo. It is a finding about the session that made it, and it is written in the first person.**
+
+**THE RULE.** Any of these verbs, said in a chat reply, is a promise that the commit exists in the
+same session: added, registered, recorded, decided, noted, created, documented, closed, opened,
+scoped, ranked. Before the reply goes out, the change is in a file, and the file is committed and
+pushed. Where it goes:
+
+- **A new front door, or a status change to one** goes in `FRONT_DOORS.md`, both the table row and
+  the section. A row with no section is half a record.
+- **A change to what is next** goes in this file's Top 15, which is regenerated rather than
+  annotated.
+- **A decision with reasoning worth keeping** goes in this file, under a heading that states the
+  finding rather than the topic.
+- **A fact learned about a destination, a vendor, or an environment** goes next to the rule it
+  modifies, in this file.
+
+**And the cheap check, which costs one command.** Before saying a thing is recorded, grep for it:
+
+    git --no-pager grep -n "FD-13" -- '*.md'
+
+Empty output means it is not recorded, whatever any reply said. That is the same instruction the
+WHERE THE CURRENT WORK LIST LIVES section already gives for reading a "done" -- *a doc claiming
+something is done is a lead, not a fact* -- turned around and pointed at my own output. **Grep
+before repeating a "done", and grep before claiming an "added".**
+
 ---
 
 ## WHERE 2026-09-05 LEFT THINGS — read this first

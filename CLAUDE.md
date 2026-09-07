@@ -777,11 +777,22 @@ the drift rule pointed at documents, and it is the reason item 3 exists at all.
     exactly as `claude-skill` was registered before the skill that links to it. No PR to that repo:
     its README says it is unmaintained and accepts nothing.
 
-11. **The org question, as its own decision.** Raised by item 3 and it touches items 1, 3 and 7.
-    Does the plugin, its marketplace, and the MCP server repo live under `RelayShield/` or under
-    `nzdsf2-gif/`? The registry record and rsscan already say the org. The plugin says the personal
-    account. **This is a session-planning decision, not a task**: fixing it needs a session whose
-    repo source is `relayshield/*`, chosen in the picker before the prompt is typed.
+11. **The org move: DECIDED 2026-09-07 and half built. The push is founder-side.**
+    Raised by item 3 and it touches items 1, 3 and 7. Andrew's call: the plugin gets an
+    official-org home, because xAI's guide says a branded plugin sourced from a personal
+    account "will be questioned" and `nzdsf2-gif/relayshield` is that shape exactly.
+    **It is a SYNC, not a move**, because the published agent-bait post tells readers to run
+    `claude plugin marketplace add nzdsf2-gif/relayshield` on a live page. The monorepo keeps
+    its copy and stays a working marketplace; `RelayShield/relayshield-plugin` becomes the
+    canonical source FD-13 submits, with the files at the repo root so no `path` is needed.
+    **Two copies is the rsscan trap**, so `tools/sync_plugin_repo.py --check` is the alarm and
+    it fails in both directions, including refusing to write over a file that exists only in
+    the org repo. `plugin.json` was repointed and a `LICENSE` added so the copies can be
+    byte-identical.
+    **What is left is one push that only Andrew can make.** Verified by TEST rather than read
+    from this file: `add_repo` for `relayshield/*` from this session returns *"cross-tier adds
+    are not supported in v1"*. `RelayShield/relayshield-plugin` does not exist yet;
+    `relayshield-mcp` and `rsscan` do.
 
 12. **Extend the Rain demo to the merchant-agent shape.** A demo is evidence, a post is argument.
     `tools/rain_demo.py` already does the hard part with verifiable on-chain payments. The audience

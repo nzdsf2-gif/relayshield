@@ -33,6 +33,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# The ORG repo is the source we submit, and that is the whole point of FD-13's
+# org move: xAI's guide says a branded plugin sourced from a personal account
+# "will be questioned". There the plugin's files are at the repo ROOT, so no
+# `path` is needed at all.
+ORG_URL = "https://github.com/RelayShield/relayshield-plugin.git"
+# The monorepo remains a fallback, and stays valid: .claude-plugin/marketplace.json
+# still sources ./plugins/relayshield, so `claude plugin marketplace add
+# nzdsf2-gif/relayshield` keeps working and the published blog post stays true.
 PLUGIN_SUBDIR = "plugins/relayshield"
 REMOTE_URL = "https://github.com/nzdsf2-gif/relayshield.git"
 
@@ -45,7 +53,33 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rev", default="origin/main",
                     help="revision to pin (default: origin/main)")
+    ap.add_argument("--from-monorepo", action="store_true",
+                    help="pin nzdsf2-gif/relayshield at plugins/relayshield instead of "
+                         "the org repo. Only for a submission made before the org "
+                         "move lands; it is the shape xAI's guide questions.")
     args = ap.parse_args()
+
+    if not args.from_monorepo:
+        # Read the org repo's own HEAD. Nothing local can vouch for it, so it is
+        # resolved against the remote rather than assumed.
+        try:
+            out = subprocess.check_output(
+                ["git", "ls-remote", ORG_URL, "HEAD"], text=True, timeout=90,
+                stderr=subprocess.DEVNULL).split()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            print("ERROR: cannot read HEAD of\n"
+                  f"       {ORG_URL}\n"
+                  "       Create the org repo and push the plugin first (see FD-13 in\n"
+                  "       FRONT_DOORS.md), or pass --from-monorepo to pin the monorepo.",
+                  file=sys.stderr)
+            return 1
+        if not out:
+            print(f"ERROR: {ORG_URL} has no HEAD. Push the first commit.", file=sys.stderr)
+            return 1
+        sha = out[0]
+        entry = _entry(ORG_URL, sha, path=None)
+        print(json.dumps(entry, indent=2))
+        return 0
 
     try:
         sha = _git("rev-parse", args.rev)
@@ -83,7 +117,16 @@ def main() -> int:
               + "\n  ".join(missing), file=sys.stderr)
         return 1
 
-    entry = {
+    entry = _entry(REMOTE_URL, sha, path=PLUGIN_SUBDIR)
+    print(json.dumps(entry, indent=2))
+    return 0
+
+
+def _entry(url, sha, path):
+    source = {"source": "url", "url": url, "sha": sha}
+    if path:
+        source["path"] = path
+    return {
         "name": "relayshield",
         "description": (
             "Counterparty screening for agents. Scans the instruction files a repository "
@@ -94,12 +137,7 @@ def main() -> int:
             "Also screens MCP servers for typosquat distance and registration age."
         ),
         "category": "security",
-        "source": {
-            "source": "url",
-            "url": REMOTE_URL,
-            "sha": sha,
-            "path": PLUGIN_SUBDIR,
-        },
+        "source": source,
         "homepage": "https://relayshield.net",
         # Brand-scoped on purpose. Their guide pushes back on generic terms like
         # "api", "cli" and "security" because keywords power Grok Build's proactive
@@ -107,9 +145,6 @@ def main() -> int:
         "keywords": ["relayshield", "agent bait scan", "mcp registry risk", "relayshield scan"],
         "domains": ["relayshield.net", "api.relayshield.net"],
     }
-
-    print(json.dumps(entry, indent=2))
-    return 0
 
 
 if __name__ == "__main__":

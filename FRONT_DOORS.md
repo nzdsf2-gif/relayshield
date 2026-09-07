@@ -32,7 +32,7 @@ when deciding what to build next — it just becomes an opinion.
 | FD-8 | Official MCP Registry | Agentic bundle, TI | **DONE 2026-09-05** | Server entry 0.2.12 serves `websiteUrl: https://relayshield.net?source=mcp-registry`, repo casing `RelayShield/`, package pinned 0.2.11. Read live from the registry API |
 | FD-9 | Glama | Agentic bundle | **DONE upstream, pending their sync** | Glama mirrors the registry record, which now carries the attribution. Nothing further to do on our side; re-check the listing in a few days |
 | FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **DONE 2026-09-05** | 0.2.11's published metadata carries `Documentation: https://api.relayshield.net/developers?source=pypi`. Read from PyPI, not from the local file |
-| FD-11 | Smithery | Agentic bundle | **LISTED, 60/100, tools not introspected** | Server metadata and config UX are full marks. Capability Quality is 0/40 because the deployment cannot start the server. `mcp_registry/smithery.yaml` was CORRECTED 2026-09-05 and still needs copying to `~/mcp-live` |
+| FD-11 | Smithery | Agentic bundle | **DONE 2026-09-06, 82/100** | Published via URL against the HF Space's Streamable HTTP endpoint. Tools now enumerate. Founder decision recorded: the Space is a flat $9/month with no per-call cost, so driving traffic there is a wanted outcome |
 | FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
 
 ---
@@ -475,6 +475,38 @@ The `Documentation` value should carry `?source=pypi`.
 directory, so a client installing from the registry record gets an older package than a client
 installing from PyPI. The FD-8 re-publish fixes that too, which makes one publish close three
 things: `websiteUrl`, `repository.url` and the version lag.
+
+---
+
+## FD-11 CLOSED AT 82/100, AND THE SPACE IS NOW A PRODUCTION SURFACE
+
+2026-09-06. The listing went 28 -> 60 -> 82 across three fixes, and the last one was the endpoint.
+
+**What actually closed it:** Smithery's "Publish via URL" against
+`https://relayshieldadmin-relayshield-agentic-attack-surface.hf.space/gradio_api/mcp/`. Smithery
+speaks Streamable HTTP, the Space serves Streamable HTTP, and once it could connect it enumerated
+the tools and Capability Quality stopped being zero.
+
+**The three wrong turns, worth not repeating:**
+
+1. `https://relayshield.net?source=mcp-registry` in the URL field. That is a marketing website; it
+   returns `text/html`, which is verbatim what the Logs said.
+2. `smithery.yaml` alone. It is correct and it is on the repo, but a git push does not re-scan a
+   listing, and Smithery only re-reads on Publish.
+3. `http://localhost:7860/gradio_api/mcp/` from the Space's log. That is the bind address INSIDE the
+   container. It is not reachable from anywhere else and a reboot fixes nothing.
+
+**FOUNDER DECISION, RECORDED so nobody re-litigates it.** The listing sends strangers to our hosted
+Space, so their calls run on our HuggingFace box rather than theirs. Andrew's call, in his words:
+the Space is a flat $9/month with no per-call charge, and driving real traffic there is a good
+outcome. So the volume question is settled and this is not a cost to revisit.
+
+**THE OPERATIONAL CONSEQUENCE, which is new and is not settled.** The HF Space has just stopped
+being a demo. A public directory listing now depends on it, so **if the Space goes down, a live
+front door breaks**, and nothing watches it. That is the same shape as every other quiet alarm in
+this repo. Worth a check in the next session: `check_server_status` already exists as a tool on the
+Space itself, so the cheap version is a scheduled call against the public endpoint that opens an
+issue when it stops answering.
 
 ---
 

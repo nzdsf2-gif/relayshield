@@ -506,7 +506,29 @@ thing already known to work.
 
 1. **Settle the org question first.** See above. If the plugin moves to `RelayShield/`, that is a
    separate session and it changes FD-12's install path too.
-2. Fork `xai-org/plugin-marketplace`, branch from `main`.
+2. **Fork `xai-org/plugin-marketplace` INTO THE `RelayShield` ORG, not the personal
+   account.** GitHub's fork dialog defaults to the personal account and has an
+   **Owner** dropdown; pick `RelayShield`. Then branch from `main`.
+
+   **Why, and it was Andrew who caught this on 2026-09-08 after a personal-account
+   fork was handed over as a default rather than a decision.** Their guide's
+   ownership rule is about `source.url`, which is already
+   `RelayShield/relayshield-plugin`, so the fork owner does not decide acceptance.
+   But their review matrix grades **Source legitimacy** as *"Official org vs
+   personal/throwaway account; repo exists; SHA pinned; brand matches source"*, and
+   a PR header reading `RelayShield:add-relayshield-plugin -> xai-org:main`
+   corroborates first-party ownership in the one place a reviewer looks first. A
+   header reading `nzdsf2-gif:...` invites the exact question the org move exists to
+   pre-empt, on a PR whose whole argument is that we are who we say we are.
+
+   Verified 2026-09-08: `RelayShield/plugin-marketplace` does not exist, so the fork
+   name is free. A fork into an org is refused only when a repo of that name is
+   already there.
+
+   **The general form, worth more than this instance: a default is not a decision.**
+   GitHub picked the personal account and it was passed on unexamined. Anywhere an
+   owner, a branch, a visibility or a name is being chosen, say which one and why,
+   because the reader cannot tell a considered choice from an accepted default.
 3. Add ONE entry to `.grok-plugin/marketplace.json`. Remote source recommended for third-party:
    point `source.url` at our public repo and pin a **full 40-character lowercase commit SHA**.
    Nothing is vendored.

@@ -103,7 +103,20 @@ plugin is a detector for it, so `SKILL.md` necessarily describes the patterns it
 matches. If any of it reads like an instruction aimed at an installing agent, I
 would rather you flag it than wave it through.
 
-**Provenance.** The same plugin is also distributed through our own Claude Code
-marketplace at `nzdsf2-gif/relayshield`, which is our monorepo and predates the
-org repo. The org repo is now the canonical source and the two are kept
-byte-identical by a checked sync rather than by hand.
+**Provenance, stated up front because the pinned source references it.** The
+plugin's README carries `claude plugin marketplace add nzdsf2-gif/relayshield`,
+and I would rather explain that than have you find it.
+
+`nzdsf2-gif/relayshield` is our development monorepo. It is also a Claude Code
+marketplace, and it predates `RelayShield/relayshield-plugin`, so it is the
+install route named in a published article and it has to keep working. The org
+repo is a plugin rather than a marketplace, so it is not currently an alternative
+route for Claude Code; that is why the README still names the older one.
+
+Everything that identifies the plugin points at the org. In the commit this PR
+pins, `.claude-plugin/plugin.json` declares
+`"repository": "https://github.com/RelayShield/relayshield-plugin"`, author
+`RelayShield`, homepage `relayshield.net`. The two copies are kept byte-identical
+by a checked sync (`--check` fails on a file that differs, is missing, or exists
+only in one of them) rather than by hand, so the copy you audit is the copy that
+ships.

@@ -34,7 +34,7 @@ when deciding what to build next — it just becomes an opinion.
 | FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **DONE 2026-09-05** | 0.2.11's published metadata carries `Documentation: https://api.relayshield.net/developers?source=pypi`. Read from PyPI, not from the local file |
 | FD-11 | Smithery | Agentic bundle | **LISTED, 60/100, tools not introspected** | Server metadata and config UX are full marks. Capability Quality is 0/40 because the deployment cannot start the server. `mcp_registry/smithery.yaml` was CORRECTED 2026-09-05 and still needs copying to `~/mcp-live` |
 | FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
-| FD-13 | xAI Grok Build plugin marketplace | Agentic bundle, API | **ROUTE OPEN, ARTEFACT ALMOST PORTABLE** | Added 2026-09-07. `xai-org/plugin-marketplace`, an open PR-route catalog. It accepts `.claude-plugin/plugin.json` verbatim, so our plugin ports with no rewrite. Its bar is NOT thinner than FD-12's, which is the correction below. Do FD-12 first |
+| FD-13 | xAI Grok Build plugin marketplace | Agentic bundle, API | **SUBMITTED 2026-09-08, PR #612** | Open at `xai-org/plugin-marketplace`, from a `RelayShield`-owned fork, pinning `RelayShield/relayshield-plugin`. Socket checks green; `validate` is gated behind a maintainer approving the workflow, which is GitHub's first-time-contributor rule and not a failure. Awaiting review. **Do not push to the branch while it waits**: a push re-arms that approval gate |
 
 ---
 
@@ -501,6 +501,41 @@ So **the root-source index run is UNVERIFIED until the org repo exists**, and it
 is one command after the first push. The harder case, a monorepo source with a
 `path`, IS verified and indexed both components, so this is the simpler shape of a
 thing already known to work.
+
+### SUBMITTED 2026-09-08. PR #612.
+
+Opened against `xai-org/plugin-marketplace` from a fork owned by the `RelayShield`
+org, pinning `RelayShield/relayshield-plugin` at `72fe82c`. Diff: 31 insertions, 0
+deletions, across `marketplace.json` and `plugin-index.json`.
+
+**The first check state, and how to read it, because two of the three lines look
+worse than they are:**
+
+- **"1 workflow awaiting approval"** and `validate` sitting at *Expected, waiting
+  for status to be reported*. This is GitHub's own rule for a first-time
+  contributor from a fork: workflows do not run until a maintainer clicks approve.
+  It is **not** a failure and there is nothing on our side to fix. `validate` is
+  the required check, so it stays pending until they approve it.
+- **"Review required"** and **"Merging is blocked"** are the same fact stated
+  twice: one approving review from someone with write access. Expected.
+- Socket Security **Project Report** and **Pull Request Alerts** both passed;
+  `semgrep-cloud-platform/scan` was still running.
+
+**THE ONE THING NOT TO DO WHILE IT WAITS: do not push to the branch.** Every push
+from a first-time contributor re-arms the workflow-approval gate, so a tidy-up
+commit costs another wait on a maintainer, and it would also dismiss any review
+already given. If a change is genuinely needed, make it once, deliberately.
+
+**What we expect to hold up, and why it is not a guess:** their three CI scripts
+were run here against this exact pinned SHA before the PR was opened, and all
+three passed, with their generator recording both components. If `validate` goes
+red after approval it is something their CI does that those three scripts do not,
+which is new information and worth reading rather than re-running.
+
+**And a worry that does not apply:** the `curl -sL ... | sh` string in `SKILL.md`
+is not in this diff. The PR changes two JSON files and nothing else, so a code
+scanner on this repository never sees it. It is disclosed in the PR body anyway,
+because a human reviewer auditing the pinned source will.
 
 ### The eight submission steps, from their own guide
 

@@ -577,46 +577,64 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 (dispatch from the Actions UI). Nothing does it for Workers yet.
 
 
-## "ADD IT TO BUNDLE D" WAS ALREADY ANSWERED, IN THE CODE, AND THE ANSWER IS NOT YET
+## "I CANNOT REACH AWS" IS A CLAIM ABOUT THIS CONTAINER, NOT ABOUT THE WORK
 
-Asked 2026-09-08: can agent-bait-scan be added to Bundle D remotely, from a browser session against
-the AWS console? Three separate answers, and only the third one matters.
+**Rewritten 2026-09-08 after Andrew pushed back on the first version of this section, and he was
+right.** The first answer to "can you add agent-bait-scan to Bundle D remotely" was that it needs a
+human at the AWS console. **That was wrong, and it broke a rule this file already carries.**
 
-**No browser session, and not for want of a tool.** This container has no browser, no usable AWS
-credentials, and a live AWS console login inside an agent session is the wrong shape regardless of
-capability. AWS changes ship as a committed script run on the Mac with `AWS_PROFILE=relayshield`,
-which is the standing rule.
+**What is true, and it was tested rather than quoted:** this container's `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` are invalid. `boto3` `get_caller_identity()` returns
+`InvalidClientTokenId`. AWS endpoints themselves ARE reachable through the proxy: `sts.amazonaws.com`
+answers 302 and the marketplace catalog host answers 404, so egress was never the problem.
 
-**But access is NOT the gap, and this is the part that was assumed rather than checked.** A Bundle D
-customer can call `/v1/metered/agent-bait-scan` TODAY. The bundle gate in
-`relayshield_agentic_api.py` keys on `bundle_d_access` on the key record, not on a per-endpoint
-allowlist, so the endpoint is already inside the bundle. Nothing is blocked.
+**What follows from that is what NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK already
+says: the work MOVES, it does not stop.** Into a committed script run on the Mac, or into GitHub
+Actions, which holds `relayshield-github-deploy` via OIDC. `lambda_drift_check.yml` and
+`recover_live_handler.yml` are the precedent and have been for weeks. Answering "a human must do it
+in a browser" ignored our own established route, and the failure is that I described the container's
+limits as the task's limits.
 
-**What is genuinely absent is one AWS Marketplace USAGE DIMENSION, and the code says why it is
-absent, in a comment written before anyone asked:**
+**Adding a dimension is an API call**, `StartChangeSet` on the Marketplace Catalog API against
+`prod-kkvurtspreofy`. Nothing in it needs a browser. `tools/marketplace_add_dimension.py` and
+`.github/workflows/marketplace_dimension.yml` now do it.
 
-    # agent-bait-scan is deliberately ABSENT, and this comment is the reason.
-    # Adding a third usage dimension to a PUBLISHED AWS Marketplace product is a
-    # change set against the listing with AWS's own review latency on their side
-    # of it -- a bad place to discover a fresh heuristic needs tuning. It goes in
-    # once the endpoint has run against real traffic long enough to have a
-    # measured false-positive rate. Until then an AWS-licensed caller falls
-    # through to the branches below and is metered on the Stripe rail, which is
-    # correct: it is billed, just not through a Marketplace dimension.
+### The danger is real, and it is not the one I named
 
-So an AWS-licensed caller is **billed**, on the Stripe rail, rather than free. There is no revenue
-leak and no access gap. The dimension is a listing change with AWS review latency attached, and the
-reason to wait is that a published dimension is an expensive place to discover the heuristic needs
-tuning.
+From `relayshield_bundle_fulfillment.py`, written before anyone asked:
 
-**Therefore the unblocking work is measurement, not a console session.** Item 13's gate is a
-measured false-positive rate, and until agent-bait-scan has run against real traffic there is
-nothing to measure. Publishing the post was the thing most likely to produce that traffic, and it
-shipped on 2026-09-07.
+> Bundle A was originally planned for that same entity, but adding it there meant submitting a change
+> set that **replaces the whole rate card**, which had already **rolled Bundle D's prices back to
+> placeholders once (2026-07-27)**.
 
-**The general form, and it is why this is written down rather than answered once:** before asking
-how to do a thing, grep for whether it is already done and whether a previous session left a reason
-it is not. The reason was in a code comment, in the file the change would have touched.
+A change set does not add a dimension to a rate card. It replaces the card with whatever you hand
+it, and an empty card is a valid document. So the tool reads before it writes, refuses a capture
+older than 24 hours, and requires the entity id typed by hand in the workflow input.
+
+**AND RUNNING IT FOUND A TRAP IN OUR OWN ARTEFACT.** `aws_marketplace/offer_baseline_2026-07-31.json`
+is an **`Offer@1.0`** entity carrying **zero dimensions**, while the product plainly has two live
+(`mcp_registry_risk`, `prompt_injection_breach`). **Dimensions live on the SaaS PRODUCT entity, not
+on the offer.** Building a change set from that file would have submitted an empty rate card, which
+is exactly the 2026-07-27 failure. Two guards now refuse it: the entity must be a `SaaSProduct`, and
+the capture must already contain both known-live dimensions. Both were tested by triggering them.
+
+### Two prerequisites, neither satisfied today
+
+1. **The role has no catalog permissions.** The IAM snapshot carries
+   `aws-marketplace:MeterUsage`, `BatchMeterUsage` and `ResolveCustomer` -- metering only.
+   `DescribeEntity`, `ListEntities` and `StartChangeSet` are all absent, so even `--describe` fails
+   until they are granted. That grant is itself an IAM change, and note the shared role's inline
+   budget is full, so it is a customer-managed policy.
+2. **The product decision, which this tooling does not overrule.** `AWS_DIMENSION_NAMES` in
+   `relayshield_agentic_api.py` says agent-bait-scan is deliberately absent until the endpoint has a
+   MEASURED false-positive rate, because a published dimension is an expensive place to discover a
+   heuristic needs tuning. **Access was never the gap:** a Bundle D key already reaches
+   `/v1/metered/agent-bait-scan`, because the gate keys on `bundle_d_access` rather than a
+   per-endpoint allowlist, and an AWS-licensed caller falls through to the Stripe rail and IS billed.
+   No revenue leak, no access gap.
+
+**So the capability now exists and the decision is the only thing left**, which is the right way
+round and was not the case this morning.
 
 ---
 

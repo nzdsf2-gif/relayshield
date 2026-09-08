@@ -334,26 +334,41 @@ one sentence, then the existing opening. Keep everything else identical.
 
 ### 4. Hugging Face
 
-A community blog post under `relayshieldadmin`, in the same series as the
-smolagents posts. This is the channel with the most natural fit after dev.to,
-because the audience is people wiring tools into agents, which is precisely the
-moment the check belongs in.
+**HF is NOT a syndication target. It gets an ORIGINAL piece, and the reason is
+structural.** Verified 2026-09-08 from the community article editor itself: it
+offers Owner, Slug, thumbnail and Coauthors, and **no canonical URL field**. So a
+full copy there is a duplicate competing with our own canonical rather than
+pointing at it, which is the opposite of what every other channel in this plan
+does.
 
-**Title:** Your agent reads the README, and that is the attack surface
+`blog-agent-bait-scan-hf.md` is that original piece: about 1,250 words, the same
+argument told for people who wire tools into agents, linking the canonical for
+the long version rather than reproducing it.
 
-**HF blog tags:** `security`, `agents`, `mcp`, `tools`
+**A FALSE CLAIM WAS CAUGHT HERE BEFORE IT SHIPPED, and it is worth recording
+because the check that caught it was written into this plan for exactly this
+reason.** The draft said the agent-bait check "is already a tool on the Space".
+**It is not.** `hf-space-mcp-server/app.py` declares thirteen tools and none of
+them is an agent-bait scan. That is the `_APIFY_BANNER` mistake in a new place:
+claiming a capability on a surface that does not have it.
 
-**The HF-specific angle, three paragraphs to add at the end, replacing the
-plugin section:** the same check is already a tool on the RelayShield Agentic
-Attack Surface Space, so an HF reader can call it without leaving the platform.
-Link the Space at
-`https://huggingface.co/spaces/relayshieldadmin/relayshield-agentic-attack-surface`
-and the developers page with `?source=agent-bait-hf`.
+What IS on the Space, and what the article names instead, is
+`check_mcp_server_risk`, which screens an MCP server for typosquat distance,
+domain age and criminal-corpus hits. It answers the neighbouring question, and the
+article says outright that the agent-bait check lives at the API endpoint rather
+than on the Space.
 
-**Check before posting:** confirm `agent_bait_scan` is actually exposed as a tool
-on the Space. The Space is egress-blocked from the build container, so this has
-never been verified from here, and claiming a tool that is not there is the
-`_APIFY_BANNER` mistake in a new place.
+**Publishing it:** <https://huggingface.co/new-blog>, Owner `relayshieldadmin`.
+The title is the first `#` heading in the body, so paste the file as-is. Slug:
+`your-agent-reads-the-readme`. A thumbnail is optional and is used as the cover
+image on hf.co/blog and in link previews.
+
+**Still unverified, and it needs a browser:** whether the DEPLOYED Space matches
+`hf-space-mcp-server/app.py`. huggingface.co is egress-blocked from the container,
+so the repo copy is the best available evidence and the drift rule says a repo
+copy is not proof of what is deployed. The article's claim is safe either way,
+because it only names a tool the repo copy has and explicitly does NOT claim the
+agent-bait one.
 
 ### 5. LinkedIn
 

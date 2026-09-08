@@ -645,6 +645,29 @@ therefore ship `published: false`, and `--publish` flips it.
 
 That is the ONE thing worth stopping for. Everything else warns.
 
+### HUGGING FACE IS NOT A SYNDICATION TARGET. IT TAKES AN ORIGINAL.
+
+Verified 2026-09-08 from the community article editor: it has Owner, Slug,
+thumbnail and Coauthors, and **no canonical URL field**. Every other channel in
+the house order either sets a canonical properly (dev.to) or snapshots with one
+(Medium). HF can do neither, so a full copy there is a duplicate competing with
+our own canonical instead of pointing at it.
+
+**So HF gets a shorter ORIGINAL piece written for its audience, linking the
+canonical for the long version.** `blog-agent-bait-scan-hf.md` is the pattern.
+Publish at <https://huggingface.co/new-blog>, owner `relayshieldadmin`; the title
+is the first `#` heading in the body, so the file pastes as-is.
+
+**AND THE CHECK THAT MATTERS BEFORE ANY HF POST: name only tools the Space
+actually has.** On 2026-09-08 a draft claimed the agent-bait check was "already a
+tool on the Space". It is not: `hf-space-mcp-server/app.py` declares thirteen
+tools and no agent-bait scan. That is the `_APIFY_BANNER` mistake in a new place,
+and it was caught only because the plan carried an explicit instruction to verify
+it. huggingface.co is egress-blocked from the container, so the repo copy is the
+best evidence available and the DRIFT RULE applies: it is not proof of what is
+deployed. Grep `app.py` before naming a tool, and never upgrade "the repo has it"
+into "the Space has it" without opening the Space.
+
 ### The file, and how to make the next one
 
 `blog-agent-bait-scan-devto.md` is the pattern: DEV front matter, then a short runnable lead-in

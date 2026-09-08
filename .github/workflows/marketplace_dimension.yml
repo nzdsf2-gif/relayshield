@@ -69,9 +69,18 @@ jobs:
             --from aws_marketplace/entity_current.json \
             --i-have-read-the-rate-card-warning
 
-      - name: Upload the capture
+      # The false-positive rate is the PRODUCT gate on adding the dimension, and
+      # it is separate from the permission gate above. Pull the sample here so
+      # the numbers and the change set come from the same run.
+      - name: Pull the agent-bait scan sample
+        continue-on-error: true
+        run: python3 tools/agent_bait_fp_rate.py --pull --days 30 --sample 50
+
+      - name: Upload the capture and the sample
         uses: actions/upload-artifact@v4
         with:
           name: marketplace-entity-capture
-          path: aws_marketplace/entity_current.json
+          path: |
+            aws_marketplace/entity_current.json
+            aws_marketplace/agent_bait_adjudication.jsonl
           if-no-files-found: warn

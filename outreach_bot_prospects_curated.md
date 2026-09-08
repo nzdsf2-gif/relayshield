@@ -393,3 +393,93 @@ are the most interesting cluster in the sweep and every one of them is reachable
 GitHub. They are agent products, so the pitch is MCP registry risk and prompt-injection exposure
 rather than the widget. **That is a different message and a different week.** Worth doing properly
 once the widget outreach has told us whether any of this converts.
+
+---
+
+# BATCH 2, added 2026-09-08. EMAIL-FIRST, because batch 1 measured 50%.
+
+**The founder's measurement, and it changes the pipeline rather than extending it:**
+*"Less than 50% of the initial candidates resulted in actual outreach messages (I sent roughly 10
+emails). In general, without actual email contacts, links to websites rarely produced actual
+contacts to message."*
+
+**So a website is no longer treated as contactability.** The old scoring gave 20 of 100 points for
+"has a website or an email", which counted a contact form nobody fills as equal to an address you
+can write to. Half the list was therefore unreachable through the only channel that actually got
+used. Batch 2 is selected on FIT, and then `tools/resolve_prospect_emails.py` decides who is
+mailable. A row with no resolved address is not a prospect for this channel.
+
+**HOW THESE 24 WERE FOUND, and what is verified.** GitHub repository search, 2026-09-08,
+`topic:telegram-bot` crossed with payments, wallets, crypto and trading, `stars:8..300`,
+`pushed:>2026-05-01`, excluding awesome-lists. **Everything in the table below is from the search
+response: name, stars, description, topics, last push. NONE of the emails are resolved yet** --
+api.github.com is scoped away from the build container, so that step runs on the Mac. Do not treat
+the fit ranking as a contact list.
+
+**Four were deliberately excluded** and it is worth saying why, because they surface high in this
+search and will keep doing so:
+
+- `ReNothingg/telegram-check-catcher` -- automates collecting other people's crypto cheques.
+- `ReNothingg/P2C-Crypto-Sniper-Bot` -- sells order-interception software.
+- `DiegoBermud65/mirroredge-polymarket-...` -- description is one sentence repeated ten times, which
+  is SEO padding, and 88 forks against 24 stars is not an audience.
+- `exgun007/gramnetwork-bot`, `rygroup-dev/zolana-sentinel` -- farming and claim automation. No
+  counterparty question for a user, so nothing of ours belongs in them.
+
+Selling a counterparty-screening product to a tool whose purpose is intercepting someone else's
+order is not a near-miss, it is the wrong customer, and one reply saying so publicly would cost more
+than the sale.
+
+## Tier A -- holds or moves other people's money. Mail these first.
+
+| # | Repo | Stars | Why it fits | The line to lead with |
+|---|---|---|---|---|
+| 13 | `glazybyte/Crypto-Escrow-Telegram-Bot` | 15 | An escrow bot **holds crypto in its own wallet** and releases on both parties' approval. The counterparty question is the entire product. | Escrow decides WHEN to release. It does not decide whether the address it releases to has been seen in criminal channels. |
+| 14 | `Libermall/Telegram-Cryptocurrency-Wallet-Libermall` | 14 | TON wallet, cheques, fiat invoices, staking and a DEX gateway. Says outright it is security-maintenance only, so the fit is the LIVE products it points at. | Five money paths in one bot and no screen on the address at the far end of any of them. |
+| 15 | `TegroTON/Telegram-Cryptocurrency-Wallet-TON-Kotlin` | 29 | Non-custodial TON wallet, sends to friends via virtual cheques, accepts payments in-bot. Same org as batch 1's `ai-telegram-pay-miniapp`. | Follow-up on the same org rather than a cold approach. |
+| 16 | `bruhxax/Link-Bot` | 23 | Sells and manages VPN subscriptions, payments plus a Mini App. Handles recurring money from strangers. | A subscription bot takes a payment method from someone it has never met. |
+| 17 | `JumpCodeFrog/telegram-shop-bot` | 10 | Catalogue, Stars and USDT payments, subscriptions, Mini App, admin panel. | A shop bot's risk is the buyer's address, not its own code. |
+| 18 | `king-tri-ton/TelegramStarsBot` | 17 | A reference implementation for taking Telegram Stars, so it is copied. Reach the pattern, not one bot. | The example everyone forks is the best place for a check to live. |
+| 19 | `slightbasebo/fragment-api-dev` | 134 | Stars and Premium API with GRAM/USDT payments, **no API key**, Python SDK. Highest-star payments target here. | Keyless is our shape too: `/v1/wallet-risk` needs no key either. |
+| 20 | `exmanka/ksiVPN-telegram-bot` | 46 | P2P payments plus YooKassa, promocodes, referrals. P2P is where the counterparty is a stranger by construction. | P2P means the other side is unvetted by definition. |
+| 21 | `Tonwed/gpt-upi` | 54 | UPI scanner and order hub with Telegram login, wallets and worker dashboard. Payments outside crypto. | The only non-crypto payments target on this list, which is worth learning from. |
+
+## Tier B -- agent-shaped, where the buyer is the agent
+
+| # | Repo | Stars | Why it fits |
+|---|---|---|---|
+| 22 | `x402agent/SolanaOS` | 9 | The org name is `x402agent`. We run 28 live x402 endpoints. Whatever else is true, they already speak the protocol we settle in. |
+| 23 | `gokhantos/opencrow` | 23 | Multi-agent platform across Telegram and WhatsApp, 90+ tools, **MCP in its topics**, crypto and DeFi. An agent mounting 90 tools is the agent-bait audience exactly. |
+| 24 | `fciaf420/moonbags` | 40 | Solana auto-trading with an LLM exit advisor and Jupiter swaps. An LLM deciding a swap is an agent paying a counterparty. |
+| 25 | `uerax/all-in-one-bot` | 181 | Smart-money tracking and on-chain address analysis, 181 stars. They already do address analysis, so this is an integration conversation rather than a pitch. |
+| 26 | `vooi-app/vooi-signals-bot-example` | 18 | Telegram signals into an LLM parser into a trading API. An org account, so a support address is likely. |
+| 27 | `punkpeye/awesome-remote-mcp-servers` | 47 | **Not outreach, a LISTING.** A curated index of remote MCP servers, which is FD-15's artefact. Submit rather than mail. |
+
+## Tier C -- trading bots. Weaker fit, mail only if Tiers A and B run dry.
+
+`skharchikov/polymarket-bot` (32) · `IvanWng97/TradingAgents-Telegram` (45) ·
+`ozgen/binance-telegram-bot` (26) · `sbauwow/schwagent` (21) ·
+`NadirAliOfficial/trading-scanner` (13) · `Formyselfonly/invest-alert-bot` (40) ·
+`lukmanc405/neko-futures-trader` (8) · `zargarkhan1/quorum-alpha-dash` (119)
+
+**Why they are Tier C and not simply rejected.** A trading bot's user is not paying an unknown
+counterparty; they are trading on an exchange they chose. The wallet check has no natural moment.
+What these do have is an LLM making a decision with money attached, which is the agent-bait audience
+one step removed. `quorum-alpha-dash` at 119 stars is the only one worth an early look, and its
+value is the audience rather than the fit.
+
+## THE STEP THAT DECIDES WHO IS ACTUALLY MAILABLE
+
+**ANDREW RUNS THIS.** It resolves a real address per candidate, or drops the row:
+
+    export GITHUB_TOKEN=$(gh auth token)
+    python3 tools/resolve_prospect_emails.py --in prospects_batch2.txt --out prospects_batch2.jsonl
+
+It tries the owner's public profile email, then the owner's own recent commit author address, and
+**rejects `users.noreply.github.com`** because that address is not deliverable and counting it is
+how a list looks reachable and is not. `tools/contact_hygiene.py` screens the result, so
+`root@203.0.113.4` and `trial@telegram.bot` cannot come back a second time.
+
+**Then mail only the resolved rows, and record the conversion.** The number worth tracking is not
+replies. It is **candidates that became a sent message**, which was under 50% for batch 1 and is the
+number this batch is built to move.

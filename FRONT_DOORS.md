@@ -35,6 +35,8 @@ when deciding what to build next — it just becomes an opinion.
 | FD-11 | Smithery | Agentic bundle | **LISTED, 60/100, tools not introspected** | Server metadata and config UX are full marks. Capability Quality is 0/40 because the deployment cannot start the server. `mcp_registry/smithery.yaml` was CORRECTED 2026-09-05 and still needs copying to `~/mcp-live` |
 | FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
 | FD-13 | xAI Grok Build plugin marketplace | Agentic bundle, API | **SUBMITTED 2026-09-08, PR #612** | Open at `xai-org/plugin-marketplace`, from a `RelayShield`-owned fork, pinning `RelayShield/relayshield-plugin`. Socket checks green; `validate` is gated behind a maintainer approving the workflow, which is GitHub's first-time-contributor rule and not a failure. Awaiting review. **Do not push to the branch while it waits**: a push re-arms that approval gate |
+| FD-14 | OpenAI plugin directory (ChatGPT + Codex) | Agentic bundle, API | **ROUTE OPEN, UNSCOPED** | Added 2026-09-08. Developers can submit apps; the app directory migrated to a **Plugin directory** on 2026-07-09 covering ChatGPT AND Codex. Apps SDK is built on MCP, so `relayshield-mcp` is already the right shape. **Its rules have not been read. That is step one, not step two** |
+| FD-15 | Hosted HTTP MCP endpoint, onboarded everywhere that takes one | Agentic bundle, API | **NOT STARTED** | Added 2026-09-08. One artefact, three destinations: Grok Bot custom connectors, Smithery (FD-11), and anything else that takes a URL rather than a package. The HF Space already serves MCP over HTTP; this is onboarding, not building |
 
 ---
 
@@ -825,3 +827,76 @@ the explicit parameter is what survives a referrer being stripped.
 **6. Do not paste any RelayShield API key into a Smithery configuration field.** Users bring their
 own key or use the keyless endpoints. Nothing about a listing needs a credential from us, and the
 2025 incident is the reason to keep it that way.
+
+
+---
+
+## FD-14 — OpenAI's plugin directory. **ROUTE OPEN. RULES NOT READ.**
+
+Added 2026-09-08 at Andrew's request. **This is the largest audience of the three
+plugin directories and it is deliberately left unscoped**, because scoping it
+before reading its rules is the FD-2 mistake, and FD-2 cost a day writing a
+submission for a page whose own last section said the PR would be closed without
+comment.
+
+**What is established, from OpenAI's own announcements:**
+
+- **Developers can submit apps for review**, tracking approval status in the
+  OpenAI Developer Platform. Submissions carry MCP connectivity details, testing
+  guidance, directory metadata and country availability.
+- **The app directory migrated to a Plugin directory on 2026-07-09**, and plugins
+  are described as the primary way to discover workflow capabilities across
+  **ChatGPT and Codex**. Two surfaces, one submission.
+- **The Apps SDK is built on MCP.** It extends MCP so a developer can design the
+  interface as well as the logic. Our server speaks MCP already.
+
+**Why it ranks above FD-13 on reach and below it on readiness.** Reach is not
+close: ChatGPT plus Codex against Grok Build. But FD-12 and FD-13 submit an
+artefact that already existed, and this one has an unknown delta between "an MCP
+server" and "an app the directory accepts", because the Apps SDK adds an
+interface layer that a stdio server does not have.
+
+**Step one, and nothing before it: read the destination.** Specifically, whether
+a plain MCP server is submittable or whether the directory requires Apps SDK
+components on top; what the review bar actually says; and whether a paid,
+pay-per-call tool is eligible at all, since several directories quietly are not.
+Only then is it worth an estimate.
+
+**The artefact question to settle at the same time**, because it decides the
+work: our MCP server is a stdio package on PyPI, while ChatGPT connects to a
+REMOTE MCP server over HTTP. That is FD-15, and doing FD-15 first may turn FD-14
+into a listing rather than a build.
+
+---
+
+## FD-15 — one hosted HTTP MCP endpoint, onboarded everywhere that takes a URL
+
+Added 2026-09-08. **This is an onboarding item, not a build item, and that is the
+point of grouping it.**
+
+Three destinations want the same thing, a publicly reachable MCP server at a URL:
+
+- **Grok Bot custom connectors.** Grok lets a user add a publicly reachable MCP
+  server from connector settings, which is the real integration angle for xAI.
+  The Grok Bot *template marketplace* at `x.ai/bot/marketplace` is blueprints for
+  pre-configured bots and is NOT this; a template could follow later, pre-wired
+  to our connector.
+- **Smithery, which is FD-11.** `mcp_registry/smithery.yaml` is written and
+  unshipped. Smithery visitors hit a hosted surface, so FD-11 and this are the
+  same work seen from two directions.
+- **OpenAI, FD-14**, if its rules require a remote server rather than a package.
+
+**What already exists**, and it is most of it: the HF Space
+`relayshieldadmin/relayshield-agentic-attack-surface` runs as an MCP server over
+HTTP with thirteen tools, and the Apify Actor serves MCP over Streamable HTTP in
+Standby. So the question is not whether we can host one, it is **which URL is the
+canonical one to give a stranger**, and that has never been decided.
+
+**Decide that first.** A Space that sleeps, an Actor that bills per run, and a
+purpose-built endpoint on our own API have different reliability and cost stories,
+and handing three different URLs to three directories is how the four-pattern-table
+problem started.
+
+**And it needs the watcher from Top 15 item 6 before it is advertised anywhere.**
+Publishing a URL to three directories without knowing when it stops answering is
+the quiet-alarm failure with an audience.

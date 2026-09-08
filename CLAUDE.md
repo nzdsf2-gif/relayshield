@@ -577,6 +577,75 @@ Recover the live artifact into git FIRST.** `recover_live_handler.yml` does this
 (dispatch from the Actions UI). Nothing does it for Workers yet.
 
 
+## "ADD IT TO BUNDLE D" WAS ALREADY ANSWERED, IN THE CODE, AND THE ANSWER IS NOT YET
+
+Asked 2026-09-08: can agent-bait-scan be added to Bundle D remotely, from a browser session against
+the AWS console? Three separate answers, and only the third one matters.
+
+**No browser session, and not for want of a tool.** This container has no browser, no usable AWS
+credentials, and a live AWS console login inside an agent session is the wrong shape regardless of
+capability. AWS changes ship as a committed script run on the Mac with `AWS_PROFILE=relayshield`,
+which is the standing rule.
+
+**But access is NOT the gap, and this is the part that was assumed rather than checked.** A Bundle D
+customer can call `/v1/metered/agent-bait-scan` TODAY. The bundle gate in
+`relayshield_agentic_api.py` keys on `bundle_d_access` on the key record, not on a per-endpoint
+allowlist, so the endpoint is already inside the bundle. Nothing is blocked.
+
+**What is genuinely absent is one AWS Marketplace USAGE DIMENSION, and the code says why it is
+absent, in a comment written before anyone asked:**
+
+    # agent-bait-scan is deliberately ABSENT, and this comment is the reason.
+    # Adding a third usage dimension to a PUBLISHED AWS Marketplace product is a
+    # change set against the listing with AWS's own review latency on their side
+    # of it -- a bad place to discover a fresh heuristic needs tuning. It goes in
+    # once the endpoint has run against real traffic long enough to have a
+    # measured false-positive rate. Until then an AWS-licensed caller falls
+    # through to the branches below and is metered on the Stripe rail, which is
+    # correct: it is billed, just not through a Marketplace dimension.
+
+So an AWS-licensed caller is **billed**, on the Stripe rail, rather than free. There is no revenue
+leak and no access gap. The dimension is a listing change with AWS review latency attached, and the
+reason to wait is that a published dimension is an expensive place to discover the heuristic needs
+tuning.
+
+**Therefore the unblocking work is measurement, not a console session.** Item 13's gate is a
+measured false-positive rate, and until agent-bait-scan has run against real traffic there is
+nothing to measure. Publishing the post was the thing most likely to produce that traffic, and it
+shipped on 2026-09-07.
+
+**The general form, and it is why this is written down rather than answered once:** before asking
+how to do a thing, grep for whether it is already done and whether a previous session left a reason
+it is not. The reason was in a code comment, in the file the change would have touched.
+
+---
+
+## PAYPAL ON relayshield.net: NO. DECIDED 2026-09-08.
+
+Asked directly, and the answer is not close.
+
+**What we sell and how it is paid for today.** Six monitored subscription plans and bundle
+checkouts on Stripe; pay-per-call on x402 settling USDC on Base with no account at all; AWS
+Marketplace for Bundle D and the TI tiers. Three rails, each matched to a buyer.
+
+**PayPal adds a fourth rail and reaches no buyer the first three miss.** The API buyer is a
+developer who pays by card or by wallet, both already served. The AWS buyer must transact through
+AWS by definition. The agentic buyer is the entire reason x402 exists and cannot use PayPal at all,
+because there is no human present to approve a checkout.
+
+**And it is not free to add.** A payment rail is not a button: it is a webhook to verify, a
+subscription lifecycle to reconcile, a refund and chargeback path, and a second source of truth for
+"is this customer entitled". `relayshield_stripe_webhook.py` and the `client_reference_id` incident
+are the evidence for how much care one rail already takes -- a non-numeric value in that field
+silently returned 200 and a paid customer was never onboarded. Doubling that surface for a buyer
+segment we cannot name is the wrong trade.
+
+**The one condition that would change it**, so this is not re-litigated on a hunch: a named
+prospect who says they cannot buy without it. Not a general belief that PayPal converts, which is
+true in retail and irrelevant here. Until that person exists, the answer is no.
+
+---
+
 ## PUBLISHING TO DEV.TO. ONE COMMAND. DO NOT RE-DERIVE THIS.
 
 **Written 2026-09-07 after ONE post took FOUR ROUNDS, every one of them my fault and none of them
@@ -791,153 +860,112 @@ There is deliberately no setting that lets a known-bad target through, and a tes
 
 ## WHERE 2026-09-05 LEFT THINGS — read this first
 
-### THE TOP 15, REGENERATED 2026-09-07
+### THE TOP 15, REGENERATED 2026-09-08
 
-**Regenerated, not annotated**, for the same reason as last time: a list carrying strikethroughs is
-how a stale list gets recited as current.
+**Regenerated, not annotated.** Five items closed or dispatched since yesterday.
 
-**Four items closed since 2026-09-05, and one of the four was closed by somebody else's session
-without this file being told.** FD-8 published on 2026-09-06 and nothing here recorded it. That is
-the drift rule pointed at documents, and it is the reason item 3 exists at all.
+**Closed or sent since 2026-09-07:** the agent-bait post is LIVE on the canonical, on dev.to via
+the API, and on Hugging Face as an original piece. FD-12 was submitted 2026-09-06. FD-13 was
+submitted 2026-09-08 as PR #612. FD-8, FD-9 and FD-10 stay closed.
 
-**Verified live 2026-09-07 from this container, not read from a doc:**
+**Two questions answered by reading rather than by doing, and both changed the plan:**
 
-- **FD-8, FD-9 and FD-10 are DONE.** The registry's latest record is 0.2.12, published 2026-09-06.
-  `websiteUrl` carries `?source=mcp-registry`, `repository.url` is corrected to the `RelayShield`
-  org, and the record pins `pypi relayshield-mcp==0.2.11`.
-  **A near-miss worth recording, because it is the 2026-09-05 lesson in a new costume.** The record's
-  own version is 0.2.12 and PyPI's latest is 0.2.11, which reads exactly like a canonical directory
-  pointing at a package that cannot be installed. It is not: the record's version and the version it
-  PINS are different fields, and the pin resolves. **Check the field that decides before reporting a
-  breakage, not the field that merely differs.**
-- **Both FD-12 prerequisites are MET, so FD-12 is unblocked.** `relayshield-mcp` 0.2.11 is on PyPI
-  declaring `mcp>=1.0.0,<2.0.0`, so the plugin can no longer install a server that dies at import.
-  And `.claude-plugin/marketplace.json` IS on `origin/main` now; it was not on 2026-09-05, which was
-  the second blocker.
-- **`relayshield-mpp-settlement` is in NO deploy map.** `grep mpp .github/workflows/deploy_lambdas.yml`
-  returns nothing. Item 4 is real and is not a doc artefact.
-- **The Apify intro post is DONE**, posted in the previous session.
+- **"Add agent-bait to Bundle D" needs no code and no AWS console.** A Bundle D key already reaches
+  the endpoint; only the Marketplace usage DIMENSION is absent, deliberately, for a reason written
+  in `relayshield_agentic_api.py` before anyone asked. See the section above. It is item 12 and its
+  gate is measurement.
+- **PayPal is a no**, decided and written down so it is not re-opened on a hunch.
 
 ---
 
-1. **FD-12: submit the plugin to Anthropic's directory. It is unblocked as of today.**
-   Both prerequisites were verified met above, and this item has been gated on them since it was
-   opened. The submission text is already written in `plugin_directory_submission.md`; the route is
-   <https://clau.de/plugin-directory-submission>. **Read item 3's org finding BEFORE submitting**,
-   because it decides the install path this submission will carry, and changing that path after a
-   directory listing is live is a worse problem than deciding it now.
-   Immediately before submitting: `claude plugin validate` on both manifests, then install and run
-   `claude plugin details`, because validate says the file is well formed and details says what the
-   plugin actually contributes. That distinction cost a round already.
+1. **Build the Telegram Mini App v1, then run the six discovery routes.**
+   Andrew's committed plan, and I re-litigated it on 2026-09-08 using the exact argument
+   `miniapp_discovery_and_stripe_choice.md` §2 records as the ERROR: ranking by the menu button,
+   which is right for a bot with an audience and wrong for ours. **The plan stands and this is the
+   ranking**, from that file:
+   (1) the Telegram blog channel, linked from every post, the only surface whose audience chose us;
+   (2) channels that ANNOUNCE Mini Apps, one polite submission each, targets already measured by
+   `tools/find_miniapp_channels.py` -- `@trendingapps` 3.9M, `@web3telegrambotx` 72,742,
+   `@findminiapp` 56,380, `@onclicka_tma_en` 33,723, `@telegtapps` 9,671;
+   (3) Mini App directories, tApps Center and family, one afternoon of submissions;
+   (4) attributed deep links `t.me/<bot>/app?startapp=<source>` everywhere we already appear, with
+   the keys registered in `_SOURCE_BANNERS` FIRST;
+   (5) the bot's menu button, cheap and high-converting for the users we have, not a growth channel;
+   (6) TON catalogues, only if TON wallet and token scans ship in v1.
+   **Sequencing is the whole risk: each announcement channel gives ONE first impression, and
+   submitting before the app exists spends it.** Build first, submit second.
 
-2. **Publish the agent-bait post (ABS-2). One blocker left, and it is a code change, not writing.**
-   The post is finished: Island's link is in the second paragraph, the figures are corrected to the
-   ones that corroborate, and a full eight-channel distribution plan is appended, adding dev.to and
-   Hugging Face to the house order, with per-channel copy, tags, hashtags and measured character
-   counts.
-   **The blocker: there is no `agent-bait` key in `_SOURCE_BANNERS`.** Every link in that plan would
-   log `unmatched:` and render no banner, so the post would ship looking fine and attributing
-   nothing. That is FD-8's four unattributed months, and it is one banner plus nine aliases
-   following the `npm-worm` pattern already in `relayshield_developer_signup.py`.
-   One check that needs a machine this container cannot reach: the Hugging Face section claims
-   `agent_bait_scan` is a tool on the Space. **Confirm that before posting.** The Space is
-   egress-blocked from here, and claiming a tool that is not there is the `_APIFY_BANNER` mistake in
-   a new place.
+2. **FD-15: decide the canonical hosted MCP URL, then onboard it everywhere that takes one.**
+   New today, and it is an onboarding item rather than a build: the HF Space already serves MCP over
+   HTTP with thirteen tools and the Apify Actor serves it over Streamable HTTP. Three destinations
+   want the same URL -- **Grok Bot custom connectors** (the real xAI angle; the bot template
+   marketplace is blueprints and is not this), **Smithery** which is FD-11, and **OpenAI** if FD-14's
+   rules need a remote server. **Decide which URL a stranger gets before handing three directories
+   three different ones**, and pair it with item 3, because advertising a URL whose outages nobody
+   watches is the quiet-alarm failure with an audience.
 
-3. **FD-13: SUBMITTED 2026-09-08, PR #612. Awaiting review, and the correct action is to wait.**
-   Open at `xai-org/plugin-marketplace` from a `RelayShield`-owned fork, pinning
-   `RelayShield/relayshield-plugin` at `72fe82c`, 31 insertions and 0 deletions.
-   **Read the check state correctly.** "1 workflow awaiting approval" and a `validate` stuck at
-   *Expected* are GitHub's first-time-contributor rule, not a failure: workflows from a fork do
-   not run until a maintainer approves them. Socket's two checks passed. Their three CI scripts
-   were run here against this exact SHA before opening and all three passed.
-   **DO NOT PUSH TO THE BRANCH WHILE IT WAITS.** Every push from a first-time contributor re-arms
-   that approval gate and dismisses any review already given, so a tidy-up commit costs another
-   wait on a maintainer.
-   **The org move that unblocked this is DONE:** `RelayShield/relayshield-plugin` exists and is
-   canonical, the monorepo keeps its copy so the published `claude plugin marketplace add
-   nzdsf2-gif/relayshield` stays true, and `tools/sync_plugin_repo.py --check` is the alarm
-   against the rsscan two-copies trap.
+3. **Watch the HF Space.** `check_server_status` is already a tool on it, so the fix is a scheduled
+   call that opens an issue when it stops answering. **A GitHub Actions workflow, not a container
+   script:** the Space is egress-blocked from here, verified again today. Model it on
+   `xsoar_pack_watch.yml`, then run `python3 test_workflows_parse.py`, because a workflow that fails
+   to parse produces "No jobs were run", which is quieter than a failure.
 
-4. **Map `relayshield-mpp-settlement` in `deploy_lambdas.yml`.**
-   Verified today that it is in neither the `paths:` trigger nor `LAMBDA_MAP`, so no edit to that
-   handler ships automatically. It is already in `iam_github_deploy_invoke.json`, so its first CI
-   deploy will not repeat run 134's denied probe.
-   **The order rule applies and has not been satisfied:** create first, map second. The function was
-   created in AWS, so mapping it no longer risks the `ResourceNotFoundException` that mapping a
-   nonexistent function produces. **The trap that nearly wasted the Discord fix applies here too:**
-   the deployer ships a function only when the push CHANGED ITS SOURCE, so a commit that maps it
-   while touching only workflow files deploys nothing. The mapping commit must touch the `.py`.
+4. **Map `relayshield-mpp-settlement` in `deploy_lambdas.yml`.** Still in neither the `paths:`
+   trigger nor `LAMBDA_MAP`; `tools/check_deploy_invoke_policy.py` prints it as
+   "granted but not in LAMBDA_MAP" on every run. The function exists in AWS, so mapping it no longer
+   risks a `ResourceNotFoundException`. **The mapping commit must touch the `.py`**, or the deployer
+   ships nothing.
 
-5. **MPP settlement selftest, reads-only.** Unblocked now that the routes read correct.
+5. **MPP settlement selftest, reads-only.**
    `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/mpp_settlement_selftest.py --reads-only`.
-   The stored key is LIVE so the PaymentIntent is skipped; it still answers the question that blocks
-   us, which is whether the account has crypto deposit addresses and a business profile. A 403 there
-   is the text to send `machine-payments@stripe.com`.
+   Answers whether the account has crypto deposit addresses and a business profile. A 403 is the
+   text to send `machine-payments@stripe.com`.
 
-6. **Watch the HF Space.** `check_server_status` is already a tool on the Space, so the cheap fix is
-   a scheduled call against the public endpoint that opens an issue when it stops answering.
-   **It must be a GitHub Actions workflow, not a container script and not a tool run from here:**
-   the Space is egress-blocked from this container (`CONNECT tunnel failed, 403`), verified again
-   today, and Actions has the egress this does not. Model it on `xsoar_pack_watch.yml`, which is the
-   same shape: a daily check that opens an issue when a state flips.
-   **And run `python3 test_workflows_parse.py` after writing it.** A workflow that fails to parse
-   produces "No jobs were run", which is quieter than a failure, and a watcher that is silently dead
-   is worse than no watcher.
+6. **FD-11: Smithery listing.** `mcp_registry/smithery.yaml` is written and unshipped. Now paired
+   with item 2, since a Smithery visitor lands on whatever hosted URL that item settles.
 
-7. **FD-11: Smithery listing.** `mcp_registry/smithery.yaml` is written and unshipped, and there is
-   still no RelayShield entry. Listing yes, hosting is a separate decision. This pairs naturally with
-   item 6 because the Space is the surface a Smithery visitor would hit.
+7. **FD-14: read OpenAI's plugin directory rules. Reading IS the task.**
+   Largest audience of the three directories: the app directory became a Plugin directory on
+   2026-07-09 spanning ChatGPT and Codex, submissions go through the OpenAI Developer Platform, and
+   the Apps SDK is built on MCP. **Do not scope the work before reading the rules** -- FD-2 cost a
+   day on a destination whose own page said the PR would be closed unread. Three questions decide
+   it: is a plain MCP server submittable or must it carry Apps SDK components, what is the stated
+   bar, and is a paid pay-per-call tool eligible at all.
 
-8. **Rewrite the MCP directory listing copy to lead with counterparty authorization.**
-   This was meant to happen in the same pass as the FD-8 publish and did not. The record that went
-   out on 2026-09-06 still describes the server as a list of tools: *"Breach, SIM swap, infostealer,
-   domain lookalikes, MCP registry risk, prompt-injection detection."* That is what we do, not why a
-   reader should care. It needs another `mcp-publisher` run, so consider batching it with anything
-   else the record needs rather than spending a version on copy alone.
+8. **Rewrite the MCP registry listing copy to lead with counterparty authorization.** The record
+   still describes the server as a list of tools. Needs an `mcp-publisher` run, so batch it with
+   anything else the record needs rather than spending a version on copy alone.
 
-9. **Apify: submit the article in November**, when the Typeform reopens. The intro post is done. The
-   draft is `blog-apify-actor-as-agent-tool.md` at ~1,300 words, over the 1,000-word floor.
-   **The disqualifier: it must NOT appear on blog.relayshield.net first.** Originality is a programme
-   rule, and publishing early is the single easiest way to lose the $500. Three facts to verify with
-   the console open are listed in the draft's own NOT FOR PUBLICATION section.
+9. **Apify: the form is OPEN NOW, not November.** Saurav Jain in `#apify-writers`, 2026-09-07:
+   *"We will credit $100 prepaid Apify Platform usage to everyone who filled form by the end of the
+   month."* That supersedes the November date recorded on 2026-09-05. Andrew has DM'd his username
+   and asked for the form link. **The disqualifier is unchanged: the article must NOT appear on
+   blog.relayshield.net first.** Submitting is not publishing.
 
-10. **The Commerce Agents blog post.** `commerce_agents_integration.md` has the argument and it rests
-    on a primary source published by Anthropic that says in its own words that authorization is the
-    deployment's problem. **Register `?source=commerce-agents` in `_SOURCE_BANNERS` BEFORE it ships**,
-    exactly as `claude-skill` was registered before the skill that links to it. No PR to that repo:
-    its README says it is unmaintained and accepts nothing.
+10. **The Commerce Agents blog post.** `commerce_agents_integration.md` has the argument, resting on
+    a primary source Anthropic published saying authorization is the deployment's problem.
+    **Register `?source=commerce-agents` BEFORE it ships.** No PR to that repo; its README says it
+    accepts nothing.
 
-11. **The org move: DECIDED 2026-09-07 and half built. The push is founder-side.**
-    Raised by item 3 and it touches items 1, 3 and 7. Andrew's call: the plugin gets an
-    official-org home, because xAI's guide says a branded plugin sourced from a personal
-    account "will be questioned" and `nzdsf2-gif/relayshield` is that shape exactly.
-    **It is a SYNC, not a move**, because the published agent-bait post tells readers to run
-    `claude plugin marketplace add nzdsf2-gif/relayshield` on a live page. The monorepo keeps
-    its copy and stays a working marketplace; `RelayShield/relayshield-plugin` becomes the
-    canonical source FD-13 submits, with the files at the repo root so no `path` is needed.
-    **Two copies is the rsscan trap**, so `tools/sync_plugin_repo.py --check` is the alarm and
-    it fails in both directions, including refusing to write over a file that exists only in
-    the org repo. `plugin.json` was repointed and a `LICENSE` added so the copies can be
-    byte-identical.
-    **What is left is one push that only Andrew can make.** Verified by TEST rather than read
-    from this file: `add_repo` for `relayshield/*` from this session returns *"cross-tier adds
-    are not supported in v1"*. `RelayShield/relayshield-plugin` does not exist yet;
-    `relayshield-mcp` and `rsscan` do.
+11. **The org question is DONE for the plugin and open for everything else.**
+    `RelayShield/relayshield-plugin` exists, is canonical, and FD-13 pins it. The monorepo keeps its
+    copy so the published `claude plugin marketplace add nzdsf2-gif/relayshield` stays true, with
+    `tools/sync_plugin_repo.py --check` as the alarm. What remains: FD-12's submission carries the
+    monorepo path, so if that listing goes live the install path is the personal account.
 
-12. **Extend the Rain demo to the merchant-agent shape.** A demo is evidence, a post is argument.
-    `tools/rain_demo.py` already does the hard part with verifiable on-chain payments. The audience
-    ranking, by whether the recipient has a distribution interest, is unchanged: Routavo, Rain,
-    Stripe, Coinbase CDP, Aduna. Not Anthropic.
+12. **ABS-1: the Bundle D usage dimension.** Gated on a MEASURED false-positive rate, not a date,
+    and the reason is in the code comment quoted above. The post shipping on 2026-09-07 is the thing
+    most likely to produce the traffic that makes the measurement possible.
 
-13. **ABS-1 Bundle D usage dimension.** Waits on a measured false-positive rate, not a date.
+13. **Extend the Rain demo to the merchant-agent shape.** `tools/rain_demo.py` does the hard part.
+    Audience order unchanged: Routavo, Rain, Stripe, Coinbase CDP, Aduna. Not Anthropic.
 
-14. **Send the twelve** (`outreach_bot_prospects_curated.md`). Founder-side. Five real inboxes first,
-    then the seven websites. Track replies per 100 by channel.
+14. **Send the twelve** (`outreach_bot_prospects_curated.md`). Five real inboxes first, then the
+    seven websites. Track replies per 100 by channel.
 
 15. **INTEL-5.** `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/diagnose_stolen_sessions.py`.
-    One command, and until it runs no count out of `relayshield_stolen_sessions` means anything about
-    the criminal market.
+    Until it runs, no count out of `relayshield_stolen_sessions` means anything about the criminal
+    market.
 
 ### THE PUBLISHED MCP PACKAGE IS BROKEN FOR EVERY NEW INSTALL. FOUND 2026-09-05.
 

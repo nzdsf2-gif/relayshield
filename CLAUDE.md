@@ -821,28 +821,20 @@ the drift rule pointed at documents, and it is the reason item 3 exists at all.
    egress-blocked from here, and claiming a tool that is not there is the `_APIFY_BANNER` mistake in
    a new place.
 
-3. **FD-13: xAI's Grok Build plugin marketplace. AFTER FD-12, and its rules were read.**
-   `xai-org/plugin-marketplace`, verified live on 2026-09-07 by cloning it: last commit 2026-09-04,
-   an `external_plugins/` directory holding exactly one third-party entry so far. It accepts
-   `.claude-plugin/plugin.json` verbatim, so our plugin needs no manifest rewrite, and a remote
-   source vendors nothing and only pins a SHA.
-   **Two corrections to how this was carried, both from their own `CONTRIBUTING.md`:**
-   **(a) The bar is not thinner than FD-12's, it is more explicitly specified.** They enumerate five
-   rejection classes including prompt injection planted in a `SKILL.md`, and a five-dimension review
-   matrix, with code-owner review plus CI. xAI disclaims *authoring and verifying* third-party
-   plugins, which is a liability statement, not an absence of review. Reading it as the latter is how
-   a submission gets sent back.
-   **(b) The thing that actually blocks us is ownership, not security.** Their guide: *"Source from
-   your official org, not a personal account. A branded plugin sourced from
-   `some-personal-account/acme-thing` reads as a possible impersonation and will be questioned."*
-   **Our marketplace is `nzdsf2-gif/relayshield`.** That names our exact shape. A `RelayShield` org
-   exists and is already authoritative for the MCP registry record and for rsscan.
-   **And it cannot be fixed from a `nzdsf2-gif/*` session:** repo sources are one owner, fixed at
-   session creation, and a cross-tier `add_repo` for `relayshield/*` is refused. **Moving the plugin
-   to the org is a separate session, decided before the work starts.** Full entry, including the
-   eight submission steps and why the pitch is the Rain and Routavo gap word for word, is now in
-   `FRONT_DOORS.md`.
-   **The ranking stands: FD-13 is a second copy of the same work, not new work.** Do FD-12 first.
+3. **FD-13: SUBMITTED 2026-09-08, PR #612. Awaiting review, and the correct action is to wait.**
+   Open at `xai-org/plugin-marketplace` from a `RelayShield`-owned fork, pinning
+   `RelayShield/relayshield-plugin` at `72fe82c`, 31 insertions and 0 deletions.
+   **Read the check state correctly.** "1 workflow awaiting approval" and a `validate` stuck at
+   *Expected* are GitHub's first-time-contributor rule, not a failure: workflows from a fork do
+   not run until a maintainer approves them. Socket's two checks passed. Their three CI scripts
+   were run here against this exact SHA before opening and all three passed.
+   **DO NOT PUSH TO THE BRANCH WHILE IT WAITS.** Every push from a first-time contributor re-arms
+   that approval gate and dismisses any review already given, so a tidy-up commit costs another
+   wait on a maintainer.
+   **The org move that unblocked this is DONE:** `RelayShield/relayshield-plugin` exists and is
+   canonical, the monorepo keeps its copy so the published `claude plugin marketplace add
+   nzdsf2-gif/relayshield` stays true, and `tools/sync_plugin_repo.py --check` is the alarm
+   against the rsscan two-copies trap.
 
 4. **Map `relayshield-mpp-settlement` in `deploy_lambdas.yml`.**
    Verified today that it is in neither the `paths:` trigger nor `LAMBDA_MAP`, so no edit to that

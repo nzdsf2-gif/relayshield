@@ -453,6 +453,39 @@ def handle_agent_bait_scan(params: dict) -> dict:
                 "cause an agent to take. They are not an assertion that the "
                 "repository or its maintainer is malicious.")
 
+    # ONE STRUCTURED LINE PER SCAN, so a false-positive rate can be MEASURED
+    # rather than estimated. Added 2026-09-08.
+    #
+    # AWS_DIMENSION_NAMES in relayshield_agentic_api.py holds agent-bait-scan
+    # back from the Bundle D rate card until this endpoint has a measured
+    # false-positive rate, because a published Marketplace dimension is an
+    # expensive place to discover a heuristic needs tuning. That gate could not
+    # open, because nothing was recording what the heuristics FIRED ON: the
+    # existing logger calls cover fetch failures and provenance errors only.
+    #
+    # It logs the SHAPE of a finding, never the evidence string. The evidence can
+    # quote arbitrary text from a stranger's repository, and CloudWatch is not the
+    # place for that. Kind, severity and whether it sat inside a hidden region are
+    # what an adjudicator needs to sample by; the repository name is what they
+    # need to go and look.
+    try:
+        logger.info(
+            "AGENT_BAIT_SCAN %s",
+            json.dumps({
+                "repository":   f"{owner}/{repo}",
+                "verdict":      verdict,
+                "n_findings":   len(findings),
+                "kinds":        sorted({f.get("kind", "") for f in findings}),
+                "severities":   sorted({f.get("severity", "") for f in findings}),
+                "hidden":       any(f.get("hidden") for f in findings),
+                "provenance":   bool(provenance),
+                "surfaces":     sorted(surfaces.keys()),
+                "n_domains":    len(references["domains"]),
+            }, separators=(",", ":")),
+        )
+    except Exception:                      # pragma: no cover - logging never breaks a scan
+        pass
+
     return _ok({
         "repository":        f"{owner}/{repo}",
         "verdict":           verdict,

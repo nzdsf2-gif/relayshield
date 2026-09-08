@@ -1,0 +1,31 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "MarketplaceCatalogRead",
+      "Effect": "Allow",
+      "Action": [
+        "aws-marketplace:DescribeEntity",
+        "aws-marketplace:ListEntities",
+        "aws-marketplace:ListChangeSets",
+        "aws-marketplace:DescribeChangeSet"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "MarketplaceCatalogWrite",
+      "Effect": "Allow",
+      "Action": "aws-marketplace:StartChangeSet",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AgentBaitFalsePositiveRateRead",
+      "Effect": "Allow",
+      "Action": [
+        "logs:FilterLogEvents",
+        "logs:DescribeLogGroups"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:239677749008:log-group:/aws/lambda/relayshield-agentic-api:*"
+    }
+  ]
+}

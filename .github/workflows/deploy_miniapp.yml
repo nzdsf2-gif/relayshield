@@ -1,0 +1,51 @@
+name: Deploy Telegram Mini App
+
+# Same shape as deploy_blog.yml and for the same reason: the Cloudflare deploy
+# runs wrangler, and this container has no Cloudflare credentials and cannot
+# reach api.cloudflare.com. Moving it to CI means a Mini App change ships from
+# anywhere.
+#
+# Requires the existing CLOUDFLARE_API_TOKEN repository secret.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare_worker_miniapp.js'
+      - 'widget/relayshield-widget.js'
+      - 'wrangler.miniapp.toml'
+      - 'tools/build_miniapp.py'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-miniapp
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The embedded widget must match its source, or the Mini App ships a
+      # stale copy of the detection logic while the tests pass against the
+      # current one. That is the four-pattern-table failure, and this is the
+      # check that makes it loud.
+      - name: Widget embed is current
+        run: python3 tools/build_miniapp.py --check
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Widget tests
+        run: node --test widget/relayshield-widget.test.mjs
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --config wrangler.miniapp.toml

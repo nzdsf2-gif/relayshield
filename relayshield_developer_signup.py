@@ -2923,6 +2923,28 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "&quot;safe&quot; &mdash; the ceiling is &quot;nothing known against it&quot;, and the "
             "response says so itself.")),
     ),
+    # Telegram Mini App v1, registered 2026-09-08 BEFORE the app ships and
+    # BEFORE any deep link goes into a channel submission or a directory. The
+    # Mini App forwards its startapp value as ?source=, and its Worker DROPS any
+    # value not on this list rather than forwarding it, because an unregistered
+    # key logs unmatched: and renders nothing, which looks like attribution and
+    # is none.
+    #
+    # One key per discovery route, following the miniapp_discovery ranking, so
+    # CloudWatch can separate an arrival from an announcement channel from one
+    # from a directory. They render the same banner.
+    "tg-miniapp": (
+        (),
+        _banner("Arriving from the RelayShield Mini App", _p(
+            "You just checked a link or an address in Telegram. The same two checks are "
+            'open endpoints: <code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">'
+            "POST /v1/link-check</code> screens a URL against our indicator corpus, Safe "
+            'Browsing and domain age, and <code style="background:var(--bg);border-radius:5px;'
+            'padding:.15rem .4rem">POST /v1/wallet-risk</code> screens an address across EVM, '
+            "Solana, TON and Bitcoin. <b>Both need no key, no card and no signup</b>, capped per "
+            "source IP rather than billed, so you can put the same check inside your own bot or "
+            "agent today. A key raises the cap and adds multi-engine URL analysis.")),
+    ),
     "tg-widget": (
         (),
         _banner("Arriving from a Telegram bot", _p(
@@ -3217,6 +3239,14 @@ _SOURCE_ALIASES = {
     # banner. They stay distinguishable because _resolve_source logs the RAW
     # parameter, so CloudWatch can still separate dev.to from Mastodon while the
     # page renders one thing. Registered BEFORE the first link goes out.
+    # Mini App discovery routes, 2026-09-08. Registered BEFORE the first
+    # submission, because each announcement channel gives exactly one first
+    # impression and an unattributed one cannot be measured at all.
+    "tg-miniapp-channel":   "tg-miniapp",
+    "tg-miniapp-directory": "tg-miniapp",
+    "tg-miniapp-blog":      "tg-miniapp",
+    "tg-miniapp-bot":       "tg-miniapp",
+    "miniapp":              "tg-miniapp",
     "agent-bait-medium":     "agent-bait",
     "agent-bait-devto":      "agent-bait",
     "agent-bait-hf":         "agent-bait",

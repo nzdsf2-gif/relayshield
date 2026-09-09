@@ -163,21 +163,40 @@ BASE="https://$API_ID.execute-api.$REGION.amazonaws.com/$STAGE/v1/watchlist"
 # THE PREFLIGHT IS CHECKED FIRST AND SEPARATELY, because it is the half that
 # fails invisibly. curl ignores CORS entirely, so a POST can look perfect from a
 # terminal while every browser refuses to send it.
+#
+# AND THE BODY IS PRINTED, NOT JUST THE STATUS. The first version of this check
+# captured the status code and threw the body away, so its first real run
+# reported "-> 404, access-control-allow-origin: NONE" and left nothing to act
+# on. A 404 from API Gateway and a 404 from our own handler are different
+# problems with different fixes, and the body is the ONLY thing that separates
+# them -- which is this repo's own "a status code describes your REQUEST, not
+# the resource" rule, broken inside the tool written to enforce it.
 echo "   OPTIONS $BASE/list"
-PRE=$(curl -sS -o /dev/null -w '%{http_code}' -X OPTIONS "$BASE/list" \
+PRE_RAW=$(curl -sS -i -X OPTIONS "$BASE/list" \
         -H 'Origin: https://miniapp.relayshield.net' \
         -H 'Access-Control-Request-Method: POST' \
-        -H 'Access-Control-Request-Headers: content-type' || true)
-ACAO=$(curl -sS -D - -o /dev/null -X OPTIONS "$BASE/list" \
-        -H 'Origin: https://miniapp.relayshield.net' \
-        -H 'Access-Control-Request-Method: POST' \
-        -H 'Access-Control-Request-Headers: content-type' 2>/dev/null \
-        | tr -d '\r' | awk 'tolower($1) == "access-control-allow-origin:" {print $2}')
-echo "   -> $PRE, access-control-allow-origin: ${ACAO:-NONE}"
+        -H 'Access-Control-Request-Headers: content-type' 2>&1 || true)
+echo "$PRE_RAW" | sed 's/^/     /'
+PRE=$(printf '%s' "$PRE_RAW" | tr -d '\r' | awk 'NR==1 {print $2}')
+ACAO=$(printf '%s' "$PRE_RAW" | tr -d '\r' \
+        | awk 'tolower($1) == "access-control-allow-origin:" {print $2}')
+echo "   -> ${PRE:-no status}, access-control-allow-origin: ${ACAO:-NONE}"
 if [ "$PRE" != "204" ] || [ -z "$ACAO" ]; then
   echo "STOP: the preflight did not succeed with an allow-origin header." >&2
   echo "The POST below may still pass from curl, and the Mini App will still be" >&2
-  echo "dead in a browser. Fix this before believing step 7b." >&2
+  echo "dead in a browser, so this is a hard stop rather than a warning." >&2
+  echo >&2
+  echo "READ THE BODY PRINTED ABOVE. It says which component answered:" >&2
+  echo '  {"message": ...}                 API Gateway answered. The route, the' >&2
+  echo "                                   method or the deployment did not take." >&2
+  echo '  {"ok": false, "error": "unknown   OUR handler answered, so the gateway is' >&2
+  echo '   path X"}                        fine. If X starts with /prod the stage' >&2
+  echo "                                   prefix is reaching event.path; if it is" >&2
+  echo "                                   /v1/watchlist/list the deployed code is" >&2
+  echo "                                   older than the CORS commit." >&2
+  echo >&2
+  echo "One run settles all of it, and changes nothing:" >&2
+  echo "  sh tools/diagnose_watchlist_routes.sh" >&2
   exit 1
 fi
 echo

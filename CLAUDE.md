@@ -684,6 +684,28 @@ one that assumes it finished.** Both failures were caused by doing the next thin
 returning is not creation finishing, in IAM, in Lambda, in DynamoDB, or in API Gateway, where the
 change is invisible until the stage is redeployed.
 
+**AND THE CHECK I WROTE TO ENFORCE THE STATUS-CODE RULE BROKE THE STATUS-CODE RULE.** Its first real
+run, the same day, printed exactly this and nothing else:
+
+    -> 404, access-control-allow-origin: NONE
+    STOP: the preflight did not succeed with an allow-origin header.
+
+Correct verdict, unactionable output. **An API Gateway 404 and our own handler's 404 are different
+problems with different fixes, and the BODY is the only thing that separates them** -- API Gateway
+answers `{"message": ...}`, a shape our handler never produces, while our handler names the path it
+was given, which is how a stage prefix leaking into `event.path` announces itself. The probe captured
+the status code with `-o /dev/null` and threw the body away, so a stop that should have been
+self-diagnosing cost a round trip instead.
+
+So: **every probe in this repo prints the body of what it got, not a summary of it.** `curl -sS -i`,
+and print it. `tools/diagnose_watchlist_routes.sh` is the read-only script that separates the four
+causes in one run, including invoking the function DIRECTLY with the gateway taken out of the path,
+which is the move that made `diagnose_agent_bait_routes.sh` pay for itself.
+
+**The general form, and it is now three sessions old: a check that says a thing is wrong owes the
+reader the evidence that says WHICH thing.** "It failed" is a round trip. "It failed and here is who
+answered" is a fix.
+
 ---
 
 ## A PUBLIC LISTING CARRIES ONLY CLAIMS THAT STAY TRUE WITHOUT MAINTENANCE

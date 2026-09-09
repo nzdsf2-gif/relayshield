@@ -308,6 +308,43 @@ class TestWatchlistRouteScript(unittest.TestCase):
         self.assertIn("ACCOUNT=239677749008", script)
         self.assertIn("620534471984", script)
 
+    def test_the_preflight_check_prints_the_body_not_just_the_status(self):
+        """Its first real run reported "-> 404, allow-origin: NONE" and nothing
+        else, which is unactionable: an API Gateway 404 and our handler's 404
+        are different problems and only the body separates them. That is this
+        repo's own status-code rule broken inside the tool enforcing it."""
+        script = (ROOT / "tools" / "create_watchlist_routes.sh").read_text(encoding="utf-8")
+        self.assertIn("curl -sS -i -X OPTIONS", script,
+                      "the preflight probe must capture headers AND body")
+        self.assertIn("diagnose_watchlist_routes.sh", script,
+                      "the failure path must name the one command that settles it")
+
+    def test_the_diagnostic_is_read_only(self):
+        """It runs against a live published API. A diagnostic that changes
+        something cannot be run twice to compare."""
+        # COMMANDS, NOT PROSE. The first version of this asserted against the
+        # whole file and failed on the word "update-function-code" inside a
+        # comment explaining the fix -- the same mistake as asserting "uvx" is
+        # absent from a file whose comments explain why uvx was removed. A file
+        # is allowed to name the thing it warns about.
+        lines = [l for l in (ROOT / "tools" / "diagnose_watchlist_routes.sh")
+                 .read_text(encoding="utf-8").splitlines()
+                 if not l.lstrip().startswith("#")]
+        for mutating in ("create-resource", "put-method", "put-integration",
+                         "create-deployment", "add-permission", "update-function-code",
+                         "delete-"):
+            hit = [l for l in lines if mutating in l and not l.lstrip().startswith("echo")]
+            self.assertEqual(hit, [], f"{mutating} is not a read: {hit}")
+
+    def test_the_diagnostic_asks_the_function_directly(self):
+        """When two causes produce the same symptom, ask the component with the
+        gateway taken out of the path. That is what separates stale code from a
+        gateway fault, and it is the move that paid for
+        diagnose_agent_bait_routes.sh on its first run."""
+        d = (ROOT / "tools" / "diagnose_watchlist_routes.sh").read_text(encoding="utf-8")
+        self.assertIn("lambda invoke", d)
+        self.assertIn('"httpMethod":"OPTIONS"', d)
+
     def test_the_lambda_script_waits_for_active_before_invoking(self):
         """create-function returns before the function can be invoked, so the
         probe hit ResourceConflictException: state Pending."""

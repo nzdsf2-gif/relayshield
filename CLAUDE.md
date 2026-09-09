@@ -878,30 +878,35 @@ There is deliberately no setting that lets a known-bad target through, and a tes
 
 ## WHERE 2026-09-05 LEFT THINGS — read this first
 
-## SMITHERY POINTS AT THE PyPI STDIO SERVER IN THIS REPO. CHECK ~/mcp-live BEFORE ASSUMING.
+## SMITHERY POINTS AT THE PyPI STDIO SERVER. SETTLED 2026-09-09, IT IS NOT THE HF SPACE.
 
-Raised 2026-09-09: *"On Smithery double check your memory because we already pointed it to our HF
-MCP server in the last session."*
+Andrew asked me to double-check the recollection that Smithery had been pointed at the HF MCP
+server. It has not, and the check is now on record from the copy that actually matters.
 
-**What `mcp_registry/smithery.yaml` on `origin/main` actually says**, read rather than recalled:
-`startCommand.type: stdio`, running `uvx --from relayshield-mcp>=0.2.10`, with the sixteen tool
-names of the PUBLISHED PyPI package. It does not reference the HF Space anywhere. Its own header
-records a 2026-09-05 correction, and that correction pointed it at the PyPI server, not at HF: the
-previous version ran `node dist/index.js` and named four tools that do not exist.
+**`~/mcp-live/smithery.yaml`, grepped on the Mac**, which is the file Smithery reads:
 
-**But this repo is NOT where Smithery reads it from**, and the file says so in its first line:
-*"Copy this to the ROOT of the MCP server's own repository (~/mcp-live), not here."* `~/mcp-live` is
-on Andrew's Mac and nothing in this container can see it. So "it was pointed at HF last session" may
-be true of the copy that matters and invisible from here -- which is exactly the
-"IT IS NOT IN THE REPO IS A CLAIM ABOUT ORIGIN" rule, and the answer is the same one command:
+    27:  type: stdio
+    44:  commandFunction: |
+    46:      command: 'uvx',
 
-    cd ~/mcp-live && grep -n "type:\|url\|hf.space\|command" smithery.yaml
+No `url`, no `hf.space`, nothing hosted. It is the stdio PyPI package, identical to the copy in
+`mcp_registry/`. So both copies agree and neither points at HF. The 2026-09-05 change corrected this
+file to describe the RIGHT server (PyPI, sixteen real tool names) after a previous version described
+a Node server that does not exist; it never pointed it at the Space.
 
-**Why it is worth settling rather than shrugging at.** stdio and hosted-HTTP are not two spellings
-of one listing, they are the FD-11 / FD-15 decision. A stdio listing tells a visitor to install a
-Python package; a hosted one hands them a URL. FD-15 exists because Grok Bot connectors, Smithery
-and possibly OpenAI all want the SAME hosted URL, and handing three directories three different
-answers is how the four-pattern-table problem started.
+**Why this matters rather than being a filing detail.** stdio and hosted-HTTP are two different
+listings with two different visitors. A stdio entry tells someone to install a Python package; a
+hosted entry hands them a URL. FD-15 exists because Grok Bot connectors, Smithery and possibly
+OpenAI all want the SAME hosted URL, and we have two candidates already serving MCP over HTTP (the
+HF Space and the Apify Actor) with no decision recorded about which one a stranger gets.
+
+**So FD-11 is not blocked and never was: the stdio listing can ship today.** What is undecided is
+whether we ALSO want a hosted entry, and that is FD-15's question, not this file's.
+
+**The process note worth keeping.** The right answer here came from one grep on the machine that
+holds the file, after this container could only report what `origin/main` said. That is the
+"IT IS NOT IN THE REPO IS A CLAIM ABOUT ORIGIN" rule working in the direction it was written for:
+report what you checked, name the one command that settles the rest, and let it be run.
 
 ---
 

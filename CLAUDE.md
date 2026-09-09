@@ -638,6 +638,129 @@ round and was not the case this morning.
 
 ---
 
+## AN ENDPOINT IS NOT SHIPPED UNTIL THE PREFLIGHT ANSWERS. curl CANNOT TELL YOU THIS.
+
+**Found 2026-09-09 while wiring the Mini App watchlist, before it could cost anything, and it is a
+new instance of the quiet-alarm shape rather than a new lesson.**
+
+`relayshield_watchlist.py` returned no CORS headers at all. `relayshield_api.py` has carried
+`Access-Control-Allow-Origin: *` for months, and the new file simply did not, because it was written
+against the handler dispatch pattern and nobody looked at who calls it.
+
+**The Mini App is served from its own hostname and posts `content-type: application/json`, which is
+not a CORS-safelisted value.** So a browser sends an OPTIONS PREFLIGHT first and will not send the
+POST at all unless it succeeds. Two consequences, and the second is the nasty one:
+
+- A response without `Access-Control-Allow-Origin` is discarded by the browser AFTER it arrives. The
+  Lambda logs a successful call and the user sees nothing.
+- **A failed preflight means the real request is never sent, so there is no log line at all.** The
+  symptom is a button that does nothing, and the server-side evidence is an empty log, which reads
+  like the click never happened.
+
+**And curl ignores CORS entirely**, so every terminal test passes on an endpoint that is dead in the
+only client that uses it. That is the exact shape of the alarm that goes quiet rather than red.
+
+So: `_CORS` on every response including the 400s and 404s, an OPTIONS branch answered BEFORE the
+route lookup (a preflight carries no body and arrives at a path the browser has not been allowed to
+POST to yet), `tools/create_watchlist_routes.sh` creates an OPTIONS method alongside every POST and
+checks the preflight SEPARATELY and FIRST, and `test_miniapp.py` executes the dispatcher with boto3
+stubbed rather than grepping it.
+
+`*` rather than the Mini App's origin, deliberately: these endpoints authenticate on Telegram's
+signed `initData` in the body, never on a cookie or an Origin header, so there is no ambient
+authority for an origin allowlist to protect, and locking it down would break the widget for no gain.
+
+**THE SECOND HALF, and it is the same mistake at a different layer.** The same script had to wait for
+the Lambda to leave `Pending`:
+
+    ResourceConflictException ... The function is currently in the following state: Pending
+
+`create-function` RETURNS before the function can be invoked. That is the IAM propagation retry
+already in that script, one operation later -- **an AWS call that succeeds, followed immediately by
+one that assumes it finished.** Both failures were caused by doing the next thing at machine speed.
+`aws lambda wait function-active-v2` is one line and the documented answer.
+
+**The general form: after any AWS create, ask what the NEXT call assumes about it.** Creation
+returning is not creation finishing, in IAM, in Lambda, in DynamoDB, or in API Gateway, where the
+change is invisible until the stage is redeployed.
+
+---
+
+## A PUBLIC LISTING CARRIES ONLY CLAIMS THAT STAY TRUE WITHOUT MAINTENANCE
+
+**Andrew's observation, 2026-09-09, and it is better than the answer it corrected:** *"Your
+corrected metrics are also stale which was a lazy response. The numbers are constantly getting
+outdated so they're always going to be out-dated which make me wonder if we should at a minimum cite
+only metrics that change infrequently."*
+
+He is right, and the first fix I proposed was wrong in an instructive way. The Bundle D listing
+quoted *"5.0M+ indicators of compromise, 3,750+ malware families, and 85+ monitored criminal Telegram
+marketplaces"* in three places. My answer was to replace them with the corrected figures. **That
+swaps one expiry date for another** -- and each refresh is an AWS change set with their review
+latency attached, on a PUBLISHED page, which is an absurd amount of machinery to spend on a number
+that is wrong again next month.
+
+**The rule: on any page we cannot cheaply edit, name the SOURCES and the CAPABILITIES, not the
+COUNTS.** "Collected continuously from monitored criminal Telegram marketplaces, infostealer log
+dumps and public indicator feeds" is true today, was true in June, and needs no maintenance. "5.0M
+indicators" needs a change set to stay honest.
+
+**This is MEASUREMENT DOCTRINE arriving where it was always pointed.** That section has said since
+August that the corpus headline is never quoted, because most of it is ingested public feeds every
+target buyer already has, and quoting it nearly killed the Segment 1 outreach in front of people who
+checked. The AWS listing was the most public place we were still doing it, and it took a question
+about staleness to notice. The listing now says outright that we do not quote a corpus headline and
+why, which turns the doctrine into a differentiator instead of an omission.
+
+**A count that IS allowed is one that changes by a deliberate act with a commit behind it.** "An MCP
+server exposing 13 tools" is fine: it moves when we ship a tool. Counted from
+`hf-space-mcp-server/app.py`'s own manifest, which is the file deployed as this listing's registered
+MCP endpoint, and verifiable in one command:
+
+    grep -c '"name": "' hf-space-mcp-server/app.py
+
+**It is enforced, not remembered.** `tools/marketplace_add_dimension.py --with-copy` refuses to build
+a change set whose copy quotes any of those figures, and says why.
+
+**And the copy ships in the SAME change set as the agent-bait dimension.** One submission is one AWS
+review cycle. Two is two cycles plus a window where the copy advertises a capability the rate card
+cannot bill.
+
+---
+
+## WHEN SOMETHING IS WRONG, SAY WHAT TO DO ABOUT IT. A DIAGNOSIS IS NOT AN ANSWER.
+
+**Asked for explicitly on 2026-09-09, in Andrew's words: "Make a note in Claude.md if something is
+wrong to provide concrete recommendations. Dont leave me hanging as you did."**
+
+What earned it: a reply reported that `smithery.yaml` was `type: stdio` rather than pointing at the
+HF Space, said the recollection was mistaken, and stopped there. Every word was accurate and it left
+him holding a problem with no next move. He had to come back and ask what to do, which is a round
+trip spent on something that should have been in the first reply.
+
+**This is the same failure as rule 14's, one level up.** Rule 14 says a command must run in HIS
+state. This says a FINDING must come with the action it implies. A finding with no recommendation
+outsources the thinking to the person with less context, which is exactly backwards.
+
+**So every "this is wrong", "this is missing", "this cannot work" is followed, in the same reply, by:**
+
+1. **What I recommend**, named as a recommendation and not a menu. One option, chosen. If there is a
+   real trade-off, say which one I would take and why, then list the alternative -- never a list of
+   three with no pick, and never "it depends on your priorities", which is a way of not answering.
+2. **What it costs**, roughly. Half an hour, a day, a review cycle, a round trip.
+3. **Who does it and how**, with the label rule 9 requires. If it is mine, do it in the same session
+   rather than describing it.
+
+**And where I genuinely cannot decide -- because it is a business call, a spend, or a thing only he
+can see -- say THAT explicitly and give the recommendation anyway**, marked as mine to be overruled.
+"I would do X, but this is your call because it commits money" is an answer. "Here are the options"
+is not.
+
+The one exception is a question that is genuinely his to answer and has no default: those go through
+a direct question, asked once, with my own recommendation attached to it.
+
+---
+
 ## PAYPAL ON relayshield.net: NO. DECIDED 2026-09-08.
 
 Asked directly, and the answer is not close.
@@ -945,6 +1068,65 @@ listing nobody outside our own account can take up would explain a lot.
 
 ---
 
+## SMITHERY NOW POINTS AT THE HOSTED HF SPACE. CHANGED 2026-09-09, AND THE CLI SCHEMA IS NOT WHAT WE THOUGHT.
+
+**This SUPERSEDES the section immediately below it, which is kept because its finding was correct on
+the morning it was written and its process note is the reason this one exists.**
+
+Two things changed, and the second was a surprise that would have cost a round if it had been
+guessed at instead of read.
+
+**1. The file points at the hosted Space, because that is the listing we actually want.**
+`mcp_registry/smithery.yaml` now carries `target: remote` and
+
+    https://relayshieldadmin-relayshield-agentic-attack-surface.hf.space/gradio_api/mcp/sse
+
+the SAME URL the AWS Marketplace entity registers as Bundle D's `EndpointUrl`. The PUBLIC Space, not
+the `-aws` one: they run the same code, but `AWS_MARKETPLACE_MODE=true` scrubs every reference to the
+self-serve signup page for AWS's Tier-1 audit, and a Smithery visitor is not an AWS buyer and should
+be able to find the way to buy. That is FD-15 answered: one hosted URL, everywhere.
+
+**2. THE MODERN SMITHERY CLI READS EXACTLY TWO KEYS OUT OF THAT FILE.** Read from `@smithery/cli`
+4.11.1 on the npm registry, not from a docs page -- smithery.ai is egress-blocked from the container
+and npm is not, which is the BLOCKED SOURCE WAS REACHABLE ALL ALONG rule paying for itself a second
+time. Its parser is literally:
+
+    z.object({ name: z.string().optional(),
+               target: z.enum(["local","remote"]).optional() }).loose()
+
+`.loose()` keeps unknown keys, which is why the rest of that file is harmless documentation. **The
+elaborate `startCommand` / `configSchema` / `commandFunction` block that two previous sessions argued
+about, corrected, and argued about again is the LEGACY v1 schema** from when Smithery scanned a
+GitHub repo and built the server itself. It is not read by the CLI that publishes today. We spent
+three sessions perfecting a file the tool mostly ignores.
+
+**And publishing a hosted server is ONE command, from the CLI's own README:**
+
+    smithery auth login
+    smithery mcp publish <url> -n <org/server>
+
+The login is not optional and is not "you logged in earlier" -- that is the `mcp-publisher` 401 that
+cost a round, and the rule is that a block driving an authenticated CLI carries its auth step every
+time.
+
+**FD-11 IS THEREFORE NOT BLOCKED AND NEVER NEEDED A BUILD.** It is one command against a URL that
+already answers.
+
+**THE URL IS WATCHED, AND THE WATCH WAS LOOKING AT THE WRONG THING UNTIL TODAY.**
+`tools/check_hf_space.py` checked the Space's HTTP front door and the HF API's runtime stage. Neither
+says anything about whether the MCP server is MOUNTED. `app.py` passes `mcp_server=True` to
+`demo.launch()`, and its own comments record a previous Gradio upgrade changing how that route is
+served -- so dropping that argument, or upgrading past a rename, would have left the watcher green
+forever while every directory we are listed in resolved to a 404. It now probes
+`/gradio_api/mcp/sse` itself on both Spaces, treats 404/405/410 there as DOWN, and reports
+`/gradio_api/mcp/` (streamable HTTP) as information so "the route moved" and "the server is down"
+are one line apart instead of an afternoon apart. `test_hosted_mcp_pointer.py` pins the URL in
+`smithery.yaml` against the one the watcher probes, because advertising a URL that nothing watches is
+the quiet alarm with an audience, and advertising one the watcher does NOT probe is worse: the alarm
+is green and pointed at the wrong target.
+
+---
+
 ## SMITHERY POINTS AT THE PyPI STDIO SERVER. SETTLED 2026-09-09, IT IS NOT THE HF SPACE.
 
 Andrew asked me to double-check the recollection that Smithery had been pointed at the HF MCP
@@ -1012,20 +1194,23 @@ submitted 2026-09-08 as PR #612. FD-8, FD-9 and FD-10 stay closed.
    **Sequencing is the whole risk: each announcement channel gives ONE first impression, and
    submitting before the app exists spends it.** Build first, submit second.
 
-2. **FD-15: decide the canonical hosted MCP URL, then onboard it everywhere that takes one.**
-   New today, and it is an onboarding item rather than a build: the HF Space already serves MCP over
-   HTTP with thirteen tools and the Apify Actor serves it over Streamable HTTP. Three destinations
-   want the same URL -- **Grok Bot custom connectors** (the real xAI angle; the bot template
-   marketplace is blueprints and is not this), **Smithery** which is FD-11, and **OpenAI** if FD-14's
-   rules need a remote server. **Decide which URL a stranger gets before handing three directories
-   three different ones**, and pair it with item 3, because advertising a URL whose outages nobody
-   watches is the quiet-alarm failure with an audience.
+2. **FD-15 IS DECIDED. It is now three submissions, not a decision.** The canonical hosted MCP URL
+   is the PUBLIC Space's `/gradio_api/mcp/sse` -- the same URL the AWS Marketplace entity already
+   registers as Bundle D's `EndpointUrl`, so we advertise one URL everywhere instead of three.
+   `mcp_registry/smithery.yaml` carries it, `tools/check_hf_space.py` probes it every six hours, and
+   `test_hosted_mcp_pointer.py` fails if those two ever disagree. What is left is handing it to the
+   three destinations that take one: **Smithery** (item 6, one command), **Grok Bot custom
+   connectors**, and **OpenAI** if FD-14's rules need a remote server. The `-aws` Space is NOT the
+   answer for any of them: it scrubs the signup page for AWS's Tier-1 audit, so a public directory
+   pointed at it would hide the way to buy.
 
-3. **Watch the HF Space.** `check_server_status` is already a tool on it, so the fix is a scheduled
-   call that opens an issue when it stops answering. **A GitHub Actions workflow, not a container
-   script:** the Space is egress-blocked from here, verified again today. Model it on
-   `xsoar_pack_watch.yml`, then run `python3 test_workflows_parse.py`, because a workflow that fails
-   to parse produces "No jobs were run", which is quieter than a failure.
+3. **The HF Space watcher is BUILT and now checks the thing that matters.**
+   `.github/workflows/hf_space_watch.yml` runs `tools/check_hf_space.py` every six hours, opens an
+   issue on DOWN and closes it on recovery. Extended 2026-09-09: it was checking the Space's front
+   door and HF's runtime stage, **neither of which says whether the MCP server is mounted** -- so it
+   would have stayed green forever if `mcp_server=True` were dropped or a Gradio upgrade renamed the
+   route, while every directory listing 404d. It now probes `/gradio_api/mcp/sse` itself on BOTH
+   Spaces. **Nothing left to build; the open item is watching the first few runs.**
 
 4. **Map `relayshield-mpp-settlement` in `deploy_lambdas.yml`.** Still in neither the `paths:`
    trigger nor `LAMBDA_MAP`; `tools/check_deploy_invoke_policy.py` prints it as
@@ -1038,8 +1223,13 @@ submitted 2026-09-08 as PR #612. FD-8, FD-9 and FD-10 stay closed.
    Answers whether the account has crypto deposit addresses and a business profile. A 403 is the
    text to send `machine-payments@stripe.com`.
 
-6. **FD-11: Smithery listing.** `mcp_registry/smithery.yaml` is written and unshipped. Now paired
-   with item 2, since a Smithery visitor lands on whatever hosted URL that item settles.
+6. **FD-11: Smithery listing. NOT BLOCKED, AND SMALLER THAN WE THOUGHT -- it is two commands.**
+   Read from `@smithery/cli` 4.11.1 on npm 2026-09-09: publishing a hosted server is
+   `smithery auth login` then `smithery mcp publish <url> -n relayshield/relayshield`. The
+   `smithery.yaml` we spent three sessions perfecting is mostly legacy v1 schema the current CLI
+   ignores -- it reads `name` and `target` and keeps the rest. The URL is settled by item 2 and is
+   watched. **Recommendation: do this next; it is ten minutes and it is the cheapest open item on
+   this list.**
 
 7. **FD-14: read OpenAI's plugin directory rules. Reading IS the task.**
    Largest audience of the three directories: the app directory became a Plugin directory on

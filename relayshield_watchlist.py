@@ -294,6 +294,50 @@ ROUTES = {
 }
 
 
+# CORS IS NOT COSMETIC HERE, IT IS THE WHOLE FEATURE.
+#
+# The Mini App is served by cloudflare_worker_miniapp.js on its own hostname and
+# calls api.relayshield.net, so every watchlist request is CROSS-ORIGIN from a
+# browser. Two things follow, and missing either one makes the button silently
+# do nothing while the Lambda logs a perfectly successful call:
+#
+#   1. The POST sends `content-type: application/json`, which is not a
+#      CORS-safelisted value, so the browser sends an OPTIONS PREFLIGHT first.
+#      A preflight that 403s or 404s means the real request is never sent.
+#   2. The real response needs Access-Control-Allow-Origin or the browser
+#      discards a 200 it already has in hand.
+#
+# relayshield_api.py has carried `Access-Control-Allow-Origin: *` on its
+# responses for months. This file did not, and nothing would have reported it:
+# curl ignores CORS entirely, so the endpoint tests clean from a terminal and is
+# dead in the only client that uses it. That is the quiet-alarm shape again.
+#
+# `*` rather than the Mini App's origin, deliberately and consistently with the
+# rest of the API: these endpoints are authenticated by Telegram's SIGNED
+# initData in the body, never by a cookie or an Origin header, so there is no
+# ambient authority for an origin allowlist to protect. Locking it to one origin
+# would break the widget and every other caller for no security gain.
+_CORS = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "content-type",
+    "access-control-allow-methods": "POST,OPTIONS",
+    "access-control-max-age": "86400",
+}
+
+
+def _respond(status: int, payload: dict) -> dict:
+    return {"statusCode": status,
+            "headers": {"content-type": "application/json", **_CORS},
+            "body": json.dumps(payload)}
+
+
+def _method(event: dict) -> str:
+    """REST (payload v1) puts it at the top level; HTTP API v2 nests it."""
+    return (event.get("httpMethod")
+            or event.get("requestContext", {}).get("http", {}).get("method")
+            or "POST").upper()
+
+
 def lambda_handler(event, context):
     # The deployer invokes what it deploys to prove the package imports. Return
     # early rather than touching DynamoDB on a probe.
@@ -301,16 +345,20 @@ def lambda_handler(event, context):
         return {"statusCode": 200, "body": json.dumps({"ok": True, "probe": True})}
 
     path = (event.get("rawPath") or event.get("path") or "").rstrip("/")
+
+    # Answer the preflight before anything else, including the route lookup: a
+    # preflight carries no body and must succeed on a path the browser has not
+    # yet been allowed to POST to.
+    if _method(event) == "OPTIONS":
+        return {"statusCode": 204, "headers": dict(_CORS), "body": ""}
+
     handler = ROUTES.get(path)
     if not handler:
-        return {"statusCode": 404,
-                "body": json.dumps({"ok": False, "error": f"unknown path {path}"})}
+        return _respond(404, {"ok": False, "error": f"unknown path {path}"})
     try:
         body = json.loads(event.get("body") or "{}")
     except json.JSONDecodeError:
-        return {"statusCode": 400, "body": json.dumps({"ok": False, "error": "invalid JSON"})}
+        return _respond(400, {"ok": False, "error": "invalid JSON"})
 
     result = handler(body if isinstance(body, dict) else {})
-    return {"statusCode": 200 if result.get("ok") else 400,
-            "headers": {"content-type": "application/json"},
-            "body": json.dumps(result)}
+    return _respond(200 if result.get("ok") else 400, result)

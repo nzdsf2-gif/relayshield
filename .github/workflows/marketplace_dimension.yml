@@ -10,6 +10,14 @@ name: Marketplace Dimension
 # missing credential moves the check rather than cancelling it, and Actions holds
 # the role. lambda_drift_check.yml and recover_live_handler.yml are the precedent.
 #
+# IT CARRIES THE LISTING COPY TOO, IN ONE CHANGE SET. One submission is one AWS
+# review cycle. Two submissions against the same published listing is two cycles
+# and a window in which the copy advertises agent-bait scanning while the rate
+# card cannot bill it. aws_marketplace/bundle_d_listing_copy.json holds only the
+# fields that change; the rest are round-tripped from the live capture, because
+# UpdateInformation REPLACES the whole information block exactly as AddDimensions
+# replaces the whole rate card.
+#
 # DEFAULT IS READ-ONLY, AND DELIBERATELY SO. A change set REPLACES the whole rate
 # card on a published listing, and a malformed one rolled this product's prices
 # back to placeholders on 2026-07-27. So `describe` is the default mode, `plan`
@@ -27,6 +35,10 @@ on:
         description: 'For apply ONLY: type the product entity id to confirm'
         type: string
         default: ''
+      include_listing_copy:
+        description: 'Also send the listing-copy change in the SAME change set'
+        type: boolean
+        default: true
 
 permissions:
   id-token: write
@@ -60,13 +72,23 @@ jobs:
 
       - name: Plan
         if: ${{ inputs.mode != 'describe' }}
-        run: python3 tools/marketplace_add_dimension.py --plan --from aws_marketplace/entity_current.json
+        run: |
+          COPY=""
+          if [ "${{ inputs.include_listing_copy }}" = "true" ]; then
+            COPY="--with-copy"
+          fi
+          python3 tools/marketplace_add_dimension.py --plan \
+            --from aws_marketplace/entity_current.json $COPY
 
       - name: Apply
         if: ${{ inputs.mode == 'apply' }}
         run: |
+          COPY=""
+          if [ "${{ inputs.include_listing_copy }}" = "true" ]; then
+            COPY="--with-copy"
+          fi
           python3 tools/marketplace_add_dimension.py --apply \
-            --from aws_marketplace/entity_current.json \
+            --from aws_marketplace/entity_current.json $COPY \
             --i-have-read-the-rate-card-warning
 
       # The false-positive rate is the PRODUCT gate on adding the dimension, and

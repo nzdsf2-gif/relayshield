@@ -706,6 +706,51 @@ which is the move that made `diagnose_agent_bait_routes.sh` pay for itself.
 reader the evidence that says WHICH thing.** "It failed" is a round trip. "It failed and here is who
 answered" is a fix.
 
+### AND THE ANSWER WAS THE THIRD INSTANCE OF THE SAME RACE, IN THE SAME SCRIPT
+
+The diagnostic settled it in one run, and the finding is worse than a bug.
+
+Read the timestamps together. The Lambda's `LastModified` was **11:31:01 UTC**, so the CORS code was
+live. The stage deployment `d41p0d` was created at **07:32:52 -04:00, which is 11:32:52 UTC**, and
+the probe that 404'd ran seconds later inside the same script. An hour on, with nothing changed in
+between, the identical request returned **204 with `access-control-allow-origin: *`** and the POST
+returned `{"ok": false, "error": "unverified: open this inside Telegram"}` with CORS headers on it.
+Steps 4 to 6 had already ruled out every other cause: six methods correct, six integrations pointing
+at the right function, the stage serving the newest deployment, the function Active and answering a
+synthetic OPTIONS with 204.
+
+**`create-deployment` returns a deployment id before the edge serves the new resource set.** So this
+is the same class as the two failures already fixed inside `create_watchlist_lambda.sh`, in the same
+session, by the same person:
+
+    create-role       -> "the role cannot be assumed by Lambda"
+    create-function   -> "the function is in state: Pending"
+    create-deployment -> a 404 at the edge for a few seconds
+
+**AND THE REPO ALREADY KNEW.** `tools/create_mpp_settlement_lambda.sh` hit this exact race on
+2026-09-05 and carries an inline retry with the diagnosis written above it, including the sentence
+*"a propagation race that reports as a hard failure is worse than a slow script: it sends someone
+diagnosing a routing bug that does not exist."* A script written four days later probed once,
+because that knowledge lived in a neighbouring file's comments and nothing carried it across.
+
+**A LESSON RECORDED IN ONE FILE IS NOT A LESSON THE NEXT FILE LEARNS.** That is the real finding, and
+the fix is structural rather than another comment: `tools/lib_await_route.sh` holds `await_http`
+once, and `create_watchlist_routes.sh`, `create_link_check_endpoint.sh` and
+`create_agent_bait_scan_routes.sh` all source it. The last two had the same single-probe bug and had
+simply been getting away with it.
+
+**The half that keeps it from becoming a new problem: only 403, 404 and a failed connection are
+waited on.** Those are what an undeployed route returns. Every other status is a real answer from a
+component that is listening, so it returns immediately. A loop that waits out a 500 turns a clear
+fault into a slow one, which is the "a probe that cannot tell must not block" rule pointed the other
+way. Verified in this container against a live host: it succeeds on the first try, returns instantly
+on a real non-matching answer, and retries only the 404.
+
+**One place it deliberately is NOT used**, because the helper cannot tell: the second agent-bait
+probe EXPECTS 403, which is also a propagation code. Ordering does that work instead -- the first
+probe returning 402 proves the stage reached the edge, and the second request goes to the same stage
+moments later.
+
 ---
 
 ## A PUBLIC LISTING CARRIES ONLY CLAIMS THAT STAY TRUE WITHOUT MAINTENANCE

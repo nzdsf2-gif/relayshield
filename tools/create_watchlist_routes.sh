@@ -44,6 +44,10 @@ export AWS_PAGER=""
 
 aws() { command aws --profile "$PROFILE" --region "$REGION" --no-cli-pager "$@"; }
 
+# The shared propagation wait. A fourth copy of this loop was the alternative,
+# and this repo already carries four copies of one pattern table.
+. "$(dirname "$0")/lib_await_route.sh"
+
 echo "== 1. Which account are we actually talking to?"
 GOT=$(aws sts get-caller-identity --query Account --output text)
 if [ "$GOT" != "$ACCOUNT" ]; then
@@ -164,24 +168,23 @@ BASE="https://$API_ID.execute-api.$REGION.amazonaws.com/$STAGE/v1/watchlist"
 # fails invisibly. curl ignores CORS entirely, so a POST can look perfect from a
 # terminal while every browser refuses to send it.
 #
-# AND THE BODY IS PRINTED, NOT JUST THE STATUS. The first version of this check
-# captured the status code and threw the body away, so its first real run
-# reported "-> 404, access-control-allow-origin: NONE" and left nothing to act
-# on. A 404 from API Gateway and a 404 from our own handler are different
-# problems with different fixes, and the body is the ONLY thing that separates
-# them -- which is this repo's own "a status code describes your REQUEST, not
-# the resource" rule, broken inside the tool written to enforce it.
+# It polls rather than probing once: see lib_await_route.sh for why, and for the
+# admission that this exact race was already solved in a neighbouring script and
+# not carried across. Only 403, 404 and a failed connection are waited on, so a
+# real fault still reports immediately.
 echo "   OPTIONS $BASE/list"
-PRE_RAW=$(curl -sS -i -X OPTIONS "$BASE/list" \
-        -H 'Origin: https://miniapp.relayshield.net' \
-        -H 'Access-Control-Request-Method: POST' \
-        -H 'Access-Control-Request-Headers: content-type' 2>&1 || true)
-echo "$PRE_RAW" | sed 's/^/     /'
-PRE=$(printf '%s' "$PRE_RAW" | tr -d '\r' | awk 'NR==1 {print $2}')
-ACAO=$(printf '%s' "$PRE_RAW" | tr -d '\r' \
+await_http 204 -X OPTIONS "$BASE/list" \
+  -H 'Origin: https://miniapp.relayshield.net' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: content-type' || true
+
+ACAO=$(tr -d '\r' < "$AWAIT_HEADERS" \
         | awk 'tolower($1) == "access-control-allow-origin:" {print $2}')
-echo "   -> ${PRE:-no status}, access-control-allow-origin: ${ACAO:-NONE}"
-if [ "$PRE" != "204" ] || [ -z "$ACAO" ]; then
+sed 's/^/     /' "$AWAIT_HEADERS"
+sed 's/^/     /' "$AWAIT_BODY"; echo
+echo "   -> ${AWAIT_STATUS:-no status}, access-control-allow-origin: ${ACAO:-NONE}"
+
+if [ "$AWAIT_STATUS" != "204" ] || [ -z "$ACAO" ]; then
   echo "STOP: the preflight did not succeed with an allow-origin header." >&2
   echo "The POST below may still pass from curl, and the Mini App will still be" >&2
   echo "dead in a browser, so this is a hard stop rather than a warning." >&2
@@ -197,6 +200,7 @@ if [ "$PRE" != "204" ] || [ -z "$ACAO" ]; then
   echo >&2
   echo "One run settles all of it, and changes nothing:" >&2
   echo "  sh tools/diagnose_watchlist_routes.sh" >&2
+  await_cleanup
   exit 1
 fi
 echo
@@ -215,6 +219,7 @@ case "$BODY" in
     echo "LIVE. The gateway routes to our handler and the identity gate refuses"
     echo "an unsigned request, which is exactly right."
     echo
+    await_cleanup
     echo "The remaining half cannot be tested with curl: a real call carries"
     echo "Telegram's signed initData, which only Telegram can mint. Open the"
     echo "Mini App inside Telegram and add a watch."

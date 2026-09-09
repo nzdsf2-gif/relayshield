@@ -313,11 +313,41 @@ class TestWatchlistRouteScript(unittest.TestCase):
         else, which is unactionable: an API Gateway 404 and our handler's 404
         are different problems and only the body separates them. That is this
         repo's own status-code rule broken inside the tool enforcing it."""
+        # ASSERT THE PROPERTY, NOT THE INCANTATION. The first version of this
+        # pinned the literal `curl -sS -i -X OPTIONS`, so moving the probe into
+        # the shared helper broke a test about a behaviour that had not changed.
+        # A test that names one command tests that command, not the rule.
         script = (ROOT / "tools" / "create_watchlist_routes.sh").read_text(encoding="utf-8")
-        self.assertIn("curl -sS -i -X OPTIONS", script,
-                      "the preflight probe must capture headers AND body")
+        self.assertIn("$AWAIT_HEADERS", script,
+                      "the preflight must capture response headers")
+        self.assertIn("$AWAIT_BODY", script,
+                      "the preflight must capture the response body")
+        self.assertTrue(re.search(r'sed .*AWAIT_BODY', script),
+                        "the body must be PRINTED, not merely captured")
         self.assertIn("diagnose_watchlist_routes.sh", script,
                       "the failure path must name the one command that settles it")
+
+    def test_every_route_script_waits_for_the_edge(self):
+        """create-deployment returns before the edge serves the new resource
+        set. Three scripts create a deployment and then immediately prove it;
+        every one must poll, or it is a coin flip that reports as a routing bug.
+
+        The knowledge existed in create_mpp_settlement_lambda.sh's comments
+        since 2026-09-05 and did not reach the script written on 2026-09-09,
+        which is precisely why it is a shared file now instead of a comment."""
+        for name in ("create_watchlist_routes.sh", "create_link_check_endpoint.sh",
+                     "create_agent_bait_scan_routes.sh"):
+            src = (ROOT / "tools" / name).read_text(encoding="utf-8")
+            self.assertIn("create-deployment", src, f"{name} premise changed")
+            self.assertIn("lib_await_route.sh", src, f"{name} does not source the wait")
+            self.assertIn("await_http", src, f"{name} does not use it")
+
+    def test_the_wait_only_retries_propagation_shaped_answers(self):
+        """A loop that waits out a 500 turns a clear fault into a slow one. Only
+        403, 404 and a failed connection are what an undeployed route returns."""
+        lib = (ROOT / "tools" / "lib_await_route.sh").read_text(encoding="utf-8")
+        self.assertIn("403|404|000) ;;", lib)
+        self.assertIn("*) return 1 ;;", lib)
 
     def test_the_diagnostic_is_read_only(self):
         """It runs against a live published API. A diagnostic that changes

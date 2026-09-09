@@ -147,7 +147,21 @@ def plan(from_path: Path, max_age_hours: int | None):
             "          Usage dimensions live on the PRODUCT entity, not the offer.\n"
             "          Re-run --describe against the product entity id."
         )
-    known = [k for k in ("mcp_registry_risk", "prompt_injection_breach")]
+    # ALL SIX live dimensions, read from the real DescribeEntity capture on
+    # 2026-09-09. The first version of this guard named only two, taken from
+    # AWS_DIMENSION_NAMES in relayshield_agentic_api.py -- but that table maps
+    # only the endpoints we METER through the Marketplace rail, not the
+    # dimensions the LISTING carries. Four more exist:
+    # agentic_bundle_access (the Entitled monthly minimum), bulk_identity_risk,
+    # tech_stack_cve and llm_credential_exposure.
+    #
+    # THE DEFECT THAT MATTERED: a capture holding only those two would have
+    # PASSED the old guard, and a change set built from it could have dropped
+    # four live dimensions including the Entitled one that carries the monthly
+    # commitment. That is the 2026-07-27 "prices rolled back to placeholders"
+    # failure with a guard in front of it that did not look.
+    known = ["agentic_bundle_access", "bulk_identity_risk", "tech_stack_cve",
+             "mcp_registry_risk", "prompt_injection_breach", "llm_credential_exposure"]
     present = {d.get("Key") for d in dims}
     missing = [k for k in known if k not in present]
     if missing:

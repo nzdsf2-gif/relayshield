@@ -104,11 +104,43 @@ if AWS_PROFILE=relayshield aws lambda get-function --function-name "$FN" --no-cl
     --zip-file "fileb://$TMP/watchlist.zip" --no-cli-pager >/dev/null
   echo "$FN code updated"
 else
-  AWS_PROFILE=relayshield aws lambda create-function --function-name "$FN" \
-    --runtime python3.12 --handler relayshield_watchlist.lambda_handler \
-    --role "arn:aws:iam::${ACCOUNT}:role/${ROLE}" \
-    --timeout 15 --memory-size 256 \
-    --zip-file "fileb://$TMP/watchlist.zip" --no-cli-pager >/dev/null
+  # RETRY, BECAUSE IAM IS EVENTUALLY CONSISTENT AND THIS FAILED ON ITS FIRST
+  # REAL RUN (2026-09-09):
+  #
+  #   InvalidParameterValueException ... The role defined for the function
+  #   cannot be assumed by Lambda.
+  #
+  # Nothing was wrong with the role. It was created seconds earlier and the
+  # trust policy had not yet propagated to the Lambda service. That is a
+  # documented AWS behaviour and the documented answer is to retry, not to
+  # change anything -- which is why the message is so misleading: it names the
+  # role as the problem when the problem is the clock.
+  #
+  # The first version of this script called create-function immediately after
+  # create-role, so it was GUARANTEED to hit this on a fresh account and to
+  # work on the re-run, which is the worst kind of intermittent.
+  CREATED=0
+  i=1
+  while [ "$i" -le 10 ]; do
+    if AWS_PROFILE=relayshield aws lambda create-function --function-name "$FN" \
+        --runtime python3.12 --handler relayshield_watchlist.lambda_handler \
+        --role "arn:aws:iam::${ACCOUNT}:role/${ROLE}" \
+        --timeout 15 --memory-size 256 \
+        --zip-file "fileb://$TMP/watchlist.zip" --no-cli-pager >/dev/null 2>"$TMP/err"; then
+      CREATED=1
+      break
+    fi
+    if grep -q "cannot be assumed by Lambda" "$TMP/err"; then
+      echo "  role not propagated yet, attempt $i of 10, waiting 6s"
+      sleep 6
+      i=$((i + 1))
+      continue
+    fi
+    echo "create-function failed for a reason that is not propagation:" >&2
+    cat "$TMP/err" >&2
+    exit 1
+  done
+  [ "$CREATED" = "1" ] || { echo "role still not assumable after 60s. Re-run this script." >&2; exit 1; }
   echo "$FN created"
 fi
 rm -rf "$TMP"

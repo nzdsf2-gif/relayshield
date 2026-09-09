@@ -80,12 +80,33 @@ echo
 echo "== PROVE IT, against the ROLE =="
 # Simulate against the role, never from the operator's own shell: the operator
 # can do things the role cannot, so testing here would answer the wrong question.
+#
+# TWO SIMULATIONS, NOT ONE, AND THE REASON COST A ROUND ON 2026-09-08.
+# simulate-principal-policy defaults --resource-arns to "*". The marketplace
+# statements ARE Resource "*", so they evaluate correctly. The logs statement is
+# scoped to one log group, so evaluating it against "*" returns implicitDeny --
+# which is the SIMULATION being asked the wrong question, not a broken grant. The
+# first version of this script printed that implicitDeny under the instruction
+# "every decision above must read allowed", which reads as a failure and is not.
+#
+# A status code, and an authorization decision, is a fact about the QUESTION you
+# asked. Ask about the resource the policy actually names.
+echo "-- marketplace catalog, resource * --"
 AWS_PROFILE=relayshield aws iam simulate-principal-policy \
   --policy-source-arn "arn:aws:iam::${ACCOUNT}:role/${ROLE}" \
-  --action-names aws-marketplace:DescribeEntity aws-marketplace:StartChangeSet logs:FilterLogEvents \
+  --action-names aws-marketplace:DescribeEntity aws-marketplace:StartChangeSet \
+  --query 'EvaluationResults[].{action:EvalActionName,decision:EvalDecision}' \
+  --output table --no-cli-pager
+
+echo "-- log read, against the log group the policy names --"
+AWS_PROFILE=relayshield aws iam simulate-principal-policy \
+  --policy-source-arn "arn:aws:iam::${ACCOUNT}:role/${ROLE}" \
+  --action-names logs:FilterLogEvents \
+  --resource-arns "arn:aws:logs:us-east-1:${ACCOUNT}:log-group:/aws/lambda/relayshield-agentic-api:*" \
   --query 'EvaluationResults[].{action:EvalActionName,decision:EvalDecision}' \
   --output table --no-cli-pager
 
 echo
-echo "Every decision above must read allowed."
-echo "Then, in the Actions UI, run 'Marketplace Dimension' with mode=describe."
+echo "All THREE decisions above must read allowed."
+echo "If logs:FilterLogEvents still reads implicitDeny here, with the resource"
+echo "given, then the grant genuinely did not take. Send that output."

@@ -6,10 +6,14 @@ paid for. They are not general good practice.
 """
 
 import ast
+import importlib.util
 import json
 import re
 import subprocess
+import sys
+import types
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -205,6 +209,112 @@ class TestWatchlistHandler(unittest.TestCase):
         """The deployer invokes what it deploys. A handler that does real work
         on invoke needs this, and two already did."""
         self.assertIn('event.get("source") == "ci.import-probe"', self.src)
+
+
+class TestWatchlistCORS(unittest.TestCase):
+    """These EXECUTE the dispatcher, with boto3 stubbed, rather than grepping it.
+
+    CORS is the one thing curl cannot tell you about. It ignores CORS entirely,
+    so the endpoint can pass every terminal test and still be dead in the only
+    client that uses it -- and the browser reports it as a button that does
+    nothing, with no request in the Lambda's log at all, because the request was
+    never sent. That is the quiet-alarm shape, so it gets executed tests.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        # No boto3 in this container, and the module builds three clients at
+        # import. Stub the whole thing: nothing these tests reach touches AWS.
+        boto3 = types.ModuleType("boto3")
+        boto3.resource = lambda *a, **k: unittest.mock.MagicMock()
+        boto3.client = lambda *a, **k: unittest.mock.MagicMock()
+        conditions = types.ModuleType("boto3.dynamodb.conditions")
+        conditions.Key = unittest.mock.MagicMock()
+        dynamodb_mod = types.ModuleType("boto3.dynamodb")
+        dynamodb_mod.conditions = conditions
+        boto3.dynamodb = dynamodb_mod
+        sys.modules.setdefault("boto3", boto3)
+        sys.modules.setdefault("boto3.dynamodb", dynamodb_mod)
+        sys.modules.setdefault("boto3.dynamodb.conditions", conditions)
+        spec = importlib.util.spec_from_file_location(
+            "relayshield_watchlist", ROOT / "relayshield_watchlist.py")
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+
+    def test_the_preflight_is_answered_on_every_route(self):
+        """A preflight that 403s means the POST is never sent."""
+        for path in ("/v1/watchlist/add", "/v1/watchlist/list", "/v1/watchlist/remove"):
+            r = self.mod.lambda_handler({"path": path, "httpMethod": "OPTIONS"}, None)
+            self.assertEqual(r["statusCode"], 204, path)
+            h = {k.lower(): v for k, v in r["headers"].items()}
+            self.assertEqual(h["access-control-allow-origin"], "*", path)
+            self.assertIn("content-type", h["access-control-allow-headers"].lower(), path)
+
+    def test_the_preflight_works_on_the_v2_payload_shape_too(self):
+        """REST puts the method at the top level; an HTTP API nests it. Reading
+        only one of them means the preflight silently falls through to the POST
+        branch and 404s on a path with no body."""
+        r = self.mod.lambda_handler(
+            {"rawPath": "/v1/watchlist/list",
+             "requestContext": {"http": {"method": "OPTIONS"}}}, None)
+        self.assertEqual(r["statusCode"], 204)
+
+    def test_every_real_response_carries_allow_origin(self):
+        """A 200 without this header is discarded by the browser after the fact,
+        which is indistinguishable from an outage in the UI."""
+        for event in ({"path": "/v1/watchlist/list", "httpMethod": "POST", "body": "{}"},
+                      {"path": "/v1/nope", "httpMethod": "POST", "body": "{}"},
+                      {"path": "/v1/watchlist/add", "httpMethod": "POST", "body": "not json"}):
+            r = self.mod.lambda_handler(event, None)
+            h = {k.lower(): v for k, v in r["headers"].items()}
+            self.assertEqual(h.get("access-control-allow-origin"), "*",
+                             f"{event['path']} -> {r['statusCode']} has no allow-origin")
+
+    def test_an_unsigned_request_is_refused_and_that_is_the_wiring_proof(self):
+        """create_watchlist_routes.sh asserts this exact string end to end: it
+        proves the gateway routed the path AND that our handler ran AND that the
+        identity gate is on, in one response."""
+        r = self.mod.lambda_handler(
+            {"path": "/v1/watchlist/list", "httpMethod": "POST", "body": "{}"}, None)
+        self.assertEqual(r["statusCode"], 400)
+        self.assertIn("unverified", r["body"])
+
+    def test_the_import_probe_still_returns_early(self):
+        r = self.mod.lambda_handler({"source": "ci.import-probe"}, None)
+        self.assertEqual(r["statusCode"], 200)
+        self.assertIn('"probe": true', r["body"])
+
+
+class TestWatchlistRouteScript(unittest.TestCase):
+    """Two files that must agree, with nothing checking that they do, is the
+    shape that produced run 134's red probe. The script wires paths; the handler
+    serves them."""
+
+    def test_the_script_wires_exactly_the_routes_the_handler_serves(self):
+        script = (ROOT / "tools" / "create_watchlist_routes.sh").read_text(encoding="utf-8")
+        src = (ROOT / "relayshield_watchlist.py").read_text(encoding="utf-8")
+        served = set(re.findall(r'"(/v1/watchlist/\w+)":', src))
+        parts = re.search(r'^PARTS="([^"]+)"', script, re.M).group(1).split()
+        wired = {f"/v1/watchlist/{p}" for p in parts}
+        self.assertEqual(served, wired,
+                         "the route script and the handler disagree about the routes")
+
+    def test_the_script_creates_the_OPTIONS_method(self):
+        script = (ROOT / "tools" / "create_watchlist_routes.sh").read_text(encoding="utf-8")
+        self.assertIn("for M in POST OPTIONS", script)
+
+    def test_the_script_refuses_the_pre_audit_account(self):
+        script = (ROOT / "tools" / "create_watchlist_routes.sh").read_text(encoding="utf-8")
+        self.assertIn("ACCOUNT=239677749008", script)
+        self.assertIn("620534471984", script)
+
+    def test_the_lambda_script_waits_for_active_before_invoking(self):
+        """create-function returns before the function can be invoked, so the
+        probe hit ResourceConflictException: state Pending."""
+        script = (ROOT / "tools" / "create_watchlist_lambda.sh").read_text(encoding="utf-8")
+        wait = script.index("wait function-active-v2")
+        probe = script.index("ci.import-probe")
+        self.assertLess(wait, probe, "the Active wait must come BEFORE the probe")
 
 
 class TestGame(unittest.TestCase):

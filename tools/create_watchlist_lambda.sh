@@ -102,6 +102,7 @@ cp relayshield_watchlist.py "$TMP/"
 if AWS_PROFILE=relayshield aws lambda get-function --function-name "$FN" --no-cli-pager >/dev/null 2>&1; then
   AWS_PROFILE=relayshield aws lambda update-function-code --function-name "$FN" \
     --zip-file "fileb://$TMP/watchlist.zip" --no-cli-pager >/dev/null
+  AWS_PROFILE=relayshield aws lambda wait function-updated-v2 --function-name "$FN"
   echo "$FN code updated"
 else
   # RETRY, BECAUSE IAM IS EVENTUALLY CONSISTENT AND THIS FAILED ON ITS FIRST
@@ -146,6 +147,26 @@ fi
 rm -rf "$TMP"
 
 echo
+echo "== wait for the function to become Active =="
+# THE SECOND THING THIS SCRIPT GOT WRONG ON A REAL RUN (2026-09-09):
+#
+#   ResourceConflictException ... The operation cannot be performed at this
+#   time. The function is currently in the following state: Pending
+#
+# create-function RETURNS before the function can be invoked. Lambda provisions
+# it asynchronously, so a freshly created function sits in Pending for a few
+# seconds and every invoke against it is refused. Exactly the same class as the
+# IAM propagation retry above -- an operation that succeeds, followed
+# immediately by one that assumes it finished -- and it failed for exactly the
+# same reason: the script did the next thing at machine speed.
+#
+# `wait function-active-v2` is the documented answer and it is one line. It
+# polls GetFunction until State leaves Pending, so it is a no-op on the
+# update path and on any re-run.
+AWS_PROFILE=relayshield aws lambda wait function-active-v2 --function-name "$FN"
+echo "Active"
+
+echo
 echo "== prove it imports =="
 AWS_PROFILE=relayshield aws lambda invoke --function-name "$FN" \
   --payload '{"source":"ci.import-probe"}' --cli-binary-format raw-in-base64-out \
@@ -155,7 +176,10 @@ cat /tmp/rs-watchlist-probe.json; echo
 echo
 echo "Expect: {\"statusCode\": 200, \"body\": \"{\\\"ok\\\": true, \\\"probe\\\": true}\"}"
 echo
-echo "STILL TO DO, and neither is done by this script:"
-echo "  1. Wire the three /v1/watchlist/* routes on the API gateway."
+echo "NEXT, in this order:"
+echo "  1. sh tools/create_watchlist_routes.sh"
+echo "     Wires the three /v1/watchlist/* routes AND their OPTIONS preflights,"
+echo "     then proves one end to end. Without it the Mini App gets a 403 that"
+echo "     reads like an auth failure."
 echo "  2. Only THEN add relayshield_watchlist.py to deploy_lambdas.yml, and the"
 echo "     commit that maps it must touch the .py or the deployer ships nothing."

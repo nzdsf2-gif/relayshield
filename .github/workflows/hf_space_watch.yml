@@ -20,6 +20,13 @@ name: HF Space Watch
 # wakes it. Paging on SLEEPING is how an alarm gets muted, so the checker treats
 # it as UP and says so.
 #
+# IT CHECKS THE MCP ENDPOINT, NOT JUST THE FRONT DOOR. Added 2026-09-09 when
+# mcp_registry/smithery.yaml was pointed at that exact URL. The Space front door
+# answering 200 says the Gradio app is serving a web page; it says nothing about
+# whether /gradio_api/mcp/sse is mounted. Drop mcp_server=True, or upgrade Gradio
+# past a route rename, and this workflow would have stayed green forever while
+# every directory we are listed in resolved to a 404.
+#
 # THREE OUTCOMES, DELIBERATELY DISTINCT:
 #   UP          green, and any open outage issue is closed.
 #   DOWN        red, and an issue is opened (or reused if one is already open).
@@ -75,8 +82,13 @@ jobs:
               `buyers who arrived through AWS.`,
               ``,
               `This matters beyond the Space itself: it is the hosted MCP surface FD-15`,
-              `points Grok Bot connectors and Smithery at. A directory listing that`,
-              `resolves to a dead URL is worse than no listing.`,
+              `points Grok Bot connectors and Smithery at, and mcp_registry/smithery.yaml`,
+              `names /gradio_api/mcp/sse on the public Space by URL. A directory listing`,
+              `that resolves to a dead URL is worse than no listing.`,
+              ``,
+              `If the detail above says the MCP path 404s while the front door is fine,`,
+              `the app is up and the endpoint moved: check the alt path the report names`,
+              `(\`/gradio_api/mcp/\`, streamable HTTP) before assuming an outage.`,
               ``,
               `Reproduce: \`python3 tools/check_hf_space.py\``,
               ``,

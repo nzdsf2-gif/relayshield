@@ -878,6 +878,73 @@ There is deliberately no setting that lets a known-bad target through, and a tes
 
 ## WHERE 2026-09-05 LEFT THINGS — read this first
 
+## READING THE LIVE BUNDLE D ENTITY ANSWERED THREE QUESTIONS AND FOUND TWO OF MY DEFECTS
+
+**2026-09-09. The DescribeEntity capture is the most informative artefact this programme has
+produced, and it was available the whole time.**
+
+### 1. agent-bait-scan is NOT in Bundle D. Six dimensions, and none of them is it.
+
+    agentic_bundle_access      Entitled            the monthly minimum
+    bulk_identity_risk         ExternallyMetered
+    tech_stack_cve             ExternallyMetered
+    mcp_registry_risk          ExternallyMetered
+    prompt_injection_breach    ExternallyMetered
+    llm_credential_exposure    ExternallyMetered
+
+`LastModifiedDate 2026-08-06`, `ProductState Active`, `Visibility Public`. So the listing is healthy
+and the dimension is simply absent, exactly as `AWS_DIMENSION_NAMES` says it should be.
+
+### 2. MY GUARD KNEW TWO OF THOSE SIX, AND THAT WAS THE DANGEROUS HALF
+
+`tools/marketplace_add_dimension.py` refused any capture missing `mcp_registry_risk` or
+`prompt_injection_breach`, because I took the list from `AWS_DIMENSION_NAMES`. **That table maps the
+endpoints we METER through the Marketplace rail. It is not the listing's rate card.** Four
+dimensions are on the product and not in that table, including the **Entitled** one that carries the
+monthly commitment.
+
+So a capture holding only those two would have PASSED, and a change set built from it could have
+dropped four live dimensions and the monthly minimum with them. That is the 2026-07-27 "prices
+rolled back to placeholders" failure, with a guard in front of it that was looking at the wrong
+list. All six are named now, and a two-dimension capture is refused by test.
+
+**The general form: a guard is only as good as where it got its expectations.** Deriving them from a
+neighbouring table in our own code felt rigorous and was not; the authoritative list was one
+DescribeEntity away.
+
+### 3. THERE ARE TWO HF SPACES, AND THE WATCHER WAS WATCHING THE LESS IMPORTANT ONE
+
+The listing carries `ApiType: MCP_SERVER` and this endpoint:
+
+    https://relayshieldadmin-relayshield-agentic-attack-surface-aws.hf.space/gradio_api/mcp/sse
+
+Note the `-aws` suffix. `hf-space-mcp-server/app.py` says outright that the same file is deployed
+twice: the public Space, and a second one with `AWS_MARKETPLACE_MODE=true` that scrubs every
+reference to the self-serve signup page, because **AWS's Tier-1 audit treats a reachable link to an
+external payment page as a violation and that failed Bundle D's visibility request twice.**
+
+**The AWS Space is a PUBLISHED product's declared endpoint.** If it stops answering, buyers who
+arrived through AWS Marketplace hit a dead URL. That is worse than the public Space going quiet, and
+until today nothing watched it: `tools/check_hf_space.py` named only the public one. It now checks
+both, reports them separately, and the worst verdict decides the run.
+
+### 4. TWO THINGS THE ENTITY SHOWS THAT ARE NOT MINE TO FIX SILENTLY
+
+**The public listing quotes corpus figures this repo has since corrected.** Three times, in
+ShortDescription, LongDescription and Highlights: *"5.0M+ indicators of compromise, 3,750+ malware
+families, and 85+ monitored criminal Telegram marketplaces."* The corrected figures recorded on
+2026-09-03 are 494K distinct indicators, 5.8M sightings and 95 channels. MEASUREMENT DOCTRINE says
+the headline is not quoted at all, and this is a PUBLIC page a competitor can read. Changing listing
+copy is a change set, so it batches with the dimension rather than being a separate submission.
+
+**The delivery option targets ONE account.** The product's `Targeting.PositiveTargeting` lists eight
+buyer accounts, but the DeliveryOption inside `version-baq5najnqgsam` lists only `239677749008`,
+which is ours. Whether that restricts who can actually subscribe is a question for the Marketplace
+console rather than something to assert from a JSON field, but it is worth asking, because a public
+listing nobody outside our own account can take up would explain a lot.
+
+---
+
 ## SMITHERY POINTS AT THE PyPI STDIO SERVER. SETTLED 2026-09-09, IT IS NOT THE HF SPACE.
 
 Andrew asked me to double-check the recollection that Smithery had been pointed at the HF MCP

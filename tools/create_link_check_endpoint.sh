@@ -40,6 +40,11 @@ export AWS_PAGER=""
 
 aws() { command aws --profile "$PROFILE" --region "$REGION" --no-cli-pager "$@"; }
 
+# Added 2026-09-09. This script probed once, milliseconds after
+# create-deployment returned, and only ever passed because it got lucky on the
+# race. See lib_await_route.sh.
+. "$(dirname "$0")/lib_await_route.sh"
+
 echo "== 1. Which account are we actually talking to?"
 GOT=$(aws sts get-caller-identity --query Account --output text)
 if [ "$GOT" != "$ACCOUNT" ]; then
@@ -123,9 +128,12 @@ echo
 echo "== 6. Prove it end to end"
 URL="https://$API_ID.execute-api.$REGION.amazonaws.com/$STAGE$PARENT_PATH/$PART"
 echo "   POST $URL"
-BODY=$(curl -sS -X POST "$URL" \
-         -H 'Content-Type: application/json' \
-         -d '{"url":"https://example.com","source":"setup-script"}' || true)
+await_http 200 -X POST "$URL" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com","source":"setup-script"}' || true
+BODY=$(cat "$AWAIT_BODY")
+await_cleanup
+echo "   HTTP $AWAIT_STATUS"
 echo "   $BODY"
 echo
 case "$BODY" in

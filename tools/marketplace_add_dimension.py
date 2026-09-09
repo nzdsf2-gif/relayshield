@@ -125,7 +125,104 @@ def _load(from_path: Path, max_age_hours: int | None):
     return entity
 
 
-def plan(from_path: Path, max_age_hours: int | None):
+# THE INFORMATION BLOCK REPLACES, EXACTLY LIKE THE RATE CARD DOES.
+#
+# UpdateInformation is not a patch. Whatever this document contains becomes the
+# listing, so a change set that names three fields and omits the other six blanks
+# them on a PUBLISHED page. Same failure mode as 2026-07-27's prices rolled back
+# to placeholders, one entity section over.
+#
+# So the override file is a PARTIAL and the other fields are round-tripped from
+# the live capture. Nothing is retyped, which means nothing can be retyped wrong.
+#
+# THE SHAPE IS FLAT AND WAS VERIFIED, NOT GUESSED. The nine keys below are read
+# out of aws_marketplace/bundle_a_create_entity.json, a change set AWS actually
+# accepted. Guessing would have produced {"Description": {...}} by analogy with
+# the DescribeEntity response, where these fields ARE nested -- the read shape and
+# the write shape genuinely differ, and only one of them is in our own artefacts.
+_INFO_FROM_ENTITY = {
+    "ProductTitle":        ("Description", "ProductTitle"),
+    "ShortDescription":    ("Description", "ShortDescription"),
+    "LongDescription":     ("Description", "LongDescription"),
+    "Highlights":          ("Description", "Highlights"),
+    "SearchKeywords":      ("Description", "SearchKeywords"),
+    "Categories":          ("Description", "Categories"),
+    "LogoUrl":             ("PromotionalResources", "LogoUrl"),
+    "AdditionalResources": ("PromotionalResources", "AdditionalResources"),
+    "SupportDescription":  ("SupportInformation", "Description"),
+}
+
+# Held at what AWS has already accepted rather than at what reads best. See the
+# _why block in aws_marketplace/bundle_d_listing_copy.json: a rejected change set
+# costs a review cycle on a published listing, and this one carries the dimension
+# with it.
+_MAX_HIGHLIGHTS = 3
+
+
+def copy_change(entity: dict, details: dict, copy_path: Path):
+    """Build the UpdateInformation change, or return None if there is nothing
+    to change."""
+    override = json.loads(copy_path.read_text(encoding="utf-8"))
+    override = {k: v for k, v in override.items() if not k.startswith("_")}
+
+    doc = {}
+    for field, (section, key) in _INFO_FROM_ENTITY.items():
+        doc[field] = (details.get(section) or {}).get(key)
+
+    # A field the capture does not carry cannot be round-tripped, and sending
+    # None for it is how a live listing loses its logo or its support text.
+    blank = [f for f, v in doc.items()
+             if f not in override and v in (None, "", [])
+             and f not in ("AdditionalResources",)]
+    if blank:
+        raise SystemExit(
+            "REFUSING: the capture has no value for "
+            f"{', '.join(blank)}.\n"
+            "          UpdateInformation REPLACES the whole information block, so\n"
+            "          submitting this would blank those fields on a published\n"
+            "          listing. Re-run --describe against the product entity."
+        )
+
+    doc.update(override)
+
+    if len(doc.get("Highlights") or []) > _MAX_HIGHLIGHTS:
+        raise SystemExit(
+            f"REFUSING: {len(doc['Highlights'])} highlights. AWS documents a maximum\n"
+            f"          of {_MAX_HIGHLIGHTS}, and the accepted change set in\n"
+            "          aws_marketplace/bundle_a_create_entity.json carries three.\n"
+            "          A rejection costs a review cycle on a live listing."
+        )
+
+    # MEASUREMENT DOCTRINE, enforced rather than remembered. These are the exact
+    # figures the live listing carried in three places, and the ones a competitor
+    # reading the page would check. The doctrine has said since August that the
+    # corpus headline is never quoted; the listing was the last public place we
+    # were still doing it, and nothing stopped a future session putting a fresh
+    # number back.
+    prose = " ".join(str(doc.get(f) or "") for f in
+                     ("ShortDescription", "LongDescription")) + " " + \
+            " ".join(doc.get("Highlights") or [])
+    for banned in ("5.0M", "3,750", "85+ monitored", "494K", "5.8M sightings"):
+        if banned in prose:
+            raise SystemExit(
+                f"REFUSING: the copy quotes '{banned}'. MEASUREMENT DOCTRINE: the\n"
+                "          corpus headline is never quoted, least of all on a public\n"
+                "          listing. Name the sources, which do not change, rather\n"
+                "          than counts, which do."
+            )
+
+    if all(doc[f] == (details.get(sec) or {}).get(k)
+           for f, (sec, k) in _INFO_FROM_ENTITY.items()):
+        return None
+
+    return {
+        "ChangeType": "UpdateInformation",
+        "Entity": {"Type": entity["EntityType"], "Identifier": ENTITY_ID},
+        "DetailsDocument": doc,
+    }, override
+
+
+def plan(from_path: Path, max_age_hours: int | None, copy_path: Path | None = None):
     entity = _load(from_path, max_age_hours)
     details = json.loads(entity.get("Details") or "{}")
     dims = list(details.get("Dimensions", []))
@@ -147,7 +244,21 @@ def plan(from_path: Path, max_age_hours: int | None):
             "          Usage dimensions live on the PRODUCT entity, not the offer.\n"
             "          Re-run --describe against the product entity id."
         )
-    known = [k for k in ("mcp_registry_risk", "prompt_injection_breach")]
+    # ALL SIX live dimensions, read from the real DescribeEntity capture on
+    # 2026-09-09. The first version of this guard named only two, taken from
+    # AWS_DIMENSION_NAMES in relayshield_agentic_api.py -- but that table maps
+    # only the endpoints we METER through the Marketplace rail, not the
+    # dimensions the LISTING carries. Four more exist:
+    # agentic_bundle_access (the Entitled monthly minimum), bulk_identity_risk,
+    # tech_stack_cve and llm_credential_exposure.
+    #
+    # THE DEFECT THAT MATTERED: a capture holding only those two would have
+    # PASSED the old guard, and a change set built from it could have dropped
+    # four live dimensions including the Entitled one that carries the monthly
+    # commitment. That is the 2026-07-27 "prices rolled back to placeholders"
+    # failure with a guard in front of it that did not look.
+    known = ["agentic_bundle_access", "bulk_identity_risk", "tech_stack_cve",
+             "mcp_registry_risk", "prompt_injection_breach", "llm_credential_exposure"]
     present = {d.get("Key") for d in dims}
     missing = [k for k in known if k not in present]
     if missing:
@@ -160,28 +271,53 @@ def plan(from_path: Path, max_age_hours: int | None):
             "          check you are reading the right entity."
         )
 
-    if any(d.get("Key") == NEW_DIMENSION["Key"] for d in dims):
-        print(f"'{NEW_DIMENSION['Key']}' is already a dimension on this product. "
-              "Nothing to do.")
-        return None
-
-    # The whole rate card goes back, existing dimensions preserved verbatim.
-    dims.append(NEW_DIMENSION)
-    change_set = [{
-        "ChangeType": "AddDimensions",
-        "Entity": {"Type": entity["EntityType"], "Identifier": ENTITY_ID},
-        "DetailsDocument": {"Dimensions": [NEW_DIMENSION]},
-    }]
+    change_set = []
     print(f"entity        : {ENTITY_ID} ({entity['EntityType']})")
     print(f"captured at   : {entity.get('_captured_at')}")
-    print(f"dimensions    : {len(dims) - 1} -> {len(dims)}")
-    print("existing, preserved:")
-    for d in dims[:-1]:
-        print(f"    - {d.get('Key')}")
-    print("adding:")
-    print(json.dumps(NEW_DIMENSION, indent=2))
+
+    if any(d.get("Key") == NEW_DIMENSION["Key"] for d in dims):
+        print(f"dimension     : '{NEW_DIMENSION['Key']}' is already on this product, "
+              "nothing to add")
+    else:
+        # The whole rate card goes back, existing dimensions preserved verbatim.
+        dims.append(NEW_DIMENSION)
+        change_set.append({
+            "ChangeType": "AddDimensions",
+            "Entity": {"Type": entity["EntityType"], "Identifier": ENTITY_ID},
+            "DetailsDocument": {"Dimensions": [NEW_DIMENSION]},
+        })
+        print(f"dimensions    : {len(dims) - 1} -> {len(dims)}")
+        print("existing, preserved:")
+        for d in dims[:-1]:
+            print(f"    - {d.get('Key')}")
+        print("adding:")
+        print(json.dumps(NEW_DIMENSION, indent=2))
+
+    # BATCHED WITH THE DIMENSION, NOT SUBMITTED SEPARATELY. One change set is one
+    # AWS review cycle. Two submissions against the same published listing is two
+    # cycles and a window in which the copy advertises agent-bait scanning while
+    # the rate card cannot bill it.
+    if copy_path is not None:
+        built = copy_change(entity, details, copy_path)
+        if built is None:
+            print("copy          : the live listing already matches the override file")
+        else:
+            change, override = built
+            change_set.append(change)
+            print(f"copy          : {len(override)} field(s) overridden "
+                  f"({', '.join(sorted(override))})")
+            for field in sorted(override):
+                live = (details.get("Description") or {}).get(field)
+                print(f"\n  --- {field} ---")
+                print(f"  was : {json.dumps(live)[:300]}")
+                print(f"  now : {json.dumps(change['DetailsDocument'][field])[:300]}")
+
+    if not change_set:
+        print("\nNothing to do.")
+        return None
+
     print("\nchange set that would be sent:")
-    print(json.dumps(change_set, indent=2))
+    print(json.dumps(change_set, indent=2)[:6000])
     return change_set
 
 
@@ -195,14 +331,20 @@ def main() -> int:
     ap.add_argument("--out", default="aws_marketplace/entity_current.json")
     ap.add_argument("--i-have-read-the-rate-card-warning", action="store_true",
                     help="required for --apply. See the docstring.")
+    ap.add_argument("--with-copy", nargs="?", const="aws_marketplace/bundle_d_listing_copy.json",
+                    default=None, metavar="FILE",
+                    help="also send the listing-copy change, batched into the SAME "
+                         "change set. One submission is one AWS review cycle.")
     args = ap.parse_args()
 
     if args.describe:
         out = Path(args.out); out.parent.mkdir(parents=True, exist_ok=True)
         return describe(out)
 
+    copy_path = Path(args.with_copy) if args.with_copy else None
+
     if args.plan:
-        plan(Path(args.from_path), max_age_hours=None)
+        plan(Path(args.from_path), max_age_hours=None, copy_path=copy_path)
         return 0
 
     if not args.i_have_read_the_rate_card_warning:
@@ -216,12 +358,13 @@ def main() -> int:
             "an expensive place to find out a heuristic needs tuning."
         )
 
-    change_set = plan(Path(args.from_path), max_age_hours=24)
+    change_set = plan(Path(args.from_path), max_age_hours=24, copy_path=copy_path)
     if change_set is None:
         return 0
+    name = ("add-agent-bait-dimension-and-listing-copy" if copy_path
+            else "add-agent-bait-scan-dimension")
     resp = _client().start_change_set(
-        Catalog=CATALOG, ChangeSet=change_set,
-        ChangeSetName="add-agent-bait-scan-dimension",
+        Catalog=CATALOG, ChangeSet=change_set, ChangeSetName=name,
     )
     print("\nSUBMITTED.")
     print("  ChangeSetId :", resp.get("ChangeSetId"))

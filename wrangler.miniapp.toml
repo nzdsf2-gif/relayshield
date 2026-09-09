@@ -2,6 +2,41 @@ name = "relayshield-miniapp"
 main = "cloudflare_worker_miniapp.js"
 compatibility_date = "2024-01-01"
 
+# CUSTOM DOMAIN, NOT A ZONE ROUTE, AND THE DIFFERENCE IS THE WHOLE REASON THIS
+# COMMENT EXISTS.
+#
+# This file shipped on 2026-09-09 as:
+#
+#   routes = [{ pattern = "app.relayshield.net/*", zone_name = "relayshield.net" }]
+#
+# The deploy SUCCEEDED and the hostname did not exist:
+#
+#   curl: (6) Could not resolve host: app.relayshield.net
+#
+# A ZONE ROUTE ATTACHES A WORKER TO A HOSTNAME. IT DOES NOT CREATE THE HOSTNAME.
+# blog, badge, partners, pricing and support all use the zone-route form and all
+# work, because each of those subdomains already had a proxied DNS record in the
+# zone. `app` was new, so there was no record for the route to attach to, and
+# wrangler reported success either way -- the deploy-succeeded-and-nothing-works
+# shape this repo keeps paying for.
+#
+# `custom_domain = true` makes wrangler CREATE the DNS record and the binding
+# together, so a new hostname is self-sufficient from the config rather than
+# depending on a dashboard step nobody wrote down. Note the pattern loses its
+# `/*` and its `zone_name`: a custom domain is a hostname, not a path pattern,
+# and wrangler rejects the combination.
+#
+# THE RULE, for the next new subdomain: an EXISTING hostname may use a zone
+# route; a NEW one uses custom_domain. Getting this wrong is not an error, it is
+# a silence.
+#
+# UNVERIFIED, and it is the one thing that could still fail: this needs the
+# deploy token to carry DNS edit on the zone. The same token already created the
+# `badge.relayshield.net` custom-domain binding (CS-BADGE-2), so the permission
+# is very likely present. If the deploy fails with an authentication or
+# permission error naming DNS, add an `app` CNAME to the zone apex by hand,
+# PROXIED (orange cloud), and revert this block to the zone-route form -- with
+# the record in place, that form then works.
 routes = [
-  { pattern = "app.relayshield.net/*", zone_name = "relayshield.net" }
+  { pattern = "app.relayshield.net", custom_domain = true }
 ]

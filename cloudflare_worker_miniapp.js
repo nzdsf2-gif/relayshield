@@ -23,11 +23,17 @@
 // FD-8 is four months of unattributed arrivals from skipping exactly that step.
 //
 // WHAT IT DOES NOT DO, on purpose:
-//   * No initData signature verification, because nothing here is
-//     user-specific and there is no account to impersonate. If v2 ever stores
-//     anything per user, that check becomes mandatory before it does.
 //   * No wallet connect. TON Connect is a v2 question and would gate the first
 //     answer behind a wallet, which is the opposite of the point.
+//
+// INITDATA IS SENT AND IS VERIFIED SERVER-SIDE. An earlier version of this
+// header said signature verification was unnecessary "because nothing here is
+// user-specific" -- true until the watchlist existed, and exactly the kind of
+// comment that goes stale silently. The watchlist is per-user, so the page sends
+// Telegram's SIGNED initData and relayshield_watchlist.py takes the user id from
+// the verified payload. The raw id is never sent and would not be trusted if it
+// were: a per-user store that believes a client-supplied id has no access
+// control at all.
 //   * No analytics beyond the ?source= key the API already logs.
 
 const API_BASE = "https://api.relayshield.net";
@@ -43,6 +49,7 @@ const ALLOWED_SOURCES = new Set([
   "tg-miniapp-directory",
   "tg-miniapp-blog",
   "tg-miniapp-bot",
+  "tg-miniapp-share",
 ]);
 
 function sourceFor(startParam) {
@@ -69,28 +76,39 @@ const PAGE = `<!doctype html>
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 16px;
+    margin: 0; padding: 16px 16px 32px;
     background: var(--bg); color: var(--text);
     font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
   h1 { font-size: 1.15rem; margin: 0 0 4px; }
-  .sub { color: var(--hint); font-size: .85rem; margin: 0 0 18px; }
+  .sub { color: var(--hint); font-size: .85rem; margin: 0 0 16px; }
+  nav { display: flex; gap: 6px; margin: 0 0 16px; }
+  nav button {
+    flex: 1; padding: 9px 6px; font: inherit; font-size: .88rem;
+    background: var(--card); color: var(--hint);
+    border: 1px solid transparent; border-radius: 10px;
+  }
+  nav button[aria-selected="true"] { color: var(--text); border-color: var(--accent); }
   textarea {
-    width: 100%; min-height: 84px; padding: 12px; resize: vertical;
+    width: 100%; min-height: 80px; padding: 12px; resize: vertical;
     background: var(--card); color: var(--text);
     border: 1px solid rgba(148,163,184,.25); border-radius: 12px;
     font: inherit; font-size: 16px;
   }
   textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  button.go {
-    width: 100%; margin-top: 12px; padding: 14px;
-    background: var(--accent); color: var(--accent-text);
+  button.go, button.ghost {
+    width: 100%; margin-top: 10px; padding: 13px;
     border: 0; border-radius: 12px; font: inherit; font-weight: 600;
   }
-  button.go[disabled] { opacity: .5; }
+  button.go { background: var(--accent); color: var(--accent-text); }
+  button.ghost {
+    background: transparent; color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  button[disabled] { opacity: .5; }
   .verdict {
-    margin-top: 18px; padding: 14px; border-radius: 12px;
+    margin-top: 16px; padding: 14px; border-radius: 12px;
     background: var(--card); border-left: 4px solid var(--unknown);
   }
   .verdict[data-level="critical"] { border-left-color: var(--crit); }
@@ -106,25 +124,77 @@ const PAGE = `<!doctype html>
   ul { margin: 8px 0 0; padding-left: 18px; }
   li { margin: 2px 0; font-size: .92rem; }
   .caveat { color: var(--hint); font-size: .78rem; margin-top: 12px; }
-  footer { margin-top: 26px; text-align: center; font-size: .8rem; }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 12px; margin-bottom: 8px;
+    background: var(--card); border-radius: 10px;
+    border-left: 3px solid var(--unknown);
+  }
+  .row[data-level="critical"], .row[data-level="high"] { border-left-color: var(--high); }
+  .row[data-level="medium"] { border-left-color: var(--med); }
+  .row[data-level="low"]    { border-left-color: var(--low); }
+  .row .t {
+    flex: 1; min-width: 0; font-size: .85rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .x { background: none; border: 0; color: var(--hint); font-size: 1.1rem; padding: 0 4px; }
+  .empty { color: var(--hint); font-size: .9rem; padding: 18px 2px; }
+  .quiz-opt {
+    display: block; width: 100%; text-align: left; margin-bottom: 8px;
+    padding: 14px; border-radius: 10px; font: inherit; font-size: .95rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--card); color: var(--text);
+    border: 1px solid rgba(148,163,184,.25);
+  }
+  .quiz-opt[data-state="right"] { border-color: var(--low); }
+  .quiz-opt[data-state="wrong"] { border-color: var(--crit); }
+  .score { color: var(--hint); font-size: .85rem; }
+  footer { margin-top: 24px; text-align: center; font-size: .8rem; }
   footer a { color: var(--accent); text-decoration: none; }
   .hidden { display: none; }
+  canvas { width: 100%; border-radius: 12px; margin-top: 12px; }
 </style>
 </head>
 <body>
-  <h1>Check a link or wallet address</h1>
-  <p class="sub">Paste anything you were sent. No signup, no wallet connect.</p>
+  <h1>RelayShield</h1>
+  <p class="sub" id="sub">Check a link or address. No signup, no wallet connect.</p>
 
-  <textarea id="in" placeholder="https://... or 0x... or a TON, Solana or Bitcoin address"
-            autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-  <button class="go" id="go">Check it</button>
+  <nav role="tablist">
+    <button role="tab" id="tab-check" aria-selected="true">Check</button>
+    <button role="tab" id="tab-watch" aria-selected="false">Watching</button>
+    <button role="tab" id="tab-learn" aria-selected="false">Spot the fake</button>
+  </nav>
 
-  <div class="verdict hidden" id="out" data-level="unknown">
-    <p class="head" id="head"></p>
-    <p class="target" id="target"></p>
-    <ul id="reasons"></ul>
-    <p class="caveat" id="caveat"></p>
-  </div>
+  <section id="pane-check">
+    <textarea id="in" placeholder="https://... or 0x... or a TON, Solana or Bitcoin address"
+              autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+    <button class="go" id="go">Check it</button>
+
+    <div class="verdict hidden" id="out" data-level="unknown">
+      <p class="head" id="head"></p>
+      <p class="target" id="target"></p>
+      <ul id="reasons"></ul>
+      <p class="caveat" id="caveat"></p>
+      <button class="ghost" id="watch">Tell me if this changes</button>
+      <button class="ghost" id="share">Share this result</button>
+      <canvas id="card" class="hidden" width="800" height="418"></canvas>
+    </div>
+
+    <h1 id="hist-h" class="hidden" style="margin-top:22px;font-size:.95rem">Recent checks</h1>
+    <div id="hist"></div>
+  </section>
+
+  <section id="pane-watch" class="hidden">
+    <div id="watchlist"></div>
+  </section>
+
+  <section id="pane-learn" class="hidden">
+    <p class="sub">One of these is a lookalike. The other is real. Which is fake?</p>
+    <div id="quiz"></div>
+    <p class="score" id="score"></p>
+    <button class="ghost" id="next">Next pair</button>
+  </section>
 
   <footer>
     <a id="more" href="__DEVELOPERS__" target="_blank" rel="noopener">Run this check from your own bot or agent</a>
@@ -136,13 +206,17 @@ import { check } from "/relayshield-widget.js";
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 
-// Telegram hands the deep link's startapp value to the page here. An
-// unregistered value is dropped server-side, so this only ever forwards a key
-// that renders a banner.
 const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
 const SOURCE = "__SOURCE__";
 const source = /^[a-z0-9-]{1,40}$/.test(startParam) ? startParam : SOURCE;
+const API = "__API__";
 document.getElementById("more").href = "__DEVELOPERS__?source=" + encodeURIComponent(source);
+
+/* The SIGNED string. initDataUnsafe is used only to decide whether to show the
+   watchlist UI at all; every request carries initData and the server derives the
+   user id from its signature. */
+const initData = (tg && tg.initData) || "";
+const uid = initData ? true : null;
 
 const HEADS = {
   critical: "Do not proceed",
@@ -152,9 +226,8 @@ const HEADS = {
   unknown:  "Could not complete the check",
 };
 
-const inEl = document.getElementById("in");
-const goEl = document.getElementById("go");
-const outEl = document.getElementById("out");
+const $ = (id) => document.getElementById(id);
+let last = null;
 
 function haptic(level) {
   if (!tg || !tg.HapticFeedback) return;
@@ -162,54 +235,266 @@ function haptic(level) {
   if (map[level]) tg.HapticFeedback.notificationOccurred(map[level]);
 }
 
-async function run() {
-  const value = inEl.value.trim();
-  if (!value) return;
-  goEl.disabled = true;
-  goEl.textContent = "Checking...";
-  let v;
+/* ---- Tabs ---------------------------------------------------------- */
+const panes = { check: "pane-check", watch: "pane-watch", learn: "pane-learn" };
+function show(name) {
+  for (const [k, id] of Object.entries(panes)) {
+    $(id).classList.toggle("hidden", k !== name);
+    $("tab-" + k).setAttribute("aria-selected", String(k === name));
+  }
+  if (name === "watch") loadWatches();
+  if (name === "learn" && !$("quiz").childElementCount) newPair();
+}
+for (const k of Object.keys(panes)) $("tab-" + k).addEventListener("click", () => show(k));
+
+/* ---- Scan history: LOCAL ONLY -------------------------------------- */
+/* Deliberately localStorage and never the server. A server-side record of what
+   somebody checked is a profile of their financial anxieties, and the watchlist
+   is the one thing that legitimately needs to leave the device. */
+const HKEY = "rs.history.v1";
+function readHistory() {
+  try { return JSON.parse(localStorage.getItem(HKEY) || "[]"); } catch (e) { return []; }
+}
+function pushHistory(entry) {
   try {
-    v = await check(value, { source });
-  } catch (e) {
-    // check() is documented never to throw, so this is belt and braces: a
-    // thrown error here would leave the user with a spinner and no answer,
-    // which is worse than a stated "could not complete".
-    v = { level: "unknown", target: value, reasons: ["The check did not complete."] };
+    const h = readHistory().filter((x) => x.target !== entry.target);
+    h.unshift(entry);
+    localStorage.setItem(HKEY, JSON.stringify(h.slice(0, 20)));
+  } catch (e) { /* private mode, or storage disabled. Not worth an error. */ }
+  renderHistory();
+}
+function renderHistory() {
+  const h = readHistory();
+  $("hist-h").classList.toggle("hidden", h.length === 0);
+  const box = $("hist");
+  box.textContent = "";
+  for (const e of h) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.dataset.level = e.level;
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = e.target;                 // textContent, never innerHTML
+    row.appendChild(t);
+    row.addEventListener("click", () => { $("in").value = e.target; show("check"); run(); });
+    box.appendChild(row);
   }
+}
+
+/* ---- Check --------------------------------------------------------- */
+async function run() {
+  const value = $("in").value.trim();
+  if (!value) return;
+  $("go").disabled = true;
+  $("go").textContent = "Checking...";
+  let v;
+  try { v = await check(value, { source }); }
+  catch (e) { v = { level: "unknown", target: value, reasons: ["The check did not complete."] }; }
+
   const level = HEADS[v.level] ? v.level : "unknown";
+  last = { target: v.target || value, level, reasons: v.reasons || [] };
 
-  outEl.dataset.level = level;
-  document.getElementById("head").textContent = HEADS[level];
-  document.getElementById("target").textContent = v.target || value;
-
-  const ul = document.getElementById("reasons");
+  $("out").dataset.level = level;
+  $("head").textContent = HEADS[level];
+  $("target").textContent = last.target;
+  const ul = $("reasons");
   ul.textContent = "";
-  for (const r of (v.reasons || [])) {
+  for (const r of last.reasons) {
     const li = document.createElement("li");
-    li.textContent = r;            // textContent, never innerHTML: the reasons
-    ul.appendChild(li);            // can quote attacker-supplied strings.
+    li.textContent = r;
+    ul.appendChild(li);
   }
-
-  // The ceiling is "nothing known against it". Saying "safe" is the one thing
-  // this product does not do, and the caveat is part of the answer rather than
-  // small print, exactly as the endpoints' own responses state it.
-  document.getElementById("caveat").textContent =
+  $("caveat").textContent =
     level === "low"
       ? "This means nothing known against it, which is not the same as safe."
       : level === "unknown"
         ? "No verdict was reached. Treat that as unknown, not as clear."
         : "Based on indicators seen in criminal channels and public feeds.";
 
-  outEl.classList.remove("hidden");
+  $("card").classList.add("hidden");
+  $("watch").textContent = "Tell me if this changes";
+  $("watch").disabled = false;
+  $("out").classList.remove("hidden");
   haptic(level);
-  goEl.disabled = false;
-  goEl.textContent = "Check it";
+  pushHistory({ target: last.target, level });
+  $("go").disabled = false;
+  $("go").textContent = "Check it";
 }
-
-goEl.addEventListener("click", run);
-inEl.addEventListener("keydown", (e) => {
+$("go").addEventListener("click", run);
+$("in").addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") run();
 });
+
+/* ---- Watchlist ----------------------------------------------------- */
+async function post(path, body) {
+  const r = await fetch(API + path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+$("watch").addEventListener("click", async () => {
+  if (!last) return;
+  if (!uid) {
+    $("watch").textContent = "Open this inside Telegram to watch";
+    return;
+  }
+  $("watch").disabled = true;
+  $("watch").textContent = "Saving...";
+  try {
+    const res = await post("/v1/watchlist/add", {
+      init_data: initData, target: last.target, level: last.level,
+    });
+    $("watch").textContent = res && res.ok
+      ? "Watching. We will message you if it changes."
+      : (res && res.error) || "Could not save that.";
+  } catch (e) {
+    $("watch").textContent = "Could not save that.";
+    $("watch").disabled = false;
+  }
+});
+
+async function loadWatches() {
+  const box = $("watchlist");
+  if (!uid) {
+    box.textContent = "";
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = "Open this inside Telegram to keep a watchlist.";
+    box.appendChild(p);
+    return;
+  }
+  box.textContent = "";
+  const loading = document.createElement("p");
+  loading.className = "empty";
+  loading.textContent = "Loading...";
+  box.appendChild(loading);
+
+  let res;
+  try { res = await post("/v1/watchlist/list", { init_data: initData }); }
+  catch (e) { res = null; }
+  box.textContent = "";
+
+  const items = (res && res.ok && res.data && res.data.watches) || [];
+  if (!items.length) {
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = "Nothing watched yet. Check something, then tap "
+      + "\u201cTell me if this changes\u201d.";
+    box.appendChild(p);
+    return;
+  }
+  for (const w of items) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.dataset.level = w.last_level || "unknown";
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = w.target;
+    const x = document.createElement("button");
+    x.className = "x";
+    x.textContent = "\u00d7";
+    x.setAttribute("aria-label", "Stop watching");
+    x.addEventListener("click", async () => {
+      x.disabled = true;
+      await post("/v1/watchlist/remove", { init_data: initData, watch_id: w.watch_id });
+      loadWatches();
+    });
+    row.appendChild(t);
+    row.appendChild(x);
+    box.appendChild(row);
+  }
+}
+
+/* ---- Share card ---------------------------------------------------- */
+/* The growth loop: someone posts a scam link in a group, one member checks it,
+   and forwards a card. Telegram's native surface is forwarding, and a security
+   verdict is one of the few things people genuinely forward.
+   It NEVER renders "safe" -- a forwarded false reassurance is the worst
+   artefact this product could produce. */
+$("share").addEventListener("click", () => {
+  if (!last) return;
+  const c = $("card");
+  const g = c.getContext("2d");
+  const colours = { critical: "#ef4444", high: "#f97316", medium: "#eab308",
+                    low: "#22c55e", unknown: "#94a3b8" };
+  g.fillStyle = "#0f172a"; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = colours[last.level] || "#94a3b8"; g.fillRect(0, 0, 12, c.height);
+  g.fillStyle = "#f8fafc";
+  g.font = "bold 44px -apple-system, system-ui, sans-serif";
+  g.fillText(HEADS[last.level], 48, 96);
+  g.fillStyle = "#94a3b8";
+  g.font = "24px ui-monospace, Menlo, monospace";
+  const shown = last.target.length > 46 ? last.target.slice(0, 45) + "\u2026" : last.target;
+  g.fillText(shown, 48, 148);
+  g.fillStyle = "#cbd5e1";
+  g.font = "22px -apple-system, system-ui, sans-serif";
+  let y = 208;
+  for (const r of last.reasons.slice(0, 3)) {
+    g.fillText("\u2022 " + (r.length > 52 ? r.slice(0, 51) + "\u2026" : r), 48, y);
+    y += 34;
+  }
+  g.fillStyle = "#64748b";
+  g.font = "20px -apple-system, system-ui, sans-serif";
+  g.fillText("Checked with RelayShield \u00b7 t.me/relayshield_bot", 48, 386);
+  c.classList.remove("hidden");
+  $("share").textContent = "Press and hold the image to forward it";
+});
+
+/* ---- Spot the fake ------------------------------------------------- */
+/* The one game that earns its place: the skill it teaches IS the product's
+   skill. Points, streaks and leaderboards were rejected because they move DAU
+   by attracting people who want points, and that audience does not buy a
+   security subscription. Getting better at spotting a homoglyph makes the user
+   safer, which is the test every idea here had to pass. */
+const REAL = ["binance.com", "metamask.io", "ledger.com", "uniswap.org", "coinbase.com",
+              "trustwallet.com", "phantom.app", "opensea.io", "tonkeeper.com", "kraken.com"];
+function fakeOf(d) {
+  const tricks = [
+    (s) => s.replace("l", "1"), (s) => s.replace("o", "0"),
+    (s) => s.replace("i", "l"), (s) => s.replace("m", "rn"),
+    (s) => s.replace(".", "-") + ".com", (s) => s.split(".")[0] + "-wallet." + s.split(".")[1],
+  ];
+  for (let i = 0; i < 12; i++) {
+    const f = tricks[Math.floor(Math.random() * tricks.length)](d);
+    if (f !== d) return f;
+  }
+  return d.split(".")[0] + "-app." + d.split(".").slice(1).join(".");
+}
+let right = 0, asked = 0;
+function newPair() {
+  const real = REAL[Math.floor(Math.random() * REAL.length)];
+  const fake = fakeOf(real);
+  const opts = Math.random() < 0.5 ? [fake, real] : [real, fake];
+  const box = $("quiz");
+  box.textContent = "";
+  for (const o of opts) {
+    const b = document.createElement("button");
+    b.className = "quiz-opt";
+    b.textContent = o;
+    b.addEventListener("click", () => {
+      if (box.dataset.done) return;
+      box.dataset.done = "1";
+      asked += 1;
+      const correct = o === fake;
+      if (correct) right += 1;
+      for (const child of box.children) {
+        child.dataset.state = child.textContent === fake ? "right" : "wrong";
+      }
+      $("score").textContent = correct
+        ? \`Right. "\${fake}" is the lookalike. \${right}/\${asked}\`
+        : \`Not this time. "\${fake}" was the lookalike. \${right}/\${asked}\`;
+      haptic(correct ? "low" : "medium");
+    });
+    box.appendChild(b);
+  }
+  delete box.dataset.done;
+}
+$("next").addEventListener("click", newPair);
+
+renderHistory();
 </script>
 </body>
 </html>`;
@@ -235,6 +520,7 @@ export default {
     const source = sourceFor(url.searchParams.get("startapp") || "");
     const body = PAGE
       .replaceAll("__DEVELOPERS__", DEVELOPERS)
+      .replaceAll("__API__", API_BASE)
       .replaceAll("__SOURCE__", source);
 
     return new Response(body, {

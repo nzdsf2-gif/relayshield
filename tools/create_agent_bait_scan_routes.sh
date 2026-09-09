@@ -35,6 +35,10 @@ export AWS_PAGER=""
 
 aws() { command aws --profile "$PROFILE" --region "$REGION" --no-cli-pager "$@"; }
 
+# Added 2026-09-09. This script probed once, milliseconds after
+# create-deployment returned. See lib_await_route.sh.
+. "$(dirname "$0")/lib_await_route.sh"
+
 echo "== 1. Which account are we actually talking to?"
 GOT=$(aws sts get-caller-identity --query Account --output text)
 if [ "$GOT" != "$ACCOUNT" ]; then
@@ -162,10 +166,21 @@ echo "== 7. Prove both doors"
 BASE="https://$API_ID.execute-api.$REGION.amazonaws.com/$STAGE"
 
 echo "   POST $BASE/v1/payg/agent-bait-scan  (no payment -- expecting 402)"
-CODE=$(curl -sS -o /tmp/abs_payg.json -w '%{http_code}' \
-         -X POST "$BASE/v1/payg/agent-bait-scan" \
-         -H 'Content-Type: application/json' \
-         -d '{"repository":"nzdsf2-gif/relayshield"}' || true)
+# ONLY THIS PROBE WAITS FOR PROPAGATION, and the reason matters. await_http
+# treats 403 and 404 as "not deployed yet" and keeps waiting; here the expected
+# answer is 402, so those two codes are unambiguously the race.
+#
+# THE SECOND PROBE BELOW EXPECTS 403, WHICH IS ALSO A PROPAGATION CODE, so the
+# helper could not tell a real 403 from an undeployed route and must not be used
+# there. It does not need to be: this probe returning 402 proves the stage has
+# reached the edge, and the second request goes to the same stage a moment
+# later. Ordering does the work the helper cannot.
+await_http 402 -X POST "$BASE/v1/payg/agent-bait-scan" \
+  -H 'Content-Type: application/json' \
+  -d '{"repository":"nzdsf2-gif/relayshield"}' || true
+CODE=$AWAIT_STATUS
+cp "$AWAIT_BODY" /tmp/abs_payg.json
+await_cleanup
 echo "   HTTP $CODE"
 head -c 400 /tmp/abs_payg.json; echo; echo
 

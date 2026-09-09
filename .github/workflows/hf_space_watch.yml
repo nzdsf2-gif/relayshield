@@ -20,6 +20,13 @@ name: HF Space Watch
 # wakes it. Paging on SLEEPING is how an alarm gets muted, so the checker treats
 # it as UP and says so.
 #
+# IT CHECKS THE MCP ENDPOINT, NOT JUST THE FRONT DOOR. Added 2026-09-09 when
+# mcp_registry/smithery.yaml was pointed at that exact URL. The Space front door
+# answering 200 says the Gradio app is serving a web page; it says nothing about
+# whether /gradio_api/mcp/sse is mounted. Drop mcp_server=True, or upgrade Gradio
+# past a route rename, and this workflow would have stayed green forever while
+# every directory we are listed in resolved to a 404.
+#
 # THREE OUTCOMES, DELIBERATELY DISTINCT:
 #   UP          green, and any open outage issue is closed.
 #   DOWN        red, and an issue is opened (or reused if one is already open).
@@ -37,20 +44,20 @@ permissions:
 
 jobs:
   watch:
-    name: Is the RelayShield HF Space answering?
+    name: Are BOTH RelayShield HF Spaces answering?
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the Space
+      - name: Check both Spaces
         id: check
         run: |
           set +e
           python3 tools/check_hf_space.py --json > result.json 2> status.txt
           echo "rc=$?" >> "$GITHUB_OUTPUT"
           cat result.json
-          VERDICT=$(python3 -c "import json;print(json.load(open('result.json'))['verdict'])")
-          DETAIL=$(python3 -c "import json;print(json.load(open('result.json'))['detail'])")
+          VERDICT=$(python3 -c "import json;d=json.load(open('result.json'))['spaces'];print('DOWN' if any(s['exit']==1 for s in d) else ('UNREACHABLE' if any(s['exit']==2 for s in d) else 'UP'))")
+          DETAIL=$(python3 -c "import json;d=json.load(open('result.json'))['spaces'];print(' | '.join(f\"{s['label']}: {s['detail']}\" for s in d))")
           echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
           echo "detail=$DETAIL" >> "$GITHUB_OUTPUT"
 
@@ -66,11 +73,22 @@ jobs:
               ``,
               `**${detail}**`,
               ``,
-              `Space: https://huggingface.co/spaces/relayshieldadmin/relayshield-agentic-attack-surface`,
+              `Public Space:  https://huggingface.co/spaces/relayshieldadmin/relayshield-agentic-attack-surface`,
+              `AWS Space:     https://huggingface.co/spaces/relayshieldadmin/relayshield-agentic-attack-surface-aws`,
+              ``,
+              `The AWS one is the higher-stakes of the two: it is registered on the`,
+              `Bundle D Marketplace listing as that product's MCP endpoint, so if it`,
+              `is down a PUBLISHED AWS product's declared endpoint is dead in front of`,
+              `buyers who arrived through AWS.`,
               ``,
               `This matters beyond the Space itself: it is the hosted MCP surface FD-15`,
-              `points Grok Bot connectors and Smithery at. A directory listing that`,
-              `resolves to a dead URL is worse than no listing.`,
+              `points Grok Bot connectors and Smithery at, and mcp_registry/smithery.yaml`,
+              `names /gradio_api/mcp/sse on the public Space by URL. A directory listing`,
+              `that resolves to a dead URL is worse than no listing.`,
+              ``,
+              `If the detail above says the MCP path 404s while the front door is fine,`,
+              `the app is up and the endpoint moved: check the alt path the report names`,
+              `(\`/gradio_api/mcp/\`, streamable HTTP) before assuming an outage.`,
               ``,
               `Reproduce: \`python3 tools/check_hf_space.py\``,
               ``,

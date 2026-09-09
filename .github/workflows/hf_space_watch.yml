@@ -1,0 +1,124 @@
+name: HF Space Watch
+
+# WHY THIS EXISTS
+# ---------------
+# The HuggingFace Space is one of five MCP surfaces and the only HOSTED one we
+# point strangers at. mcp_surfaces_inventory.md records the failure mode:
+# a hosted surface never shows "disconnected" in a client, it presents as a
+# failing URL, and nobody sees that unless something is looking.
+#
+# FD-15 is about handing that URL to Grok Bot connectors, Smithery and possibly
+# OpenAI. Advertising it in three directories while nothing watches whether it
+# answers is the quiet-alarm shape with an audience attached.
+#
+# IT RUNS HERE AND NOT IN THE CONTAINER because huggingface.co is egress-blocked
+# from the Claude Code sandbox. Verified again 2026-09-08: the checker returns
+# UNREACHABLE there. That is the standing rule -- a missing capability moves the
+# check into Actions, it does not cancel it.
+#
+# ASLEEP IS NOT DOWN. A free-tier Space sleeps on inactivity and the next request
+# wakes it. Paging on SLEEPING is how an alarm gets muted, so the checker treats
+# it as UP and says so.
+#
+# THREE OUTCOMES, DELIBERATELY DISTINCT:
+#   UP          green, and any open outage issue is closed.
+#   DOWN        red, and an issue is opened (or reused if one is already open).
+#   UNREACHABLE red, and NO issue -- that is a fact about this runner's network,
+#               and filing it as a Space outage would train us to ignore the label.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    name: Is the RelayShield HF Space answering?
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the Space
+        id: check
+        run: |
+          set +e
+          python3 tools/check_hf_space.py --json > result.json 2> status.txt
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+          cat result.json
+          VERDICT=$(python3 -c "import json;print(json.load(open('result.json'))['verdict'])")
+          DETAIL=$(python3 -c "import json;print(json.load(open('result.json'))['detail'])")
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "detail=$DETAIL" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the outage issue
+        if: steps.check.outputs.verdict == 'DOWN'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'HF Space is down';
+            const detail = `${{ steps.check.outputs.detail }}`;
+            const body = [
+              `The RelayShield HuggingFace Space is not answering.`,
+              ``,
+              `**${detail}**`,
+              ``,
+              `Space: https://huggingface.co/spaces/relayshieldadmin/relayshield-agentic-attack-surface`,
+              ``,
+              `This matters beyond the Space itself: it is the hosted MCP surface FD-15`,
+              `points Grok Bot connectors and Smithery at. A directory listing that`,
+              `resolves to a dead URL is worse than no listing.`,
+              ``,
+              `Reproduce: \`python3 tools/check_hf_space.py\``,
+              ``,
+              `_This issue closes itself on the next run that reports UP._`,
+            ].join('\n');
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'hf-space-down',
+            });
+            if (open.data.length) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: open.data[0].number,
+                body: `Still down. ${detail}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['hf-space-down'],
+              });
+            }
+
+      - name: Close the outage issue when it recovers
+        if: steps.check.outputs.verdict == 'UP'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'hf-space-down',
+            });
+            for (const issue of open.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Recovered. ${{ steps.check.outputs.detail }}`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, state: 'closed',
+              });
+            }
+
+      # Red on DOWN, red on UNREACHABLE, green on UP. UNREACHABLE is red WITHOUT
+      # an issue on purpose: a check that could not answer is not a Space outage,
+      # and filing it as one is how the label stops meaning anything.
+      - name: Fail the run when it is not UP
+        if: steps.check.outputs.verdict != 'UP'
+        run: |
+          echo "::error::HF Space check: ${{ steps.check.outputs.verdict }} - ${{ steps.check.outputs.detail }}"
+          exit 1

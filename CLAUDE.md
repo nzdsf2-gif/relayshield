@@ -878,6 +878,33 @@ There is deliberately no setting that lets a known-bad target through, and a tes
 
 ## WHERE 2026-09-05 LEFT THINGS — read this first
 
+## SMITHERY POINTS AT THE PyPI STDIO SERVER IN THIS REPO. CHECK ~/mcp-live BEFORE ASSUMING.
+
+Raised 2026-09-09: *"On Smithery double check your memory because we already pointed it to our HF
+MCP server in the last session."*
+
+**What `mcp_registry/smithery.yaml` on `origin/main` actually says**, read rather than recalled:
+`startCommand.type: stdio`, running `uvx --from relayshield-mcp>=0.2.10`, with the sixteen tool
+names of the PUBLISHED PyPI package. It does not reference the HF Space anywhere. Its own header
+records a 2026-09-05 correction, and that correction pointed it at the PyPI server, not at HF: the
+previous version ran `node dist/index.js` and named four tools that do not exist.
+
+**But this repo is NOT where Smithery reads it from**, and the file says so in its first line:
+*"Copy this to the ROOT of the MCP server's own repository (~/mcp-live), not here."* `~/mcp-live` is
+on Andrew's Mac and nothing in this container can see it. So "it was pointed at HF last session" may
+be true of the copy that matters and invisible from here -- which is exactly the
+"IT IS NOT IN THE REPO IS A CLAIM ABOUT ORIGIN" rule, and the answer is the same one command:
+
+    cd ~/mcp-live && grep -n "type:\|url\|hf.space\|command" smithery.yaml
+
+**Why it is worth settling rather than shrugging at.** stdio and hosted-HTTP are not two spellings
+of one listing, they are the FD-11 / FD-15 decision. A stdio listing tells a visitor to install a
+Python package; a hosted one hands them a URL. FD-15 exists because Grok Bot connectors, Smithery
+and possibly OpenAI all want the SAME hosted URL, and handing three directories three different
+answers is how the four-pattern-table problem started.
+
+---
+
 ### THE TOP 15, REGENERATED 2026-09-08
 
 **Regenerated, not annotated.** Five items closed or dispatched since yesterday.

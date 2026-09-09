@@ -3246,6 +3246,11 @@ _SOURCE_ALIASES = {
     "tg-miniapp-directory": "tg-miniapp",
     "tg-miniapp-blog":      "tg-miniapp",
     "tg-miniapp-bot":       "tg-miniapp",
+    # The share card is the growth loop: a verdict forwarded into the group chat
+    # where the scam was posted. Registered when the Worker started allowing it,
+    # because the test that pins ALLOWED_SOURCES against these tables caught it
+    # missing in the same commit that added it.
+    "tg-miniapp-share":     "tg-miniapp",
     "miniapp":              "tg-miniapp",
     "agent-bait-medium":     "agent-bait",
     "agent-bait-devto":      "agent-bait",

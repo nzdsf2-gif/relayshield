@@ -52,7 +52,11 @@ Re-ranked for the audience we actually have.
 3. **Mini App directories and catalogues**, tApps Center and the others in the same family. Worth
    one afternoon of submissions. They convert like directories convert, which is to say modestly and
    forever.
-4. **Deep links with attribution, everywhere we already appear.** `t.me/<bot>/app?startapp=<source>`
+4. **Deep links with attribution, everywhere we already appear.** `t.me/relayshield_bot/idcheck?startapp=<source>`
+   **The short name `idcheck` is SETTLED, 2026-09-10, and it is not a placeholder.** It was
+   registered in BotFather after `/myapps` confirmed the bot had no web apps at all, so nothing
+   collided. An earlier draft of this line wrote `<bot>/app`, chosen before anyone had listed
+   what the bot carried; every published link uses `idcheck`.
    carries the parameter into the Mini App, so blog posts, the developers page, the widget's README
    and any directory listing each get their own key. Register those keys in `_SOURCE_BANNERS` BEFORE
    the links go out. The official MCP registry cost four months of unattributed arrivals by getting

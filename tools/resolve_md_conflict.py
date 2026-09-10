@@ -99,6 +99,72 @@ def _stem(heading):
     return out.rstrip(" ,.:-").upper()
 
 
+def strip_empty_headings(lines):
+    """Drop a heading ONLY if it owns no body AND its title occurs elsewhere.
+
+    KEEPING BOTH SIDES STRANDS HEADINGS, and that is what the duplicate report
+    was really seeing. When one side of a conflict contributes a heading line
+    and the other contributes that section's body, keep-both emits the heading
+    in one place and the content in another, leaving an empty heading.
+
+    BOTH CONDITIONS ARE LOAD-BEARING AND THE FIRST VERSION HAD NEITHER RIGHT.
+    It removed any heading followed by another heading, and on the real file
+    that deleted EIGHT, including `# CLAUDE.md` itself -- the document title,
+    which is legitimately followed by its first `##` -- and four
+    `## WHERE <date> LEFT THINGS` dividers that have always been empty and have
+    nothing to do with any merge. A resolver that quietly deletes the title of
+    the file it is repairing is worse than one that asks a question.
+
+    So:
+
+      * "owns no body" is DEPTH-AWARE. A heading followed by a DEEPER heading
+        introduces a subsection and is doing its job. Only a following heading
+        at the SAME or SHALLOWER depth means this one got nothing.
+      * "occurs elsewhere" is what confines this to merge damage. A stranded
+        heading whose title is unique is a pre-existing divider in someone's
+        document and none of this tool's business; a stranded heading whose
+        title appears again is the copy the merge duplicated, and the surviving
+        copy carries the content.
+
+    Under both conditions removal cannot lose text, which is why it is
+    automatic while the duplicate report is not.
+    """
+    def depth(line):
+        m = re.match(r"^(#{1,6}) \S", line)
+        return len(m.group(1)) if m else None
+
+    stems = {}
+    for line in lines:
+        if depth(line) is not None:
+            stems[_stem(line)] = stems.get(_stem(line), 0) + 1
+
+    out, removed, i = [], [], 0
+    while i < len(lines):
+        line = lines[i]
+        d = depth(line)
+        if d is None:
+            out.append(line)
+            i += 1
+            continue
+
+        j = i + 1
+        while j < len(lines) and lines[j].strip() == "":
+            j += 1
+        nd = depth(lines[j]) if j < len(lines) else None
+
+        owns_no_body = nd is not None and nd <= d
+        duplicated = stems.get(_stem(line), 0) > 1
+
+        if owns_no_body and duplicated:
+            removed.append((i + 1, line.strip()))
+            i = j
+            continue
+
+        out.append(line)
+        i += 1
+    return out, removed
+
+
 def duplicate_headings(lines):
     """Exact duplicates AND near-duplicates that differ only by a trailing date."""
     seen, dupes = {}, []
@@ -139,6 +205,14 @@ def main():
         raise SystemExit(f"ERROR: {len(leftover)} marker line(s) survived. Not writing.")
 
     print(f"{p}: {n} conflict(s), both sides kept.")
+
+    resolved, stranded = strip_empty_headings(resolved)
+    if stranded:
+        print(f"  removed {len(stranded)} EMPTY heading(s) left stranded by keep-both.")
+        print("  An empty heading carries no content, so this is lossless and automatic:")
+        for ln, text in stranded:
+            print(f"    line {ln}: {text[:74]}")
+
     print(f"  {len(lines)} lines in -> {len(resolved)} lines out")
 
     dupes = duplicate_headings(resolved)

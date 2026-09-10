@@ -140,6 +140,177 @@ Fix, in that directory:
 
 ---
 
+## THREE INSTRUCTIONS I SHIPPED ON 2026-09-09 THAT COST ANDREW A ROUND EACH. READ BEFORE WRITING ANY BLOCK.
+
+He asked for this section in these words: *"We've now wasted another needless turn... This needs to
+stop."* All three were mine, none was a typo, and rules 1 to 14 above did not catch any of them.
+They are one failure wearing three costumes: **I wrote instructions for states I had not looked at.**
+
+### A. A MERGE BLOCK MUST ANTICIPATE THE CONFLICT IT IS GOING TO CAUSE
+
+He ran the standard five-line merge block and got:
+
+    Automatic merge failed; fix conflicts and then commit the result.
+
+The block had a STOP IF for `MERGE_HEAD exists` and **nothing for the conflict itself**, so it ended
+mid-way with no instruction for the state it had just produced. He had to resolve it himself.
+
+**This is not bad luck, it is arithmetic, and it will happen on almost every merge from now on.**
+EVERY session appends to CLAUDE.md. Two sessions running the same day therefore both append to the
+same region of the same file, and git cannot know that appending two different sections to one
+document is not a contradiction. **Proved immediately:** merging `origin/main` into this branch
+minutes later produced the identical conflict, in CLAUDE.md, and nowhere else.
+
+**So the merge block carries the resolution, and the resolution for CLAUDE.md is KEEP BOTH SIDES.**
+It is an append-structured document; two new sections are two new sections, never an either/or.
+Never resolve one by deleting the other, and never `git checkout --ours CLAUDE.md`, which silently
+discards the other session's work.
+
+    git checkout --merge CLAUDE.md
+    # then delete the three marker lines by hand, keeping the text on both sides
+
+**And the second half, which is what makes it cheap:** a conflict in CLAUDE.md ALONE is expected and
+resolvable in ten seconds. A conflict in a `.py`, a `.toml` or a workflow is not, and means two
+sessions edited the same code. **The block must say which it got**, because those are different
+situations with different answers and "there was a conflict" does not distinguish them.
+
+### B. PREDICTING A FAILURE AND SHIPPING IT ANYWAY IS WORSE THAN NOT PREDICTING IT
+
+Step 3 of the Mini App checklist told him to check `app.relayshield.net`, and warned in writing that
+a zone route attaches to a hostname without creating one. He ran it:
+
+    curl: (6) Could not resolve host: app.relayshield.net
+
+**The prediction was exactly right, which is the problem.** I had already reasoned my way to the
+cause, written it down, and then shipped `wrangler.miniapp.toml` with the broken form anyway and
+handed him a dashboard step as the remedy. **The fix was one line in a file I was already editing.**
+
+A warning is not a fix. If a session can name the failure, it can name the change, and the change
+goes in the same commit as the warning. Shipping a known-broken config with a note explaining that
+it is broken spends the reader's round to discover something already known.
+
+`wrangler.miniapp.toml` now uses `custom_domain = true`, which creates the DNS record. The general
+rule is in that file's own comment: **an existing hostname may use a zone route; a NEW one uses
+`custom_domain`.**
+
+### C. AN INSTRUCTION THAT WRITES TO A LIVE SHARED SURFACE MUST BE PRECEDED BY THE ONE THAT READS IT
+
+**The serious one.** Step 4 told him to run `/newapp` on `@relayshield_bot` with short name `app`,
+then `/setmenubutton`. That bot **already carries the Telegram TI monitoring app**, and:
+
+- **`/setmenubutton` REPLACES the existing menu button.** It does not add a second one. Following
+  that step would have taken a live customer-facing surface off the bot, with nothing to undo it
+  except knowing what had been there before -- which nobody wrote down, because nobody read it.
+- **`app` is a generic short name on a bot that already has apps**, and Andrew had to say so.
+
+**CORRECTED 2026-09-10, BY THE VERY CHECK THIS SECTION DEMANDS, AND THE CORRECTION IS AGAINST ME
+IN BOTH DIRECTIONS.** He ran `/myapps` and it returned **"You currently have no web apps."** So:
+
+- **The short-name collision I claimed did not exist.** `app` was free. That half of my warning was
+  me over-reading his objection and describing a risk I had still not looked up -- the same defect
+  one paragraph later, which is why the correction belongs here rather than in a footnote.
+- **The destructive half was REAL, and the mechanism was the menu button, not a registered app.**
+  `@relayshield_bot` runs the TI monitoring product through its MENU, and Andrew's instruction is
+  that **the menu keeps the prominent control**. `/setmenubutton` would have replaced it. So the
+  step was dangerous for exactly the reason given and for none of the reasons I evidenced.
+
+**The rule survives the correction intact and is arguably strengthened by it.** I could not tell,
+before he read the list, which of the two risks was the real one -- and I wrote a destructive
+command anyway, on a guess that happened to point at the wrong hazard. **List first. What comes back
+decides which danger you were actually in**, and a plausible-sounding reason for a warning is not
+the same as knowing the reason.
+
+**The registration went ahead on that evidence: title `RelayShield IDCheck`, short name `idcheck`,
+`t.me/relayshield_bot/idcheck`.** The menu button was left alone, permanently, and that is a product
+decision recorded rather than a checklist step deferred.
+
+**I wrote a registration procedure for a surface I had never listed the contents of.** BotFather
+state is not in the repo, is not visible from this container, and no session had recorded it. That
+is the `_APIFY_BANNER` and MetaMask-Snap class exactly: asserting the state of a surface I cannot
+see. The difference is that those two were false claims, and this one was a WRITE.
+
+**THE RULE, and it is broader than BotFather.** Before handing over any command that creates,
+renames, replaces or configures something on a live shared surface -- BotFather, a Cloudflare zone,
+a Stripe product, an AWS resource, an npm or PyPI name, a marketplace listing -- **the block before
+it lists what is already there, and Andrew reads that output before the write runs.** Two blocks,
+never one; rule 14's "one block, one outcome" already says diagnosis and fix do not share a block,
+and this is that rule where the fix is destructive.
+
+**A name is never chosen by me for a surface I cannot enumerate.** Propose one, say why, and have
+the listing step settle it -- a collision is invisible to a writer and obvious to the reader who can
+see the list.
+
+**And the specific facts, so no session re-derives them:** `/myapps` in BotFather lists a bot's
+existing web apps. `/newapp` adds one. `/setmenubutton` REPLACES. `@relayshield_bot` carries the TI
+monitoring app, so the Mini App takes a distinct short name and **must not touch the menu button
+until it is settled what that button currently does** -- a direct link works without it, so there is
+no reason to spend a destructive command on convenience.
+
+### WHAT THE THREE HAVE IN COMMON, which is the part worth carrying
+
+Rules 1 to 14 fix instructions that were malformed. **These three were well-formed instructions
+written against an unexamined state**: the state of the two branches, the state of the DNS zone, the
+state of the bot. Each was one read away from being right, and in every case I had access to the
+read or could have asked for it.
+
+**So, before a block ships: name the state it assumes, and say how that state was established.** If
+the answer is "I assumed it", the block is not finished. "I could not check it from the container"
+is not an exemption -- it is the trigger for making the check the reader's first step, which is what
+NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK has said all along.
+
+## TELEGRAM STARS IN THE MINI APP: NOT NOW, AND NEVER AS A CAP ON THE FREE CHECKS
+
+Asked 2026-09-10: *"Its still not clear how we can use the stars or what value they bring."* Full
+reasoning in `miniapp_stars_monetization.md`; the parts that must not be re-derived:
+
+**BOTH PAYWALL CANDIDATES ARE ALREADY FREE, AND ONE COSTS US NOTHING.** `/v1/link-check`'s own entry
+in `KEYLESS_SCAN_ENDPOINTS` says it: *"no paid upstream at all: DynamoDB, Safe Browsing's free tier
+and RDAP. The per-IP cap is here to stop it becoming an open proxy, not to protect a vendor bill."*
+And `/v1/ton-address` has been keyless since Crypto Shield Mobile, so charging for it would REMOVE a
+free feature rather than add a paid one. TON *token* checks are the one real gap and they are a
+BUILD, not a paywall -- only `/v1/ton-address` exists.
+
+**THE VALUE IS A SIGNAL, NOT REVENUE, AND THE SIGNAL IS UNINTERPRETABLE TODAY.** Stars reach a buyer
+the other three rails structurally cannot -- an anonymous Telegram user with no account, card or
+wallet -- and a payment measures value where opens and returns measure interest. But the six
+discovery routes have not run and `tools/source_arrivals.py` has never been run against the
+`tg-miniapp` keys, so this would be optimising a funnel nobody has measured. **The gate is that
+measurement, not a date.**
+
+**THE CONSTRAINT WORTH KNOWING EVEN THOUGH WE ARE BUILDING NOTHING: Stars are the ONLY compliant way
+to charge a consumer inside a Telegram Mini App.** Telegram requires digital goods sold in Mini Apps
+to be paid in Stars, because that is how it satisfies Apple's and Google's IAP rules. **Wiring
+"upgrade" from inside the Mini App to Stripe, x402 or the developers page for a digital good is the
+route that gets a bot restricted** -- and it is exactly what a future session would do, reasonably,
+because all three rails already exist one link away. UNVERIFIED from the container
+(`core.telegram.org` is egress-blocked); the check is one tab,
+<https://core.telegram.org/bots/payments-stars>, read BEFORE any payment code.
+
+**IF IT IS EVER BUILT, ONE PRINCIPLE DECIDES THE SHAPE: Stars pay vendor bills, they never tax the
+free tier.** Never a cap on `/v1/link-check` or `/v1/ton-address`. The honest candidate is
+`/v1/scan-url` -- VirusTotal, a real per-call bill, already $0.05 on the PAYG rail. Self-limiting by
+construction: it can only charge for things that cost money, so it cannot drift into taxing the thing
+the app is for.
+
+**The expensive prerequisite is already built**, which is worth knowing before anyone re-scopes this
+as large: `relayshield_watchlist.py` verifies Telegram's `initData` HMAC and derives the user id as
+`HMAC-SHA256(pepper, telegram_user_id)`. A verified non-spoofable per-user identity is the hard half
+and it is live.
+
+## THE MINI APP IS `t.me/relayshield_bot/idcheck`. THE MENU BUTTON STAYS WITH TI MONITORING.
+
+Settled 2026-09-10, after `/myapps` returned **"You currently have no web apps."**
+
+Registered as title `RelayShield IDCheck`, short name **`idcheck`**. Every planned deep link reads
+`t.me/relayshield_bot/idcheck?startapp=<source>` -- corrected in
+`miniapp_discovery_and_stripe_choice.md` §2, item 1 route (4), and the `TOP_15_2026-09-09.md`
+snapshot. Nothing still says `/app`.
+
+**`@relayshield_bot`'s menu button belongs to the TI monitoring product and KEEPS the prominent
+control.** Andrew's instruction, and it is a decision rather than a deferred step: `/setmenubutton`
+is not part of this launch and is not a later one. The Mini App does not need it -- the direct link
+works on its own and item 1 already ranks the menu button fifth of six.
+
 ## ENVIRONMENT — what this container can and cannot do
 
 | | Status |
@@ -1135,8 +1306,6 @@ listing nobody outside our own account can take up would explain a lot.
 
 ---
 
-## SMITHERY NOW POINTS AT THE HOSTED HF SPACE. CHANGED 2026-09-09, AND THE CLI SCHEMA IS NOT WHAT WE THOUGHT.
-
 ## THE MINI APP MERGE DID NOT DEPLOY IT, AND A DEPLOYED WORKER IS NOT A MINI APP
 
 Found 2026-09-09, asked as "I ran the merge that deployed the Tg miniApp. How do I access it on Tg?"
@@ -1155,7 +1324,8 @@ URL as a Mini App.** It exists only after `/newapp` in @BotFather, which is what
 in the repo and could not be** -- it is a conversation with a bot, not a file -- and its absence from
 the Mini App v1 work was a real gap. `miniapp_launch_checklist.md` now carries it, with the short
 name pinned to `app` because `miniapp_discovery_and_stripe_choice.md` and item 1 already assume
-`t.me/<bot>/app` in every planned link.
+`t.me/<bot>/app` in every planned link. **SUPERSEDED 2026-09-10: the registered short name is
+`idcheck`, and every planned link now reads `t.me/relayshield_bot/idcheck?startapp=<source>`.**
 
 **The likely third failure, flagged before it fires:** `wrangler.miniapp.toml` uses the zone-route
 form, like blog/badge/partners/pricing/support. **A zone route attaches to a hostname, it does not
@@ -1218,7 +1388,7 @@ against main, so mapping it now would be mapping a function whose drift is unmea
 the first diff, then map. A clean diff makes item 4 one line; a dirty one makes it a recovery, and
 learning that from a red check costs nothing while learning it from a deploy costs the live code.
 
-### THE TOP 15, REGENERATED 2026-09-08
+## SMITHERY NOW POINTS AT THE HOSTED HF SPACE. CHANGED 2026-09-09, AND THE CLI SCHEMA IS NOT WHAT WE THOUGHT.
 
 **This SUPERSEDES the section immediately below it, which is kept because its finding was correct on
 the morning it was written and its process note is the reason this one exists.**
@@ -1381,7 +1551,7 @@ its watchlist are built and live. The Bundle D tooling is finished and its guard
    (2) Mini App announcement channels -- `@trendingapps` 3.9M, `@web3telegrambotx` 72,742,
        `@findminiapp` 56,380, `@onclicka_tma_en` 33,723, `@telegtapps` 9,671;
    (3) Mini App directories, tApps Center and family;
-   (4) attributed deep links `t.me/<bot>/app?startapp=<source>`, keys registered FIRST;
+   (4) attributed deep links `t.me/relayshield_bot/idcheck?startapp=<source>`, keys registered FIRST;
    (5) the bot's menu button, cheap rather than high-reach;
    (6) TON catalogues, only if TON scans ship.
 

@@ -1137,6 +1137,89 @@ listing nobody outside our own account can take up would explain a lot.
 
 ## SMITHERY NOW POINTS AT THE HOSTED HF SPACE. CHANGED 2026-09-09, AND THE CLI SCHEMA IS NOT WHAT WE THOUGHT.
 
+## THE MINI APP MERGE DID NOT DEPLOY IT, AND A DEPLOYED WORKER IS NOT A MINI APP
+
+Found 2026-09-09, asked as "I ran the merge that deployed the Tg miniApp. How do I access it on Tg?"
+Two separate blockers, either one enough on its own, and neither is a defect in the code.
+
+**1. The merge never reached GitHub.** `origin/main` is at `556b4f1` and carries neither
+`cloudflare_worker_miniapp.js` nor `wrangler.miniapp.toml` nor `.github/workflows/deploy_miniapp.yml`.
+That is the LOCAL MERGE IS NOT A PUSH rule, and **it has a second edge nobody had written down: a
+workflow file that is not on the default branch cannot be dispatched from the Actions UI either.**
+So the usual fallback -- Claude cannot dispatch, Andrew clicks *Run workflow* -- was not available.
+There was no route to deploying this that did not start with pushing `main`.
+
+**2. A Cloudflare Worker at `app.relayshield.net` is a web page. Telegram does not serve an arbitrary
+URL as a Mini App.** It exists only after `/newapp` in @BotFather, which is what mints
+`t.me/relayshield_bot/<short_name>` and gives `?startapp=` something to attach to. **That step is not
+in the repo and could not be** -- it is a conversation with a bot, not a file -- and its absence from
+the Mini App v1 work was a real gap. `miniapp_launch_checklist.md` now carries it, with the short
+name pinned to `app` because `miniapp_discovery_and_stripe_choice.md` and item 1 already assume
+`t.me/<bot>/app` in every planned link.
+
+**The likely third failure, flagged before it fires:** `wrangler.miniapp.toml` uses the zone-route
+form, like blog/badge/partners/pricing/support. **A zone route attaches to a hostname, it does not
+create one.** If `app` has no proxied DNS record in the zone, wrangler reports a successful deploy
+and the hostname does not resolve -- the deploy-succeeded-and-nothing-works shape again.
+
+**Do not submit to any announcement channel before opening it on a phone.** Item 1 is explicit:
+each channel gives one first impression, `@trendingapps` is 3.9M of them, and a submission landing
+while the link 404s spends it.
+
+## THE PRE-COMMIT HOOK'S DISCOVERY VALUE HAS NEVER BEEN MEASURED, AND IT HAS BEEN MEASURABLE SINCE 2026-09-03
+
+Asked 2026-09-09 as "is there a similar benefit to an IDE widget". The question rests on rsscan
+having been a good discovery surface, and **nothing in this repo could say whether that is true.**
+`rsscan` and `rsscan-deps` are registered `_SOURCE_BANNERS` keys, so every arrival has been
+attributed and logged in CloudWatch the whole time. Nobody counted them. FD-1 says **DONE**, and
+"done" is a fact about shipping, not about reach.
+
+`tools/source_arrivals.py` closes it, and it runs on the Mac:
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/source_arrivals.py --days 90 --key rsscan
+
+It reports the window it OBSERVED rather than the one asked for, prints `unmatched:` rows first
+because each is a live link naming a key that does not exist, and separates ZERO ARRIVALS from
+UNREGISTERED, which are different findings with different fixes.
+
+**IT ALSO CAUGHT ITSELF, which is the part worth carrying.** The first `registered_keys()` walked
+only `ast.Assign`, so it read `_SOURCE_ALIASES` and silently skipped `_SOURCE_BANNERS` -- declared as
+`_SOURCE_BANNERS: dict[...] = {`, an `ast.AnnAssign`. It returned 117 keys, which looks exactly like
+a working parse, with every real banner missing. The tool would have reported `rsscan`, `tg-widget`
+and `tg-miniapp` as UNREGISTERED when all three are registered, and an unregistered key is a
+completely different conclusion from a channel that produced nothing. Nothing errored. Found by
+running it and grepping the handler to check -- rule 14 applied to my own tool rather than to a
+command. It now asserts a floor: an empty table raises rather than reporting a false absence, and
+`test_source_arrivals.py` pins it against an independent parse.
+
+**The answer to the widget question is in `ide_widget_scope.md`**, and the short form is: three of
+the four named categories are not ours (no SAST anywhere in this codebase, and "malware detection"
+overstates an indicator match), one is completely ours and has no IDE incumbent, and **rsscan is the
+wrong host for it because the direction is opposite** -- rsscan reads `git diff --cached`, your own
+authored change, while agent-baiting is about files somebody else wrote that your agent is about to
+read. Measure first, read the VS Code Marketplace rules second, build one narrow thing third.
+
+## A DEPLOY PATH IS NOT DRIFT DETECTION, AND relayshield-oauth-watchlist-monitor HAD ONLY THE FIRST
+
+Asked 2026-09-09 as "we also need to map the rs-watchlist.py in the deployer". **It is already
+mapped**, and has been: `deploy_lambdas.yml` carries it in the `paths:` trigger, the manual-dispatch
+list and `LAMBDA_MAP`, and `iam_github_deploy_invoke.json` carries its ARN. Nothing to do there.
+
+**What it did not have was a drift check**, and that is the gap that was real. The telegram, whatsapp
+and discord handlers are all mapped in the deployer AND watched in `lambda_drift_check.yml`,
+deliberately, because "having a deploy path is not the same as never being hand-deployed again". The
+watchlist monitor was in the deployer only, so the question "has anyone hand-deployed over it" had
+never been asked of it. It is now watched.
+
+**`relayshield_mpp_settlement.py` was added to the drift check at the same time, and deliberately NOT
+to the deployer.** `tools/check_deploy_invoke_policy.py` prints "granted but not in LAMBDA_MAP" for
+it on every run and Top-15 item 4 is to close that -- but nothing has ever compared its live package
+against main, so mapping it now would be mapping a function whose drift is unmeasured. Watch, read
+the first diff, then map. A clean diff makes item 4 one line; a dirty one makes it a recovery, and
+learning that from a red check costs nothing while learning it from a deploy costs the live code.
+
+### THE TOP 15, REGENERATED 2026-09-08
+
 **This SUPERSEDES the section immediately below it, which is kept because its finding was correct on
 the morning it was written and its process note is the reason this one exists.**
 

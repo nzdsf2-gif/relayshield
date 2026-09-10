@@ -99,7 +99,37 @@ class TestRendering(unittest.TestCase):
         self.assertNotRegex(heads.group(1).lower(), r'"\s*safe\s*"')
 
     def test_unknown_is_not_presented_as_clear(self):
-        self.assertIn("Treat that as unknown, not as clear.", _worker())
+        """The invariant, not the sentence.
+
+        This pinned the literal string "Treat that as unknown, not as clear."
+        and failed on 2026-09-10 when that copy was rewritten -- correctly, since
+        it guards a safety claim, but it could not tell a rewrite that KEPT the
+        meaning from one that lost it. `unknown` is the MOST COMMON outcome
+        (_link_check_level returns it for anything not in the corpus, not on Safe
+        Browsing and older than 30 days), so its wording is the wording most
+        users will read, and it must never imply the target is fine.
+        """
+        worker = _worker()
+        caveat = re.search(r'\$\("caveat"\)\.textContent\s*=(.*?);\n', worker, re.S)
+        self.assertIsNotNone(caveat, "the caveat assignment moved; re-point this test")
+        block = caveat.group(1)
+        i = block.find('level === "unknown"')
+        self.assertGreater(i, -1, "the unknown branch is gone")
+        branch = block[i:i + 400].lower()
+        self.assertTrue(
+            any(p in branch for p in ("not proof", "not the same as safe",
+                                      "absence of evidence", "not as clear")),
+            "the unknown branch must explicitly deny that this means safe")
+        # Every mention of "safe" must sit inside a NEGATION. A naive
+        # assertNotRegex on "is safe" fails on "not proof it is safe", which is
+        # the denial we want, and on "Google Safe Browsing", which is a product
+        # name -- so both are handled explicitly rather than by banning a word.
+        scan = branch.replace("safe browsing", "")
+        for m in re.finditer(r"\bsafe\b|\bfine\b|\bclear\b", scan):
+            before = scan[max(0, m.start() - 45):m.start()]
+            self.assertRegex(
+                before, r"\bnot\b|\bnever\b|\bno\b|\bisn't\b|\brather than\b",
+                f"'{m.group(0)}' appears without a negation near it: ...{before}")
 
 
 class TestBotCallToAction(unittest.TestCase):

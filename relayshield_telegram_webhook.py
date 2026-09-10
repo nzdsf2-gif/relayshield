@@ -6020,6 +6020,31 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         # cannot drift apart.
         send_message(chat_id, fwd.quickstart_text(fwd.PLATFORM_TELEGRAM),
                      parse_mode=fwd.QUICKSTART_PARSE_MODE[fwd.PLATFORM_TELEGRAM])
+    elif cmd in ("app", "idcheck", "check"):
+        # THE MINI APP HAD NO ROUTE FROM THE BOT, which is why a pinned bot chat
+        # did not help the founder reach it on 2026-09-10. A direct link
+        # (t.me/<bot>/idcheck) opens the app without creating a chat, and the
+        # menu button belongs to TI monitoring and keeps the prominent control,
+        # so this is the durable one-tap route: pinned chat -> /app -> button.
+        #
+        # An inline web_app button opens the Mini App INSIDE Telegram. A plain
+        # url button would hand it to the browser, which is the same defect the
+        # Mini App's own openTelegramLink call exists to avoid, pointed the
+        # other way. web_app buttons are private-chat only, which this is.
+        #
+        # ?s= rather than ?startapp=: a button launch carries no start_param, so
+        # the app reads the query instead. tg-miniapp-bot is already in the
+        # Worker's ALLOWED_SOURCES and in _SOURCE_BANNERS, registered before this
+        # link shipped rather than after.
+        send_message(
+            chat_id,
+            "Paste a link or a wallet address and get a verdict before you trust it. "
+            "No signup, no wallet connect.",
+            reply_markup={"inline_keyboard": [[{
+                "text": "Open RelayShield IDCheck",
+                "web_app": {"url": "https://app.relayshield.net/?s=tg-miniapp-bot"},
+            }]]},
+        )
     elif cmd == "verify":
         handle_verify(chat_id)
     elif cmd == "otp":

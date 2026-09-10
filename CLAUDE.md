@@ -203,6 +203,27 @@ then `/setmenubutton`. That bot **already carries the Telegram TI monitoring app
   except knowing what had been there before -- which nobody wrote down, because nobody read it.
 - **`app` is a generic short name on a bot that already has apps**, and Andrew had to say so.
 
+**CORRECTED 2026-09-10, BY THE VERY CHECK THIS SECTION DEMANDS, AND THE CORRECTION IS AGAINST ME
+IN BOTH DIRECTIONS.** He ran `/myapps` and it returned **"You currently have no web apps."** So:
+
+- **The short-name collision I claimed did not exist.** `app` was free. That half of my warning was
+  me over-reading his objection and describing a risk I had still not looked up -- the same defect
+  one paragraph later, which is why the correction belongs here rather than in a footnote.
+- **The destructive half was REAL, and the mechanism was the menu button, not a registered app.**
+  `@relayshield_bot` runs the TI monitoring product through its MENU, and Andrew's instruction is
+  that **the menu keeps the prominent control**. `/setmenubutton` would have replaced it. So the
+  step was dangerous for exactly the reason given and for none of the reasons I evidenced.
+
+**The rule survives the correction intact and is arguably strengthened by it.** I could not tell,
+before he read the list, which of the two risks was the real one -- and I wrote a destructive
+command anyway, on a guess that happened to point at the wrong hazard. **List first. What comes back
+decides which danger you were actually in**, and a plausible-sounding reason for a warning is not
+the same as knowing the reason.
+
+**The registration went ahead on that evidence: title `RelayShield IDCheck`, short name `idcheck`,
+`t.me/relayshield_bot/idcheck`.** The menu button was left alone, permanently, and that is a product
+decision recorded rather than a checklist step deferred.
+
 **I wrote a registration procedure for a surface I had never listed the contents of.** BotFather
 state is not in the repo, is not visible from this container, and no session had recorded it. That
 is the `_APIFY_BANNER` and MetaMask-Snap class exactly: asserting the state of a surface I cannot
@@ -236,6 +257,59 @@ read or could have asked for it.
 the answer is "I assumed it", the block is not finished. "I could not check it from the container"
 is not an exemption -- it is the trigger for making the check the reader's first step, which is what
 NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK has said all along.
+
+## TELEGRAM STARS IN THE MINI APP: NOT NOW, AND NEVER AS A CAP ON THE FREE CHECKS
+
+Asked 2026-09-10: *"Its still not clear how we can use the stars or what value they bring."* Full
+reasoning in `miniapp_stars_monetization.md`; the parts that must not be re-derived:
+
+**BOTH PAYWALL CANDIDATES ARE ALREADY FREE, AND ONE COSTS US NOTHING.** `/v1/link-check`'s own entry
+in `KEYLESS_SCAN_ENDPOINTS` says it: *"no paid upstream at all: DynamoDB, Safe Browsing's free tier
+and RDAP. The per-IP cap is here to stop it becoming an open proxy, not to protect a vendor bill."*
+And `/v1/ton-address` has been keyless since Crypto Shield Mobile, so charging for it would REMOVE a
+free feature rather than add a paid one. TON *token* checks are the one real gap and they are a
+BUILD, not a paywall -- only `/v1/ton-address` exists.
+
+**THE VALUE IS A SIGNAL, NOT REVENUE, AND THE SIGNAL IS UNINTERPRETABLE TODAY.** Stars reach a buyer
+the other three rails structurally cannot -- an anonymous Telegram user with no account, card or
+wallet -- and a payment measures value where opens and returns measure interest. But the six
+discovery routes have not run and `tools/source_arrivals.py` has never been run against the
+`tg-miniapp` keys, so this would be optimising a funnel nobody has measured. **The gate is that
+measurement, not a date.**
+
+**THE CONSTRAINT WORTH KNOWING EVEN THOUGH WE ARE BUILDING NOTHING: Stars are the ONLY compliant way
+to charge a consumer inside a Telegram Mini App.** Telegram requires digital goods sold in Mini Apps
+to be paid in Stars, because that is how it satisfies Apple's and Google's IAP rules. **Wiring
+"upgrade" from inside the Mini App to Stripe, x402 or the developers page for a digital good is the
+route that gets a bot restricted** -- and it is exactly what a future session would do, reasonably,
+because all three rails already exist one link away. UNVERIFIED from the container
+(`core.telegram.org` is egress-blocked); the check is one tab,
+<https://core.telegram.org/bots/payments-stars>, read BEFORE any payment code.
+
+**IF IT IS EVER BUILT, ONE PRINCIPLE DECIDES THE SHAPE: Stars pay vendor bills, they never tax the
+free tier.** Never a cap on `/v1/link-check` or `/v1/ton-address`. The honest candidate is
+`/v1/scan-url` -- VirusTotal, a real per-call bill, already $0.05 on the PAYG rail. Self-limiting by
+construction: it can only charge for things that cost money, so it cannot drift into taxing the thing
+the app is for.
+
+**The expensive prerequisite is already built**, which is worth knowing before anyone re-scopes this
+as large: `relayshield_watchlist.py` verifies Telegram's `initData` HMAC and derives the user id as
+`HMAC-SHA256(pepper, telegram_user_id)`. A verified non-spoofable per-user identity is the hard half
+and it is live.
+
+## THE MINI APP IS `t.me/relayshield_bot/idcheck`. THE MENU BUTTON STAYS WITH TI MONITORING.
+
+Settled 2026-09-10, after `/myapps` returned **"You currently have no web apps."**
+
+Registered as title `RelayShield IDCheck`, short name **`idcheck`**. Every planned deep link reads
+`t.me/relayshield_bot/idcheck?startapp=<source>` -- corrected in
+`miniapp_discovery_and_stripe_choice.md` §2, item 1 route (4), and the `TOP_15_2026-09-09.md`
+snapshot. Nothing still says `/app`.
+
+**`@relayshield_bot`'s menu button belongs to the TI monitoring product and KEEPS the prominent
+control.** Andrew's instruction, and it is a decision rather than a deferred step: `/setmenubutton`
+is not part of this launch and is not a later one. The Mini App does not need it -- the direct link
+works on its own and item 1 already ranks the menu button fifth of six.
 
 ## ENVIRONMENT — what this container can and cannot do
 
@@ -1250,7 +1324,8 @@ URL as a Mini App.** It exists only after `/newapp` in @BotFather, which is what
 in the repo and could not be** -- it is a conversation with a bot, not a file -- and its absence from
 the Mini App v1 work was a real gap. `miniapp_launch_checklist.md` now carries it, with the short
 name pinned to `app` because `miniapp_discovery_and_stripe_choice.md` and item 1 already assume
-`t.me/<bot>/app` in every planned link.
+`t.me/<bot>/app` in every planned link. **SUPERSEDED 2026-09-10: the registered short name is
+`idcheck`, and every planned link now reads `t.me/relayshield_bot/idcheck?startapp=<source>`.**
 
 **The likely third failure, flagged before it fires:** `wrangler.miniapp.toml` uses the zone-route
 form, like blog/badge/partners/pricing/support. **A zone route attaches to a hostname, it does not
@@ -1476,7 +1551,7 @@ its watchlist are built and live. The Bundle D tooling is finished and its guard
    (2) Mini App announcement channels -- `@trendingapps` 3.9M, `@web3telegrambotx` 72,742,
        `@findminiapp` 56,380, `@onclicka_tma_en` 33,723, `@telegtapps` 9,671;
    (3) Mini App directories, tApps Center and family;
-   (4) attributed deep links `t.me/<bot>/app?startapp=<source>`, keys registered FIRST;
+   (4) attributed deep links `t.me/relayshield_bot/idcheck?startapp=<source>`, keys registered FIRST;
    (5) the bot's menu button, cheap rather than high-reach;
    (6) TON catalogues, only if TON scans ship.
 

@@ -223,6 +223,7 @@ const PAGE = `<!doctype html>
   </section>
 
   <footer>
+    <button class="ghost hidden" id="pin">Add to home screen</button>
     <a id="botlink" href="__BOT__">Monitor my email, phone and wallets</a>
     <a id="more" href="__DEVELOPERS__" target="_blank" rel="noopener">Run this check from your own bot or agent</a>
   </footer>
@@ -389,6 +390,45 @@ for (const id of ["cta-link", "botlink"]) {
       tg.openTelegramLink(el.href);
     }
   });
+}
+
+/* ---- Getting back in ------------------------------------------------
+ * A DIRECT-LINK MINI APP LEAVES NO WAY BACK, and the founder hit this on
+ * 2026-09-10: t.me/<bot>/<app> opens the app WITHOUT creating a bot chat, so
+ * there is nothing in the chat list to pin and nothing in Telegram's Apps tab
+ * for a brand-new app nobody has used. He could not find his own Mini App.
+ *
+ * That is the retention hole underneath everything in miniapp_stickiness_plan.md:
+ * the watchlist, the history and the digest all assume the user can RETURN, and
+ * an arrival from an announcement channel had no route to.
+ *
+ * Two routes now exist. The bot CTA creates a real chat (?start= triggers the
+ * bot's welcome), which is pinnable. And this puts an icon on the device home
+ * screen, which is Telegram's own answer to exactly this.
+ *
+ * FEATURE-DETECTED AND SILENT WHEN ABSENT. addToHomeScreen and
+ * checkHomeScreenStatus arrived in a later Bot API than some installed clients
+ * run, and this page loads the unversioned SDK, so the method may simply not be
+ * there. A button that does nothing is worse than no button, so it stays hidden
+ * unless the method exists AND the app is not already installed.
+ */
+if (tg && typeof tg.addToHomeScreen === "function") {
+  const showPin = () => {
+    $("pin").classList.remove("hidden");
+    $("pin").addEventListener("click", () => {
+      try { tg.addToHomeScreen(); } catch (e) { /* client refused; nothing to do */ }
+    });
+  };
+  if (typeof tg.checkHomeScreenStatus === "function") {
+    try {
+      // 'added' means it is already on the home screen, so offering again is
+      // noise. Anything else -- including 'unknown' -- is worth offering, since
+      // the cost of a redundant prompt is far lower than no route back at all.
+      tg.checkHomeScreenStatus((status) => { if (status !== "added") showPin(); });
+    } catch (e) { showPin(); }
+  } else {
+    showPin();
+  }
 }
 
 $("go").addEventListener("click", run);

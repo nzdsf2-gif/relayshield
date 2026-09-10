@@ -179,6 +179,35 @@ class TestBotCallToAction(unittest.TestCase):
                       "the href must stay real so the link works without the SDK")
 
 
+class TestGettingBackIn(unittest.TestCase):
+    """A direct-link Mini App leaves no way back. The founder could not find his
+    own app on 2026-09-10: t.me/<bot>/<app> opens without creating a bot chat, so
+    there was nothing to pin and nothing in the Apps tab. Every return mechanic in
+    the stickiness plan assumes the user can get back."""
+
+    def test_the_home_screen_offer_is_feature_detected(self):
+        src = _worker()
+        self.assertIn("addToHomeScreen", src)
+        self.assertIn('typeof tg.addToHomeScreen === "function"', src,
+                      "an unconditional call breaks on clients without the method")
+
+    def test_it_starts_hidden(self):
+        src = _worker()
+        self.assertIn('class="ghost hidden" id="pin"', src,
+                      "a button that does nothing is worse than no button")
+
+    def test_it_is_not_offered_when_already_added(self):
+        src = _worker()
+        self.assertIn("checkHomeScreenStatus", src)
+        self.assertIn('status !== "added"', src)
+
+    def test_the_call_cannot_throw_into_the_page(self):
+        src = _worker()
+        i = src.index("tg.addToHomeScreen()")
+        self.assertIn("try", src[max(0, i - 120):i],
+                      "a refusing client must not take the page down with it")
+
+
 class TestHeaders(unittest.TestCase):
     def test_telegram_can_frame_it(self):
         """Telegram renders a Mini App in an iframe. A DENY here is a blank app,

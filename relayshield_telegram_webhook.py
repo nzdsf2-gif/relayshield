@@ -2223,6 +2223,16 @@ _BOT_COMMANDS_FREE = [
 
 _BOT_COMMANDS_BASE = [
     ("quickstart", "Three things you can do right now"),
+    # Added 2026-09-10, and it belongs in BASE rather than any tier because the
+    # Mini App is KEYLESS: every user, on every plan and none, can use it.
+    #
+    # Registering it here is not optional decoration. TGWA-1 recorded that
+    # Telegram's native "/" menu is populated ONLY by setMyCommands via
+    # commands_for_tier, so a handler branch with no entry here works when typed
+    # and is invisible to everyone who does not already know it exists -- which,
+    # for a command whose whole purpose is being found, is the same as not
+    # shipping it.
+    ("app", "Open RelayShield IDCheck - scan a link or wallet address"),
     ("breach", "Breach monitoring status"),
     # Merged 2026-08-11, all on one test: would a real user fail to tell these
     # apart? /sessions into /sweep (sweep's own description already claimed

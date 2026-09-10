@@ -9,6 +9,7 @@ import ast
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 import types
@@ -177,6 +178,41 @@ class TestBotCallToAction(unittest.TestCase):
                       "asking them to open Telegram, from inside Telegram")
         self.assertIn('href="__BOT__"', src,
                       "the href must stay real so the link works without the SDK")
+
+
+class TestTheWorkerActuallyParses(unittest.TestCase):
+    """NOTHING IN THIS SUITE PARSED THE WORKER UNTIL 2026-09-10.
+
+    A code comment containing a BACKTICK was added inside the `const PAGE = ` ... ``
+    template literal. A backtick terminates a template literal, so the file was
+    no longer valid JavaScript -- and every check here passed anyway, because
+    they all read the file as TEXT. build_miniapp.py --check passed too. The
+    deploy would have failed at wrangler, which is late, red, and reads like a
+    Cloudflare problem rather than a stray character.
+
+    `node --check` is one command and catches it in a second, so it belongs
+    beside the checks that cannot.
+    """
+
+    def test_worker_is_valid_javascript(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not available")
+        out = subprocess.run([node, "--check", str(WORKER)],
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.returncode, 0,
+                         f"cloudflare_worker_miniapp.js is not valid JS:\n{out.stderr}")
+
+    def test_no_stray_backtick_inside_the_page_template(self):
+        # The specific trap, named. An escaped \` is fine and the widget embed
+        # relies on it; a bare one closes the template early.
+        src = _worker()
+        page = src.split("const PAGE = `", 1)[1]
+        body = page.rsplit("`;", 1)[0]
+        stray = [i for i, ch in enumerate(body)
+                 if ch == "`" and (i == 0 or body[i - 1] != "\\")]
+        self.assertEqual(stray, [],
+                         "a bare backtick inside the PAGE template ends it early")
 
 
 class TestGettingBackIn(unittest.TestCase):

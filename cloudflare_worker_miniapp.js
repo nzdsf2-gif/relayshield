@@ -236,7 +236,17 @@ if (tg) { tg.ready(); tg.expand(); }
 
 const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
 const SOURCE = "__SOURCE__";
-const source = /^[a-z0-9-]{1,40}$/.test(startParam) ? startParam : SOURCE;
+// A web_app BUTTON CARRIES NO start_param. Telegram sets initDataUnsafe.start_param
+// only for direct links (t.me/<bot>/<app>?startapp=...). When the Mini App is
+// launched from an inline web_app button in the bot chat there is no such field,
+// so a bot-launched session would have been indistinguishable from a bare
+// arrival. The bot passes ?s= on the button URL instead, and it is validated
+// against exactly the same allowlist -- an unregistered key is dropped rather
+// than forwarded, because a key that logs unmatched: looks like attribution
+// and is none.
+const urlSource = new URLSearchParams(location.search).get("s") || "";
+const raw = startParam || urlSource;
+const source = /^[a-z0-9-]{1,40}$/.test(raw) ? raw : SOURCE;
 const API = "__API__";
 document.getElementById("more").href = "__DEVELOPERS__?source=" + encodeURIComponent(source);
 

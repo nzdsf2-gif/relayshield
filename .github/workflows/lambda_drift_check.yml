@@ -142,6 +142,43 @@ jobs:
             # recover_live_handler.yml onto
             # claude/recovered-live-relayshield-developer-signup.
             ["relayshield_developer_signup.py"]="relayshield-developer-signup"
+            # Added 2026-09-09, and this one is the OTHER half of the rule the
+            # entries above keep restating. relayshield_oauth_watchlist_monitor.py
+            # HAS a deploy path -- it is in deploy_lambdas.yml's paths: trigger,
+            # its manual-dispatch list and its LAMBDA_MAP, and in
+            # iam_github_deploy_invoke.json -- and it was in no drift check at
+            # all. So the question "has anyone hand-deployed over it" has never
+            # been asked of this function, and a deploy path does not answer it:
+            # the telegram, whatsapp and discord handlers are all mapped in the
+            # deployer AND watched here, deliberately, because "having a deploy
+            # path is not the same as never being hand-deployed again".
+            #
+            # It runs the OAuth watchlist monitor, so a hand-deployed change in
+            # it would be a change to what gets watched, which is the quiet kind:
+            # nothing errors, the monitor just covers something different from
+            # what main says it covers.
+            #
+            # The name is corroborated rather than assumed: this exact ARN is in
+            # iam_github_deploy_invoke.json, which was applied against AWS by
+            # hand, and deploy_lambdas.yml has been calling update-function-code
+            # on it. An UNREADABLE result here would still redden the run, which
+            # is the check on that.
+            ["relayshield_oauth_watchlist_monitor.py"]="relayshield-oauth-watchlist-monitor"
+            # Added 2026-09-09. The inverse case, and it is watched here FIRST
+            # for the reason every entry above spells out. tools/check_deploy_invoke_policy.py
+            # prints "granted but not in LAMBDA_MAP: relayshield-mpp-settlement"
+            # on every run, and Top-15 item 4 is to close that. It is not closed
+            # here, on purpose: this function was created on the Mac by
+            # tools/create_mpp_settlement_lambda.sh and nothing has ever compared
+            # its live package against main, so mapping it in the deployer now
+            # would be mapping a function whose drift is unmeasured. That is the
+            # 2026-08-17 order run backwards.
+            #
+            # Watch it, read the first diff, and only then map it. A clean diff
+            # makes item 4 a one-line change; a dirty one makes it a recovery,
+            # and finding that out from a red check costs nothing while finding
+            # it out from a deploy costs the live code.
+            ["relayshield_mpp_settlement.py"]="relayshield-mpp-settlement"
           )
 
           DRIFTED=""

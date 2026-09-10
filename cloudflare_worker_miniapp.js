@@ -335,17 +335,32 @@ async function run() {
     level === "low"
       ? "This means nothing known against it, which is not the same as safe."
       : level === "unknown"
-        ? "No verdict was reached. Treat that as unknown, not as clear."
+        ? "Checked against our criminal-channel indicator corpus, Google Safe Browsing and domain age. None of them knows this one. That is an absence of evidence, not proof it is safe."
         : "Based on indicators seen in criminal channels and public feeds.";
 
   // The offer is made AFTER a result, because that is when it is relevant, and
   // the wording follows the finding. Pitching monitoring to somebody who has
   // just been told "nothing known against it" in the same words used for a
   // confirmed scam is how a real product starts reading as an advert.
+  // COPY CORRECTED 2026-09-10 after Andrew asked "what credential do we use to
+  // derive verdict from a breached account?" -- the honest answer is NONE. The
+  // first draft said "attacks like this start from a breached account", which
+  // asserts a causal story this check never established. A link check reads a
+  // URL against three sources and knows nothing whatever about the reader.
+  // Claiming otherwise in a product that refuses to say "safe" on an absence of
+  // evidence is the same failure pointed the other way.
+  //
+  // "unknown" gets its OWN line and it is the most important one, because it is
+  // the MOST COMMON outcome. _link_check_level returns "unknown" for anything
+  // not in the IOC corpus, not on Safe Browsing and older than 30 days, which
+  // is every ordinary URL. Rendering that as a dead end is what makes the app
+  // feel like it failed; naming what was checked turns it into an answer.
   $("cta-line").textContent =
     level === "critical" || level === "high"
-      ? "Attacks like this start from a breached account. RelayShield watches your email, phone and wallets and tells you the moment one turns up."
-      : "RelayShield can watch your email, phone and wallets for breaches, SIM swaps and stolen sessions.";
+      ? "Flagged. If a link like this reached you, it is worth knowing whether your own email or phone is already exposed."
+      : level === "unknown"
+        ? "Not in any source we check. That is not the same as safe, and it says nothing about you. Checking your own email is a separate question with a definite answer."
+        : "RelayShield can watch your email, phone and wallets for breaches, SIM swaps and stolen sessions.";
   $("cta").classList.remove("hidden");
 
   $("card").classList.add("hidden");

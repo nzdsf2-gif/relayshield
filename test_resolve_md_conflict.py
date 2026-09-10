@@ -79,6 +79,48 @@ class TestDuplicateHeadings(unittest.TestCase):
         self.assertEqual(r.duplicate_headings(L("not # a heading\n#no space\n")), [])
 
 
+class TestStrandedHeadings(unittest.TestCase):
+    """The first version of this removed EIGHT headings on the real file,
+    including `# CLAUDE.md` itself. Both conditions below are why it does not."""
+
+    def test_removes_a_duplicated_empty_heading(self):
+        out, removed = r.strip_empty_headings(L(
+            "## SAME\n\n## OTHER\n\nbody\n\n## SAME\n\nreal content\n"))
+        self.assertEqual(len(removed), 1)
+        self.assertIn("real content", "".join(out))
+        self.assertEqual("".join(out).count("## SAME"), 1)
+
+    def test_keeps_a_parent_heading_followed_by_a_DEEPER_one(self):
+        # `# CLAUDE.md` followed by `## HOW TO ...` is correct structure, and
+        # deleting the document's title is what the first version did.
+        src = "# TITLE\n\n## TITLE\n\nbody\n"
+        out, removed = r.strip_empty_headings(L(src))
+        self.assertEqual(removed, [], "a heading owning a deeper subsection is not stranded")
+        self.assertIn("# TITLE", "".join(out))
+
+    def test_keeps_a_UNIQUE_empty_heading(self):
+        # `## WHERE 2026-09-05 LEFT THINGS` has always been empty and has
+        # nothing to do with any merge. Not this tool's business.
+        src = "## WHERE 2026-09-05 LEFT THINGS\n\n## SOMETHING ELSE\n\nbody\n"
+        out, removed = r.strip_empty_headings(L(src))
+        self.assertEqual(removed, [])
+        self.assertIn("WHERE 2026-09-05 LEFT THINGS", "".join(out))
+
+    def test_removes_a_stranded_heading_differing_only_by_date(self):
+        src = ("### THE TOP 15, REGENERATED 2026-09-08\n\n"
+               "### THE TOP 15, REGENERATED 2026-09-09\n\nitem\n")
+        out, removed = r.strip_empty_headings(L(src))
+        self.assertEqual(len(removed), 1)
+        self.assertIn("2026-09-08", removed[0][1])
+        self.assertIn("2026-09-09", "".join(out))
+        self.assertNotIn("2026-09-08", "".join(out))
+
+    def test_never_removes_a_heading_that_owns_text(self):
+        src = "## A\n\nreal body\n\n## A\n\nanother body\n"
+        out, removed = r.strip_empty_headings(L(src))
+        self.assertEqual(removed, [], "both own content; neither is stranded")
+
+
 class TestCli(unittest.TestCase):
     def _run(self, text, *args):
         import tempfile

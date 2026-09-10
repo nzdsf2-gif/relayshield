@@ -102,6 +102,53 @@ class TestRendering(unittest.TestCase):
         self.assertIn("Treat that as unknown, not as clear.", _worker())
 
 
+class TestBotCallToAction(unittest.TestCase):
+    """The bot link. `BOT` was declared and never used until 2026-09-10, so the
+    only call to action in the app was the DEVELOPER page -- an API pitched to a
+    consumer who had just been shown a flagged scam. The stickiness plan's own
+    mechanism depends on this path existing, so it is pinned rather than trusted."""
+
+    def test_the_bot_constant_is_actually_used(self):
+        src = _worker()
+        self.assertIn("__BOT__", src, "the page must reference the bot placeholder")
+        self.assertIn('.replaceAll("__BOT__", BOT)', src,
+                      "the placeholder must be substituted, or the href ships literal")
+
+    def test_the_bot_link_carries_attribution(self):
+        src = _worker()
+        self.assertIn("start=SRC_miniapp", src,
+                      "an unattributed bot link makes Mini App conversions invisible")
+
+    def test_attribution_uses_the_scheme_the_bot_actually_parses(self):
+        # handle_start matches payload.upper().startswith("SRC_"). A bare label
+        # would fall through to the Coinbase charge-code branch instead.
+        bot_src = (ROOT / "relayshield_telegram_webhook.py").read_text(encoding="utf-8")
+        self.assertIn('startswith("SRC_")', bot_src,
+                      "the bot no longer parses SRC_; the Mini App link needs updating")
+
+    def test_the_offer_is_shown_only_after_a_result(self):
+        src = _worker()
+        self.assertIn('id="cta"', src)
+        self.assertIn('class="cta hidden"', src,
+                      "the offer must start hidden, not greet a first-time user")
+
+    def test_the_wording_differs_by_severity(self):
+        src = _worker()
+        i = src.index('$("cta-line").textContent')
+        block = src[i:i + 700]
+        self.assertIn("critical", block)
+        self.assertIn("high", block)
+        self.assertIn("breach", block.lower())
+
+    def test_it_opens_the_chat_rather_than_a_browser(self):
+        src = _worker()
+        self.assertIn("openTelegramLink", src,
+                      "a bare t.me anchor in a webview lands the user on a web page "
+                      "asking them to open Telegram, from inside Telegram")
+        self.assertIn('href="__BOT__"', src,
+                      "the href must stay real so the link works without the SDK")
+
+
 class TestHeaders(unittest.TestCase):
     def test_telegram_can_frame_it(self):
         """Telegram renders a Mini App in an iframe. A DENY here is a blank app,

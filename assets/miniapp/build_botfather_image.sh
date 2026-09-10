@@ -35,3 +35,19 @@ if (w, h) != (640, 360):
     raise SystemExit(f"WRONG SIZE: {w}x{h}, BotFather needs exactly 640x360")
 print("OK: exactly 640x360")
 PY
+
+# A JPEG COPY, AND IT IS NOT REDUNDANT. BotFather's photo step rejects a
+# DOCUMENT with "send photo", and Telegram Desktop decides photo-vs-document
+# partly from the file type: a PNG is the one it will most readily send
+# uncompressed as a file, which is exactly the rejected path. A baseline JPEG
+# with no alpha is unambiguously photo-shaped, so it removes the variable
+# instead of relying on the sender ticking the right box.
+#
+# Pillow is not in this container and is not worth adding to it. PyPI is
+# reachable, so a throwaway venv is the documented route.
+VENV="${TMPDIR:-/tmp}/rs-img-venv"
+if [ ! -x "$VENV/bin/python" ]; then
+  python3 -m venv "$VENV"
+  "$VENV/bin/pip" install -q --disable-pip-version-check Pillow
+fi
+"$VENV/bin/python" "$DIR/to_jpeg.py" "$DIR"

@@ -38,7 +38,19 @@
 
 const API_BASE = "https://api.relayshield.net";
 const DEVELOPERS = API_BASE + "/developers";
-const BOT = "https://t.me/relayshield_bot";
+// THE MONITORING BOT, and this constant was DECLARED AND NEVER USED until
+// 2026-09-10. The only call to action in the whole app was the developer link
+// in the footer, so a consumer who had just been shown a flagged scam was being
+// sold an API. The stickiness plan's own mechanism -- "the Mini App creates bot
+// subscribers rather than the bot's tiny audience carrying the Mini App" --
+// requires a path from here to there, and there was none.
+//
+// SRC_ is the bot's existing acquisition-source deep link
+// (relayshield_telegram_webhook.py, handle_start). It takes a free-form channel
+// label, logs it and stores it once on the user record, so unlike _SOURCE_BANNERS
+// this needs no key registered in advance and cannot log `unmatched:`. First
+// touch wins there, deliberately.
+const BOT = "https://t.me/relayshield_bot?start=SRC_miniapp";
 
 // Keys the Mini App may pass through as ?source=. An unknown start_param is
 // dropped rather than forwarded: an unregistered key logs `unmatched:` and
@@ -90,6 +102,10 @@ const PAGE = `<!doctype html>
     border: 1px solid transparent; border-radius: 10px;
   }
   nav button[aria-selected="true"] { color: var(--text); border-color: var(--accent); }
+  .cta { margin-top:14px; padding-top:12px; border-top:1px solid rgba(148,163,184,.25);
+         font-size:.9rem; color:var(--hint); line-height:1.45; }
+  .cta a { display:inline-block; margin-top:6px; color:var(--accent);
+           text-decoration:none; font-weight:600; }
   textarea {
     width: 100%; min-height: 80px; padding: 12px; resize: vertical;
     background: var(--card); color: var(--text);
@@ -150,8 +166,16 @@ const PAGE = `<!doctype html>
   .quiz-opt[data-state="right"] { border-color: var(--low); }
   .quiz-opt[data-state="wrong"] { border-color: var(--crit); }
   .score { color: var(--hint); font-size: .85rem; }
-  footer { margin-top: 24px; text-align: center; font-size: .8rem; }
+  /* Two links, stacked. Inline they ran together as one unreadable sentence:
+     "Monitor my email, phone and wallets Run this check from your own bot or
+     agent". The consumer link is first and carries the weight, because a
+     consumer who just checked a scam is the majority arrival here and the
+     developer page was the only call to action this app had until 2026-09-10. */
+  footer { margin-top: 24px; text-align: center; font-size: .8rem;
+           display: flex; flex-direction: column; gap: 10px; }
   footer a { color: var(--accent); text-decoration: none; }
+  footer a#botlink { font-weight: 600; }
+  footer a#more { color: var(--hint); }
   .hidden { display: none; }
   canvas { width: 100%; border-radius: 12px; margin-top: 12px; }
 </style>
@@ -179,6 +203,8 @@ const PAGE = `<!doctype html>
       <button class="ghost" id="watch">Tell me if this changes</button>
       <button class="ghost" id="share">Share this result</button>
       <canvas id="card" class="hidden" width="800" height="418"></canvas>
+      <p class="cta hidden" id="cta"><span id="cta-line"></span>
+        <a id="cta-link" href="__BOT__">Open the monitoring bot</a></p>
     </div>
 
     <h1 id="hist-h" class="hidden" style="margin-top:22px;font-size:.95rem">Recent checks</h1>
@@ -197,6 +223,8 @@ const PAGE = `<!doctype html>
   </section>
 
   <footer>
+    <button class="ghost hidden" id="pin">Add to home screen</button>
+    <a id="botlink" href="__BOT__">Monitor my email, phone and wallets</a>
     <a id="more" href="__DEVELOPERS__" target="_blank" rel="noopener">Run this check from your own bot or agent</a>
   </footer>
 
@@ -308,8 +336,33 @@ async function run() {
     level === "low"
       ? "This means nothing known against it, which is not the same as safe."
       : level === "unknown"
-        ? "No verdict was reached. Treat that as unknown, not as clear."
+        ? "Checked against our criminal-channel indicator corpus, Google Safe Browsing and domain age. None of them knows this one. That is an absence of evidence, not proof it is safe."
         : "Based on indicators seen in criminal channels and public feeds.";
+
+  // The offer is made AFTER a result, because that is when it is relevant, and
+  // the wording follows the finding. Pitching monitoring to somebody who has
+  // just been told "nothing known against it" in the same words used for a
+  // confirmed scam is how a real product starts reading as an advert.
+  // COPY CORRECTED 2026-09-10 after Andrew asked "what credential do we use to
+  // derive verdict from a breached account?" -- the honest answer is NONE. The
+  // first draft said "attacks like this start from a breached account", which
+  // asserts a causal story this check never established. A link check reads a
+  // URL against three sources and knows nothing whatever about the reader.
+  // Claiming otherwise in a product that refuses to say "safe" on an absence of
+  // evidence is the same failure pointed the other way.
+  //
+  // "unknown" gets its OWN line and it is the most important one, because it is
+  // the MOST COMMON outcome. _link_check_level returns "unknown" for anything
+  // not in the IOC corpus, not on Safe Browsing and older than 30 days, which
+  // is every ordinary URL. Rendering that as a dead end is what makes the app
+  // feel like it failed; naming what was checked turns it into an answer.
+  $("cta-line").textContent =
+    level === "critical" || level === "high"
+      ? "Flagged. If a link like this reached you, it is worth knowing whether your own email or phone is already exposed."
+      : level === "unknown"
+        ? "Not in any source we check. That is not the same as safe, and it says nothing about you. Checking your own email is a separate question with a definite answer."
+        : "RelayShield can watch your email, phone and wallets for breaches, SIM swaps and stolen sessions.";
+  $("cta").classList.remove("hidden");
 
   $("card").classList.add("hidden");
   $("watch").textContent = "Tell me if this changes";
@@ -320,6 +373,64 @@ async function run() {
   $("go").disabled = false;
   $("go").textContent = "Check it";
 }
+// A BARE t.me ANCHOR INSIDE A MINI APP OPENS A BROWSER, NOT THE CHAT. Telegram
+// runs this page in a webview, so an ordinary link navigates the webview or
+// hands the URL to the system browser, and the user lands on a t.me web page
+// asking them to open Telegram -- from inside Telegram. openTelegramLink is the
+// documented route: it closes the Mini App and opens the bot chat directly.
+//
+// The href stays real so the link still works if the SDK is missing, which is
+// also how it behaves when the page is opened in an ordinary browser.
+for (const id of ["cta-link", "botlink"]) {
+  const el = $(id);
+  if (!el) continue;
+  el.addEventListener("click", (e) => {
+    if (tg && typeof tg.openTelegramLink === "function") {
+      e.preventDefault();
+      tg.openTelegramLink(el.href);
+    }
+  });
+}
+
+/* ---- Getting back in ------------------------------------------------
+ * A DIRECT-LINK MINI APP LEAVES NO WAY BACK, and the founder hit this on
+ * 2026-09-10: t.me/<bot>/<app> opens the app WITHOUT creating a bot chat, so
+ * there is nothing in the chat list to pin and nothing in Telegram's Apps tab
+ * for a brand-new app nobody has used. He could not find his own Mini App.
+ *
+ * That is the retention hole underneath everything in miniapp_stickiness_plan.md:
+ * the watchlist, the history and the digest all assume the user can RETURN, and
+ * an arrival from an announcement channel had no route to.
+ *
+ * Two routes now exist. The bot CTA creates a real chat (?start= triggers the
+ * bot's welcome), which is pinnable. And this puts an icon on the device home
+ * screen, which is Telegram's own answer to exactly this.
+ *
+ * FEATURE-DETECTED AND SILENT WHEN ABSENT. addToHomeScreen and
+ * checkHomeScreenStatus arrived in a later Bot API than some installed clients
+ * run, and this page loads the unversioned SDK, so the method may simply not be
+ * there. A button that does nothing is worse than no button, so it stays hidden
+ * unless the method exists AND the app is not already installed.
+ */
+if (tg && typeof tg.addToHomeScreen === "function") {
+  const showPin = () => {
+    $("pin").classList.remove("hidden");
+    $("pin").addEventListener("click", () => {
+      try { tg.addToHomeScreen(); } catch (e) { /* client refused; nothing to do */ }
+    });
+  };
+  if (typeof tg.checkHomeScreenStatus === "function") {
+    try {
+      // 'added' means it is already on the home screen, so offering again is
+      // noise. Anything else -- including 'unknown' -- is worth offering, since
+      // the cost of a redundant prompt is far lower than no route back at all.
+      tg.checkHomeScreenStatus((status) => { if (status !== "added") showPin(); });
+    } catch (e) { showPin(); }
+  } else {
+    showPin();
+  }
+}
+
 $("go").addEventListener("click", run);
 $("in").addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") run();
@@ -520,6 +631,7 @@ export default {
     const source = sourceFor(url.searchParams.get("startapp") || "");
     const body = PAGE
       .replaceAll("__DEVELOPERS__", DEVELOPERS)
+      .replaceAll("__BOT__", BOT)
       .replaceAll("__API__", API_BASE)
       .replaceAll("__SOURCE__", source);
 

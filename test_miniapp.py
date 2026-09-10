@@ -99,7 +99,113 @@ class TestRendering(unittest.TestCase):
         self.assertNotRegex(heads.group(1).lower(), r'"\s*safe\s*"')
 
     def test_unknown_is_not_presented_as_clear(self):
-        self.assertIn("Treat that as unknown, not as clear.", _worker())
+        """The invariant, not the sentence.
+
+        This pinned the literal string "Treat that as unknown, not as clear."
+        and failed on 2026-09-10 when that copy was rewritten -- correctly, since
+        it guards a safety claim, but it could not tell a rewrite that KEPT the
+        meaning from one that lost it. `unknown` is the MOST COMMON outcome
+        (_link_check_level returns it for anything not in the corpus, not on Safe
+        Browsing and older than 30 days), so its wording is the wording most
+        users will read, and it must never imply the target is fine.
+        """
+        worker = _worker()
+        caveat = re.search(r'\$\("caveat"\)\.textContent\s*=(.*?);\n', worker, re.S)
+        self.assertIsNotNone(caveat, "the caveat assignment moved; re-point this test")
+        block = caveat.group(1)
+        i = block.find('level === "unknown"')
+        self.assertGreater(i, -1, "the unknown branch is gone")
+        branch = block[i:i + 400].lower()
+        self.assertTrue(
+            any(p in branch for p in ("not proof", "not the same as safe",
+                                      "absence of evidence", "not as clear")),
+            "the unknown branch must explicitly deny that this means safe")
+        # Every mention of "safe" must sit inside a NEGATION. A naive
+        # assertNotRegex on "is safe" fails on "not proof it is safe", which is
+        # the denial we want, and on "Google Safe Browsing", which is a product
+        # name -- so both are handled explicitly rather than by banning a word.
+        scan = branch.replace("safe browsing", "")
+        for m in re.finditer(r"\bsafe\b|\bfine\b|\bclear\b", scan):
+            before = scan[max(0, m.start() - 45):m.start()]
+            self.assertRegex(
+                before, r"\bnot\b|\bnever\b|\bno\b|\bisn't\b|\brather than\b",
+                f"'{m.group(0)}' appears without a negation near it: ...{before}")
+
+
+class TestBotCallToAction(unittest.TestCase):
+    """The bot link. `BOT` was declared and never used until 2026-09-10, so the
+    only call to action in the app was the DEVELOPER page -- an API pitched to a
+    consumer who had just been shown a flagged scam. The stickiness plan's own
+    mechanism depends on this path existing, so it is pinned rather than trusted."""
+
+    def test_the_bot_constant_is_actually_used(self):
+        src = _worker()
+        self.assertIn("__BOT__", src, "the page must reference the bot placeholder")
+        self.assertIn('.replaceAll("__BOT__", BOT)', src,
+                      "the placeholder must be substituted, or the href ships literal")
+
+    def test_the_bot_link_carries_attribution(self):
+        src = _worker()
+        self.assertIn("start=SRC_miniapp", src,
+                      "an unattributed bot link makes Mini App conversions invisible")
+
+    def test_attribution_uses_the_scheme_the_bot_actually_parses(self):
+        # handle_start matches payload.upper().startswith("SRC_"). A bare label
+        # would fall through to the Coinbase charge-code branch instead.
+        bot_src = (ROOT / "relayshield_telegram_webhook.py").read_text(encoding="utf-8")
+        self.assertIn('startswith("SRC_")', bot_src,
+                      "the bot no longer parses SRC_; the Mini App link needs updating")
+
+    def test_the_offer_is_shown_only_after_a_result(self):
+        src = _worker()
+        self.assertIn('id="cta"', src)
+        self.assertIn('class="cta hidden"', src,
+                      "the offer must start hidden, not greet a first-time user")
+
+    def test_the_wording_differs_by_severity(self):
+        src = _worker()
+        i = src.index('$("cta-line").textContent')
+        block = src[i:i + 700]
+        self.assertIn("critical", block)
+        self.assertIn("high", block)
+        self.assertIn("breach", block.lower())
+
+    def test_it_opens_the_chat_rather_than_a_browser(self):
+        src = _worker()
+        self.assertIn("openTelegramLink", src,
+                      "a bare t.me anchor in a webview lands the user on a web page "
+                      "asking them to open Telegram, from inside Telegram")
+        self.assertIn('href="__BOT__"', src,
+                      "the href must stay real so the link works without the SDK")
+
+
+class TestGettingBackIn(unittest.TestCase):
+    """A direct-link Mini App leaves no way back. The founder could not find his
+    own app on 2026-09-10: t.me/<bot>/<app> opens without creating a bot chat, so
+    there was nothing to pin and nothing in the Apps tab. Every return mechanic in
+    the stickiness plan assumes the user can get back."""
+
+    def test_the_home_screen_offer_is_feature_detected(self):
+        src = _worker()
+        self.assertIn("addToHomeScreen", src)
+        self.assertIn('typeof tg.addToHomeScreen === "function"', src,
+                      "an unconditional call breaks on clients without the method")
+
+    def test_it_starts_hidden(self):
+        src = _worker()
+        self.assertIn('class="ghost hidden" id="pin"', src,
+                      "a button that does nothing is worse than no button")
+
+    def test_it_is_not_offered_when_already_added(self):
+        src = _worker()
+        self.assertIn("checkHomeScreenStatus", src)
+        self.assertIn('status !== "added"', src)
+
+    def test_the_call_cannot_throw_into_the_page(self):
+        src = _worker()
+        i = src.index("tg.addToHomeScreen()")
+        self.assertIn("try", src[max(0, i - 120):i],
+                      "a refusing client must not take the page down with it")
 
 
 class TestHeaders(unittest.TestCase):

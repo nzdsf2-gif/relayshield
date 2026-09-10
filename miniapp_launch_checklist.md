@@ -154,68 +154,60 @@ app**, and:
 I wrote a registration procedure for a surface whose contents I had never listed. The corrected
 procedure reads before it writes, and it is two steps, not one.
 
-#### 4a -- READ. ANDREW TYPES THIS IN TELEGRAM, to @BotFather
+#### 4a -- DONE 2026-09-10. The bot has NO web apps, and one of my two warnings was wrong.
 
-Not a shell block. This is a message sent to @BotFather in the Telegram app. **It only lists things.
-It changes nothing.**
+    /myapps  ->  "You currently have no web apps."
+    /mybots  ->  "@relayshield_bot"
 
-```text
-/myapps
-```
+**So the short-name collision I warned about did not exist.** `app` was free all along; I described a
+hazard I had still not looked up, which is the same defect the warning was about.
 
-This returns the web apps already registered against your bots. **Send back what it lists for
-`@relayshield_bot`** -- the short names in particular. Two things get decided from that output and
-neither can be decided without it: which short name is free, and what the TI monitoring app is
-called so the new one is clearly distinct from it.
+**The destructive half was real, and the mechanism is the MENU, not a registered app.**
+`@relayshield_bot` runs the TI monitoring product through its menu button, and Andrew's instruction
+is that **the menu keeps the prominent control**. `/setmenubutton` replaces what is there, so the
+step would have taken it down. Right warning, wrong evidence -- and only the listing could say which.
 
-While you are there, the menu button's current target is worth knowing too. `/mybots` ->
-`@relayshield_bot` -> *Bot Settings* -> *Menu Button* shows it without changing it.
+#### 4b -- APPROVED. Yes, write it with these values.
 
-#### 4b -- WRITE. Only after 4a's output has been read
+Nothing collides, so this is clear to run.
 
 ```text
 /newapp
 ```
 
-BotFather then asks, in this order:
-
-1. **Which bot** -- `@relayshield_bot`.
-2. **Title** -- `RelayShield Check`. Distinct from the TI monitoring app in the app list.
+1. **Which bot** -- `@relayshield_bot`
+2. **Title** -- `RelayShield IDCheck`
 3. **Short description** -- `Check a link or a wallet address before you trust it.`
 4. **Photo** -- 640x360. Required; it cannot be skipped.
 5. **GIF** -- optional. Reply `/empty`.
 6. **Web App URL** -- `https://app.relayshield.net`
-7. **Short name** -- **`linkcheck`**, unless 4a shows it taken.
+7. **Short name** -- `idcheck`
 
-**Why `linkcheck` and not `app`.** It describes what the thing does, it is unlikely to collide with
-anything a TI monitoring product would be called, and it reads correctly in the URL it produces:
-`t.me/relayshield_bot/linkcheck`. **It is a proposal, not a decision** -- 4a's output is what
-settles it, and if you prefer something else, say so and everything downstream is updated to match
-rather than the other way round.
+Giving `t.me/relayshield_bot/idcheck`.
 
-**THE ONE THING THAT MUST BE UPDATED IF THE SHORT NAME CHANGES.** `miniapp_discovery_and_stripe_choice.md`
-and CLAUDE.md item 1 both write the deep links as `t.me/<bot>/app?startapp=<source>`. That `app` was
-written when nobody had checked what the bot already had. **Whatever 4b actually registers is the
-name those links must carry**, and they are the links that go to `@trendingapps` and the
-directories -- each of which gives one first impression. Tell me the final short name and I will
-correct every planned link in one commit.
+**One note, not an objection, and the decision stands either way.** "IDCheck" reads slightly toward
+IDENTITY verification, while the app checks links and wallet addresses. That is a small expectation
+gap rather than a wrong name, it is short and brandable, and RelayShield does sell identity and
+breach checks, so it is defensible. **Say so before any link ships if you want to change it** -- the
+short name is in every published deep link and each announcement channel gives one first impression,
+so it is cheap to change today and expensive next week.
 
-#### 4c -- THE MENU BUTTON: DO NOT TOUCH IT YET
+**CLAUDE ALREADY DID THIS:** every planned deep link now reads
+`t.me/relayshield_bot/idcheck?startapp=<source>` -- in `miniapp_discovery_and_stripe_choice.md` §2,
+CLAUDE.md item 1 and route (4), and the `TOP_15_2026-09-09.md` snapshot. Nothing still says `/app`.
 
-`/setmenubutton` is **not** part of this launch. It replaces what is there, the TI monitoring app may
-be using it, and **the Mini App does not need it**: `t.me/relayshield_bot/<short_name>` is a direct
-link that works on its own, and item 1 ranks the menu button fifth of six discovery routes anyway --
-cheap rather than high-reach.
+#### 4c -- THE MENU BUTTON STAYS WITH TI MONITORING. Settled, not deferred.
 
-Decide it separately, once 4a has said what the button currently does. If the answer turns out to be
-"nothing", it is free and worth taking. If it is the TI app, that is a product decision about which
-surface owns the bot's single most prominent control, and it is not a step in a launch checklist.
+Andrew's instruction: the existing menu is the TI monitoring product's and **it should keep the
+prominent control**. So `/setmenubutton` is not part of this launch and is not a later step either.
 
----
+The Mini App does not need it. `t.me/relayshield_bot/idcheck` is a direct link that works on its own,
+and item 1 already ranks the menu button fifth of six discovery routes -- cheap rather than
+high-reach. Nothing is lost by leaving it where it is.
 
 ## What "it works" looks like
 
-Open `https://t.me/relayshield_bot/<the short name 4b registered>` on a phone with Telegram
+Open `https://t.me/relayshield_bot/idcheck` on a phone with Telegram
 installed. The app opens inside Telegram, in Telegram's own colours (the Worker reads
 `--tg-theme-*`), with one input. Paste `0x0000000000000000000000000000000000000000` or any URL and a
 verdict comes back with no signup, no key and no wallet connect, because `/v1/link-check` and

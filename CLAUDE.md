@@ -174,6 +174,42 @@ resolvable in ten seconds. A conflict in a `.py`, a `.toml` or a workflow is not
 sessions edited the same code. **The block must say which it got**, because those are different
 situations with different answers and "there was a conflict" does not distinguish them.
 
+### A2. NEVER PUT `git add -A` IN A BLOCK HANDED TO ANDREW
+
+Added 2026-09-11, after the merge block failed on him again and the failure was mine.
+
+    No local changes to save
+    error: Your local changes to the following files would be overwritten by merge:
+      ansible-relayshield relayshield-snap
+    warning: unable to rmdir 'ansible-relayshield': Directory not empty
+    Merge with strategy ort failed.
+    ...
+    warning: adding embedded git repository: ansible-relayshield
+    Aborting commit due to empty commit message.
+
+**His clone holds two EMBEDDED GIT REPOSITORIES** -- `ansible-relayshield/` and
+`relayshield-snap/`, separate projects cloned inside `~/dev/relayshield`. Two things follow and
+the block assumed neither:
+
+- **`git stash --include-untracked` CANNOT stash a nested git repo.** It reports
+  "No local changes to save" and leaves them exactly where they are, so the stash line -- which
+  exists precisely to clear the tree before a merge -- silently did nothing.
+- **`git add -A` STAGES them as gitlinks**, which is what the "adding embedded git repository"
+  warnings are. That is my line doing it, in a block I wrote, to a repository that is not ours.
+
+Then the merge aborted, the resolver correctly reported nothing to do, the commit aborted with
+an empty message because no merge was in progress, and the push said "Everything up-to-date".
+**Every line after the first failure produced output that looked like a different problem.**
+
+**THE RULE: a block handed over stages only the files it means to.** `git add CLAUDE.md`, never
+`git add -A`. A wildcard add in someone else's working tree picks up whatever is lying in it --
+embedded repos, build output, a half-finished experiment -- and the damage is silent because
+`add` does not fail.
+
+**And the stash line is not a substitute for knowing what is in the tree.** It handles untracked
+FILES. It does not handle nested repositories, and this file has claimed since 2026-09-04 that
+it "clears the tree unconditionally". **That claim is wrong and is corrected here.**
+
 ### B. PREDICTING A FAILURE AND SHIPPING IT ANYWAY IS WORSE THAN NOT PREDICTING IT
 
 Step 3 of the Mini App checklist told him to check `app.relayshield.net`, and warned in writing that
@@ -310,6 +346,57 @@ snapshot. Nothing still says `/app`.
 control.** Andrew's instruction, and it is a decision rather than a deferred step: `/setmenubutton`
 is not part of this launch and is not a later one. The Mini App does not need it -- the direct link
 works on its own and item 1 already ranks the menu button fifth of six.
+
+## NEVER SHIP TELEGRAM COPY THAT RELIES ON LEGACY MARKDOWN ESCAPING. IT HAS NONE.
+
+**Asked for explicitly on 2026-09-11: "Write a note to memory not to merge and push future
+changes to the Tg bot that allow legacy markdown with no escape syntax. This problem has
+happened in multiple sessions."** He is right that it has recurred, and the reason it recurred
+is the part worth recording.
+
+**THE RULE. Telegram's legacy `Markdown` parse mode has NO ESCAPE SYNTAX.** A backslash before
+`_` or `*` is not consumed. It renders visibly, or Telegram links `@relayshield` as a mention
+and strands `_bot` beside it in a different colour, which is what the founder saw and called
+sloppy. There were ELEVEN in `relayshield_telegram_webhook.py` and one in
+`relayshield_forward_analysis.py`.
+
+**So a value containing `_` or `*` goes in a CODE SPAN**, which legacy Markdown treats as
+literal. Not a backslash. Never a backslash.
+
+**AND A CODE SPAN CANNOT LIVE INSIDE A BOLD RUN.** `*Label: ` + code + `*` does not nest.
+Close the bold first: `*Label:* ` then the code span. Three of these had shipped long before
+anyone was looking at the handle -- `*Company domain set: {domain}*`,
+`*LLMjacking risk detected for {domain}*`, `*Token Approvals - {short}*`.
+
+**WHY IT KEPT COMING BACK, AND THIS IS THE ACTUAL FINDING: A TEST WAS ENFORCING IT.**
+`test_relayshield_forward_analysis.py` carried `test_telegram_cards_name_the_bot_escaped`,
+asserting `src.count("@relayshield\\_bot") >= 3` -- it REQUIRED at least three escaped
+underscores, believing escaping was the fix. So the defect was not merely present, it was
+PINNED, and any correct fix would have been reverted by CI as a regression.
+
+This file had recorded the true cause on 2026-09-02 -- *"Telegram Markdown escaping never
+worked... Quickstart is HTML now; the forward note uses code spans"* -- and that knowledge
+fixed quickstart while a test in a different file held every other surface broken. **A lesson
+recorded in one file is not a lesson the next file learns.** Same finding as the
+`create-deployment` propagation race, which one script knew about and a script written four
+days later did not.
+
+**IT IS ENFORCED NOW, NOT REMEMBERED.** `test_telegram_markdown_escapes.py` fails on any
+backslash-escaped underscore in either file, on any code span nested in a bold run, and on an
+italic run opened across the handle. It skips comment lines, because prose describing the bug
+is not the bug. Both guards were proven by REINTRODUCING the defect and watching them fail.
+
+**Before any change to Telegram copy, run it:**
+
+    python3 test_telegram_markdown_escapes.py
+
+**And the standing preference, in order:** a code span for any value with `_` or `*`; HTML
+parse mode for anything with real structure (that is why Quickstart is HTML); plain prose if
+neither. **`parse_mode="Markdown"` plus a backslash is always wrong and there is no case where
+it is not.**
+
+**One constant, `BOT_HANDLE_MD`, for the bot's own handle.** This file already learned that
+lesson when `checkemail@` was written as `emailcheck@` twice in one message.
 
 ## ENVIRONMENT — what this container can and cannot do
 

@@ -673,7 +673,7 @@ def paste_hint(platform: str) -> str:
     return (
         "\U0001F4E8 *You do not need a command.*\n\n"
         "*Copy any suspicious message and paste it here*, or forward it to "
-        "@relayshield\\_bot. Works for a text, a link, or a message from "
+        "`@relayshield_bot`. Works for a text, a link, or a message from "
         "someone already in your contacts. Screenshots work too.\n\n"
         + EMAIL_HINT
     )

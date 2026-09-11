@@ -802,25 +802,64 @@ async function loadWatches() {
       ? " \u00b7 until " + new Date(data.slots_expire_at * 1000).toISOString().slice(0, 10)
       : "";
     meter.textContent = data.used + " of " + data.limit + " slots used" + until;
-    box.appendChild(meter);
-    /* Offered BEFORE the slots are full, not only at the wall. A paywall
-       discovered at the moment of refusal reads as a bait and switch even when
-       the free tier was generous, and this one is three slots. */
-    if (!data.slots_expire_at && data.used >= data.limit - 1) {
-      offerUpgrade({
-        message: "Watching more than " + data.limit + " things?",
+
+    /* THE UPGRADE IS VISIBLE AT EVERY SLOT COUNT, NOT ONLY NEAR THE WALL.
+       The previous condition was 'used >= limit - 1' with a comment above it
+       claiming the offer came BEFORE the slots were full. The comment and the
+       code disagreed: two of three IS nearly the wall, and a user with zero or
+       one watch never learned the paid tier existed at all.
+
+       That is the same defect as inline mode in a new place -- a capability
+       that is built, live, and pointed at by nothing. A paid tier nobody can
+       see is a paid tier nobody buys, and the people watching addresses their
+       money is actually in are exactly the ones for whom this is worth buying.
+
+       QUIET AT LOW COUNTS, PROMINENT AT THE WALL. An inline link next to the
+       meter is information; a card that dominates the screen before somebody
+       has watched anything is an advertisement, and it converts worse because
+       they have not felt the value yet. The big card still fires when the
+       slots are actually full, from add_watch's slots_full branch. */
+    if (!data.slots_expire_at) {
+      meter.appendChild(document.createTextNode(" \u00b7 "));
+      const more = document.createElement("button");
+      more.className = "linkish";
+      more.textContent = data.upgrade_stars + " Stars for " + data.upgrade_slots;
+      more.addEventListener("click", () => offerUpgrade({
+        message: "Watch up to " + data.upgrade_slots + " TON addresses for "
+               + data.upgrade_days + " days. Your free slots keep working "
+               + "exactly as they do now.",
         upgrade_stars: data.upgrade_stars, upgrade_slots: data.upgrade_slots,
         upgrade_days: data.upgrade_days,
-      });
+      }));
+      meter.appendChild(more);
     }
+    box.appendChild(meter);
   }
 
   if (!items.length) {
+    /* The empty state has to sell WATCHING, not apologise for being empty.
+       It used to say "Nothing watched yet" and return, so the tab that carries
+       the only paid product in the app said nothing about what it does or what
+       it costs to anyone who had not already used it. */
     const p = document.createElement("p");
     p.className = "empty";
-    p.textContent = "Nothing watched yet. Check something, then tap "
-      + "\u201cTell me if this changes\u201d.";
+    p.textContent = "Nothing watched yet. Check a TON address or a link, then "
+      + "tap \u201cTell me if this changes\u201d and we will message you here "
+      + "the moment it does.";
     box.appendChild(p);
+    if (data.limit && !data.slots_expire_at) {
+      const tiers = document.createElement("p");
+      tiers.className = "empty";
+      /* NEVER implies the paid alerts are better, faster or more complete.
+         They are identical. The only thing Stars buy is MORE slots, because a
+         slot is the only thing with a marginal cost -- a recurring TON Center
+         call, a DexScreener call and a corpus query, forever. Copy that hinted
+         otherwise would be taxing the free tier while claiming not to. */
+      tiers.textContent = data.limit + " free slots, alerted immediately and in "
+        + "full. " + data.upgrade_stars + " Stars raises it to "
+        + data.upgrade_slots + " for " + data.upgrade_days + " days.";
+      box.appendChild(tiers);
+    }
     return;
   }
   for (const w of items) {

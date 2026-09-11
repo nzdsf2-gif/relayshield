@@ -306,6 +306,14 @@ const PAGE = `<!doctype html>
       __PAID_SLOTS__ addresses for __SLOTS_DAYS__ days. Stars buy more slots and
       nothing else: the free alerts are identical.</p>
 
+    <!-- THE PRICE NEEDS SOMETHING TO PRESS. The tier line above named a price
+         with no tap target, because the only buy control was rendered from the
+         /v1/watchlist/list response beside the slot meter -- so a user whose
+         list call had not returned, or had failed, read what we charge and had
+         no way to pay it. Buying does not depend on the list: the invoice call
+         needs initData and nothing else. -->
+    <button class="ghost" id="watch-buy">Get __PAID_SLOTS__ addresses for __SLOTS_STARS__ Stars</button>
+
     <div id="watchlist"></div>
     <div id="upsell" class="upsell" hidden></div>
   </section>
@@ -862,6 +870,25 @@ async function buySlots(btn) {
   });
 }
 
+/* Filled in by loadWatches when the real numbers arrive. Empty means the static
+   fallbacks inside offerUpgrade are used, which is why they exist there. */
+const liveTiers = {};
+
+/* Wired at module load, NOT inside loadWatches, and that is the point: the buy
+   path must not depend on a call that can fail. Telegram's invoice needs the
+   signed initData and nothing else, so the only thing the list response adds
+   here is better numbers, and those already have static fallbacks. */
+const buyBtn = $("watch-buy");
+if (buyBtn) {
+  buyBtn.addEventListener("click", () => offerUpgrade({
+    message: "Watch up to " + (liveTiers.slots || __PAID_SLOTS__) + " TON "
+           + "addresses for " + (liveTiers.days || __SLOTS_DAYS__) + " days. "
+           + "Your free slots keep working exactly as they do now.",
+    upgrade_stars: liveTiers.stars, upgrade_slots: liveTiers.slots,
+    upgrade_days: liveTiers.days,
+  }));
+}
+
 async function loadWatches() {
   const box = $("watchlist");
   if (!uid) {
@@ -910,6 +937,12 @@ async function loadWatches() {
      already paid: continuing to sell a tier to its own buyer is the fastest
      way to make a paid product feel like an advertisement. */
   const tiersLine = $("watch-tiers");
+  if (data.upgrade_stars) {
+    liveTiers.stars = data.upgrade_stars;
+    liveTiers.slots = data.upgrade_slots;
+    liveTiers.days = data.upgrade_days;
+  }
+  if (buyBtn) buyBtn.hidden = Boolean(data.slots_expire_at);
   if (tiersLine && data.limit) {
     if (data.slots_expire_at) {
       tiersLine.textContent = data.limit + " watch slots, alerted immediately "

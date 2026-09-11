@@ -95,7 +95,8 @@ if (globalThis.window.__rsBoot !== true) {
   console.log("ok    boot heartbeat set");
 }
 
-for (const id of ["tab-check", "tab-watch", "tab-learn", "try-bad", "go", "watch", "share"]) {
+for (const id of ["tab-check", "tab-watch", "tab-learn", "try-bad", "go", "watch", "share",
+                  "watch-buy"]) {
   const fn = listeners[id] && listeners[id].click;
   if (!fn) { console.log("FAIL  no click listener registered: " + id); failed++; continue; }
   try { fn(); console.log("ok    " + id); }

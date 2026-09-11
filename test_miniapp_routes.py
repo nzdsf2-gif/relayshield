@@ -369,6 +369,19 @@ def served_module() -> str:
     return r.stdout
 
 
+def served_page() -> str:
+    """The whole HTML document a browser receives, with every __TOKEN__ already
+    substituted. Same rule as served_module: read the ARTEFACT, never the
+    source it was generated from."""
+    if not shutil.which("node"):
+        raise unittest.SkipTest("node is not installed")
+    r = subprocess.run(["node", str(ROOT / "tools" / "miniapp_render.mjs")],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise AssertionError("the Worker would not render a page: " + r.stderr)
+    return r.stdout
+
+
 def page_script(src: str = "") -> str:
     """Kept as the old name; it now returns what is SERVED, never the source."""
     return served_module()
@@ -733,20 +746,53 @@ class TestStarsAreVisibleInTheWatchTab(unittest.TestCase):
         self.assertIn("offerUpgrade", meter)
         self.assertIn("data.upgrade_stars", meter)
 
-    def test_the_empty_state_names_the_tiers(self):
-        empty = self.body[self.body.index("if (!items.length)"):]
-        empty = empty[:empty.index("for (const w of items)")]
-        self.assertIn("data.upgrade_stars", empty)
-        self.assertIn("data.upgrade_slots", empty)
-        self.assertIn("data.upgrade_days", empty)
-        self.assertIn("free slots", empty)
+    def test_the_tiers_are_named_without_a_network_call(self):
+        """THE DEFECT THIS REPLACES: every word of the pricing was built from
+        the /v1/watchlist/list response, so a user who was not verified, or
+        whose list call failed, saw no mention of a paid tier at all -- which
+        is indistinguishable from a product that has no paid tier. What we
+        charge is a fact about our own product and must not depend on a network
+        call succeeding, so it is STATIC markup now."""
+        page = served_page()
+        tiers = page[page.index('id="watch-tiers"'):]
+        tiers = re.sub(r"\s+", " ", tiers[:tiers.index("</p>")])
+        self.assertIn("Stars", tiers)
+        self.assertNotIn("data.", tiers, "the static line reads live data")
+        self.assertNotIn("__", tiers, "a placeholder reached the browser")
+        self.assertRegex(tiers, r"\d")
 
     def test_a_paying_user_is_never_shown_the_upgrade(self):
         """slots_expire_at is set only while an entitlement is live. Pitching an
         upgrade to somebody who already bought it is the clearest possible
-        signal that nothing is reading their account."""
-        for guard in re.findall(r"if \(([^)]*slots_expire_at[^)]*)\)", self.body):
-            self.assertIn("!data.slots_expire_at", guard)
+        signal that nothing is reading their account.
+
+        THE FIRST VERSION OF THIS TEST ASSERTED THE WRONG THING: it required
+        every guard naming slots_expire_at to be NEGATED, which is a proxy for
+        the rule rather than the rule. It then failed on a positive branch that
+        renders the PAID state -- correct code, caught by a test checking the
+        shape of the condition instead of what the branch does.
+
+        The invariant is about the BODY: nothing under a truthy
+        slots_expire_at may sell anything."""
+        for m in re.finditer(r"if \(data\.slots_expire_at\) \{", self.body):
+            depth, i = 0, m.end() - 1
+            while True:
+                if self.body[i] == "{":
+                    depth += 1
+                elif self.body[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            branch = self.body[m.end():i].lower()
+            for sell in ("upgrade", "stars", "offerupgrade", "raises it"):
+                self.assertNotIn(sell, branch,
+                                 f"a paying user is sold to: {sell}")
+
+        # And the offer itself still hangs off the negated guard.
+        meter = self.body[self.body.index("const meter ="):
+                          self.body.index("box.appendChild(meter)")]
+        self.assertIn("if (!data.slots_expire_at)", meter)
 
     def test_the_copy_never_implies_paid_alerts_are_better(self):
         """The only thing Stars buy is MORE SLOTS, because a slot is the only
@@ -781,6 +827,75 @@ class TestStarsAreVisibleInTheWatchTab(unittest.TestCase):
         up = up[:up.index("async function loadWatches")]
         for rail in ("stripe", "checkout", "x402", "/developers"):
             self.assertNotIn(rail, up.lower())
+
+
+class TestSlotNumbersAgreeWithTheServer(unittest.TestCase):
+    """The watch tab now names the price in STATIC markup, so the Worker holds
+    a second copy of four numbers whose authority is relayshield_watchlist.py.
+
+    Two files that must agree with nothing checking that they do is the shape
+    that produced run 134's red probe, four months of FD-8, and a rate card
+    that nearly shipped with four dimensions missing. Here the cost is worse
+    than a wrong banner: copy shown to a buyer that disagrees with what the
+    server will actually grant is a price we do not honour."""
+
+    def setUp(self):
+        self.py = (ROOT / "relayshield_watchlist.py").read_text()
+        self.page = served_page()
+
+    def server_value(self, name: str) -> str:
+        m = re.search(rf"^{name}\s*=\s*(\d+)", self.py, re.M)
+        self.assertIsNotNone(m, f"{name} is gone from relayshield_watchlist.py")
+        return m.group(1)
+
+    def test_the_served_tier_line_quotes_the_servers_own_numbers(self):
+        tiers = self.page[self.page.index('id="watch-tiers"'):]
+        tiers = tiers[:tiers.index("</p>")]
+        numbers = set(re.findall(r"\d+", tiers))
+        for const in ("FREE_WATCH_SLOTS", "PAID_WATCH_SLOTS",
+                      "SLOTS_PRICE_STARS", "SLOTS_DURATION_DAYS"):
+            self.assertIn(self.server_value(const), numbers,
+                          f"the watch tab does not quote {const}")
+
+    def test_no_stray_number_is_presented_as_a_price(self):
+        """A number in that line that the server does not recognise is a price
+        we invented, which is how the tier copy drifts from the entitlement."""
+        tiers = self.page[self.page.index('id="watch-tiers"'):]
+        tiers = tiers[:tiers.index("</p>")]
+        allowed = {self.server_value(c) for c in
+                   ("FREE_WATCH_SLOTS", "PAID_WATCH_SLOTS",
+                    "SLOTS_PRICE_STARS", "SLOTS_DURATION_DAYS")}
+        for n in re.findall(r"\d+", tiers):
+            self.assertIn(n, allowed, f"{n} in the tier line is not a server value")
+
+
+class TestAFailedListIsNotAnEmptyList(unittest.TestCase):
+    """They rendered identically, and "Nothing watched yet" over a watchlist
+    that might be full is the quiet-alarm shape with a user on the end of it:
+    it reads as "my watches are gone".
+
+    Same rule as the CORS preflight and the 404 probe -- a check that says
+    something is wrong owes the reader the evidence that says WHICH thing."""
+
+    def setUp(self):
+        w = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        i = w.index("async function loadWatches")
+        self.body = w[i:w.index("/* ---- Share card", i)]
+
+    def test_a_failed_response_returns_before_the_empty_state(self):
+        guard = self.body.index("if (!res || !res.ok)")
+        self.assertLess(guard, self.body.index("if (!items.length)"),
+                        "an unreachable list still falls through to the empty state")
+
+    def test_the_failure_names_what_happened(self):
+        block = self.body[self.body.index("if (!res || !res.ok)"):]
+        block = block[:block.index("const data =")]
+        self.assertIn("res.error", block, "the server's own reason is discarded")
+        self.assertIn("Could not", block)
+
+    def test_the_unverified_case_says_why(self):
+        block = self.body[:self.body.index("box.textContent = \"\";\n  const loading")]
+        self.assertIn("Telegram", block)
 
 
 class TestShareCardTeachesTheMechanic(unittest.TestCase):

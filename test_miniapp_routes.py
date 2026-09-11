@@ -396,6 +396,88 @@ class TestTheWorkerActuallyParses(unittest.TestCase):
             + "\n  ".join(offenders))
 
 
+class TestTheWorkerModuleActuallyRUNS(unittest.TestCase):
+    """IMPORTS the Worker and serves a request. The only check in this suite
+    that catches the whole family.
+
+    Three defects in two days, all syntactically perfect and all runtime dead: a
+    stray backtick inside the template literal, a constant declared in the
+    WORKER scope and read from the PAGE, and a constant read before the one it
+    depends on is initialised -- a temporal dead zone, which 500s every request
+    at Worker startup. node --check passes all three. Executing the module
+    catches all three, and it is four lines."""
+
+    JS_SERVE = 'const m = await import("__W__");\nconst res = await m.default.fetch(new Request("https://app.relayshield.net/"), {}, {});\nconst t = await res.text();\nif (!t.includes("<!doctype html>")) { console.error("no page"); process.exit(1); }\nif (t.includes("__BUILD__") || t.includes("__SOURCE__") || t.includes("__BOT__")) {\n  console.error("a placeholder was not substituted"); process.exit(1);\n}\nconsole.log("ok");\n'
+    JS_WIDGET = 'const m = await import("__W__");\nconst res = await m.default.fetch(\n  new Request("https://app.relayshield.net/relayshield-widget.js"), {}, {});\nconst t = await res.text();\nif (!res.headers.get("content-type").includes("javascript")) {\n  console.error("wrong content-type"); process.exit(1);\n}\nif (!t.includes("export async function check")) {\n  console.error("the widget does not export check"); process.exit(1);\n}\nconsole.log("ok");\n'
+    JS_BUILD = 'const m = await import("__W__");\nconst a = await (await m.default.fetch(new Request("https://x/"), {}, {})).text();\nconst b = await (await m.default.fetch(new Request("https://x/?startapp=tg-miniapp-blog"), {}, {})).text();\nconst ida = (a.match(/Build ([0-9a-f]{8})/) || [])[1];\nconst idb = (b.match(/Build ([0-9a-f]{8})/) || [])[1];\nif (!ida || ida !== idb) { console.error("build id missing or unstable"); process.exit(1); }\nconsole.log("ok");\n'
+
+    def _run_node(self, script):
+        if not shutil.which("node"):
+            self.skipTest("node is not installed")
+        worker = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        with tempfile.TemporaryDirectory() as d:
+            # .mjs so node treats it as a module whatever any package.json says.
+            copy = Path(d) / "w.mjs"
+            copy.write_text(worker)
+            runner = Path(d) / "run.mjs"
+            runner.write_text(script.replace("__W__", copy.as_uri()))
+            return subprocess.run(["node", str(runner)],
+                                  capture_output=True, text=True)
+
+    def test_it_loads_and_serves_a_page(self):
+        r = self._run_node(self.JS_SERVE)
+        self.assertEqual(r.returncode, 0, r.stderr or r.stdout)
+
+    def test_it_serves_the_widget_module_the_page_imports(self):
+        """A module whose import fails runs NOTHING, and the static HTML still
+        renders -- indistinguishable from a CSS bug or a stale cache."""
+        r = self._run_node(self.JS_WIDGET)
+        self.assertEqual(r.returncode, 0, r.stderr or r.stdout)
+
+    def test_the_build_id_is_present_and_stable(self):
+        """It exists to answer "am I looking at the new page", which has cost a
+        round trip more than once. An id that did not appear would be worse than
+        none: it would answer the question wrongly."""
+        r = self._run_node(self.JS_BUILD)
+        self.assertEqual(r.returncode, 0, r.stderr or r.stdout)
+
+
+class TestTheBootWatchdog(unittest.TestCase):
+    """The Mini App has no console on a phone, so a silent JS death is invisible
+    by construction: the static HTML renders, the buttons do nothing, and that
+    looks identical to a CSS bug, a stale cache, or a broken handler."""
+
+    def setUp(self):
+        self.w = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+
+    def test_the_watchdog_is_a_classic_script_above_the_module(self):
+        """A module that fails to parse, fails to IMPORT, or throws on its first
+        line never runs its own error handler, so the watchdog cannot live
+        inside it."""
+        classic = self.w.index("window.__rsBoot = false;")
+        module = self.w.index('<script type="module">')
+        self.assertLess(classic, module, "the watchdog is inside or below the module")
+        head = self.w[:classic]
+        self.assertIn("<script>", head)
+        self.assertNotIn('<script type="module">', head)
+
+    def test_the_module_checks_in_after_the_import(self):
+        boot = self.w.index("window.__rsBoot = true;")
+        imp = self.w.index('import { check } from "/relayshield-widget.js";')
+        self.assertGreater(boot, imp, "the heartbeat must follow the import")
+
+    def test_it_reports_rather_than_staying_silent(self):
+        self.assertIn('id="boot"', self.w)
+        self.assertIn("did not start", self.w)
+        self.assertIn("unhandledrejection", self.w)
+
+    def test_the_csp_allows_the_inline_watchdog(self):
+        """It is an inline classic script. A CSP without 'unsafe-inline' would
+        block the very thing that reports blocked scripts."""
+        csp = self.w[self.w.index("content-security-policy"):][:400]
+        self.assertIn("'unsafe-inline'", csp)
+
+
 class TestPageScopeIsSelfContained(unittest.TestCase):
     """THE BUG node --check CANNOT SEE, and it shipped once in this session.
 

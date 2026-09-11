@@ -396,14 +396,34 @@ class TestHelpCardsCarryTheHints(unittest.TestCase):
 
     def test_telegram_quick_start_card_has_both_hints(self):
         src = self._src("relayshield_telegram_webhook.py")
-        self.assertIn("Forward anything that looks off to @relayshield", src)
+        self.assertIn("Forward anything that looks off to", src)
         self.assertIn("Paste a screenshot of a suspicious text", src)
 
-    def test_telegram_cards_name_the_bot_escaped(self):
-        """All three Telegram surfaces name the handle, and every one of them
-        escapes the underscore. One unescaped occurrence is a 400 on that card."""
+    def test_telegram_cards_name_the_bot_in_a_code_span(self):
+        """REPLACES test_telegram_cards_name_the_bot_escaped, WHICH ENFORCED THE BUG.
+
+        That test asserted `src.count("@relayshield\\\\_bot") >= 3` -- it REQUIRED at
+        least three backslash-escaped underscores, on the belief that escaping
+        was the fix and an unescaped underscore was a 400.
+
+        Legacy Markdown has NO ESCAPE SYNTAX. The backslash is not consumed: it
+        either renders visibly, or Telegram links "@relayshield" as a mention and
+        strands "_bot" beside it in a different colour. The founder reported
+        exactly that on 2026-09-10 and called it sloppy.
+
+        CLAUDE.md recorded the cause on 2026-09-02 -- "Quickstart is HTML now;
+        the forward note uses code spans" -- and this test kept every OTHER
+        surface escaped, and would have reverted any fix. A lesson recorded in
+        one file is not a lesson the next file learns, and a test defending the
+        defect is worse than no test.
+
+        A code span is literal in legacy Markdown, so the underscore survives.
+        """
         src = self._src("relayshield_telegram_webhook.py")
-        self.assertGreaterEqual(src.count("@relayshield\\\\_bot"), 3)
+        self.assertGreaterEqual(src.count("`@relayshield_bot`"), 3,
+                                "the handle must be in a code span on every surface")
+        self.assertNotIn("@relayshield\\\\_bot", src,
+                         "backslash-escaping an underscore is never the fix here")
 
     # Asserted as CONCEPTS, not exact sentences. The first version pinned literal
     # copy, so every wording change broke it -- and one such break sat unnoticed

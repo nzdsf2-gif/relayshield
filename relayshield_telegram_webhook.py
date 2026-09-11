@@ -1386,9 +1386,9 @@ def msg_help(tier: str) -> str:
     if tier == TIER_FREE:
         return (
             "🛡️ *RelayShield Free — Commands*\n\n"
-            "📨 *Forward anything that looks off to @relayshield\\_bot* — a "
+            "📨 *Forward anything that looks off to `@relayshield_bot`* — a "
             "text, a link, or a message from someone in your contacts. Tap the "
-            "message, choose Forward, search *@relayshield\\_bot*. No command "
+            "message, choose Forward, search `@relayshield_bot`. No command "
             "needed.\n"
             "📸 *Paste a screenshot of a suspicious text* — just send the "
             "picture here.\n\n"
@@ -1416,9 +1416,9 @@ def msg_help(tier: str) -> str:
         # this text from one header to the next, so anything here belongs to no
         # category and shows only in the full list — which is what an
         # orientation line should do.
-        "📨 *Forward anything that looks off to @relayshield\\_bot* — a text, "
+        "📨 *Forward anything that looks off to `@relayshield_bot`* — a text, "
         "a link, or a message from someone in your contacts. Tap the message, "
-        "choose Forward, search *@relayshield\\_bot*. No command needed.\n"
+        "choose Forward, search `@relayshield_bot`. No command needed.\n"
         "📸 *Paste a screenshot of a suspicious text* — just send the picture "
         "here.\n"
         "• /quickstart — Three things you can do right now\n\n"
@@ -2122,13 +2122,13 @@ def msg_help_top(tier: str) -> str:
         # parse_mode="Markdown", where a lone _ opens an italic entity; unescaped,
         # @relayshield_bot leaves it unclosed, Telegram answers 400, and the whole
         # card fails to send.
-        "📨 *Forward anything that looks off to @relayshield\\_bot* — a text, "
+        "📨 *Forward anything that looks off to `@relayshield_bot`* — a text, "
         "a link, or a message from someone in your contacts. Tap the message, "
-        "choose Forward, then search *@relayshield\\_bot*. No command needed. "
+        "choose Forward, then search `@relayshield_bot`. No command needed. "
         "A hijacked account still shows up as your friend, so those are worth "
         "forwarding too",
         "📸 *Paste a screenshot of a suspicious text* — send the picture to "
-        "@relayshield\\_bot, no caption needed. Best for an SMS you cannot forward "
+        "`@relayshield_bot`, no caption needed. Best for an SMS you cannot forward "
         "into Telegram",
         "",
         "• /scan <url> — Scan a suspicious link for malware or phishing",
@@ -2220,6 +2220,22 @@ _BOT_COMMANDS_FREE = [
     ("scan", "Scan a suspicious link for malware or phishing"),
     ("plan", "Your license type"),
 ]
+
+# THE BOT'S OWN HANDLE, IN A CODE SPAN, AND THE CODE SPAN IS THE WHOLE POINT.
+# Telegram's legacy Markdown has NO ESCAPE SYNTAX, so putting a backslash
+# before the underscore does not escape it: the backslash renders visibly, or
+# Telegram links
+# "@relayshield" as a mention and leaves "_bot" stranded beside it in a different
+# colour. The founder reported exactly that on 2026-09-10 and called it sloppy,
+# correctly: it was in ELEVEN places in this file.
+#
+# A code span is literal in legacy Markdown, so the underscore survives. It also
+# reads as monospaced and is tappable to copy, which is better than bold for a
+# username somebody is being told to go and search for.
+#
+# One constant, because this file already learned that lesson the expensive way:
+# "checkemail@" was written as "emailcheck@" twice in one message.
+BOT_HANDLE_MD = "`@relayshield_bot`"
 
 _BOT_COMMANDS_BASE = [
     ("quickstart", "Three things you can do right now"),
@@ -2477,7 +2493,7 @@ def handle_verify_bot(chat_id: int) -> None:
         "You are talking to the official RelayShield bot.\n\n"
         "*How to confirm independently:*\n"
         "1. Visit *relayshield.net* — the official bot username is listed there\n"
-        "2. The official username is *@RelayShield\\_bot* — verify it matches exactly "
+        "2. The official username is `@RelayShield_bot` — verify it matches exactly "
         "(watch for 0 vs O, l vs I, rn vs m)\n\n"
         "*What RelayShield will never ask for:*\n"
         "• Your password or PIN\n"
@@ -3879,7 +3895,7 @@ def handle_addmember(chat_id: int, user: dict) -> None:
         chat_id,
         f"✅ *Team Invite Code*\n\n"
         f"`{code}`\n\n"
-        f"Share this code with your new team member. They should open @RelayShield\\_bot, "
+        f"Share this code with your new team member. They should open `@RelayShield_bot`, "
         f"type /start, and enter this code when prompted.\n\n"
         f"*Expires in:* 7 days\n"
         f"*Seats:* {seats_used} of {seat_limit} used\n\n"
@@ -5547,7 +5563,7 @@ def handle_stats(chat_id: int) -> None:
             f"  • Pending payment: {pending_count}\n\n"
             f"💳 *Paid breakdown*\n"
             f"{paid_breakdown}\n\n"
-            f"⏳ *Pending / AWAITING\\_PAYMENT*\n"
+            f"⏳ *Pending* / `AWAITING_PAYMENT`\n"
             f"{pending_breakdown}\n\n"
             f"🔄 *Conversion*\n"
             f"  • Free → Paid: {conversions}\n\n"
@@ -7287,7 +7303,7 @@ def _inline_article(rid: str, title: str, desc: str, body: str) -> dict:
 # medium enforces the split, which is why no detail belongs here.
 _INLINE_UPSELL = (
     "\n\n_Addresses are only half of it. Most drains start with a leaked "
-    "credential, not a bad contract. DM_ @relayshield\\_bot _to check whether "
+    "credential, not a bad contract. DM " + BOT_HANDLE_MD + " to check whether "
     "your email or phone is exposed._"
 )
 

@@ -156,6 +156,12 @@ const PAGE = `<!doctype html>
   }
   .row .x { background: none; border: 0; color: var(--hint); font-size: 1.1rem; padding: 0 4px; }
   .empty { color: var(--hint); font-size: .9rem; padding: 18px 2px; }
+  .upsell {
+    margin-top: 14px; padding: 14px; border-radius: 10px;
+    background: var(--card); border: 1px solid rgba(148,163,184,.25);
+  }
+  .upsell p { margin: 0 0 10px; font-size: .9rem; }
+  .upsell button { width: 100%; }
   .quiz-opt {
     display: block; width: 100%; text-align: left; margin-bottom: 8px;
     padding: 14px; border-radius: 10px; font: inherit; font-size: .95rem;
@@ -213,6 +219,7 @@ const PAGE = `<!doctype html>
 
   <section id="pane-watch" class="hidden">
     <div id="watchlist"></div>
+    <div id="upsell" class="upsell" hidden></div>
   </section>
 
   <section id="pane-learn" class="hidden">
@@ -468,14 +475,92 @@ $("watch").addEventListener("click", async () => {
     const res = await post("/v1/watchlist/add", {
       init_data: initData, target: last.target, level: last.level,
     });
-    $("watch").textContent = res && res.ok
-      ? "Watching. We will message you if it changes."
-      : (res && res.error) || "Could not save that.";
+    if (res && res.ok) {
+      $("watch").textContent = last.kind === "address" && isTon(last.target)
+        ? "Watching. We will message you the moment it changes."
+        : "Saved. Live re-checks cover TON addresses and tokens today.";
+      return;
+    }
+    if (res && res.error === "slots_full") {
+      offerUpgrade(res.data || {});
+      $("watch").textContent = "Free slots are full.";
+      $("watch").disabled = false;
+      return;
+    }
+    $("watch").textContent = (res && res.error) || "Could not save that.";
+    $("watch").disabled = false;
   } catch (e) {
     $("watch").textContent = "Could not save that.";
     $("watch").disabled = false;
   }
 });
+
+/* Mirrors _is_valid_ton_address in relayshield_api.py and _normalise in
+   relayshield_watchlist.py. Three copies is one too many, and this one earns
+   its place: it decides the wording of a sentence, never a verdict, so a
+   disagreement here is cosmetic where a disagreement there would be wrong. */
+function isTon(v) {
+  const t = String(v || "").trim();
+  return /^-?\d+:[0-9a-fA-F]{64}$/.test(t) || /^[A-Za-z0-9_-]{48}$/.test(t);
+}
+
+/* ---- Stars ----------------------------------------------------------
+   Stars are the ONLY compliant way to charge a consumer inside a Mini App:
+   Telegram requires digital goods to be paid in Stars to satisfy Apple's and
+   Google's IAP rules. Linking out to Stripe, x402 or the developers page for a
+   digital good is the route that gets a bot restricted, and all three exist one
+   link away, so the temptation is real and the answer is no.
+
+   WHAT IS SOLD IS SLOTS, NOT CHECKS AND NOT ALERTS. Checking stays free and
+   unlimited. An alert is never held back for payment: charging at the moment
+   somebody's money is moving would make the free tier's promise a lie. */
+function offerUpgrade(d) {
+  const box = $("upsell");
+  if (!box) return;
+  box.textContent = "";
+  const p = document.createElement("p");
+  p.textContent = d.message || "Free watch slots are full.";
+  const b = document.createElement("button");
+  b.className = "primary";
+  b.textContent = "\u2B50 " + (d.upgrade_stars || 50) + " Stars \u2014 "
+    + (d.upgrade_slots || 25) + " slots for " + (d.upgrade_days || 90) + " days";
+  b.addEventListener("click", () => buySlots(b));
+  box.appendChild(p);
+  box.appendChild(b);
+  box.hidden = false;
+}
+
+async function buySlots(btn) {
+  if (!tg || !tg.openInvoice) {
+    btn.textContent = "Update Telegram to buy with Stars";
+    return;
+  }
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = "Opening...";
+  let res;
+  try { res = await post("/v1/watchlist/invoice", { init_data: initData }); }
+  catch (e) { res = null; }
+  if (!res || !res.ok || !res.data || !res.data.invoice_link) {
+    btn.textContent = (res && res.error) || "Could not start the purchase.";
+    btn.disabled = false;
+    return;
+  }
+  /* The status callback is the ONLY place the result is known. Telegram does
+     not resolve a promise here and the payment completes on ITS side, so the
+     entitlement is credited by the bot webhook's successful_payment handler,
+     never by this button. All this does is refresh what we display. */
+  tg.openInvoice(res.data.invoice_link, (status) => {
+    btn.disabled = false;
+    btn.textContent = was;
+    if (status === "paid") {
+      $("upsell").hidden = true;
+      loadWatches();
+    } else if (status === "failed") {
+      btn.textContent = "That did not go through.";
+    }
+  });
+}
 
 async function loadWatches() {
   const box = $("watchlist");
@@ -498,7 +583,29 @@ async function loadWatches() {
   catch (e) { res = null; }
   box.textContent = "";
 
-  const items = (res && res.ok && res.data && res.data.watches) || [];
+  const data = (res && res.ok && res.data) || {};
+  const items = data.watches || [];
+
+  if (data.limit) {
+    const meter = document.createElement("p");
+    meter.className = "empty";
+    const until = data.slots_expire_at
+      ? " \u00b7 until " + new Date(data.slots_expire_at * 1000).toISOString().slice(0, 10)
+      : "";
+    meter.textContent = data.used + " of " + data.limit + " slots used" + until;
+    box.appendChild(meter);
+    /* Offered BEFORE the slots are full, not only at the wall. A paywall
+       discovered at the moment of refusal reads as a bait and switch even when
+       the free tier was generous, and this one is three slots. */
+    if (!data.slots_expire_at && data.used >= data.limit - 1) {
+      offerUpgrade({
+        message: "Watching more than " + data.limit + " things?",
+        upgrade_stars: data.upgrade_stars, upgrade_slots: data.upgrade_slots,
+        upgrade_days: data.upgrade_days,
+      });
+    }
+  }
+
   if (!items.length) {
     const p = document.createElement("p");
     p.className = "empty";
@@ -513,7 +620,11 @@ async function loadWatches() {
     row.dataset.level = w.last_level || "unknown";
     const t = document.createElement("span");
     t.className = "t";
-    t.textContent = w.target;
+    /* An honest label, because the alternative is a promise we do not keep.
+       The monitor re-checks TON and only TON, so a domain or an EVM address in
+       this list is stored and not watched. Showing them identically would be
+       the quiet-alarm shape with a user on the end of it. */
+    t.textContent = w.monitored ? w.target : w.target + "  \u00b7 not re-checked yet";
     const x = document.createElement("button");
     x.className = "x";
     x.textContent = "\u00d7";

@@ -11141,7 +11141,15 @@ def handle_ton_address(params: dict) -> dict:
 
     # If it's a known token, return token data directly (no wallet check needed)
     if token_meta:
-        logger.info("ton-address token=%s price=%s", token_meta.get("token_symbol"), token_meta.get("price_usd"))
+        # source= is on this line so the Mini App's TON checks are COUNTABLE.
+        # /v1/link-check has logged it since it was written; this endpoint did
+        # not, so half the Mini App's traffic was invisible to
+        # tools/miniapp_funnel.py and would have reported as a channel nobody
+        # used. A key that is sent, accepted and never logged is the same false
+        # absence as a key that was never registered.
+        logger.info("ton-address token=%s price=%s source=%s",
+                    token_meta.get("token_symbol"), token_meta.get("price_usd"),
+                    (params.get("source") or "-")[:40])
         return _ok({
             "address":      address,
             "type":         "token",
@@ -11181,7 +11189,8 @@ def handle_ton_address(params: dict) -> dict:
         risk_flags.append("uninitialized contract — proceed with caution")
 
     risk_level = "CRITICAL" if any("scam" in f for f in risk_flags) else "MEDIUM" if risk_flags else "LOW"
-    logger.info("ton-address wallet=%s balance=%.4f risk=%s", address, balance_ton, risk_level)
+    logger.info("ton-address wallet=%s balance=%.4f risk=%s source=%s",
+                address, balance_ton, risk_level, (params.get("source") or "-")[:40])
     return _ok({
         "address":     address,
         "type":        "wallet",

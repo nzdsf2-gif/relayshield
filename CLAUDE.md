@@ -294,6 +294,213 @@ the answer is "I assumed it", the block is not finished. "I could not check it f
 is not an exemption -- it is the trigger for making the check the reader's first step, which is what
 NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK has said all along.
 
+## THE MERGE THAT FAILED THREE TIMES: REPRODUCED, AND THE FIX IS ONE LINE
+
+**2026-09-11. Andrew ran the same block three times across two turns and got the same
+"0" result each time.** Two of those turns were spent on my diagnosis rather than on the fix,
+and the diagnosis was wrong twice before it was right. **It has now been REPRODUCED in a
+scratch repo, byte for byte**, so this section is a measurement rather than a theory.
+
+**The exact failure:**
+
+    No local changes to save
+    error: Your local changes to the following files would be overwritten by merge:
+      ansible-relayshield relayshield-snap
+    warning: unable to rmdir 'ansible-relayshield': Directory not empty
+    Merge with strategy ort failed.
+
+**The cause, and it is a LOOP I built.** Rule A2 already records that `git add -A` stages his
+two embedded git repositories as gitlinks. What A2 did not work out is what happens next:
+
+1. `git add -A` puts `ansible-relayshield` and `relayshield-snap` in the INDEX as gitlinks.
+2. `git stash --include-untracked` **cannot stash a nested git repo.** It prints
+   "No local changes to save" and leaves them exactly where they are.
+3. A **fast-forward** merge survives this. A **three-way** merge does not -- and every merge
+   from now on is three-way, because `origin/main` already carries a merge commit.
+4. The failed merge partially unwinds the index, so a *second* run of a block WITHOUT
+   `git add -A` would have worked.
+5. **But the block HAD `git add -A` at the top**, which re-staged them before every attempt.
+
+So each run re-created the exact condition that made the previous run fail. That is why three
+identical failures looked like one stubborn problem and were actually the same fix, refused
+three times by my own block.
+
+**THE FIX, VERIFIED END TO END IN A SCRATCH REPO INCLUDING IDEMPOTENCY:**
+
+    git rm -rf --cached -q --ignore-unmatch ansible-relayshield relayshield-snap
+
+`--cached` touches only the index, so **the embedded repos and their history are untouched on
+disk** -- confirmed by reading their git log after the merge. `-f` is required and the first
+version of this line omitted it, failing with "staged content different from both the file and
+the HEAD"; that was caught by running it, not by reading it. `--ignore-unmatch` makes it exit 0
+when there is nothing to remove, so it is safe on every future merge.
+
+**AND `git add -A` IS GONE FROM EVERY BLOCK, PERMANENTLY.** Rule A2 said so on 2026-09-11 and a
+block shipped with it anyway on the same day. The standard merge block is now:
+
+    cd ~/dev/relayshield
+    git checkout main
+    git --no-pager fetch origin claude/<branch>
+    git rm -rf --cached -q --ignore-unmatch ansible-relayshield relayshield-snap
+    git stash push --include-untracked -m "pre-merge untracked"
+    git -c pull.rebase=false merge --no-edit FETCH_HEAD
+
+**The permanent fix is his to choose and is one command:** move the two embedded repos out of
+the clone, `mv ~/dev/relayshield/ansible-relayshield ~/dev/relayshield/relayshield-snap ~/dev/`.
+A repository inside a repository will keep generating this class of problem no matter how many
+lines the block carries -- the same reasoning that separated the clone from the documents
+folder on 2026-09-05. Until he does, the `git rm --cached` line handles it.
+
+**The general form, and it is the one worth carrying: when the same instruction fails three
+times, the instruction is the loop.** I spent two turns hypothesising about `.gitignore` and
+about gitlinks on `origin/main` -- both disproved by one `git ls-tree` -- when reproducing it
+locally took four minutes and settled it completely. **A failure that reproduces is not a
+mystery, it is a test case, and building the test case first is cheaper than the third guess.**
+
+## STARS SELL WATCH SLOTS. NOT CHECKS, AND NOT ALERTS. DECIDED AND BUILT 2026-09-11.
+
+**This SUPERSEDES the "charge for the alert, not the scan" conclusion in
+`miniapp_stars_the_alert_not_the_scan.md`**, which was mine and was wrong, and the reason it was
+wrong is worth more than the conclusion.
+
+**Charging for the ALERT charges at the moment the user's money is already moving.** The free
+tier's promise is "we will tell you if this changes"; attaching an invoice to that message makes
+the promise bait. It is the same defect as a paywall on `/v1/link-check`, one step further down
+the funnel and harder to see.
+
+**A SLOT IS THE HONEST UNIT, because it is the one thing that actually costs us money.** Every
+watched target is a TON Center call, a DexScreener call and a corpus query, on every cycle,
+forever. That bill scales with slots and with nothing else. So:
+
+  * **Checking: free, unlimited, unchanged.** `/v1/link-check` and `/v1/ton-address` are keyless
+    and stay keyless. `test_checking_is_never_metered` fails if any of them appears in
+    `relayshield_watchlist.py`, and it was proven by adding one.
+  * **Watching: 3 slots free**, alerted fully and immediately, no delay and no degradation.
+  * **Stars: 50 ⭐ raises it to 25 slots for 90 days.** A capability upgrade, never a tax.
+
+This satisfies the standing principle exactly as written: **Stars pay vendor bills, they never
+tax the free tier.** And it is self-limiting by construction -- it can only ever charge for the
+thing with a marginal cost, so it cannot drift into taxing the thing the app is for.
+
+**90 days rather than forever**, because Stars are a one-off purchase with no subscription
+primitive, so an expiry has to live on our side or not exist at all, and a permanent
+entitlement bought once outlives the feature.
+
+### READING THE PAYMENT CODE BEFORE WIRING STARS FOUND TWO DEFECTS, ONE OF THEM A BILLING HOLE
+
+Rule C says an instruction that writes to a live surface is preceded by the one that reads it.
+Applied to code rather than to BotFather, it paid immediately.
+
+**1. A 50-STAR PAYMENT WOULD HAVE BOUGHT A FULL SUBSCRIPTION.** `handle_successful_payment`
+maps the payment amount to a plan with `tier_map.get(amount, TIER_PERSONAL)`. A Stars purchase
+arrives as `total_amount=50`, matches no plan, and falls through to the **default**. The buyer
+would have been given a paid subscription for about a dollar and then sent down the phone-number
+onboarding for SIM-swap monitoring they never bought. **Currency is the discriminator, not the
+amount:** `XTR` is Stars and every real plan is priced in fiat, so the XTR branch returns before
+the tier map is ever consulted, and a test asserts that ORDER rather than merely the presence of
+the branch.
+
+**2. NO `pre_checkout_query` BRANCH EXISTED, SO NO TELEGRAM PAYMENT COULD EVER COMPLETE.**
+Telegram sends a pre-checkout query and gives **ten seconds** to answer it. An unanswered query
+fails the payment on the buyer's side and logs nothing on ours. The most expensive shape a
+missing branch can take: every part of the purchase looks built, the invoice opens, and no money
+can ever arrive. It approves unconditionally and **fulfils nothing** -- granting there would
+hand out slots to anyone who opens an invoice and abandons it.
+
+**The grant is idempotent on `telegram_payment_charge_id`.** Telegram retries a webhook it did
+not get a 200 from, and a retry that extended the entitlement again is a free upgrade for anyone
+who can make our handler time out once.
+
+## PINNING A MINI APP: TELEGRAM HAS NO SUCH THING. YOU PIN A CHAT, AND WE HAD TO CREATE ONE.
+
+**Asked four times across three turns and answered wrongly three times, because every answer was
+about where to FIND the app.** That was not the question.
+
+**The fact that settles it: Telegram has no primitive for pinning a Mini App.** What a user pins
+is a CHAT. A Mini App opened from a direct link (`t.me/relayshield_bot/idcheck`) does not create
+one -- the web view opens over the app and the bot never appears in the chat list. So a new user
+who has never messaged `@relayshield_bot` has **nothing to long-press**, which is exactly what
+Andrew kept reporting, on both laptop and phone, and it was correct every time.
+
+**And pinning the BOT does not help**, which was his second question: the existing pinned chat is
+the TI monitoring bot, and pinning it gives no route to the Mini App.
+
+**THE FIX, AND IT IS IN OUR CONTROL RATHER THAN TELEGRAM'S.** A bot may message a user who has
+opened it through a Mini App, and that message is what creates the chat entry. So **the first
+watch now sends one**, and it says how to pin. Three things at once:
+
+1. The chat exists, so it can be pinned, muted or archived -- all the things a user expects.
+2. It **proves the alert channel before an alert is needed.** Finding out the bot was blocked at
+   the moment something got drained is the worst possible time to find out.
+3. It turns a Mini App user into a bot subscriber, which is the flywheel
+   `relayshield_watchlist.py`'s own docstring has claimed since 2026-09-09 and did not do.
+
+Only on the FIRST watch: a confirmation on every add is a notification tax on the feature's own
+power users.
+
+**The home-screen route (`addToHomeScreen`, Bot API 8.0) stays as it is** -- feature-detected,
+Android-mostly, higher friction, and now the second option rather than the only one.
+
+## THE WATCHLIST PROMISED ALERTS AND NOTHING SENT THEM, FOR TWO DAYS
+
+Found 2026-09-11 while scoping the monitor, and it is the worst kind of gap because every part
+of it looked finished.
+
+`relayshield_watchlist.py` shipped on 2026-09-09. Its docstring says the chat_id is **encrypted
+rather than hashed** specifically because "we cannot send an alert without the chat_id". The
+table, the KMS grants, the initData verification and the CORS preflight were all built and all
+correct. **There was no scheduled monitor, no notification code and no workflow.** Every user who
+tapped "Tell me if this changes" was told something untrue.
+
+`relayshield_watchlist_monitor.py` is the sender. **TON only, deliberately** -- Telegram Mini
+Apps live inside Telegram's rules and TON is the chain Telegram ships, which is Andrew's
+instruction and also the right call. Rows of other kinds are **counted and logged, never
+deleted and never silently dropped**, and the Mini App labels them "not re-checked yet" in the
+list: a watchlist that hides what it cannot re-check is indistinguishable from one that works.
+
+**THE THREE RULES IN IT THAT MUST NOT BE RELAXED:**
+
+1. **THE FIRST RUN AGAINST A ROW NEVER ALERTS.** Rows written before the monitor existed carry no
+   snapshot, so every signal would read as "changed from nothing" and the first scheduled run
+   would message every user about every target at once. That is how a security bot gets reported
+   rather than uninstalled, and it is one `if` away. Proven by deleting the branch and watching
+   the test fail.
+2. **IMPROVEMENTS ARE RECORDED, NEVER SENT.** An alert is for action. "Good news" at 3am trains
+   people to ignore the next one, and the next one is the one that mattered.
+3. **"WE COULD NOT CHECK" MUST NEVER RENDER AS "IT IS GONE".** An upstream outage that reads as
+   an emptied pool sends a false rug alert, which is the single mistake that would make this
+   product actively harmful. Every unreadable number is `None`, never `0`, and a failed lookup
+   leaves the stored snapshot untouched so the NEXT run diffs against the last real observation.
+
+**It imports `handle_ton_address` from `relayshield_api.py` rather than calling the vendors
+itself**, for two reasons and the second decided it. A fifth copy of the TON calls would drift
+from the endpoint it is meant to be monitoring. And the alternative that looks cleaner is worse:
+calling our own public `/v1/ton-address` over HTTP would work once per cap window, because the
+**keyless per-IP cap would see every invocation arriving from one NAT address and throttle the
+monitor against itself.** The dependency walk was run against the deployer's own `resolve_deps`
+grep and packages five files -- checked, not assumed.
+
+## A MEASUREMENT TOOL WRITTEN FROM WHAT THE CODE *SHOULD* LOG IS A FALSE ABSENCE
+
+`tools/miniapp_funnel.py` answers the founder's high-priority question -- tg-miniapp arrivals,
+bot signups, Stars, and traffic to the API landing site -- and **two of its seven filters were
+wrong on the first draft, both in the direction that reports a live channel as dead.**
+
+- It filtered the webhook log for `SRC_miniapp`. That is the **deep-link payload**; the webhook
+  strips the prefix and lower-cases it before logging, so the line reads
+  `acquisition source=miniapp` and the filter would have matched nothing, forever.
+- **`/v1/ton-address` logged no source at all.** `/v1/link-check` has logged one since it was
+  written, so half the Mini App's traffic was uncountable. Fixed in the same commit rather than
+  noted: a key that is sent, accepted and never logged is the same false absence as a key that
+  was never registered.
+
+Both are pinned by tests that read the filter out of the tool and assert it against the line the
+code actually writes, and both were proven by reintroducing them.
+
+**The general form: a zero from a measurement tool GETS ACTED ON.** That makes a wrong filter
+more expensive than no tool at all, and it is the `sorted()`-on-version-strings lesson in a new
+place -- a number I print is evidence the reader will act on.
+
 ## TELEGRAM STARS IN THE MINI APP: NOT NOW, AND NEVER AS A CAP ON THE FREE CHECKS
 
 Asked 2026-09-10: *"Its still not clear how we can use the stars or what value they bring."* Full

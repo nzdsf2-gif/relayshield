@@ -38,7 +38,7 @@ ACCOUNT=239677749008
 API_ID=atq6wtkp6k
 STAGE=prod
 FUNC=relayshield-watchlist
-PARTS="add list remove"
+PARTS="add list remove invoice"
 
 export AWS_PAGER=""
 
@@ -157,7 +157,7 @@ echo "== 6. Deploy the $STAGE stage"
 # A gateway change is invisible until the stage is redeployed. Skipping this
 # leaves every path 403 while the console shows all six methods configured.
 aws apigateway create-deployment --rest-api-id "$API_ID" --stage-name "$STAGE" \
-  --description "add /v1/watchlist/{add,list,remove} for the Telegram Mini App" \
+  --description "add /v1/watchlist/{add,list,remove,invoice} for the Telegram Mini App" \
   --query 'id' --output text
 echo
 

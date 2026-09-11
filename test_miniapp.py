@@ -273,10 +273,16 @@ class TestPrivacy(unittest.TestCase):
         worker = _worker()
         self.assertIn("localStorage.getItem(HKEY", worker)
         self.assertIn("localStorage.setItem(HKEY", worker)
-        # The only POSTs may be the three watchlist routes.
+        # The only POSTs may be the watchlist routes. This is an ALLOWLIST and
+        # the point is that adding one is a deliberate act with a reason: every
+        # new POST from this page is a new thing leaving somebody's device.
+        # /v1/watchlist/invoice sends init_data and nothing else -- it mints a
+        # Stars invoice link and carries no target, no history and no amount
+        # chosen by the client.
         posts = set(re.findall(r'post\("(/v1/[^"]+)"', worker))
         self.assertEqual(posts, {"/v1/watchlist/add", "/v1/watchlist/list",
-                                 "/v1/watchlist/remove"}, f"unexpected POST targets: {posts}")
+                                 "/v1/watchlist/remove", "/v1/watchlist/invoice"},
+                         f"unexpected POST targets: {posts}")
 
     def test_history_reads_are_wrapped_against_a_throwing_accessor(self):
         """localStorage THROWS in a private window and in some embedded webviews,

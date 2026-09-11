@@ -32,6 +32,8 @@
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-stablecoin-monitor",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-stripe-webhook",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-telegram-webhook",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-watchlist",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-watchlist-monitor",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield-whatsapp-webhook",
         "arn:aws:lambda:us-east-1:239677749008:function:relayshield_tgmonthly_digest"
       ]

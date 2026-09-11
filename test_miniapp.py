@@ -9,6 +9,7 @@ import ast
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 import types
@@ -179,6 +180,41 @@ class TestBotCallToAction(unittest.TestCase):
                       "the href must stay real so the link works without the SDK")
 
 
+class TestTheWorkerActuallyParses(unittest.TestCase):
+    """NOTHING IN THIS SUITE PARSED THE WORKER UNTIL 2026-09-10.
+
+    A code comment containing a BACKTICK was added inside the `const PAGE = ` ... ``
+    template literal. A backtick terminates a template literal, so the file was
+    no longer valid JavaScript -- and every check here passed anyway, because
+    they all read the file as TEXT. build_miniapp.py --check passed too. The
+    deploy would have failed at wrangler, which is late, red, and reads like a
+    Cloudflare problem rather than a stray character.
+
+    `node --check` is one command and catches it in a second, so it belongs
+    beside the checks that cannot.
+    """
+
+    def test_worker_is_valid_javascript(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not available")
+        out = subprocess.run([node, "--check", str(WORKER)],
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.returncode, 0,
+                         f"cloudflare_worker_miniapp.js is not valid JS:\n{out.stderr}")
+
+    def test_no_stray_backtick_inside_the_page_template(self):
+        # The specific trap, named. An escaped \` is fine and the widget embed
+        # relies on it; a bare one closes the template early.
+        src = _worker()
+        page = src.split("const PAGE = `", 1)[1]
+        body = page.rsplit("`;", 1)[0]
+        stray = [i for i, ch in enumerate(body)
+                 if ch == "`" and (i == 0 or body[i - 1] != "\\")]
+        self.assertEqual(stray, [],
+                         "a bare backtick inside the PAGE template ends it early")
+
+
 class TestGettingBackIn(unittest.TestCase):
     """A direct-link Mini App leaves no way back. The founder could not find his
     own app on 2026-09-10: t.me/<bot>/<app> opens without creating a bot chat, so
@@ -237,10 +273,16 @@ class TestPrivacy(unittest.TestCase):
         worker = _worker()
         self.assertIn("localStorage.getItem(HKEY", worker)
         self.assertIn("localStorage.setItem(HKEY", worker)
-        # The only POSTs may be the three watchlist routes.
+        # The only POSTs may be the watchlist routes. This is an ALLOWLIST and
+        # the point is that adding one is a deliberate act with a reason: every
+        # new POST from this page is a new thing leaving somebody's device.
+        # /v1/watchlist/invoice sends init_data and nothing else -- it mints a
+        # Stars invoice link and carries no target, no history and no amount
+        # chosen by the client.
         posts = set(re.findall(r'post\("(/v1/[^"]+)"', worker))
         self.assertEqual(posts, {"/v1/watchlist/add", "/v1/watchlist/list",
-                                 "/v1/watchlist/remove"}, f"unexpected POST targets: {posts}")
+                                 "/v1/watchlist/remove", "/v1/watchlist/invoice"},
+                         f"unexpected POST targets: {posts}")
 
     def test_history_reads_are_wrapped_against_a_throwing_accessor(self):
         """localStorage THROWS in a private window and in some embedded webviews,

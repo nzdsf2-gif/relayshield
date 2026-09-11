@@ -41,6 +41,14 @@ jobs:
         with:
           node-version: '20'
 
+      # The worker is a template literal holding an entire HTML page, and a
+      # stray backtick in a code comment closes it early. Every text-based check
+      # in this repo passed over exactly that on 2026-09-10; only a parser sees
+      # it. Wrangler would fail below, but as a red deploy that reads like a
+      # Cloudflare problem rather than one character.
+      - name: Worker parses
+        run: node --check cloudflare_worker_miniapp.js
+
       - name: Widget tests
         run: node --test widget/relayshield-widget.test.mjs
 

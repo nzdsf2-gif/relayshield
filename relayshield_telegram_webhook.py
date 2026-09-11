@@ -1386,9 +1386,9 @@ def msg_help(tier: str) -> str:
     if tier == TIER_FREE:
         return (
             "🛡️ *RelayShield Free — Commands*\n\n"
-            "📨 *Forward anything that looks off to @relayshield\\_bot* — a "
+            "📨 *Forward anything that looks off to* `@relayshield_bot` — a "
             "text, a link, or a message from someone in your contacts. Tap the "
-            "message, choose Forward, search *@relayshield\\_bot*. No command "
+            "message, choose Forward, search `@relayshield_bot`. No command "
             "needed.\n"
             "📸 *Paste a screenshot of a suspicious text* — just send the "
             "picture here.\n\n"
@@ -1416,9 +1416,9 @@ def msg_help(tier: str) -> str:
         # this text from one header to the next, so anything here belongs to no
         # category and shows only in the full list — which is what an
         # orientation line should do.
-        "📨 *Forward anything that looks off to @relayshield\\_bot* — a text, "
+        "📨 *Forward anything that looks off to* `@relayshield_bot` — a text, "
         "a link, or a message from someone in your contacts. Tap the message, "
-        "choose Forward, search *@relayshield\\_bot*. No command needed.\n"
+        "choose Forward, search `@relayshield_bot`. No command needed.\n"
         "📸 *Paste a screenshot of a suspicious text* — just send the picture "
         "here.\n"
         "• /quickstart — Three things you can do right now\n\n"
@@ -2122,13 +2122,13 @@ def msg_help_top(tier: str) -> str:
         # parse_mode="Markdown", where a lone _ opens an italic entity; unescaped,
         # @relayshield_bot leaves it unclosed, Telegram answers 400, and the whole
         # card fails to send.
-        "📨 *Forward anything that looks off to @relayshield\\_bot* — a text, "
+        "📨 *Forward anything that looks off to* `@relayshield_bot` — a text, "
         "a link, or a message from someone in your contacts. Tap the message, "
-        "choose Forward, then search *@relayshield\\_bot*. No command needed. "
+        "choose Forward, then search `@relayshield_bot`. No command needed. "
         "A hijacked account still shows up as your friend, so those are worth "
         "forwarding too",
         "📸 *Paste a screenshot of a suspicious text* — send the picture to "
-        "@relayshield\\_bot, no caption needed. Best for an SMS you cannot forward "
+        "`@relayshield_bot`, no caption needed. Best for an SMS you cannot forward "
         "into Telegram",
         "",
         "• /scan <url> — Scan a suspicious link for malware or phishing",
@@ -2221,8 +2221,34 @@ _BOT_COMMANDS_FREE = [
     ("plan", "Your license type"),
 ]
 
+# THE BOT'S OWN HANDLE, IN A CODE SPAN, AND THE CODE SPAN IS THE WHOLE POINT.
+# Telegram's legacy Markdown has NO ESCAPE SYNTAX, so putting a backslash
+# before the underscore does not escape it: the backslash renders visibly, or
+# Telegram links
+# "@relayshield" as a mention and leaves "_bot" stranded beside it in a different
+# colour. The founder reported exactly that on 2026-09-10 and called it sloppy,
+# correctly: it was in ELEVEN places in this file.
+#
+# A code span is literal in legacy Markdown, so the underscore survives. It also
+# reads as monospaced and is tappable to copy, which is better than bold for a
+# username somebody is being told to go and search for.
+#
+# One constant, because this file already learned that lesson the expensive way:
+# "checkemail@" was written as "emailcheck@" twice in one message.
+BOT_HANDLE_MD = "`@relayshield_bot`"
+
 _BOT_COMMANDS_BASE = [
     ("quickstart", "Three things you can do right now"),
+    # Added 2026-09-10, and it belongs in BASE rather than any tier because the
+    # Mini App is KEYLESS: every user, on every plan and none, can use it.
+    #
+    # Registering it here is not optional decoration. TGWA-1 recorded that
+    # Telegram's native "/" menu is populated ONLY by setMyCommands via
+    # commands_for_tier, so a handler branch with no entry here works when typed
+    # and is invisible to everyone who does not already know it exists -- which,
+    # for a command whose whole purpose is being found, is the same as not
+    # shipping it.
+    ("app", "Open RelayShield IDCheck - scan a link or wallet address"),
     ("breach", "Breach monitoring status"),
     # Merged 2026-08-11, all on one test: would a real user fail to tell these
     # apart? /sessions into /sweep (sweep's own description already claimed
@@ -2467,7 +2493,7 @@ def handle_verify_bot(chat_id: int) -> None:
         "You are talking to the official RelayShield bot.\n\n"
         "*How to confirm independently:*\n"
         "1. Visit *relayshield.net* — the official bot username is listed there\n"
-        "2. The official username is *@RelayShield\\_bot* — verify it matches exactly "
+        "2. The official username is `@RelayShield_bot` — verify it matches exactly "
         "(watch for 0 vs O, l vs I, rn vs m)\n\n"
         "*What RelayShield will never ask for:*\n"
         "• Your password or PIN\n"
@@ -2758,6 +2784,9 @@ def _summarise_update(body: dict) -> str:
     kind = next((k for k in (
         "message", "callback_query", "inline_query", "chosen_inline_result",
         "edited_message", "channel_post", "my_chat_member",
+        # Without this, every payment update logs as type=unknown and the one
+        # thing worth tracing in the funnel is the one thing invisible in logs.
+        "pre_checkout_query",
     ) if k in body), "unknown")
 
     payload = body.get(kind) or {}
@@ -3869,7 +3898,7 @@ def handle_addmember(chat_id: int, user: dict) -> None:
         chat_id,
         f"✅ *Team Invite Code*\n\n"
         f"`{code}`\n\n"
-        f"Share this code with your new team member. They should open @RelayShield\\_bot, "
+        f"Share this code with your new team member. They should open `@RelayShield_bot`, "
         f"type /start, and enter this code when prompted.\n\n"
         f"*Expires in:* 7 days\n"
         f"*Seats:* {seats_used} of {seat_limit} used\n\n"
@@ -4152,7 +4181,7 @@ def handle_setdomain(chat_id: int, domain_arg: str | None, user: dict) -> None:
 
     send_message(
         chat_id,
-        f"✅ *Company domain set: `{domain}`*\n\n"
+        f"✅ *Company domain set:* `{domain}`\n\n"
         f"RelayShield will monitor `{domain}` for lookalike domains — typosquatting and "
         f"phishing impersonation attempts.\n\n"
         f"Alerts will be delivered to you and all {seat_count} team seat(s) if an attacker "
@@ -4273,7 +4302,7 @@ def handle_checkllm(chat_id: int, user: dict) -> None:
     providers = ", ".join(sorted(set(findings)))
     send_message(
         chat_id,
-        f"🚨 *LLMjacking risk detected for `{domain}`*\n\n"
+        f"🚨 *LLMjacking risk detected for* `{domain}`\n\n"
         f"Exposed provider key(s) found: *{providers}*\n\n"
         "This is a live, uncapped billing liability, not just a data exposure — rotate "
         "immediately and check your provider's usage dashboard for anomalous spend right now, "
@@ -5271,7 +5300,7 @@ def handle_approvals(chat_id: int, user: dict) -> None:
     for w in evm_wallets:
         address = w.get("wallet_address", "")
         short   = f"{address[:6]}...{address[-4:]}"
-        lines   = [f"*🔓 Token Approvals — `{short}`*\n"]
+        lines   = [f"*🔓 Token Approvals —* `{short}`\n"]
 
         # GoPlus address_security check (Ethereum — most signal-rich chain)
         risk = _goplus_risk_check(address, chain_id=1)
@@ -5537,7 +5566,7 @@ def handle_stats(chat_id: int) -> None:
             f"  • Pending payment: {pending_count}\n\n"
             f"💳 *Paid breakdown*\n"
             f"{paid_breakdown}\n\n"
-            f"⏳ *Pending / AWAITING\\_PAYMENT*\n"
+            f"⏳ *Pending* / `AWAITING_PAYMENT`\n"
             f"{pending_breakdown}\n\n"
             f"🔄 *Conversion*\n"
             f"  • Free → Paid: {conversions}\n\n"
@@ -6020,6 +6049,31 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
         # cannot drift apart.
         send_message(chat_id, fwd.quickstart_text(fwd.PLATFORM_TELEGRAM),
                      parse_mode=fwd.QUICKSTART_PARSE_MODE[fwd.PLATFORM_TELEGRAM])
+    elif cmd in ("app", "idcheck", "check"):
+        # THE MINI APP HAD NO ROUTE FROM THE BOT, which is why a pinned bot chat
+        # did not help the founder reach it on 2026-09-10. A direct link
+        # (t.me/<bot>/idcheck) opens the app without creating a chat, and the
+        # menu button belongs to TI monitoring and keeps the prominent control,
+        # so this is the durable one-tap route: pinned chat -> /app -> button.
+        #
+        # An inline web_app button opens the Mini App INSIDE Telegram. A plain
+        # url button would hand it to the browser, which is the same defect the
+        # Mini App's own openTelegramLink call exists to avoid, pointed the
+        # other way. web_app buttons are private-chat only, which this is.
+        #
+        # ?s= rather than ?startapp=: a button launch carries no start_param, so
+        # the app reads the query instead. tg-miniapp-bot is already in the
+        # Worker's ALLOWED_SOURCES and in _SOURCE_BANNERS, registered before this
+        # link shipped rather than after.
+        send_message(
+            chat_id,
+            "Paste a link or a wallet address and get a verdict before you trust it. "
+            "No signup, no wallet connect.",
+            reply_markup={"inline_keyboard": [[{
+                "text": "Open RelayShield IDCheck",
+                "web_app": {"url": "https://app.relayshield.net/?s=tg-miniapp-bot"},
+            }]]},
+        )
     elif cmd == "verify":
         handle_verify(chat_id)
     elif cmd == "otp":
@@ -7061,6 +7115,77 @@ def handle_callback_query(update: dict) -> None:
         answer_callback(cq_id)
 
 
+def handle_pre_checkout(update: dict) -> None:
+    """Answer Telegram's pre-checkout query. Ten seconds, no retries.
+
+    We approve unconditionally, and that is the correct answer rather than a
+    shortcut. A pre-checkout query is Telegram asking "can you still fulfil
+    this"; the only honest reason to say no is an inventory or eligibility
+    constraint, and a watch-slot entitlement has neither -- it is a row we
+    write. Refusing would invent a failure mode the product does not have.
+
+    What we must NOT do is fulfil anything here. This fires before the money
+    moves, and granting on it would hand out slots to anyone who opens an
+    invoice and abandons it. Fulfilment is successful_payment and only that.
+    """
+    q = update.get("pre_checkout_query") or {}
+    qid = q.get("id")
+    if not qid:
+        return
+    try:
+        tg_api("answerPreCheckoutQuery", {"pre_checkout_query_id": qid, "ok": True})
+        logger.info("pre_checkout approved payload=%s", str(q.get("invoice_payload"))[:32])
+    except Exception as exc:
+        # A failure here is silent to us and visible to the buyer, so it is
+        # logged at ERROR: it is the difference between a working product and
+        # one that takes money from nobody.
+        logger.error("answerPreCheckoutQuery failed: %s", exc)
+
+
+def handle_stars_payment(message: dict, payment: dict) -> None:
+    """Credit a Telegram Stars purchase of Mini App watch slots.
+
+    The user id comes from the update's own `from` field, which Telegram signs
+    and delivers to our webhook URL. It is never taken from invoice_payload:
+    payload is a string we chose and Telegram echoes verbatim, so trusting it
+    for identity would be the same defect the watchlist endpoints were built to
+    avoid, one layer further out.
+    """
+    user_id = (message.get("from") or {}).get("id")
+    chat_id = (message.get("chat") or {}).get("id")
+    stars   = payment.get("total_amount", 0)
+    charge  = payment.get("telegram_payment_charge_id", "")
+
+    if not user_id:
+        logger.error("stars payment with no user id, cannot credit")
+        return
+
+    try:
+        from relayshield_watchlist import grant_slots
+        result = grant_slots(user_id, stars, charge)
+    except Exception as exc:
+        # THE ONE FAILURE THAT COSTS THE USER MONEY. They have paid and we
+        # could not credit it, so this is ERROR, it names the charge id so a
+        # refund or a manual grant is possible, and the user is told rather
+        # than left with a silent debit.
+        logger.error("stars grant FAILED charge=%s stars=%s: %s", charge, stars, exc)
+        if chat_id:
+            send_message(chat_id,
+                         "Your payment went through but we could not apply it yet. "
+                         "Nothing is lost -- it will be applied automatically, and "
+                         "you can reply here if it is not.")
+        return
+
+    data = result.get("data") or {}
+    if chat_id and not data.get("duplicate"):
+        send_message(chat_id,
+                     f"Thanks. You can now watch up to {data.get('slots', 25)} TON "
+                     f"addresses and tokens. We will message you here the moment one "
+                     f"of them changes.\n\nChecking is still free and unlimited.")
+    logger.info("stars payment credited stars=%s duplicate=%s",
+                stars, bool(data.get("duplicate")))
+
+
 def handle_successful_payment(update: dict) -> None:
     """
     Telegram Payments 2.0 — successful_payment update.
@@ -7072,8 +7197,26 @@ def handle_successful_payment(update: dict) -> None:
     first_name = message.get("from", {}).get("first_name", "there")
     payment = message.get("successful_payment", {})
     amount = payment.get("total_amount", 0)
+    currency = payment.get("currency", "")
 
-    logger.info("Successful payment: chat_id=%s amount=%s", chat_id, amount)
+    logger.info("Successful payment: chat_id=%s amount=%s currency=%s",
+                chat_id, amount, currency)
+
+    # STARS ARE NOT A SUBSCRIPTION, AND THE LINE BELOW IS WHY THIS BRANCH HAD TO
+    # EXIST BEFORE ANY STARS CODE SHIPPED.
+    #
+    # The tier map is keyed on total_amount and falls back to TIER_PERSONAL for
+    # anything it does not recognise. A 50-Star purchase arrives here as
+    # total_amount=50, matches no plan, and would have been handed a full paid
+    # subscription for about a dollar -- then sent down the phone-number
+    # onboarding for SIM-swap monitoring it never bought. Found by reading this
+    # function before wiring Stars, which is the only reason it is not live.
+    #
+    # Currency is the discriminator, not the amount: "XTR" is Telegram Stars and
+    # every real plan is priced in a fiat currency.
+    if currency == "XTR":
+        handle_stars_payment(message, payment)
+        return
 
     # Map payment amount to tier
     tier_map = {v["amount"]: k for k, v in PLAN_PRICES.items()}
@@ -7252,7 +7395,7 @@ def _inline_article(rid: str, title: str, desc: str, body: str) -> dict:
 # medium enforces the split, which is why no detail belongs here.
 _INLINE_UPSELL = (
     "\n\n_Addresses are only half of it. Most drains start with a leaked "
-    "credential, not a bad contract. DM_ @relayshield\\_bot _to check whether "
+    "credential, not a bad contract. DM " + BOT_HANDLE_MD + " to check whether "
     "your email or phone is exposed._"
 )
 
@@ -7418,7 +7561,16 @@ def lambda_handler(event, context):
             result = handle_inbound_signal(body)
             return {"statusCode": 200, "body": result}
 
-        if "message" in body:
+        # A Stars or card purchase CANNOT COMPLETE without this branch, and
+        # there was no such branch until 2026-09-11. Telegram sends a
+        # pre_checkout_query and gives us TEN SECONDS to answer it; an
+        # unanswered query fails the payment on the user's side with a message
+        # they cannot act on, and nothing on ours logs an error. The most
+        # expensive kind of missing code: every part of the purchase looks
+        # built, and no purchase can ever succeed.
+        if "pre_checkout_query" in body:
+            handle_pre_checkout(body)
+        elif "message" in body:
             msg = body["message"]
             if "successful_payment" in msg:
                 handle_successful_payment(body)

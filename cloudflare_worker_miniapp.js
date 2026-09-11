@@ -52,6 +52,28 @@ const DEVELOPERS = API_BASE + "/developers";
 // touch wins there, deliberately.
 const BOT = "https://t.me/relayshield_bot?start=SRC_miniapp";
 
+/* THE SLOT NUMBERS, SUBSTITUTED INTO STATIC COPY AT REQUEST TIME.
+
+   They exist here because the watch tab's pricing was rendered ENTIRELY from
+   the /v1/watchlist/list response, so a user who was not verified, or whose
+   list call failed, saw no mention of the paid tier at all -- and that reads
+   exactly like a product that has no paid tier. What we charge for is a fact
+   about our own product and must not depend on a network call succeeding.
+
+   They are NOT page-scope constants: the page and the Worker run in different
+   processes and share nothing but these __TOKEN__ substitutions, which is the
+   INLINE_TEXT defect recorded in CLAUDE.md. Substituting into the HTML keeps
+   one source and no cross-scope read.
+
+   AND THEY MUST AGREE WITH relayshield_watchlist.py, which is the authority:
+   FREE_WATCH_SLOTS, PAID_WATCH_SLOTS, SLOTS_PRICE_STARS, SLOTS_DURATION_DAYS.
+   test_miniapp_routes.py fails if they drift. Copy shown to a buyer that
+   disagrees with what the server will actually grant is worse than no copy. */
+const FREE_SLOTS = "3";
+const PAID_SLOTS = "25";
+const SLOTS_STARS = "50";
+const SLOTS_DAYS = "90";
+
 // Keys the Mini App may pass through as ?source=. An unknown start_param is
 // dropped rather than forwarded: an unregistered key logs `unmatched:` and
 // renders no banner, so forwarding junk would look like attribution and be none.
@@ -278,6 +300,12 @@ const PAGE = `<!doctype html>
     <p class="watch-intro">All of them are accounts on TON, so all of them get the
       same checks: TON&rsquo;s own account data, DEX liquidity, and our indicator
       corpus collected from criminal Telegram channels.</p>
+
+    <p class="watch-intro" id="watch-tiers"><b>__FREE_SLOTS__ addresses free</b>,
+      alerted immediately and in full. <b>__SLOTS_STARS__ Stars</b> raises it to
+      __PAID_SLOTS__ addresses for __SLOTS_DAYS__ days. Stars buy more slots and
+      nothing else: the free alerts are identical.</p>
+
     <div id="watchlist"></div>
     <div id="upsell" class="upsell" hidden></div>
   </section>
@@ -840,7 +868,11 @@ async function loadWatches() {
     box.textContent = "";
     const p = document.createElement("p");
     p.className = "empty";
-    p.textContent = "Open this inside Telegram to keep a watchlist.";
+    /* Name the CAUSE. "Open this inside Telegram" and "we could not reach the
+       server" are different problems with different fixes, and until today
+       both of them, plus an empty list, rendered as the same nothing. */
+    p.textContent = "Open this from Telegram to keep a watchlist \u2014 a watch "
+      + "is tied to your Telegram account, so we cannot load one here.";
     box.appendChild(p);
     return;
   }
@@ -855,8 +887,42 @@ async function loadWatches() {
   catch (e) { res = null; }
   box.textContent = "";
 
-  const data = (res && res.ok && res.data) || {};
+  /* A FAILED LIST IS NOT AN EMPTY LIST, and it used to render as one. Both
+     collapsed to data = {}, which printed "Nothing watched yet" over a
+     watchlist that might be full -- and which took every slot and price line
+     down with it, because all of that copy was built from this response. */
+  if (!res || !res.ok) {
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = res && res.error
+      ? "Could not load your watchlist: " + res.error
+      : "Could not reach the watchlist just now. Nothing has been lost \u2014 "
+        + "pull the app closed and open it again.";
+    box.appendChild(p);
+    return;
+  }
+
+  const data = res.data || {};
   const items = data.watches || [];
+
+  /* The static tier line is the fallback, not the truth. Once the real numbers
+     are in, say them, and drop the upsell entirely for somebody who has
+     already paid: continuing to sell a tier to its own buyer is the fastest
+     way to make a paid product feel like an advertisement. */
+  const tiersLine = $("watch-tiers");
+  if (tiersLine && data.limit) {
+    if (data.slots_expire_at) {
+      tiersLine.textContent = data.limit + " watch slots, alerted immediately "
+        + "and in full, until "
+        + new Date(data.slots_expire_at * 1000).toISOString().slice(0, 10) + ".";
+    } else {
+      tiersLine.textContent = data.limit + " addresses free, alerted "
+        + "immediately and in full. " + data.upgrade_stars + " Stars raises it "
+        + "to " + data.upgrade_slots + " addresses for " + data.upgrade_days
+        + " days. Stars buy more slots and nothing else: the free alerts are "
+        + "identical.";
+    }
+  }
 
   if (data.limit) {
     const meter = document.createElement("p");
@@ -910,19 +976,14 @@ async function loadWatches() {
       + "tap \u201cTell me if this changes\u201d and we will message you here "
       + "the moment it does.";
     box.appendChild(p);
-    if (data.limit && !data.slots_expire_at) {
-      const tiers = document.createElement("p");
-      tiers.className = "empty";
-      /* NEVER implies the paid alerts are better, faster or more complete.
-         They are identical. The only thing Stars buy is MORE slots, because a
-         slot is the only thing with a marginal cost -- a recurring TON Center
-         call, a DexScreener call and a corpus query, forever. Copy that hinted
-         otherwise would be taxing the free tier while claiming not to. */
-      tiers.textContent = data.limit + " free slots, alerted immediately and in "
-        + "full. " + data.upgrade_stars + " Stars raises it to "
-        + data.upgrade_slots + " for " + data.upgrade_days + " days.";
-      box.appendChild(tiers);
-    }
+    /* The tier line is no longer rendered here. It is STATIC markup above the
+       list (#watch-tiers), so it is on screen before this call is made and
+       survives the call failing -- which is the whole reason the pricing was
+       invisible. What we charge NEVER implies the paid alerts are better,
+       faster or more complete: they are identical, and the only thing Stars
+       buy is more slots, because a slot is the only thing with a marginal
+       cost -- a recurring TON Center call, a DexScreener call and a corpus
+       query, forever. */
     return;
   }
   for (const w of items) {
@@ -1113,6 +1174,10 @@ export default {
       .replaceAll("__BOT__", BOT)
       .replaceAll("__API__", API_BASE)
       .replaceAll("__BUILD__", buildId())
+      .replaceAll("__FREE_SLOTS__", FREE_SLOTS)
+      .replaceAll("__PAID_SLOTS__", PAID_SLOTS)
+      .replaceAll("__SLOTS_STARS__", SLOTS_STARS)
+      .replaceAll("__SLOTS_DAYS__", SLOTS_DAYS)
       .replaceAll("__SOURCE__", source);
 
     return new Response(body, {

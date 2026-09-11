@@ -446,6 +446,39 @@ class TestTheExample(unittest.TestCase):
         self.assertNotRegex(block, r"\b-?\d+:[0-9a-fA-F]{64}\b")
 
 
+class TestShareCardTeachesTheMechanic(unittest.TestCase):
+    """The share card is the compounding loop: a forwarded verdict lands in
+    front of somebody who is, right then, in the chat where the scam was posted.
+    Naming the bot and leaving them to work it out is three steps away from the
+    moment they are in."""
+
+    def setUp(self):
+        self.w = open(ROOT / "cloudflare_worker_miniapp.js").read()
+
+    def test_the_card_names_the_inline_mechanic(self):
+        i = self.w.index('g.fillText("Check one yourself')
+        self.assertIn("@relayshield_bot in any chat", self.w[i:i + 200])
+
+    def test_the_footer_lines_fit_the_canvas(self):
+        """Canvas text does not wrap. A line longer than the card runs off the
+        edge, and the only place that shows up is a screenshot somebody has
+        already forwarded."""
+        m = re.search(r'<canvas id="card"[^>]*width="(\d+)"[^>]*height="(\d+)"', self.w)
+        self.assertIsNotNone(m, "the canvas dimensions moved")
+        width, height = int(m.group(1)), int(m.group(2))
+        footer = re.findall(r'g\.fillText\("([^"]+)", 48, (3\d\d)\)', self.w)
+        self.assertGreaterEqual(len(footer), 2, "the second footer line is gone")
+        for text, y in footer:
+            # 20px system sans, conservative 10.2px per character.
+            self.assertLess(48 + len(text) * 10.2, width, f"overflows: {text}")
+            self.assertLess(int(y), height - 20, f"below the card: {text}")
+
+    def test_it_does_not_collide_with_the_reasons_block(self):
+        ys = [int(y) for _, y in re.findall(r'g\.fillText\("([^"]*)", 48, (\d+)\)', self.w)]
+        self.assertTrue(all(y >= 340 or y <= 300 for y in ys),
+                        "a footer line sits inside the reasons band")
+
+
 class TestWatchTabExplainsItself(unittest.TestCase):
     def setUp(self):
         self.w = open(ROOT / "cloudflare_worker_miniapp.js").read()

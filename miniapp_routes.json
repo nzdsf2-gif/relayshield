@@ -1,0 +1,141 @@
+{
+  "_README": [
+    "THE CANONICAL LIST OF MINI APP DISCOVERY ROUTES. One key per DESTINATION,",
+    "not one per category, because the founder runs tools/miniapp_funnel.py",
+    "before and after EACH submission and five announcement channels are five",
+    "separate events. A single shared 'tg-miniapp-channel' key would make the",
+    "3.9M-subscriber channel and the 9,671-subscriber one indistinguishable,",
+    "which is the measurement that decides whether reach or fit is what works.",
+    "",
+    "THIS FILE IS THE SOURCE OF TRUTH. Two deployed artefacts mirror it and",
+    "cannot read it at runtime: ALLOWED_SOURCES in cloudflare_worker_miniapp.js",
+    "gates the ?startapp= value, and _SOURCE_ALIASES in",
+    "relayshield_developer_signup.py maps the key to a banner. A key missing",
+    "from EITHER is silently downgraded -- the Worker falls back to the generic",
+    "'tg-miniapp' and the landing page logs 'unmatched:'. Both are attribution",
+    "that looks like it worked. test_miniapp_routes.py fails if the three",
+    "disagree.",
+    "",
+    "REGISTER THE KEY BEFORE THE LINK SHIPS. FD-8 is four months of arrivals",
+    "from the canonical MCP directory logging unmatched: because a link went out",
+    "carrying a key nobody had registered.",
+    "",
+    "Ranking is from miniapp_discovery_and_stripe_choice.md section 2 and is NOT",
+    "to be re-litigated. audience_note records where each number came from, and",
+    "a number with no source is not a number."
+  ],
+  "routes": [
+    {
+      "rank": 1,
+      "id": "blog",
+      "key": "tg-miniapp-blog",
+      "destination": "The RelayShield Telegram blog channel",
+      "audience": null,
+      "audience_note": "UNMEASURED -- nobody has counted the blog channel's subscribers. Ours, and the only surface whose audience chose us, which is why it ranks first despite being the smallest.",
+      "status": "ready",
+      "why_first": "One first impression is spent per channel. Spend the first one where a bad reception costs least and the feedback is honest."
+    },
+    {
+      "rank": 2,
+      "id": "trendingapps",
+      "key": "tg-miniapp-trendingapps",
+      "destination": "@trendingapps",
+      "audience": 3900000,
+      "audience_note": "Measured by tools/find_miniapp_channels.py. @twa_apps is the SAME channel, do not submit twice.",
+      "status": "ready",
+      "why_first": "The largest single first impression we will ever spend. It goes AFTER the blog channel and after at least one small channel, so the app has been opened by strangers before it is shown to 3.9M of them."
+    },
+    {
+      "rank": 3,
+      "id": "web3botx",
+      "key": "tg-miniapp-web3botx",
+      "destination": "@web3telegrambotx",
+      "audience": 72742,
+      "audience_note": "Measured by tools/find_miniapp_channels.py, 2026-09-03.",
+      "status": "ready"
+    },
+    {
+      "rank": 4,
+      "id": "findminiapp",
+      "key": "tg-miniapp-findminiapp",
+      "destination": "@findminiapp",
+      "audience": 56380,
+      "audience_note": "Measured by tools/find_miniapp_channels.py, 2026-09-03.",
+      "status": "ready"
+    },
+    {
+      "rank": 5,
+      "id": "onclicka",
+      "key": "tg-miniapp-onclicka",
+      "destination": "@onclicka_tma_en",
+      "audience": 33723,
+      "audience_note": "From the 2026-09-09 Top 15. NOT re-measured by find_miniapp_channels.py, which returned four channels and not this one.",
+      "status": "ready"
+    },
+    {
+      "rank": 6,
+      "id": "telegtapps",
+      "key": "tg-miniapp-telegtapps",
+      "destination": "@telegtapps",
+      "audience": 9671,
+      "audience_note": "Measured by tools/find_miniapp_channels.py, 2026-09-03 (9,673 on that run; 9,671 in the Top 15. The difference is two subscribers and a week, not a discrepancy worth chasing).",
+      "status": "ready",
+      "why_first": "The smallest, so it is the cheapest place to discover the listing copy is wrong. Worth running BEFORE @trendingapps for that reason alone."
+    },
+    {
+      "rank": 7,
+      "id": "tapps",
+      "key": "tg-miniapp-tapps",
+      "destination": "tApps Center",
+      "audience": null,
+      "audience_note": "UNMEASURED. A directory listing is a standing surface rather than one impression, so it is worth doing whatever the number turns out to be.",
+      "status": "ready"
+    },
+    {
+      "rank": 8,
+      "id": "directory",
+      "key": "tg-miniapp-directory",
+      "destination": "Other Mini App directories",
+      "audience": null,
+      "audience_note": "UNMEASURED. A shared key deliberately: these are long-tail listings and one key per directory would be attribution nobody reads.",
+      "status": "ready"
+    },
+    {
+      "rank": 9,
+      "id": "ton",
+      "key": "tg-miniapp-ton",
+      "destination": "TON catalogues",
+      "audience": null,
+      "audience_note": "UNMEASURED.",
+      "status": "ready",
+      "why_first": "UNBLOCKED 2026-09-11. This route was gated on 'only if TON scans ship' and they now do: /v1/ton-address plus relayshield_watchlist_monitor.py, which watches TON and only TON. A TON catalogue is the one audience for whom that is the headline rather than a detail."
+    },
+    {
+      "rank": 10,
+      "id": "menu",
+      "key": null,
+      "destination": "The @relayshield_bot menu button",
+      "audience": null,
+      "audience_note": "UNMEASURED, and it is the bot's own audience, which is small. Ranked here because it is CHEAP, not because it reaches anyone -- ranking a surface by how it performs in general rather than how it performs for US is the error that put this at the top of the first draft.",
+      "status": "not_shipped_by_decision",
+      "why_first": "DO NOT SHIP. /setmenubutton REPLACES the existing button, and that button belongs to the TI monitoring product, which keeps the prominent control. This is a recorded product decision, not a deferred step, and it has no key ON PURPOSE: a key would make it look approved. Shipping it means adding the key first, which is the check firing correctly."
+    }
+  ],
+  "loop_keys": [
+    {
+      "key": "tg-miniapp-share",
+      "what": "The share card. Someone posts a scam link in a group, one member checks it and forwards the verdict.",
+      "why_not_a_route": "It is not a submission we make, so there is no before-and-after to run. It is the compounding loop the routes are meant to start, and it is the number that says whether any of them mattered."
+    },
+    {
+      "key": "tg-miniapp-bot",
+      "what": "The /app, /idcheck and /check commands in @relayshield_bot.",
+      "why_not_a_route": "Reaches people who already have the bot. It is a convenience for existing users, not discovery, and counting it as a route would flatter the funnel."
+    },
+    {
+      "key": "tg-miniapp",
+      "what": "The generic fallback.",
+      "why_not_a_route": "Anything arriving here carried no route key or one the Worker refused. A RISING count here is a defect, not a channel: it means a published link is losing its attribution."
+    }
+  ]
+}

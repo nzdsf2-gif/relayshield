@@ -3587,7 +3587,8 @@ def handle_wallet_risk(params: dict) -> dict:
         risk_level = "HIGH" if "zero_balance_high_activity" in risk_flags or "high_tx_volume" in risk_flags \
             else "MEDIUM" if risk_flags else "LOW"
         _record_first_seen(address, "bitcoin")
-        logger.info("wallet-risk address=%s chain=bitcoin risk=%s flags=%d", address, risk_level, len(risk_flags))
+        logger.info("wallet-risk address=%s chain=bitcoin risk=%s flags=%d source=%s",
+                    address, risk_level, len(risk_flags), (params.get("source") or "-")[:40])
         return _ok({
             "address":    address,
             "chain":      "bitcoin",
@@ -3650,8 +3651,18 @@ def handle_wallet_risk(params: dict) -> dict:
 
     risk_level = "HIGH" if sanctions_hit or len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
     _record_first_seen(address, chain)
-    logger.info("wallet-risk address=%s chain=%s risk=%s flags=%d sanctioned=%s",
-                address, chain, risk_level, len(risk_flags), sanctions_hit)
+    # source= HERE, not only on /v1/ton-address, and the difference is the whole
+    # measurement. The Mini App and the widget both go through check(), which
+    # routes EVERY address -- TON included -- to /v1/wallet-risk and never to
+    # /v1/ton-address. So a source added to ton-address alone is added to the
+    # endpoint this client does not call, and the Mini App's address checks stay
+    # uncountable while the fix looks done.
+    #
+    # Found by tracing the call rather than by reading the endpoint list, which
+    # is the only way it could have been found: both endpoints exist, both take
+    # a TON address, and only one of them is ever reached from the app.
+    logger.info("wallet-risk address=%s chain=%s risk=%s flags=%d sanctioned=%s source=%s",
+                address, chain, risk_level, len(risk_flags), sanctions_hit, (params.get("source") or "-")[:40])
     return _ok({
         "address":    address.lower() if chain == "evm" else address,
         "chain":      chain,

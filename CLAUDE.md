@@ -294,6 +294,83 @@ the answer is "I assumed it", the block is not finished. "I could not check it f
 is not an exemption -- it is the trigger for making the check the reader's first step, which is what
 NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK has said all along.
 
+## THE STARS OFFER WAS ONLY VISIBLE AT THE WALL, AND MY OWN COMMENT SAID OTHERWISE
+
+Founder, 2026-09-11: *"Shouldn't the watch tab include the Stars payment workflow? Users pay us to
+watch interesting addresses that are tied to their money, so we should prompt them to pay."*
+
+He is right, and the code contained its own indictment. The offer was gated on
+`data.used >= data.limit - 1` -- two of three slots -- with a comment directly above it reading
+*"Offered BEFORE the slots are full, not only at the wall."* **The comment and the code disagreed,
+and the code won.** A user with zero or one watch never learned the paid tier existed.
+
+**That is the inline-mode defect in a third place: built, live, and pointed at by nothing.** A paid
+tier nobody can see is a paid tier nobody buys, and the people watching addresses their money is
+actually in are precisely the ones for whom 50 Stars is obviously worth it.
+
+**QUIET AT LOW COUNTS, PROMINENT AT THE WALL**, which is the distinction worth keeping. An inline
+link beside the slot meter is information; a card that dominates the screen before somebody has
+watched anything is an advertisement, and it converts worse because they have not felt the value
+yet. The full card still fires from `add_watch`'s `slots_full` branch.
+
+**And the empty state now sells watching rather than apologising for being empty.** It said "Nothing
+watched yet" and returned, so the tab carrying the only paid product in the app said nothing about
+what it does or what it costs to anybody who had not already used it.
+
+**THE ONE LINE OF COPY THAT IS NOT NEGOTIABLE: the free slots are alerted immediately and in full.**
+The only thing Stars buy is MORE SLOTS, because a slot is the only thing with a marginal cost -- a
+recurring TON Center call, a DexScreener call and a corpus query, forever. Copy hinting that paid
+alerts are faster, prioritised or more complete would be taxing the free tier while claiming not to,
+which is the single principle this design exists to hold. A test forbids "faster", "priority",
+"real-time", "sooner" and "delayed" in the watch tab's user-visible strings, and separately requires
+a sentence that positively tells a free user their alerts are unchanged.
+
+## A DETECTOR WHOSE EXTRACTOR STOPS AT THE THING BEING DETECTED CANNOT DETECT IT
+
+The most interesting bug of the session, and it passed green for as long as nobody triggered it.
+
+`page_script()` extracted the Mini App's client code by walking forward from `` const PAGE = ` `` to
+the first UNESCAPED backtick. Two things followed, and both were wrong:
+
+- **The page ends at line 994, not 981.** The quiz builds NESTED template literals with escaped
+  backticks, and the walk stopped near them, so the scope test was silently checking about two
+  thirds of the page.
+- **The stray-backtick test could never fire.** A stray backtick ENDS the extraction, so the
+  offending character always falls outside the range being scanned. Circular by construction.
+
+Both are fixed by finding the template's real CLOSING DELIMITER (`</html>` plus backtick-semicolon)
+rather than scanning for the next backtick. Proven three ways: a stray backtick near the top is
+caught, one PAST the nested templates is caught, and the legitimate escaped ones are not flagged.
+
+**`node --check` IS IN THE SUITE NOW, and was not.** `test_miniapp.py` says "no node" in its own
+docstring, so the authoritative parse check had never been part of any test run -- the stray backtick
+has broken this file three times and was caught by somebody happening to run node by hand each time.
+That is the quiet-alarm shape guarding the one defect this file reliably produces. The targeted
+backtick test sits alongside it because `node --check` reports the error at whatever token follows
+the backtick, which reads as a problem with that token rather than with a quoted word in a comment
+forty characters earlier.
+
+## STRIPPING COMMENTS BEFORE GREPPING IS NOW A SHARED HELPER, AFTER THE FOURTH TIME
+
+Every guard written in `test_miniapp_routes.py` has, on its first run, matched prose describing the
+defect rather than the defect itself:
+
+1. a comment naming `BOT` failed the Worker-scope test,
+2. a docstring naming `invoice_payload` failed the signed-identity test,
+3. a comment quoting `/v1/link-check` failed the never-metered test,
+4. a comment reading *"better, faster or more complete"* failed the test forbidding exactly those
+   words in user copy.
+
+**It keeps recurring because the two habits collide by construction:** the natural way to write a
+guard is to search the file, and the natural way to write good code is to explain the rule beside
+the code that follows it. `strip_js_comments()` is module-level now rather than something each test
+rediscovers, and `code_only()` does the same job for Python via `ast`.
+
+**And the matching half of the same lesson:** copy in this file wraps across concatenations, so
+`"alerted immediately and in " + "full."` matches neither half of a contiguous search. The first
+version of that assertion failed on copy that was entirely correct. String literals are joined
+before matching.
+
 ## THE MINI APP CHECKS LINKS AND TON. NOTHING ELSE, AND NOT AS A PRODUCT LIMIT.
 
 Founder's instruction, 2026-09-11: *"The check tab should only show Ton addresses, not BitCoin or

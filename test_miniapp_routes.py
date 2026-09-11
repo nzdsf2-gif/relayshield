@@ -300,20 +300,100 @@ class TestTonOnlyCheckTab(unittest.TestCase):
                         "the Solana pattern is tested before TON")
 
 
+def strip_js_comments(js: str) -> str:
+    """Comments out. THIS IS THE FOURTH TIME THIS SUITE HAS NEEDED IT.
+
+    Every guard written here has, on its first run, matched prose describing the
+    defect rather than the defect: a comment naming BOT, a docstring naming
+    invoice_payload, a comment quoting /v1/link-check, and a comment containing
+    the words "better, faster or more complete" while forbidding exactly those
+    words in user copy.
+
+    It keeps recurring because the natural way to write a guard is to search the
+    file, and the natural way to write good code is to explain the rule next to
+    the code that follows it. Those two habits collide every single time, so the
+    stripper is a shared helper rather than something each test rediscovers."""
+    js = re.sub(r"/\*.*?\*/", " ", js, flags=re.S)
+    return re.sub(r"(?m)^\s*//.*$", " ", js)
+
+
+PAGE_OPEN = "const PAGE = `"
+PAGE_CLOSE = "</html>`;"
+
+
+def page_span(src: str):
+    """(first_line, last_line) of the PAGE template literal, 1-indexed.
+
+    FOUND BY ITS CLOSING DELIMITER, not by scanning for the next backtick, and
+    the difference is a bug this file shipped. Walking forward to the first
+    unescaped backtick stops at line 981, where the quiz uses NESTED template
+    literals with escaped backticks -- perfectly legal, and about 13 lines short
+    of the real end. So the scope test was silently checking two thirds of the
+    page, and the backtick test could never see the defect it was written for:
+    a stray backtick ENDS the scan, so it always falls outside the range.
+
+    A detector whose extractor stops at the thing being detected cannot detect
+    it. That is circular by construction and it passed green for exactly as long
+    as nobody triggered it."""
+    lines = src.split("\n")
+    first = next(i for i, l in enumerate(lines) if l.startswith(PAGE_OPEN))
+    last = next(i for i, l in enumerate(lines) if i > first and PAGE_CLOSE in l)
+    return first + 1, last + 1
+
+
 def page_script(src: str) -> str:
     """The PAGE template literal's contents: the code the BROWSER runs.
 
     Everything outside it runs in the Cloudflare Worker, in a different process
     on a different machine, and the two scopes share nothing but the __TOKEN__
     substitutions done at request time."""
-    start = src.index("const PAGE = `")
-    i = start + len("const PAGE = `")
-    while True:
-        j = src.index("`", i)
-        if src[j - 1] != "\\":
-            break
-        i = j + 1
-    return src[start:j]
+    first, last = page_span(src)
+    return "\n".join(src.split("\n")[first - 1:last])
+
+
+class TestTheWorkerActuallyParses(unittest.TestCase):
+    """node --check, in the SUITE rather than by hand.
+
+    A stray backtick inside the PAGE template literal has now broken this file
+    THREE times, and every time it was caught by running node manually because
+    somebody happened to. test_miniapp.py says "no node" in its own docstring,
+    so the authoritative check was not in any suite at all -- the alarm that
+    goes quiet rather than red, guarding the one defect this file keeps
+    producing."""
+
+    def test_node_check_passes(self):
+        if not shutil.which("node"):
+            self.skipTest("node is not installed")
+        r = subprocess.run(["node", "--check",
+                            str(ROOT / "cloudflare_worker_miniapp.js")],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_no_stray_backtick_inside_the_page_template(self):
+        """The same defect with a USEFUL message. node --check reports a syntax
+        error pointing at whatever token follows the backtick, which reads as a
+        problem with that token -- 'Unexpected identifier used' when the actual
+        fault is a quoted word in a comment forty characters earlier. A check
+        that says a thing is wrong owes the reader the evidence that says WHICH
+        thing."""
+        src = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        first, last = page_span(src)
+        lines = src.split("\n")
+        offenders = []
+        for n in range(first, last + 1):
+            line = lines[n - 1]
+            # The opening and closing lines ARE the delimiters.
+            if n in (first, last):
+                continue
+            # An ESCAPED backtick is legal and the quiz uses several: the
+            # client script builds nested template literals with them.
+            if "`" in line.replace("\\`", ""):
+                offenders.append(f"line {n}: {line.strip()[:90]}")
+        self.assertEqual(
+            offenders, [],
+            "an unescaped backtick inside the PAGE template literal ends the "
+            "string early. Everything after it is parsed as code:\n  "
+            + "\n  ".join(offenders))
 
 
 class TestPageScopeIsSelfContained(unittest.TestCase):
@@ -330,22 +410,9 @@ class TestPageScopeIsSelfContained(unittest.TestCase):
 
     SUBSTITUTED = {"__SOURCE__", "__API__", "__BOT__", "__WIDGET__"}
 
-    @staticmethod
-    def _strip_comments(js: str) -> str:
-        """Comments out, for the third time in this suite's history.
-
-        The first run of this very test flagged BOT, because a comment two lines
-        above says "sat in the Worker's own scope alongside BOT". Prose
-        describing a defect is not the defect -- the same correction
-        test_telegram_markdown_escapes.py and code_only() already carry, and it
-        keeps arriving in new costumes because the natural way to write a guard
-        is to search the file."""
-        js = re.sub(r"/\*.*?\*/", " ", js, flags=re.S)
-        return re.sub(r"(?m)^\s*//.*$", " ", js)
-
     def test_every_constant_the_page_uses_is_declared_in_the_page(self):
         src = (ROOT / "cloudflare_worker_miniapp.js").read_text()
-        page = self._strip_comments(page_script(src))
+        page = strip_js_comments(page_script(src))
         declared = set(re.findall(r"\bconst\s+([A-Z][A-Z0-9_]{2,})\s*=", page))
         used = set(re.findall(r"\b([A-Z][A-Z0-9_]{2,})\b", page))
         # Browser and Telegram globals, plus our own placeholder tokens.
@@ -444,6 +511,80 @@ class TestTheExample(unittest.TestCase):
         block = self.w[self.w.index("const EXAMPLE_URL"):][:400]
         self.assertNotRegex(block, r"EQ[A-Za-z0-9_-]{46}")
         self.assertNotRegex(block, r"\b-?\d+:[0-9a-fA-F]{64}\b")
+
+
+class TestStarsAreVisibleInTheWatchTab(unittest.TestCase):
+    """A paid tier nobody can see is a paid tier nobody buys.
+
+    The offer used to be gated on `used >= limit - 1`, i.e. two of three, with a
+    comment above it claiming it appeared BEFORE the slots were full. The
+    comment and the code disagreed, and a user with zero or one watch never
+    learned the paid tier existed -- the same shape as inline mode: built, live,
+    pointed at by nothing."""
+
+    def setUp(self):
+        self.w = open(ROOT / "cloudflare_worker_miniapp.js").read()
+        i = self.w.index("async function loadWatches")
+        self.body = self.w[i:self.w.index("/* ---- Share card", i)]
+
+    def test_the_upgrade_is_not_gated_on_being_near_the_wall(self):
+        self.assertNotIn("data.used >= data.limit - 1", self.body,
+                         "the offer is gated on nearly-full slots again")
+
+    def test_the_meter_carries_the_offer_at_every_count(self):
+        meter = self.body[self.body.index("const meter ="):
+                          self.body.index("box.appendChild(meter)")]
+        self.assertIn("offerUpgrade", meter)
+        self.assertIn("data.upgrade_stars", meter)
+
+    def test_the_empty_state_names_the_tiers(self):
+        empty = self.body[self.body.index("if (!items.length)"):]
+        empty = empty[:empty.index("for (const w of items)")]
+        self.assertIn("data.upgrade_stars", empty)
+        self.assertIn("data.upgrade_slots", empty)
+        self.assertIn("data.upgrade_days", empty)
+        self.assertIn("free slots", empty)
+
+    def test_a_paying_user_is_never_shown_the_upgrade(self):
+        """slots_expire_at is set only while an entitlement is live. Pitching an
+        upgrade to somebody who already bought it is the clearest possible
+        signal that nothing is reading their account."""
+        for guard in re.findall(r"if \(([^)]*slots_expire_at[^)]*)\)", self.body):
+            self.assertIn("!data.slots_expire_at", guard)
+
+    def test_the_copy_never_implies_paid_alerts_are_better(self):
+        """The only thing Stars buy is MORE SLOTS, because a slot is the only
+        thing with a marginal cost. Copy hinting that paid alerts are faster or
+        more complete would be taxing the free tier while claiming not to, which
+        is the one principle this design exists to hold."""
+        # Every quoted string in the function, with COMMENTS STRIPPED FIRST --
+        # the comment right above this code forbids the words "better, faster
+        # or more complete" and therefore contains them.
+        #
+        # And the pieces are JOINED before matching, because copy in this file
+        # is wrapped across concatenations: "alerted immediately and in " +
+        # "full." A contiguous search finds neither half, which made the first
+        # version of this assertion fail on copy that was perfectly correct.
+        code = strip_js_comments(self.body)
+        blob = "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', code)).lower()
+        blob = re.sub(r"\s+", " ", blob)
+        for claim in ("faster", "priority", "instant alerts", "real-time",
+                      "sooner", "delayed", "limited alerts"):
+            self.assertNotIn(claim, blob, f"the copy implies a better tier: {claim}")
+        # And it must positively say the free slots are unaffected.
+        self.assertTrue(
+            any(p in blob for p in ("alerted immediately and in full",
+                                    "keep working exactly as they do now")),
+            "nothing tells a free user their alerts are unchanged")
+
+    def test_buying_still_goes_through_telegram(self):
+        """Stars are the only compliant rail for a digital good in a Mini App,
+        and all three of our other rails are one link away."""
+        self.assertIn("tg.openInvoice(", self.w)
+        up = self.w[self.w.index("function offerUpgrade"):]
+        up = up[:up.index("async function loadWatches")]
+        for rail in ("stripe", "checkout", "x402", "/developers"):
+            self.assertNotIn(rail, up.lower())
 
 
 class TestShareCardTeachesTheMechanic(unittest.TestCase):

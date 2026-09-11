@@ -877,9 +877,23 @@ $("share").addEventListener("click", () => {
     g.fillText("\u2022 " + (r.length > 52 ? r.slice(0, 51) + "\u2026" : r), 48, y);
     y += 34;
   }
+  /* TWO FOOTER LINES, AND THE SECOND ONE IS THE COMPOUNDING HALF.
+     A forwarded verdict lands in front of somebody who is, right then, in the
+     conversation where the scam was posted. The old single line named the bot
+     and left them to work out what to do with it, which means opening a new
+     chat, finding the app and pasting -- three steps away from the moment they
+     are actually in. Naming the inline mechanic turns a card that advertises
+     us into a card that teaches the reader to do the check themselves, in the
+     chat they are already looking at.
+
+     Kept to one short sentence because it is rendered into a fixed-width
+     canvas at 20px and there is no wrapping: a longer line silently runs off
+     the edge of the image, which is the kind of defect that only shows up in a
+     screenshot somebody already forwarded. */
   g.fillStyle = "#64748b";
   g.font = "20px -apple-system, system-ui, sans-serif";
-  g.fillText("Checked with RelayShield \u00b7 t.me/relayshield_bot", 48, 386);
+  g.fillText("Check one yourself: type @relayshield_bot in any chat", 48, 362);
+  g.fillText("Checked with RelayShield \u00b7 t.me/relayshield_bot", 48, 392);
   c.classList.remove("hidden");
   $("share").textContent = "Press and hold the image to forward it";
 });

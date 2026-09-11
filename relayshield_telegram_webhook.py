@@ -1386,7 +1386,7 @@ def msg_help(tier: str) -> str:
     if tier == TIER_FREE:
         return (
             "🛡️ *RelayShield Free — Commands*\n\n"
-            "📨 *Forward anything that looks off to `@relayshield_bot`* — a "
+            "📨 *Forward anything that looks off to* `@relayshield_bot` — a "
             "text, a link, or a message from someone in your contacts. Tap the "
             "message, choose Forward, search `@relayshield_bot`. No command "
             "needed.\n"
@@ -1416,7 +1416,7 @@ def msg_help(tier: str) -> str:
         # this text from one header to the next, so anything here belongs to no
         # category and shows only in the full list — which is what an
         # orientation line should do.
-        "📨 *Forward anything that looks off to `@relayshield_bot`* — a text, "
+        "📨 *Forward anything that looks off to* `@relayshield_bot` — a text, "
         "a link, or a message from someone in your contacts. Tap the message, "
         "choose Forward, search `@relayshield_bot`. No command needed.\n"
         "📸 *Paste a screenshot of a suspicious text* — just send the picture "
@@ -2122,7 +2122,7 @@ def msg_help_top(tier: str) -> str:
         # parse_mode="Markdown", where a lone _ opens an italic entity; unescaped,
         # @relayshield_bot leaves it unclosed, Telegram answers 400, and the whole
         # card fails to send.
-        "📨 *Forward anything that looks off to `@relayshield_bot`* — a text, "
+        "📨 *Forward anything that looks off to* `@relayshield_bot` — a text, "
         "a link, or a message from someone in your contacts. Tap the message, "
         "choose Forward, then search `@relayshield_bot`. No command needed. "
         "A hijacked account still shows up as your friend, so those are worth "
@@ -4178,7 +4178,7 @@ def handle_setdomain(chat_id: int, domain_arg: str | None, user: dict) -> None:
 
     send_message(
         chat_id,
-        f"✅ *Company domain set: `{domain}`*\n\n"
+        f"✅ *Company domain set:* `{domain}`\n\n"
         f"RelayShield will monitor `{domain}` for lookalike domains — typosquatting and "
         f"phishing impersonation attempts.\n\n"
         f"Alerts will be delivered to you and all {seat_count} team seat(s) if an attacker "
@@ -4299,7 +4299,7 @@ def handle_checkllm(chat_id: int, user: dict) -> None:
     providers = ", ".join(sorted(set(findings)))
     send_message(
         chat_id,
-        f"🚨 *LLMjacking risk detected for `{domain}`*\n\n"
+        f"🚨 *LLMjacking risk detected for* `{domain}`\n\n"
         f"Exposed provider key(s) found: *{providers}*\n\n"
         "This is a live, uncapped billing liability, not just a data exposure — rotate "
         "immediately and check your provider's usage dashboard for anomalous spend right now, "
@@ -5297,7 +5297,7 @@ def handle_approvals(chat_id: int, user: dict) -> None:
     for w in evm_wallets:
         address = w.get("wallet_address", "")
         short   = f"{address[:6]}...{address[-4:]}"
-        lines   = [f"*🔓 Token Approvals — `{short}`*\n"]
+        lines   = [f"*🔓 Token Approvals —* `{short}`\n"]
 
         # GoPlus address_security check (Ethereum — most signal-rich chain)
         risk = _goplus_risk_check(address, chain_id=1)

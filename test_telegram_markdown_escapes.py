@@ -51,5 +51,34 @@ class TestNoEscapedUnderscores(unittest.TestCase):
             self.assertNotRegex(src, r"DM_ ", f"{f.name} opens an italic run after DM")
 
 
+class TestNoNestedEntities(unittest.TestCase):
+    """A CODE SPAN CANNOT LIVE INSIDE A BOLD RUN in legacy Markdown.
+
+    Found on 2026-09-11 by verifying the escaped-underscore fix instead of
+    declaring it done -- the founder asked for exactly that and it was the right
+    ask. Replacing `*... @relayshield\\_bot*` with a code span left the code span
+    INSIDE the bold run, which legacy Markdown does not nest: the backticks
+    render literally or the bold breaks.
+
+    THREE of the six were pre-existing and nothing to do with the handle:
+    `*Company domain set: {domain}*`, `*LLMjacking risk detected for {domain}*`
+    and `*Token Approvals - {short}*` had all shipped that way.
+
+    The fix is to close the bold BEFORE the span: `*Label:* ` + code.
+    """
+
+    def test_no_code_span_inside_a_bold_run(self):
+        for f in FILES:
+            # Collapse adjacent literals so a string split across source lines is
+            # judged as the runtime sees it, not as the author typed it.
+            src = re.sub(r'"\s*\n\s*"', "", f.read_text(encoding="utf-8"))
+            bad = [m.group(0)[:100] for m in re.finditer(r"\*[^*\n]{0,200}\*", src)
+                   if "`" in m.group(0)]
+            self.assertEqual(
+                bad, [],
+                f"{f.name}: legacy Markdown does not nest a code span in bold. "
+                f"Close the bold first:\n  " + "\n  ".join(bad))
+
+
 if __name__ == "__main__":
     unittest.main()

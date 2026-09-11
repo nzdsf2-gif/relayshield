@@ -183,6 +183,12 @@ const PAGE = `<!doctype html>
   .row .x { background: none; border: 0; color: var(--hint); font-size: 1.1rem; padding: 0 4px; }
   .empty { color: var(--hint); font-size: .9rem; padding: 18px 2px; }
   .example { color: var(--hint); font-size: .82rem; margin: 10px 2px 0; }
+  .boot {
+    margin: 0 0 12px; padding: 10px 12px; border-radius: 8px;
+    background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.35);
+    color: var(--text); font-size: .82rem;
+  }
+  .build { color: var(--hint); font-size: .7rem; opacity: .7; margin-top: 10px; }
   .linkish {
     background: none; border: 0; padding: 0; font: inherit; font-size: .82rem;
     color: var(--accent); text-decoration: underline; cursor: pointer;
@@ -229,6 +235,8 @@ const PAGE = `<!doctype html>
     <button role="tab" id="tab-watch" aria-selected="false">Watching</button>
     <button role="tab" id="tab-learn" aria-selected="false">Spot the fake</button>
   </nav>
+
+  <p id="boot" class="boot" hidden></p>
 
   <section id="pane-check">
     <textarea id="in" placeholder="Paste a link, or a TON address (EQ... / UQ... / 0:...)"
@@ -285,10 +293,49 @@ const PAGE = `<!doctype html>
     <button class="ghost hidden" id="pin">Add to home screen</button>
     <a id="botlink" href="__BOT__">Monitor my email, phone and wallets</a>
     <a id="more" href="__DEVELOPERS__" target="_blank" rel="noopener">Run this check from your own bot or agent</a>
+    <p class="build">Build __BUILD__</p>
   </footer>
+
+<script>
+/* A CLASSIC script, deliberately, and it must stay above the module.
+
+   THE MINI APP HAS NO CONSOLE. On a phone there is no way to see a JavaScript
+   error, so every failure of the code below presents identically: the static
+   HTML renders, the buttons do nothing, and the tabs do not switch. That is
+   indistinguishable from a CSS problem, a cache problem, or a bug in a handler,
+   and on 2026-09-11 it cost a round trip in which the code turned out to parse,
+   load and run correctly against every check available in the container.
+
+   A module that fails to parse, fails to IMPORT, or throws on its first line
+   never runs its own error handler -- so the watchdog cannot live inside it.
+   This script runs regardless, records anything the page throws, and after
+   three seconds says so on the page itself if the module never checked in. */
+window.__rsErr = "";
+window.__rsBoot = false;
+window.addEventListener("error", function (e) {
+  window.__rsErr = (e && (e.message || String(e.error))) || "script error";
+});
+window.addEventListener("unhandledrejection", function (e) {
+  window.__rsErr = "unhandled rejection: " + (e && e.reason);
+});
+setTimeout(function () {
+  if (window.__rsBoot) return;
+  var d = document.getElementById("boot");
+  if (!d) return;
+  d.hidden = false;
+  d.textContent = "This app's code did not start. "
+    + (window.__rsErr || "No error was reported, which usually means the script "
+       + "was blocked or could not be fetched.")
+    + " Build __BUILD__.";
+}, 3000);
+</script>
 
 <script type="module">
 import { check } from "/relayshield-widget.js";
+/* The heartbeat the watchdog above waits for. First statement after the import
+   on purpose: if the import resolves, this runs, and anything that throws LATER
+   is reported by the error listener rather than by the silence. */
+window.__rsBoot = true;
 
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
@@ -993,6 +1040,39 @@ renderHistory();
 </body>
 </html>`;
 
+/* A SHORT, VISIBLE BUILD ID, AND IT ANSWERS A QUESTION THAT KEEPS COSTING ROUNDS.
+   "I cannot see your changes" has three causes that look identical from a phone:
+   the deploy did not run, Telegram served a cached page, or the change is live
+   and something else is wrong. Nothing on the page could tell them apart, so
+   every report started with a round trip to establish which one it was.
+
+   Computed from the page AND the embedded widget, so it moves whenever either
+   does. FNV-1a rather than crypto: this is a cache-buster and a version label,
+   not a checksum anyone is defending, and it must be cheap enough to run once
+   at Worker load with no async. */
+/* LAZY, AND THAT IS NOT AN OPTIMISATION. The first version of this was an IIFE
+   that ran at module load and read WIDGET_JS, which is declared FIFTY LINES
+   FURTHER DOWN -- `const` is not initialised until its own line is reached, so
+   that is a temporal-dead-zone ReferenceError at Worker startup and every
+   request 500s. `node --check` passes it: the syntax is perfect.
+
+   Third instance of one family in two days. A stray backtick, a constant in the
+   wrong SCOPE, and now a constant in the wrong ORDER -- all syntactically
+   valid, all runtime dead, none visible to a parser. The guard for the whole
+   family is to EXECUTE the module, which test_miniapp_routes.py now does. */
+let _build = "";
+function buildId() {
+  if (_build) return _build;
+  let h = 0x811c9dc5;
+  const src = PAGE + WIDGET_JS;
+  for (let i = 0; i < src.length; i++) {
+    h ^= src.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  _build = h.toString(16).padStart(8, "0");
+  return _build;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -1016,6 +1096,7 @@ export default {
       .replaceAll("__DEVELOPERS__", DEVELOPERS)
       .replaceAll("__BOT__", BOT)
       .replaceAll("__API__", API_BASE)
+      .replaceAll("__BUILD__", buildId())
       .replaceAll("__SOURCE__", source);
 
     return new Response(body, {

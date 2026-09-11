@@ -294,6 +294,58 @@ the answer is "I assumed it", the block is not finished. "I could not check it f
 is not an exemption -- it is the trigger for making the check the reader's first step, which is what
 NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK has said all along.
 
+## THE MINI APP HAS NO CONSOLE, SO EVERY JS FAILURE LOOKS IDENTICAL. IT REPORTS ITSELF NOW.
+
+2026-09-11. Reported as: the Check tab shows the new TON-only text, but "Try a link that gets
+flagged" does nothing, the Watching tab will not open, and neither will Spot the fake.
+
+**Every one of those is the same symptom: the static HTML rendered and no JavaScript ran.** On a
+phone there is no console, so that is indistinguishable from a CSS bug, a stale cache, a broken
+handler, or a failed deploy -- four causes with four different fixes and no way to tell them apart.
+
+**I could not reproduce it, and everything checkable from the container passes**, which is worth
+recording precisely so the next session does not repeat the search: the page HTML is tag-balanced,
+the stylesheet is brace-balanced and `.hidden` survives, the page module parses as a real ES module,
+it EXECUTES against a stubbed DOM, and all four handlers register and fire without throwing. Deploy
+run 7 succeeded. So the honest report was "I cannot reproduce this", not a fifth guess.
+
+**THE FIX IS THE INSTRUMENT, NOT A GUESS.** A classic (non-module) script now runs ABOVE the module,
+records anything the page throws, and after three seconds writes onto the page itself if the module
+never checked in. It has to be classic and it has to be above: **a module that fails to parse, fails
+to IMPORT, or throws on its first line never runs its own error handler**, so a watchdog inside it
+reports nothing in exactly the cases that matter. The module sets `window.__rsBoot = true` directly
+after the import, which is the heartbeat.
+
+**And a visible BUILD id in the footer**, computed from the page plus the embedded widget. "I cannot
+see your changes" has three causes that look identical from a phone -- the deploy did not run,
+Telegram served a cached page, or the change is live and something else is wrong -- and nothing on
+the page could separate them, so every report started with a round trip to establish which.
+
+## THE THIRD RUNTIME-DEAD DEFECT IN TWO DAYS, AND IT WAS IN THE FIX FOR THE SECOND
+
+Writing the build id, I declared it as an IIFE that ran at module load and read `WIDGET_JS`, which is
+declared **fifty lines further down**. `const` is not initialised until its own line is reached, so
+that is a temporal-dead-zone `ReferenceError` at Worker startup and **every request 500s**.
+
+`node --check` passes it. The syntax is perfect.
+
+That is three in one family in two days, all syntactically valid and all runtime dead:
+
+1. a stray backtick inside the `PAGE` template literal,
+2. a constant declared in the WORKER scope and read from the PAGE,
+3. a constant read before the one it depends on is initialised.
+
+**No parser sees any of them. Executing the module sees all three.**
+`test_miniapp_routes.py` now imports the Worker and serves a request: it checks the module loads,
+that it returns a page with every `__PLACEHOLDER__` substituted, that `/relayshield-widget.js` is
+served with a JavaScript content-type and still exports `check` (a module whose import fails runs
+NOTHING while the static HTML renders, which is this whole section's symptom), and that the build id
+appears. Proven by reintroducing all three defects plus a broken widget route.
+
+**The general form, and it now outranks every syntax check in this repo: `node --check` answers
+"does this parse". It never answers "does this run". For anything that is a deployed artefact rather
+than a library, execute it.**
+
 ## THE STARS OFFER WAS ONLY VISIBLE AT THE WALL, AND MY OWN COMMENT SAID OTHERWISE
 
 Founder, 2026-09-11: *"Shouldn't the watch tab include the Stars payment workflow? Users pay us to

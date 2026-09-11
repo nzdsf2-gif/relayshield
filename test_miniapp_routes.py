@@ -829,6 +829,52 @@ class TestStarsAreVisibleInTheWatchTab(unittest.TestCase):
             self.assertNotIn(rail, up.lower())
 
 
+class TestTheBuyPathDoesNotDependOnTheList(unittest.TestCase):
+    """The price was visible and unpressable.
+
+    The only buy control was rendered from the /v1/watchlist/list response
+    beside the slot meter, so a user whose list call had not returned -- or had
+    failed -- read what we charge with no way to pay it. Buying needs the signed
+    initData and nothing else; the list adds better numbers, not capability.
+
+    This is the same defect as the missing tier line one layer down, and worth a
+    guard of its own because the natural place to add a button is next to the
+    data that describes it."""
+
+    def setUp(self):
+        self.w = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        i = self.w.index("async function loadWatches")
+        self.load = self.w[i:self.w.index("/* ---- Share card", i)]
+
+    def test_the_page_serves_a_buy_control_before_any_request(self):
+        page = served_page()
+        self.assertIn('id="watch-buy"', page)
+        label = page[page.index('id="watch-buy"'):]
+        label = label[:label.index("</button>")]
+        self.assertIn("Stars", label)
+        self.assertNotIn("__", label, "a placeholder reached the browser")
+
+    def test_it_is_wired_outside_loadWatches(self):
+        code = strip_js_comments(self.w)
+        wiring = 'buyBtn.addEventListener'
+        self.assertIn(wiring, code, "the buy control has no handler")
+        self.assertNotIn(wiring, strip_js_comments(self.load),
+                         "buying was moved back inside the list call")
+
+    def test_the_offer_carries_fallback_numbers(self):
+        """offerUpgrade is reachable before any response, so every number it
+        renders needs a default. Without them the button reads 'undefined
+        Stars', which is worse than no button."""
+        up = self.w[self.w.index("function offerUpgrade"):]
+        up = up[:up.index("async function loadWatches")]
+        for field in ("upgrade_stars", "upgrade_slots", "upgrade_days"):
+            self.assertRegex(up, rf"d\.{field} \|\| \d+",
+                             f"{field} has no fallback")
+
+    def test_a_paying_user_does_not_see_the_buy_control(self):
+        self.assertIn("buyBtn.hidden = Boolean(data.slots_expire_at)", self.load)
+
+
 class TestSlotNumbersAgreeWithTheServer(unittest.TestCase):
     """The watch tab now names the price in STATIC markup, so the Worker holds
     a second copy of four numbers whose authority is relayshield_watchlist.py.

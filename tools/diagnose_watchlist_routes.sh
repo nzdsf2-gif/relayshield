@@ -136,6 +136,16 @@ echo
 echo "   --- POST $BASE/list"
 curl -sS -i -X POST "$BASE/list" -H 'Content-Type: application/json' -d '{}' | sed 's/^/   /'
 echo
+# THE STARS ROUTE, PROBED BY NAME. It was added to the Lambda's ROUTES table and
+# to the create script's PARTS list on 2026-09-11, AFTER this API's resources were
+# last created, so it is the one most likely to be missing at the edge -- and a
+# missing invoice route means the buy button opens nothing. Probed separately
+# because "the other three work" says nothing about this one.
+echo "   --- POST $BASE/invoice   (the Stars route)"
+curl -sS -i -X POST "$BASE/invoice" -H 'Content-Type: application/json' -d '{}' \
+  | sed 's/^/   /'
+echo
+
 echo "   --- a route known to work, for comparison: POST /v1/link-check"
 curl -sS -o /dev/null -w '   %{http_code}\n' -X POST \
   "https://$API_ID.execute-api.$REGION.amazonaws.com/$STAGE/v1/link-check" \
@@ -152,6 +162,12 @@ echo "                                       If X is /v1/watchlist/list and step
 echo "                                       returned 204, the code is fine and the"
 echo "                                       gateway is sending OPTIONS somewhere"
 echo "                                       unexpected."
+echo "  /invoice: {\"message\": ...}        -> THE ROUTE DOES NOT EXIST AT THE EDGE."
+echo "                                       Expected if step 2 shows no invoice row."
+echo "                                       Fix: sh tools/create_watchlist_routes.sh"
+echo "  /invoice: {\"ok\": false, \"error\":  -> the route EXISTS and our handler"
+echo "        \"unverified: ...\"}            answered. Nothing to create; a refusal"
+echo "                                       to an unsigned curl is the correct reply."
 echo "  Step 6 says 404                    -> stale code (cause B). Nothing in the"
 echo "                                       gateway is wrong. Re-run the create"
 echo "                                       script after merging."

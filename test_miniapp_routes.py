@@ -13,7 +13,9 @@ measurement tool gets acted on.
 """
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -230,6 +232,242 @@ class TestSnapshotAndCompare(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             self.mod.print_comparison(cur, "before-x")
         self.assertIn("tg-miniapp-typo", buf.getvalue())
+
+
+class TestTonOnlyCheckTab(unittest.TestCase):
+    """The Check tab screens links and TON, and nothing else.
+
+    A Telegram Mini App lives inside Telegram's rules and TON is the chain
+    Telegram ships. This is the founder's instruction; the precise clause is
+    UNVERIFIED from the container because core.telegram.org is egress-blocked,
+    and the instruction is the conservative direction either way."""
+
+    def setUp(self):
+        self.w = WORKER if False else open(ROOT / "cloudflare_worker_miniapp.js").read()
+
+    def test_the_placeholder_does_not_advertise_other_chains(self):
+        """The first thing a user reads. Inviting a Solana address and then
+        refusing it is worse than never offering."""
+        m = re.search(r'id="in" placeholder="([^"]+)"', self.w)
+        self.assertIsNotNone(m)
+        ph = m.group(1).lower()
+        for chain in ("solana", "bitcoin", "0x"):
+            self.assertNotIn(chain, ph, f"the placeholder still offers {chain}")
+        self.assertIn("ton", ph)
+
+    def test_other_chains_are_named_and_refused(self):
+        self.assertIn("OTHER_CHAINS", self.w)
+        for name in ("Ethereum or EVM", "Bitcoin", "Solana", "Ronin"):
+            self.assertIn(name, self.w, f"{name} is not named in the refusal")
+
+    def test_a_refused_address_is_not_redirected_anywhere(self):
+        """Pointing an Ethereum address at another of our surfaces from in here
+        is the same rule broken one link further out, which is exactly the
+        Stars-to-Stripe trap."""
+        i = self.w.index("function offChainReason")
+        j = self.w.index("async function run()")
+        body = self.w[i:j]
+        for rail in ("http", "t.me", "developers", "relayshield.net"):
+            self.assertNotIn(rail, body,
+                             f"the refusal path links out to {rail}")
+
+    def test_a_refused_address_cannot_be_watched_or_shared(self):
+        """Watching an EVM address would put a row in the table that the TON
+        monitor will never re-check -- a promise nothing keeps, which is the
+        defect the monitor was built to end."""
+        i = self.w.index("const off = offChainReason(value);")
+        block = self.w[i:i + 900]
+        self.assertIn("last = null", block)
+        self.assertIn('["watch", "share", "cta"]', block)
+
+    def test_the_gate_is_NOT_in_the_shared_widget(self):
+        """widget/relayshield-widget.js is copied into other people's bots and
+        called from servers that are not Telegram. Restricting it there would
+        break every other caller to satisfy one host's terms."""
+        wid = (ROOT / "widget" / "relayshield-widget.js").read_text()
+        self.assertNotIn("OTHER_CHAINS", wid)
+        self.assertIn("EVM", wid)
+        self.assertIn("BTC", wid)
+        self.assertIn("SOL", wid)
+
+    def test_ton_wins_over_solana_on_the_overlapping_range(self):
+        """A 48-character TON friendly address also matches the Solana base58
+        range. The TON test must return FIRST or every TON address is refused
+        as Solana -- which would break the only chain this app checks."""
+        i = self.w.index("function offChainReason")
+        body = self.w[i:i + 900]
+        self.assertLess(body.index("TON_ADDR.test(t)"), body.index("OTHER_CHAINS"),
+                        "the Solana pattern is tested before TON")
+
+
+def page_script(src: str) -> str:
+    """The PAGE template literal's contents: the code the BROWSER runs.
+
+    Everything outside it runs in the Cloudflare Worker, in a different process
+    on a different machine, and the two scopes share nothing but the __TOKEN__
+    substitutions done at request time."""
+    start = src.index("const PAGE = `")
+    i = start + len("const PAGE = `")
+    while True:
+        j = src.index("`", i)
+        if src[j - 1] != "\\":
+            break
+        i = j + 1
+    return src[start:j]
+
+
+class TestPageScopeIsSelfContained(unittest.TestCase):
+    """THE BUG node --check CANNOT SEE, and it shipped once in this session.
+
+    INLINE_TEXT was first declared in the Worker's own scope, forty lines above
+    the template literal, and used inside the page. Both syntax checks passed --
+    the file parses, the string is a valid string -- and the browser would have
+    thrown ReferenceError on load, leaving a blank tip and no error anywhere we
+    look. Same family as the stray backtick: syntactically valid, runtime dead.
+
+    So: every SCREAMING_CASE constant the page reads must be declared in the
+    page, or be one of the values substituted into it at request time."""
+
+    SUBSTITUTED = {"__SOURCE__", "__API__", "__BOT__", "__WIDGET__"}
+
+    @staticmethod
+    def _strip_comments(js: str) -> str:
+        """Comments out, for the third time in this suite's history.
+
+        The first run of this very test flagged BOT, because a comment two lines
+        above says "sat in the Worker's own scope alongside BOT". Prose
+        describing a defect is not the defect -- the same correction
+        test_telegram_markdown_escapes.py and code_only() already carry, and it
+        keeps arriving in new costumes because the natural way to write a guard
+        is to search the file."""
+        js = re.sub(r"/\*.*?\*/", " ", js, flags=re.S)
+        return re.sub(r"(?m)^\s*//.*$", " ", js)
+
+    def test_every_constant_the_page_uses_is_declared_in_the_page(self):
+        src = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        page = self._strip_comments(page_script(src))
+        declared = set(re.findall(r"\bconst\s+([A-Z][A-Z0-9_]{2,})\s*=", page))
+        used = set(re.findall(r"\b([A-Z][A-Z0-9_]{2,})\b", page))
+        # Browser and Telegram globals, plus our own placeholder tokens.
+        known = {"JSON", "URL", "DOM", "SVG", "HTML", "API", "GET", "POST",
+                 "OK", "ID", "UTC", "CSS", "TON", "EQ", "UQ", "USD"}
+        missing = {u for u in used - declared - known - self.SUBSTITUTED
+                   if not u.startswith("__")}
+        # Anything left must appear in the Worker scope, which is the defect.
+        worker_only = {m for m in missing
+                       if re.search(r"\bconst\s+" + m + r"\s*=", src.replace(page, ""))}
+        self.assertFalse(
+            worker_only,
+            f"declared in the Worker scope and read by the page: {sorted(worker_only)}. "
+            "The browser will throw ReferenceError; no syntax check sees this.")
+
+
+class TestTheGateActuallyRuns(unittest.TestCase):
+    """EXECUTES the gate against real address shapes, rather than reading its
+    regexes. test_miniapp.py already learned that a file which parses as text
+    can still be code that does the wrong thing, and a regex is the single
+    easiest thing in this file to get subtly wrong -- TON's 48-character
+    friendly form sits inside Solana's base58 range, so an ordering mistake
+    refuses every address this app exists to check and nothing errors."""
+
+    CASES = [
+        ("EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N", "", "TON friendly EQ"),
+        ("UQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N", "", "TON friendly UQ"),
+        ("0:" + "a" * 64, "", "TON raw"),
+        ("-1:" + "b" * 64, "", "TON masterchain"),
+        ("0x" + "a" * 40, "Ethereum", "EVM"),
+        ("ronin:0x" + "b" * 40, "Ronin", "Ronin"),
+        ("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "Bitcoin", "BTC bech32"),
+        ("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "Bitcoin", "BTC legacy"),
+        ("7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV3qyouov87awMs", "Solana", "SOL"),
+        ("https://evil.example/x", "", "url"),
+        ("evil.example", "", "bare domain"),
+        ("", "", "empty"),
+    ]
+
+    def test_every_shape_is_classified_correctly(self):
+        if not shutil.which("node"):
+            self.skipTest("node is not installed")
+        w = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        gate = w[w.index("const TON_ADDR ="):w.index("async function run()")]
+        harness = gate + "\nconst cases = " + json.dumps(self.CASES) + ";\n" + """
+const out = [];
+for (const [input, expect, label] of cases) {
+  const got = offChainReason(input);
+  const ok = expect ? got.includes(expect) : got === "";
+  if (!ok) out.push(label + ": " + JSON.stringify(got));
+}
+console.log(JSON.stringify(out));
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+            f.write(harness)
+            path = f.name
+        try:
+            r = subprocess.run(["node", path], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            failures = json.loads(r.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+        self.assertEqual(failures, [], f"misclassified: {failures}")
+
+
+class TestTheExample(unittest.TestCase):
+    """An empty box is the worst first screen for a product whose most common
+    honest answer is 'nothing known'."""
+
+    def setUp(self):
+        self.w = open(ROOT / "cloudflare_worker_miniapp.js").read()
+
+    def test_the_example_runs_a_real_check(self):
+        """Not a canned card. A rendered verdict nobody can check is a claim
+        about our own product, and it goes stale silently."""
+        i = self.w.index('$("try-bad").addEventListener')
+        block = self.w[i:i + 300]
+        self.assertIn("run()", block)
+        self.assertIn('$("in").value = EXAMPLE_URL', block)
+
+    def test_the_example_is_flagged_by_construction_not_by_our_say_so(self):
+        """Google's own Safe Browsing test host, which /v1/link-check consults.
+        A domain we merely assert is in our corpus would be unverifiable, and
+        shipping a REAL criminal link inside our own app and inviting a tap is
+        worse than either."""
+        self.assertIn("testsafebrowsing.appspot.com", self.w)
+        i = self.w.index("const EXAMPLE_URL")
+        self.assertIn("UNVERIFIED", self.w[max(0, i - 1800):i],
+                      "the example is not run from this container and must say so")
+
+    def test_the_example_is_a_url_not_an_invented_ton_address(self):
+        """No TON address is shipped as an example. Naming one is a claim about
+        a live address that cannot be verified from here, and an address that
+        stops being flagged turns the example into a false negative on the
+        app's own front screen."""
+        block = self.w[self.w.index("const EXAMPLE_URL"):][:400]
+        self.assertNotRegex(block, r"EQ[A-Za-z0-9_-]{46}")
+        self.assertNotRegex(block, r"\b-?\d+:[0-9a-fA-F]{64}\b")
+
+
+class TestWatchTabExplainsItself(unittest.TestCase):
+    def setUp(self):
+        self.w = open(ROOT / "cloudflare_worker_miniapp.js").read()
+
+    def test_it_names_every_kind_that_holds_money(self):
+        for kind in ("Jettons", "Wallets", "Vaults", "DeFi", "NFT"):
+            self.assertIn(kind, self.w, f"the watch tab does not mention {kind}")
+
+    def test_the_kinds_match_what_the_monitor_actually_detects(self):
+        """Naming a kind the monitor cannot act on is a promise nothing keeps --
+        the exact defect the watchlist shipped with for two days."""
+        mon = (ROOT / "relayshield_watchlist_monitor.py").read_text()
+        for signal in ("LIQUIDITY_GONE", "BALANCE_DRAINED", "CONTRACT_DEPLOYED",
+                       "SCAM_FLAGGED"):
+            self.assertIn(signal, mon)
+
+    def test_it_says_ton_and_does_not_offer_other_chains(self):
+        i = self.w.index('class="watch-intro"')
+        block = self.w[i:self.w.index('id="watchlist"')]
+        self.assertIn("TON", block)
+        for chain in ("Ethereum", "Solana", "Bitcoin"):
+            self.assertNotIn(chain, block)
 
 
 if __name__ == "__main__":

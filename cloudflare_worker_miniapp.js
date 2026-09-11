@@ -182,6 +182,14 @@ const PAGE = `<!doctype html>
   }
   .row .x { background: none; border: 0; color: var(--hint); font-size: 1.1rem; padding: 0 4px; }
   .empty { color: var(--hint); font-size: .9rem; padding: 18px 2px; }
+  .example { color: var(--hint); font-size: .82rem; margin: 10px 2px 0; }
+  .linkish {
+    background: none; border: 0; padding: 0; font: inherit; font-size: .82rem;
+    color: var(--accent); text-decoration: underline; cursor: pointer;
+  }
+  .watch-intro { color: var(--hint); font-size: .85rem; margin: 4px 2px 10px; }
+  .watch-kinds { margin: 0 0 14px; padding-left: 18px; }
+  .watch-kinds li { font-size: .85rem; margin: 6px 0; color: var(--text); }
   .upsell {
     margin-top: 14px; padding: 14px; border-radius: 10px;
     background: var(--card); border: 1px solid rgba(148,163,184,.25);
@@ -223,9 +231,12 @@ const PAGE = `<!doctype html>
   </nav>
 
   <section id="pane-check">
-    <textarea id="in" placeholder="https://... or 0x... or a TON, Solana or Bitcoin address"
+    <textarea id="in" placeholder="Paste a link, or a TON address (EQ... / UQ... / 0:...)"
               autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
     <button class="go" id="go">Check it</button>
+    <p class="example">Not sure what to paste?
+      <button class="linkish" id="try-bad">Try a link that gets flagged</button></p>
+    <p class="example" id="inline-tip"></p>
 
     <div class="verdict hidden" id="out" data-level="unknown">
       <p class="head" id="head"></p>
@@ -244,6 +255,21 @@ const PAGE = `<!doctype html>
   </section>
 
   <section id="pane-watch" class="hidden">
+    <p class="watch-intro">Watching re-checks a TON address every few hours and
+      messages you the moment the answer changes. It covers anything on TON that
+      can hold or move your money:</p>
+    <ul class="watch-kinds">
+      <li><b>Jettons and tokens</b> &mdash; liquidity pulled, price collapsed, or
+        newly flagged as a scam.</li>
+      <li><b>Wallets</b> &mdash; a balance that was there and is not any more.</li>
+      <li><b>Vaults and DeFi contracts</b> &mdash; an address that was not running
+        code when you sent to it, and is now.</li>
+      <li><b>NFT collections</b> &mdash; the collection address flagged after you
+        bought.</li>
+    </ul>
+    <p class="watch-intro">All of them are accounts on TON, so all of them get the
+      same checks: TON&rsquo;s own account data, DEX liquidity, and our indicator
+      corpus collected from criminal Telegram channels.</p>
     <div id="watchlist"></div>
     <div id="upsell" class="upsell" hidden></div>
   </section>
@@ -268,6 +294,19 @@ const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 
 const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
+/* Plain prose, no parse mode, no formatting: it renders into textContent here
+   and is the wording the share card and the bot should use too, so it has to
+   survive being copied anywhere.
+
+   DEFINED HERE, INSIDE THE PAGE SCRIPT, AND THAT IS NOT A STYLE CHOICE. The
+   first version of this constant sat in the Worker's own scope alongside BOT,
+   forty lines up and outside the template literal. Both syntax checks passed
+   and the browser would have thrown ReferenceError on load -- the same class as
+   the stray backtick, and invisible to a parser for the same reason:
+   syntactically valid, runtime dead. Anything the page reads is declared in
+   the page. */
+const INLINE_TEXT = "In any chat, type @relayshield_bot then paste a link. The "
+  + "check posts into that conversation, without anyone leaving it.";
 const SOURCE = "__SOURCE__";
 // A web_app BUTTON CARRIES NO start_param. Telegram sets initDataUnsafe.start_param
 // only for direct links (t.me/<bot>/<app>?startapp=...). When the Mini App is
@@ -353,9 +392,73 @@ function renderHistory() {
 }
 
 /* ---- Check --------------------------------------------------------- */
+/* ---- TON ONLY, AND THAT IS A HOST RULE RATHER THAN A PRODUCT LIMIT --------
+   A Telegram Mini App lives inside Telegram's rules, and TON is the chain
+   Telegram ships. Screening Ethereum, Solana or Bitcoin addresses from inside
+   one is a fight with the host we have no reason to pick, and the founder's
+   instruction is explicit. So this surface checks LINKS and TON, full stop.
+
+   THE RESTRICTION LIVES HERE AND NOT IN widget/relayshield-widget.js, on
+   purpose. That file is copied into other people's bots and called from servers
+   that are not Telegram at all, where every chain is fine; /v1/wallet-risk
+   still answers for EVM, Solana and Bitcoin and nothing about the API changes.
+   Putting the gate in the shared file would break every other caller to satisfy
+   one host's terms.
+
+   A rejected address is NOT redirected anywhere. Pointing an Ethereum address
+   at another one of our surfaces from in here would be the same rule broken one
+   link further out, which is exactly how the Stars-to-Stripe trap works.
+
+   UNVERIFIED from the container: core.telegram.org is egress-blocked, so the
+   precise clause has not been read here. This implements the founder's
+   instruction, which is the conservative direction regardless of what the
+   clause turns out to say. */
+const TON_ADDR = /^(?:-?\d+:[0-9a-fA-F]{64}|[A-Za-z0-9_-]{48})$/;
+const LOOKS_URL = /^(?:https?:\/\/|[a-z0-9-]+(?:\.[a-z0-9-]+)+)/i;
+const OTHER_CHAINS = [
+  [/^0x[0-9a-fA-F]{40}$/, "an Ethereum or EVM address"],
+  [/^ronin:0x[0-9a-fA-F]{40}$/i, "a Ronin address"],
+  [/^(?:bc1|[13])[a-zA-HJ-NP-Z0-9]{25,87}$/, "a Bitcoin address"],
+  [/^[1-9A-HJ-NP-Za-km-z]{32,44}$/, "a Solana address"],
+];
+
+/** "", or a plain sentence naming what was pasted and why it is not checked. */
+function offChainReason(value) {
+  const t = String(value || "").trim();
+  if (!t || LOOKS_URL.test(t) || TON_ADDR.test(t)) return "";
+  for (const [re, name] of OTHER_CHAINS) {
+    // TON's 48-char friendly form and Solana's base58 range overlap, so the TON
+    // test above has to win first -- which it does, because it returns early.
+    if (re.test(t)) {
+      return "That looks like " + name + ". This app checks links and TON "
+           + "addresses.";
+    }
+  }
+  return "";
+}
+
 async function run() {
   const value = $("in").value.trim();
   if (!value) return;
+
+  const off = offChainReason(value);
+  if (off) {
+    // Rendered through the ordinary verdict card rather than an alert, so it
+    // reads as an answer and not as an error. The stored verdict is cleared
+    // too, so nothing off-chain can be watched or shared.
+    last = null;
+    $("out").classList.remove("hidden");
+    $("out").dataset.level = "unknown";
+    $("head").textContent = "Not checked here.";
+    $("target").textContent = value;
+    $("reasons").textContent = "";
+    $("caveat").textContent = off;
+    for (const id of ["watch", "share", "cta"]) $(id).classList.add("hidden");
+    haptic("unknown");
+    return;
+  }
+  for (const id of ["watch", "share"]) $(id).classList.remove("hidden");
+
   $("go").disabled = true;
   $("go").textContent = "Checking...";
   let v;
@@ -473,6 +576,86 @@ if (tg && typeof tg.addToHomeScreen === "function") {
     showPin();
   }
 }
+
+/* ---- The example ---------------------------------------------------------
+   An empty box asking for input is the worst possible first screen for this
+   product: the most common honest answer is "nothing known", so a first-time
+   user who pastes something clean learns nothing about what the app is for.
+
+   THE EXAMPLE IS A REAL CHECK, NOT A CANNED CARD. It fills the box and runs the
+   same code path a user runs, so whatever comes back is true at the moment they
+   press it. A screenshot of a verdict we rendered ourselves would be a claim
+   about our own product that nobody could check, and it would go stale silently
+   the first time the underlying answer changed.
+
+   AND THE URL IS ONE THAT IS FLAGGED BY CONSTRUCTION RATHER THAN BY OUR SAY-SO.
+   testsafebrowsing.appspot.com is GOOGLE'S OWN test host, published so that
+   anyone integrating Safe Browsing can prove their integration fires. Our
+   /v1/link-check consults Safe Browsing, so this is a genuine detection rather
+   than a demo mode -- and it is not a real criminal's domain, which matters
+   because the alternative is shipping a live malicious link inside our own app
+   and inviting people to tap it.
+
+   UNVERIFIED from the container: api.relayshield.net and Google are both
+   egress-blocked here, so this has not been run end to end from this machine.
+   That is exactly why it is wired as a live check with an honest failure path
+   rather than as a promise -- if Safe Browsing ever stops flagging it, the user
+   sees a real "nothing known" verdict and the app is still telling the truth,
+   instead of a broken screenshot. One command settles it on the Mac:
+     curl -sS -X POST https://api.relayshield.net/v1/link-check \
+       -H 'content-type: application/json' \
+       -d '{"url":"http://testsafebrowsing.appspot.com/s/malware.html"}' */
+/* ---- Teach inline mode, which is the only surface that reaches the moment of
+   need ----------------------------------------------------------------------
+   The honest problem with a checker is that nobody opens one. The scam arrives
+   in a group chat while you are thinking about something else, and an app you
+   have to remember, find and open has already lost.
+
+   @relayshield_bot has had INLINE MODE the whole time: type the bot's username
+   then a link, in ANY chat, and the verdict posts into that conversation.
+   handle_inline_query is built, rate-limited and live. NOTHING TELLS ANYONE IT
+   EXISTS -- not the Mini App, not the share card, not the bot's own welcome.
+   That is a finished feature with no route to it, which is the same shape as
+   the watchlist that could not alert.
+
+   switchInlineQuery is the one-tap version, and it is FEATURE-DETECTED rather
+   than assumed: Telegram documents it as available only to Mini Apps launched
+   from a keyboard or inline button, and ours is launched from a direct link, so
+   it may simply be absent here. UNVERIFIED from the container --
+   core.telegram.org is egress-blocked. The text fallback is therefore the path
+   that must work, and it is written to be useful on its own rather than as an
+   apology for a missing button. */
+const EXAMPLE_URL = "http://testsafebrowsing.appspot.com/s/malware.html";
+
+(function teachInline() {
+  const tip = $("inline-tip");
+  if (!tip) return;
+  const canSwitch = tg && typeof tg.switchInlineQuery === "function";
+  if (canSwitch) {
+    tip.textContent = "Checking something in a group chat? ";
+    const b = document.createElement("button");
+    b.className = "linkish";
+    b.textContent = "Check it without leaving the chat";
+    b.addEventListener("click", () => {
+      try {
+        tg.switchInlineQuery(last && last.target ? last.target : "",
+                             ["users", "groups"]);
+      } catch (e) {
+        // Documented as restricted by launch type, so a throw here is expected
+        // rather than exceptional. Degrade to the instruction, never to nothing.
+        tip.textContent = INLINE_TEXT;
+      }
+    });
+    tip.appendChild(b);
+  } else {
+    tip.textContent = INLINE_TEXT;
+  }
+})();
+
+$("try-bad").addEventListener("click", () => {
+  $("in").value = EXAMPLE_URL;
+  run();
+});
 
 $("go").addEventListener("click", run);
 $("in").addEventListener("keydown", (e) => {

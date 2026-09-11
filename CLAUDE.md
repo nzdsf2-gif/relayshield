@@ -420,6 +420,47 @@ appears. Proven by reintroducing all three defects plus a broken widget route.
 "does this parse". It never answers "does this run". For anything that is a deployed artefact rather
 than a library, execute it.**
 
+## THE PRICE WAS VISIBLE AND UNPRESSABLE, AND THE GATEWAY ROUTE FOR IT MAY NOT EXIST
+
+**Founder, 2026-09-11: *"I do see Build 3c2e1188 and also see the '50 stars raises it to 25
+addresses for 90 days' but you've not wired the actual payment rails in there. Why not?"***
+
+**The rails ARE built, end to end, and every piece is on `origin/main`:** the Worker posts
+`/v1/watchlist/invoice`, `stars_invoice()` calls `createInvoiceLink` in `XTR` with no provider
+token, `tg.openInvoice` opens it, `handle_pre_checkout` answers inside Telegram's ten seconds,
+`handle_stars_payment` reads the user id from the signed `from` field, and `grant_slots()` is
+idempotent on `telegram_payment_charge_id`. So his conclusion was right and the mechanism was
+not one he could see.
+
+**MY HALF: THE TIER LINE I SHIPPED AN HOUR EARLIER HAD NO TAP TARGET.** It named a price in
+prose, and the only buy control in the app was rendered from the `/v1/watchlist/list` response
+beside the slot meter. So the fix for "the price is invisible" produced "the price is visible
+and unbuyable" -- the same defect one layer down, in the patch for it. **Buying depends on the
+signed initData and nothing else; the list adds better numbers, not capability.** The button is
+static markup now, wired at module load, with the live response refining its numbers and hiding
+it for somebody who has already paid. A test fails if the wiring moves back inside `loadWatches`,
+proven by moving it.
+
+**THE OTHER HALF, AND IT IS THE ONE THAT ACTUALLY BLOCKS A PAYMENT: the `invoice` route probably
+does not exist at the API Gateway edge.** `tools/create_watchlist_routes.sh` gained `invoice` in
+`PARTS` in commit `63e769f`, THIS session. The script last ran on 2026-09-09, when there were
+three routes. The Lambda's `ROUTES` table carries `/v1/watchlist/invoice`, main carries the
+handler, and **the edge has never been told the path exists**, so the Worker's POST gets an API
+Gateway 404 and the app says the invoice could not be opened. Re-running the script is the fix
+and it is idempotent: it adds the one missing resource and leaves the other three alone.
+
+**UNVERIFIED from the container, and it must stay labelled that way** -- there are no AWS
+credentials here, so this is read off the script's own `PARTS` line and the date it changed,
+which is evidence about the repo and not about the edge. `tools/diagnose_watchlist_routes.sh`
+answers it for real in one read-only run.
+
+**THE GENERAL FORM, and it is the third costume this week: a route added to the handler's
+dispatch table is not a route.** A path lives in three places -- the client that calls it, the
+Lambda that answers it, and the gateway resource that connects them -- and only the first two are
+in the repo. Adding the first two and pushing looks complete, tests green, and 404s at the edge.
+Same family as "a registered attribution key is not a live integration" and "three lists must
+agree": **the half that cannot be checked from here is the half that is missing.**
+
 ## THE PRICING WAS BEHIND A NETWORK CALL, SO A FAILED CALL DELETED THE PAID TIER
 
 **Founder, 2026-09-11: *"why don't i see any copy on Paying stars for watching more addresses or

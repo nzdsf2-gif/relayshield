@@ -460,8 +460,22 @@ function renderHistory() {
    precise clause has not been read here. This implements the founder's
    instruction, which is the conservative direction regardless of what the
    clause turns out to say. */
-const TON_ADDR = /^(?:-?\d+:[0-9a-fA-F]{64}|[A-Za-z0-9_-]{48})$/;
-const LOOKS_URL = /^(?:https?:\/\/|[a-z0-9-]+(?:\.[a-z0-9-]+)+)/i;
+/* EVERY BACKSLASH IN HERE IS DOUBLED, AND THAT IS NOT STYLE. This code lives
+   inside the PAGE template literal, so the Worker evaluates its escapes ONCE
+   before the browser ever sees it: a single-backslash \\d arrives as a bare d,
+   and a single-backslash \\/ arrives as a bare /.
+
+   The second one is fatal rather than merely wrong. /^(?:https?:\\/\\/ served
+   as /^(?:https?:// ENDS THE REGEX LITERAL at the second slash, so the browser
+   sees /^(?:https?:/ and throws "Invalid regular expression: missing )" while
+   parsing the module -- which means the module never runs, no handler is ever
+   registered, and the app renders as static HTML with dead tabs and dead
+   buttons. That is exactly what shipped on 2026-09-11.
+
+   Every OTHER regex in this file was already written with doubled backslashes.
+   The convention existed; these two lines broke it. */
+const TON_ADDR = /^(?:-?\\d+:[0-9a-fA-F]{64}|[A-Za-z0-9_-]{48})$/;
+const LOOKS_URL = /^(?:https?:\\/\\/|[a-z0-9-]+(?:\\.[a-z0-9-]+)+)/i;
 const OTHER_CHAINS = [
   [/^0x[0-9a-fA-F]{40}$/, "an Ethereum or EVM address"],
   [/^ronin:0x[0-9a-fA-F]{40}$/i, "a Ronin address"],
@@ -649,9 +663,11 @@ if (tg && typeof tg.addToHomeScreen === "function") {
    rather than as a promise -- if Safe Browsing ever stops flagging it, the user
    sees a real "nothing known" verdict and the app is still telling the truth,
    instead of a broken screenshot. One command settles it on the Mac:
-     curl -sS -X POST https://api.relayshield.net/v1/link-check \
-       -H 'content-type: application/json' \
-       -d '{"url":"http://testsafebrowsing.appspot.com/s/malware.html"}' */
+     curl -sS -X POST https://api.relayshield.net/v1/link-check
+       -H 'content-type: application/json'
+       -d '{"url":"http://testsafebrowsing.appspot.com/s/malware.html"}'
+   (one line, joined -- a trailing backslash here is a template-literal line
+   continuation and would silently weld these three lines together) */
 /* ---- Teach inline mode, which is the only surface that reaches the moment of
    need ----------------------------------------------------------------------
    The honest problem with a checker is that nobody opens one. The scam arrives

@@ -341,14 +341,37 @@ def page_span(src: str):
     return first + 1, last + 1
 
 
-def page_script(src: str) -> str:
-    """The PAGE template literal's contents: the code the BROWSER runs.
+def served_module() -> str:
+    """The module a BROWSER actually receives, obtained by RUNNING the Worker.
 
-    Everything outside it runs in the Cloudflare Worker, in a different process
-    on a different machine, and the two scopes share nothing but the __TOKEN__
-    substitutions done at request time."""
-    first, last = page_span(src)
-    return "\n".join(src.split("\n")[first - 1:last])
+    THIS REPLACED A FUNCTION THAT LIED, AND THE LIE SHIPPED A DEAD APP.
+
+    The page lives inside a template literal, so the Worker evaluates its escape
+    sequences once before anyone sees it. Reading the source and stripping a
+    couple of escapes by hand -- which is what this file did until 2026-09-11 --
+    produces text NOBODY EVER RUNS. A regex written /^(?:https?:\\/\\/ is
+    SERVED as /^(?:https?:// , the second slash ends the regex literal, and the
+    browser throws "Invalid regular expression: missing )" while parsing the
+    module. The module never runs, no handler is registered, and the app renders
+    as static HTML with dead tabs and a dead button.
+
+    Every check in this file passed. They all read the source.
+
+    A detector whose extractor does not match what is deployed cannot detect
+    anything -- the third time this suite has learned that, and the first time it
+    cost a live outage rather than a green test."""
+    if not shutil.which("node"):
+        raise unittest.SkipTest("node is not installed")
+    r = subprocess.run(["node", str(ROOT / "tools" / "miniapp_render.mjs"), "--module"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise AssertionError("the Worker would not render a page: " + r.stderr)
+    return r.stdout
+
+
+def page_script(src: str = "") -> str:
+    """Kept as the old name; it now returns what is SERVED, never the source."""
+    return served_module()
 
 
 class TestTheWorkerActuallyParses(unittest.TestCase):
@@ -440,6 +463,61 @@ class TestTheWorkerModuleActuallyRUNS(unittest.TestCase):
         none: it would answer the question wrongly."""
         r = self._run_node(self.JS_BUILD)
         self.assertEqual(r.returncode, 0, r.stderr or r.stdout)
+
+
+class TestTheServedPageRuns(unittest.TestCase):
+    """THE CHECK THAT WOULD HAVE CAUGHT THE 2026-09-11 OUTAGE, and the only one
+    that could have.
+
+    It runs the Worker, takes the module a browser actually receives, evaluates
+    it against a minimal DOM, and fires the controls a user presses. Everything
+    else in this repo reads the source, and the source is not what ships."""
+
+    def _smoke(self):
+        if not shutil.which("node"):
+            self.skipTest("node is not installed")
+        return subprocess.run(["node", str(ROOT / "tools" / "miniapp_smoke.mjs")],
+                              capture_output=True, text=True)
+
+    def test_the_served_module_parses_and_every_control_responds(self):
+        r = self._smoke()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for control in ("tab-check", "tab-watch", "tab-learn", "try-bad", "go"):
+            self.assertIn("ok    " + control, r.stdout)
+
+    def test_the_boot_heartbeat_fires_in_the_served_page(self):
+        """If this is ever false, the watchdog will show a red box to every
+        user -- so it is better to find it here."""
+        r = self._smoke()
+        self.assertIn("ok    boot heartbeat set", r.stdout)
+
+    def test_backslashes_in_served_regexes_survived_the_template(self):
+        """The specific defect. Inside the PAGE template literal a single
+        backslash is eaten: \\d arrives as d (silently wrong) and \\/ arrives
+        as / (which ends the regex literal and kills the whole module).
+
+        Asserted on the SERVED text, because in the source these are correctly
+        doubled and look wrong."""
+        # COMMENTS STRIPPED FIRST, for the fifth time in this suite. The first
+        # version of this assertion PASSED on the real defect, because the
+        # comment above those two lines documents the correct form and
+        # therefore contains it.
+        mod = strip_js_comments(served_module())
+        self.assertIn(r"/^(?:-?\d+:[0-9a-fA-F]{64}", mod,
+                      "the digit class was eaten by the template literal")
+        self.assertIn(r"https?:\/\/", mod,
+                      "the escaped slashes were eaten; the regex literal ends early")
+
+    def test_no_regex_in_the_served_module_lost_its_escapes(self):
+        """General form rather than two named cases. Any regex literal the
+        template damaged either fails to compile or silently changes meaning,
+        and both are invisible to every source-reading check."""
+        mod = served_module()
+        for m in re.finditer(r"^\s*(?:const|let)\s+\w+\s*=\s*(/(?![/*]).*?/[a-z]*);\s*$",
+                             mod, re.M):
+            body = m.group(1)
+            self.assertNotIn("//", body[1:-1],
+                             f"a bare // inside a regex literal ends it early: {body}")
 
 
 class TestTheBootWatchdog(unittest.TestCase):
@@ -537,7 +615,11 @@ class TestTheGateActuallyRuns(unittest.TestCase):
     def test_every_shape_is_classified_correctly(self):
         if not shutil.which("node"):
             self.skipTest("node is not installed")
-        w = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        # The SERVED module, not the source. The source carries doubled
+        # backslashes for the template literal, so running it directly tests a
+        # regex that differs from the one the browser compiles -- which is how
+        # this test went green while the real gate was broken.
+        w = served_module()
         gate = w[w.index("const TON_ADDR ="):w.index("async function run()")]
         harness = gate + "\nconst cases = " + json.dumps(self.CASES) + ";\n" + """
 const out = [];
@@ -558,6 +640,38 @@ console.log(JSON.stringify(out));
         finally:
             os.unlink(path)
         self.assertEqual(failures, [], f"misclassified: {failures}")
+
+    def test_ton_addresses_are_RECOGNISED_not_merely_unrefused(self):
+        """offChainReason returns "" for a TON address AND for anything it does
+        not recognise at all, so the case table above cannot tell them apart.
+
+        That blind spot is not theoretical: with the digit class eaten by the
+        template literal, a raw TON address matches nothing, falls through every
+        branch, and returns "" -- which the table reads as a pass. This asserts
+        the regex itself."""
+        if not shutil.which("node"):
+            self.skipTest("node is not installed")
+        mod = served_module()
+        gate = mod[mod.index("const TON_ADDR ="):mod.index("async function run()")]
+        cases = [("0:" + "a" * 64, True), ("-1:" + "b" * 64, True),
+                 ("EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N", True),
+                 ("0:" + "a" * 63, False), ("0xdeadbeef", False)]
+        harness = gate + "\nconst C = " + json.dumps(cases) + ";\n" + """
+const bad = [];
+for (const [addr, want] of C) {
+  if (TON_ADDR.test(addr) !== want) bad.push(addr.slice(0, 24) + " expected " + want);
+}
+console.log(JSON.stringify(bad));
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+            f.write(harness); path = f.name
+        try:
+            r = subprocess.run(["node", path], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            bad = json.loads(r.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+        self.assertEqual(bad, [], f"TON_ADDR does not recognise: {bad}")
 
 
 class TestTheExample(unittest.TestCase):

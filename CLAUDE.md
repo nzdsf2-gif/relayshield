@@ -420,6 +420,53 @@ appears. Proven by reintroducing all three defects plus a broken widget route.
 "does this parse". It never answers "does this run". For anything that is a deployed artefact rather
 than a library, execute it.**
 
+## THE PRICING WAS BEHIND A NETWORK CALL, SO A FAILED CALL DELETED THE PAID TIER
+
+**Founder, 2026-09-11: *"why don't i see any copy on Paying stars for watching more addresses or
+is our approach to remind the user just before they deplete their free watches"*** Both halves
+are worth answering, and the second one was already fixed while the first was still broken.
+
+**No, it is NOT a reminder at the wall, and that changed earlier the same day.** The offer was
+gated on `used >= limit - 1`; it is now beside the slot meter at EVERY count, with the full card
+only when the slots are actually full. That section is directly below this one.
+
+**So why could he not see it? EVERY WORD OF THE PRICING WAS RENDERED FROM
+`/v1/watchlist/list`.** The slot meter, the inline Stars link and the tier line were all built
+from that response, and all three are gated on `data.limit`. So:
+
+- an unverified user (`uid` falsy) got one sentence and an early return,
+- and a FAILED list collapsed to `data = {}`, which prints "Nothing watched yet" and **nothing
+  about a paid tier at all.**
+
+**A product with a paid tier and a product with no paid tier rendered identically**, and the
+second is what you get whenever the call does not come back. **What we charge is a fact about our
+own product. It must not depend on a network call succeeding.** The tier line is STATIC markup in
+the watch tab now, on screen before any request is made; the live response refines it and drops
+the upsell entirely for somebody who has already paid.
+
+**AND A FAILED LIST WAS RENDERING AS AN EMPTY ONE**, which is worse than the missing price:
+"Nothing watched yet" over a watchlist that might be full reads as *my watches are gone*. The
+failure path now names the cause -- the server's own error, or an unreachable endpoint -- and
+returns before the empty state. Same rule as the CORS preflight and the 404 probe: **a check that
+says something is wrong owes the reader the evidence that says WHICH thing.**
+
+**THE COST OF STATIC COPY IS A SECOND COPY OF FOUR NUMBERS, AND IT IS PINNED.** The Worker now
+holds 3 / 25 / 50 / 90, whose authority is `FREE_WATCH_SLOTS`, `PAID_WATCH_SLOTS`,
+`SLOTS_PRICE_STARS` and `SLOTS_DURATION_DAYS` in `relayshield_watchlist.py`. Two files that must
+agree with nothing checking that they do is run 134's shape, and here it is worse than a wrong
+banner: **copy shown to a buyer that disagrees with what the server grants is a price we do not
+honour.** `test_miniapp_routes.py` reads the SERVED page and fails if the numbers drift, and
+fails on any number in that line the server does not recognise. Substituted as `__TOKEN__`s
+rather than page-scope constants, because the page and the Worker share nothing else -- the
+`INLINE_TEXT` defect recorded below.
+
+**AND THE GUARD I ALREADY HAD ASSERTED THE WRONG THING.** `test_a_paying_user_is_never_shown_the
+_upgrade` required every condition naming `slots_expire_at` to be NEGATED -- a proxy for the rule
+rather than the rule -- so it failed on a correct positive branch that renders the PAID state. It
+walks the branch BODY now and forbids selling inside it. **A test that pins the shape of a
+condition instead of what the branch does will eventually fail on correct code, and the temptation
+then is to loosen it rather than fix it.**
+
 ## THE STARS OFFER WAS ONLY VISIBLE AT THE WALL, AND MY OWN COMMENT SAID OTHERWISE
 
 Founder, 2026-09-11: *"Shouldn't the watch tab include the Stars payment workflow? Users pay us to

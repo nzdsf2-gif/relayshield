@@ -294,6 +294,80 @@ the answer is "I assumed it", the block is not finished. "I could not check it f
 is not an exemption -- it is the trigger for making the check the reader's first step, which is what
 NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK has said all along.
 
+## THE PAGE IS INSIDE A TEMPLATE LITERAL, SO EVERY BACKSLASH IS EATEN ONCE. THIS SHIPPED A DEAD APP.
+
+**2026-09-11, and it is the most expensive defect of the week because every check in the repo passed
+while the app was dead.** The watchdog added hours earlier reported it on its first load:
+
+    This app's code did not start. SyntaxError: Invalid regular expression: missing )
+
+**THE MECHANISM.** `cloudflare_worker_miniapp.js` holds the whole page in a template literal, so the
+Worker evaluates its escape sequences ONCE before a browser ever sees it. Two regexes I added were
+written with single backslashes:
+
+    source                                  served to the browser
+    /^(?:-?\d+:[0-9a-fA-F]{64}...         /^(?:-?d+:[0-9a-fA-F]{64}...
+    /^(?:https?:\/\/|...                 /^(?:https?://|...
+
+The first is SILENTLY WRONG: it matches the letter `d` instead of a digit. **The second is fatal.**
+`//` ends the regex literal at the second slash, so the browser parses `/^(?:https?:/` and throws
+while reading the module. **A module that throws while parsing never runs**, so no handler is ever
+registered: the static HTML renders perfectly and the tabs, the buttons and the example are all
+dead. On a phone, with no console, that is indistinguishable from a CSS bug or a stale cache.
+
+**EVERY OTHER REGEX IN THAT FILE WAS ALREADY DOUBLED.** The convention existed. I broke it, and
+nothing in the repo could tell.
+
+### THE REASON NOTHING CAUGHT IT: EVERY CHECK READ THE SOURCE
+
+`node --check` parses the Worker, where the page is a STRING. `test_miniapp.py` greps the source.
+And the harness I wrote the same day to "execute the page" read the source and stripped two escapes
+by hand -- which produces text **nobody ever runs**. It passed. It was always going to pass.
+
+**A detector whose extractor does not match what is deployed cannot detect anything.** That is the
+third time this suite has learned it and the first time it cost a live outage rather than a green
+test. The two earlier instances were cheap: an extractor that stopped at the first backtick, and a
+guard that matched its own comment.
+
+**`tools/miniapp_render.mjs` is the extractor that matches: it RUNS THE WORKER** and prints the page,
+or the module, that a browser actually receives. Everything in `test_miniapp_routes.py` that looks at
+page code now goes through it.
+
+**`tools/miniapp_smoke.mjs` is the check that would have caught this.** It renders, evaluates the
+served module against a minimal DOM, and fires every control a user presses -- the tabs, the example
+button, Check, Watch, Share. Run it before any Mini App change:
+
+    node tools/miniapp_smoke.mjs
+
+Five guards now fail on the real defect, all proven by reintroducing it: the smoke test, a served-
+text assertion on both escapes, a general "no bare `//` inside a served regex literal", and a direct
+assertion that `TON_ADDR` RECOGNISES a raw TON address.
+
+**That last one exists because the gate test had a blind spot that this defect walked straight
+through.** `offChainReason` returns `""` for a TON address AND for anything it does not recognise at
+all, so a table of cases cannot distinguish them: with the digit class eaten, a raw TON address
+matched nothing, fell through every branch, returned `""`, and the table read it as a pass. **When a
+function's "correct" answer and its "I have no idea" answer are the same value, a case table proves
+nothing.** Assert the thing itself.
+
+### AND THE FIFTH TIME PROSE FOOLED A GUARD, IN THE GUARD FOR THIS
+
+The first version of the served-text assertion **passed on the real defect**, because the comment I
+wrote directly above those two regexes documents the correct form and therefore contains it.
+`strip_js_comments()` was already a shared helper in that file for exactly this reason, and I did not
+use it. The natural way to write a guard is to search the file; the natural way to write good code is
+to explain the rule beside it. They collide every single time.
+
+### THE RULE, AND IT OUTRANKS EVERY SYNTAX CHECK IN THIS REPO
+
+**`node --check` answers "does this parse". It never answers "does this run".** For a deployed
+artefact, execute it. And execute the ARTEFACT -- the bytes the client receives -- never the source
+it was generated from.
+
+**A trailing backslash in that template literal is a line continuation too**, which silently welded
+three lines of a comment into one. Harmless here, and the same class: the source and the served text
+are different documents.
+
 ## THE MINI APP HAS NO CONSOLE, SO EVERY JS FAILURE LOOKS IDENTICAL. IT REPORTS ITSELF NOW.
 
 2026-09-11. Reported as: the Check tab shows the new TON-only text, but "Try a link that gets

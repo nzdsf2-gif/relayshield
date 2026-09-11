@@ -3242,9 +3242,28 @@ _SOURCE_ALIASES = {
     # Mini App discovery routes, 2026-09-08. Registered BEFORE the first
     # submission, because each announcement channel gives exactly one first
     # impression and an unattributed one cannot be measured at all.
+    # ONE KEY PER DESTINATION, added 2026-09-11. _resolve_source returns the RAW
+    # parameter as the logged key rather than the alias it maps to, so these all
+    # render one banner and stay separable in CloudWatch -- exactly as
+    # n8n-offboarding and n8n-onboarding already do. That property is what makes
+    # per-route measurement possible at all, and it is easy to break by
+    # "tidying" _resolve_source to return `key`.
+    #
+    # miniapp_routes.json is the source of truth; test_miniapp_routes.py fails
+    # if this table and the Worker's ALLOWED_SOURCES do not both cover it.
+    "tg-miniapp-blog":              "tg-miniapp",
+    "tg-miniapp-trendingapps":      "tg-miniapp",
+    "tg-miniapp-web3botx":          "tg-miniapp",
+    "tg-miniapp-findminiapp":       "tg-miniapp",
+    "tg-miniapp-onclicka":          "tg-miniapp",
+    "tg-miniapp-telegtapps":        "tg-miniapp",
+    "tg-miniapp-tapps":             "tg-miniapp",
+    "tg-miniapp-directory":         "tg-miniapp",
+    "tg-miniapp-ton":               "tg-miniapp",
+    # Kept so links already published with the old shared key still resolve. It
+    # is no longer handed out: a rising count on it means somebody is using a
+    # stale link.
     "tg-miniapp-channel":   "tg-miniapp",
-    "tg-miniapp-directory": "tg-miniapp",
-    "tg-miniapp-blog":      "tg-miniapp",
     "tg-miniapp-bot":       "tg-miniapp",
     # The share card is the growth loop: a verdict forwarded into the group chat
     # where the scam was posted. Registered when the Worker started allowing it,

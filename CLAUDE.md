@@ -294,6 +294,96 @@ the answer is "I assumed it", the block is not finished. "I could not check it f
 is not an exemption -- it is the trigger for making the check the reader's first step, which is what
 NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK has said all along.
 
+## ONE ATTRIBUTION KEY PER DESTINATION, NOT PER CATEGORY. AND THE FIX WENT TO THE WRONG ENDPOINT.
+
+Built 2026-09-11, asked for as *"Build the measured bot funnel for all 6 discovery routes and run
+tools/miniapp_funnel.py before and after each one."*
+
+**THE DEFECT THAT MADE THE MEASUREMENT WORTHLESS BEFORE IT RAN.** All five Mini App announcement
+channels shared one key, `tg-miniapp-channel`. So `@trendingapps` at 3.9M subscribers and
+`@telegtapps` at 9,671 were **indistinguishable in the logs** -- and which of those works is the
+entire question the funnel exists to answer. If the big channel produces nothing and the small one
+produces returning users, that is the most valuable thing we could learn about distribution, and a
+shared key throws it away. `miniapp_routes.json` is now the source of truth, nine routes, one key
+per DESTINATION.
+
+**AND THE `source=` FIX I SHIPPED THE DAY BEFORE WENT TO AN ENDPOINT THE MINI APP DOES NOT CALL.**
+`/v1/ton-address` gained a source on 2026-09-10. Both the Mini App and the widget reach the API
+through `check()`, which routes URLs to `/v1/link-check` and **every address, TON included, to
+`/v1/wallet-risk`**. `/v1/ton-address` is never reached from the app. So the fix was real, correct
+for direct API callers, and measured nothing for the client it was written for -- while looking
+done.
+
+Found by tracing the call rather than by reading the endpoint list, which is the only way it could
+have been found: both endpoints exist, both accept a TON address, and only one is ever reached.
+**The general form: "the endpoint that does X" and "the endpoint this client calls" are different
+questions, and instrumentation must answer the second.**
+
+### THREE LISTS MUST AGREE, AND THE TEST CAUGHT A LIVE REGRESSION ON ITS FIRST RUN
+
+A route key must appear in `miniapp_routes.json`, in `ALLOWED_SOURCES` (the Worker's edge gate) and
+in `_SOURCE_ALIASES` (the landing page). **A gap in either mirror produces attribution that looks
+like it worked:** the Worker silently downgrades an unknown key to the generic `tg-miniapp`, and the
+landing page logs `unmatched:` and renders no banner. That second one is FD-8, four months of it.
+
+`test_miniapp_routes.py` fails if the three disagree, and it earned its place immediately:
+rebuilding the Worker's list from the route table **dropped `tg-miniapp-bot`**, which is not a route
+but a loop key, and would have cost the `/app` command its attribution. My edit, caught by my test,
+before it shipped.
+
+**The property that makes any of this possible is one line in `_resolve_source`,** and it is easy to
+destroy by tidying: it returns the RAW parameter as the logged key rather than the alias it maps to.
+That is why every route renders one banner and stays separable in CloudWatch, exactly as
+`n8n-offboarding` and `n8n-onboarding` already did.
+
+### BEFORE-AND-AFTER IS A MECHANISM NOW, NOT A DISCIPLINE
+
+`--snapshot before-<id>` writes a committed JSON baseline; `--compare before-<id>` prints the delta.
+A baseline held in a terminal that has scrolled away is not a baseline, and a comparison done from
+memory is not a comparison.
+
+**It REFUSES to overwrite a baseline**, and that refusal is the most important line in the tool.
+Overwriting it after the submission has run turns the before-and-after into a comparison of a number
+with itself, which reads as "the channel did nothing" -- a false negative on the one measurement the
+whole exercise exists for.
+
+**And every comparison prints the sliding-window caveat.** Both runs count a rolling `--days` window
+back from now, so a delta is only the submission's effect if the two runs are close together
+relative to that window. A 30-day baseline compared five weeks later measures the window sliding.
+Reporting that silently as a channel result is the confident-wrong-number failure this repo has paid
+for twice.
+
+### TWO THINGS THE ROUTE TABLE RECORDS AS DECISIONS RATHER THAN GAPS
+
+**The menu button is rank 10 and has NO KEY, on purpose.** A registered key would make it look
+approved. `/setmenubutton` REPLACES the button that belongs to the TI monitoring product, and
+shipping it means adding the key first -- which is the check firing correctly rather than a gap.
+
+**TON catalogues are UNBLOCKED.** That route was gated on "only if TON scans ship" and they now do:
+`/v1/ton-address` plus `relayshield_watchlist_monitor.py`, which watches TON and only TON. A TON
+catalogue is the one audience for whom that is the headline rather than a detail.
+
+**And `@trendingapps` does not go second in practice despite ranking second.** It is the largest
+single first impression we will ever spend, so `@telegtapps` at 9,671 runs first: the cheapest place
+to discover the listing copy is wrong. The rank column is priority; the running order in
+`miniapp_discovery_funnel.md` is the sequence, and the two differ deliberately.
+
+### RUN 142 IS RUN 134'S SHAPE FOR THE THIRD TIME
+
+    relayshield-watchlist WAS DEPLOYED. Only the probe was denied — the deploy
+    role has no lambda:InvokeFunction on it.
+
+`iam_github_deploy_invoke.json` gained the ARN in the mapping commit, and **the repo half does not
+push the policy to AWS.** `sh tools/apply_deploy_invoke_policy.sh` does. Third occurrence, and the
+error message did its job again: the code is live, only the verification was refused.
+
+**Read this alongside the OTHER outstanding grant, because they are different.** The webhook's role
+`relayshield-breach-check-role-1sapnwdl` returns **implicitDeny on `dynamodb:GetItem` and
+`dynamodb:PutItem`** against `relayshield_watchlist`, measured by
+`tools/grant_stars_watchlist_iam.sh`. Until that is applied, **a Stars purchase takes the money and
+fails to credit it.** That is the worst shape a failure can take here and it is why the grant is a
+script with a read-only default rather than a note.
+
 ## THE MERGE THAT FAILED THREE TIMES: REPRODUCED, AND THE FIX IS ONE LINE
 
 **2026-09-11. Andrew ran the same block three times across two turns and got the same

@@ -55,13 +55,39 @@ const BOT = "https://t.me/relayshield_bot?start=SRC_miniapp";
 // Keys the Mini App may pass through as ?source=. An unknown start_param is
 // dropped rather than forwarded: an unregistered key logs `unmatched:` and
 // renders no banner, so forwarding junk would look like attribution and be none.
+/* The ?startapp= values this app will honour. Anything else falls back to the
+   generic "tg-miniapp", so a key missing from HERE is attribution that looks
+   like it worked: the app opens, the call is logged, and the route is gone.
+
+   miniapp_routes.json is the source of truth and test_miniapp_routes.py fails
+   if this set and _SOURCE_ALIASES in relayshield_developer_signup.py do not
+   both cover it. Three lists that must agree with nothing checking that they
+   do is the shape that produced run 134's red probe.
+
+   ONE KEY PER DESTINATION, not per category. "tg-miniapp-channel" used to
+   cover all five announcement channels, which made the 3.9M-subscriber one
+   and the 9,671-subscriber one indistinguishable -- and which of those works
+   is the whole question the funnel exists to answer. It is kept below only so
+   links already published with it still resolve. */
 const ALLOWED_SOURCES = new Set([
   "tg-miniapp",
-  "tg-miniapp-channel",
-  "tg-miniapp-directory",
   "tg-miniapp-blog",
-  "tg-miniapp-bot",
+  "tg-miniapp-trendingapps",
+  "tg-miniapp-web3botx",
+  "tg-miniapp-findminiapp",
+  "tg-miniapp-onclicka",
+  "tg-miniapp-telegtapps",
+  "tg-miniapp-tapps",
+  "tg-miniapp-directory",
+  "tg-miniapp-ton",
+  // Not routes. The share card is the compounding loop and the bot
+  // commands reach people who already have the bot, so both are counted
+  // separately rather than credited to a submission we made.
   "tg-miniapp-share",
+  "tg-miniapp-bot",
+  // Retired. Links published before 2026-09-11 carry it, and dropping it
+  // would break attribution on every one of them at once.
+  "tg-miniapp-channel",
 ]);
 
 function sourceFor(startParam) {

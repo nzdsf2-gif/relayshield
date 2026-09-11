@@ -294,6 +294,174 @@ the answer is "I assumed it", the block is not finished. "I could not check it f
 is not an exemption -- it is the trigger for making the check the reader's first step, which is what
 NO AWS IN THIS SANDBOX IS NEVER A REASON TO SKIP A CHECK has said all along.
 
+## THE STARS OFFER WAS ONLY VISIBLE AT THE WALL, AND MY OWN COMMENT SAID OTHERWISE
+
+Founder, 2026-09-11: *"Shouldn't the watch tab include the Stars payment workflow? Users pay us to
+watch interesting addresses that are tied to their money, so we should prompt them to pay."*
+
+He is right, and the code contained its own indictment. The offer was gated on
+`data.used >= data.limit - 1` -- two of three slots -- with a comment directly above it reading
+*"Offered BEFORE the slots are full, not only at the wall."* **The comment and the code disagreed,
+and the code won.** A user with zero or one watch never learned the paid tier existed.
+
+**That is the inline-mode defect in a third place: built, live, and pointed at by nothing.** A paid
+tier nobody can see is a paid tier nobody buys, and the people watching addresses their money is
+actually in are precisely the ones for whom 50 Stars is obviously worth it.
+
+**QUIET AT LOW COUNTS, PROMINENT AT THE WALL**, which is the distinction worth keeping. An inline
+link beside the slot meter is information; a card that dominates the screen before somebody has
+watched anything is an advertisement, and it converts worse because they have not felt the value
+yet. The full card still fires from `add_watch`'s `slots_full` branch.
+
+**And the empty state now sells watching rather than apologising for being empty.** It said "Nothing
+watched yet" and returned, so the tab carrying the only paid product in the app said nothing about
+what it does or what it costs to anybody who had not already used it.
+
+**THE ONE LINE OF COPY THAT IS NOT NEGOTIABLE: the free slots are alerted immediately and in full.**
+The only thing Stars buy is MORE SLOTS, because a slot is the only thing with a marginal cost -- a
+recurring TON Center call, a DexScreener call and a corpus query, forever. Copy hinting that paid
+alerts are faster, prioritised or more complete would be taxing the free tier while claiming not to,
+which is the single principle this design exists to hold. A test forbids "faster", "priority",
+"real-time", "sooner" and "delayed" in the watch tab's user-visible strings, and separately requires
+a sentence that positively tells a free user their alerts are unchanged.
+
+## A DETECTOR WHOSE EXTRACTOR STOPS AT THE THING BEING DETECTED CANNOT DETECT IT
+
+The most interesting bug of the session, and it passed green for as long as nobody triggered it.
+
+`page_script()` extracted the Mini App's client code by walking forward from `` const PAGE = ` `` to
+the first UNESCAPED backtick. Two things followed, and both were wrong:
+
+- **The page ends at line 994, not 981.** The quiz builds NESTED template literals with escaped
+  backticks, and the walk stopped near them, so the scope test was silently checking about two
+  thirds of the page.
+- **The stray-backtick test could never fire.** A stray backtick ENDS the extraction, so the
+  offending character always falls outside the range being scanned. Circular by construction.
+
+Both are fixed by finding the template's real CLOSING DELIMITER (`</html>` plus backtick-semicolon)
+rather than scanning for the next backtick. Proven three ways: a stray backtick near the top is
+caught, one PAST the nested templates is caught, and the legitimate escaped ones are not flagged.
+
+**`node --check` IS IN THE SUITE NOW, and was not.** `test_miniapp.py` says "no node" in its own
+docstring, so the authoritative parse check had never been part of any test run -- the stray backtick
+has broken this file three times and was caught by somebody happening to run node by hand each time.
+That is the quiet-alarm shape guarding the one defect this file reliably produces. The targeted
+backtick test sits alongside it because `node --check` reports the error at whatever token follows
+the backtick, which reads as a problem with that token rather than with a quoted word in a comment
+forty characters earlier.
+
+## STRIPPING COMMENTS BEFORE GREPPING IS NOW A SHARED HELPER, AFTER THE FOURTH TIME
+
+Every guard written in `test_miniapp_routes.py` has, on its first run, matched prose describing the
+defect rather than the defect itself:
+
+1. a comment naming `BOT` failed the Worker-scope test,
+2. a docstring naming `invoice_payload` failed the signed-identity test,
+3. a comment quoting `/v1/link-check` failed the never-metered test,
+4. a comment reading *"better, faster or more complete"* failed the test forbidding exactly those
+   words in user copy.
+
+**It keeps recurring because the two habits collide by construction:** the natural way to write a
+guard is to search the file, and the natural way to write good code is to explain the rule beside
+the code that follows it. `strip_js_comments()` is module-level now rather than something each test
+rediscovers, and `code_only()` does the same job for Python via `ast`.
+
+**And the matching half of the same lesson:** copy in this file wraps across concatenations, so
+`"alerted immediately and in " + "full."` matches neither half of a contiguous search. The first
+version of that assertion failed on copy that was entirely correct. String literals are joined
+before matching.
+
+## THE MINI APP CHECKS LINKS AND TON. NOTHING ELSE, AND NOT AS A PRODUCT LIMIT.
+
+Founder's instruction, 2026-09-11: *"The check tab should only show Ton addresses, not BitCoin or
+Solana so we don't violate Tg TOS."*
+
+A Telegram Mini App lives inside Telegram's rules and TON is the chain Telegram ships. Screening
+Ethereum, Solana or Bitcoin from inside one is a fight with the host we have no reason to pick.
+**UNVERIFIED from the container** -- core.telegram.org is egress-blocked, so the precise clause has
+not been read here. The instruction is the conservative direction whatever the clause says.
+
+**THE GATE IS IN THE WORKER, NOT IN `widget/relayshield-widget.js`, AND THAT IS THE WHOLE DESIGN.**
+That file is copied into other people's bots and called from servers that are not Telegram at all,
+where every chain is fine. `/v1/wallet-risk` still answers for EVM, Solana and Bitcoin and nothing
+about the API changed. Putting the gate in the shared file would break every other caller to satisfy
+one host's terms, and a test asserts it is absent there.
+
+**A REFUSED ADDRESS IS NOT REDIRECTED ANYWHERE.** Pointing an Ethereum address at another of our own
+surfaces from inside the Mini App is the same rule broken one link further out -- exactly the shape
+of the Stars-to-Stripe trap that gets a bot restricted. It says what was pasted and stops.
+
+**And a refused address cannot be watched or shared.** Watching an EVM address would write a row the
+TON monitor will never re-check, which is the promise-nothing-keeps defect the monitor was built to
+end, re-created one screen earlier.
+
+**The ordering matters and is tested by EXECUTION rather than by reading.** TON's 48-character
+friendly form sits inside Solana's base58 range, so testing Solana first refuses every address this
+app exists to check, silently. Twelve real address shapes are run through the actual gate in node.
+
+## THE EXAMPLE IS A REAL CHECK AGAINST A URL THAT IS FLAGGED BY CONSTRUCTION
+
+An empty box is the worst possible first screen for a product whose most common honest answer is
+"nothing known": a first-time user who pastes something clean learns nothing about what the app is
+for.
+
+**It is not a canned card.** It fills the box and runs the same code path the user runs, so whatever
+comes back is true at the moment they press it. A verdict we rendered ourselves is a claim about our
+own product that nobody can check and that goes stale silently.
+
+**And the URL is `testsafebrowsing.appspot.com/s/malware.html`, which is GOOGLE'S OWN test host**,
+published so anyone integrating Safe Browsing can prove their integration fires. `/v1/link-check`
+consults Safe Browsing, so the flag is earned rather than asserted -- and it is not a real criminal's
+domain, which matters because the alternative is shipping a live malicious link inside our own app
+and inviting people to tap it.
+
+**No TON address ships as an example, deliberately.** Naming one is a claim about a live address that
+cannot be verified from this container, and an address that stops being flagged turns the example
+into a false negative on the app's own front screen. A test forbids one appearing there.
+
+## INLINE MODE HAS BEEN BUILT THE WHOLE TIME AND NOTHING TOLD ANYONE
+
+Found 2026-09-11 while answering "is the Mini App compelling enough to return to". The honest answer
+turned on a surface that already existed.
+
+`handle_inline_query` in `relayshield_telegram_webhook.py` is complete, rate-limited and live: type
+the bot's username then a link, **in any chat**, and the verdict posts into that conversation.
+**Nothing mentioned it.** Not the Mini App, not the share card, not the bot's welcome. A finished
+feature with no route to it, which is the same shape as a watchlist that could not alert.
+
+**That matters more than any new feature, because it is the only surface that reaches the moment of
+need.** A scam arrives in a group chat while the user is thinking about something else. An app they
+have to remember, find and open has already lost; a check that works inside the conversation where
+the scam was posted has not.
+
+`switchInlineQuery` is the one-tap version and is **FEATURE-DETECTED, not assumed**: Telegram
+documents it as available only to Mini Apps launched from a keyboard or inline button, and ours is
+launched from a direct link, so it may simply be absent. UNVERIFIED from the container. The text
+fallback is therefore the path that must work and is written to be useful on its own.
+
+## THE BUG `node --check` CANNOT SEE: WORKER SCOPE IS NOT PAGE SCOPE
+
+Shipped and caught within the same session, 2026-09-11.
+
+`INLINE_TEXT` was declared in the Worker's own scope, forty lines above the `const PAGE = ...`
+template literal, and read from inside the page. **`node --check` passed. `build_miniapp.py --check`
+passed.** The file parses; the string is a valid string. The browser would have thrown
+`ReferenceError` on load and the tip would simply have been blank, with no error anywhere we look.
+
+Same family as the stray backtick that shipped on 2026-09-10: **syntactically valid, runtime dead.**
+Everything outside the template literal runs in a Cloudflare Worker, in a different process on a
+different machine, and the two scopes share nothing but the `__TOKEN__` substitutions done at
+request time.
+
+`test_miniapp_routes.py` now extracts the page template and fails if any SCREAMING_CASE constant the
+page reads is declared only in the Worker. Proven by moving the constant back and watching it fail.
+
+**And the guard's own first run was a false positive, for the third time in this file's history:** it
+flagged `BOT` because a COMMENT two lines above says "sat in the Worker's own scope alongside BOT".
+Prose describing a defect is not the defect. It strips comments now, the same correction
+`test_telegram_markdown_escapes.py` and `code_only()` already carry -- and it keeps arriving in new
+costumes because the natural way to write a guard is to search the file.
+
 ## ONE ATTRIBUTION KEY PER DESTINATION, NOT PER CATEGORY. AND THE FIX WENT TO THE WRONG ENDPOINT.
 
 Built 2026-09-11, asked for as *"Build the measured bot funnel for all 6 discovery routes and run

@@ -111,9 +111,15 @@ class TestRendering(unittest.TestCase):
         users will read, and it must never imply the target is fine.
         """
         worker = _worker()
-        caveat = re.search(r'\$\("caveat"\)\.textContent\s*=(.*?);\n', worker, re.S)
-        self.assertIsNotNone(caveat, "the caveat assignment moved; re-point this test")
-        block = caveat.group(1)
+        # ALL of them, not the first. The TON-only gate added a second
+        # $("caveat").textContent = assignment ABOVE this one, and a re.search
+        # for the first match then tested the wrong branch and failed on code
+        # that was correct. A test pinned to a position in a file is a test that
+        # breaks whenever anything is inserted above it, which trains people to
+        # edit the test instead of reading it.
+        blocks = re.findall(r'\$\("caveat"\)\.textContent\s*=(.*?);\n', worker, re.S)
+        self.assertTrue(blocks, "the caveat assignment moved; re-point this test")
+        block = next((b for b in blocks if 'level === "unknown"' in b), "")
         i = block.find('level === "unknown"')
         self.assertGreater(i, -1, "the unknown branch is gone")
         branch = block[i:i + 400].lower()

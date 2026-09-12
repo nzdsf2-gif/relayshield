@@ -96,7 +96,7 @@ if (globalThis.window.__rsBoot !== true) {
 }
 
 for (const id of ["tab-check", "tab-watch", "tab-learn", "try-bad", "go", "watch", "share",
-                  "watch-buy"]) {
+                  "watch-buy", "watch-add"]) {
   const fn = listeners[id] && listeners[id].click;
   if (!fn) { console.log("FAIL  no click listener registered: " + id); failed++; continue; }
   try { fn(); console.log("ok    " + id); }

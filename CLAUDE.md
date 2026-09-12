@@ -420,6 +420,62 @@ appears. Proven by reintroducing all three defects plus a broken widget route.
 "does this parse". It never answers "does this run". For anything that is a deployed artefact rather
 than a library, execute it.**
 
+## THE WATCHLIST READ A SECRET THAT DOES NOT EXIST, AND EVERY PROBE PASSED
+
+**2026-09-12. The worst defect of the week, found by the log the previous fix made readable.**
+`tools/diagnose_stars_invoice.sh` step 4, sixteen times over:
+
+    ResourceNotFoundException ... Secrets Manager can't find the specified secret
+      relayshield_watchlist.py line 170, in verified_user_id
+      token = _get_secret(BOT_TOKEN_SECRET)
+
+**One character, in two places, plus a wrong key inside the secret.**
+
+    relayshield_watchlist.py  relayshield/telegram-bot-token   key "bot_token"
+    the secret that EXISTS    relayshield/telegram_bot_token   key "telegram_bot_token"
+
+`TG_SECRET_NAME` and `TG_SECRET_KEY` in `relayshield_telegram_webhook.py` have been reading it
+correctly for months. **So this was never about Stars.** `verified_user_id` is the first line of
+`add_watch`, `list_watches`, `remove_watch` AND `stars_invoice`, so **every verified watchlist call
+raised from 2026-09-09 to 2026-09-12.** The tracebacks name `list_watches` far more often than
+`stars_invoice`: people were trying to use the watchlist and getting a 502.
+
+**THE THIRD DEFECT IS THE ONE THAT WOULD HAVE SURVIVED FIXING THE NAME.** The IAM policy in
+`tools/create_watchlist_lambda.sh` grants the ARN, so it named the hyphenated secret too -- a
+corrected name would have moved the failure from ResourceNotFound to AccessDenied. And inside the
+secret, `parsed.get("bot_token") or parsed.get("token") or token` **falls through to the RAW JSON
+STRING as the token**, which fails the HMAC for every user and raises nothing at all. A wrong answer
+rather than an exception, which is strictly worse.
+
+### WHY EVERY CHECK PASSED, AND THIS IS THE GENERAL LESSON
+
+`verified_user_id` returns None for empty `init_data` **BEFORE** it reads the secret. So an unsigned
+request never touches Secrets Manager.
+
+`create_watchlist_routes.sh` and `diagnose_watchlist_routes.sh` both prove the route by asserting
+exactly one thing: that an unsigned POST is refused with
+`{"ok": false, "error": "unverified: open this inside Telegram"}`. **That refusal is the one path
+that does not need the secret.** Both scripts printed LIVE over a function that could not serve a
+single real user.
+
+**A PROBE THAT TAKES A ROUTE THE REAL CLIENT DOES NOT TAKE PROVES NOTHING ABOUT THE REAL CLIENT.**
+This is the `/v1/ton-address` instrumentation lesson in a new place -- "the endpoint that does X"
+and "the endpoint this client calls" are different questions -- and the CORS lesson too: curl
+ignores CORS, and curl also cannot mint initData. **The cheapest path is the one a probe reaches
+for, and it is systematically the path that skips the dependencies.**
+
+The guard is four tests in `test_miniapp.py`, reading both constants out of both files plus the ARN
+out of the shell script, all proven by reintroducing the defect. Two files that must agree with
+nothing checking that they do, for the fourth time: the pattern tables, `LAMBDA_MAP` against the
+invoke policy, the three route lists, and now this.
+
+**AND THE NEW GUARD WAS FOOLED BY ITS OWN COMMENT ON ITS FIRST RUN, FOR THE SIXTH TIME.** The
+key-order test searched for `BOT_TOKEN_KEY` and matched the comment saying "BOT_TOKEN_KEY first",
+so it passed with the order reversed. It strips comments now. Six occurrences, four files, one
+cause: the natural way to write a guard is to search the file, and the natural way to write good
+code is to explain the rule beside it. **Strip comments in the FIRST version of any new guard, not
+the second.**
+
 ## TWILIO SIM SWAP IS APPROVED FOR THE US, AND THERE IS NOTHING TO RE-ADD
 
 **2026-09-12. Twilio approved the Lookup SIM Swap configuration for the United States**, ticket

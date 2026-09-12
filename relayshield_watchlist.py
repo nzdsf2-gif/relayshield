@@ -91,7 +91,20 @@ TABLE_NAME    = os.environ.get("WATCHLIST_TABLE", "relayshield_watchlist")
 KMS_KEY_ALIAS = os.environ.get("KMS_DATA_KEY_ALIAS", "alias/relayshield-data-key")
 PEPPER_SECRET = os.environ.get("WATCHLIST_PEPPER_SECRET", "relayshield/watchlist-pepper")
 
-BOT_TOKEN_SECRET = os.environ.get("BOT_TOKEN_SECRET", "relayshield/telegram-bot-token")
+# THE NAME AND THE KEY BOTH HAVE TO MATCH relayshield_telegram_webhook.py, AND
+# NEITHER DID. This module shipped reading "relayshield/telegram-bot-token" with
+# HYPHENS and looked for a "bot_token" key inside it. The secret that exists is
+# "relayshield/telegram_bot_token" with UNDERSCORES, and the key inside it is
+# "telegram_bot_token" -- TG_SECRET_NAME and TG_SECRET_KEY in the webhook, which
+# has been reading it correctly for months.
+#
+# So every verified call raised ResourceNotFoundException: add, list, remove AND
+# invoice, from 2026-09-09 to 2026-09-12. Two files that must agree with nothing
+# checking that they do, for the fourth time in this repo.
+# test_miniapp.py now reads both constants out of both files and fails if they
+# drift, which is the only thing that stops a fifth.
+BOT_TOKEN_SECRET = os.environ.get("BOT_TOKEN_SECRET", "relayshield/telegram_bot_token")
+BOT_TOKEN_KEY = "telegram_bot_token"
 INITDATA_MAX_AGE = 86400          # a signature that never expires is a bearer token
 
 # SLOTS ARE THE UNIT STARS BUY, AND THAT IS A DELIBERATE CHOICE OVER THE TWO
@@ -171,7 +184,12 @@ def verified_user_id(init_data: str):
     token = _get_secret(BOT_TOKEN_SECRET)
     try:
         parsed = json.loads(token)
-        token = parsed.get("bot_token") or parsed.get("token") or token
+        # BOT_TOKEN_KEY first: it is the key the secret actually carries. The
+        # other two were a guess, and a guess that silently falls through to the
+        # RAW JSON STRING as the token, which then fails the HMAC for every user
+        # with no error anywhere -- a wrong answer rather than an exception.
+        token = (parsed.get(BOT_TOKEN_KEY) or parsed.get("bot_token")
+                 or parsed.get("token") or token)
     except (json.JSONDecodeError, AttributeError):
         pass
 

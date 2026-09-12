@@ -420,6 +420,91 @@ appears. Proven by reintroducing all three defects plus a broken widget route.
 "does this parse". It never answers "does this run". For anything that is a deployed artefact rather
 than a library, execute it.**
 
+## TWILIO SIM SWAP IS APPROVED FOR THE US, AND THERE IS NOTHING TO RE-ADD
+
+**2026-09-12. Twilio approved the Lookup SIM Swap configuration for the United States**, ticket
+28883049. Asked as: do we need to re-add SIM swap to Stripe, AWS or the bots?
+
+**The account SID is deliberately NOT recorded here, and the reason is worth more than the SID.**
+The first version of this section quoted it out of the approval email, and **GitHub's push
+protection refused the push**: an `AC`-prefixed Twilio Account SID is a scanned pattern. So a
+credential-shaped string arrived in a pasted vendor email, went into a commit without anyone typing
+it, and only a server-side rule stopped it -- which is rule 12 in a new costume. Rule 12 says a
+vendor DOC page read while signed in may carry your key; this says **a vendor SUPPORT email carries
+your account identifiers too**, and pasting it into a session puts them one commit from a public
+repo. The SID is in the Twilio console when anyone needs it.
+
+**No, to all of it, and the reason is that nothing was ever removed.** Checked in the code rather
+than recalled:
+
+- `/v1/metered/sim-swap` is in the dispatcher, `KEYLESS`/PAYG tables at **$0.25**, the metering
+  table, `_TTL` freshness at 86,400s, and the AWS rate-card comment. `/v1/payg/sim-swap` is a live
+  x402 endpoint at 250000 units.
+- `/simswap` in `relayshield_telegram_webhook.py` is complete: consent enrolment, `/simswap`
+  withdrawal, `handle_sim_status`. `relayshield_whatsapp_webhook.py` imports the same consent
+  module and defaults `sim_swap_monitoring` to False until the number's OWN owner consents.
+
+**THE CODE WAS SELF-GATING THE WHOLE TIME, AND THAT IS WHY THERE IS NO WORK.** `handle_sim_swap`
+reads `sim_swap.error_code` off a Twilio **200** and returns a **503** rather than a verdict,
+because Twilio answers 200 with `error_code=60606` when carrier registration is not approved. Its
+own comment names that code. And the metered dispatcher only bills a 2xx, **so a non-answer was
+never charged.** Approval does not enable a feature; it stops that branch firing.
+
+**So the only thing that changes is that real verdicts now flow, and the check is a call rather
+than a code change.** The one thing worth confirming is the SCOPE: Twilio approved the **United
+States**. A non-US number still returns 60606 and still 503s, which is correct behaviour and must
+not be read as a regression.
+
+## THE STARS INVOICE FAILED AND THE ONE LINE THAT NAMED WHY WAS THROWN AWAY
+
+**2026-09-12, reported as "I pressed the Stars button but it fails with could not start the
+purchase", after `create_watchlist_routes.sh` created `/v1/watchlist/invoice` (`0lm0as`, POST and
+OPTIONS, stage deployment `dpot17`) and proved the gateway reaches our handler.**
+
+So the route was no longer the problem. `stars_invoice()` was, and it had TWO defects that between
+them guaranteed an unactionable failure.
+
+**1. THE BRANCH THAT LOGS TELEGRAM'S REASON COULD NEVER RUN.** The code was:
+
+    except Exception as exc:
+        logger.error("createInvoiceLink failed: %s", exc)   # "HTTP Error 400: Bad Request"
+    if not body.get("ok"):
+        logger.error("createInvoiceLink rejected: %s", body.get("description"))
+
+**Telegram answers a rejected `createInvoiceLink` with a non-2xx status and the reason in the
+BODY.** `urllib` raises `HTTPError` on any non-2xx, so every Telegram-side refusal landed in the
+`except`, where `exc` stringifies to "HTTP Error 400: Bad Request" and names no cause at all. The
+`if not body.get("ok")` branch was reachable only for a 200 carrying `ok: false`, which Telegram
+does not send. **Circular by construction, exactly like the stray-backtick detector whose extractor
+stopped at the backtick.** It reads `exc.read()` now and logs the body.
+
+**The rule this repo already had, applied one layer in: every probe prints the body of what it got
+rather than a summary of it.** That was written for diagnostics. It applies to our own error paths,
+where the cost is higher, because a diagnostic can be re-run and a user's failed purchase cannot.
+
+**2. `provider_token` WAS OMITTED WHERE THE BOT API DOCUMENTS AN EMPTY STRING.** Its own parameter
+description is *"Pass an empty string for payments in Telegram Stars"*, and it was required outright
+before Stars existed. **Read from `@grammyjs/types` 5.0.0 on npm, not guessed** -- core.telegram.org
+is egress-blocked from the container and `registry.npmjs.org` is not, which is the BLOCKED SOURCE
+WAS REACHABLE ALL ALONG rule paying for itself a third time. A vendor's typed client is better
+evidence than a docs page anyway.
+
+**AND THE TWO FAILURE MESSAGES WERE ONE CAPITAL LETTER APART.** Our handler returns "could not
+start the purchase, try again"; the Worker's fallback for a request that never arrived said "Could
+not start the purchase." **A Telegram refusal and an unreachable endpoint read identically on a
+phone**, so the screen could not say which side to look at. The fallback names the side now.
+
+**`tools/diagnose_stars_invoice.sh` is read-only and answers the question curl cannot**: it prints
+the deployed `LastModified` first, because a fix that has not shipped cannot log anything, then
+every `createInvoiceLink` line in the last 24 hours, then any traceback or AccessDenied separately,
+because a raise BEFORE the try block (`_get_secret`, say) is a different cause with a different fix.
+
+**One hypothesis was checked and DISPROVED rather than shipped as a warning:** that
+`relayshield-watchlist-role` lacked `secretsmanager:GetSecretValue` on the bot token. `git log -S`
+shows that ARN has been in `tools/create_watchlist_lambda.sh` since its first commit (`982e9bb`,
+2026-09-09), so the role got it when the script ran. Naming a cause I had not checked is what rule
+C exists to stop.
+
 ## A GREEDY PROXY MAKES A MISSING ROUTE ANSWER IN OUR OWN ENVELOPE
 
 **2026-09-12. The invoice probe I added yesterday was right about the conclusion and wrong about

@@ -162,11 +162,31 @@ echo "                                       If X is /v1/watchlist/list and step
 echo "                                       returned 204, the code is fine and the"
 echo "                                       gateway is sending OPTIONS somewhere"
 echo "                                       unexpected."
-echo "  /invoice: {\"message\": ...}        -> THE ROUTE DOES NOT EXIST AT THE EDGE."
-echo "                                       Expected if step 2 shows no invoice row."
+# CORRECTED 2026-09-12, ON THIS PROBE'S FIRST REAL RUN. It predicted that a
+# missing route answers {"message": ...} from API Gateway. It does not, because
+# of the /{proxy+} in step 3: the request falls through to relayshield-api, which
+# 404s in OUR envelope with its own wording. So "our handler answered" was NOT
+# proof the route existed, and three different components can 404 here.
+#
+# THE DISCRIMINATOR IS THE CORS HEADERS, not the envelope. relayshield_watchlist
+# puts access-control-allow-origin on EVERY response including its 404s;
+# relayshield-api does not. Same lesson as the 402 that came from the wrong
+# Lambda at the wrong price: verify the field that DIFFERS between them.
+echo "  /invoice: {\"message\": ...}        -> API Gateway itself. Route missing and"
+echo "                                       nothing greedy caught it."
+echo "  /invoice: \"unknown endpoint: ...\" -> RELAYSHIELD-API answered, via /{proxy+}."
+echo "        and NO access-control header   THE ROUTE DOES NOT EXIST. This is the"
+echo "                                       normal shape here, because of step 3."
+echo "                                       Worse than a plain 404: with no CORS"
+echo "                                       header the browser discards it, so the"
+echo "                                       buy button fails SILENTLY in the app."
 echo "                                       Fix: sh tools/create_watchlist_routes.sh"
-echo "  /invoice: {\"ok\": false, \"error\":  -> the route EXISTS and our handler"
-echo "        \"unverified: ...\"}            answered. Nothing to create; a refusal"
+echo "                                       An explicit resource beats /{proxy+},"
+echo "                                       so the proxy needs no change."
+echo "  /invoice: \"unknown path ...\"       -> relayshield-watchlist answered. The"
+echo "        WITH access-control-allow-*    route EXISTS and its ROUTES table does"
+echo "                                       not carry the path. A different bug."
+echo "  /invoice: \"unverified: ...\"        -> the route exists and works. A refusal"
 echo "                                       to an unsigned curl is the correct reply."
 echo "  Step 6 says 404                    -> stale code (cause B). Nothing in the"
 echo "                                       gateway is wrong. Re-run the create"

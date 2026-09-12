@@ -52,7 +52,7 @@ address. `/v1/wallet-risk` logs a source now.
 
 | Rank | Destination | Audience | Key |
 |---|---|---|---|
-| 1 | The RelayShield Telegram blog channel | unmeasured | `tg-miniapp-blog` |
+| 1 | The RelayShield Telegram blog channel | 4 | `tg-miniapp-blog` |
 | 2 | @trendingapps | 3,900,000 | `tg-miniapp-trendingapps` |
 | 3 | @web3telegrambotx | 72,742 | `tg-miniapp-web3botx` |
 | 4 | @findminiapp | 56,380 | `tg-miniapp-findminiapp` |
@@ -121,7 +121,22 @@ See the table for priority. Run them in this order:
 
 ### 1. The RelayShield Telegram blog channel
 
-Audience: unmeasured. UNMEASURED -- nobody has counted the blog channel's subscribers. Ours, and the only surface whose audience chose us, which is why it ranks first despite being the smallest.
+Audience: **4**, counted by the founder on 2026-09-12. That closes the UNMEASURED line this entry
+carried, and it changes NOTHING about the running order.
+
+**The blog channel does not rank first for reach and never did.** It ranks first because it is the
+cheapest possible place to discover that something is wrong, and four subscribers makes that more
+true rather than less. What this submission rehearses, in order of what it would cost to learn
+later: that a `t.me/<bot>/<app>` link renders and opens from a channel post at all; that
+`tg-miniapp-blog` survives the whole attribution chain into CloudWatch and out of
+`tools/miniapp_funnel.py`; and that `--snapshot` then `--compare` prints something a reader can act
+on. Each of those is a thing we would otherwise find out in front of 3.9M people.
+
+**So read its delta accordingly.** One arrival is a success, because it proves the chain. Zero from
+four subscribers says nothing about the app and quite a lot about the pipe, and the right response
+is to check the pipe rather than to conclude the app is unappealing.
+
+The post copy, and how to pin it, are in `miniapp_blog_channel_post.md`.
 
 **ANDREW RUNS THIS, before submitting:**
 ```zsh

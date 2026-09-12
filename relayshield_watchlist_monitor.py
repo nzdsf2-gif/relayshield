@@ -122,12 +122,30 @@ logger.setLevel(logging.INFO)
 
 dynamodb       = boto3.resource("dynamodb")
 kms_client     = boto3.client("kms")
-secrets_client = boto3.client("secretsmanager")
 
 WATCHLIST_TABLE  = os.environ.get("WATCHLIST_TABLE", "relayshield_watchlist")
 INTEL_IOCS_TABLE = os.environ.get("INTEL_IOCS_TABLE", "relayshield_intel_iocs")
-BOT_TOKEN_SECRET = os.environ.get("BOT_TOKEN_SECRET", "relayshield/telegram-bot-token")
 TELEGRAM_API     = "https://api.telegram.org/bot{token}/{method}"
+
+# THE BOT TOKEN IS NOT READ HERE. It is imported from relayshield_watchlist,
+# which owns it, and that is the fix for the defect this module's own
+# BOT_TOKEN_SECRET constant WAS.
+#
+# It said "relayshield/telegram-bot-token" with HYPHENS. The secret is
+# "relayshield/telegram_bot_token" with UNDERSCORES, so every get_secret_value
+# raised ResourceNotFoundException and EVERY ALERT THIS MONITOR EVER TRIED TO
+# SEND FAILED -- in the one function whose whole job is to keep the promise the
+# watchlist makes, and with no trace but a WARNING line saying the send failed.
+# Same one-character defect as relayshield_watchlist.py's, in the file nobody
+# re-checked after fixing that one.
+#
+# This module's own _get_secret unwrapped the JSON envelope correctly, which is
+# worth saying plainly: it was not wrong, it was reading a name that does not
+# exist. It is gone anyway, because four copies of a three-line unwrap is how
+# the sibling file ended up with three dead call sites, and the deployer's
+# resolve_deps grep packages this import exactly as it packages
+# relayshield_api above.
+from relayshield_watchlist import bot_token
 
 # TON Center's free tier is one request per second and handle_ton_address makes
 # up to three upstream calls per target. Pacing here rather than being throttled
@@ -146,39 +164,6 @@ BALANCE_DRAIN_RATIO   = 0.10     # keeping <10% of the balance is a drain
 MATERIAL_BALANCE_TON  = 1.0      # below this, a "drain" is dust moving
 
 _LEVEL_RANK = {"unknown": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
-
-_secret_cache: dict = {}
-_SECRET_TTL = 300
-
-
-def _get_secret(name: str) -> str:
-    """Cached with a TTL, falling back to the last known good value.
-
-    Same shape as the TTL cache in relayshield_api.py, and for the same reason
-    recorded there: a module-level cache with no expiry means a rotated secret
-    is not picked up until the execution environment recycles, which can be
-    hours. A cache that never expires is a correctness bug wearing a
-    performance optimisation's clothes.
-    """
-    entry = _secret_cache.get(name)
-    now = time.time()
-    if entry and now - entry[1] < _SECRET_TTL:
-        return entry[0]
-    try:
-        raw = secrets_client.get_secret_value(SecretId=name)["SecretString"]
-        try:
-            parsed = json.loads(raw)
-            value = parsed.get("telegram_bot_token") or parsed.get("token") or raw
-        except (ValueError, AttributeError):
-            value = raw
-        _secret_cache[name] = (value, now)
-        return value
-    except Exception as exc:
-        if entry:
-            logger.warning("secret refresh failed for %s, using cached: %s", name, exc)
-            return entry[0]
-        raise
-
 
 def decrypt_field(ciphertext_b64: str) -> str:
     resp = kms_client.decrypt(CiphertextBlob=base64.b64decode(ciphertext_b64))
@@ -375,7 +360,7 @@ def format_alert(target: str, signals: list) -> str:
 
 
 def send_alert(chat_id: str, text: str) -> bool:
-    token = _get_secret(BOT_TOKEN_SECRET)
+    token = bot_token()
     payload = json.dumps({
         "chat_id": chat_id,
         "text": text,

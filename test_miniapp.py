@@ -629,11 +629,128 @@ class TestTheBotTokenSecretMatchesTheWebhook(unittest.TestCase):
         in yet another costume because the natural way to write a guard is to
         search the file and the natural way to write good code is to explain
         the rule beside it."""
-        body = self.wl[self.wl.index("def verified_user_id"):]
-        body = body[:body.index("hmac.compare_digest")]
+        body = self.wl[self.wl.index("def bot_token"):]
+        body = body[:body.index("\ndef ", 10)] if "\ndef " in body[10:] else body
         body = "\n".join(re.sub(r"#.*$", "", ln) for ln in body.splitlines())
         self.assertLess(body.index("BOT_TOKEN_KEY"), body.index('"bot_token"'),
                         "a guessed key is consulted before the real one")
+
+    def test_the_monitors_grant_names_the_same_secret(self):
+        """The half that SURVIVES fixing a name. A corrected constant read
+        against a hyphenated ARN turns ResourceNotFound into AccessDenied,
+        which reads as a completely different bug."""
+        name = self._const(self.wl, "BOT_TOKEN_SECRET")
+        mon_iam = (ROOT / "tools" / "create_watchlist_monitor.sh").read_text()
+        self.assertIn(f"secret:{name}-*", mon_iam,
+                      "the monitor's role is granted a secret the code cannot read")
+
+
+class TestOneOwnerForTheBotToken(unittest.TestCase):
+    """FOUR CALL SITES UNWRAPPED THE SECRET FOUR WAYS AND THREE WERE DEAD.
+
+    `_get_secret` returns the SecretString verbatim and the secret is a JSON
+    object, so a caller that does not unwrap it puts `{"telegram_bot_token":
+    "..."}` into the Bot API path. Telegram answers 404 and the user sees
+    "could not start the purchase" over a log that says Not Found -- a wrong
+    answer rather than an exception, which is strictly worse.
+
+    On 2026-09-12: verified_user_id unwrapped correctly, stars_invoice did not
+    unwrap at all, the first-watch greeting tried only the two GUESSED keys,
+    and the monitor read a secret name that does not exist. Three of the four
+    dead, in the four places that decide whether anyone can pay us, be greeted,
+    or be alerted.
+
+    So the unwrap is one function and these tests fail if it is copied again.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.wl_src = (ROOT / "relayshield_watchlist.py").read_text()
+        cls.mon_src = (ROOT / "relayshield_watchlist_monitor.py").read_text()
+
+    @staticmethod
+    def _code(src):
+        return "\n".join(re.sub(r"#.*$", "", ln) for ln in src.splitlines())
+
+    def test_only_bot_token_reads_the_secret_directly(self):
+        code = self._code(self.wl_src)
+        body = code[code.index("def bot_token"):]
+        body = body[:body.index("\ndef ", 10)]
+        self.assertIn("_get_secret(BOT_TOKEN_SECRET)", body)
+        elsewhere = code.replace(body, "")
+        self.assertNotIn("_get_secret(BOT_TOKEN_SECRET)", elsewhere,
+                         "a second call site reads the raw secret again")
+
+    def test_every_bot_api_call_uses_the_unwrapped_token(self):
+        """The three places a token reaches api.telegram.org."""
+        code = self._code(self.wl_src)
+        self.assertIn("api.telegram.org", code)
+        for fn in ("def verified_user_id", "def stars_invoice"):
+            body = code[code.index(fn):]
+            body = body[:body.index("\ndef ", 10)]
+            self.assertIn("bot_token()", body, f"{fn} does not unwrap the secret")
+
+    def test_the_monitor_does_not_keep_its_own_copy(self):
+        code = self._code(self.mon_src)
+        self.assertIn("from relayshield_watchlist import bot_token", code)
+        self.assertNotIn("BOT_TOKEN_SECRET", code,
+                         "the monitor names the secret again, which is how it "
+                         "came to name the hyphenated one")
+        self.assertIn("bot_token()", code)
+
+    def test_the_monitor_import_is_packaged_by_the_deployer(self):
+        """resolve_deps greps `^[[:space:]]*(import|from) relayshield_`. An
+        import the deployer cannot see ships a package that fails at import."""
+        self.assertRegex(self.mon_src,
+                         r"(?m)^[ \t]*from relayshield_watchlist import bot_token")
+
+
+class TestBotTokenUnwrapsForReal(unittest.TestCase):
+    """EXECUTED, not grepped. The dead call sites were all syntactically fine."""
+
+    @classmethod
+    def setUpClass(cls):
+        boto3 = types.ModuleType("boto3")
+        boto3.resource = lambda *a, **k: unittest.mock.MagicMock()
+        boto3.client = lambda *a, **k: unittest.mock.MagicMock()
+        conditions = types.ModuleType("boto3.dynamodb.conditions")
+        conditions.Key = unittest.mock.MagicMock()
+        dynamodb_mod = types.ModuleType("boto3.dynamodb")
+        dynamodb_mod.conditions = conditions
+        boto3.dynamodb = dynamodb_mod
+        sys.modules.setdefault("boto3", boto3)
+        sys.modules.setdefault("boto3.dynamodb", dynamodb_mod)
+        sys.modules.setdefault("boto3.dynamodb.conditions", conditions)
+        spec = importlib.util.spec_from_file_location(
+            "relayshield_watchlist_bt", ROOT / "relayshield_watchlist.py")
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+
+    def setUp(self):
+        self.mod._secret_cache.clear()
+
+    def _with_secret(self, raw):
+        self.mod.secrets_client.get_secret_value = (
+            lambda **kw: {"SecretString": raw})
+
+    def test_the_json_envelope_is_unwrapped(self):
+        self._with_secret(json.dumps({"telegram_bot_token": "12345:AAreal"}))
+        self.assertEqual(self.mod.bot_token(), "12345:AAreal")
+
+    def test_the_raw_json_is_never_returned_as_a_token(self):
+        """The actual failure mode: the whole blob goes into the Bot API path
+        and Telegram 404s. A token never contains a brace."""
+        self._with_secret(json.dumps({"telegram_bot_token": "12345:AAreal"}))
+        self.assertNotIn("{", self.mod.bot_token())
+
+    def test_a_plain_string_secret_still_works(self):
+        self._with_secret("12345:AAplain")
+        self.assertEqual(self.mod.bot_token(), "12345:AAplain")
+
+    def test_a_json_string_secret_is_not_mistaken_for_an_envelope(self):
+        """json.loads("\"abc\"") returns a str, and .get would raise."""
+        self._with_secret('"12345:AAquoted"')
+        self.assertEqual(self.mod.bot_token(), "12345:AAquoted")
 
 
 if __name__ == "__main__":

@@ -162,6 +162,49 @@ def _get_secret(secret_name: str) -> str:
     return raw
 
 
+def bot_token() -> str:
+    """The Telegram bot token, unwrapped from the secret's JSON envelope.
+
+    ONE OWNER, BECAUSE FOUR CALL SITES DID THIS FOUR DIFFERENT WAYS AND THREE
+    OF THEM WERE DEAD.
+
+    `_get_secret` returns the SecretString verbatim, and the secret is a JSON
+    object, so the value it hands back is `{"telegram_bot_token": "..."}` and
+    not a token. Every caller has to unwrap it, and on 2026-09-12 the four that
+    do were:
+
+      verified_user_id   unwrapped with BOT_TOKEN_KEY first     CORRECT
+      stars_invoice      did not unwrap at all                  DEAD
+      first-watch note   tried "bot_token" and "token" only     DEAD
+      the monitor        did not unwrap, and named the OLD      DEAD
+                         hyphenated secret as well
+
+    The two DEAD unwraps fail the same way the wrong secret key did: the whole
+    JSON blob goes into the Bot API path, Telegram answers 404 for a token that
+    is not a token, and the user sees "could not start the purchase" over a log
+    that says Not Found. A wrong answer, not an exception.
+
+    So the unwrap is not a line each caller writes. It is this function, and a
+    test fails if any call site reads BOT_TOKEN_SECRET directly again.
+    """
+    raw = _get_secret(BOT_TOKEN_SECRET)
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
+    if isinstance(parsed, str):
+        # A secret stored as a bare JSON string. Returning `raw` here would
+        # hand back the token WITH its surrounding quotes, which is the same
+        # class of dead token this function exists to stop.
+        return parsed
+    if not isinstance(parsed, dict):
+        return raw
+    # BOT_TOKEN_KEY first: it is the key the secret actually carries. The other
+    # two were a guess, and a guess that falls through to the raw JSON string
+    # is a wrong answer rather than an error.
+    return parsed.get(BOT_TOKEN_KEY) or parsed.get("bot_token") or parsed.get("token") or raw
+
+
 def verified_user_id(init_data: str):
     """Return the Telegram user id from a SIGNED initData string, or None.
 
@@ -181,17 +224,7 @@ def verified_user_id(init_data: str):
         return None
 
     check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
-    token = _get_secret(BOT_TOKEN_SECRET)
-    try:
-        parsed = json.loads(token)
-        # BOT_TOKEN_KEY first: it is the key the secret actually carries. The
-        # other two were a guess, and a guess that silently falls through to the
-        # RAW JSON STRING as the token, which then fails the HMAC for every user
-        # with no error anywhere -- a wrong answer rather than an exception.
-        token = (parsed.get(BOT_TOKEN_KEY) or parsed.get("bot_token")
-                 or parsed.get("token") or token)
-    except (json.JSONDecodeError, AttributeError):
-        pass
+    token = bot_token()
 
     secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
     ours = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
@@ -363,16 +396,20 @@ def stars_invoice(params: dict) -> dict:
     is the route that gets a bot restricted, and it is exactly what a future
     session would reach for because all three rails already exist one link away.
 
-    currency "XTR" with a single labelled price and NO provider_token is the
-    Stars shape. A provider token is what makes it a card payment, so passing
-    one here would be a different product that Telegram would reject in this
-    context.
+    currency "XTR" with a single labelled price and an EMPTY provider_token is
+    the Stars shape. A real provider token is what makes it a card payment, so
+    a non-empty one here would be a different product that Telegram would
+    reject in this context -- but the field itself is not omitted, because the
+    Bot API's own description of it is "Pass an empty string for payments in
+    Telegram Stars". An earlier version of this docstring said "NO
+    provider_token", which reads as "omit it" and is how the field came to be
+    missing in the first place.
     """
     uid = verified_user_id(params.get("init_data", ""))
     if not uid:
         return {"ok": False, "error": "unverified: open this inside Telegram"}
 
-    token = _get_secret(BOT_TOKEN_SECRET)
+    token = bot_token()
     payload = json.dumps({
         "title": "RelayShield watch slots",
         "description": (
@@ -532,11 +569,7 @@ def _greet_first_watch(uid) -> None:
         "is still free and unlimited in the app."
     )
     try:
-        token = _get_secret(BOT_TOKEN_SECRET)
-        try:
-            token = json.loads(token).get("bot_token") or json.loads(token).get("token") or token
-        except (json.JSONDecodeError, AttributeError, TypeError):
-            pass
+        token = bot_token()
         # No parse_mode at all. Legacy Markdown has NO ESCAPE SYNTAX and this
         # text needs no formatting, so the safest option is to ask for none --
         # plain prose is the third item in CLAUDE.md's standing preference and

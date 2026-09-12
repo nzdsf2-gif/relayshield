@@ -76,6 +76,15 @@ fi
 # so there is no key to query BY. Nothing else in this policy is wider than it
 # needs to be -- UpdateItem on one table, Query on the IOC table only, and KMS
 # restricted to the one alias by condition.
+#
+# THE SECRET ARN SAYS telegram_bot_token WITH UNDERSCORES. It said hyphens, the
+# same one-character defect as the handler's own constant, and it is the half
+# that would have SURVIVED fixing the name: a corrected name read against a
+# hyphenated ARN moves the failure from ResourceNotFoundException to
+# AccessDeniedException, which reads as a completely different bug.
+#
+# No comments inside the policy document itself. It is JSON on a command line
+# and a `#` in it is a parse error, not a note.
 AWS_PROFILE=relayshield aws iam put-role-policy --role-name "$ROLE" \
   --policy-name relayshield-watchlist-monitor-access \
   --policy-document "{
@@ -88,7 +97,7 @@ AWS_PROFILE=relayshield aws iam put-role-policy --role-name "$ROLE" \
       {\"Effect\":\"Allow\",\"Action\":\"kms:Decrypt\",\"Resource\":\"*\",
        \"Condition\":{\"StringEquals\":{\"kms:RequestAlias\":\"${KEY_ALIAS}\"}}},
       {\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",
-       \"Resource\":[\"arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:relayshield/telegram-bot-token-*\"]}
+       \"Resource\":[\"arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:relayshield/telegram_bot_token-*\"]}
     ]}" --no-cli-pager
 echo "policy applied"
 

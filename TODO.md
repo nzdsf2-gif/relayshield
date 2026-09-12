@@ -3228,3 +3228,71 @@ Full requirement set, checked against what we actually have, in
 
 **Timeline once submitted:** 24 to 48 hours review, a **48-business-hour** preview test window, then
 10 to 14 days to deploy across regions. **Premium tier is permanent and cannot be changed later.**
+
+---
+
+## ADDED 2026-09-12 — two scoped items, on founder instruction
+
+### BOT-TOKEN-1 — leaked Telegram bot tokens as a finding
+
+**`leaked_bot_token_finding_scope.md`.** There is NO Telegram bot token pattern in `NHI_PATTERNS`
+(`relayshield_api.py`), in `_NHI_PATS` (`relayshield_intel_monitor.py`) or in the generated
+`rsscan/rsscan/patterns.py`. So the corpus count is **UNMEASURED, not zero**, and no number may be
+quoted from it until the pattern has shipped and collected.
+
+Unique among every other row in those tables: a bot token is **self-validating and
+self-attributing** with one unauthenticated `getMe`, which gives liveness AND the owner's bot
+username. The blast radius is session-shaped rather than key-shaped, so the remediation is
+**revoke in BotFather** and rotating anything else does nothing.
+
+**THE HARD LINE: `getMe` only. Never `getUpdates`, `setWebhook` or `deleteWebhook`.** `getUpdates`
+drains the owner's pending update queue and returns other people's conversations. That is what
+`soxoj/telegram-bot-dumper` does, correctly, WITH the owner's authorization — and we have none.
+It gets a test, not a comment. The token is never stored: `sha256(token)` plus the username.
+
+- **Phase 0, half a day, do now.** The context-anchored pattern into all four tables that must
+  agree, `python3 tools/sync_patterns.py` for the rsscan mirror. Ships to rsscan as a PRE-leak
+  catch on `git diff --cached`, which needs no corpus at all.
+- **Phase 1, one day.** `getMe` liveness, hash-only storage, username index, severity split.
+- **Phase 2, two days, GATED ON A NON-ZERO COUNT.** The Mini App username lookup. A tab that
+  answers "nothing known" to every visitor is the OpenRouter-webhook mistake: building against
+  zero rows.
+
+**On the Mini App question: yes, and it is the best discovery answer proposed so far** — bot
+developers are the one audience already inside Telegram that is also commercially interesting, and
+the check needs the criminal-channel corpus so nobody scraping GitHub can replicate it. **Lookup by
+USERNAME, never by pasted token.** Asking a developer to paste a live credential into a form is the
+thing we tell everyone else not to do.
+
+### CSM-SIMSWAP-1 — Crypto Shield Mobile enrols nobody for SIM swap
+
+**`simswap_crypto_shield_mobile_scope.md`. About three days, and one part costs nothing and should
+happen first.**
+
+The app collects the phone number (`SettingsScreen.tsx` → `PhoneManager`, SecureStore
+`cs_phone_number`), labels it "Used for SIM swap monitoring", SELLS it on the paywall, CLAIMS it in
+the Solana dApp Store listing, and ships `AlertCard` type `SIM_SWAP` plus the full `SimLockGuide`
+remediation screen. **`checkSimSwap()` in `src/api/relayshield.ts:73` has zero callers.** The
+number never leaves the device.
+
+**This was found on 2026-08-14 and written down in the file built to fix it.**
+`relayshield_sim_swap_consent.py`'s docstring says so verbatim. Three of that audit's four surfaces
+were wired; this one was recorded and left.
+
+Three defects, in the order they bite:
+
+1. **Nothing enrols.** `scan_sim_swap_users()` has never had a CS M user in its set.
+2. **`checkSimSwap` is the WRONG ENDPOINT.** It posts `/v1/metered/sim-swap`, a one-shot $0.25
+   lookup that enrols nothing. The right one is **`/v1/sim-swap/enroll`**, unmetered. Two live
+   endpoints one character of muscle memory apart, and the wrong one is already imported.
+3. **An enrolled user still would not be told.** `relayshield_sim_swap_monitor.py` delivers over
+   WhatsApp, SMS fallback and a Telegram signal, and sends **no Expo push**. The join is
+   `relayshield_users.enrolled_by_account` ↔ `relayshield_push_tokens.user_id`, both of which hold
+   the API KEY — note the two tables use `user_id` to mean different things.
+
+**Plus the consent clause.** `enroll(enrollment_type="self")` RAISES without
+`consent_acknowledged=True`, and that flag is what a carrier audit rests on. The app shows a
+description, not an authorization. `cs_mobile` is already in `CONSENT_SOURCES`, reserved and unused.
+
+**Do the copy first, today, at zero engineering cost:** until this ships, the paywall and the store
+listing sell a feature that enrols nobody. Either the claim comes down or the feature goes in.

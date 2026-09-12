@@ -420,6 +420,46 @@ appears. Proven by reintroducing all three defects plus a broken widget route.
 "does this parse". It never answers "does this run". For anything that is a deployed artefact rather
 than a library, execute it.**
 
+## A GREEDY PROXY MAKES A MISSING ROUTE ANSWER IN OUR OWN ENVELOPE
+
+**2026-09-12. The invoice probe I added yesterday was right about the conclusion and wrong about
+the evidence, on its first real run.** It predicted that a missing route answers
+`{"message": ...}` from API Gateway. What came back was:
+
+    HTTP/2 404
+    {"ok": false, "error": "unknown endpoint: /v1/watchlist/invoice"}
+
+**That is OUR envelope, so by my own reading guide the route existed. It does not.** Step 2 of the
+same run lists four watchlist resources and no `invoice` among them.
+
+**THE MECHANISM IS THE `/{proxy+}` THE DIAGNOSTIC ITSELF PRINTS IN STEP 3.** With no explicit
+resource, the request falls through to the greedy proxy at the API root, which is wired to
+`relayshield-api`, whose unknown-path branch is `_err(f"unknown endpoint: {path}", 404)`.
+`relayshield_watchlist.py`'s own 404 says `unknown path {path}`. **Three components can 404 at that
+URL and I had written the guide as though there were two.**
+
+**THE DISCRIMINATOR IS THE CORS HEADERS, NOT THE ENVELOPE.** `relayshield_watchlist.py` puts
+`access-control-allow-origin` on EVERY response including its 404s, deliberately, because a
+preflight that fails means the real request is never sent. `relayshield-api` does not. In the run
+above, `/list`'s 400 carried the CORS headers and `/invoice`'s 404 carried none, which settles it
+in one line. **This is the 402-at-the-wrong-price lesson exactly: when two components produce the
+same SHAPE of answer, verify the field that differs between them.**
+
+**AND THE MISSING ROUTE IS WORSE THAN A PLAIN 404 BECAUSE OF THAT MISSING HEADER.** A browser
+discards a cross-origin response with no `access-control-allow-origin` after it arrives, so inside
+the Mini App the buy button does not show an error: **it does nothing at all.** The terminal sees a
+404 with a body; the user sees a dead button. That is the CORS quiet-alarm shape with money on the
+end of it.
+
+**The fix needs no change to the proxy.** An explicit resource beats a greedy `/{proxy+}` -- already
+recorded from the agent-bait diagnosis -- so creating `/v1/watchlist/invoice` takes precedence and
+the proxy keeps serving everything else.
+
+**The general form, and it is the sixth costume this week: a guard is only as good as where it got
+its expectations.** I wrote that reading guide from what API Gateway does to an unrouted path, in a
+repo whose own diagnostic prints, three steps earlier, the exact reason that does not apply here.
+The evidence I needed was in the output of the tool I was editing.
+
 ## THE PRICE WAS VISIBLE AND UNPRESSABLE, AND THE GATEWAY ROUTE FOR IT MAY NOT EXIST
 
 **Founder, 2026-09-11: *"I do see Build 3c2e1188 and also see the '50 stars raises it to 25

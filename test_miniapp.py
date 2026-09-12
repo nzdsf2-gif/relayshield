@@ -568,5 +568,73 @@ class TestWrangler(unittest.TestCase):
         self.assertIn("app.relayshield.net", cfg)
 
 
+
+class TestTheBotTokenSecretMatchesTheWebhook(unittest.TestCase):
+    """The watchlist and the webhook must name the SAME secret and the SAME key
+    inside it, and for three days they named neither.
+
+    relayshield_watchlist.py shipped reading "relayshield/telegram-bot-token"
+    with HYPHENS, looking for a "bot_token" key. The secret that exists is
+    "relayshield/telegram_bot_token" with UNDERSCORES and the key is
+    "telegram_bot_token". Result: ResourceNotFoundException on EVERY verified
+    call -- add, list, remove and invoice -- from 2026-09-09 to 2026-09-12.
+
+    AND EVERY PROBE PASSED, WHICH IS THE PART WORTH THE TEST. verified_user_id
+    returns None for empty init_data BEFORE it reads the secret, so an unsigned
+    curl never touches Secrets Manager. tools/create_watchlist_routes.sh and
+    tools/diagnose_watchlist_routes.sh both assert exactly that refusal, so the
+    one path they exercise is the one path that does not need the secret. A
+    probe that takes a route the real client does not take proves nothing about
+    the real client.
+
+    The IAM grant is checked too: it names the ARN, so a corrected name with a
+    stale grant is an AccessDenied waiting behind a ResourceNotFound."""
+
+    def setUp(self):
+        self.wl = (ROOT / "relayshield_watchlist.py").read_text()
+        self.hook = (ROOT / "relayshield_telegram_webhook.py").read_text()
+        self.iam = (ROOT / "tools" / "create_watchlist_lambda.sh").read_text()
+
+    def _const(self, src, name):
+        m = re.search(rf'^{name}\s*=\s*"([^"]+)"', src, re.M)
+        if m:
+            return m.group(1)
+        m = re.search(rf'^{name}\s*=\s*os\.environ\.get\(\s*"[^"]+"\s*,\s*"([^"]+)"',
+                      src, re.M)
+        self.assertIsNotNone(m, f"{name} is gone or its shape changed")
+        return m.group(1)
+
+    def test_the_secret_name_agrees(self):
+        self.assertEqual(self._const(self.wl, "BOT_TOKEN_SECRET"),
+                         self._const(self.hook, "TG_SECRET_NAME"))
+
+    def test_the_key_inside_the_secret_agrees(self):
+        """A wrong KEY is worse than a wrong name: json.loads succeeds, the
+        lookup misses, and the code falls through to the raw JSON string as the
+        token. That fails the HMAC for every user and raises nothing."""
+        self.assertEqual(self._const(self.wl, "BOT_TOKEN_KEY"),
+                         self._const(self.hook, "TG_SECRET_KEY"))
+
+    def test_the_iam_grant_names_that_secret(self):
+        name = self._const(self.wl, "BOT_TOKEN_SECRET")
+        self.assertIn(f"secret:{name}-*", self.iam,
+                      "the role is granted a secret the code does not read")
+
+    def test_the_real_key_is_tried_before_the_guesses(self):
+        """PROSE FOOLED THIS GUARD ON ITS FIRST RUN, FOR THE SIXTH TIME IN THIS
+        REPO. The comment above the code says "BOT_TOKEN_KEY first", so the
+        first match was the explanation rather than the code, and the assertion
+        passed with the order reversed. Comments are stripped now -- the same
+        correction strip_js_comments() and code_only() already carry, arriving
+        in yet another costume because the natural way to write a guard is to
+        search the file and the natural way to write good code is to explain
+        the rule beside it."""
+        body = self.wl[self.wl.index("def verified_user_id"):]
+        body = body[:body.index("hmac.compare_digest")]
+        body = "\n".join(re.sub(r"#.*$", "", ln) for ln in body.splitlines())
+        self.assertLess(body.index("BOT_TOKEN_KEY"), body.index('"bot_token"'),
+                        "a guessed key is consulted before the real one")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -3,6 +3,12 @@
 
     AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/miniapp_funnel.py --days 30
 
+It reads CloudWatch Logs INSIGHTS, so the identity running it needs
+logs:StartQuery, logs:GetQueryResults and logs:StopQuery. A refusal comes back
+named -- ERROR AccessDeniedException against the group that refused -- and is
+never rendered as a zero. Progress goes to stderr, one line per query, because
+a long silence is exactly what made the previous version look broken.
+
 WHY THIS IS THE HIGH-PRIORITY TOOL AND NOT A NICE-TO-HAVE. The founder asked
 for exactly this, in these words: "Lets measure tg-miniapp arrivals, miniapp bot
 signups, Stars, and Tg miniApps traffic driven to our existing Tg bot ... as
@@ -175,7 +181,127 @@ ROUTE_SOURCES = [
 _ROUTE_RX = re.compile(r"source=(tg-miniapp[a-z0-9-]*)")
 
 
-def pull_routes(logs, start_ms, keys):
+# ---------------------------------------------------------------------------
+# WHY THIS TOOL USES LOGS INSIGHTS AND NOT filter_log_events, WHICH IS WHAT IT
+# SHIPPED WITH AND IS WHY IT PRINTED ITS HEADER AND THEN NOTHING ELSE.
+#
+# Reported twice as "I'm still getting no reply to your terminal command". The
+# output was not swallowed and nothing raised: the run printed the header and
+# then sat inside a pagination loop for longer than anyone was prepared to
+# wait. filter_log_events is a SCAN. It returns a nextToken to continue walking
+# log streams even when the page it just returned held no matching events at
+# all, so a rare pattern over 30 days of /aws/lambda/relayshield-api -- the
+# busiest group we have -- is thousands of sequential round trips before the
+# first number can be printed. Eight such sweeps run before any output.
+#
+# Insights does the filter server-side and returns the matching lines in one
+# query, so the same question costs one round trip plus a short poll.
+#
+# THE REGEXES ARE NOT DUPLICATED INTO INSIGHTS' OWN parse SYNTAX, DELIBERATELY.
+# The query filters on the coarse substring and the EXISTING Python regex still
+# does the matching, client-side, exactly as before. Re-expressing each stage
+# regex as an Insights `parse` would be two things that must agree with nothing
+# checking that they do, which is the shape that has cost this repo four
+# separate false absences -- and a measurement tool's wrong answer gets acted
+# on.
+INSIGHTS_LIMIT = 10000        # Insights' own hard cap on rows returned
+INSIGHTS_TIMEOUT_S = 180
+INSIGHTS_POLL_S = 1.0
+
+
+def _like(term: str) -> str:
+    """One substring predicate, quoted the way Insights wants it."""
+    esc = term.replace("\\", "\\\\").replace('"', '\\"')
+    return f'@message like "{esc}"'
+
+
+def run_insights(logs, group, query, start_ms, end_ms,
+                 limit=None, timeout=None):
+    """(rows, statistics, status). rows are dicts of field name -> value.
+
+    status is the honest one and is never collapsed:
+      OK            the query completed
+      NO LOG GROUP  the group does not exist. NOT zero.
+      TIMEOUT       we stopped waiting. NOT zero, and NOT a result.
+      QUERY FAILED  Insights returned Failed/Cancelled
+      ERROR <code>  anything else, named
+    """
+    import time
+    from botocore.exceptions import ClientError
+    # Read the caps at CALL time, not as default arguments bound at import.
+    # A default argument cannot be adjusted by a caller or a test, and the cap
+    # is exactly the branch that decides whether a number is a count or a
+    # floor -- which is the one branch that must be exercisable.
+    limit = INSIGHTS_LIMIT if limit is None else limit
+    timeout = INSIGHTS_TIMEOUT_S if timeout is None else timeout
+    print(f"  querying {group} ...", file=sys.stderr, flush=True)
+    try:
+        qid = logs.start_query(logGroupName=group,
+                               startTime=int(start_ms // 1000),
+                               endTime=int(end_ms // 1000),
+                               queryString=query,
+                               limit=limit)["queryId"]
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code == "ResourceNotFoundException":
+            return [], {}, "NO LOG GROUP"
+        return [], {}, f"ERROR {code}"
+    deadline = time.time() + timeout
+    while True:
+        resp = logs.get_query_results(queryId=qid)
+        status = resp.get("status")
+        if status == "Complete":
+            rows = [{f["field"]: f.get("value") for f in row}
+                    for row in resp.get("results", [])]
+            return rows, resp.get("statistics") or {}, "OK"
+        if status in ("Failed", "Cancelled", "Timeout"):
+            return [], {}, "QUERY FAILED"
+        if time.time() >= deadline:
+            try:
+                logs.stop_query(queryId=qid)
+            except Exception:
+                pass
+            return [], {}, "TIMEOUT"
+        time.sleep(INSIGHTS_POLL_S)
+
+
+def group_window(logs, group, start_ms, end_ms, cache):
+    """(event_count, earliest_ms, status) for one log group, cached per run.
+
+    This is what finally separates the three findings the docstring has always
+    claimed to separate and the old code could not. filter_log_events answered
+    one question -- did anything match -- so a function that had not run at all
+    and a function that ran constantly without ever matching both came back as
+    "ZERO". They are different problems with different fixes.
+
+    It also gives a better window: the earliest event in the GROUP is what the
+    retention actually held, where the earliest MATCHING event is a fact about
+    the filter. The window section is a claim about retention, so it wants the
+    first.
+    """
+    if group not in cache:
+        rows, _stats, status = run_insights(
+            logs, group, "stats count(*) as n, min(@timestamp) as first_ms",
+            start_ms, end_ms, limit=1)
+        if status != "OK":
+            cache[group] = (None, None, status)
+        else:
+            n, first = 0, None
+            if rows:
+                try:
+                    n = int(float(rows[0].get("n") or 0))
+                except (TypeError, ValueError):
+                    n = 0
+                raw = rows[0].get("first_ms")
+                try:
+                    first = int(float(raw)) if raw else None
+                except (TypeError, ValueError):
+                    first = None
+            cache[group] = (n, first, "OK")
+    return cache[group]
+
+
+def pull_routes(logs, start_ms, end_ms, keys, window_cache):
     """Counts per route key, plus what arrived carrying a key we do not know.
 
     The unknown bucket is printed loudly for the same reason source_arrivals.py
@@ -183,66 +309,66 @@ def pull_routes(logs, start_ms, keys):
     does not exist, and it is invisible everywhere else -- the page renders, the
     check answers, nothing errors, and the attribution is simply gone.
     """
-    from botocore.exceptions import ClientError
     counts, unknown, reachable = Counter(), Counter(), True
     for group, pattern in ROUTE_SOURCES:
-        token = None
-        try:
-            while True:
-                kw = dict(logGroupName=group, startTime=start_ms,
-                          filterPattern=f'"{pattern}" "tg-miniapp"')
-                if token:
-                    kw["nextToken"] = token
-                resp = logs.filter_log_events(**kw)
-                for ev in resp.get("events", []):
-                    m = _ROUTE_RX.search(ev.get("message", ""))
-                    if not m:
-                        continue
-                    k = m.group(1)
-                    (counts if k in keys else unknown)[k] += 1
-                token = resp.get("nextToken")
-                if not token:
-                    break
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "ResourceNotFoundException":
-                reachable = False
+        n, _first, wstatus = group_window(logs, group, start_ms, end_ms, window_cache)
+        if wstatus != "OK":
+            reachable = False
+            continue
+        if not n:
+            continue
+        query = ("fields @message | filter "
+                 + _like(pattern) + " and " + _like("tg-miniapp"))
+        rows, stats, status = run_insights(logs, group, query, start_ms, end_ms)
+        if status != "OK":
+            reachable = False
+            continue
+        for r in rows:
+            m = _ROUTE_RX.search(r.get("@message") or "")
+            if not m:
                 continue
-            raise
+            k = m.group(1)
+            (counts if k in keys else unknown)[k] += 1
+        # A capped page is a floor, and a floor presented as a count is the
+        # confident-wrong-number failure. Say so rather than under-reporting.
+        if len(rows) >= INSIGHTS_LIMIT and _matched(stats) > len(rows):
+            reachable = False
     return counts, unknown, reachable
 
 
-def pull_stage(logs, group, pattern, rx, start_ms):
-    """(count, breakdown, earliest_ms, status). status is the honest one."""
-    from botocore.exceptions import ClientError
-    counts, total, earliest, token, saw_any_event = Counter(), 0, None, None, False
+def _matched(stats) -> int:
     try:
-        while True:
-            kw = dict(logGroupName=group, startTime=start_ms, filterPattern=f'"{pattern}"')
-            if token:
-                kw["nextToken"] = token
-            resp = logs.filter_log_events(**kw)
-            for ev in resp.get("events", []):
-                saw_any_event = True
-                ts = ev.get("timestamp")
-                if ts and (earliest is None or ts < earliest):
-                    earliest = ts
-                m = rx.search(ev.get("message", ""))
-                if m:
-                    total += 1
-                    counts[m.group(1)] += 1
-            token = resp.get("nextToken")
-            if not token:
-                break
-    except ClientError as e:
-        code = e.response["Error"]["Code"]
-        if code == "ResourceNotFoundException":
-            # NOT zero. The function may not exist yet, which for
-            # relayshield-watchlist-monitor is the expected state until
-            # tools/create_watchlist_monitor.sh has been run.
-            return 0, counts, None, "NO LOG GROUP"
-        return 0, counts, None, f"ERROR {code}"
-    if not saw_any_event:
-        return 0, counts, None, "ZERO"
+        return int(float(stats.get("recordsMatched") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def pull_stage(logs, group, pattern, rx, start_ms, end_ms, window_cache):
+    """(count, breakdown, earliest_ms, status). status is the honest one."""
+    counts = Counter()
+    n, earliest, wstatus = group_window(logs, group, start_ms, end_ms, window_cache)
+    if wstatus != "OK":
+        # NOT zero. The function may not exist yet, which for
+        # relayshield-watchlist-monitor is the expected state until
+        # tools/create_watchlist_monitor.sh has been run.
+        return 0, counts, None, wstatus
+    if not n:
+        return 0, counts, None, "NEVER INVOKED"
+    query = "fields @message | filter " + _like(pattern)
+    rows, stats, status = run_insights(logs, group, query, start_ms, end_ms)
+    if status != "OK":
+        return 0, counts, earliest, status
+    total = 0
+    for r in rows:
+        m = rx.search(r.get("@message") or "")
+        if m:
+            total += 1
+            counts[m.group(1)] += 1
+    if len(rows) >= INSIGHTS_LIMIT and _matched(stats) > len(rows):
+        # More matched than Insights will return. total is a FLOOR.
+        return total, counts, earliest, "CAPPED"
+    if not total:
+        return 0, counts, earliest, "ZERO"
     return total, counts, earliest, "OK"
 
 
@@ -357,12 +483,20 @@ def main() -> int:
 
     assert_account()
     logs = boto3.client("logs", region_name=REGION)
-    start_ms = int((datetime.now(timezone.utc) - timedelta(days=args.days)).timestamp() * 1000)
+    now = datetime.now(timezone.utc)
+    end_ms = int(now.timestamp() * 1000)
+    start_ms = int((now - timedelta(days=args.days)).timestamp() * 1000)
+    window_cache = {}
 
     print(f"RelayShield Mini App funnel, {args.days} days requested\n")
+    # Progress goes to stderr, per query, because this reads several log groups
+    # and a long silence after the header is what made the old version look
+    # broken. A tool that is working and a tool that is hung must not produce
+    # the same thing on screen.
     rows = []
     for label, group, pattern, rx, meaning in STAGES:
-        total, counts, earliest, status = pull_stage(logs, group, pattern, rx, start_ms)
+        total, counts, earliest, status = pull_stage(
+            logs, group, pattern, rx, start_ms, end_ms, window_cache)
         rows.append((label, total, counts, earliest, status, meaning))
 
     widest = max(len(r[0]) for r in rows)
@@ -371,12 +505,26 @@ def main() -> int:
             shown = str(total)
         elif status == "ZERO":
             shown = "0"
+        elif status == "CAPPED":
+            shown = f">={total}"
         else:
             shown = status
         print(f"  {label.ljust(widest)}   {shown:>8}")
         if status == "NO LOG GROUP":
-            print(f"  {' ' * widest}            ^ the function has never run. NOT a")
+            print(f"  {' ' * widest}            ^ the log group does not exist, so the")
+            print(f"  {' ' * widest}              function has never run. NOT a")
             print(f"  {' ' * widest}              measurement of the channel.")
+        elif status == "NEVER INVOKED":
+            print(f"  {' ' * widest}            ^ the group exists and held NO events at")
+            print(f"  {' ' * widest}              all in this window. The function is idle,")
+            print(f"  {' ' * widest}              which is not the same as nothing matching.")
+        elif status == "CAPPED":
+            print(f"  {' ' * widest}            ^ more lines matched than Insights will")
+            print(f"  {' ' * widest}              return ({INSIGHTS_LIMIT}). This is a FLOOR, not a")
+            print(f"  {' ' * widest}              count. Narrow --days to get a real number.")
+        elif status == "TIMEOUT":
+            print(f"  {' ' * widest}            ^ the query did not finish in")
+            print(f"  {' ' * widest}              {INSIGHTS_TIMEOUT_S}s. NOT zero and NOT a result.")
         elif total == 0:
             print(f"  {' ' * widest}            ^ zero means: {meaning}")
         elif total < DEFENSIBLE_FLOOR:
@@ -388,7 +536,8 @@ def main() -> int:
 
     # ---- per route ----------------------------------------------------
     keys = {r["key"] for r in routes if r["key"]}
-    route_counts, unknown, reachable = pull_routes(logs, start_ms, keys)
+    route_counts, unknown, reachable = pull_routes(
+        logs, start_ms, end_ms, keys, window_cache)
 
     print("\nPer discovery route:")
     if not reachable:

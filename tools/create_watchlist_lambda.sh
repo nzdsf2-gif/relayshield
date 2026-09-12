@@ -89,7 +89,7 @@ AWS_PROFILE=relayshield aws iam put-role-policy --role-name "$ROLE" \
        \"Condition\":{\"StringEquals\":{\"kms:RequestAlias\":\"${KEY_ALIAS}\"}}},
       {\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",
        \"Resource\":[\"arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:${PEPPER}-*\",
-                     \"arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:relayshield/telegram-bot-token-*\"]}
+                     \"arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:relayshield/telegram_bot_token-*\"]}
     ]}" --no-cli-pager
 echo "policy applied"
 

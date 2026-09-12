@@ -216,6 +216,17 @@ const PAGE = `<!doctype html>
     color: var(--accent); text-decoration: underline; cursor: pointer;
   }
   .watch-intro { color: var(--hint); font-size: .85rem; margin: 4px 2px 10px; }
+  input.watch-in {
+    width: 100%; padding: 12px;
+    background: var(--card); color: var(--text);
+    border: 1px solid rgba(148,163,184,.25); border-radius: 12px;
+    /* 16px, NOT inherited. iOS Safari zooms the whole page on focus for any
+       input under 16px, and a Mini App that jumps when the keyboard opens
+       reads as broken. The textarea above carries the same rule. */
+    font: inherit; font-size: 16px;
+  }
+  input.watch-in:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .watch-msg { color: var(--hint); font-size: .82rem; margin: 8px 2px 0; }
   .watch-kinds { margin: 0 0 14px; padding-left: 18px; }
   .watch-kinds li { font-size: .85rem; margin: 6px 0; color: var(--text); }
   .upsell {
@@ -313,6 +324,27 @@ const PAGE = `<!doctype html>
          no way to pay it. Buying does not depend on the list: the invoice call
          needs initData and nothing else. -->
     <button class="ghost" id="watch-buy">Get __PAID_SLOTS__ addresses for __SLOTS_STARS__ Stars</button>
+
+    <!-- THE WATCHING TAB HAD NO WAY TO ADD A WATCH, reported in those words.
+         The only route was: Check tab, paste, check, then press "Tell me if
+         this changes" on the verdict card. So the tab that explains watching,
+         names the price and carries the buy button was the one place you could
+         not use a slot, and somebody who had just bought 25 of them had
+         nowhere to spend them.
+
+         IT STILL RUNS THE CHECK. This is not a second, looser add path: the
+         same off-chain gate refuses the same addresses, and the same check()
+         call establishes the baseline the monitor diffs against. A watch added
+         without one is a row whose first re-check reads as "changed from
+         nothing", which is the alert-everybody-at-once failure the monitor's
+         first-run rule exists to prevent. -->
+    <div class="watch-add">
+      <input id="watch-in" class="watch-in" type="text"
+             placeholder="Paste a TON address to watch (EQ... / UQ... / 0:...)"
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button class="ghost" id="watch-add">Watch it</button>
+    </div>
+    <p class="watch-msg" id="watch-add-msg"></p>
 
     <div id="watchlist"></div>
     <div id="upsell" class="upsell" hidden></div>
@@ -771,6 +803,30 @@ async function post(path, body) {
   return r.json();
 }
 
+/* ONE ADD PATH, USED BY BOTH CONTROLS. The verdict card's button and the
+   Watching tab's own box call this, so the slots-full upsell, the wording and
+   the error handling cannot drift between them -- which is what two copies of
+   this block would have done by the second change to either. */
+async function addWatch(target, level) {
+  try {
+    const res = await post("/v1/watchlist/add", {
+      init_data: initData, target: target, level: level,
+    });
+    if (res && res.ok) {
+      return { ok: true, text: isTon(target)
+        ? "Watching. We will message you the moment it changes."
+        : "Saved. Live re-checks cover TON addresses and tokens today." };
+    }
+    if (res && res.error === "slots_full") {
+      offerUpgrade(res.data || {});
+      return { ok: false, text: "Free slots are full." };
+    }
+    return { ok: false, text: (res && res.error) || "Could not save that." };
+  } catch (e) {
+    return { ok: false, text: "Could not save that." };
+  }
+}
+
 $("watch").addEventListener("click", async () => {
   if (!last) return;
   if (!uid) {
@@ -779,29 +835,56 @@ $("watch").addEventListener("click", async () => {
   }
   $("watch").disabled = true;
   $("watch").textContent = "Saving...";
-  try {
-    const res = await post("/v1/watchlist/add", {
-      init_data: initData, target: last.target, level: last.level,
-    });
-    if (res && res.ok) {
-      $("watch").textContent = last.kind === "address" && isTon(last.target)
-        ? "Watching. We will message you the moment it changes."
-        : "Saved. Live re-checks cover TON addresses and tokens today.";
-      return;
-    }
-    if (res && res.error === "slots_full") {
-      offerUpgrade(res.data || {});
-      $("watch").textContent = "Free slots are full.";
-      $("watch").disabled = false;
-      return;
-    }
-    $("watch").textContent = (res && res.error) || "Could not save that.";
-    $("watch").disabled = false;
-  } catch (e) {
-    $("watch").textContent = "Could not save that.";
-    $("watch").disabled = false;
-  }
+  const r = await addWatch(last.target, last.level);
+  $("watch").textContent = r.text;
+  if (!r.ok) $("watch").disabled = false;
 });
+
+/* The Watching tab's own add box. Same gate, same check, same add. */
+const watchAddBtn = $("watch-add");
+if (watchAddBtn) {
+  const say = (t) => { const el = $("watch-add-msg"); if (el) el.textContent = t; };
+  const doAdd = async () => {
+    const value = ($("watch-in").value || "").trim();
+    if (!value) return;
+    if (!uid) {
+      say("Open this from Telegram to keep a watchlist.");
+      return;
+    }
+    /* THE SAME REFUSAL AS THE CHECK TAB, and it has to be here rather than
+       left to the server: watching an EVM or Solana address would write a row
+       the TON monitor will never re-check, which is a promise nothing keeps --
+       the exact defect the monitor was built to end, re-created one screen
+       earlier. */
+    const off = offChainReason(value);
+    if (off) { say(off); return; }
+    watchAddBtn.disabled = true;
+    const was = watchAddBtn.textContent;
+    watchAddBtn.textContent = "Checking...";
+    say("");
+    let v;
+    try { v = await check(value, { source }); }
+    catch (e) { v = null; }
+    if (!v) {
+      say("Could not check that just now, so it has not been watched. "
+        + "Nothing has been saved.");
+      watchAddBtn.disabled = false;
+      watchAddBtn.textContent = was;
+      return;
+    }
+    watchAddBtn.textContent = "Saving...";
+    const level = HEADS[v.level] ? v.level : "unknown";
+    const r = await addWatch(v.target || value, level);
+    say(r.text);
+    watchAddBtn.disabled = false;
+    watchAddBtn.textContent = was;
+    if (r.ok) { $("watch-in").value = ""; loadWatches(); }
+  };
+  watchAddBtn.addEventListener("click", doAdd);
+  $("watch-in").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); doAdd(); }
+  });
+}
 
 /* Mirrors _is_valid_ton_address in relayshield_api.py and _normalise in
    relayshield_watchlist.py. Three copies is one too many, and this one earns

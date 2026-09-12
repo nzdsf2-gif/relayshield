@@ -829,6 +829,59 @@ class TestStarsAreVisibleInTheWatchTab(unittest.TestCase):
             self.assertNotIn(rail, up.lower())
 
 
+class TestTheWatchingTabCanActuallyAddAWatch(unittest.TestCase):
+    """Reported in these words: "There is no way to add a watch in the Watching
+    tab."
+
+    He was right. The only route to a watch was Check tab, paste, check, then
+    press the verdict card's button -- so the tab that explains watching, names
+    the price and carries the buy button was the one place a slot could not be
+    used, and somebody who had just paid for 25 of them had nowhere to spend
+    them. That is the price-with-no-tap-target defect one screen over.
+    """
+
+    def setUp(self):
+        self.w = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        self.code = strip_js_comments(self.w)
+
+    def test_the_served_watch_pane_carries_an_input_and_a_button(self):
+        page = served_page()
+        pane = page[page.index('id="pane-watch"'):]
+        pane = pane[:pane.index("</section>")]
+        self.assertIn('id="watch-in"', pane)
+        self.assertIn('id="watch-add"', pane)
+        self.assertNotIn("__", pane[pane.index('id="watch-in"'):],
+                         "a placeholder reached the browser")
+
+    def test_it_is_wired(self):
+        self.assertIn("watchAddBtn.addEventListener", self.code)
+
+    def test_the_off_chain_gate_is_applied_before_the_add(self):
+        """Watching an EVM address writes a row the TON monitor will never
+        re-check, which is the promise-nothing-keeps defect the monitor was
+        built to end, re-created one screen earlier."""
+        i = self.code.index("const watchAddBtn")
+        body = self.code[i:self.code.index("\n}", i)]
+        self.assertIn("offChainReason(value)", body)
+        self.assertLess(body.index("offChainReason(value)"),
+                        body.index("addWatch("),
+                        "the add happens before the refusal")
+
+    def test_a_watch_added_here_still_runs_a_check_first(self):
+        """A row with no baseline reads as "changed from nothing" on the
+        monitor's first pass, which is how a security bot messages every user
+        about every target at once."""
+        i = self.code.index("const watchAddBtn")
+        body = self.code[i:self.code.index("\n}", i)]
+        self.assertIn("await check(value", body)
+        self.assertLess(body.index("await check(value"), body.index("addWatch("))
+
+    def test_there_is_exactly_one_add_call(self):
+        """Two copies of the add block would drift on the second change to
+        either, and one of them carries the slots-full upsell."""
+        self.assertEqual(self.code.count('post("/v1/watchlist/add"'), 1)
+
+
 class TestTheBuyPathDoesNotDependOnTheList(unittest.TestCase):
     """The price was visible and unpressable.
 

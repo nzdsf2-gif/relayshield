@@ -850,7 +850,13 @@ async function buySlots(btn) {
   try { res = await post("/v1/watchlist/invoice", { init_data: initData }); }
   catch (e) { res = null; }
   if (!res || !res.ok || !res.data || !res.data.invoice_link) {
-    btn.textContent = (res && res.error) || "Could not start the purchase.";
+    /* TWO DIFFERENT FAILURES USED TO READ THE SAME ON SCREEN. Our handler's
+       own message is "could not start the purchase, try again"; this fallback
+       said "Could not start the purchase." So a Telegram refusal and a request
+       that never arrived were one capital letter apart, and the screen could
+       not tell you which side to look at. Name the side. */
+    btn.textContent = (res && res.error)
+      || "Could not reach RelayShield to start the purchase.";
     btn.disabled = false;
     return;
   }

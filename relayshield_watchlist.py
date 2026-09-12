@@ -74,6 +74,7 @@ import logging
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -364,6 +365,13 @@ def stars_invoice(params: dict) -> dict:
         # returns it verbatim, so it carries no secret and no user id: the id
         # comes from the update's own `from` field, which Telegram signs.
         "payload": f"slots:{SLOTS_DURATION_DAYS}",
+        # AN EMPTY STRING, NOT AN OMITTED FIELD. The Bot API's own description
+        # of this parameter is "Pass an empty string for payments in Telegram
+        # Stars", and it was required outright before Stars existed. Read from
+        # @grammyjs/types on npm rather than guessed: core.telegram.org is
+        # egress-blocked from the container, npm is not, and the vendor's typed
+        # client is better evidence than a docs page anyway.
+        "provider_token": "",
         "currency": "XTR",
         "prices": [{"label": f"{PAID_WATCH_SLOTS} slots, {SLOTS_DURATION_DAYS} days",
                     "amount": SLOTS_PRICE_STARS}],
@@ -375,8 +383,30 @@ def stars_invoice(params: dict) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        # THE BRANCH BELOW COULD NEVER RUN, AND THIS IS WHY.
+        #
+        # Telegram answers a rejected createInvoiceLink with a NON-2XX status
+        # and the reason in the BODY. urllib raises HTTPError on any non-2xx,
+        # so every Telegram-side refusal landed here, and `exc` stringifies to
+        # "HTTP Error 400: Bad Request" -- which names no cause at all. The
+        # `if not body.get("ok")` branch that logs `description` was reachable
+        # only for a 200 carrying ok:false, which Telegram does not send.
+        #
+        # So the one line that would have told us what was wrong was thrown
+        # away, and the user got "could not start the purchase" over a log that
+        # said "Bad Request". Read the body. Every probe in this repo prints
+        # what it got rather than a summary of it, and that rule applies to our
+        # own error paths, not just to diagnostics.
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        logger.error("createInvoiceLink HTTP %s: %s", exc.code, detail or exc)
+        return {"ok": False, "error": "could not start the purchase, try again"}
     except Exception as exc:
-        logger.error("createInvoiceLink failed: %s", exc)
+        logger.error("createInvoiceLink failed: %r", exc)
         return {"ok": False, "error": "could not start the purchase, try again"}
 
     if not body.get("ok"):

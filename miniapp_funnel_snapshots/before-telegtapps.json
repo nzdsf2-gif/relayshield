@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-09-13T23:38:25.580197+00:00",
+  "days_requested": 30,
+  "stages": {
+    "CHECKED": 0,
+    "WATCHED": 2,
+    "BOT": 1,
+    "STARS": 1,
+    "ALERTED": 0,
+    "DEVELOPERS": 5
+  },
+  "routes": {
+    "tg-miniapp-blog": 0,
+    "tg-miniapp-trendingapps": 0,
+    "tg-miniapp-web3botx": 0,
+    "tg-miniapp-findminiapp": 0,
+    "tg-miniapp-onclicka": 0,
+    "tg-miniapp-telegtapps": 0,
+    "tg-miniapp-tapps": 0,
+    "tg-miniapp-directory": 0,
+    "tg-miniapp-ton": 0
+  },
+  "unknown_route_keys": {}
+}

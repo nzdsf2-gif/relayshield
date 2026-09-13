@@ -306,11 +306,36 @@ EXPECT: the funnel, then `Snapshot saved: miniapp_funnel_snapshots/before-telegt
 STOP IF: `REFUSING to overwrite` -- a baseline already exists under that label, so
 this route was already started. Do not delete it without deciding to.
 
-**ANDREW SUBMITS** the link below to @telegtapps.
+**ANDREW READS THE CHANNEL FIRST.** Open `t.me/telegtapps` and read its
+DESCRIPTION, its PINNED MESSAGE and the last few posts. One of those names the
+submission route: these channels take submissions through a bot, a form, or a
+DM to an admin, and which one it is differs per channel and changes over time.
+
+**This step exists because the line below used to say "ANDREW SUBMITS" and
+never said how.** That is the FD-2 and Apify defect recorded in CLAUDE.md --
+an instruction nobody can act on -- and it was asked about on the first channel
+we tried. The container cannot reach Telegram, so this read is the reader's and
+cannot be done for them.
+
+**Record what you find in this file** under the channel, so the remaining five
+do not each cost a round.
+
+**ANDREW SUBMITS** the link below, through whatever route that read turned up.
 
 ```text
 https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-telegtapps
 ```
+
+**OPENING THAT LINK YOURSELF IS A TEST, NOT A SUBMISSION, AND THE ORDER
+MATTERS.** Tapping OPEN APP logs nothing against the route key: the route
+counter reads `source=` lines in `/aws/lambda/relayshield-api`, and simply
+opening the app calls nothing there. **Pressing "Check it" does** -- that is one
+arrival credited to this channel, by us.
+
+So verify the link BEFORE taking the baseline, never after. A self-visit inside
+the baseline is harmless; the same visit after it becomes part of the delta and
+reads as the channel producing a user. On a channel where single digits are the
+likely result, one of ours is material.
 
 **ANDREW RUNS THIS, 48 hours later:**
 ```zsh

@@ -136,6 +136,11 @@
       "key": "tg-miniapp",
       "what": "The generic fallback.",
       "why_not_a_route": "Anything arriving here carried no route key or one the Worker refused. A RISING count here is a defect, not a channel: it means a published link is losing its attribution."
+    },
+    {
+      "key": "tg-miniapp-bottoken",
+      "what": "A bot DEVELOPER pasted their bot's handle into the Check tab and followed the link to the API landing page.",
+      "why_not_a_route": "It is OUTBOUND, not an arrival: nothing is submitted anywhere, so there is no before-and-after to run. It is the flywheel number -- the only Mini App visitor whose own product has the problem our endpoints solve -- and counting it as a discovery route would credit a submission we never made."
     }
   ]
 }

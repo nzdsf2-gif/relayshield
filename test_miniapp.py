@@ -170,12 +170,51 @@ class TestBotCallToAction(unittest.TestCase):
                       "the offer must start hidden, not greet a first-time user")
 
     def test_the_wording_differs_by_severity(self):
+        """ANCHORED ON THE VERDICT RENDERER, NOT ON THE FIRST cta-line WRITE.
+
+        It used to take the first `$("cta-line").textContent` in the file, which
+        silently became the wrong block the moment a second branch wrote that
+        element -- the bot-handle branch, which has no severity because a bot
+        handle is not a verdict. That is the extractor defect this file keeps
+        producing: a walk that finds the first thing shaped like the target and
+        then asserts about whatever it landed on.
+
+        The invariant is about the SEVERITY ternary, so anchor on it."""
         src = _worker()
-        i = src.index('$("cta-line").textContent')
-        block = src[i:i + 700]
+        i = src.index('level === "critical" || level === "high"')
+        block = src[i:i + 900]
         self.assertIn("critical", block)
         self.assertIn("high", block)
         self.assertIn("breach", block.lower())
+
+    def test_the_developer_branch_does_not_claim_a_finding(self):
+        """A bot developer arrives primed to read a capability as a finding, so
+        the one thing this screen must not do is diagnose their bot. Same rule
+        as the outreach drafts, on a screen instead of an email."""
+        src = _worker()
+        i = src.index("const bot = BOT_HANDLE.exec(value);")
+        block = src[i:src.index("const off = offChainReason(value);", i)]
+        code = "\n".join(l for l in block.splitlines()
+                          if not l.lstrip().startswith("//"))
+        self.assertIn("not a finding about you", code,
+                      "the screen must say outright that we have not looked")
+        for claim in ("your token is leaked", "exposed", "compromised", "breached"):
+            self.assertNotIn(claim, code.lower(),
+                             f"the developer branch asserts {claim!r} about a bot "
+                             "we have only seen the handle of")
+
+    def test_the_developer_branch_offers_a_live_action_not_a_dead_one(self):
+        """Token WATCHING is not offered here on purpose: the pattern shipped
+        2026-09-13 and the corpus has collected none, so the control would
+        either do nothing or answer "nothing known" to every visitor forever.
+        The API is real today, so the API is the offer."""
+        src = _worker()
+        i = src.index("const bot = BOT_HANDLE.exec(value);")
+        block = src[i:src.index("const off = offChainReason(value);", i)]
+        self.assertIn("__DEVELOPERS__?source=tg-miniapp-bottoken", block,
+                      "the developer branch must route to the API landing page "
+                      "with its own registered key")
+        self.assertNotIn('"/v1/watchlist/add"', block)
 
     def test_it_opens_the_chat_rather_than_a_browser(self):
         src = _worker()

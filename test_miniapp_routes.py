@@ -921,6 +921,54 @@ class TestTheWatchingTabCanActuallyAddAWatch(unittest.TestCase):
         self.assertEqual(self.code.count('post("/v1/watchlist/add"'), 1)
 
 
+class TestTheDeveloperPathIsDiscoverable(unittest.TestCase):
+    """A RECOGNISER WITH NO PROMPT IS A FEATURE NOTHING POINTS AT.
+
+    BOT_HANDLE shipped matching correctly and the developer card rendered
+    correctly, and no developer could have found either: the Check tab's
+    placeholder said "a link, or a TON address" and nothing mentioned a bot.
+    Reported the same day it deployed.
+
+    That is the inline-mode defect exactly -- complete, live, and pointed at by
+    nothing -- which this repo had recorded as a lesson two days earlier. The
+    recogniser is not the feature; the route to it is.
+    """
+
+    def setUp(self):
+        self.page = served_page()
+
+    def test_the_placeholder_names_a_bot_handle(self):
+        i = self.page.index('id="in"')
+        tag = self.page[i:self.page.index(">", i)]
+        self.assertIn("handle", tag.lower(),
+                      "the input does not tell a developer they can paste one")
+
+    def test_there_is_a_visible_developer_prompt(self):
+        self.assertIn('id="try-bot"', self.page)
+        label = self.page[self.page.index('id="try-bot"'):]
+        label = label[:label.index("</button>")]
+        self.assertIn("bot developer", label.lower())
+        self.assertNotIn("__", label, "a placeholder reached the browser")
+
+    def test_the_example_is_our_own_bot(self):
+        """Prefilling a stranger's handle would point our app at somebody
+        else's product and render a card about it -- the outreach rule broken
+        on a screen, where it is worse than in an email."""
+        code = strip_js_comments(
+            (ROOT / "cloudflare_worker_miniapp.js").read_text())
+        i = code.index('$("try-bot").addEventListener')
+        body = code[i:code.index("});", i)]
+        self.assertIn("@relayshield_bot", body)
+
+    def test_pressing_it_runs_the_real_check(self):
+        """Not a canned card. Whatever it says is true when they press it."""
+        code = strip_js_comments(
+            (ROOT / "cloudflare_worker_miniapp.js").read_text())
+        i = code.index('$("try-bot").addEventListener')
+        body = code[i:code.index("});", i)]
+        self.assertIn("run()", body)
+
+
 class TestTheBuyPathDoesNotDependOnTheList(unittest.TestCase):
     """The price was visible and unpressable.
 

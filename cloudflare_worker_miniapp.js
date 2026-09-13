@@ -276,11 +276,23 @@ const PAGE = `<!doctype html>
   <p id="boot" class="boot" hidden></p>
 
   <section id="pane-check">
-    <textarea id="in" placeholder="Paste a link, or a TON address (EQ... / UQ... / 0:...)"
+    <textarea id="in" placeholder="Paste a link, a TON address (EQ... / UQ... / 0:...), or your bot&#39;s @handle"
               autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
     <button class="go" id="go">Check it</button>
     <p class="example">Not sure what to paste?
       <button class="linkish" id="try-bad">Try a link that gets flagged</button></p>
+    <!-- THE RECOGNISER WITHOUT THE PROMPT IS A FEATURE NOTHING POINTS AT, and
+         that is exactly what shipped on 2026-09-13: BOT_HANDLE matched, the
+         developer card rendered correctly, and no developer could ever have
+         discovered it because the placeholder said "a link, or a TON address".
+         Reported as "What I dont see though is the new copy you were going to
+         add to the Check tab to prompt Dev's to paste a link to their bot."
+
+         Same shape as inline mode -- complete, live, and mentioned nowhere --
+         which this repo recorded as a lesson two days earlier and I repeated.
+         A capability the user cannot find is not shipped. -->
+    <p class="example" id="dev-tip">Build a Telegram bot?
+      <button class="linkish" id="try-bot">Check what we watch for bot developers</button></p>
     <p class="example" id="inline-tip"></p>
 
     <div class="verdict hidden" id="out" data-level="unknown">
@@ -882,6 +894,19 @@ const EXAMPLE_URL = "http://testsafebrowsing.appspot.com/s/malware.html";
 
 $("try-bad").addEventListener("click", () => {
   $("in").value = EXAMPLE_URL;
+  run();
+});
+
+/* OUR OWN BOT, DELIBERATELY, AND IT IS THE SAME REASONING AS THE FLAGGED-LINK
+   EXAMPLE. Prefilling a stranger's bot handle would be pointing our own app at
+   somebody else's product and rendering a card about it, which is the thing the
+   outreach rules forbid in an email and is worse on a screen. @relayshield_bot
+   is ours, so the card it produces is a claim about us and nobody else.
+
+   It runs the REAL path, not a canned card: whatever the developer branch says
+   is true at the moment they press it. */
+$("try-bot").addEventListener("click", () => {
+  $("in").value = "@relayshield_bot";
   run();
 });
 

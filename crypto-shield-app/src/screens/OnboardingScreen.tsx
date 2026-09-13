@@ -261,10 +261,24 @@ export function OnboardingScreen({ onComplete }: Props) {
           {step === 3 && (
             <View style={styles.stepWrap}>
               <Text style={styles.stepNum}>3 of 4</Text>
-              <Text style={styles.stepTitle}>SIM swap monitoring</Text>
+              {/* CSM-SIMSWAP-1. THE WORST OF THE FOUR, BECAUSE IT IS THE
+                  PRIMARY ONBOARDING FLOW: it said "to enable monitoring" and
+                  nothing was enabled. checkSimSwap() has zero callers and the
+                  number never leaves the device.
+
+                  The threat education is TRUE and stays. What changed is the
+                  promise: the step now points at the SIM-lock guide, which is
+                  built (components/SimLockGuide.tsx), real, carrier by carrier,
+                  and is the single most effective thing a user can do about
+                  this anyway -- a carrier port-out lock prevents the swap,
+                  where monitoring only tells you afterwards. So the honest
+                  version of this screen is also the more useful one. */}
+              <Text style={styles.stepTitle}>SIM swap: lock your number</Text>
               <Text style={styles.stepDesc}>
                 SIM swaps are the #1 method attackers use to bypass exchange 2FA and drain crypto
-                accounts. Enter the phone number you use for exchange logins to enable monitoring.
+                accounts. The strongest defence is a port-out lock with your carrier, and Crypto
+                Shield shows you how to set one up. Enter the number you use for exchange logins
+                and we will keep it on this device, ready for carrier monitoring.
               </Text>
 
               <Text style={styles.fieldLabel}>Phone Number (optional)</Text>

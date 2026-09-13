@@ -21,7 +21,10 @@ const FEATURES_PRO = [
   "SOL portfolio valuation",
   "EVM · Solana · TON · Bitcoin",
   "Criminal Telegram marketplace monitoring",
-  "SIM-swap & breach alerts",
+  // "SIM-swap & breach alerts" -- the breach half is real and ships; the
+  // SIM-swap half enrols nobody (CSM-SIMSWAP-1), so the line now claims only
+  // what the app actually does. Restore the full wording with the enrol call.
+  "Breach & infostealer alerts",
   "Security sweep (email + OAuth)",
 ];
 

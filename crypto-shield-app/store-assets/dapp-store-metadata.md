@@ -18,6 +18,12 @@ Crypto Shield is read-only wallet security monitoring for Solana, EVM (including
 TON, Bitcoin, and XRP — built by RelayShield, a threat intelligence company that also
 protects businesses and consumers against breaches, SIM-swap fraud, and infostealer malware.
 
+<!-- SIM SWAP IS DESCRIBED HERE AS SOMETHING RELAYSHIELD DOES, WHICH IS TRUE,
+     AND IS NO LONGER LISTED AS SOMETHING THIS APP DOES, WHICH IT DOes NOT.
+     CSM-SIMSWAP-1: checkSimSwap() has no callers and the phone number never
+     leaves the device. The keyword below stays because the company line above
+     is accurate; the feature bullet was removed. -->
+
 We never ask for your seed phrase or private keys. Crypto Shield can't move your funds —
 it watches your wallets and alerts you the moment something looks wrong.
 
@@ -29,7 +35,7 @@ it watches your wallets and alerts you the moment something looks wrong.
 - NFT floor price tracking and alerts
 - Criminal marketplace intelligence — 80+ monitored underground channels where stolen data
   and drainer kits are traded, so you're flagged before you know you're a target
-- SIM-swap and breach exposure alerts for your linked email/phone
+- Breach and infostealer exposure alerts for your linked email
 - Signature Guard — token/NFT approval monitoring, transaction simulation before you sign,
   and session hijack detection
 - Security Sweep — one-tap check across breach exposure, infostealer logs, and OAuth
@@ -46,7 +52,7 @@ carries active Tech E&O and Cyber Insurance coverage.
 
 ## Keywords (if the portal has a keywords/tags field)
 wallet security, crypto security, address poisoning, NFT security, phishing protection,
-SIM swap, breach monitoring, Solana wallet, transaction simulation, signature guard,
+breach monitoring, Solana wallet, transaction simulation, signature guard,
 XRP wallet, Base chain, lookalike token detection
 
 ## Portal form field values (publish.solanamobile.com — confirmed 2026-07-04, revised 2026-08-01)

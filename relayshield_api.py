@@ -7195,6 +7195,38 @@ NHI_PATTERNS: list[tuple[str, str, str, str, str | None]] = [
     # Meta Model API (format undisclosed, waitlisted public preview).
     ("sendgrid_key",     r"SG\.[a-zA-Z0-9\-_.]{22}\.[a-zA-Z0-9\-_.]{43}", "HIGH", "SendGrid API Key", None),
     ("twilio_sid",       r"AC[a-f0-9]{32}",                           "MEDIUM",   "Twilio Account SID", None),
+    # TELEGRAM BOT TOKEN (BOT-TOKEN-1, 2026-09-13). The credential format of the
+    # platform two of our three consumer products live on, and it was in none of
+    # the four tables until now.
+    #
+    # CONTEXT-ANCHORED, AND THAT IS NOT OPTIONAL HERE. The raw shape is
+    # `<8-10 digits>:<35 base64url>`, and `digits:opaque` is one of the most
+    # common strings in any config dump -- a bare pattern would fire on database
+    # DSNs, timestamps and ids, and a noisy CRITICAL is how a detector gets
+    # ignored. The 2026-09-11 Mini App gate is the neighbouring lesson: a raw TON
+    # address is `-?\d+:<64 hex>`, which is this shape with a different tail.
+    #
+    # The BODY stays permissive for the reason written on the OpenRouter and
+    # Venice rows: a too-tight length is how `sk-or-v1-` keys were dropped in
+    # silence for months. The context carries the precision, and this is the one
+    # credential in the table whose liveness can be CONFIRMED for free -- getMe
+    # is unauthenticated and returns the bot's own username. See
+    # leaked_bot_token_finding_scope.md for why getUpdates is forbidden.
+    ("telegram_bot_token",
+     _ctx_key(r"telegram|tg_bot|bot_?token|TELEGRAM_BOT_TOKEN|api\.telegram\.org",
+              r"[0-9]{8,10}:[A-Za-z0-9_\-]{35}"),
+     "CRITICAL", "Telegram Bot Token (revoke in BotFather, rotation does nothing)", None),
+    # AND THE URL FORM, WHICH THE CONTEXT PATTERN ABOVE CANNOT SEE. _ctx_key
+    # requires an assignment operator, so `https://api.telegram.org/bot<TOKEN>/
+    # sendMessage` -- the single most common way a bot token actually leaks, in
+    # a curl line, a log, a paste or a stack trace -- matched nothing. Found by
+    # running the pattern against real shapes rather than reading it.
+    #
+    # No assignment is needed here because the literal host-plus-`/bot` prefix
+    # carries all the precision on its own.
+    ("telegram_bot_token_url",
+     r"api\.telegram\.org/bot([0-9]{8,10}:[A-Za-z0-9_\-]{35})",
+     "CRITICAL", "Telegram Bot Token in a URL (revoke in BotFather)", None),
     ("stripe_pub",       r"pk_live_[a-zA-Z0-9]{24,}",                "MEDIUM",   "Stripe Publishable Key", None),
     ("jwt_token",        r"eyJ[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}\.[A-Za-z0-9\-_]{20,}", "MEDIUM", "JWT Token", None),
     # Agent-framework credentials (added 2026-07-07, AGENTIC-1) — AI agent
@@ -7555,6 +7587,10 @@ _GITHUB_SEARCH_LITERALS: dict[str, tuple[str, ...]] = {
     "llm_key_generic_sk":    (),
     "sendgrid_key":          ("SG.",),
     "twilio_sid":            (),   # "AC" + 32 hex is far too short/common to query
+    # No prefix: the token's leading digits are a bot id, so there is no literal
+    # to query on. Attribution comes from getMe instead, which is better.
+    "telegram_bot_token":    (),
+    "telegram_bot_token_url": (),
     "stripe_pub":            ("pk_live_",),
     "jwt_token":             ("eyJ",),
     "langsmith_key":         ("lsv2_",),

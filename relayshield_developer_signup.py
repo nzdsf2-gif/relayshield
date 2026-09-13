@@ -2945,6 +2945,42 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "source IP rather than billed, so you can put the same check inside your own bot or "
             "agent today. A key raises the cap and adds multi-engine URL analysis.")),
     ),
+    # A DEVELOPER, NOT A CONSUMER, AND THAT IS WHY IT IS NOT ALIASED TO
+    # "tg-miniapp" LIKE EVERY OTHER MINI APP KEY ABOVE.
+    #
+    # Founder, 2026-09-13, correcting me: "the visitor is not already a RS API
+    # buyer. Attracting them to our API landing site is our flywheel and that is
+    # what I want you to sharpen with the messaging." He is right on both
+    # counts. A bot developer who just pasted their bot's handle into the Mini
+    # App is not a customer and has bought nothing; what they are is the one
+    # visitor whose own product has the same problem our endpoints solve.
+    #
+    # So this arrival gets its own copy rather than the generic Mini App banner,
+    # which speaks to somebody who checked a link. The generic one would waste
+    # the only moment this person is paying attention to us.
+    #
+    # WHAT IT MUST NOT DO: assert anything about their bot's security. We saw a
+    # handle, nothing more. That is the outreach rule
+    # (tools/generate_outreach.py's ten tests) applied to a landing page, and it
+    # matters more here because the reader arrived from a security check and is
+    # primed to read a capability as a finding.
+    "tg-miniapp-bottoken": (
+        (),
+        _banner("You build Telegram bots", _p(
+            "Your bot's token is the whole of its security: anyone holding it can read every "
+            "message sent to your bot and impersonate it to every user who trusts it. It is closer "
+            "to a session than to an API key, which is why the fix is <b>/revoke in BotFather</b> "
+            "and why rotating anything else does nothing. <b>RelayShield watches criminal Telegram "
+            "channels and infostealer dumps for credentials</b>, and bot tokens are now one of the "
+            "shapes we look for.<br><br>"
+            "The endpoints your bot can call are open and need no key, no card and no signup: "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">'
+            "POST /v1/link-check</code> screens a URL your users paste, and "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">'
+            "POST /v1/wallet-risk</code> screens an address before your bot sends anything to it. "
+            "There is a copy-in file if that is faster than writing the call yourself. "
+            "<b>Capped per source IP rather than billed</b>; a key raises the cap.")),
+    ),
     "tg-widget": (
         (),
         _banner("Arriving from a Telegram bot", _p(

@@ -940,12 +940,28 @@ to discover the listing copy is wrong. The rank column is priority; the running 
 push the policy to AWS.** `sh tools/apply_deploy_invoke_policy.sh` does. Third occurrence, and the
 error message did its job again: the code is live, only the verification was refused.
 
-**Read this alongside the OTHER outstanding grant, because they are different.** The webhook's role
-`relayshield-breach-check-role-1sapnwdl` returns **implicitDeny on `dynamodb:GetItem` and
-`dynamodb:PutItem`** against `relayshield_watchlist`, measured by
-`tools/grant_stars_watchlist_iam.sh`. Until that is applied, **a Stars purchase takes the money and
-fails to credit it.** That is the worst shape a failure can take here and it is why the grant is a
-script with a read-only default rather than a note.
+**THE STARS GRANT IS CLOSED. MEASURED 2026-09-12, AND THIS SECTION USED TO SAY THE OPPOSITE.**
+It recorded the webhook's role `relayshield-breach-check-role-1sapnwdl` as returning **implicitDeny
+on `dynamodb:GetItem` and `dynamodb:PutItem`** against `relayshield_watchlist`, with the conclusion
+that **a Stars purchase would take the money and fail to credit it.** That was true when it was
+written and is not true now. `sh tools/grant_stars_watchlist_iam.sh` run read-only reports:
+
+    dynamodb:GetItem                       allowed
+    dynamodb:PutItem                       allowed
+    secretsmanager:GetSecretValue          allowed
+
+and `relayshield-stars-watchlist-grant` is in that role's ATTACHED MANAGED policies, so the script's
+`--apply` path ran at some point and nobody recorded it. **A DOC RECORDING AN OPEN ITEM IS A LEAD,
+NOT A FACT, EXACTLY AS A DOC RECORDING A DONE ONE IS.** This file already says that in the other
+direction and the cost is the same either way: a stale open item spends a round proving it is shut,
+and the only reason this one was cheap is that the read is one command.
+
+Note the role is carrying **26 inline policies plus 11 attached managed policies** as of that run.
+The inline budget is spent and the managed slots are at 11 of 10-plus-defaults, so the IAM SPLIT
+runbook (`iam_role_split.md`) is closer to forced than it looks.
+
+**Read this alongside the deploy-invoke grant above, which IS still outstanding and is a different
+thing entirely.**
 
 ## THE MERGE THAT FAILED THREE TIMES: REPRODUCED, AND THE FIX IS ONE LINE
 

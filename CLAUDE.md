@@ -1494,7 +1494,33 @@ So:
 
 This is the same class of failure as rules 1-5: the command was not wrong, it was not a command.
 
-### 6. Every `aws` command starts with `AWS_PROFILE=relayshield`. No exceptions.
+### 6. Every command that RESOLVES AWS CREDENTIALS starts with `AWS_PROFILE=relayshield`.
+
+**Widened 2026-09-13, after I broke this rule by reading it too narrowly.** A block
+handed over read:
+
+    python3 tools/iam_split_roles.py --from-snapshot ... --only relayshield-intel-feed --apply
+
+with no profile, and the script refused:
+
+    Refusing to run: credentials resolve to account 620534471984, not 239677749008.
+
+**The rule said "every `aws` command" and I read that as the `aws` CLI.** It is not
+about the CLI. It is about anything that resolves a credential chain -- a `python3`
+script using boto3, a committed tool, a one-liner in a venv, `terraform`, an SDK
+call from a REPL. The default profile is the pre-audit account, so omitting the
+prefix does not error, it aims at `620534471984`.
+
+**This one was an `--apply`, so it was a WRITE**, which is the expensive direction
+this rule exists for: a write against the wrong account succeeds, prints a success
+block, and creates a resource invisible to everything that needs it. The script's
+own account guard caught it, and that guard is why this cost one line instead of a
+stray IAM role in the audit account.
+
+**So: if a command can talk to AWS, the block carries the profile, whatever the
+command is spelled like.** The original rule text follows unchanged.
+
+
 
 **`620534471984` is NEVER the target of a RelayShield command.** It is the pre-audit account, kept
 deliberately separate so a new AWS workflow can be trialled without touching production. It is also

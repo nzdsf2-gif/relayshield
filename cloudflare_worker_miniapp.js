@@ -107,6 +107,10 @@ const ALLOWED_SOURCES = new Set([
   // separately rather than credited to a submission we made.
   "tg-miniapp-share",
   "tg-miniapp-bot",
+  // Outbound, not an arrival -- but it must be here anyway, because a developer
+  // who follows the link and later opens the app from it would otherwise be
+  // downgraded to the generic key and the flywheel would read as zero.
+  "tg-miniapp-bottoken",
   // Retired. Links published before 2026-09-11 carry it, and dropping it
   // would break attribution on every one of them at once.
   "tg-miniapp-channel",
@@ -544,6 +548,27 @@ function renderHistory() {
    The convention existed; these two lines broke it. */
 const TON_ADDR = /^(?:-?\\d+:[0-9a-fA-F]{64}|[A-Za-z0-9_-]{48})$/;
 const LOOKS_URL = /^(?:https?:\\/\\/|[a-z0-9-]+(?:\\.[a-z0-9-]+)+)/i;
+/* A TELEGRAM BOT HANDLE, WHICH IS A DIFFERENT VISITOR ASKING A DIFFERENT
+   QUESTION. Founder, 2026-09-13: "you need to modify the copy on Check screen
+   to distinguish bot links from others for devs."
+
+   "@name_bot", "t.me/name_bot" or a bare "name_bot". Telegram requires a bot
+   username to end in "bot" (case-insensitive) and to be 5-32 characters, which
+   is what makes this recognisable at all without a network call.
+
+   NO BACKTICKS IN THIS COMMENT, AND THAT IS NOT STYLE. Everything here lives
+   inside the PAGE template literal, so one backtick ends the template and the
+   browser receives a broken module that registers no handlers at all. That has
+   shipped a dead app three times; node --check caught this one before it left
+   the container.
+
+   IT IS TESTED BEFORE LOOKS_URL, and the order is the whole trick: "t.me/x_bot"
+   matches LOOKS_URL, so testing it second would send every bot developer down
+   the link-check path and they would get a verdict about t.me. Same ordering
+   hazard as TON's 48-char form sitting inside Solana's base58 range, which cost
+   this file a silent refusal of every address it exists to check. */
+const BOT_HANDLE = /^(?:https?:\\/\\/)?(?:t\\.me\\/|@)?([A-Za-z0-9_]{4,31}[Bb][Oo][Tt])$/;
+
 const OTHER_CHAINS = [
   [/^0x[0-9a-fA-F]{40}$/, "an Ethereum or EVM address"],
   [/^ronin:0x[0-9a-fA-F]{40}$/i, "a Ronin address"],
@@ -569,6 +594,56 @@ function offChainReason(value) {
 async function run() {
   const value = $("in").value.trim();
   if (!value) return;
+
+  /* A BOT HANDLE IS A DEVELOPER, AND THIS BRANCH IS BEFORE THE GATE ON PURPOSE.
+     "t.me/x_bot" matches LOOKS_URL, so running the gate first sends every bot
+     developer down the link-check path and hands them a verdict about t.me.
+
+     IT ASSERTS NOTHING ABOUT THEIR BOT. We saw a handle and nothing else, and
+     the reader arrived from a security check so they are primed to read a
+     capability as a finding. That is the outreach rule -- never diagnose a
+     prospect from their own front page -- applied to a screen instead of an
+     email, and it matters more here.
+
+     ONE ACTION, AND IT IS A LIVE ONE. Token watching is not offered yet: the
+     pattern shipped on 2026-09-13 and the corpus has not collected any, so a
+     watch button here would either do nothing or answer "nothing known" to
+     every visitor forever. A control that does nothing is the defect this file
+     has already paid for. The API is real today, so the API is the offer. */
+  const bot = BOT_HANDLE.exec(value);
+  if (bot) {
+    last = null;
+    $("out").classList.remove("hidden");
+    $("out").dataset.level = "unknown";
+    $("head").textContent = "That is a Telegram bot.";
+    $("target").textContent = "@" + bot[1];
+    $("reasons").textContent = "";
+    for (const line of [
+      "Your bot token is the whole of its security: anyone holding it reads "
+      + "every message sent to your bot and can impersonate it.",
+      "It is closer to a session than to a key, so the fix is /revoke in "
+      + "BotFather. Rotating anything else does nothing.",
+      "RelayShield watches criminal Telegram channels and infostealer dumps "
+      + "for leaked credentials, and bot tokens are one of the shapes we look "
+      + "for.",
+    ]) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      $("reasons").appendChild(li);
+    }
+    $("caveat").textContent = "We have not looked at your bot. This is what we "
+      + "check for, not a finding about you.";
+    for (const id of ["watch", "share"]) $(id).classList.add("hidden");
+    $("cta").classList.remove("hidden");
+    $("cta-line").textContent = "The checks your own bot can call are open, "
+      + "keyless and free to start: screen a link a user pastes, or an address "
+      + "before your bot sends to it.";
+    const link = $("cta-link");
+    link.textContent = "Open the developer docs";
+    link.href = "__DEVELOPERS__?source=tg-miniapp-bottoken";
+    haptic("unknown");
+    return;
+  }
 
   const off = offChainReason(value);
   if (off) {
@@ -637,6 +712,15 @@ async function run() {
       : level === "unknown"
         ? "Not in any source we check. That is not the same as safe, and it says nothing about you. Checking your own email is a separate question with a definite answer."
         : "RelayShield can watch your email, phone and wallets for breaches, SIM swaps and stolen sessions.";
+  /* RESTORE THE CTA LINK. The bot-handle branch above repoints it at the
+     developer docs, and without this the NEXT check -- an ordinary URL, by an
+     ordinary user -- would still offer them developer documentation. A shared
+     element that one branch mutates and another does not reset is a state bug
+     that only appears on the second use, which is exactly the kind nobody
+     tests by hand. */
+  const ctaLink = $("cta-link");
+  ctaLink.textContent = "Open the monitoring bot";
+  ctaLink.href = "__BOT__";
   $("cta").classList.remove("hidden");
 
   $("card").classList.add("hidden");
@@ -660,10 +744,23 @@ for (const id of ["cta-link", "botlink"]) {
   const el = $(id);
   if (!el) continue;
   el.addEventListener("click", (e) => {
-    if (tg && typeof tg.openTelegramLink === "function") {
+    /* CHECK THE HREF, NOT THE ELEMENT ID. openTelegramLink is documented for
+       t.me links; handing it an api.relayshield.net URL is undefined and the
+       likely result is a tap that does nothing -- and cta-link now carries a
+       developer-docs URL on the bot-handle branch. openLink is the documented
+       method for an external URL, and is feature-detected because this page
+       loads the unversioned SDK and an older client may not have it. */
+    const isTelegram = /^https?:\/\/t\.me\//i.test(el.href);
+    if (!tg) return;
+    if (isTelegram && typeof tg.openTelegramLink === "function") {
       e.preventDefault();
       tg.openTelegramLink(el.href);
+    } else if (!isTelegram && typeof tg.openLink === "function") {
+      e.preventDefault();
+      tg.openLink(el.href);
     }
+    // Otherwise the anchor navigates normally, which is correct in a browser
+    // and correct in a client whose SDK lacks the method.
   });
 }
 

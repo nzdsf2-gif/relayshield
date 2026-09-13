@@ -3296,3 +3296,24 @@ description, not an authorization. `cs_mobile` is already in `CONSENT_SOURCES`, 
 
 **Do the copy first, today, at zero engineering cost:** until this ships, the paywall and the store
 listing sell a feature that enrols nobody. Either the claim comes down or the feature goes in.
+
+### CSM-SIMSWAP-2 — post the corrected CS Mobile build and listing copy
+
+Added 2026-09-13 on founder instruction. **CSM-SIMSWAP-1's copy fix is committed in this repo and
+is NOT live.** Two separate publish steps, and neither happens by merging:
+
+1. **The app binary.** The four in-app surfaces (`PaywallModal`, `PaywallScreen`, `SettingsScreen`,
+   `OnboardingScreen`) only change on a new EAS build submitted to the Solana dApp Store. Until that
+   ships, every installed copy still sells SIM swap monitoring that enrols nobody.
+2. **The store listing text**, which is edited in the publisher portal by hand. `crypto-shield-app/
+   store-assets/dapp-store-metadata.md` is the corrected source: drop the
+   "SIM-swap and breach exposure alerts" bullet and the "SIM swap" keyword. **Keep** the company
+   line, "protects businesses and consumers against breaches, SIM-swap fraud, and infostealer
+   malware" -- that describes RelayShield and is true of the API and the bots.
+
+**The listing edit is the one to do FIRST**, because it is a form field rather than a build, it is
+the copy a prospective buyer reads before installing anything, and it needs no review cycle.
+
+**This is the DRIFT RULE pointed at a store listing.** The repo copy and the published copy are two
+things that must agree with nothing checking that they do, and only one of them is what a buyer
+sees. `test_csm_simswap_claims.py` pins the repo half and cannot see the portal.

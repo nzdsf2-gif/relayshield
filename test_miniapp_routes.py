@@ -41,6 +41,19 @@ def signup_aliases():
     return set(re.findall(r'"(tg-miniapp[a-z0-9-]*)":\s*"tg-miniapp"', SIGNUP))
 
 
+def signup_own_banners():
+    """Keys that carry their OWN banner entry rather than an alias.
+
+    `_SOURCE_BANNERS` rows look like `"key": (` followed by a tuple of referer
+    hosts and a `_banner(...)` call."""
+    return set(re.findall(r'^\s{4}"(tg-miniapp[a-z0-9-]*)":\s*\(\s*$', SIGNUP, re.M))
+
+
+def signup_registered():
+    """Either route is fine. BOTH is a defect -- see the test below."""
+    return signup_aliases() | signup_own_banners()
+
+
 class TestTheThreeListsAgree(unittest.TestCase):
 
     def test_every_route_key_is_allowed_by_the_worker(self):
@@ -56,12 +69,38 @@ class TestTheThreeListsAgree(unittest.TestCase):
         self.assertFalse(missing, f"not in _SOURCE_ALIASES: {sorted(missing)}")
 
     def test_the_loop_keys_are_registered_too(self):
+        """REGISTERED, not necessarily ALIASED.
+
+        This test used to require an alias for every loop key, and it failed on
+        `tg-miniapp-bottoken` -- which is correct behaviour and a wrong
+        assertion. That key carries its OWN banner, because a bot developer
+        arriving from a token finding is a different reader from a consumer who
+        checked a link, and the generic Mini App copy would waste the only
+        moment they are paying attention.
+
+        ADDING THE ALIAS TO SATISFY THE OLD TEST WOULD HAVE BROKEN THE THING IT
+        WAS PROTECTING. `_resolve_source` applies aliases BEFORE the banner
+        table, so an alias makes an own-banner unreachable: the key resolves,
+        the page renders, nothing errors, and the wrong banner shows. That is
+        the `rsscan -> github` defect this repo already paid for, and it is
+        recorded as such. A key that exists, resolves, and renders the wrong
+        thing is worse than a missing key."""
+        registered = signup_registered()
         for k in LOOP_KEYS:
             if k == "tg-miniapp":
                 self.assertIn('"tg-miniapp": (', SIGNUP)
                 continue
             self.assertIn(k, worker_allowed(), f"{k} not gated by the Worker")
-            self.assertIn(k, signup_aliases(), f"{k} has no alias")
+            self.assertIn(k, registered,
+                          f"{k} has neither an alias nor its own banner")
+
+    def test_no_key_is_both_aliased_and_given_its_own_banner(self):
+        """The rsscan defect, pinned. An alias resolves first, so a key with
+        both renders the generic banner and its own is dead code that looks
+        live."""
+        both = signup_aliases() & signup_own_banners()
+        self.assertFalse(both, f"aliased AND given a banner, so the banner is "
+                               f"unreachable: {sorted(both)}")
 
     def test_the_worker_still_honours_the_retired_shared_key(self):
         """Links published before 2026-09-11 carry tg-miniapp-channel. Dropping

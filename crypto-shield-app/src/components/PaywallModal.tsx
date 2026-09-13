@@ -22,7 +22,13 @@ const PLAN_DETAILS = {
       "Breach & infostealer monitoring",
       "Address poisoning sweep",
       "Real-time wallet risk scoring",
-      "SIM swap monitoring",
+      // "SIM swap monitoring" WAS HERE AND IS REMOVED UNTIL IT WORKS.
+      // CSM-SIMSWAP-1: the app collects the phone number, labels it "Used for
+      // SIM swap monitoring" and never sends it -- checkSimSwap() in
+      // src/api/relayshield.ts has zero callers -- so nobody buying this plan
+      // was ever enrolled. Selling a feature that enrols nobody is the one part
+      // of that gap that is not merely missing but PAID FOR.
+      // Put it back in the same commit that ships the enrol call.
     ],
   },
   ti: {

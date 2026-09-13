@@ -231,7 +231,17 @@ function PhoneManager() {
         keyboardType="phone-pad"
         autoCorrect={false}
       />
-      <Text style={[em.limitNote, { marginBottom: 6 }]}>Used for SIM swap monitoring. Must include country code.</Text>
+      {/* CSM-SIMSWAP-1. THIS SAID "Used for SIM swap monitoring" AND NOTHING
+          USED IT. The number is written to SecureStore and read by nothing:
+          checkSimSwap() in src/api/relayshield.ts has zero callers, so
+          scan_sim_swap_users() has never had a Crypto Shield Mobile user in its
+          set. A field that tells the user what it is for, and is for nothing,
+          is worse than no field -- they believe they are monitored.
+          The wording is honest until the enrol call ships; at that point this
+          line is replaced by the carrier authorization clause, which
+          enroll(enrollment_type="self") REQUIRES via consent_acknowledged and
+          which a carrier audit rests on. */}
+      <Text style={[em.limitNote, { marginBottom: 6 }]}>Stored on this device only. Must include country code.</Text>
       <TouchableOpacity style={em.saveBtn} onPress={savePhone}>
         <Text style={em.saveBtnText}>{saved ? "✓ Saved" : "Save Phone Number"}</Text>
       </TouchableOpacity>
@@ -387,7 +397,10 @@ export function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Phone Number</Text>
           <Text style={styles.sectionDesc}>
-            Used for SIM swap monitoring. Enter the phone number associated with your crypto exchange accounts.
+            {/* CSM-SIMSWAP-1: said "Used for SIM swap monitoring" over a number
+                that never leaves the device. Honest until the enrol call ships. */}
+            Stored on this device. Enter the phone number associated with your crypto
+            exchange accounts so it is ready when carrier monitoring is enabled.
           </Text>
           <PhoneManager />
         </View>

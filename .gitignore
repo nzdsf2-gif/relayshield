@@ -83,6 +83,7 @@ coverage/
 # rule above exists because relayshield_favicon.png is 24576x24576 and 87 MB,
 # which is essentially the entire packed size of this repository.
 !assets/miniapp/*.png
+!assets/miniapp/*.jpg
 .telethon_venv
 zapier_partner_test_key.txt
 

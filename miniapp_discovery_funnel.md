@@ -293,7 +293,37 @@ that channel.
 STOP IF: `NEW UNKNOWN ROUTE KEYS` -- a link shipped carrying a key nobody
 registered, and its arrivals are unattributed.
 
-### 6. @telegtapps
+### 6. @telegtapps -- DO NOT SUBMIT. It is a paid ad channel, not a directory.
+
+**Checked by opening it, 2026-09-13, and the ranking was wrong.** Its own
+description reads **"Clickers. Telegram apps. HighRisk Dapps."** Every post is
+forwarded from a single source channel ("ZN") and is a product advertisement --
+ShortsLab, PassportPhotoSnap, Aidentika, mostly Russian-language. 9.53K
+subscribers, 8 photos, 9 links, **no pinned message and no submission process**.
+
+**There is nothing to register with.** The only route in is buying a post from
+the admin, which is an ad spend and not a listing.
+
+**And the audience is wrong twice over.** Clicker and tap-to-earn traffic does
+not buy identity security, and a security product appearing in a channel whose
+own strapline advertises HIGH-RISK DAPPS, between a Shorts-script generator and
+a passport photo app, is a bad first impression rather than a cheap one.
+
+**THE DEFECT IS IN HOW THIS TABLE WAS BUILT, AND IT AFFECTS THE OTHER FOUR.**
+`tools/find_miniapp_channels.py` measured SUBSCRIBER COUNTS and never recorded
+channel TYPE, so paid promo channels were ranked alongside real catalogues on
+audience size alone. That is this repo's own rule -- rank a surface by how it
+performs for US, not in general -- broken by the tool that produced the ranking.
+
+**So every remaining channel gets a TYPE CHECK before anything is spent on it**,
+and it is the same one-minute read: open it and ask whether it is a curated
+catalogue with a submission route, or a broker selling posts. A channel whose
+posts are all forwarded from one source is the second kind.
+
+The baseline and compare commands below are kept because they are correct for
+any channel; the submission step is not to be run for this one.
+
+### 6a. @telegtapps, original entry (superseded above)
 
 Audience: 9,671. Measured by tools/find_miniapp_channels.py, 2026-09-03 (9,673 on that run; 9,671 in the Top 15. The difference is two subscribers and a week, not a discrepancy worth chasing).
 

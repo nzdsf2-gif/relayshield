@@ -104,6 +104,13 @@ const ALLOWED_SOURCES = new Set([
   // minitelegram.com, the second web directory. Registered before the
   // submission, never after: an unregistered key is downgraded here.
   "tg-miniapp-minitelegram",
+  // Three more catalogue destinations, registered 2026-09-14 BEFORE any of them
+  // is submitted to. tonapp is the TON ecosystem's own catalogue; tgapp is a
+  // general Telegram apps directory; awesome is the GitHub curated list, whose
+  // audience is developers rather than consumers.
+  "tg-miniapp-tonapp",
+  "tg-miniapp-tgapp",
+  "tg-miniapp-awesome",
   "tg-miniapp-onclicka",
   "tg-miniapp-telegtapps",
   "tg-miniapp-tapps",

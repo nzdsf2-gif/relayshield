@@ -87,6 +87,34 @@
     },
     {
       "rank": 7,
+      "id": "tonapp",
+      "key": "tg-miniapp-tonapp",
+      "destination": "ton.app, the TON dApp catalogue",
+      "audience": null,
+      "audience_note": "UNMEASURED. ton.app is the TON ecosystem's own catalogue and the one destination where TON-only is the HEADLINE rather than a limitation. Its own Terms of Service state that developers may submit an application for listing and that acceptance is at their discretion -- read from the destination's own page, not from a blog about it.",
+      "status": "ready"
+    },
+    {
+      "rank": 8,
+      "id": "tgapp",
+      "key": "tg-miniapp-tgapp",
+      "destination": "tg.app, a Telegram apps and bots catalogue",
+      "audience": null,
+      "audience_note": "UNMEASURED. Described as free to list with a quick review. UNVERIFIED from the container: tg.app is egress-blocked here, so that is a search summary rather than their own page, and the founder's first step is to read the header and footer for the submission route.",
+      "status": "ready"
+    },
+    {
+      "rank": 9,
+      "id": "awesome",
+      "key": "tg-miniapp-awesome",
+      "destination": "awesome-telegram-mini-apps on GitHub",
+      "audience": null,
+      "audience_note": "UNMEASURED as traffic, and the wrong unit again: it is a developer-audience list rather than a consumer catalogue, so an arrival from it is more likely to be a bot developer than a person checking an address. That makes it a poor volume bet and a good FIT bet, which is the audience the tg-miniapp-bottoken route already exists for.",
+      "status": "ready",
+      "why_first": "THE ONE TO DO FIRST, because it is the only route in this table that needs NO IMAGE UPLOAD. miniTelegram's form crashed the page on four separate icon files and discarded a filled form each time; an awesome-list entry is one line of Markdown in a pull request, submitted from a browser with no file picker anywhere in the flow. Its CONTRIBUTING.md was READ rather than assumed: one PR per suggestion, appended to the bottom of the relevant category, format '- [Resource](link) - Description.' The Products section already carries an entry in the t.me/<bot>/<app> form, so ours fits the house style rather than asking for an exception."
+    },
+    {
+      "rank": 10,
       "id": "onclicka",
       "key": "tg-miniapp-onclicka",
       "destination": "@onclicka_tma_en",
@@ -95,7 +123,7 @@
       "status": "ready"
     },
     {
-      "rank": 8,
+      "rank": 11,
       "id": "telegtapps",
       "key": "tg-miniapp-telegtapps",
       "destination": "@telegtapps",
@@ -105,7 +133,7 @@
       "why_first": "The smallest, so it is the cheapest place to discover the listing copy is wrong. Worth running BEFORE @trendingapps for that reason alone."
     },
     {
-      "rank": 9,
+      "rank": 12,
       "id": "tapps",
       "key": "tg-miniapp-tapps",
       "destination": "tApps Center",
@@ -114,7 +142,7 @@
       "status": "ready"
     },
     {
-      "rank": 10,
+      "rank": 13,
       "id": "directory",
       "key": "tg-miniapp-directory",
       "destination": "Other Mini App directories",
@@ -123,7 +151,7 @@
       "status": "ready"
     },
     {
-      "rank": 11,
+      "rank": 14,
       "id": "ton",
       "key": "tg-miniapp-ton",
       "destination": "TON catalogues",
@@ -133,7 +161,7 @@
       "why_first": "UNBLOCKED 2026-09-11. This route was gated on 'only if TON scans ship' and they now do: /v1/ton-address plus relayshield_watchlist_monitor.py, which watches TON and only TON. A TON catalogue is the one audience for whom that is the headline rather than a detail."
     },
     {
-      "rank": 12,
+      "rank": 15,
       "id": "menu",
       "key": null,
       "destination": "The @relayshield_bot menu button",

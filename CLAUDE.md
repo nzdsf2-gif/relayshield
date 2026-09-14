@@ -4667,3 +4667,52 @@ where a 22px line of body copy is a grey smudge.
 `tools/miniapp_render.mjs`, and that caught a real omission: the paste box takes *"a link, a TON
 address (EQ... / UQ... / 0:...), or @handle"* and the first draft described two of the three inputs.
 Full copy is in `findmini_submission_2026-09-14.md`.
+
+## AN IMAGE SENT THROUGH THE CHAT ARRIVES AS `.webp`. SEND IMAGES VIA THE REPO.
+
+**2026-09-14, and it cost three rounds on the miniTelegram submission before anyone said the word
+"webp".** The founder reported the icon upload failing with a full-page *"Something didn't go
+according to plan"*, then that the downloaded file *"shows as .webp and is greyed out in my desktop
+folder"*.
+
+**Greyed out in a file picker is the whole diagnosis.** An upload dialog that accepts JPG and PNG
+filters everything else out, so a `.webp` cannot even be SELECTED. miniTelegram never rejected our
+icon. It never received it.
+
+**THE FILE WAS NEVER THE PROBLEM AND I HAD ALREADY PROVED THAT.** Inspected rather than assumed:
+512x512, 8-bit RGB, no alpha, non-interlaced, 65 KB against a 5 MB cap, IHDR and IDAT and nothing
+else. I then generated four format and size variants to "remove the variable" -- and every one of
+them would have arrived as `.webp` too, because **the re-encoding happens in the delivery, not in
+the file.** Four variants of the right answer, all destroyed in transit by the same step.
+
+**THE RULE. The chat is the DELIVERY for a `.md`. It is NOT the delivery for an image.** The
+top-of-file rule says send the file so he can download it, and that rule was written about
+documents. Markdown survives the trip; a PNG or a JPEG does not.
+
+**So any image deliverable -- an app icon, a store screenshot, a listing asset, an OG image --
+travels in the REPO, and the instruction is the merge.** After it, the file on his Mac is
+byte-identical to the one generated here, because git moves bytes and nothing re-encodes them:
+
+    cd ~/dev/relayshield
+    git checkout main
+    git --no-pager fetch origin claude/<branch>
+    git rm -rf --cached -q --ignore-unmatch ansible-relayshield relayshield-snap
+    git stash push --include-untracked -m "pre-merge untracked"
+    git -c pull.rebase=false merge --no-edit FETCH_HEAD
+    file assets/miniapp/idcheck_icon_512.png
+    open assets/miniapp
+
+Send the image in chat as well if it helps him SEE it -- a preview is genuinely useful and a webp
+previews fine. **Just never as the copy he is meant to upload somewhere.** Say which one is which in
+the same reply, because a sent file looks like a deliverable whatever it is for.
+
+**AND IT IS WHY `.gitignore` NOW CARRIES `!assets/miniapp/*.png` AND `!assets/miniapp/*.jpg`.** The
+blanket `*.png` and `*.jpg` rules exist because `relayshield_favicon.png` is 87 MB. An image that has
+to reach the founder intact must be TRACKED, or the merge that is supposed to deliver it delivers
+nothing. Keep these small and the exception is free.
+
+**THE GENERAL FORM, and it is the reading-guide lesson in a new place: a pipeline can transform the
+artefact after you have verified it.** Every check I ran read the bytes on disk here. None of them
+described the bytes that arrived there. That is the template-literal defect exactly -- the source and
+the served text are different documents -- and it is the third time this repo has paid for verifying
+an artefact at the wrong end of a pipe.

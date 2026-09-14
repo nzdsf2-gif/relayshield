@@ -293,7 +293,83 @@ that channel.
 STOP IF: `NEW UNKNOWN ROUTE KEYS` -- a link shipped carrying a key nobody
 registered, and its arrivals are unattributed.
 
-### 6. @telegtapps
+### 5a. tApps Center -- THE SUBMISSION ROUTE, RESOLVED 2026-09-14
+
+**THE SUBMISSION BOT IS `@app_moderation_bot`. IT IS NOT `@tapps_bot`.**
+
+That distinction is the whole reason this took three rounds. `@tapps_bot` IS the
+Telegram Apps Center -- the catalogue itself, a Mini App you browse, "a
+community-driven catalog of apps developed by third-party developers, not
+affiliated with Telegram Messenger", roughly 56K users. **Opening it shows you
+the catalogue and no submission flow, because submissions do not go through it.**
+The founder looked and correctly reported there was no way in.
+
+Submissions go to a separate, purpose-built **Apps Moderation Bot**, and its
+handle appears nowhere on the catalogue itself:
+
+    https://t.me/app_moderation_bot
+
+**Found by web search from the container after three of these channels turned out
+to hide their route.** tapps.center, docs.ton.org, medium.com and peakd.com are
+all egress-blocked here, so this rests on multiple secondary sources agreeing --
+Adsgram's write-up of the Apps Center, the TON blog's tApps announcement, the TON
+Builders Portal listing page, and a developer's own account of getting listed.
+**UNVERIFIED against the bot itself**, which is the founder's first step and
+settles it in one message.
+
+**IT IS THE RIGHT CATALOGUE FOR US, which is worth saying because the ranking got
+the last one wrong.** tApps Center is the TON ecosystem's own catalogue, and this
+Mini App checks TON and only TON. That is the one audience for whom our
+restriction is the headline rather than a limitation.
+
+**WHAT MODERATION CHECKS, so nothing is discovered at rejection:**
+
+1. **The bot must reply to `/start` in ENGLISH by default.** Reviewers check it.
+   `handle_start` in `relayshield_telegram_webhook.py` does, with no payload.
+2. **Terms of Use and a Privacy Policy must exist**, even for an app that stores
+   very little. `https://relayshield.net/terms` and `https://relayshield.net/privacy`
+   are live and already linked from the pricing page and the mobile app.
+3. **Graphic assets**: a logo, an icon, and up to SIX screenshots. A developer who
+   has been through it describes the screenshots as the thing that sells the
+   listing -- treat them as ads, not as documentation.
+4. **A category**, chosen from the catalogue's own list.
+5. **A security check** on the app itself.
+
+**Review takes roughly 3 to 8 days.** That is the gap between submitting and the
+delta being measurable, so take the baseline before submitting and do not read a
+flat `--compare` in the first week as a result.
+
+### 6. @telegtapps -- DO NOT SUBMIT. It is a paid ad channel, not a directory.
+
+**Checked by opening it, 2026-09-13, and the ranking was wrong.** Its own
+description reads **"Clickers. Telegram apps. HighRisk Dapps."** Every post is
+forwarded from a single source channel ("ZN") and is a product advertisement --
+ShortsLab, PassportPhotoSnap, Aidentika, mostly Russian-language. 9.53K
+subscribers, 8 photos, 9 links, **no pinned message and no submission process**.
+
+**There is nothing to register with.** The only route in is buying a post from
+the admin, which is an ad spend and not a listing.
+
+**And the audience is wrong twice over.** Clicker and tap-to-earn traffic does
+not buy identity security, and a security product appearing in a channel whose
+own strapline advertises HIGH-RISK DAPPS, between a Shorts-script generator and
+a passport photo app, is a bad first impression rather than a cheap one.
+
+**THE DEFECT IS IN HOW THIS TABLE WAS BUILT, AND IT AFFECTS THE OTHER FOUR.**
+`tools/find_miniapp_channels.py` measured SUBSCRIBER COUNTS and never recorded
+channel TYPE, so paid promo channels were ranked alongside real catalogues on
+audience size alone. That is this repo's own rule -- rank a surface by how it
+performs for US, not in general -- broken by the tool that produced the ranking.
+
+**So every remaining channel gets a TYPE CHECK before anything is spent on it**,
+and it is the same one-minute read: open it and ask whether it is a curated
+catalogue with a submission route, or a broker selling posts. A channel whose
+posts are all forwarded from one source is the second kind.
+
+The baseline and compare commands below are kept because they are correct for
+any channel; the submission step is not to be run for this one.
+
+### 6a. @telegtapps, original entry (superseded above)
 
 Audience: 9,671. Measured by tools/find_miniapp_channels.py, 2026-09-03 (9,673 on that run; 9,671 in the Top 15. The difference is two subscribers and a week, not a discrepancy worth chasing).
 
@@ -306,11 +382,36 @@ EXPECT: the funnel, then `Snapshot saved: miniapp_funnel_snapshots/before-telegt
 STOP IF: `REFUSING to overwrite` -- a baseline already exists under that label, so
 this route was already started. Do not delete it without deciding to.
 
-**ANDREW SUBMITS** the link below to @telegtapps.
+**ANDREW READS THE CHANNEL FIRST.** Open `t.me/telegtapps` and read its
+DESCRIPTION, its PINNED MESSAGE and the last few posts. One of those names the
+submission route: these channels take submissions through a bot, a form, or a
+DM to an admin, and which one it is differs per channel and changes over time.
+
+**This step exists because the line below used to say "ANDREW SUBMITS" and
+never said how.** That is the FD-2 and Apify defect recorded in CLAUDE.md --
+an instruction nobody can act on -- and it was asked about on the first channel
+we tried. The container cannot reach Telegram, so this read is the reader's and
+cannot be done for them.
+
+**Record what you find in this file** under the channel, so the remaining five
+do not each cost a round.
+
+**ANDREW SUBMITS** the link below, through whatever route that read turned up.
 
 ```text
 https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-telegtapps
 ```
+
+**OPENING THAT LINK YOURSELF IS A TEST, NOT A SUBMISSION, AND THE ORDER
+MATTERS.** Tapping OPEN APP logs nothing against the route key: the route
+counter reads `source=` lines in `/aws/lambda/relayshield-api`, and simply
+opening the app calls nothing there. **Pressing "Check it" does** -- that is one
+arrival credited to this channel, by us.
+
+So verify the link BEFORE taking the baseline, never after. A self-visit inside
+the baseline is harmless; the same visit after it becomes part of the delta and
+reads as the channel producing a user. On a channel where single digits are the
+likely result, one of ours is material.
 
 **ANDREW RUNS THIS, 48 hours later:**
 ```zsh

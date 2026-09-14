@@ -48,21 +48,73 @@ See "What I changed" below -- it needs a merge and a push before it resolves.
 
     RelayShield IDCheck
 
-Matches the BotFather registration exactly. Do not shorten it to "RelayShield": the bot's TI
-monitoring product already owns that name and the two should stay separable.
+**Three reasons, and the third is the one that decides it.**
+
+It is what the app is ALREADY registered as. BotFather holds title `RelayShield IDCheck`, short name
+`idcheck`, at `t.me/relayshield_bot/idcheck`. A catalogue entry under a different name is a second
+name for one product, and this repo has already paid for that once when `checkemail@` was written as
+`emailcheck@` twice in a single message.
+
+**Do not shorten it to "RelayShield".** `@relayshield_bot` carries the TI monitoring product, which
+keeps the prominent control and the plain brand name. Two products under one name in a directory is
+how a visitor ends up in the wrong one.
+
+**And do not shorten it to "IDCheck" either**, which is the tempting option because it is what the
+icon says. On its own it is a generic noun pair that three other apps in any catalogue could carry,
+and it drops the only word that makes us findable by name. The brand carries the trust and the
+function word carries the search.
 
 ### Profile picture  *(required, square, min 256x256, under 1MB)*
 
     assets/miniapp/idcheck_icon_512.png
 
-512x512, 186 KB, square. Generated this session and sent alongside this file, so you can upload it
-without going near the repo.
+512x512, 65 KB, square. Sent alongside this file so you can upload it without going near the repo.
+
+**YOU WERE RIGHT ABOUT THE BRANDING AND THE FILE COULD NOT BE USED AS IT STANDS.** Both halves
+matter.
+
+`idcheck_botfather_640x360.jpg` is the better artwork and I should have reached for it first. It is
+the real brand mark: the shield, the RELAYSHIELD eyebrow, the ID/Check lockup in the Telegram theme
+colours. Reaching past it for a bare favicon was me picking the file that happened to be square
+rather than the file that was right.
+
+**But it is 640x360 and this field demands SQUARE, at least 256x256.** That is not a preference, it
+is the stated constraint, and 640x360 is 16:9. Cropping it to a square either cuts the wordmark off
+or cuts the shield off, because the design is deliberately a two-column lockup with the shield on the
+left and the type on the right. There is no square inside it that contains both.
+
+**So the icon is REGENERATED from the same design rather than cropped out of it**, which is what the
+existing pipeline was built for. `assets/miniapp/idcheck_icon_512.html` re-lays the identical shield
+SVG and the identical ID/Check lockup into a 512x512 vertical composition, renders through the same
+headless Chromium path as the BotFather image, and pins the same two colours: `#17212b` and
+`#3b82f6`, the `--tg-theme-bg-color` and `--tg-theme-button-color` defaults declared in
+`cloudflare_worker_miniapp.js`. The catalogue tile and the app a user opens are one colour scheme
+rather than two guesses.
+
+**The tagline and the eyebrow are dropped from the square version on purpose.** A catalogue renders
+this at roughly 80 to 120 pixels in a grid, where a 22px line of body copy becomes a grey smudge and
+makes the tile look dirty. The shield carries it at that size and the wordmark is what survives
+next.
 
 ### App short description in English, maximum 20 words  *(required)*
 
-    Check a TON address or link before you send. Free, instant, no wallet connection and no signup.
+    Check a link, a TON address or a Telegram handle before you trust it. No signup, no wallet connect.
 
-17 words. Leads with the action, and the three "no"s are the objections a stranger actually has.
+**19 words of the 20.** Revised from my first draft after rendering the page the Worker actually
+serves and reading the real placeholder, which is
+`Paste a link, a TON address (EQ... / UQ... / 0:...), or @handle`.
+
+**The first draft omitted handles, and handles are a third of what the box accepts.** Describing two
+of three inputs in the one line a stranger reads is a smaller version of the defect this repo keeps
+paying for: a capability that is built, live, and pointed at by nothing.
+
+**"before you trust it" is lifted deliberately** from the BotFather card, which already reads *"Check
+a link or a wallet address before you trust it."* Same promise, same words, two surfaces.
+
+**"No signup, no wallet connect" is lifted from the app's own header**, verified in the served page
+rather than remembered. A stranger's first two objections to a crypto-adjacent tool are "do I have to
+sign up" and "does this want my wallet", and answering both inside the 20 words is worth more than
+another adjective.
 
 ### App short description in Russian  *(optional)*
 
@@ -81,6 +133,9 @@ interface is English-only anyway, so a Russian card would promise an experience 
 
     Paste a TON address and it runs the same checks, then shows what it can see about
     the address itself.
+
+    Paste a Telegram handle and it checks that too, which is the one most people never
+    think to check and the one most impersonation starts with.
 
     Watching something you care about? Add it to your watchlist and the bot messages
     you when what it sees changes. Three watch slots are free, and free alerts arrive
@@ -113,18 +168,40 @@ price we do not honour.
 
 ### Screenshots  *(required, up to 10, EQUAL SIZE, under 1MB each)*
 
-Four is plenty and equal size is a hard requirement, so take them all on one device in one sitting.
-In this order, because the first is the thumbnail:
+**Take five, not ten, and take them all on ONE phone in ONE sitting.** Equal size is a hard
+requirement and the free way to satisfy it is to never change device or orientation. Ten mediocre
+frames convert worse than five that each show one thing.
 
-1. **Check tab after pressing "Try a link that gets flagged."** The strongest single frame we have:
-   a real red verdict, earned live. The example URL is Google's own Safe Browsing test host, so the
-   flag is genuine and it is not a real criminal domain.
-2. **A TON address verdict**, showing the address panel.
-3. **The Watching tab**, showing the slot meter and the tier line.
-4. **Spot the fake**, the quiz.
+I rendered the page the Worker actually serves and screenshotted it, so this list is read off the
+real front screen rather than guessed. **What I could NOT do is drive the tabs** -- the page module
+would not execute handlers from a `file://` context, so frames 3 and 4 below are named from the code
+and the smoke test rather than seen. Say so if either turns out different from the description.
 
-**Do not screenshot a clean "nothing known" result as frame 1.** It is the honest common case and it
-is the worst possible thumbnail: it looks like an empty app.
+**Shoot in this order. Frame 1 is the thumbnail and does most of the work.**
+
+1. **The Check tab straight after tapping "Try a link that gets flagged."** A real red verdict,
+   earned live, on Google's own Safe Browsing test host. Nothing else we have says "this product
+   works" in one frame. It is not a canned card and it is not a real criminal domain, which is the
+   whole reason that example exists.
+2. **A TON address verdict**, so the TON half is visible rather than claimed. You need a real
+   address that returns something; a blank result is worse than no frame.
+3. **The Watching tab**, showing the slot meter and the tier line with the Stars price. This is the
+   only frame that shows there is a paid tier at all.
+4. **Spot the fake**, the quiz. It is the frame that shows the app is not just a text box, and it is
+   the one a browsing stranger is most likely to linger on.
+5. **The Check tab's bot-developer prompt**, the "Build a Telegram bot? Check what we watch for bot
+   developers" line, prefilled. Optional, and worth it only if the first four are clean.
+
+**DO NOT make frame 1 a clean "nothing known" result.** I looked at that state rendered: it is the
+honest common case and it is almost entirely empty dark space. As a grid thumbnail it reads as an app
+that does nothing.
+
+**One thing to eyeball while you are in there.** My headless render showed the tab strip and the
+paste box overflowing the right edge at 390px wide. That is very probably an artifact of headless
+Chromium not applying the mobile viewport meta, and the responsive tests pass, so I am NOT reporting
+it as a bug. But you will have the app open on a real phone at exactly that width, which is the one
+moment it costs nothing to check. If "Spot the fake" really is cut off on the tab strip, tell me and
+it is a small fix.
 
 ### TON blockchain  *(you have ticked it)*
 
@@ -199,6 +276,7 @@ the rest is an oversized icon.
 
 Note it survives a blanket `*.png` rule in `.gitignore` because somebody force-added it.
 
-The 512x512 icon above was produced from it, so it is not useless, just wrongly sized. Worth
-replacing with a sane one and dropping the original in a later session. Not today, and not before
-the submission.
+**It is now unused as well as unreferenced.** The first version of the icon was downscaled from it;
+the icon you are uploading is generated from the brand HTML instead, so nothing in this submission
+depends on that file any more. Worth dropping in a later session. Not today, and not underneath a
+submission: removing it rewrites history.

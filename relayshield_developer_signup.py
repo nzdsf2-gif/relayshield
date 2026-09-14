@@ -3291,6 +3291,7 @@ _SOURCE_ALIASES = {
     "tg-miniapp-trendingapps":      "tg-miniapp",
     "tg-miniapp-web3botx":          "tg-miniapp",
     "tg-miniapp-findminiapp":       "tg-miniapp",
+    "tg-miniapp-findminiweb":       "tg-miniapp",
     "tg-miniapp-onclicka":          "tg-miniapp",
     "tg-miniapp-telegtapps":        "tg-miniapp",
     "tg-miniapp-tapps":             "tg-miniapp",

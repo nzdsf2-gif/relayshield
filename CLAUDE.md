@@ -4716,3 +4716,44 @@ artefact after you have verified it.** Every check I ran read the bytes on disk 
 described the bytes that arrived there. That is the template-literal defect exactly -- the source and
 the served text are different documents -- and it is the third time this repo has paid for verifying
 an artefact at the wrong end of a pipe.
+
+## CATALOGUE STATE AT THE END OF 2026-09-14. TWO SUBMITTED, ONE PARKED, TWO NEXT.
+
+**Top 15 item 1 is no longer theoretical.** Two catalogue submissions are in, after four earlier
+rounds reached none.
+
+| Destination | Key | State |
+|---|---|---|
+| findmini.app | `tg-miniapp-findminiweb` | **SUBMITTED**, web form, under 24h review stated |
+| awesome-telegram-mini-apps | `tg-miniapp-awesome` | **SUBMITTED**, pull request **#77**, open |
+| minitelegram.com | `tg-miniapp-minitelegram` | **PARKED**, their form crashes on icon upload |
+| ton.app | `tg-miniapp-tonapp` | next, key registered |
+| tg.app | `tg-miniapp-tgapp` | after that, key registered, weakest evidence |
+
+**`tg-miniapp-findminiweb` IS DEPLOYED** -- deploy_miniapp run 16 and deploy_lambdas run 149 both
+green on `538c35f`. The other three keys are registered in all three lists and ship on the next
+merge.
+
+**THE AWESOME-LIST ROUTE IS THE ONE TO REACH FOR WHEN A FORM FIGHTS BACK.** It has no file picker
+anywhere in it: edit the README on GitHub, which auto-forks and opens the PR. That property is why
+it was ranked first despite being a developer list rather than a consumer catalogue -- two rounds
+had just been lost to an upload dialog. **When a submission surface is costing rounds, ask whether a
+PR-shaped destination exists before generating another asset for the one that is failing.**
+
+**miniTelegram is parked on THEIR defect, not ours.** Four separate icon files -- 512 and 1024, PNG
+and baseline JPEG, every one RGB with no alpha and far under their 5 MB cap -- each crashed the page
+and discarded the filled form. A validator that rejects a file gives a message; a page that crashes
+and destroys a session is a bug. Their FAQ carries a contact and the report costs one email. Do not
+spend another round generating images for it.
+
+**AND THE ICON EPISODE IS RECORDED AS A LOOP I RAN, because the rule already existed.** I decided
+the chat layer was re-encoding to `.webp` -- true -- without ever confirming which files the four
+attempts used, then handed back a file already tried and called it different. Same bytes. The right
+move after the FIRST failure was one question about what he was holding. This file says that when
+the same instruction fails three times the instruction is the loop; I ran it to four, and the
+correction came from the founder each time.
+
+**One rejection recorded so it is not rediscovered:** `telesearch/Telegram-Mini-Apps-List` is not a
+candidate. Last updated December 2024 by its own header, **no CONTRIBUTING.md at all** (404, so no
+submission route exists), and ranked purely by monthly users with a top thirty of PAWS, Blum and
+Hamster Kombat. A stale clicker leaderboard.

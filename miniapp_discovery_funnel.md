@@ -293,6 +293,52 @@ that channel.
 STOP IF: `NEW UNKNOWN ROUTE KEYS` -- a link shipped carrying a key nobody
 registered, and its arrivals are unattributed.
 
+### 5a. tApps Center -- THE SUBMISSION ROUTE, RESOLVED 2026-09-14
+
+**THE SUBMISSION BOT IS `@app_moderation_bot`. IT IS NOT `@tapps_bot`.**
+
+That distinction is the whole reason this took three rounds. `@tapps_bot` IS the
+Telegram Apps Center -- the catalogue itself, a Mini App you browse, "a
+community-driven catalog of apps developed by third-party developers, not
+affiliated with Telegram Messenger", roughly 56K users. **Opening it shows you
+the catalogue and no submission flow, because submissions do not go through it.**
+The founder looked and correctly reported there was no way in.
+
+Submissions go to a separate, purpose-built **Apps Moderation Bot**, and its
+handle appears nowhere on the catalogue itself:
+
+    https://t.me/app_moderation_bot
+
+**Found by web search from the container after three of these channels turned out
+to hide their route.** tapps.center, docs.ton.org, medium.com and peakd.com are
+all egress-blocked here, so this rests on multiple secondary sources agreeing --
+Adsgram's write-up of the Apps Center, the TON blog's tApps announcement, the TON
+Builders Portal listing page, and a developer's own account of getting listed.
+**UNVERIFIED against the bot itself**, which is the founder's first step and
+settles it in one message.
+
+**IT IS THE RIGHT CATALOGUE FOR US, which is worth saying because the ranking got
+the last one wrong.** tApps Center is the TON ecosystem's own catalogue, and this
+Mini App checks TON and only TON. That is the one audience for whom our
+restriction is the headline rather than a limitation.
+
+**WHAT MODERATION CHECKS, so nothing is discovered at rejection:**
+
+1. **The bot must reply to `/start` in ENGLISH by default.** Reviewers check it.
+   `handle_start` in `relayshield_telegram_webhook.py` does, with no payload.
+2. **Terms of Use and a Privacy Policy must exist**, even for an app that stores
+   very little. `https://relayshield.net/terms` and `https://relayshield.net/privacy`
+   are live and already linked from the pricing page and the mobile app.
+3. **Graphic assets**: a logo, an icon, and up to SIX screenshots. A developer who
+   has been through it describes the screenshots as the thing that sells the
+   listing -- treat them as ads, not as documentation.
+4. **A category**, chosen from the catalogue's own list.
+5. **A security check** on the app itself.
+
+**Review takes roughly 3 to 8 days.** That is the gap between submitting and the
+delta being measurable, so take the baseline before submitting and do not read a
+flat `--compare` in the first week as a result.
+
 ### 6. @telegtapps -- DO NOT SUBMIT. It is a paid ad channel, not a directory.
 
 **Checked by opening it, 2026-09-13, and the ranking was wrong.** Its own

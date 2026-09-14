@@ -1274,6 +1274,435 @@ it is not.**
 **One constant, `BOT_HANDLE_MD`, for the bot's own handle.** This file already learned that
 lesson when `checkemail@` was written as `emailcheck@` twice in one message.
 
+## WHERE 2026-09-13/14 LEFT THINGS — READ THIS FIRST, IT SUPERSEDES THE 2026-09-09 TOP 15
+
+### THE HEADLINE: STARS WORKS END TO END. A REAL PURCHASE COMPLETED.
+
+**2026-09-13. The founder bought 50 Stars and the Mini App showed "25 watch slots,
+alerted immediately and in full, until 2026-12-12."** That single event proves five
+things no test could:
+
+1. `createInvoiceLink` mints, `tg.openInvoice` opens it.
+2. `handle_pre_checkout` answers inside Telegram's TEN SECONDS.
+3. The **XTR branch returns before the fiat tier map**, so a `total_amount=50`
+   did NOT fall through to `tier_map.get(amount, TIER_PERSONAL)` and hand him a
+   full subscription for a dollar.
+4. `grant_slots` wrote the entitlement row -- so the webhook role's DynamoDB
+   grant is real.
+5. The app refreshed to the PAID state and hid the buy button.
+
+**The whole revenue path is live. Nothing about Stars is theoretical any more.**
+
+**AND THE PURCHASE ROUTE MATTERS FOR ANYONE WHO REPEATS IT.** Telegram Desktop
+refused to SELL him Stars -- "this payment method is not available for the
+selected product", which is the top-up provider refusing, NOT our invoice. He
+bought 100 Stars another way and the Mini App then paid from the balance with no
+top-up sheet at all. **Stars are an ACCOUNT balance**: buy them by whatever route
+completes, then spend them from any device. A desktop top-up failure says nothing
+about our code, and the screenshot that shows "50 Stars Needed" over our invoice
+is PROOF our side worked.
+
+### THE BOT TOKEN WAS NEVER UNWRAPPED. THREE OF FOUR CALL SITES WERE DEAD.
+
+**The defect underneath the Stars failure, and it was one layer past the secret
+name fixed the day before.** `_get_secret` returns the SecretString VERBATIM and
+the secret is a JSON object, so what it hands back is
+`{"telegram_bot_token": "..."}` and **not a token**. Every caller has to unwrap
+it. On 2026-09-12 the four that do were:
+
+    verified_user_id      unwrapped with BOT_TOKEN_KEY first        CORRECT
+    stars_invoice         did not unwrap at all                     DEAD
+    first-watch greeting  tried only the two GUESSED keys           DEAD
+    watchlist monitor     read the OLD hyphenated secret name       DEAD
+
+`stars_invoice` put the whole JSON blob into the Bot API path, so Telegram
+answered 404 for a token that is not a token and the user saw "could not start
+the purchase" over a log that said Not Found. **A wrong answer, not an
+exception** -- which is why fixing the secret NAME made `list_watches` work while
+the buy button stayed dead. Two different bugs one layer apart.
+
+**THE MONITOR WAS THE EXPENSIVE ONE.** Its `BOT_TOKEN_SECRET` still said
+`relayshield/telegram-bot-token` with HYPHENS, so **every alert it ever tried to
+send raised ResourceNotFoundException** -- in the one function whose whole job is
+keeping the watchlist's promise -- with no trace but a WARNING saying the send
+failed. Its IAM ARN named the hyphenated secret too, which is the half that would
+have SURVIVED fixing the name: ResourceNotFound becomes AccessDenied.
+
+**`bot_token()` in `relayshield_watchlist.py` is now the single owner** and the
+monitor imports it module-level, where `resolve_deps` packages it. Nine tests,
+four EXECUTED against a stubbed Secrets Manager because every dead call site was
+syntactically perfect.
+
+**The general form, for the fifth time: N copies of a three-line unwrap is N
+chances to be wrong, and the copies do not fail loudly, they fail with a wrong
+value.**
+
+### THE FUNNEL WAS HUNG, NOT BROKEN. `filter_log_events` IS A SCAN.
+
+Reported twice as "I'm still getting no reply to your terminal command". Nothing
+raised and no output was lost: `tools/miniapp_funnel.py` printed its header and
+then sat inside a pagination loop. **`filter_log_events` returns a `nextToken` to
+continue walking log streams even when the page it just returned held no matching
+events**, so a rare pattern over 30 days of `/aws/lambda/relayshield-api` is
+thousands of sequential round trips -- and EIGHT such sweeps ran before a single
+number could print.
+
+It reads **CloudWatch Logs Insights** now: one query plus a short poll, progress
+on stderr per query. Three things it could not do before:
+
+* **NEVER INVOKED separated from ZERO.** A group-level probe says whether the
+  function ran at all, so "idle" and "ran constantly and matched nothing" stop
+  being the same output. The docstring had claimed this distinction for weeks
+  and the code could not deliver it.
+* **CAPPED.** Insights returns at most 10,000 rows; beyond that the number is
+  rendered `>=N` as a FLOOR rather than silently under-reported.
+* The observed window comes from the group's earliest event rather than the
+  earliest MATCHING event, which is what that section actually claims.
+
+**The stage regexes are NOT restated in Insights' parse syntax.** The query
+filters on the coarse substring and the existing Python regex still matches, so
+there is one copy. 16 tests, proven by reintroducing the scan call.
+
+**IT NEEDS NEW IAM: `logs:StartQuery`, `logs:GetQueryResults`, `logs:StopQuery`.**
+UNVERIFIED whether `relayshield-deployer` has them. A refusal comes back NAMED
+(`ERROR AccessDeniedException` against the group that refused) and is never
+rendered as a zero.
+
+### THE WATCHING TAB COULD NOT ADD A WATCH
+
+Reported in those words. The only route to a watch was Check tab, paste, check,
+then press the verdict card's button -- so **the tab that explains watching, names
+the price and carries the buy button was the one place a slot could not be used**,
+and somebody who had just paid for 25 had nowhere to spend them.
+
+It is not a looser path: the box runs the same off-chain gate (watching an EVM
+address writes a row the TON monitor never re-checks) and the same `check()`
+first (a row with no baseline reads as "changed from nothing" on the monitor's
+first pass). Both pinned by tests that assert the ORDERING, not the presence.
+
+### A RECOGNISER WITH NO PROMPT IS A FEATURE NOTHING POINTS AT
+
+**The sharpest self-inflicted defect of the session, and it is a lesson this file
+had recorded TWO DAYS EARLIER.**
+
+The founder asked for Check-tab copy distinguishing bot developers. I shipped
+`BOT_HANDLE`, a developer card, a registered `tg-miniapp-bottoken` key and its own
+landing-page banner -- and **the placeholder still said "Paste a link, or a TON
+address" and nothing anywhere mentioned a bot.** Deploy run 14 succeeded. The
+feature was live and undiscoverable, which is the INLINE MODE defect exactly:
+complete, live, and pointed at by nothing.
+
+**The recogniser is not the feature. The route to it is.** There is now a visible
+prompt that prefills `@relayshield_bot` -- ours, deliberately, because prefilling
+a stranger's handle would point our app at somebody else's product and render a
+card about it.
+
+**AND HE CORRECTED MY REASONING, RIGHTLY.** I had written that a bot developer
+"is already an API buyer". They are not. They are a developer whose own product
+has the problem our endpoints solve -- a hypothesis about FIT, not a fact about
+purchase, and stating it the other way round is how a plan ends up describing a
+company we do not have.
+
+### THREE OF MY OWN DEFECTS CAUGHT BY THE CHECKS THAT EXIST, IN ONE COMMIT
+
+All before they left the container, and each one is a guard earning its place:
+
+1. **Backticks in a comment inside the PAGE template literal.** That ends the
+   template and ships a module registering no handlers. `node --check` caught it.
+2. **Escapes eaten twice** -- a Python heredoc took one layer and the template
+   literal took the rest, so the served text was `/^(?:https?://` and the module
+   threw. **`node --check` PASSED. `miniapp_smoke.mjs` caught it**, which is the
+   exact case it was written for.
+3. **`openTelegramLink` about to be handed an `api.relayshield.net` URL**, and the
+   CTA link never restored -- so the NEXT ordinary check would have offered a
+   consumer developer documentation.
+
+**AND TWO TESTS WERE WRONG RATHER THAN THE CODE**, which is the half worth
+remembering:
+
+* The three-lists guard required an ALIAS for every loop key and failed on
+  `tg-miniapp-bottoken`. **Adding the alias would have broken what it protects**:
+  `_resolve_source` applies aliases BEFORE the banner table, so an alias makes an
+  own-banner unreachable. That is the `rsscan -> github` defect, already paid for
+  once. The test accepts either and forbids BOTH now.
+* The CTA-severity test took the FIRST `cta-line` write in the file and became
+  the wrong block the moment a second branch wrote that element. Anchored on the
+  severity ternary now.
+
+### CSM-SIMSWAP-1: THE APP SOLD SIM SWAP MONITORING AND ENROLLED NOBODY
+
+Five surfaces claimed it -- the paywall modal, the paywall screen, the phone
+field, onboarding step 3, and the Solana dApp Store listing -- and
+**`checkSimSwap()` in `crypto-shield-app/src/api/relayshield.ts` has ZERO
+CALLERS.** The number is written to SecureStore and read by nothing, so
+`scan_sim_swap_users()` has never had a Crypto Shield Mobile user in its set.
+
+**IT WAS FOUND ON 2026-08-14 AND WRITTEN INTO THE DOCSTRING OF THE FILE BUILT TO
+FIX IT.** `relayshield_sim_swap_consent.py` says so verbatim. That audit found
+four defects, one per surface; three were wired and this one was recorded and
+left. **A finding with no guard is a finding that comes back.**
+
+Copy corrected on all five. The guard keys on whether any app source posts
+`/v1/sim-swap/enroll`, so **shipping the feature unblocks the copy automatically**.
+Two traps named before they are walked into: `checkSimSwap` posts
+`/v1/metered/sim-swap`, a one-shot $0.25 lookup that enrols NOTHING, and the
+monitor sends no Expo push, so an enrolled app user would be watched correctly and
+told nothing (the join is `enrolled_by_account` against the push table's
+`user_id`, both holding the API key, in two tables where `user_id` means different
+things).
+
+**MY FIRST VERSION OF THAT GUARD WAS TOO BLUNT AND I FIXED THE GUARD, NOT THE
+CLAIM.** It failed on the Developer API product card, which says the API does SIM
+swap monitoring -- and that is TRUE. A check that forces you to delete a true
+sentence to be honest about a different product is a check that gets loosened.
+
+### BOT-TOKEN-1 PHASE 0 SHIPPED: WE NOW DETECT TELEGRAM BOT TOKENS
+
+There was **no Telegram bot token pattern anywhere** -- not in `NHI_PATTERNS`, not
+in `_NHI_PATS`, not in the rsscan mirror -- while AWS, GitHub, Stripe, Slack,
+OpenAI, Anthropic, OpenRouter and twenty others were covered. **So the corpus
+count was UNMEASURED, not zero.**
+
+Two entries, in all four tables that must agree, context-anchored because
+`digits:opaque` is one of the commonest strings in a config dump. **The SECOND
+entry exists only because running the first showed it could not see the commonest
+leak**: `_ctx_key` requires an assignment operator, so
+`https://api.telegram.org/bot<TOKEN>/sendMessage` matched nothing. Found by
+EXECUTING the pattern, never by reading it.
+
+**Remediation says REVOKE IN BOTFATHER, never "rotate".** A bot token is
+session-shaped, not key-shaped. 13 tests, every one executing the regex against
+real and decoy shapes including a raw TON address (`-?<digits>:<64 hex>`, this
+shape with a longer tail).
+
+**THE HARD LINE, from actually reading `soxoj/telegram-bot-dumper` after being
+rightly rebuked for dismissing it from its name: `getMe` ONLY, NEVER
+`getUpdates`.** `getUpdates` drains the owner's pending update queue and returns
+other people's conversations. That tool does it correctly because it runs WITH the
+owner's authorization. We have none.
+
+### IAM: THE SHARED ROLE IS OVER THE CAP, NOT NEAR IT
+
+The snapshot ran and is committed at
+`iam/snapshots/relayshield-breach-check-role-1sapnwdl.json`:
+
+    inline : 26 policies, 10127/10240 bytes, 113 free
+    managed: 11 attached of 10 allowed
+    lambdas running as this role: 42
+
+**11 of 10.** The next permission anyone needs on that role cannot be attached by
+either route. 42 Lambdas against the 22 in `LAMBDA_MAP`.
+
+The dry run produced per-function policies for all 42 and dropped 649 statements,
+which is the split working. **`relayshield-intel-feed` is the first migration: 5
+statements, 1,124 bytes**, smallest by a clear margin, scheduled rather than
+customer-facing. Its `DenyWalletPrivateKey` statement survives the derivation. It
+has **no `logs:` statement and that is fine** -- `iam_split_roles.py:306` attaches
+`AWSLambdaBasicExecutionRole` by ARN separately, checked rather than assumed.
+
+**The verification after applying is NOT the import probe.** `ci.import-probe`
+returns before touching DynamoDB, so it passes whether or not the role works --
+the probe-takes-the-cheap-path trap. The real check is the next scheduled run
+writing rows.
+
+### MICROSOFT: LET THE POWER PLATFORM DEVELOPER ENVIRONMENT LAPSE
+
+Asked as "MS Azure Sentinel", and **the expiring thing is not Azure at all.**
+Three screens settled it:
+
+* **Power Platform admin**: "Andrew Gibbs Work's Environment", Developer,
+  **Ready (4 days until disabled)**, Dataverse Yes. The other row, Default
+  Directory, is not expiring -- and TODO.md records the MS-4 custom connector as
+  created in *Default Directory*.
+* **Azure**: *"Welcome to Azure! Don't have a subscription?"* -- **there is no
+  Azure subscription.** No Log Analytics workspace, no Sentinel, nothing billing.
+  MS-1 is blocked on a workspace that was never created and MS-1b's cleanup
+  warning is moot.
+* **Partner Center**: an account with no workspaces -- **no commercial
+  marketplace enrolment**, which MS-1 and MS-3 both need.
+
+**Let it lapse.** Worst case it holds the custom connector, whose definition is
+committed (`powerplatform_connector/relayshield_swagger2.json`,
+`apiProperties.json`) and regenerated by a committed script. A custom connector
+is visible only in our own tenant and its certification is blocked on two known
+items. **A Power Platform environment cannot contain a Log Analytics workspace**,
+so nothing about Sentinel is at risk either way.
+
+### MINI APP DIRECTORY SUBMISSION IS UNRESOLVED AFTER FOUR ROUNDS. READ THIS BEFORE SPENDING A FIFTH.
+
+**Nothing has been submitted to any directory. The blog channel is the only route
+that has run.** Three separate failures, and the pattern matters more than any of
+them:
+
+**1. `@telegtapps` is a PAID AD CHANNEL, not a directory. DO NOT SUBMIT.** Its own
+description reads *"Clickers. Telegram apps. HighRisk Dapps."* Every post is
+forwarded from one source and is an advertisement. No pinned message, no
+submission process. The only way in is buying a post. And the audience is wrong
+twice over: clicker traffic does not buy identity security, and a security product
+listed in a channel advertising high-risk dapps is a bad first impression rather
+than a cheap one.
+
+**THE DEFECT IS IN HOW THE RANKING WAS BUILT.**
+`tools/find_miniapp_channels.py` measured SUBSCRIBER COUNTS and never recorded
+channel TYPE, so paid promo channels were ranked alongside real catalogues on
+audience size alone -- and I then sent the founder at the top of that ranking
+without checking what the channel was. **Every remaining channel gets a type check
+FIRST: a curated catalogue with a submission route, or a broker selling posts. All
+posts forwarded from one source is the second kind.**
+
+**2. The funnel doc said "ANDREW SUBMITS" and never said how**, which is the FD-2
+defect in our own file. Fixed, with the read that finds the route as an explicit
+step.
+
+**3. `@app_moderation_bot` DOES NOT ANSWER `/start`.** I named it as the tApps
+Center submission bot on four SECONDARY sources agreeing -- Adsgram, the TON blog,
+the TON Builders Portal, a developer's write-up -- and **not one of them was the
+destination's own page**, because tapps.center, docs.ton.org, medium.com and
+peakd.com are ALL egress-blocked from this container. He tried twice and got
+nothing. **A bot that does not answer /start is dead, and that is the FD-2 lesson
+being broken by the person who wrote it down.**
+
+**THE NEXT ACTION IS `tapps.center` IN A BROWSER, NOT IN TELEGRAM.** Every attempt
+so far went through Telegram, where a catalogue shows its contents and hides its
+plumbing. A website shows its navigation in one look. `@tapps_bot` IS the
+catalogue -- opening it was never going to reveal a submission route.
+
+**I RECOMMENDED DEPRIORITISING DIRECTORIES AND THE FOUNDER OVERRULED IT, CORRECTLY.
+His words: "It is critical to expand the discovery surface for the Tg bot and our
+api landing site. That is the sole reason we built this miniApp. We have to be
+able to register it to catalogs."**
+
+He is right and my recommendation answered the wrong question. Four wasted rounds
+are an argument about METHOD, not about whether the goal is worth pursuing -- and
+the Mini App has no other justification. **Catalogue registration is not
+optional. Do not re-propose dropping it.**
+
+**WHAT ACTUALLY CHANGES IS THE KIND OF CATALOGUE WE GO AT FIRST, and this is the
+finding that came out of the four rounds:**
+
+    A TELEGRAM-CHANNEL directory shows you its CONTENTS and hides its plumbing.
+    A WEB directory shows you its NAVIGATION.
+
+Every failure this session was a Telegram-first attempt: `@telegtapps` turned out
+to be an ad broker, `@tapps_bot` is the catalogue rather than the submission
+route, and `@app_moderation_bot` does not answer. **A website puts "Submit your
+app" in the header or the footer, visible in one look, and it names the CURRENT
+mechanism rather than one a blog post recorded a year ago.**
+
+**So the running order inverts: web front door first, Telegram channel second.**
+Three candidates, all with real sites, and the founder can check each in under a
+minute because a browser is the one tool that works here and the container has
+none:
+
+| Catalogue | Web front door | Key already registered |
+|---|---|---|
+| miniTelegram | `minitelegram.com` | needs one |
+| FindMini | `findmini.app` | `tg-miniapp-findminiapp` |
+| tApps Center | `tapps.center` | `tg-miniapp-tapps` |
+
+**miniTelegram is the one to try FIRST**, because its submission flow is described
+rather than inferred: sign in with Telegram, submit an app card (official link,
+description, categories, screenshots, language), and their team reviews before
+publication. **UNVERIFIED from the container** -- minitelegram.com, findmini.app
+and tapps.center are ALL egress-blocked here, which is precisely why the read is
+the founder's and why guessing a handle from secondary sources failed three times.
+
+**REGISTER THE `?source=` KEY BEFORE SUBMITTING TO ANY OF THEM.** miniTelegram has
+none. An unregistered key is silently downgraded to the generic `tg-miniapp` at
+the Worker's edge and logs `unmatched:` on the landing page, which is attribution
+that looks like it worked -- FD-8, four months of it.
+
+**ONE ORDERING RULE THAT IS EASY TO GET BACKWARDS**, recorded because it will
+apply to whichever channel finally works: **opening the deep link yourself logs
+NOTHING against the route key** -- the counter reads `source=` lines in
+`/aws/lambda/relayshield-api` and opening the app calls nothing there. **Pressing
+"Check it" DOES.** So verify a link BEFORE taking the baseline; a self-visit
+inside the baseline is harmless, the same visit after it becomes part of the delta.
+
+**AND NO BASELINE EXISTS FOR THE BLOG CHANNEL.** `miniapp_funnel_snapshots/` holds
+only its README, because the funnel was hanging when that submission went out. The
+blog channel's effect is permanently unmeasurable. Do not repeat it.
+
+### THE TOP 15, REGENERATED 2026-09-14
+
+**Regenerated, not annotated. This supersedes the 2026-09-09 list above.**
+
+**Closed since then:** the watchlist is mapped in the deployer AND the drift
+check; Stars is proven end to end by a real purchase; the Stars IAM grant is
+measured closed; the funnel works; the Watching tab can add a watch; the
+developer route is built and discoverable; CSM-SIMSWAP-1's copy is corrected;
+BOT-TOKEN-1 phase 0 has shipped; the IAM snapshot is committed and the first
+migration is chosen.
+
+1. **REGISTER THE MINI APP IN A CATALOGUE. WEB FRONT DOOR FIRST, IN THIS ORDER:
+   `minitelegram.com`, then `findmini.app`, then `tapps.center`.** Open each in a
+   BROWSER and look at the header and footer for "Submit your app" / "Add app" /
+   "For developers". miniTelegram first because its flow is described rather than
+   inferred (sign in with Telegram, app card, team review).
+   **This is the founder's explicit priority and overrules a recommendation I
+   made to deprioritise it: the Mini App exists to expand discovery for the bot
+   and the API landing site, and it has no other justification.**
+   Register the `?source=` key for whichever one takes us BEFORE submitting --
+   miniTelegram has none -- and take the `--snapshot before-<id>` baseline before
+   the submission, never after.
+
+2. **IAM split, first migration. The command is ready and the policy has been
+   read.**
+   `AWS_PROFILE=relayshield python3 tools/iam_split_roles.py --from-snapshot iam/snapshots/relayshield-breach-check-role-1sapnwdl.json --only relayshield-intel-feed --apply`
+   **Verify with the next scheduled run's log, NOT the import probe**, which
+   returns before touching DynamoDB. Do not migrate a second function until rows
+   are written.
+
+3. **Batch 2 outreach addresses. Two commands, both built, neither run.**
+   `export GITHUB_TOKEN=$(gh auth token)`, then
+   `tools/resolve_prospect_emails.py --in prospects_batch2.txt --out prospects_batch2.jsonl`,
+   then `tools/merge_prospect_emails.py --drafts outreach_bot_prospects_batch2.md
+   --resolved prospects_batch2.jsonl`. The merge writes a send-ready file where
+   every draft carries a To: line and unreachable rows are parked, not hidden.
+
+4. **CSM-SIMSWAP-2: the dApp Store listing copy.** A portal form field, no review
+   cycle, and it is what a buyer reads before installing. Do it before the EAS
+   build. The corrected source is
+   `crypto-shield-app/store-assets/dapp-store-metadata.md`.
+
+5. **The funnel's Insights IAM grant.** `logs:StartQuery`, `logs:GetQueryResults`,
+   `logs:StopQuery` on `relayshield-deployer`. UNVERIFIED whether it already has
+   them; the tool names the refusal rather than reporting a zero.
+
+6. **CSM-SIMSWAP-1 proper: the enrol call.** ~3 days.
+   `enrollSimSwap` posting `/v1/sim-swap/enroll` (NOT `/v1/metered/sim-swap`), the
+   carrier authorization clause gating the button, `withdrawSimSwap`, and Expo
+   push as a delivery channel on the monitor. Full scope in
+   `simswap_crypto_shield_mobile_scope.md`.
+
+7. **BOT-TOKEN-1 phase 1.** `getMe` liveness, hash-only storage, username
+   indexing, severity split on liveness, and the `getUpdates` prohibition as a
+   test. One day, gated on nothing. Phase 2 (the Mini App lookup) is gated on a
+   NON-ZERO corpus count, not a date.
+
+8. **Map `relayshield_watchlist_monitor.py` in `deploy_lambdas.yml`.** It is in
+   the drift check and `iam_github_deploy_invoke.json` but not the deployer, so
+   `check_deploy_invoke_policy.py` prints it as "granted but not in LAMBDA_MAP"
+   on every run. **The mapping commit must touch the `.py`.**
+
+9. **Map `relayshield-mpp-settlement`**, same shape, same rule.
+
+10. **FD-11: Smithery.** Still two commands, still the cheapest open item.
+    `npx -y @smithery/cli@latest auth login` then `mcp publish <hf sse url> -n relayshield/relayshield`.
+
+11. **Bundle D change set**, dimension AND listing copy in one submission.
+
+12. **Apify: the form is open now.** The article must NOT appear on
+    blog.relayshield.net first.
+
+13. **ABS-1: the measured agent-bait false-positive rate**, which gates the
+    dimension in item 11.
+
+14. **INTEL-5.** `tools/diagnose_stolen_sessions.py`. Until it runs, no count out
+    of `relayshield_stolen_sessions` means anything.
+
+15. **The Commerce Agents post.** Register `?source=commerce-agents` first.
+
 ## ENVIRONMENT — what this container can and cannot do
 
 | | Status |

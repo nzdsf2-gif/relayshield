@@ -4583,3 +4583,87 @@ Never put a bare partner code in that field.
 - Length limits: Mastodon 500 chars · Farcaster ~1024 bytes · LinkedIn 3000 · Telegram 4096.
   Write each short version to its own limit. dev.to has no practical limit; publish the full post
   with `canonical_url` set to the blog.relayshield.net URL.
+
+## THE FIRST CATALOGUE SUBMISSION IS IN. FINDMINI, 2026-09-14, VIA A WEB FORM.
+
+**Top 15 item 1, and it went through on the first attempt after four rounds failed at it.**
+`findmini.app/submit/` accepted the app and answered *"Thanks for your submission! We'll review your
+app and add it to the catalog."* Stated turnaround under 24 hours; corrections go to
+`support@findmini.app`.
+
+**WHAT ACTUALLY UNBLOCKED IT WAS THE WEB-FRONT-DOOR FINDING, NOT MORE EFFORT.** Every earlier attempt
+went through Telegram, where a catalogue shows its contents and hides its plumbing: `@telegtapps`
+turned out to be an ad broker, `@tapps_bot` is the catalogue rather than the route, and
+`@app_moderation_bot` did not answer `/start`. FindMini put "Submit your app" at a plain URL and the
+whole thing took one form. **Prefer a web directory's own site over its Telegram surface, every
+time.**
+
+**AND I HAD THE RANKING WRONG UNTIL THE DAY OF.** The 2026-09-14 Top 15 said miniTelegram first,
+because its flow was "described rather than inferred". FindMini's was better than described: a named
+form URL, a named turnaround and a published exclusion list. **"Described" beats "inferred" and
+"a URL that loads" beats both.**
+
+### `@app_moderation_bot` IS NOT PROVEN DEAD, AND THIS FILE SAID IT WAS
+
+Asked directly, and the honest answer is no. The measured fact is that a founder's `/start` got no
+reply on mobile and on desktop. **"Therefore dead" is inference from one symptom**, written by me, in
+the same section that criticises me for naming that bot on four secondary sources without reading the
+destination's own page.
+
+Re-tested from the container rather than recalled: `t.me`, `tapps.center`, `builders.ton.org`,
+`medium.com` and `core.telegram.org` are ALL egress-blocked, so the bot still cannot be probed here.
+**What is now on the other side of the scale:** the TON Studio blog that introduced tApps Center names
+the Apps Moderation Bot as the mechanism, and a 2026 developer account describes a COMPLETED listing
+through it with 3 to 8 day moderation. Somebody got in that way recently.
+
+**A live bot and a silent `/start` are not contradictory.** Most likely first: it needs a deep-link
+payload (`?start=<token>` handed out by the catalogue), so a bare `/start` typed from search hits a
+handler expecting one. Then: the flow moved to the web; a squatted or renamed username; genuinely
+dead. **The observation that separates them costs ten seconds and is the founder's: does the chat show
+a START button and a bot description, or nothing at all?** Do not spend another round on tApps until
+that is answered.
+
+### THE FUNNEL'S INSIGHTS IAM GRANT IS ALREADY IN PLACE. TOP 15 ITEM 5 IS CLOSED.
+
+`miniapp_funnel_snapshots/before-telegtapps.json`, generated **2026-09-13T23:38 UTC**, carries real
+stage numbers (`WATCHED 2`, `BOT 1`, `STARS 1`, `DEVELOPERS 5`) and no `AccessDeniedException`. The
+tool names a refusal rather than rendering it as a zero, so numbers coming back at all is the
+evidence. `relayshield-deployer` has `logs:StartQuery`, `logs:GetQueryResults` and `logs:StopQuery`.
+
+**AND THIS FILE'S CLAIM THAT `miniapp_funnel_snapshots/` "HOLDS ONLY ITS README" IS NOW WRONG.** It
+was true when written and a baseline has been taken since. Corrected here rather than left, because
+a stale status in this file is exactly what the WHERE THE CURRENT WORK LIST LIVES section warns costs
+a round to disprove.
+
+### THE KEY IS `tg-miniapp-findminiweb`, AND IT IS A SEPARATE DESTINATION ON PURPOSE
+
+`tg-miniapp-findminiapp` is the CHANNEL, 56,380 subscribers. This is the web directory. Same
+operation very probably, and still two destinations: **a channel post is one impression lasting a
+day; a directory listing is a standing shelf that keeps returning arrivals for as long as it is up.**
+Sharing a key merges a broadcast with a permanent surface and makes the delta uninterpretable, which
+is the `tg-miniapp-channel` defect the route table was rebuilt to remove.
+
+Registered in all three lists that must agree: `miniapp_routes.json` rank 5, `ALLOWED_SOURCES` in
+`cloudflare_worker_miniapp.js`, `_SOURCE_ALIASES` in `relayshield_developer_signup.py`.
+
+**THE ORDERING THAT IS EASY TO GET BACKWARDS, AND THE WINDOW IS ABOUT 24 HOURS:** merge and push so
+the key deploys, THEN open the deep link and press "Check it" to prove it logs, THEN take
+`--snapshot before-findminiweb`. Opening the link logs NOTHING on its own; pressing "Check it" is
+what writes the `source=` line. A self-visit inside the baseline is harmless; the same visit after it
+becomes part of the delta. The snapshot REFUSES to overwrite, which is the most important line in
+that tool.
+
+### THE LISTING ARTWORK IS GENERATED, NOT CROPPED
+
+The profile picture field wants SQUARE, minimum 256x256. `idcheck_botfather_640x360.jpg` is the right
+brand mark and is 16:9, a two-column lockup with the shield left and the type right, so **no square
+inside it contains both** and any crop loses one. `assets/miniapp/idcheck_icon_512.html` re-lays the
+identical shield SVG and ID/Check lockup into 512x512 and renders through the same headless Chromium
+path, pinning the same `#17212b` and `#3b82f6` that `cloudflare_worker_miniapp.js` declares as the
+Telegram theme defaults. Tagline and eyebrow are dropped: a catalogue renders this at 80 to 120px,
+where a 22px line of body copy is a grey smudge.
+
+**The descriptions were written against the page the Worker ACTUALLY SERVES**, rendered with
+`tools/miniapp_render.mjs`, and that caught a real omission: the paste box takes *"a link, a TON
+address (EQ... / UQ... / 0:...), or @handle"* and the first draft described two of the three inputs.
+Full copy is in `findmini_submission_2026-09-14.md`.

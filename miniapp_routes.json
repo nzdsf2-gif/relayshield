@@ -77,6 +77,16 @@
     },
     {
       "rank": 6,
+      "id": "minitelegram",
+      "key": "tg-miniapp-minitelegram",
+      "destination": "minitelegram.com, the WEB directory",
+      "audience": null,
+      "audience_note": "UNMEASURED, and the wrong unit for a directory in any case. A standing listing is worth doing whatever the traffic turns out to be, which is why it is not gated on a number the way an announcement channel is.",
+      "status": "ready",
+      "why_first": "SECOND of the web front doors, after findmini.app. Its submission flow is DESCRIBED rather than inferred -- sign in with Telegram, submit an app card (official link, description, categories, screenshots, language), team review before publication -- which is why the 2026-09-14 Top 15 ranked it first. FindMini overtook it on the day by being better than described: a named form URL, a named turnaround and a published exclusion list. Described beats inferred, and a URL that loads beats both. Registered BEFORE submission, which is the whole point: an unregistered key is silently downgraded to the generic tg-miniapp at the Worker's edge and logs 'unmatched:' on the landing page. That is FD-8, four months of it."
+    },
+    {
+      "rank": 7,
       "id": "onclicka",
       "key": "tg-miniapp-onclicka",
       "destination": "@onclicka_tma_en",
@@ -85,7 +95,7 @@
       "status": "ready"
     },
     {
-      "rank": 7,
+      "rank": 8,
       "id": "telegtapps",
       "key": "tg-miniapp-telegtapps",
       "destination": "@telegtapps",
@@ -95,7 +105,7 @@
       "why_first": "The smallest, so it is the cheapest place to discover the listing copy is wrong. Worth running BEFORE @trendingapps for that reason alone."
     },
     {
-      "rank": 8,
+      "rank": 9,
       "id": "tapps",
       "key": "tg-miniapp-tapps",
       "destination": "tApps Center",
@@ -104,7 +114,7 @@
       "status": "ready"
     },
     {
-      "rank": 9,
+      "rank": 10,
       "id": "directory",
       "key": "tg-miniapp-directory",
       "destination": "Other Mini App directories",
@@ -113,7 +123,7 @@
       "status": "ready"
     },
     {
-      "rank": 10,
+      "rank": 11,
       "id": "ton",
       "key": "tg-miniapp-ton",
       "destination": "TON catalogues",
@@ -123,7 +133,7 @@
       "why_first": "UNBLOCKED 2026-09-11. This route was gated on 'only if TON scans ship' and they now do: /v1/ton-address plus relayshield_watchlist_monitor.py, which watches TON and only TON. A TON catalogue is the one audience for whom that is the headline rather than a detail."
     },
     {
-      "rank": 11,
+      "rank": 12,
       "id": "menu",
       "key": null,
       "destination": "The @relayshield_bot menu button",

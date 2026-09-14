@@ -101,6 +101,9 @@ const ALLOWED_SOURCES = new Set([
   // above. Same operation very probably; still two destinations, because a
   // channel post is one impression and a directory listing is a standing shelf.
   "tg-miniapp-findminiweb",
+  // minitelegram.com, the second web directory. Registered before the
+  // submission, never after: an unregistered key is downgraded here.
+  "tg-miniapp-minitelegram",
   "tg-miniapp-onclicka",
   "tg-miniapp-telegtapps",
   "tg-miniapp-tapps",

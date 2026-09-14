@@ -97,6 +97,10 @@ const ALLOWED_SOURCES = new Set([
   "tg-miniapp-trendingapps",
   "tg-miniapp-web3botx",
   "tg-miniapp-findminiapp",
+  // The findmini.app WEB directory, distinct from the @findminiapp channel
+  // above. Same operation very probably; still two destinations, because a
+  // channel post is one impression and a directory listing is a standing shelf.
+  "tg-miniapp-findminiweb",
   "tg-miniapp-onclicka",
   "tg-miniapp-telegtapps",
   "tg-miniapp-tapps",

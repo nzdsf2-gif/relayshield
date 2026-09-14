@@ -65,6 +65,16 @@
     },
     {
       "rank": 5,
+      "id": "findminiweb",
+      "key": "tg-miniapp-findminiweb",
+      "destination": "findmini.app, the WEB directory",
+      "audience": null,
+      "audience_note": "UNMEASURED as an audience, and that is the wrong unit for it. The site's own search bar reports 6,616 TMAs and 5,335 bots indexed, which measures the CATALOGUE and not its traffic. A standing listing is worth doing whatever the number turns out to be.",
+      "status": "ready",
+      "why_first": "SEPARATE FROM rank 4 ON PURPOSE. @findminiapp is a Telegram CHANNEL and this is the web directory; they are very probably the same operation, and they are still two destinations. A channel post is ONE impression with a lifetime of a day. A directory listing is a STANDING surface that keeps returning arrivals for as long as it is up. Sharing one key merges a broadcast with a permanent shelf and makes the delta uninterpretable, which is the tg-miniapp-channel defect this table was rebuilt to remove. It is the FIRST submission we actually make, ahead of its rank, because findmini.app/submit/ is a plain web form with no bot and no sign-in and their stated turnaround is under 24 hours -- the cheapest possible test of whether our listing copy survives a moderator. The rank column is priority; the running order is the sequence, and the two differ deliberately, exactly as @telegtapps runs before @trendingapps."
+    },
+    {
+      "rank": 6,
       "id": "onclicka",
       "key": "tg-miniapp-onclicka",
       "destination": "@onclicka_tma_en",
@@ -73,7 +83,7 @@
       "status": "ready"
     },
     {
-      "rank": 6,
+      "rank": 7,
       "id": "telegtapps",
       "key": "tg-miniapp-telegtapps",
       "destination": "@telegtapps",
@@ -83,7 +93,7 @@
       "why_first": "The smallest, so it is the cheapest place to discover the listing copy is wrong. Worth running BEFORE @trendingapps for that reason alone."
     },
     {
-      "rank": 7,
+      "rank": 8,
       "id": "tapps",
       "key": "tg-miniapp-tapps",
       "destination": "tApps Center",
@@ -92,7 +102,7 @@
       "status": "ready"
     },
     {
-      "rank": 8,
+      "rank": 9,
       "id": "directory",
       "key": "tg-miniapp-directory",
       "destination": "Other Mini App directories",
@@ -101,7 +111,7 @@
       "status": "ready"
     },
     {
-      "rank": 9,
+      "rank": 10,
       "id": "ton",
       "key": "tg-miniapp-ton",
       "destination": "TON catalogues",
@@ -111,7 +121,7 @@
       "why_first": "UNBLOCKED 2026-09-11. This route was gated on 'only if TON scans ship' and they now do: /v1/ton-address plus relayshield_watchlist_monitor.py, which watches TON and only TON. A TON catalogue is the one audience for whom that is the headline rather than a detail."
     },
     {
-      "rank": 10,
+      "rank": 11,
       "id": "menu",
       "key": null,
       "destination": "The @relayshield_bot menu button",

@@ -1,0 +1,101 @@
+name: FindMini Listing Watch
+
+# WHY THIS EXISTS
+# ---------------
+# RelayShield IDCheck was submitted to findmini.app/submit/ on 2026-09-14.
+# Their stated turnaround is "usually within 24 hours or less" and nothing
+# tells us when it actually goes live.
+#
+# This is not merely about knowing. The ORDERING depends on it. The
+# `--snapshot before-findminiweb` baseline has to be taken BEFORE the listing
+# starts producing arrivals, and a baseline taken afterwards is a comparison of
+# a number with itself -- which reads as "the channel did nothing", a false
+# negative on the one measurement the whole submission exists for.
+#
+# So the day it publishes is a day somebody has to act on, and "remember to
+# look" is how the blog channel's baseline was missed entirely.
+#
+# It deliberately does NOT go red while the listing is absent. Absent is the
+# normal state during moderation and a daily red run is an alarm nobody reads.
+# It goes red only when the probe could not ask the question at all, because
+# that is the case a 404 would otherwise be mistaken for.
+#
+# IF IT REPORTS undetermined ON EVERY RUN, THE PROBE IS WRONG, NOT THE SITE.
+# The likeliest cause is findmini.app refusing a datacenter IP or the URL
+# scheme in tools/check_findmini_listing.py being a wrong guess -- its own
+# docstring says the scheme is inferred from two observed app pages. Fix the
+# probe; do not let a permanently red watcher train everyone to ignore it.
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  watch:
+    name: Has findmini.app published the listing yet?
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe every candidate URL
+        id: check
+        run: |
+          set -uo pipefail
+          python3 tools/check_findmini_listing.py | tee findmini.txt
+          STATUS=$(grep '^FINDMINI_LISTING_STATUS=' findmini.txt | tail -1 | cut -d= -f2)
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "status: $STATUS"
+          if [ "$STATUS" = "undetermined" ]; then
+            echo "::error::No candidate URL answered. This run is not evidence either way."
+            exit 1
+          fi
+
+      - name: Open the baseline issue on the day it publishes
+        if: steps.check.outputs.status == 'listed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'FindMini listing is LIVE — take the baseline before arrivals accrue';
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'miniapp',
+            });
+            if (existing.data.some(i => i.title === title)) return;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title,
+              labels: ['miniapp'],
+              body: [
+                'A findmini.app page now answers 200 AND names the app, so the listing is',
+                'published and `tg-miniapp-findminiweb` can start producing arrivals.',
+                '',
+                '**If `miniapp_funnel_snapshots/before-findminiweb.json` does not exist yet,',
+                'the clean before-and-after is already gone.** The tool refuses to overwrite a',
+                'baseline on purpose, so taking one now measures the listing plus whatever it',
+                'has already produced. Take it anyway and label it honestly.',
+                '',
+                '```',
+                'AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/miniapp_funnel.py \\',
+                '  --days 30 --compare before-findminiweb',
+                '```',
+                '',
+                'Read the sliding-window caveat it prints. Both runs count a rolling window',
+                'back from now, so a delta is only this listing\'s effect if the two runs are',
+                'close together relative to that window.',
+                '',
+                'Next catalogue in the running order: miniTelegram, key `tg-miniapp-minitelegram`,',
+                'already registered. tApps Center stays blocked on one observation about',
+                '@app_moderation_bot.',
+              ].join('\n'),
+            });
+
+      - name: Say plainly that absent is normal
+        if: steps.check.outputs.status == 'not_listed'
+        run: |
+          echo "Not published yet. Moderation is stated as under 24 hours but is not a promise."
+          echo "This run is not a failure and does not need reading."

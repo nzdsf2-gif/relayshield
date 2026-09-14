@@ -64,13 +64,32 @@ TON and only TON.
 
 ### Categories
 
-Their list, not ours, so pick from what the form offers. In preference order: **Security**, then
-**Utilities** or **Tools**, then **TON** if it is offered as a category rather than a filter.
+**CORRECTED. My first answer named four categories that do not exist on the form.** I recommended
+Security, Utilities, Tools or TON without having seen the list, which is the same defect as writing
+a BotFather step for a bot whose apps I had never listed: a well-formed instruction written against
+an unexamined state. The options are wallets, trading and analytics, tasks and productivity, and
+loaders.
 
-**Do not file it under Finance or Crypto if a Security option exists.** The catalogue's crypto
-shelves are where the clickers and high-risk dapps sit, which is the same audience-mismatch argument
-that ruled out `@telegtapps` as a destination. We want to be the thing a cautious person finds, not
-another entry in the pile they are trying to check.
+**Pick "tasks and productivity", and it is the only one of the four that is not a false claim.**
+
+The argument is not preference, it is that three of them contradict the submission's own copy:
+
+* **Wallets** is the trap, because it looks closest and it is the worst. The full description a
+  moderator reads two fields later says outright *"It does not connect to your wallet, ask for a
+  seed phrase, or ask you to sign anything."* Filing a non-wallet app under Wallets is a
+  self-contradiction inside one submission, and it puts us in the shelf a cautious user is browsing
+  precisely because they are trying to check something.
+* **Trading and analytics** would claim trading signals or portfolio analytics. We do neither.
+* **Loaders** is clicker and tap-to-earn infrastructure. Wrong audience and a bad neighbourhood for
+  a security product, which is the `@telegtapps` argument again.
+
+**Tasks and productivity is a genuine fit rather than a least-bad fallback.** IDCheck is a utility
+you open to get one thing done and then close. It is not a place you keep money and not a game.
+
+**Two things worth doing while you are there.** If the form allows multi-select, pick that one
+ALONE rather than adding Wallets for reach. And if there is a free-text or "other" field, say
+"security" in it: a catalogue with no security category and a growing number of checker apps is one
+that may add one, and being the app that asked is cheap.
 
 ### Screenshots
 

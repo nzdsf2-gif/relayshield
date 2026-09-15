@@ -11,6 +11,15 @@
 #
 #   HTTP 200, ok:true         the API is fine; the failure was in the browser
 #                             (CORS, or the 4s timeout in check()).
+#
+# THE 4-SECOND TIMEOUT IS THE ONE A STATUS CODE CANNOT SHOW YOU, so this
+# measures it. check() passes timeoutMs = 4000 to AbortSignal.timeout, and an
+# abort throws, and check()'s catch-all returns a verdict with raw = {}. So a
+# response that is perfectly correct but SLOW renders exactly the same card as
+# a rejected one, with no reason line under it, because there is no body to
+# read a reason out of. Step 2 below re-sends the request with curl capped at
+# the same 4 seconds: if step 1 answers 200 and step 2 times out, the API is
+# not broken and our own deadline is what the user hit.
 #   HTTP 429                  the daily KEYLESS PER-IP CAP. Not an outage. The
 #                             Mini App now renders this reason, but only
 #                             because the 429 carries allow-origin -- check
@@ -30,20 +39,54 @@ set -e
 TARGET="$1"
 [ -n "$TARGET" ] || { echo "usage: $0 <url-or-address>"; exit 2; }
 
+# RS_API_ORIGIN exists so this script's own branches can be EXERCISED against a
+# local server rather than only read: api.relayshield.net is egress-blocked from
+# the build container, and an unrun diagnostic is how a verification step ships
+# that cannot return a pass in any state. Leave it unset for the real host.
+ORIGIN="${RS_API_ORIGIN:-https://api.relayshield.net}"
+
 case "$TARGET" in
   http://*|https://*) PATH_="/v1/link-check"; FIELD="url" ;;
   *)                  PATH_="/v1/wallet-risk"; FIELD="address" ;;
 esac
 
-echo "POST https://api.relayshield.net$PATH_  ($FIELD)"
+echo "STEP 1 -- what the API returns, with no deadline of ours in the way"
+echo "POST $ORIGIN$PATH_  ($FIELD)"
 echo
-curl -sS -i --max-time 20 \
-  -X POST "https://api.relayshield.net$PATH_" \
+curl -sS -i --max-time 30 \
+  -w '\n\nTIMING  connect %{time_connect}s  first byte %{time_starttransfer}s  total %{time_total}s\n' \
+  -X POST "$ORIGIN$PATH_" \
   -H 'Content-Type: application/json' \
   -H 'User-Agent: relayshield-widget/1.0' \
   -H 'Origin: https://app.relayshield.net' \
   -d "{\"$FIELD\":\"$TARGET\",\"source\":\"tg-miniapp\"}"
 echo
+echo "----------------------------------------------------------------------"
+echo "STEP 2 -- the SAME request under the app's own 4-second deadline"
 echo
-echo "READ THE STATUS AND THE access-control-allow-origin HEADER TOGETHER."
-echo "A 2xx with no allow-origin is a success the Mini App still cannot use."
+# The -w line is captured rather than printed straight out: curl writes it on
+# failure too, so a timed-out request would otherwise announce itself as
+# "ANSWERED IN 4.00s with HTTP 000", which is the opposite of what happened.
+if S2=$(curl -sS -o /dev/null --max-time 4 \
+     -w 'ANSWERED IN %{time_total}s with HTTP %{http_code}' \
+     -X POST "$ORIGIN$PATH_" \
+     -H 'Content-Type: application/json' \
+     -H 'User-Agent: relayshield-widget/1.0' \
+     -H 'Origin: https://app.relayshield.net' \
+     -d "{\"$FIELD\":\"$TARGET\",\"source\":\"tg-miniapp\"}" 2>/dev/null)
+then
+  echo "$S2"
+else
+  echo "TIMED OUT AT 4s -- this is the app's own deadline, not an API failure."
+  echo "check() aborts here, the catch-all returns raw = {}, and the card says"
+  echo "\"Could not complete the check\" with no reason, because there is no body."
+fi
+echo
+echo "----------------------------------------------------------------------"
+echo "HOW TO READ IT"
+echo
+echo "  step 1 non-2xx                  the API answered and said why. Read the body."
+echo "  step 1 2xx, no allow-origin     a success the browser THROWS AWAY. Ours to fix."
+echo "  step 1 2xx fast, step 2 fine    the API is healthy; look at the client."
+echo "  step 1 2xx SLOW, step 2 times   our 4s deadline is what the user hit."
+echo "  connection refused / no answer  says nothing either way. Re-run once."

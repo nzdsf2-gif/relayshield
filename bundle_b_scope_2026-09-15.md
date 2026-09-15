@@ -1,76 +1,90 @@
-# AWS Bundle B — scoped 2026-09-15, and the order is not the obvious one
+# AWS Bundle B — scoped 2026-09-15
 
-**Bundle B is not a build. Every endpoint in it already exists and is metered.** What is
-missing is packaging, and the packaging is blocked on three things, two of which also block
-Bundle A — which is further along than Bundle B and **has been one change set from
-sellable since 17 July**.
+**This file replaces an earlier version of itself that was wrong.** That version said
+Bundle A's dimensions had never been added to AWS. They had. Bundle A and Bundle D are
+both live, on **two separate product entities**, which is the fact everything below rests
+on. The correction and how I got it wrong are in section 5.
 
 ---
 
-## 1. What is actually built, checked in the code rather than recalled
+## 1. Bundle B is packaging, not a build
 
-Bundle B is *Attack Surface & Supply Chain*, $100/mo minimum, five dimensions
-(`RelayShield_Strategy.md:5374`, approved 2026-07-06). All five endpoints are live:
+*Attack Surface & Supply Chain*, $100/mo minimum, five endpoints, all live and all
+metered today:
 
-| Endpoint | `/v1/metered/` | `/v1/payg/` |
-|---|---|---|
-| `supply-chain` | yes | yes |
-| `asset-intel` | yes | — |
-| `secret-scan` | yes | yes |
-| `threat-actor` | yes | — |
-| `session-risk` | yes | yes |
+| Endpoint | `/v1/metered/` | `/v1/payg/` | Price, read from the live tables |
+|---|---|---|---|
+| `supply-chain` | yes | yes | $0.10 |
+| `asset-intel` | yes | — | $0.15 |
+| `secret-scan` | yes | yes | $0.35 |
+| `threat-actor` | yes | — | $0.30 |
+| `session-risk` | yes | yes | $0.30 |
 
-So the marginal work is a dimension table, a gate, a fulfillment config and an AWS change
-set. Not five endpoints.
+No endpoint needs writing. What is missing is an AWS product and four lines of gating.
 
-## 2. THE FINDING THAT DECIDES THE ORDER: Bundle A's dimensions were never added to AWS
+## 2. Bundle B gets its OWN entity, and that makes it cheaper than it looked
 
-`BUNDLE_A_DIMENSION_NAMES` and `is_bundle_a_call` are in `relayshield_api.py`. The
-fulfillment Lambda carries a full `core_identity_bundle_access` config. The code shipped
-**2026-07-13**.
+    Bundle D   prod-kkvurtspreofy    Agentic Attack Surface
+    Bundle A   prod-f5qkfsxlxs4qg    Core Identity Exposure
+    Bundle B   a third entity, created by the change set below
 
-**And the live product entity does not carry a single Bundle A dimension.** The
-DescribeEntity capture shows six, and all six are Bundle D's:
+`aws_marketplace/bundle_a_*.json` is the exact template, in four artefacts:
+`create_entity` (CreateProduct, UpdateInformation, UpdateTargeting, AddDeliveryOptions,
+AddDimensions), `test_offer` (pricing terms), `go_public` (UpdateVisibility), and a
+stale `add_dimensions` that targets Bundle D's entity from the abandoned
+shared-entity plan.
 
-    agentic_bundle_access      Entitled
-    bulk_identity_risk         ExternallyMetered
-    tech_stack_cve             ExternallyMetered
-    mcp_registry_risk          ExternallyMetered
-    prompt_injection_breach    ExternallyMetered
-    llm_credential_exposure    ExternallyMetered
+**Two things I previously flagged as hazards do not apply, because the entity is new.**
+There is no rate card to replace, so the 2026-07-27 placeholder failure is not reachable
+here; and the one-change-set-in-flight limit is per entity, so Bundle B does not queue
+behind anything on Bundle A or D.
 
-TODO.md item 33 records why: the `AddDimensions` change set failed with
-`ResourceInUseException` in July because another change set was in flight, and the entity
-was **re-checked live on 2026-07-17 and found clear**. Nobody resubmitted. So Bundle A is
-sold in code, gated in code, fulfilled in code, and cannot be bought.
+**CLAUDE ALREADY DID THIS: `aws_marketplace/bundle_b_create_entity.json` is written.**
+Built by reading Bundle A's change set rather than retyping its envelope, so the shape
+AWS already accepted is preserved. Six dimensions (one Entitled monthly minimum plus five
+ExternallyMetered), full usage instructions for all five endpoints, listing copy that
+names its sources and quotes no corpus count.
 
-**My recommendation, and it is mine to be overruled: do Bundle A's AddDimensions before
-Bundle B.** Bundle A is one submission away from revenue against code that has been live
-for two months; Bundle B is that same submission plus a code change in a file with no
-deploy path (section 3). Doing B first means two bundles with code and no rate card
-instead of one, and both change sets touch the same entity, which allows only one in
-flight at a time.
+`test_bundle_b_changeset.py`, six guards, all green:
 
-## 3. THE FILE BUNDLE B HAS TO BE WRITTEN INTO IS IN NO DEPLOY MAP AND NO DRIFT CHECK
+- no corpus count, matched as a SHAPE rather than as today's stale figures;
+- the sources ARE named, so the doctrine reads as a differentiator and not an omission;
+- no external payment route anywhere in the copy, and the usage instructions say outright
+  that AWS handles billing -- the Tier-1 clause that failed Bundle D's visibility request
+  twice;
+- every endpoint has a dimension and every dimension has an endpoint;
+- exactly one Entitled dimension, because dropping it drops the monthly minimum;
+- every change targets the product this change set CREATES, never an existing entity.
 
-`relayshield_bundle_fulfillment.py` holds `BUNDLE_CONFIGS`, which maps an entitlement's
-`Dimension` to its bundle. A Bundle B entry goes there and nowhere else.
+## 3. What is still to do, in order
 
-**It is in neither `deploy_lambdas.yml` nor `lambda_drift_check.yml`.** Source in the repo,
-live traffic from every bundle subscriber, no deploy path, no drift detection — the
-**seventh** instance of that exact combination, and the last one
-(`relayshield_developer_signup.py`) had quietly grown 700 lines including two Stripe
-revenue doors that a repo-sourced deploy would have deleted with no error anywhere.
+1. **Read the fulfillment drift diff.** Section 4. Read-only, one command.
+2. **Grant the catalog permissions.** Section 4.
+3. **Submit `bundle_b_create_entity.json`**, then build `bundle_b_test_offer.json` from
+   Bundle A's, with the five prices in section 1 and a $100/mo minimum.
+4. **The code**, three small edits mirroring Bundle A exactly:
+   - `BUNDLE_B_DIMENSION_NAMES` and `is_bundle_b_call` in `relayshield_api.py` (mapped in
+     both the deployer and the drift check, so this one is safe to write today);
+   - `BUNDLE_B_PRODUCT_CODE`, its entry in `PRODUCT_CODES`, and an
+     `attack_surface_bundle_access` entry in `BUNDLE_CONFIGS` with a `bundle_b_access`
+     flag -- all in `relayshield_bundle_fulfillment.py`, which is what step 1 gates.
+5. **`bundle_b_go_public.json`**, with the entity id typed by hand after creation.
 
-**So writing Bundle B into it blind is the 2026-08-17 mistake, on the file that decides
-who gets entitled to what.**
+## 4. The two real blockers, both verified rather than recalled
 
-**CLAUDE ALREADY DID THIS:** added it to `lambda_drift_check.yml`, watch only, deliberately
-not to the deployer. The function name in the map is a guess from the filename convention
-and is UNVERIFIED; if the run reports UNREADABLE, the name is wrong, not the entry.
+**The fulfillment Lambda is in NO deploy map and NO drift check.**
+`relayshield_bundle_fulfillment.py` holds `BUNDLE_CONFIGS` and `PRODUCT_CODES`, so two of
+step 4's edits land there. It is in neither `deploy_lambdas.yml` nor
+`lambda_drift_check.yml`: source in the repo, live traffic from every bundle subscriber,
+no deploy path, no drift detection. **Seventh instance of that combination**, and the last
+one had grown 700 lines including two Stripe revenue doors that a repo-sourced deploy
+would have deleted with no error anywhere.
 
-**ANDREW RUNS THIS** to settle it without waiting for the nightly check. It is read-only —
-it lists functions, downloads a package and diffs:
+**CLAUDE ALREADY DID THIS:** added it to the drift check, watch only, deliberately not to
+the deployer. The function name in the map is a guess from the filename convention and is
+labelled UNVERIFIED; UNREADABLE means the name is wrong, not the entry.
+
+**ANDREW RUNS THIS.** Read-only: it lists functions, downloads a package and diffs.
 
 ```zsh
 cd ~/dev/relayshield
@@ -81,45 +95,39 @@ git stash push --include-untracked -m "pre-merge untracked"
 git -c pull.rebase=false merge --no-edit FETCH_HEAD
 sh tools/handler_drift.sh relayshield_bundle_fulfillment.py
 ```
+EXPECT: the resolved function name, then either *live is byte-identical to commit X* --
+the stale case, safe, map it in the deployer -- or a list of live-only content, which is
+recovered with `recover_live_handler.yml` first, exactly as developer-signup was.
+STOP IF: the merge conflicts in **only CLAUDE.md** -- expected, keep both sides. A
+conflict in a `.py` or a workflow is different; send me the filename.
 
-EXPECT: the resolved function name, then either *live is byte-identical to commit X* (the
-stale case — safe, map it in the deployer) or a list of live-only content (recover first
-with `recover_live_handler.yml`, exactly as developer-signup was).
-STOP IF: the merge conflicts in **only CLAUDE.md** — expected, keep both sides. A conflict
-in a `.py` or a workflow is different; send me the filename.
+**The role has no catalog permissions.** Read out of
+`iam/snapshots/relayshield-breach-check-role-1sapnwdl.json` directly: `MeterUsage` and
+`ResolveCustomer` are present, `DescribeEntity`, `ListEntities` and `StartChangeSet` are
+all absent. So `StartChangeSet` fails before it reaches AWS's validator. That grant is an
+IAM change on a role carrying 26 inline policies at 10,127 of 10,240 bytes with 11 of 10
+managed slots used, so it is a customer-managed policy on a role already over the cap.
 
-## 4. The third blocker, and it is IAM
+## 5. THE CORRECTION, and what produced it
 
-The IAM snapshot carries `aws-marketplace:MeterUsage`, `BatchMeterUsage` and
-`ResolveCustomer` — **metering only**. `DescribeEntity`, `ListEntities` and `StartChangeSet`
-are all absent, so `tools/marketplace_add_dimension.py` fails even on `--describe`.
+I wrote that Bundle A had never had its dimensions added, and offered a recommendation to
+do Bundle A before Bundle B on that basis. Andrew corrected it. Two mistakes, both
+recorded shapes in this repo:
 
-That grant is itself an IAM change, and the shared role's inline budget is full (26
-policies, 10,127 of 10,240 bytes) with 11 of 10 managed slots used. **So it is a
-customer-managed policy on a role that is already over the cap**, which is the IAM split
-runbook arriving whether we wanted it or not.
+**I read the wrong entity.** The DescribeEntity capture in CLAUDE.md is of
+`prod-kkvurtspreofy`, which is Bundle D's product. Bundle A lives on
+`prod-f5qkfsxlxs4qg`. Its six dimensions were never going to appear in a capture of a
+different product, and I read their absence as evidence. That is "a guard is only as good
+as where it got its expectations", one directory over.
 
-## 5. And the danger that is specific to this, worth restating before anyone submits
+**And I read a July plan as current status.** `TODO.md` item 33 describes Bundle A as
+dimensions on Bundle D's entity, which is what `bundle_a_add_dimensions.json` still
+targets. That plan was abandoned in favour of a separate product.
+`bundle_a_go_public.json` names the new entity id on its own first lines, and I did not
+open it. This file's own rule is that a doc recording an open item is a LEAD, not a fact,
+and the one file that would have settled it was sitting in the same directory as the one
+I did read.
 
-**A change set does not add a dimension. It replaces the whole rate card with whatever you
-hand it, and an empty card is a valid document.** That rolled Bundle D's prices back to
-placeholders once already, on 2026-07-27.
-
-`tools/marketplace_add_dimension.py` guards it: the capture must be a `SaaSProduct`, must
-be under 24 hours old, and must already contain all six live dimensions. **Those guards
-were written for Bundle D and they are exactly what Bundle A and B need too** — a
-submission that adds Bundle B while dropping Bundle D's monthly minimum is the same
-failure with more money on it.
-
-## 6. The order, then
-
-1. **Read the fulfillment drift diff** (section 3). Read-only, one command, and it decides
-   whether the next step is a map or a recovery.
-2. **Grant the catalog permissions** as a customer-managed policy on the deploy role.
-3. **Bundle A `AddDimensions` + pricing terms.** The code is live and tested; this is the
-   cheapest revenue on the list.
-4. **Then Bundle B**: `BUNDLE_B_DIMENSION_NAMES` and `is_bundle_b_call` mirroring Bundle A,
-   a `BUNDLE_CONFIGS` entry with a `bundle_b_access` flag, and its own change set.
-
-Steps 1 and 2 are prerequisites for both bundles, which is the argument for doing them now
-rather than for doing Bundle B now.
+**The check that costs nothing and would have caught it: when a repo holds more than one
+product entity, any claim about a product names the entity id it was read from.** There
+are two live entities and there is about to be a third.

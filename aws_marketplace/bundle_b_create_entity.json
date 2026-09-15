@@ -1,0 +1,142 @@
+{
+  "Catalog": "AWSMarketplace",
+  "ChangeSet": [
+    {
+      "ChangeType": "CreateProduct",
+      "ChangeName": "CreateProductChange",
+      "Entity": {
+        "Type": "SaaSProduct@1.0"
+      },
+      "DetailsDocument": {}
+    },
+    {
+      "ChangeType": "UpdateInformation",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "ProductTitle": "RelayShield - Attack Surface & Supply Chain API Bundle",
+        "ShortDescription": "RelayShield Attack Surface & Supply Chain delivers metered access to five exposure detection APIs, billed entirely through AWS Marketplace. It covers third-party and vendor exposure, asset intelligence sweeps, public artifact secret detection, threat actor and campaign lookup, and session hijack risk. The bundle is licensed independently, with no dependency on any other RelayShield product or bundle.",
+        "LongDescription": "Attack Surface & Supply Chain is built for teams whose exposure does not stop at their own perimeter.\n\nThe bundle screens vendor and third-party domains for exposed credentials, lookalike registrations and breach history; registers an asset watchlist and sweeps it as new exposure is observed; detects live credentials left in public artifacts across code hosts and package registries; looks up actors, campaigns and CVEs against exploit chatter; and reports active session hijack risk from stolen session artefacts.\n\nSession hijack risk is the signal most often missing from an identity programme. A stolen session cookie is not remediated by a password reset, because the session itself is the credential. Surfacing it alongside supply chain and secret exposure is what lets a team tell a stale leak from an intrusion that is already underway.\n\nIntelligence is collected continuously from monitored criminal Telegram marketplaces, infostealer log dumps, public indicator feeds and public code and package artifacts. RelayShield deliberately does not quote a corpus headline: most published totals are dominated by ingested public feeds that every buyer already has, and a number that is correct this month is wrong next month. What is durable is the sources and what the endpoints do with them.\n\nAll five endpoints are REST, authenticated with a single header, and metered per call through AWS Marketplace. There is no separate account to create and no payment method to add.",
+        "Highlights": [
+          "Five attack surface and supply chain APIs licensed as one bundle through AWS Marketplace, with no dependency on any other bundle or platform-wide subscription.",
+          "Session hijack detection from stolen session artefacts, the exposure a password reset does not remediate, correlated against the same identity as secret and supply chain findings.",
+          "Collected continuously from monitored criminal Telegram marketplaces, infostealer log dumps, public indicator feeds and public code and package artifacts."
+        ],
+        "SearchKeywords": [
+          "supply chain security",
+          "third party risk",
+          "attack surface",
+          "secret scanning",
+          "session hijacking",
+          "threat intelligence",
+          "credential exposure",
+          "asset intelligence"
+        ],
+        "Categories": [
+          "Security"
+        ],
+        "LogoUrl": "https://relayshield-public-assets.s3.amazonaws.com/bundle_b/relayshield_logo_bundle_b.png",
+        "AdditionalResources": [],
+        "SupportDescription": "Email support: support@relayshield.net. Full API documentation, authentication steps, endpoint URLs, and sample requests are published at https://api.relayshield.net/developers"
+      }
+    },
+    {
+      "ChangeType": "UpdateTargeting",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "PositiveTargeting": {
+          "BuyerAccounts": [
+            "442429445748"
+          ]
+        }
+      }
+    },
+    {
+      "ChangeType": "AddDeliveryOptions",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": {
+        "DeliveryOptions": [
+          {
+            "Details": {
+              "SaaSUrlDeliveryOptionDetails": {
+                "FulfillmentUrl": "https://api.relayshield.net/marketplace/bundle-fulfillment",
+                "UsageInstructions": "Overview\nRelayShield Attack Surface & Supply Chain (Bundle B) is a REST API. All endpoints are served from a single base URL and authenticated with one header.\n\nBase URL\nhttps://api.relayshield.net\n\nGetting your API key\n1. Subscribe to this product in AWS Marketplace.\n2. On the \"Set up your account\" page after subscribing, enter the email address where your key should be sent.\n3. Your API key is emailed automatically when the subscription activates. No separate account or payment method is required; all billing is handled by AWS Marketplace.\n4. If the email has not arrived within 15 minutes, contact support@relayshield.net with your AWS account ID.\n\nAuthentication\nEvery request requires this header:\nX-RS-API-KEY: YOUR_API_KEY\n\nVerifying your access\nRun this call to confirm your key is active. A 200 response confirms the endpoint is reachable and your key is valid.\n\ncurl -X POST https://api.relayshield.net/v1/metered/supply-chain \\\n  -H \"X-RS-API-KEY: YOUR_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"domains\": [\"example.com\"]}'\n\nEndpoints\n\n1. Supply Chain Exposure Check\nPOST /v1/metered/supply-chain\nBody: {\"domains\": [\"vendor1.com\", \"vendor2.com\"]}\nScreens up to ten vendor domains in one call for exposed credentials, lookalike registrations and breach history.\n\n2. Asset Intelligence Sweep\nPOST /v1/metered/asset-intel\nBody: {\"assets\": [\"example.com\", \"203.0.113.0/24\"]}\nRegisters an asset watchlist and sweeps it against newly observed exposure.\n\n3. Public Artifact Secret Scan\nPOST /v1/metered/secret-scan\nBody: {\"domain\": \"example.com\"}\nDetects live credentials in public artifacts across six sources, including code hosts and package registries.\n\n4. Threat Actor and Campaign Lookup\nPOST /v1/metered/threat-actor\nBody: {\"query\": \"CVE-2026-1234\"}\nReturns exploit chatter and actor or campaign context collected from monitored criminal channels.\n\n5. Session Hijack Risk\nPOST /v1/metered/session-risk\nBody: {\"email\": \"user@example.com\"}\nReports active session and adversary-in-the-middle hijack risk from stolen session artefacts. A stolen session is not remediated by a password reset, which is what separates this from a breach check.\n\nResponses\nEvery endpoint returns JSON in the form {\"ok\": true, \"data\": {...}}. An error returns {\"ok\": false, \"error\": \"...\"} with a non-2xx status. Only a 2xx response is metered.\n\nRate limits and billing\nUsage is metered per call and reported to AWS Marketplace. There is no separate invoice and no payment method to add.\n\nSupport\nEmail support@relayshield.net. Full API documentation, authentication steps, endpoint URLs and sample requests are published at https://api.relayshield.net/developers\n"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "ChangeType": "AddDimensions",
+      "Entity": {
+        "Type": "SaaSProduct@1.0",
+        "Identifier": "$CreateProductChange.Entity.Identifier"
+      },
+      "DetailsDocument": [
+        {
+          "Key": "attack_surface_bundle_access",
+          "Name": "Attack Surface & Supply Chain - Monthly Access",
+          "Description": "Monthly minimum commitment for Attack Surface & Supply Chain API access, five endpoints.",
+          "Unit": "Units",
+          "Types": [
+            "Entitled"
+          ]
+        },
+        {
+          "Key": "supply_chain_calls",
+          "Name": "Supply Chain Exposure Check",
+          "Description": "Checks a vendor or third-party domain for exposed credentials, lookalikes and breach history.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "asset_intel_calls",
+          "Name": "Asset Intelligence Sweep",
+          "Description": "Registers an asset watchlist and sweeps it against newly observed exposure.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "secret_scan_calls",
+          "Name": "Public Artifact Secret Scan",
+          "Description": "Detects live credentials in public artifacts across six sources, including code hosts and package registries.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "threat_actor_calls",
+          "Name": "Threat Actor and Campaign Lookup",
+          "Description": "Looks up an actor, campaign or CVE against exploit chatter collected from criminal channels.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        },
+        {
+          "Key": "session_risk_calls",
+          "Name": "Session Hijack Risk",
+          "Description": "Detects active session and adversary-in-the-middle hijack risk from stolen session artefacts.",
+          "Unit": "Units",
+          "Types": [
+            "ExternallyMetered"
+          ]
+        }
+      ]
+    }
+  ]
+}

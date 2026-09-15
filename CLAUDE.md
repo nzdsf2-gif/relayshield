@@ -4856,3 +4856,70 @@ new place. When a reply names it as a destination, name it as `api.relayshield.n
 **There is nothing here to weigh up and no trade-off to surface.** It is a statement of fact about a
 live surface. Do not propose the root, do not ask which one is meant, and do not write a section
 reasoning about it. Read this line and move on.
+
+## THERE ARE THREE AWS PRODUCT ENTITIES, NOT ONE. BUNDLE A AND BUNDLE D ARE BOTH LIVE.
+
+**2026-09-15, after I told the founder Bundle A's dimensions had never been added to AWS
+and he corrected it in three words: "You are wrong!!!"** He is right, and the way I got
+there is worth more than the fact.
+
+    prod-kkvurtspreofy    Bundle D, Agentic Attack Surface      LIVE, public
+    prod-f5qkfsxlxs4qg    Bundle A, Core Identity Exposure      LIVE
+    (a third)             Bundle B, Attack Surface & Supply Chain -- change set written
+
+**EVERY BUNDLE AFTER D GETS ITS OWN SaaSProduct ENTITY.** That is not a detail, it is the
+architecture, and two hazards this file records loudly do not apply because of it: a
+change set cannot replace another product's rate card, and the one-change-set-in-flight
+limit is PER ENTITY, so bundles do not queue behind each other.
+
+### TWO MISTAKES, BOTH SHAPES THIS FILE ALREADY NAMES
+
+**1. I read the wrong entity and called the absence evidence.** The DescribeEntity capture
+recorded above is of `prod-kkvurtspreofy`. Bundle A's dimensions were never going to
+appear in a capture of a different product. **"A guard is only as good as where it got its
+expectations"**, one directory over: I had the right discipline and pointed it at the
+wrong artefact.
+
+**2. I read a July plan as current status.** `TODO.md` item 33 describes Bundle A as
+dimensions ON Bundle D's entity, and `aws_marketplace/bundle_a_add_dimensions.json` still
+targets `prod-kkvurtspreofy` because it is from that abandoned plan. **The plan changed.**
+`bundle_a_create_entity.json` creates a new product and `bundle_a_go_public.json` names
+`prod-f5qkfsxlxs4qg` on its own first lines. **Both files sat in the same directory as the
+one I did read, and I did not open either.** This file's own rule is that a doc recording
+an open item is a LEAD, not a fact -- and a stale CHANGE SET is a doc.
+
+### THE RULE, and it is one line
+
+**When a repo holds more than one product entity, any claim about a product names the
+entity id it was read from.** "Bundle A is not live" is unsupportable without
+`prod-f5qkfsxlxs4qg` beside it. The same applies to any surface with siblings: two HF
+Spaces, two Telegram sessions, three bundles. **Naming the id is what makes the claim
+checkable, and it is what stops the next session reading a neighbour's capture as this
+one's.**
+
+### WHAT IS BUILT FOR BUNDLE B, so it is not re-derived
+
+`aws_marketplace/bundle_b_create_entity.json` -- CreateProduct, UpdateInformation,
+UpdateTargeting, AddDeliveryOptions, AddDimensions. Built by READING Bundle A's change set
+and reusing its envelope rather than retyping it, so the shape AWS already accepted is
+preserved. Six dimensions: `attack_surface_bundle_access` Entitled, plus five
+ExternallyMetered at the prices the live tables carry -- supply-chain $0.10, asset-intel
+$0.15, secret-scan $0.35, threat-actor $0.30, session-risk $0.30.
+
+`test_bundle_b_changeset.py` holds six guards, and two of them are the AWS review cycles
+this programme has already paid for: **no corpus count** (matched as a SHAPE, not as
+today's stale figures, because the next wrong number is a different number) and **no
+external payment route**, with a positive assertion that the usage instructions say
+outright that AWS handles billing -- the Tier-1 clause that failed Bundle D's visibility
+request twice. The other four pin that every endpoint has a dimension, every dimension has
+an endpoint, exactly one dimension is Entitled, and every change targets the product the
+change set CREATES rather than an existing entity.
+
+**Still blocked on two things, both verified from the artefact rather than recalled.** The
+role has `MeterUsage` and `ResolveCustomer` and lacks `DescribeEntity`, `ListEntities` and
+`StartChangeSet`, read straight out of the IAM snapshot. And
+`relayshield_bundle_fulfillment.py` -- where `BUNDLE_CONFIGS` and `PRODUCT_CODES` live, so
+where two of Bundle B's code edits must land -- is in NEITHER `deploy_lambdas.yml` NOR
+`lambda_drift_check.yml`. **Seventh instance of source-in-repo, live traffic, no deploy
+path.** Added to the drift check only; `sh tools/handler_drift.sh
+relayshield_bundle_fulfillment.py` reads the first diff.

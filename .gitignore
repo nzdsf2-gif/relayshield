@@ -91,6 +91,11 @@ coverage/
 # screenshot that is not tracked is a screenshot the merge does not deliver,
 # which is the whole point of putting images in the repo rather than the chat.
 !assets/miniapp/store/*.png
+
+# The 1080x1920 set, same generator, same rule. tg.app requires 1280x720 or
+# 1080x1920 and rejects anything else, so the 900x1600 ton.app set is the
+# wrong size there; both are kept rather than one being regenerated each time.
+!assets/miniapp/store_1080x1920/*.png
 .telethon_venv
 zapier_partner_test_key.txt
 

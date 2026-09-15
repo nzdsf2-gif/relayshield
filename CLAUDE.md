@@ -4808,3 +4808,51 @@ run before it shipped, which is the thing that did not happen to the curl line.
 it UNVERIFIED. I had run neither, because a one-line curl does not feel like a
 command -- and it is the line the reader trusts most, because it is the one that
 tells them whether everything else worked.
+
+## THE API LANDING PAGE IS `https://api.relayshield.net/developers`. SETTLED. DO NOT RELITIGATE.
+
+**Written 2026-09-15 at Andrew's explicit instruction, in his words: *"The actual url is
+https://api.relayshield.net/developers. We've been through this ad infinitum in prior sessions.
+Write a note to your Claude.md memory so you never relitigate this statement of fact again."***
+
+**THE FACT, and it is not a preference, a recommendation, or a thing to re-derive:**
+
+    https://api.relayshield.net/developers        the API landing page. THIS URL.
+    https://api.relayshield.net                   the API HOST. Not the landing page.
+
+**The bare host is where ENDPOINTS live** -- `/v1/link-check`, `/v1/wallet-risk`, `/badge.js`, the
+marketplace fulfillment path, `zapier-relayshield`'s `API_BASE`, the XSOAR "Server URL" field. Those
+uses are correct and must not be "fixed" into `/developers`; they are a different thing.
+
+**Everywhere a HUMAN or a LISTING is pointed at the landing page, the path is `/developers`.** A
+catalogue's Website field, an outreach message, a blog link, a marketplace listing, a README, a chat
+reply that names the URL. `cloudflare_worker_miniapp.js` already has this right --
+`const DEVELOPERS = API_BASE + "/developers";` -- and that constant, not a hand-typed string, is the
+shape to copy.
+
+**THE ROOT RENDERING SOMETHING IS NOT EVIDENCE AND IS PROBABLY WHY THIS KEEPS COMING BACK.**
+`api.relayshield.net` in a browser returns a page titled *"RelayShield API: Security Intelligence for
+Developers"*. **That does not make the root the address.** A future session that opens the root, sees
+the developer page, and concludes the landing page "is at api.relayshield.net" will be wrong in
+exactly the way every previous session was wrong, and will spend one of Andrew's rounds being
+corrected. The page having more than one route to it does not give it more than one address.
+
+**AND `?source=` BELONGS ON `/developers`, WHICH IS THE HALF THAT COSTS REAL MONEY IF IT DRIFTS.**
+Every attribution key in `_SOURCE_BANNERS` is read by `handle_landing_page` in
+`relayshield_developer_signup.py`. So:
+
+    https://api.relayshield.net/developers?source=tg-miniapp-tonapp    CORRECT
+    https://api.relayshield.net?source=tg-miniapp-tonapp               WRONG, and it is FD-8's shape
+
+A `?source=` hung on the bare root is a key that is sent, is not read by the banner table, and logs
+nothing under that key -- attribution that looks like it worked, which is the four-month defect this
+repo already paid for once. **`test_miniapp_routes.py` fails on that form**, proven by writing one.
+
+**In PROSE, say the URL rather than "the API landing site"** whenever the reader might need to open
+it. The phrase is fine as a category -- it is Andrew's own, and this file uses it -- but a sentence
+that leaves someone guessing the path has not delivered the thing they needed, which is rule 9 in a
+new place. When a reply names it as a destination, name it as `api.relayshield.net/developers`.
+
+**There is nothing here to weigh up and no trade-off to surface.** It is a statement of fact about a
+live surface. Do not propose the root, do not ask which one is meant, and do not write a section
+reasoning about it. Read this line and move on.

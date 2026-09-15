@@ -1254,5 +1254,52 @@ class TestTheKeylessCapIsReadableByTheClientThatHitsIt(unittest.TestCase):
 
 
 
+class TestTheLandingPageURLIsNeverTheBareRoot(unittest.TestCase):
+    """`https://api.relayshield.net/developers` IS THE LANDING PAGE. THE BARE
+    HOST IS NOT, AND THIS HAS COST REPEATED ROUNDS.
+
+    The bare host is correct for ENDPOINTS -- /v1/*, /badge.js, the marketplace
+    fulfillment path -- so this does not ban it. It bans the one form that is
+    always wrong and always silent: a ?source= attribution key hung on the root.
+
+    handle_landing_page in relayshield_developer_signup.py reads ?source= and
+    renders the banner. A key sent to the root is accepted by nothing, logs
+    nothing under that key, and renders no banner -- attribution that looks like
+    it worked, which is FD-8's shape and four months of it."""
+
+    BAD = re.compile(r"api\.relayshield\.net/?\?(?:source|src)=")
+
+    def _files(self):
+        for pattern in ("*.md", "*.py", "*.js", "*.json", "*.sh"):
+            for p in ROOT.glob(pattern):
+                yield p
+
+    def test_no_source_key_is_hung_on_the_bare_host(self):
+        offenders = []
+        for p in self._files():
+            if p.name in ("CLAUDE.md", Path(__file__).name):
+                # Both quote the wrong form in order to forbid it. Prose
+                # describing a defect is not the defect -- the lesson this
+                # suite has now learned six times.
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for m in self.BAD.finditer(text):
+                line = text[:m.start()].count("\n") + 1
+                offenders.append(f"{p.name}:{line}")
+        self.assertEqual(offenders, [],
+                         "?source= belongs on /developers, never on the bare host: "
+                         + ", ".join(offenders))
+
+    def test_the_worker_derives_the_landing_url_rather_than_typing_it(self):
+        code = strip_js_comments(WORKER)
+        self.assertIn('const DEVELOPERS = API_BASE + "/developers";', code,
+                      "the landing URL is derived from API_BASE, so the path "
+                      "cannot drift away from /developers in one place only")
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

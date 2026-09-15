@@ -92,7 +92,9 @@
       "destination": "ton.app, the TON dApp catalogue",
       "audience": null,
       "audience_note": "UNMEASURED. ton.app is the TON ecosystem's own catalogue and the one destination where TON-only is the HEADLINE rather than a limitation. Its own Terms of Service state that developers may submit an application for listing and that acceptance is at their discretion -- read from the destination's own page, not from a blog about it.",
-      "status": "ready"
+      "status": "submitted",
+      "submitted_at": "2026-09-15",
+      "submission_note": "SUBMITTED 2026-09-15 through ton.app's own developer form. Awaiting review. The screenshots had to be generated at exactly 900x1600 -- ton.app states that resolution and an iPhone screenshot is 1179x2556, the wrong size AND the wrong aspect ratio, which is why dragging one in was rejected. Nothing about email or drag-and-drop was involved."
     },
     {
       "rank": 8,
@@ -101,7 +103,9 @@
       "destination": "tg.app, a Telegram apps and bots catalogue",
       "audience": null,
       "audience_note": "UNMEASURED. Described as free to list with a quick review. UNVERIFIED from the container: tg.app is egress-blocked here, so that is a search summary rather than their own page, and the founder's first step is to read the header and footer for the submission route.",
-      "status": "ready"
+      "status": "approved",
+      "submitted_at": "2026-09-15",
+      "submission_note": "SUBMITTED AND APPROVED 2026-09-15, the same day, through tg.app's own Creator Studio web form. Listed as 'Scam Checker | RelayShield IDCheck', Mini App, category Tools. THE FIRST LISTING OF OURS THAT IS ACTUALLY LIVE ON A CATALOGUE rather than queued behind a review. THE TITLE IS DELIBERATELY NOT THE BRAND ALONE. tg.app's own guidance is that Telegram search favours titles matching what users type, and nobody types 'RelayShield' -- so the listing leads with the term and keeps the brand attached. This changes NOTHING in BotFather: the app title stays 'RelayShield IDCheck' and the short name stays 'idcheck', because a catalogue title and a Mini App title are different fields on different systems and renaming a live surface for a search benefit a listing already gives you is a write with no upside. Its Claim Listing search returned no existing RelayShield record, so this created the entry rather than duplicating one."
     },
     {
       "rank": 9,

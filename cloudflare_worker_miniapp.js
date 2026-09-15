@@ -478,8 +478,27 @@ const HEADS = {
   high:     "Do not proceed",
   medium:   "Treat with caution",
   low:      "Nothing known against it",
-  unknown:  "Could not complete the check",
+  unknown:  "No match in any source we check",
 };
+
+/* "unknown" CARRIES TWO OPPOSITE MEANINGS AND THE PAGE COLLAPSED THEM INTO ONE.
+   check() returns level "unknown" both for a target that WAS screened against
+   all three sources and matched none of them -- the MOST COMMON outcome for an
+   ordinary URL, as the caveat below has said all along -- and for a call that
+   never completed. Verdict.ok is the discriminator and the widget uses it;
+   this page read only .level, so every clean URL rendered the heading
+   "Could not complete the check" directly above body copy naming exactly what
+   had been checked. The two halves of one card contradicted each other, on the
+   outcome most users see, and the share image carried the same heading out of
+   the app into somebody else's chat.
+
+   Same shape as the widget's own split, which is why HEAD_UNCHECKED is a
+   separate constant rather than a second table: there is one failure wording
+   and it must not be reachable from a completed check. */
+const HEAD_UNCHECKED = "Could not complete the check";
+function headFor(level, ok) {
+  return level === "unknown" && !ok ? HEAD_UNCHECKED : HEADS[level];
+}
 
 const $ = (id) => document.getElementById(id);
 let last = null;
@@ -696,10 +715,14 @@ async function run() {
   catch (e) { v = { level: "unknown", target: value, reasons: ["The check did not complete."] }; }
 
   const level = HEADS[v.level] ? v.level : "unknown";
-  last = { target: v.target || value, level, reasons: v.reasons || [] };
+  /* STRICTLY === true. The catch above builds a plain object with no ok field,
+     and check() only ever sets ok on a call that came back, so anything other
+     than an explicit true is an unchecked target. */
+  const ok = v.ok === true;
+  last = { target: v.target || value, level, ok, reasons: v.reasons || [] };
 
   $("out").dataset.level = level;
-  $("head").textContent = HEADS[level];
+  $("head").textContent = headFor(level, ok);
   $("target").textContent = last.target;
   const ul = $("reasons");
   ul.textContent = "";
@@ -712,7 +735,9 @@ async function run() {
     level === "low"
       ? "This means nothing known against it, which is not the same as safe."
       : level === "unknown"
-        ? "Checked against our criminal-channel indicator corpus, Google Safe Browsing and domain age. None of them knows this one. That is an absence of evidence, not proof it is safe."
+        ? (ok
+            ? "Checked against our criminal-channel indicator corpus, Google Safe Browsing and domain age. None of them knows this one. That is an absence of evidence, not proof it is safe."
+            : "The check did not complete, so this was not screened at all. Treat it as unchecked, not as safe, and try it again in a moment.")
         : "Based on indicators seen in criminal channels and public feeds.";
 
   // The offer is made AFTER a result, because that is when it is relevant, and
@@ -735,9 +760,11 @@ async function run() {
   $("cta-line").textContent =
     level === "critical" || level === "high"
       ? "Flagged. If a link like this reached you, it is worth knowing whether your own email or phone is already exposed."
-      : level === "unknown"
+      : level === "unknown" && ok
         ? "Not in any source we check. That is not the same as safe, and it says nothing about you. Checking your own email is a separate question with a definite answer."
-        : "RelayShield can watch your email, phone and wallets for breaches, SIM swaps and stolen sessions.";
+        : level === "unknown"
+          ? "Nothing was established either way here. Whether your own email or phone is already exposed is a separate question, and that one has a definite answer."
+          : "RelayShield can watch your email, phone and wallets for breaches, SIM swaps and stolen sessions.";
   /* RESTORE THE CTA LINK. The bot-handle branch above repoints it at the
      developer docs, and without this the NEXT check -- an ordinary URL, by an
      ordinary user -- would still offer them developer documentation. A shared
@@ -1286,7 +1313,7 @@ $("share").addEventListener("click", () => {
   g.fillStyle = colours[last.level] || "#94a3b8"; g.fillRect(0, 0, 12, c.height);
   g.fillStyle = "#f8fafc";
   g.font = "bold 44px -apple-system, system-ui, sans-serif";
-  g.fillText(HEADS[last.level], 48, 96);
+  g.fillText(headFor(last.level, last.ok), 48, 96);
   g.fillStyle = "#94a3b8";
   g.font = "24px ui-monospace, Menlo, monospace";
   const shown = last.target.length > 46 ? last.target.slice(0, 45) + "\u2026" : last.target;

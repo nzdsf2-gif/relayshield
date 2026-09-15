@@ -1141,5 +1141,74 @@ class TestWatchTabExplainsItself(unittest.TestCase):
             self.assertNotIn(chain, block)
 
 
+class TestUnknownSeparatesCheckedFromUnchecked(unittest.TestCase):
+    """`unknown` MEANT TWO OPPOSITE THINGS AND THE CARD RENDERED BOTH AT ONCE.
+
+    check() returns level "unknown" for a target screened against all three
+    sources that matched none of them -- the most common outcome for an ordinary
+    URL -- and for a call that never came back. Verdict.ok is the discriminator,
+    and the widget has always used it. The page read only .level, so a clean URL
+    got the heading "Could not complete the check" directly above body copy
+    naming exactly what had been checked, and the SHARE IMAGE carried that
+    heading out of the app into somebody else's chat.
+
+    Both halves are pinned: the function is EXECUTED out of the served module,
+    and the two call sites are checked with comments stripped, because the
+    comment above headFor necessarily quotes the wording it forbids."""
+
+    def test_headFor_actually_distinguishes_the_two(self):
+        if not shutil.which("node"):
+            self.skipTest("node is not installed")
+        mod = served_module()
+        i = mod.index("const HEADS = {")
+        j = mod.index("const $ = (id) =>", i)
+        block = mod[i:j]
+        harness = block + """
+const out = {
+  checked:   headFor("unknown", true),
+  unchecked: headFor("unknown", false),
+  high:      headFor("high", true),
+  highFail:  headFor("high", false),
+};
+console.log(JSON.stringify(out));
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+            f.write(harness); path = f.name
+        try:
+            r = subprocess.run(["node", path], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            got = json.loads(r.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(path)
+
+        self.assertNotEqual(got["checked"], got["unchecked"],
+                            "a completed check and a failed one render the same heading")
+        # The failure wording must be reachable ONLY from a failure.
+        for word in ("could not", "did not", "failed"):
+            self.assertNotIn(word, got["checked"].lower(),
+                             "a completed check is being reported as a failure: "
+                             + got["checked"])
+        self.assertIn("could not", got["unchecked"].lower(),
+                      "a call that never came back must say so: " + got["unchecked"])
+        # A real finding is a real finding whatever ok says; only "unknown" splits.
+        self.assertEqual(got["high"], got["highFail"])
+        self.assertIn("do not proceed", got["high"].lower())
+
+    def test_both_render_sites_go_through_headFor(self):
+        """The verdict card AND the share canvas. The share image is the one
+        that leaves the app, so it is the more expensive of the two to get
+        wrong and was the easier one to miss."""
+        code = strip_js_comments(WORKER)
+        self.assertIn('$("head").textContent = headFor(level, ok);', code,
+                      "the verdict heading must be chosen on ok as well as level")
+        self.assertIn("g.fillText(headFor(last.level, last.ok)", code,
+                      "the share card still indexes HEADS directly, so a shared "
+                      "image of a clean URL says the check failed")
+        self.assertIn("const ok = v.ok === true;", code,
+                      "ok must be read strictly: the catch branch builds a plain "
+                      "object with no ok field at all, so a truthiness test would "
+                      "read every failure as a completed check")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -75,6 +75,25 @@ jobs:
             # deciding -- live-only content means recover it, main's own
             # commits in reverse means simply add it to deploy_lambdas.yml.
             ["relayshield_feed_maintainer.py"]="relayshield-feed-maintainer"
+            # Added 2026-09-15, while scoping AWS Bundle B. SEVENTH instance of
+            # the same combination: source in the repo, LIVE and serving every
+            # AWS Marketplace bundle subscriber through
+            # /marketplace/bundle-fulfillment, and in NEITHER map.
+            #
+            # It matters more than most, because this is the file Bundle B has
+            # to be REGISTERED in -- BUNDLE_CONFIGS maps an entitlement's
+            # Dimension to its bundle -- so a Bundle B entry written blind
+            # would be written into a file whose live copy nobody has ever
+            # compared against main. That is the relayshield_developer_signup
+            # case exactly, and that one had grown 700 lines of billing path.
+            #
+            # DRIFT CHECK ONLY, deliberately, and the deployer entry waits on
+            # the first diff being READ. The name below is a guess from the
+            # filename convention and is UNVERIFIED: if this reports UNREADABLE,
+            # fix the name, do not drop the entry. The read-only command that
+            # resolves it against AWS is
+            #   sh tools/handler_drift.sh relayshield_bundle_fulfillment.py
+            ["relayshield_bundle_fulfillment.py"]="relayshield-bundle-fulfillment"
             ["relayshield_api.py"]="relayshield-api"
             ["relayshield_breach_monitor.py"]="relayshield-breach-monitor"
             # Added 2026-08-30. Source in the repo since 2026-07-07, live and

@@ -4757,3 +4757,54 @@ correction came from the founder each time.
 candidate. Last updated December 2024 by its own header, **no CONTRIBUTING.md at all** (404, so no
 submission route exists), and ranked purely by monthly users with a top thirty of PAWS, Blum and
 Hamster Kombat. A stale clicker leaderboard.
+
+## THE VERIFICATION STEP I SHIPPED COULD NOT RETURN A PASS IN ANY STATE
+
+**2026-09-15.** The founder pushed main, deploy_miniapp run 17 went green on
+`120a1cf`, the key deployed correctly, and he ran the check I had written
+directly underneath it:
+
+    curl -sS https://app.relayshield.net/ | grep -c tg-miniapp-tonapp
+    0
+
+**Nothing was wrong. The probe was incapable of returning 1.** The Worker
+resolves the key with `sourceFor(url.searchParams.get("startapp") || "")`, so a
+request carrying NO `?startapp=` resolves to the generic `tg-miniapp` and
+substitutes that into `__SOURCE__`. The key being asked about never appears in
+the response of an unparameterised request, deployed or not.
+
+**That is this repo's own "a probe that takes a route the real client does not
+take proves nothing" rule, broken in the verification step of the very commit
+that deploys the key** -- and it is the `/v1/ton-address` instrumentation
+lesson and the unsigned-POST watchlist probe for the third time. The cheapest
+request is the one a probe reaches for, and it is systematically the one that
+skips the thing being tested.
+
+**AND IT COST MORE THAN A ROUND, WHICH IS THE PART WORTH CARRYING.** A `0` from
+a check I labelled EXPECT/STOP IF reads as "the deploy failed" and the next move
+is to go looking at Cloudflare, at wrangler, at the DNS record -- all of which
+were fine. **A wrong verification is more expensive than no verification**,
+exactly as a wrong filter in a measurement tool is worse than no tool: both
+produce a number the reader acts on.
+
+**THE FIX IS A COMMITTED SCRIPT, NOT A BETTER ONE-LINER.**
+`tools/verify_miniapp_source_key.sh <key>` requests the page WITH the parameter
+and separates the three states, which are three different problems:
+
+    LIVE        the edge echoes the key into const SOURCE
+    DOWNGRADED  the edge answered with the GENERIC key -- registered on a branch,
+                or the deploy did not run. This is the state that looks like
+                working attribution and is not.
+    UNREACHABLE nothing answered. Says nothing about the key either way.
+
+It prints the `const SOURCE = "..."` line it matched on rather than a count,
+because a check that says something is wrong owes the reader the evidence that
+says WHICH thing. `RS_MINIAPP_ORIGIN` exists so the live code path can be
+EXERCISED against a local render instead of only read -- all three branches were
+run before it shipped, which is the thing that did not happen to the curl line.
+
+**THE GENERAL FORM: a verification line in a chat reply is a command, and rule
+14 applies to it exactly as it applies to the fix above it.** Run it, or label
+it UNVERIFIED. I had run neither, because a one-line curl does not feel like a
+command -- and it is the line the reader trusts most, because it is the one that
+tells them whether everything else worked.

@@ -1210,5 +1210,49 @@ console.log(JSON.stringify(out));
                       "read every failure as a completed check")
 
 
+class TestTheKeylessCapIsReadableByTheClientThatHitsIt(unittest.TestCase):
+    """THE 429 WAS THE ONE RESPONSE IN ITS PATH WITH NO CORS HEADER.
+
+    Reported as a TON address returning "Could not complete the check" inside
+    the Mini App. Every neighbouring return in relayshield_api.py's dispatch
+    sets Access-Control-Allow-Origin; the keyless-quota 429 set only
+    Content-Type, so a browser DISCARDED it after it arrived, the fetch
+    rejected, check() resolved to ok:false, and a daily limit -- which the
+    reader can act on -- rendered exactly like an outage, which they cannot.
+
+    curl reads that body perfectly, so every terminal test passed on a response
+    the only client receiving it could not read. Same shape as the watchlist
+    preflight, one layer in."""
+
+    def test_the_429_carries_cors(self):
+        # COMMENTS STRIPPED FIRST, not second. The fix carries a comment
+        # explaining why the header is there, so it names the header -- and a
+        # naive search would pass on code that had lost it. Sixth occurrence of
+        # that collision in this suite; this one was written stripped.
+        api = (ROOT / "relayshield_api.py").read_text(encoding="utf-8")
+        code = "\n".join(l for l in api.splitlines() if not l.lstrip().startswith("#"))
+        i = code.index("keyless scan quota exceeded")
+        j = code.index('"statusCode": 429', i)
+        head = code[j:code.index('"body"', j)]
+        self.assertIn("Access-Control-Allow-Origin", head,
+                      "a 429 with no allow-origin is discarded by the browser, so "
+                      "the cap is indistinguishable from an outage in the Mini App")
+
+    def test_the_page_renders_the_servers_reason_when_there_is_one(self):
+        """check() keeps the response body on Verdict.raw. Throwing it away is
+        what made a readable limit unreadable."""
+        code = strip_js_comments(WORKER)
+        self.assertIn("function serverReason(v)", code)
+        self.assertIn("serverReason(v)", code[code.index("$(\"caveat\").textContent"):],
+                      "the caveat must use the server's reason when the check failed")
+        self.assertIn("v.raw", code, "the reason comes off the verdict's raw body")
+
+    def test_the_reason_is_never_rendered_as_html(self):
+        """It is server text on a user's screen. textContent, never innerHTML --
+        the rule the reasons list has carried since the widget shipped."""
+        self.assertNotIn(".innerHTML", strip_js_comments(WORKER))
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

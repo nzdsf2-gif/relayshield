@@ -12910,7 +12910,23 @@ def lambda_handler(event: dict, context) -> dict:
                 logger.warning("keyless scan quota exceeded path=%s ip=%s", path, _source_ip)
                 return {
                     "statusCode": 429,
-                    "headers": {"Content-Type": "application/json"},
+                    # CORS ON THE 429, AND IT IS THE ONE RESPONSE IN THIS PATH
+                    # THAT DID NOT CARRY IT. Every neighbouring return sets
+                    # Access-Control-Allow-Origin; this one set only
+                    # Content-Type, so a browser DISCARDED it after it arrived.
+                    # The Mini App's fetch then rejects, check() resolves to
+                    # ok:false, and the user is told "Could not complete the
+                    # check" -- an outage -- when the real answer is "you have
+                    # hit the daily unauthenticated limit", which is actionable
+                    # and completely different. On a phone there is no way to
+                    # tell those apart.
+                    #
+                    # This is the CORS quiet-alarm shape this repo already paid
+                    # for on the watchlist preflight, one layer in: curl reads
+                    # this body perfectly, so every terminal test passes on a
+                    # response the only client that receives it cannot read.
+                    "headers": {"Content-Type": "application/json",
+                                "Access-Control-Allow-Origin": "*"},
                     "body": json.dumps({
                         "ok": False,
                         "error": "Daily limit reached for unauthenticated scans. "

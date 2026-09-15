@@ -495,6 +495,18 @@ const HEADS = {
    Same shape as the widget's own split, which is why HEAD_UNCHECKED is a
    separate constant rather than a second table: there is one failure wording
    and it must not be reachable from a completed check. */
+/* WHEN THE SERVER SAID WHY, SAY WHY. check() keeps the response body on
+   Verdict.raw, and the page threw it away -- so a daily keyless cap, which is
+   a limit the reader can act on, rendered identically to an outage, which is
+   not. "It failed" is a round trip; "it failed and here is who answered" is a
+   fix, and that rule applies to the user's screen exactly as it applies to a
+   diagnostic. textContent renders it, so a hostile string is inert. */
+function serverReason(v) {
+  const raw = v && v.raw;
+  const msg = raw && typeof raw.error === "string" ? raw.error.trim() : "";
+  return msg && msg.length <= 300 ? msg : "";
+}
+
 const HEAD_UNCHECKED = "Could not complete the check";
 function headFor(level, ok) {
   return level === "unknown" && !ok ? HEAD_UNCHECKED : HEADS[level];
@@ -737,7 +749,9 @@ async function run() {
       : level === "unknown"
         ? (ok
             ? "Checked against our criminal-channel indicator corpus, Google Safe Browsing and domain age. None of them knows this one. That is an absence of evidence, not proof it is safe."
-            : "The check did not complete, so this was not screened at all. Treat it as unchecked, not as safe, and try it again in a moment.")
+            : serverReason(v)
+              ? "The check did not complete: " + serverReason(v) + " Treat this as unchecked, not as safe."
+              : "The check did not complete, so this was not screened at all. Treat it as unchecked, not as safe, and try it again in a moment.")
         : "Based on indicators seen in criminal channels and public feeds.";
 
   // The offer is made AFTER a result, because that is when it is relevant, and

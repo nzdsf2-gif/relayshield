@@ -1301,5 +1301,62 @@ class TestTheLandingPageURLIsNeverTheBareRoot(unittest.TestCase):
 
 
 
+class TestTheCheckDeadlineIsTheAppsOwnNotTheBots(unittest.TestCase):
+    """The page must never inherit the widget's 4-second default.
+
+    check()'s own docstring sets timeoutMs = 4000 because it runs inside a
+    Telegram BOT HANDLER, where a reply arriving late is a reply nobody is
+    waiting for. A Mini App screen is the opposite case: a person is watching
+    a button that says "Checking..." and would much rather wait than be told
+    the check failed.
+
+    THE FAILURE THIS GUARDS IS INVISIBLE ON THE CARD, which is why it is
+    pinned rather than remembered. An abort throws, check()'s catch-all
+    returns a verdict with raw = {}, and serverReason() therefore has no body
+    to read -- so a premature timeout renders "Could not complete the check"
+    with NO reason under it, identical to a rejected request and to a network
+    failure. Three different causes, one screen, and the only one of them that
+    is ours to fix is the deadline.
+
+    Read out of the SERVED page rather than the source, because the source and
+    the bytes a browser receives are different documents.
+    """
+
+    def setUp(self):
+        self.page = strip_js_comments(page_script())
+
+    def test_every_check_call_passes_an_explicit_timeout(self):
+        calls = re.findall(r"\bcheck\(\s*value\s*,\s*\{([^}]*)\}", self.page)
+        self.assertGreaterEqual(len(calls), 2,
+                                "expected the Check tab and the Watching tab "
+                                "to call check(); found %d" % len(calls))
+        for opts in calls:
+            self.assertIn("timeoutMs", opts,
+                          "a check() call with no timeoutMs silently inherits "
+                          "the widget's 4000ms bot default: " + opts.strip())
+
+    def test_the_deadline_is_declared_in_the_page_and_is_generous(self):
+        m = re.search(r"const CHECK_TIMEOUT_MS = (\d+);", self.page)
+        self.assertIsNotNone(
+            m, "CHECK_TIMEOUT_MS must be declared INSIDE the page template: a "
+               "constant declared in the Worker's scope and read from the page "
+               "is a ReferenceError at load, which node --check cannot see")
+        self.assertGreaterEqual(
+            int(m.group(1)), 8000,
+            "/v1/wallet-risk on a TON address calls TON Center and DexScreener "
+            "on a possibly-cold Lambda over a phone network; anything under 8s "
+            "has no headroom for the slowest of those")
+
+    def test_the_shared_widget_keeps_the_bot_default(self):
+        """The fix must not leak into the file other people copy."""
+        widget = (ROOT / "widget" / "relayshield-widget.js").read_text()
+        self.assertIn("timeoutMs = 4000", strip_js_comments(widget),
+                      "widget/relayshield-widget.js is copied into other "
+                      "people's bots, where 4000 is correct. Raising it there "
+                      "would raise the stall ceiling in every one of them to "
+                      "fix a screen they do not have.")
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

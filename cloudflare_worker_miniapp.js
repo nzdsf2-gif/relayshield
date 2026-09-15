@@ -512,6 +512,28 @@ function headFor(level, ok) {
   return level === "unknown" && !ok ? HEAD_UNCHECKED : HEADS[level];
 }
 
+/* THE WIDGET'S 4-SECOND DEFAULT IS CORRECT FOR A BOT AND WRONG FOR THIS SCREEN,
+   and until now this page inherited it by calling check() with no timeoutMs.
+   Its own docstring says why 4000: "this runs inside a Telegram handler, and a
+   bot that stalls is worse than a bot that says it could not check." That is a
+   statement about a HANDLER, where a reply arriving late is a reply nobody is
+   waiting for. Here a person is looking at a button that says "Checking..."
+   and would rather wait eight seconds than be told the check failed.
+
+   IT IS SET HERE RATHER THAN IN widget/relayshield-widget.js, deliberately.
+   That file is copied into other people's bots, where 4000 is the right
+   number; changing it there would raise the stall ceiling in every one of
+   them to fix a screen they do not have.
+
+   AND THE COST OF BEING WRONG IS ASYMMETRIC. A slow answer costs seconds. A
+   premature abort renders "Could not complete the check" over a target the
+   API was about to return a real verdict for -- and with no body to read, the
+   card cannot even say why, so a first-time user is told the product does not
+   work. /v1/wallet-risk on a TON address calls TON Center and DexScreener, on
+   a Lambda that may be cold, over a phone's network; 4000ms has no headroom
+   for the slowest of those and 12000 has plenty. */
+const CHECK_TIMEOUT_MS = 12000;
+
 const $ = (id) => document.getElementById(id);
 let last = null;
 
@@ -723,7 +745,7 @@ async function run() {
   $("go").disabled = true;
   $("go").textContent = "Checking...";
   let v;
-  try { v = await check(value, { source }); }
+  try { v = await check(value, { source, timeoutMs: CHECK_TIMEOUT_MS }); }
   catch (e) { v = { level: "unknown", target: value, reasons: ["The check did not complete."] }; }
 
   const level = HEADS[v.level] ? v.level : "unknown";
@@ -1040,7 +1062,7 @@ if (watchAddBtn) {
     watchAddBtn.textContent = "Checking...";
     say("");
     let v;
-    try { v = await check(value, { source }); }
+    try { v = await check(value, { source, timeoutMs: CHECK_TIMEOUT_MS }); }
     catch (e) { v = null; }
     if (!v) {
       say("Could not check that just now, so it has not been watched. "

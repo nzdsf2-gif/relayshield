@@ -4923,3 +4923,76 @@ where two of Bundle B's code edits must land -- is in NEITHER `deploy_lambdas.ym
 `lambda_drift_check.yml`. **Seventh instance of source-in-repo, live traffic, no deploy
 path.** Added to the drift check only; `sh tools/handler_drift.sh
 relayshield_bundle_fulfillment.py` reads the first diff.
+
+## THE FIRST LIVE CATALOGUE LISTING. tg.app APPROVED THE SAME DAY, 2026-09-15.
+
+**Top 15 item 1 has produced a listing that is actually on a shelf, not queued behind a review.**
+tg.app's Creator Studio accepted the Mini App through a plain web form and the card came back
+**Approved** in the same session: *Scam Checker | RelayShield IDCheck*, Mini App, Tools,
+Sep 15 2026, 0 views 0 opens.
+
+| Destination | Key | State |
+|---|---|---|
+| tg.app | `tg-miniapp-tgapp` | **APPROVED**, live |
+| ton.app | `tg-miniapp-tonapp` | **SUBMITTED** 2026-09-15, under review |
+| findmini.app | `tg-miniapp-findminiweb` | **SUBMITTED** 2026-09-14, under review |
+| awesome-telegram-mini-apps | `tg-miniapp-awesome` | **SUBMITTED**, PR #77 open |
+| minitelegram.com | `tg-miniapp-minitelegram` | **PARKED**, their form crashes on icon upload |
+
+**FOUR OF THE FIVE WENT THROUGH A WEB FRONT DOOR.** The web-first finding is now measured
+rather than argued: every Telegram-first attempt this programme made reached nothing, and four
+web forms in two days produced four submissions and one live listing. Reach for the site.
+
+### THE LISTING TITLE IS NOT THE BRAND, AND BOTFATHER DOES NOT CHANGE
+
+tg.app's own guidance: *"Telegram search favors titles that match what users type, not brand
+names alone."* Nobody types "RelayShield". The listing leads with the term and keeps the brand
+attached -- `Scam Checker | RelayShield IDCheck`.
+
+**This changes NOTHING in BotFather, deliberately.** The app title stays `RelayShield IDCheck`
+and the short name stays `idcheck`. A catalogue title and a Mini App title are different fields
+on different systems, three catalogues already carry `t.me/relayshield_bot/idcheck`, and
+renaming a live shared surface to buy a search benefit the listing already delivers is a write
+with no upside -- rule C, in the direction where the cheap answer is to do nothing.
+
+## THE 4-SECOND DEADLINE WAS A BOT'S, AND THIS SCREEN INHERITED IT BY SAYING NOTHING
+
+**Found 2026-09-15 from a founder screenshot: a valid TON address, pasted through the tg.app
+deep link, rendering "Could not complete the check" with NO reason line under it.**
+
+**THE ABSENCE OF THE REASON IS THE EVIDENCE, and it is worth learning to read.**
+`serverReason()` prints `v.raw.error`, and `check()` only leaves `raw` empty when the fetch
+THREW. So a blank card under that heading rules out, in one glance, the daily 429 cap, every
+5xx, and every JSON error we send -- all of those carry a body. What is left is a rejection, a
+network failure, or **our own deadline**. A card with no reason is a narrower finding than a
+card with one, which is the opposite of how it looks.
+
+**THE DEADLINE WAS THE WIDGET'S, AND THE PAGE ACQUIRED IT BY OMISSION.** Both call sites read
+`check(value, { source })` with no `timeoutMs`, so they inherited `timeoutMs = 4000` from
+`widget/relayshield-widget.js` -- whose own docstring says why: *"this runs inside a Telegram
+handler, and a bot that stalls is worse than a bot that says it could not check."* **That is a
+statement about a HANDLER**, where a late reply is a reply nobody is waiting for. A Mini App
+screen is the opposite case: a person is watching a button that says "Checking..." and would
+far rather wait eight seconds than be told the product failed.
+
+**A DEFAULT IS A DECISION MADE FOR A DIFFERENT CALLER.** Nothing was misconfigured; the page
+simply never stated its own requirement, so it silently took a bot's. `CHECK_TIMEOUT_MS = 12000`
+is declared IN THE PAGE (Worker scope is a `ReferenceError` at load that `node --check` cannot
+see), and `widget/relayshield-widget.js` KEEPS 4000 -- that file is copied into other people's
+bots, where 4000 is right, and raising it there would lift the stall ceiling in every one of
+them to fix a screen they do not have. A test asserts both halves, proven by reintroducing each.
+
+### AND MY OWN DIAGNOSTIC CANNOT SEE A COLD START. IT WARMS THE FUNCTION IT MEASURES.
+
+`tools/diagnose_miniapp_check.sh` step 1 sends the request with no deadline; step 2 re-sends it
+under the app's own 4 seconds. **Step 1 warms the Lambda, so step 2 always measures a WARM
+one** -- and the phone that failed hit a cold one. So "step 2 answered" is real evidence about
+a warm function and **no evidence at all** about the case that failed.
+
+That is the probe-takes-the-cheap-path trap for the fourth time (the unsigned watchlist POST,
+`/v1/ton-address` instrumentation, the source-key curl that could not pass in any state), and
+this time it is inside the tool written to end the previous one. **A two-step probe where step
+1 changes the state step 2 measures is one probe, not two.** The fix shipped on the asymmetry
+rather than on the measurement, which is the right call when the measurement cannot reach the
+failing case: a slow answer costs seconds, a premature abort tells a first-time user the product
+does not work and cannot even say why.

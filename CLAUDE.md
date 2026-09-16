@@ -5080,3 +5080,81 @@ old parse.
 **The general form, and it is new: two numbers in one output that cannot both be
 true is a defect even when each is individually plausible.** Nothing errored,
 both halves looked like normal output, and only reading them TOGETHER shows it.
+
+## THREE COMMANDS I SHIPPED ON 2026-09-16 AND ALL THREE FAILED ON HIM
+
+Every one was mine, none was a typo, and each is a rule this file already
+carries being broken in a new file.
+
+### 1. tg.app KEYS A LISTING ON THE BOT, NOT ON THE LINK. THERE IS ONE PER BOT.
+
+Submitting the bot returned *"a listing with this Tg link already exists"*. The
+Mini App listing is `t.me/relayshield_bot/idcheck?startapp=...` and the bot is
+`t.me/relayshield_bot?start=SRC_...`. **tg.app normalises both to the bot
+username**, so they are the same listing to it, and the Mini App card already
+holds that slot.
+
+**I INFERRED THREE LISTINGS FROM THE SHAPE OF THEIR SIDEBAR.** Creator Studio
+has separate routes for apps, bots, channels and groups, and I read four menu
+items as four permitted entries per bot. That is rule C exactly -- a procedure
+written for a surface whose rules I had not read -- and the menu was never
+evidence about uniqueness.
+
+**Nothing is lost and there is nothing to retry.** The slot went to the better
+surface: the Mini App is the thing a catalogue visitor can open, and it is
+approved and live. `t.me/RelayShield` is a DIFFERENT username, so the channel
+listing is unaffected.
+
+**The general form: a navigation menu tells you what KINDS of thing a system
+holds. It never tells you the uniqueness constraint.** One is a layout, the
+other is a rule, and only the second one rejects a submission.
+
+### 2. "Cloudflare account id:" WAS ANSWERED WITH AN EMAIL ADDRESS, CORRECTLY
+
+`tools/recover_live_worker.sh` prompted for an account id, got
+`relayshieldadmin@gmail.com`, and returned a 404 whose own reading guide said
+*"no deployed script by that name"* -- sending the reader to check the Worker.
+**The Worker was never the problem.**
+
+A Cloudflare account id is a 32-character hex string buried in a dashboard
+sidebar. **A prompt that does not say so is rule 11's placeholder wearing a
+question mark**: it looks like an instruction to whoever wrote it and is
+unanswerable to whoever reads it. An email is the most reasonable guess there is.
+
+Two fixes, and the first removes the question rather than explaining it: the
+token LISTS the accounts it can see, so the script discovers the id and names
+the account it picked. The second is a format check, because the failure it
+prevents reads as a missing Worker rather than as a bad input.
+
+**And the discovery itself shipped broken and was caught by running it.** It
+grepped `"id":"..."` out of the JSON and matched nothing when there was a space
+after the colon -- an empty result indistinguishable from "this token sees no
+accounts". It parses with `json.load` now. **Grepping JSON is grepping a
+template literal's source: it works until the shape moves by one character.**
+
+### 3. THE METRICS TOOL HUNG, AND IT IS THE `filter_log_events` DEFECT REBUILT
+
+`tools/ti_demo_metrics.py --distinct` printed its header and then nothing.
+Nothing raised and no output was lost: `Select="COUNT"` **still reads every page
+of the table**, so counting 5.5 million rows is thousands of sequential round
+trips before a single number can print -- with a real read bill accruing behind
+a silent screen.
+
+**That is the defect this file records about `tools/miniapp_funnel.py`, in a new
+file, four days later, by the same author.** The section is titled "THE FUNNEL
+WAS HUNG, NOT BROKEN" and names the exact mechanism. A lesson recorded in one
+file is not a lesson the next file learns, for the third time, and writing it
+down again is evidently not the fix.
+
+**The fix is `DescribeTable`, which is one call and free.** `ItemCount` is
+approximate and refreshed roughly every six hours, which is fine for a headline
+about to be rewritten as prose and never fine for a number quoted to the row --
+another reason the recommendation is sources-not-counts. The two small tables
+still scan, because they need a filter, and they now print a page counter:
+**a tool that goes quiet is indistinguishable from a tool that has hung.**
+`--distinct` states the cost and the row estimate BEFORE it starts.
+
+**THE RULE, and it is the one all three share: a long-running read announces
+itself before it starts and reports progress while it runs.** Anything else is
+indistinguishable from a hang, and the reader's only move is Ctrl-C and a round
+trip.

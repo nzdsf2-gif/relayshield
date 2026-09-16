@@ -399,10 +399,23 @@ class TestClassification(unittest.TestCase):
 
 class TestStars(unittest.TestCase):
 
-    def test_the_invoice_is_stars_and_carries_no_provider_token(self):
-        """A provider_token is what makes an invoice a CARD payment. Passing one
-        here would be a different product, and Telegram would reject it in a
-        Mini App context."""
+    def test_the_invoice_is_stars_with_an_empty_provider_token(self):
+        """The invariant is STARS, NOT CARD, and it has two halves.
+
+        currency is XTR, and provider_token is PRESENT AND EMPTY. A NON-empty
+        provider_token is what makes an invoice a card payment: a different
+        product, and one Telegram would reject in a Mini App context. That is
+        the thing this test forbids.
+
+        The field is NOT omitted, and this test must never be "fixed" by
+        removing it from stars_invoice(). The Bot API's own description of the
+        parameter is "Pass an empty string for payments in Telegram Stars",
+        read from @grammyjs/types 5.0.0 on npm (core.telegram.org is
+        egress-blocked from the container; the vendor's typed client is better
+        evidence anyway). Omitting it was the defect fixed on 2026-09-12, and a
+        real 50-Star purchase completed end to end on 2026-09-13 with this
+        shape. An earlier version of this test asserted the field was ABSENT,
+        which pinned the defect and stayed red on a correct main."""
         captured = {}
 
         class _Resp:
@@ -422,7 +435,8 @@ class TestStars(unittest.TestCase):
 
         self.assertTrue(out["ok"])
         self.assertEqual(captured["body"]["currency"], "XTR")
-        self.assertNotIn("provider_token", captured["body"])
+        self.assertIn("provider_token", captured["body"])
+        self.assertEqual(captured["body"]["provider_token"], "")
         self.assertIn("createInvoiceLink", captured["url"])
         self.assertEqual(captured["body"]["prices"][0]["amount"], wl.SLOTS_PRICE_STARS)
 

@@ -339,6 +339,56 @@ class TestTonOnlyCheckTab(unittest.TestCase):
                         "the Solana pattern is tested before TON")
 
 
+def python_prose_blanked(text: str) -> str:
+    """Blank COMMENTS and DOCSTRINGS in Python source, preserving line numbers.
+
+    THE SEVENTH TIME PROSE HAS FOOLED A GUARD IN THIS SUITE, and the previous
+    six were answered by adding one more filename to a skip list. That list
+    grows by one every time somebody writes a new test that quotes the defect
+    in order to forbid it -- which is the correct way to write such a test, so
+    the list will never stop growing.
+
+    NOT a blanket string strip, and that distinction is the whole point. A real
+    offender in a .py file lives in a STRING LITERAL: the URL we actually emit.
+    Blanking every string would hide exactly the case this guard exists for.
+    Comments and docstrings are prose by definition; other strings are code.
+    """
+    import ast
+    import io
+    import tokenize
+
+    lines = text.splitlines(keepends=True)
+    blank = [False] * (len(lines) + 2)
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef,
+                                 ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = getattr(node, "body", None)
+        if not body:
+            continue
+        first = body[0]
+        if (isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            for n in range(first.lineno, (first.end_lineno or first.lineno) + 1):
+                blank[n] = True
+
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                for n in range(tok.start[0], tok.end[0] + 1):
+                    blank[n] = True
+    except (tokenize.TokenError, IndentationError):
+        pass
+
+    return "".join("\n" if blank[i + 1] else ln for i, ln in enumerate(lines))
+
+
 def strip_js_comments(js: str) -> str:
     """Comments out. THIS IS THE FOURTH TIME THIS SUITE HAS NEEDED IT.
 
@@ -1277,15 +1327,21 @@ class TestTheLandingPageURLIsNeverTheBareRoot(unittest.TestCase):
     def test_no_source_key_is_hung_on_the_bare_host(self):
         offenders = []
         for p in self._files():
-            if p.name in ("CLAUDE.md", Path(__file__).name):
-                # Both quote the wrong form in order to forbid it. Prose
-                # describing a defect is not the defect -- the lesson this
-                # suite has now learned six times.
+            if p.name == "CLAUDE.md":
+                # It quotes the wrong form in order to forbid it, and it is
+                # prose end to end, so there is no code half to scan.
                 continue
             try:
                 text = p.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
+            if p.suffix == ".py":
+                # A test that forbids this form has to spell it out in its own
+                # docstring, and that is not the defect. Blanking comments and
+                # docstrings scans the CODE of every .py file -- including this
+                # one -- rather than exempting files by name, which is a list
+                # that grows by one with every new guard anyone writes.
+                text = python_prose_blanked(text)
             for m in self.BAD.finditer(text):
                 line = text[:m.start()].count("\n") + 1
                 offenders.append(f"{p.name}:{line}")

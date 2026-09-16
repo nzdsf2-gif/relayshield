@@ -80,12 +80,11 @@ would have saved you. It would not have. It reads your staged diff on your lapto
 of a server's config. What it does is make the second half smaller, which is a statement about the
 next bug rather than this one.
 
-And while writing this up we checked our own pattern tables for GitLab formats and found none.
-GitHub was covered twice. GitLab had zero coverage. A detector reports what it has a pattern for,
-and "clean" and "we never looked for this" are the same output. Eight formats now, same day.
-
-If you run any secret scanner, the question this week is not how many patterns it has. It is
-whether it has the one for the platform you just had to patch.
+A detector reports what it has a pattern for, and "clean" and "we never looked for this" are the
+same output. So if you run any secret scanner, the question this week is not how many patterns it
+has. It is whether it has the ones for the platform you just had to patch. Ours covers eight
+GitLab credential formats: personal access tokens in both the classic and routable forms, deploy,
+runner, OAuth application, Kubernetes agent, pipeline trigger and CI job tokens.
 
 Order matters, and people get it backwards: patch first, then hunt, then rotate. Rotating on a
 server that is still readable hands the attacker the new credentials.
@@ -133,12 +132,11 @@ We make a pre-commit secret scanner and it would NOT have saved you here. It rea
 diff on your own machine. It has no view of a server's config. It makes the second category
 smaller, which matters for the next bug and not for this one.
 
-And writing this up, we checked our own pattern tables for GitLab token formats and found none.
-GitHub was covered twice. GitLab: nothing. A detector reports what it has a pattern for, and
-"clean" and "we never looked" are the same output. Eight formats added the same day.
-
-The question for your own scanner this week is not how many patterns it has. It is whether it has
-the one for the platform you just patched.
+A detector reports what it has a pattern for, and "clean" and "we never looked" are the same
+output. So the question for your own scanner this week is not how many patterns it has. It is
+whether it has the ones for the platform you just patched. Ours covers eight GitLab credential
+formats: personal access tokens in both forms, deploy, runner, OAuth app, Kubernetes agent,
+pipeline trigger and CI job tokens.
 
 Do it in this order:
 1. Patch, or remove public access
@@ -169,8 +167,9 @@ Two halves. The server's config, which no pre-commit hook ever touched. And what
 developers committed, which a commits API reads out of history even after a later commit deleted
 it.
 
-We make a secret scanner. It would not have saved you here, and while writing this we found it had
-zero GitLab patterns while covering GitHub twice. Fixed same day.
+We make a secret scanner. It would not have saved you here: it reads your staged diff, not a
+server's config. It does name all eight GitLab token formats, which is the thing worth checking in
+whatever you run this week.
 
 Patch, hunt, THEN rotate. Rotating on a readable server hands over the new keys.
 

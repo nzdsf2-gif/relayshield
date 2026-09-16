@@ -2905,6 +2905,27 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     # npm-worm pattern: _resolve_source substring-matches the whole Referer, and
     # Medium strips the query string from the rendered anchor href, so the slug is
     # the only thing that survives that platform.
+    # GitLab CVE-2026-85706 post, registered 2026-09-16 BEFORE the post ships.
+    # An unregistered key logs unmatched: and renders no banner, which is
+    # attribution that looks like it worked -- FD-8, four months of it.
+    "gitlab-cve": (
+        ("a-file-read-bug-is-a-credential-theft-bug",
+         "gitlab-file-read-credential-theft",
+         "cve-2026-85706"),
+        _banner("Arriving from the GitLab file-read post", _p(
+            "That post is about what an arbitrary file read is actually worth: the credentials "
+            "inside the files. Two of our checks are the ones that matter after a read like it. "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">rsscan</code> '
+            "is a pre-commit hook that reads your own staged diff and refuses the commit when a "
+            "credential is in it, so the file a traversal reaches holds less. It covers GitLab "
+            "personal access tokens, deploy, runner, OAuth application, Kubernetes agent, pipeline "
+            "trigger and CI job tokens, alongside AWS, GitHub, Stripe, Slack and the LLM providers. "
+            "And "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">POST /v1/breach-check</code> '
+            "answers the other half, which is whether a credential has already surfaced in the "
+            "criminal channels and infostealer dumps we collect from. Neither says &quot;safe&quot;: "
+            "the ceiling is &quot;nothing known against it&quot;, and the response says so itself.")),
+    ),
     "agent-bait": (
         ("your-agent-reads-the-readme-that-is-the-attack-surface-nobody-scans",
          "your-agent-reads-the-readme",
@@ -3312,6 +3333,13 @@ _SOURCE_ALIASES = {
     # missing in the same commit that added it.
     "tg-miniapp-share":     "tg-miniapp",
     "miniapp":              "tg-miniapp",
+    "gitlab-cve-blog":       "gitlab-cve",
+    "gitlab-cve-medium":     "gitlab-cve",
+    "gitlab-cve-devto":      "gitlab-cve",
+    "gitlab-cve-linkedin":   "gitlab-cve",
+    "gitlab-cve-telegram":   "gitlab-cve",
+    "gitlab-cve-farcaster":  "gitlab-cve",
+    "gitlab-cve-mastodon":   "gitlab-cve",
     "agent-bait-medium":     "agent-bait",
     "agent-bait-devto":      "agent-bait",
     "agent-bait-hf":         "agent-bait",

@@ -9,7 +9,7 @@ DO NOT hand-edit. Regenerate with:
 
     python3 tools/sync_patterns.py
 
-Sync digest: 1e9a40c3a82057d4
+Sync digest: b4f2277a16359a8c
 `tools/sync_patterns.py --check` fails if this drifts from relayshield_api.py,
 so a pattern fixed server-side cannot silently go stale in the client.
 """
@@ -45,6 +45,61 @@ NHI_PATTERNS = [
     ("aws_access_key",   r"AKIA[A-Z0-9]{16}",                         "CRITICAL", "AWS IAM Access Key", None),
     ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}",              "CRITICAL", "GitHub Personal Access Token", None),
     ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}",             "CRITICAL", "GitHub Fine-Grained PAT", None),
+    # ── GitLab, added 2026-09-16 ────────────────────────────────────────
+    # There was NO GitLab credential pattern anywhere in this table, in
+    # rsscan's mirror, or in the intel monitor -- while GitHub was covered
+    # TWICE. So the corpus count for GitLab tokens was UNMEASURED, not zero,
+    # which is the BOT-TOKEN-1 finding in a second place.
+    #
+    # It was found while reading CVE-2026-85706: an unauthenticated path
+    # traversal in self-hosted GitLab that reads arbitrary files, whose whole
+    # value to an attacker is the credentials inside them. We could not have
+    # recognised one of those credentials if it landed in the corpus.
+    #
+    # Regexes taken from gitleaks' own rule source rather than from a docs
+    # page -- docs.gitlab.com is egress-blocked from the container and
+    # raw.githubusercontent.com is not, which is the BLOCKED SOURCE WAS
+    # REACHABLE ALL ALONG rule again. A scanner's implementation is better
+    # evidence than prose about the format.
+    #
+    # NO _ctx_key ON ANY OF THESE, deliberately: every one carries a literal
+    # `gl*-` prefix that is precise on its own, exactly as the Telegram URL
+    # form does. Requiring an assignment operator would miss the commonest
+    # real leak, which is a token sitting in a CI log or a clone URL.
+    #
+    # ORDERING IS LOAD-BEARING AND IS TESTED BY EXECUTION. The routable PAT
+    # must be tried BEFORE the classic one: `glpat-[\w-]{20}` matches the
+    # first 20 characters of a routable token, so the classic rule would
+    # swallow it and report the wrong type with the wrong remediation. Same
+    # shape as TON's friendly form sitting inside Solana's base58 range.
+    ("gitlab_pat_routable",
+     r"glpat-[0-9a-zA-Z_\-]{27,300}\.[0-9a-z]{2}[0-9a-z]{7}",
+     "CRITICAL", "GitLab Personal Access Token, routable format (revoke in User Settings > Access Tokens)", None),
+    ("gitlab_pat",
+     r"glpat-[\w-]{20}",
+     "CRITICAL", "GitLab Personal Access Token (revoke in User Settings > Access Tokens)", None),
+    ("gitlab_deploy_token",
+     r"gldt-[0-9a-zA-Z_\-]{20}",
+     "CRITICAL", "GitLab Deploy Token, read/write to repos, packages and containers", None),
+    ("gitlab_runner_token",
+     r"glrt-[0-9a-zA-Z_\-]{20}",
+     "CRITICAL", "GitLab Runner Authentication Token, executes CI jobs", None),
+    ("gitlab_oauth_secret",
+     r"gloas-[0-9a-zA-Z_\-]{64}",
+     "CRITICAL", "GitLab OAuth Application Secret, impersonates the login provider", None),
+    ("gitlab_agent_token",
+     r"glagent-[0-9a-zA-Z_\-]{50}",
+     "CRITICAL", "GitLab Kubernetes Agent Token, reaches the connected cluster", None),
+    ("gitlab_pipeline_trigger",
+     r"glptt-[0-9a-f]{40}",
+     "HIGH",     "GitLab Pipeline Trigger Token, starts arbitrary pipelines", None),
+    ("gitlab_ci_job_token",
+     r"glcbt-[0-9a-zA-Z]{1,5}_[0-9a-zA-Z_\-]{20}",
+     "HIGH",     "GitLab CI/CD Job Token, acts as the job's user while it runs", None),
+    # Deliberately NOT added: glffct- (feature flag client), glft- (feed) and
+    # glimt- (incoming mail). Each is a real GitLab token and none of them
+    # reaches source, CI or a cluster, and every pattern in this table is a
+    # maintenance cost paid in four places. Add one when a real finding needs it.
     ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}",                "CRITICAL", "Stripe Secret Key", None),
     # Our own key format. Added 2026-08-18 after a live rs_live_ key reached a
     # public commit and was caught by GitGuardian, not by us. rsscan carried 33

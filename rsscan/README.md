@@ -2,7 +2,7 @@
 
 Block commits and builds that introduce API keys, tokens and other machine credentials.
 
-Detects 31 credential patterns — AWS IAM keys, GitHub PATs, Stripe secrets, Slack tokens, private keys, and LLM provider keys (OpenAI, Anthropic, Google, Groq, xAI, Replicate).
+Detects 49 credential patterns — AWS IAM keys, GitHub PATs, GitLab tokens (personal access in both forms, deploy, runner, OAuth application, Kubernetes agent, pipeline trigger and CI job), Stripe secrets, Slack tokens, private keys, and LLM provider keys (OpenAI, Anthropic, Google, Groq, xAI, Replicate).
 
 **Free, and it runs entirely on your machine.** No account, no API key, no network call. Your source code never leaves the host — matching happens locally against patterns shipped inside the package.
 

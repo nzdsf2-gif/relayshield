@@ -5209,3 +5209,105 @@ relayshield-ti-demo cloudflare_worker_ti_demo.js` runs FIRST**; only an
 something no commit does, and that is recovered into git before anything
 overwrites it -- the 2026-08-17 rule, on the one component that still has no
 automated path.
+
+## THE MONITOR SAID A NUMBER WAS PORTED FROM T-MOBILE TO T-MOBILE. IT IS OURS AND IT IS WRONG.
+
+**2026-09-16, reported by the founder as "I received a potential sim swap port out fraud message
+indicating my mobile number may be transferred from T-Mobile USA to T-Mobile USA... I'm highly
+suspicious it is a bogus message."**
+
+**It is bogus and it is OURS, which is the worse of the two answers.** The wording is
+`build_port_out_alert_message` in `relayshield_sim_swap_monitor.py` verbatim -- *"Your phone number
+appears to have been transferred from \*{old}\* to \*{new}\*"* -- so this was never a phisher. A
+security product told its own founder his number had been stolen, and the sentence it used is not
+one that can be true.
+
+**THE DETECTOR WAS RAW STRING EQUALITY ON A VENDOR DISPLAY NAME:**
+
+    port_out_suspected = bool(last_known_carrier != carrier_name and ...)
+
+and `carrier_name` is assembled from a TWO-SOURCE FALLBACK inside
+`call_twilio_sim_swap_lookup`: `lti.get("carrier_name") or sim_swap_obj.get("carrier_name", "")`.
+Those two Lookup v2 packages spell one carrier more than one way -- "T-Mobile USA" against
+"T-Mobile USA, Inc." -- and **either can be transiently unavailable**, so the stored baseline and
+the current read disagree byte for byte while naming the same carrier. There was no normalisation
+anywhere in the file. **On a phone the difference renders invisibly**, which is why the message
+reads as nonsense rather than as a mismatch.
+
+**THE TIMING IS NOT A COINCIDENCE AND IT IS THE PART TO CARRY.** This file records that Twilio
+approved SIM swap for the United States on 2026-09-12, and that the code was SELF-GATING until
+then: `handle_sim_swap` read `error_code=60606` off a Twilio 200 and returned 503 rather than a
+verdict. **So this Lambda began producing real customer-facing CRITICAL alerts four days ago, for
+the first time, and the first one it sent was wrong.** The approval did not break anything. It
+removed the gate that had been hiding a latent defect, and nothing was watching for that.
+**When a vendor approval, a feature flag or a quota lifts a gate, the code behind it is running for
+the first time -- treat the first outputs as unproven, not as a resumption.**
+
+### THE FIX IS AN IDENTITY, NOT A BETTER STRING COMPARE
+
+**MCC/MNC is what a port-out actually changes.** Lookup v2 returns `mobile_country_code` and
+`mobile_network_code` beside the name; that pair is the carrier's identity on the network, numeric
+and not a label anyone reformats. It was being thrown away. `network_identity()` captures it,
+`last_known_network` stores it, and it decides whenever both sides carry it. The display name is
+what we SHOW; it is no longer what we compare.
+
+`normalise_carrier()` is the fallback for the runs where the vendor withholds MCC/MNC -- NFKC, case,
+unicode dashes, collapsed spaces, trailing corporate suffixes -- so the two spellings above land on
+one value. And under both, the floor: **a port-out is never reported when the two sides normalise
+equal**, restated a second time inside the message builder so the sentence is unemittable whatever
+the builder is handed.
+
+**Both halves refuse to alert on a missing read, in both directions.** No baseline is not a
+port-out (`relayshield_watchlist_monitor.py`'s first-run rule, in the one place where the message is
+CRITICAL), and an unreadable current carrier is not a port-out either -- **"we could not check" must
+never render as "it moved"**, which is that file's rule 3 in a new file. `update_user_swap_state`
+also refuses to write an EMPTY network over a good one: erasing a baseline is silent, and the run
+after it would pass a genuine port-out as clean.
+
+`test_sim_swap_monitor.py` is 16 tests and the file had NO test suite at all. Five defects were
+reintroduced to prove them. **One of those five is only caught by the `ast` test**: restoring the raw
+comparison inside `process_user` leaves every behavioural test green, because they call
+`detect_port_out` directly. **A guard nothing calls is decoration, and only a test that reads the
+CALL SITE can tell.**
+
+### THE SECOND FINDING: THE ALERT NEVER GOES TO TELEGRAM, AND THAT IS THE CODE, NOT A FAILURE
+
+He also reported *"I didn't receive this alert on Telegram"*, and that is expected behaviour rather
+than a delivery fault -- which is itself evidence the message was ours. Traced rather than assumed:
+
+* the customer alert is **WhatsApp only** (`send_whatsapp` / `send_whatsapp_template`),
+* `_push_tg_signal` invokes the Telegram webhook with a **correlation signal**, and
+  `handle_inbound_signal` runs predictive warnings and attack-chain checks with it. It does not
+  deliver the alert,
+* `_send_telegram_admin` is the only Telegram path that sends a body, and it is **admin
+  co-notification for business-tier employee records only**.
+
+**So a user whose `delivery_channels` include Telegram still gets nothing on Telegram for the most
+severe alert we produce.** That is a real gap and it is NOT fixed here -- the ask was a diagnosis,
+and widening a CRITICAL alert's delivery is a product change. Recommended, roughly half a day:
+reuse the `action: "send_message"` shape `handle_inbound_signal` already implements, gated on
+`"telegram" in delivery_channels`, after the WhatsApp send rather than instead of it.
+
+### AND THE FUNCTION WAS IN NO DRIFT CHECK
+
+`relayshield_sim_swap_monitor.py` is in `deploy_lambdas.yml` and in `iam_github_deploy_invoke.json`
+and was in `lambda_drift_check.yml` nowhere. Same shape as `relayshield_oauth_watchlist_monitor.py`:
+**a deploy path is not drift detection.** Added. A function that has just started speaking to
+customers is the worst one to have no drift answer for.
+
+### THE DIAGNOSTIC, AND WHAT IT SEPARATES
+
+`sh tools/diagnose_sim_swap_alert.sh [+1...]` is read-only and answers three questions that have
+three different answers:
+
+1. **Did Twilio report an actual SIM change (`swapped=True`)?** That is the independent signal and
+   it is NOT what a port-out alert is built from. True on any recent run means treat the number as
+   compromised whatever the carrier strings say. **No lines is the good answer.**
+2. **What were the two carrier strings, byte for byte?** The log line now uses `%r` rather than
+   `%s`, deliberately: a bare `%s` renders an invisible difference invisibly, in the one log
+   somebody reads to diagnose it.
+3. **What is stored as the baseline right now**, which is what the NEXT run compares against.
+
+**The phone number is an ARGUMENT and is never written into the repo.** It is personal data and this
+repository is public -- rule 12's shape, where the credential-like thing arrives in a pasted message
+rather than in a vendor doc.

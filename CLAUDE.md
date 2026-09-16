@@ -5158,3 +5158,54 @@ still scan, because they need a filter, and they now print a page counter:
 itself before it starts and reports progress while it runs.** Anything else is
 indistinguishable from a hang, and the reader's only move is Ctrl-C and a round
 trip.
+
+## THE TI DEMO CARDS ARE UPDATED, AND THE FIRST ONE NOW NAMES ITS UNIT
+
+**2026-09-16. Measured by `tools/ti_demo_metrics.py`, which is the only route
+these should ever be refreshed by:**
+
+    intel_iocs rows            7,602,575   SIGHTINGS
+    malpedia_families          3,815
+    intel_channels active=true 113
+    mitre_attack sk=info       193
+
+**The card that read "5.4M+ / IOC indicators" now reads "7.6M+ / Indicator
+sightings", and that half is not cosmetic.** The number was never merely stale:
+`relayshield_intel_iocs` is keyed `(ioc_value, seen_ts)`, so refreshing the
+figure alone would have carried the wrong unit forward with a newer date on it.
+The hero was rewritten to match, because two numbers on one page that disagree
+about what they count is the same defect one layer over.
+
+**The founder chose counts over the sources-not-counts alternative, with the
+MEASUREMENT DOCTRINE trade-off on the table.** That is a business call and it is
+his. **The unit being correct is not a preference and was not part of it.**
+
+### THE GUARDS, AND THE FIRST VERSION FAILED ON THE CORRECT LABEL
+
+`test_ti_demo_metrics.py`, seven tests, read from the page the Worker ACTUALLY
+SERVES via the new `tools/ti_demo_render.mjs` -- the TI demo holds its page in a
+template literal exactly like the Mini App, and `node --check` answers "does
+this parse" and never "does this run".
+
+Four defects, each proven by reintroducing it: the row count labelled "IOC
+indicators" (two guards fire), an approximate `ItemCount` printed as the exact
+`7,602,575`, the hero and the card disagreeing on the unit, and a `+` on a
+small exactly-counted card.
+
+**AND THE FIRST VERSION OF THE UNIT GUARD WAS A BANNED-WORD LIST, WHICH FAILED
+ON "Indicator sightings" -- the correct label.** That is the CSM-SIMSWAP-1
+mistake exactly: a check that forces you to delete a true sentence to pass is a
+check that gets loosened rather than obeyed. The rule is narrower than the first
+draft and is the real one: **a card may name indicators, and if it does it must
+also name the unit.**
+
+### IT IS EDITED, NOT DEPLOYED, AND THAT ORDER IS THE WHOLE POINT
+
+`grep -rl ti-demo .github/workflows` still returns nothing, so every live
+version of this Worker was pushed by hand and `wrangler deploy` would replace it
+with the repo copy and print success. **`sh tools/recover_live_worker.sh
+relayshield-ti-demo cloudflare_worker_ti_demo.js` runs FIRST**; only an
+`IDENTICAL` verdict makes the deploy safe. `THEY DIFFER` means live holds
+something no commit does, and that is recovered into git before anything
+overwrites it -- the 2026-08-17 rule, on the one component that still has no
+automated path.

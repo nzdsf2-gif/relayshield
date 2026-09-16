@@ -616,16 +616,44 @@ footer a{color:#00B5A5;text-decoration:none}
 <div class="container">
   <div class="hero">
     <h1>Live Threat Intelligence</h1>
-    <p>Query 5,400,000+ indicators, MITRE ATT&CK profiles, trending threats, and identity risk scoring — powered by RelayShield's live OSINT collection pipeline.</p>
+    <p>Query 7,600,000+ indicator sightings collected continuously from monitored criminal Telegram channels, infostealer log dumps and public indicator feeds, alongside MITRE ATT&CK profiles, trending threats and identity risk scoring.</p>
   </div>
 
   <div class="corpus-stats">
-    <!-- Metrics verified live against DynamoDB 2026-08-12:
-         intel_iocs 5,483,159 · malpedia_families 3,802 · intel_channels active=true 89 ·
-         mitre_attack sk=info 193. Re-verify before quoting these anywhere. -->
-    <div class="stat-card"><div class="stat-num">5.4M+</div><div class="stat-label">IOC indicators</div></div>
-    <div class="stat-card"><div class="stat-num">3,800+</div><div class="stat-label">Malware families</div></div>
-    <div class="stat-card"><div class="stat-num">89</div><div class="stat-label">Active criminal Telegram channels</div></div>
+    <!-- Measured 2026-09-16 by tools/ti_demo_metrics.py, which is the ONLY way
+         these should ever be refreshed. Re-run it rather than editing by hand:
+
+           AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/ti_demo_metrics.py
+
+           intel_iocs rows            7,602,575   <- SIGHTINGS, not indicators
+           malpedia_families          3,815
+           intel_channels active=true 113
+           mitre_attack sk=info       193
+
+         THE FIRST CARD SAYS "SIGHTINGS" AND THAT IS NOT A WORDING PREFERENCE.
+         It said "IOC indicators" over this same row count from 2026-08-12 until
+         today, and the two are different quantities by roughly an order of
+         magnitude: relayshield_intel_iocs is keyed (ioc_value, seen_ts), so one
+         value seen on five days is five rows. export_intel_sample.py's own
+         collapse() docstring says it outright -- "Counting rows would inflate
+         every number we quote" -- and the last measured split was 494K distinct
+         against 5.8M sightings on 2026-09-03.
+
+         So the number was never stale. It was the wrong UNIT under the label,
+         and this is the page most likely to be read by somebody who checks.
+         **Do not relabel this card "indicators" without running --distinct**,
+         which is a full multi-million-row scan and is why the figure below is a
+         sightings count stated as one. test_ti_demo_metrics.py fails if the
+         first card ever pairs this row count with an "indicator" label again.
+
+         MEASUREMENT DOCTRINE still says a corpus headline is not quoted at all,
+         and the sources-not-counts alternative is printed by that same tool
+         under "OPTION A". Showing counts here is the founder's call, taken with
+         that trade-off on the table; the unit being correct is not optional
+         either way. -->
+    <div class="stat-card"><div class="stat-num">7.6M+</div><div class="stat-label">Indicator sightings</div></div>
+    <div class="stat-card"><div class="stat-num">3,815</div><div class="stat-label">Malware families</div></div>
+    <div class="stat-card"><div class="stat-num">113</div><div class="stat-label">Active criminal Telegram channels</div></div>
     <div class="stat-card"><div class="stat-num">193</div><div class="stat-label">MITRE ATT&CK groups</div></div>
   </div>
 

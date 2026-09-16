@@ -265,6 +265,48 @@ def run_insights(logs, group, query, start_ms, end_ms,
         time.sleep(INSIGHTS_POLL_S)
 
 
+_TS_FORMATS = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S",
+               "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S")
+
+
+def _parse_insights_ts(raw):
+    """Epoch ms from whatever Insights returns for min(@timestamp), or None.
+
+    THE WINDOW SECTION WAS SILENT FOR EVERY STAGE AND THE COUNTS WERE FINE,
+    which is the shape worth recognising: `min(@timestamp)` comes back as a
+    FORMATTED STRING -- "2026-09-15 12:34:56.789" -- not as epoch milliseconds.
+    `int(float(raw))` raises ValueError on that, the old code caught it and
+    returned None, and the caller renders None as "no events, so no window was
+    observed". So a run with real counts on every line printed "no events" under
+    every one of them, and nothing anywhere said the two disagreed.
+
+    That matters more than a cosmetic line, because the window is the SLIDING
+    WINDOW CAVEAT. --compare is only a measurement of a submission if the two
+    runs are close together relative to the window each observed, and this is
+    the only thing that reports what was observed. A baseline taken while it is
+    silent carries no way to check that later. The quiet alarm again.
+
+    Both shapes are accepted rather than one being assumed: a numeric string is
+    treated as epoch ms, and the documented formatted forms are parsed. An
+    unparseable value still returns None, because a wrong window is worse than
+    an absent one -- it would be a number the reader acts on.
+    """
+    if raw in (None, ""):
+        return None
+    text = str(raw).strip()
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        pass
+    for fmt in _TS_FORMATS:
+        try:
+            dt = datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        return int(dt.timestamp() * 1000)
+    return None
+
+
 def group_window(logs, group, start_ms, end_ms, cache):
     """(event_count, earliest_ms, status) for one log group, cached per run.
 
@@ -292,11 +334,7 @@ def group_window(logs, group, start_ms, end_ms, cache):
                     n = int(float(rows[0].get("n") or 0))
                 except (TypeError, ValueError):
                     n = 0
-                raw = rows[0].get("first_ms")
-                try:
-                    first = int(float(raw)) if raw else None
-                except (TypeError, ValueError):
-                    first = None
+                first = _parse_insights_ts(rows[0].get("first_ms"))
             cache[group] = (n, first, "OK")
     return cache[group]
 

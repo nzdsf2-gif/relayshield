@@ -4996,3 +4996,87 @@ this time it is inside the tool written to end the previous one. **A two-step pr
 rather than on the measurement, which is the right call when the measurement cannot reach the
 failing case: a slow answer costs seconds, a premature abort tells a first-time user the product
 does not work and cannot even say why.
+
+## THE TI DEMO QUOTES SIGHTINGS UNDER AN INDICATORS LABEL, AND NOTHING CAN SEE WHAT IS LIVE
+
+**2026-09-16, asked as "need to update the metrics for our TI corpus" on
+`relayshield-ti-demo.relayshieldadmin.workers.dev`. Two findings, and the first
+is not staleness.**
+
+`cloudflare_worker_ti_demo.js` shows **"5.4M+ / IOC indicators"**, and its own
+comment above the cards names the source: *"verified live against DynamoDB
+2026-08-12: intel_iocs 5,483,159"*. That is the ROW COUNT of
+`relayshield_intel_iocs` -- and `export_intel_sample.py`'s `collapse()` says in
+its own docstring why that is not an indicator count: *"The table is keyed
+(ioc_value, seen_ts), so a value seen on five days is five rows. Counting rows
+would inflate every number we quote."*
+
+**So the card is a SIGHTINGS count wearing an INDICATORS label**, and the two
+differ by roughly an order of magnitude: the 2026-09-03 measurement recorded
+**494K distinct against 5.8M sightings**. Refreshing the number would keep the
+defect and change its date. This is MEASUREMENT DOCTRINE's exact warning, on the
+page most likely to be read by somebody who checks.
+
+`tools/ti_demo_metrics.py` re-measures all four cards with the right units and
+prints two paste-ready replacements: **sources-not-counts** (recommended, what
+the AWS listing already does, cannot go stale) and **corrected counts with a
+date on every card**. The distinct count is a full multi-million-row scan, so it
+is opt-in behind `--distinct`; without it the tool says outright that indicators
+were NOT measured rather than printing the row count under that heading, which
+is the defect it exists to stop.
+
+### AND NOTHING IN THIS REPO CAN SEE WHAT THAT WORKER ACTUALLY SERVES
+
+**The DRIFT RULE's third case, open since it was written: "The TI demo
+Cloudflare Worker -- still outstanding. Nothing does it for Workers yet."** It is
+worse than unwatched. `grep -rl ti-demo .github/workflows` returns NOTHING, so
+no workflow has ever deployed it: every live version was pushed by hand, which
+is precisely where an uncommitted edit survives. `wrangler deploy` would replace
+it with the repo copy and print success.
+
+**So the metrics edit could not safely be made blind, and that is the whole
+reason this turn produced a recovery tool rather than a copy change.**
+`tools/recover_live_worker.sh` downloads a deployed Worker through the Workers
+API -- wrangler has no download command, the API is one GET -- and diffs it
+against the repo copy. Read-only, writes only to the scratch directory.
+`api.cloudflare.com` is egress-blocked here so it could not be run against the
+real host, and all four branches were therefore exercised against a local
+stand-in: unreachable, 403, identical, and drifted.
+
+**One defect in it was found by running it and could not have been found by
+reading it.** `CODE=$(curl ...)` under `set -e` ABORTS THE SCRIPT on a failed
+connection, silently, and the pipeline downstream still reported exit 0 -- so an
+unreachable API read as "nothing to recover", which is the worst of the three
+outcomes. It carries `|| true` and an explicit no-answer branch now, and that
+branch says the failure is a fact about the network and not about the Worker.
+
+## THE FUNNEL PRINTED COUNTS AND "NO EVENTS" UNDER EVERY ONE OF THEM
+
+**2026-09-16, in the `--snapshot before-tgapp` run.** Six stages reported real
+numbers (CHECKED 2, WATCHED 2, BOT 1, STARS 1, DEVELOPERS 5) and the window
+section under them said, for every single stage:
+
+    CHECKED     no events, so no window was observed
+
+**Two halves of one output contradicting each other, with nothing saying so.**
+`min(@timestamp)` comes back from CloudWatch Insights as a FORMATTED STRING --
+`2026-09-15 12:34:56.789` -- not as epoch milliseconds. `int(float(raw))` raises
+on that, the old code caught it and returned `None`, and `None` renders as "no
+events".
+
+**That is not cosmetic, because the window IS the sliding-window caveat.** A
+`--compare` delta only measures a submission if the two runs are close together
+relative to the window each observed, and this section is the only thing that
+reports what was observed. It has been silent on every run, so **every baseline
+taken so far carries no way to check that afterwards** -- including
+`before-telegtapps` and `before-tgapp`. The quiet alarm, in the tool written to
+stop confident wrong numbers.
+
+`_parse_insights_ts` accepts both shapes rather than assuming one, and returns
+`None` for anything unparseable, because a wrong window is worse than an absent
+one: it is a number the reader acts on. Four tests, proven by reintroducing the
+old parse.
+
+**The general form, and it is new: two numbers in one output that cannot both be
+true is a defect even when each is individually plausible.** Nothing errored,
+both halves looked like normal output, and only reading them TOGETHER shows it.

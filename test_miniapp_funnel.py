@@ -18,6 +18,7 @@ table declares, rather than a second copy written in Insights' parse syntax.
 import re
 import sys
 import unittest
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -258,6 +259,67 @@ class TestQuoting(unittest.TestCase):
     def test_a_quote_in_a_pattern_cannot_break_out_of_the_predicate(self):
         self.assertEqual(F._like('a"b'), '@message like "a\\"b"')
         self.assertEqual(F._like('a\\b'), '@message like "a\\\\b"')
+
+
+class TestTheObservedWindowIsActuallyReported(unittest.TestCase):
+    """min(@timestamp) comes back FORMATTED, not as epoch milliseconds.
+
+    Found 2026-09-16 from a real run: every stage printed a count and every
+    window line under it printed "no events, so no window was observed". Two
+    halves of the same output contradicting each other, with nothing saying so.
+
+    int(float("2026-09-15 12:34:56.789")) raises, the old code caught it and
+    returned None, and None renders as "no events". So the SLIDING WINDOW
+    CAVEAT -- the only thing that says whether a --compare delta measures a
+    submission or measures the window sliding -- was silent on every run, and a
+    baseline taken while it was silent carries no way to check that afterwards.
+    """
+
+    def test_a_formatted_timestamp_is_parsed(self):
+        for text in ("2026-09-15 12:34:56.789", "2026-09-15 12:34:56",
+                     "2026-09-15T12:34:56.789", "2026-09-15T12:34:56"):
+            with self.subTest(text=text):
+                ms = F._parse_insights_ts(text)
+                self.assertIsNotNone(
+                    ms, "a formatted timestamp must not read as 'no events'")
+                self.assertEqual(
+                    datetime.fromtimestamp(ms / 1000, tz=timezone.utc).date(),
+                    date(2026, 9, 15))
+
+    def test_epoch_milliseconds_still_work(self):
+        """Accepted as well as, never instead of: the shape is not assumed."""
+        self.assertEqual(F._parse_insights_ts("1757937296789"), 1757937296789)
+        self.assertEqual(F._parse_insights_ts(1757937296789), 1757937296789)
+
+    def test_an_unreadable_value_is_None_rather_than_a_guess(self):
+        """A wrong window is worse than an absent one -- it gets acted on."""
+        for bad in (None, "", "banana", "not-a-date"):
+            with self.subTest(bad=bad):
+                self.assertIsNone(F._parse_insights_ts(bad))
+
+    def test_a_group_with_events_reports_a_window(self):
+        """The end-to-end shape, because the unit fix is not the symptom.
+
+        group_window is what the window section reads, so this asserts the
+        thing the run actually printed wrongly rather than only the helper.
+        """
+        class Logs:
+            def start_query(self, **kw):
+                return {"queryId": "q"}
+
+            def get_query_results(self, **kw):
+                return {"status": "Complete", "statistics": {},
+                        "results": [[{"field": "n", "value": "42"},
+                                     {"field": "first_ms",
+                                      "value": "2026-09-01 00:00:00.000"}]]}
+
+        n, earliest, status = F.group_window(
+            Logs(), "/aws/lambda/whatever", 0, 1, {})
+        self.assertEqual((n, status), (42, "OK"))
+        self.assertIsNotNone(
+            earliest,
+            "42 events and no observed window is the contradiction this fixes")
+
 
 
 if __name__ == "__main__":

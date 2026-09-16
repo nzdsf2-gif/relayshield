@@ -41,11 +41,83 @@ if [ -z "$CF_API_TOKEN" ]; then
 fi
 [ -n "$CF_API_TOKEN" ] || { echo "no token, nothing to do"; exit 2; }
 
+# THE ACCOUNT ID IS DISCOVERED, NOT ASKED FOR, AND THE FIRST VERSION ASKED.
+# It prompted "Cloudflare account id:" and the answer was an EMAIL ADDRESS --
+# which is a perfectly reasonable thing to type at that prompt, and produced a
+# 404 whose reading guide said "no deployed script by that name", sending the
+# reader to check the Worker. The Worker was never the problem. A Cloudflare
+# account id is a 32-character hex string buried in the dashboard sidebar, and
+# a prompt that does not say so is rule 11's placeholder wearing a question
+# mark: it looks like an instruction to whoever wrote it and is unanswerable to
+# whoever reads it.
+#
+# The token can list the accounts it can see, so the question does not need
+# asking at all. One extra GET removes a whole class of wrong answer.
 if [ -z "$CF_ACCOUNT_ID" ]; then
-  printf 'Cloudflare account id: '
-  read CF_ACCOUNT_ID
+  ACCTS="${TMPDIR:-/tmp}/cf-accounts.json"
+  ACODE=$(curl -sS -o "$ACCTS" -w '%{http_code}' \
+    -H "Authorization: Bearer $CF_API_TOKEN" \
+    "https://api.cloudflare.com/client/v4/accounts?per_page=50" 2>/dev/null) || true
+  if [ "$ACODE" = "200" ]; then
+    # PARSED, NOT GREPPED. The first version matched '"id":"..."' with no
+    # space after the colon and silently extracted nothing from JSON that had
+    # one -- an empty result that reads identically to "the token sees no
+    # accounts". Grepping JSON is the same class as grepping the source of a
+    # template literal: it works until the shape shifts by one character.
+    CF_ACCOUNT_ID=$(python3 - "$ACCTS" <<'PYEOF'
+import json, sys
+try:
+    rows = json.load(open(sys.argv[1])).get("result") or []
+except Exception:
+    rows = []
+for r in rows:
+    if isinstance(r, dict) and isinstance(r.get("id"), str) and len(r["id"]) == 32:
+        print(r["id"]); break
+PYEOF
+)
+    NAMES=$(python3 - "$ACCTS" <<'PYEOF'
+import json, sys
+try:
+    rows = json.load(open(sys.argv[1])).get("result") or []
+except Exception:
+    rows = []
+print(", ".join(str(r.get("name", "?")) for r in rows if isinstance(r, dict)))
+PYEOF
+)
+    if [ -n "$CF_ACCOUNT_ID" ]; then
+      echo "Account discovered from the token: $CF_ACCOUNT_ID"
+      echo "  (accounts this token can see: $NAMES)"
+      # MORE THAN ONE ACCOUNT IS A DECISION, NOT A DEFAULT. Taking the first
+      # silently is how a read lands in the wrong account -- the same shape as
+      # AWS_PROFILE defaulting to the pre-audit account.
+      COUNT=$(python3 -c "import json,sys;print(len(json.load(open(sys.argv[1])).get('result') or []))" "$ACCTS" 2>/dev/null || echo 1)
+      if [ "$COUNT" != "1" ]; then
+        echo "  NOTE: $COUNT accounts are visible and the FIRST was taken. If the"
+        echo "  Worker is in another one, re-run with CF_ACCOUNT_ID set."
+      fi
+    fi
+  else
+    echo "Could not list accounts (HTTP $ACODE). Body:"
+    cat "$ACCTS" 2>/dev/null; echo
+  fi
 fi
-[ -n "$CF_ACCOUNT_ID" ] || { echo "no account id, nothing to do"; exit 2; }
+
+if [ -z "$CF_ACCOUNT_ID" ]; then
+  echo "No account id, and the token could not list one."
+  echo "Find it in the Cloudflare dashboard: open any zone, and the right-hand"
+  echo "sidebar shows 'Account ID' as a 32-character hex string. It is NOT an"
+  echo "email address and NOT the account name."
+  exit 2
+fi
+
+# Validated rather than trusted, because the failure it prevents reads as a
+# missing Worker. `expr` for portability: sh has no [[ =~ ]].
+if ! expr "$CF_ACCOUNT_ID" : '[0-9a-f]\{32\}$' >/dev/null; then
+  echo "That is not a Cloudflare account id: $CF_ACCOUNT_ID"
+  echo "It must be exactly 32 hexadecimal characters. An email address or an"
+  echo "account name here returns a 404 that reads like a missing Worker."
+  exit 2
+fi
 
 OUT="${TMPDIR:-/tmp}/live-worker-$SCRIPT_NAME.js"
 API="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/$SCRIPT_NAME"

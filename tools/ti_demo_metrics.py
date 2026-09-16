@@ -66,26 +66,63 @@ def _guard_account(region):
             f"AWS_PROFILE=relayshield.")
 
 
+def _table_item_count(table_name, region):
+    """Row count from DescribeTable. One call, instant, free.
+
+    THE FIRST VERSION OF THIS TOOL SCANNED, AND IT HUNG. `Select="COUNT"` still
+    reads every page of a 5.5-million-row table, so the run printed its header
+    and then sat in a pagination loop for minutes with nothing on screen and a
+    real read bill accruing -- which is EXACTLY the defect CLAUDE.md records
+    about miniapp_funnel.py and `filter_log_events`, rebuilt by me in a new
+    file four days later. A lesson recorded in one file is not a lesson the
+    next file learns, for the third time.
+
+    DescribeTable's ItemCount is APPROXIMATE and refreshed roughly every six
+    hours, and that is fine for a headline that is about to be rewritten as
+    prose anyway. It is never fine for a number quoted to the row, which is
+    another reason Option A is the recommendation.
+    """
+    import boto3
+    from botocore.exceptions import ClientError
+
+    try:
+        d = boto3.client("dynamodb", region_name=region).describe_table(
+            TableName=table_name)
+        return d["Table"].get("ItemCount")
+    except ClientError as exc:
+        print(f"  ! {table_name}: {exc.response['Error']['Code']}",
+              file=sys.stderr)
+        return None
+
+
 def _count(table_name, region, filt=None):
-    """Row count via Select=COUNT. Returns None if the table is unreadable.
+    """Filtered row count by scan. Returns None if the table is unreadable.
 
     None rather than 0, deliberately and for the same reason the watchlist
     monitor does it: "we could not read this" and "this is empty" are different
     findings, and rendering the first as the second is how a false number gets
     onto a page.
+
+    Only used for the SMALL tables -- channels and MITRE -- where a filter is
+    needed and the row count is in the hundreds. It prints a page counter to
+    stderr regardless, because a tool that goes quiet is indistinguishable from
+    a tool that has hung, and this file has already made that mistake once.
     """
     import boto3
     from botocore.exceptions import ClientError
 
     table = boto3.resource("dynamodb", region_name=region).Table(table_name)
-    total, kwargs = 0, {"Select": "COUNT"}
+    total, pages, kwargs = 0, 0, {"Select": "COUNT"}
     if filt:
         kwargs.update(filt)
     try:
         while True:
             page = table.scan(**kwargs)
             total += page.get("Count", 0)
+            pages += 1
             key = page.get("LastEvaluatedKey")
+            print(f"    {table_name}: page {pages}, {total} matched so far",
+                  file=sys.stderr)
             if not key:
                 return total
             kwargs["ExclusiveStartKey"] = key
@@ -95,10 +132,26 @@ def _count(table_name, region, filt=None):
         return None
 
 
-def _distinct_indicators(region):
+def _distinct_indicators(region, approx_rows=None):
+    """Distinct indicators, by full scan and collapse. SLOW AND NOT FREE.
+
+    Reuses export_intel_sample.py's own `collapse()` so this number reconciles
+    exactly with measured_exclusive_share rather than being a second, subtly
+    different measurement.
+
+    It says what it is about to cost BEFORE it starts. A long-running read that
+    announces nothing is the hang this file was rewritten to stop.
+    """
     from export_intel_sample import EXCLUDED_TYPES, _scan_live, collapse
 
+    est = ""
+    if approx_rows:
+        est = f" about {approx_rows:,} rows,"
+    print(f"  FULL SCAN of {IOCS_TABLE}:{est} several minutes and a real read\n"
+          f"  bill. Ctrl-C now if that was not intended.\n", file=sys.stderr)
     items = _scan_live(IOCS_TABLE, region)
+    print(f"  scanned {len(items):,} rows, collapsing to distinct indicators...",
+          file=sys.stderr)
     records = collapse(items)
     return sum(1 for r in records if r["ioc_type"] not in EXCLUDED_TYPES)
 
@@ -119,8 +172,8 @@ def main():
     _guard_account(args.region)
 
     print("Re-measuring the TI demo's stat cards\n", file=sys.stderr)
-    sightings = _count(IOCS_TABLE, args.region)
-    families = _count(FAMILIES_TABLE, args.region)
+    sightings = _table_item_count(IOCS_TABLE, args.region)
+    families = _table_item_count(FAMILIES_TABLE, args.region)
     channels = _count(CHANNELS_TABLE, args.region, {
         "FilterExpression": "active = :t",
         "ExpressionAttributeValues": {":t": True},
@@ -129,7 +182,7 @@ def main():
         "FilterExpression": "sk = :i",
         "ExpressionAttributeValues": {":i": "info"},
     })
-    distinct = _distinct_indicators(args.region) if args.distinct else None
+    distinct = _distinct_indicators(args.region, sightings) if args.distinct else None
 
     today = date.today().isoformat()
     out = {

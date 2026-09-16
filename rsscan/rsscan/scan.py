@@ -14,7 +14,7 @@ Two modes, one code path:
 Either way only ADDED lines are scanned, so a repo with pre-existing findings
 does not get an unbypassable gate.
 
-**Everything matches locally.** All 31 credential patterns run on this machine.
+**Everything matches locally.** All 49 credential patterns run on this machine.
 No source code, no diff and no matched value is ever transmitted. There is no
 API key, no account and no network call on the scanning path — which is what
 makes the free tier genuinely free (zero server cost per commit) and removes the

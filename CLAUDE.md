@@ -5311,3 +5311,83 @@ three different answers:
 **The phone number is an ARGUMENT and is never written into the repo.** It is personal data and this
 repository is public -- rule 12's shape, where the credential-like thing arrives in a pasted message
 rather than in a vendor doc.
+
+## TWO SESSIONS FIXED THE SIM SWAP BUG IN PARALLEL. THE MERGE BLOCK I SHIPPED WAS WRONG.
+
+**2026-09-16. The founder ran the merge block and got conflicts in FOUR files**, including an
+`add/add` conflict on `test_sim_swap_monitor.py` -- two sessions had independently written a file
+of that name on the same day, for the same defect.
+
+**MY FAILURE, AND IT IS A RULE THIS FILE ALREADY CARRIES IN THOSE WORDS.** I checked
+`origin/main..HEAD`, saw one commit, and told him the merge was a fast-forward with no CLAUDE.md
+conflict. His own output says what I could not see:
+
+    Your branch is ahead of 'origin/main' by 5 commits.
+
+**`origin/main` is a claim about origin. It is not a claim about his clone.** The
+"IT IS NOT IN THE REPO IS A CLAIM ABOUT ORIGIN" section says exactly this, and I had even corrected
+a stale-ref reading an hour earlier and still drew the conclusion from the wrong end. **A merge
+block must anticipate the conflict it is going to cause** -- rule A -- and mine asserted there
+would be none. The one command that settles it costs him nothing and belongs in the block before
+any claim about the merge:
+
+    git --no-pager log --oneline origin/main..main
+
+**AND THE PUSH AT THE END OF A CONFLICTED BLOCK STILL RAN.** `git push origin main` pushed his five
+local commits (`2e6fa37..0a6da4c`) while the merge sat unresolved in the working tree, because
+`push` sends HEAD and an uncommitted merge is not in HEAD. So the block half-succeeded: his work
+went up, mine did not, and the tree was left full of conflict markers. **A block whose later steps
+assume an earlier one succeeded must stop when it does not.**
+
+### THE RECONCILE: THEIRS IS THE BASE, BECAUSE THEIRS IS BETTER
+
+Both sessions found the same three-part defect. The other session's detection is **strictly better
+and it is already live**, so it is the base and nothing of it was overwritten:
+
+- **MCC/MNC (`mobile_country_code` / `mobile_network_code`) as the discriminator**, with the
+  normalised display name only as a fallback. That is the carrier's identity ON THE NETWORK and it
+  does not move when a vendor restyles a string. My branch compared display names and tracked which
+  Twilio package supplied them -- a correct answer to a smaller question.
+- `detect_port_out()` as one decision point, plus **the same floor again inside both message
+  builders**, so "transferred from X to X" is unemittable whatever it is handed.
+- `update_user_swap_state` refusing to write an empty network over a good baseline.
+
+**What that branch did NOT carry, and this commit adds on top of it:**
+
+1. **TELEGRAM WAS NOT A DELIVERY CHANNEL AT ALL** -- the half the founder actually asked for.
+   `sent` was WhatsApp's result alone, so a user written with `delivery_channels: ["telegram"]`
+   enrolled with `/simswap`, was scanned correctly, and was alerted nowhere, with `sent` False so
+   the state was never stamped and the same check re-ran every cycle. `sent = wa_sent or tg_sent`
+   now, with the bodies built `is_telegram=True` (code spans, `/phone` and `/sweep` instead of
+   `Reply PHONE`).
+2. **PORT-OUT STILL BYPASSED DEDUP ENTIRELY.** Their detector makes a false transition far less
+   likely; it does not make a repeat quiet. Dedup is keyed on the TRANSITION now, preferring the
+   MCC/MNC pair, so a different carrier change still fires immediately while a repeat of the same
+   one is suppressed for seven days.
+
+**One tool was dropped rather than merged: my `tools/diagnose_sim_swap_alert.py`.** Theirs is
+`tools/diagnose_sim_swap_alert.sh`, already on main and already doing the job. Two tools one
+extension apart is drift with a delay on it.
+
+### THE TEST FILE APPENDED CLEAN AND RAN NOTHING
+
+`unittest.main()` sat in the MIDDLE of their file, so classes appended below it were defined after
+the runner had already exited. The file passed, reported **16 tests**, and silently skipped the
+seventeen just added. Caught only by reading the count rather than the OK. **A test file that grows
+by appending needs its `__main__` block last**, and the number of tests is the thing to read, not
+the word OK -- the quiet alarm, inside the suite written to stop one.
+
+33 tests now, and the four added guards were each proven by reintroducing their defect:
+
+    sent = wa_sent (Telegram gap)   -> 3 failures
+    port-out bypasses dedup         -> 1 failure
+    carrier bolded on Telegram      -> 2 failures
+    transition key never stamped    -> 1 failure
+
+### THE GENERAL FORM, and it is new
+
+**When two sessions ship the same fix, the reconcile is not "mine vs theirs", it is "which half
+does each one have".** Both were right about the defect and each missed something the other saw.
+Taking either branch whole would have shipped a regression: theirs alone leaves Telegram users
+alerted nowhere, mine alone throws away MCC/MNC for a weaker string comparison. **Read both, keep
+the better base, and add only what it lacks.**

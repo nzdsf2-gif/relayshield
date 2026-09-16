@@ -273,6 +273,11 @@ const PAGE = `<!doctype html>
   footer a { color: var(--accent); text-decoration: none; }
   footer a#botlink { font-weight: 600; }
   footer a#more { color: var(--hint); }
+  .inline-footer { color: var(--hint); font-size: .78rem; line-height: 1.45;
+                   margin: 0; }
+  .inline-footer code { color: var(--fg); background: rgba(255,255,255,.07);
+                        border-radius: 4px; padding: 1px 5px;
+                        font-size: .78rem; }
   .hidden { display: none; }
   canvas { width: 100%; border-radius: 12px; margin-top: 12px; }
 </style>
@@ -391,6 +396,30 @@ const PAGE = `<!doctype html>
     <button class="ghost hidden" id="pin">Add to home screen</button>
     <a id="botlink" href="__BOT__">Monitor my email, phone and wallets</a>
     <a id="more" href="__DEVELOPERS__" target="_blank" rel="noopener">Run this check from your own bot or agent</a>
+
+    <!-- INLINE MODE, NAMED ON EVERY TAB, AND IT IS STATIC MARKUP ON PURPOSE.
+
+         teachInline() already writes INLINE_TEXT into #inline-tip, and that
+         line only ever reaches somebody who is already standing in the Check
+         tab with nothing pasted. The people who most need to know are the ones
+         reading Spot the fake or looking at a watchlist, and the footer is the
+         one element on screen from all three.
+
+         STATIC, for the reason the tier line is static: what our own bot can do
+         is a fact about our own product and must not depend on a network call,
+         on initData, or on switchInlineQuery being available. A user who reads
+         this and types the handle by hand gets the full behaviour; the one-tap
+         button in the Check tab is a convenience on top of it, not the route.
+
+         The handle sits in a <code> span rather than bold because it is a
+         string the reader is being asked to TYPE, and because Telegram
+         linkifies a bare @handle in some contexts and not others. -->
+    <p class="inline-footer">In any Telegram chat, type
+      <code>@relayshield_bot</code> followed by a link or a TON address. The
+      verdict posts straight into that conversation, so you can check something
+      in the group where it was shared without adding a bot to it or leaving
+      the chat.</p>
+
     <p class="build">Build __BUILD__</p>
   </footer>
 

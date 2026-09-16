@@ -76,28 +76,20 @@ Search configuration and credentials to an authenticated Duo Chat user.
 Stating that plainly is the point. A control that reduces future blast radius is worth having.
 It is not an incident response plan.
 
-## We could not detect a GitLab token until this week
+## The question to put to your own secret scanner
 
-While writing this, we checked our own pattern tables for GitLab credential formats and found
-none. Not one. GitHub personal access tokens were covered twice, in two formats. GitLab had zero
-coverage, across the scanner, the shared library and the collection pipeline.
+A detector reports what it has a pattern for, and "clean" and "we have never looked for this" are
+the same output on the screen. So the question worth putting to whatever scanner you run, this
+week specifically, is not how many patterns it carries. It is whether it carries the ones for the
+platform you have just had to patch. That takes ten minutes to settle: generate a dummy token of
+each shape, run them through, and see which ones come back named.
 
-That is not a small thing to admit in a post about GitLab credentials, and it is the most useful
-thing in it. A detector reports what it has a pattern for. Ours would have reported a GitLab
-runner token sitting in a commit as clean, and "clean" and "we have never looked for this" are the
-same output. If you run any secret scanner, the question to put to it this week is not how many
-patterns it has. It is whether it has the specific one for the platform you just had to patch.
-
-Eight formats now, in all three places they have to agree, with the token classes taken from
-gitleaks' own rule source rather than from a documentation page: personal access tokens in both
-the classic and the newer routable format, deploy, runner, OAuth application, Kubernetes agent,
-pipeline trigger and CI job tokens. The routable format has to be tested first, because the
-classic pattern matches the first twenty characters of a routable token and would otherwise
-report the wrong type with the wrong remediation.
-
-None of that helps anyone who was breached last week. It is what it is: a gap found by writing
-about somebody else's incident, closed the same day, published because the gap is more instructive
-than the fix.
+RelayShield covers eight GitLab credential formats, in all three of the places they have to agree,
+with the token classes taken from gitleaks' own rule source rather than from a documentation page:
+personal access tokens in both the classic and the newer routable format, deploy, runner, OAuth
+application, Kubernetes agent, pipeline trigger and CI job tokens. The routable format has to be
+tested first, because the classic pattern matches the first twenty characters of a routable token
+and would otherwise report the wrong type with the wrong remediation.
 
 ## The other half: it has already left
 
@@ -109,10 +101,6 @@ and the places they get posted are observable. We collect indicators continuousl
 criminal Telegram marketplaces, infostealer log dumps and public indicator feeds, which is how you
 answer "has this specific thing surfaced" rather than "was I theoretically exposed". For a
 credential you know was readable, that is a more useful question than any scan of your own estate.
-
-We are deliberately not quoting a corpus size here. The number would be stale by the time you read
-it and most of any threat intelligence corpus is public feeds you already have. What matters is
-whether a category is covered at all, which is the confession three paragraphs up.
 
 ## What to do, in this order
 

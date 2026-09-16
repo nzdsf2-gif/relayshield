@@ -21,10 +21,20 @@ Tiered alert content:
 Business tiers (employee records):
     - Admin co-notification sent after employee alert is successfully delivered.
 
+Delivery:
+    - WhatsApp (template + freeform) when the record has no delivery_channels
+      (legacy) or lists "whatsapp".
+    - Telegram (one freeform message) when the record lists "telegram" and
+      carries a telegram_chat_id. A user who enrolled with /simswap in the bot
+      is delivered to there; before 2026-09-16 they were alerted nowhere.
+    - The alert counts as sent if EITHER channel delivered.
+
 Deduplication:
     - `last_swap_alerted_at` ISO timestamp stored in relayshield_users.
-      Alert suppressed if sent within the last 23 hours for the same user.
-    - Port-out alerts bypass dedup — always fire on carrier change.
+      Swap alert suppressed if sent within the last 23 hours for the same user.
+    - Port-out is deduped on the TRANSITION (`last_port_out_key`), not the user,
+      so a different carrier change still fires immediately while a repeat of
+      the same change is suppressed for PORT_OUT_DEDUP_SECONDS.
 
 Port-out detection:
     - `last_known_carrier` and `last_known_network` (MCC-MNC) stored in
@@ -152,6 +162,12 @@ SIM_SWAP_TEMPLATE_SID = "HX9df8877e110384af8835931dfeeff954"
 
 # Dedup: suppress re-alerts for the same user within this window.
 DEDUP_WINDOW_SECONDS = 23 * 3600  # 23 hours
+
+# Port-out dedup is keyed on the TRANSITION, not on the user, so a DIFFERENT
+# carrier change still fires immediately inside this window. 7 days because a
+# real port-out is resolved by phone calls to a carrier over days, not hours,
+# and repeating the same CRITICAL message every run through that is noise.
+PORT_OUT_DEDUP_SECONDS = 7 * 24 * 3600
 
 # Small pause between Twilio Lookup calls to avoid rate limits.
 LOOKUP_DELAY_SECONDS = 0.5
@@ -391,6 +407,7 @@ def update_user_swap_state(
     carrier_name: str,
     alert_fired: bool,
     network_id: str = "",
+    port_out_key: str = "",
 ) -> None:
     """
     Persist carrier baseline and (when alert was sent) timestamp to the user record.
@@ -400,6 +417,9 @@ def update_user_swap_state(
     one. An empty read must never erase a good baseline: the next run would then
     have nothing to compare against and a genuine port-out would pass as clean,
     which is the failure mode this whole function exists to prevent.
+
+    `port_out_key` records WHICH carrier transition was alerted, so a repeat of
+    the same one is suppressed while a new one still fires immediately.
     """
     table     = dynamodb.Table(USERS_TABLE)
     now_iso   = datetime.now(timezone.utc).isoformat()
@@ -414,6 +434,14 @@ def update_user_swap_state(
     if alert_fired:
         update_expr += ", last_swap_alerted_at = :t"
         expr_values[":t"] = now_iso
+
+    # Stamps the ONE transition just alerted, so the next run can tell a repeat
+    # of the same change from a new one. Without this stamp the transition dedup
+    # above can never engage.
+    if port_out_key:
+        update_expr += ", last_port_out_key = :pk, last_port_out_alerted_at = :t2"
+        expr_values[":pk"] = port_out_key
+        expr_values[":t2"] = now_iso
 
     table.update_item(
         Key={"user_id": user_id},
@@ -632,28 +660,73 @@ def _push_tg_signal(user_id: str, signal_type: str, tg_chat_id: int) -> None:
         logger.exception("_push_tg_signal failed user_id=%s: %s", user_id, exc)
 
 
-def _send_telegram_admin(tg_chat_id: int, message: str) -> bool:
-    """Send a Telegram message directly to admin via Bot API for co-notification."""
+# The secret holds a JSON OBJECT, not a token. _get_secret returns the
+# SecretString verbatim, so every caller has to unwrap it -- and on 2026-09-12
+# three of four call sites in this codebase did not, each failing with a WRONG
+# VALUE rather than an exception. One owner here, so there is one place to be
+# wrong.
+TG_BOT_TOKEN_SECRET = "relayshield/telegram_bot_token"
+TG_BOT_TOKEN_KEY    = "telegram_bot_token"
+
+
+def telegram_bot_token() -> str:
+    """The bot token, unwrapped from the JSON secret."""
+    raw = secrets_client.get_secret_value(
+        SecretId=TG_BOT_TOKEN_SECRET
+    )["SecretString"].strip()
     try:
-        raw = secrets_client.get_secret_value(
-            SecretId="relayshield/telegram_bot_token"
-        )["SecretString"].strip()
-        try:
-            token = json.loads(raw)["telegram_bot_token"]
-        except (json.JSONDecodeError, KeyError):
-            token = raw
-        url     = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = json.dumps(
-            {"chat_id": tg_chat_id, "text": message, "parse_mode": "Markdown"}
-        ).encode()
+        return json.loads(raw)[TG_BOT_TOKEN_KEY]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return raw
+
+
+def _send_telegram(tg_chat_id: int, message: str, what: str) -> bool:
+    """POST one message to the Bot API. Returns delivery success."""
+    try:
+        url     = f"https://api.telegram.org/bot{telegram_bot_token()}/sendMessage"
+        payload = json.dumps({
+            "chat_id":    tg_chat_id,
+            "text":       message,
+            # Legacy Markdown, which has NO escape syntax. Every interpolated
+            # VALUE in these bodies is therefore built inside a code span by
+            # build_*_alert_message(is_telegram=True) rather than escaped.
+            "parse_mode": "Markdown",
+            "disable_web_page_preview": True,
+        }).encode()
         req = urllib.request.Request(
             url, data=payload, headers={"Content-Type": "application/json"}
         )
-        urllib.request.urlopen(req, timeout=5)
+        urllib.request.urlopen(req, timeout=10)
         return True
     except Exception as exc:
-        logger.exception("Telegram admin notify failed chat_id=%s: %s", tg_chat_id, exc)
+        logger.exception("Telegram %s failed chat_id=%s: %s", what, tg_chat_id, exc)
         return False
+
+
+def send_telegram_alert(tg_chat_id: int, message: str) -> bool:
+    """Deliver a SIM swap / port-out alert to the USER over Telegram.
+
+    WHY THIS EXISTS. Until 2026-09-16 this function sent the alert over WhatsApp
+    and nothing else, and `sent` was WhatsApp's result alone. A user who signed
+    up through the bot is written with delivery_channels = ["telegram"] and has
+    no WhatsApp session, so they enrolled with /simswap, were scanned correctly
+    by scan_sim_swap_users(), and were alerted NOWHERE -- and `sent` stayed
+    False, so the state was never stamped and the same check re-ran every cycle.
+
+    _push_tg_signal DID fire for those users, which is why this looked wired. It
+    pushes a CORRELATION SIGNAL, not a notification: handle_inbound_signal runs
+    predictive warnings and attack-chain detection with it. Its own docstring
+    says so. A signal is not an alert.
+    """
+    sent = _send_telegram(tg_chat_id, message, "alert")
+    if sent:
+        logger.info("Telegram alert sent for chat_id=%s", tg_chat_id)
+    return sent
+
+
+def _send_telegram_admin(tg_chat_id: int, message: str) -> bool:
+    """Send a Telegram message directly to admin via Bot API for co-notification."""
+    return _send_telegram(tg_chat_id, message, "admin notify")
 
 
 def _send_coordinated(
@@ -813,6 +886,47 @@ def check_and_fire_correlation(
 # ---------------------------------------------------------------------------
 # Deduplication
 # ---------------------------------------------------------------------------
+
+def port_out_transition_key(old_name: str, old_network: str,
+                           new_name: str, new_network: str) -> str:
+    """Stable identifier for ONE carrier transition, used to dedup repeats.
+
+    Prefers the MCC/MNC pair, because that is the carrier's identity on the
+    network and does not move when a vendor restyles a display name. Falls back
+    to normalised display names, which is what detect_port_out falls back to.
+    """
+    if old_network and new_network:
+        return f"{old_network}>{new_network}"
+    return f"{normalise_carrier(old_name)}>{normalise_carrier(new_name)}"
+
+
+def is_port_out_recently_alerted(user: dict, transition_key: str) -> bool:
+    """True when this EXACT carrier transition was already alerted recently.
+
+    WHY THIS EXISTS. Port-out deliberately bypassed dedup entirely, on the
+    reasoning that a real port-out must never be suppressed by an unrelated swap
+    alert. That reasoning is sound and is preserved here: dedup is keyed on the
+    TRANSITION, so a different carrier change fires immediately even inside the
+    window. What it stops is re-sending the identical CRITICAL message on every
+    scheduled run, which is how a security alert gets muted by the one person
+    who needs it.
+
+    detect_port_out now makes a FALSE transition far less likely. This is the
+    floor under it: whatever slips through is said once, not hourly.
+    """
+    if not transition_key:
+        return False
+    if user.get("last_port_out_key") != transition_key:
+        return False
+    last_alerted = user.get("last_port_out_alerted_at")
+    if not last_alerted:
+        return False
+    try:
+        last_dt = datetime.fromisoformat(str(last_alerted).replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - last_dt).total_seconds() < PORT_OUT_DEDUP_SECONDS
+    except (ValueError, TypeError):
+        return False
+
 
 def is_recently_alerted(user: dict) -> bool:
     """Return True if a swap alert was sent within DEDUP_WINDOW_SECONDS."""
@@ -979,6 +1093,7 @@ def build_sim_swap_alert_message(
     subscription_tier: str,
     carrier_name: str,
     swap_event_timestamp: str,
+    is_telegram: bool = False,
 ) -> str:
     """
     Build the tiered WhatsApp alert body (freeform).
@@ -993,9 +1108,14 @@ def build_sim_swap_alert_message(
     except Exception:
         time_str = swap_event_timestamp or "unknown time"
 
+    # A value goes in a CODE SPAN on Telegram and a bold run on WhatsApp.
+    # Legacy Markdown has no escape syntax and a code span cannot live inside
+    # a bold run, so the two spellings are built rather than nested.
+    phone_md = f"`{phone_number}`" if is_telegram else f"*{phone_number}*"
+
     header = (
         f"🚨 *SIM/eSIM Change Detected — RelayShield*\n\n"
-        f"A SIM or eSIM change was detected on *{phone_number}* at {time_str}.\n\n"
+        f"A SIM or eSIM change was detected on {phone_md} at {time_str}.\n\n"
         f"*If you did not authorise this, act immediately.*\n\n"
     )
 
@@ -1008,18 +1128,29 @@ def build_sim_swap_alert_message(
             + "→ T-Mobile: 1-800-937-8997\n"
             + "→ Verizon: 1-800-922-0204\n\n"
             + 'Say: _"I did not authorise a SIM or eSIM change on my account."_\n\n'
-            + "Reply *PHONE* for carrier-specific SIM lock steps.\n"
-            + "Reply *SWEEP* to audit your inbox for backdoors left by attackers.\n\n"
+            + (
+                "Run /phone for carrier-specific SIM lock steps.\n"
+                "Run /sweep to audit your inbox for backdoors left by attackers.\n"
+                "Run /sim to re-check your SIM status at any time.\n\n"
+                if is_telegram else
+                "Reply *PHONE* for carrier-specific SIM lock steps.\n"
+                "Reply *SWEEP* to audit your inbox for backdoors left by attackers.\n\n"
+            )
             + "⬆️ Upgrade to Business Shield for carrier-specific hardening steps and eSIM audit guidance.\n\n"
             + "🛡️ RelayShield\n📢 t.me/RelayShield"
         )
 
     # ── Business Basic / Business Shield ──────────────────────────────────
     hardening     = _carrier_hardening_block(carrier_name)
+    sweep_step = (
+        "→ Run /sweep to audit your email inbox for backdoors"
+        if is_telegram else
+        "→ Reply *SWEEP* to audit your email inbox for backdoors"
+    )
     account_steps = (
         "\n\n*Secure your accounts:*\n"
         "→ Change passwords on any account using SMS two-factor authentication\n"
-        "→ Reply *SWEEP* to audit your email inbox for backdoors\n"
+        f"{sweep_step}\n"
         "→ Enable an authenticator app (Google Authenticator / Authy) on all key accounts"
     )
 
@@ -1048,19 +1179,27 @@ def build_port_out_alert_message(
     old_carrier: str,
     new_carrier: str,
     subscription_tier: str,
+    is_telegram: bool = False,
 ) -> str:
     """CRITICAL alert body for suspected port-out fraud.
 
     The second floor under detect_port_out, at the point of rendering: naming
     the same carrier on both sides of a transfer is a sentence this function
     must not be able to produce, whatever it is handed.
+
+    Carrier names are third-party VALUES, so on Telegram they go in code spans
+    rather than a bold run: legacy Markdown has no escape syntax, and a name
+    carrying an underscore would otherwise break the message body.
     """
+    def _val(text: str) -> str:
+        return f"`{text}`" if is_telegram else f"*{text}*"
+
     same_carrier = (
         normalise_carrier(old_carrier)
         and normalise_carrier(old_carrier) == normalise_carrier(new_carrier)
     )
     if old_carrier and new_carrier and not same_carrier:
-        change_line = f"transferred from *{old_carrier}* to *{new_carrier}*"
+        change_line = f"transferred from {_val(old_carrier)} to {_val(new_carrier)}"
     else:
         change_line = "transferred to a new carrier"
 
@@ -1071,13 +1210,20 @@ def build_port_out_alert_message(
         f"including all OTP codes and account recovery messages.\n\n"
     )
 
+    escalation = (
+        "Run /phone for carrier fraud escalation numbers."
+        if is_telegram else
+        "Reply *PHONE* for carrier fraud escalation numbers."
+    )
+    origin = _val(old_carrier) if old_carrier else "your original carrier"
+
     base_steps = (
         f"*Act immediately:*\n"
-        f"1️⃣ Call *{old_carrier or 'your original carrier'}*: report an unauthorised port-out\n"
+        f"1️⃣ Call {origin}: report an unauthorised port-out\n"
         f"2️⃣ Request a port-back and freeze your account against further changes\n"
         f"3️⃣ Contact your bank and email provider — treat all SMS two-factor as compromised\n"
         f"4️⃣ Do not rely on SMS for any authentication until your number is restored\n\n"
-        f"Reply *PHONE* for carrier fraud escalation numbers."
+        f"{escalation}"
     )
 
     if subscription_tier == TIER_PRO:
@@ -1097,8 +1243,15 @@ def build_admin_swap_notification(
     carrier_name: str,
     alert_type: str,
     old_carrier: str = "",
+    is_telegram: bool = False,
 ) -> str:
-    """Admin co-notification body for employee SIM swap or port-out."""
+    """Admin co-notification body for employee SIM swap or port-out.
+
+    Carrier names are third-party values, so on Telegram they go in code spans
+    rather than a bold run -- legacy Markdown has no escape syntax.
+    """
+    def _val(text: str) -> str:
+        return f"`{text}`" if is_telegram else f"*{text}*"
     name_str = employee_name if employee_name else f"a team member (···{phone_last4})"
 
     if alert_type == "port_out":
@@ -1107,7 +1260,7 @@ def build_admin_swap_notification(
             and normalise_carrier(old_carrier) == normalise_carrier(carrier_name)
         )
         change_line = (
-            f"from *{old_carrier}* to *{carrier_name}*"
+            f"from {_val(old_carrier)} to {_val(carrier_name)}"
             if (old_carrier and carrier_name and not same_carrier)
             else "to a new carrier"
         )
@@ -1124,7 +1277,7 @@ def build_admin_swap_notification(
             f"🛡️ RelayShield — admin CRITICAL alert\n📢 t.me/RelayShield"
         )
 
-    carrier_line = f" on *{carrier_name}*" if carrier_name else ""
+    carrier_line = f" on {_val(carrier_name)}" if carrier_name else ""
     return (
         f"⚠️ *SIM/eSIM Swap Alert: {name_str}*\n\n"
         f"A SIM or eSIM change was detected on {name_str}'s phone number{carrier_line}.\n\n"
@@ -1327,7 +1480,23 @@ def process_user(
             )
         return "clean"
 
-    # Dedup (port-out always fires; swap deduped by 23-hr window)
+    transition_key = (
+        port_out_transition_key(
+            last_known_carrier, last_known_network, carrier_name, network_id
+        )
+        if port_out_suspected else ""
+    )
+
+    # Dedup. A swap is deduped per USER on a 23-hour window; a port-out is
+    # deduped per TRANSITION, so a genuinely new carrier change is never
+    # suppressed by an earlier one while a repeat of the same one is.
+    if port_out_suspected and is_port_out_recently_alerted(user, transition_key):
+        logger.info(
+            "user_id=%s port-out transition %s already alerted — suppressed.",
+            user_id, transition_key,
+        )
+        return "skipped"
+
     if not port_out_suspected and is_recently_alerted(user):
         logger.info("user_id=%s swap recently alerted — suppressed.", user_id)
         return "skipped"
@@ -1335,40 +1504,87 @@ def process_user(
     alert_type        = "port_out" if port_out_suspected else "sim_swap"
     subscription_tier = user.get("subscription_tier", TIER_PERSONAL)
 
+    # ── Delivery channels ─────────────────────────────────────────────────
+    # A user who signed up through the Telegram bot is written with
+    # delivery_channels = ["telegram"] and has no WhatsApp session. Until
+    # 2026-09-16 this function sent over WhatsApp and nothing else, and `sent`
+    # was WhatsApp's result alone -- so such a user enrolled with /simswap, was
+    # scanned correctly, and was alerted NOWHERE, with `sent` False so the state
+    # was never stamped and the same check re-ran every cycle.
+    #
+    # An ABSENT delivery_channels means a legacy WhatsApp record, so WhatsApp
+    # stays enabled by default. Telegram requires the chat id AND an explicit
+    # opt-in, which is the convention every other monitor here uses.
+    channels   = user.get("delivery_channels", []) or []
+    tg_chat_id = user.get("telegram_chat_id")
+    wa_enabled = (not channels) or ("whatsapp" in channels)
+    tg_enabled = bool(tg_chat_id) and "telegram" in channels
+
     # Build freeform alert body (tiered content, carrier-specific steps)
-    if alert_type == "port_out":
-        body = build_port_out_alert_message(
-            phone_e164, last_known_carrier, carrier_name, subscription_tier
-        )
-    else:
-        body = build_sim_swap_alert_message(
-            phone_e164, subscription_tier, carrier_name, swap_ts
+    def _body(is_telegram: bool) -> str:
+        if alert_type == "port_out":
+            return build_port_out_alert_message(
+                phone_e164, last_known_carrier, carrier_name, subscription_tier,
+                is_telegram=is_telegram,
+            )
+        return build_sim_swap_alert_message(
+            phone_e164, subscription_tier, carrier_name, swap_ts,
+            is_telegram=is_telegram,
         )
 
+    body      = _body(False)
     to_number = to_whatsapp_number(phone_e164)
+    wa_sent   = False
+    tg_sent   = False
 
+    # ── WhatsApp ──────────────────────────────────────────────────────────
     # Step 1 — Send pre-approved template (bypasses 63016 session window, always delivered).
     # Port-out uses freeform-only as primary since it's a CRITICAL distinct event; template
     # covers the swap case. Both paths fall through to the freeform enrichment step.
-    if alert_type == "sim_swap":
-        template_sent = send_whatsapp_template(
-            to_number, phone_e164, carrier_name, swap_ts,
-            account_sid, auth_token, from_number,
-        )
-        if not template_sent:
-            logger.warning(
-                "SIM swap template failed for user_id=%s — attempting freeform.", user_id
+    if wa_enabled:
+        if alert_type == "sim_swap":
+            template_sent = send_whatsapp_template(
+                to_number, phone_e164, carrier_name, swap_ts,
+                account_sid, auth_token, from_number,
             )
-        sent = template_sent
-    else:
-        # Port-out: freeform is primary (no separate port-out template)
-        sent = send_whatsapp(to_number, body, account_sid, auth_token, from_number)
+            if not template_sent:
+                logger.warning(
+                    "SIM swap template failed for user_id=%s — attempting freeform.", user_id
+                )
+            wa_sent = template_sent
+        else:
+            # Port-out: freeform is primary (no separate port-out template)
+            wa_sent = send_whatsapp(to_number, body, account_sid, auth_token, from_number)
 
-    # Step 2 — Freeform enrichment with tiered carrier-specific steps.
-    # Sent immediately after template. Works when user has an active WhatsApp session.
-    # Silently skipped on 63016 — template already delivered the core notification.
-    if sent and alert_type == "sim_swap":
-        send_whatsapp(to_number, body, account_sid, auth_token, from_number)
+        # Step 2 — Freeform enrichment with tiered carrier-specific steps.
+        # Sent immediately after template. Works when user has an active WhatsApp session.
+        # Silently skipped on 63016 — template already delivered the core notification.
+        if wa_sent and alert_type == "sim_swap":
+            send_whatsapp(to_number, body, account_sid, auth_token, from_number)
+    else:
+        logger.info(
+            "user_id=%s has no WhatsApp delivery channel — WA alert skipped.", user_id
+        )
+
+    # ── Telegram ──────────────────────────────────────────────────────────
+    # One message carrying the whole alert. There is no template/session split
+    # on Telegram: a bot may message a user who has started it, so the alert and
+    # its remediation steps travel together.
+    if tg_enabled:
+        tg_sent = send_telegram_alert(int(tg_chat_id), _body(True))
+        logger.info(
+            "SIM swap TG alert — user_id=%s alert_type=%s sent=%s",
+            user_id, alert_type, tg_sent,
+        )
+
+    if not wa_enabled and not tg_enabled:
+        logger.error(
+            "user_id=%s is monitored for SIM swap with NO delivery channel — "
+            "alert_type=%s could not be delivered anywhere.",
+            user_id, alert_type,
+        )
+
+    sent = wa_sent or tg_sent
 
     # For port-out (freeform primary, CRITICAL), store SMS fallback in case no session.
     # SMS fallback Lambda fires after 4 hours if user has not messaged RelayShield.
@@ -1377,7 +1593,8 @@ def process_user(
             f"🚨 RelayShield CRITICAL: Your phone number {phone_e164} appears to have "
             f"been ported to {carrier_name}. This means ALL SMS two-factor authentication "
             f"is compromised. Call your original carrier immediately to request a port-back. "
-            f"Reply to this message or open WhatsApp to see full instructions."
+            f"Open {'Telegram' if tg_sent and not wa_sent else 'WhatsApp'} "
+            f"or reply to this message to see full instructions."
         )
         try:
             store_pending_sms_fallback(user_id, fallback_summary)
@@ -1386,11 +1603,12 @@ def process_user(
 
     if sent:
         update_user_swap_state(
-            user_id, carrier_name, alert_fired=True, network_id=network_id
+            user_id, carrier_name, alert_fired=True, network_id=network_id,
+            port_out_key=transition_key,
         )
         logger.warning(
-            "Alert sent — user_id=%s alert_type=%s carrier=%s",
-            user_id, alert_type, carrier_name,
+            "Alert sent — user_id=%s alert_type=%s carrier=%r wa=%s tg=%s",
+            user_id, alert_type, carrier_name, wa_sent, tg_sent,
         )
 
         # Record signal, fire predictive warning, check for coordinated attack chain
@@ -1407,10 +1625,12 @@ def process_user(
         except Exception as exc:
             logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
 
-        # Telegram correlation — push signal to TG webhook if user has Telegram delivery
-        tg_chat_id = user.get("telegram_chat_id")
-        tg_channels = user.get("delivery_channels", [])
-        if tg_chat_id and "telegram" in tg_channels:
+        # Telegram correlation — push the signal to the TG webhook so it can run
+        # predictive warnings and attack-chain detection. This is SEPARATE from
+        # the alert itself, which was sent above: the signal drives correlation,
+        # it is not a notification, and treating it as one is why Telegram users
+        # got no SIM swap alert at all until 2026-09-16.
+        if tg_enabled:
             _push_tg_signal(user_id, alert_type, int(tg_chat_id))
 
         # SIEM/SOAR forwarding — no-ops cleanly if no destination configured.
@@ -1453,6 +1673,11 @@ def process_user(
                             employee_name, phone_last4, carrier_name,
                             alert_type, old_carrier=last_known_carrier,
                         )
+                        admin_body_tg = build_admin_swap_notification(
+                            employee_name, phone_last4, carrier_name,
+                            alert_type, old_carrier=last_known_carrier,
+                            is_telegram=True,
+                        )
                         admin_phone = get_e164_phone(admin_record)
                         if admin_phone:
                             admin_sent = send_whatsapp(
@@ -1467,7 +1692,7 @@ def process_user(
                         admin_tg_id  = admin_record.get("telegram_chat_id")
                         admin_tg_chs = admin_record.get("delivery_channels", [])
                         if admin_tg_id and "telegram" in admin_tg_chs:
-                            _send_telegram_admin(int(admin_tg_id), admin_body)
+                            _send_telegram_admin(int(admin_tg_id), admin_body_tg)
                             logger.info("Admin co-notification TG — admin_user_id=%s", admin_user_id)
                     except Exception as exc:
                         logger.exception(

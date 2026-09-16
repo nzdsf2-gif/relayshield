@@ -251,5 +251,233 @@ class TestTheHandlerUsesTheDetector(unittest.TestCase):
         self.assertEqual(calls["ExpressionAttributeValues"][":n"], "310-160")
 
 
+
+
+# ---------------------------------------------------------------------------
+# Delivery — added 2026-09-16, reconciling a parallel session's work
+#
+# The detection half above came from one session; this half from another, and
+# the two were merged rather than one overwriting the other. MCC/MNC detection
+# is strictly better than what the other branch had, so it is the base. What it
+# did not carry is everything below: Telegram was not a delivery channel at all,
+# and port-out still bypassed dedup entirely.
+# ---------------------------------------------------------------------------
+
+class DeliveryHarness(unittest.TestCase):
+    """Runs the real process_user with Twilio and the Bot API stubbed."""
+
+    def setUp(self):
+        self.updates, self.wa, self.tg = [], [], []
+        self.patches = [
+            mock.patch.object(mon, "update_user_swap_state",
+                              side_effect=lambda *a, **k: self.updates.append((a, k))),
+            mock.patch.object(mon, "send_whatsapp",
+                              side_effect=lambda to, body, *a: (self.wa.append((to, body)), True)[1]),
+            mock.patch.object(mon, "send_whatsapp_template",
+                              side_effect=lambda to, *a: (self.wa.append((to, "TEMPLATE")), True)[1]),
+            mock.patch.object(mon, "send_telegram_alert",
+                              side_effect=lambda cid, body: (self.tg.append((cid, body)), True)[1]),
+            mock.patch.object(mon, "record_signal", return_value=[]),
+            mock.patch.object(mon, "check_and_warn_predictive"),
+            mock.patch.object(mon, "check_and_fire_correlation"),
+            mock.patch.object(mon, "_push_tg_signal"),
+            mock.patch.object(mon, "store_pending_sms_fallback"),
+            mock.patch.object(mon.siem_connector, "dispatch_finding"),
+        ]
+        for p in self.patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in self.patches])
+
+    def run_user(self, user, lookup):
+        with mock.patch.object(mon, "call_twilio_sim_swap_lookup", return_value=lookup):
+            return mon.process_user(user, "AC", "tok", "whatsapp:+1500", {})
+
+    @staticmethod
+    def wa_user(**kw):
+        u = {"user_id": "u1", "phone_number": "+15551230000",
+             "subscription_tier": mon.TIER_PERSONAL}
+        u.update(kw)
+        return u
+
+    @staticmethod
+    def tg_user(**kw):
+        u = {"user_id": "u2", "phone_number": "+15551230001",
+             "subscription_tier": mon.TIER_PERSONAL,
+             "delivery_channels": ["telegram"], "telegram_chat_id": 4242}
+        u.update(kw)
+        return u
+
+    @staticmethod
+    def lookup(carrier, network="310260", swapped=False):
+        return {"swapped_in_period": swapped, "swap_event_timestamp": "",
+                "carrier_name": carrier, "network_id": network}
+
+
+class TestTelegramIsADeliveryChannel(DeliveryHarness):
+
+    def test_a_telegram_user_receives_the_alert(self):
+        """The gap the founder reported. A user who enrolled with /simswap in
+        the bot was monitored correctly and alerted nowhere."""
+        result = self.run_user(self.tg_user(), self.lookup("T-Mobile USA", swapped=True))
+        self.assertEqual(result, "sim_swap")
+        self.assertEqual(len(self.tg), 1, "the Telegram user must get exactly one alert")
+        self.assertEqual(self.tg[0][0], 4242)
+        self.assertEqual(self.wa, [], "a telegram-only user must not be sent WhatsApp")
+
+    def test_telegram_alone_counts_as_delivered(self):
+        """`sent` was WhatsApp's result alone, so a Telegram-only user left it
+        False -- the state was never stamped and the alert re-ran every cycle."""
+        self.run_user(self.tg_user(), self.lookup("T-Mobile USA", swapped=True))
+        self.assertTrue(
+            any(kw.get("alert_fired") for _, kw in self.updates),
+            "delivery over Telegram must stamp the alert state",
+        )
+
+    def test_a_legacy_record_with_no_channels_still_gets_whatsapp(self):
+        """An absent delivery_channels means a legacy WhatsApp record."""
+        self.run_user(self.wa_user(), self.lookup("T-Mobile USA", swapped=True))
+        self.assertTrue(self.wa)
+        self.assertEqual(self.tg, [])
+
+    def test_a_dual_channel_user_gets_both(self):
+        self.run_user(
+            self.wa_user(delivery_channels=["whatsapp", "telegram"], telegram_chat_id=99),
+            self.lookup("T-Mobile USA", swapped=True))
+        self.assertTrue(self.wa)
+        self.assertTrue(self.tg)
+
+    def test_a_port_out_reaches_telegram_too(self):
+        result = self.run_user(
+            self.tg_user(last_known_carrier="T-Mobile USA", last_known_network="310260"),
+            self.lookup("AT&T Mobility", network="310410"))
+        self.assertEqual(result, "port_out")
+        self.assertEqual(len(self.tg), 1)
+        self.assertIn("CRITICAL", self.tg[0][1])
+
+
+class TestPortOutDedup(DeliveryHarness):
+
+    def test_the_same_transition_is_not_re_sent(self):
+        """Port-out bypassed dedup entirely, so a false transition re-fired on
+        every scheduled run. detect_port_out makes that far less likely; this is
+        the floor under it -- whatever slips through is said once, not hourly."""
+        key = mon.port_out_transition_key("T-Mobile USA", "310260", "AT&T Mobility", "310410")
+        result = self.run_user(
+            self.wa_user(last_known_carrier="T-Mobile USA", last_known_network="310260",
+                         last_port_out_key=key,
+                         last_port_out_alerted_at=mon.datetime.now(mon.timezone.utc).isoformat()),
+            self.lookup("AT&T Mobility", network="310410"))
+        self.assertEqual(result, "skipped")
+        self.assertEqual(self.wa, [], "the identical transition must not re-send")
+
+    def test_a_DIFFERENT_transition_fires_inside_the_dedup_window(self):
+        """The security property the old bypass was reaching for, kept."""
+        stale = mon.port_out_transition_key("T-Mobile USA", "310260", "AT&T Mobility", "310410")
+        result = self.run_user(
+            self.wa_user(last_known_carrier="T-Mobile USA", last_known_network="310260",
+                         last_port_out_key=stale,
+                         last_port_out_alerted_at=mon.datetime.now(mon.timezone.utc).isoformat()),
+            self.lookup("Verizon Wireless", network="311480"))
+        self.assertEqual(result, "port_out")
+        self.assertTrue(self.wa)
+
+    def test_the_transition_key_is_stamped_so_the_next_run_can_dedup(self):
+        self.run_user(
+            self.wa_user(last_known_carrier="T-Mobile USA", last_known_network="310260"),
+            self.lookup("AT&T Mobility", network="310410"))
+        self.assertTrue(
+            any(kw.get("port_out_key") for _, kw in self.updates),
+            "without the stamp the dedup above can never engage",
+        )
+
+    def test_the_key_prefers_the_network_identity_over_the_display_name(self):
+        """MCC/MNC does not move when a vendor restyles a display name."""
+        a = mon.port_out_transition_key("T-Mobile USA", "310260", "AT&T Mobility", "310410")
+        b = mon.port_out_transition_key("T-Mobile USA, Inc.", "310260", "AT&T Mobility LLC", "310410")
+        self.assertEqual(a, b)
+
+
+class TestTelegramMarkdown(unittest.TestCase):
+    """Legacy Markdown has NO escape syntax, so a VALUE goes in a code span."""
+
+    def bodies(self):
+        return [
+            mon.build_sim_swap_alert_message("+15551230000", mon.TIER_PERSONAL,
+                                             "T-Mobile USA", "", is_telegram=True),
+            mon.build_sim_swap_alert_message("+15551230000", mon.TIER_PRO,
+                                             "T-Mobile USA", "", is_telegram=True),
+            mon.build_port_out_alert_message("+15551230000", "T-Mobile USA",
+                                             "AT&T Mobility", mon.TIER_PERSONAL, is_telegram=True),
+            mon.build_admin_swap_notification("Jo", "0000", "AT&T Mobility", "port_out",
+                                              old_carrier="T-Mobile USA", is_telegram=True),
+        ]
+
+    def test_no_backslash_escapes(self):
+        for body in self.bodies():
+            self.assertNotIn("\\_", body)
+            self.assertNotIn("\\*", body)
+
+    def test_a_carrier_name_is_a_code_span_not_a_bold_run(self):
+        body = mon.build_port_out_alert_message(
+            "+15551230000", "T-Mobile USA", "AT&T Mobility", mon.TIER_PERSONAL, is_telegram=True)
+        self.assertIn("`T-Mobile USA`", body)
+        self.assertIn("`AT&T Mobility`", body)
+        self.assertNotIn("*T-Mobile USA*", body)
+
+    def test_a_carrier_with_an_underscore_survives(self):
+        body = mon.build_port_out_alert_message(
+            "+1555", "carrier_one", "carrier_two", mon.TIER_PERSONAL, is_telegram=True)
+        self.assertIn("`carrier_one`", body)
+        self.assertNotIn("*carrier_one*", body)
+
+    def test_a_code_span_never_sits_inside_a_bold_run(self):
+        for body in self.bodies():
+            for seg in body.split("\n"):
+                if "`" in seg and seg.count("*") >= 2:
+                    before = seg[:seg.index("`")]
+                    self.assertEqual(before.count("*") % 2, 0,
+                                     f"code span opened inside an unclosed bold run: {seg!r}")
+
+    def test_telegram_copy_names_commands_not_whatsapp_reply_keywords(self):
+        """'Reply PHONE' is an instruction nobody in Telegram can follow."""
+        for body in self.bodies():
+            self.assertNotIn("Reply *PHONE*", body)
+            self.assertNotIn("Reply *SWEEP*", body)
+        personal = mon.build_sim_swap_alert_message(
+            "+1555", mon.TIER_PERSONAL, "T-Mobile USA", "", is_telegram=True)
+        self.assertIn("/phone", personal)
+        self.assertIn("/sweep", personal)
+
+    def test_the_whatsapp_body_keeps_its_reply_keywords(self):
+        wa = mon.build_sim_swap_alert_message(
+            "+1555", mon.TIER_PERSONAL, "T-Mobile USA", "", is_telegram=False)
+        self.assertIn("Reply *PHONE*", wa)
+        self.assertNotIn("/sweep", wa)
+
+
+class TestOneTokenUnwrap(unittest.TestCase):
+
+    def test_the_secret_name_appears_once(self):
+        """N copies of a three-line unwrap is N chances to be wrong, and the
+        copies fail with a WRONG VALUE rather than an exception.
+
+        Counted over ast.Constant nodes, not unparsed source: ast.walk visits a
+        module-level assignment inside several parent nodes, so counting
+        substrings reports 3 for one occurrence. The first version of this test
+        failed on correct code for exactly that reason -- a guard is only as
+        good as where it got its expectations.
+        """
+        tree = ast.parse(open("relayshield_sim_swap_monitor.py").read())
+        hits = [n for n in ast.walk(tree)
+                if isinstance(n, ast.Constant) and n.value == "relayshield/telegram_bot_token"]
+        self.assertEqual(len(hits), 1)
+
+    def test_the_secret_name_uses_underscores(self):
+        """The hyphenated name does not exist; every read of it raised
+        ResourceNotFoundException for three days in 2026-09."""
+        self.assertEqual(mon.TG_BOT_TOKEN_SECRET, "relayshield/telegram_bot_token")
+        self.assertEqual(mon.TG_BOT_TOKEN_KEY, "telegram_bot_token")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -27,8 +27,13 @@ Deduplication:
     - Port-out alerts bypass dedup — always fire on carrier change.
 
 Port-out detection:
-    - `last_known_carrier` stored in relayshield_users on every clean check.
-    - When carrier changes from a known non-empty value, port-out is flagged.
+    - `last_known_carrier` and `last_known_network` (MCC-MNC) stored in
+      relayshield_users on every clean check.
+    - Flagged when the number is on a DIFFERENT carrier than last time.
+      MCC/MNC decides whenever both sides carry it; a NORMALISED display name
+      is the fallback. It is never a raw comparison of the vendor's display
+      string -- that shipped a "transferred from T-Mobile USA to T-Mobile USA"
+      alert on 2026-09-16. See detect_port_out.
 
 Phone resolution:
     - Primary:  KMS decrypt of phone_encrypted (post-migration records)
@@ -74,6 +79,7 @@ import json
 import logging
 import os
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -248,20 +254,162 @@ def get_user_by_id(user_id: str) -> dict | None:
     return response.get("Item")
 
 
+# ---------------------------------------------------------------------------
+# Carrier identity — what a port-out actually is
+# ---------------------------------------------------------------------------
+#
+# A port-out is the number moving to a DIFFERENT CARRIER. It is not the vendor
+# spelling its display name differently between two runs, and on 2026-09-16
+# this monitor sent a CRITICAL alert saying a number had been "transferred from
+# T-Mobile USA to T-Mobile USA" -- the same carrier on both sides, which is not
+# a port-out under any reading and is not a sentence a security product should
+# ever be able to emit.
+#
+# The cause is that `carrier_name` is a VENDOR DISPLAY STRING assembled from a
+# two-source fallback: `line_type_intelligence.carrier_name` when that package
+# answers, and `sim_swap.carrier_name` when it does not. Those two packages
+# spell the same carrier differently ("T-Mobile USA" against "T-Mobile USA,
+# Inc.") and either can be transiently unavailable, so the stored baseline and
+# the current read can disagree byte-for-byte while naming one carrier. The old
+# test was `last_known_carrier != carrier_name` -- raw equality on that string,
+# with no normalisation anywhere in the file.
+#
+# TWO GUARDS, AND THE FIRST ONE IS THE REAL ANSWER.
+#
+# 1. MCC/MNC. Lookup v2 returns `mobile_country_code` and `mobile_network_code`
+#    alongside the name. That pair IS the carrier's identity on the network --
+#    numeric, stable, and not a label anyone reformats. When both sides carry
+#    it, it decides and the display name is only what we show the user.
+# 2. A normalised name, for the runs where MCC/MNC is absent. Case, unicode
+#    dashes, doubled spaces and corporate suffixes are all removed, so the two
+#    spellings above collapse to one value.
+#
+# And the floor under both: a port-out is never reported when the two sides
+# normalise equal. That is the line that makes the sentence above impossible.
+
+
+_CORP_SUFFIXES = (
+    "inc", "incorporated", "llc", "l.l.c", "corp", "corporation", "co",
+    "ltd", "limited", "plc", "gmbh", "s.a", "sa", "ag", "nv", "bv", "pty",
+)
+
+_DASHES = "‐‑‒–—―−－"
+
+
+def normalise_carrier(name: str) -> str:
+    """Collapse a vendor carrier display string to a comparable identity.
+
+    Returns "" for anything empty or for the literal "unknown", which is what
+    update_user_swap_state writes when the vendor told us nothing. An empty
+    result means "no baseline", never "a carrier called nothing".
+    """
+    if not name:
+        return ""
+    text = unicodedata.normalize("NFKC", str(name)).casefold().strip()
+    if not text or text == "unknown":
+        return ""
+    for dash in _DASHES:
+        text = text.replace(dash, "-")
+    # Drop trailing corporate suffixes, repeatedly: "t-mobile usa, inc." and
+    # "t-mobile usa" have to land on the same value or the whole guard is
+    # decorative.
+    changed = True
+    while changed:
+        changed = False
+        text = text.strip().strip(",.;")
+        for suffix in _CORP_SUFFIXES:
+            for sep in (", ", " "):
+                tail = sep + suffix
+                if text.endswith(tail):
+                    text = text[: -len(tail)]
+                    changed = True
+                    break
+            if changed:
+                break
+    # Everything that is not a letter or a digit is spelling, not identity.
+    out = "".join(ch for ch in text if ch.isalnum())
+    return out if out != "unknown" else ""
+
+
+def network_identity(mcc: str, mnc: str) -> str:
+    """The carrier's numeric network identity, or "" when the vendor withheld it.
+
+    Both halves are required. A bare MCC is a country, not a carrier, and
+    comparing countries would call every port-out clean.
+    """
+    mcc = (mcc or "").strip()
+    mnc = (mnc or "").strip()
+    if not mcc or not mnc:
+        return ""
+    return f"{mcc}-{mnc}"
+
+
+def detect_port_out(
+    stored_carrier: str,
+    stored_network: str,
+    current_carrier: str,
+    current_network: str,
+) -> bool:
+    """True only when the number has moved to a DIFFERENT carrier.
+
+    Pure, so the decision can be tested without Twilio, DynamoDB or a phone.
+    """
+    prev_net = (stored_network or "").strip()
+    curr_net = (current_network or "").strip()
+    # A stored value without both halves is not an identity. Guard here as well
+    # as at the write, because a record written before this code existed carries
+    # whatever the old version put there.
+    prev_net = prev_net if "-" in prev_net else ""
+    curr_net = curr_net if "-" in curr_net else ""
+
+    prev_name = normalise_carrier(stored_carrier)
+    curr_name = normalise_carrier(current_carrier)
+
+    # No baseline is not a port-out. The first observation of any number would
+    # otherwise read as "changed from nothing", which is the first-run alert
+    # storm relayshield_watchlist_monitor.py exists to refuse.
+    if not prev_net and not prev_name:
+        return False
+    if not curr_net and not curr_name:
+        return False
+
+    # The names agreeing settles it, whatever the numbers say. A carrier does
+    # not port a number to itself, and saying so to a customer destroys the
+    # credibility of every alert after it.
+    if prev_name and curr_name and prev_name == curr_name:
+        return False
+
+    # MCC/MNC decides whenever both sides have it.
+    if prev_net and curr_net:
+        return prev_net != curr_net
+
+    return bool(prev_name and curr_name and prev_name != curr_name)
+
+
 def update_user_swap_state(
     user_id: str,
     carrier_name: str,
     alert_fired: bool,
+    network_id: str = "",
 ) -> None:
     """
     Persist carrier baseline and (when alert was sent) timestamp to the user record.
     Always updates last_known_carrier for port-out tracking.
+
+    `network_id` is the MCC-MNC pair and is written ONLY when the vendor gave us
+    one. An empty read must never erase a good baseline: the next run would then
+    have nothing to compare against and a genuine port-out would pass as clean,
+    which is the failure mode this whole function exists to prevent.
     """
     table     = dynamodb.Table(USERS_TABLE)
     now_iso   = datetime.now(timezone.utc).isoformat()
 
     update_expr = "SET last_known_carrier = :c"
     expr_values: dict = {":c": carrier_name or "unknown"}
+
+    if network_id:
+        update_expr += ", last_known_network = :n"
+        expr_values[":n"] = network_id
 
     if alert_fired:
         update_expr += ", last_swap_alerted_at = :t"
@@ -756,10 +904,22 @@ def call_twilio_sim_swap_lookup(
                 # of the sim_swap package, and fall back to the sim_swap object.
                 "carrier_name":         lti.get("carrier_name")
                                         or sim_swap_obj.get("carrier_name", ""),
+                # The numeric network identity, when the LTI package answered.
+                # This is what a port-out actually changes; carrier_name is a
+                # display string the vendor is free to reformat between runs.
+                "network_id":           network_identity(
+                                            lti.get("mobile_country_code", ""),
+                                            lti.get("mobile_network_code", ""),
+                                        ),
             }
             logger.info(
-                "Twilio Lookup %s — swapped=%s carrier=%s",
-                phone_e164, result["swapped_in_period"], result["carrier_name"] or "unknown",
+                # repr() on the carrier, deliberately. Two spellings of one
+                # carrier are what produced a "transferred from T-Mobile USA to
+                # T-Mobile USA" alert, and a bare %s renders the difference
+                # invisible in exactly the log somebody reads to diagnose it.
+                "Twilio Lookup %s — swapped=%s carrier=%r network=%s",
+                phone_e164, result["swapped_in_period"],
+                result["carrier_name"] or "unknown", result["network_id"] or "unknown",
             )
             return result
 
@@ -889,8 +1049,17 @@ def build_port_out_alert_message(
     new_carrier: str,
     subscription_tier: str,
 ) -> str:
-    """CRITICAL alert body for suspected port-out fraud."""
-    if old_carrier and new_carrier:
+    """CRITICAL alert body for suspected port-out fraud.
+
+    The second floor under detect_port_out, at the point of rendering: naming
+    the same carrier on both sides of a transfer is a sentence this function
+    must not be able to produce, whatever it is handed.
+    """
+    same_carrier = (
+        normalise_carrier(old_carrier)
+        and normalise_carrier(old_carrier) == normalise_carrier(new_carrier)
+    )
+    if old_carrier and new_carrier and not same_carrier:
         change_line = f"transferred from *{old_carrier}* to *{new_carrier}*"
     else:
         change_line = "transferred to a new carrier"
@@ -933,9 +1102,13 @@ def build_admin_swap_notification(
     name_str = employee_name if employee_name else f"a team member (···{phone_last4})"
 
     if alert_type == "port_out":
+        same_carrier = (
+            normalise_carrier(old_carrier)
+            and normalise_carrier(old_carrier) == normalise_carrier(carrier_name)
+        )
         change_line = (
             f"from *{old_carrier}* to *{carrier_name}*"
-            if (old_carrier and carrier_name)
+            if (old_carrier and carrier_name and not same_carrier)
             else "to a new carrier"
         )
         return (
@@ -1133,20 +1306,25 @@ def process_user(
     swapped             = lookup["swapped_in_period"]
     swap_ts             = lookup["swap_event_timestamp"]
     carrier_name        = lookup["carrier_name"]
+    network_id          = lookup.get("network_id", "")
     last_known_carrier  = user.get("last_known_carrier", "")
+    last_known_network  = user.get("last_known_network", "")
 
-    # Port-out detection: carrier changed from a known non-empty value
-    port_out_suspected = bool(
-        last_known_carrier
-        and carrier_name
-        and last_known_carrier not in ("unknown", "")
-        and last_known_carrier != carrier_name
+    # Port-out detection: the number is on a DIFFERENT carrier than last time.
+    # MCC/MNC decides when both sides have it; a normalised display name is the
+    # fallback. Never a raw string comparison -- see detect_port_out.
+    port_out_suspected = detect_port_out(
+        last_known_carrier, last_known_network, carrier_name, network_id
     )
 
     # Nothing to report
     if not swapped and not port_out_suspected:
-        if carrier_name and carrier_name != last_known_carrier:
-            update_user_swap_state(user_id, carrier_name, alert_fired=False)
+        if (carrier_name and carrier_name != last_known_carrier) or (
+            network_id and network_id != last_known_network
+        ):
+            update_user_swap_state(
+                user_id, carrier_name, alert_fired=False, network_id=network_id
+            )
         return "clean"
 
     # Dedup (port-out always fires; swap deduped by 23-hr window)
@@ -1207,7 +1385,9 @@ def process_user(
             logger.exception("SMS fallback store failed user_id=%s: %s", user_id, exc)
 
     if sent:
-        update_user_swap_state(user_id, carrier_name, alert_fired=True)
+        update_user_swap_state(
+            user_id, carrier_name, alert_fired=True, network_id=network_id
+        )
         logger.warning(
             "Alert sent — user_id=%s alert_type=%s carrier=%s",
             user_id, alert_type, carrier_name,
@@ -1245,7 +1425,9 @@ def process_user(
                     "details": {
                         "phone":               phone_e164,
                         "carrier":             carrier_name,
+                        "network_id":          network_id,
                         "last_known_carrier":  last_known_carrier,
+                        "last_known_network":  last_known_network,
                         "swap_event_timestamp": swap_ts,
                     },
                     "detected_at": datetime.now(timezone.utc).isoformat(),

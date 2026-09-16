@@ -8,8 +8,8 @@ SHA-256 phone_hash for GSI-based lookups.
 Background
 ----------
 Before field-level KMS encryption was introduced for phone numbers, user
-records stored whatsapp_number (e.g. "whatsapp:+19785013199") and phone_number
-(e.g. "+19785013199") as plaintext. The updated webhook Lambdas now write
+records stored whatsapp_number (e.g. "whatsapp:+15550100") and phone_number
+(e.g. "+15550100") as plaintext. The updated webhook Lambdas now write
 phone_encrypted (KMS ciphertext) and phone_hash (SHA-256) for all new records,
 and fall back to the legacy whatsapp_number field for existing ones.
 

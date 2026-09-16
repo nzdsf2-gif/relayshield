@@ -5311,3 +5311,113 @@ three different answers:
 **The phone number is an ARGUMENT and is never written into the repo.** It is personal data and this
 repository is public -- rule 12's shape, where the credential-like thing arrives in a pasted message
 rather than in a vendor doc.
+
+## WHERE 2026-09-16 LEFT THINGS. READ THIS FIRST.
+
+Four items, in the order they were worked. The findings each have their own section above; this is
+state and what is still open.
+
+### 1. THE SIM SWAP ALERT WAS A FALSE POSITIVE AND IT IS CONFIRMED, NOT INFERRED
+
+`sh tools/diagnose_sim_swap_alert.sh` step 3 returned **no lines**, which is the good answer:
+**Twilio reported no SIM or eSIM change on that number.** The port-out alert was built entirely from
+the carrier-name comparison, and that comparison was the defect written up in the section above.
+
+**The confirmation matters more than the fix, and it is worth knowing why the diagnostic could give
+it.** A port-out alert never consults `swapped_in_period` -- the two signals are independent, and
+only one of them was wrong. Had step 3 printed a line, the same message would have been a false
+alarm about the WRONG THING and a real compromise about the right one. **A wrong verdict and a wrong
+verdict about a real event are not the same finding**, and nothing on the phone could separate them.
+
+Fixed, tested and pushed: `detect_port_out` on MCC/MNC with a normalised name as the fallback, the
+never-alert-on-equal floor in the detector AND in both message builders, `last_known_network` stored
+and never erased by an empty read, `%r` on the carrier in the log line, 16 tests where there were
+none, and the function added to `lambda_drift_check.yml`.
+
+**And the founder's own mobile number was found committed in two prose lines** -- a docstring in
+`relayshield_kms_phone_migration.py` and a `TODO.md` row -- while checking that this session did not
+introduce one. Redacted in HEAD. **Git history still carries them and that is not recoverable**; it
+is a phone number rather than a credential, so the recommendation is to leave the history alone. It
+is rule 12's shape with the source being a pasted message rather than a vendor doc.
+
+### 2. TG-SIMSWAP-1 IS ON DECK. THE MOST SEVERE ALERT WE PRODUCE NEVER REACHES TELEGRAM.
+
+**Andrew's instruction, 2026-09-16: add it as an on-deck TODO for Telegram in the next session.**
+Scoped here so the next session does not re-derive it.
+
+**What is true today, traced through the code rather than assumed.** A SIM swap or port-out alert is
+**WhatsApp only**. Three Telegram-shaped things exist and none of them delivers it:
+
+* `_push_tg_signal` invokes the Telegram webhook with `{source: "relayshield_internal", user_id,
+  signal_type, telegram_chat_id}`. `handle_inbound_signal` reads `recent_signals` and runs
+  PREDICTIVE warnings and attack-chain correlation. **It never sends the alert body.**
+* `_send_telegram_admin` does send a body, and it fires only for a business-tier EMPLOYEE record
+  with an `admin_user_id`, to the admin. Not to the person whose number moved.
+* `handle_inbound_signal` ALREADY implements the shape needed:
+  `{"action": "send_message", "telegram_chat_id": <int>, "message": "<text>"}` -> `send_message(...,
+  parse_mode="Markdown")`. **Nothing calls it for this alert.**
+
+So a user who set `delivery_channels` to include Telegram is told, by that setting, that they will
+be reached there, and for the one CRITICAL alert in the product they are not. That is the
+watchlist-promised-alerts shape: every part looks finished and the last hop does not exist.
+
+**THE SCOPE, roughly half a day.** In `process_user`, after the WhatsApp send and inside the
+existing `if sent:` block, gated on `tg_chat_id and "telegram" in tg_channels`, invoke the webhook
+with the `send_message` action carrying `body` -- the same string WhatsApp got. **After the WhatsApp
+send and never instead of it**: two channels for a CRITICAL alert is redundancy, and swapping one
+for the other trades a known-working path for a new one.
+
+**THREE TRAPS, NAMED BEFORE THEY ARE WALKED INTO.**
+
+1. **`parse_mode="Markdown"` is legacy Markdown and has NO ESCAPE SYNTAX.** `build_port_out_alert_
+   message` interpolates CARRIER NAMES into `*bold*` runs, and a carrier containing `_` or `*` --
+   or a phone number, or any vendor string -- renders broken or strands text in a mention. That is
+   this file's own NEVER SHIP TELEGRAM COPY section, and the alert body was written for WhatsApp,
+   which has different rules. **Run `python3 test_telegram_markdown_escapes.py` before shipping it**,
+   and put any interpolated value in a code span rather than a backslash.
+2. **A second channel is a second way to spam.** The 23-hour dedup lives in
+   `is_recently_alerted` and port-out DELIBERATELY bypasses it. Adding a channel doubles whatever
+   that produces, so the delivery decision must sit INSIDE the existing `if sent:` block and never
+   introduce its own retry.
+3. **The invoke is async (`InvocationType: "Event"`), so a failure is invisible.** `_push_tg_signal`
+   already swallows its exception. A CRITICAL alert whose second channel fails silently is worse
+   than one channel, because the setting says it was delivered. Log the outcome at WARNING and
+   record which channels actually took it.
+
+**A test asserts the ORDERING, not the presence** -- the Watching-tab lesson: a guard that merely
+finds the branch passes on a version that sends Telegram first and drops WhatsApp.
+
+### 3. THE TI DEMO: THE CARDS ARE NOT ON `origin/main`, AND MERGING WOULD NOT DEPLOY THEM
+
+**Reported as "TI demo is merged and updated with correct metrics". The first half is half true and
+the second is not, and both are checkable.** `origin/main` is at `2e6fa37`, which carries
+`tools/ti_demo_metrics.py`, `tools/ti_demo_render.mjs` and the diagnosis. The commit that changes
+the four cards is **`b6763a4`, still only on the branch** -- the merge ran before that edit existed.
+`git --no-pager show origin/main:cloudflare_worker_ti_demo.js | grep stat-num` still prints
+`5.4M+ / IOC indicators`.
+
+**And even a correct merge changes nothing a visitor sees.** `grep -rl ti-demo .github/workflows`
+returns NOTHING. Every live version of that Worker was pushed by hand, so the page only moves when
+`npx wrangler deploy --config wrangler.ti-demo.toml` runs -- **and that deploy overwrites whatever is
+live with the repo copy.** `sh tools/recover_live_worker.sh relayshield-ti-demo
+cloudflare_worker_ti_demo.js` runs FIRST and only an `IDENTICAL` verdict makes it safe.
+
+**THE GENERAL FORM, and it is this file's own rule pointed at a status report rather than at a doc:
+"merged" and "deployed" are different facts, and for this Worker they are separated by a step nothing
+automates.** A merge is a claim about a branch; only the Cloudflare API can answer what is served.
+Checking it cost one `git show` and it is the check that stops a stale page being reported as fixed.
+
+### 4. WHAT IS OPEN GOING INTO THE NEXT SESSION
+
+**Nothing is blocked on a decision. Everything below is a command or a scope.**
+
+1. **Merge and push.** Three commits are on the branch and not on main: the failed-commands fixes,
+   the TI demo cards, and the SIM swap port-out fix. Until they are pushed, the monitor still
+   compares raw carrier strings on every four-hour run.
+2. **`recover_live_worker.sh` then the TI demo deploy**, in that order, never the other.
+3. **TG-SIMSWAP-1**, scoped in section 2 above. Half a day.
+4. **Catalogues.** tg.app APPROVED and live. ton.app, findmini.app and awesome PR #77 all submitted
+   and under review; miniTelegram parked on their own form defect. The outstanding ten-second read is
+   still the founder's: does `@app_moderation_bot` show a START button and a description, or nothing.
+5. **Bundle B**, unchanged: `sh tools/handler_drift.sh relayshield_bundle_fulfillment.py` reads the
+   first diff of the seventh unmapped handler, then the catalog IAM grant, then the change set.

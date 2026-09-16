@@ -1647,6 +1647,20 @@ def _parse_passwords_file(text: str) -> list[dict]:
         ("aws_access_key",   r"AKIA[A-Z0-9]{16}", "CRITICAL", "AWS IAM Access Key", None),
         ("github_pat",       r"gh[pousr]_[a-zA-Z0-9]{36,}", "CRITICAL", "GitHub PAT", None),
         ("github_pat_fine",  r"github_pat_[a-zA-Z0-9_]{82}", "CRITICAL", "GitHub Fine-Grained PAT", None),
+        # GitLab, added 2026-09-16 alongside the same eight in
+        # relayshield_api.py's NHI_PATTERNS and rsscan's mirror. GitHub was in
+        # this table twice and GitLab not at all, so a GitLab token appearing
+        # in a criminal channel was collected as ordinary text and counted as
+        # nothing. ROUTABLE BEFORE CLASSIC -- the classic rule matches the
+        # first 20 characters of a routable token.
+        ("gitlab_pat_routable", r"glpat-[0-9a-zA-Z_\-]{27,300}\.[0-9a-z]{2}[0-9a-z]{7}", "CRITICAL", "GitLab PAT (routable)", None),
+        ("gitlab_pat",          r"glpat-[\w-]{20}", "CRITICAL", "GitLab Personal Access Token", None),
+        ("gitlab_deploy_token", r"gldt-[0-9a-zA-Z_\-]{20}", "CRITICAL", "GitLab Deploy Token", None),
+        ("gitlab_runner_token", r"glrt-[0-9a-zA-Z_\-]{20}", "CRITICAL", "GitLab Runner Token", None),
+        ("gitlab_oauth_secret", r"gloas-[0-9a-zA-Z_\-]{64}", "CRITICAL", "GitLab OAuth Application Secret", None),
+        ("gitlab_agent_token",  r"glagent-[0-9a-zA-Z_\-]{50}", "CRITICAL", "GitLab Kubernetes Agent Token", None),
+        ("gitlab_pipeline_trigger", r"glptt-[0-9a-f]{40}", "HIGH", "GitLab Pipeline Trigger Token", None),
+        ("gitlab_ci_job_token", r"glcbt-[0-9a-zA-Z]{1,5}_[0-9a-zA-Z_\-]{20}", "HIGH", "GitLab CI/CD Job Token", None),
         ("stripe_secret",    r"sk_live_[a-zA-Z0-9]{24,}", "CRITICAL", "Stripe Secret Key", None),
         ("private_key",      r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", "CRITICAL", "Private Key", None),
         ("slack_bot",        r"xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+", "HIGH", "Slack Bot Token", None),

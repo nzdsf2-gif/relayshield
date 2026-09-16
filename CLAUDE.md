@@ -5391,3 +5391,116 @@ does each one have".** Both were right about the defect and each missed somethin
 Taking either branch whole would have shipped a regression: theirs alone leaves Telegram users
 alerted nowhere, mine alone throws away MCC/MNC for a weaker string comparison. **Read both, keep
 the better base, and add only what it lacks.**
+
+## WE COULD NOT DETECT A SINGLE GITLAB CREDENTIAL. FOUND BY WRITING ABOUT SOMEBODY ELSE'S CVE.
+
+**2026-09-16, asked as "develop a blog on this GitLab vulnerability, is there an integration angle
+for rsscan".** The angle was real and the check for it found a hole.
+
+**41 credential patterns in `NHI_PATTERNS`. GitHub covered TWICE (`github_pat`,
+`github_pat_fine`). GitLab: nothing, in any of the three tables.** So the corpus count for GitLab
+tokens was **UNMEASURED, not zero** -- the BOT-TOKEN-1 finding in a second place, four days later.
+
+**It matters here specifically because of what the CVE is.** CVE-2026-85706 is an unauthenticated
+arbitrary file read on self-hosted GitLab, and watchTowr's own description of the payoff is
+*"read local files and configs to obtain credentials, secrets and sensitive information"*. **A
+GitLab runner token landing in the corpus would have been collected as ordinary text and counted
+as nothing**, in the week that class of credential was being stolen at scale.
+
+**Eight formats added to all three tables** (`relayshield_api.py`, the regenerated rsscan mirror,
+and `_NHI_PATS` in the collection path): PAT classic and routable, deploy, runner, OAuth
+application, Kubernetes agent, pipeline trigger, CI job. `glffct-`, `glft-` and `glimt-` were
+deliberately skipped and the reason is in the comment: none reaches source, CI or a cluster, and
+every pattern is a maintenance cost paid in four places.
+
+**ORDERING IS LOAD-BEARING AND IT IS THE TON-INSIDE-SOLANA SHAPE AGAIN.** `glpat-[\w-]{20}`
+matches the **first twenty characters of a routable token**, so a table that tries classic first
+reports the wrong type with the wrong remediation and never says it was unsure. The routable rule
+goes first, and the test asserts the ORDER by resolving a real routable token through the table
+rather than asserting both rules merely exist.
+
+**THE REGEXES CAME FROM gitleaks' OWN RULE SOURCE**, not from a docs page:
+`raw.githubusercontent.com/gitleaks/gitleaks/master/cmd/generate/config/rules/gitlab.go`.
+`docs.gitlab.com` is egress-blocked from the container and `raw.githubusercontent.com` is not,
+which is BLOCKED SOURCE WAS REACHABLE ALL ALONG paying for itself a fourth time. **A scanner's
+implementation is better evidence about a token format than prose describing it.**
+
+`test_gitlab_token_pattern.py`, 9 tests, every guard proven by reintroducing its defect: ordering
+swapped (4 failures), a rule dropped from one table (1), severities disagreeing across tables (1),
+and the PAT gated behind `_ctx_key` so it stops matching a clone URL or a CI log (4 plus an error).
+
+### THE POST SAYS WHAT rsscan DOES NOT DO, AND THAT IS THE REASON IT IS PUBLISHABLE
+
+`rsscan` reads `git diff --cached`, on a laptop, before a commit exists. **It has no view of
+`gitlab.rb`, `secrets.yml`, or the CI variables in the database**, which is the half of a GitLab
+file-read that actually hurts. A post implying otherwise would be selling a laptop tool as a
+server control to an audience that would notice within a paragraph.
+
+**So the post states the limit in its own voice and keeps the narrower true claim**: a credential
+that never reaches a commit is not in the history the NEXT file-read bug walks. That is a
+statement about blast radius, not a mitigation, and saying so is what makes the rest credible.
+
+**And it publishes the gap above as a confession rather than hiding it**, because "clean" and "we
+have never looked for this" are the same output from a detector, which is the most useful sentence
+in the piece and is true of every scanner the reader runs.
+
+### NOTHING IN THE PUBLISHED COPY RESTS ON A NUMBER I COULD NOT CHECK
+
+`cve.org`, `cisa.gov`, `docs.gitlab.com`, `nvd.nist.gov` and `rapid7.com` are **ALL egress-blocked**
+(all HTTP 000, checked rather than assumed). So the CVSS score, the three version strings and the
+CISA deadline are **attributed in prose to the party that published them** rather than asserted by
+us -- the house rule for a post built on somebody else's reporting, and also what makes an
+unverified number safe to print. The argument rests on the MECHANISM, which the source states in
+watchTowr's own words. The NOT FOR PUBLICATION section names the three things to confirm in a
+browser before it goes out.
+
+## tapps.center IS UNDER CONSTRUCTION. THAT CLOSES `@app_moderation_bot` FOR GOOD.
+
+**2026-09-16, from a founder screenshot of the site itself.** tapps.center now renders
+*"Something new is coming -- We're building the next chapter for apps on TON & Telegram"* over an
+ecosystem link list (Tonkeeper, Wallet, STON.fi, DeDust, EVAA). **There is no submission route
+because there is no catalogue right now.**
+
+**This retires a question this file has spent three rounds on.** The section above asks whether
+`@app_moderation_bot` is dead and says the discriminating observation is whether its chat shows a
+START button. **That observation is no longer worth ten seconds.** The bot's catalogue is being
+rebuilt, so a silent `/start` is explained whatever the bot's state is, and the honest reading of
+the earlier evidence is that the TON Studio blog and the 2026 developer write-up were both
+describing a mechanism that has since been taken down.
+
+**Do not spend another round on tApps.** Re-check it when something else brings us back to TON
+catalogues, and treat the site's own front page as the signal rather than the bot.
+
+**The general form, and it is cheap: when a submission route goes quiet, look at whether the
+DESTINATION still exists before diagnosing the route.** Three rounds went into a bot's silence
+and one page load explains it.
+
+### AND MY REACHABILITY PROBE WAS UNINFORMATIVE, WHICH I ALMOST REPORTED AS A FINDING
+
+Probing eleven candidate directories from the container returned **HTTP 000 for every one** --
+including `tg.app`, `findmini.app` and `ton.app`, all three of which have **accepted a submission
+from us in the last two days**. So 000 here means the container's egress policy and nothing about
+the destination.
+
+**That is the Apify Actor lesson exactly** (absence of evidence from a blocked container is not
+evidence of absence) **and the status-code rule**: 000 is a fact about the request, not about the
+site. Had it been written up as "these directories do not resolve", the next session would have
+deleted live candidates from the list. **A probe whose negative result is indistinguishable from
+its blocked result has no standing to report a negative.**
+
+## tg.app CHANNEL LISTING IS PENDING, NOT APPROVED. READ THE CARD, NOT THE BANNER.
+
+**2026-09-16.** The founder reported the blog channel approved. The green banner on that page says
+*"Your listing was approved"* about **"Scam Checker | RelayShield IDCheck"**, which is the MINI APP
+and was approved the day before. The channel's own card, lower on the same page, reads
+**`RelayShield Blog | Crypto Scam Alerts` / Channel / Tools / Sep 16, 2026 / Pending`**.
+
+**Two listings, one page, and the persistent banner describes the older one.** Nothing was wrong
+with the submission and the name recommended for search was accepted verbatim.
+
+**It changes one thing that matters: the funnel baseline.** `--snapshot before-tgappblog` is taken
+when the listing goes LIVE, not when it is submitted, because arrivals cannot start before then
+and a baseline taken too early measures the window sliding rather than the listing.
+
+**The general form: a status banner and a status field are different claims, and the banner is the
+one that persists.** Read the row for the thing you just did.

@@ -5504,3 +5504,133 @@ and a baseline taken too early measures the window sliding rather than the listi
 
 **The general form: a status banner and a status field are different claims, and the banner is the
 one that persists.** Read the row for the thing you just did.
+
+## THE GITLAB POST IS PUBLISHED, AND `build_blog.py` DOES NOT STRIP THE INTERNAL SECTION
+
+**2026-09-16. The canonical 404'd because the post was never published**, only written: it sat at
+the repo root as `blog-gitlab-file-read-credential-theft.md` and the publish path is
+`blog_markdown/*.md` with front matter, then `python3 build_blog.py`, then a push to main, which
+`deploy_blog.yml` picks up on any change under `blog_markdown/**`. **Writing a blog file is not
+publishing one**, which is the LOCAL MERGE IS NOT A PUSH rule wearing a third costume.
+
+**AND THE TRAP THAT WAS ONE `cp` AWAY FROM FIRING.** `build_blog.py` has **no handling of the
+`NOT FOR PUBLICATION` marker at all** -- `grep -c` returns 0. Every file in `blog_markdown/` is
+pre-stripped BY HAND, so the omission has never fired, while CLAUDE.md prescribes writing that
+section on every blog file. Dropping this post in unedited would have published the verification
+notes, the attribution key table and the list of what shipped alongside it, to a live page, with
+no error anywhere.
+
+**A convention followed by hand every time is a convention that fails the first time somebody is
+in a hurry.** `test_blog_publish_hygiene.py` now enforces it, reading the BUILT artifact rather
+than the markdown because the source and the served text are different documents.
+
+### THE HOUSE-STYLE GUARDS FAILED ON FIFTEEN LIVE PAGES, AND THE TEST WAS WRONG
+
+The first version asserted no em-dashes and no quote bars across every post and went red on
+fifteen of them. **CLAUDE.md says in terms that this is not retroactive:** *"Posts already frozen
+in blog_content/ keep whatever html they were published with. Do not rewrite them to match; they
+are live pages."* A check that forces you to edit a live page to go green is the CSM-SIMSWAP-1
+mistake, and it gets loosened rather than obeyed.
+
+**The cutoff is taken from the data rather than picked:** the newest post carrying an em-dash is
+2026-07-29 and the newest carrying a `<blockquote>` is 2026-08-12, so `2026-08-31` sits after
+every historical offender and before every post written under the current conventions. A separate
+test asserts the cutoff still has posts behind it, because **a scoped guard that scopes itself
+down to nothing passes forever** -- the empty-set-reads-as-clean shape.
+
+### TWO OF THE FOUR GUARDS DID NOT FIRE ON THEIR FIRST PROOF, AND BOTH WERE MINE
+
+**The em-dash guard read only `html`.** Proving it by injecting an em-dash put it in the **TITLE**,
+because `.replace(..., 1)` hit the front matter first, and the guard reported OK over a post whose
+most visible string carried the character. It checks `title`, `excerpt` and `html` now. **A guard
+that checks one field of a record is a guard against one field.**
+
+**The quote-bar guard could not be tripped from markdown at all**, and that is correct rather than
+broken: `build_blog.py` already renders `> ` as a plain `<p>`, so the house style is implemented
+rather than remembered. The path that can still produce one is a post added straight to
+`blog_content/*.json`, where the html is hand-written and nothing renders it, and the proof was
+redone that way. **When a guard will not fire, establish whether the defect is unreachable before
+concluding the guard is broken.**
+
+All four proven: internal section attached (2 failures), em-dash in the title (1), `<blockquote>`
+via a hand-written JSON (1), `?source=` on the bare host (1).
+
+## INLINE MODE IS ON THE BLOG FOOTER NOW. IT IS THE ONLY SURFACE WHERE USE DISTRIBUTES.
+
+**Asked as "I'm unclear how you propose to use @rs_bot <link> as a discovery surface. Can we list
+it in our blog site or other surfaces?"** The answer is yes and the explanation was mine to get
+right the first time.
+
+**WHAT IT ACTUALLY DOES**, read from `handle_inline_query` rather than described from memory: type
+`@relayshield_bot` followed by a link or a wallet address **in any Telegram chat**, including a
+group the bot is not in and has never been added to. Telegram shows a result card; tapping it
+posts the verdict into that conversation, stamped **"via @relayshield_bot"**. No install, no
+membership, nobody leaves the chat.
+
+**WHY THAT IS A DISCOVERY SURFACE RATHER THAN A FEATURE.** Every other surface we have consumes
+attention to deliver a check. This one produces an impression for everyone else in the room as a
+by-product of one person doing something useful: a check run in a 200-person group is seen by 200
+people, carrying our handle, **at the moment a scam link was actually posted**. That is a better
+moment than any blog post read later by somebody with no pending decision.
+
+**It is on the blog footer, on every page, alongside the email-check line, and for the same
+stated reason that line exists**: the blog is read by people who arrived worried about something,
+and inline mode needs no account, no signup and no API key. That footer comment records that the
+email check "was live for a day with nowhere pointing at it". **Inline mode was live for weeks
+with nowhere pointing at it**, which is worse and is the same defect.
+
+**Still pointed at by nothing and worth doing next**, in this order: the Mini App (its users are
+already checking things and the group chat is where the next one arrives), the bot's own welcome,
+and the share card.
+
+## ON DECK: THE WHATSAPP BOT HAS NO FRONT DOOR AND NO ATTRIBUTION
+
+**Recorded 2026-09-16 at Andrew's request as an on-deck item.** Asked as whether there are
+catalogues to register the WhatsApp bot in. **There is no WhatsApp catalogue ecosystem to
+register in**, and that is structural rather than a gap in our research: Telegram has a public
+username namespace and deep links, so third parties can build directories on top of it. WhatsApp
+has neither, Meta runs no bot directory, and Click-to-WhatsApp is paid advertising.
+
+**So the WA problem is not a missing catalogue. It is a missing front door, and two greps settle
+it:**
+
+1. **`wa.me`, `whatsapp.com/send` and `api.whatsapp.com` appear NOWHERE** in any `.py`, `.js` or
+   `.json` in this repo. The developers page and the Mini App do not mention WhatsApp at all. The
+   bot is live and there is no link to it on any surface we control.
+2. **`relayshield_whatsapp_webhook.py` has no acquisition-source parsing.** The Telegram webhook
+   reads an `SRC_` deep-link payload and logs `acquisition source=`; the WhatsApp handler has
+   nothing equivalent. `consent_source="whatsapp"` is SIM-swap consent, a different thing. So even
+   if a link existed, the arrival would be unattributable.
+
+**THE ITEM: a `wa.me/<number>?text=` front door with a source token in the prefilled message**,
+parsed the way `SRC_` already is, then placed on the developers page, the blog footer and the Mini
+App. Roughly half a day. It makes WhatsApp measurable for the first time, and until it exists
+**no number about WhatsApp arrivals means anything** -- the same rule this file applies to the
+stolen-sessions table.
+
+**Register nothing and place no link before the parsing exists.** A link that is sent, accepted
+and never logged is the same false absence as a key that was never registered, which is FD-8 and
+four months of it.
+
+## tg.app: THE BLOG CHANNEL IS APPROVED. I READ THE WRONG SCREENSHOT FIELD.
+
+**2026-09-16.** I reported the channel as Pending. It is **Approved**, and the banner on the
+current page names it directly: *"RelayShield Blog | Crypto Scam Alerts is now live in the TG.app
+catalog."*
+
+**The reading that produced the error is worth keeping even though the conclusion was wrong.** On
+the earlier screenshot the green banner described the MINI APP and the channel's own row said
+Pending, so the banner and the row disagreed. The correction is not "trust the banner" but
+**check the row for the thing you are asking about, and check it again if the page has been
+reloaded since** -- a status field moves and a screenshot does not.
+
+**Two RelayShield listings are now live on tg.app:** the Mini App (`Scam Checker | RelayShield
+IDCheck`) and the channel (`RelayShield Blog | Crypto Scam Alerts`). That confirms what the
+one-listing-per-bot section predicted: `t.me/RelayShield` is a different username from
+`t.me/relayshield_bot`, so the channel never contended for the Mini App's slot.
+
+**The baseline is due NOW rather than on approval**, because approval already happened:
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/miniapp_funnel.py --snapshot before-tgappblog
+
+It REFUSES to overwrite, so a late one cannot quietly become a comparison of a number with itself.

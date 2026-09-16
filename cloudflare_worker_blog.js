@@ -134,6 +134,25 @@ ${body}
      <a href="mailto:checkemail@relayshield.net">checkemail@relayshield.net</a>
      and you get a plain-text verdict back by reply. No account needed. We store
      the verdict and the indicators we extract, never your email.</p>
+  <!-- Inline mode, on every page. ADDED 2026-09-16, and it is the email-check
+       line's situation exactly: handle_inline_query has been complete, rate
+       limited and live in relayshield_telegram_webhook.py for weeks, and
+       NOTHING anywhere mentioned it. Not the Mini App, not the share card, not
+       the bot's welcome. A finished feature with no route to it.
+
+       Why it is worth a footer slot rather than a blog post. Inline mode is
+       the only surface where USING the product distributes it: the verdict
+       posts into somebody else's group chat carrying "via @relayshield_bot",
+       so one person checking a link in a 200-person group is an impression for
+       200 people, at the moment a scam was actually posted. Nobody has to add
+       a bot, install anything, or leave the conversation.
+
+       Phrased as a thing you can do, not as a feature, for the same reason the
+       line above is. -->
+  <p>In any Telegram chat, type <code>@relayshield_bot</code> followed by a link
+     or a wallet address. The verdict posts straight into that conversation, so
+     you can check something in the group where it was shared without adding a
+     bot to it or leaving the chat.</p>
 </div></footer>
 </body></html>`;
 }

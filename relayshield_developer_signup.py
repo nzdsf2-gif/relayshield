@@ -2954,6 +2954,30 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     # One key per discovery route, following the miniapp_discovery ranking, so
     # CloudWatch can separate an arrival from an announcement channel from one
     # from a directory. They render the same banner.
+    # TELEGRAM BOT DIRECTORIES, registered 2026-09-17 BEFORE any submission.
+    #
+    # ITS OWN BANNER RATHER THAN AN ALIAS TO tg-miniapp, and the reason is the
+    # arrival's shape rather than tidiness. A Mini App arrival has ALREADY run
+    # a check and the banner can say "you just checked a link". A directory
+    # visitor has clicked a Website URL off a catalogue card and has run
+    # nothing, so a banner claiming they did is a claim about them that is
+    # false, on the first screen they see.
+    #
+    # _resolve_source applies aliases BEFORE the banner table, so aliasing
+    # this key would make this banner unreachable -- the rsscan -> github
+    # defect, already paid for once.
+    "storebot": (
+        (),
+        _banner("Arriving from a Telegram bot directory", _p(
+            "The bot you found there runs on these endpoints, and they are open. "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">'
+            "POST /v1/link-check</code> screens a URL against our indicator corpus, Safe "
+            'Browsing and domain age; <code style="background:var(--bg);border-radius:5px;'
+            'padding:.15rem .4rem">POST /v1/wallet-risk</code> screens an address across EVM, '
+            "Solana, TON and Bitcoin. <b>No key, no card and no signup</b> for either, capped "
+            "per source IP rather than billed, so the same check can sit inside your own bot "
+            "today. A key raises the cap and adds multi-engine URL analysis.")),
+    ),
     "tg-miniapp": (
         (),
         _banner("Arriving from the RelayShield Mini App", _p(
@@ -3333,6 +3357,11 @@ _SOURCE_ALIASES = {
     # missing in the same commit that added it.
     "tg-miniapp-share":     "tg-miniapp",
     "miniapp":              "tg-miniapp",
+    # One key per DESTINATION. storebot.me and botsarchive.com are different
+    # catalogues with different audiences, so a shared key would merge them
+    # into a number nobody can act on.
+    "storebot-me":    "storebot",
+    "botsarchive":    "storebot",
     "gitlab-cve-blog":       "gitlab-cve",
     "gitlab-cve-medium":     "gitlab-cve",
     "gitlab-cve-devto":      "gitlab-cve",

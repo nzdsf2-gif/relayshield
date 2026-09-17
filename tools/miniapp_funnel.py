@@ -124,6 +124,25 @@ STAGES = [
      re.compile(r"watchlist alert sent signals=([\w,]+)"),
      "either nothing watched has changed, or the monitor is not running"),
 
+    # DIRECTORY ARRIVALS ON THE TELEGRAM BOT, added 2026-09-17 with the first
+    # bot-directory submission rather than after it.
+    #
+    # THE BOT STAGE ABOVE CANNOT COUNT THESE AND MUST NOT BE WIDENED TO TRY.
+    # Its regex is (miniapp|tg-miniapp[a-z-]*) because it answers exactly one
+    # question -- does the Mini App feed the bot -- and folding directory
+    # traffic into it would destroy that answer to gain this one. Two
+    # questions, two stages.
+    #
+    # A zero here is ambiguous in a way worth stating: nobody arrived, OR the
+    # catalogue never published the listing, OR the Bot Direct Link was
+    # submitted without its ?start=SRC_ payload, which is the easiest of the
+    # three to get wrong and the only one invisible from the outside.
+    ("DIRECTORY  bot-directory arrivals on the Telegram bot",
+     "/aws/lambda/relayshield-telegram-webhook", "acquisition source=",
+     re.compile(r"acquisition source=(storebot[a-z0-9-]*|botsarchive)"),
+     "no directory listing is live yet, OR the submitted link lost its "
+     "?start=SRC_ payload -- check the listing card before the channel"),
+
     # WHATSAPP HAD NO STAGE AND NO WAY TO GET ONE UNTIL 2026-09-17. The handler
     # parsed no acquisition source at all, and `wa.me` appeared nowhere in the
     # repo, so there was no link to attribute and nothing to attribute it with.

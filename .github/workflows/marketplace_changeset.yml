@@ -1,0 +1,72 @@
+name: Marketplace Change Set
+
+# Submits a COMMITTED change set file to the AWS Marketplace Catalog API.
+#
+# WHY THIS IS A SECOND WORKFLOW RATHER THAN A MODE ON marketplace_dimension.yml.
+# That one is pointed at Bundle D: it reads prod-kkvurtspreofy, round-trips every
+# field it is not changing, and requires the product code typed by hand. All of
+# that is correct for MODIFYING a published listing and none of it applies to
+# CREATING one, where there is no entity to read and no id to confirm because AWS
+# assigns it. Folding both into one workflow would mean a mode in which every one
+# of those guards is skipped, which is the guard that gets skipped by accident.
+#
+# THE TOOL REFUSES to target prod-kkvurtspreofy or prod-f5qkfsxlxs4qg, so this
+# workflow cannot touch a live listing whatever is typed into it.
+#
+# DEFAULT IS A DRY RUN. `apply` additionally needs the confirmation phrase, which
+# the tool checks rather than the workflow: a guard in the thing that does the
+# work survives being called from somewhere else.
+
+on:
+  workflow_dispatch:
+    inputs:
+      changeset:
+        description: 'Path to the change set JSON, relative to the repo root'
+        type: string
+        default: 'aws_marketplace/bundle_b_create_entity.json'
+      mode:
+        description: 'dry-run (prints what would be sent) | apply (SENDS IT)'
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+      confirm:
+        description: 'For apply ONLY: type CREATE-NEW-PRODUCT'
+        type: string
+        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  changeset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse apply without the typed confirmation
+        if: ${{ inputs.mode == 'apply' }}
+        run: |
+          if [ "${{ inputs.confirm }}" != "CREATE-NEW-PRODUCT" ]; then
+            echo "::error::apply requires confirm = CREATE-NEW-PRODUCT, typed by hand."
+            echo "This creates a real product in a real marketplace account."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::239677749008:role/relayshield-github-deploy
+          aws-region: us-east-1
+
+      - name: Install boto3
+        run: pip install --quiet boto3
+
+      - name: Dry run
+        if: ${{ inputs.mode == 'dry-run' }}
+        run: python3 tools/marketplace_submit_changeset.py "${{ inputs.changeset }}"
+
+      - name: Apply
+        if: ${{ inputs.mode == 'apply' }}
+        run: |
+          python3 tools/marketplace_submit_changeset.py "${{ inputs.changeset }}" \
+            --apply --confirm "${{ inputs.confirm }}"

@@ -814,6 +814,28 @@ BUNDLE_A_DIMENSION_NAMES = {
     "/v1/metered/crypto-intel":    "crypto_intel_calls",
 }
 
+# Bundle B, Attack Surface & Supply Chain. Its own SaaSProduct entity, like
+# Bundle A and unlike the original shared-entity plan -- see
+# bundle_b_scope_2026-09-15.md. $100/mo minimum plus five metered endpoints, all
+# of which were already live and metered before the bundle existed: this is
+# packaging, not a build.
+#
+# ZERO OVERLAP WITH BUNDLE A OR BUNDLE D, verified mechanically rather than by
+# eye (test_bundle_b_gating.py reads all three tables and asserts the
+# intersection is empty, on paths AND on dimension keys AND on gate flags). An
+# overlap here does not raise, it double-bills or cross-grants, which is the
+# quiet kind.
+#
+# The dimension keys are read from the same change set that creates the
+# product, so the rate card and this table cannot disagree.
+BUNDLE_B_DIMENSION_NAMES = {
+    "/v1/metered/supply-chain":  "supply_chain_calls",
+    "/v1/metered/asset-intel":   "asset_intel_calls",
+    "/v1/metered/secret-scan":   "secret_scan_calls",
+    "/v1/metered/threat-actor":  "threat_actor_calls",
+    "/v1/metered/session-risk":  "session_risk_calls",
+}
+
 # Crypto Shield Mobile ($10.99/mo or $105.99/yr) — the exact set of metered
 # endpoints the app calls (crypto-shield-app/src/api/relayshield.ts), and
 # nothing more. Deliberately excludes bulk-identity-risk even though it's
@@ -1281,6 +1303,29 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             and bool(key_record.get("stripe_customer_id"))
             and path in BUNDLE_A_DIMENSION_NAMES
         )
+        # Bundle B through AWS Marketplace. Same shape as is_bundle_a_call: the
+        # aws_customer_id condition is what distinguishes an AWS-licensed caller
+        # from a direct-Stripe one, and the two bill on different rails.
+        is_bundle_b_call = (
+            bool(key_record.get("bundle_b_access"))
+            and bool(key_record.get("aws_customer_id"))
+            and path in BUNDLE_B_DIMENSION_NAMES
+        )
+        # Bundle B "Door 2" -- bought directly on Stripe rather than through AWS.
+        #
+        # THIS BRANCH EXISTS BECAUSE ITS ABSENCE HAS SHIPPED TWICE. Without it a
+        # Stripe Bundle B customer is refused 402 on every call while being
+        # charged monthly, because is_bundle_b_call requires aws_customer_id.
+        # That defect shipped in the Bundle D door, was caught pre-launch in
+        # Bundle A, and the Bundle A comment says outright it is written down so
+        # it is not reintroduced a third time when a Bundle E arrives. This is
+        # that moment, one bundle early.
+        is_bundle_b_direct_call = (
+            bool(key_record.get("bundle_b_access"))
+            and not key_record.get("aws_customer_id")
+            and bool(key_record.get("stripe_customer_id"))
+            and path in BUNDLE_B_DIMENSION_NAMES
+        )
         # Crypto Shield Mobile — scoped bypass for the small set of endpoints the
         # app actually calls (see CS_MOBILE_ALLOWED_ENDPOINTS), not the full catalog.
         is_cs_mobile_call = bool(key_record.get("cs_mobile_access")) and path in CS_MOBILE_ALLOWED_ENDPOINTS
@@ -1309,6 +1354,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
     if (not is_demo and not use_credits and not has_subscription and not is_bundle_d_call
             and not is_bundle_d_direct_call
             and not is_bundle_a_call and not is_bundle_a_direct_call
+            and not is_bundle_b_call and not is_bundle_b_direct_call
             and not is_bundle_d_included_call
             and not is_cs_mobile_call and not is_llm_license_call
             and not is_watch_license_call and not is_free_tier_call):
@@ -1366,6 +1412,20 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             # infostealer $0.50, domain $0.30, oauth-watchlist $0.30,
             # crypto-intel $0.30. Verified against offer-2itznygmz6hpu
             # 2026-08-12. Never bill this key through BatchMeterUsage.
+            _record_stripe_meter_event(key_record.get("stripe_customer_id", ""), path)
+        elif is_bundle_b_call:
+            _report_marketplace_usage(
+                key_record.get("aws_account_id", ""), key_record.get("aws_license_arn", ""), BUNDLE_B_DIMENSION_NAMES[path]
+            )
+        elif is_bundle_b_direct_call:
+            # Stripe door for Bundle B, same aggregate meter and the same
+            # path-derived price, so the direct customer pays the AWS rate card:
+            # supply-chain $0.10, asset-intel $0.15, secret-scan $0.35,
+            # threat-actor $0.30, session-risk $0.30. Those five figures are the
+            # ones in aws_marketplace/bundle_b_create_entity.json, and a test
+            # reads them out of that file rather than trusting this comment --
+            # copy shown to a buyer that disagrees with what we charge is a
+            # price we do not honour.
             _record_stripe_meter_event(key_record.get("stripe_customer_id", ""), path)
         elif is_bundle_d_included_call:
             # Included in the flat $299/mo Bundle D licence. No AWS dimension,

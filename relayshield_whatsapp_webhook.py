@@ -1355,6 +1355,44 @@ def verify_twilio_signature(
 # Phone number helpers
 # ---------------------------------------------------------------------------
 
+# --- Acquisition source on the WhatsApp front door -------------------------
+#
+# WHATSAPP HAS NO USERNAME NAMESPACE AND NO DEEP LINK PAYLOAD. Telegram gives
+# us `t.me/<bot>?start=SRC_<key>` and hands the payload to the handler; the
+# only equivalent WhatsApp offers is `wa.me/<number>?text=<prefilled message>`,
+# which puts the token in the message BODY. So the token arrives as ordinary
+# text that the user can see, edit or delete before sending, and the parser has
+# to be tolerant of that rather than assume it survived.
+#
+# SAME `SRC_` PREFIX AND SAME LOG LINE AS THE TELEGRAM SIDE, deliberately. The
+# funnel counts `acquisition source=` out of a log group; a second spelling
+# would mean a second filter, and this repo has already paid for a filter
+# written against what the code SHOULD log rather than what it does.
+WA_SOURCE_RE = re.compile(r"^\s*SRC[_-]([A-Za-z0-9_-]{1,40})\b[.,!]?\s*", re.I)
+
+
+def parse_wa_source(body: str) -> tuple[str, str]:
+    """Return (source_key, body_without_the_token).
+
+    THE TOKEN IS STRIPPED FROM THE BODY, and that is not tidiness. The prefill
+    is the user's first message, so whatever is left after the token is what
+    they actually typed -- and if the token were left in place every front-door
+    arrival would have its first real instruction prefixed by a string our own
+    command parsing has never seen. A front door that breaks the first command
+    is worse than no front door.
+
+    Accepts SRC- as well as SRC_ because some clients and some humans retype a
+    prefill, and a hyphen is the likelier slip when every key we register is
+    itself hyphenated (wa-blog, wa-miniapp). Cheap to accept, silent to miss.
+    """
+    if not body:
+        return "", body
+    m = WA_SOURCE_RE.match(body)
+    if not m:
+        return "", body
+    return m.group(1).lower()[:32], body[m.end():].strip()
+
+
 def normalise_phone(phone: str) -> str:
     """Strip whatsapp: prefix and normalise to E.164."""
     phone = phone.replace("whatsapp:", "").strip()
@@ -5477,9 +5515,14 @@ def handler(event, context):
     # way Telegram's hidden_user is -- simply not carried by the API.
     forward_origin = fwd.parse_whatsapp_forward(params)
 
+    # HASHED, not raw. This line wrote a customer's phone number in the clear
+    # into CloudWatch on every inbound message. A phone number is personal
+    # data and log retention is not a place we get to decide it stops being
+    # that; every other identifier in this file is hashed or encrypted, and
+    # this one was the exception because it was written first.
     logger.info(
         "Inbound WhatsApp from=%s body_len=%d num_media=%d",
-        from_number, len(message_body), num_media,
+        hash_phone(from_number), len(message_body), num_media,
     )
 
     if not from_number:
@@ -5512,16 +5555,56 @@ def handler(event, context):
         logger.warning("Twilio signature verification failed — request rejected. url=%s", webhook_url)
         return {"statusCode": 403, "body": "Invalid Twilio signature"}
 
+    # --- Acquisition source, BEFORE the user lookup ------------------------
+    #
+    # THE ORDERING IS THE WHOLE POINT AND IT IS EASY TO GET BACKWARDS. A
+    # front-door arrival is BY DEFINITION somebody we have never seen, so it
+    # lands in the `if not user` branch a few lines below, which returns 200
+    # and stops. Parsing the token after the lookup would therefore attribute
+    # every arrival the link ever produces to nothing, forever, while looking
+    # completely correct in the diff -- a key that is sent, accepted and never
+    # logged, which is FD-8's shape and four months of it.
+    #
+    # It is also stripped here rather than inside a command branch, so every
+    # path below sees the message the user actually typed.
+    wa_source, message_body = parse_wa_source(message_body)
+    if wa_source:
+        # Source names are channel labels we choose, never user data, so they
+        # are safe to log in the clear. The number is hashed, as everywhere.
+        logger.info("acquisition source=%s wa=%s", wa_source, hash_phone(from_number))
+
     # --- Look up user ---
     user = get_user_by_whatsapp(from_number)
 
+    if wa_source and user and not user.get("acquisition_source"):
+        # Only set once. The first touch is the one that earned the arrival;
+        # overwriting on a later visit would credit the wrong channel. Same
+        # rule as the Telegram side, and the same reason.
+        try:
+            update_user(user["user_id"], {"acquisition_source": wa_source})
+        except Exception as exc:
+            logger.warning("acquisition source store failed: %s", exc)
+
     if not user:
-        logger.warning("No user found for WhatsApp number: %s", from_number)
-        # Send a helpful message rather than silently failing
+        logger.warning("No user found for WhatsApp number: %s", hash_phone(from_number))
+        # A STRANGER WHO TAPPED OUR OWN LINK IS NOT AN ERROR, and this branch
+        # used to treat them as one: "your account isn't set up yet, visit
+        # relayshield.net". Bouncing somebody to a website one message after
+        # they opened a chat is worse than having no link at all -- they came
+        # here to ask about a thing, and we answered with homework.
+        #
+        # It still cannot run a check for them (that is the next build), so it
+        # is honest about what it is: name what the bot does, then point at the
+        # one place that takes them further. Leading with capability rather
+        # than with a signup wall is the only part of this we control today.
         send_whatsapp(
             from_number,
-            "👋 Welcome! It looks like your account isn't set up yet.\n\n"
-            "Visit *relayshield.net* to sign up and get started.",
+            "👋 *RelayShield*\n\n"
+            "We monitor your email, phone and wallets for breaches, "
+            "infostealer logs and SIM-swap attempts, and we alert you here "
+            "the moment something surfaces.\n\n"
+            "Set it up at *relayshield.net* and this chat becomes your alert "
+            "channel.",
             account_sid, auth_token, twilio_from,
         )
         return {"statusCode": 200, "body": "No user found"}
@@ -5632,7 +5715,7 @@ def handler(event, context):
 
     logger.info(
         "Handled message from=%s state=%s result=%s",
-        from_number, onboarding_state, result,
+        hash_phone(from_number), onboarding_state, result,
     )
 
     # Twilio expects a 200 with TwiML or empty body

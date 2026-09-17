@@ -89,5 +89,48 @@ class TestTheProviderListNamesWhatWeDetect(unittest.TestCase):
                         "README names GitLab but no gitlab_* rule exists")
 
 
+class TestTheReadmeSeverityTableMatchesTheRules(unittest.TestCase):
+    """The README now prints a prefix/severity table, which is a THIRD place
+    the same facts live. Two places that must agree with nothing checking them
+    is this repo's most repeated defect; three is worse, and a README is the
+    copy a user acts on when deciding whether a finding is urgent."""
+
+    README = (ROOT / "rsscan" / "README.md").read_text(encoding="utf-8")
+    ROW = re.compile(r"^\|\s*`(gl[a-z]*-)`\s*\|[^|]*\|\s*(CRITICAL|HIGH)\s*\|", re.M)
+
+    def rules_by_prefix(self):
+        out = {}
+        for entry in NHI_PATTERNS:
+            name, pattern, severity = entry[0], entry[1], entry[2]
+            if not name.startswith("gitlab_"):
+                continue
+            m = re.search(r"(gl[a-z]*-)", pattern)
+            if m:
+                out.setdefault(m.group(1), set()).add(severity)
+        return out
+
+    def test_every_documented_prefix_exists_and_agrees(self):
+        rows = self.ROW.findall(self.README)
+        self.assertTrue(rows, "no GitLab severity table found in the README")
+        rules = self.rules_by_prefix()
+        for prefix, severity in rows:
+            with self.subTest(prefix=prefix):
+                self.assertIn(prefix, rules,
+                              f"README documents {prefix} but no rule matches it")
+                self.assertEqual(
+                    rules[prefix], {severity},
+                    f"README says {prefix} is {severity}, the rules say "
+                    f"{sorted(rules[prefix])}")
+
+    def test_every_rule_prefix_is_documented(self):
+        # The other direction, which is the one that silently drifts: a rule
+        # shipped and never written down is coverage the user cannot know
+        # they have.
+        documented = {p for p, _ in self.ROW.findall(self.README)}
+        for prefix in self.rules_by_prefix():
+            self.assertIn(prefix, documented,
+                          f"rule prefix {prefix} is not in the README table")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -82,6 +82,41 @@ SNAPSHOT_DIR = ROOT / "miniapp_funnel_snapshots"
 ACCOUNT = "239677749008"
 REGION = "us-east-1"
 
+def _bot_directory_alternation() -> str:
+    """Regex alternation of every bot-directory key, read from the route table.
+
+    bot_directories.json is the source of truth for which directories we have
+    published a ?start=SRC_ link into. This function is the ONLY place the
+    funnel learns those keys, so adding a destination to the table is enough
+    and nobody has to remember a second edit here.
+
+    A trailing [a-z0-9-]* is deliberately NOT added. Keys are exact by
+    construction -- the webhook lower-cases the payload and the route table's
+    own test asserts each key survives that transform -- and a loose suffix
+    would let `storebot` swallow a future `storebot-paid`, merging two
+    destinations into one number, which is the tg-miniapp-channel defect the
+    route tables exist to prevent.
+
+    If the file is missing or unreadable the stage must not silently match
+    nothing, because a regex that matches nothing is indistinguishable from a
+    channel that produced nothing. It raises instead.
+    """
+    path = ROOT / "bot_directories.json"
+    if not path.exists():
+        raise SystemExit(
+            f"ERROR: {path.name} is missing, so the DIRECTORY stage has no keys.\n"
+            "       That would print zero for every directory, which reads as\n"
+            "       'no arrivals' and is not a measurement. Restore the file.")
+    keys = [r["key"] for r in json.loads(path.read_text()).get("routes", [])
+            if r.get("key")]
+    if not keys:
+        raise SystemExit(
+            "ERROR: bot_directories.json lists no keys. An empty alternation\n"
+            "       matches everything or nothing depending on the engine, and\n"
+            "       neither is a number anyone should act on.")
+    return "|".join(re.escape(k) for k in sorted(keys))
+
+
 # Each stage: (label, log group, CloudWatch filter, regex over the message,
 #              what a zero here would MEAN). The last field is the point: a
 # number with no interpretation is a number somebody will interpret wrongly.
@@ -123,6 +158,52 @@ STAGES = [
      "/aws/lambda/relayshield-watchlist-monitor", "watchlist alert sent",
      re.compile(r"watchlist alert sent signals=([\w,]+)"),
      "either nothing watched has changed, or the monitor is not running"),
+
+    # DIRECTORY ARRIVALS ON THE TELEGRAM BOT, added 2026-09-17 with the first
+    # bot-directory submission rather than after it.
+    #
+    # THE BOT STAGE ABOVE CANNOT COUNT THESE AND MUST NOT BE WIDENED TO TRY.
+    # Its regex is (miniapp|tg-miniapp[a-z-]*) because it answers exactly one
+    # question -- does the Mini App feed the bot -- and folding directory
+    # traffic into it would destroy that answer to gain this one. Two
+    # questions, two stages.
+    #
+    # A zero here is ambiguous in a way worth stating: nobody arrived, OR the
+    # catalogue never published the listing, OR the Bot Direct Link was
+    # submitted without its ?start=SRC_ payload, which is the easiest of the
+    # three to get wrong and the only one invisible from the outside.
+    # THE KEYS ARE READ FROM bot_directories.json, NOT LISTED HERE. The first
+    # version of this stage hardcoded (storebot|botsarchive), and a route table
+    # holding eight destinations shipped the same day in a different file. Two
+    # lists of the same thing with nothing checking that they agree is this
+    # repo's most-repeated defect -- the four pattern tables, LAMBDA_MAP against
+    # the invoke policy, the three route lists, the watchlist secret name -- and
+    # here it fails in the direction that reports a live channel as dead: submit
+    # to a directory, forget to add its key to this regex, and the stage prints
+    # a confident zero forever.
+    ("DIRECTORY  bot-directory arrivals on the Telegram bot",
+     "/aws/lambda/relayshield-telegram-webhook", "acquisition source=",
+     re.compile(r"acquisition source=(" + _bot_directory_alternation() + r")\b"),
+     "no directory listing is live yet, OR the submitted link lost its "
+     "?start=SRC_ payload -- check the listing card before the channel"),
+
+    # WHATSAPP HAD NO STAGE AND NO WAY TO GET ONE UNTIL 2026-09-17. The handler
+    # parsed no acquisition source at all, and `wa.me` appeared nowhere in the
+    # repo, so there was no link to attribute and nothing to attribute it with.
+    # Both halves shipped together, deliberately: a link placed before the
+    # parsing exists is a key that is sent, accepted and never logged, which is
+    # the false absence FD-8 cost four months.
+    #
+    # FILTERED ON THE LINE THE CODE WRITES, checked against
+    # relayshield_whatsapp_webhook.py rather than against what it ought to log:
+    #   logger.info("acquisition source=%s wa=%s", wa_source, hash_phone(...))
+    # Same prefix and same shape as the Telegram stage above, which is why the
+    # two are one filter apart instead of two schemes.
+    ("WHATSAPP   front-door arrivals on the WhatsApp bot",
+     "/aws/lambda/relayshield-whatsapp-webhook", "acquisition source=",
+     re.compile(r"acquisition source=(wa-[a-z0-9-]*)"),
+     "the wa.me links are placed and nobody taps them, OR the number in the "
+     "Workers is unset so no link was ever rendered -- check that first"),
 
     ("DEVELOPERS arrivals on the API landing page",
      "/aws/lambda/relayshield-developer-signup", "developer-signup request",

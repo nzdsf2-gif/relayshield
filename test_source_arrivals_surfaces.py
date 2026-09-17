@@ -186,6 +186,49 @@ class TestBotDirectoriesTable(unittest.TestCase):
                 f'bot key {r["key"]!r} appears in relayshield_developer_signup.py')
 
 
+class TestTheFunnelReadsTheSameTable(unittest.TestCase):
+    """One list of directory keys, not two.
+
+    tools/miniapp_funnel.py's DIRECTORY stage and bot_directories.json shipped
+    on the same day in two sessions and hardcoded different subsets. That is the
+    shape this repo has paid for five times, and here it fails silently in the
+    direction that reports a live channel as dead.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import miniapp_funnel
+        self.funnel = miniapp_funnel
+
+    def test_every_route_key_is_countable_by_the_funnel(self):
+        alt = self.funnel._bot_directory_alternation()
+        rx = re.compile(r"acquisition source=(" + alt + r")\b")
+        for r in json.loads((ROOT / "bot_directories.json").read_text())["routes"]:
+            line = f"acquisition source={r['key']} chat=deadbeef"
+            self.assertIsNotNone(
+                rx.search(line),
+                f"{r['key']!r} is in bot_directories.json and the funnel's "
+                "DIRECTORY stage cannot count it. Submitting to it would print "
+                "a confident zero forever.")
+
+    def test_the_directory_stage_does_not_swallow_mini_app_keys(self):
+        """Two stages, two questions. Merging them destroys the BOT answer."""
+        alt = self.funnel._bot_directory_alternation()
+        rx = re.compile(r"acquisition source=(" + alt + r")\b")
+        for k in ("miniapp", "tg-miniapp", "tg-miniapp-tgapp", "tg-miniapp-findminiweb"):
+            self.assertIsNone(
+                rx.search(f"acquisition source={k} chat=deadbeef"),
+                f"the DIRECTORY stage matches the Mini App key {k!r}, so the "
+                "two stages now answer the same question twice and neither "
+                "answers its own")
+
+    def test_an_empty_table_raises_rather_than_matching_nothing(self):
+        """A regex that matches nothing looks exactly like a dead channel."""
+        import inspect
+        src = inspect.getsource(self.funnel._bot_directory_alternation)
+        self.assertIn("raise SystemExit", src)
+
+
 class TestReportWording(unittest.TestCase):
     """Execute report(), because reading it does not answer what it prints."""
 

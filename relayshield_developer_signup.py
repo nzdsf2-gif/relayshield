@@ -292,6 +292,62 @@ def _get_secret(name: str) -> str:
     return _secret_cache[name]
 
 
+# --- The WhatsApp front door -----------------------------------------------
+#
+# READ AT RUNTIME RATHER THAN COMMITTED AS A CONSTANT, and that is the whole
+# reason this placement is here rather than being a third copy of WA_NUMBER.
+# cloudflare_worker_blog.js and cloudflare_worker_miniapp.js each hold the
+# number as a constant because a Cloudflare Worker cannot read Secrets Manager,
+# and a test pins those two equal. This handler CAN read it -- it already reads
+# three secrets -- so adding a third constant would mean three files to edit and
+# two of them enforced, which is the N-copies defect this repo has paid for five
+# times.
+#
+# FAIL-CLOSED, and the failure mode is the reason. wa.me answers a malformed or
+# missing number with HTTP 200 and an "invalid" page, NOT a 404, so a broken
+# front door looks live to every probe we own. An unreadable secret therefore
+# renders NO link at all rather than one with a hole in it.
+WA_NUMBER_SECRET = "relayshield/twilio_whatsapp_number"
+WA_NUMBER_KEY = "TWILIO_WHATSAPP_NUMBER"
+
+
+def _wa_number() -> str:
+    """The bot's WhatsApp number as bare digits, or "" if it cannot be read.
+
+    Never raises. This renders a landing page, and a page that 500s because a
+    footer link could not be built is a far worse outcome than a missing line.
+    """
+    try:
+        raw = _get_secret(WA_NUMBER_SECRET)
+    except Exception as exc:
+        logger.warning("wa front door: secret unreadable: %s", exc)
+        return ""
+    # The secret is a JSON object, and _get_secret returns the SecretString
+    # VERBATIM. Every caller has to unwrap it -- three of four call sites of the
+    # BOT TOKEN secret were dead for days because they did not, and that failed
+    # with a WRONG VALUE rather than an exception, which is strictly worse.
+    try:
+        parsed = json.loads(raw)
+        value = parsed.get(WA_NUMBER_KEY, "") if isinstance(parsed, dict) else ""
+    except (ValueError, TypeError):
+        value = raw
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    # E.164 is 8 to 15 digits. Anything outside that is not a phone number, and
+    # emitting it would produce a link that passes a probe and reaches nobody.
+    return digits if 8 <= len(digits) <= 15 else ""
+
+
+def _wa_front_door_html() -> str:
+    """One footer line, or the empty string. Never a partial link."""
+    num = _wa_number()
+    if not num:
+        return ""
+    return ('\n  <p style="margin-top:.6rem;font-size:.85rem">'
+            '<a href="https://wa.me/' + num + '?text=SRC_wa-devs" '
+            'style="color:var(--muted)">Prefer WhatsApp? Message the '
+            'RelayShield bot</a></p>')
+
+
 def _stripe_key() -> str:
     raw = _get_secret("relayshield/stripe_secret_key")
     try:
@@ -2520,6 +2576,7 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
     <a href="https://blog.relayshield.net/rss.xml" style="color:var(--accent)">RSS</a>
   </p>
   <p>RelayShield LLC · <a href="https://relayshield.net">relayshield.net</a> · <a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
+  <!--WA_FRONT_DOOR-->
   <p style="margin-top:.6rem">
     <a href="https://x402-list.com/services/relayshield?utm_source=badge&amp;utm_medium=referral&amp;utm_campaign=embed" target="_blank" rel="noopener">
       <img src="https://x402-list.com/badge/relayshield.svg?data=uptime&amp;period=30d" alt="RelayShield on x402-list.com: continuously monitored" style="height:20px;vertical-align:middle" />
@@ -2954,6 +3011,30 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     # One key per discovery route, following the miniapp_discovery ranking, so
     # CloudWatch can separate an arrival from an announcement channel from one
     # from a directory. They render the same banner.
+    # TELEGRAM BOT DIRECTORIES, registered 2026-09-17 BEFORE any submission.
+    #
+    # ITS OWN BANNER RATHER THAN AN ALIAS TO tg-miniapp, and the reason is the
+    # arrival's shape rather than tidiness. A Mini App arrival has ALREADY run
+    # a check and the banner can say "you just checked a link". A directory
+    # visitor has clicked a Website URL off a catalogue card and has run
+    # nothing, so a banner claiming they did is a claim about them that is
+    # false, on the first screen they see.
+    #
+    # _resolve_source applies aliases BEFORE the banner table, so aliasing
+    # this key would make this banner unreachable -- the rsscan -> github
+    # defect, already paid for once.
+    "storebot": (
+        (),
+        _banner("Arriving from a Telegram bot directory", _p(
+            "The bot you found there runs on these endpoints, and they are open. "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">'
+            "POST /v1/link-check</code> screens a URL against our indicator corpus, Safe "
+            'Browsing and domain age; <code style="background:var(--bg);border-radius:5px;'
+            'padding:.15rem .4rem">POST /v1/wallet-risk</code> screens an address across EVM, '
+            "Solana, TON and Bitcoin. <b>No key, no card and no signup</b> for either, capped "
+            "per source IP rather than billed, so the same check can sit inside your own bot "
+            "today. A key raises the cap and adds multi-engine URL analysis.")),
+    ),
     "tg-miniapp": (
         (),
         _banner("Arriving from the RelayShield Mini App", _p(
@@ -3333,6 +3414,11 @@ _SOURCE_ALIASES = {
     # missing in the same commit that added it.
     "tg-miniapp-share":     "tg-miniapp",
     "miniapp":              "tg-miniapp",
+    # One key per DESTINATION. storebot.me and botsarchive.com are different
+    # catalogues with different audiences, so a shared key would merge them
+    # into a number nobody can act on.
+    "storebot-me":    "storebot",
+    "botsarchive":    "storebot",
     "gitlab-cve-blog":       "gitlab-cve",
     "gitlab-cve-medium":     "gitlab-cve",
     "gitlab-cve-devto":      "gitlab-cve",
@@ -3585,7 +3671,16 @@ def handle_landing_page(query_params: dict | None = None, referer: str = "") -> 
     # tables land on a general API page and have to hunt for the piece that
     # brought them. Swap in a LangChain-specific quickstart above the fold.
     banner = _banner_for(referer, query_params)
-    return _html(_strip_html_comments(LANDING_PAGE.replace("<!--REFERRER_BANNER-->", banner)))
+    # BOTH SUBSTITUTIONS HAPPEN BEFORE _strip_html_comments, AND THE ORDER IS
+    # LOAD-BEARING RATHER THAN STYLISTIC. Both placeholders ARE html comments,
+    # so stripping first would delete them and every later replace would match
+    # nothing -- the page would render perfectly, with no banner and no front
+    # door, and nothing anywhere would error. That is the quiet-alarm shape on
+    # a live page, and it is one line of reordering away at all times.
+    page = (LANDING_PAGE
+            .replace("<!--REFERRER_BANNER-->", banner)
+            .replace("<!--WA_FRONT_DOOR-->", _wa_front_door_html()))
+    return _html(_strip_html_comments(page))
 
 
 def _aws_email_capture_page(aws_customer_id: str, source: str = "aws_marketplace") -> str:

@@ -52,6 +52,32 @@ const DEVELOPERS = API_BASE + "/developers";
 // touch wins there, deliberately.
 const BOT = "https://t.me/relayshield_bot?start=SRC_miniapp";
 
+/* THE WHATSAPP FRONT DOOR. WORKER SCOPE, and it stays here: the page reads it
+   only through the __WA_LINK__ substitution above.
+
+   Bare digits, no "+" and no spaces. wa.me answers a malformed number with a
+   200 and a "phone number shared via url is invalid" page rather than a 404,
+   so a wrong value produces a link that passes every probe and reaches
+   nobody -- which is why waLink() returns the EMPTY STRING when this is unset
+   and the footer paragraph simply does not render.
+
+   The number lives in Secrets Manager (relayshield/twilio_whatsapp_number)
+   and nowhere else, and a Worker cannot read Secrets Manager. Fill it from:
+     AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/wa_front_door_link.py
+   The same value goes in cloudflare_worker_blog.js and a test pins them
+   equal. */
+const WA_NUMBER = "";
+const WA_SOURCE = "wa-miniapp";
+
+function waLink() {
+  if (!WA_NUMBER) return "";
+  return '<p class="inline-footer">On WhatsApp instead? '
+    + '<a href="https://wa.me/' + WA_NUMBER + '?text=SRC_' + WA_SOURCE + '">'
+    + 'Message RelayShield there</a> and we will monitor your email, phone '
+    + 'and wallets for breaches, infostealer logs and SIM-swap attempts, and '
+    + 'alert you in that chat.</p>';
+}
+
 /* THE SLOT NUMBERS, SUBSTITUTED INTO STATIC COPY AT REQUEST TIME.
 
    They exist here because the watch tab's pricing was rendered ENTIRELY from
@@ -419,6 +445,20 @@ const PAGE = `<!doctype html>
       verdict posts straight into that conversation, so you can check something
       in the group where it was shared without adding a bot to it or leaving
       the chat.</p>
+
+    <!-- THE WHATSAPP FRONT DOOR, SUBSTITUTED RATHER THAN READ FROM PAGE SCOPE.
+
+         __WA_LINK__ is filled by the Worker at request time and is the EMPTY
+         STRING when WA_NUMBER is unset, so this paragraph disappears entirely
+         rather than shipping a wa.me/ link with a hole in it. wa.me answers a
+         malformed number with a 200 and an "invalid" page, so a broken link
+         here would look live to every probe we have.
+
+         Substituted as a __TOKEN__ and not declared in the page for the reason
+         INLINE_TEXT was moved: the page and the Worker are different scopes on
+         different machines, and anything the page reads from the Worker's own
+         scope is a ReferenceError at load that node --check cannot see. -->
+    __WA_LINK__
 
     <p class="build">Build __BUILD__</p>
   </footer>
@@ -1528,7 +1568,8 @@ export default {
       .replaceAll("__PAID_SLOTS__", PAID_SLOTS)
       .replaceAll("__SLOTS_STARS__", SLOTS_STARS)
       .replaceAll("__SLOTS_DAYS__", SLOTS_DAYS)
-      .replaceAll("__SOURCE__", source);
+      .replaceAll("__SOURCE__", source)
+      .replaceAll("__WA_LINK__", waLink());
 
     return new Response(body, {
       headers: {

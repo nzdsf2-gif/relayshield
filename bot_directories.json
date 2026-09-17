@@ -54,6 +54,16 @@
     },
     {
       "rank": 2,
+      "id": "botsarchive",
+      "key": "botsarchive",
+      "destination": "BotsArchive, botsarchive.com",
+      "submit_url": "https://botsarchive.com/",
+      "route_type": "catalogue_and_broker",
+      "status": "ready",
+      "note": "MEASURED 2026-09-17 and it is BOTH KINDS OF THING AT ONCE, which corrects the 2026-09-14 rule rather than fitting it: a genuine database with a website and a search bot, AND an advertising channel selling posts at $408 (Telega.io, ~110k subscribers, ~6,100 average post reach). The two categories are not exclusive; @telegtapps was purely a broker and this is not. TAKE THE FREE LISTING, DECLINE THE POST. All figures from third-party trackers, because botsarchive.com, t.me, tgstat.com and telega.io are ALL egress-blocked from the container."
+    },
+    {
+      "rank": 3,
       "id": "tgbotlist",
       "key": "tgbotlist",
       "destination": "TgBotList, telegram-bot-list.com",
@@ -63,7 +73,7 @@
       "note": "Its own copy states a stated turnaround: checked and added within 24 hours. A NAMED turnaround is the property that made findmini.app the right first submission -- it converts silence into evidence, because after 24 hours silence means something."
     },
     {
-      "rank": 3,
+      "rank": 4,
       "id": "toptelegrambots",
       "key": "toptelegrambots",
       "destination": "toptelegrambots.com",
@@ -73,7 +83,7 @@
       "note": "Its own copy says the listing appears INSTANTLY after a Telegram-side verification of bot ownership. Instant publication is worth more than review latency here: it is the cheapest possible test of whether our listing copy survives a real catalogue, and it fails loudly rather than silently."
     },
     {
-      "rank": 4,
+      "rank": 5,
       "id": "besttelegrambot",
       "key": "besttelegrambot",
       "destination": "besttelegrambot.com",
@@ -83,7 +93,7 @@
       "note": "Free submission, self-described as 600+ bots. Small, and a standing shelf is worth having whatever the number turns out to be -- the same reasoning that put findmini.app ahead of its rank."
     },
     {
-      "rank": 5,
+      "rank": 6,
       "id": "tdirectory",
       "key": "tdirectory",
       "destination": "Telegram Directory, tdirectory.me",
@@ -93,7 +103,7 @@
       "note": "Takes channels, groups AND bots, so it is two submissions rather than one: @relayshield_bot and the @RelayShield blog channel. Check whether it keys a listing on the account the way tg.app keys one per bot BEFORE spending the second submission."
     },
     {
-      "rank": 6,
+      "rank": 7,
       "id": "telegramic",
       "key": "telegramic",
       "destination": "Telegramic, telegramic.org",
@@ -103,7 +113,7 @@
       "note": "Listed as a bots directory. No submission route seen in search results, so step one is the header and the footer, exactly as it was for findmini.app."
     },
     {
-      "rank": 7,
+      "rank": 8,
       "id": "botlist",
       "key": "botlist",
       "destination": "@botlist / @BotListChat",

@@ -1,9 +1,25 @@
-# AWS Bundle B — scoped 2026-09-15
+# AWS Bundle B — scoped 2026-09-15, revised 2026-09-17
 
-**This file replaces an earlier version of itself that was wrong.** That version said
-Bundle A's dimensions had never been added to AWS. They had. Bundle A and Bundle D are
-both live, on **two separate product entities**, which is the fact everything below rests
-on. The correction and how I got it wrong are in section 5.
+## THE STATE OF THE SHELF, so nothing below has to be inferred
+
+    Bundle D   prod-kkvurtspreofy    Agentic Attack Surface       LIVE, public
+    Bundle A   prod-f5qkfsxlxs4qg    Core Identity Exposure       LIVE
+    Bundle B   no entity yet         Attack Surface & Supply Chain  change set written
+
+**Bundle A is LIVE and has been. It is not outstanding and it is not a prerequisite for
+anything here.** An earlier version of this file said its dimensions had never been added
+to AWS, which was wrong, and the founder corrected it. Every bundle after D gets its OWN
+SaaSProduct entity, so Bundle B does not touch, queue behind, or risk either of the two
+live products. How the wrong claim was produced is in section 5, kept because the method
+matters more than the fact.
+
+## WHAT IS LEFT, IN ONE PARAGRAPH
+
+Two commands and three small code edits. **Neither of the two things this file previously
+called blockers is a blocker.** The catalog IAM grant is one committed script that has
+never been run, not an IAM migration -- corrected 2026-09-17, section 4. The fulfillment
+drift read is one read-only command. The change set itself is written and carries six
+passing guards.
 
 ---
 
@@ -59,7 +75,8 @@ names its sources and quotes no corpus count.
 ## 3. What is still to do, in order
 
 1. **Read the fulfillment drift diff.** Section 4. Read-only, one command.
-2. **Grant the catalog permissions.** Section 4.
+2. **Run the catalog grant that already exists**, `sh tools/apply_marketplace_catalog_policy.sh`.
+   Section 4. This was previously written up as an IAM migration and it is not one.
 3. **Submit `bundle_b_create_entity.json`**, then build `bundle_b_test_offer.json` from
    Bundle A's, with the five prices in section 1 and a $100/mo minimum.
 4. **The code**, three small edits mirroring Bundle A exactly:
@@ -70,7 +87,7 @@ names its sources and quotes no corpus count.
      flag -- all in `relayshield_bundle_fulfillment.py`, which is what step 1 gates.
 5. **`bundle_b_go_public.json`**, with the entity id typed by hand after creation.
 
-## 4. The two real blockers, both verified rather than recalled
+## 4. One real blocker and one that turned out not to be
 
 **The fulfillment Lambda is in NO deploy map and NO drift check.**
 `relayshield_bundle_fulfillment.py` holds `BUNDLE_CONFIGS` and `PRODUCT_CODES`, so two of
@@ -89,7 +106,7 @@ labelled UNVERIFIED; UNREADABLE means the name is wrong, not the entry.
 ```zsh
 cd ~/dev/relayshield
 git checkout main
-git --no-pager fetch origin claude/great-ritchie-6b8adu
+git --no-pager fetch origin claude/tender-planck-cb2qrx
 git rm -rf --cached -q --ignore-unmatch ansible-relayshield relayshield-snap
 git stash push --include-untracked -m "pre-merge untracked"
 git -c pull.rebase=false merge --no-edit FETCH_HEAD

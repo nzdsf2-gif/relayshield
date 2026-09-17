@@ -5664,44 +5664,76 @@ the Bundle-A-entity mistake one directory over, in the same document that confes
 product names the entity id. The repo holds a snapshot of one role and a workflow naming a
 different one, and reading only the first is how "not granted" becomes "cannot be granted".
 
-## THE WHATSAPP FRONT DOOR DOES NOT EXIST, AND THE ROOM BEHIND IT IS LOCKED
+## I SAID THE WHATSAPP FRONT DOOR DID NOT EXIST. IT DID. `--all` IS NOT ALL.
 
-**Asked as "now that the WA frontdoor was created, how can we build its discovery
-surface".** It was not created. Checked rather than recalled:
+**2026-09-17, and the founder corrected it in five exclamation marks: *"We implemented
+the WA front door in the last session!!!!!"*** He is right. It is commit `b641375` on
+`origin/claude/laughing-bell-gxagsd`, complete with the parser, the links, 260 lines of
+tests and a funnel stage.
 
-    git --no-pager log --all -S "wa.me" -- '*.py' '*.js'     no commits, any ref
-    grep -rn "wa.me" --include=*.py --include=*.js --include=*.json .   CLAUDE.md only
+**THE COMMAND THAT PRODUCED THE FALSE NEGATIVE, AND IT LOOKS AIRTIGHT:**
 
-and `origin/main` was at the same commit as this branch when that ran, so this is a claim
-about origin AND about every fetched branch. **UNVERIFIED for an unpushed commit on the
-Mac**, which `git --no-pager log --oneline origin/main..main` settles in one line. The
-ON DECK section recording the item is dated 2026-09-16 and describes it as work to do, so
-the likeliest reading is that the ITEM was created and the front door was not.
+    git --no-pager log --all -S "wa.me" -- '*.py' '*.js'     -> nothing
 
-**BUT THE LINK IS THE SMALLER HALF, AND THE LARGER HALF IS WHY IT MUST NOT SHIP YET.**
-`relayshield_whatsapp_webhook.py:5516` resolves the sender and, for an unknown number,
-sends *"It looks like your account isn't set up yet. Visit relayshield.net to sign up"*
-and **returns**. The only account-creating write in that file is an employee record
-created by an admin who already has one. **There is no self-serve path into the WhatsApp
-bot at all.**
+**`--all` MEANS EVERY REF THIS CONTAINER HAS FETCHED. IT DOES NOT MEAN EVERY REF ON
+ORIGIN.** A session starts with `main` and whatever branch it was given. I had run
+`git fetch origin main`, so `--all` covered exactly two refs, and the branch holding the
+answer was never among them. One `git fetch --all` before the search returns it
+instantly, which is how it was found in the end.
 
-So a `wa.me` front door placed on the developers page, the blog footer and the Mini App
-would take cold discovery traffic and hand every arrival a sentence telling them to go
-back to a website. That is worse than no link: it spends the impression AND teaches the
-person the product does not work. **Telegram is not like this** -- a stranger can `/start`,
-run keyless checks through the widget, use inline mode in a group, and open the Mini App,
-all with no account -- which is why the same link works there and does not work here.
+**And the pathspec was a second, independent hole.** `-- '*.py' '*.js'` would also have
+missed a `wa.me` that landed only in a `.md` or a `.json`, which is where half this
+repo's decisions live.
 
-**THE ORDER IS: open the door, then point at it.** A keyless first-contact path on
-WhatsApp (the `/v1/link-check` and `/v1/wallet-risk` pair the Telegram widget already
-uses, both keyless and both capped per source) is the prerequisite, roughly a day. The
-`wa.me?text=` link and its source parsing are half a day AFTER it. Shipping them in the
-other order is FD-8's shape with a worse ending: not attribution that looks like it
-worked, but a funnel that measurably works and delivers nothing.
+**THIS IS THE "IT IS NOT IN THE REPO IS A CLAIM ABOUT ORIGIN" RULE, ONE LAYER FURTHER
+IN, AND THE NEW HALF IS WORSE THAN THE OLD ONE.** That section warns that a grep here
+says nothing about the founder's unpushed clone. What it did not say is that a grep here
+says nothing about **pushed branches this container never fetched either**. The work was
+on GitHub, public, fetchable in one command, and I reported it as non-existent -- then
+built a recommendation, a section of this file and a Top 10 item on top of that.
 
-**And the number is NOT in the repo, deliberately.** It is `TWILIO_WHATSAPP_NUMBER` in
-Secrets Manager. A committed `wa.me/<number>` is a hardcoded live surface identifier in a
-public repository, and I cannot see the value from here anyway, so no session guesses it.
+**THE RULE: before any claim that something was never built, `git fetch --all --prune`,
+then search with NO pathspec.** Both halves. And the search that actually settles it is
+one line:
+
+    git fetch --all --prune && git --no-pager log --all --oneline -S "<string>"
+
+**The cost was not the wrong answer, it was what I did with it.** I wrote a
+recommendation ("open the door, then point at it"), a Top 10 item and a CLAUDE.md
+section from an absence I had not established, and the founder had to spend a round
+telling me the thing already existed. An absence is a finding like any other and it
+needs the same evidence a presence does.
+
+### WHAT IS ACTUALLY BUILT, AND THE ONE THING THAT IS NOT
+
+`b641375` and `9e51b56` carry, all on that branch and none of it on `main`:
+
+* **`parse_wa_source()`** in `relayshield_whatsapp_webhook.py` -- `SRC_<key>` out of the
+  prefilled message BODY, because WhatsApp has no deep-link payload, **parsed BEFORE the
+  user lookup** since a front-door arrival is by definition unknown and the unknown-user
+  branch returns 200 and stops. Parsing after it would attribute every arrival to
+  nothing, forever, while looking correct in the diff.
+* The token is **stripped from the body**, so the user's first real instruction is not
+  prefixed by a string our command parsing has never seen.
+* `SRC-` accepted as well as `SRC_`, because the prefill is editable text a human can
+  retype and every key we register is itself hyphenated.
+* **A real defect fixed in passing: the inbound log line wrote the customer's phone
+  number in the clear** into CloudWatch on every message. It is hashed now, like every
+  other identifier in that file.
+* Links on the **blog footer** (`wa-blog`) and the **Mini App** (`wa-miniapp`), a
+  **WHATSAPP funnel stage**, a **DIRECTORY stage**, and `tools/wa_front_door_link.py`.
+
+**THE ONE THING MISSING IS THE NUMBER.** Both Workers declare `const WA_NUMBER = ""` and
+render the paragraph only when it is non-empty, so today the links are absent rather than
+broken -- deliberately, because `wa.me/` with a hole in it renders as a page rather than
+failing. The number is in Secrets Manager and no session can see it.
+
+**THE CORRECTION THAT MATTERS FOR THE PRODUCT, AND IT SURVIVES MY BEING WRONG ABOUT THE
+CODE:** `relayshield_whatsapp_webhook.py` still answers an unknown number with *"It looks
+like your account isn't set up yet. Visit relayshield.net to sign up"* and returns. So
+the front door is built, the attribution is correct, and **what a stranger finds behind it
+is still a closed door.** That is a product decision rather than a defect -- it is worth
+knowing before the link is placed widely, not after.
 
 ## SUBMITTING THE BOT TO DIRECTORIES WAS UNMEASURABLE. CAUGHT BEFORE THE LINKS SHIPPED.
 
@@ -5780,3 +5812,497 @@ the plugin and the marketplace manifest both exist, both pass `claude plugin val
 other, so this is a question rather than a finding: if it was submitted, the row is stale
 and should say so. If it was not, it is the cheapest open item on the board -- finished,
 tested work sitting behind a form, against the directory whose artefact we already ship.
+## EVERY DEV.TO POST SHIPS A GENERATED FILE. THE SCRIPT SENDS IT. NEITHER HALF IS OPTIONAL.
+
+**Written 2026-09-17 at Andrew's request, after the GitLab post reached DEV's web editor with its
+front matter rendering as visible text** -- the exact failure recorded on 2026-09-07, repeated ten
+days later, and the cause was mine and was NOT the paste.
+
+**THE RULE THAT ALREADY EXISTED SAID "NEVER THE WEB EDITOR" AND HAD NO ARTEFACT BEHIND IT.** The
+channels doc for that post carried the front matter in a ```yaml block and the sentence *"publish
+with tools/publish_devto.py, never the web editor"* -- and **no file was ever generated for the
+script to send.** So the instruction forbade the only route that was actually available. A reader
+holding a yaml block and a script that takes a filename has one move, and it is the forbidden one.
+
+**So the rule has two halves now and the first is the new one:**
+
+1. **THE GENERATED FILE EXISTS, in the same commit as the canonical.** `<slug>-devto.md`, generated
+   FROM `blog_markdown/`'s published body rather than written by hand, so the two cannot diverge.
+   A channels doc that describes front matter without committing a file has not delivered the
+   dev.to channel, whatever it says.
+2. **`tools/publish_devto.py` sends it.** `--dry-run` first, then `--publish`. The key comes from
+   the environment via `read -rs`, never an argument.
+
+**GENERATING IT IS FOUR MECHANICAL STEPS AND ALL FOUR MATTER:**
+
+  * Take the body from `blog_markdown/<slug>.md`, never the root working copy -- that one still
+    carries its `NOT FOR PUBLICATION` section, and `build_blog.py` does not strip it.
+  * **Strip the leading `# ` heading.** It becomes DEV's `title` field, so leaving it in publishes
+    the title twice.
+  * **Switch the one `?source=` key to that channel's own**, `<key>-devto`. One key per
+    DESTINATION, never per category.
+  * Add a short runnable lead-in above the body. DEV's readers want the thing before the thesis.
+
+**AND RULE 14 APPLIES TO A LEAD-IN EXACTLY AS IT APPLIES TO A PASTED BLOCK.** The first draft of
+that lead-in said `rsscan install-hook`, **which does not exist.** I wrote it because it is what
+such a command is usually called. Read from `scan.py` instead: `--staged` is the DEFAULT, so bare
+`rsscan` reads `git diff --cached -U0`, and CI is `--rev-range A...B`. A wrong command in a pasted
+block costs one reader a round trip; a wrong command in a published post is wrong for everybody who
+reads it, forever, on a developers' site where being wrong about your own CLI is the whole
+impression.
+
+**Four tags maximum and they must already exist on DEV.** `security`, `devops`, `opensource` and
+`ai` are the known-safe set. A tag that does not exist returns 422 naming it; drop it and re-run.
+
+### rsscan TOLD INSTALLERS IT HAD 31 PATTERNS WHILE HOLDING 49
+
+Found in the same turn, and it is the two-files-must-agree shape landing on the artefact a stranger
+actually installs. Eight GitLab formats shipped on 2026-09-16 and neither sentence moved:
+`rsscan/README.md` and the module docstring in `rsscan/rsscan/scan.py` both said 31, **beside a
+provider list that named GitHub and did not name GitLab** -- in the same week we published a post
+whose entire argument is that a detector reports only what it has a pattern for.
+
+`PATTERN_COUNT` is already derived (`len(_COMPILED)`), so only the prose can drift.
+`test_rsscan_stated_count.py` pins every `"<n> credential patterns"` string against it, pins the
+README's prefix/severity table against the rules themselves in BOTH directions, and fails if the
+guard ever scopes itself down to nothing. It deliberately does NOT strip comments: the thing being
+checked IS prose.
+
+**MY FIRST PROVIDER GUARD WAS DECORATION AND ITS OWN PROOF RUN SHOWED IT.** It searched the whole
+README for "gitlab" and PASSED with the provider clause deleted, because the README also documents
+a GitLab CI component -- so the word is present whatever the table holds. **Anchor a prose guard on
+the SENTENCE that makes the claim, never on the file.** A word that appears for an unrelated reason
+is a guard that cannot fail.
+
+## THE WHATSAPP FRONT DOOR IS BUILT, AND THE NUMBER IS THE ONE THING A SESSION CANNOT FILL IN
+
+**Built 2026-09-17. The on-deck item recorded on 2026-09-16 said the WA bot had no front door and
+no attribution, and both halves shipped together, deliberately.** A link placed before the parsing
+exists is a key that is sent, accepted and never logged, which is FD-8 and four months of it.
+
+**WHATSAPP HAS NO USERNAME NAMESPACE AND NO DEEP-LINK PAYLOAD.** Telegram hands
+`t.me/<bot>?start=SRC_<key>` to the handler as a payload. The only thing WhatsApp offers is
+`wa.me/<number>?text=<prefill>`, which puts the token in the MESSAGE BODY -- visible to the user,
+editable by the user, and arriving as ordinary text. `parse_wa_source()` therefore tolerates
+`SRC-` as well as `SRC_`, is case-insensitive, and **STRIPS the token from the body**, because the
+prefill IS the user's first message and anything after the token is a real instruction our command
+parsing has never seen prefixed.
+
+**THE ORDERING IS THE WHOLE BUILD AND IT IS EASY TO GET BACKWARDS.** A front-door arrival is BY
+DEFINITION a number we have never seen, and `handler()`'s `if not user` branch sends a welcome and
+returns 200. **So a parse placed after `get_user_by_whatsapp()` attributes every arrival the link
+ever produces to nothing, forever, while reading perfectly in a diff.** It is the only defect here
+that running the code cannot reveal -- both orderings pass every behavioural test, because those
+test the parser in isolation -- so `test_wa_front_door.py` checks source ORDER inside the handler,
+proven by moving the call.
+
+**THE UNKNOWN-NUMBER REPLY WAS A DEAD END AND IS PART OF THE DOOR.** It said *"your account isn't
+set up yet, visit relayshield.net"*. Bouncing a stranger to a website one message after they tapped
+our own link is worse than having no link: they came to ask about something and we answered with
+homework. It leads with what the bot does now. **It still cannot run a check for them, and saying
+so plainly is the honest scope** -- the keyless WA check is the next build, not this one.
+
+**THE NUMBER LIVES IN SECRETS MANAGER AND NOWHERE ELSE, AND NO SESSION CAN READ IT.**
+`relayshield/twilio_whatsapp_number`, read at runtime by six handlers, hardcoded by none. So
+`WA_NUMBER` in both Workers is the EMPTY STRING and **each renders no link at all while it is
+empty.** That is not a placeholder to tidy up later, it is a fail-closed:
+
+**wa.me ANSWERS A MALFORMED OR MISSING NUMBER WITH HTTP 200 AND AN "INVALID" PAGE, NOT A 404.** So
+a broken front door looks live to every probe we own -- the quiet alarm, on the link itself. Bare
+digits only, no `+` and no spaces. Fill both from:
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/wa_front_door_link.py
+
+It is read-only, prints the number and never the raw SecretString, and **refuses to print a link
+for anything that is not E.164** rather than emitting one that would pass a probe and reach nobody.
+
+**AND THE GUARD I WROTE FOUND A SECOND RAW PHONE NUMBER I HAD MISSED.** `handler()` logged
+`from_number` in the clear into CloudWatch on every inbound message, and a second line logged it
+again on every handled message. A phone number is personal data and log retention is not where we
+get to decide it stops being that; every other identifier in that file is hashed or encrypted and
+these two were the exception because they were written first. Both hashed, and an `ast` test now
+fails on any `logger` call passing `from_number` raw.
+
+**Two constants that must agree**, `WA_NUMBER` in `cloudflare_worker_blog.js` and in
+`cloudflare_worker_miniapp.js`, are pinned equal by test. The Mini App takes it through a
+`__WA_LINK__` substitution rather than reading the Worker constant from page scope -- the
+`INLINE_TEXT` defect, which `node --check` cannot see.
+
+**`tools/miniapp_funnel.py` HAS A WHATSAPP STAGE NOW**, filtered on the line the code actually
+writes rather than on what it ought to write. Its zero-means note says the thing that will
+otherwise cost a round: **a zero here is more likely to be an unset `WA_NUMBER` than an unpopular
+link.** Check the constant before the channel.
+
+## BOTSARCHIVE IS A REAL DIRECTORY THAT ALSO SELLS POSTS. THE FREE HALF IS WORTH TAKING; THE POST IS $408.
+
+**Asked 2026-09-17 as "is this legit and should I sign up our Tg bot and/or our miniApp".**
+
+**It is real, and it is BOTH KINDS OF THING AT ONCE**, which is why the 2026-09-14 rule (*"a curated
+catalogue with a submission route, or a broker selling posts"*) needs its correction recorded here:
+**those two categories are not exclusive.** `@telegtapps` was purely a broker. BotsArchive runs a
+genuine database with a website and a search bot AND sells advertising in its channel.
+
+Measured rather than recalled, from third-party trackers because `botsarchive.com`, `t.me`,
+`tgstat.com` and `telega.io` are ALL egress-blocked from the container:
+
+    channel subscribers      ~110,000-112,800   (four trackers, consistent)
+    average post reach       ~6,100 views       engagement ~5.5%
+    advertising post price   $408 on Telega.io  category "Directory of Channels & Bots"
+
+**SO THE "ACTION REQUIRED -- CONTACT @BotsArchiveSupportBot TO PROCEED WITH THE LISTING" STEP IS
+VERY LIKELY THE FEE GATE, AND THAT IS AN INFERENCE, NOT A MEASUREMENT.** A free submission that
+passes moderation and then requires a support conversation "to proceed", on a channel with a
+published $408 ad rate, is the shape of a paywall. **It has NOT been confirmed.** Nothing found
+suggests deception either -- selling posts in your own channel is an ordinary business, and no
+complaint, scam report or payment dispute turned up against them anywhere.
+
+**THE RECOMMENDATION, AND IT IS A SPLIT BECAUSE THE PRODUCT IS TWO PRODUCTS:**
+
+* **The website database entry: take it if it is free.** A directory row is a standing shelf that
+  keeps returning arrivals, which is the whole reason the 2026-09-14 finding ranks a listing above
+  a channel post.
+* **The $408 channel post: NO, and this is my call to be overruled.** That is about 6.7 cents per
+  view of an audience that collects Telegram bots. They are not people with money at risk, which is
+  who buys identity monitoring, and the catalogue work already in flight has produced four
+  submissions and a live listing for nothing. **Spend the $408 only after a free listing has
+  produced measurable arrivals**, which is a thing we can now count.
+* **Ask the price outright in the first message, before anything else.** "Is a channel post
+  required for the database listing, and what does it cost?" A support bot that answers with a
+  figure has settled it; one that does not is the answer too.
+* **The Mini App is a SEPARATE submission and should not be bundled into this conversation.**
+  BotsArchive archives BOTS. tg.app already taught us that a catalogue keys on the bot username,
+  so a Mini App and its bot can collide into one slot -- ask which they list before submitting the
+  second thing.
+
+**REGISTER THE `?source=` KEY BEFORE ANY OF IT.** `SRC_botsarchive` already parses on the Telegram
+side (the SRC_ prefix exists precisely because "BOTSARCHIVE" is 11 characters of A-Z and would
+otherwise hit the Coinbase charge-code branch -- that comment has been in the webhook since
+2026-08-10). Take the `--snapshot before-botsarchive` baseline BEFORE the listing goes live, never
+after.
+
+## OMARCHY: THE ANGLE IS REAL AND I RECOMMEND NOT BUILDING IT. THE INTERESTING PART IS A POST.
+
+**Asked 2026-09-17: "is there a RS angle here to build a desktop plugin".**
+
+**WHAT AN OMARCHY PLUGIN ACTUALLY IS**, read from the marketplace's own README rather than inferred:
+a public GitHub repository carrying a `manifest.json`, a README and a licence, installed by pointing
+`omarchy plugin` at the URL. A bar widget is a Quickshell QML component loaded into a slot.
+
+**AND THE MARKETPLACE SAYS IN ITS OWN WORDS THAT IT DOES NOT AUDIT THEM.** Plugins run
+**unsandboxed** and "may access or modify files, settings, credentials, network resources, or other
+parts of your system"; the marketplace performs "limited automated checks" which are explicitly
+"not a security audit, certification, endorsement, or guarantee".
+
+**THAT IS OUR THESIS ARRIVING IN A NEW REGISTRY, AND IT IS NOT A REASON TO SHIP A WIDGET.** Two
+candidate builds, and I would take neither today:
+
+* **A bar widget running our scam checks.** Weak. It is a QML component in a language nothing in
+  this repo uses, for an audience that has to already want it, and a desktop widget does not reach
+  the moment of need the way inline mode does.
+* **Screening an Omarchy plugin repo before install.** Strong on fit and **nearly free**, because
+  `.claude/skills/relayshield-agent-bait` already reads a GitHub repo's manifest, README and
+  agent-facing files and checks every referenced domain against the corpus. An Omarchy plugin IS a
+  GitHub repo with a manifest. The marginal work is a `manifest.json` reader and a README line, not
+  a build.
+
+**WHY STILL NO: rank a surface by how it performs for US, not in general.** Omarchy is a niche Arch
+distribution whose users are the most technical audience available and the least likely to buy
+identity monitoring, and this repo has already recorded that exact error once -- ranking the bot's
+menu button top for a bot with almost no users.
+
+**WHAT I WOULD DO INSTEAD, and it costs an afternoon rather than a week: a post.** "Your distro's
+plugin marketplace says, in its own README, that it does not audit plugins. Here is what to read
+before you install one." It reaches the Omarchy audience without building anything, it rests on a
+primary source we have actually read, and it is the agent-bait argument we already publish aimed at
+a registry that is currently describing the problem for us. Register `?source=omarchy` first.
+
+**THE CONDITION THAT WOULD CHANGE THE ANSWER**, so this is not re-litigated on a hunch: a named
+Omarchy plugin that turns out to be malicious, or a request from someone inside that community.
+Either makes the screening case concrete rather than theoretical.
+
+## WHERE 2026-09-17 LEFT THINGS — READ THIS FIRST. IT SUPERSEDES THE 2026-09-14 TOP 15.
+
+### THE COMMAND THAT FAILED WAS NOT ON HIS MACHINE, AND THE TOOL HAD A SECOND DEPENDENCY
+
+**Reported as "WA front-door: command failed" with no error text**, which is the
+right way to report it and left me two candidate causes with different fixes.
+`origin/main` was at `e2e9224` and the WhatsApp commit was `b641375`, **so the
+file did not exist on his Mac.** That is the LOCAL MERGE IS NOT A PUSH rule, in
+the direction where the block I sent was correct and the one he ran was the
+second of two.
+
+**AND I HAD GIVEN IT A SECOND WAY TO FAIL FOR A DIFFERENT REASON.** The tool
+imported `boto3`, so `~/.rsvenv` had to exist and be populated before a one-line
+question could be answered -- and the three failures (file absent, venv absent,
+secret unreadable) are indistinguishable from the error text. It shells out to
+the **AWS CLI** now, which every other command in this file already assumes, and
+falls back to boto3 only if `aws` is absent. `--no-cli-pager`, per rule 9. A CLI
+error is printed VERBATIM and the reading guide names ExpiredToken and
+AccessDenied separately, because those have different fixes.
+
+**THE GENERAL FORM, and it is rule 14 pointed at a dependency rather than a
+command: every prerequisite a tool adds is another thing that can be the reason
+it failed, and the reader cannot see which.** Prefer the dependency the reader
+already has.
+
+### WHATSAPP DOES HAVE A DIRECTORY. IT IS FOR CHANNELS, NOT FOR BOTS.
+
+**This CORRECTS the 2026-09-16 on-deck note, which said "there is no WhatsApp
+catalogue ecosystem to register in".** Half right, and the wrong half is the
+half with the opportunity in it.
+
+* **There is no directory for WhatsApp BOTS.** Meta runs none. That stands.
+* **There IS a directory for WhatsApp CHANNELS** -- searchable inside the app
+  from the Updates tab, browsable by category and country, and on the web at
+  `whatsapp.com/channels`. Channels rank in their declared primary country, and
+  the stated signals are category fit, follower growth in the first seven days,
+  reaction rate per post, and post frequency. Meta has since added **Promoted
+  Channels**, which is paid placement in that directory.
+
+**SO THE WA DISCOVERY SURFACE IS A CHANNEL, AND THE BOT IS ITS DESTINATION.** It
+is the exact shape that already works for us on Telegram: `t.me/RelayShield` is
+the blog channel, it is now listed on tg.app, and it is a different username
+from `t.me/relayshield_bot`. A WhatsApp Channel carrying scam alerts is
+discoverable; the `wa.me/<number>?text=SRC_wa-channel` front door in every post
+is what turns a follower into a conversation.
+
+**THE THING TO CHECK BEFORE BUILDING IT, and it is the founder's read because
+the container cannot see it:** a Channel is created from a WhatsApp account, and
+ours is a **Twilio-hosted business number**. Whether that number can own a
+Channel at all is the question that decides whether this is half a day or
+impossible, and it is one look in the app. **Do not scope the work before that
+read** -- FD-2 cost a day on a destination whose own page said no.
+
+**And the measured caveat from the same reading: directory-only Channels grow
+far slower than Channels whose link is on owned surfaces.** So the Channel is
+not a substitute for the front door, it is a second surface that needs the same
+link. Both, or neither is worth much.
+
+### BOTSARCHIVE IS A DEAD END IN PRACTICE. STOREBOT IS THE LIVE ONE.
+
+`@BotsArchiveSupportBot` did not answer. Combined with the $408 published ad
+rate on that channel, the honest reading is that the free half is not staffed,
+and **the recommendation from 2026-09-17 morning stands unchanged: do not pay.**
+Nothing is lost -- the submission was free and produced no listing.
+
+**`storebot.me/add-bot/` is the replacement and it is a plain web form**, which
+is the web-front-door finding paying for itself a fifth time. Free, no payment
+field, jpg/png/gif upload with a 256 MB cap, and it is one of the oldest
+Telegram bot directories. Copy is committed at
+`storebot_submission_2026-09-17.md`, field by field.
+
+**THE BOT, NOT THE MINI APP, and the reason is the form rather than a
+preference.** Its required fields are Bot Direct Link, Bot Status and Bot
+Commands. A Mini App has no commands and no online state, so three fields would
+be empty or invented. The Mini App is named inside Bot Info and reachable with
+`/app`, so the listing costs us nothing there, and three catalogues already
+carry `t.me/relayshield_bot/idcheck` directly.
+
+**THE COLD START WAS CHECKED RATHER THAN ASSUMED**, which is rule C applied to
+our own surface: `msg_welcome()` greets a stranger with what the product does
+and an intent keyboard, and asks "Who are you protecting?" It does not demand a
+phone number, an email or a payment first. A directory visitor lands somewhere
+sensible, so the bot is a defensible thing to point a catalogue at.
+
+**`storebot` IS REGISTERED IN ALL THREE PLACES BEFORE THE SUBMISSION**, with
+`storebot-me` and `botsarchive` as aliases. It has its OWN banner rather than an
+alias to `tg-miniapp`, because a Mini App arrival has already run a check and
+that banner says so -- a directory visitor has run nothing, and a first screen
+claiming otherwise is a false claim about the reader.
+
+**AND THE FUNNEL HAS A DIRECTORY STAGE**, deliberately separate from the BOT
+stage. That one answers "does the Mini App feed the bot" and its regex is
+`(miniapp|tg-miniapp[a-z-]*)`; widening it to catch directory traffic would
+destroy that answer to gain this one. **Two questions, two stages.**
+
+### I INVENTED A COMMAND IN A PUBLIC LISTING, ONE TURN AFTER WRITING THE RULE
+
+The first draft of the StoreBot copy advertised `/watch`, `/wascam` and
+`/simswap`. **`/watch` does not exist at all**; the Mini App command is `/app`.
+`/wascam` and `/simswap` are handler ALIASES that `setMyCommands` never
+registers, so a reader typing them from our own public listing would be using
+commands their Telegram menu does not offer.
+
+**This is the `rsscan install-hook` failure, in the next turn after I wrote that
+lesson into this file.** Writing a rule down is evidently not the same as
+applying it. The list is now generated from `_BOT_COMMANDS_BASE` by `ast` --
+that table is what `setMyCommands` actually registers, and a handler branch with
+no entry in it is invisible to everyone who does not already know it exists.
+
+**THE RULE, and it is narrower and more usable than "run it or label it": a
+command list, a price, a version or a count going into a PUBLIC artefact is read
+out of the code that defines it, mechanically, never typed from memory.** The
+`ast` extraction took one command and would have caught all three.
+
+### THE TOP 15, REGENERATED 2026-09-17
+
+**Regenerated, not annotated. This supersedes the 2026-09-14 list.**
+
+**Closed since then:** four catalogue submissions and two live tg.app listings;
+the funnel's window parse; the TI demo cards and their unit; the SIM swap
+port-out defect and its Telegram delivery; GitLab credential detection in all
+three tables; the GitLab post published on every channel including dev.to;
+inline mode pointed at from the blog footer and the Mini App; the WhatsApp
+front door built.
+
+1. **FILL `WA_NUMBER` AND MERGE. The WhatsApp front door is built and renders
+   nothing until this is done**, deliberately, because wa.me answers a bad
+   number with a 200 and an "invalid" page. Merge first, then
+   `AWS_PROFILE=relayshield python3 tools/wa_front_door_link.py`, then paste the
+   bare digits into `WA_NUMBER` in BOTH `cloudflare_worker_blog.js` and
+   `cloudflare_worker_miniapp.js`. A test pins them equal.
+
+2. **Submit the bot to StoreBot.** `storebot.me/add-bot/`, copy committed at
+   `storebot_submission_2026-09-17.md`. Search their site for RelayShield first
+   -- tg.app keys one listing per bot username and StoreBot may too. Take
+   `--snapshot before-storebot` BEFORE it goes live.
+
+3. **The WhatsApp Channel question, and READING IS THE TASK.** Can a
+   Twilio-hosted business number own a WhatsApp Channel? One look in the app
+   decides whether the only real WA discovery surface is available to us at all.
+   Do not scope the build before that answer.
+
+4. **IAM split, first migration.** The command is ready and the policy read.
+   `AWS_PROFILE=relayshield python3 tools/iam_split_roles.py --from-snapshot iam/snapshots/relayshield-breach-check-role-1sapnwdl.json --only relayshield-intel-feed --apply`
+   Verify with the next scheduled run's log, NOT the import probe. The shared
+   role is at 11 managed policies of 10 allowed, so this is closer to forced
+   than it looks.
+
+5. **Deploy the TI demo Worker, recovery FIRST.** The cards are edited and
+   unshipped. `sh tools/recover_live_worker.sh relayshield-ti-demo
+   cloudflare_worker_ti_demo.js` runs before anything; only `IDENTICAL` makes
+   the deploy safe. It is the one component with no automated path, so every
+   live version was hand-pushed.
+
+6. **`relayshield_bundle_fulfillment.py` first drift diff.** Seventh instance of
+   source-in-repo, live traffic, no deploy path. In the drift check only.
+   `sh tools/handler_drift.sh relayshield_bundle_fulfillment.py`. It holds
+   `BUNDLE_CONFIGS` and `PRODUCT_CODES`, so Bundle B is blocked behind it.
+
+7. **Batch 2 outreach addresses.** Two commands, both built, neither run.
+   `export GITHUB_TOKEN=$(gh auth token)`, then `resolve_prospect_emails.py`,
+   then `merge_prospect_emails.py`.
+
+8. **CSM-SIMSWAP-2: the dApp Store listing copy.** A portal field, no review
+   cycle, read by a buyer before installing. Before the EAS build.
+
+9. **BOT-TOKEN-1 phase 1.** `getMe` liveness, hash-only storage, username
+   indexing, severity split on liveness, and the `getUpdates` prohibition as a
+   test. One day, gated on nothing.
+
+10. **Map `relayshield_watchlist_monitor.py` in `deploy_lambdas.yml`.** In the
+    drift check and the invoke policy, not the deployer, so
+    `check_deploy_invoke_policy.py` prints it on every run. The mapping commit
+    must touch the `.py`.
+
+11. **Map `relayshield-mpp-settlement`**, same shape, same rule.
+
+12. **FD-11: Smithery.** Two commands, still the cheapest open item.
+    `npx -y @smithery/cli@latest auth login`, then
+    `mcp publish <hf sse url> -n relayshield/relayshield`.
+
+13. **Bundle D change set**, dimension AND listing copy in one submission, which
+    is one AWS review cycle. Blocked on the role's catalog permissions.
+
+14. **The Omarchy post**, if the marketplace angle is taken up: their own README
+    says plugins run unsandboxed and that their checks are not a security audit.
+    An afternoon, and it needs `?source=omarchy` registered first.
+
+15. **INTEL-5.** `tools/diagnose_stolen_sessions.py`. Until it runs, no count
+    out of `relayshield_stolen_sessions` means anything.
+
+## THE WA FRONT DOOR IS POINTED AT TWO MORE SURFACES, AND THE NUMBER IS STILL THE GATE
+
+**2026-09-17, second session of the day, extending `claude/laughing-bell-gxagsd` rather
+than duplicating it.** That branch built the parser, the blog and Mini App links, the
+funnel stage and the tool. Two placements it NAMED and did not build are now built:
+
+* **`api.relayshield.net/developers`, key `wa-devs`.** It **reads the number from Secrets
+  Manager at request time** rather than carrying a constant, and that is the design rather
+  than convenience: a Cloudflare Worker cannot read Secrets Manager, which is the ONLY
+  reason `WA_NUMBER` exists as a constant anywhere. This handler already reads three
+  secrets. A fourth copy of the number would be a copy `--write` does not target and no
+  test pins. `_wa_number()` never raises (a landing page that 500s over a footer link is
+  worse than a missing line), unwraps the JSON secret (three of four call sites of the BOT
+  TOKEN secret were dead for days because they did not, failing with a WRONG VALUE rather
+  than an exception), and refuses anything outside 8-15 digits.
+* **The `checkemail@` reply, key `wa-email`.** The highest-intent surface we have:
+  somebody forwards a suspicious email, has no account, and the reply's only onward link
+  is a website.
+
+**THE SUBSTITUTION ORDER ON THE DEVELOPERS PAGE IS LOAD-BEARING AND ONE LINE FROM BEING
+WRONG.** `<!--WA_FRONT_DOOR-->` IS an html comment, like `<!--REFERRER_BANNER-->`. Strip
+the comments first and both placeholders are deleted, every later `.replace` matches
+nothing, and the page renders perfectly with no banner and no front door while nothing
+anywhere errors. A test asserts the ORDER, proven by inverting it.
+
+**`tools/wa_front_door_link.py --write` fills every Worker constant in one pass.** Three
+files to edit by hand and two of them enforced is the copy that drifts. It **refuses to
+CREATE a `WA_NUMBER` line** and only replaces one that exists: appending a second `const`
+declaration is a SyntaxError that stops the Worker deploying and names a line nobody
+wrote. Verified by running it, including idempotency and `node --check` on all three.
+
+**AND THE DIRECTORY COUNTERS ARE ONE LIST NOW.** Two sessions shipped bot-directory
+counting the same day: a funnel stage hardcoding `(storebot|botsarchive)` and a route
+table holding eight destinations. `_bot_directory_alternation()` reads the keys out of
+`bot_directories.json`, so adding a destination is one edit, and a missing key raises
+rather than matching nothing -- a regex that matches nothing is indistinguishable from a
+channel that produced nothing. No loose suffix, deliberately: `storebot[a-z0-9-]*` would
+swallow a future `storebot-paid` and merge two destinations into one number.
+
+**`bot_directories.md` is GENERATED from the JSON** by `tools/bot_directories_md.py`. The
+founder reads the markdown, the funnel counts from the JSON, and writing both by hand is
+the two-files-must-agree defect with a new hat on.
+
+**WHAT IS STILL NOT TRUE, and it survives my having been wrong about the code:** the
+WhatsApp bot cannot run a check for somebody without an account. Telegram gives a stranger
+keyless checks, inline mode in a group and the Mini App; WhatsApp has none of those. So
+every link placed converts attention we already had rather than creating reach -- which is
+fine, and is worth doing, and is not the same thing as a discovery surface. The next
+WhatsApp build is a keyless first-contact check, roughly a day.
+
+## TYPESAFE.AI: JOIN THE WAITLIST, SCOPE NOTHING, AND POINT IT AT ABS-1 IF IT ARRIVES
+
+**Asked 2026-09-17.** TypeSafe left stealth 2026-09-15 with **Jev**, a "System One" model
+returning TYPED decisions with a per-answer CONFIDENCE VALUE rather than text. Their own
+launch numbers: 20-200x faster, 40-400x cheaper, $0.042/M input with output free.
+
+**The fit is real and specific, which is why this is recorded rather than dismissed.**
+`relayshield_intel_classifier.py` already invokes Claude Haiku through Bedrock and asks it
+for APPROVE/REJECT plus a category from a channel record. That IS a typed decision over a
+small piece of state.
+
+**And the recommendation is still to build nothing**, for reasons that are about us rather
+than about them:
+
+* **There is no cost problem to solve.** That call runs on a backlog, not at request time.
+* **That file's docstring states why Bedrock was chosen: "zero new vendor/secret".**
+  Adding TypeSafe reverses a deliberate decision to buy a saving we do not need.
+* **The speed and cost figures are their own launch materials**, and MEASUREMENT DOCTRINE
+  applies to numbers quoted inward as much as outward.
+
+**The one place worth pointing it when access arrives is ABS-1**, the unmeasured
+agent-bait false-positive rate that gates the Bundle D dimension. A confidence-carrying
+typed score is exactly what that verdict wants and it is off the customer path while it is
+being measured. Half a day against an open item, not an integration.
+
+## APIFY'S LIMIT EMAIL WAS ANSWERED BY THE DASHBOARD, NOT BY REASONING
+
+**2026-09-17.** The "Maximum platform usage per month custom limit is expiring in 6 days"
+email is a HARD CAP notice, not a bill: Apify suspends platform services rather than
+charging on. The account carries a custom $10 where the Free default is $5, so the cap
+halves when it lapses.
+
+**Actual usage: $0.06 of $10.00, 0.2754 compute units.** 0.6% of the allowance, so neither
+number is reachable and there is nothing to do. **Ignore it.**
+
+**The founder settled it with one screenshot after I had written a section about how to
+read two numbers in the console.** That is the right outcome and the cheap one: when the
+answer is a number on a screen the founder can see and the container cannot, ask for the
+screen rather than writing the procedure for reading it.
+
+**The thing worth carrying is not the answer.** $0.06 a month on a Standby Actor says the
+Actor is barely waking up, which matters for the Apify writers-programme article whose
+whole premise is that we built and ran it. And nothing watches that Actor:
+`tools/check_hf_space.py` probes both HF Spaces every six hours and there is no equivalent
+here, so a dead Actor would reach us through a prospect.

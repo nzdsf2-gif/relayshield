@@ -66,6 +66,33 @@ import { EmailMessage } from "cloudflare:email";
 
 const API_BASE = "https://api.relayshield.net";
 
+/* THE WHATSAPP FRONT DOOR, AND THIS IS THE HIGHEST-INTENT PLACE WE HAVE FOR IT.
+   Somebody who forwards a suspicious email has a live question, no account, and
+   no other route to us: the reply's only onward link is a website. A wa.me line
+   gives them a channel that needs no signup and that the bot can alert them on
+   later, which is the one thing an email reply cannot do.
+
+   EMPTY UNTIL FILLED, and that is fail-closed rather than a placeholder to tidy
+   up. wa.me answers a malformed or missing number with HTTP 200 and an
+   "invalid" page rather than a 404, so a broken front door looks live to every
+   probe we own. An empty constant emits NO line at all.
+
+   Bare digits, no "+" and no spaces. The number lives in Secrets Manager
+   (relayshield/twilio_whatsapp_number) and no session can read it, so it is
+   filled by:
+
+     AWS_PROFILE=relayshield python3 tools/wa_front_door_link.py --write
+
+   which writes every Worker constant at once rather than leaving three files to
+   be edited by hand and two of them enforced. */
+const WA_NUMBER = "";
+const WA_SOURCE = "wa-email";
+
+function waFrontDoorLine() {
+  if (!WA_NUMBER) return [];
+  return ["Prefer WhatsApp? https://wa.me/" + WA_NUMBER + "?text=SRC_" + WA_SOURCE];
+}
+
 // Free tier.
 //
 // RAISED 2026-09-02 from 5/hour, which was wrong in both directions. The
@@ -1325,6 +1352,7 @@ function buildReply(sig, linkResults, subject, forwarded) {
   out.push("---");
   out.push("Forward anything suspicious to checkemail@relayshield.net.");
   out.push("We store the verdict and the indicators we extract. We do not store your email.");
+  for (const line of waFrontDoorLine()) out.push(line);
   out.push("RelayShield: https://relayshield.net?source=email-scan");
   return out.join("\n");
 }

@@ -125,6 +125,43 @@ Scans the diff locally and fails on a finding at or above `--fail-on` (default `
   To bypass entirely: git commit --no-verify
 ```
 
+### GitLab credentials
+
+Added 2026-09-16, while CVE-2026-85706 was being exploited in the wild. An
+unauthenticated arbitrary file read on a self-hosted GitLab reaches the
+server's own config, and the thing worth stealing in those files is a token.
+
+Eight formats, and they matter for different reasons:
+
+| Prefix | What it is | Severity |
+|---|---|---|
+| `glpat-` | Personal access token, classic and the newer routable form | CRITICAL |
+| `gldt-` | Deploy token, writes to your container registry | CRITICAL |
+| `glrt-` | Runner registration token, executes CI on your runners | CRITICAL |
+| `gloas-` | OAuth application secret, impersonates your login provider | CRITICAL |
+| `glagent-` | Kubernetes agent token, reaches your cluster | CRITICAL |
+| `glptt-` | Pipeline trigger token | HIGH |
+| `glcbt-` | CI job token | HIGH |
+
+The token classes are taken from [gitleaks' own rule
+source](https://github.com/gitleaks/gitleaks/blob/master/cmd/generate/config/rules/gitlab.go)
+rather than from a documentation page, because a scanner's implementation is
+better evidence about a token format than prose describing it.
+
+**The routable format is tested before the classic one, and the order is
+load-bearing.** `glpat-` followed by twenty characters matches the first
+twenty characters of a routable token too, so a table that tried classic first
+would report the wrong type with the wrong remediation and never say it was
+unsure.
+
+**Remediation for a runner or deploy token is REVOKE, not rotate.** These are
+session-shaped rather than key-shaped: there is no version of the credential
+that stays valid while you issue a new one.
+
+Not covered, deliberately: `glffct-`, `glft-` and `glimt-`. None of them
+reaches source, CI or a cluster, and every pattern is a maintenance cost paid
+in four tables that have to agree.
+
 ## Configuration
 
 Every flag has an environment variable equivalent, which is how the CI clients drive it.

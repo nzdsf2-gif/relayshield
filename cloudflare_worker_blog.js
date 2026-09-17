@@ -12,6 +12,26 @@ import { POSTS } from "./blog_posts.js";
 import { OG_PNG_BASE64 } from "./blog_og_image.js";
 import { DEVELOPERS_OG_PNG_BASE64 } from "./developers_og_image.js";
 
+/* THE WHATSAPP FRONT DOOR, AND IT IS EMPTY ON PURPOSE UNTIL SOMEBODY FILLS IT.
+
+   WhatsApp has no username namespace and no deep-link payload, so the only
+   front door it offers is wa.me/<number>?text=<prefill>. That needs the bot's
+   E.164 number as a literal, and this Worker cannot read Secrets Manager,
+   where the number lives and where it has only ever lived.
+
+   Bare digits, no "+", no spaces -- wa.me rejects anything else by rendering
+   a "phone number shared via url is invalid" page with a 200 status, so a
+   malformed number produces a link that looks live to every probe and goes
+   nowhere. That is why the footer below renders NOTHING while this is empty
+   rather than emitting a wa.me/ link with a hole in it.
+
+   Fill it from:  AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/wa_front_door_link.py
+   The same value goes in cloudflare_worker_miniapp.js; a test pins the two
+   equal, because two constants that must agree with nothing checking them is
+   the shape this repo has now paid for five times. */
+const WA_NUMBER = "";
+const WA_SOURCE = "wa-blog";
+
 const SITE = "https://blog.relayshield.net";
 const NAME = "RelayShield Security Intelligence";
 const TAGLINE =
@@ -153,6 +173,10 @@ ${body}
      or a wallet address. The verdict posts straight into that conversation, so
      you can check something in the group where it was shared without adding a
      bot to it or leaving the chat.</p>
+  ${WA_NUMBER ? `<p>On WhatsApp instead? <a href="https://wa.me/${WA_NUMBER}?text=SRC_${WA_SOURCE}">Message
+     RelayShield there</a> and we will monitor your email, phone and wallets
+     for breaches, infostealer logs and SIM-swap attempts, and alert you in
+     that chat.</p>` : ``}
 </div></footer>
 </body></html>`;
 }

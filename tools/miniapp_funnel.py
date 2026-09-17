@@ -124,6 +124,24 @@ STAGES = [
      re.compile(r"watchlist alert sent signals=([\w,]+)"),
      "either nothing watched has changed, or the monitor is not running"),
 
+    # WHATSAPP HAD NO STAGE AND NO WAY TO GET ONE UNTIL 2026-09-17. The handler
+    # parsed no acquisition source at all, and `wa.me` appeared nowhere in the
+    # repo, so there was no link to attribute and nothing to attribute it with.
+    # Both halves shipped together, deliberately: a link placed before the
+    # parsing exists is a key that is sent, accepted and never logged, which is
+    # the false absence FD-8 cost four months.
+    #
+    # FILTERED ON THE LINE THE CODE WRITES, checked against
+    # relayshield_whatsapp_webhook.py rather than against what it ought to log:
+    #   logger.info("acquisition source=%s wa=%s", wa_source, hash_phone(...))
+    # Same prefix and same shape as the Telegram stage above, which is why the
+    # two are one filter apart instead of two schemes.
+    ("WHATSAPP   front-door arrivals on the WhatsApp bot",
+     "/aws/lambda/relayshield-whatsapp-webhook", "acquisition source=",
+     re.compile(r"acquisition source=(wa-[a-z0-9-]*)"),
+     "the wa.me links are placed and nobody taps them, OR the number in the "
+     "Workers is unset so no link was ever rendered -- check that first"),
+
     ("DEVELOPERS arrivals on the API landing page",
      "/aws/lambda/relayshield-developer-signup", "developer-signup request",
      re.compile(r"developer-signup request .*?\bsource=(tg-miniapp[a-z-]*|tg-widget)"),

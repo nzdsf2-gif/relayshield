@@ -101,12 +101,38 @@ recovered with `recover_live_handler.yml` first, exactly as developer-signup was
 STOP IF: the merge conflicts in **only CLAUDE.md** -- expected, keep both sides. A
 conflict in a `.py` or a workflow is different; send me the filename.
 
-**The role has no catalog permissions.** Read out of
-`iam/snapshots/relayshield-breach-check-role-1sapnwdl.json` directly: `MeterUsage` and
-`ResolveCustomer` are present, `DescribeEntity`, `ListEntities` and `StartChangeSet` are
-all absent. So `StartChangeSet` fails before it reaches AWS's validator. That grant is an
-IAM change on a role carrying 26 inline policies at 10,127 of 10,240 bytes with 11 of 10
-managed slots used, so it is a customer-managed policy on a role already over the cap.
+**~~The role has no catalog permissions.~~ CORRECTED 2026-09-17, AND THIS WAS NOT A
+BLOCKER AT ALL.** The paragraph below is kept struck through because the correction is
+worth more than the claim, and because a reader who has seen the old version needs to
+know which half moved.
+
+I wrote that the catalog grant was an IAM change on a role carrying 26 inline policies at
+10,127 of 10,240 bytes with 11 of 10 managed slots used -- so a customer-managed policy on
+a role already over its cap, which reads as "Bundle B is gated behind the IAM split".
+
+**I read the wrong role's snapshot.** `relayshield-breach-check-role-1sapnwdl` is the
+RUNTIME role the fulfillment Lambda executes as, and what it needs at runtime is
+`ResolveCustomer` and `MeterUsage`, both of which it HAS. A change set is not a runtime
+operation. `.github/workflows/marketplace_dimension.yml:64` assumes
+`arn:aws:iam::239677749008:role/relayshield-github-deploy`, and that is the identity
+`StartChangeSet` is called by.
+
+**And the grant is already written, already targets the right role, and has simply never
+been run.** `tools/apply_marketplace_catalog_policy.sh` creates one customer-managed
+policy from `iam/relayshield-marketplace-catalog.json` -- `DescribeEntity`,
+`ListEntities`, `ListChangeSets`, `DescribeChangeSet`, `StartChangeSet` -- attaches it to
+`relayshield-github-deploy`, and proves the result with `simulate-principal-policy`
+against the ROLE. Its own header says why it runs operator-side and once: a role cannot
+widen its own permissions, so the first grant cannot happen inside Actions. **UNVERIFIED
+from the container** that it has not already been applied; there are no AWS credentials
+here, so this is read off the repo and the script's own output settles it in one run.
+
+**This is the third time the repo half of a policy has been mistaken for the AWS half**
+(`apply_deploy_invoke_policy.sh` twice, and the Stars grant that turned out to be closed
+already). The general form, and it is the one this file already confesses to one section
+down: **a claim about a permission names the role it was read from.** "The role has no
+catalog permissions" is unsupportable without saying which of the two roles, and the
+snapshot in this repo is of the one that was never going to have them.
 
 ## 5. THE CORRECTION, and what produced it
 

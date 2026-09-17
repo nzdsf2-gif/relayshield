@@ -35,7 +35,7 @@ when deciding what to build next — it just becomes an opinion.
 | FD-11 | Smithery | Agentic bundle | **LISTED, 60/100, tools not introspected** | Server metadata and config UX are full marks. Capability Quality is 0/40 because the deployment cannot start the server. `mcp_registry/smithery.yaml` was CORRECTED 2026-09-05 and still needs copying to `~/mcp-live` |
 | FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
 | FD-13 | xAI Grok Build plugin marketplace | Agentic bundle, API | **SUBMITTED 2026-09-08, PR #612** | Open at `xai-org/plugin-marketplace`, from a `RelayShield`-owned fork, pinning `RelayShield/relayshield-plugin`. Socket checks green; `validate` is gated behind a maintainer approving the workflow, which is GitHub's first-time-contributor rule and not a failure. Awaiting review. **Do not push to the branch while it waits**: a push re-arms that approval gate |
-| FD-14 | OpenAI plugin directory (ChatGPT + Codex) | Agentic bundle, API | **ROUTE OPEN, UNSCOPED** | Added 2026-09-08. Developers can submit apps; the app directory migrated to a **Plugin directory** on 2026-07-09 covering ChatGPT AND Codex. Apps SDK is built on MCP, so `relayshield-mcp` is already the right shape. **Its rules have not been read. That is step one, not step two** |
+| FD-14 | OpenAI plugin directory (ChatGPT + Codex) | Agentic bundle, API | **ROUTE OPEN, UNSCOPED** | Added 2026-09-08. Developers can submit apps; the app directory migrated to a **Plugin directory** on 2026-07-09 covering ChatGPT AND Codex. Apps SDK is built on MCP, so `relayshield-mcp` is already the right shape. **Step one PARTLY DONE 2026-09-17** from search results quoting their pages (their docs are egress-blocked, so this is SECONDARY evidence). Two gates nobody had named: OpenAI Platform **identity/business verification is a prerequisite**, and **selling digital goods, subscriptions or in-app services is not yet allowed**, with the documented link-out route scoped to PHYSICAL goods. So a listing is built on the KEYLESS checks or it is a compliance problem -- the Telegram Stars trap with another host's name on it |
 | FD-15 | Hosted HTTP MCP endpoint, onboarded everywhere that takes one | Agentic bundle, API | **NOT STARTED** | Added 2026-09-08. One artefact, three destinations: Grok Bot custom connectors, Smithery (FD-11), and anything else that takes a URL rather than a package. The HF Space already serves MCP over HTTP; this is onboarding, not building |
 
 ---
@@ -860,6 +860,37 @@ interface layer that a stdio server does not have.
 a plain MCP server is submittable or whether the directory requires Apps SDK
 components on top; what the review bar actually says; and whether a paid,
 pay-per-call tool is eligible at all, since several directories quietly are not.
+
+**PARTLY DONE 2026-09-17, and the third question is the one that bit.** Read from
+search results quoting OpenAI's own pages, because `developers.openai.com` and
+`platform.openai.com` are both egress-blocked from the container -- so this is
+SECONDARY evidence and stays labelled that way until a browser confirms it.
+
+- **A submission needs**: app name, logo, description, company and privacy policy
+  URLs, MCP and tool information, test prompts and their responses, localization
+  and country availability. All of that we have or can write.
+- **Identity verification in the OpenAI Platform Dashboard is a PREREQUISITE**,
+  and business verification specifically if we publish under RelayShield's name.
+  That has its own latency and it is Andrew's, not a build task.
+- **Selling digital goods, subscriptions or in-app services is NOT YET ALLOWED**,
+  and the documented link-out-to-your-own-site route is scoped to PHYSICAL goods.
+
+**That last point is a product constraint, not a paperwork one, and it is a shape
+this repo has already paid for.** CLAUDE.md records that wiring "upgrade" from
+inside a Telegram Mini App to Stripe, x402 or the developers page for a digital
+good is the route that gets a bot restricted. A pay-per-call API sold from inside
+a ChatGPT app is the same move against a different host.
+
+**The resolution is the same as Telegram's and it is already built.**
+`/v1/link-check` and `/v1/wallet-risk` are KEYLESS, have no paid upstream, and are
+capped per source IP rather than behind a bill. A listing exposing those sells
+nothing inside ChatGPT and is the honest shape of the product anyway: the free
+check is what the product is for, and the paid rails are reached the way every
+other API customer reaches them, outside the host.
+
+**So the decision to take BEFORE writing any submission metadata** is that the
+listing carries the keyless checks only. Write it the other way and the review is
+where we find out.
 Only then is it worth an estimate.
 
 **The artefact question to settle at the same time**, because it decides the

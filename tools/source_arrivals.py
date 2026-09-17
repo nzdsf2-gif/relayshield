@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Count arrivals on api.relayshield.net/developers by ?source= key.
+"""Count attributed arrivals by key, on either of the two surfaces that log one.
+
+    tools/source_arrivals.py                    the developers page (default)
+    tools/source_arrivals.py --surface bot      t.me/relayshield_bot ?start=SRC_
+
+The two are different log groups with different attribution mechanisms; the
+SURFACES table below says how they differ and why that difference decides what
+an absence means on each. The rest of this docstring was written for the
+developers surface and holds for both.
 
 WHY THIS EXISTS, and it is not bookkeeping. Every distribution decision this
 repo makes rests on an unmeasured premise. "The pre-commit hook was a good
@@ -47,6 +55,7 @@ before concluding anything about the channel.
 """
 
 import argparse
+import json
 import re
 import sys
 from collections import Counter
@@ -54,14 +63,63 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LOG_GROUP = "/aws/lambda/relayshield-developer-signup"
 ACCOUNT = "239677749008"
 
-# The line relayshield_developer_signup.py emits on every request. The source
-# value is the RAW parameter, not the banner variant it maps to, so
-# n8n-onboarding and n8n-offboarding stay distinguishable here even though both
-# render the same banner.
-_LINE = re.compile(r"developer-signup request .*?\bsource=(\S+)")
+# TWO SURFACES, ONE TOOL, AND THAT IS DELIBERATE RATHER THAN TIDY.
+#
+# Added 2026-09-17, when submitting @relayshield_bot to bot directories turned
+# out to be unmeasurable: tools/miniapp_funnel.py's BOT stage matches
+# `acquisition source=(miniapp|tg-miniapp[a-z-]*)`, so it counts Mini App
+# arrivals and NOTHING ELSE, and this tool read only the developer-signup log
+# group. Five bot directory submissions would have produced five numbers nobody
+# could separate -- FD-8's shape, caught before the links shipped rather than
+# four months after.
+#
+# A SECOND TOOL WAS THE OBVIOUS MOVE AND IT IS THE WRONG ONE. This repo has
+# paid four times for two files that must agree with nothing checking that they
+# do (the pattern tables, LAMBDA_MAP against the invoke policy, the three route
+# lists, the watchlist secret name). A second counter would have drifted from
+# this one's doctrine -- the observed window, ZERO separated from UNMEASURED --
+# and the drift would be invisible because both would keep printing numbers.
+#
+# THE TWO SURFACES ATTRIBUTE DIFFERENTLY AND THE DIFFERENCE IS LOAD-BEARING:
+#
+#   developers  ?source=<key> on api.relayshield.net/developers. The key is
+#               GATED: _SOURCE_BANNERS decides, and an unregistered key logs
+#               `unmatched:<key>` and renders no banner. So an unregistered key
+#               is recoverable after the fact -- the unmatched row names it.
+#
+#   bot         ?start=SRC_<key> on t.me/relayshield_bot. There is NO allowlist:
+#               relayshield_telegram_webhook.py accepts any key up to 32
+#               characters and logs it verbatim. So a bot key needs no
+#               registration anywhere -- and a link published WITHOUT the
+#               SRC_ suffix logs nothing at all, leaves no unmatched row, and is
+#               indistinguishable from organic /start traffic forever. On this
+#               surface the unrecoverable mistake is omission, not registration.
+SURFACES = {
+    "developers": {
+        "log_group": "/aws/lambda/relayshield-developer-signup",
+        # The line relayshield_developer_signup.py emits on every request. The
+        # source value is the RAW parameter, not the banner variant it maps to,
+        # so n8n-onboarding and n8n-offboarding stay distinguishable here even
+        # though both render the same banner.
+        "filter": "developer-signup request",
+        "line": re.compile(r"developer-signup request .*?\bsource=(\S+)"),
+        "unit": "arrivals on the developers page, not signups and not revenue",
+        "gated": True,
+    },
+    "bot": {
+        "log_group": "/aws/lambda/relayshield-telegram-webhook",
+        # relayshield_telegram_webhook.py, the SRC_ branch. It logs the source
+        # and a HASHED chat id, then falls through to the ordinary welcome:
+        # the parameter is attribution only and never changes what the user
+        # sees.
+        "filter": "acquisition source=",
+        "line": re.compile(r"acquisition source=(\S+)"),
+        "unit": "bot /start arrivals that CARRIED a SRC_ key, not total signups",
+        "gated": False,
+    },
+}
 
 
 def registered_keys() -> set:
@@ -130,7 +188,7 @@ def assert_account() -> None:
             "       and is not.")
 
 
-def pull(days: int):
+def pull(surface: str, days: int):
     try:
         import boto3
         from botocore.exceptions import ClientError
@@ -138,14 +196,16 @@ def pull(days: int):
         raise SystemExit("ERROR: boto3 missing. Use ~/.rsvenv/bin/python on the Mac.")
 
     assert_account()
+    spec = SURFACES[surface]
+    log_group, line_rx = spec["log_group"], spec["line"]
     logs = boto3.client("logs", region_name="us-east-1")
     start = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp() * 1000)
 
     counts, total, earliest, token = Counter(), 0, None, None
     try:
         while True:
-            kw = dict(logGroupName=LOG_GROUP, startTime=start,
-                      filterPattern="developer-signup request")
+            kw = dict(logGroupName=log_group, startTime=start,
+                      filterPattern=spec["filter"])
             if token:
                 kw["nextToken"] = token
             resp = logs.filter_log_events(**kw)
@@ -153,7 +213,7 @@ def pull(days: int):
                 ts = ev.get("timestamp")
                 if ts and (earliest is None or ts < earliest):
                     earliest = ts
-                m = _LINE.search(ev.get("message", ""))
+                m = line_rx.search(ev.get("message", ""))
                 if not m:
                     continue
                 total += 1
@@ -167,7 +227,7 @@ def pull(days: int):
         code = e.response["Error"]["Code"]
         if code == "ResourceNotFoundException":
             raise SystemExit(
-                f"ERROR: log group {LOG_GROUP} not found in {ACCOUNT}.\n"
+                f"ERROR: log group {log_group} not found in {ACCOUNT}.\n"
                 "       That is a missing log group, NOT zero arrivals. The\n"
                 "       function may never have been invoked, or the name has\n"
                 "       changed. Do not read this as a measurement.")
@@ -176,8 +236,27 @@ def pull(days: int):
     return counts, total, earliest
 
 
-def report(counts, total, earliest, days, want) -> int:
-    print(f"log group     : {LOG_GROUP}")
+def bot_route_keys() -> set:
+    """Read the bot directory keys out of bot_directories.json.
+
+    Unlike registered_keys() this is NOT a gate that the running code consults.
+    The webhook accepts any SRC_ key. This file records which ones we have
+    actually published, which is what makes ZERO ARRIVALS mean something: a key
+    we submitted somewhere and that produced nothing is a channel result, and a
+    key nobody has published is not a measurement at all.
+    """
+    path = ROOT / "bot_directories.json"
+    if not path.exists():
+        return set()
+    data = json.loads(path.read_text())
+    return {r["key"] for r in data.get("routes", []) if r.get("key")}
+
+
+def report(counts, total, earliest, days, want, surface) -> int:
+    spec = SURFACES[surface]
+    gated = spec["gated"]
+    print(f"surface       : {surface}")
+    print(f"log group     : {spec['log_group']}")
     if earliest:
         seen = datetime.fromtimestamp(earliest / 1000, tz=timezone.utc)
         observed = (datetime.now(timezone.utc) - seen).days
@@ -200,7 +279,7 @@ def report(counts, total, earliest, days, want) -> int:
         return 1
 
     unmatched = {k: v for k, v in counts.items() if k.startswith("unmatched:")}
-    if unmatched:
+    if unmatched and gated:
         print("UNMATCHED KEYS -- each one is a LIVE LINK pointing at a key that does")
         print("not exist. The page renders, nothing errors, and the attribution is")
         print("silently gone. Register the key, then re-run.")
@@ -217,24 +296,36 @@ def report(counts, total, earliest, days, want) -> int:
 
     if want:
         print("KEYS ASKED ABOUT")
-        known = registered_keys()
+        known = registered_keys() if gated else bot_route_keys()
         for k in want:
             n = counts.get(k, 0)
-            if k not in known:
+            if k not in known and gated:
                 print(f"  {k}: UNREGISTERED. Not in _SOURCE_BANNERS or _SOURCE_ALIASES,")
                 print(f"     so arrivals on it logged as unmatched:{k} and rendered no")
                 print("     banner. This is not a measurement of the channel.")
+            elif k not in known:
+                print(f"  {k}: NOT IN bot_directories.json. The webhook would have")
+                print("     logged it fine -- there is no allowlist on this surface -- so")
+                print(f"     {n} is a real count. But nothing records where this key was")
+                print("     published, so it cannot be read as a result for any channel.")
             elif n == 0:
-                print(f"  {k}: ZERO ARRIVALS over the observed window. The key is")
-                print("     registered and resolving, so this is a real absence -- but")
-                print("     check the key was registered BEFORE the window started, and")
-                print("     that relayshield-developer-signup was deployed for it")
-                print("     (no deploy path existed before 2026-09-03).")
+                print(f"  {k}: ZERO ARRIVALS over the observed window.")
+                print("     BEFORE reading that as a channel that did not work, rule out")
+                print("     the failure that looks identical: a listing that points at a")
+                print("     BARE t.me/relayshield_bot logs nothing, so a live and working")
+                print("     listing reads as zero here. Open the listing and check the")
+                print("     link carries ?start=SRC_ before concluding anything.")
             else:
                 print(f"  {k}: {n}")
         print()
 
-    print("Counts are arrivals on the developers page, not signups and not revenue.")
+    if not gated:
+        print("EVERY COUNT ABOVE EXCLUDES ARRIVALS WITH NO SRC_ KEY, which is most of")
+        print("them. This measures attributed arrivals, never total bot traffic, and")
+        print("the two must not be compared with each other.")
+        print()
+
+    print(f"Counts are {spec['unit']}.")
     print("Do not quote any of these externally: MEASUREMENT DOCTRINE applies to our")
     print("own funnel exactly as it does to the corpus.")
     return 0
@@ -243,21 +334,27 @@ def report(counts, total, earliest, days, want) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--surface", choices=sorted(SURFACES), default="developers",
+                    help="developers = ?source= on the developers page (default). "
+                         "bot = ?start=SRC_ arrivals on t.me/relayshield_bot. "
+                         "They are different log groups and different attribution "
+                         "mechanisms; see the SURFACES comment.")
     ap.add_argument("--days", type=int, default=30)
     ap.add_argument("--key", action="append", default=[],
                     help="Report this key explicitly, including when it is zero "
                          "or unregistered. Repeatable.")
     ap.add_argument("--list-registered", action="store_true",
-                    help="Print every registered key and exit. Needs no AWS.")
+                    help="Print every known key for the surface and exit. Needs no AWS.")
     args = ap.parse_args()
 
     if args.list_registered:
-        for k in sorted(registered_keys()):
+        keys = registered_keys() if SURFACES[args.surface]["gated"] else bot_route_keys()
+        for k in sorted(keys):
             print(k)
         return 0
 
-    counts, total, earliest = pull(args.days)
-    return report(counts, total, earliest, args.days, args.key)
+    counts, total, earliest = pull(args.surface, args.days)
+    return report(counts, total, earliest, args.days, args.key, args.surface)
 
 
 if __name__ == "__main__":

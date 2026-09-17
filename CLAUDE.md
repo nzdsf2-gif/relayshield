@@ -5634,3 +5634,149 @@ one-listing-per-bot section predicted: `t.me/RelayShield` is a different usernam
     AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/miniapp_funnel.py --snapshot before-tgappblog
 
 It REFUSES to overwrite, so a late one cannot quietly become a comparison of a number with itself.
+
+## BUNDLE B WAS NEVER GATED BEHIND THE IAM SPLIT. I READ THE WRONG ROLE.
+
+**2026-09-17, asked as "which is higher priority, AWS Bundle B or the OpenAI plugin
+marketplace".** Answering it meant reading Bundle B's blockers, and one of the two was
+mine and was wrong.
+
+`bundle_b_scope_2026-09-15.md` said the catalog grant (`DescribeEntity`, `ListEntities`,
+`StartChangeSet`) was an IAM change on **`relayshield-breach-check-role-1sapnwdl`** -- 26
+inline policies at 10,127 of 10,240 bytes, 11 of 10 managed slots -- so a customer-managed
+policy on a role already over its cap. That reads as *Bundle B is gated behind the IAM
+split*, which is a week of work in front of a revenue item.
+
+**A change set is not a runtime operation, and that role is the runtime role.** The
+fulfillment Lambda needs `ResolveCustomer` and `MeterUsage` at runtime and HAS both.
+`.github/workflows/marketplace_dimension.yml:64` assumes
+`role/relayshield-github-deploy`, and that is the identity that calls `StartChangeSet`.
+
+**`tools/apply_marketplace_catalog_policy.sh` already exists, already targets
+`relayshield-github-deploy`, and has simply never been run.** Its own header explains why
+it is operator-side and once: a role cannot widen its own permissions, so the first grant
+cannot happen inside Actions. So the blocker is one command, not an IAM migration.
+
+**Third occurrence of the repo half of a policy being mistaken for the AWS half**, after
+`apply_deploy_invoke_policy.sh` twice and the Stars grant that measured closed. And it is
+the Bundle-A-entity mistake one directory over, in the same document that confesses to it:
+**a claim about a permission names the ROLE it was read from**, exactly as a claim about a
+product names the entity id. The repo holds a snapshot of one role and a workflow naming a
+different one, and reading only the first is how "not granted" becomes "cannot be granted".
+
+## THE WHATSAPP FRONT DOOR DOES NOT EXIST, AND THE ROOM BEHIND IT IS LOCKED
+
+**Asked as "now that the WA frontdoor was created, how can we build its discovery
+surface".** It was not created. Checked rather than recalled:
+
+    git --no-pager log --all -S "wa.me" -- '*.py' '*.js'     no commits, any ref
+    grep -rn "wa.me" --include=*.py --include=*.js --include=*.json .   CLAUDE.md only
+
+and `origin/main` was at the same commit as this branch when that ran, so this is a claim
+about origin AND about every fetched branch. **UNVERIFIED for an unpushed commit on the
+Mac**, which `git --no-pager log --oneline origin/main..main` settles in one line. The
+ON DECK section recording the item is dated 2026-09-16 and describes it as work to do, so
+the likeliest reading is that the ITEM was created and the front door was not.
+
+**BUT THE LINK IS THE SMALLER HALF, AND THE LARGER HALF IS WHY IT MUST NOT SHIP YET.**
+`relayshield_whatsapp_webhook.py:5516` resolves the sender and, for an unknown number,
+sends *"It looks like your account isn't set up yet. Visit relayshield.net to sign up"*
+and **returns**. The only account-creating write in that file is an employee record
+created by an admin who already has one. **There is no self-serve path into the WhatsApp
+bot at all.**
+
+So a `wa.me` front door placed on the developers page, the blog footer and the Mini App
+would take cold discovery traffic and hand every arrival a sentence telling them to go
+back to a website. That is worse than no link: it spends the impression AND teaches the
+person the product does not work. **Telegram is not like this** -- a stranger can `/start`,
+run keyless checks through the widget, use inline mode in a group, and open the Mini App,
+all with no account -- which is why the same link works there and does not work here.
+
+**THE ORDER IS: open the door, then point at it.** A keyless first-contact path on
+WhatsApp (the `/v1/link-check` and `/v1/wallet-risk` pair the Telegram widget already
+uses, both keyless and both capped per source) is the prerequisite, roughly a day. The
+`wa.me?text=` link and its source parsing are half a day AFTER it. Shipping them in the
+other order is FD-8's shape with a worse ending: not attribution that looks like it
+worked, but a funnel that measurably works and delivers nothing.
+
+**And the number is NOT in the repo, deliberately.** It is `TWILIO_WHATSAPP_NUMBER` in
+Secrets Manager. A committed `wa.me/<number>` is a hardcoded live surface identifier in a
+public repository, and I cannot see the value from here anyway, so no session guesses it.
+
+## SUBMITTING THE BOT TO DIRECTORIES WAS UNMEASURABLE. CAUGHT BEFORE THE LINKS SHIPPED.
+
+The Mini App has five catalogue submissions and **@relayshield_bot has none**, so bot
+directories are the obvious next surface. Checking what would count them found nothing:
+
+* `tools/miniapp_funnel.py`'s BOT stage is
+  `re.compile(r"acquisition source=(miniapp|tg-miniapp[a-z-]*)")` -- Mini App arrivals and
+  nothing else, by design.
+* `tools/source_arrivals.py` hard-coded `/aws/lambda/relayshield-developer-signup`, and a
+  bot arrival is logged by the TELEGRAM webhook.
+
+**Five submissions would have produced one number nobody could split.** That is the
+`tg-miniapp-channel` defect and FD-8's, arrived at from a third direction.
+
+**THE TWO SURFACES ATTRIBUTE DIFFERENTLY AND GETTING IT BACKWARDS COSTS A ROUND.** A Mini
+App link carries `?startapp=<key>` and the Worker GATES it: an unregistered key is
+silently downgraded and logs `unmatched:`, which is recoverable later because the
+unmatched row names it. A bot link carries `?start=SRC_<key>` and
+`relayshield_telegram_webhook.py` has **no allowlist** -- any key up to 32 characters is
+lower-cased and logged verbatim. So **a bot key needs no registration in
+`ALLOWED_SOURCES`, `_SOURCE_ALIASES` or `_SOURCE_BANNERS`**, and putting one there
+measures nothing because the bot never reads those tables. **On this surface the
+unrecoverable mistake is OMISSION**: a listing pointing at a bare `t.me/relayshield_bot`
+logs nothing, leaves no unmatched row, and is indistinguishable from organic `/start`
+traffic forever.
+
+`tools/source_arrivals.py --surface bot` reads the webhook's log group, and
+`bot_directories.json` is the route table. **One tool with two surfaces rather than a
+second counter**, because two files that must agree with nothing checking that they do is
+this repo's most-repeated defect and a second counter would have drifted from this one's
+doctrine while both kept printing numbers.
+
+**The guard reads the filter out of the TOOL and matches it against the line the handler
+ACTUALLY WRITES**, both sides parsed rather than retyped, and the bot-surface report
+refuses to render a zero as a dead channel -- it names the failure that looks identical.
+16 tests, and the funnel's own historical defect (a filter written against the `SRC_`
+payload rather than the logged line) was reintroduced to prove they fire.
+
+## FD-14: THE RULES ARE PARTLY READ NOW, AND THERE ARE TWO GATES NOBODY HAD NAMED
+
+FD-14 has said "ROUTE OPEN, RULES NOT READ" since 2026-09-08, with step one being the
+read. `developers.openai.com` and `platform.openai.com` are **egress-blocked** from the
+container (WebFetch refuses the domain outright, curl returns 000), so this is read from
+search results quoting their pages and is **secondary evidence** -- which is precisely how
+`@app_moderation_bot` cost three rounds, so it is labelled rather than promoted.
+
+**Two things it surfaced, and both are gates rather than tasks:**
+
+1. **Identity verification in the OpenAI Platform Dashboard is a PREREQUISITE**, business
+   verification to publish under a business name. That is Andrew's, it has its own
+   latency, and it blocks the submission rather than the build.
+2. **Selling digital goods, subscriptions or in-app services is NOT YET ALLOWED**, and
+   the documented link-out-to-your-own-site route is scoped to PHYSICAL goods.
+
+**The second one is the Telegram Stars trap with a different host's name on it.** This
+file already records that wiring "upgrade" from inside a Mini App to Stripe or x402 for a
+digital good is the route that gets a bot restricted. A pay-per-call API sold inside a
+ChatGPT app is the same shape. **The keyless half is unaffected** -- `/v1/link-check` and
+`/v1/wallet-risk` cost us nothing and sell nothing -- so a listing built on those is
+compliant, and the paid rails stay outside the host, reached the way every other API
+customer reaches them.
+
+**So FD-14 is a listing of the free checks or it is a compliance problem, and that is
+decided BEFORE any submission metadata is written.**
+
+## FD-12 IS BUILT AND, AS FAR AS THIS REPO KNOWS, NEVER SUBMITTED
+
+`FRONT_DOORS.md` has carried FD-12 as **ROUTE OPEN, ARTEFACT BUILT** since 2026-09-05:
+the plugin and the marketplace manifest both exist, both pass `claude plugin validate`,
+`test_agent_bait_skill.py` pins them, and the submission form is named
+(<https://clau.de/plugin-directory-submission>). FD-13 next to it says **SUBMITTED, PR
+#612**. The difference between those two words is a form.
+
+**A doc recording an open item is a LEAD, not a fact**, in this direction as much as the
+other, so this is a question rather than a finding: if it was submitted, the row is stale
+and should say so. If it was not, it is the cheapest open item on the board -- finished,
+tested work sitting behind a form, against the directory whose artefact we already ship.

@@ -9,6 +9,7 @@ on:
       - 'relayshield_stripe_webhook.py'
       - 'relayshield_domain_monitor.py'
       - 'relayshield_sim_swap_monitor.py'
+      - 'relayshield_bundle_fulfillment.py'
       - 'relayshield_api.py'
       # Shared modules. These are not handlers, but handlers import them, so a
       # change to one must redeploy every package that pulls it in. The job
@@ -127,7 +128,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Manual trigger — deploy all mapped Lambda files
-            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py relayshield_intel_feed.py relayshield_intel_kev.py relayshield_discord_bot.py relayshield_developer_signup.py relayshield_watchlist.py relayshield_watchlist_monitor.py"
+            CHANGED="relayshield_breach_monitor.py relayshield_whatsapp_webhook.py relayshield_stripe_webhook.py relayshield_domain_monitor.py relayshield_sim_swap_monitor.py relayshield_api.py relayshield_digest_sender.py relayshield_day3_sender.py relayshield_oauth_watchlist_monitor.py relayshield_monthly_oauth_reminder.py relayshield_quarterly_sweep_sender.py relayshield_telegram_webhook.py relayshield_intel_monitor.py relayshield_alchemy_webhook.py relayshield_approval_monitor.py relayshield_gas_monitor.py relayshield_liquidation_monitor.py relayshield_tgmonthly_digest.py relayshield_stablecoin_monitor.py relayshield_intel_feed.py relayshield_intel_kev.py relayshield_discord_bot.py relayshield_developer_signup.py relayshield_watchlist.py relayshield_watchlist_monitor.py relayshield_bundle_fulfillment.py"
             echo "Manual trigger — deploying all Lambdas"
           else
             # Push trigger — deploy every handler this PUSH changed.
@@ -170,6 +171,7 @@ jobs:
             ["relayshield_stripe_webhook.py"]="relayshield-stripe-webhook"
             ["relayshield_domain_monitor.py"]="relayshield-domain-monitor"
             ["relayshield_sim_swap_monitor.py"]="relayshield-sim-swap-monitor"
+            ["relayshield_bundle_fulfillment.py"]="relayshield-bundle-fulfillment"
             ["relayshield_api.py"]="relayshield-api"
             ["relayshield_digest_sender.py"]="relayshield-digest-sender"
             ["relayshield_day3_sender.py"]="relayshield-day3-sender"

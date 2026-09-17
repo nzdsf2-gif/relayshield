@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+"""Submit a COMMITTED Marketplace change set file. The route Bundle B had none of.
+
+WHY THIS EXISTS, AND IT IS A GAP RATHER THAN A PREFERENCE. `bundle_b_create_entity.json`
+has been written and guarded by six tests since 2026-09-15, and nothing in this repo
+could send it. `tools/marketplace_add_dimension.py` is hardcoded to
+`BUNDLE_D_ENTITY_ID = prod-kkvurtspreofy`, reads that live entity, and builds a
+dimension change set FROM the capture -- so it cannot submit a `CreateProduct`, which
+by definition names no entity because AWS assigns the id.
+
+So the change set existed, the tests passed, and the submission had no door. That is
+"a route added to the handler's dispatch table is not a route" one layer out: the
+artefact is real, the thing that would send it was never built, and every check we had
+was checking the artefact.
+
+    python3 tools/marketplace_submit_changeset.py aws_marketplace/bundle_b_create_entity.json
+    python3 tools/marketplace_submit_changeset.py <file> --apply --confirm CREATE-NEW-PRODUCT
+
+DEFAULT IS A DRY RUN. It prints exactly what would be sent and exits 0 without calling
+AWS. `--apply` additionally requires the confirmation token typed by hand, because the
+failure mode on this API is not an error, it is a silently wrong listing.
+
+IT REFUSES TO TOUCH AN EXISTING ENTITY, and that refusal is the most important line in
+the file. A change set does NOT add to a rate card, it REPLACES the card with whatever
+it is handed, and a malformed one rolled Bundle D's prices back to placeholders on
+2026-07-27. This tool is for CREATING products. Modifying a published one goes through
+marketplace_add_dimension.py, which reads the live entity first and round-trips every
+field it is not changing. Keeping those two jobs in two tools is what makes this one
+safe to run without a capture.
+
+RUNS ON THE MAC OR IN ACTIONS. The container has no usable AWS credentials, and the
+Actions role `relayshield-github-deploy` is the identity `StartChangeSet` is called by
+-- see .github/workflows/marketplace_changeset.yml. It needs the catalog grant first:
+
+    sh tools/apply_marketplace_catalog_policy.sh
+
+which is operator-side and once, because a role cannot widen its own permissions.
+"""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+ACCOUNT = "239677749008"
+CATALOG = "AWSMarketplace"
+CONFIRM_TOKEN = "CREATE-NEW-PRODUCT"
+
+# Entities that are LIVE and must never be the target of this tool. Named
+# explicitly rather than inferred: a published listing is exactly the thing whose
+# rate card a bad change set replaces, and the guard is worth more when it names
+# what it is protecting.
+LIVE_ENTITIES = {
+    "prod-kkvurtspreofy": "Bundle D, Agentic Attack Surface (LIVE, public)",
+    "prod-f5qkfsxlxs4qg": "Bundle A, Core Identity Exposure (LIVE)",
+}
+
+# A change set that creates a product opens with CreateProduct. Anything else is
+# either a modification (wrong tool) or a shape nobody has reviewed.
+CREATE_TYPES = {"CreateProduct", "CreateOffer"}
+
+# UpdateVisibility IS ALLOWED ON ITS OWN, and the first version of this guard
+# refused it. That was a FALSE POSITIVE and fixing the guard rather than working
+# around it is the point: flipping a product from Limited to Public replaces no
+# rate card, it is the last step of the create sequence, and the refusal even
+# named marketplace_add_dimension.py -- which cannot do UpdateVisibility either,
+# so the reader was sent to a tool that would also refuse them.
+#
+# What actually protects the live listings is the LIVE_ENTITIES check below, not
+# this one. UpdateVisibility against prod-kkvurtspreofy is still refused there,
+# which is the case worth refusing: a published product taken private.
+STANDALONE_TYPES = {"UpdateVisibility"}
+
+
+class Refused(Exception):
+    """A guard fired. The message is the reason, and it is printed verbatim."""
+
+
+PLACEHOLDER_RE = __import__("re").compile(r"__[A-Z][A-Z0-9_]*__")
+
+
+def substitute(doc: dict, product_id: str) -> dict:
+    """Fill the placeholders a committed change set cannot carry literally.
+
+    TWO FIELDS, AND NEITHER CAN BE COMMITTED WITH A REAL VALUE:
+
+    `__BUNDLE_B_PRODUCT_ID__` -- AWS assigns the product id when CreateProduct
+    succeeds, so it does not exist when the offer file is written. Guessing one
+    would target a product that is not ours.
+
+    `__CHARGE_DATE__` -- bundle_a_test_offer.json carries ChargeDate 2026-08-08,
+    which was correct on the day it was submitted and is a date in the PAST for
+    anyone running it since. A payment schedule in the past is rejected, so this
+    is filled at send time and the date used is printed rather than assumed.
+    """
+    import datetime
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    raw = json.dumps(doc)
+    if product_id:
+        raw = raw.replace("__BUNDLE_B_PRODUCT_ID__", product_id)
+    if "__CHARGE_DATE__" in raw:
+        raw = raw.replace("__CHARGE_DATE__", today)
+        print(f"charge date   : {today} (filled at send time, not committed)")
+    return json.loads(raw)
+
+
+def validate(doc: dict) -> list:
+    """Return the change list, or raise Refused with the reason.
+
+    PURE, and deliberately so: it takes a parsed document and touches nothing
+    else, which is what lets every guard below be exercised in a container with
+    no AWS credentials. A guard that can only be tested against the live API is
+    a guard nobody runs.
+    """
+    if not isinstance(doc, dict):
+        raise Refused("the file does not hold a JSON object")
+
+    catalog = doc.get("Catalog")
+    if catalog != CATALOG:
+        raise Refused(
+            f"Catalog is {catalog!r}, expected {CATALOG!r}. A change set for a "
+            "different catalog is not one this account can submit.")
+
+    changes = doc.get("ChangeSet")
+    if not isinstance(changes, list) or not changes:
+        raise Refused("ChangeSet is missing or empty. An empty change set is a "
+                      "valid document that does nothing, which is worse than an "
+                      "error because it returns success.")
+
+    types = [c.get("ChangeType") for c in changes]
+    if not (set(types) & CREATE_TYPES) and not set(types) <= STANDALONE_TYPES:
+        raise Refused(
+            f"{types} is neither a create sequence nor "
+            f"{sorted(STANDALONE_TYPES)}.\n"
+            "       This tool CREATES products and offers, and flips a new one to "
+            "Public.\n"
+            "       Changing a PUBLISHED listing replaces its whole rate card, so "
+            "it goes\n"
+            "       through tools/marketplace_add_dimension.py, which reads the "
+            "live entity first.")
+
+    # A LITERAL PLACEHOLDER MUST NEVER REACH AWS. This is rule 11 one layer out:
+    # `<paste the key>` in a shell block is a syntax error the reader sees at
+    # once, and `__BUNDLE_B_PRODUCT_ID__` in a change set is a string AWS will
+    # accept into a field and then fail on, or worse, store.
+    left = PLACEHOLDER_RE.findall(json.dumps(doc))
+    if left:
+        raise Refused(
+            f"unsubstituted placeholder(s): {sorted(set(left))}.\n"
+            "       __BUNDLE_B_PRODUCT_ID__ is filled with --product-id, using the "
+            "id\n"
+            "       StartChangeSet returned when the product was created.")
+
+    for change in changes:
+        ident = (change.get("Entity") or {}).get("Identifier", "")
+        if ident in LIVE_ENTITIES:
+            raise Refused(
+                f"a change targets {ident} -- {LIVE_ENTITIES[ident]}.\n"
+                "       REFUSING. A change set REPLACES the whole rate card of the "
+                "entity it names,\n"
+                "       and a malformed one rolled Bundle D's prices back to "
+                "placeholders on 2026-07-27.\n"
+                "       If you meant to modify that listing, use "
+                "tools/marketplace_add_dimension.py.")
+
+    return changes
+
+
+def summarise(changes: list) -> None:
+    """Print what would be sent, in the shape a reader can check against the plan."""
+    print(f"changes       : {len(changes)}")
+    for i, change in enumerate(changes, 1):
+        entity = change.get("Entity") or {}
+        ident = entity.get("Identifier")
+        target = ident if ident else "NEW (AWS assigns the id)"
+        print(f"  {i}. {change.get('ChangeType'):<20} {entity.get('Type','?'):<18} {target}")
+
+    # Dimensions are the field this programme has been burned by, so they are
+    # printed rather than counted.
+    #
+    # DetailsDocument IS NOT ONE SHAPE, and assuming it was is how the first
+    # version of this function crashed on the very file it was written for.
+    # AddDimensions carries a LIST of dimensions directly; AddDeliveryOptions
+    # carries a DICT with a DeliveryOptions key. Found by running it against the
+    # real change set rather than by reading the API docs.
+    for change in changes:
+        dd = change.get("DetailsDocument")
+        if isinstance(dd, list):
+            dims = dd
+        elif isinstance(dd, dict):
+            dims = dd.get("Dimensions")
+        else:
+            dims = None
+        if not dims:
+            continue
+        print(f"\ndimensions in {change.get('ChangeType')}: {len(dims)}")
+        for d in dims:
+            print(f"  {d.get('Key','?'):<32} {d.get('Types', d.get('Unit','?'))}")
+
+
+def assert_account() -> None:
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+    except ImportError:
+        raise SystemExit(
+            "ERROR: boto3 missing. This runs on the Mac (~/.rsvenv/bin/python) or "
+            "in Actions.\n"
+            "       A dry run needs neither: re-run without --apply.")
+    try:
+        got = boto3.client("sts").get_caller_identity()["Account"]
+    except ClientError as exc:
+        raise SystemExit(f"ERROR: STS: {exc.response['Error']['Code']}")
+    if got != ACCOUNT:
+        raise SystemExit(
+            f"ERROR: credentials resolve to {got}, not {ACCOUNT}.\n"
+            f"       {ACCOUNT} is the ONLY RelayShield account. Re-run with\n"
+            "       AWS_PROFILE=relayshield. A WRITE against the wrong account\n"
+            "       SUCCEEDS and creates a product nothing can see.")
+
+
+def submit(doc: dict, changes: list, name: str) -> int:
+    import boto3
+    from botocore.exceptions import ClientError
+    client = boto3.client("marketplace-catalog", region_name="us-east-1")
+    try:
+        resp = client.start_change_set(
+            Catalog=doc["Catalog"], ChangeSet=changes, ChangeSetName=name)
+    except ClientError as exc:
+        code = exc.response["Error"]["Code"]
+        if code in ("AccessDeniedException", "UnauthorizedException"):
+            raise SystemExit(
+                f"ERROR: {code} on StartChangeSet.\n"
+                "       The catalog grant has never been applied. It is one command,\n"
+                "       operator-side and once, because a role cannot widen its own\n"
+                "       permissions:\n\n"
+                "           sh tools/apply_marketplace_catalog_policy.sh\n")
+        raise SystemExit(
+            f"ERROR: {code}: {exc.response['Error'].get('Message','')[:400]}")
+
+    print("\nSUBMITTED")
+    print(f"  ChangeSetId  : {resp.get('ChangeSetId')}")
+    print(f"  ChangeSetArn : {resp.get('ChangeSetArn')}")
+    print("\nAWS reviews this asynchronously. Watch it with:")
+    print(f"  AWS_PROFILE=relayshield aws marketplace-catalog describe-change-set \\")
+    print(f"    --catalog {CATALOG} --change-set-id {resp.get('ChangeSetId')} --no-cli-pager")
+    print("\nWHEN IT SUCCEEDS it returns the new entity id. That id is the product")
+    print("code the fulfillment Lambda needs as BUNDLE_B_PRODUCT_CODE, and until it")
+    print("is set every Bundle B branch in the code stays inert by construction.")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("changeset", help="path to the committed change set JSON")
+    ap.add_argument("--apply", action="store_true",
+                    help="actually call StartChangeSet. Requires --confirm.")
+    ap.add_argument("--confirm", default="",
+                    help=f"type {CONFIRM_TOKEN} to confirm an --apply")
+    ap.add_argument("--product-id", default="",
+                    help="the entity id AWS returned from CreateProduct, "
+                         "substituted for __BUNDLE_B_PRODUCT_ID__ in an offer file")
+    ap.add_argument("--name", default="",
+                    help="ChangeSetName. Defaults to the file's stem.")
+    args = ap.parse_args()
+
+    path = Path(args.changeset)
+    if not path.is_absolute():
+        path = ROOT / path
+    if not path.exists():
+        raise SystemExit(f"ERROR: {path} does not exist.")
+
+    doc = json.loads(path.read_text())
+    # relative_to RAISES on a path outside the repo, and the first version used
+    # it bare -- so pointing this at a file in /tmp crashed with a pathlib
+    # traceback instead of reading the file. Found by running it.
+    try:
+        shown = path.relative_to(ROOT)
+    except ValueError:
+        shown = path
+    print(f"file          : {shown}")
+    doc = substitute(doc, args.product_id)
+    try:
+        changes = validate(doc)
+    except Refused as exc:
+        raise SystemExit(f"REFUSED: {exc}")
+
+    print(f"catalog       : {doc['Catalog']}")
+    summarise(changes)
+
+    if not args.apply:
+        print("\nDRY RUN. Nothing was sent. Add --apply --confirm "
+              f"{CONFIRM_TOKEN} to submit.")
+        return 0
+
+    if args.confirm != CONFIRM_TOKEN:
+        raise SystemExit(
+            f"\nREFUSED: --apply needs --confirm {CONFIRM_TOKEN} typed by hand.\n"
+            "         This creates a real product in a real marketplace account.")
+
+    assert_account()
+    return submit(doc, changes, args.name or path.stem)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

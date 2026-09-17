@@ -6306,3 +6306,113 @@ Actor is barely waking up, which matters for the Apify writers-programme article
 whole premise is that we built and ran it. And nothing watches that Actor:
 `tools/check_hf_space.py` probes both HF Spaces every six hours and there is no equivalent
 here, so a dead Actor would reach us through a prospect.
+
+## BUNDLE B'S CHANGE SET HAD NO DOOR. THE ARTEFACT WAS REAL AND NOTHING COULD SEND IT.
+
+**2026-09-17, asked as "can you remotely publish our Bundle B license and prompt me to
+run the E2E test AWS auditors require".** Answering the first half found the blocker.
+
+`aws_marketplace/bundle_b_create_entity.json` has been written and guarded by six tests
+since 2026-09-15. **The only submitter in the repo cannot send it.**
+`tools/marketplace_add_dimension.py` opens with `ENTITY_ID = os.environ.get(
+"BUNDLE_D_ENTITY_ID", "prod-kkvurtspreofy")`, calls `describe_entity` on it, and builds a
+dimension change set FROM that capture. A `CreateProduct` names no entity, because AWS
+assigns the id. So the tool's first action is the one thing this change set cannot
+supply.
+
+**Every check we had was checking the artefact.** Six guards on the JSON, all green, and
+nothing asserted that a route existed to submit it. That is "a route added to the
+handler's dispatch table is not a route" one layer out, and this time the missing half
+was not at the gateway edge but in our own toolbox.
+
+**`tools/marketplace_submit_changeset.py` is the door**, plus
+`.github/workflows/marketplace_changeset.yml` because Actions holds the identity
+`StartChangeSet` is called by. **A second workflow rather than a mode on the first**: the
+Bundle D one reads the live entity, round-trips every field it is not changing, and
+requires the product code typed by hand, and all three are correct for MODIFYING a
+published listing and meaningless for creating one. Folding them together means a mode in
+which every one of those guards is skipped, which is the guard that gets skipped by
+accident.
+
+### THE ANSWER TO "REMOTELY" IS NO, AND THE REASON IS IAM WORKING CORRECTLY
+
+`tools/apply_marketplace_catalog_policy.sh` has still never been run, and **it cannot be
+automated**: a role cannot widen its own permissions, so the first grant is operator-side
+by construction. Workflow dispatch is separately 403 for me. Two steps are the founder's
+and no amount of tooling changes that.
+
+### FOUR GUARDS IN THE SUBMITTER, AND ONE OF THEM WAS A FALSE POSITIVE I FIXED
+
+It refuses a change set targeting `prod-kkvurtspreofy` or `prod-f5qkfsxlxs4qg` by name,
+refuses an empty change set (a valid document that does nothing and returns success),
+refuses `--apply` without a typed phrase, and refuses **any unsubstituted
+`__PLACEHOLDER__`** -- rule 11 one layer out, where `<paste the key>` is a syntax error a
+reader sees at once and `__BUNDLE_B_PRODUCT_ID__` is a string AWS accepts into a field.
+
+**And the first version refused `UpdateVisibility`, which is the go-public step.** That is
+the CSM-SIMSWAP-1 mistake exactly: a check that forces you to skip a legitimate step to
+pass. Worse, its message named `marketplace_add_dimension.py`, **which cannot do
+UpdateVisibility either**, so the reader was sent to a tool that would also refuse them.
+Narrowed rather than loosened, and a test now pins BOTH directions: go-public validates,
+and a visibility flip on a live listing is still refused.
+
+### TWO GUARDS DID NOT FIRE ON THEIR FIRST PROOF AND BOTH WERE MINE
+
+**The negation guard was satisfied by the defect.** It asserted `"not " in block` for the
+direct-door condition, and rewriting `not key_record.get("aws_customer_id")` into
+`key_record.get("aws_customer_id") is not None` -- the inversion that bills an AWS
+customer on the AWS rail AND the Stripe rail for the same call -- left it GREEN, because
+`is not None` contains `not `. **A substring the defect also satisfies is not a guard.**
+It asserts the exact negation now.
+
+**And one proof was a no-op I nearly recorded as a pass.** The edit meant to introduce a
+dimension-key drift used two spaces where the file has three, so nothing changed and the
+suite was green for the right reason and the wrong one. **Reading "OK" after a proof step
+proves nothing unless the edit is confirmed to have applied.**
+
+### THE E2E TEST IS A REAL SUBSCRIPTION, AND BUNDLE A ALREADY SHOWS ITS SHAPE
+
+`aws_marketplace/bundle_a_test_offer.json` is the vehicle, and reading it answered the
+question better than any doc could: a private offer targeted at ONE buyer account
+(`442429445748`, not the seller account), granting the Entitled dimension once and pricing
+every metered dimension at `0.00000001` -- free in practice and **non-zero on purpose, so
+BatchMeterUsage is genuinely exercised rather than skipped.** Subscribe, get redirected to
+the fulfillment URL with `x-amzn-marketplace-token`, resolve, provision, meter, THEN ask
+for public visibility.
+
+`bundle_b_test_offer.json` is built from that accepted envelope with four fields changed
+rather than retyped. **Its ChargeDate is a placeholder and Bundle A's is not:** that file
+carries `2026-08-08`, correct on the day and a date in the PAST for anyone since, and a
+payment schedule in the past is rejected. The submitter fills it at send time and prints
+the date it used. A test fails if a literal date is ever committed there.
+
+**AWS's own validation requirements were NOT read**: `docs.aws.amazon.com` returns 000
+from the container. So the sequence is derived from our own accepted artefact, which is
+strong evidence and is not the same as their published bar, and the runbook says so where
+a reader will hit it rather than in a footnote.
+
+### AND THE DRIFT READ UNBLOCKED THE THING EVERYTHING ELSE WAITED ON
+
+`sh tools/handler_drift.sh relayshield_bundle_fulfillment.py` came back **NO DRIFT, live
+byte-identical to main**, LastModified 2026-08-07. That is the stale case, so the rule
+applies in the direction that allows action: map it. It is now in `deploy_lambdas.yml`'s
+`paths:` trigger, `LAMBDA_MAP` and the dispatch list, and `iam_github_deploy_invoke.json`
+gained its ARN, which is 27 mapped functions all invocable.
+
+**No `ci.import-probe` early return is needed and that was checked rather than assumed**:
+the probe payload has no `Records` and no `path`, so it falls through to a real
+`{"statusCode": 404}`, which is all the probe asserts. Same reasoning as the Discord bot.
+
+**The Bundle B code ships INERT**, and that is what makes it safe to deploy before the
+product exists. `BUNDLE_B_PRODUCT_CODE` is an env var defaulting to the empty string and
+`PRODUCT_CODES` filters empties, so the file behaves exactly as it does today until AWS
+assigns an id. The same pattern Bundle A already used, and the reason step 3 of the
+runbook can precede step 5.
+
+**ONE TRAP NAMED BEFORE IT FIRES, because predicting a failure and shipping it anyway is
+worse than not predicting it:** `update-function-configuration --environment` REPLACES the
+whole variables block. Setting `BUNDLE_B_PRODUCT_CODE` with a bare command **deletes
+`BUNDLE_A_PRODUCT_CODE` and `BUNDLE_D_PRODUCT_CODE`** if they are there, and Bundles A and
+D stop resolving with no error until a customer subscribes. The runbook reads the existing
+block first. It is the change-set lesson in a different API: **it replaces, it does not
+merge.**

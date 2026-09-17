@@ -87,11 +87,18 @@ DEVELOPERS_URL = f"{PUBLIC_API_BASE_URL}/developers"
 # skips empty codes, so this file behaves exactly as before until it is set.
 BUNDLE_D_PRODUCT_CODE = os.environ.get("BUNDLE_D_PRODUCT_CODE", "")
 BUNDLE_A_PRODUCT_CODE = os.environ.get("BUNDLE_A_PRODUCT_CODE", "")
+# Bundle B, Attack Surface & Supply Chain. Its own entity again, and EMPTY
+# until AWS assigns the product code -- StartChangeSet returns the id, it is
+# not a value anyone chooses. Every branch below skips empty codes, so this
+# file behaves exactly as it does today until the Lambda env var is set, which
+# is what makes it safe to commit this before the product exists.
+BUNDLE_B_PRODUCT_CODE = os.environ.get("BUNDLE_B_PRODUCT_CODE", "")
 
 # Every product code we recognise, for the DynamoDB scans that previously
 # filtered on a single equality. A key row belongs to us if its
 # aws_product_code is any of these.
-PRODUCT_CODES = [c for c in (BUNDLE_D_PRODUCT_CODE, BUNDLE_A_PRODUCT_CODE) if c]
+PRODUCT_CODES = [c for c in (BUNDLE_D_PRODUCT_CODE, BUNDLE_A_PRODUCT_CODE,
+                             BUNDLE_B_PRODUCT_CODE) if c]
 
 
 def _product_code_filter():
@@ -142,6 +149,19 @@ BUNDLE_CONFIGS = {
             "- Domain Lookalike Detection (domain) — typosquatted/lookalike domains against your brand\n"
             "- OAuth Token Exposure Watchlist (oauth-watchlist) — exposed OAuth/API tokens across leaked credential sources\n"
             "- Crypto Intelligence Check (crypto-intel) — wallet/domain checks against RelayShield's crypto threat intel corpus"
+        ),
+    },
+    "attack_surface_bundle_access": {
+        "product_code": BUNDLE_B_PRODUCT_CODE,
+        "label":        "attack_surface_supply_chain",
+        "dynamo_flag":  "bundle_b_access",
+        "display_name": "Attack Surface & Supply Chain (Bundle B)",
+        "endpoints_text": (
+            "- Supply Chain Risk (supply-chain) \u2014 dependency and package compromise across your declared stack\n"
+            "- Asset Intelligence (asset-intel) \u2014 internet-facing asset discovery and exposure\n"
+            "- Secret Scan (secret-scan) \u2014 leaked credentials and API keys across public sources\n"
+            "- Threat Actor Intelligence (threat-actor) \u2014 actor attribution and campaign context\n"
+            "- Session Risk (session-risk) \u2014 stolen session and token reuse detection"
         ),
     },
 }

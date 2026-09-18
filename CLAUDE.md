@@ -6702,3 +6702,83 @@ reaches it.**
 entity-id correction. A log is a record of the code that ran, not of the code that is correct now --
 so a fix shipped after a run does not retroactively fix that run's output, and the reader has to be
 told which lines to disregard.
+
+## THE CHANGE SET FAILED ON A LOGO THAT WAS NEVER UPLOADED. SIX GUARDS ON THE DOCUMENT SAW NOTHING.
+
+**2026-09-18. Asked as "show me where to find the Bundle B product code" in the Marketplace
+Management Portal. It is not there, and the portal is right:** that page lists three SaaS products,
+all Public, and Bundle B is not among them because **the change set FAILED.**
+
+    Status : FAILED
+    Error  : INVALID_MEDIA_LOCATION Media location not accessible:
+             .../bundle_b/relayshield_logo_bundle_b.png
+
+**AND MY FIRST SENTENCE BACK TO HIM WAS WRONG IN A WAY WORTH RECORDING.** He said step 5b succeeded;
+I said the portal contradicts that. **It does not.** The `read` job WAS green -- reading is all it
+does -- and what it read was a failed change set. Both are true at once. That is this file's own
+"a red run names a step, not an outcome" pointed the other way: **a GREEN run names a step too.** He
+corrected it in one line and he was right.
+
+### THE DEFECT: A FIELD WHOSE VALUE IS AN EXTERNAL RESOURCE IS NOT VALIDATED BY VALIDATING THE STRING
+
+`bundle_b_create_entity.json` was built by reading Bundle A's ACCEPTED change set and reusing its
+envelope, which is the right method and is recorded above as such. The `LogoUrl` came across with
+`bundle_a` substituted to `bundle_b` in the path -- **and that object had never been uploaded.**
+`curl -I` settles it in one second, from this container:
+
+    bundle_a/relayshield_logo_bundle_a.png   200
+    bundle_b/relayshield_logo_bundle_b.png   403
+
+**A public S3 bucket with no ListBucket answers 403 for an object that is not there rather than 404**,
+so those two codes are ONE finding and a guard that only knows 404 misses the real case.
+
+`test_bundle_b_changeset.py`'s six guards were all green and always would have been: every one of
+them reads the DOCUMENT. **Six checks on a document say nothing about a URL inside it**, which is the
+"a guard is only as good as where it got its expectations" shape landing on a field rather than on a
+table -- and the expectation here lives on somebody else's server.
+
+### THE FIX IS A PREFLIGHT, NOT A NOTE, AND THE DRY RUN RUNS IT
+
+`check_media()` in `tools/marketplace_submit_changeset.py` HEADs every `*Url` field AWS actually
+dereferences and refuses before spending a change set. It reproduces AWS's exact failure locally in
+one second against the fifteen a real submission takes, and **it runs BEFORE the dry-run return**, so
+a dry run checks the same document an apply would send.
+
+**Only 403 and 404 block. A timeout, a refused connection, a 5xx or a blocked egress policy prints
+UNKNOWN and continues**, because a probe that cannot tell has no standing to stop the work -- the
+rule `publish_devto.py` already carries, applied to a submission instead of a post. An S3 blip that
+refuses to submit finished work is worse than the defect it guards.
+
+**It deliberately ignores every URL AWS never fetches.** The usage instructions carry
+`api.relayshield.net` and a docs link; probing those turns an unrelated outage into a refusal.
+
+**THE LOGO NOW POINTS AT BUNDLE A'S OBJECT**, checked rather than assumed: it is downloaded and
+looked at, and it is the generic RelayShield shield mark with **no bundle-specific text in it**, so
+reuse is correct rather than a shortcut. A separate `bundle_b` object buys nothing a reader can see
+and needs an upload nobody has done.
+
+### AND MY FIRST ORDERING GUARD PASSED ON THE DEFECT, FOR THE SECOND TIME THIS WEEK
+
+It compared `body.index("check_media(doc)")` against `body.index("DRY RUN")`. Moving the call INSIDE
+the `if not args.apply` branch **preserves textual order** while making it run on the dry run and NOT
+on the apply -- the dangerous half, and the guard stayed green. **A substring the defect also
+satisfies is not a guard**, which this file recorded four days ago about `is not None` containing
+`not `.
+
+It reads `main()` with `ast` now and asserts the property that matters: `check_media` is called
+exactly ONCE, at the top level of the function, before any branch that can return. **"Not nested in
+a branch" is the rule; "earlier in the file" was a proxy for it**, and a proxy is what fails on
+correct code or passes on broken code, eventually both.
+
+Three defects proven by reintroducing them: the call moved into the branch, 403 narrowed to 404
+alone, and the call deleted. The 403 mapping is pinned without a network, because the narrowing
+changed the live verdict on the real URL from MISSING to UNKNOWN and nothing noticed.
+
+### THE GENERAL FORM
+
+**Before submitting anything to a system that will FETCH what you hand it, fetch it yourself.** A
+change set, a webhook registration, an OG image, a marketplace listing, an MCP server URL in a
+directory record. The remote system's failure is slow, asynchronous and arrives as an error code;
+yours is one HEAD request. This repo already watches the HF Space's own MCP URL for exactly that
+reason -- **advertising a URL that nothing checks is the quiet alarm** -- and a change set is the
+same thing with a review cycle attached.

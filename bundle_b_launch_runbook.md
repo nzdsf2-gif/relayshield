@@ -56,11 +56,22 @@ was left in his terminal was there because nobody had moved it.
 | 1 | Catalog grant | **ANDREW, TERMINAL** | the only one, and it cannot be automated |
 | 4 | Dry run the change set | ANDREW CLICKS | Actions, Marketplace Change Set |
 | 5 | Create the product | ANDREW CLICKS | same workflow, `apply` |
-| 5b | **Read the product code back** | ANDREW CLICKS | Actions, Read a Marketplace product |
+| 5b | **Read the product code back** | ANDREW CLICKS | Actions, Read a Marketplace product **(needs the merge first)** |
 | 6 | Set `BUNDLE_B_PRODUCT_CODE` | ANDREW CLICKS | Actions, Set one Lambda env var |
 | 7 | Create the test offer | ANDREW CLICKS | Marketplace Change Set, `product_id` filled |
 | 8 | E2E subscription | **ANDREW, BROWSER** | a real subscription is the point of it |
 | 9 | Go public | ANDREW CLICKS | Marketplace Change Set |
+
+**A CLICK ON A NEW WORKFLOW IS NOT A CLICK UNTIL main CARRIES THE FILE.** Every entry above
+except 5b is already on `origin/main` and appears in the Actions sidebar today. **Read a
+Marketplace product** was written this session and is the one exception: GitHub dispatches a
+workflow only from the DEFAULT BRANCH, so it is invisible until the merge. Checked rather than
+assumed -- `git ls-tree origin/main .github/workflows/` names nineteen files and that is the
+twentieth.
+
+No test guards this, deliberately. A check demanding every named workflow be on main would fail
+on every workflow the day it is written, which is the check that gets worked around rather than
+obeyed. The note above is the guard.
 
 **STEP 1 IS OPERATOR-SIDE BY CONSTRUCTION AND NO TOOLING CHANGES THAT.** A role cannot
 widen its own permissions, so the first catalog grant to `relayshield-github-deploy`
@@ -197,9 +208,23 @@ STOP IF: `AccessDeniedException` -- step 1 did not take.
 
 ## STEP 5b -- ANDREW CLICKS THIS. Read the result. This is the step that tells you what to type next.
 
+**THE MERGE IS A PREREQUISITE FOR THIS STEP AND I SHIPPED IT WITHOUT SAYING SO.** Reported as
+*"Step 5b says 'read a marketplace product' which doesn't literally exist"* -- correct, it was
+not in the sidebar, because **a workflow file that is not on the DEFAULT BRANCH cannot be
+dispatched from the Actions UI.** This file already records that edge from the Mini App deploy
+and I wrote a click against a workflow living on a branch anyway. Merge and push main first;
+the entry appears immediately after.
+
 Actions, **Read a Marketplace product (read only)**, Run workflow, `change_set_id` = the id
 from STEP 5. No apply mode, no confirmation phrase, so re-run it as often as you like while
 AWS is still working.
+
+**THE CHANGE SET SUBMITTED ON 2026-09-18 IS `de0zvpnvpcq3olta3y7kpx4p2`** (Marketplace Change
+Set run #4, Apply, green -- which also proves STEP 1 took, because `StartChangeSet` returned
+rather than refusing). Read out of the run log rather than asked for.
+
+**AND DISREGARD THE LAST THREE LINES OF THAT RUN'S OUTPUT.** They say *"That id is the product
+code"*. It is not, and that text was corrected after the run executed. See the table below.
 
 EXPECT: `Status : SUCCEEDED`, a `CreateProduct: prod-...` line, and a
 **PRODUCT CODE CANDIDATES** section.

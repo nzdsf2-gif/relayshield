@@ -6657,3 +6657,48 @@ value a tool tells you to go and paste somewhere is as consequential as a number
 Both get acted on without re-derivation. Read it out of the code or the artefact that defines
 it -- `grep` found both real product codes in this repo in one command -- and never out of a
 sentence a previous session wrote.
+
+## A CLICK ON A WORKFLOW WRITTEN THIS SESSION IS NOT A CLICK. IT IS NOT IN HIS SIDEBAR.
+
+**2026-09-18, reported as *"Your runbook Step 5b says 'read a marketplace product' which doesn't
+literally exist. Do you mean Marketplace Change Set?"*** No -- the workflow is real, it is on the
+branch, and **GitHub dispatches a workflow only from the DEFAULT BRANCH**, so it does not appear in
+the Actions sidebar until main carries the file.
+
+**THIS FILE ALREADY RECORDS THAT EDGE, FROM THE MINI APP DEPLOY**: *"a workflow file that is not on
+the default branch cannot be dispatched from the Actions UI either"*. I wrote a `ANDREW CLICKS THIS`
+step against a workflow living on a feature branch anyway, one turn after writing the workflow.
+
+**It is the LOCAL MERGE IS NOT A PUSH rule in its third direction.** A push reaches GitHub, a merge
+reaches his clone -- and **a push to a BRANCH does not reach the Actions dispatch menu**, which reads
+main and nothing else. Checked rather than recalled: `git ls-tree origin/main .github/workflows/`
+lists nineteen files and `marketplace_read_product.yml` is not among them, while the other five
+workflows the runbook names all are.
+
+**THE RULE: a click step naming a workflow written in the same session carries the merge as its
+prerequisite, in the step, not in a preamble.** The cheap check is one command and it distinguishes
+the two states a reader cannot:
+
+    git --no-pager ls-tree origin/main --name-only .github/workflows/ | grep <file>
+
+**And no test guards this, deliberately.** A check requiring every named workflow to be on main
+would fail on every workflow the day it is written -- the CSM-SIMSWAP-1 shape, where passing means
+deleting something true. The note in the step is the guard.
+
+### THE OTHER HALF OF THAT QUESTION WAS ANSWERABLE FROM HERE, AND I HAD NOT TRIED
+
+He also asked what the ChangeSetId from step 5 was. **It is in the run log, and the GitHub MCP tools
+in this session can read a job log.** `actions_list` then `get_job_logs` returned it in two calls:
+`de0zvpnvpcq3olta3y7kpx4p2`, with run #4's step list showing `Dry run: skipped` and `Apply: success`,
+which ALSO proves STEP 1's catalog grant took -- `StartChangeSet` returned instead of refusing.
+
+**Asking him to go and read a value that is in a log I can read is a round trip I chose.** The same
+class as writing the procedure for reading two numbers off an Apify screen he could just screenshot,
+inverted: there, the container could not see it and I wrote a procedure; here, the container COULD
+see it and I asked anyway. **Before asking for a value, ask which of this session's tools already
+reaches it.**
+
+**And the run log still carries the wrong sentence**, because it executed `403a63c`, before the
+entity-id correction. A log is a record of the code that ran, not of the code that is correct now --
+so a fix shipped after a run does not retroactively fix that run's output, and the reader has to be
+told which lines to disregard.

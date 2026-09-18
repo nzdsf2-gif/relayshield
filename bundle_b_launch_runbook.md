@@ -63,9 +63,19 @@ STOP IF: `REFUSING: expected 239677749008` -- re-run with `AWS_PROFILE=relayshie
 touches either file probes cleanly. **Then go to STEP 1**, the catalog grant, which is
 the one that actually blocks Bundle B.
 
+### AND STEP 6 WAS RUN OUT OF ORDER ON 2026-09-18. READ THIS BEFORE ANYTHING ELSE.
+
+`BUNDLE_B_PRODUCT_CODE` was set to `622fa036203fb4ea59ea180be6d4570757ec755e`, which is
+**this session's git commit SHA, not a product code.** Steps 4 and 5 had not run, so no
+Bundle B product exists and no code had been assigned. The value is wrong and the write
+also REPLACED the whole environment block, so anything else that was in it is gone.
+
+Do not write to that block again until STEP 6 below has been run and read. It is
+read-only and it is the first thing to do.
+
 ---
 
-## STEP 1 -- ANDREW RUNS THIS. ANDREW RUNS THIS. The catalog grant, once.
+## STEP 1 -- ANDREW RUNS THIS. The catalog grant, once.
 
 ```zsh
 cd ~/dev/relayshield
@@ -149,39 +159,52 @@ EXPECT: `SUBMITTED` plus a `ChangeSetId`. AWS reviews asynchronously, so the pro
 not exist the moment this returns. Watch it:
 
 ```zsh
+read -r "CSID?Paste the ChangeSetId, then press Enter: "
 AWS_PROFILE=relayshield aws marketplace-catalog describe-change-set \
-  --catalog AWSMarketplace --change-set-id PASTE_THE_ID_HERE --no-cli-pager
+  --catalog AWSMarketplace --change-set-id "$CSID" --no-cli-pager
 ```
 EXPECT: `Status` moves `PREPARING` -> `APPLYING` -> `SUCCEEDED`, and the entity id
 appears. **That id is the product code.** Save it.
 STOP IF: `FAILED` -- the `ErrorDetailList` names the field. Send it to me.
 
-## STEP 6 -- ANDREW RUNS THIS. Set the product code on the Lambda.
+## STEP 6 -- ANDREW RUNS THIS. READ the environment block. Do not write yet.
 
-Until this runs, every Bundle B branch in the code is inert and a subscriber would
-resolve and be provisioned nothing.
+**THE FIRST VERSION OF THIS STEP PUT THE WRITE ABOVE THE WARNING AND IT FIRED ON
+2026-09-18.** `update-function-configuration --environment` REPLACES the whole variables
+block; it does not merge. So a command setting one variable deletes every other variable
+on that function, and the API returns a success block showing the new state -- which is
+indistinguishable from a correct result, because it IS the correct result of the command
+that was sent.
+
+This function reads THREE product codes. Read what is there before touching it:
 
 ```zsh
 cd ~/dev/relayshield
-read -r "BUNDLE_B_PRODUCT_CODE?Paste the Bundle B product code, then press Enter: "
-AWS_PROFILE=relayshield aws lambda update-function-configuration \
-  --function-name relayshield-bundle-fulfillment \
-  --environment "Variables={BUNDLE_B_PRODUCT_CODE=$BUNDLE_B_PRODUCT_CODE}" \
-  --no-cli-pager
+AWS_PROFILE=relayshield sh tools/diagnose_bundle_fulfillment_env.sh
 ```
-**STOP. READ THIS BEFORE RUNNING IT.** `update-function-configuration` REPLACES the whole
-environment block. If that function already carries `BUNDLE_D_PRODUCT_CODE` or
-`BUNDLE_A_PRODUCT_CODE`, the command above **deletes them** and Bundles A and D stop
-resolving. Read what is there first:
+EXPECT: section 1 prints the block as it stands; sections 2 and 3 print any earlier block
+still recoverable from a published version or from CloudTrail. The reading guide at the
+bottom says which of the three states you are in.
+STOP IF: `AWS_PROFILE is not set` or `credentials resolve to 620534471984` -- nothing was
+read, re-run with the profile.
+STOP IF: sections 2 and 3 are both empty -- AWS cannot tell us what was there. Send me
+section 1 and do not write a value in from memory.
 
-```zsh
-AWS_PROFILE=relayshield aws lambda get-function-configuration \
-  --function-name relayshield-bundle-fulfillment \
-  --query 'Environment.Variables' --no-cli-pager
-```
-EXPECT: the existing variables. If there are any, send them to me and I will write the
-full replacement block rather than you reconstructing it by hand. **This is the same
-shape as a change set replacing a rate card: the API replaces, it does not merge.**
+**Send me section 1 and whichever of 2 or 3 has content.** I write the full replacement
+block; reconstructing it by hand is how one of the three goes missing.
+
+## STEP 6b -- ANDREW RUNS THIS, ONLY AFTER I HAVE SENT THE BLOCK.
+
+Until a real Bundle B product code is set, every Bundle B branch in the code is inert and
+a subscriber would resolve and be provisioned nothing. That is the designed state, so
+there is no hurry to fill it and every reason not to fill it with a guess.
+
+**The value comes from step 5's `describe-change-set`, and nothing else.** It is the
+entity id AWS assigns. It is not a commit SHA, not a branch name, and not anything
+readable from this repository -- the product does not exist until step 5 succeeds.
+
+The command will be a single `update-function-configuration` carrying ALL THREE variables,
+because the API replaces. I send it once I have read step 6's output.
 
 ## STEP 7 -- ANDREW CLICKS THIS. Create the test offer.
 

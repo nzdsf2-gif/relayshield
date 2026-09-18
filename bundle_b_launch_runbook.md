@@ -37,6 +37,34 @@ the guards fire.
 
 ---
 
+## WHO DOES WHAT. ONE TERMINAL COMMAND IS LEFT, AND THE REST ARE CLICKS.
+
+**Rewritten 2026-09-18 after the founder asked why he was slogging through ten terminal
+steps.** He was right and the answer was not "you have to". Everything that is an AWS
+API call can run in Actions, which holds `relayshield-github-deploy` through OIDC; what
+was left in his terminal was there because nobody had moved it.
+
+| # | What | Who | How |
+|---|---|---|---|
+| 1 | Catalog grant | **ANDREW, TERMINAL** | the only one, and it cannot be automated |
+| 4 | Dry run the change set | ANDREW CLICKS | Actions, Marketplace Change Set |
+| 5 | Create the product | ANDREW CLICKS | same workflow, `apply` |
+| 6 | Set `BUNDLE_B_PRODUCT_CODE` | ANDREW CLICKS | Actions, Set one Lambda env var |
+| 7 | Create the test offer | ANDREW CLICKS | Marketplace Change Set, `product_id` filled |
+| 8 | E2E subscription | **ANDREW, BROWSER** | a real subscription is the point of it |
+| 9 | Go public | ANDREW CLICKS | Marketplace Change Set |
+
+**STEP 1 IS OPERATOR-SIDE BY CONSTRUCTION AND NO TOOLING CHANGES THAT.** A role cannot
+widen its own permissions, so the first catalog grant to `relayshield-github-deploy`
+cannot be made by anything running as `relayshield-github-deploy`. That is IAM working
+correctly. Workflow dispatch is separately 403 for me, so the clicks are his too -- but a
+click with the fields filled in is not a command to check, paste and diagnose.
+
+**Steps 2 and 3 are done.** The merge landed, run 156 deployed all three functions, and
+the invoke grant is the outstanding half of that.
+
+---
+
 ## WHERE YOU ARE NOW, 2026-09-18. STEPS 2 AND 3 ARE ALREADY DONE.
 
 You ran the merge and the push on 2026-09-17/18. `origin/main` is at `622fa03` and
@@ -167,63 +195,56 @@ EXPECT: `Status` moves `PREPARING` -> `APPLYING` -> `SUCCEEDED`, and the entity 
 appears. **That id is the product code.** Save it.
 STOP IF: `FAILED` -- the `ErrorDetailList` names the field. Send it to me.
 
-## STEP 6 -- ANDREW RUNS THIS. READ the environment block. Do not write yet.
+## STEP 6 -- ANDREW CLICKS THIS. Set the product code. No terminal, no paste.
 
-**THE FIRST VERSION OF THIS STEP PUT THE WRITE ABOVE THE WARNING AND IT FIRED ON
-2026-09-18.** `update-function-configuration --environment` REPLACES the whole variables
-block; it does not merge. So a command setting one variable deletes every other variable
-on that function, and the API returns a success block showing the new state -- which is
-indistinguishable from a correct result, because it IS the correct result of the command
-that was sent.
+**This step used to be a pasted `update-function-configuration` and that is what went
+wrong on 2026-09-18.** `--environment` REPLACES the whole variables block rather than
+merging, so one key set by hand left the function holding only that key, with a success
+block on screen. The fix is not a more careful command.
 
-This function reads THREE product codes. Read what is there before touching it:
+`tools/lambda_env_merge.py` GETs the block, merges the one key, and **refuses to write a
+result that drops a key**. It also refuses a 40-character hex value for anything ending
+`_PRODUCT_CODE`, because that is a git commit SHA and it is exactly what got pasted.
 
-```zsh
-cd ~/dev/relayshield
-AWS_PROFILE=relayshield sh tools/diagnose_bundle_fulfillment_env.sh
-```
-EXPECT: section 1 prints the block as it stands; sections 2 and 3 print any earlier block
-still recoverable from a published version or from CloudTrail. The reading guide at the
-bottom says which of the three states you are in.
-STOP IF: `AWS_PROFILE is not set` or `credentials resolve to 620534471984` -- nothing was
-read, re-run with the profile.
-STOP IF: sections 2 and 3 are both empty -- AWS cannot tell us what was there. Send me
-section 1 and do not write a value in from memory.
+Actions, **Set one Lambda env var (merge, never replace)**, Run workflow:
 
-**Send me section 1 and whichever of 2 or 3 has content.** I write the full replacement
-block; reconstructing it by hand is how one of the three goes missing.
+| Field | Value |
+|---|---|
+| function | `relayshield-bundle-fulfillment` |
+| key | `BUNDLE_B_PRODUCT_CODE` |
+| value | the product id from STEP 5, and nothing else |
+| mode | `plan` first |
 
-## STEP 6b -- ANDREW RUNS THIS, ONLY AFTER I HAVE SENT THE BLOCK.
+EXPECT: a `before:`, an `after:` and a `preserved:` line. Non-product values print as
+`<redacted>` -- these blocks carry live secrets and a full dump would put them in a run
+log anyone with repo read access can fetch.
+**Read `preserved:`. Every key that was there must be listed.** Then re-run with
+`mode: apply`.
+STOP IF: `REFUSED: ... git commit SHA` -- the value is not a product code and STEP 5 has
+not produced one yet.
+STOP IF: `AccessDenied` on `UpdateFunctionConfiguration` -- the deploy role lacks that
+action. Section 5 of `tools/diagnose_bundle_fulfillment_env.sh` says so in advance; tell
+me and I will send the one-line grant.
 
-Until a real Bundle B product code is set, every Bundle B branch in the code is inert and
-a subscriber would resolve and be provisioned nothing. That is the designed state, so
-there is no hurry to fill it and every reason not to fill it with a guess.
-
-**The value comes from step 5's `describe-change-set`, and nothing else.** It is the
-entity id AWS assigns. It is not a commit SHA, not a branch name, and not anything
-readable from this repository -- the product does not exist until step 5 succeeds.
-
-The command will be a single `update-function-configuration` carrying ALL THREE variables,
-because the API replaces. I send it once I have read step 6's output.
+**If the block is missing `BUNDLE_D_PRODUCT_CODE` or `BUNDLE_A_PRODUCT_CODE`**, set each
+the same way, one run per key. The tool merges, so order does not matter and nothing is
+lost between runs. Section 4 of the diagnostic reads those values off
+`relayshield-api` and `relayshield-agentic-api`, which this incident never touched.
 
 ## STEP 7 -- ANDREW CLICKS THIS. Create the test offer.
 
-Same workflow, `changeset: aws_marketplace/bundle_b_test_offer.json`, `mode: apply`,
-`confirm: CREATE-NEW-PRODUCT`.
+Actions, **Marketplace Change Set**, Run workflow:
 
-**It will refuse** unless the product id is supplied, which the workflow does not yet take
-as an input -- so run this one locally instead:
+| Field | Value |
+|---|---|
+| changeset | `aws_marketplace/bundle_b_test_offer.json` |
+| mode | `dry-run` first, then `apply` |
+| confirm | `CREATE-NEW-PRODUCT`, for apply only |
+| product_id | the Bundle B product id from STEP 5 |
 
-```zsh
-cd ~/dev/relayshield
-read -r "PID?Paste the Bundle B product id, then press Enter: "
-AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/marketplace_submit_changeset.py \
-  aws_marketplace/bundle_b_test_offer.json --product-id "$PID" \
-  --apply --confirm CREATE-NEW-PRODUCT
-```
 EXPECT: `charge date : <today>` filled at send time, nine changes ending in
-`ReleaseOffer`, then `SUBMITTED`.
-STOP IF: `unsubstituted placeholder` -- the id did not reach it.
+`ReleaseOffer`, then `SUBMITTED` on apply.
+STOP IF: `unsubstituted placeholder` -- `product_id` was left empty.
 
 **What this offer is.** A private offer targeted at buyer account `442429445748`, granting
 the Entitled dimension once and pricing all five metered dimensions at `0.00000001` -- free
@@ -281,33 +302,21 @@ means `bundle_b_access` was never written onto the key record in step 3 of the f
 **Nothing about metered usage is billed at a meaningful amount here**: five calls at
 `0.00000001` is a fraction of a cent, which is the point of the test offer's pricing.
 
-## STEP 9 -- ANDREW CLICKS THIS. Go public, once step 8 passes.
+## STEP 9 -- ANDREW CLICKS THIS. Go public, once STEP 8 passes.
 
-```zsh
-cd ~/dev/relayshield
-read -r "PID?Paste the Bundle B product id, then press Enter: "
-AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/marketplace_submit_changeset.py \
-  aws_marketplace/bundle_b_go_public.json --product-id "$PID" \
-  --apply --confirm CREATE-NEW-PRODUCT
-```
+Actions, **Marketplace Change Set**, Run workflow:
+
+| Field | Value |
+|---|---|
+| changeset | `aws_marketplace/bundle_b_go_public.json` |
+| mode | `dry-run` first, then `apply` |
+| confirm | `CREATE-NEW-PRODUCT` |
+| product_id | the Bundle B product id |
+
 EXPECT: one `UpdateVisibility` change, then `SUBMITTED`. **AWS reviews this one with a
 human in the loop**, so it is not instant and it can come back with comments.
 
-**Do not run step 9 before step 8 passes.** Public visibility is the thing that is hard to
+**Do not run STEP 9 before STEP 8 passes.** Public visibility is the thing that is hard to
 take back, and the fulfillment verification is exactly what the review asks about.
 
 ---
-
-## TWO THINGS THAT WILL BITE AND ARE WRITTEN DOWN RATHER THAN DISCOVERED
-
-**`update-function-configuration` replaces the environment block.** Step 6 says so twice
-because the failure is silent: Bundles A and D stop resolving and nothing errors until a
-customer subscribes.
-
-**AWS's own documentation could not be read from the container.**
-`docs.aws.amazon.com` returned HTTP 000, which is the container's egress policy and not a
-fact about AWS. **So the step-8 sequence is derived from `bundle_a_test_offer.json` --
-our own artefact, which AWS accepted for Bundle A -- and not from their published
-requirements.** That is strong evidence and it is not the same thing. If the visibility
-review asks for something step 8 does not cover, that is the gap, and it is worth
-reading their current SaaS validation page before step 9 rather than after.

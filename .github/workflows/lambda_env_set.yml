@@ -1,0 +1,63 @@
+name: Set one Lambda env var (merge, never replace)
+
+# Why this workflow exists rather than a pasted command.
+#
+# `aws lambda update-function-configuration --environment` REPLACES the whole
+# variables block. On 2026-09-18 a bare command set one key on
+# relayshield-bundle-fulfillment and the function was left holding only that
+# key, with a success block on screen. tools/lambda_env_merge.py GETs the
+# block, merges, and refuses to write a result that drops a key -- so the
+# hazard is removed rather than remembered.
+#
+# Running it HERE means the value is typed into a form and never into a
+# terminal, and the run is recorded.
+#
+# The role needs lambda:GetFunctionConfiguration and
+# lambda:UpdateFunctionConfiguration. Section 5 of
+# tools/diagnose_bundle_fulfillment_env.sh simulates both and says whether
+# this workflow can run at all; a refusal here names the missing action
+# rather than failing as a generic AccessDenied.
+
+on:
+  workflow_dispatch:
+    inputs:
+      function:
+        description: "Lambda function name, e.g. relayshield-bundle-fulfillment"
+        required: true
+      key:
+        description: "Environment variable name, e.g. BUNDLE_B_PRODUCT_CODE"
+        required: true
+      value:
+        description: "Value to set. A 40-hex git SHA is refused for a *_PRODUCT_CODE."
+        required: true
+      mode:
+        description: "plan reads and prints only. apply writes."
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::239677749008:role/relayshield-github-deploy
+          aws-region: us-east-1
+
+      - name: Merge the variable into the existing block
+        run: |
+          MODE="${{ inputs.mode }}"
+          ARGS="--function ${{ inputs.function }} --key ${{ inputs.key }} --value ${{ inputs.value }}"
+          if [ "$MODE" = "apply" ]; then
+            python3 tools/lambda_env_merge.py $ARGS --apply
+          else
+            python3 tools/lambda_env_merge.py $ARGS
+          fi

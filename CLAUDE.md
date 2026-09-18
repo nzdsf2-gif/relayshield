@@ -6470,3 +6470,53 @@ than saying so.** `check_deploy_invoke_policy.py` already keeps `LAMBDA_MAP` and
 honest and runs inside `test_workflows_parse.py`; whether AWS has the policy is
 unknowable from here by construction. **The guard is the ordering in the runbook and this
 section, and that is the honest scope.**
+
+## I PUT A DESTRUCTIVE WRITE ABOVE ITS OWN WARNING, AND IT FIRED WITHIN THE HOUR
+
+**2026-09-18, asked as "Step 6: Does this output look ok?"** No, twice over, and the
+second one is mine.
+
+    read -r "BUNDLE_B_PRODUCT_CODE?Paste the Bundle B product code..."
+    Paste the Bundle B product code: 622fa036203fb4ea59ea180be6d4570757ec755e
+
+**That is this session's git commit SHA.** No Bundle B product existed -- steps 4 and 5
+had not run, and `StartChangeSet` is what makes AWS assign a code. The prompt asked for a
+value that did not yet exist anywhere, so the most recent 40-hex string in the terminal
+was the reasonable thing to reach for. **A prompt for a value the reader cannot possibly
+have is rule 11's placeholder wearing a question mark**, exactly like the Cloudflare
+account id answered with an email address two days earlier.
+
+**AND THE COMMAND REPLACED THE WHOLE ENVIRONMENT BLOCK.** `update-function-configuration
+--environment` does not merge. `relayshield_bundle_fulfillment.py` reads THREE product
+codes, and the block now holds one. An emptied `BUNDLE_D_PRODUCT_CODE` raises nothing:
+`PRODUCT_CODES` loses the entry, `_product_code_filter()` stops matching any existing key
+row, and `_get_entitlement` queries `GetEntitlements` with the wrong set -- so revocation
+and suspension scans over a LIVE PUBLIC listing find nothing and report success.
+
+**MY RUNBOOK PUT THE WRITE FIRST AND THE WARNING UNDER IT**, opening
+*"STOP. READ THIS BEFORE RUNNING IT"* -- below the fenced block it was warning about, with
+the read-the-existing-block command below that. Rule C says in its own words that an
+instruction writing to a live shared surface is PRECEDED by the one that reads it, two
+blocks and never one. **I wrote the hazard down, correctly, underneath the thing that
+causes it.** That is rule B again and it is the second ordering defect in this same
+document in two turns: yesterday the grant was ordered before the merge that feeds it.
+
+**THE RULE, and it is narrower than "read first" because that was already written down and
+did not work: a block that writes is never in the same reply as the reasoning about
+whether it is safe to write.** The read is its own step with its own EXPECT. The write
+comes back in a later reply, built from what the read returned. Prose cannot enforce an
+order inside a reply, because a fenced block under a heading is the thing a reader runs.
+
+**AND `--environment` IS NOT ALONE.** The same replace-not-merge shape is a change set
+against a rate card (which rolled Bundle D's prices to placeholders once), `put-role-policy`
+against an inline policy, and `setMyCommands`. **Before any call whose argument is a whole
+collection, ask what is in that collection now** -- and get the answer from the API, not
+from the diff.
+
+`tools/diagnose_bundle_fulfillment_env.sh` is the read, and it exists because Lambda keeps
+no previous configuration for `$LATEST`: the old block survives only in a PUBLISHED VERSION
+or in CLOUDTRAIL's `requestParameters.environment`, 90-day retention. It checks both, names
+a refusal as a fact about the identity rather than about the function, and says outright
+when neither can answer instead of printing nothing. All five branches were exercised
+against a stand-in `aws`, because a diagnostic that has only been read is the defect it is
+meant to catch.

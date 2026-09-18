@@ -6520,3 +6520,59 @@ a refusal as a fact about the identity rather than about the function, and says 
 when neither can answer instead of printing nothing. All five branches were exercised
 against a stand-in `aws`, because a diagnostic that has only been read is the defect it is
 meant to catch.
+
+## HE ASKED WHY HE WAS RUNNING TEN TERMINAL STEPS. THE ANSWER WAS NOT "YOU HAVE TO".
+
+**2026-09-18: *"Rather than my wrestling with your runbook, why can't you deploy the bulk
+of the remaining terminal commands in my place."*** He is right, and the honest count was
+one terminal command, not ten.
+
+**EVERY STEP IN THAT RUNBOOK THAT IS AN AWS API CALL CAN RUN IN ACTIONS**, which holds
+`relayshield-github-deploy` through OIDC and has since `lambda_drift_check.yml` was
+written. What was sitting in his terminal was there because nobody had moved it, which is
+this file's own "I CANNOT REACH AWS IS A CLAIM ABOUT THIS CONTAINER" rule pointed at a
+runbook instead of at a task: **the container's limits are not the reader's limits either.**
+
+    STEP 1  catalog grant          TERMINAL, and genuinely cannot be automated
+    STEP 4  dry run                click
+    STEP 5  create the product     click
+    STEP 6  set the env var        click  <- was the pasted command that broke things
+    STEP 7  test offer             click  <- was terminal because MY workflow lacked an input
+    STEP 8  E2E subscription       browser, and a real subscription is the point
+    STEP 9  go public              click
+
+**Only STEP 1 is structural.** A role cannot widen its own permissions, so the first
+catalog grant to `relayshield-github-deploy` cannot be made by anything running as it.
+
+**STEPS 7 AND 9 WERE TERMINAL FOR NO REASON AT ALL.** `marketplace_changeset.yml` had no
+`product_id` input, so the runbook fell back to a pasted command carrying a `read -r`
+prompt. One input added, and both became clicks. **A missing workflow input is a reason a
+step is in someone's terminal, and it reads exactly like a step that has to be.**
+
+### THE ENV WRITE IS A MERGE NOW, SO THE HAZARD IS GONE RATHER THAN DOCUMENTED
+
+`tools/lambda_env_merge.py` GETs the variables block, merges one key, and **refuses to
+write a result that drops a key**. It refuses a 40-character hex value for anything ending
+`_PRODUCT_CODE`, which is the git SHA that was pasted, and it prints every non-product
+value as `<redacted>` -- `deploy_lambdas.yml` learned that one expensively, its default
+output having printed live secrets into a log anyone with repo read access can fetch.
+
+**The general form, and it is the better version of "read before you write": when a write
+is dangerous because it replaces a collection, the fix is a tool that reads and merges,
+not a warning above the command.** A warning depends on the reader; a refusal does not.
+Every branch was exercised against a stand-in `aws`.
+
+### CLOUDTRAIL CANNOT ANSWER WHAT WAS IN A LAMBDA ENV BLOCK, AND `{}` IS NOT "EMPTY"
+
+The diagnostic's CloudTrail section returned `{}` for both config writes. **AWS
+deliberately omits Lambda environment variables from `requestParameters`, because they
+routinely carry secrets.** So that section proves a write happened and when, and can never
+carry values -- and my own reading guide had no row for `{}`, only for "empty", which is a
+different answer with a different meaning.
+
+**The route that does work was sitting one function over.** `relayshield_api.py` and
+`relayshield_agentic_api.py` both read `BUNDLE_D_PRODUCT_CODE` from their OWN environment
+blocks, which this incident never touched. Section 4 reads exactly those keys, by name
+rather than dumping the block. **When a value is gone from one place, ask which other
+component was configured with the same value** -- that is cheaper than any forensic route
+and it was available before CloudTrail was ever queried.

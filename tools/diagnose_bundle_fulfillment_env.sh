@@ -133,26 +133,79 @@ if not shown:
 esac
 echo
 
+echo "== 4. The SAME product codes on the functions that were NOT touched"
+echo "   relayshield_api.py and relayshield_agentic_api.py both read"
+echo "   BUNDLE_D_PRODUCT_CODE from their OWN environment blocks, which this"
+echo "   incident did not write to. If either carries it, the value is"
+echo "   recovered without guessing."
+echo "   Only the named keys are printed. These blocks also hold live secrets"
+echo "   and a full dump would put them in this terminal and its scrollback."
+for FN in relayshield-api relayshield-agentic-api; do
+  for KEY in BUNDLE_D_PRODUCT_CODE BUNDLE_A_PRODUCT_CODE BUNDLE_B_PRODUCT_CODE; do
+    V=$(aws_ lambda get-function-configuration --function-name "$FN" \
+          --query "Environment.Variables.$KEY" --output text 2>&1) || true
+    case "$V" in
+      ""|None) V="(not set)" ;;
+      *Error*|*error*) V="(could not read: $V)" ;;
+    esac
+    printf '   %-26s %-24s %s\n' "$FN" "$KEY" "$V"
+  done
+done
+echo
+
+echo "== 5. Can GitHub Actions do the write, so a terminal step is not needed?"
+echo "   Simulating on relayshield-github-deploy, the role Actions assumes."
+ROLE_ARN="arn:aws:iam::${ACCOUNT}:role/relayshield-github-deploy"
+FN_ARN="arn:aws:lambda:${REGION}:${ACCOUNT}:function:${FUNC}"
+SIM=$(aws_ iam simulate-principal-policy \
+        --policy-source-arn "$ROLE_ARN" \
+        --action-names lambda:GetFunctionConfiguration lambda:UpdateFunctionConfiguration \
+        --resource-arns "$FN_ARN" \
+        --query 'EvaluationResults[].[EvalActionName,EvalDecision]' \
+        --output text 2>&1) || true
+case "$SIM" in
+  *Error*|*error*|*Denied*Access*) : ;;
+esac
+if printf '%s' "$SIM" | grep -qi "error"; then
+  echo "   could not simulate, verbatim:"
+  echo "$SIM"
+  echo "   This says nothing about the role. It says this identity may not"
+  echo "   call iam:SimulatePrincipalPolicy."
+else
+  printf '%s\n' "$SIM" | sed 's/^/   /'
+  echo "   allowed on BOTH means the env write can run in Actions and you"
+  echo "   never paste it. implicitDeny on either means it stays a terminal"
+  echo "   command until that grant is added."
+fi
+echo
+
 cat <<'GUIDE'
 == HOW TO READ THIS
 
-Compare section 1 against the newest block in section 2 or 3 that is NOT the
-one just written.
+Section 1 is the block as it stands. Compare it against section 4 first,
+because that is the route most likely to answer.
 
-  Section 1 holds FEWER keys than the earlier block
-      Variables were deleted. Every key in the earlier block that is missing
-      from section 1 has to go back, in ONE update-function-configuration
-      call, because the API replaces rather than merges.
+  SECTION 3 SHOWING {} IS NOT AN EMPTY RESULT.
+      CloudTrail deliberately OMITS Lambda environment variables from
+      requestParameters, because they routinely carry secrets. So an
+      UpdateFunctionConfiguration event proves a config write HAPPENED and
+      its timestamp, and can never carry the values. Do not read {} as
+      "nothing was set".
 
-  Section 1 holds the same keys
-      Nothing was lost. Only the VALUE of the key that was set needs checking.
+  SECTION 4 CARRIES A PRODUCT CODE
+      That is the value. It belongs in the block alongside whatever else
+      section 1 should hold, in ONE call, because the API replaces.
 
-  Sections 2 and 3 are both empty
-      AWS cannot tell us what was there. The product codes are readable from
-      the Marketplace listings instead: each SaaSProduct entity's product code
-      is what ResolveCustomer returns for a subscriber to it, and the Bundle D
-      and Bundle A entity ids are prod-kkvurtspreofy and prod-f5qkfsxlxs4qg.
-      Do NOT guess a value into that block: a wrong product code matches no
-      key row and fails silently, which is the state this script exists to
-      detect.
+  SECTION 4 SAYS (not set) EVERYWHERE
+      Then no function carries it and the code was never configured, which
+      also means the emptied block deleted nothing. Bundle D fulfillment
+      resolves its product from ResolveCustomer on the redirect path and
+      was already blind on the SNS and scan paths. That is a finding in its
+      own right, not a non-answer.
+
+  NEVER GUESS A PRODUCT CODE.
+      A wrong one matches no key row, raises nothing, and reports success.
+      The authoritative value is what ResolveCustomer returns for a
+      subscriber, and it is visible in the Marketplace console against
+      prod-kkvurtspreofy (Bundle D) and prod-f5qkfsxlxs4qg (Bundle A).
 GUIDE

@@ -38,6 +38,7 @@ which is operator-side and once, because a role cannot widen its own permissions
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -219,6 +220,102 @@ def assert_account() -> None:
             "       SUCCEEDS and creates a product nothing can see.")
 
 
+MEDIA_KEY = re.compile(r"(Logo|Media|Image|Video|Thumbnail|Screenshot)Url$")
+
+
+def media_urls(node, path=""):
+    """Every URL AWS will try to FETCH, with the key path that named it.
+
+    A change set carries plenty of URLs AWS never dereferences -- the base URL
+    in usage instructions, support links, documentation. Only the media fields
+    are fetched, and only those can fail preparation.
+    """
+    out = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            here = f"{path}.{k}" if path else k
+            if isinstance(v, str) and MEDIA_KEY.search(k) and v.startswith("http"):
+                out.append((here, v))
+            else:
+                out.extend(media_urls(v, here))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            out.extend(media_urls(v, f"{path}[{i}]"))
+    elif isinstance(node, str) and path.endswith("Detail"):
+        # Change details arrive as JSON-encoded strings in some exports.
+        try:
+            out.extend(media_urls(json.loads(node), path))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return out
+
+
+def probe_media(url: str, timeout: float = 15.0):
+    """(verdict, detail). UNAMBIGUOUS failures only may block.
+
+    403 and 404 both mean "AWS will not be able to fetch this": a public S3
+    bucket with no ListBucket answers 403 for an object that does not exist
+    rather than 404, so the two are one finding, not two. Everything else --
+    a timeout, a refused connection, a 5xx, a blocked egress policy -- means
+    THIS PROBE COULD NOT TELL, and a probe that cannot tell has no standing
+    to stop the work.
+    """
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, method="HEAD")
+    req.add_header("User-Agent", "Mozilla/5.0 (RelayShield preflight)")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return "OK", f"HTTP {resp.status}"
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 404):
+            return "MISSING", f"HTTP {exc.code}"
+        return "UNKNOWN", f"HTTP {exc.code}"
+    except Exception as exc:
+        return "UNKNOWN", type(exc).__name__
+
+
+def check_media(doc: dict, probe=probe_media) -> None:
+    """Refuse a change set whose media AWS cannot fetch.
+
+    WHY THIS EXISTS. On 2026-09-18 change set de0zvpnvpcq3olta3y7kpx4p2 was
+    submitted, ran for fifteen seconds and came back FAILED:
+
+        INVALID_MEDIA_LOCATION Media location not accessible:
+        .../bundle_b/relayshield_logo_bundle_b.png
+
+    The URL was produced by substituting bundle_a -> bundle_b in a path copied
+    out of Bundle A's accepted change set. The SHAPE was right and the object
+    had never been uploaded, so six guards on the document all passed. A field
+    whose value is an EXTERNAL RESOURCE is not validated by validating the
+    string, and the cheapest place to learn that is here rather than from AWS.
+    """
+    found = media_urls(doc)
+    if not found:
+        return
+    print("\nmedia preflight:")
+    bad = []
+    for path, url in found:
+        verdict, detail = probe(url)
+        print(f"  {verdict:<8} {detail:<10} {path} = {url}")
+        if verdict == "MISSING":
+            bad.append((path, url, detail))
+        elif verdict == "UNKNOWN":
+            print("           ^ this probe could not tell. Not blocking; AWS may "
+                  "still refuse it.")
+    if bad:
+        lines = "\n".join(f"    {p} = {u}  ({d})" for p, u, d in bad)
+        raise SystemExit(
+            "\nREFUSED: media AWS cannot fetch. Change set preparation would "
+            "FAIL on\n         INVALID_MEDIA_LOCATION, which is what happened on "
+            "2026-09-18.\n\n" + lines + "\n\n"
+            "         A public S3 object that was never uploaded answers 403, not\n"
+            "         404, so 403 here means absent rather than forbidden. Upload\n"
+            "         the object, or point the field at one that already returns\n"
+            "         200 -- Bundle A's logo is the RelayShield shield mark with no\n"
+            "         bundle-specific text in it.\n")
+
+
 def submit(doc: dict, changes: list, name: str) -> int:
     import boto3
     from botocore.exceptions import ClientError
@@ -294,6 +391,11 @@ def main() -> int:
 
     print(f"catalog       : {doc['Catalog']}")
     summarise(changes)
+
+    # BEFORE the dry-run return, deliberately: a dry run that skips the one
+    # check AWS would have failed on is checking a different document from the
+    # one that ships, which is the family of defect this repo keeps paying for.
+    check_media(doc)
 
     if not args.apply:
         print("\nDRY RUN. Nothing was sent. Add --apply --confirm "

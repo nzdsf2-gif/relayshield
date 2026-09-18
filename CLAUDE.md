@@ -6329,7 +6329,7 @@ was not at the gateway edge but in our own toolbox.
 `.github/workflows/marketplace_changeset.yml` because Actions holds the identity
 `StartChangeSet` is called by. **A second workflow rather than a mode on the first**: the
 Bundle D one reads the live entity, round-trips every field it is not changing, and
-requires the product code typed by hand, and all three are correct for MODIFYING a
+requires the ENTITY ID typed by hand, and all three are correct for MODIFYING a
 published listing and meaningless for creating one. Folding them together means a mode in
 which every one of those guards is skipped, which is the guard that gets skipped by
 accident.
@@ -6576,3 +6576,84 @@ blocks, which this incident never touched. Section 4 reads exactly those keys, b
 rather than dumping the block. **When a value is gone from one place, ask which other
 component was configured with the same value** -- that is cheaper than any forensic route
 and it was available before CloudTrail was ever queried.
+
+
+## AN ENTITY ID IS NOT A PRODUCT CODE, AND MY OWN TOOL PRINTED THAT IT WAS
+
+**2026-09-18, asked as "You need to tell me what Product Code to enter. Running GH Action in
+Step 5 doesn't make it obvious."** He is right twice: the value was not obvious, and the
+answer the repo had written down for it was WRONG.
+
+`tools/marketplace_submit_changeset.py` printed, on every successful submission:
+
+    WHEN IT SUCCEEDS it returns the new entity id. That id is the product
+    code the fulfillment Lambda needs as BUNDLE_B_PRODUCT_CODE
+
+`bundle_b_launch_runbook.md` STEP 5 said the same in four words -- *"That id is the product
+code."* -- and CLAUDE.md called `marketplace_dimension.yml`'s `confirm_entity` input "the
+product code typed by hand" when that input takes `prod-kkvurtspreofy`.
+
+**THEY ARE DIFFERENT NAMESPACES, AND THE EVIDENCE WAS IN THIS REPO THE WHOLE TIME.**
+`docs.aws.amazon.com` returns 000 from the container, so this was settled by grepping our
+own artefacts rather than by recalling a docs page:
+
+    entity id     prod-kkvurtspreofy          Catalog API identifier
+    product code  46y72j0d99w7lyqkiqrakpc5k   TODO.md:1707, "set aws_product_code"
+    product code  5s4a96a1ui1a5efrom6udnm2g   relayshield_aws_marketplace.py:22
+
+The entity id is what `StartChangeSet` returns and what the test-offer and go-public change
+sets take as `product_id`. **The PRODUCT CODE is what `ResolveCustomer` returns and what
+`GetEntitlements(ProductCode=...)` and `BatchMeterUsage` take**, and it is the value
+`BUNDLE_B_PRODUCT_CODE` needs.
+
+**SO THE ENTITY ID IN THAT FIELD IS STRICTLY WORSE THAN THE GIT SHA THAT WAS ACTUALLY
+PASTED.** `_product_code_filter()` would match no key row, `_get_entitlement` would query
+the wrong product, nothing raises, and the fulfillment path reports success -- the exact
+silent-wrong-answer shape the diagnostic was built to catch. A git SHA at least looks wrong.
+
+### THE SHAPES COLLIDE, WHICH IS WHY "IT LOOKS LIKE A PRODUCT CODE" PROVES NOTHING
+
+`9hxvi0lkd62on8uhb1iv3yfbc` is a CHANGE SET id, from `TODO.md`. Same 25 lowercase
+alphanumerics as both real product codes. **Three different identifiers, two of them
+indistinguishable by shape**, so anything reporting a candidate labels it with the key path
+it came from rather than the pattern it matched.
+
+### THE FIX IS A READ, BECAUSE THE MISSING STEP WAS A READ
+
+Turning "create the product" into a click without giving the reader a way to read its RESULT
+back is half a step, and that is precisely what he reported. `tools/marketplace_read_product.py`
+plus `.github/workflows/marketplace_read_product.yml` are STEP 5b: `DescribeChangeSet`, then
+`DescribeEntity` on the id it returns, then any product-code-shaped value with its key path.
+**Read only, no apply mode and no confirmation phrase, deliberately** -- it is the thing you
+re-run every few minutes while AWS is still APPLYING, and a workflow that cannot be talked
+into writing is one nobody hesitates to re-run.
+
+**Whether `DescribeEntity` carries the product code at all is UNVERIFIED and is labelled that
+way in the tool.** The only DescribeEntity capture in this repo is of an Offer, not a
+SaaSProduct. So the tool REPORTS what came back and, when nothing matches, says that is a
+finding about the API rather than about the product, and names the authoritative read:
+the Marketplace Management Portal product page. The code is also the suffix of the SNS topic
+ARN AWS creates for a listing, which `relayshield_aws_marketplace.py:23` records.
+
+`tools/lambda_env_merge.py` now refuses a `prod-` value for any `*_PRODUCT_CODE` key, next to
+the git-SHA refusal, and the refusal names the read that produces the right value rather than
+just saying no.
+
+### TWO THINGS THE PROOF RUNS FOUND THAT READING WOULD NOT HAVE
+
+**A guard I wrote could never fire.** `candidates()` excluded `prod-` ids with its own rule;
+deleting that rule changed nothing, because an entity id is hyphenated and the shape pattern
+allows no hyphen. **Decoration reads as protection.** It is gone, and the test asserts the
+exclusion as a property of the shape pattern, which is where it actually lives.
+
+**And the FAILED branch told the reader to wait.** A `FAILED` change set printed *"NOT
+SUCCEEDED YET ... re-run this in a few minutes"*, which is correct for `PREPARING` and
+`APPLYING` and is advice to wait forever for a change set that is finished and dead. Two
+statuses, one message, and only running it shows that. `FAILED` now says nothing was created
+and points at the error lines.
+
+**THE RULE, and it is the measurement-tool rule pointed at advice rather than at numbers: a
+value a tool tells you to go and paste somewhere is as consequential as a number it prints.**
+Both get acted on without re-derivation. Read it out of the code or the artefact that defines
+it -- `grep` found both real product codes in this repo in one command -- and never out of a
+sentence a previous session wrote.

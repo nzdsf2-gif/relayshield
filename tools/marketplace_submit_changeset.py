@@ -244,9 +244,15 @@ def submit(doc: dict, changes: list, name: str) -> int:
     print("\nAWS reviews this asynchronously. Watch it with:")
     print(f"  AWS_PROFILE=relayshield aws marketplace-catalog describe-change-set \\")
     print(f"    --catalog {CATALOG} --change-set-id {resp.get('ChangeSetId')} --no-cli-pager")
-    print("\nWHEN IT SUCCEEDS it returns the new entity id. That id is the product")
-    print("code the fulfillment Lambda needs as BUNDLE_B_PRODUCT_CODE, and until it")
-    print("is set every Bundle B branch in the code stays inert by construction.")
+    print("\nWHEN IT SUCCEEDS it returns the new ENTITY ID (prod-...). Read it, and")
+    print("the product code, with:")
+    print(f"  python3 tools/marketplace_read_product.py --change-set-id {resp.get('ChangeSetId')}")
+    print("\nTHE ENTITY ID IS NOT THE PRODUCT CODE. This line used to say it was, and")
+    print("that was wrong. The entity id is the Catalog API identifier and is what the")
+    print("test-offer and go-public change sets take as --product-id. The PRODUCT CODE")
+    print("is what ResolveCustomer returns and what GetEntitlements and BatchMeterUsage")
+    print("take, and it is the value BUNDLE_B_PRODUCT_CODE needs. Setting the entity id")
+    print("there would match no key row, raise nothing, and report success.")
     return 0
 
 

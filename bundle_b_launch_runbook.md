@@ -29,7 +29,14 @@ AWS assigns the id.
 The artefact was real, every test passed, and the submission had no door. That is "a
 route added to the handler's dispatch table is not a route", one layer out.
 
-**Built this session:** `tools/marketplace_submit_changeset.py`,
+**Added 2026-09-18, after "Running GH Action in Step 5 doesn't make it obvious" what to
+type into step 6:** STEP 5b. Turning a step into a click without giving the reader a way
+to read its RESULT back is half a step. `tools/marketplace_read_product.py` and
+`.github/workflows/marketplace_read_product.yml` are that read -- and writing them found
+that this runbook, `tools/marketplace_submit_changeset.py` and CLAUDE.md all said the
+entity id IS the product code. It is not. See STEP 5b.
+
+**Built 2026-09-17:** `tools/marketplace_submit_changeset.py`,
 `.github/workflows/marketplace_changeset.yml`, `aws_marketplace/bundle_b_test_offer.json`,
 `aws_marketplace/bundle_b_go_public.json`, the Bundle B gating in `relayshield_api.py` and
 `relayshield_bundle_fulfillment.py`, and 27 tests. Six defects were reintroduced to prove
@@ -49,6 +56,7 @@ was left in his terminal was there because nobody had moved it.
 | 1 | Catalog grant | **ANDREW, TERMINAL** | the only one, and it cannot be automated |
 | 4 | Dry run the change set | ANDREW CLICKS | Actions, Marketplace Change Set |
 | 5 | Create the product | ANDREW CLICKS | same workflow, `apply` |
+| 5b | **Read the product code back** | ANDREW CLICKS | Actions, Read a Marketplace product |
 | 6 | Set `BUNDLE_B_PRODUCT_CODE` | ANDREW CLICKS | Actions, Set one Lambda env var |
 | 7 | Create the test offer | ANDREW CLICKS | Marketplace Change Set, `product_id` filled |
 | 8 | E2E subscription | **ANDREW, BROWSER** | a real subscription is the point of it |
@@ -184,16 +192,41 @@ STOP IF: `AccessDeniedException` -- step 1 did not take.
 Same workflow, `mode: apply`, `confirm: CREATE-NEW-PRODUCT` typed by hand.
 
 EXPECT: `SUBMITTED` plus a `ChangeSetId`. AWS reviews asynchronously, so the product does
-not exist the moment this returns. Watch it:
+not exist the moment this returns. Copy the `ChangeSetId` and go to STEP 5b.
+STOP IF: `AccessDeniedException` -- step 1 did not take.
 
-```zsh
-read -r "CSID?Paste the ChangeSetId, then press Enter: "
-AWS_PROFILE=relayshield aws marketplace-catalog describe-change-set \
-  --catalog AWSMarketplace --change-set-id "$CSID" --no-cli-pager
-```
-EXPECT: `Status` moves `PREPARING` -> `APPLYING` -> `SUCCEEDED`, and the entity id
-appears. **That id is the product code.** Save it.
-STOP IF: `FAILED` -- the `ErrorDetailList` names the field. Send it to me.
+## STEP 5b -- ANDREW CLICKS THIS. Read the result. This is the step that tells you what to type next.
+
+Actions, **Read a Marketplace product (read only)**, Run workflow, `change_set_id` = the id
+from STEP 5. No apply mode, no confirmation phrase, so re-run it as often as you like while
+AWS is still working.
+
+EXPECT: `Status : SUCCEEDED`, a `CreateProduct: prod-...` line, and a
+**PRODUCT CODE CANDIDATES** section.
+STOP IF: `Status : PREPARING` or `APPLYING` -- AWS is still working. Wait a few minutes and
+re-run. The product does not exist until SUCCEEDED, so there is nothing to read yet.
+STOP IF: `Status : FAILED` -- the error lines name the field. Send them to me.
+
+**THE ENTITY ID IS NOT THE PRODUCT CODE, AND UNTIL 2026-09-18 THIS RUNBOOK SAID IT WAS.**
+That was mine and it was wrong. They are different namespaces, and the evidence is in this
+repo rather than in a doc I remembered:
+
+| | Example | What takes it |
+|---|---|---|
+| entity id | `prod-kkvurtspreofy` | Catalog API. STEP 7 and STEP 9's `product_id` |
+| product code | `46y72j0d99w7lyqkiqrakpc5k` | `ResolveCustomer`, `GetEntitlements`, `BatchMeterUsage`. **`BUNDLE_B_PRODUCT_CODE`** |
+
+(`TODO.md:1707` and `relayshield_aws_marketplace.py:22` each record a real product code.
+Note a change set id is the same 25-character shape, so read the label, never the shape.)
+
+**If the candidates section says NONE**, that is a fact about `DescribeEntity` and not about
+the product -- whether it carries the code is UNVERIFIED, because `docs.aws.amazon.com` is
+egress-blocked from my container and the only capture in this repo is of an Offer. The
+authoritative read is then one browser page:
+
+**ANDREW CLICKS THIS:** <https://aws.amazon.com/marketplace/management/products/>, open the
+Bundle B product, and read the product code off its page. It also appears at the end of the
+SNS topic ARN AWS creates for the listing.
 
 ## STEP 6 -- ANDREW CLICKS THIS. Set the product code. No terminal, no paste.
 
@@ -204,7 +237,8 @@ block on screen. The fix is not a more careful command.
 
 `tools/lambda_env_merge.py` GETs the block, merges the one key, and **refuses to write a
 result that drops a key**. It also refuses a 40-character hex value for anything ending
-`_PRODUCT_CODE`, because that is a git commit SHA and it is exactly what got pasted.
+`_PRODUCT_CODE`, because that is a git commit SHA and it is exactly what got pasted, and
+a `prod-...` entity id, because this runbook told you to paste one of those until 5b existed.
 
 Actions, **Set one Lambda env var (merge, never replace)**, Run workflow:
 
@@ -212,7 +246,7 @@ Actions, **Set one Lambda env var (merge, never replace)**, Run workflow:
 |---|---|
 | function | `relayshield-bundle-fulfillment` |
 | key | `BUNDLE_B_PRODUCT_CODE` |
-| value | the product id from STEP 5, and nothing else |
+| value | the **product code** from STEP 5b. Not the `prod-...` entity id |
 | mode | `plan` first |
 
 EXPECT: a `before:`, an `after:` and a `preserved:` line. Non-product values print as
@@ -222,6 +256,8 @@ log anyone with repo read access can fetch.
 `mode: apply`.
 STOP IF: `REFUSED: ... git commit SHA` -- the value is not a product code and STEP 5 has
 not produced one yet.
+STOP IF: `REFUSED: ... Catalog API ENTITY ID` -- that is the `prod-...` id, which STEP 7 and
+STEP 9 want and this field does not. Go back to STEP 5b for the product code.
 STOP IF: `AccessDenied` on `UpdateFunctionConfiguration` -- the deploy role lacks that
 action. Section 5 of `tools/diagnose_bundle_fulfillment_env.sh` says so in advance; tell
 me and I will send the one-line grant.

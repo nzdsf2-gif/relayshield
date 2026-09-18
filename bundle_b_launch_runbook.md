@@ -37,7 +37,35 @@ the guards fire.
 
 ---
 
-## STEP 1 -- ANDREW RUNS THIS. The catalog grant, once.
+## WHERE YOU ARE NOW, 2026-09-18. STEPS 2 AND 3 ARE ALREADY DONE.
+
+You ran the merge and the push on 2026-09-17/18. `origin/main` is at `622fa03` and
+deploy_lambdas run **156 DEPLOYED BOTH FUNCTIONS** -- the red is the import probe being
+refused `lambda:InvokeFunction`, which the run's own annotation says in those words.
+**Nothing is broken and nothing needs rolling back.**
+
+What is outstanding from the first three steps is the grant that should have run between
+them, and it is one command now that your clone carries the ARN:
+
+```zsh
+cd ~/dev/relayshield
+git --no-pager log --oneline -1
+sh tools/apply_deploy_invoke_policy.sh
+```
+EXPECT: `622fa03` on the first line, then account `239677749008`, the
+`relayshield-bundle-fulfillment` ARN added, and `allowed` from
+`simulate-principal-policy`.
+STOP IF: the first line is NOT `622fa03` -- the merge is not in your clone and the JSON
+has no ARN to push. Run STEP 2 below first.
+STOP IF: `REFUSING: expected 239677749008` -- re-run with `AWS_PROFILE=relayshield`.
+
+**There is nothing to re-deploy after it.** The code is live; the next deploy that
+touches either file probes cleanly. **Then go to STEP 1**, the catalog grant, which is
+the one that actually blocks Bundle B.
+
+---
+
+## STEP 1 -- ANDREW RUNS THIS. ANDREW RUNS THIS. The catalog grant, once.
 
 ```zsh
 cd ~/dev/relayshield
@@ -49,22 +77,18 @@ ROLE. The last lines should show `allowed` for `StartChangeSet` and `DescribeEnt
 STOP IF: `REFUSING: expected 239677749008` -- you are on the pre-audit profile. Re-run
 with `AWS_PROFILE=relayshield`.
 
-## STEP 2 -- ANDREW RUNS THIS. The deploy-invoke grant, because I added an ARN.
+## STEP 2 -- ANDREW RUNS THIS. Merge, and grant the deploy role the invoke it needs.
 
-`relayshield-bundle-fulfillment` is now in `LAMBDA_MAP`, and `deploy_lambdas.yml` invokes
-what it deploys. Without this the first deploy touching that file goes RED on the import
-probe while the code is live -- run 134's shape, for the fourth time.
+**THE ORDER OF THESE TWO IS LOAD-BEARING AND THE FIRST VERSION OF THIS RUNBOOK HAD IT
+BACKWARDS, WHICH COST A RED RUN ON 2026-09-18.** `apply_deploy_invoke_policy.sh` pushes
+`iam_github_deploy_invoke.json` **out of your clone** to AWS, and that file gains the
+`relayshield-bundle-fulfillment` ARN only through the merge. Applying it first sends AWS
+a policy without the new ARN, so the deploy that follows goes red on the import probe --
+run 134's shape, for the fourth time, guaranteed by the instruction rather than by luck.
 
-```zsh
-cd ~/dev/relayshield
-sh tools/apply_deploy_invoke_policy.sh
-```
-EXPECT: the new ARN added, then `simulate-principal-policy` showing `allowed`.
-
-## STEP 3 -- ANDREW RUNS THIS. Merge and push, which deploys the code.
-
-The Bundle B code is INERT until `BUNDLE_B_PRODUCT_CODE` is set, by construction, so it
-is safe to ship before the product exists. That is the whole reason it can go first.
+So: merge, which puts the ARN in the file, and grant from the same block on the same
+success. The push is STEP 3, deliberately, so the grant is live in AWS before any deploy
+fires.
 
 ```zsh
 cd ~/dev/relayshield
@@ -73,12 +97,30 @@ git --no-pager fetch origin main claude/tender-planck-cb2qrx
 git --no-pager log --oneline origin/main..main
 git rm -rf --cached -q --ignore-unmatch ansible-relayshield relayshield-snap
 git stash push --include-untracked -m "pre-merge untracked"
-git -c pull.rebase=false merge --no-edit origin/claude/tender-planck-cb2qrx && git push origin main
+git -c pull.rebase=false merge --no-edit origin/claude/tender-planck-cb2qrx && sh tools/apply_deploy_invoke_policy.sh
 ```
-EXPECT: the log line prints nothing, then a fast-forward and a push.
-STOP IF: `CONFLICT`. The push is skipped by design. CLAUDE.md alone is expected and is
-`git checkout --merge CLAUDE.md`, keep both sides, `git commit --no-edit`. A `.py` or a
-workflow is two sessions in one file -- send me the filename.
+EXPECT: the log line prints nothing, then a fast-forward, then the grant script printing
+account `239677749008`, the ARN added, and `simulate-principal-policy` showing `allowed`.
+STOP IF: `CONFLICT`. The grant is skipped by design, because a conflicted tree has no
+reliable copy of that JSON. CLAUDE.md alone is expected and is `git checkout --merge
+CLAUDE.md`, keep both sides, `git commit --no-edit`, then re-run the grant on its own. A
+`.py` or a workflow is two sessions in one file -- send me the filename.
+STOP IF: `REFUSING: expected 239677749008` -- re-run with `AWS_PROFILE=relayshield`.
+
+## STEP 3 -- ANDREW RUNS THIS. Push, which deploys the code.
+
+The Bundle B code is INERT until `BUNDLE_B_PRODUCT_CODE` is set, by construction, so it
+is safe to ship before the product exists. That is the whole reason it can go first.
+
+```zsh
+cd ~/dev/relayshield
+git push origin main
+```
+EXPECT: a push, then a green `deploy_lambdas` run in Actions.
+STOP IF: the run is RED on `WAS DEPLOYED. Only the probe was denied` -- the code IS live
+and nothing needs rolling back. It means step 2's grant did not run or did not take. Run
+`sh tools/apply_deploy_invoke_policy.sh` on its own; the next deploy probes cleanly and
+there is nothing to re-deploy.
 
 **This deploy ships `relayshield-api` AND `relayshield-bundle-fulfillment`.** The second
 one has never had a deploy path before today; its drift read this morning came back

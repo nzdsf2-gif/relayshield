@@ -6416,3 +6416,57 @@ whole variables block. Setting `BUNDLE_B_PRODUCT_CODE` with a bare command **del
 D stop resolving with no error until a customer subscribes. The runbook reads the existing
 block first. It is the change-set lesson in a different API: **it replaces, it does not
 merge.**
+
+## RUN 134'S SHAPE FOR THE FIFTH TIME, AND THIS ONE MY OWN RUNBOOK GUARANTEED
+
+**2026-09-18, reported as "Bundle B deploy lambda in step 4 failed".** Read from the run
+rather than from the screenshot, which is the half that settles it:
+
+    ✅ relayshield-agentic-api deployed          imports cleanly
+    ✅ relayshield-api deployed                  imports cleanly
+    ✅ relayshield-bundle-fulfillment deployed   probe DENIED
+
+    AccessDeniedException ... assumed-role/relayshield-github-deploy/GitHubActions
+    is not authorized to perform: lambda:InvokeFunction on
+    function:relayshield-bundle-fulfillment
+
+**All three functions are live. Nothing needed rolling back.** The error message written
+into the deployer after run 134 said so in those words, unprompted, which is that
+message earning its place for the fourth time.
+
+**THE NEW PART, AND IT IS WORSE THAN THE DEFECT: MY RUNBOOK ORDERED THE REMEDY SO IT
+COULD NOT WORK.** `bundle_b_launch_runbook.md` shipped with
+
+    STEP 2  sh tools/apply_deploy_invoke_policy.sh
+    STEP 3  merge and push
+
+and **that script pushes `iam_github_deploy_invoke.json` out of the CLONE**, which gains
+the `relayshield-bundle-fulfillment` ARN only through the merge in step 3. So step 2 sends
+AWS a policy without the new ARN and step 3 then deploys into a role that still cannot
+invoke it. **The red run was not bad luck, it was arithmetic**, exactly like the
+`git add -A` loop: the instruction re-created the condition that makes the next step fail.
+
+And step 2 said in its own text *"without this the first deploy goes RED on the import
+probe -- run 134's shape, for the fourth time"*. **I named the failure, wrote the remedy,
+and ordered the two so the remedy could not reach it**, which is rule B ("predicting a
+failure and shipping it anyway is worse than not predicting it") in its most expensive
+form so far.
+
+**THE ORDER, AND IT IS THREE PHASES RATHER THAN TWO.** The merge is what puts the ARN in
+the file, the grant is what puts it in AWS, and the push is what fires the deploy:
+
+    merge locally   -> the JSON now carries the ARN
+    apply the grant -> AWS now carries it
+    push            -> the deploy probes cleanly
+
+The runbook now chains the first two on one `&&` so a CONFLICT skips the grant rather
+than applying a half-merged file, and the push is its own step. **A grant that reads a
+repo file is downstream of the merge, always** -- this is the repo-half/AWS-half split
+that `apply_deploy_invoke_policy.sh` was written for, with the third term nobody had
+written down: the repo half is not in the clone until the merge lands.
+
+**Nothing here is testable from the container and pretending otherwise would be worse
+than saying so.** `check_deploy_invoke_policy.py` already keeps `LAMBDA_MAP` and the JSON
+honest and runs inside `test_workflows_parse.py`; whether AWS has the policy is
+unknowable from here by construction. **The guard is the ordering in the runbook and this
+section, and that is the honest scope.**

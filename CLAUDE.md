@@ -6782,3 +6782,38 @@ directory record. The remote system's failure is slow, asynchronous and arrives 
 yours is one HEAD request. This repo already watches the HF Space's own MCP URL for exactly that
 reason -- **advertising a URL that nothing checks is the quiet alarm** -- and a change set is the
 same thing with a review cycle attached.
+
+## THE VALUE THE READER NEEDS WAS IN A LOG. THE ONE ON SCREEN WAS A GIT SHA, TWICE.
+
+**2026-09-18, asked as "Is this the new ChangeSetid from Step 5 which i just reran:
+a7067bd2c5e70b0318c9b7f327ddeb13568b778c".** No -- that is this session's own runbook
+commit. A ChangeSetId is 25 lowercase alphanumerics.
+
+**SECOND TIME IN TWO DAYS, AND THE MECHANISM IS THE SAME BOTH TIMES.** A git SHA was
+pasted into `BUNDLE_B_PRODUCT_CODE` on 2026-09-18 morning, and now offered as a
+ChangeSetId. **GitHub prints the commit SHA in the Actions run page HEADER**, large and
+copyable; the ChangeSetId is inside the job's output, behind an expandable step. So the
+plausible-looking value is the one on screen and the correct one is buried. **That is not a
+reader error, it is a layout, and a procedure that says "copy the ChangeSetId" without
+saying where it is loses to the layout every time.**
+
+**THE FIX IS THE REFUSAL, NOT THE INSTRUCTION.** `marketplace_read_product.py` now blocks a
+40-hex value and its message says WHERE the real one is -- open the run, expand the Apply
+step, the line reading `ChangeSetId  : ...`. `lambda_env_merge.py` already carried the
+same refusal for the product code. Anything else unexpected WARNS and continues: a
+read-only tool has no standing to block on a shape it merely does not recognise.
+
+**And the value was readable from here the whole time.** `actions_list` plus
+`get_job_logs` returned it in two calls, along with which of the two runs was the dry run
+and which the apply. **Before asking for a value, ask which of this session's tools already
+reaches it** -- written down one turn earlier and then not applied, which is why the
+refusal is code rather than another sentence.
+
+### THE RE-RUN WORKED, AND THE PREFLIGHT PROVED ITSELF ON THE REAL DOCUMENT
+
+    run #5  19:06:54Z   dry run   media preflight: OK HTTP 200
+    run #6  19:08:52Z   apply     SUBMITTED  ChangeSetId 17or75a96xofiu7gic33wjrm6
+
+The logo check that FAILED the first change set now passes in one second, in the dry run,
+before anything is spent. A guard written after a failure is worth having only if the next
+run exercises it, and this one did.

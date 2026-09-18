@@ -83,6 +83,42 @@ def candidates(doc):
     return out
 
 
+GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+CHANGE_SET = re.compile(r"^[a-z0-9]{20,30}$")
+ENTITY = re.compile(r"^prod-[a-z0-9]+$")
+
+
+def check_input_shapes(change_set_id, entity_id):
+    """Refuse a git commit SHA, warn on anything else that looks wrong.
+
+    A 40-hex string has been offered as a marketplace identifier twice, and
+    both times for the same reason: GitHub prints the commit SHA in the run
+    page header, while the ChangeSetId is only inside the job's output. So the
+    plausible-looking value is the one on screen and the right one is buried.
+
+    Only the git-SHA shape blocks, because it cannot be either identifier. A
+    value that is merely unexpected warns and continues: a probe that cannot
+    tell has no standing to stop a read-only tool.
+    """
+    if change_set_id and GIT_SHA.match(change_set_id):
+        raise SystemExit(
+            f"REFUSED: {change_set_id} is a 40-character git commit SHA, not a\n"
+            "ChangeSetId. GitHub shows the commit in the Actions run header; the\n"
+            "ChangeSetId is 25 lowercase alphanumerics and is printed by the apply\n"
+            "job itself, on the line reading 'ChangeSetId  : ...'. Open the run,\n"
+            "expand the Apply step, and copy it from there.")
+    if entity_id and GIT_SHA.match(entity_id):
+        raise SystemExit(
+            f"REFUSED: {entity_id} is a git commit SHA, not an entity id. An\n"
+            "entity id looks like prod-kkvurtspreofy.")
+    if change_set_id and not CHANGE_SET.match(change_set_id):
+        print(f"WARNING: {change_set_id!r} does not look like a ChangeSetId "
+              "(25 lowercase alphanumerics). Reading it anyway.")
+    if entity_id and not ENTITY.match(entity_id):
+        print(f"WARNING: {entity_id!r} does not look like an entity id "
+              "(prod-...). Reading it anyway.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--change-set-id", default="")
@@ -93,6 +129,8 @@ def main() -> int:
 
     if not args.change_set_id and not args.entity_id:
         raise SystemExit("ERROR: give --change-set-id or --entity-id.")
+
+    check_input_shapes(args.change_set_id, args.entity_id)
 
     try:
         import boto3

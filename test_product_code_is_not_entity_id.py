@@ -156,5 +156,74 @@ class NoArtefactSaysTheyAreTheSame(unittest.TestCase):
                          "one you re-run freely while AWS is still APPLYING")
 
 
+class AGitShaIsNeverAMarketplaceIdentifier(unittest.TestCase):
+    """Offered twice: once as the product code, once as the ChangeSetId.
+
+    Both times because GitHub prints the commit SHA in the Actions run header
+    while the value the reader needs is inside the job's output. The shape is
+    unambiguous -- 40 hex is neither a 25-character ChangeSetId nor a prod-
+    entity id -- so this one refuses rather than warns.
+    """
+
+    SHA = "a7067bd2c5e70b0318c9b7f327ddeb13568b778c"
+    REAL_CHANGE_SET = "17or75a96xofiu7gic33wjrm6"
+
+    def test_a_sha_as_a_change_set_id_is_refused(self):
+        with self.assertRaises(SystemExit) as ctx:
+            READ.check_input_shapes(self.SHA, "")
+        self.assertIn("git commit SHA", str(ctx.exception))
+        self.assertIn("ChangeSetId", str(ctx.exception))
+
+    def test_a_sha_as_an_entity_id_is_refused(self):
+        with self.assertRaises(SystemExit):
+            READ.check_input_shapes("", self.SHA)
+
+    def test_a_real_change_set_id_passes_silently(self):
+        import contextlib, io as _io
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            READ.check_input_shapes(self.REAL_CHANGE_SET, "")
+        self.assertEqual(buf.getvalue(), "",
+                         "a correct id must not be warned about")
+
+    def test_a_real_entity_id_passes_silently(self):
+        import contextlib, io as _io
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            for ident in ENTITY_IDS:
+                READ.check_input_shapes("", ident)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_an_unrecognised_value_warns_and_continues(self):
+        """A probe that cannot tell has no standing to stop a read-only tool."""
+        import contextlib, io as _io
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            READ.check_input_shapes("SOMETHING-ELSE", "")
+        self.assertIn("WARNING", buf.getvalue())
+
+    def test_the_refusal_runs_before_any_aws_call(self):
+        """It has to fire without credentials and without boto3, or the reader
+        gets an import error instead of the sentence naming their mistake."""
+        import ast
+        src = (ROOT / "tools" / "marketplace_read_product.py").read_text(encoding="utf-8")
+        main = next(n for n in ast.walk(ast.parse(src))
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        def index_of(pred):
+            for i, stmt in enumerate(main.body):
+                for sub in ast.walk(stmt):
+                    if pred(sub):
+                        return i
+            return None
+        check = index_of(lambda n: isinstance(n, ast.Call)
+                         and getattr(n.func, "id", "") == "check_input_shapes")
+        boto = index_of(lambda n: isinstance(n, ast.Import)
+                        and any(a.name == "boto3" for a in n.names))
+        self.assertIsNotNone(check, "check_input_shapes is not called at all")
+        self.assertIsNotNone(boto)
+        self.assertLess(check, boto,
+                        "the shape refusal must precede the boto3 import")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

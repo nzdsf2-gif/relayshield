@@ -206,7 +206,7 @@ EXPECT: `SUBMITTED` plus a `ChangeSetId`. AWS reviews asynchronously, so the pro
 not exist the moment this returns. Copy the `ChangeSetId` and go to STEP 5b.
 STOP IF: `AccessDeniedException` -- step 1 did not take.
 
-## STEP 5 FAILED ON 2026-09-18 AND HAS TO BE RE-RUN. READ THIS BEFORE ANYTHING ELSE.
+## STEP 5 FAILED ONCE ON 2026-09-18, WAS FIXED, AND WAS RE-RUN. THE LIVE CHANGE SET IS `17or75a96xofiu7gic33wjrm6`.
 
 Change set `de0zvpnvpcq3olta3y7kpx4p2` came back **FAILED**, so **no Bundle B product exists, no
 product code exists, and the Marketplace Management Portal correctly lists three SaaS products.**
@@ -226,6 +226,27 @@ again, which produces a NEW ChangeSetId for STEP 5b.
 
 **Nothing was created, so nothing needs undoing.** A failed change set leaves no entity.
 
+**RE-RUN, 2026-09-18 19:06 and 19:09 UTC, both green and read from the run logs rather than
+reported:**
+
+    run #5  19:06:54Z   Dry run: success    Apply: skipped
+    run #6  19:08:52Z   Dry run: skipped    Apply: success
+
+Both printed the new preflight block, which is the guard doing its job on the real document:
+
+    media preflight:
+      OK       HTTP 200   ChangeSet[1].DetailsDocument.LogoUrl = .../bundle_a/relayshield_logo_bundle_a.png
+
+**The apply submitted `17or75a96xofiu7gic33wjrm6`.** That is the id STEP 5b takes.
+`arn:aws:aws-marketplace:us-east-1:239677749008:AWSMarketplace/ChangeSet/17or75a96xofiu7gic33wjrm6`.
+
+**THE 40-HEX STRING ON THE RUN PAGE IS THE GIT COMMIT, NOT THE CHANGE SET.** GitHub prints
+`a7067bd2c5e70b0318c9b7f327ddeb13568b778c` in the run header because that is the commit the
+workflow ran; the ChangeSetId is 25 lowercase alphanumerics and is only in the job's output.
+Offered as a marketplace identifier twice now, once for the product code and once for this, and
+both times because the value the reader actually needed was buried in a log while a
+plausible-looking one was on screen.
+
 ## STEP 5b -- ANDREW CLICKS THIS. Read the result. This is the step that tells you what to type next.
 
 **THE MERGE IS A PREREQUISITE FOR THIS STEP AND I SHIPPED IT WITHOUT SAYING SO.** Reported as
@@ -235,13 +256,17 @@ dispatched from the Actions UI.** This file already records that edge from the M
 and I wrote a click against a workflow living on a branch anyway. Merge and push main first;
 the entry appears immediately after.
 
-Actions, **Read a Marketplace product (read only)**, Run workflow, `change_set_id` = the id
-from STEP 5. No apply mode, no confirmation phrase, so re-run it as often as you like while
-AWS is still working.
+Actions, **Read a Marketplace product (read only)**, Run workflow, `change_set_id` =
+
+    17or75a96xofiu7gic33wjrm6
+
+No apply mode, no confirmation phrase, so re-run it as often as you like while AWS is still
+working. **The workflow is on `origin/main` as of `a7067bd` and is in the sidebar now**, checked
+with `git ls-tree origin/main .github/workflows/` rather than assumed.
 
 **THE FIRST CHANGE SET, `de0zvpnvpcq3olta3y7kpx4p2`, FAILED** -- see the section above. It still
-proved STEP 1 took, because `StartChangeSet` returned rather than refusing. Use the ChangeSetId
-from the NEW apply run.
+proved STEP 1 took, because `StartChangeSet` returned rather than refusing. Do not read that one;
+read `17or75a96xofiu7gic33wjrm6`.
 
 **A GREEN `read` JOB DOES NOT MEAN A SUCCEEDED CHANGE SET.** The workflow succeeds whenever the
 read completes; the change set's own `Status` line is the answer. Read that line, not the job's

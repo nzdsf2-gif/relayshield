@@ -41,6 +41,25 @@ REGION = "us-east-1"
 # StartChangeSet and is never this shape.
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
+# AN ENTITY ID IS NOT A PRODUCT CODE, and until 2026-09-18 this repo's own submit
+# tool and the Bundle B runbook both said it was. Measured from our own artefacts,
+# because docs.aws.amazon.com is egress-blocked from the container:
+#
+#     entity id     prod-kkvurtspreofy          Catalog API identifier
+#     product code  46y72j0d99w7lyqkiqrakpc5k   TODO.md:1707
+#     product code  5s4a96a1ui1a5efrom6udnm2g   relayshield_aws_marketplace.py:22
+#
+# The product code is what ResolveCustomer returns and what GetEntitlements and
+# BatchMeterUsage take. An entity id in this field matches no key row, raises
+# nothing, and reports success -- strictly worse than the git SHA, because the
+# SHA at least looks wrong.
+ENTITY_ID = re.compile(r"^prod-[a-z0-9]+$")
+
+# Both observed codes are 25 lowercase alphanumerics. This WARNS rather than
+# refuses: one length seen twice is not a specification, and a tool that blocks
+# a correct value is worse than one that questions it.
+CODE_SHAPE = re.compile(r"^[a-z0-9]{20,30}$")
+
 
 class Refused(Exception):
     pass
@@ -73,6 +92,23 @@ def validate(key: str, value: str) -> None:
             "product is created. If the product does not exist yet, there is no code\n"
             "to set and this step is premature."
         )
+    if key.endswith("_PRODUCT_CODE") and ENTITY_ID.match(value):
+        raise Refused(
+            f"{key} was given {value!r}, which is a Catalog API ENTITY ID, not a\n"
+            "product code. They are different namespaces: the entity id is what\n"
+            "StartChangeSet returns and what the test-offer and go-public change\n"
+            "sets take; the product code is what ResolveCustomer returns and what\n"
+            "GetEntitlements and BatchMeterUsage take. Read the real code with:\n"
+            "    python3 tools/marketplace_read_product.py --entity-id " + value
+        )
+
+
+def shape_note(key: str, value: str) -> str:
+    if key.endswith("_PRODUCT_CODE") and not CODE_SHAPE.match(value):
+        return ("NOTE: both product codes recorded in this repo are 20-30 lowercase\n"
+                "      alphanumerics and this value is not. Not refused, because one\n"
+                "      observed shape is not a specification. Check it before apply.")
+    return ""
 
 
 def current(function: str) -> dict:
@@ -125,6 +161,9 @@ def main() -> int:
     print(f"after    : {json.dumps(redact(after), sort_keys=True)}")
     kept = sorted(set(before) - {args.key})
     print(f"preserved: {kept if kept else '(none -- the block held only this key)'}")
+    note = shape_note(args.key, args.value)
+    if note:
+        print(note)
 
     if not args.apply:
         print("\nPLAN ONLY. Nothing was written. Re-run with --apply.")

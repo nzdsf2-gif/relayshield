@@ -206,6 +206,26 @@ EXPECT: `SUBMITTED` plus a `ChangeSetId`. AWS reviews asynchronously, so the pro
 not exist the moment this returns. Copy the `ChangeSetId` and go to STEP 5b.
 STOP IF: `AccessDeniedException` -- step 1 did not take.
 
+## STEP 5 FAILED ON 2026-09-18 AND HAS TO BE RE-RUN. READ THIS BEFORE ANYTHING ELSE.
+
+Change set `de0zvpnvpcq3olta3y7kpx4p2` came back **FAILED**, so **no Bundle B product exists, no
+product code exists, and the Marketplace Management Portal correctly lists three SaaS products.**
+
+    INVALID_MEDIA_LOCATION Media location not accessible:
+    .../bundle_b/relayshield_logo_bundle_b.png
+
+**That object was never uploaded.** `bundle_a/relayshield_logo_bundle_a.png` returns 200 and the
+`bundle_b` path returns 403, which on a public S3 bucket means absent rather than forbidden. The
+change set now points at Bundle A's object -- the generic RelayShield shield mark, no
+bundle-specific text in it, checked by downloading it.
+
+**`tools/marketplace_submit_changeset.py` now HEADs every media URL before submitting**, so a dry
+run catches this in one second instead of AWS catching it in fifteen. **Re-run STEP 4 first**: the
+dry run prints a `media preflight:` block and `OK HTTP 200` is the line to look for. Then STEP 5
+again, which produces a NEW ChangeSetId for STEP 5b.
+
+**Nothing was created, so nothing needs undoing.** A failed change set leaves no entity.
+
 ## STEP 5b -- ANDREW CLICKS THIS. Read the result. This is the step that tells you what to type next.
 
 **THE MERGE IS A PREREQUISITE FOR THIS STEP AND I SHIPPED IT WITHOUT SAYING SO.** Reported as
@@ -219,9 +239,13 @@ Actions, **Read a Marketplace product (read only)**, Run workflow, `change_set_i
 from STEP 5. No apply mode, no confirmation phrase, so re-run it as often as you like while
 AWS is still working.
 
-**THE CHANGE SET SUBMITTED ON 2026-09-18 IS `de0zvpnvpcq3olta3y7kpx4p2`** (Marketplace Change
-Set run #4, Apply, green -- which also proves STEP 1 took, because `StartChangeSet` returned
-rather than refusing). Read out of the run log rather than asked for.
+**THE FIRST CHANGE SET, `de0zvpnvpcq3olta3y7kpx4p2`, FAILED** -- see the section above. It still
+proved STEP 1 took, because `StartChangeSet` returned rather than refusing. Use the ChangeSetId
+from the NEW apply run.
+
+**A GREEN `read` JOB DOES NOT MEAN A SUCCEEDED CHANGE SET.** The workflow succeeds whenever the
+read completes; the change set's own `Status` line is the answer. Read that line, not the job's
+tick.
 
 **AND DISREGARD THE LAST THREE LINES OF THAT RUN'S OUTPUT.** They say *"That id is the product
 code"*. It is not, and that text was corrected after the run executed. See the table below.

@@ -120,7 +120,7 @@ class TheDryRunRunsIt(unittest.TestCase):
     """A dry run that skips the one check AWS failed on is checking a different
     document from the one that ships."""
 
-    def test_check_media_runs_unconditionally_in_main(self):
+    def _assert_unconditional(self, func_name):
         """Asserted with ast, because the first version of this guard was a
         substring-index comparison and the mutation that moves the call INSIDE
         the dry-run branch preserves textual order. It passed on the defect.
@@ -138,13 +138,13 @@ class TheDryRunRunsIt(unittest.TestCase):
         top_level = [
             i for i, stmt in enumerate(main.body)
             if any(isinstance(sub, ast.Call)
-                   and getattr(sub.func, "id", "") == "check_media"
+                   and getattr(sub.func, "id", "") == func_name
                    for sub in ast.walk(stmt))
             and not isinstance(stmt, (ast.If, ast.Try, ast.For, ast.While))
         ]
         self.assertEqual(
             len(top_level), 1,
-            "check_media must be called exactly once, at the top level of "
+            f"{func_name} must be called exactly once, at the top level of "
             "main(). Nested in a branch it runs on some paths and not others, "
             "and the path it would skip is --apply.")
 
@@ -153,9 +153,78 @@ class TheDryRunRunsIt(unittest.TestCase):
                    and any(isinstance(sub, ast.Return) for sub in ast.walk(stmt))]
         self.assertTrue(returns, "main() has no conditional return to order against")
         self.assertLess(top_level[0], min(returns),
-                        "check_media must run before the first branch that can "
+                        f"{func_name} must run before the first branch that can "
                         "return, or a dry run checks a different document from "
                         "the one an apply sends")
+
+    def test_check_media_runs_unconditionally_in_main(self):
+        self._assert_unconditional("check_media")
+
+    def test_check_pricing_runs_unconditionally_in_main(self):
+        self._assert_unconditional("check_pricing")
+
+
+class ItBlocksADimensionWithNoPrice(unittest.TestCase):
+    """Change set 17or75a96xofiu7gic33wjrm6 passed the media preflight added
+    hours earlier and failed anyway:
+
+        INVALID_INPUT When adding dimensions for SaaS products, you must also
+        set pricing for usage dimensions.
+
+    Five changes where Bundle A's accepted set has thirteen. The pricing half
+    of the document was absent, so nothing that read the document could see it.
+    """
+
+    PRICED = {
+        "ChangeSet": [
+            {"ChangeType": "AddDimensions",
+             "DetailsDocument": [{"Key": "a_calls", "Types": ["ExternallyMetered"]},
+                                 {"Key": "bundle_access", "Types": ["Entitled"]}]},
+            {"ChangeType": "UpdatePricingTerms",
+             "DetailsDocument": {"Terms": [
+                 {"Type": "UsageBasedPricingTerm",
+                  "RateCards": [{"RateCard": [{"DimensionKey": "a_calls",
+                                               "Price": "0.10"}]}]},
+                 {"Type": "ConfigurableUpfrontPricingTerm",
+                  "RateCards": [{"RateCard": [{"DimensionKey": "bundle_access",
+                                               "Price": "100"}]}]}]}},
+        ]
+    }
+
+    def test_a_fully_priced_change_set_passes(self):
+        SUBMIT.check_pricing(self.PRICED)
+
+    def test_the_document_aws_refused_is_refused_here(self):
+        doc = {"ChangeSet": [self.PRICED["ChangeSet"][0]]}
+        with self.assertRaises(SystemExit) as ctx:
+            SUBMIT.check_pricing(doc)
+        self.assertIn("INVALID_INPUT", str(ctx.exception))
+        self.assertIn("a_calls", str(ctx.exception))
+
+    def test_one_unpriced_dimension_among_priced_ones_still_blocks(self):
+        doc = json.loads(json.dumps(self.PRICED))
+        doc["ChangeSet"][0]["DetailsDocument"].append(
+            {"Key": "b_calls", "Types": ["ExternallyMetered"]})
+        with self.assertRaises(SystemExit) as ctx:
+            SUBMIT.check_pricing(doc)
+        self.assertIn("b_calls", str(ctx.exception))
+
+    def test_a_price_for_a_dimension_that_does_not_exist_blocks(self):
+        """A rate card naming a key no dimension declares is a price nothing
+        can bill -- the silent direction of the same disagreement."""
+        doc = json.loads(json.dumps(self.PRICED))
+        (doc["ChangeSet"][1]["DetailsDocument"]["Terms"][0]
+            ["RateCards"][0]["RateCard"]).append(
+                {"DimensionKey": "typo_calls", "Price": "0.10"})
+        with self.assertRaises(SystemExit) as ctx:
+            SUBMIT.check_pricing(doc)
+        self.assertIn("typo_calls", str(ctx.exception))
+
+    def test_a_change_set_with_no_dimensions_is_not_this_check_s_business(self):
+        """UpdateVisibility and the test offer add no dimensions. A guard that
+        fires on them is one that gets skipped."""
+        SUBMIT.check_pricing({"ChangeSet": [{"ChangeType": "UpdateVisibility",
+                                          "DetailsDocument": {}}]})
 
 
 if __name__ == "__main__":

@@ -206,7 +206,7 @@ EXPECT: `SUBMITTED` plus a `ChangeSetId`. AWS reviews asynchronously, so the pro
 not exist the moment this returns. Copy the `ChangeSetId` and go to STEP 5b.
 STOP IF: `AccessDeniedException` -- step 1 did not take.
 
-## STEP 5 FAILED ONCE ON 2026-09-18, WAS FIXED, AND WAS RE-RUN. THE LIVE CHANGE SET IS `17or75a96xofiu7gic33wjrm6`.
+## STEP 5 HAS FAILED TWICE AND IS FIXED AGAIN. RE-RUN STEPS 4 AND 5. READ THIS FIRST.
 
 Change set `de0zvpnvpcq3olta3y7kpx4p2` came back **FAILED**, so **no Bundle B product exists, no
 product code exists, and the Marketplace Management Portal correctly lists three SaaS products.**
@@ -226,8 +226,32 @@ again, which produces a NEW ChangeSetId for STEP 5b.
 
 **Nothing was created, so nothing needs undoing.** A failed change set leaves no entity.
 
-**RE-RUN, 2026-09-18 19:06 and 19:09 UTC, both green and read from the run logs rather than
-reported:**
+**SECOND FAILURE, `17or75a96xofiu7gic33wjrm6`, read from the STEP 5b run rather than
+reported.** The logo was fixed and the media preflight passed; the change set failed on a
+different field:
+
+    Status : FAILED
+    Error  : INVALID_INPUT When adding dimensions for SaaS products, you must also
+             set pricing for usage dimensions.
+
+**The document carried FIVE changes. Bundle A's accepted one carries THIRTEEN.** I built
+Bundle B by reusing Bundle A's envelope and stopped reading at `AddDimensions`, so the
+whole offer half -- `ReleaseProduct`, `CreateOffer`, the offer's information, **pricing**,
+legal, support and renewal terms, and `ReleaseOffer` -- was simply absent. Six guards were
+green because every one of them read the document that existed rather than asking what a
+complete one looks like.
+
+**Fixed, and the prices are read out of the code rather than typed:** the per-call rate
+card is derived from `BUNDLE_B_DIMENSION_NAMES` and `METERED_CREDIT_COSTS` in
+`relayshield_api.py` (supply-chain $0.10, asset-intel $0.15, secret-scan $0.35,
+threat-actor $0.30, session-risk $0.30) and the monthly minimum is the $100 that file's own
+Bundle B comment records. A test fails if the listing and the biller ever disagree.
+
+**And the submitter now reproduces AWS's refusal locally, in the dry run, in one second.**
+The STEP 4 dry run prints a `pricing preflight:` block; every dimension must read `OK`.
+
+**THE EARLIER RE-RUN, for the record**, 2026-09-18 19:06 and 19:09 UTC, both green and
+read from the run logs rather than reported:
 
     run #5  19:06:54Z   Dry run: success    Apply: skipped
     run #6  19:08:52Z   Dry run: skipped    Apply: success
@@ -237,8 +261,8 @@ Both printed the new preflight block, which is the guard doing its job on the re
     media preflight:
       OK       HTTP 200   ChangeSet[1].DetailsDocument.LogoUrl = .../bundle_a/relayshield_logo_bundle_a.png
 
-**The apply submitted `17or75a96xofiu7gic33wjrm6`.** That is the id STEP 5b takes.
-`arn:aws:aws-marketplace:us-east-1:239677749008:AWSMarketplace/ChangeSet/17or75a96xofiu7gic33wjrm6`.
+**The apply submitted `17or75a96xofiu7gic33wjrm6`, which is the one that FAILED on
+pricing.** Do not read it again; the next apply produces a new id.
 
 **THE 40-HEX STRING ON THE RUN PAGE IS THE GIT COMMIT, NOT THE CHANGE SET.** GitHub prints
 `a7067bd2c5e70b0318c9b7f327ddeb13568b778c` in the run header because that is the commit the
@@ -256,17 +280,18 @@ dispatched from the Actions UI.** This file already records that edge from the M
 and I wrote a click against a workflow living on a branch anyway. Merge and push main first;
 the entry appears immediately after.
 
-Actions, **Read a Marketplace product (read only)**, Run workflow, `change_set_id` =
-
-    17or75a96xofiu7gic33wjrm6
+Actions, **Read a Marketplace product (read only)**, Run workflow, `change_set_id` = the
+id the STEP 5 apply printed. **`17or75a96xofiu7gic33wjrm6` is spent** -- it is the change
+set that failed on pricing, and reading it again just reprints that failure.
 
 No apply mode, no confirmation phrase, so re-run it as often as you like while AWS is still
 working. **The workflow is on `origin/main` as of `a7067bd` and is in the sidebar now**, checked
 with `git ls-tree origin/main .github/workflows/` rather than assumed.
 
-**THE FIRST CHANGE SET, `de0zvpnvpcq3olta3y7kpx4p2`, FAILED** -- see the section above. It still
-proved STEP 1 took, because `StartChangeSet` returned rather than refusing. Do not read that one;
-read `17or75a96xofiu7gic33wjrm6`.
+**BOTH EARLIER CHANGE SETS FAILED**, `de0zvpnvpcq3olta3y7kpx4p2` on the logo and
+`17or75a96xofiu7gic33wjrm6` on pricing -- see the section above. Both still proved STEP 1
+took, because `StartChangeSet` returned rather than refusing. Read the id from the newest
+apply, never one of those two.
 
 **A GREEN `read` JOB DOES NOT MEAN A SUCCEEDED CHANGE SET.** The workflow succeeds whenever the
 read completes; the change set's own `Status` line is the answer. Read that line, not the job's
@@ -302,17 +327,16 @@ authoritative read is then one browser page:
 Bundle B product, and read the product code off its page. It also appears at the end of the
 SNS topic ARN AWS creates for the listing.
 
-## STEP 6 -- ANDREW CLICKS THIS. Set the product code. No terminal, no paste.
+## STEP 6 -- ANDREW CLICKS THIS. Set the product code.
 
-**This step used to be a pasted `update-function-configuration` and that is what went
-wrong on 2026-09-18.** `--environment` REPLACES the whole variables block rather than
-merging, so one key set by hand left the function holding only that key, with a success
-block on screen. The fix is not a more careful command.
+**THERE IS NOTHING TO TYPE IN A TERMINAL IN THIS STEP.** It is a GitHub Actions form,
+like steps 4, 5, 5b, 7 and 9. `tools/lambda_env_merge.py` is named below only because it
+is what that workflow runs on the runner; **you never invoke it**, and an earlier version
+of this step read as though you might.
 
-`tools/lambda_env_merge.py` GETs the block, merges the one key, and **refuses to write a
-result that drops a key**. It also refuses a 40-character hex value for anything ending
-`_PRODUCT_CODE`, because that is a git commit SHA and it is exactly what got pasted, and
-a `prod-...` entity id, because this runbook told you to paste one of those until 5b existed.
+**AND IT IS BLOCKED UNTIL STEP 5 SUCCEEDS.** The value this step needs does not exist
+until AWS has created the product, so if 5b still reports FAILED there is nothing to
+enter here and this step is not yet reachable.
 
 Actions, **Set one Lambda env var (merge, never replace)**, Run workflow:
 
@@ -332,6 +356,15 @@ STOP IF: `REFUSED: ... git commit SHA` -- the value is not a product code and ST
 not produced one yet.
 STOP IF: `REFUSED: ... Catalog API ENTITY ID` -- that is the `prod-...` id, which STEP 7 and
 STEP 9 want and this field does not. Go back to STEP 5b for the product code.
+**Why a workflow rather than a command, recorded so it is not undone:**
+`aws lambda update-function-configuration --environment` REPLACES the whole variables
+block rather than merging, so one key set by hand on 2026-09-18 left the function holding
+only that key, with a success block on screen. The workflow GETs the block, merges the one
+key, and **refuses to write a result that drops a key**. It also refuses a 40-character
+hex value for anything ending `_PRODUCT_CODE` (that is a git commit SHA, and it is exactly
+what got pasted) and a `prod-...` entity id (that is the Catalog API identifier, which
+steps 7 and 9 want and this field does not).
+
 STOP IF: `AccessDenied` on `UpdateFunctionConfiguration` -- the deploy role lacks that
 action. Section 5 of `tools/diagnose_bundle_fulfillment_env.sh` says so in advance; tell
 me and I will send the one-line grant.

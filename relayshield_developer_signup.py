@@ -3398,6 +3398,11 @@ _SOURCE_ALIASES = {
     "tg-miniapp-tonapp":         "tg-miniapp",
     "tg-miniapp-tgapp":          "tg-miniapp",
     "tg-miniapp-awesome":        "tg-miniapp",
+    # Registered 2026-09-19 before either destination is submitted to. An
+    # unregistered key renders no banner and logs "unmatched:", which is
+    # attribution that looks like it worked -- FD-8, four months of it.
+    "tg-miniapp-dappradar":      "tg-miniapp",
+    "tg-miniapp-producthunt":    "tg-miniapp",
     "tg-miniapp-onclicka":          "tg-miniapp",
     "tg-miniapp-telegtapps":        "tg-miniapp",
     "tg-miniapp-tapps":             "tg-miniapp",

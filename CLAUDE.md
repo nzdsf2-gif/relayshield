@@ -7006,3 +7006,58 @@ accepted.** The refusal names a symptom; the accepted example is the specificati
 sessions of this programme have now reached for the second one and stopped halfway --
 Bundle A's envelope was read as far as `AddDimensions`, its dimension lengths were never
 read at all, and both were one `json.load` away.
+
+## FD-12 WAS SUBMITTED THIRTEEN DAYS AGO AND THE ROW SAID OTHERWISE. IT IS WATCHED NOW.
+
+**2026-09-19.** `FRONT_DOORS.md`'s FD-12 row read **ROUTE OPEN, ARTEFACT BUILT**; two hundred
+lines below it, in the same file, sat the sentence **"FD-12's form was submitted 2026-09-06."**
+Nobody was wrong on purpose. The submission form returns no ticket and no email, so the only way
+to know the state was to remember to look -- and **a status nothing measures drifts.** That is
+the XSOAR gate word for word, and it gets the same fix:
+`.github/workflows/claude_plugin_directory_watch.yml`, weekly, issue on the day it lands.
+
+**MEASURED, because the directory is one public JSON file:** `anthropics/claude-plugins-official`
+carries **310 plugins**, 39 first-party, 14 vendored, **258 sourced REMOTELY** (97 `git-subdir`,
+161 `url`). We are in none of them.
+
+**THERE IS NO FOLLOW-UP ROUTE, AND IT WAS READ RATHER THAN ASSUMED.** No issue template, no
+CONTRIBUTING, and `.github/workflows/close-external-prs.yml` **auto-closes any non-member PR**
+unless `external-pr-scope.js` finds it adds an entry whose source repo ALREADY backs a live
+listing. Ours does not. **Do not open a PR there** -- that is FD-2's failure with the evidence
+available in advance for once, and it took one clone to establish.
+
+**THE COMPETITIVE FINDING IS THE BEST ARGUMENT FOR A RE-SUBMISSION.** Eighteen entries carry
+`category: security` -- 42crunch, auth0, crowdsec, two CrowdStrike, jfrog, semgrep, sonarqube,
+sonatype, two StackHawk, two Vanta, workos, zscaler and three Anthropic ones. **Every one is
+app-sec, identity, or posture and compliance. Not one screens the thing an agent is about to
+install.** The directory has no entry making agent-bait's argument.
+
+**AND THE ORG MOVE IS HALF APPLIED, WHICH IS WORSE THAN NEITHER STATE.**
+`plugins/relayshield/.claude-plugin/plugin.json` names `RelayShield/relayshield-plugin` as its
+repository while `.claude-plugin/marketplace.json` still sources the personal account. Their guide
+calls org ownership *"the single biggest thing that speeds up review"*. **It cannot be finished
+from a `nzdsf2-gif/*` session** -- repo sources are one owner, fixed before the prompt is typed.
+
+## THE CATALOGUE TABLES HOLD MORE READY ROUTES THAN HAVE BEEN SUBMITTED
+
+Asked as "we need to add RS to more catalogs", and the honest ranking is worth stating before the
+rows: **`miniapp_routes.json` held 14 destinations and `bot_directories.json` held 8, and four
+Mini App submissions and one unconfirmed bot submission have gone out.** The binding constraint is
+submissions, not candidates. Adding rows is cheap and does not move anything on its own.
+
+Five added anyway, typed and ranked rather than listed: **dappradar** (the one catalogue whose
+audience HOLDS TON, which is the single audience for whom a TON-only Check tab is the headline
+rather than a limitation), **producthunt** (recorded as a DIFFERENT KIND of destination and ranked
+last -- a listing is a standing shelf, a launch is ONE DAY, which makes it a channel post with a
+bigger audience and the largest first impression left unspent), and **botostore, tgstat, tlgrm**
+on the bot side, all `route_type: unverified`.
+
+**Both Mini App keys are registered in all three lists BEFORE either is submitted.** A bot key
+needs no registration and a Mini App key does; getting that backwards costs a round in one
+direction and four months of `unmatched:` in the other.
+
+**AND A REACHABILITY PROBE WAS RUN AND PROVED NOTHING, WHICH IS THE POINT OF RECORDING IT.**
+Eleven candidate hosts, all **HTTP 000** from the container -- including `findmini.app` and
+`storebot.me`, both of which have accepted a submission from us in the last week. **A probe whose
+negative result is indistinguishable from its blocked result has no standing to report a
+negative**, so every new row says UNVERIFIED and names the one-minute browser read that settles it.

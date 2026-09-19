@@ -175,6 +175,26 @@
       "audience_note": "UNMEASURED, and it is the bot's own audience, which is small. Ranked here because it is CHEAP, not because it reaches anyone -- ranking a surface by how it performs in general rather than how it performs for US is the error that put this at the top of the first draft.",
       "status": "not_shipped_by_decision",
       "why_first": "DO NOT SHIP. /setmenubutton REPLACES the existing button, and that button belongs to the TI monitoring product, which keeps the prominent control. This is a recorded product decision, not a deferred step, and it has no key ON PURPOSE: a key would make it look approved. Shipping it means adding the key first, which is the check firing correctly."
+    },
+    {
+      "rank": 16,
+      "id": "dappradar",
+      "key": "tg-miniapp-dappradar",
+      "destination": "DappRadar, the dapp catalogue, TON and Telegram mini app sections",
+      "audience": null,
+      "audience_note": "UNMEASURED. UNVERIFIED from the container, and the label is the point: every candidate host returns 000 here, including findmini.app and storebot.me, both of which have accepted a submission from us. 000 is a fact about this container's egress and says nothing about the destination, so it can neither confirm nor refute a route. TYPE-CHECK IT FIRST: open dappradar.com and find the submit route in the header or footer, and confirm it is a catalogue rather than a paid placement shelf.",
+      "status": "ready",
+      "why_first": "The one catalogue whose audience HOLDS TON. The Check tab is TON-only by Telegram-terms design, and every other destination has to be told that as a limitation; here it is the headline. Same argument the TON catalogues row already makes, against a destination with a web front door, which is the only kind that has worked for us."
+    },
+    {
+      "rank": 17,
+      "id": "producthunt",
+      "key": "tg-miniapp-producthunt",
+      "destination": "Product Hunt",
+      "audience": null,
+      "audience_note": "UNMEASURED, and a count would be the wrong number anyway. UNVERIFIED from the container, and the label is the point: every candidate host returns 000 here, including findmini.app and storebot.me, both of which have accepted a submission from us. 000 is a fact about this container's egress and says nothing about the destination, so it can neither confirm nor refute a route.",
+      "status": "ready",
+      "why_first": "RANKED LAST ON PURPOSE, and recorded as a different KIND of destination rather than a fifteenth catalogue. A directory listing is a standing shelf that keeps returning arrivals; a Product Hunt launch is ONE DAY, which makes it a channel post with a bigger audience. It is also the largest single first impression left unspent, so it goes after a listing has proved the copy, never before. Take the --snapshot baseline before it, never after."
     }
   ],
   "loop_keys": [

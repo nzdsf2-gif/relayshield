@@ -20,6 +20,7 @@ actually pasted, because the SHA at least looks wrong.
 """
 import importlib.util
 import re
+import ast
 import unittest
 from pathlib import Path
 
@@ -223,6 +224,64 @@ class AGitShaIsNeverAMarketplaceIdentifier(unittest.TestCase):
         self.assertIsNotNone(boto)
         self.assertLess(check, boto,
                         "the shape refusal must precede the boto3 import")
+
+
+class AChangeSetIdentifierCarriesARevisionSuffix(unittest.TestCase):
+    """Change set 27vgy6fh2q7uke1ddtxa0w1l3 SUCCEEDED and created the product,
+    and this tool then died one line later:
+
+        ValidationException: [Requested entity id 'prod-szi2wdww3obry@1' is
+        invalid. It should match with ^[a-zA-Z0-9][.a-zA-Z0-9/-]+[a-zA-Z0-9$.]
+
+    DescribeChangeSet reports the entity REVISION (`@1`); DescribeEntity
+    refuses it. Two identifiers for one product, one character apart, and the
+    failure reads as "the product is invalid" when the product is fine and it
+    was the request that was malformed.
+    """
+
+    def test_the_revision_suffix_is_stripped(self):
+        self.assertEqual(READ.bare_entity_id("prod-szi2wdww3obry@1"),
+                         "prod-szi2wdww3obry")
+
+    def test_a_bare_id_is_unchanged(self):
+        self.assertEqual(READ.bare_entity_id("prod-kkvurtspreofy"),
+                         "prod-kkvurtspreofy")
+
+    def test_an_offer_identifier_strips_too(self):
+        self.assertEqual(READ.bare_entity_id("offer-tphmeebmexqp2@1"),
+                         "offer-tphmeebmexqp2")
+
+    def test_a_double_digit_revision_strips(self):
+        self.assertEqual(READ.bare_entity_id("prod-szi2wdww3obry@12"),
+                         "prod-szi2wdww3obry")
+
+    def test_empty_and_none_are_safe(self):
+        self.assertEqual(READ.bare_entity_id(""), "")
+        self.assertEqual(READ.bare_entity_id(None), "")
+
+    def test_the_stripped_id_satisfies_the_tool_s_own_entity_pattern(self):
+        """The guard that WARNS on an unrecognised entity id must not warn on
+        the one the change set just handed us."""
+        self.assertTrue(READ.ENTITY.match(READ.bare_entity_id("prod-szi2wdww3obry@1")))
+
+    def test_an_at_suffix_is_never_sent_to_describe_entity(self):
+        """Read the CALL SITE, not the helper. A helper nothing calls is
+        decoration -- the ast lesson from the SIM swap detector."""
+        src = (ROOT / "tools" / "marketplace_read_product.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        main = next(n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        assigns = [n for n in ast.walk(main)
+                   if isinstance(n, ast.Assign)
+                   and any(isinstance(t, ast.Name) and t.id == "entity_id" for t in n.targets)]
+        from_changeset = [n for n in assigns
+                          if isinstance(n.value, ast.Call)
+                          and getattr(n.value.func, "id", "") == "bare_entity_id"]
+        self.assertTrue(
+            from_changeset,
+            "the entity id taken out of the change set must go through "
+            "bare_entity_id(); a raw Identifier carries @1 and DescribeEntity "
+            "refuses it")
 
 
 if __name__ == "__main__":

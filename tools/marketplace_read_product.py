@@ -88,6 +88,26 @@ CHANGE_SET = re.compile(r"^[a-z0-9]{20,30}$")
 ENTITY = re.compile(r"^prod-[a-z0-9]+$")
 
 
+# A CHANGE SET RETURNS prod-xxxx@1. DescribeEntity REFUSES THE @1.
+#
+# Change set 27vgy6fh2q7uke1ddtxa0w1l3 SUCCEEDED, created the product, and this
+# tool then died one line later:
+#
+#     ValidationException: [Requested entity id 'prod-szi2wdww3obry@1' is
+#     invalid. It should match with ^[a-zA-Z0-9][.a-zA-Z0-9/-]+[a-zA-Z0-9$.]
+#
+# The `@1` is the entity REVISION, which DescribeChangeSet reports and
+# DescribeEntity does not accept. Two identifiers for one product, one
+# character apart, and the failure reads as "the product is invalid" when the
+# product is fine and the request was malformed -- a status code describing the
+# REQUEST, not the resource, for the fourth time in this programme.
+ENTITY_REVISION = re.compile(r"@\d+$")
+
+
+def bare_entity_id(ident: str) -> str:
+    """prod-szi2wdww3obry@1 -> prod-szi2wdww3obry"""
+    return ENTITY_REVISION.sub("", ident or "")
+
 def check_input_shapes(change_set_id, entity_id):
     """Refuse a git commit SHA, warn on anything else that looks wrong.
 
@@ -130,6 +150,7 @@ def main() -> int:
     if not args.change_set_id and not args.entity_id:
         raise SystemExit("ERROR: give --change-set-id or --entity-id.")
 
+    args.entity_id = bare_entity_id(args.entity_id)
     check_input_shapes(args.change_set_id, args.entity_id)
 
     try:
@@ -172,7 +193,7 @@ def main() -> int:
             ident = (ch.get("Entity") or {}).get("Identifier", "")
             print(f"   {ch.get('ChangeType','')}: {ident or '(no identifier yet)'}")
             if ident.startswith("prod-") and not entity_id:
-                entity_id = ident
+                entity_id = bare_entity_id(ident)
         # FAILED and APPLYING are different answers with different next moves,
         # and the first draft printed the "wait and re-run" text for both --
         # telling the reader to wait for something that will never succeed.
@@ -229,6 +250,15 @@ def main() -> int:
         print("   Open the product, and the product code is on its page. It is also")
         print("   in the SNS topic ARN AWS creates for the listing, which ends in the")
         print("   product code (relayshield_aws_marketplace.py:23 records one).")
+        print("\n   AND IT IS NOT A BLOCKER. Do not go hunting for it before the")
+        print("   E2E test: relayshield_bundle_fulfillment.py keys BUNDLE_CONFIGS on")
+        print("   the entitlement DIMENSION, not on the product code, and the code")
+        print("   itself arrives from ResolveCustomer at fulfillment time. With the")
+        print("   env var still empty the mismatch guard is skipped (it requires BOTH")
+        print("   sides non-empty) and the bundle resolves correctly. The subscription")
+        print("   then PRINTS the real code, in the CloudWatch line reading")
+        print("   'Product code not recognised: got <CODE>, known []'. Set the env var")
+        print("   from that, AFTER the test, not before it.")
 
     print(f"\n   The entity id is {entity_id}. That is NOT the product code -- it is")
     print("   the Catalog API identifier, and it is what the test-offer and")

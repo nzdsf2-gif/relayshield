@@ -348,6 +348,47 @@ accepted example except three keys that cannot change without changing what the 
 change set and Bundle A's accepted one have the IDENTICAL field structure -- same changes,
 same keys, all the way down. A test fails if that stops being true in either direction.
 
+## THE PRODUCT EXISTS. `prod-szi2wdww3obry`, CREATED 2026-09-19 BY `27vgy6fh2q7uke1ddtxa0w1l3`.
+
+    Status : SUCCEEDED
+    CreateProduct : prod-szi2wdww3obry@1
+    CreateOffer   : offer-tphmeebmexqp2@1      all thirteen changes applied
+
+**The red run was MY TOOL, one line after the product was created**, and the two halves of
+that output say opposite things while both being true -- a GREEN step and a RED step in one
+job, which is "a red run names a step, not an outcome" in the direction that matters here.
+
+    ValidationException: [Requested entity id 'prod-szi2wdww3obry@1' is invalid.
+    It should match with ^[a-zA-Z0-9][.a-zA-Z0-9/-]+[a-zA-Z0-9$.]
+
+**DescribeChangeSet reports the entity REVISION (`@1`). DescribeEntity refuses it.** One
+product, two identifiers, one character apart, and the message reads as "the product is
+invalid" when the product is fine and the REQUEST was malformed. Stripped now, with the
+call site asserted by `ast` rather than the helper's existence.
+
+### THE PRODUCT CODE IS NOT A BLOCKER, AND STEP 6 MOVES AFTER STEP 8
+
+Read from `relayshield_bundle_fulfillment.py` rather than assumed, and it changes the order
+of the rest of this runbook:
+
+* **`BUNDLE_CONFIGS` is keyed on the entitlement DIMENSION** (`attack_surface_bundle_access`),
+  not on the product code. `_resolve_bundle` looks up that dimension and nothing else.
+* **`ResolveCustomer` RETURNS the product code** at fulfillment time, and `_get_entitlement`
+  is called with that value, so `GetEntitlements` queries the right product whatever the
+  env var says.
+* **The mismatch guard requires BOTH sides non-empty** -- `if product_code and
+  config.get("product_code") and ...` -- so an empty `BUNDLE_B_PRODUCT_CODE` SKIPS it rather
+  than tripping it.
+
+So the E2E subscription works with the variable unset, and **the subscription is what tells
+us the code**, in one CloudWatch line:
+
+    Product code not recognised: got <THE CODE>, known ['<bundle D>', '<bundle A>']
+
+**Set the env var from that line, AFTER the test.** Hunting for it first is a round spent on
+a value the next step hands over, and it was the step that produced a git SHA in a product
+code field two days ago.
+
 ## STEP 5b -- ANDREW CLICKS THIS. Read the result. This is the step that tells you what to type next.
 
 **THE MERGE IS A PREREQUISITE FOR THIS STEP AND I SHIPPED IT WITHOUT SAYING SO.** Reported as

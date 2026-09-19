@@ -88,9 +88,12 @@ def validate(key: str, value: str) -> None:
     if key.endswith("_PRODUCT_CODE") and GIT_SHA.match(value):
         raise Refused(
             f"{key} was given {value!r}, which is a 40-character git commit SHA.\n"
-            "An AWS Marketplace product code is assigned by StartChangeSet when the\n"
-            "product is created. If the product does not exist yet, there is no code\n"
-            "to set and this step is premature."
+            "That is the commit shown in the Actions run page HEADER, which is the\n"
+            "most copyable 40-hex string on that screen and is never a product code.\n"
+            "A product code is 20-30 lowercase alphanumerics, and it is returned by\n"
+            "ResolveCustomer when a customer subscribes -- NOT by StartChangeSet,\n"
+            "which returns the prod-... entity id. So it does not exist until the\n"
+            "E2E subscription runs, and that test does not need this key set."
         )
     if key.endswith("_PRODUCT_CODE") and ENTITY_ID.match(value):
         raise Refused(
@@ -98,8 +101,17 @@ def validate(key: str, value: str) -> None:
             "product code. They are different namespaces: the entity id is what\n"
             "StartChangeSet returns and what the test-offer and go-public change\n"
             "sets take; the product code is what ResolveCustomer returns and what\n"
-            "GetEntitlements and BatchMeterUsage take. Read the real code with:\n"
-            "    python3 tools/marketplace_read_product.py --entity-id " + value
+            "GetEntitlements and BatchMeterUsage take.\n\n"
+            "AND THIS STEP IS PREMATURE, WHICH IS THE LARGER FINDING. The code is\n"
+            "assigned to a SUBSCRIPTION, so it does not exist until the E2E test\n"
+            "runs -- and that test does NOT need this key. BUNDLE_CONFIGS in\n"
+            "relayshield_bundle_fulfillment.py is keyed on the entitlement\n"
+            "DIMENSION, ResolveCustomer supplies the code at fulfillment time, and\n"
+            "the mismatch guard needs both sides non-empty so an unset key skips\n"
+            "it. Run the test offer and the subscription first; the subscription\n"
+            "prints the real code in its own CloudWatch line:\n"
+            "    Product code not recognised: got <THE CODE>, known [...]\n"
+            "Set this key from that line, afterwards. Do not go hunting for it."
         )
 
 

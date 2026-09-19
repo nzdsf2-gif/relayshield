@@ -61,13 +61,25 @@ class TheEnvToolRefusesAnEntityId(unittest.TestCase):
                 ENV.validate("BUNDLE_B_PRODUCT_CODE", ident)
 
     def test_the_refusal_says_which_namespace_it_got(self):
+        """The property is that a refusal names the route to the RIGHT value.
+
+        This guard used to require the string `marketplace_read_product.py`,
+        which pinned one ROUTE rather than the property -- and when that route
+        turned out to be the wrong one (DescribeEntity may carry no product
+        code at all; ResolveCustomer is what returns it) the guard defended the
+        wrong answer and failed on the correction. A test that pins the shape
+        of an answer instead of what the answer must ACHIEVE eventually fails
+        on correct code, and the temptation then is to loosen it.
+        """
         try:
             ENV.validate("BUNDLE_D_PRODUCT_CODE", "prod-kkvurtspreofy")
         except ENV.Refused as exc:
-            self.assertIn("ENTITY ID", str(exc))
-            self.assertIn("marketplace_read_product.py", str(exc),
-                          "a refusal owes the reader the read that produces the "
-                          "right value")
+            text = str(exc)
+            self.assertIn("ENTITY ID", text)
+            self.assertTrue(
+                "ResolveCustomer" in text or "marketplace_read_product.py" in text,
+                "a refusal owes the reader the route that produces the right "
+                f"value; this one names neither: {text}")
         else:
             self.fail("prod-kkvurtspreofy was accepted")
 
@@ -136,16 +148,45 @@ class NoArtefactSaysTheyAreTheSame(unittest.TestCase):
         self.assertIsNone(hit, f"marketplace_submit_changeset.py still says: "
                                f"{hit.group(0) if hit else ''}")
 
-    def test_the_runbook_step_6_asks_for_the_product_code(self):
+    def test_the_runbook_value_row_asks_for_the_product_code(self):
+        """Anchored on the ROW, not on the step number it sits under.
+
+        The first version required "from STEP 5b" and failed the day that step
+        moved to 8b -- a guard encoding the runbook's numbering rather than its
+        claim. What must hold is that the row naming the env var's value asks
+        for the product code and says outright it is not the prod- id.
+        """
         text = (ROOT / "bundle_b_launch_runbook.md").read_text(encoding="utf-8")
-        self.assertIn("| value | the **product code** from STEP 5b", text,
-                      "STEP 6's value row must name the product code, not the "
-                      "product id -- naming the id is what sent the wrong value")
+        rows = [l for l in text.splitlines()
+                if l.startswith("| value |") and "product code" in l]
+        self.assertTrue(rows, "no `| value |` row names the product code")
+        for row in rows:
+            self.assertIn("Not the `prod-", row,
+                          f"this row does not rule out the entity id: {row}")
 
     def test_the_runbook_carries_the_read_that_produces_it(self):
+        """Either route is acceptable; naming NEITHER is not. The E2E log line
+        is the authoritative one, because ResolveCustomer is what assigns the
+        code, and the DescribeEntity read is a cheaper try that may find
+        nothing."""
         text = (ROOT / "bundle_b_launch_runbook.md").read_text(encoding="utf-8")
-        self.assertIn("STEP 5b", text)
-        self.assertIn("marketplace_read_product", text)
+        self.assertTrue(
+            "Product code not recognised" in text
+            or "marketplace_read_product" in text,
+            "the runbook must name at least one route to the product code")
+
+    def test_the_env_step_comes_after_the_subscription_that_assigns_the_value(self):
+        """2026-09-19: it was run sixth, with the entity id, and refused. The
+        guard was right and the ORDER was wrong -- a step numbered 6 in a
+        numbered list is an instruction to run it sixth, whatever the prose
+        beside it says. Prose cannot enforce an order; position can."""
+        lines = (ROOT / "bundle_b_launch_runbook.md").read_text(
+            encoding="utf-8").splitlines()
+        def at(prefix):
+            return next(i for i, l in enumerate(lines) if l.startswith(prefix))
+        self.assertLess(at("## STEP 8 --"), at("## STEP 8b --"),
+                        "setting BUNDLE_B_PRODUCT_CODE must come after the "
+                        "subscription, which is what assigns the value")
 
     def test_the_read_workflow_exists_and_has_no_apply_mode(self):
         wf = (ROOT / ".github" / "workflows" /
@@ -282,6 +323,52 @@ class AChangeSetIdentifierCarriesARevisionSuffix(unittest.TestCase):
             "the entity id taken out of the change set must go through "
             "bare_entity_id(); a raw Identifier carries @1 and DescribeEntity "
             "refuses it")
+
+
+class TheRefusalsNameTheRouteThatProducesTheValue(unittest.TestCase):
+    """2026-09-19: step 6 was run with `prod-szi2wdww3obry` and refused. The
+    guard was right -- an entity id in that field matches no key row, raises
+    nothing, and makes a revocation scan over a live listing find nothing and
+    report success.
+
+    But a refusal that only says no costs a round. Both of these used to send
+    the reader somewhere that cannot answer: the entity-id one named
+    marketplace_read_product.py, which reports NONE when DescribeEntity carries
+    no code, and the git-SHA one said the code comes from StartChangeSet, which
+    is the sentence this programme has now been wrong about twice.
+
+    A product code is returned by ResolveCustomer, so it exists only once a
+    customer subscribes -- and the subscription does not need the key, because
+    BUNDLE_CONFIGS is keyed on the entitlement DIMENSION.
+    """
+
+    def _refusal(self, value):
+        with self.assertRaises(ENV.Refused) as ctx:
+            ENV.validate("BUNDLE_B_PRODUCT_CODE", value)
+        return str(ctx.exception)
+
+    def test_an_entity_id_is_refused(self):
+        self.assertIn("ENTITY ID", self._refusal("prod-szi2wdww3obry"))
+
+    def test_the_entity_id_refusal_names_resolvecustomer_not_a_lookup_tool(self):
+        text = self._refusal("prod-szi2wdww3obry")
+        self.assertIn("ResolveCustomer", text)
+        self.assertNotIn("marketplace_read_product.py", text)
+
+    def test_the_entity_id_refusal_says_the_step_is_premature(self):
+        """The reader's next move is the test offer, not a hunt."""
+        self.assertIn("PREMATURE", self._refusal("prod-szi2wdww3obry").upper())
+
+    def test_the_git_sha_refusal_no_longer_credits_startchangeset(self):
+        """StartChangeSet returns the ENTITY ID. Saying it returns the product
+        code is the exact confusion these guards exist to stop, printed by the
+        guard itself."""
+        text = self._refusal("a7067bd2c5e70b0318c9b7f327ddeb13568b778c")
+        self.assertIn("ResolveCustomer", text)
+        self.assertNotIn("product code is assigned by StartChangeSet", text)
+
+    def test_a_real_product_code_is_accepted(self):
+        ENV.validate("BUNDLE_B_PRODUCT_CODE", "46y72j0d99w7lyqkiqrakpc5k")
 
 
 if __name__ == "__main__":

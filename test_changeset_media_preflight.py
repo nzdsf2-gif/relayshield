@@ -312,5 +312,143 @@ class ItComparesEveryFieldAgainstTheAcceptedSet(unittest.TestCase):
             {"ChangeType": "UpdateVisibility", "DetailsDocument": {"x": "y"}}]})
 
 
+class AConfirmationIsChosenNotTyped(unittest.TestCase):
+    """2026-09-19: an apply was refused because CREATE-NEW_PRODUCT was typed
+    for CREATE-NEW-PRODUCT. One underscore, invisible at a glance, in an
+    18-character string with mixed punctuation.
+
+    The guard fired correctly and the round was still spent, which is the point:
+    a confirmation that CAN be mistyped WILL be, and the cost lands on the
+    reader rather than on whoever chose a free-text box. A dropdown keeps the
+    whole safety property -- the dangerous value is not the default and must be
+    selected deliberately -- and removes the keyboard from the path.
+    """
+
+    def _inputs(self, name):
+        import yaml
+        wf = yaml.safe_load(
+            (ROOT / ".github" / "workflows" / f"{name}.yml").read_text(encoding="utf-8"))
+        return wf[True]["workflow_dispatch"]["inputs"]
+
+    def test_the_create_confirmation_is_a_choice(self):
+        field = self._inputs("marketplace_changeset")["confirm"]
+        self.assertEqual(field["type"], "choice",
+                         "a typed confirmation phrase is one keystroke from a "
+                         "wasted round; make it a dropdown")
+        self.assertIn("CREATE-NEW-PRODUCT", field["options"])
+
+    def test_the_dangerous_value_is_not_the_default(self):
+        """A dropdown that defaults to the confirmation is not a confirmation."""
+        for name, key in (("marketplace_changeset", "confirm"),
+                          ("marketplace_dimension", "confirm_entity")):
+            field = self._inputs(name)[key]
+            self.assertEqual(field.get("default", ""), "",
+                             f"{name}.{key} defaults to a live value")
+
+    def test_the_dimension_confirmation_is_a_choice_of_real_entities(self):
+        field = self._inputs("marketplace_dimension")["confirm_entity"]
+        self.assertEqual(field["type"], "choice")
+        self.assertIn("prod-kkvurtspreofy", field["options"])
+
+
+class AHandTypedProductIdIsValidatedBeforeUse(unittest.TestCase):
+    """`product_id` cannot be a dropdown, because AWS assigns new ids. So it
+    gets the other half: a shape check that reproduces AWS's refusal in zero
+    seconds, and the `@1` revision stripped, because the value a reader copies
+    out of the create run carries it and both DescribeEntity and a change set
+    refuse it."""
+
+    def test_a_revision_suffix_is_stripped(self):
+        self.assertEqual(SUBMIT.clean_product_id("prod-szi2wdww3obry@1"),
+                         "prod-szi2wdww3obry")
+
+    def test_surrounding_whitespace_is_stripped(self):
+        self.assertEqual(SUBMIT.clean_product_id("  prod-szi2wdww3obry  "),
+                         "prod-szi2wdww3obry")
+
+    def test_empty_is_allowed_because_a_create_set_needs_none(self):
+        self.assertEqual(SUBMIT.clean_product_id(""), "")
+
+    def test_a_wrong_shape_is_refused_locally(self):
+        for bad in ("prod_szi2wdww3obry", "PROD-SZI2WDWW3OBRY", "szi2wdww3obry"):
+            with self.assertRaises(SUBMIT.Refused, msg=f"{bad} was accepted"):
+                SUBMIT.clean_product_id(bad)
+
+    def test_the_cleaner_runs_before_substitution(self):
+        """Read the CALL SITE: a validator nothing calls is decoration."""
+        src = (ROOT / "tools" / "marketplace_submit_changeset.py").read_text(
+            encoding="utf-8")
+        main = next(n for n in ast.walk(ast.parse(src))
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        order = []
+        for node in ast.walk(main):
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "id", "")
+                if name in ("clean_product_id", "substitute"):
+                    order.append((node.lineno, name))
+        order.sort()
+        names = [n for _, n in order]
+        self.assertIn("clean_product_id", names,
+                      "main() never validates --product-id")
+        self.assertLess(names.index("clean_product_id"), names.index("substitute"),
+                        "the id is substituted into the document before it is "
+                        "checked, so a bad value reaches AWS")
+
+
+class TheReferenceIsChosenByShape(unittest.TestCase):
+    """The first version hard-wired bundle_a_create_entity.json, so the TEST
+    OFFER and GO-PUBLIC sets -- the two documents that follow the create -- were
+    compared against nothing and printed no field table at all.
+
+    That is the same gap that let four over-length descriptions through: the
+    comparison existed and did not reach the document being sent. Running it
+    against the test offer immediately found an over-length offer Description.
+    """
+
+    def _doc(self, name):
+        return json.loads((ROOT / "aws_marketplace" / f"{name}.json").read_text())
+
+    def test_a_create_set_picks_bundle_a_s_create_set(self):
+        got = SUBMIT.pick_reference(self._doc("bundle_b_create_entity"))
+        self.assertEqual(got.name, "bundle_a_create_entity.json")
+
+    def test_a_test_offer_picks_bundle_a_s_test_offer(self):
+        got = SUBMIT.pick_reference(self._doc("bundle_b_test_offer"))
+        self.assertEqual(got.name, "bundle_a_test_offer.json")
+
+    def test_a_go_public_set_picks_bundle_a_s_go_public(self):
+        got = SUBMIT.pick_reference(self._doc("bundle_b_go_public"))
+        self.assertEqual(got.name, "bundle_a_go_public.json")
+
+    def test_an_unknown_shape_gets_no_reference_rather_than_a_wrong_one(self):
+        self.assertIsNone(SUBMIT.pick_reference(
+            {"ChangeSet": [{"ChangeType": "SomethingNobodyHasSent"}]}))
+
+    def test_check_field_limits_actually_calls_it(self):
+        """Proven necessary: reverting the selection to REFERENCES[0] left
+        every test above GREEN, because they call pick_reference directly.
+        A chooser nothing consults is decoration -- the same shape as a guard
+        nothing calls, which this repo has now paid for three times."""
+        src = (ROOT / "tools" / "marketplace_submit_changeset.py").read_text(
+            encoding="utf-8")
+        func = next(n for n in ast.walk(ast.parse(src))
+                    if isinstance(n, ast.FunctionDef) and n.name == "check_field_limits")
+        calls = [getattr(n.func, "id", "") for n in ast.walk(func)
+                 if isinstance(n, ast.Call)]
+        self.assertIn("pick_reference", calls,
+                      "check_field_limits does not choose its reference by "
+                      "shape, so it compares every document against one file")
+
+    def test_every_bundle_b_document_has_an_accepted_counterpart(self):
+        """A document with no reference is one nothing can vet. Today all three
+        have one, and this fails the day a fourth is added without its own
+        accepted example -- which is the moment to notice, not after AWS says
+        so."""
+        for name in ("bundle_b_create_entity", "bundle_b_test_offer",
+                     "bundle_b_go_public"):
+            self.assertIsNotNone(SUBMIT.pick_reference(self._doc(name)),
+                                 f"{name} has no accepted Bundle A counterpart")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

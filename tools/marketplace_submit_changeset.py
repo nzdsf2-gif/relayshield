@@ -80,6 +80,36 @@ class Refused(Exception):
 PLACEHOLDER_RE = __import__("re").compile(r"__[A-Z][A-Z0-9_]*__")
 
 
+# A HAND-TYPED IDENTIFIER IS VALIDATED BEFORE IT IS SUBSTITUTED, NOT AFTER.
+#
+# 2026-09-19: an apply was refused because CREATE-NEW_PRODUCT was typed for
+# CREATE-NEW-PRODUCT. That input is a dropdown now and cannot be mistyped.
+# `product_id` cannot be a dropdown -- AWS assigns new ids -- so it gets the
+# other half of the same treatment: a shape check here, which reproduces AWS's
+# refusal in zero seconds instead of fifteen, and names the field.
+#
+# It also strips the `@N` revision, because DescribeChangeSet prints
+# prod-szi2wdww3obry@1 and DescribeEntity and a change set both refuse it. The
+# value a reader copies is the one with the suffix on it.
+PRODUCT_ID = re.compile(r"^prod-[a-z0-9]+$")
+
+
+def clean_product_id(raw: str) -> str:
+    value = re.sub(r"@\d+$", "", (raw or "").strip())
+    if not value:
+        return ""
+    if not PRODUCT_ID.match(value):
+        raise Refused(
+            f"--product-id was given {raw!r}, which is not an entity id.\n"
+            "An entity id is 'prod-' followed by lowercase letters and digits,\n"
+            "with no spaces and no @revision suffix. It is printed by the Apply\n"
+            "step of the create run as 'CreateProduct: prod-....@1', and the\n"
+            "'@1' is the revision -- strip it, which this tool does for you when\n"
+            "the rest of the value is well formed."
+        )
+    return value
+
+
 def substitute(doc: dict, product_id: str) -> dict:
     """Fill the placeholders a committed change set cannot carry literally.
 
@@ -426,7 +456,34 @@ CEILINGS = {
             "characters'"),
 }
 
-REFERENCE = ROOT / "aws_marketplace" / "bundle_a_create_entity.json"
+# THE REFERENCE IS CHOSEN BY SHAPE, NOT HARD-WIRED TO THE CREATE SET.
+#
+# The first version named bundle_a_create_entity.json and nothing else, so the
+# TEST OFFER and the GO-PUBLIC change sets -- the two documents that follow the
+# create -- were compared against nothing at all and printed no field table.
+# That is exactly the gap that let four over-length descriptions through on the
+# create set: the comparison existed and did not reach the document being sent.
+#
+# Bundle A has an accepted artefact for all three, so each one has an authority.
+# Matching on the ChangeType sequence picks it without a mapping to maintain.
+REFERENCES = [
+    ROOT / "aws_marketplace" / "bundle_a_create_entity.json",
+    ROOT / "aws_marketplace" / "bundle_a_test_offer.json",
+    ROOT / "aws_marketplace" / "bundle_a_go_public.json",
+]
+
+
+def pick_reference(doc: dict):
+    """The accepted Bundle A change set with the same ChangeType sequence."""
+    mine = [c.get("ChangeType") for c in doc.get("ChangeSet", [])]
+    for path in REFERENCES:
+        if not path.exists():
+            continue
+        theirs = [c.get("ChangeType")
+                  for c in json.loads(path.read_text()).get("ChangeSet", [])]
+        if theirs == mine:
+            return path
+    return None
 
 
 def field_classes(doc: dict) -> dict:
@@ -454,7 +511,7 @@ def field_classes(doc: dict) -> dict:
     return out
 
 
-def check_field_limits(doc: dict, reference=REFERENCE) -> None:
+def check_field_limits(doc: dict, reference="auto") -> None:
     classes = field_classes(doc)
 
     over = []
@@ -470,11 +527,14 @@ def check_field_limits(doc: dict, reference=REFERENCE) -> None:
             lines.append(f"        limit source: {source}")
         raise SystemExit("\n".join(lines) + "\n")
 
+    if reference == "auto":
+        reference = pick_reference(doc)
     if not reference or not Path(reference).exists():
+        print("\nNo accepted Bundle A change set has this ChangeType sequence,")
+        print("so there is nothing to compare field sizes against. That is a")
+        print("finding about this document's shape, not a pass.")
         return
     ref = field_classes(json.loads(Path(reference).read_text()))
-    if "CreateProduct" not in [c.get("ChangeType") for c in doc.get("ChangeSet", [])]:
-        return          # the reference is a CREATE set; an offer set is not one
 
     print("\nfield sizes, against the change set AWS accepted "
           f"({Path(reference).name}):")
@@ -567,6 +627,7 @@ def main() -> int:
     except ValueError:
         shown = path
     print(f"file          : {shown}")
+    args.product_id = clean_product_id(args.product_id)
     doc = substitute(doc, args.product_id)
     try:
         changes = validate(doc)

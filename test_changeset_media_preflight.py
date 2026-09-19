@@ -163,6 +163,9 @@ class TheDryRunRunsIt(unittest.TestCase):
     def test_check_pricing_runs_unconditionally_in_main(self):
         self._assert_unconditional("check_pricing")
 
+    def test_check_field_limits_runs_unconditionally_in_main(self):
+        self._assert_unconditional("check_field_limits")
+
 
 class ItBlocksADimensionWithNoPrice(unittest.TestCase):
     """Change set 17or75a96xofiu7gic33wjrm6 passed the media preflight added
@@ -225,6 +228,88 @@ class ItBlocksADimensionWithNoPrice(unittest.TestCase):
         fires on them is one that gets skipped."""
         SUBMIT.check_pricing({"ChangeSet": [{"ChangeType": "UpdateVisibility",
                                           "DetailsDocument": {}}]})
+
+
+class ItBlocksAFieldOverALimitAwsEnforces(unittest.TestCase):
+    """The FIFTH failed change set, em3sw5gs00lifcmy42mxe95t9, 2026-09-19:
+
+        INVALID_INPUT Remove invalid key 'supply_chain_calls' with types
+        '[Metered, ExternallyMetered]'. Valid descriptions cannot exceed more
+        than 90 characters.
+
+    Four of six descriptions were over. Media passed, pricing passed, eleven
+    document guards passed. Five submissions, five different validations none
+    of our checks knew about -- which is the defect, rather than any one of
+    the five.
+    """
+
+    def doc(self, description):
+        return {"ChangeSet": [{
+            "ChangeType": "AddDimensions",
+            "DetailsDocument": [{"Key": "a_calls", "Name": "A",
+                                 "Description": description, "Unit": "Units",
+                                 "Types": ["ExternallyMetered"]}]}]}
+
+    def test_a_90_character_description_passes(self):
+        SUBMIT.check_field_limits(self.doc("x" * 90), reference=None)
+
+    def test_a_91_character_description_is_refused(self):
+        with self.assertRaises(SystemExit) as ctx:
+            SUBMIT.check_field_limits(self.doc("x" * 91), reference=None)
+        self.assertIn("AddDimensions[].Description", str(ctx.exception))
+        self.assertIn("91 > 90", str(ctx.exception))
+
+    def test_the_refusal_names_where_the_limit_came_from(self):
+        """A limit nobody can source is a limit the next session deletes."""
+        with self.assertRaises(SystemExit) as ctx:
+            SUBMIT.check_field_limits(self.doc("x" * 120), reference=None)
+        self.assertIn("em3sw5gs00lifcmy42mxe95t9", str(ctx.exception))
+
+    def test_the_committed_bundle_b_change_set_is_within_every_limit(self):
+        SUBMIT.check_field_limits(json.loads(BUNDLE_B.read_text(encoding="utf-8")))
+
+    def test_the_document_aws_refused_is_refused_here(self):
+        """The exact four descriptions, restored from the submitted version."""
+        doc = json.loads(BUNDLE_B.read_text(encoding="utf-8"))
+        dims = next(c for c in doc["ChangeSet"]
+                    if c["ChangeType"] == "AddDimensions")["DetailsDocument"]
+        for d in dims:
+            if d["Key"] == "secret_scan_calls":
+                d["Description"] = ("Detects live credentials in public artifacts "
+                                    "across six sources, including code hosts and "
+                                    "package registries.")
+        with self.assertRaises(SystemExit) as ctx:
+            SUBMIT.check_field_limits(doc)
+        self.assertIn("109 > 90", str(ctx.exception))
+
+
+class ItComparesEveryFieldAgainstTheAcceptedSet(unittest.TestCase):
+    """A class path collapses list indices, so every dimension Description is
+    ONE field rather than six. Comparing by INDEX against another product pairs
+    'Breach Exposure Check' with 'Supply Chain Exposure Check' and reports the
+    difference as a finding, which is a guard nobody can act on."""
+
+    def test_indices_collapse_into_one_class(self):
+        classes = SUBMIT.field_classes({"ChangeSet": [{
+            "ChangeType": "AddDimensions",
+            "DetailsDocument": [{"Description": "a"}, {"Description": "bb"}]}]})
+        self.assertEqual(classes["AddDimensions[].Description"], ["a", "bb"])
+
+    def test_over_reference_reports_and_does_not_block(self):
+        """The repo rule: a probe that cannot tell must not block. 'Longer than
+        one accepted example' is not a known constraint."""
+        doc = json.loads(BUNDLE_B.read_text(encoding="utf-8"))
+        info = next(c for c in doc["ChangeSet"]
+                    if c["ChangeType"] == "UpdateInformation"
+                    and "ProductTitle" in c["DetailsDocument"])
+        info["DetailsDocument"]["ProductTitle"] = "R" * 400
+        SUBMIT.check_field_limits(doc)          # must not raise
+
+    def test_an_offer_change_set_is_not_measured_against_a_create_set(self):
+        """bundle_b_test_offer.json creates no product. Comparing its fields
+        with a create set's would report every absent field as a difference."""
+        SUBMIT.check_field_limits({"ChangeSet": [
+            {"ChangeType": "UpdateVisibility", "DetailsDocument": {"x": "y"}}]})
 
 
 if __name__ == "__main__":

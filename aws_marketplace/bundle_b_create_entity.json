@@ -16,13 +16,13 @@
         "Identifier": "$CreateProductChange.Entity.Identifier"
       },
       "DetailsDocument": {
-        "ProductTitle": "RelayShield - Attack Surface & Supply Chain API Bundle",
-        "ShortDescription": "RelayShield Attack Surface & Supply Chain delivers metered access to five exposure detection APIs, billed entirely through AWS Marketplace. It covers third-party and vendor exposure, asset intelligence sweeps, public artifact secret detection, threat actor and campaign lookup, and session hijack risk. The bundle is licensed independently, with no dependency on any other RelayShield product or bundle.",
-        "LongDescription": "Attack Surface & Supply Chain is built for teams whose exposure does not stop at their own perimeter.\n\nThe bundle screens vendor and third-party domains for exposed credentials, lookalike registrations and breach history; registers an asset watchlist and sweeps it as new exposure is observed; detects live credentials left in public artifacts across code hosts and package registries; looks up actors, campaigns and CVEs against exploit chatter; and reports active session hijack risk from stolen session artefacts.\n\nSession hijack risk is the signal most often missing from an identity programme. A stolen session cookie is not remediated by a password reset, because the session itself is the credential. Surfacing it alongside supply chain and secret exposure is what lets a team tell a stale leak from an intrusion that is already underway.\n\nIntelligence is collected continuously from monitored criminal Telegram marketplaces, infostealer log dumps, public indicator feeds and public code and package artifacts. RelayShield deliberately does not quote a corpus headline: most published totals are dominated by ingested public feeds that every buyer already has, and a number that is correct this month is wrong next month. What is durable is the sources and what the endpoints do with them.\n\nAll five endpoints are REST, authenticated with a single header, and metered per call through AWS Marketplace. There is no separate account to create and no payment method to add.",
+        "ProductTitle": "RelayShield - Attack Surface & Supply Chain API",
+        "ShortDescription": "RelayShield Attack Surface & Supply Chain delivers metered access to five exposure detection APIs, billed entirely through AWS Marketplace. It covers third-party and vendor exposure, asset intelligence sweeps, public artifact secret detection, threat actor lookup, and session hijack risk. The bundle is licensed independently, with no dependency on any other RelayShield product.",
+        "LongDescription": "Attack Surface & Supply Chain is built for teams whose exposure does not stop at their own perimeter.\n\nThe bundle screens vendor and third-party domains for exposed credentials, lookalike registrations and breach history; registers an asset watchlist and sweeps it as new exposure is observed; detects live credentials left in public artifacts across code hosts and package registries; looks up actors, campaigns and CVEs against exploit chatter; and reports active session hijack risk from stolen session artefacts.\n\nSession hijack risk is the signal most often missing from an identity programme. A stolen session cookie is not remediated by a password reset: the session is itself the credential. Surfacing it alongside supply chain and secret exposure is what lets a team tell a stale leak from an intrusion already underway.\n\nIntelligence is collected continuously from monitored criminal Telegram marketplaces, infostealer log dumps, public indicator feeds and public code artifacts. RelayShield deliberately does not quote a corpus headline: a total that is correct this month is wrong next month, and what is durable is the sources.\n\nAll five endpoints are REST, authenticated with a single header, and metered per call through AWS Marketplace. There is no separate account to create and no payment method to add.",
         "Highlights": [
-          "Five attack surface and supply chain APIs licensed as one bundle through AWS Marketplace, with no dependency on any other bundle or platform-wide subscription.",
-          "Session hijack detection from stolen session artefacts, the exposure a password reset does not remediate, correlated against the same identity as secret and supply chain findings.",
-          "Collected continuously from monitored criminal Telegram marketplaces, infostealer log dumps, public indicator feeds and public code and package artifacts."
+          "Five attack surface and supply chain APIs licensed as one bundle through AWS Marketplace, with no dependency on any other bundle.",
+          "Session hijack detection from stolen session artefacts, the exposure a password reset does not remediate, correlated with secret and supply chain findings.",
+          "Collected continuously from monitored criminal Telegram marketplaces, infostealer log dumps, public indicator feeds and public code artifacts."
         ],
         "SearchKeywords": [
           "supply chain security",
@@ -84,7 +84,7 @@
       "DetailsDocument": [
         {
           "Key": "attack_surface_bundle_access",
-          "Name": "Attack Surface & Supply Chain - Monthly Access",
+          "Name": "Attack Surface & Supply Chain - Monthly",
           "Description": "Monthly minimum commitment for Attack Surface & Supply Chain API access, five endpoints.",
           "Unit": "Units",
           "Types": [
@@ -94,7 +94,7 @@
         {
           "Key": "supply_chain_calls",
           "Name": "Supply Chain Exposure Check",
-          "Description": "Checks a vendor or third-party domain for exposed credentials, lookalikes and breach history.",
+          "Description": "Checks a vendor domain for exposed credentials, lookalikes and breach history.",
           "Unit": "Units",
           "Types": [
             "ExternallyMetered"
@@ -112,7 +112,7 @@
         {
           "Key": "secret_scan_calls",
           "Name": "Public Artifact Secret Scan",
-          "Description": "Detects live credentials in public artifacts across six sources, including code hosts and package registries.",
+          "Description": "Detects live credentials in public artifacts across code hosts and package registries.",
           "Unit": "Units",
           "Types": [
             "ExternallyMetered"
@@ -121,7 +121,7 @@
         {
           "Key": "threat_actor_calls",
           "Name": "Threat Actor and Campaign Lookup",
-          "Description": "Looks up an actor, campaign or CVE against exploit chatter collected from criminal channels.",
+          "Description": "Looks up an actor, campaign or CVE against exploit chatter from criminal channels.",
           "Unit": "Units",
           "Types": [
             "ExternallyMetered"
@@ -130,7 +130,7 @@
         {
           "Key": "session_risk_calls",
           "Name": "Session Hijack Risk",
-          "Description": "Detects active session and adversary-in-the-middle hijack risk from stolen session artefacts.",
+          "Description": "Detects session and adversary-in-the-middle hijack risk from stolen session artefacts.",
           "Unit": "Units",
           "Types": [
             "ExternallyMetered"
@@ -163,7 +163,7 @@
         "Identifier": "$CreateOfferChange.Entity.Identifier"
       },
       "DetailsDocument": {
-        "Name": "RelayShield Attack Surface & Supply Chain - public offer",
+        "Name": "RelayShield Attack Surface & Supply Chain - offer",
         "Description": "Offer for the Attack Surface & Supply Chain API bundle, 100 USD monthly minimum plus metered per-call usage."
       }
     },

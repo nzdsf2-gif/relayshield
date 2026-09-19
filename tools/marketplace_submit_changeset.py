@@ -123,6 +123,15 @@ def substitute(doc: dict, product_id: str) -> dict:
     which was correct on the day it was submitted and is a date in the PAST for
     anyone running it since. A payment schedule in the past is rejected, so this
     is filled at send time and the date used is printed rather than assumed.
+
+    `__AVAILABILITY_END_DATE__` -- the SAME defect in the SAME file, left behind
+    when ChargeDate was fixed. A private offer needs UpdateAvailability or
+    ReleaseOffer fails MISSING_AVAILABILITY_END_DATE (commit e72cc31, which cost
+    Bundle A a submission), and Bundle A's literal 2026-09-06 was correct on the
+    day and is in the past for anyone since. An END date in the past is worse
+    than a charge date in the past: it can release an offer that has already
+    expired, so the buyer account is told to subscribe to something it cannot
+    see. Ninety days out, which outlives any verification run.
     """
     import datetime
     today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
@@ -132,6 +141,11 @@ def substitute(doc: dict, product_id: str) -> dict:
     if "__CHARGE_DATE__" in raw:
         raw = raw.replace("__CHARGE_DATE__", today)
         print(f"charge date   : {today} (filled at send time, not committed)")
+    if "__AVAILABILITY_END_DATE__" in raw:
+        end = (datetime.datetime.now(datetime.timezone.utc).date()
+               + datetime.timedelta(days=90)).isoformat()
+        raw = raw.replace("__AVAILABILITY_END_DATE__", end)
+        print(f"availability  : ends {end} (filled at send time, not committed)")
     return json.loads(raw)
 
 
@@ -511,6 +525,79 @@ def field_classes(doc: dict) -> dict:
     return out
 
 
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def date_fields(doc: dict):
+    """Yield (key path, value) for every ISO date under a key ending in Date.
+
+    Narrow on purpose. `Version: "2022-07-14"` in the standard EULA term is a
+    document version that happens to look like a date, and it is correct as it
+    stands; widening this to every date-shaped string would refuse it.
+    """
+    out = []
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, f"{path}.{key}" if path else key)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, f"{path}[]")
+        elif isinstance(node, str):
+            leaf = path.rsplit(".", 1)[-1].replace("[]", "")
+            if leaf.endswith("Date") and ISO_DATE.match(node):
+                out.append((path, node))
+
+    walk(doc, "")
+    return out
+
+
+def check_dates(doc: dict, today=None) -> None:
+    """Refuse a date in the past. Checked AFTER substitution, on what is sent.
+
+    THIS EXISTS BECAUSE A DATE COPIED FROM AN ACCEPTED CHANGE SET IS CORRECT ON
+    ONE DAY AND WRONG ON EVERY OTHER. bundle_a_test_offer.json carries
+    ChargeDate 2026-08-08 and AvailabilityEndDate 2026-09-06, both right when
+    they were submitted. Bundle B was built by reusing that envelope, the charge
+    date was turned into a placeholder, and the availability date was not --
+    half the fix, which is the shape of every Bundle B failure so far.
+
+    A past date is unambiguous and therefore blocks: it cannot become valid by
+    waiting, and nothing about the submission makes it right. That is the
+    distinction from check_media, where a timeout means the probe could not tell
+    and has no standing to stop finished work.
+    """
+    import datetime
+    today = today or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    found = date_fields(doc)
+    if not found:
+        print("dates         : none in this change set")
+        return
+    stale = []
+    for path, value in found:
+        verdict = "PAST" if value < today else "ok"
+        print(f"date          : {verdict:4}  {value}  {path}")
+        if verdict == "PAST":
+            stale.append((path, value))
+    if stale:
+        # SystemExit, not Refused: this runs OUTSIDE main()'s try, exactly like
+        # check_media and check_pricing. A Refused raised here escapes as a
+        # traceback instead of a readable refusal.
+        raise SystemExit(
+            "\nREFUSED: date(s) in the past: "
+            + ", ".join(f"{p} = {v}" for p, v in stale)
+            + f" (today is {today}).\n"
+            "       A payment schedule in the past is rejected, and an "
+            "availability END date in the\n"
+            "       past releases an offer that has already expired -- the buyer "
+            "account is then told\n"
+            "       to subscribe to something it cannot see. Make the field a "
+            "__PLACEHOLDER__ and fill\n"
+            "       it in substitute(), rather than committing a date that is "
+            "correct for one day.")
+
+
 def check_field_limits(doc: dict, reference="auto") -> None:
     classes = field_classes(doc)
 
@@ -643,6 +730,7 @@ def main() -> int:
     check_media(doc)
     check_pricing(doc)
     check_field_limits(doc)
+    check_dates(doc)
 
     if not args.apply:
         print("\nDRY RUN. Nothing was sent. Add --apply --confirm "

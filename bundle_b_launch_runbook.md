@@ -466,6 +466,61 @@ need it. Read from `relayshield_bundle_fulfillment.py` rather than assumed:
 So the order is **STEP 7, then STEP 8, then STEP 8b**. The subscription is what prints the
 code, and it prints it in its own warning line. Skip to STEP 7.
 
+## STEP 6b -- ANDREW DOES THIS. Settle the buyer account BEFORE step 7. It is free now.
+
+**STEP 8 tells you to sign in as `442429445748` and nothing in this repository says whose
+account that is.** That is a real gap and it is mine: the value was copied across from
+`bundle_a_test_offer.json` when Bundle B's envelope was reused, and the reuse carried the
+number without carrying the fact.
+
+**WHAT THE REPOSITORY DOES ESTABLISH**, so you are not re-deriving it:
+
+* `442429445748` appears in exactly four places: the `PositiveTargeting.BuyerAccounts` of
+  Bundle A's and Bundle B's create sets, and of their two test offers. Nowhere else.
+* Commit `e72cc31` (2026-08-07) created Bundle A's test offer `offer-d75uqa4lwqsuo`
+  against it, and says in its own message that it *"mirrors Bundle D's proven test-offer
+  shape"*. So the same account was targeted for Bundle D before that.
+* The offer names it `TestUser`.
+
+**WHAT IT DOES NOT ESTABLISH, and this is the part that decides the step:** whether that
+is a second AWS account you created for Bundle A's verification, or somebody else's.
+Bundle A and Bundle D are both live and public, and AWS grants public visibility only
+after the fulfillment test passes -- so the account was almost certainly used
+successfully twice. **That is inference from two live listings, not a measurement**, and
+an absence needs the same evidence a presence does.
+
+**THE READ THAT SETTLES IT, and it is one look from the SELLER account you are already
+signed into.** If that account is in your AWS Organization, this names it and its email:
+
+```zsh
+AWS_PROFILE=relayshield aws organizations describe-account \
+  --account-id 442429445748 --no-cli-pager
+```
+EXPECT: a `Name` and an `Email` you recognise -- then it is yours and STEP 8 is a sign-in.
+STOP IF: `AWSOrganizationsNotInUseException` or `AccountNotFoundException` -- that says
+only that it is not in an organization with the seller account, which is the normal state
+for a separately created account. It is NOT evidence the account is not yours. Try the
+console sign-in instead: <https://signin.aws.amazon.com/>, **Root user**, and the email
+address you would have used. A password reset goes to that inbox.
+STOP IF: `AccessDenied` -- a fact about the deployer identity, not about the account.
+
+**IF IT IS YOURS, do nothing here.** STEP 8 is a sign-in and the number is correct.
+
+**IF YOU CANNOT GET INTO IT, change the target NOW rather than at step 8.** The test
+offer has not been created yet, so the account it points at is one line in a committed
+file. After STEP 7 runs it is an offer in AWS and changing it costs another change set.
+
+Edit `aws_marketplace/bundle_b_test_offer.json`, the `BuyerAccounts` array, to an account
+you control, and tell me so I can update the offer Name with it in the same commit.
+**It must not be the seller account `239677749008`**: AWS requires the verification from a
+buyer, and a seller cannot subscribe to its own listing.
+
+**The product's own targeting does not need touching either way.** `prod-szi2wdww3obry`
+is restricted to that account today, and STEP 9's `UpdateVisibility` is what lifts the
+restriction -- exactly as Bundle A went public.
+
+---
+
 ## STEP 7 -- ANDREW CLICKS THIS. Create the test offer.
 
 Actions, **Marketplace Change Set**, Run workflow:
@@ -477,8 +532,13 @@ Actions, **Marketplace Change Set**, Run workflow:
 | confirm | `CREATE-NEW-PRODUCT`, for apply only |
 | product_id | `prod-szi2wdww3obry` -- the entity id STEP 5 created |
 
-EXPECT: `charge date : <today>` filled at send time, nine changes ending in
-`ReleaseOffer`, then `SUBMITTED` on apply.
+EXPECT: `charge date : <today>` and `availability : ends <today + 90 days>`, both filled
+at send time, nine changes ending in `ReleaseOffer`, then `SUBMITTED` on apply. Then two
+`date : ok` lines; a `date : PAST` line is a refusal, not a warning.
+STOP IF: `MISSING_AVAILABILITY_END_DATE` -- the `UpdateAvailability` change was dropped. A
+private offer needs it or `ReleaseOffer` fails, which cost Bundle A a submission
+(commit `e72cc31`). The change set carries it and a test asserts the sequence matches
+Bundle A's accepted one.
 STOP IF: `unsubstituted placeholder` -- `product_id` was left empty.
 STOP IF: `REFUSED: ... targets a LIVE listing` -- a `prod-` id was typed that
 belongs to Bundle A or Bundle D. Bundle B's is `prod-szi2wdww3obry`.
@@ -496,10 +556,22 @@ than skipped. It is Bundle A's accepted envelope with four fields changed.
 simulation.** You subscribe to your own Limited product through the offer from step 7 and
 prove the whole path works before asking for public visibility.
 
-1. **Sign in to the AWS console as the BUYER account** (`442429445748`, not the seller
-   account). The offer is targeted at it and invisible to anything else.
-2. **Open the private offer and subscribe.** AWS redirects you to the product's
-   fulfillment URL with an `x-amzn-marketplace-token` in a POST body.
+1. **Sign in to the AWS console as the BUYER account** -- `442429445748` unless STEP 6b
+   changed it, and NOT the seller account. A private offer is invisible to every account
+   it is not targeted at, which is why the seller console shows you nothing to accept.
+   Sign in at <https://signin.aws.amazon.com/> as **Root user** with that account's own
+   email address, in a separate browser profile or a private window so it does not fight
+   with the seller session you are already in.
+2. **Find the offer and subscribe.** In that account: AWS Marketplace console, left nav
+   **Manage subscriptions**, then **Private offers** -- the offer appears there, named
+   `442429445748 - TestUser - Bundle B Fulfillment Verification`. Open it and Accept, then
+   **Set up your account** on the confirmation page. AWS then redirects you to the
+   product's fulfillment URL with an `x-amzn-marketplace-token` in a POST body.
+   STOP IF: the Private offers list is empty -- either STEP 7's `ReleaseOffer` did not
+   land (a released offer is what makes it visible; check STEP 7 returned `SUBMITTED` and
+   then SUCCEEDED, not just SUBMITTED), or you are signed into the wrong account. The
+   account id is in the console header, top right; check it before diagnosing anything
+   else.
 3. **You should land on the RelayShield registration page** and receive the Bundle B
    key. That single redirect exercises `ResolveCustomer`, `GetEntitlements` and the
    `attack_surface_bundle_access` branch of `BUNDLE_CONFIGS`.

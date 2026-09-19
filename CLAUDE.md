@@ -6955,3 +6955,54 @@ prerequisite.
 is not valid YAML, because a plain scalar cannot contain `": "`. `test_workflows_parse.py`
 failed it immediately, which is that check earning its place again -- GitHub's own response
 to an unparseable workflow is "No jobs were run", quieter than a failure.
+
+## FIVE REFUSED CHANGE SETS, FIVE DIFFERENT VALIDATIONS, ONE DEFECT: I FIXED THEM ONE AT A TIME
+
+**2026-09-19, and the founder's words are the measurement: *"You messed up Step 5b a fifth
+time... It feels like trial-and-error where you are being very careless. I want Bundle B
+released and I don't want to burn tons more turns to do it."*** He is right, and the thing
+worth recording is not the fifth defect.
+
+    de0zvpnvpcq3olta3y7kpx4p2   INVALID_MEDIA_LOCATION      a logo never uploaded
+    17or75a96xofiu7gic33wjrm6   INVALID_INPUT ... pricing   5 changes, not 13
+    dldmvatisooxdj8b7zll8q4a1   INVALID_INPUT ... pricing   the fix was on a branch
+    em3sw5gs00lifcmy42mxe95t9   INVALID_INPUT ... 90 chars  four descriptions over
+
+**EACH ROUND I ADDED A GUARD FOR THE THING THAT HAD JUST FAILED, AND EVERY ONE OF THOSE
+GUARDS READ THE DOCUMENT THAT EXISTED.** Six document guards were green on a document
+missing eight of its thirteen changes. Eleven were green on one with four over-length
+fields. **A check that reads the artefact can only find what the artefact contains; it can
+never tell you what a VALID one looks like.** That question has one answer available in
+this repo and it was used for the envelope and then put down: `bundle_a_create_entity.json`
+is the only change set AWS has ever accepted from us.
+
+**SO THE REFERENCE IS THE WHOLE ACCEPTED DOCUMENT, FIELD BY FIELD, NOT ITS SHAPE.**
+`check_field_limits()` prints every field in the change set beside the longest value AWS
+took in that SAME field, with list indices collapsed -- a class path, so all six dimension
+Descriptions are one field rather than six. Comparing by INDEX pairs "Breach Exposure
+Check" with "Supply Chain Exposure Check" and reports the difference as a finding, which is
+a guard nobody can act on.
+
+**The measurement that would have caught the fifth failure before the first:** Bundle A's
+dimension descriptions are 80/76/88/78/71/71/83 and **every one is under 90.** The
+constraint was derivable from the accepted example all along, without a docs page --
+`docs.aws.amazon.com` returns 000 from this container, which is exactly why the accepted
+artefact is the authority.
+
+**TWO MECHANISMS, DELIBERATELY DIFFERENT IN FORCE, and the split is the repo's own rule.**
+`CEILINGS` holds limits we have MEASURED and it BLOCKS, each entry naming where the number
+came from -- a limit nobody can source is one the next session deletes. Everything else
+merely REPORTS `OVER`, because "longer than one accepted example" is not a known constraint
+and a probe that cannot tell has no standing to stop finished work.
+
+**AND THE COMPARISON FOUND SOMETHING BETTER THAN A LENGTH: THE TWO DOCUMENTS HAVE THE
+IDENTICAL FIELD STRUCTURE.** Same changes, same keys, all the way down. A test now fails in
+BOTH directions -- a field Bundle A carries that we do not is a missing step, and a field we
+carry that no accepted set has may be fine but nothing in this repo has evidence that it is.
+
+**THE GENERAL FORM, and it outranks adding another guard: when a remote system has refused
+you more than once, stop fixing the thing it named. Diff your artefact against one it
+accepted.** The refusal names a symptom; the accepted example is the specification. Three
+sessions of this programme have now reached for the second one and stopped halfway --
+Bundle A's envelope was read as far as `AddDimensions`, its dimension lengths were never
+read at all, and both were one `json.load` away.

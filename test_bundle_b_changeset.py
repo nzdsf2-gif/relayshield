@@ -247,6 +247,53 @@ class TestItIsAWholeSubmission(unittest.TestCase):
         found = re.findall(r"prod-[a-z0-9]+", CHANGESET.read_text(encoding="utf-8"))
         self.assertEqual(found, [], f"literal entity id in the change set: {found}")
 
+    def field_classes(self, path):
+        """Every field in the document, with list indices collapsed."""
+        out = set()
+
+        def walk(node, prefix):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    walk(value, f"{prefix}.{key}" if prefix else key)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value, f"{prefix}[]")
+            else:
+                out.add(prefix)
+
+        for change in json.loads(path.read_text(encoding="utf-8"))["ChangeSet"]:
+            walk(change.get("DetailsDocument"), change.get("ChangeType", "?"))
+        return out
+
+    def test_every_field_the_accepted_set_carries_is_present_here(self):
+        """The ChangeType sequence above says the same CHANGES are present.
+        This says the same FIELDS are, which is the question that was never
+        asked across five refused submissions: a document can carry all
+        thirteen changes and still be missing a key inside one of them, and
+        nothing that reads only this document can see an absence."""
+        mine = self.field_classes(CHANGESET)
+        accepted = self.field_classes(BUNDLE_A)
+        self.assertEqual(
+            accepted - mine, set(),
+            "fields AWS accepted in Bundle A that Bundle B does not carry")
+        self.assertEqual(
+            mine - accepted, set(),
+            "fields Bundle B carries that no accepted change set has. They may "
+            "be fine; nothing in this repo has evidence that they are")
+
+    def test_no_dimension_description_exceeds_ninety_characters(self):
+        """The fifth refusal, em3sw5gs00lifcmy42mxe95t9, in the artefact rather
+        than in the submitter: 'Valid descriptions cannot exceed more than 90
+        characters'. A guard in the tool protects the submission path; a guard
+        here protects the file from being edited back over the line."""
+        doc = json.loads(CHANGESET.read_text(encoding="utf-8"))
+        dims = next(c for c in doc["ChangeSet"]
+                    if c["ChangeType"] == "AddDimensions")["DetailsDocument"]
+        over = [(d["Key"], len(d["Description"])) for d in dims
+                if len(d["Description"]) > 90]
+        self.assertEqual(over, [], f"dimension descriptions over 90: {over}")
+
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

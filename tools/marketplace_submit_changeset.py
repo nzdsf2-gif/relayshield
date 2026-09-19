@@ -389,6 +389,117 @@ def check_pricing(doc: dict) -> None:
               "         price nothing can ever bill.\n")
 
 
+# ---------------------------------------------------------------- field sizes
+#
+# THE FIFTH FAILED CHANGE SET, em3sw5gs00lifcmy42mxe95t9, 2026-09-19:
+#
+#     INVALID_INPUT Remove invalid key 'supply_chain_calls' with types
+#     '[Metered, ExternallyMetered]'. Valid descriptions cannot exceed more
+#     than 90 characters.
+#
+# Four of six dimension descriptions were over. The media preflight passed,
+# the pricing preflight passed, eleven document guards passed, and AWS still
+# refused it -- for the FIFTH time, each time on a different validation that
+# none of our checks knew about.
+#
+# The pattern was fixing one constraint per round. What ends it is not another
+# single-field check: it is asking, for EVERY field, whether this document is
+# within the range the ACCEPTED example demonstrates. Bundle A's create set is
+# the only change set AWS has taken from us, so it is the authority on what
+# passes -- exactly as its ENVELOPE was the authority on which changes a SaaS
+# create needs.
+#
+# Two mechanisms, deliberately different in force:
+#
+#   CEILINGS  a limit we have MEASURED. It blocks. Each entry names where the
+#             number came from; a limit nobody can source does not go here.
+#   reference every string, against the longest string AWS accepted in that
+#             same field. Over-length prints OVER and does NOT block, because
+#             "longer than one example" is not a known constraint and a probe
+#             that cannot tell has no standing to stop finished work. It is
+#             the line a reader checks before pressing apply.
+
+CEILINGS = {
+    "AddDimensions[].Description": (
+        90, "AWS INVALID_INPUT on change set em3sw5gs00lifcmy42mxe95t9, "
+            "2026-09-19: 'Valid descriptions cannot exceed more than 90 "
+            "characters'"),
+}
+
+REFERENCE = ROOT / "aws_marketplace" / "bundle_a_create_entity.json"
+
+
+def field_classes(doc: dict) -> dict:
+    """{class path: [strings]} for every string in the change set.
+
+    A CLASS path collapses list indices, so the third dimension's Description
+    and the fifth one's are the same field rather than two. Comparing by index
+    against another product is meaningless -- it pairs 'Breach Exposure Check'
+    with 'Supply Chain Exposure Check' and calls the difference a finding.
+    """
+    out = {}
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, f"{path}.{key}" if path else key)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, f"{path}[]")
+        elif isinstance(node, str):
+            out.setdefault(path, []).append(node)
+
+    for change in doc.get("ChangeSet", []):
+        walk(change.get("DetailsDocument"), change.get("ChangeType", "?"))
+    return out
+
+
+def check_field_limits(doc: dict, reference=REFERENCE) -> None:
+    classes = field_classes(doc)
+
+    over = []
+    for path, (limit, source) in CEILINGS.items():
+        for value in classes.get(path, []):
+            if len(value) > limit:
+                over.append((path, limit, len(value), value, source))
+    if over:
+        lines = ["\nREFUSED: field values over a limit AWS enforces:\n"]
+        for path, limit, got, value, source in over:
+            lines.append(f"    {path}  {got} > {limit}")
+            lines.append(f"        {value[:72]}...")
+            lines.append(f"        limit source: {source}")
+        raise SystemExit("\n".join(lines) + "\n")
+
+    if not reference or not Path(reference).exists():
+        return
+    ref = field_classes(json.loads(Path(reference).read_text()))
+    if "CreateProduct" not in [c.get("ChangeType") for c in doc.get("ChangeSet", [])]:
+        return          # the reference is a CREATE set; an offer set is not one
+
+    print("\nfield sizes, against the change set AWS accepted "
+          f"({Path(reference).name}):")
+    longer = []
+    for path, values in sorted(classes.items()):
+        mine = max(len(v) for v in values)
+        theirs = ref.get(path)
+        if not theirs:
+            continue
+        accepted = max(len(v) for v in theirs)
+        mark = "OVER" if mine > accepted else "    "
+        if mine > accepted:
+            longer.append((path, mine, accepted))
+        print(f"  {mark} {mine:>5} / {accepted:>5} accepted   {path}")
+
+    if longer:
+        print("\n  NOT A REFUSAL, and read it before pressing apply: these "
+              "fields are longer\n  than anything AWS has taken from us. No "
+              "limit is known for them, so this\n  cannot say they are too "
+              "long -- only that they are outside the range that\n  is proven "
+              "to pass.")
+        for path, mine, accepted in longer:
+            print(f"    {path}  {mine} vs {accepted}")
+
+
 def submit(doc: dict, changes: list, name: str) -> int:
     import boto3
     from botocore.exceptions import ClientError
@@ -470,6 +581,7 @@ def main() -> int:
     # one that ships, which is the family of defect this repo keeps paying for.
     check_media(doc)
     check_pricing(doc)
+    check_field_limits(doc)
 
     if not args.apply:
         print("\nDRY RUN. Nothing was sent. Add --apply --confirm "

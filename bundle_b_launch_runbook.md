@@ -229,9 +229,17 @@ EXPECT, in this order:
   **Read those six names.** They are the rate card and nothing after this changes them cheaply.
 - `pricing preflight:` with `OK` against all six.
 - `media preflight:` `OK  HTTP 200`.
+- `field sizes, against the change set AWS accepted` -- a table of every field in the
+  document beside the longest value AWS has ever taken from us in that same field.
+  Three lines read `OVER`, all of them by one or two characters on a dimension KEY or a
+  search keyword, and all three are deliberate: a key cannot be shortened without
+  changing what the API meters. Nothing else may be OVER.
 
 STOP IF: `changes : 5` -- STEP 3b did not land. Do not run the apply.
 STOP IF: any `UNPRICED` line -- send me the block; the apply would fail the same way again.
+STOP IF: `REFUSED: field values over a limit AWS enforces` -- the run stops itself; send
+me the block. It is reproducing AWS's own refusal in one second instead of fifteen.
+STOP IF: an `OVER` line naming anything that is not a Key or a SearchKeyword -- send it.
 STOP IF: `AccessDeniedException` -- step 1 did not take.
 
 ## STEP 5 -- ANDREW CLICKS THIS. Create the product. IRREVERSIBLE.
@@ -245,7 +253,7 @@ AWS reviews asynchronously, so the product does not exist the moment this return
 that id to STEP 5b.
 STOP IF: `AccessDeniedException` -- step 1 did not take.
 
-## STEP 5 HAS FAILED FOUR TIMES. TWO DEFECTS, AND THE LAST TWO RUNS WERE THE SAME ONE.
+## STEP 5 HAS FAILED FIVE TIMES. FOUR DEFECTS, AND EACH ONE NOW HAS A PREFLIGHT.
 
 Change set `de0zvpnvpcq3olta3y7kpx4p2` came back **FAILED**, so **no Bundle B product exists, no
 product code exists, and the Marketplace Management Portal correctly lists three SaaS products.**
@@ -315,6 +323,30 @@ workflow ran; the ChangeSetId is 25 lowercase alphanumerics and is only in the j
 Offered as a marketplace identifier twice now, once for the product code and once for this, and
 both times because the value the reader actually needed was buried in a log while a
 plausible-looking one was on screen.
+
+## THE FIFTH FAILURE, `em3sw5gs00lifcmy42mxe95t9`, AND WHAT ENDED THE PATTERN
+
+    INVALID_INPUT Remove invalid key 'supply_chain_calls' with types
+    '[Metered, ExternallyMetered]'. Valid descriptions cannot exceed more
+    than 90 characters.
+
+Four of six dimension descriptions were over: 93, 109, 92, 93. The run listed all thirteen
+changes and both preflights passed, so STEP 3b and the pricing fix had both landed -- this
+was a fourth, separate validation.
+
+**The defect was not any of the four. It was fixing one constraint per round.** Every check
+we had read the document that existed. None asked whether it was within the range of the
+one document AWS has actually accepted from us.
+
+**Bundle A's create set is now the reference, for every field rather than for its envelope.**
+The dry run prints each field beside the longest value AWS took in that same field, and the
+90-character ceiling -- the only one we have MEASURED -- blocks. The four descriptions were
+shortened to 78, 75, 86, 82 and 86; nothing else in the document is now longer than the
+accepted example except three keys that cannot change without changing what the API meters.
+
+**Measured while doing it, and worth knowing before anyone edits this file:** Bundle B's
+change set and Bundle A's accepted one have the IDENTICAL field structure -- same changes,
+same keys, all the way down. A test fails if that stops being true in either direction.
 
 ## STEP 5b -- ANDREW CLICKS THIS. Read the result. This is the step that tells you what to type next.
 

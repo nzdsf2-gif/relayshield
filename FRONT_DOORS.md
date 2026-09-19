@@ -33,7 +33,7 @@ when deciding what to build next — it just becomes an opinion.
 | FD-9 | Glama | Agentic bundle | **DONE upstream, pending their sync** | Glama mirrors the registry record, which now carries the attribution. Nothing further to do on our side; re-check the listing in a few days |
 | FD-10 | PyPI project page for `relayshield-mcp` | Agentic bundle | **DONE 2026-09-05** | 0.2.11's published metadata carries `Documentation: https://api.relayshield.net/developers?source=pypi`. Read from PyPI, not from the local file |
 | FD-11 | Smithery | Agentic bundle | **LISTED, 60/100, tools not introspected** | Server metadata and config UX are full marks. Capability Quality is 0/40 because the deployment cannot start the server. `mcp_registry/smithery.yaml` was CORRECTED 2026-09-05 and still needs copying to `~/mcp-live` |
-| FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **ROUTE OPEN, ARTEFACT BUILT** | Added 2026-09-05. Their README: *"Third-party partners can submit plugins"*, via <https://clau.de/plugin-directory-submission>. Our marketplace and plugin exist and both pass `claude plugin validate` |
+| FD-12 | Anthropic Claude Code plugin directory | Agentic bundle, API | **SUBMITTED 2026-09-06, NOT LISTED** | Form sent via <https://clau.de/plugin-directory-submission>. Measured 2026-09-19: the directory holds 310 plugins, 18 of them `security`, and none is ours. No ticket, no issue template, and their `close-external-prs.yml` auto-closes a non-member PR, so the form is the only route. Watched weekly by `claude_plugin_directory_watch.yml` |
 | FD-13 | xAI Grok Build plugin marketplace | Agentic bundle, API | **SUBMITTED 2026-09-08, PR #612** | Open at `xai-org/plugin-marketplace`, from a `RelayShield`-owned fork, pinning `RelayShield/relayshield-plugin`. Socket checks green; `validate` is gated behind a maintainer approving the workflow, which is GitHub's first-time-contributor rule and not a failure. Awaiting review. **Do not push to the branch while it waits**: a push re-arms that approval gate |
 | FD-14 | OpenAI plugin directory (ChatGPT + Codex) | Agentic bundle, API | **ROUTE OPEN, UNSCOPED** | Added 2026-09-08. Developers can submit apps; the app directory migrated to a **Plugin directory** on 2026-07-09 covering ChatGPT AND Codex. Apps SDK is built on MCP, so `relayshield-mcp` is already the right shape. **Step one PARTLY DONE 2026-09-17** from search results quoting their pages (their docs are egress-blocked, so this is SECONDARY evidence). Two gates nobody had named: OpenAI Platform **identity/business verification is a prerequisite**, and **selling digital goods, subscriptions or in-app services is not yet allowed**, with the documented link-out route scoped to PHYSICAL goods. So a listing is built on the KEYLESS checks or it is a compliance problem -- the Telegram Stars trap with another host's name on it |
 | FD-15 | Hosted HTTP MCP endpoint, onboarded everywhere that takes one | Agentic bundle, API | **NOT STARTED** | Added 2026-09-08. One artefact, three destinations: Grok Bot custom connectors, Smithery (FD-11), and anything else that takes a URL rather than a package. The HF Space already serves MCP over HTTP; this is onboarding, not building |
@@ -452,6 +452,47 @@ prepared. FD-13 is the second copy of the same work, not a different piece of wo
 **That ranking stands after the correction**, and for a better reason than before: the artefact is
 built, the manifest is accepted as-is and the argument is written, so the marginal cost of FD-13
 after FD-12 is small. **FD-12's form was submitted 2026-09-06.**
+
+### FD-12 MEASURED 2026-09-19, AND THE ROW WAS STALE BY THIRTEEN DAYS
+
+**The row said ROUTE OPEN, ARTEFACT BUILT. Two hundred lines below it, in this
+same file, was the sentence "FD-12's form was submitted 2026-09-06."** Nobody was
+wrong on purpose: the form returns no ticket and no email, so the only way to know
+the state was to remember to go and look, and a status nothing measures drifts.
+That is the XSOAR gate exactly, and it now gets the same answer --
+`.github/workflows/claude_plugin_directory_watch.yml`, weekly, opening an issue on
+the day it lands. Daily would be an alarm nobody reads; nothing is gated on this
+listing the way the XSOAR blog post is gated on that pack.
+
+**THE DIRECTORY IS A SINGLE PUBLIC JSON FILE, WHICH IS WHY THIS IS CHEAP.**
+`anthropics/claude-plugins-official/.claude-plugin/marketplace.json`, read from the
+container: **310 plugins**. 39 first-party under `plugins/`, 14 vendored under
+`external_plugins/`, and **258 sourced REMOTELY** -- 97 `git-subdir`, 161 `url`. So
+the remote route is the well-trodden one and our submission vendors nothing.
+
+**THERE IS NO FOLLOW-UP ROUTE, AND THAT WAS READ RATHER THAN ASSUMED.** No issue
+template, no CONTRIBUTING. `.github/workflows/close-external-prs.yml` closes a pull
+request from any non-member unless `external-pr-scope.js` finds it adds a
+marketplace entry whose **source repo already backs a live listing**. Ours does
+not, so a PR from us is closed before review. **Do not open one** -- that is FD-2's
+failure with the evidence available beforehand for once.
+
+**THE COMPETITIVE READ, AND IT IS THE BEST ARGUMENT FOR A RE-SUBMISSION.** Eighteen
+plugins carry `category: security`: 42crunch, auth0, claude-security, crowdsec, two
+CrowdStrike Falcon entries, duende, jfrog, security-guidance, semgrep, sonarqube,
+sonatype, two StackHawk entries, two Vanta entries, workos, zscaler. **Every one of
+them is app-sec, identity, or posture and compliance. Not one screens the thing an
+agent is about to install.** That is the whole of agent-bait's argument and the
+directory currently has no entry making it.
+
+**THE ONE IMPROVEMENT IN OUR CONTROL IS THE ORG MOVE.** Their guide calls org
+ownership *"the single biggest thing that speeds up review"*, and our marketplace
+is `nzdsf2-gif/relayshield`, a personal account, for a plugin branded RelayShield.
+Note `plugins/relayshield/.claude-plugin/plugin.json` ALREADY names
+`RelayShield/relayshield-plugin` as its repository while the marketplace entry
+still points at the personal account -- the move is half applied, and the two
+disagree today. **It cannot be finished from a `nzdsf2-gif/*` session**: repo
+sources are one owner, fixed before the prompt is typed.
 
 ### THE ORG MOVE. Decided 2026-09-07, and it is a SYNC rather than a move.
 

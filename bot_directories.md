@@ -28,6 +28,9 @@ AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/source_arrivals.py --surface 
 | 6 | [Telegram Directory, tdirectory.me](https://tdirectory.me/) | `tdirectory` | Not submitted | UNVERIFIED -- nobody has looked |
 | 7 | [Telegramic, telegramic.org](https://telegramic.org/bots/) | `telegramic` | Not submitted | UNVERIFIED -- nobody has looked |
 | 8 | @botlist / @BotListChat | `botlist` | Not submitted (ranked last by rule) | Telegram-native, not a web form |
+| 9 | [botostore.com](https://botostore.com) | `botostore` | Not submitted | UNVERIFIED -- nobody has looked |
+| 10 | [tgstat.com](https://tgstat.com) | `tgstat` | Not submitted | UNVERIFIED -- nobody has looked |
+| 11 | [tlgrm.eu](https://tlgrm.eu) | `tlgrm` | Not submitted | UNVERIFIED -- nobody has looked |
 
 ## Why each one sits where it does
 
@@ -140,6 +143,48 @@ https://t.me/relayshield_bot?start=SRC_botlist
 ```
 
 TELEGRAM-NATIVE, SO IT RANKS BELOW EVERY WEB FORM, and that ordering is measured rather than argued. Every Telegram-first attempt this programme made reached nothing -- @telegtapps was an ad broker, @tapps_bot was the catalogue rather than the route, @app_moderation_bot never answered /start -- while four web forms in two days produced four submissions and a live listing. A channel shows you its contents and hides its plumbing; a website shows you its navigation.
+
+### 9. botostore.com
+
+**Key** `botostore` · **State** Not submitted
+
+**Submit at** <https://botostore.com>
+
+**Link to give them**
+
+```text
+https://t.me/relayshield_bot?start=SRC_botostore
+```
+
+One of the longest-running Telegram bot catalogues with a web front door. Ranked on age, which is the only evidence available here -- nothing in this repo has measured its traffic and no number should be quoted for it. TYPE-CHECK BEFORE SUBMITTING, and two questions settle it. Is it a curated catalogue with a submission route, or a broker selling posts? @telegtapps was ranked on subscriber count and turned out to be the second. And does it already list @relayshield_bot -- tg.app keys one listing per BOT USERNAME, so a second submission can collide with the first rather than adding to it. UNVERIFIED from the container: this host returns 000 here, as does storebot.me, which accepted a submission. 000 is a fact about egress.
+
+### 10. tgstat.com
+
+**Key** `tgstat` · **State** Not submitted
+
+**Submit at** <https://tgstat.com>
+
+**Link to give them**
+
+```text
+https://t.me/relayshield_bot?start=SRC_tgstat
+```
+
+An analytics site that also runs a catalogue, so the type check matters more than usual: analytics sites sell advertising, and a catalogue that exists as a shop front for ad inventory is the @telegtapps shape wearing a better suit. TYPE-CHECK BEFORE SUBMITTING, and two questions settle it. Is it a curated catalogue with a submission route, or a broker selling posts? @telegtapps was ranked on subscriber count and turned out to be the second. And does it already list @relayshield_bot -- tg.app keys one listing per BOT USERNAME, so a second submission can collide with the first rather than adding to it. UNVERIFIED from the container: this host returns 000 here, as does storebot.me, which accepted a submission. 000 is a fact about egress.
+
+### 11. tlgrm.eu
+
+**Key** `tlgrm` · **State** Not submitted
+
+**Submit at** <https://tlgrm.eu>
+
+**Link to give them**
+
+```text
+https://t.me/relayshield_bot?start=SRC_tlgrm
+```
+
+A channels-and-bots directory with an add form. The only row on this list that may take the BLOG CHANNEL as well as the bot, which is a second listing for one read -- t.me/RelayShield is a different username from t.me/relayshield_bot, so the two cannot collide. TYPE-CHECK BEFORE SUBMITTING, and two questions settle it. Is it a curated catalogue with a submission route, or a broker selling posts? @telegtapps was ranked on subscriber count and turned out to be the second. And does it already list @relayshield_bot -- tg.app keys one listing per BOT USERNAME, so a second submission can collide with the first rather than adding to it. UNVERIFIED from the container: this host returns 000 here, as does storebot.me, which accepted a submission. 000 is a fact about egress.
 
 ---
 

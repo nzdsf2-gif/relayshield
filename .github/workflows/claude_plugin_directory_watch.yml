@@ -1,0 +1,93 @@
+name: Claude Plugin Directory Watch
+
+# WHY THIS EXISTS
+# ---------------
+# FD-12's form was submitted on 2026-09-06. On 2026-09-19 the FRONT_DOORS row
+# still read "ROUTE OPEN, ARTEFACT BUILT" -- two hundred lines above a sentence
+# in the same file saying it had been submitted. Nobody was wrong on purpose:
+# there is no ticket, no confirmation email and no issue template, so the only
+# way to know the state was for somebody to remember to go and look.
+#
+# This is the XSOAR gate exactly, and it gets the same answer: watch it rather
+# than remember it. The directory IS a single public JSON file, so the check is
+# one HTTP request and no credentials.
+#
+# It does NOT go red when we are absent. Absent is the normal state and a daily
+# red run is an alarm nobody reads by the third week -- the quiet-alarm rule
+# pointed the other way. The run goes red only when the file could not be read
+# at all, because THAT is the case where "not listed" would be a false absence.
+#
+# WEEKLY RATHER THAN DAILY. A directory review is not a pipeline; a day's
+# latency on a listing costs nothing, and the XSOAR watcher is daily only
+# because the moment its pack lands a competitor-readable claim becomes
+# publishable. Nothing here is gated on the listing that way.
+
+on:
+  schedule:
+    - cron: '0 10 * * 1'
+  workflow_dispatch:
+
+jobs:
+  watch:
+    name: Is RelayShield in anthropics/claude-plugins-official yet?
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the directory
+        id: check
+        run: |
+          set -uo pipefail
+          python3 tools/check_claude_plugin_listing.py | tee listing.txt
+          STATUS=$(grep '^CLAUDE_PLUGIN_LISTING=' listing.txt | tail -1 | cut -d= -f2)
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          if [ "$STATUS" = "undetermined" ]; then
+            echo "::error::The directory could not be read. This run is not evidence either way."
+            exit 1
+          fi
+
+      - name: Open the issue on the day it lands
+        if: steps.check.outputs.status == 'listed'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'FD-12 is LIVE — RelayShield is in the Claude plugin directory';
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'front-doors',
+            });
+            if (existing.data.some(i => i.title === title)) return;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title,
+              labels: ['front-doors'],
+              body: [
+                'The plugin now appears in `anthropics/claude-plugins-official`.',
+                '',
+                '1. **FRONT_DOORS.md: the FD-12 ROW *and* its section.** A row with no',
+                '   section is half a record, and a stale row is what made this watcher',
+                '   necessary in the first place.',
+                '2. **Check the install path in the live entry against what we publish.**',
+                '   The agent-bait blog post tells readers, on a live page, to run',
+                '   `claude plugin marketplace add nzdsf2-gif/relayshield`. If the listed',
+                '   entry points somewhere else, one of the two is wrong for every reader.',
+                '3. **FD-13 is the same artefact.** Its PR is already open; note the',
+                '   listing there if it is still unreviewed.',
+                '4. Nothing new to register: anything pointing at the plugin already',
+                '   carries `?source=claude-skill`.',
+              ].join('\n'),
+            });
+
+      - name: Say what is available when it has not landed
+        if: steps.check.outputs.status == 'absent'
+        run: |
+          echo "Still not listed. There is no follow-up route: their own"
+          echo "close-external-prs workflow auto-closes a non-member PR unless it adds"
+          echo "an entry whose source repo already backs a live listing, and ours does"
+          echo "not. Wait, or re-submit a stronger entry -- the org move is the largest"
+          echo "available improvement, and it needs a session whose repo source is the"
+          echo "RelayShield org."

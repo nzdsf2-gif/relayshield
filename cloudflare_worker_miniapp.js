@@ -137,6 +137,13 @@ const ALLOWED_SOURCES = new Set([
   "tg-miniapp-tonapp",
   "tg-miniapp-tgapp",
   "tg-miniapp-awesome",
+  // Two destinations registered 2026-09-19, BEFORE either is submitted to.
+  // dappradar is a dapp catalogue whose audience holds TON, which is the one
+  // audience for whom a TON-only Check tab is the headline. producthunt is
+  // deliberately NOT a catalogue: a launch is one day, so it is ranked last
+  // and spent only after a listing has proved the copy.
+  "tg-miniapp-dappradar",
+  "tg-miniapp-producthunt",
   "tg-miniapp-onclicka",
   "tg-miniapp-telegtapps",
   "tg-miniapp-tapps",

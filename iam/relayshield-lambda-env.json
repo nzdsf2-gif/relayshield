@@ -1,0 +1,18 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAndMergeEnvironmentOnProductCodeFunctions",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetFunctionConfiguration",
+        "lambda:UpdateFunctionConfiguration"
+      ],
+      "Resource": [
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-bundle-fulfillment",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-api",
+        "arn:aws:lambda:us-east-1:239677749008:function:relayshield-agentic-api"
+      ]
+    }
+  ]
+}

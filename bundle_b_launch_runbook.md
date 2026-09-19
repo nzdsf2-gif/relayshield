@@ -588,14 +588,63 @@ hex value for anything ending `_PRODUCT_CODE` (that is a git commit SHA, and it 
 what got pasted) and a `prod-...` entity id (that is the Catalog API identifier, which
 steps 7 and 9 want and this field does not).
 
-STOP IF: `AccessDenied` on `UpdateFunctionConfiguration` -- the deploy role lacks that
-action. Section 5 of `tools/diagnose_bundle_fulfillment_env.sh` says so in advance; tell
-me and I will send the one-line grant.
+STOP IF: `AccessDenied` on `UpdateFunctionConfiguration`. **THIS FIRED ON 2026-09-19.**
+`plan` succeeded and `apply` failed, because `GetFunctionConfiguration` is granted to
+`relayshield-github-deploy` and `UpdateFunctionConfiguration` is not. There are two routes
+and they are not equivalent in cost:
 
-**If the block is missing `BUNDLE_D_PRODUCT_CODE` or `BUNDLE_A_PRODUCT_CODE`**, set each
-the same way, one run per key. The tool merges, so order does not matter and nothing is
-lost between runs. Section 4 of the diagnostic reads those values off
-`relayshield-api` and `relayshield-agentic-api`, which this incident never touched.
+**ROUTE A, the AWS console, and it needs no IAM change at all.** Lambda, function
+`relayshield-bundle-fulfillment`, Configuration, Environment variables, Edit. **That page
+is a merge by construction** -- it shows every existing row and you add one. The hazard
+this whole step exists to avoid is a property of the `--environment` API parameter, not of
+the console, and you are acting as yourself rather than as the deploy role, so no grant is
+involved. Use this when the point is to be finished.
+
+**ROUTE B, grant the role, so the workflow is not dead for the next key.**
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    sh tools/apply_lambda_env_policy.sh
+
+EXPECT: both decisions in the table read `allowed`.
+STOP IF: `REFUSING: expected 239677749008` -- the profile resolved to the pre-audit
+account and nothing was written.
+Then re-run the workflow's `apply`. Route B is worth doing whichever route sets this key,
+because it is the difference between a workflow that works and one that fails every time.
+
+### THE BLOCK LOST `BUNDLE_A_PRODUCT_CODE` AND `BUNDLE_D_PRODUCT_CODE` ON 2026-09-18
+
+The plan run on 2026-09-19 printed `preserved: (none -- the block held only this key)`,
+which is the measurement that settles it: **the hand-typed `--environment` write of
+2026-09-18 did land, and it deleted both.**
+
+**That is a live defect on two PUBLIC listings and it outranks Bundle B.** With those keys
+unset, `PRODUCT_CODES` loses their entries, `_product_code_filter()` matches no existing
+key row, and `_deactivate_api_key` finds nothing on an unsubscribe -- so **a cancelled
+Bundle A or Bundle D customer keeps a working key**, silently, because a scan that matches
+nothing and a customer with no keys are the same output.
+
+Restore all three, one run per key (or all three rows at once in the console). The tool
+merges, so order does not matter and nothing is lost between runs.
+
+**READ THE VALUES, DO NOT TYPE THEM FROM MEMORY OR FROM THIS REPO.** Two product-code-shaped
+strings in this repo (`46y72j0d99w7lyqkiqrakpc5k`, `5s4a96a1ui1a5efrom6udnm2g`) sit in
+contexts that do not establish which product they belong to, and one of them is the TI
+product rather than a bundle. A value pasted into this field wrongly produces no error and
+breaks deactivation exactly as an empty one does.
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    AWS_PROFILE=relayshield sh tools/diagnose_bundle_fulfillment_env.sh
+
+EXPECT: section 1 prints the block as it stands; **section 4 prints
+`BUNDLE_D_PRODUCT_CODE` off `relayshield-api` and `relayshield-agentic-api`**, which this
+incident never wrote to, so that value is recovered rather than guessed. Section 2 prints
+any published version whose configuration is frozen -- if one exists it carries the whole
+old block including Bundle A's.
+STOP IF: section 4 shows `(not set)` on both functions and section 2 shows no versions.
+Then the only remaining authoritative read is the Marketplace Management Portal product
+page for each bundle, seller side, **Product code** field.
 
 ## STEP 9 -- ANDREW CLICKS THIS. Go public, once STEP 8 passes.
 

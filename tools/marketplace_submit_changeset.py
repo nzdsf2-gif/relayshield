@@ -316,6 +316,79 @@ def check_media(doc: dict, probe=probe_media) -> None:
             "         bundle-specific text in it.\n")
 
 
+def priced_dimensions(doc: dict) -> dict:
+    """{dimension key: price} across every rate card in the change set."""
+    out = {}
+    for change in doc.get("ChangeSet", []):
+        if change.get("ChangeType") != "UpdatePricingTerms":
+            continue
+        details = change.get("DetailsDocument") or {}
+        for term in details.get("Terms", []):
+            for card in term.get("RateCards", []):
+                for row in card.get("RateCard", []):
+                    key = row.get("DimensionKey")
+                    if key:
+                        out[key] = row.get("Price")
+    return out
+
+
+def check_pricing(doc: dict) -> None:
+    """Refuse a change set that adds dimensions and prices none of them.
+
+    WHY THIS EXISTS. Change set 17or75a96xofiu7gic33wjrm6 cleared the media
+    preflight added hours earlier and then came back FAILED anyway:
+
+        INVALID_INPUT When adding dimensions for SaaS products, you must also
+        set pricing for usage dimensions.
+
+    The document held five changes. Bundle A's accepted one holds thirteen: the
+    offer, its pricing, legal, support and renewal terms, and the two releases.
+    It was built by reusing Bundle A's envelope and I stopped reading at
+    AddDimensions, so the half that prices the dimensions was simply absent.
+
+    Every guard was on the document that existed. This one asks what a COMPLETE
+    one looks like, which is the question none of them asked.
+    """
+    dims = []
+    for change in doc.get("ChangeSet", []):
+        if change.get("ChangeType") == "AddDimensions":
+            dims += change.get("DetailsDocument") or []
+    if not dims:
+        return
+
+    priced = priced_dimensions(doc)
+    print("\npricing preflight:")
+    for dim in dims:
+        key = dim.get("Key")
+        price = priced.get(key)
+        mark = "OK      " if price is not None else "UNPRICED"
+        print(f"  {mark} {key:<32} {price if price is not None else '-'}")
+
+    unpriced = [d.get("Key") for d in dims if d.get("Key") not in priced]
+    if unpriced:
+        raise SystemExit(
+            "\nREFUSED: these dimensions carry no price:\n"
+            + "\n".join(f"    {k}" for k in unpriced)
+            + "\n\n         AWS refuses the whole change set with\n"
+              "         INVALID_INPUT ... you must also set pricing for usage\n"
+              "         dimensions. A SaaS product is created by ONE change set\n"
+              "         carrying the product AND its offer: CreateProduct,\n"
+              "         UpdateInformation, UpdateTargeting, AddDeliveryOptions,\n"
+              "         AddDimensions, ReleaseProduct, CreateOffer, the offer's\n"
+              "         UpdateInformation, UpdatePricingTerms, UpdateLegalTerms,\n"
+              "         UpdateSupportTerms, UpdateRenewalTerms, ReleaseOffer.\n"
+              "         aws_marketplace/bundle_a_create_entity.json is the copy\n"
+              "         AWS accepted; read all of it, not the first half.\n")
+
+    orphans = [k for k in priced if k not in {d.get("Key") for d in dims}]
+    if orphans:
+        raise SystemExit(
+            "\nREFUSED: priced dimensions that this change set never declares:\n"
+            + "\n".join(f"    {k}" for k in orphans)
+            + "\n\n         A rate card naming a key no dimension defines is a\n"
+              "         price nothing can ever bill.\n")
+
+
 def submit(doc: dict, changes: list, name: str) -> int:
     import boto3
     from botocore.exceptions import ClientError
@@ -396,6 +469,7 @@ def main() -> int:
     # check AWS would have failed on is checking a different document from the
     # one that ships, which is the family of defect this repo keeps paying for.
     check_media(doc)
+    check_pricing(doc)
 
     if not args.apply:
         print("\nDRY RUN. Nothing was sent. Add --apply --confirm "

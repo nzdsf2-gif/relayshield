@@ -6817,3 +6817,85 @@ refusal is code rather than another sentence.
 The logo check that FAILED the first change set now passes in one second, in the dry run,
 before anything is spent. A guard written after a failure is worth having only if the next
 run exercises it, and this one did.
+
+## THE CHANGE SET FAILED A SECOND TIME. I HAD READ BUNDLE A'S ENVELOPE AS FAR AS ITS DIMENSIONS.
+
+**2026-09-19, read from the STEP 5b run rather than reported.** The logo fix took and the
+media preflight printed `OK HTTP 200`, and `17or75a96xofiu7gic33wjrm6` failed anyway:
+
+    INVALID_INPUT When adding dimensions for SaaS products, you must also set
+    pricing for usage dimensions.
+
+**FIVE CHANGES WHERE BUNDLE A'S ACCEPTED SET HAS THIRTEEN.** This file records, approvingly,
+that Bundle B was "built by READING Bundle A's change set and reusing its envelope rather
+than retyping it, so the shape AWS already accepted is preserved". That was the right
+method and I applied it to the first five changes. Everything after `AddDimensions` --
+`ReleaseProduct`, `CreateOffer`, the offer's `UpdateInformation`, **`UpdatePricingTerms`**,
+`UpdateLegalTerms`, `UpdateSupportTerms`, `UpdateRenewalTerms`, `ReleaseOffer` -- was never
+read and therefore never copied. **A SaaS product is created by ONE change set carrying the
+product AND its offer**, and a product with dimensions and no rate card is not a smaller
+version of that, it is invalid.
+
+**SECOND FAILURE IN TWO DAYS ON THE SAME DOCUMENT, AND THE SECOND ONE IS THE SAME SHAPE AS
+THE FIRST.** The logo was a field copied across with its value substituted and not checked;
+this was a section not copied across at all. Both are "I reused an accepted artefact" doing
+less work than the sentence implies. **When the method is reuse, the check is a diff against
+the thing being reused, not a reading of the result.**
+
+**AND EVERY GUARD WAS GREEN, INCLUDING THE ONE I ADDED HOURS EARLIER.** Six document guards
+plus the new media preflight, all passing on a document missing eight of its thirteen parts.
+**A check that reads the document cannot see what the document does not contain.** The new
+guard is therefore not another document check: `test_bundle_b_changeset.py` asserts Bundle
+B's ChangeType sequence EQUALS Bundle A's, because Bundle A's file is the only accepted
+example in the repo and a difference there is a missing step rather than a style choice.
+
+### THE PREFLIGHT REPRODUCES AWS'S REFUSAL IN ONE SECOND
+
+`check_pricing()` in `tools/marketplace_submit_changeset.py` runs beside `check_media()`,
+at the top level of `main()` before any branch that returns, and refuses a change set whose
+`AddDimensions` keys are not all priced -- and, in the other direction, a rate card naming a
+key no dimension declares, which is a price nothing can ever bill. Run against the exact
+document AWS rejected it prints six `UNPRICED` lines and exits 1.
+
+**The general form, third instance this week: when a remote system will VALIDATE what you
+hand it, reproduce its validation locally.** `check_media` fetches what AWS would fetch;
+`check_pricing` asserts what AWS would assert. The remote answer costs fifteen seconds, a
+review cycle and a round trip; the local one costs nothing and names the field.
+
+### THE RATE CARD IS DERIVED FROM THE BILLING TABLES, NOT TYPED
+
+The five per-call prices are read out of `BUNDLE_B_DIMENSION_NAMES` and
+`METERED_CREDIT_COSTS` in `relayshield_api.py`, and the $100 monthly minimum out of that
+file's own Bundle B comment. **A price in a public listing is a number in a public artefact**,
+so the rule that a command list is extracted rather than remembered applies with money on it:
+a listing price above what we meter is a price we do not honour, and one below it bills AWS
+buyers less than everyone else with nothing raising. `test_bundle_b_changeset.py` fails if
+the two ever disagree, proven by moving `secret_scan_calls` to $0.45.
+
+### AND ONE OF MY OWN GUARDS FAILED ON THE CORRECT DOCUMENT
+
+`test_it_creates_its_own_entity` required every change to target
+`$CreateProductChange.Entity.Identifier`. The offer half correctly targets
+`$CreateOfferChange.Entity.Identifier`, so the complete change set failed a test written
+against the incomplete one. **A guard derived from a broken artefact encodes the breakage**,
+which is the CSM-SIMSWAP-1 shape arriving from a new direction: there, passing meant deleting
+a true sentence; here, passing meant keeping the document invalid. It accepts either chain now
+and still refuses a literal `prod-...`, which would point the offer at a LIVE product.
+
+## STEP 6 WAS A CLICK AND READ LIKE A COMMAND. THE TOOL'S NAME WAS THE WHOLE PROBLEM.
+
+Reported as: *"your Step 6 instruction is poorly worded... Am I submitting a terminal command
+`tools/lambda_env_merge.py`? If so you violated your rule where you are supposed to list as
+Andrew runs this."*
+
+**The step was labelled `ANDREW CLICKS THIS` and its body then spent a paragraph on the
+script's behaviour before naming the workflow.** Rule 9 says the LABEL governs the block that
+follows it; it does not say the prose in between cannot contradict the label. A reader who
+sees a repo-relative path to a `.py` file has been handed something that looks runnable,
+whatever the heading says -- and this repo's own rules exist because a fenced block, a slash
+command and a placeholder all look identical to somebody reading quickly.
+
+**THE RULE: when a step is a click, the workflow name is the first thing in it, and any tool
+it runs on the runner is named only after the form, explicitly as something the reader never
+invokes.** Mechanism belongs under the instruction, never above it -- the same ordering that
+put a destructive write above its own warning two days ago.

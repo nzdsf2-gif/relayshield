@@ -510,72 +510,29 @@ than skipped. It is Bundle A's accepted envelope with four fields changed.
 
 ---
 
-## STEP 8 -- ANDREW DOES THIS. The E2E fulfillment test AWS requires.
+## STEP 8 -- DONE 2026-09-19 20:40 UTC. The offer was accepted and an agreement exists.
 
-**This is the step the auditors care about, and it is a real subscription, not a
-simulation.** You subscribe to your own Limited product through the offer from step 7 and
-prove the whole path works before asking for public visibility.
+    Product   RelayShield - Attack Surface & Supply Chain API   prod-szi2wdww3obry
+    Offer     442429445748 - TestUser - Bundle B Fulfillment Verification
+              offer-a4jhoh7wgdz5g
+    Agreement agmt-29l852u6kqzmjh2me0pglvj9q
+    Buyer     442429445748 (TestUser)
+    Term      2026-09-19 to 2026-10-19, purchase amount 0.01 USD
 
-1. **Sign in to the AWS console as `442429445748` (`TestUser`)**, not the seller account.
-   Confirmed accessible 2026-09-19. A private offer is invisible to every account it is
-   not targeted at, which is why the seller console shows nothing to accept. Use a
-   separate browser profile or a private window so it does not fight with the seller
-   session.
-2. **Find the offer and subscribe.** In that account: AWS Marketplace console, left nav
-   **Manage subscriptions**, then **Private offers** -- the offer appears there, named
-   `442429445748 - TestUser - Bundle B Fulfillment Verification`. Open it and Accept, then
-   **Set up your account** on the confirmation page. AWS then redirects you to the
-   product's fulfillment URL with an `x-amzn-marketplace-token` in a POST body.
-   STOP IF: the Private offers list is empty, check these three IN THIS ORDER, because the
-   first is by far the likeliest and costs nothing:
-   (a) **Has STEP 7 applied at all?** Zero offers before STEP 7 is the correct state, not a
-       fault. This is what the list looked like on 2026-09-19 and nothing was wrong.
-   (b) **Did the change set reach SUCCEEDED, not just SUBMITTED?** `ReleaseOffer` is what
-       makes an offer visible, and it is the last of the nine changes. Read it with STEP 5b.
-   (c) **Is `AvailabilityEndDate` in the future?** An offer released with an end date in the
-       past is expired on arrival and renders as no offer at all -- the same empty list, a
-       completely different cause. The submitter refuses a past date before sending, so this
-       can only happen from a stale `main`; the run log prints the date it filled in.
-3. **You should land on the RelayShield registration page** and receive the Bundle B
-   key. That single redirect exercises `ResolveCustomer`, `GetEntitlements` and the
-   `attack_surface_bundle_access` branch of `BUNDLE_CONFIGS`.
-4. **Make one call against each of the five endpoints** with the key you were issued:
-   `/v1/metered/supply-chain`, `/v1/metered/asset-intel`, `/v1/metered/secret-scan`,
-   `/v1/metered/threat-actor`, `/v1/metered/session-risk`.
+Confirmed by AWS Marketplace's own "Customer accepted an AWS Marketplace offer" email and by the
+buyer account's Purchased offers list showing 1 of 1. **This is the evidence AWS's visibility
+review asks for**, and it is a real subscription rather than a simulation.
 
-**Then confirm it, rather than assuming it.** Four things, and each has a different
-failure:
+**The one thing an acceptance does NOT prove is the fulfillment REDIRECT.** Accepting creates the
+agreement; clicking through to the product's fulfillment URL is what posts
+`x-amzn-marketplace-token` to `relayshield-bundle-fulfillment`, where `ResolveCustomer` runs and a
+key is provisioned. If you did not land on a RelayShield registration page, that half has not run
+and STEP 8b's log route has nothing to read -- use the portal route instead, which does not depend
+on it.
 
-```zsh
-cd ~/dev/relayshield
-AWS_PROFILE=relayshield aws logs filter-log-events \
-  --log-group-name /aws/lambda/relayshield-bundle-fulfillment \
-  --start-time $(( ($(date +%s) - 3600) * 1000 )) \
-  --filter-pattern "resolve_customer" --no-cli-pager \
-  --query 'events[*].message' --output text
-```
-EXPECT: a `resolve_customer` line naming the Bundle B product code.
-STOP IF: nothing -- the subscription never reached our handler, which is a fulfillment URL
-problem and not a code problem.
+---
 
-```zsh
-AWS_PROFILE=relayshield aws logs filter-log-events \
-  --log-group-name /aws/lambda/relayshield-api \
-  --start-time $(( ($(date +%s) - 3600) * 1000 )) \
-  --filter-pattern "BatchMeterUsage" --no-cli-pager \
-  --query 'events[*].message' --output text
-```
-EXPECT: five accepted meter records, one per endpoint.
-STOP IF: `InvalidUsageDimension` -- the dimension key in the code and the one on the
-product disagree. `test_bundle_b_gating.py` asserts they cannot, so this would mean the
-deployed code is older than the change set: check `LastModified` on `relayshield-api`.
-STOP IF: `402` in the API log instead -- the 402 gate does not recognise the key, which
-means `bundle_b_access` was never written onto the key record in step 3 of the flow.
-
-**Nothing about metered usage is billed at a meaningful amount here**: five calls at
-`0.00000001` is a fraction of a cent, which is the point of the test offer's pricing.
-
-## STEP 8b -- ANDREW CLICKS THIS. Set the product code, FROM STEP 8'S OWN LOG.
+## STEP 8b -- ANDREW CLICKS THIS. Set the product code. NOTHING TO MERGE FIRST.
 
 **THERE IS NOTHING TO TYPE IN A TERMINAL IN THIS STEP.** It is a GitHub Actions form,
 like steps 4, 5, 5b, 7 and 9. `tools/lambda_env_merge.py` is named below only because it
@@ -591,6 +548,18 @@ That line is `relayshield_bundle_fulfillment.py` reporting a code it resolved an
 recognise, which is exactly correct while this key is unset, and it is the authoritative
 read: it is what `ResolveCustomer` returned for this product, not a value anybody typed.
 It is a 20-30 character lowercase alphanumeric string with no `prod-` prefix.
+
+**THAT LINE EXISTS ONLY IF THE FULFILLMENT REDIRECT RAN.** Accepting the offer creates the
+agreement; it does not by itself POST a token to our handler. So if you accepted the offer and
+never landed on a RelayShield registration page, there is no log line to read and the log route
+is a dead end rather than a slow one.
+
+**THE ROUTE THAT DOES NOT DEPEND ON IT: the AWS Marketplace Management Portal, SELLER side.**
+Open the product page for `RelayShield - Attack Surface & Supply Chain API` and read the
+**Product code** field. It is a distinct field from the Product ID -- the ID is
+`prod-szi2wdww3obry` and the CODE is the 25-character string this step wants. The two real ones
+already in this repo, for shape only, are `46y72j0d99w7lyqkiqrakpc5k` and
+`5s4a96a1ui1a5efrom6udnm2g`. **Do not paste either of those**; they belong to other products.
 
 Actions, **Set one Lambda env var (merge, never replace)**, Run workflow:
 

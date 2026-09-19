@@ -7304,3 +7304,46 @@ worst diagnostic shape this programme produces: success everywhere and nothing o
 empty list, establish whether the thing that fills it has ever run.** Absence of a record and
 absence of the process that writes records are the same output and different problems, which is
 what `_store_observed_session` already says about the stolen-sessions table.
+
+## THE E2E SUBSCRIPTION COMPLETED. BUNDLE B HAS A REAL AGREEMENT.
+
+**2026-09-19 20:40 UTC.** `442429445748` (TestUser) accepted `offer-a4jhoh7wgdz5g` on
+`prod-szi2wdww3obry` and AWS created **`agmt-29l852u6kqzmjh2me0pglvj9q`**, 0.01 USD, term
+2026-09-19 to 2026-10-19. Confirmed by AWS's own "Customer accepted an AWS Marketplace offer"
+email and by the buyer account's Purchased offers list reading 1 of 1.
+
+**STEP 8b AND STEP 9 NEEDED NO MERGE, AND CHECKING THAT WAS THE WHOLE ANSWER TO "CAN I MOVE
+ON".** `lambda_env_set.yml`, `tools/lambda_env_merge.py` and `bundle_b_go_public.json` are all
+on `origin/main` already. **The pre-handover checklist's question 2 -- what does the job READ,
+every file -- answers "go straight to the click" as often as it answers "merge first"**, and
+running it costs one command either way. Three of the seven Bundle B failures were a file on a
+branch, so the check that has been catching problems also clears the path.
+
+### ACCEPTING AN OFFER IS NOT THE SAME EVENT AS FULFILLMENT, AND STEP 8b DEPENDED ON THE SECOND
+
+The agreement is what AWS's review asks for. **The fulfillment REDIRECT is a separate click**:
+it is what POSTs `x-amzn-marketplace-token` to `relayshield-bundle-fulfillment`, where
+`ResolveCustomer` runs, a key is provisioned, and the `Product code not recognised: got <CODE>`
+line is written. STEP 8b read that line as its only source for the value.
+
+**So a step's input can depend on a sub-event of the step before it that the step before it does
+not guarantee.** The runbook now names a second route that does not -- the Management Portal's
+own Product code field, seller side -- because a value with one source is a step that stalls
+whenever that source did not fire, and the reader cannot tell a missing log line from a missing
+permission.
+
+### AND `BUNDLE_B_PRODUCT_CODE` IS NOT COSMETIC. IT DECIDES WHETHER A CANCELLED CUSTOMER KEEPS A KEY.
+
+Read from `relayshield_bundle_fulfillment.py` rather than assumed, because "the E2E works with it
+unset" (true, and recorded above) reads as "it does not matter" (false). `_product_code_filter()`
+builds a DynamoDB filter from `PRODUCT_CODES`, and three functions use it:
+
+    _deactivate_api_key             unsubscribe / entitlement lapse
+    _find_api_key_for_customer      lookup outside the pending placeholder
+    _find_provisioned_key_for_customer   the confirmation page
+
+With the key unset, a Bundle B row carrying that `aws_product_code` matches none of them. **The
+expensive one is the first: a cancelled Bundle B customer's key is never deactivated**, silently,
+because a scan that matches nothing and a customer with no keys are the same output. That is the
+quiet-alarm shape with revenue on it, and it is the reason 8b is a prerequisite for a real buyer
+rather than tidying after go-public.

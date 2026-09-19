@@ -7061,3 +7061,90 @@ Eleven candidate hosts, all **HTTP 000** from the container -- including `findmi
 `storebot.me`, both of which have accepted a submission from us in the last week. **A probe whose
 negative result is indistinguishable from its blocked result has no standing to report a
 negative**, so every new row says UNVERIFIED and names the one-minute browser read that settles it.
+
+## A STEP NUMBERED 6 IS AN INSTRUCTION TO RUN IT SIXTH. PROSE CANNOT REORDER A LIST.
+
+**2026-09-19.** I wrote *"step 6 moves after step 8"* in a reply, handed over
+`prod-szi2wdww3obry` in the same reply, and **left STEP 6 sitting at position 6 in the
+runbook.** He ran it sixth with the value I had just given him, and
+`tools/lambda_env_merge.py` refused it:
+
+    REFUSED: BUNDLE_B_PRODUCT_CODE was given 'prod-szi2wdww3obry', which is a
+    Catalog API ENTITY ID, not a product code.
+
+**The guard was right and the ORDER was mine.** An entity id in that field matches no key
+row, raises nothing, and makes a revocation scan over a live public listing find nothing
+and report success -- strictly worse than the git SHA that was pasted two days earlier,
+because a SHA at least looks wrong.
+
+**THIS IS THE DESTRUCTIVE-WRITE-ABOVE-ITS-OWN-WARNING DEFECT, THIRD INSTANCE IN THREE
+DAYS, AND THE LESSON HAS NOW BEEN WRITTEN DOWN TWICE WITHOUT BEING APPLIED.** The grant
+was ordered before the merge that feeds it; the env write was placed above the warning
+about it; and now a step was left in a position its own text disclaims. All three are the
+same thing: **I put the ordering in prose and the artefact carried a different order.**
+
+**THE RULE, and it is the only version of this that has any force: reorder the ARTEFACT.**
+A numbered list is read by its numbers. A heading is a position. A fenced block under a
+label is the thing that gets run. Prose beside any of them loses, every time, and the
+reader is not at fault for following the structure. STEP 6 is now STEP 8b, physically
+after STEP 8, with a stub at position 6 saying where it went and why -- and
+`test_product_code_is_not_entity_id.py` fails if the two ever swap back, proven by
+swapping them.
+
+### AND THE PRODUCT CODE WAS NEVER A BLOCKER, WHICH IS WHY THE STEP COULD MOVE
+
+Read from `relayshield_bundle_fulfillment.py` rather than assumed:
+
+* **`BUNDLE_CONFIGS` is keyed on the entitlement DIMENSION** (`attack_surface_bundle_access`),
+  never on the product code. `_resolve_bundle` looks up that dimension alone.
+* **`ResolveCustomer` RETURNS the product code** at fulfillment, and `_get_entitlement`
+  queries `GetEntitlements` with that value whatever the environment holds.
+* **The mismatch guard needs BOTH sides non-empty**, so an unset `BUNDLE_B_PRODUCT_CODE`
+  SKIPS it rather than tripping it.
+
+So the E2E subscription works with the key unset, **and the subscription is what assigns
+and prints the code** -- `Product code not recognised: got <CODE>, known [...]`, which is
+the handler correctly reporting a code it resolved and does not recognise. Set it from
+that line, afterwards.
+
+**A PRODUCT CODE IS ASSIGNED TO A SUBSCRIPTION, NOT TO A PRODUCT, AND BOTH OF MY REFUSAL
+MESSAGES SAID OTHERWISE.** The git-SHA one said the code "is assigned by StartChangeSet",
+which is the entity id; the entity-id one sent the reader to
+`marketplace_read_product.py`, which may legitimately report NONE. **Two guards firing
+correctly and then giving wrong directions is worse than one guard**, because the reader
+trusts a refusal that names a next step. Both name ResolveCustomer now, and a test asserts
+they do.
+
+### AND TWO OF MY OWN GUARDS DEFENDED THE WRONG ANSWER
+
+`test_the_refusal_says_which_namespace_it_got` REQUIRED the string
+`marketplace_read_product.py`, and `test_the_runbook_step_6_asks_for_the_product_code`
+required `from STEP 5b`. **Both pinned a ROUTE and a POSITION rather than the property**,
+so the day the route turned out to be wrong and the step moved, the guards failed on the
+correction and defended the defect. That is the CSM-SIMSWAP-1 shape and the
+`is not None`-contains-`not` shape in one: **a guard that encodes today's answer instead
+of what the answer must ACHIEVE eventually fails on correct code, and the temptation then
+is to loosen it.** They assert the properties now -- a refusal names SOME route to the
+right value, and the `| value |` row rules out the `prod-` id -- and the new ordering
+guard asserts position rather than any wording at all.
+
+### THE `@1` THAT MADE A SUCCESSFUL CREATE LOOK LIKE A FAILURE
+
+Change set `27vgy6fh2q7uke1ddtxa0w1l3` SUCCEEDED, applied all thirteen changes, and
+created **`prod-szi2wdww3obry`** with offer `offer-tphmeebmexqp2`. The run went red one
+line later, in my own tool:
+
+    ValidationException: [Requested entity id 'prod-szi2wdww3obry@1' is invalid.
+    It should match with ^[a-zA-Z0-9][.a-zA-Z0-9/-]+[a-zA-Z0-9$.]
+
+**DescribeChangeSet reports the entity REVISION. DescribeEntity refuses it.** One product,
+two identifiers, one character apart, and the message reads as *your product is invalid*
+when the product is fine and the REQUEST was malformed -- a status code describing the
+request rather than the resource, for the fourth time in this programme. `bare_entity_id()`
+strips it, asserted at the CALL SITE with `ast` because a helper nothing calls is
+decoration.
+
+**And it is a GREEN-run version of "a red run names a step, not an outcome":** the founder
+reported 5b as succeeded and I said the portal contradicted that. It did not. The read job
+was green, reading is all it does, and what it read was a failed change set. Both halves
+true at once, and he corrected me in one line.

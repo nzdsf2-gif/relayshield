@@ -445,52 +445,26 @@ authoritative read is then one browser page:
 Bundle B product, and read the product code off its page. It also appears at the end of the
 SNS topic ARN AWS creates for the listing.
 
-## STEP 6 -- ANDREW CLICKS THIS. Set the product code.
+## STEP 6 IS NOW STEP 8b. IT MOVED, AND RUNNING IT HERE IS REFUSED BY DESIGN.
 
-**THERE IS NOTHING TO TYPE IN A TERMINAL IN THIS STEP.** It is a GitHub Actions form,
-like steps 4, 5, 5b, 7 and 9. `tools/lambda_env_merge.py` is named below only because it
-is what that workflow runs on the runner; **you never invoke it**, and an earlier version
-of this step read as though you might.
+**2026-09-19: it was run here with the entity id, and `lambda_env_merge.py` refused it.**
+The guard did its job -- an entity id in that field matches no key row, raises nothing, and
+makes revocation scans over a live listing find nothing and report success. But the step
+should not have been reachable yet, and leaving it numbered 6 in a numbered list is an
+instruction to run it sixth, whatever the prose beside it says.
 
-**AND IT IS BLOCKED UNTIL STEP 5 SUCCEEDS.** The value this step needs does not exist
-until AWS has created the product, so if 5b still reports FAILED there is nothing to
-enter here and this step is not yet reachable.
+**THE VALUE DOES NOT EXIST UNTIL THE E2E SUBSCRIPTION RUNS**, and the subscription does not
+need it. Read from `relayshield_bundle_fulfillment.py` rather than assumed:
 
-Actions, **Set one Lambda env var (merge, never replace)**, Run workflow:
+* `BUNDLE_CONFIGS` is keyed on the entitlement DIMENSION (`attack_surface_bundle_access`),
+  never on the product code, and `_resolve_bundle` looks up that dimension alone.
+* `ResolveCustomer` RETURNS the product code at fulfillment, and `_get_entitlement` queries
+  `GetEntitlements` with THAT value whatever the environment says.
+* The mismatch guard needs BOTH sides non-empty (`if product_code and
+  config.get("product_code")`), so an empty `BUNDLE_B_PRODUCT_CODE` SKIPS it.
 
-| Field | Value |
-|---|---|
-| function | `relayshield-bundle-fulfillment` |
-| key | `BUNDLE_B_PRODUCT_CODE` |
-| value | the **product code** from STEP 5b. Not the `prod-...` entity id |
-| mode | `plan` first |
-
-EXPECT: a `before:`, an `after:` and a `preserved:` line. Non-product values print as
-`<redacted>` -- these blocks carry live secrets and a full dump would put them in a run
-log anyone with repo read access can fetch.
-**Read `preserved:`. Every key that was there must be listed.** Then re-run with
-`mode: apply`.
-STOP IF: `REFUSED: ... git commit SHA` -- the value is not a product code and STEP 5 has
-not produced one yet.
-STOP IF: `REFUSED: ... Catalog API ENTITY ID` -- that is the `prod-...` id, which STEP 7 and
-STEP 9 want and this field does not. Go back to STEP 5b for the product code.
-**Why a workflow rather than a command, recorded so it is not undone:**
-`aws lambda update-function-configuration --environment` REPLACES the whole variables
-block rather than merging, so one key set by hand on 2026-09-18 left the function holding
-only that key, with a success block on screen. The workflow GETs the block, merges the one
-key, and **refuses to write a result that drops a key**. It also refuses a 40-character
-hex value for anything ending `_PRODUCT_CODE` (that is a git commit SHA, and it is exactly
-what got pasted) and a `prod-...` entity id (that is the Catalog API identifier, which
-steps 7 and 9 want and this field does not).
-
-STOP IF: `AccessDenied` on `UpdateFunctionConfiguration` -- the deploy role lacks that
-action. Section 5 of `tools/diagnose_bundle_fulfillment_env.sh` says so in advance; tell
-me and I will send the one-line grant.
-
-**If the block is missing `BUNDLE_D_PRODUCT_CODE` or `BUNDLE_A_PRODUCT_CODE`**, set each
-the same way, one run per key. The tool merges, so order does not matter and nothing is
-lost between runs. Section 4 of the diagnostic reads those values off
-`relayshield-api` and `relayshield-agentic-api`, which this incident never touched.
+So the order is **STEP 7, then STEP 8, then STEP 8b**. The subscription is what prints the
+code, and it prints it in its own warning line. Skip to STEP 7.
 
 ## STEP 7 -- ANDREW CLICKS THIS. Create the test offer.
 
@@ -501,11 +475,13 @@ Actions, **Marketplace Change Set**, Run workflow:
 | changeset | `aws_marketplace/bundle_b_test_offer.json` |
 | mode | `dry-run` first, then `apply` |
 | confirm | `CREATE-NEW-PRODUCT`, for apply only |
-| product_id | the Bundle B product id from STEP 5 |
+| product_id | `prod-szi2wdww3obry` -- the entity id STEP 5 created |
 
 EXPECT: `charge date : <today>` filled at send time, nine changes ending in
 `ReleaseOffer`, then `SUBMITTED` on apply.
 STOP IF: `unsubstituted placeholder` -- `product_id` was left empty.
+STOP IF: `REFUSED: ... targets a LIVE listing` -- a `prod-` id was typed that
+belongs to Bundle A or Bundle D. Bundle B's is `prod-szi2wdww3obry`.
 
 **What this offer is.** A private offer targeted at buyer account `442429445748`, granting
 the Entitled dimension once and pricing all five metered dimensions at `0.00000001` -- free
@@ -562,6 +538,59 @@ means `bundle_b_access` was never written onto the key record in step 3 of the f
 
 **Nothing about metered usage is billed at a meaningful amount here**: five calls at
 `0.00000001` is a fraction of a cent, which is the point of the test offer's pricing.
+
+## STEP 8b -- ANDREW CLICKS THIS. Set the product code, FROM STEP 8'S OWN LOG.
+
+**THERE IS NOTHING TO TYPE IN A TERMINAL IN THIS STEP.** It is a GitHub Actions form,
+like steps 4, 5, 5b, 7 and 9. `tools/lambda_env_merge.py` is named below only because it
+is what that workflow runs on the runner; **you never invoke it**, and an earlier version
+of this step read as though you might.
+
+**THE VALUE COMES OUT OF STEP 8, AND NOWHERE ELSE IS CHEAPER.** The subscription's own
+CloudWatch line names it:
+
+    Product code not recognised: got <THE CODE>, known ['<bundle D>', '<bundle A>']
+
+That line is `relayshield_bundle_fulfillment.py` reporting a code it resolved and does not
+recognise, which is exactly correct while this key is unset, and it is the authoritative
+read: it is what `ResolveCustomer` returned for this product, not a value anybody typed.
+It is a 20-30 character lowercase alphanumeric string with no `prod-` prefix.
+
+Actions, **Set one Lambda env var (merge, never replace)**, Run workflow:
+
+| Field | Value |
+|---|---|
+| function | `relayshield-bundle-fulfillment` |
+| key | `BUNDLE_B_PRODUCT_CODE` |
+| value | the **product code** from STEP 8's log line. Not the `prod-...` entity id |
+| mode | `plan` first |
+
+EXPECT: a `before:`, an `after:` and a `preserved:` line. Non-product values print as
+`<redacted>` -- these blocks carry live secrets and a full dump would put them in a run
+log anyone with repo read access can fetch.
+**Read `preserved:`. Every key that was there must be listed.** Then re-run with
+`mode: apply`.
+STOP IF: `REFUSED: ... git commit SHA` -- that is the commit in the Actions page HEADER,
+which is the most copyable 40-hex string on the screen and is never a product code.
+STOP IF: `REFUSED: ... Catalog API ENTITY ID` -- that is `prod-szi2wdww3obry`, which STEP 7
+and STEP 9 take and this field does not. The product code is in STEP 8's log, above.
+**Why a workflow rather than a command, recorded so it is not undone:**
+`aws lambda update-function-configuration --environment` REPLACES the whole variables
+block rather than merging, so one key set by hand on 2026-09-18 left the function holding
+only that key, with a success block on screen. The workflow GETs the block, merges the one
+key, and **refuses to write a result that drops a key**. It also refuses a 40-character
+hex value for anything ending `_PRODUCT_CODE` (that is a git commit SHA, and it is exactly
+what got pasted) and a `prod-...` entity id (that is the Catalog API identifier, which
+steps 7 and 9 want and this field does not).
+
+STOP IF: `AccessDenied` on `UpdateFunctionConfiguration` -- the deploy role lacks that
+action. Section 5 of `tools/diagnose_bundle_fulfillment_env.sh` says so in advance; tell
+me and I will send the one-line grant.
+
+**If the block is missing `BUNDLE_D_PRODUCT_CODE` or `BUNDLE_A_PRODUCT_CODE`**, set each
+the same way, one run per key. The tool merges, so order does not matter and nothing is
+lost between runs. Section 4 of the diagnostic reads those values off
+`relayshield-api` and `relayshield-agentic-api`, which this incident never touched.
 
 ## STEP 9 -- ANDREW CLICKS THIS. Go public, once STEP 8 passes.
 

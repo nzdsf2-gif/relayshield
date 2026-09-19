@@ -450,5 +450,85 @@ class TheReferenceIsChosenByShape(unittest.TestCase):
                                  f"{name} has no accepted Bundle A counterpart")
 
 
+class ADateInThePastIsRefused(unittest.TestCase):
+    """bundle_a_test_offer.json carries ChargeDate 2026-08-08 AND
+    AvailabilityEndDate 2026-09-06. Both were correct on the day it was
+    submitted. Bundle B was built by reusing that envelope, ChargeDate was
+    turned into a placeholder and the availability date was NOT -- half the
+    fix, which is the shape of every Bundle B failure so far.
+
+    A past date BLOCKS rather than warning, and the distinction is the one
+    check_media draws: a timeout means the probe could not tell, while a date
+    before today cannot become valid by waiting.
+    """
+
+    TODAY = "2026-09-19"
+
+    def _doc(self, value, key="AvailabilityEndDate"):
+        return {"ChangeSet": [{"DetailsDocument": {key: value}}]}
+
+    def test_a_past_date_is_refused(self):
+        with self.assertRaises(SystemExit) as caught:
+            SUBMIT.check_dates(self._doc("2026-09-06"), today=self.TODAY)
+        self.assertIn("2026-09-06", str(caught.exception))
+        self.assertIn("AvailabilityEndDate", str(caught.exception))
+
+    def test_today_and_the_future_pass(self):
+        SUBMIT.check_dates(self._doc(self.TODAY), today=self.TODAY)
+        SUBMIT.check_dates(self._doc("2026-12-18"), today=self.TODAY)
+
+    def test_a_past_charge_date_is_refused_too(self):
+        with self.assertRaises(SystemExit):
+            SUBMIT.check_dates(self._doc("2026-08-08", key="ChargeDate"),
+                               today=self.TODAY)
+
+    def test_a_version_that_looks_like_a_date_is_left_alone(self):
+        """The standard EULA term carries Version 2022-07-14, which is a
+        document version and is correct as it stands. A guard that forces you
+        to change a true value to go green is one that gets loosened."""
+        SUBMIT.check_dates(
+            {"ChangeSet": [{"DetailsDocument": {"Documents": [
+                {"Type": "StandardEula", "Version": "2022-07-14"}]}}]},
+            today=self.TODAY)
+
+    def test_the_committed_test_offer_carries_no_literal_date(self):
+        """The defect itself: a date written into the file is right for one day.
+        Every date in a committed Bundle B change set is a placeholder."""
+        for name in ("bundle_b_create_entity", "bundle_b_test_offer",
+                     "bundle_b_go_public"):
+            doc = json.loads(
+                (ROOT / "aws_marketplace" / f"{name}.json").read_text())
+            for path, value in SUBMIT.date_fields(doc):
+                self.fail(f"{name} commits a literal date: {path} = {value}. "
+                          "Make it a __PLACEHOLDER__ filled in substitute().")
+
+    def test_substitution_fills_both_dates_in_the_future(self):
+        doc = json.loads(
+            (ROOT / "aws_marketplace" / "bundle_b_test_offer.json").read_text())
+        filled = SUBMIT.substitute(doc, "prod-szi2wdww3obry")
+        found = dict((p.rsplit(".", 1)[-1], v)
+                     for p, v in SUBMIT.date_fields(filled))
+        self.assertIn("ChargeDate", found)
+        self.assertIn("AvailabilityEndDate", found)
+        SUBMIT.check_dates(filled)
+        self.assertGreater(found["AvailabilityEndDate"], found["ChargeDate"],
+                           "the offer expires on or before it is charged")
+
+    def test_main_actually_calls_it(self):
+        """A guard nothing calls is decoration, and it has to run at the top
+        level of main() -- nested in the dry-run branch it would check the one
+        document that is never sent."""
+        src = (ROOT / "tools" / "marketplace_submit_changeset.py").read_text(
+            encoding="utf-8")
+        func = next(n for n in ast.walk(ast.parse(src))
+                    if isinstance(n, ast.FunctionDef) and n.name == "main")
+        top = [n for n in func.body if isinstance(n, ast.Expr)
+               and isinstance(n.value, ast.Call)
+               and getattr(n.value.func, "id", "") == "check_dates"]
+        self.assertEqual(len(top), 1,
+                         "check_dates is not called exactly once at the top "
+                         "level of main(), so it may not see what is sent")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

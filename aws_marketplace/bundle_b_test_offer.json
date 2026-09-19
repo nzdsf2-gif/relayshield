@@ -152,7 +152,7 @@
         "Identifier": "$CreateTestOffer.Entity.Identifier"
       },
       "DetailsDocument": {
-        "AvailabilityEndDate": "2026-09-06"
+        "AvailabilityEndDate": "__AVAILABILITY_END_DATE__"
       }
     },
     {

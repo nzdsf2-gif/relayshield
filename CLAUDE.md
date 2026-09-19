@@ -7212,3 +7212,71 @@ thing I can do and it is not the fix.** The fix is the artefact change in the sa
 the dropdown, the shape validator, the moved step, the preflight. If a turn produces a
 CLAUDE.md section and no change that makes the failure impossible, it has not delivered
 anything -- it has written down an apology and billed a round for it.
+
+## THE SIXTH FAILURE WAS CAUGHT BEFORE THE CLICK, BY THE CHECKLIST, ON THE OTHER HALF OF A FIX I ALREADY MADE
+
+**2026-09-19.** `bundle_b_test_offer.json` carried `AvailabilityEndDate: "2026-09-06"` --
+a literal date copied from Bundle A's accepted offer, **thirteen days in the past**.
+
+**THE SAME FILE ALREADY RECORDS ME FIXING THIS EXACT DEFECT IN THE FIELD NEXT TO IT.**
+The 2026-09-17 section says *"its ChargeDate is a placeholder and Bundle A's is not: that
+file carries 2026-08-08, correct on the day and a date in the PAST for anyone since"*. I
+turned `ChargeDate` into `__CHARGE_DATE__`, wrote down why, and **left the availability
+date literal two changes further down the same document.** Half the fix, which is the
+shape of every Bundle B failure so far.
+
+**AN END DATE IN THE PAST IS WORSE THAN A CHARGE DATE IN THE PAST.** A stale charge date
+is rejected. A stale availability date **releases an offer that has already expired**, so
+the buyer account is told to go and accept something it cannot see -- and STEP 8's failure
+would have read as a fulfillment-URL problem, which is a different bug with a different
+fix.
+
+**IT WAS FOUND BY THE PRE-HANDOVER CHECKLIST'S OWN QUESTION 3 -- what will the remote
+system VALIDATE -- asked while reading commit `e72cc31` for something else entirely.** That
+commit message is also where the requirement is recorded: *"Private offers additionally
+require UpdateAvailability with an AvailabilityEndDate, or ReleaseOffer fails
+MISSING_AVAILABILITY_END_DATE ... That is absent from the create-product flow and cost one
+submission."* **The knowledge was in a commit message and nothing carried it into the
+artefact**, which is a lesson recorded in one file not being a lesson the next file learns,
+for the fourth time.
+
+**THE GUARD IS GENERAL RATHER THAN ANOTHER FIELD-SPECIFIC ONE.** `check_dates()` walks
+every ISO date under a key ending in `Date`, **after substitution, on the document that is
+actually sent**, and REFUSES any that is before today. It blocks rather than warning, and
+that is the same distinction `check_media` draws from the other side: a timeout means the
+probe could not tell, while **a date before today cannot become valid by waiting.**
+
+It is deliberately narrow: the standard EULA term carries `Version: "2022-07-14"`, which
+is a document version that happens to look like a date and is correct as it stands. A
+guard that forces you to change a true value to go green is one that gets loosened.
+
+Seven tests, three proven by reintroducing the defect -- the literal date back in the
+file, the call deleted from `main()`, and **the call moved inside the dry-run branch**,
+where it would check the one document that is never sent.
+
+**THE RULE, and it is narrower than "diff against the accepted example" because that was
+already written down and still let this through: a value copied from an accepted artefact
+is correct on ONE DAY if it is a date, for ONE PRODUCT if it is an id, and at ONE MOMENT
+if it is a URL.** When reuse is the method, every field carried across is a candidate for
+a placeholder, and the question is not "did I copy it correctly" but "what makes this
+value true, and is that still true today".
+
+### AND THE BUYER ACCOUNT IN THAT OFFER IS A FACT THE REPO NEVER RECORDED
+
+`442429445748` appears in exactly four places -- the `PositiveTargeting.BuyerAccounts` of
+Bundle A's and Bundle B's create sets and test offers -- and **nothing anywhere says whose
+account it is.** It came across in the same reuse that carried the stale date. STEP 8 then
+told the founder to sign in as it, and he could not, reasonably.
+
+**The inference is strong and it is still an inference:** Bundle A and Bundle D are both
+live and public, AWS grants public visibility only after the fulfillment test passes, and
+`e72cc31` says Bundle A's offer *"mirrors Bundle D's proven test-offer shape"* -- so that
+account was almost certainly used successfully twice. **An absence needs the same evidence
+a presence does**, so the runbook now carries STEP 6b: one `organizations describe-account`
+read from the seller side, and the decision made BEFORE the offer exists, when the target
+is one line in a committed file rather than an offer in AWS.
+
+**The general form: when a step names an identifier the reader has to BE rather than
+type, the artefact says where that identity came from.** An account id, a root email, a
+seller role -- these are not values to paste and a runbook that treats them as if they
+were has not delivered the step.

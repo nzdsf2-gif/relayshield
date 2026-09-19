@@ -7280,3 +7280,27 @@ is one line in a committed file rather than an offer in AWS.
 type, the artefact says where that identity came from.** An account id, a root email, a
 seller role -- these are not values to paste and a runbook that treats them as if they
 were has not delivered the step.
+
+### THE BUYER ACCOUNT IS OURS. SETTLED 2026-09-19 BY ONE SCREENSHOT.
+
+`442429445748` is **`TestUser`**, and the founder signed into it and opened AWS Marketplace ->
+Private offers. **The inference two sections above was right and it is now a measurement.** The
+gap was never access; it was that no session had recorded whose account it is, so the runbook
+told him to BE an identity the repo could not explain.
+
+**AND THE LIST READ `Available private offers (0)`, WHICH IS THE CORRECT ANSWER.** STEP 7 has
+never applied, so no Bundle B offer exists. **An empty list before the offer is created is the
+expected state and reads exactly like a failure**, which is the same shape as a measurement tool
+printing a zero: the reader acts on it. The runbook now orders that diagnosis so the free check
+comes first -- has STEP 7 run at all -- before anything about the change set or the account.
+
+**THE ONE THING THAT WOULD HAVE MADE IT A REAL FAILURE WAS CAUGHT BY THE DATE GUARD HOURS
+EARLIER.** `origin/main` still carried `AvailabilityEndDate: "2026-09-06"`. Clicking STEP 7
+against it would have released an offer that EXPIRED THIRTEEN DAYS AGO, which renders as **the
+same empty list** -- an offer that was created, succeeded, and is invisible. That is the
+worst diagnostic shape this programme produces: success everywhere and nothing on screen.
+
+**The general form, and it is the empty-set rule arriving from a new side: before diagnosing an
+empty list, establish whether the thing that fills it has ever run.** Absence of a record and
+absence of the process that writes records are the same output and different problems, which is
+what `_store_observed_session` already says about the stolen-sessions table.

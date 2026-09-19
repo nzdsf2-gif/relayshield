@@ -48,6 +48,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # WHICH COMMIT AM I RUNNING? Added 2026-09-19, after the same change set
+      # failed a FOURTH time because the fix for the third failure was on a
+      # branch and this workflow checks out main. A dispatch always runs the
+      # DEFAULT BRANCH's copy of every file it reads -- the workflow, the tool
+      # AND the change set JSON -- so "Claude fixed it" and "the fix is in this
+      # run" are different facts, and nothing in the output distinguished them.
+      #
+      # This step makes the second one readable: the commit, and the shape of
+      # the document about to be sent. A five-change SaaS create is invalid;
+      # thirteen is the accepted shape. Read this before pressing apply.
+      - name: Which commit and which document
+        run: |
+          echo "commit  : $(git --no-pager log --oneline -1)"
+          echo "date    : $(git --no-pager log -1 --format=%cI)"
+          python3 - "${{ inputs.changeset }}" <<'PY'
+          import json, sys
+          doc = json.load(open(sys.argv[1]))
+          changes = doc.get("ChangeSet", [])
+          print(f"file    : {sys.argv[1]}")
+          print(f"changes : {len(changes)}")
+          for c in changes:
+              print(f"          {c['ChangeType']}")
+          PY
+
       - name: Refuse apply without the typed confirmation
         if: ${{ inputs.mode == 'apply' }}
         run: |

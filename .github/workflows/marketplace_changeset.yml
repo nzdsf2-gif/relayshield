@@ -29,9 +29,21 @@ on:
         type: choice
         options: [dry-run, apply]
         default: dry-run
+      # A CHOICE, NOT A STRING, AND THAT IS THE WHOLE POINT.
+      # 2026-09-19: this was free text and the apply was refused because
+      # CREATE-NEW_PRODUCT was typed instead of CREATE-NEW-PRODUCT -- one
+      # underscore, invisible at a glance, in an 18-character string with mixed
+      # punctuation. The guard fired correctly and the round was still spent.
+      #
+      # A dropdown keeps every bit of the safety property: the dangerous value
+      # is not the default and has to be chosen deliberately. It removes the
+      # only failure mode a typed phrase adds, which is the keyboard.
       confirm:
-        description: 'For apply ONLY: type CREATE-NEW-PRODUCT'
-        type: string
+        description: 'For apply ONLY: select CREATE-NEW-PRODUCT'
+        type: choice
+        options:
+          - ''
+          - CREATE-NEW-PRODUCT
         default: ''
       product_id:
         description: 'Bundle B product id, for the test offer and go-public sets. Leave empty when CREATING the product.'

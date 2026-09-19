@@ -19,7 +19,7 @@
       },
       "DetailsDocument": {
         "Name": "442429445748 - TestUser - Bundle B Fulfillment Verification",
-        "Description": "Internal test subscription to verify Bundle B fulfillment, entitlement resolution and BatchMeterUsage before requesting public visibility."
+        "Description": "Internal test subscription to verify Bundle B fulfillment, entitlement resolution and metering before public visibility."
       }
     },
     {

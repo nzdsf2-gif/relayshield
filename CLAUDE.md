@@ -7148,3 +7148,67 @@ decoration.
 reported 5b as succeeded and I said the portal contradicted that. It did not. The read job
 was green, reading is all it does, and what it read was a failed change set. Both halves
 true at once, and he corrected me in one line.
+
+## THE PRE-HANDOVER CHECKLIST. ASKED FOR BY NAME, 2026-09-19, AFTER SEVEN REFUSALS.
+
+**His words: *"Step 7 failed again and so did you!!!! I feel your approach is careless trial
+and error. You've not learned anything. Write a message to Claude.memory to explain how you
+will avoid foolish errors to avoid unnecessary future turns."*** He is right, and the
+sections above are the evidence: I have written a post-mortem after every one of these and
+the next step still failed. **A record of what went wrong is not a method for making the
+next thing right.** This section is the method. It is deliberately short, because the
+previous ones were long and did not work.
+
+### WHAT ACTUALLY FAILED, WHICH IS NOT WHAT THE ERRORS SAID
+
+    a logo URL never uploaded          I did not fetch what AWS would fetch
+    5 changes where 13 are required    I read the accepted example halfway
+    a fix sitting on a branch          I did not check which files the job reads
+    four descriptions over 90          I compared the shape and not the fields
+    a step numbered 6, run sixth       I put the ordering in prose, not the artefact
+    CREATE-NEW_PRODUCT                 I made a human type an 18-character phrase
+
+**Every one was knowable before the click, from inside this container, for free.** Not one
+needed AWS to answer. I handed the step over anyway and let the reader discover it, and the
+apology afterwards has never once prevented the next one.
+
+### THE CHECKLIST. FOUR QUESTIONS, BEFORE ANY STEP LEAVES THIS SESSION.
+
+**1. What must the reader TYPE? Make it impossible to get wrong instead of instructing them.**
+A free-text box in a workflow input is a keystroke away from a wasted round. If the set of
+valid values is known, it is a `type: choice`. If it is not known (an id AWS assigns), the
+TOOL validates the shape and normalises it -- strip the `@1`, strip the whitespace -- and
+refuses locally with a message naming where the right value is. **A dropdown keeps every bit
+of a confirmation's safety: the dangerous value is not the default and has to be chosen.**
+
+**2. What does the job READ? Every file, not just the workflow.** A dispatch runs `main`'s
+copy of the workflow, the tool it runs, and the DATA it is pointed at. If any of them is on
+my branch, the step is a merge followed by a click, and the merge is IN the step.
+
+**3. What will the remote system VALIDATE? Reproduce it here, before spending the call.**
+It fetches a URL -- `curl -I` it. It requires every dimension priced -- assert it. It caps a
+field -- measure the accepted example. **And point the check at the document actually being
+sent**: the field comparison existed for two days and was hard-wired to the create set, so
+the test offer it never read carried an over-length description the whole time.
+
+**4. Does the ARTEFACT carry the order and the values, or does my prose?** A numbered list is
+read by its numbers. A fenced block under a heading is what gets run. An `EXPECT:` line is
+read as truth. **Prose beside any of them loses**, so reorder the file, fix the number, move
+the step. And an `EXPECT` is written from the requirement or the accepted example, never from
+our own artefact -- one written from our own document confirms our own document.
+
+### THE ONE RULE UNDERNEATH ALL FOUR
+
+**When a remote system has refused you once, stop fixing the thing it named and diff your
+artefact against one it accepted, field by field, in both directions.** The refusal is a
+symptom and names one field. The accepted example is the specification and names all of them.
+`bundle_a_*.json` answered every single one of these failures and was sitting in the same
+directory each time.
+
+### AND THE COST OF THIS SECTION ITSELF
+
+This file is enormous and I have added to it every turn. **Adding a section is the cheapest
+thing I can do and it is not the fix.** The fix is the artefact change in the same commit:
+the dropdown, the shape validator, the moved step, the preflight. If a turn produces a
+CLAUDE.md section and no change that makes the failure impossible, it has not delivered
+anything -- it has written down an apology and billed a round for it.

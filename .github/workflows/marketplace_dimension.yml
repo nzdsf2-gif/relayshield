@@ -32,8 +32,16 @@ on:
         options: [describe, plan, apply]
         default: describe
       confirm_entity:
-        description: 'For apply ONLY: type the product entity id to confirm'
-        type: string
+        # A CHOICE for the same reason as marketplace_changeset.yml's confirm.
+        # The safety property here is "name the entity you mean", and a
+        # dropdown of the live entity ids preserves it exactly while removing
+        # the typo. Both ids are public and neither is the default.
+        description: 'For apply ONLY: select the product entity id to confirm'
+        type: choice
+        options:
+          - ''
+          - prod-kkvurtspreofy
+          - prod-f5qkfsxlxs4qg
         default: ''
       include_listing_copy:
         description: 'Also send the listing-copy change in the SAME change set'

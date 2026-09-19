@@ -6899,3 +6899,59 @@ command and a placeholder all look identical to somebody reading quickly.
 it runs on the runner is named only after the form, explicitly as something the reader never
 invokes.** Mechanism belongs under the instruction, never above it -- the same ordering that
 put a destructive write above its own warning two days ago.
+
+## THE FOURTH FAILURE WAS MY FIX SITTING ON A BRANCH. A CLICK RUNS `main`, NOT MY WORK.
+
+**2026-09-19, and the founder's words are the measurement: *"This is the 4th time the Step
+5b changeset has failed. Its not only your fault but its cost me too many unnecessary turns
+and token."*** Change set `dldmvatisooxdj8b7zll8q4a1` came back with the IDENTICAL error as
+the one before it:
+
+    INVALID_INPUT When adding dimensions for SaaS products, you must also set
+    pricing for usage dimensions.
+    CreateProduct / UpdateInformation / AddDeliveryOptions / AddDimensions / UpdateTargeting
+
+**Five changes. The document I had fixed carries thirteen.** `origin/main` was at `a7067bd`
+and my fix was `b01ce51` on `claude/tender-planck-cb2qrx`, so the workflow checked out the
+OLD document, submitted it, and AWS refused it for the same reason a second time. **Nothing
+was wrong with the fix and nothing was wrong with his click.** My reply said "Two clicks
+first" and never said merge.
+
+**I WROTE THIS RULE YESTERDAY AND APPLIED IT TO THE WRONG NOUN.** The section above says a
+click step naming a workflow written this session carries the merge as its prerequisite,
+because a dispatch reads the default branch. **A dispatch reads the default branch's copy of
+EVERY FILE THE JOB TOUCHES** -- the workflow, the tool it runs, and the DATA it is pointed
+at. I fixed the sentence for workflow files and left the same hole open for the JSON, one
+turn later, on the same runbook.
+
+**THE RULE, and it is the noun that was wrong rather than the idea: before any click step,
+ask which files that job READS, and whether every one of them is on `main`.** Not "is the
+workflow there". The cheap check names the thing rather than the branch:
+
+    git --no-pager show origin/main:<path> | <the one-line assertion>
+
+**AND THE OTHER HALF IS WORSE, BECAUSE IT TAUGHT HIM THE DEFECT.** Runbook STEP 4 said
+`EXPECT: five changes`. I wrote that line by reading our own document rather than from what
+AWS requires, so the dry run printed the correct number for a broken file and the reader had
+no way to know. **An EXPECT written from the artefact confirms the artefact.** It has to come
+from the requirement, or from the accepted example -- Bundle A's thirteen -- and when those
+two disagree the EXPECT is the thing that is wrong.
+
+### THE GUARD IS IN THE RUN OUTPUT, BECAUSE THE READER CANNOT SEE MY BRANCH
+
+`marketplace_changeset.yml` now opens every run with **the commit it checked out and every
+`ChangeType` in the file it is about to send**. A stale `main` was previously invisible until
+AWS answered fifteen seconds later with a validation error, and the run log named neither.
+`marketplace_read_product.yml` prints the commit too. Both were exercised by running the step
+body exactly as the YAML stores it: it prints `changes : 13` here and `changes : 5` against
+`origin/main`'s copy, which is precisely the distinction nobody could make.
+
+**And the runbook gained STEP 3b, a merge-and-push with `13 changes` as its EXPECT**, in
+front of the two click steps rather than in a preamble -- the same placement rule as the
+destructive write two days ago: a prerequisite stated after the thing it governs is not a
+prerequisite.
+
+**One thing the guards caught on the way, worth one line:** `run: echo "commit : $(...)"`
+is not valid YAML, because a plain scalar cannot contain `": "`. `test_workflows_parse.py`
+failed it immediately, which is that check earning its place again -- GitHub's own response
+to an unparseable workflow is "No jobs were run", quieter than a failure.

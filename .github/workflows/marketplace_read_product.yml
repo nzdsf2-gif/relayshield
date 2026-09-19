@@ -42,6 +42,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A dispatch runs the DEFAULT BRANCH's copy of every file, so this names
+      # the commit the run used. A fix on a branch is not a fix in this run.
+      - name: Which commit
+        run: |
+          echo "commit : $(git --no-pager log --oneline -1)"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::239677749008:role/relayshield-github-deploy

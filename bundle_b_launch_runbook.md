@@ -183,6 +183,31 @@ there is nothing to re-deploy.
 one has never had a deploy path before today; its drift read this morning came back
 byte-identical to main, which is what made mapping it safe.
 
+## STEP 3b -- ANDREW RUNS THIS. Merge and push, BEFORE any click below.
+
+**THIS STEP EXISTS BECAUSE ITS ABSENCE COST FOUR CHANGE SETS.** A workflow dispatch runs
+the DEFAULT BRANCH's copy of **every file it reads** -- the workflow, the tool, and the
+change set JSON. A fix sitting on `claude/...` is not in the run. Change set
+`dldmvatisooxdj8b7zll8q4a1` failed on 2026-09-19 with the SAME error as the one before
+it, because the corrected document was on a branch and `main` still carried the five-change
+version.
+
+    cd ~/dev/relayshield
+    git checkout main
+    git --no-pager fetch origin claude/tender-planck-cb2qrx
+    git rm -rf --cached -q --ignore-unmatch ansible-relayshield relayshield-snap
+    git stash push --include-untracked -m "pre-merge untracked"
+    git -c pull.rebase=false merge --no-edit FETCH_HEAD
+    git push origin main
+    python3 -c "import json;print(len(json.load(open('aws_marketplace/bundle_b_create_entity.json'))['ChangeSet']),'changes')"
+
+EXPECT: the last line prints `13 changes`.
+STOP IF: `Automatic merge failed` **in CLAUDE.md alone** -- expected, two sessions append
+to it. `git checkout --merge CLAUDE.md`, delete the three marker lines keeping BOTH sides,
+`git add CLAUDE.md`, `git commit --no-edit`, then push. A conflict in a `.py`, a `.json` or
+a workflow is NOT that case: stop and send it to me.
+STOP IF: it prints `5 changes` -- the merge did not bring the fix; do not click anything.
+
 ## STEP 4 -- ANDREW CLICKS THIS. Dry run the change set. Read it.
 
 Actions, **Marketplace Change Set**, Run workflow:
@@ -193,20 +218,34 @@ Actions, **Marketplace Change Set**, Run workflow:
 | mode | `dry-run` |
 | confirm | leave empty |
 
-EXPECT: five changes, `CreateProduct` first, then six dimensions --
-`attack_surface_bundle_access` as `Entitled` and five `ExternallyMetered`. **Read those
-six names.** They are the rate card; nothing after this step changes them cheaply.
+**READ THE FIRST STEP OF THE RUN, `Which commit and which document`.** It prints the commit
+the run is using and every `ChangeType` in the file. That is the only place a stale `main`
+becomes visible before money and a review cycle are spent.
+
+EXPECT, in this order:
+- `changes : 13`. **Thirteen, not five.** A SaaS product is created by ONE change set
+  carrying the product AND its offer; five was the document AWS refused twice.
+- six dimensions -- `attack_surface_bundle_access` as `Entitled`, five `ExternallyMetered`.
+  **Read those six names.** They are the rate card and nothing after this changes them cheaply.
+- `pricing preflight:` with `OK` against all six.
+- `media preflight:` `OK  HTTP 200`.
+
+STOP IF: `changes : 5` -- STEP 3b did not land. Do not run the apply.
+STOP IF: any `UNPRICED` line -- send me the block; the apply would fail the same way again.
 STOP IF: `AccessDeniedException` -- step 1 did not take.
 
 ## STEP 5 -- ANDREW CLICKS THIS. Create the product. IRREVERSIBLE.
 
 Same workflow, `mode: apply`, `confirm: CREATE-NEW-PRODUCT` typed by hand.
+**Only after STEP 4 printed `changes : 13` and both preflights OK.**
 
-EXPECT: `SUBMITTED` plus a `ChangeSetId`. AWS reviews asynchronously, so the product does
-not exist the moment this returns. Copy the `ChangeSetId` and go to STEP 5b.
+EXPECT: `SUBMITTED` plus a `ChangeSetId`, 25 lowercase alphanumerics, printed by the Apply
+step itself. The 40-hex string in the run page HEADER is the git commit, not the id.
+AWS reviews asynchronously, so the product does not exist the moment this returns. Take
+that id to STEP 5b.
 STOP IF: `AccessDeniedException` -- step 1 did not take.
 
-## STEP 5 HAS FAILED TWICE AND IS FIXED AGAIN. RE-RUN STEPS 4 AND 5. READ THIS FIRST.
+## STEP 5 HAS FAILED FOUR TIMES. TWO DEFECTS, AND THE LAST TWO RUNS WERE THE SAME ONE.
 
 Change set `de0zvpnvpcq3olta3y7kpx4p2` came back **FAILED**, so **no Bundle B product exists, no
 product code exists, and the Marketplace Management Portal correctly lists three SaaS products.**
@@ -261,8 +300,14 @@ Both printed the new preflight block, which is the guard doing its job on the re
     media preflight:
       OK       HTTP 200   ChangeSet[1].DetailsDocument.LogoUrl = .../bundle_a/relayshield_logo_bundle_a.png
 
-**The apply submitted `17or75a96xofiu7gic33wjrm6`, which is the one that FAILED on
-pricing.** Do not read it again; the next apply produces a new id.
+**The apply submitted `17or75a96xofiu7gic33wjrm6`, which FAILED on pricing.**
+
+**AND `dldmvatisooxdj8b7zll8q4a1`, the fourth, failed with the IDENTICAL error** -- because
+the pricing fix was on a branch and the workflow checks out `main`. Nothing was wrong with
+the fix and nothing was wrong with the click. **STEP 3b above is the missing step**, and the
+dry run now prints the commit and the change count so a stale `main` is visible in one line
+rather than fifteen seconds later in an AWS refusal. Do not read either of those two ids
+again; the next apply produces a new one.
 
 **THE 40-HEX STRING ON THE RUN PAGE IS THE GIT COMMIT, NOT THE CHANGE SET.** GitHub prints
 `a7067bd2c5e70b0318c9b7f327ddeb13568b778c` in the run header because that is the commit the

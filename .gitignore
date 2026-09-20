@@ -96,6 +96,14 @@ coverage/
 # 1080x1920 and rejects anything else, so the 900x1600 ton.app set is the
 # wrong size there; both are kept rather than one being regenerated each time.
 !assets/miniapp/store_1080x1920/*.png
+
+# The AWS Marketplace architecture diagram, rendered from
+# assets/marketplace/bundle_b_architecture.html. It is uploaded into the
+# portal's Architecture details form by hand, and an image sent through the
+# chat arrives re-encoded as .webp, which an upload dialog filters out of the
+# file picker entirely. So the merge is the delivery, and the merge only
+# delivers a file that is TRACKED. 1600x900, ~170 KB.
+!assets/marketplace/*.png
 .telethon_venv
 zapier_partner_test_key.txt
 

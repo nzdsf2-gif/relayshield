@@ -3,6 +3,55 @@
 Paste-ready copy for the AWS Marketplace Management Portal, product
 **RelayShield - Attack Surface & Supply Chain API**, entity `prod-szi2wdww3obry`.
 
+## 0. THE FORM IS ONE RADIO BUTTON. THE ANSWER IS "None of the above."
+
+Read from the form itself on 2026-09-20. It asks only for an **AWS hosting pattern**, four
+options, no description box and no upload.
+
+**Pick "None of the above."** Its own text says: *"Although it's not considered deployed on AWS,
+you can continue publishing in AWS Marketplace."* That satisfies the required field, clears the red
+badge, and unblocks Update visibility.
+
+### Why not "The product runs entirely on AWS"
+
+Because that option requires *"the application plane, control plane and any 3rd party dependencies
+(including LLMs) run on AWS"*, and two of Bundle B's five endpoints depend on services that are not
+in our AWS account or the buyer's. Read out of `relayshield_api.py` rather than recalled:
+
+| Endpoint | Outbound dependency | Where |
+|---|---|---|
+| `/v1/metered/supply-chain` | `_check_vendor_domain` | **haveibeenpwned.com**, a paid commercial API |
+| `/v1/metered/secret-scan` | `_github_secret_scan` and five artifact scanners | github.com, registry.npmjs.org, pypi.org, hub.docker.com, huggingface.co, www.postman.com |
+| `/v1/metered/asset-intel` | none | |
+| `/v1/metered/threat-actor` | none | |
+| `/v1/metered/session-risk` | none | |
+
+Have I Been Pwned is the one that settles it. A public package index can be argued as reading the
+open internet rather than depending on a component; **a paid commercial API our endpoint cannot
+answer without is a third-party dependency by any reading.** Option 1 would be a claim a reviewer
+can check, on a public listing, and it would be false.
+
+### Why not "Only the application plane runs on AWS"
+
+That option describes a product whose **control plane runs OUTSIDE AWS**. Ours does not: key
+issuance, entitlement, metering and configuration are all Lambda, DynamoDB and the Marketplace
+APIs. Picking it would misdescribe us in the opposite direction.
+
+### What this costs, and why it is reversible
+
+It forgoes the "Deployed on AWS" designation, which is a search-result badge, not an eligibility
+requirement. The form says an unapproved submission can be sent again, and architecture details can
+be updated later, **so this is a decision you can revisit once somebody has actually read the
+Architecture guidelines page** (it is egress-blocked from this container, so I have not). Today the
+asymmetry is the whole argument: "None of the above" satisfies the gate in one click, and a
+rejected assessment on the last gate before go-public is another round.
+
+**The diagram and description below are NOT needed for this form.** Keep them: AWS's 2025 SaaS
+policy requires an architecture diagram in the portal as part of product validation, and the
+description is the text to hand a reviewer who asks. They cost nothing sitting here.
+
+---
+
 **UNVERIFIED: I have not seen the Architecture details form.** `aws.amazon.com` and
 `docs.aws.amazon.com` both return HTTP 000 from this container, and no session has recorded
 that form's fields. So this gives you a description AND a diagram, because the form asks for

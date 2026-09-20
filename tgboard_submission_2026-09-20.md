@@ -46,11 +46,59 @@ Type tab: **Mini-apps**
 https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-tgboard
 ```
 
-**THE FETCH BUTTON IS THE HAZARD.** A form that fetches a `t.me` URL to pull its metadata may
-normalise the URL and drop the query string. **After you press Fetch, look at what is in the
-field.** If it has become a bare `t.me/relayshield_bot/idcheck`, the attribution is gone and
-the listing is worth measurably less. Paste it back if the field is still editable; if it is
-not, tell me and we use the website field as the attributed link instead.
+### THE LINK FIELD REFUSED THIS. MEASURED 2026-09-20.
+
+    Invalid or private t.me link
+
+**Their validator rejects it before any fetch happens.** The hazard predicted above turned
+out to be worse than a silent strip: it is a hard refusal, which is the better failure of the
+two because it cannot be mistaken for success.
+
+**Two candidate causes and they need different fixes.** Test them in the field itself, cheapest
+first, pressing Fetch after each:
+
+| # | Paste this | If it is ACCEPTED, the cause was |
+|---|---|---|
+| 1 | `https://t.me/relayshield_bot/idcheck` | the `?startapp=` query string |
+| 2 | `https://t.me/relayshield_bot` | the two-segment Mini App path |
+
+**If test 1 passes**, their regex simply does not allow a query string. Submit the bare link
+and recover the attribution through the other two fields, below.
+
+**If only test 2 passes**, the Mini-apps tab keys on the BOT USERNAME and cannot address a
+Mini App directly. That is tg.app's one-listing-per-bot finding repeating, and it means the
+Mini App listing and the bot listing are the same slot. **Spend it on the Mini App**: it is the
+thing a catalogue visitor can open, and three catalogues already carry
+`t.me/relayshield_bot/idcheck` directly. Use the Mini App name, tagline and description on that
+single listing and skip section 3.
+
+**If BOTH are refused**, the account or the bot is being read as private, and that is a
+question for them rather than a thing to keep retrying. Send me what it says.
+
+### RECOVERING THE ATTRIBUTION WHEN THE LINK FIELD WILL NOT CARRY IT
+
+A bare Mini App link is NOT zero, and knowing that stops it being over-corrected: `sourceFor()`
+falls back to the generic `tg-miniapp`, so those arrivals land in the generic bucket,
+indistinguishable from any other unattributed open. The tgboard delta is what is lost, not the
+traffic.
+
+Two fields can carry the key instead, in this order:
+
+1. **Any Website or URL field on the listing.** Use
+   `https://api.relayshield.net/developers?source=tg-miniapp-tgboard`. This is the RELIABLE
+   one: the key is registered in `_SOURCE_BANNERS`/`_SOURCE_ALIASES`, the landing page reads
+   `?source=` there, and it is counted by `tools/source_arrivals.py`. Note the path is
+   `/developers`, not the bare host: `?source=` on the root is read by nothing and is FD-8's
+   exact shape.
+2. **The attributed `t.me` link as plain text in the Description.** A reader who taps it
+   carries `?startapp=tg-miniapp-tgboard` and lands attributed. Worth including whatever
+   happens with field 1, and it costs one line.
+
+**THE SAME VALIDATOR WILL PROBABLY REFUSE THE BOT LINK IN SECTION 3**
+(`?start=SRC_tg-miniapp-tgboard`). **That one matters more**, because a bot arrival with no
+payload logs nothing at all and leaves no `unmatched:` row to find later. If the field refuses
+it, put the `?start=SRC_tg-miniapp-tgboard` form in the Description as plain text so at least
+the readers who tap through are counted.
 
 **Name**
 

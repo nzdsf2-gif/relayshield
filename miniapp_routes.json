@@ -195,6 +195,17 @@
       "audience_note": "UNMEASURED, and a count would be the wrong number anyway. UNVERIFIED from the container, and the label is the point: every candidate host returns 000 here, including findmini.app and storebot.me, both of which have accepted a submission from us. 000 is a fact about this container's egress and says nothing about the destination, so it can neither confirm nor refute a route.",
       "status": "ready",
       "why_first": "RANKED LAST ON PURPOSE, and recorded as a different KIND of destination rather than a fifteenth catalogue. A directory listing is a standing shelf that keeps returning arrivals; a Product Hunt launch is ONE DAY, which makes it a channel post with a bigger audience. It is also the largest single first impression left unspent, so it goes after a listing has proved the copy, never before. Take the --snapshot baseline before it, never after."
+    },
+    {
+      "rank": 18,
+      "id": "tgboard",
+      "key": "tg-miniapp-tgboard",
+      "destination": "tgboard.com, a Telegram channels/bots/mini-apps/groups/stickers catalogue",
+      "audience": null,
+      "audience_note": "UNMEASURED. UNVERIFIED from the container: tgboard.com is egress-blocked here, so everything known about it comes from the founder's own screenshot of tgboard.com/en/add, which is a primary source and is better evidence than any search summary. What that screenshot establishes: a plain web form at /en/add, an account already signed in, five Type tabs (Channels, Bots, Mini-apps, Groups, Stickers), a t.me link field with a Fetch button, a required Category dropdown, Name, an optional Tagline for the card view, and a required Description. A 'Promotion' nav item means it ALSO sells placement -- which does not make it an ad broker, because the free submission route is right there on the same page, but it is the @telegtapps shape to watch for. WEB FRONT DOOR, which is the kind that has worked: four of our five submissions went through one.",
+      "status": "ready",
+      "submitted_at": null,
+      "submission_note": "NEVER SUBMITTED. Checked 2026-09-20: 'tgboard' appears nowhere in this repository, in any .json, .md, .py or .js. FIVE LISTINGS ARE OFFERED AND WE HAVE THREE SURFACES: the Mini App, @relayshield_bot and t.me/RelayShield. Groups and Stickers are not ours and submitting to them would be inventing a surface. ONE KEY FOR ALL THREE, because the rule is one key per DESTINATION and tgboard is one destination; the funnel already separates what happens after the click (a ?startapp= check lands in the check stage, a ?start=SRC_ arrival lands in the BOT stage), so splitting the key would make the tgboard delta two numbers that have to be added back together. THE FETCH BUTTON IS THE HAZARD: a form that fetches a t.me URL to read its metadata may normalise it and drop the query string, which silently removes the attribution while the listing still looks correct."
     }
   ],
   "loop_keys": [

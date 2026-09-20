@@ -36,6 +36,7 @@ TYPE_LABEL = {
     "broker": "Broker selling posts -- DO NOT SUBMIT",
     "catalogue_and_broker": "Both: real catalogue AND sells posts",
     "telegram_native": "Telegram-native, not a web form",
+    "web_form_seen": "Web form, SEEN directly (screenshot of the form itself)",
 }
 
 
@@ -94,10 +95,29 @@ def render() -> str:
         out.append(r.get("note", "") + "\n")
 
     out.append("---\n")
-    out.append("**Every URL above is UNVERIFIED from the container** -- all of them "
-               "are egress-blocked there, which is a fact about the container and "
-               "not about the destination. The one-minute read is the founder's, "
-               "and that is the same reason the web-front-door finding exists at all.\n")
+    # The footer used to say "every URL above is UNVERIFIED" unconditionally. It
+    # stopped being true the moment a destination's own form was seen, and a
+    # blanket caveat that is false for one row teaches a reader to discount it
+    # for all of them. Derived from route_type rather than restated by hand.
+    seen = [r["destination"] for r in d["routes"]
+            if r.get("route_type") == "web_form_seen"]
+    if seen:
+        out.append("**All but %d of the URLs above are UNVERIFIED from the "
+                   "container** -- they are egress-blocked there, which is a fact "
+                   "about the container and not about the destination. The "
+                   "exception%s (%s) %s been seen directly, as a screenshot of the "
+                   "submission form itself, which is a primary source and outranks "
+                   "any search summary. For the rest the one-minute read is the "
+                   "founder's, and that is the same reason the web-front-door "
+                   "finding exists at all.\n"
+                   % (len(seen), "" if len(seen) == 1 else "s",
+                      ", ".join(seen), "has" if len(seen) == 1 else "have"))
+    else:
+        out.append("**Every URL above is UNVERIFIED from the container** -- all of "
+                   "them are egress-blocked there, which is a fact about the "
+                   "container and not about the destination. The one-minute read "
+                   "is the founder's, and that is the same reason the "
+                   "web-front-door finding exists at all.\n")
     return "\n".join(out)
 
 

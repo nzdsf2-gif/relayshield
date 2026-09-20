@@ -136,6 +136,7 @@ const ALLOWED_SOURCES = new Set([
   // audience is developers rather than consumers.
   "tg-miniapp-tonapp",
   "tg-miniapp-tgapp",
+  "tg-miniapp-tgboard",
   "tg-miniapp-awesome",
   // Two destinations registered 2026-09-19, BEFORE either is submitted to.
   // dappradar is a dapp catalogue whose audience holds TON, which is the one

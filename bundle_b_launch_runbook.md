@@ -646,6 +646,121 @@ STOP IF: section 4 shows `(not set)` on both functions and section 2 shows no ve
 Then the only remaining authoritative read is the Marketplace Management Portal product
 page for each bundle, seller side, **Product code** field.
 
+## STEP 8c -- THE VISIBILITY REQUEST WAS REJECTED. AUDIT_ERROR, TWO ISSUES, THREE CAUSES.
+
+**2026-09-20.** `UpdateVisibility` came back with:
+
+    1. ... no successful calls to the Entitlements Service.
+    2. ... no successful metering records.
+
+**Both are downstream of ONE event that has not happened, and it is the one STEP 8 already
+warned was a separate click: the FULFILLMENT REDIRECT.** Accepting the private offer created
+`agmt-29l852u6kqzmjh2me0pglvj9q`. It did not POST a registration token to our handler, and the
+token is what starts the whole chain:
+
+    redirect  -> ResolveCustomer -> GetEntitlements       <- clears audit issue 1
+              -> writes pending_<customer> -> /developers
+    SNS       -> subscribe-success -> GetEntitlements -> provisions the API key
+    one call  -> BatchMeterUsage with the LicenseArn      <- clears audit issue 2
+
+**Three things can break that chain, they have different fixes, and two of them are already
+known to be wrong.** Diagnose before acting: a wrong resubmission costs an audit cycle.
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    AWS_PROFILE=relayshield sh tools/diagnose_bundle_b_audit.sh
+
+EXPECT: five numbered sections, each with a reading guide. Read-only, writes nothing.
+STOP IF: `credentials resolve to '620534471984'` -- the profile is missing and nothing was read.
+
+### CAUSE A -- the env var holds a git SHA, and a WRONG value is worse than an EMPTY one
+
+`_resolve_bundle()` compares `BUNDLE_CONFIGS["attack_surface_bundle_access"]["product_code"]`
+against the code `ResolveCustomer` returned. **On a mismatch it logs `Bundle mismatch` and
+returns `None`**, deliberately, because provisioning the wrong bundle grants endpoints the
+customer did not buy. So the git SHA written on 2026-09-18 does not merely fail to help: **it
+blocks fulfillment**, and an empty value would not, because the check is skipped when the
+config value is falsy.
+
+Fix it in the console -- Lambda, `relayshield-bundle-fulfillment`, Configuration, Environment
+variables, Edit -- which is a merge by construction and needs no IAM grant. Set
+`BUNDLE_B_PRODUCT_CODE` to the **product code**, 25 lowercase alphanumerics, read off the
+product's page in the Marketplace Management Portal. Not `prod-szi2wdww3obry`, which is the
+entity id and would mismatch in exactly the same way.
+
+**If the value is wrong, this step is self-diagnosing rather than silent:** section 3 of the
+diagnostic prints `Product code not recognised: got <CODE>`, and that `<CODE>` came from AWS
+rather than from anybody's memory.
+
+### CAUSE B -- nothing is subscribed to Bundle B's SNS topics, and no repo tooling ever did it
+
+Every SaaS product has its own pair of topics in AWS's account, **named after the product
+code**. The API key is provisioned on `subscribe-success`. With no subscription that event
+never arrives, no key is issued, no metered call can be made, and audit issue 2 can never
+clear.
+
+**Nothing in this repository has ever created one.** Grep `aws-mp-subscription-notification`
+and the only hits are a comment and a docstring. Bundle D's and Bundle A's were made by hand
+and no session wrote it down, so the step was invisible to every later reader including the one
+writing this runbook. That is the drift rule with the direction reversed: not code living only
+in AWS, but a **required AWS resource living only in somebody's memory.**
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    AWS_PROFILE=relayshield sh tools/subscribe_bundle_sns.sh <the product code from cause A>
+
+EXPECT: `added` then `subscribed:` for both the subscription and entitlement topics. Re-running
+it should print `already present` and `already subscribed` throughout; that re-run IS the
+verification.
+STOP IF: `AuthorizationError` on subscribe -- the topic policy does not allow this account,
+which for a marketplace topic means the product code is wrong or the product is not ours.
+STOP IF: it refuses the argument. It refuses a `prod-` entity id and a 40-hex git SHA by name,
+which are the two values that have already been pasted into product-code fields this week.
+
+**A subscription does not replay what it missed**, so an already-sent `subscribe-success` is
+gone. That does not block anything: the redirect below issues the key directly.
+
+### CAUSE C -- the redirect has simply not been followed
+
+Cheapest and most likely. Section 4 of the diagnostic says so: a redirect writes a
+`pending_<customer-id>` row before it renders, so **no pending rows means it never ran.**
+
+**ANDREW CLICKS THIS**, in the BUYER account (`442429445748`, TestUser): AWS Marketplace,
+Manage subscriptions, the Bundle B subscription, **Set up your account** (the button that
+re-issues the registration token). It lands on `api.relayshield.net/developers`. Enter an email
+when asked; the key is shown on screen and emailed.
+
+### THEN ONE METERED CALL, WHICH IS WHAT CLEARS AUDIT ISSUE 2
+
+With the issued key (it starts `rs_live_`):
+
+    ANDREW RUNS THIS:
+    read -rs "RS_KEY?Paste the Bundle B API key, then press Enter: "
+    curl -sS -i -X POST https://api.relayshield.net/v1/metered/threat-actor \
+      -H "X-RS-API-KEY: $RS_KEY" -H "Content-Type: application/json" \
+      -d '{"actor":"lazarus"}'
+
+EXPECT: HTTP 200 with a JSON body. `threat-actor` is chosen deliberately: it is the one of the
+five that makes **no outbound third-party call**, so nothing upstream can turn a metering test
+into a vendor outage.
+STOP IF: 402 or 403 -- the key carries no Bundle B entitlement, so provisioning did not
+complete. Back to cause A.
+
+Then confirm the meter actually fired, because a served call and a metered call are different
+events and only the second one clears the audit:
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    AWS_PROFILE=relayshield sh tools/diagnose_bundle_b_audit.sh
+
+EXPECT: section 5 shows `Marketplace usage reported account=... dimension=threat_actor_calls`.
+STOP IF: `Skipping bundle usage report: missing account/license_arn/dimension` -- the call was
+served and NOT metered, because the key row carries no `LicenseArn`. That means the key was
+created outside the `subscribe-success` path, and AWS counts it as zero either way.
+
+**Only then resubmit the visibility request.** Both issues have to be true at once and each one
+is a different event.
+
 ## STEP 9 -- ANDREW CLICKS THIS. Go public, once STEP 8 passes.
 
 Actions, **Marketplace Change Set**, Run workflow:

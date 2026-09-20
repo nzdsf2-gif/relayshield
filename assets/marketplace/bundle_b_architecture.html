@@ -1,0 +1,100 @@
+<!doctype html>
+<!--
+  AWS Marketplace "Architecture details" diagram for Bundle B
+  (RelayShield - Attack Surface & Supply Chain API, prod-szi2wdww3obry).
+
+  Render it, never edit the PNG:
+
+    chromium --headless --no-sandbox --disable-gpu --hide-scrollbars \
+      --window-size=1600,900 \
+      --screenshot=assets/marketplace/bundle_b_architecture.png \
+      "file://$PWD/assets/marketplace/bundle_b_architecture.html"
+
+  The PNG is TRACKED (.gitignore carries !assets/marketplace/*.png) because an
+  image sent through the chat arrives re-encoded as .webp, which an upload
+  dialog filters out of the file picker. The merge is the delivery, and the
+  merge only delivers a tracked file.
+
+  No em-dashes: house style, and this is published copy on a public listing.
+  No AWS account number: not a secret, and not something to print on a public
+  product page either.
+-->
+<meta charset="utf-8">
+<title>RelayShield Attack Surface and Supply Chain API - architecture</title>
+<style>
+  :root{
+    --ink:#0f1b2d; --mut:#5a6b80; --line:#c7d2de; --bg:#ffffff;
+    --aws:#ff9900; --rs:#1f6feb; --box:#f6f9fc;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:1600px;height:900px;background:var(--bg);
+       font:400 16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+       color:var(--ink);padding:44px 52px}
+  h1{font-size:28px;font-weight:700;letter-spacing:-.2px}
+  .sub{color:var(--mut);font-size:15px;margin-top:6px}
+  .region{margin-top:26px;border:2px dashed var(--line);border-radius:14px;
+          padding:18px 20px 22px;position:relative;height:640px}
+  .region>.tag{position:absolute;top:-12px;left:22px;background:var(--bg);
+               padding:0 10px;font-size:13px;font-weight:700;color:var(--mut);
+               letter-spacing:.6px;text-transform:uppercase}
+  .cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;height:100%}
+  .col{display:flex;flex-direction:column;gap:14px}
+  .lane{font-size:12px;font-weight:700;color:var(--mut);letter-spacing:.7px;
+        text-transform:uppercase;padding-bottom:2px;border-bottom:1px solid var(--line)}
+  .box{border:1px solid var(--line);border-radius:10px;background:var(--box);padding:12px 14px}
+  .box.aws{border-left:4px solid var(--aws)}
+  .box.rs{border-left:4px solid var(--rs)}
+  .box b{display:block;font-size:15px;font-weight:700}
+  .box span{display:block;font-size:13px;color:var(--mut);margin-top:3px}
+  .arrow{font-size:13px;color:var(--mut);text-align:center;margin:-4px 0}
+  .foot{margin-top:14px;font-size:13px;color:var(--mut)}
+  code{font:600 12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}
+</style>
+<h1>RelayShield Attack Surface &amp; Supply Chain API</h1>
+<div class="sub">SaaS, delivered as an HTTPS API. Entirely serverless, single region, one AWS account.</div>
+
+<div class="region"><span class="tag">Single AWS account &nbsp;&middot;&nbsp; us-east-1</span>
+<div class="cols">
+
+  <div class="col">
+    <div class="lane">1 &middot; Subscribe and fulfill</div>
+    <div class="box aws"><b>AWS Marketplace</b><span>Buyer subscribes and is redirected to our fulfillment URL with <code>x-amzn-marketplace-token</code></span></div>
+    <div class="arrow">&#8595; HTTPS</div>
+    <div class="box rs"><b>Amazon API Gateway</b><span>REST API, TLS 1.2+, <code>api.relayshield.net</code></span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>AWS Lambda, fulfillment</b><span><code>relayshield-bundle-fulfillment</code>. Calls <code>ResolveCustomer</code> and <code>GetEntitlements</code>, then issues the customer's API key</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>Amazon DynamoDB</b><span>API key record: customer identifier, product code, entitlement state. On-demand capacity, encrypted at rest</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>Amazon SES</b><span>Delivers the key to the buyer's registered address</span></div>
+  </div>
+
+  <div class="col">
+    <div class="lane">2 &middot; Serve a metered call</div>
+    <div class="box aws"><b>Customer application</b><span>Server-to-server HTTPS with the issued API key</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>Amazon API Gateway</b><span>Five endpoints under <code>/v1/metered/</code>: supply-chain, asset-intel, secret-scan, threat-actor, session-risk</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>AWS Lambda, API</b><span><code>relayshield-api</code>. Authenticates the key, checks the entitlement, runs the check</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>Amazon DynamoDB</b><span>Indicator corpus and watchlists. Read on every call; no customer request bodies are retained</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>AWS Secrets Manager</b><span>Upstream data-source credentials, read at runtime. No credential is stored in code or configuration</span></div>
+  </div>
+
+  <div class="col">
+    <div class="lane">3 &middot; Meter, entitle, observe</div>
+    <div class="box aws"><b>AWS Marketplace Metering</b><span><code>BatchMeterUsage</code> reports each successful call against its usage dimension. Only a 2xx is billed</span></div>
+    <div class="arrow">&#8593;</div>
+    <div class="box aws"><b>AWS Marketplace Entitlement</b><span><code>GetEntitlements</code> confirms the monthly commitment before access is granted</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box aws"><b>Amazon SNS</b><span>Subscription notification topic. Entitlement change, suspension and unsubscribe events</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>AWS Lambda, fulfillment</b><span>Same function, SNS path. Deactivates the key when an entitlement lapses</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>Amazon CloudWatch Logs</b><span>Structured logs and metering outcomes. Identifiers are hashed before they are written</span></div>
+  </div>
+
+</div>
+</div>
+<div class="foot">No EC2, no containers, no persistent compute. IAM roles are per-function and least-privilege; all data in transit is TLS, all data at rest is encrypted with AWS-managed keys.</div>

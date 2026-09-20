@@ -43,6 +43,16 @@
   "routes": [
     {
       "rank": 1,
+      "id": "tgboard",
+      "key": "tg-miniapp-tgboard",
+      "destination": "tgboard.com",
+      "submit_url": "https://tgboard.com/en/add",
+      "route_type": "web_form_seen",
+      "status": "ready",
+      "note": "RANKED FIRST AND IT IS THE ONLY ROW ON THIS LIST WHOSE FORM ANYBODY HAS ACTUALLY SEEN. Every other row's url came from a web search and is egress-blocked here; this one comes from the founder's screenshot of tgboard.com/en/add, signed in, on 2026-09-20. That is a primary source and it outranks eleven secondary ones. IT TAKES ALL THREE OF OUR SURFACES: Type tabs for Channels, Bots and Mini-apps (also Groups and Stickers, which we do not have). Same shape as tg.app, which is the one catalogue that has actually gone live for us, so the tg.app playbook applies: search the catalogue for an existing RelayShield entry FIRST, then submit the Mini App, the bot and the channel as three listings. THE KEY IS SHARED WITH miniapp_routes.json's tgboard row ON PURPOSE. tgboard is ONE destination and the rule is one key per destination; the funnel already separates a ?startapp= check from a ?start=SRC_ bot arrival by stage, so a second key would split one delta into two numbers that have to be added back together. This is the only row here that shares a key with a Mini App route, and it is because it is the only destination that lists both. A 'Promotion' nav item means it also sells placement. That does NOT make it a broker -- the free submission form is on the same page -- but it is the @telegtapps shape, so read whether the free listing actually appears in search before paying for anything. THE FETCH BUTTON IS THE HAZARD ON ALL THREE SUBMISSIONS: a form that fetches a t.me URL to pull metadata may normalise it and drop the query string, which removes the attribution silently while the listing still looks right. Check the saved link after every Fetch."
+    },
+    {
+      "rank": 2,
       "id": "storebot",
       "key": "storebot",
       "destination": "storebot.me",
@@ -53,7 +63,7 @@
       "note": "SUBMITTED TWICE BY THE FOUNDER AND NEITHER SUBMISSION CONFIRMED. No confirmation page, and the bot is not findable in their search. Three causes with three different fixes and the form cannot tell them apart: a moderation queue with no receipt, a submission that never posted, or an index that has not rebuilt. THE LINK SUBMITTED DID NOT CARRY ?start=SRC_storebot, so even a successful listing is currently unmeasurable. Re-submitting a third time is the loop -- ask them instead."
     },
     {
-      "rank": 2,
+      "rank": 3,
       "id": "botsarchive",
       "key": "botsarchive",
       "destination": "BotsArchive, botsarchive.com",
@@ -63,7 +73,7 @@
       "note": "MEASURED 2026-09-17 and it is BOTH KINDS OF THING AT ONCE, which corrects the 2026-09-14 rule rather than fitting it: a genuine database with a website and a search bot, AND an advertising channel selling posts at $408 (Telega.io, ~110k subscribers, ~6,100 average post reach). The two categories are not exclusive; @telegtapps was purely a broker and this is not. TAKE THE FREE LISTING, DECLINE THE POST. All figures from third-party trackers, because botsarchive.com, t.me, tgstat.com and telega.io are ALL egress-blocked from the container."
     },
     {
-      "rank": 3,
+      "rank": 4,
       "id": "tgbotlist",
       "key": "tgbotlist",
       "destination": "TgBotList, telegram-bot-list.com",
@@ -73,7 +83,7 @@
       "note": "Its own copy states a stated turnaround: checked and added within 24 hours. A NAMED turnaround is the property that made findmini.app the right first submission -- it converts silence into evidence, because after 24 hours silence means something."
     },
     {
-      "rank": 4,
+      "rank": 5,
       "id": "toptelegrambots",
       "key": "toptelegrambots",
       "destination": "toptelegrambots.com",
@@ -83,7 +93,7 @@
       "note": "Its own copy says the listing appears INSTANTLY after a Telegram-side verification of bot ownership. Instant publication is worth more than review latency here: it is the cheapest possible test of whether our listing copy survives a real catalogue, and it fails loudly rather than silently."
     },
     {
-      "rank": 5,
+      "rank": 6,
       "id": "besttelegrambot",
       "key": "besttelegrambot",
       "destination": "besttelegrambot.com",
@@ -93,7 +103,7 @@
       "note": "Free submission, self-described as 600+ bots. Small, and a standing shelf is worth having whatever the number turns out to be -- the same reasoning that put findmini.app ahead of its rank."
     },
     {
-      "rank": 6,
+      "rank": 7,
       "id": "tdirectory",
       "key": "tdirectory",
       "destination": "Telegram Directory, tdirectory.me",
@@ -103,7 +113,7 @@
       "note": "Takes channels, groups AND bots, so it is two submissions rather than one: @relayshield_bot and the @RelayShield blog channel. Check whether it keys a listing on the account the way tg.app keys one per bot BEFORE spending the second submission."
     },
     {
-      "rank": 7,
+      "rank": 8,
       "id": "telegramic",
       "key": "telegramic",
       "destination": "Telegramic, telegramic.org",
@@ -113,7 +123,7 @@
       "note": "Listed as a bots directory. No submission route seen in search results, so step one is the header and the footer, exactly as it was for findmini.app."
     },
     {
-      "rank": 8,
+      "rank": 9,
       "id": "botlist",
       "key": "botlist",
       "destination": "@botlist / @BotListChat",
@@ -123,7 +133,7 @@
       "note": "TELEGRAM-NATIVE, SO IT RANKS BELOW EVERY WEB FORM, and that ordering is measured rather than argued. Every Telegram-first attempt this programme made reached nothing -- @telegtapps was an ad broker, @tapps_bot was the catalogue rather than the route, @app_moderation_bot never answered /start -- while four web forms in two days produced four submissions and a live listing. A channel shows you its contents and hides its plumbing; a website shows you its navigation."
     },
     {
-      "rank": 9,
+      "rank": 10,
       "id": "botostore",
       "key": "botostore",
       "destination": "botostore.com",
@@ -133,7 +143,7 @@
       "note": "One of the longest-running Telegram bot catalogues with a web front door. Ranked on age, which is the only evidence available here -- nothing in this repo has measured its traffic and no number should be quoted for it. TYPE-CHECK BEFORE SUBMITTING, and two questions settle it. Is it a curated catalogue with a submission route, or a broker selling posts? @telegtapps was ranked on subscriber count and turned out to be the second. And does it already list @relayshield_bot -- tg.app keys one listing per BOT USERNAME, so a second submission can collide with the first rather than adding to it. UNVERIFIED from the container: this host returns 000 here, as does storebot.me, which accepted a submission. 000 is a fact about egress."
     },
     {
-      "rank": 10,
+      "rank": 11,
       "id": "tgstat",
       "key": "tgstat",
       "destination": "tgstat.com",
@@ -143,7 +153,7 @@
       "note": "An analytics site that also runs a catalogue, so the type check matters more than usual: analytics sites sell advertising, and a catalogue that exists as a shop front for ad inventory is the @telegtapps shape wearing a better suit. TYPE-CHECK BEFORE SUBMITTING, and two questions settle it. Is it a curated catalogue with a submission route, or a broker selling posts? @telegtapps was ranked on subscriber count and turned out to be the second. And does it already list @relayshield_bot -- tg.app keys one listing per BOT USERNAME, so a second submission can collide with the first rather than adding to it. UNVERIFIED from the container: this host returns 000 here, as does storebot.me, which accepted a submission. 000 is a fact about egress."
     },
     {
-      "rank": 11,
+      "rank": 12,
       "id": "tlgrm",
       "key": "tlgrm",
       "destination": "tlgrm.eu",

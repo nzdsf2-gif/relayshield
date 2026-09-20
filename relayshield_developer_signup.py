@@ -3397,6 +3397,7 @@ _SOURCE_ALIASES = {
     "tg-miniapp-minitelegram":      "tg-miniapp",
     "tg-miniapp-tonapp":         "tg-miniapp",
     "tg-miniapp-tgapp":          "tg-miniapp",
+    "tg-miniapp-tgboard":       "tg-miniapp",
     "tg-miniapp-awesome":        "tg-miniapp",
     # Registered 2026-09-19 before either destination is submitted to. An
     # unregistered key renders no banner and logs "unmatched:", which is

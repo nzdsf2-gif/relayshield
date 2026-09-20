@@ -20,21 +20,36 @@ AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/source_arrivals.py --surface 
 
 | # | Destination | Key | State | Type |
 |---|---|---|---|---|
-| 1 | [storebot.me](https://storebot.me/add-bot/) | `storebot` | SUBMITTED, NOT CONFIRMED | UNVERIFIED -- nobody has looked |
-| 2 | [BotsArchive, botsarchive.com](https://botsarchive.com/) | `botsarchive` | Not submitted | Both: real catalogue AND sells posts |
-| 3 | [TgBotList, telegram-bot-list.com](https://telegram-bot-list.com/) | `tgbotlist` | Not submitted | UNVERIFIED -- nobody has looked |
-| 4 | [toptelegrambots.com](https://toptelegrambots.com/list-telegram-bot) | `toptelegrambots` | Not submitted | UNVERIFIED -- nobody has looked |
-| 5 | [besttelegrambot.com](https://besttelegrambot.com/submit-bot-index.html) | `besttelegrambot` | Not submitted | UNVERIFIED -- nobody has looked |
-| 6 | [Telegram Directory, tdirectory.me](https://tdirectory.me/) | `tdirectory` | Not submitted | UNVERIFIED -- nobody has looked |
-| 7 | [Telegramic, telegramic.org](https://telegramic.org/bots/) | `telegramic` | Not submitted | UNVERIFIED -- nobody has looked |
-| 8 | @botlist / @BotListChat | `botlist` | Not submitted (ranked last by rule) | Telegram-native, not a web form |
-| 9 | [botostore.com](https://botostore.com) | `botostore` | Not submitted | UNVERIFIED -- nobody has looked |
-| 10 | [tgstat.com](https://tgstat.com) | `tgstat` | Not submitted | UNVERIFIED -- nobody has looked |
-| 11 | [tlgrm.eu](https://tlgrm.eu) | `tlgrm` | Not submitted | UNVERIFIED -- nobody has looked |
+| 1 | [tgboard.com](https://tgboard.com/en/add) | `tg-miniapp-tgboard` | Not submitted | Web form, SEEN directly (screenshot of the form itself) |
+| 2 | [storebot.me](https://storebot.me/add-bot/) | `storebot` | SUBMITTED, NOT CONFIRMED | UNVERIFIED -- nobody has looked |
+| 3 | [BotsArchive, botsarchive.com](https://botsarchive.com/) | `botsarchive` | Not submitted | Both: real catalogue AND sells posts |
+| 4 | [TgBotList, telegram-bot-list.com](https://telegram-bot-list.com/) | `tgbotlist` | Not submitted | UNVERIFIED -- nobody has looked |
+| 5 | [toptelegrambots.com](https://toptelegrambots.com/list-telegram-bot) | `toptelegrambots` | Not submitted | UNVERIFIED -- nobody has looked |
+| 6 | [besttelegrambot.com](https://besttelegrambot.com/submit-bot-index.html) | `besttelegrambot` | Not submitted | UNVERIFIED -- nobody has looked |
+| 7 | [Telegram Directory, tdirectory.me](https://tdirectory.me/) | `tdirectory` | Not submitted | UNVERIFIED -- nobody has looked |
+| 8 | [Telegramic, telegramic.org](https://telegramic.org/bots/) | `telegramic` | Not submitted | UNVERIFIED -- nobody has looked |
+| 9 | @botlist / @BotListChat | `botlist` | Not submitted (ranked last by rule) | Telegram-native, not a web form |
+| 10 | [botostore.com](https://botostore.com) | `botostore` | Not submitted | UNVERIFIED -- nobody has looked |
+| 11 | [tgstat.com](https://tgstat.com) | `tgstat` | Not submitted | UNVERIFIED -- nobody has looked |
+| 12 | [tlgrm.eu](https://tlgrm.eu) | `tlgrm` | Not submitted | UNVERIFIED -- nobody has looked |
 
 ## Why each one sits where it does
 
-### 1. storebot.me
+### 1. tgboard.com
+
+**Key** `tg-miniapp-tgboard` · **State** Not submitted
+
+**Submit at** <https://tgboard.com/en/add>
+
+**Link to give them**
+
+```text
+https://t.me/relayshield_bot?start=SRC_tg-miniapp-tgboard
+```
+
+RANKED FIRST AND IT IS THE ONLY ROW ON THIS LIST WHOSE FORM ANYBODY HAS ACTUALLY SEEN. Every other row's url came from a web search and is egress-blocked here; this one comes from the founder's screenshot of tgboard.com/en/add, signed in, on 2026-09-20. That is a primary source and it outranks eleven secondary ones. IT TAKES ALL THREE OF OUR SURFACES: Type tabs for Channels, Bots and Mini-apps (also Groups and Stickers, which we do not have). Same shape as tg.app, which is the one catalogue that has actually gone live for us, so the tg.app playbook applies: search the catalogue for an existing RelayShield entry FIRST, then submit the Mini App, the bot and the channel as three listings. THE KEY IS SHARED WITH miniapp_routes.json's tgboard row ON PURPOSE. tgboard is ONE destination and the rule is one key per destination; the funnel already separates a ?startapp= check from a ?start=SRC_ bot arrival by stage, so a second key would split one delta into two numbers that have to be added back together. This is the only row here that shares a key with a Mini App route, and it is because it is the only destination that lists both. A 'Promotion' nav item means it also sells placement. That does NOT make it a broker -- the free submission form is on the same page -- but it is the @telegtapps shape, so read whether the free listing actually appears in search before paying for anything. THE FETCH BUTTON IS THE HAZARD ON ALL THREE SUBMISSIONS: a form that fetches a t.me URL to pull metadata may normalise it and drop the query string, which removes the attribution silently while the listing still looks right. Check the saved link after every Fetch.
+
+### 2. storebot.me
 
 **Key** `storebot` · **State** SUBMITTED, NOT CONFIRMED · **Submitted** 2026-09-17
 
@@ -48,7 +63,7 @@ https://t.me/relayshield_bot?start=SRC_storebot
 
 SUBMITTED TWICE BY THE FOUNDER AND NEITHER SUBMISSION CONFIRMED. No confirmation page, and the bot is not findable in their search. Three causes with three different fixes and the form cannot tell them apart: a moderation queue with no receipt, a submission that never posted, or an index that has not rebuilt. THE LINK SUBMITTED DID NOT CARRY ?start=SRC_storebot, so even a successful listing is currently unmeasurable. Re-submitting a third time is the loop -- ask them instead.
 
-### 2. BotsArchive, botsarchive.com
+### 3. BotsArchive, botsarchive.com
 
 **Key** `botsarchive` · **State** Not submitted
 
@@ -62,7 +77,7 @@ https://t.me/relayshield_bot?start=SRC_botsarchive
 
 MEASURED 2026-09-17 and it is BOTH KINDS OF THING AT ONCE, which corrects the 2026-09-14 rule rather than fitting it: a genuine database with a website and a search bot, AND an advertising channel selling posts at $408 (Telega.io, ~110k subscribers, ~6,100 average post reach). The two categories are not exclusive; @telegtapps was purely a broker and this is not. TAKE THE FREE LISTING, DECLINE THE POST. All figures from third-party trackers, because botsarchive.com, t.me, tgstat.com and telega.io are ALL egress-blocked from the container.
 
-### 3. TgBotList, telegram-bot-list.com
+### 4. TgBotList, telegram-bot-list.com
 
 **Key** `tgbotlist` · **State** Not submitted
 
@@ -76,7 +91,7 @@ https://t.me/relayshield_bot?start=SRC_tgbotlist
 
 Its own copy states a stated turnaround: checked and added within 24 hours. A NAMED turnaround is the property that made findmini.app the right first submission -- it converts silence into evidence, because after 24 hours silence means something.
 
-### 4. toptelegrambots.com
+### 5. toptelegrambots.com
 
 **Key** `toptelegrambots` · **State** Not submitted
 
@@ -90,7 +105,7 @@ https://t.me/relayshield_bot?start=SRC_toptelegrambots
 
 Its own copy says the listing appears INSTANTLY after a Telegram-side verification of bot ownership. Instant publication is worth more than review latency here: it is the cheapest possible test of whether our listing copy survives a real catalogue, and it fails loudly rather than silently.
 
-### 5. besttelegrambot.com
+### 6. besttelegrambot.com
 
 **Key** `besttelegrambot` · **State** Not submitted
 
@@ -104,7 +119,7 @@ https://t.me/relayshield_bot?start=SRC_besttelegrambot
 
 Free submission, self-described as 600+ bots. Small, and a standing shelf is worth having whatever the number turns out to be -- the same reasoning that put findmini.app ahead of its rank.
 
-### 6. Telegram Directory, tdirectory.me
+### 7. Telegram Directory, tdirectory.me
 
 **Key** `tdirectory` · **State** Not submitted
 
@@ -118,7 +133,7 @@ https://t.me/relayshield_bot?start=SRC_tdirectory
 
 Takes channels, groups AND bots, so it is two submissions rather than one: @relayshield_bot and the @RelayShield blog channel. Check whether it keys a listing on the account the way tg.app keys one per bot BEFORE spending the second submission.
 
-### 7. Telegramic, telegramic.org
+### 8. Telegramic, telegramic.org
 
 **Key** `telegramic` · **State** Not submitted
 
@@ -132,7 +147,7 @@ https://t.me/relayshield_bot?start=SRC_telegramic
 
 Listed as a bots directory. No submission route seen in search results, so step one is the header and the footer, exactly as it was for findmini.app.
 
-### 8. @botlist / @BotListChat
+### 9. @botlist / @BotListChat
 
 **Key** `botlist` · **State** Not submitted (ranked last by rule)
 
@@ -144,7 +159,7 @@ https://t.me/relayshield_bot?start=SRC_botlist
 
 TELEGRAM-NATIVE, SO IT RANKS BELOW EVERY WEB FORM, and that ordering is measured rather than argued. Every Telegram-first attempt this programme made reached nothing -- @telegtapps was an ad broker, @tapps_bot was the catalogue rather than the route, @app_moderation_bot never answered /start -- while four web forms in two days produced four submissions and a live listing. A channel shows you its contents and hides its plumbing; a website shows you its navigation.
 
-### 9. botostore.com
+### 10. botostore.com
 
 **Key** `botostore` · **State** Not submitted
 
@@ -158,7 +173,7 @@ https://t.me/relayshield_bot?start=SRC_botostore
 
 One of the longest-running Telegram bot catalogues with a web front door. Ranked on age, which is the only evidence available here -- nothing in this repo has measured its traffic and no number should be quoted for it. TYPE-CHECK BEFORE SUBMITTING, and two questions settle it. Is it a curated catalogue with a submission route, or a broker selling posts? @telegtapps was ranked on subscriber count and turned out to be the second. And does it already list @relayshield_bot -- tg.app keys one listing per BOT USERNAME, so a second submission can collide with the first rather than adding to it. UNVERIFIED from the container: this host returns 000 here, as does storebot.me, which accepted a submission. 000 is a fact about egress.
 
-### 10. tgstat.com
+### 11. tgstat.com
 
 **Key** `tgstat` · **State** Not submitted
 
@@ -172,7 +187,7 @@ https://t.me/relayshield_bot?start=SRC_tgstat
 
 An analytics site that also runs a catalogue, so the type check matters more than usual: analytics sites sell advertising, and a catalogue that exists as a shop front for ad inventory is the @telegtapps shape wearing a better suit. TYPE-CHECK BEFORE SUBMITTING, and two questions settle it. Is it a curated catalogue with a submission route, or a broker selling posts? @telegtapps was ranked on subscriber count and turned out to be the second. And does it already list @relayshield_bot -- tg.app keys one listing per BOT USERNAME, so a second submission can collide with the first rather than adding to it. UNVERIFIED from the container: this host returns 000 here, as does storebot.me, which accepted a submission. 000 is a fact about egress.
 
-### 11. tlgrm.eu
+### 12. tlgrm.eu
 
 **Key** `tlgrm` · **State** Not submitted
 
@@ -188,4 +203,4 @@ A channels-and-bots directory with an add form. The only row on this list that m
 
 ---
 
-**Every URL above is UNVERIFIED from the container** -- all of them are egress-blocked there, which is a fact about the container and not about the destination. The one-minute read is the founder's, and that is the same reason the web-front-door finding exists at all.
+**All but 1 of the URLs above are UNVERIFIED from the container** -- they are egress-blocked there, which is a fact about the container and not about the destination. The exception (tgboard.com) has been seen directly, as a screenshot of the submission form itself, which is a primary source and outranks any search summary. For the rest the one-minute read is the founder's, and that is the same reason the web-front-door finding exists at all.

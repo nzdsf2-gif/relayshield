@@ -46,6 +46,50 @@ Type tab: **Mini-apps**
 https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-tgboard
 ```
 
+### SETTLED 2026-09-20. SUBMITTED AND UNDER REVIEW.
+
+    ACCEPTED   https://t.me/relayshield_bot
+    REJECTED   https://t.me/relayshield_bot/idcheck
+
+**So the cause was never the query string.** The Mini-apps tab cannot address a Mini App path
+at all, only a bot username. That is tg.app's one-listing-per-bot finding repeating at a second
+catalogue, which makes it a **pattern rather than a quirk**: a Telegram catalogue's unit is the
+BOT USERNAME, and a Mini App is a property of that bot rather than a separately addressable
+thing. Expect it at the next catalogue and test the bare username first.
+
+**The Mini App and the channel are submitted and under review. Three things follow.**
+
+**1. DO NOT SUBMIT A SEPARATE BOT LISTING.** The Mini App listing already occupies this bot's
+slot, so a Bots-tab submission is a duplicate rather than an addition, and a duplicate has to be
+got removed. Revisit once the approved card is live.
+
+**2. CHECK WHAT THE CARD'S BUTTON ACTUALLY DOES, the moment it is live.** The listing is titled
+*Scam Checker | RelayShield IDCheck* and its link resolves to the **bot chat**. Unless tgboard
+launches the bot's registered web app itself, a visitor taps a scam-checker card and lands in a
+conversation instead of the checker. **That decides whether this listing is worth anything**,
+it is one tap, and nobody can see it from here. If it lands in the chat, the fix is on our side
+rather than theirs: `/app` opens IDCheck, and the bot's welcome can lead with it.
+
+**3. THE ATTRIBUTION HAS TO COME FROM THE OTHER TWO FIELDS, and these are edits to make WHILE
+THE LISTING IS STILL EDITABLE.** The accepted link carries neither `?startapp=` nor
+`?start=SRC_`, so no arrival from it will ever be attributed through Telegram.
+
+- **Website / URL field:**
+  `https://api.relayshield.net/developers?source=tg-miniapp-tgboard`
+  The `/developers` path, never the bare host. This is the reliable carrier: the landing page
+  reads `?source=` there and `tools/source_arrivals.py` counts it.
+- **Description, as plain text:** `https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-tgboard`
+  Anyone who taps it lands attributed. One line, costs nothing.
+
+**SO THE tgboard DELTA WILL SHOW IN THE `DEVELOPERS` STAGE, NOT IN `CHECKED`, `BOT` OR
+`DIRECTORY`.** Reading a zero in those three as "tgboard produced nothing" would be wrong, and
+it is exactly the confident-wrong-number failure the funnel exists to prevent. Say so when the
+comparison is read.
+
+---
+
+### The original diagnosis, kept because it is what produced the answer
+
 ### THE LINK FIELD REFUSED THIS. MEASURED 2026-09-20.
 
     Invalid or private t.me link

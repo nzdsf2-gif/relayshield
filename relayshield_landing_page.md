@@ -137,6 +137,33 @@ Unlike a corporate breach (where your data leaks weeks later), infostealer logs 
 
 ---
 
+## EMAIL CHECKER BLOCK
+*(Placement: directly after the Email Security Sweep block. Same inbox, and it is the page's
+first thing a visitor can DO rather than read.)*
+
+**Header:** Not sure about an email? Forward it.
+
+**Body:**
+Forward any suspicious email to checkemail@relayshield.net and you get a plain-English verdict back, usually within a minute.
+
+No account. No signup. Nothing to install. It works from the inbox you already have, on the phone you are already holding.
+
+What it reads:
+- Whether the sending domain is one we have seen in criminal markets
+- Whether the reply-to address quietly differs from the sender, the oldest trick there is
+- Whether the links go where the text claims they go
+- Whether the display name is impersonating a brand you would trust
+
+It will never tell you an email is safe. The most it says is that nothing is known against it, because an absence of evidence is not proof, and a checker that says "safe" is training you to trust the one it misses.
+
+**CTA:** text rather than a button. There is nothing to click; the action is in their mail app.
+
+> THE ADDRESS IS `checkemail@`, NOT `emailcheck@`. It has been written the wrong way round twice,
+> once in the very message asking for it to be added to four surfaces, which is why
+> `relayshield_forward_analysis.py` holds it as the single constant `CHECKEMAIL_ADDRESS`.
+
+---
+
 ## THE RESPONSE LAYER
 
 **Header:** Detection is not protection. Response is protection.
@@ -164,6 +191,32 @@ RelayShield follows up until you are actually protected. Day 3: did you complete
 
 > *"Your phone number and home address were exposed in the DataBrokersPT breach (2024). Severity: HIGH — this data is used to impersonate you on a SIM swap call to your carrier. Reply SWEEP to audit your inbox, or SAFE to confirm you've read the SIM swap warning."*
 > — Example RelayShield alert
+
+---
+
+## TELEGRAM MINI APP BLOCK
+*(Placement: immediately above Pricing. It is the last thing read before the money and the only
+thing on the page a visitor can try without giving us anything.)*
+
+**Header:** Check something right now, free.
+
+**Body:**
+Paste a link, a TON address or a Telegram handle and get an answer in seconds. It runs inside Telegram, so there is nothing to install, no signup and no wallet to connect.
+
+- A link is checked against Google Safe Browsing, our criminal indicator corpus and domain age
+- A TON address is checked for drainer and scam-token signals
+- A @handle is checked before you trust a bot or an account that messaged you
+
+Watch up to three addresses free and get a message the moment something changes.
+
+It is the same intelligence the monitoring plans run on a schedule. This is the part you can hold in your hand first.
+
+**CTA button:** Open the checker in Telegram →
+**URL:** https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-blog
+
+> THE `?startapp=` KEY IS NOT OPTIONAL AND IS NOT INVENTABLE IN CARRD. An unregistered key is
+> silently downgraded to the generic `tg-miniapp` at the Worker's edge and logs `unmatched:`,
+> which is attribution that looks like it worked. Registered keys live in `miniapp_routes.json`.
 
 ---
 
@@ -217,16 +270,53 @@ RelayShield follows up until you are actually protected. Day 3: did you complete
 **Section heading:** Built for Security Teams
 
 **Body:**
-RelayShield doesn't just wrap public breach databases.
+RelayShield does not wrap public breach databases.
 
-Our intelligence pipeline monitors 25+ criminal Telegram channels in real time — infostealer log markets, credential dump channels, and SIM swap service listings — surfacing IOCs 24–72 hours before they appear in HIBP or public databases. The corpus now exceeds **1,000,000+ indicators** across 20 threat intelligence feeds, tracking **1,000+ malware families** with MITRE ATT&CK attribution.
+Our intelligence pipeline collects continuously from criminal Telegram marketplaces, infostealer log markets, credential dump channels and SIM swap service listings, alongside public indicator feeds, and surfaces indicators before they reach the public aggregators. We deliberately do not quote a corpus headline: most of any vendor's total is ingested public feeds you already have, and the number that matters is what you find in it that you could not find anywhere else.
+
+<!-- THE FIGURES THAT USED TO BE HERE WERE BOTH STALE AND AGAINST OUR OWN RULE.
+     They read "25+ criminal Telegram channels", "1,000,000+ indicators across
+     20 feeds" and "1,000+ malware families". Measured 2026-09-16: 494K distinct
+     indicators, 5.8M sightings, 113 active channels -- so the channel count
+     understated by four times and the indicator figure was in a different unit
+     from the one that matters. MEASUREMENT DOCTRINE says the fix is not to
+     correct them, it is to stop quoting them: most of the corpus is ingested
+     public feeds every target buyer already has, quoting the headline nearly
+     killed the Segment 1 outreach in front of people who checked, and the AWS
+     listing was rewritten to name SOURCES AND CAPABILITIES rather than COUNTS
+     for exactly this reason. The replacement stays true without maintenance. -->
 
 **New: Agentic AI Identity Risk** — `POST /v1/metered/bulk-identity-risk` scores up to 10 organizational domains plus their individual AI agent identities in a single call. Built for teams running AI copilots, agent workflows, and automated systems that need to know whether the identities they operate on behalf of are compromised. Each domain returns a 6-dimension risk score (0–100); each agent email returns breach, infostealer, and active session signals. $2.00/call.
 
-Available as a REST API for SOAR playbooks, SIEM enrichment, AI governance workflows, and incident response. Pay-as-you-go from $0.10/call, or subscribe at $499/month for unlimited access across all 23 endpoints.
+Available as a REST API for SOAR playbooks, SIEM enrichment, AI governance workflows and incident response. Pay as you go from $0.10 a call with no minimum, or subscribe: $499/month for 10,000 calls, $999/month uncapped.
+
+<!-- THIS SENTENCE USED TO SAY "$499/month for unlimited access across all 23
+     endpoints" AND BOTH HALVES WERE WRONG.
+
+     THE PRICE IS THE SERIOUS ONE. relayshield_developer_signup.py's own comment
+     above TI_PRICE_TIER_MAP: mp_499 is $499/mo with a 10,000 calls/month cap
+     enforced by _check_and_increment_intel_quota, and mssp_999 is the unlimited
+     one. So a buyer paying $499 expecting unlimited hits a quota gate, and this
+     page is what sold them the expectation. Copy shown to a buyer that
+     disagrees with what the server grants is a price we do not honour.
+
+     THE COUNT WAS 23 AND IS 31, counted from the distinct /v1/metered/* paths
+     in relayshield_api.py rather than recalled. It is dropped rather than
+     updated: a number that moves every time we ship needs maintenance to stay
+     honest, and this is the same reasoning that took the corpus figures out of
+     the paragraph above. If a count is ever wanted here, read it out of the
+     dispatcher; never type one from memory. -->
 
 **CTA button:** View Developer API →
-**URL:** https://api.relayshield.net/developers
+**URL:** https://api.relayshield.net/developers?source=relayshield-net
+
+<!-- THIS BUTTON HAD NO ?source= AT ALL, for as long as the page has existed, so
+     every developer arrival from our own consumer site was indistinguishable
+     from organic traffic. `relayshield-net` is registered in _SOURCE_BANNERS
+     with its own banner, BEFORE this link ships, which is the order that
+     matters: an unregistered key logs `unmatched:` and renders nothing, which
+     is FD-8 and four months of it. The path is /developers and never the bare
+     host -- ?source= on the root is read by nothing. -->
 **Style:** Outline/secondary
 
 ---
@@ -257,6 +347,20 @@ Sign up today and pay the founding rate for your first 3 months.
 → WhatsApp-native because that is where people actually respond
 → Monitors the full chain: breach → SIM swap → session hijack → bank account — not just step one
 → AI that acts — not AI that notifies
+
+**Hold crypto?**
+Crypto Shield is our read-only wallet monitor for Solana, EVM, TON, Bitcoin and XRP. It never asks for a seed phrase and it cannot move your funds. Available now on the Solana dApp Store.
+
+**CTA:** See Crypto Shield →
+**URL:** https://cryptoshieldmobile.relayshield.net
+
+<!-- LINK, DO NOT DESCRIBE. Crypto Shield has a landing page of its own and a
+     full product block here would compete with the thing this page exists to
+     sell. It IS live: cloudflare_worker_cryptoshield_landing.js says "Available
+     now on the Solana dApp Store" and carries v1.5.0 certificate-rotation
+     notes. Checked rather than assumed -- the store metadata in the repo is
+     headed "Draft", which reads as pre-launch and is in fact a draft of a copy
+     CORRECTION to a listing that is already published. -->
 
 ---
 

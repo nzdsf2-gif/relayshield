@@ -3330,6 +3330,40 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "<code>check_llm_credential_exposure</code> works with no API key at all on a shared demo quota &mdash; "
             "check whether your own LLM provider keys are circulating in stealer logs before you commit to anything.")),
     ),
+    # OUR OWN TWO MARKETING SURFACES, registered 2026-09-20 BEFORE the copy that
+    # links them ships, which is the order that matters. Both were previously
+    # unattributed: relayshield.net's "View Developer API" button has always
+    # pointed at the bare /developers with no ?source= at all, so every arrival
+    # from the consumer site has been indistinguishable from organic traffic.
+    #
+    # NEITHER IS ALIASED TO "linkedin". That key resolves to the llmjacking
+    # banner on purpose -- the published LLMjacking post links with it and
+    # repointing it would hand its existing readers the wrong landing -- so a
+    # general visitor from the company page would have been shown a banner about
+    # leaked LLM provider keys, which is a claim about what THEY came for and is
+    # wrong. An own banner rather than an alias, because _resolve_source applies
+    # aliases BEFORE the banner table and an alias makes an own banner
+    # unreachable.
+    "relayshield-net": (
+        (),
+        _banner("Arriving from relayshield.net", _p(
+            "You came from the consumer side, where RelayShield watches one person's email, "
+            "phone and wallets. This is the same intelligence as an API. The checks the "
+            "consumer product runs on a schedule are the ones you can call directly: breach "
+            "and infostealer exposure, SIM swap, session hijack, and wallet and link "
+            "screening. Pay per call from $0.10, no minimum and no contract, and the link and "
+            "address checks need no key at all to try.")),
+    ),
+    "linkedin-about": (
+        (),
+        _banner("Arriving from our LinkedIn page", _p(
+            "The short version of what is behind the profile: an API over identity-exposure "
+            "intelligence collected from criminal Telegram markets and infostealer log dumps "
+            "as well as public feeds, with a response layer on top of it. Start with the "
+            "endpoints that need no key, no card and no signup &mdash; link screening and "
+            "address screening are capped per source IP rather than billed &mdash; and read "
+            "the per-call pricing below before you talk to anyone.")),
+    ),
 }
 
 

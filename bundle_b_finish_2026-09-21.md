@@ -95,6 +95,46 @@ reasons fired.
 resolved the correct product and a customer identifier that holds no entitlement, which is what
 a token issued to a different identity looks like.
 
+## STEP 4b -- THE REDIRECT DOES NOT ISSUE THE KEY. ADDED 2026-09-21.
+
+**The email you type is only where the key is SENT and what gets stored on the key row. Nothing
+validates it against AWS**, so use an inbox you can actually open. `nzdsf4@gmail.com` is fine;
+so is any other.
+
+**But the page will very likely say "your key is being provisioned and will arrive by email",
+and no email will come.** Read from the code rather than assumed:
+
+- `_handle_email_confirmation` **only DISPLAYS** a key that already exists. It stores the email
+  and renders the fallback text when the key is not there.
+- `_provision_api_key` is called in **exactly one place**: the SNS `subscribe-success` branch.
+- **Bundle B's `subscribe-success` fired on 2026-09-19**, when nothing was subscribed to that
+  product's topic. **SNS does not replay what a subscriber missed**, so subscribing in step 3
+  covers the NEXT customer and cannot bring this one back.
+
+So for this agreement the provisioning event is gone, and the fix is to replay it:
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    AWS_PROFILE=relayshield sh tools/replay_subscribe_success.sh hEXRdWpDgwB cmh79gzztkdtp0dlzbdepa643
+
+EXPECT: the entitlement printed, `payload is valid JSON`, then `"StatusCode": 200`.
+STOP IF: `REFUSING: no entitlement for customer=...` -- it reads the entitlement BEFORE invoking
+and refuses rather than writing a key with no `LicenseArn`, which would serve calls and meter
+nothing while looking like success.
+
+**This is a replay, not a fabrication.** It invokes our own function, in our own account, with
+the event AWS already sent. Every value that matters is then read back FROM AWS by the handler:
+`GetEntitlements` supplies the dimension, the `LicenseArn` and the `CustomerAWSAccountId`. The
+payload asserts only WHICH customer and WHICH product to look up.
+
+**The `LicenseArn` is the whole point.** `BatchMeterUsage` identifies the product from it under
+Concurrent Agreements, so a key provisioned outside this path carries none and every metered
+call is dropped with `Skipping bundle usage report` -- served, unbilled, and counted as zero by
+the audit. Your offer page already shows the license exists:
+`l-1285003a7867450784813d7fda977cb7`.
+
+**The key arrives by welcome email**, at whatever address you typed.
+
 ## STEP 5 -- ANDREW RUNS THIS. Which customer identifier came back?
 
     cd ~/dev/relayshield

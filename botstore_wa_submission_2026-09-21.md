@@ -8,11 +8,21 @@ Business bot, and submitting it is the type-check failing in the same way `@tele
 did. `@relayshield_bot` belongs on tg.app, tgboard and StoreBot, where it already is or is
 queued.
 
-**AND THE FORM IN YOUR SCREENSHOT IS THE WRONG ONE.** "Create an account. It's free." with
-a mobile number as the user id, a carrier and RCS notification preferences is the CONSUMER
-signup: it lets you browse and rate bots. Finishing it would not have let you list
-anything. The listing route is in the dark nav bar: **"Do You Develop Bots?"** and
-**"Become an RBM Partner"**.
+**I WAS WRONG ABOUT THE SIGNUP FORM AND THIS CORRECTS IT.** I called it the consumer signup
+and said finishing it would not let you list anything. Dotgo's own launch announcement
+describes the flow the other way round: *"A brand can select the option to 'Submit a bot',
+create an account for themselves, and upload information for their RCS and/or WhatsApp
+bot."* **The account is the PREREQUISITE, not a detour.** The mobile-number-as-user-id and
+the carrier field are just their account model, and they apply to a brand as much as to a
+browser.
+
+I inferred "consumer form" from the fields on it, which is reading a layout as a rule, the
+same mistake as reading tg.app's sidebar as four permitted listings per bot. **A form's
+fields tell you what it collects. They never tell you what it unlocks.**
+
+**"Do You Develop Bots?" is not clickable**, which you found and I could not: `botstore.info`
+is egress-blocked from the container, so I have never seen that page. It is a heading over
+the **"Become an RBM Partner"** button beside it, not a link of its own.
 
 ---
 
@@ -36,25 +46,93 @@ own.
 **It never prints the raw SecretString**, only the number, so this is safe to run with the
 terminal visible.
 
-Then commit and push so the links deploy:
+## STEP 1b -- ANDREW RUNS THIS. Commit the THREE files it wrote, and know which deploy.
 
+**CORRECTED 2026-09-21. The file list I gave in chat was wrong.** `--write` fills the number
+only in the files that hold it as a COMMITTED CONSTANT, and `relayshield_developer_signup.py`
+is deliberately not one: it is a Lambda, so it reads the number from Secrets Manager at
+request time and needs no edit. The three it writes are:
+
+    cloudflare_worker_blog.js
+    cloudflare_worker_miniapp.js
+    cloudflare_worker_checkemail.js
+
+    ANDREW RUNS THIS:
     cd ~/dev/relayshield
-    git add cloudflare_worker_blog.js cloudflare_worker_miniapp.js relayshield_developer_signup.py
+    git --no-pager diff --stat cloudflare_worker_blog.js cloudflare_worker_miniapp.js cloudflare_worker_checkemail.js
+    git add cloudflare_worker_blog.js cloudflare_worker_miniapp.js cloudflare_worker_checkemail.js
     git commit --no-edit -m "Fill WA_NUMBER so the front-door links render"
     git push -u origin main
 
-## STEP 2 -- ANDREW CLICKS THIS. The developer route, not the consumer one.
+EXPECT: three files changed, one line each.
+STOP IF: more than one changed line per file. Send the diff before pushing.
+Stage only these three by name: a wildcard add in your tree picks up the two embedded git
+repositories.
 
-`botstore.info` -> **"Do You Develop Bots?"** in the dark nav bar.
+**THE PUSH DEPLOYS TWO OF THE THREE, AND NOTHING IN ITS OUTPUT SAYS SO.**
 
-**Search their catalogue for `relayshield` first.** tg.app keys one listing per bot and a
-second submission collides rather than adds; nobody has established whether this one does,
-and the check costs ten seconds.
+| File | Deployed by |
+|---|---|
+| `cloudflare_worker_blog.js` | `deploy_blog.yml`, on push |
+| `cloudflare_worker_miniapp.js` | `deploy_miniapp.yml`, on push |
+| `cloudflare_worker_checkemail.js` | **nothing. No workflow mentions it.** |
 
-**If the only route offered is "Become an RBM Partner", stop and tell me.** RBM is Google's
-RCS Business Messaging, which is a carrier-side programme with an onboarding process, not a
-directory form. That is a different and much larger commitment than a listing, and it is
-not worth making to get a row in a catalogue.
+`grep -rln checkemail .github/workflows/` returns nothing, so **every live version of the
+checkemail Worker was pushed by hand.** This commit changes the repo copy and not what is
+served: the blog and the Mini App would start rendering the WhatsApp link and the
+email-check reply footer would not, with no error anywhere. That is the quiet-alarm shape.
+
+**Recover it BEFORE deploying it.** A hand-deployed Worker is exactly where an uncommitted
+edit survives, and `wrangler deploy` would replace it with the repo copy and print success:
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    sh tools/recover_live_worker.sh relayshield-checkemail cloudflare_worker_checkemail.js
+
+EXPECT: `IDENTICAL`, or a diff showing only the `WA_NUMBER` line you just changed.
+STOP IF: `THEY DIFFER` on anything else. Live holds something no commit does; send the diff
+and it goes into git first. That is the 2026-08-17 rule, on the component class that still
+has no automated path.
+
+Only once that is clean:
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    npx wrangler deploy --config wrangler.checkemail.toml
+
+EXPECT: a deployment id and the name `relayshield-checkemail`.
+STOP IF: it asks you to log in. Run `npx wrangler login` first; a block driving an
+authenticated CLI carries its auth step every time.
+
+
+## STEP 2 -- ANDREW CLICKS THIS. Sign up first, then Submit a bot.
+
+**1. Finish the account form you were already on.** It is the prerequisite, not the wrong
+turn. The number you use becomes the login id.
+
+**2. Signed in, look for "Submit a bot"** in the account area, the top-right user menu, or
+where "Sign in / Sign up" used to be on the home page. Dotgo describes the flow as create an
+account, then select the option to Submit a bot, so it should appear once you are
+authenticated and not before.
+
+**3. If it is nowhere, open `botstore.info/Whatsapp`** before anything else. That is a real
+page on their site and it is the WhatsApp-specific one, which is the likeliest place a
+WhatsApp listing route lives.
+
+**4. Only if all three fail, email them.** There is a contact on `botstore.info/botstore-tos`
+and `botstore.info/botstore-pp`. One message: *"We run a WhatsApp Business bot and would like
+to list it. Where do we submit?"* A directory that cannot answer that in one reply is not
+worth a third round.
+
+**DO NOT click "Become an RBM Partner" to get a listing.** RBM is Google's RCS Business
+Messaging: a carrier-side onboarding programme with a commercial process attached, not a
+directory form. It is a far larger commitment than a catalogue row.
+
+**UNVERIFIED, and it is why this is a search rather than a link.** `botstore.info` is
+egress-blocked from this container, so all of the above comes from Dotgo's own launch
+announcement and their indexed page list, never from the pages themselves. Your browser is
+the primary source here, and it has already corrected me once today.
+
 
 ## STEP 3 -- the listing copy
 

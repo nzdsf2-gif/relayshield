@@ -175,4 +175,95 @@ else
   echo "  and in no commit is hand-deployed work, and 'wrangler deploy' would"
   echo "  delete it with no error anywhere. Recover it into git FIRST, exactly"
   echo "  as the four Lambda handlers were on 2026-08-26."
+  echo
+  echo "=============================================================="
+  echo "BUT A RAW DIFF CANNOT ANSWER THIS, AND THE FIRST VERSION OF"
+  echo "THIS SCRIPT PRETENDED IT COULD."
+  echo "=============================================================="
+  cat <<'WHY'
+  wrangler bundles with esbuild before it uploads, and esbuild STRIPS
+  COMMENTS. So the API hands back a BUILD ARTEFACT and this script was
+  diffing it against the SOURCE. Those are different documents by
+  construction, and a heavily commented Worker therefore reports
+  "THEY DIFFER" in thousands of lines while being identical in every
+  line that executes.
+
+  Measured on relayshield-checkemail, 2026-09-21: the repo file is
+  79,906 bytes with comments and about 41,000 without; the deployed
+  script is 44,106. The diff was comments.
+
+  That made "only IDENTICAL makes the deploy safe" UNREACHABLE for any
+  Worker deployed through wrangler -- a guard that can never pass, which
+  is a guard that gets ignored. Same family as the template-literal
+  defect: verify the artefact at the right end of the pipe.
+
+  THE COMPARISON BELOW IS THE ONE THAT ANSWERS THE QUESTION. It extracts
+  every identifier and every string literal from each side and reports
+  what exists in LIVE and in no commit. Comments in the source cannot
+  create a live-only token, and wrangler does not minify by default, so
+  names survive the bundle. An empty list means there is nothing
+  deployed that the repo does not have.
+WHY
+  echo
+  python3 - "$REPO_FILE" "$OUT" <<'PYEOF'
+import re, sys
+
+def tokens(path):
+    src = open(path, encoding="utf-8", errors="replace").read()
+    # Identifiers of 3+ characters: shorter ones are loop variables and noise.
+    idents = set(re.findall(r"[A-Za-z_$][A-Za-z0-9_$]{2,}", src))
+    # Quoted strings, both kinds, non-greedy and single-line. Template literals
+    # are covered by the identifier pass for anything interpolated.
+    strings = set(re.findall(r"'([^'\\\n]{4,})'", src))
+    strings |= set(re.findall(r'"([^"\\\n]{4,})"', src))
+    return idents, strings
+
+# Filtered so the CLEAN case reports zero and the verdict is unambiguous. A
+# list that always has four rows in it is a list nobody reads.
+#   __-prefixed  esbuild's own helpers (__toESM, __defProp, __commonJS)
+#   keywords     a keyword the source happens not to use is not drift
+BUNDLER = re.compile(r"^__")
+KEYWORDS = {
+    "var", "let", "const", "function", "return", "typeof", "instanceof",
+    "await", "async", "class", "extends", "super", "yield", "delete", "void",
+    "null", "true", "false", "undefined", "this", "new", "throw", "catch",
+    "finally", "switch", "case", "default", "continue", "break", "else",
+    "while", "for", "try", "import", "export", "from", "static", "get", "set",
+    "Object", "defineProperty", "prototype", "hasOwnProperty", "call", "apply",
+}
+
+def strip_noise(names):
+    return {n for n in names if not BUNDLER.match(n) and n not in KEYWORDS}
+
+r_id, r_str = tokens(sys.argv[1])
+l_id, l_str = tokens(sys.argv[2])
+r_id, l_id = strip_noise(r_id), strip_noise(l_id)
+
+only_id = sorted(l_id - r_id)
+only_str = sorted(l_str - r_str)
+
+print("  identifiers in LIVE and not in the repo : %d" % len(only_id))
+for t in only_id[:40]:
+    print("      %s" % t)
+if len(only_id) > 40:
+    print("      ... and %d more" % (len(only_id) - 40))
+print()
+print("  string literals in LIVE and not in the repo : %d" % len(only_str))
+for t in only_str[:25]:
+    print("      %r" % t[:100])
+if len(only_str) > 25:
+    print("      ... and %d more" % (len(only_str) - 25))
+print()
+if not only_id and not only_str:
+    print("  NOTHING IS DEPLOYED THAT THE REPO DOES NOT HAVE.")
+    print("  The raw diff above is comments and bundling. A redeploy is safe.")
+else:
+    print("  LIVE CARRIES SOMETHING THE REPO DOES NOT. Read the names above")
+    print("  before deploying: wrangler deploy would delete whatever they")
+    print("  belong to, with no error anywhere. Recover it into git first.")
+    print()
+    print("  esbuild's own helpers and bare keywords are already filtered out,")
+    print("  so anything listed above is a real name that only the deployed")
+    print("  script has.")
+PYEOF
 fi

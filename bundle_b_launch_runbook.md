@@ -673,24 +673,98 @@ known to be wrong.** Diagnose before acting: a wrong resubmission costs an audit
 EXPECT: five numbered sections, each with a reading guide. Read-only, writes nothing.
 STOP IF: `credentials resolve to '620534471984'` -- the profile is missing and nothing was read.
 
-### CAUSE A -- the env var holds a git SHA, and a WRONG value is worse than an EMPTY one
+### WHAT THE 2026-09-20 DIAGNOSTIC RUN ACTUALLY FOUND
 
-`_resolve_bundle()` compares `BUNDLE_CONFIGS["attack_surface_bundle_access"]["product_code"]`
-against the code `ResolveCustomer` returned. **On a mismatch it logs `Bundle mismatch` and
-returns `None`**, deliberately, because provisioning the wrong bundle grants endpoints the
-customer did not buy. So the git SHA written on 2026-09-18 does not merely fail to help: **it
-blocks fulfillment**, and an empty value would not, because the check is skipped when the
-config value is falsy.
+**CAUSE C IS DISPROVED. The redirect HAS been followed, twice**, and was refused both times:
 
-Fix it in the console -- Lambda, `relayshield-bundle-fulfillment`, Configuration, Environment
-variables, Edit -- which is a merge by construction and needs no IAM grant. Set
-`BUNDLE_B_PRODUCT_CODE` to the **product code**, 25 lowercase alphanumerics, read off the
-product's page in the Marketplace Management Portal. Not `prod-szi2wdww3obry`, which is the
-entity id and would mismatch in exactly the same way.
+    2026-09-19T21:16  Product code not recognised: got cmh79gzztkdtp0dlzbdepa643
+                      Bundle unresolved at fulfillment customer=fHL5zV6grGn
+    2026-09-20T14:37  Product code not recognised: got 7ws2zmbdyk70tq34pr0pea0s2
+                      Bundle unresolved at fulfillment customer=fHL5zV6grGn
 
-**If the value is wrong, this step is self-diagnosing rather than silent:** section 3 of the
-diagnostic prints `Product code not recognised: got <CODE>`, and that `<CODE>` came from AWS
-rather than from anybody's memory.
+**And it said "Bundle unresolved" rather than "Bundle mismatch", which is a narrower finding
+than it looks.** `_resolve_bundle` reaches the unresolved branch only when the entitlement is
+`None`, so `GetEntitlements` was CALLED and returned nothing -- there is no `get_entitlements
+failed` line, so it did not raise. Two things are therefore wrong at once and fixing only the
+env var will not clear the audit.
+
+### THE TWO LOST PRODUCT CODES ARE RECOVERED, AND THE SOURCE IS OUR OWN TABLE
+
+Section 4's pending rows carry `aws_product_code` and `aws_bundle` **side by side**, written by
+the fulfillment handler at the moment AWS told it. That is stronger evidence than any comment:
+
+    46y72j0d99w7lyqkiqrakpc5k   agentic_attack_surface   -> BUNDLE_D_PRODUCT_CODE
+    cvfvhwhmichl13kcuuutkbwmp   core_identity_exposure   -> BUNDLE_A_PRODUCT_CODE
+
+**This corrects a note I wrote on 2026-09-18.** `TODO.md:1707` mentions `46y72j...` in a passage
+about a Bundle A test, and I filed it as a Bundle A candidate on that basis. It is Bundle D's.
+A code appearing NEAR a bundle's name in prose is not the same as a code PAIRED with it by the
+code that wrote both, which is the whole reason this file says to read values out of artefacts
+rather than sentences.
+
+### BUNDLE B HAS TWO CANDIDATE CODES AND THEY MUST NOT BE GUESSED BETWEEN
+
+`cmh79gzztkdtp0dlzbdepa643` and `7ws2zmbdyk70tq34pr0pea0s2`, both returned by `ResolveCustomer`
+for the same customer on consecutive days. **Two codes mean two products**, so one possibility
+worth ruling out before going public is that an earlier change set created a Bundle B entity
+nobody recorded. `GetEntitlements` is scoped to one product and settles it:
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    AWS_PROFILE=relayshield sh tools/identify_bundle_product_codes.sh
+
+EXPECT: section 3 prints one line per candidate. **Exactly one should return
+`attack_surface_bundle_access`** -- that is Bundle B's product code.
+STOP IF: BOTH return it. Two live Bundle B products, and going public on the wrong one is worse
+than waiting. Send me the output.
+STOP IF: NEITHER returns anything. The entitlement is not visible to `GetEntitlements`, which is
+the other half of what the audit is complaining about, and no env var fixes it. Send me the
+output.
+STOP IF: `AccessDeniedException` -- a fact about the operator identity, not about the codes.
+
+### CAUSE A -- SETTING THE ENV VARS. CLICK BY CLICK.
+
+**Three variables, one edit.** Two of them are a LIVE DEFECT on Bundle A and Bundle D, not
+Bundle B tidying: with those codes unset, `_deactivate_api_key` matches no key row, so a
+cancelled Bundle A or Bundle D customer keeps a working key.
+
+**ANDREW CLICKS THIS:**
+
+1. Open <https://us-east-1.console.aws.amazon.com/lambda/home?region=us-east-1#/functions/relayshield-bundle-fulfillment>
+   and check the top right says account **239677749008**. If it says 620534471984 you are in
+   the pre-audit account; switch before touching anything.
+2. Tab **Configuration**, then **Environment variables** in the left list.
+3. Button **Edit**.
+4. The row `BUNDLE_B_PRODUCT_CODE` currently holds `622fa036203fb4ea59ea180be6d4570757ec755e`.
+   **Change its VALUE** to whichever code section 3 above returned
+   `attack_surface_bundle_access` for. Leave the key name alone.
+5. Button **Add environment variable**. Key `BUNDLE_A_PRODUCT_CODE`, value
+   `cvfvhwhmichl13kcuuutkbwmp`.
+6. Button **Add environment variable** again. Key `BUNDLE_D_PRODUCT_CODE`, value
+   `46y72j0d99w7lyqkiqrakpc5k`.
+7. **Do not touch any other row.** The block holds live secrets.
+8. Button **Save**.
+
+EXPECT: the page returns to the Environment variables list showing all three, plus whatever was
+already there.
+STOP IF: an error mentioning `ResourceConflictException` -- a deploy is in flight; wait a minute
+and press Save again.
+
+**Why the console and not the workflow:** that page shows every existing row and you edit one,
+so it is a merge by construction. The destructive-replace hazard belongs to the
+`update-function-configuration --environment` API parameter, not to the console, and you are
+acting as yourself rather than as `relayshield-github-deploy`, which still lacks
+`lambda:UpdateFunctionConfiguration`. **That is why the Step 8 apply job failed and the plan job
+did not.** `sh tools/apply_lambda_env_policy.sh` grants it, and it is worth running so the
+workflow is not dead for the next key, but it is not on the path to finishing today.
+
+Then confirm, rather than assuming Save worked:
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    AWS_PROFILE=relayshield sh tools/diagnose_bundle_b_audit.sh
+
+EXPECT: section 1 shows all three as 25-character codes, and section 2 is no longer SKIPPED.
 
 ### CAUSE B -- nothing is subscribed to Bundle B's SNS topics, and no repo tooling ever did it
 
@@ -720,15 +794,23 @@ which are the two values that have already been pasted into product-code fields 
 **A subscription does not replay what it missed**, so an already-sent `subscribe-success` is
 gone. That does not block anything: the redirect below issues the key directly.
 
-### CAUSE C -- the redirect has simply not been followed
+### CAUSE C -- re-follow the redirect. IT HAS RUN TWICE AND BEEN REFUSED TWICE.
 
-Cheapest and most likely. Section 4 of the diagnostic says so: a redirect writes a
-`pending_<customer-id>` row before it renders, so **no pending rows means it never ran.**
+Not "has not run": the 2026-09-20 diagnostic shows two attempts, both ending in
+`Bundle unresolved`. **A refused attempt provisions nothing and writes no row**, so the redirect
+has to be followed AGAIN once the env vars are right. The refusals are the evidence the button
+works, which is worth something: the token is being issued and reaching our handler.
 
-**ANDREW CLICKS THIS**, in the BUYER account (`442429445748`, TestUser): AWS Marketplace,
-Manage subscriptions, the Bundle B subscription, **Set up your account** (the button that
-re-issues the registration token). It lands on `api.relayshield.net/developers`. Enter an email
-when asked; the key is shown on screen and emailed.
+**ANDREW CLICKS THIS**, signed into the BUYER account `442429445748` (TestUser):
+AWS Marketplace, **Manage subscriptions**, the Bundle B subscription, **Set up your account**.
+That re-issues the registration token and lands on `api.relayshield.net/developers`. Enter an
+email when asked; the key is shown on screen and emailed.
+
+EXPECT: a RelayShield page that shows an `rs_live_` key.
+STOP IF: the page says the subscription "needs a quick manual check". That is
+`_resolve_bundle` returning None again, and the diagnostic's section 3 names which of the two
+reasons fired -- `Bundle mismatch` means the env var is still wrong, `Bundle unresolved` means
+`GetEntitlements` still returns nothing for that product.
 
 ### THEN ONE METERED CALL, WHICH IS WHAT CLEARS AUDIT ISSUE 2
 

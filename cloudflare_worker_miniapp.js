@@ -66,7 +66,7 @@ const BOT = "https://t.me/relayshield_bot?start=SRC_miniapp";
      AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/wa_front_door_link.py
    The same value goes in cloudflare_worker_blog.js and a test pins them
    equal. */
-const WA_NUMBER = "";
+const WA_NUMBER = "17407373961";
 const WA_SOURCE = "wa-miniapp";
 
 function waLink() {

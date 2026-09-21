@@ -85,7 +85,7 @@ const API_BASE = "https://api.relayshield.net";
 
    which writes every Worker constant at once rather than leaving three files to
    be edited by hand and two of them enforced. */
-const WA_NUMBER = "";
+const WA_NUMBER = "17407373961";
 const WA_SOURCE = "wa-email";
 
 function waFrontDoorLine() {

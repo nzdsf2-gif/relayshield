@@ -1,140 +1,60 @@
-# botstore.info: submit the WhatsApp bot. Not the Telegram one.
+# botstore.info: DEAD END. DO NOT CONTACT THEM. Closed 2026-09-21.
 
-**botstore.info is Dotgo's Bot Store: "World's First and Only Open and Global Directory of
-RCS and WhatsApp Bots."** Read off its own homepage rather than inferred.
+**VERDICT: no. Dotgo is a WhatsApp Business Solution Provider selling the messaging service
+we already buy from Twilio, and the Bot Store listing is a benefit of being their customer
+rather than an open directory.**
 
-**THE TELEGRAM BOT DOES NOT GO HERE.** A Telegram bot is neither an RCS bot nor a WhatsApp
-Business bot, and submitting it is the type-check failing in the same way `@telegtapps`
-did. `@relayshield_bot` belongs on tg.app, tgboard and StoreBot, where it already is or is
-queued.
+`botstore.info/Whatsapp` is a sales page, not a submission route. Read off the founder's own
+screenshots:
 
-**I WAS WRONG ABOUT THE SIGNUP FORM AND THIS CORRECTS IT.** I called it the consumer signup
-and said finishing it would not let you list anything. Dotgo's own launch announcement
-describes the flow the other way round: *"A brand can select the option to 'Submit a bot',
-create an account for themselves, and upload information for their RCS and/or WhatsApp
-bot."* **The account is the PREREQUISITE, not a detour.** The mobile-number-as-user-id and
-the carrier field are just their account model, and they apply to a brand as much as to a
-browser.
+| What they charge | |
+|---|---|
+| Onboarding | $0 |
+| Dotgo platform fee | "capped at $1,000/month" under a **promotion dated 2021**, so the current rate is unstated |
+| Traffic | WhatsApp's own fee **plus** $0.001 per message to Dotgo |
+| Bot with live agent software | $200/month, or $1,800/year |
+| Each additional agent | $30/month |
+| **Commitment period** | **1 year, on both the monthly and the annual plan** |
 
-I inferred "consumer form" from the fields on it, which is reading a layout as a rule, the
-same mistake as reading tg.app's sidebar as four permitted listings per bot. **A form's
-fields tell you what it collects. They never tell you what it unlocks.**
+**Three reasons this is not close, in order of how much they matter:**
 
-**"Do You Develop Bots?" is not clickable**, which you found and I could not: `botstore.info`
-is egress-blocked from the container, so I have never seen that page. It is a heading over
-the **"Become an RBM Partner"** button beside it, not a link of its own.
+1. **It would mean moving our WhatsApp number to a different BSP.** Every WhatsApp path we
+   have runs on Twilio: `get_twilio_credentials`, `send_whatsapp`, the signature
+   verification, the templates. Migrating the number to Dotgo to obtain a catalogue row is
+   a platform migration paying for a listing.
+2. **A minimum of $2,400 a year on a one-year commitment**, before the platform fee whose
+   real number is not published, to get a free directory listing. The entire point of the
+   catalogue programme is that a listing is a standing shelf that costs nothing.
+3. **A 2021 promotion still on the page in 2026** is not a live price. Asking would cost a
+   round and the answer cannot change points 1 and 2.
+
+**This is `@telegtapps` in a new costume, and it is a THIRD type this programme had not
+named.** That one was a broker selling posts where no free route existed. This is a
+directory that IS genuinely open for RCS bots, which we do not have, and gated behind a paid
+platform relationship for WhatsApp, which we do. **"Open directory" was true, for a product
+line that is not ours.**
+
+**THE TYPE-CHECK QUESTION IS NOW THREE-WAY, not two.** Before submitting anywhere, ask which
+of these it is:
+
+    curated catalogue      a free submission route, reviewed, listed
+    broker                 sells posts; the "listing" is an advertisement
+    platform benefit       free ONLY to customers of the paid product beside it
+
+The third is the hardest to see from outside, because its marketing is identical to the
+first. **The tell is a Pricing page anywhere on the domain.** A real catalogue has no
+pricing for the thing being listed.
+
+**What was NOT wasted:** the WhatsApp bot now runs a keyless check for a stranger instead of
+bouncing them, and `WA_NUMBER` is filled so every front-door link we own renders. Both were
+prerequisites for any WhatsApp discovery surface, and both stand whatever happens to this
+directory. **The listing copy below is kept for the next WhatsApp directory that has a free
+route.**
 
 ---
 
-## STEP 1 -- ANDREW RUNS THIS. Get the number, and fill it everywhere.
+## THE LISTING COPY, KEPT FOR A FUTURE DIRECTORY
 
-The listing needs the WhatsApp number, and `WA_NUMBER` is still the empty string in both
-Workers, so every front-door link we own currently renders as nothing.
-
-    cd ~/dev/relayshield
-    AWS_PROFILE=relayshield python3 tools/wa_front_door_link.py --write
-
-EXPECT: the number printed in E.164, and `cloudflare_worker_blog.js`,
-`cloudflare_worker_miniapp.js` and the developers page reported as updated.
-STOP IF: `ExpiredToken` or `AccessDenied` -- a fact about the AWS session, not about the
-secret. Re-auth and re-run.
-STOP IF: it refuses to print a link. It refuses anything that is not E.164 rather than
-emitting one that would pass a probe and reach nobody: **`wa.me` answers a malformed number
-with HTTP 200 and an "invalid" page**, so a broken front door looks live to every check we
-own.
-
-**It never prints the raw SecretString**, only the number, so this is safe to run with the
-terminal visible.
-
-## STEP 1b -- ANDREW RUNS THIS. Commit the THREE files it wrote, and know which deploy.
-
-**CORRECTED 2026-09-21. The file list I gave in chat was wrong.** `--write` fills the number
-only in the files that hold it as a COMMITTED CONSTANT, and `relayshield_developer_signup.py`
-is deliberately not one: it is a Lambda, so it reads the number from Secrets Manager at
-request time and needs no edit. The three it writes are:
-
-    cloudflare_worker_blog.js
-    cloudflare_worker_miniapp.js
-    cloudflare_worker_checkemail.js
-
-    ANDREW RUNS THIS:
-    cd ~/dev/relayshield
-    git --no-pager diff --stat cloudflare_worker_blog.js cloudflare_worker_miniapp.js cloudflare_worker_checkemail.js
-    git add cloudflare_worker_blog.js cloudflare_worker_miniapp.js cloudflare_worker_checkemail.js
-    git commit --no-edit -m "Fill WA_NUMBER so the front-door links render"
-    git push -u origin main
-
-EXPECT: three files changed, one line each.
-STOP IF: more than one changed line per file. Send the diff before pushing.
-Stage only these three by name: a wildcard add in your tree picks up the two embedded git
-repositories.
-
-**THE PUSH DEPLOYS TWO OF THE THREE, AND NOTHING IN ITS OUTPUT SAYS SO.**
-
-| File | Deployed by |
-|---|---|
-| `cloudflare_worker_blog.js` | `deploy_blog.yml`, on push |
-| `cloudflare_worker_miniapp.js` | `deploy_miniapp.yml`, on push |
-| `cloudflare_worker_checkemail.js` | **nothing. No workflow mentions it.** |
-
-`grep -rln checkemail .github/workflows/` returns nothing, so **every live version of the
-checkemail Worker was pushed by hand.** This commit changes the repo copy and not what is
-served: the blog and the Mini App would start rendering the WhatsApp link and the
-email-check reply footer would not, with no error anywhere. That is the quiet-alarm shape.
-
-**Recover it BEFORE deploying it.** A hand-deployed Worker is exactly where an uncommitted
-edit survives, and `wrangler deploy` would replace it with the repo copy and print success:
-
-    ANDREW RUNS THIS:
-    cd ~/dev/relayshield
-    sh tools/recover_live_worker.sh relayshield-checkemail cloudflare_worker_checkemail.js
-
-EXPECT: `IDENTICAL`, or a diff showing only the `WA_NUMBER` line you just changed.
-STOP IF: `THEY DIFFER` on anything else. Live holds something no commit does; send the diff
-and it goes into git first. That is the 2026-08-17 rule, on the component class that still
-has no automated path.
-
-Only once that is clean:
-
-    ANDREW RUNS THIS:
-    cd ~/dev/relayshield
-    npx wrangler deploy --config wrangler.checkemail.toml
-
-EXPECT: a deployment id and the name `relayshield-checkemail`.
-STOP IF: it asks you to log in. Run `npx wrangler login` first; a block driving an
-authenticated CLI carries its auth step every time.
-
-
-## STEP 2 -- ANDREW CLICKS THIS. Sign up first, then Submit a bot.
-
-**1. Finish the account form you were already on.** It is the prerequisite, not the wrong
-turn. The number you use becomes the login id.
-
-**2. Signed in, look for "Submit a bot"** in the account area, the top-right user menu, or
-where "Sign in / Sign up" used to be on the home page. Dotgo describes the flow as create an
-account, then select the option to Submit a bot, so it should appear once you are
-authenticated and not before.
-
-**3. If it is nowhere, open `botstore.info/Whatsapp`** before anything else. That is a real
-page on their site and it is the WhatsApp-specific one, which is the likeliest place a
-WhatsApp listing route lives.
-
-**4. Only if all three fail, email them.** There is a contact on `botstore.info/botstore-tos`
-and `botstore.info/botstore-pp`. One message: *"We run a WhatsApp Business bot and would like
-to list it. Where do we submit?"* A directory that cannot answer that in one reply is not
-worth a third round.
-
-**DO NOT click "Become an RBM Partner" to get a listing.** RBM is Google's RCS Business
-Messaging: a carrier-side onboarding programme with a commercial process attached, not a
-directory form. It is a far larger commitment than a catalogue row.
-
-**UNVERIFIED, and it is why this is a search rather than a link.** `botstore.info` is
-egress-blocked from this container, so all of the above comes from Dotgo's own launch
-announcement and their indexed page list, never from the pages themselves. Your browser is
-the primary source here, and it has already corrected me once today.
-
-
-## STEP 3 -- the listing copy
 
 **Link to give them**
 

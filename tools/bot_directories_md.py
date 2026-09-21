@@ -37,6 +37,7 @@ TYPE_LABEL = {
     "catalogue_and_broker": "Both: real catalogue AND sells posts",
     "telegram_native": "Telegram-native, not a web form",
     "web_form_seen": "Web form, SEEN directly (screenshot of the form itself)",
+    "platform_benefit": "Listing gated behind a PAID platform -- DO NOT SUBMIT",
 }
 
 

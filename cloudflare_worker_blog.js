@@ -29,7 +29,7 @@ import { DEVELOPERS_OG_PNG_BASE64 } from "./developers_og_image.js";
    The same value goes in cloudflare_worker_miniapp.js; a test pins the two
    equal, because two constants that must agree with nothing checking them is
    the shape this repo has now paid for five times. */
-const WA_NUMBER = "";
+const WA_NUMBER = "17407373961";
 const WA_SOURCE = "wa-blog";
 
 const SITE = "https://blog.relayshield.net";

@@ -722,6 +722,55 @@ the other half of what the audit is complaining about, and no env var fixes it. 
 output.
 STOP IF: `AccessDeniedException` -- a fact about the operator identity, not about the codes.
 
+### BOTH CANDIDATE CODES RETURNED NO ENTITLEMENT. 2026-09-21.
+
+    7ws2zmbdyk70tq34pr0pea0s2  no entitlement for this customer
+    cmh79gzztkdtp0dlzbdepa643  no entitlement for this customer
+
+**That is the STOP IF, and it changes the diagnosis rather than narrowing it.** The product code
+was never the only problem. Setting the env var is still necessary -- a wrong value blocks
+`_resolve_bundle` on its own -- and it is now clearly not sufficient, because with no entitlement
+`_get_entitlement` returns `None` and fulfillment fails one branch earlier, exactly as the
+09-19 and 09-20 logs show.
+
+**A PERMISSION DENIAL IS ALREADY RULED OUT.** The script prints an error verbatim when one
+comes back, and it printed the empty-result line instead. So these were real, successful,
+empty responses.
+
+**FOUR CAUSES PRODUCE THAT IDENTICAL OUTPUT AND THEY HAVE FOUR DIFFERENT FIXES.** The previous
+probe could not separate them, which is the finding worth carrying: it asked one question
+(is this code Bundle B's) and the answer it got was ambiguous across four situations.
+
+1. **The FILTER, not the data.** `GetEntitlements` filtered on `CUSTOMER_IDENTIFIER` returns
+   empty when the identifier does not match, and empty is also what no-entitlements-at-all
+   looks like. **The unfiltered call separates them in one request and nothing else does.**
+2. **The agreement is on a different product** than either code.
+3. **The entitlement has not propagated.** Real and documented -- it is why
+   `relayshield_bundle_fulfillment.py` carries a comment about AWS sending `subscribe-success`
+   before `GetEntitlements` is consistent -- but the agreement was accepted on 2026-09-19 and
+   this is days later, so it is the least likely and must not be the default assumption.
+4. **The identity cannot read entitlements.** Ruled out above, and checked again first because
+   every other section misreads without it.
+
+    ANDREW RUNS THIS:
+    cd ~/dev/relayshield
+    AWS_PROFILE=relayshield sh tools/diagnose_bundle_b_entitlement.sh
+
+EXPECT: four sections. **Section 2 is the decisive one** -- it asks the Agreement Service
+directly which product `agmt-29l852u6kqzmjh2me0pglvj9q` is against, rather than inferring it
+from a redirect.
+STOP IF: section 2 names a resource that is not `prod-szi2wdww3obry`. The E2E subscription was
+taken out on a different product, and no env var or SNS subscription fixes that.
+STOP IF: section 1 shows entitlements on a code but under a DIFFERENT `CustomerIdentifier`.
+Then the filter was the problem, that code IS Bundle B's, and the customer id in the
+fulfillment log is not the one holding the entitlement.
+STOP IF: `Invalid choice: 'marketplace-agreement'` -- the CLI is too old for that service.
+Read the agreement in the portal under Agreements instead; the script says so.
+
+**DO NOT SET `BUNDLE_B_PRODUCT_CODE` UNTIL SECTION 2 OR SECTION 4 NAMES IT.** Bundle A's and
+Bundle D's values are settled and their edit is below; do those now regardless, because they
+are a live defect on two public listings and nothing about Bundle B gates them.
+
 ### CAUSE A -- SETTING THE ENV VARS. CLICK BY CLICK.
 
 **Three variables, one edit.** Two of them are a LIVE DEFECT on Bundle A and Bundle D, not

@@ -150,8 +150,20 @@ else
   echo "$OUT" | python3 -c '
 import json,re,sys
 raw=sys.stdin.read()
-try: d=json.loads(raw)
-except Exception: print("   unparseable"); raise SystemExit(0)
+try:
+    d=json.loads(raw)
+except Exception:
+    # The CLI can prefix a deprecation or credential warning onto stdout, so a
+    # whole-stream parse fails on output that CONTAINS valid JSON. Recover from
+    # the first brace rather than reporting "unparseable", which says nothing
+    # the reader can act on and is what this printed on 2026-09-21.
+    i = raw.find("{")
+    try:
+        d = json.loads(raw[i:]) if i >= 0 else {}
+    except Exception:
+        print("   could not parse the response. Verbatim, first 400 chars:")
+        print("   " + raw.strip()[:400].replace("\n", "\n   "))
+        raise SystemExit(0)
 det=d.get("DetailsDocument") or d.get("Details") or {}
 if isinstance(det,str):
     try: det=json.loads(det)

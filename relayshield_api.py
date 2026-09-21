@@ -878,7 +878,7 @@ def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: 
         return
     try:
         mp_client = boto3.client("meteringmarketplace", region_name="us-east-1")
-        mp_client.batch_meter_usage(
+        resp = mp_client.batch_meter_usage(
             UsageRecords=[{
                 "Timestamp": datetime.now(timezone.utc),
                 "CustomerAWSAccountId": aws_account_id,
@@ -887,10 +887,56 @@ def _report_marketplace_usage(aws_account_id: str, license_arn: str, dimension: 
                 "Quantity": 1,
             }],
         )
-        logger.info("Marketplace usage reported account=%s dimension=%s", aws_account_id, dimension)
     except Exception as exc:
         logger.warning("Marketplace usage reporting failed (non-fatal) account=%s dimension=%s error=%s",
                        aws_account_id, dimension, exc)
+        return
+
+    # THE RESPONSE USED TO BE DISCARDED, AND THAT MADE THE SUCCESS LINE A LIE.
+    #
+    # BatchMeterUsage returns 200 for a record it REJECTED. Every record comes
+    # back in Results with its own Status -- Success, CustomerNotSubscribed or
+    # DuplicateRecord -- and anything the service could not process at all
+    # comes back in UnprocessedRecords. None of that raises.
+    #
+    # So "Marketplace usage reported" was logged on a call that metered
+    # NOTHING, and on 2026-09-21 that line was read as proof the meter had
+    # landed while AWS's own audit said "no successful metering records" for
+    # the same product on the same day. Both were true. The log was describing
+    # the REQUEST and the audit was describing the RESULT.
+    #
+    # This repo's own rule, written for diagnostics and applying with more
+    # force here: every probe prints the body of what it got, not a summary of
+    # it. A billing path cannot be re-run to find out what happened; a
+    # customer's call is served once.
+    results = (resp or {}).get("Results") or []
+    unprocessed = (resp or {}).get("UnprocessedRecords") or []
+    statuses = [r.get("Status", "") for r in results]
+
+    if unprocessed:
+        logger.warning("Marketplace usage UNPROCESSED account=%s dimension=%s count=%d "
+                       "(nothing was metered for these)",
+                       aws_account_id, dimension, len(unprocessed))
+    if not results and not unprocessed:
+        # Neither list came back. Not a success, and not something to report as
+        # one: say what arrived so the next reader is not guessing.
+        logger.warning("Marketplace usage reporting returned no Results and no "
+                       "UnprocessedRecords account=%s dimension=%s keys=%s",
+                       aws_account_id, dimension, sorted((resp or {}).keys()))
+        return
+
+    for status in statuses:
+        if status == "Success":
+            logger.info("Marketplace usage reported account=%s dimension=%s status=Success",
+                        aws_account_id, dimension)
+        else:
+            # CustomerNotSubscribed means the LicenseArn does not entitle this
+            # customer to this product; DuplicateRecord means an identical
+            # (customer, dimension, hour) was already metered, which is AWS
+            # deduplicating rather than an error. Named separately because they
+            # have different fixes and only the first is a problem.
+            logger.warning("Marketplace usage NOT metered account=%s dimension=%s status=%s",
+                           aws_account_id, dimension, status or "(no status)")
 
 
 def _record_stripe_meter_event(stripe_customer_id: str, path: str) -> None:

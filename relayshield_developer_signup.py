@@ -2965,6 +2965,30 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     # GitLab CVE-2026-85706 post, registered 2026-09-16 BEFORE the post ships.
     # An unregistered key logs unmatched: and renders no banner, which is
     # attribution that looks like it worked -- FD-8, four months of it.
+    # Rapuncel, 2026-09-21. Registered BEFORE the post ships, which is the whole
+    # rule: an unregistered key is sent, accepted and never rendered, and logs
+    # `unmatched:` with nothing to show the reader. The referer hosts are the
+    # ones a reader can arrive from; every channel also carries its own ?source=
+    # alias below so the CloudWatch rows stay separable per destination.
+    "rapuncel": (
+        ("the-edr-was-dead-before-the-theft-started",
+         "rapuncel-infostealer",
+         "signed-driver-edr-killer"),
+        _banner("Arriving from the Rapuncel post", _p(
+            "That post is about what is left when the detection layer is switched off first. "
+            "Rapuncel's driver carries a kill list of 145 security products, so the controls that "
+            "would have caught the theft are not running by the time it happens, and the only "
+            "signal left is the stolen material turning up somewhere else. That is the half we "
+            "work on. "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">'
+            "POST /v1/metered/infostealer</code> answers whether an address appears in "
+            "infostealer log dumps, and "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">'
+            "POST /v1/metered/session-risk</code> answers the question a password reset does not: "
+            "whether a live session was taken, which no rotation revokes. "
+            "<b>We are not an EDR and we do not stop a signed driver.</b> We tell you what left, "
+            "so the response is aimed at the right thing.")),
+    ),
     "gitlab-cve": (
         ("a-file-read-bug-is-a-credential-theft-bug",
          "gitlab-file-read-credential-theft",
@@ -3459,6 +3483,16 @@ _SOURCE_ALIASES = {
     # into a number nobody can act on.
     "storebot-me":    "storebot",
     "botsarchive":    "storebot",
+    # One key per CHANNEL, all rendering the same banner: the RAW parameter is
+    # what gets logged, so the destinations stay separable in CloudWatch even
+    # though the landing is identical. Same shape as secret-scan-* above.
+    "rapuncel-blog":         "rapuncel",
+    "rapuncel-medium":       "rapuncel",
+    "rapuncel-devto":        "rapuncel",
+    "rapuncel-linkedin":     "rapuncel",
+    "rapuncel-telegram":     "rapuncel",
+    "rapuncel-farcaster":    "rapuncel",
+    "rapuncel-mastodon":     "rapuncel",
     "gitlab-cve-blog":       "gitlab-cve",
     "gitlab-cve-medium":     "gitlab-cve",
     "gitlab-cve-devto":      "gitlab-cve",

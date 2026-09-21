@@ -2452,6 +2452,147 @@ def check_and_fire_correlation(
 # Twilio WhatsApp sender
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# KEYLESS CHECK FOR A STRANGER. Added 2026-09-21.
+# ---------------------------------------------------------------------------
+#
+# WHY IT EXISTS. Until now the `if not user` branch could only describe the
+# product. A directory listing or a wa.me link that lands a stranger in a chat
+# which cannot answer their question spends the arrival to deliver homework,
+# and that is worse than not being listed: the listing is a standing shelf and
+# the first impression is the only one.
+#
+# /v1/link-check and /v1/wallet-risk are KEYLESS by design -- no signup, no
+# card, capped per source IP rather than billed -- so there was never a
+# commercial reason for this branch to refuse. It was simply not wired.
+#
+# CLASSIFICATION IS DELIBERATELY MINIMAL AND THE SERVER DECIDES THE CHAIN.
+# relayshield_api.py's _detect_chain_api re-detects it anyway, so a fourth copy
+# of the chain patterns here would be a fourth thing to keep in step with the
+# other three (relayshield_api.py, the JS widget, the Python widget) for no
+# gain. All this needs to know is "URL-ish or address-ish", and a disagreement
+# costs one rejected call rather than a wrong verdict.
+#
+# TWO RULES INHERITED FROM widget/relayshield_widget.py, AND NEITHER IS
+# OPTIONAL:
+#   1. IT NEVER RAISES. Every failure path returns a string. A stranger's first
+#      message must not produce a stack trace and silence.
+#   2. IT NEVER SAYS "SAFE". The ceiling on a clean answer is "nothing known
+#      against it". An absence of evidence across three sources is not proof,
+#      and a checker that says safe is training somebody to trust the one it
+#      misses.
+#
+# KNOWN LIMIT, RECORDED RATHER THAN DISCOVERED LATER: the keyless cap is PER
+# SOURCE IP, and every call from here leaves through the Lambda's egress
+# address, so heavy use could throttle the whole WhatsApp front door against
+# itself. That is the same NAT problem that decided relayshield_watchlist_
+# monitor.py imports its handler instead of calling the public endpoint. The
+# 429 is handled explicitly below rather than folded into a generic failure,
+# so the log says which of the two happened; the fix, if it ever fires, is an
+# internal API key from Secrets Manager rather than a retry.
+
+_WA_URLISH = re.compile(
+    r"^(?:https?://\S+"
+    r"|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?:[/?#]\S*)?)$",
+    re.I,
+)
+# One permissive pattern covering EVM, TON friendly and raw, Bitcoin, Solana
+# and XRP. ronin: is stripped because every wallet regex rejects the prefix and
+# the address behind it is ordinary EVM -- a rejected message that should have
+# been a checked one.
+_WA_ADDRESSISH = re.compile(
+    r"^(?:ronin:)?(?:"
+    r"0x[0-9a-fA-F]{40}"
+    r"|[EUeu][Qq][A-Za-z0-9_-]{46}"
+    r"|-?\d+:[0-9a-fA-F]{64}"
+    r"|(?:bc1|[13])[a-zA-HJ-NP-Z0-9]{6,87}"
+    r"|[1-9A-HJ-NP-Za-km-z]{32,44}"
+    r"|r[1-9A-HJ-NP-Za-km-z]{24,34}"
+    r")$"
+)
+
+KEYLESS_API_BASE = "https://api.relayshield.net"
+KEYLESS_SOURCE = "wa-frontdoor"
+
+
+def keyless_check(text: str) -> str:
+    """A verdict for a stranger, or "" when there is nothing checkable.
+
+    Never raises. Never says safe.
+    """
+    target = (text or "").strip()
+    if not target or len(target) > 512:
+        return ""
+    ronin = re.match(r"^ronin:(0x[0-9a-fA-F]{40})$", target, re.I)
+    if ronin:
+        target = ronin.group(1)
+
+    if _WA_URLISH.match(target):
+        path, payload = "/v1/link-check", {"url": target}
+        if not target.lower().startswith(("http://", "https://")):
+            payload = {"url": "https://" + target}
+    elif _WA_ADDRESSISH.match(target):
+        path, payload = "/v1/wallet-risk", {"address": target}
+    else:
+        return ""
+    payload["source"] = KEYLESS_SOURCE
+
+    try:
+        req = urllib.request.Request(
+            KEYLESS_API_BASE + path,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json",
+                     "User-Agent": "relayshield-wa/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            body = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            # A real answer, not an outage, and it must not read as a clean
+            # result. Named separately so the log distinguishes the daily cap
+            # from an unreachable API.
+            logger.warning("keyless check hit the per-IP cap path=%s", path)
+            return ("We could not check that one right now, the free check is "
+                    "busy. Treat it as *unchecked*, not as safe, and try again "
+                    "shortly.")
+        logger.warning("keyless check failed path=%s code=%s", path, exc.code)
+        return ("We could not complete that check. Treat it as *unchecked*, "
+                "not as safe.")
+    except Exception as exc:
+        logger.warning("keyless check failed path=%s error=%s", path, exc)
+        return ("We could not complete that check. Treat it as *unchecked*, "
+                "not as safe.")
+
+    if not isinstance(body, dict) or not body.get("ok"):
+        return ("We could not complete that check. Treat it as *unchecked*, "
+                "not as safe.")
+
+    data = body.get("data") or {}
+    level = str(data.get("level") or data.get("risk_level") or "unknown").lower()
+    if level == "clean":
+        level = "low"
+    reasons = data.get("reasons") or data.get("risk_flags") or []
+    if not isinstance(reasons, list):
+        reasons = []
+    reasons = [str(r).replace("_", " ") for r in reasons][:4]
+
+    heads = {
+        "critical": "⛔ *Critical risk.* Do not proceed.",
+        "high":     "⚠️ *High risk.* Do not proceed.",
+        "medium":   "⚠️ *Treat with caution.*",
+        "low":      "No known red flags.",
+        "unknown":  "Nothing known against it.",
+    }
+    lines = [heads.get(level, heads["unknown"]), "", target]
+    if reasons:
+        lines.append("")
+        lines.extend("• " + r for r in reasons)
+    if level in ("low", "unknown"):
+        lines += ["", "_An absence of flags is not proof of safety._"]
+    return "\n".join(lines)
+
+
 def send_whatsapp(
     to_number: str,
     body: str,
@@ -5593,18 +5734,38 @@ def handler(event, context):
         # they opened a chat is worse than having no link at all -- they came
         # here to ask about a thing, and we answered with homework.
         #
-        # It still cannot run a check for them (that is the next build), so it
-        # is honest about what it is: name what the bot does, then point at the
-        # one place that takes them further. Leading with capability rather
-        # than with a signup wall is the only part of this we control today.
+        # IT CAN NOW RUN A CHECK FOR THEM, which is what turns this from a
+        # signup wall into a product. If the first thing they sent is a link or
+        # a wallet address, answer it before saying anything about ourselves:
+        # they came here to ask about a thing, and an answer is a better
+        # introduction than a description.
+        verdict = keyless_check(message_body)
+        if verdict:
+            send_whatsapp(
+                from_number,
+                verdict + "\n\n"
+                "\u2014\n"
+                "Checked free by *RelayShield*, no account needed. Send another "
+                "link or wallet address any time.\n\n"
+                "We also watch your email, phone and wallets for breaches, "
+                "infostealer logs and SIM-swap attempts, and alert you here. "
+                "Set that up at *relayshield.net*.",
+                account_sid, auth_token, twilio_from,
+            )
+            return {"statusCode": 200, "body": "Keyless check served"}
+
+        # Nothing checkable in the message. Name the capability first and put
+        # the signup last: leading with a wall is what this branch used to do.
         send_whatsapp(
             from_number,
             "👋 *RelayShield*\n\n"
-            "We monitor your email, phone and wallets for breaches, "
-            "infostealer logs and SIM-swap attempts, and we alert you here "
-            "the moment something surfaces.\n\n"
-            "Set it up at *relayshield.net* and this chat becomes your alert "
-            "channel.",
+            "*Send me a link or a wallet address* and I will check it, free, "
+            "with no account. I will never tell you something is safe, only "
+            "that nothing is known against it, because an absence of evidence "
+            "is not proof.\n\n"
+            "We also monitor your email, phone and wallets for breaches, "
+            "infostealer logs and SIM-swap attempts, and alert you here the "
+            "moment something surfaces. Set that up at *relayshield.net*.",
             account_sid, auth_token, twilio_from,
         )
         return {"statusCode": 200, "body": "No user found"}

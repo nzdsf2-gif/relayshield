@@ -7657,3 +7657,43 @@ here is the trap, here is how to detect it, here is how to fix it, here is the
 guard now in our own tooling. Publishing it while two duplicates are still
 listed is a claim anyone can check and find only half true. **Omit the entity
 ids**; they are ours and they add nothing to the argument.
+
+## THE CONSUMER-COMPELLING CHECKS ALL HAVE A VENDOR BILL. THAT IS WHY THE FREE SET IS THIN.
+
+**2026-09-22, asked as "why not also add email checking to the Muse connector ... link and
+wallet checking dont seem compelling enough."** The critique is right and the reason is
+structural rather than a gap in the scope.
+
+**FOURTEEN endpoints are in `KEYLESS_SCAN_ENDPOINTS`, not two, and TWELVE are crypto.** Only
+`/v1/link-check` is universal. So the honest free set for a general consumer is one endpoint,
+and reading the table rather than the scope document is what shows it.
+
+**THERE IS NO EMAIL-CHECK ENDPOINT TO ADD.** `checkemail@` is a Cloudflare Worker: the whole
+verdict model, and the 78 tests that pin it, are JavaScript in
+`cloudflare_worker_checkemail.js`. Its only API calls are `/v1/scan-url` and `/v1/result`, and
+`/v1/scan-url` is VirusTotal at $0.05 and has never been keyless. **A scoring model living in
+a Worker is not an API surface**, and "add email checking" is a build, not a connector field.
+
+**AND `/v1/breach` IS THE ONE THAT WOULD ACTUALLY HURT, FOR A REASON THAT IS NOT COST.**
+`handle_breach` calls HIBP with ONE subscription key, has **no cache anywhere**, and handles
+429 explicitly. **The $0.10 on the rate card is our RESALE price**, and I nearly recorded it as
+our cost. HIBP bills a subscription with a rate limit, so the shared key is the scarce thing --
+and the Telegram bot, the WhatsApp bot, the OAuth watchlist and every paying API customer are
+on it. **A consumer platform pointed at breach does not run up a bill, it runs us into the
+limit, and the 429 lands on the paying customers.** Invisible until it happens, which is the
+quiet-alarm shape with revenue behind it.
+
+**THE FIX IS POSITIONING, NOT AN ENDPOINT.** `/v1/link-check` is thin as "check a link" and
+strong as **"check every link in my inbox"**, and Muse reads the inbox. Same endpoint, zero
+vendor cost at any volume once a partner key lifts the per-IP cap. Breach is the right v2 and
+needs a cache on `handle_breach` plus a partner rate budget first -- about a day, worth doing
+regardless, and **until both exist, adding breach is a decision to degrade a live product.**
+
+**The general form: before adding a capability to a free surface, ask what its UPSTREAM bills
+and whether that upstream is SHARED.** A per-call bill is a cost question. A shared
+rate-limited key is a blast-radius question, and the second one reaches customers who never
+touched the new surface.
+
+**Payments on the connector: NO**, and it is not a judgement call. Nothing is sold inside the
+host, so claiming a payment surface invites review of billing we cannot show, and it is FD-14's
+restriction shape with a different host's name on it.

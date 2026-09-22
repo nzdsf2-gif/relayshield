@@ -202,10 +202,13 @@ def main():
         print("  -> A key that cannot meter cannot clear audit error 2.")
     else:
         print("  NO METERING LINES AT ALL in the last 14 days.")
-        print("  Two different causes and this cannot separate them: no metered")
-        print("  Bundle B endpoint was ever called, or the fix that writes these")
-        print("  lines is not deployed. Check the Lambda LastModified against")
-        print("  commit 447105b (2026-09-21 19:59 UTC) before concluding.")
+        print("  The fix that writes these lines IS deployed -- deploy_lambdas")
+        print("  run 159 shipped 4f0ca0e and logged 'relayshield-api imports")
+        print("  cleanly' at 2026-09-21T20:01:54Z, which carries 447105b. So for")
+        print("  any call after that time this means no metered Bundle B endpoint")
+        print("  was called at all, NOT that logging is missing.")
+        print("  -> There is nothing for AWS's audit to find. A metered call has")
+        print("     to be MADE with this product's key before resubmitting.")
     print()
 
     print("-" * 72)

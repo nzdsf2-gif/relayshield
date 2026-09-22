@@ -178,5 +178,53 @@ class ReadsNeverRaiseAndNeverScan(unittest.TestCase):
         self.assertIn("get-query-results", called)
 
 
+class AttributionIsNotAssumed(unittest.TestCase):
+    """The log line names the account and the dimension, NEVER the product.
+    Three SaaS products carry the Bundle B display name, so a success line
+    from an account that holds a meterable key row for one of them is not by
+    itself evidence for that one."""
+
+    def _verdict_branches(self):
+        tree = ast.parse(TOOL.read_text(encoding="utf-8"))
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "main")
+        out = []
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.If):
+                continue
+            # JoinedStr AS WELL AS Constant. The first version of this took
+            # only ast.Constant, and every verdict headline is an f-string, so
+            # `bad` was always empty and the guard could not fire -- it passed
+            # with the sibling check deleted. Decoration reading as protection,
+            # caught only by running the proof.
+            printed = []
+            for b in node.body:
+                if not (isinstance(b, ast.Expr) and isinstance(b.value, ast.Call)
+                        and getattr(b.value.func, "id", "") == "print"):
+                    continue
+                for a in b.value.args:
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                        printed.append(a.value)
+                    elif isinstance(a, ast.JoinedStr):
+                        printed.append("".join(
+                            v.value for v in a.values
+                            if isinstance(v, ast.Constant) and isinstance(v.value, str)))
+            out.append((ast.dump(node.test), printed))
+        return out
+
+    def test_no_yes_verdict_without_ruling_out_a_sibling_product(self):
+        bad = [test for test, printed in self._verdict_branches()
+               if any(p.strip().startswith("YES") for p in printed)
+               and "siblings" not in test]
+        self.assertEqual(bad, [],
+                         "a YES verdict must be guarded by the sibling-product "
+                         "check; the log line cannot name the product on its own")
+
+    def test_a_refused_sibling_read_is_not_a_yes(self):
+        body = TOOL.read_text(encoding="utf-8")
+        self.assertIn("PROBABLY, NOT PROVEN", body)
+        self.assertIn("NOT PROVEN.", body)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

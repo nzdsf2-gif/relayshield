@@ -3296,10 +3296,40 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     ),
     "aws": (
         ("aws.amazon.com", "console.aws.amazon.com"),
+        # BUNDLE B WENT PUBLIC 2026-09-21 (prod-szi2wdww3obry) and this banner
+        # named only Bundle D, so a buyer arriving from the new listing read a
+        # paragraph about a different product. Both are named now. No corpus
+        # count appears here or in either listing: MEASUREMENT DOCTRINE, and a
+        # page we cannot cheaply edit carries capabilities rather than counts.
         _banner("Arriving from AWS Marketplace", _p(
             "RelayShield is available through AWS Marketplace with billing handled by AWS &mdash; no separate account "
             "or payment method required. The <b>Agentic Attack Surface</b> bundle covers LLM credential exposure, MCP "
-            "registry risk, prompt-injection breach detection, agent identity risk scoring and framework CVE monitoring.")),
+            "registry risk, prompt-injection breach detection, agent identity risk scoring and framework CVE monitoring. "
+            "The <b>Attack Surface &amp; Supply Chain</b> bundle covers dependency and supply-chain exposure, asset "
+            "intelligence, leaked-secret scanning across public registries, threat-actor attribution and session risk.")),
+    ),
+    # REGISTERED 2026-09-22, BEFORE ANYTHING IS SUBMITTED TO MUSE, which is the
+    # whole point of this rule: an unregistered key is sent, accepted and never
+    # logged, and that is FD-8 and four months of it. The connector itself calls
+    # the API and sends nobody here; the form's "Product website" field is what
+    # sends a human, so it carries ?source=muse.
+    #
+    # NO REFERER HOSTS, deliberately. A connector platform's own pages are not
+    # where a click originates, and claiming muse.ai as a referer would attribute
+    # any unrelated arrival from that domain to this listing.
+    "muse": (
+        (),
+        _banner("Arriving from the Muse connector", _p(
+            "The connector calls two endpoints, and both are free and keyless: "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">/v1/link-check</code> '
+            "asks whether a link is known-bad, and "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">/v1/wallet-risk</code> '
+            "asks the same of a wallet address. Neither needs an account, a key "
+            "or a payment method, and neither ever answers &ldquo;safe&rdquo; "
+            "&mdash; the ceiling is nothing known against it. The rest of the API "
+            "below is the same corpus asked harder questions: breach and "
+            "infostealer exposure, SIM swap, leaked OAuth tokens and supply-chain "
+            "risk. Free tier is 100 calls, no card.")),
     ),
     "github": (
         ("github.com",),

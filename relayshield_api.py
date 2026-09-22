@@ -2975,6 +2975,36 @@ def _onward_route(source: str) -> dict | None:
     return CONSUMER_ROUTES.get((source or "").strip().lower()) or None
 
 
+def _with_onward(resp: dict, params: dict) -> dict:
+    """Attach the caller's consumer route to a successful keyless response.
+
+    APPLIED IN ONE PLACE, AT THE DISPATCHER, AND THAT IS THE POINT. The first
+    version of this wrote the field inside handle_link_check and
+    handle_link_check_batch, which left /v1/wallet-risk -- the OTHER half of
+    the Muse connector -- with no route back at all. Half the fix, which is the
+    shape of most defects in this repo: the reasoning was right and it was
+    applied to the endpoint in front of me rather than to the surface.
+
+    Keyless endpoints only, and only on a 200 carrying an `ok: true` envelope.
+    A 4xx says what went wrong and an advert underneath it is noise.
+
+    It never raises. A response that cannot be parsed is returned untouched:
+    losing an onward link is a missed impression, and losing the VERDICT is a
+    user told the product failed.
+    """
+    route = _onward_route((params.get("source") or "")[:40])
+    if not route or resp.get("statusCode") != 200:
+        return resp
+    try:
+        body = json.loads(resp.get("body") or "")
+    except (TypeError, ValueError):
+        return resp
+    if not body.get("ok") or not isinstance(body.get("data"), dict):
+        return resp
+    body["data"]["onward"] = route
+    return {**resp, "body": json.dumps(body)}
+
+
 _LINK_CHECK_NOTE = ("Heuristic verdict from RelayShield's IOC corpus, Google Safe "
                     "Browsing and domain registration age. An absence of flags is "
                     "not proof of safety. POST /v1/scan-url with an API key adds a "
@@ -3048,10 +3078,6 @@ def handle_link_check_batch(params: dict) -> dict:
         },
         "note": _LINK_CHECK_NOTE,
     }
-    onward = _onward_route(source)
-    if onward:
-        body["onward"] = onward
-
     if incomplete:
         # NAMED, not summarised. A caller that cannot see which ones were
         # missed will present the whole batch as checked, and a link we never
@@ -3095,10 +3121,6 @@ def handle_link_check(params: dict) -> dict:
                    "not proof of safety. POST /v1/scan-url with an API key adds a "
                    "multi-engine VirusTotal analysis.",
     }
-    onward = _onward_route(source)
-    if onward:
-        body["onward"] = onward
-
     return _ok(body)
 
 
@@ -13507,6 +13529,21 @@ def lambda_handler(event: dict, context) -> dict:
     if method != "POST":
         return _err(f"{path} only accepts POST requests", 405)
 
+    # PARSED HERE, ABOVE THE QUOTA CHECK, AND THE ORDER IS LOAD-BEARING.
+    # The keyless cap counts UNITS, and _link_check_units reads the body to
+    # see how many URLs a batch carries -- so the body has to exist before the
+    # cap is consulted. It was parsed forty lines further down, which made
+    # `params` UNBOUND at that call and raised UnboundLocalError on EVERY
+    # keyless request, outside the try block, so API Gateway returned 502 with
+    # no handler log line. Fourteen endpoints, including the widget, the Mini
+    # App and the Muse connector.
+    #
+    # Every test in the suite passed, because every one of them called the
+    # HANDLER. Nothing exercised the dispatcher, which is where the bug was.
+    # Same family as the INLINE_TEXT defect: perfectly valid syntax, runtime
+    # dead, invisible to a reader.
+    params = _body(event)
+
     # Keyless scan calls are rate-limited per source IP. A valid key skips this
     # entirely, so paying subscribers and the CS Mobile app's linked users are
     # never counted — only genuinely unauthenticated traffic is.
@@ -13544,7 +13581,6 @@ def lambda_handler(event: dict, context) -> dict:
                     }),
                 }
 
-    params = _body(event)
     try:
         # The SIM swap consent endpoints need to know WHICH account enrolled a
         # number, so they join the branch that resolves the API key record.
@@ -13569,6 +13605,8 @@ def lambda_handler(event: dict, context) -> dict:
         # Webhook endpoints receive raw event (signature verified internally)
         if path in ("/v1/app/webhook/alchemy", "/v1/app/webhook/helius"):
             return handler(event)
+        if path in KEYLESS_SCAN_ENDPOINTS:
+            return _with_onward(handler(params), params)
         return handler(params)
     except Exception as exc:
         logger.exception("Unhandled error in %s: %s", path, exc)

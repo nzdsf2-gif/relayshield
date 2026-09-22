@@ -476,5 +476,79 @@ class GsbBatching(unittest.TestCase):
             self.assertFalse(api._check_gsb("ok.com", "k"))
 
 
+class TheOnwardRoute(unittest.TestCase):
+    """A free check served to a partner is a check with no route back.
+
+    Before this, nothing in relayshield_api.py named the bot, the Mini App or
+    WhatsApp at all -- the note pointed at /v1/scan-url with an API key, a
+    DEVELOPER upsell served to consumers. That is the inline-mode defect: live,
+    working, pointed at by nothing.
+    """
+
+    def _check(self, source):
+        with unittest.mock.patch.object(api, "_heuristic_url_check",
+                                        lambda u: {"flagged": False, "reasons": [],
+                                                   "signals": {"ioc_corpus": False,
+                                                               "safe_browsing": False,
+                                                               "domain_age_days": None}}):
+            return body(api.handle_link_check({"url": "https://a.com/",
+                                               "source": source}))["data"]
+
+    def test_the_WIDGET_gets_no_onward_link(self):
+        """relayshield-widget.js is copied into OTHER PEOPLE'S BOTS. Injecting
+        'open our app' into somebody else's reply hijacks their user inside
+        their own product, and is how an integration gets removed."""
+        self.assertNotIn("onward", self._check("tg-widget"))
+
+    def test_an_unnamed_source_gets_no_onward_link(self):
+        self.assertNotIn("onward", self._check(""))
+        self.assertNotIn("onward", self._check("some-random-caller"))
+
+    def test_muse_gets_one_and_it_names_where_it_goes(self):
+        d = self._check("muse")
+        self.assertIn("onward", d)
+        self.assertIn("t.me/relayshield_bot/idcheck", d["onward"]["url"])
+        self.assertIn("telegram", d["onward"]["label"].lower(),
+                      "a link that does not say where it goes is worse than none")
+
+    def test_the_batch_form_carries_it_too(self):
+        with unittest.mock.patch.object(
+                api, "_heuristic_url_check_many",
+                lambda urls: {u: {"flagged": False, "reasons": [],
+                                  "signals": {"ioc_corpus": False,
+                                              "safe_browsing": False,
+                                              "domain_age_days": None}}
+                              for u in urls}):
+            d = body(api.handle_link_check({"urls": ["https://a.com/"],
+                                            "source": "muse"}))["data"]
+        self.assertIn("onward", d)
+
+    def test_every_onward_key_is_REGISTERED_at_the_worker_edge(self):
+        """An unregistered startapp key is silently downgraded to the generic
+        tg-miniapp, which is attribution that looks like it worked -- FD-8, and
+        four months of it. The route and the gate are two files that must
+        agree, so this reads both rather than trusting either."""
+        import re
+        worker = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        allowed = set(re.findall(r'"(tg-miniapp[a-z0-9-]*)"', worker))
+        for src, route in api.CONSUMER_ROUTES.items():
+            m = re.search(r"startapp=([a-z0-9-]+)", route["url"])
+            if not m:
+                continue
+            self.assertIn(m.group(1), allowed,
+                          f"{src}'s onward key is not in ALLOWED_SOURCES, so "
+                          f"every arrival through it logs as generic")
+
+    def test_it_is_an_ALLOWLIST_not_an_echo_of_whatever_was_sent(self):
+        """The property, not today's contents: a route is returned because the
+        source is NAMED, never because a source was merely supplied."""
+        tree = ast.parse((ROOT / "relayshield_api.py").read_text())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_onward_route")
+        src = ast.unparse(fn)
+        self.assertIn("CONSUMER_ROUTES", src)
+        self.assertIn(".get(", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

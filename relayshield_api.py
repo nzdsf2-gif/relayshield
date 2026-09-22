@@ -2938,6 +2938,43 @@ def _link_check_level(signals: dict) -> str:
     return "unknown"
 
 
+# ---------------------------------------------------------------------------
+# THE ONWARD ROUTE  (added 2026-09-22)
+# ---------------------------------------------------------------------------
+# A keyless check served to a partner platform is a check we give away with our
+# name on it and NO ROUTE BACK. Before this, nothing in relayshield_api.py named
+# t.me/relayshield_bot, the Mini App or WhatsApp at all -- the note pointed at
+# /v1/scan-url with an API key, which is a DEVELOPER upsell served to consumers.
+# That is the inline-mode defect exactly: live, working, and pointed at by
+# nothing.
+#
+# AN EXPLICIT ALLOWLIST, AND THE WIDGET IS DELIBERATELY NOT ON IT.
+# widget/relayshield-widget.js is copied into OTHER PEOPLE'S BOTS. Injecting
+# "open our app" into somebody else's reply hijacks their user inside their own
+# product, and is exactly how an integration gets removed a week later. A
+# partner platform that lists us as a connector is a different relationship: it
+# chose us, and its users are ours to talk to. So a route is returned only for
+# a source named here, never for any source merely because it was sent.
+#
+# The key in each URL is the attribution key for THAT destination, so an
+# arrival through this route is separable in the logs from every other one.
+CONSUMER_ROUTES = {
+    # Meta Muse. The Mini App rather than the developers page: a Muse user is a
+    # consumer, and a consumer sent to API documentation has been sent nowhere.
+    # Named as Telegram in the label because it IS Telegram, and a link that
+    # does not say where it goes is a worse answer than no link.
+    "muse": {
+        "label": "Check links and TON addresses yourself, free, in Telegram",
+        "url": "https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-muse",
+    },
+}
+
+
+def _onward_route(source: str) -> dict | None:
+    """The consumer route for this caller, or None. Never guesses."""
+    return CONSUMER_ROUTES.get((source or "").strip().lower()) or None
+
+
 _LINK_CHECK_NOTE = ("Heuristic verdict from RelayShield's IOC corpus, Google Safe "
                     "Browsing and domain registration age. An absence of flags is "
                     "not proof of safety. POST /v1/scan-url with an API key adds a "
@@ -3011,6 +3048,10 @@ def handle_link_check_batch(params: dict) -> dict:
         },
         "note": _LINK_CHECK_NOTE,
     }
+    onward = _onward_route(source)
+    if onward:
+        body["onward"] = onward
+
     if incomplete:
         # NAMED, not summarised. A caller that cannot see which ones were
         # missed will present the whole batch as checked, and a link we never
@@ -3043,7 +3084,7 @@ def handle_link_check(params: dict) -> dict:
     logger.info("link-check url=%s level=%s signals=%s source=%s",
                 _redact(url, "url"), level, signals, source or "unattributed")
 
-    return _ok({
+    body = {
         "target":  url,
         "level":   level,
         "flagged": bool(heuristics.get("flagged")),
@@ -3053,7 +3094,12 @@ def handle_link_check(params: dict) -> dict:
                    "Browsing and domain registration age. An absence of flags is "
                    "not proof of safety. POST /v1/scan-url with an API key adds a "
                    "multi-engine VirusTotal analysis.",
-    })
+    }
+    onward = _onward_route(source)
+    if onward:
+        body["onward"] = onward
+
+    return _ok(body)
 
 
 def _check_ct(domain: str) -> dict:

@@ -56,6 +56,30 @@ LIVE_ENTITIES = {
     "prod-f5qkfsxlxs4qg": "Bundle A, Core Identity Exposure (LIVE)",
 }
 
+# THREE SaaS PRODUCTS CARRY THE BUNDLE B DISPLAY NAME, AND ONLY ONE CAN FULFIL.
+# Measured 2026-09-22 with `aws marketplace-catalog list-entities`: three rows
+# named "RelayShield - Attack Surface & Supply Chain API", all Limited. Seven
+# visibility requests were refused because the Management Portal's own button
+# selects by NAME and the wrong row was the one being submitted.
+#
+# prod-szi2wdww3obry is the real one: it carries agreement
+# agmt-29l852u6kqzmjh2me0pglvj9q and product code cmh79gzztkdtp0dlzbdepa643,
+# which holds the live entitlement. The other two have never been subscribed,
+# fulfilled or metered, so AWS's "no successful metering records" was correct
+# for them every single time.
+#
+# THE REFUSAL IS NARROW ON PURPOSE. Only TargetVisibility Public is blocked, so
+# withdrawing a duplicate (Restricted / Limited) still works -- a guard that
+# forces you to skip the legitimate cleanup step is the one that gets loosened.
+DUPLICATE_BUNDLE_B = {
+    "prod-v5nr5gjtdnofi":
+        "a DUPLICATE Bundle B entity -- refused seven visibility requests, "
+        "never subscribed",
+    "prod-p3ei5nmgufnnq":
+        "a DUPLICATE Bundle B entity -- never subscribed, fulfilled or metered",
+}
+BUNDLE_B_REAL = "prod-szi2wdww3obry"
+
 # A change set that creates a product opens with CreateProduct. Anything else is
 # either a modification (wrong tool) or a shape nobody has reviewed.
 CREATE_TYPES = {"CreateProduct", "CreateOffer"}
@@ -207,6 +231,24 @@ def validate(doc: dict) -> list:
                 "placeholders on 2026-07-27.\n"
                 "       If you meant to modify that listing, use "
                 "tools/marketplace_add_dimension.py.")
+
+        if (change.get("ChangeType") == "UpdateVisibility"
+                and ident in DUPLICATE_BUNDLE_B
+                and (change.get("DetailsDocument") or {}).get(
+                    "TargetVisibility") == "Public"):
+            raise Refused(
+                f"UpdateVisibility Public targets {ident} -- "
+                f"{DUPLICATE_BUNDLE_B[ident]}.\n"
+                "       REFUSING. Three SaaS products carry the Bundle B display "
+                "name and only\n"
+                f"       {BUNDLE_B_REAL} has an agreement, a product code and "
+                "metering behind it.\n"
+                "       Publishing this one gives buyers a listing that cannot "
+                "fulfil.\n"
+                f"       Pass --product-id {BUNDLE_B_REAL} instead. To WITHDRAW "
+                "this duplicate,\n"
+                "       set TargetVisibility to Restricted, which this guard "
+                "allows.")
 
     return changes
 

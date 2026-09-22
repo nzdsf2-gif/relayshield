@@ -7457,3 +7457,36 @@ products with one name. **The portal's Update visibility button is what got us h
 **AND DECIDE WHAT HAPPENS TO THE SECOND ONE BEFORE PUBLISHING EITHER.** Two public products
 with the same name is worse than one unpublished: a buyer lands on whichever the search
 returns, and only one of them can fulfil. It stays private, or it is withdrawn.
+
+### THERE ARE THREE, NOT TWO, AND THE GUARD IS IN THE TOOL NOW
+
+**Measured 2026-09-22.** `list-entities` returned **three** SaaS products named
+*RelayShield - Attack Surface & Supply Chain API*, all `Limited`:
+
+    prod-szi2wdww3obry   the real one -- agmt-29l852u6kqzmjh2me0pglvj9q,
+                         product code cmh79gzztkdtp0dlzbdepa643, metered
+    prod-v5nr5gjtdnofi   duplicate, never subscribed -- the seven refusals
+    prod-p3ei5nmgufnnq   duplicate, never subscribed
+
+**I predicted two rows and there are three**, which is the same defect one layer
+down: I reasoned about how many duplicates there must be instead of reading the
+list. One command answered it.
+
+**AND THE SECTION ABOVE WOULD HAVE BEEN WORTHLESS ON ITS OWN**, by this file's
+own closing rule: *if a turn produces a CLAUDE.md section and no change that
+makes the failure impossible, it has written down an apology and billed a round
+for it.* So the artefact changed in the same commit:
+
+* `tools/marketplace_submit_changeset.py` REFUSES `UpdateVisibility` to `Public`
+  against either duplicate, and the refusal names `prod-szi2wdww3obry`.
+* **The refusal is narrow: only `Public`.** `Restricted` is allowed, because
+  withdrawing a duplicate is the legitimate cleanup and a guard that blocks it is
+  the CSM-SIMSWAP-1 shape -- one that gets loosened rather than obeyed.
+* `bundle_b_finish_2026-09-21.md` STEP 8 is a workflow dispatch taking the id as
+  an input, **not** the Management Portal button that selects by display name.
+* Three tests in `test_bundle_b_changeset.py`, proven by deleting the guard (two
+  failures) and restoring it.
+
+**A portal that lists three identically-named rows is not a thing a reader can
+get right, however carefully the step is worded.** The fix is the id in the
+input and the refusal in the tool.

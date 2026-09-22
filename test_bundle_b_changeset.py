@@ -19,6 +19,7 @@ import ast
 import json
 import pathlib
 import re
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -293,6 +294,54 @@ class TestItIsAWholeSubmission(unittest.TestCase):
                 if len(d["Description"]) > 90]
         self.assertEqual(over, [], f"dimension descriptions over 90: {over}")
 
+
+
+class DuplicateBundleBEntities(unittest.TestCase):
+    """Three SaaS products carry the Bundle B display name (measured 2026-09-22).
+
+    Seven visibility requests were refused because the Management Portal selects
+    by NAME and the wrong row was submitted. The guard is narrow on purpose: only
+    TargetVisibility Public is refused, so withdrawing a duplicate still works.
+    """
+
+    def _submit(self, product_id, visibility="Public"):
+        import subprocess, tempfile, json as _json, os
+        doc = _json.loads(
+            (ROOT / "aws_marketplace" / "bundle_b_go_public.json").read_text())
+        doc["ChangeSet"][0]["DetailsDocument"]["TargetVisibility"] = visibility
+        fd, path = tempfile.mkstemp(suffix=".json",
+                                    dir=str(ROOT / "aws_marketplace"))
+        try:
+            with os.fdopen(fd, "w") as fh:
+                _json.dump(doc, fh)
+            return subprocess.run(
+                [sys.executable, str(ROOT / "tools" /
+                                     "marketplace_submit_changeset.py"),
+                 path, "--product-id", product_id],
+                capture_output=True, text=True)
+        finally:
+            os.unlink(path)
+
+    def test_publishing_a_duplicate_is_refused_and_names_the_real_one(self):
+        for dup in ("prod-v5nr5gjtdnofi", "prod-p3ei5nmgufnnq"):
+            with self.subTest(dup=dup):
+                r = self._submit(dup)
+                self.assertNotEqual(r.returncode, 0,
+                                    f"{dup} was NOT refused")
+                self.assertIn("REFUSED", r.stdout + r.stderr)
+                self.assertIn("prod-szi2wdww3obry", r.stdout + r.stderr,
+                              "the refusal must name the entity to use instead")
+
+    def test_publishing_the_real_entity_is_allowed(self):
+        r = self._submit("prod-szi2wdww3obry")
+        self.assertEqual(r.returncode, 0,
+                         f"the real Bundle B entity was refused:\n{r.stdout}")
+
+    def test_withdrawing_a_duplicate_is_allowed(self):
+        """A guard that blocks the cleanup step is one that gets loosened."""
+        r = self._submit("prod-v5nr5gjtdnofi", visibility="Restricted")
+        self.assertEqual(r.returncode, 0,
+                         f"withdrawing a duplicate was refused:\n{r.stdout}")
 
 
 if __name__ == "__main__":

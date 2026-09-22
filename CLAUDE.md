@@ -7490,3 +7490,74 @@ for it.* So the artefact changed in the same commit:
 **A portal that lists three identically-named rows is not a thing a reader can
 get right, however carefully the step is worded.** The fix is the id in the
 input and the refusal in the tool.
+
+## BUNDLE B IS PUBLIC. prod-szi2wdww3obry, 2026-09-21.
+
+    Product ID    prod-szi2wdww3obry          Status: Public
+    Product code  cmh79gzztkdtp0dlzbdepa643
+    Product ARN   arn:aws:aws-marketplace:us-east-1:239677749008:AWSMarketplace/
+                  SaaSProduct/prod-szi2wdww3obry
+    bundle_b_go_public   Succeeded  Sep 21 2026 8:48 PM EDT -> 9:51 PM EDT
+
+Eight submissions: one create, one failed go-public (Sep 19), one succeeded
+(Sep 21). **The entity that went public is the one the accepted agreement names**
+-- `agmt-29l852u6kqzmjh2me0pglvj9q` -- so submitting by ID through
+`marketplace_changeset.yml` rather than by display name in the portal is what
+closed it, exactly as the seven-rejections section predicted.
+
+**`prod-v5nr5gjtdnofi` AND `prod-p3ei5nmgufnnq` ARE STILL LIMITED AND STILL
+CARRY THE SAME DISPLAY NAME.** Now that one of the three is Public that is no
+longer cosmetic: a buyer searching the Marketplace sees one listing, and the
+other two are duplicates that cannot fulfil. `marketplace_submit_changeset.py`
+refuses to publish either and allows `Restricted`, which is the withdrawal.
+
+### I BUILT A VERIFIER FOR A QUESTION THE PORTAL HAD ALREADY ANSWERED
+
+Asked as "verify whether the metered call landed before I burn another rejected
+submission". I read that as the question and built
+`tools/verify_bundle_b_metering.py` for it. **The submission had already
+succeeded three hours earlier**, and the Requests log on the product page says
+so in one line.
+
+**THE ORDERING RULE, and it is the cheap half of every diagnosis: before
+building a check for whether something is READY to be attempted, check whether
+it has already been ATTEMPTED and what happened.** The Requests log is one
+glance and it is the authoritative record of every change set this programme
+has submitted. It costs nothing and it is the first thing to look at, not the
+last. This is the same shape as asking the founder to read a value out of a log
+I could read myself -- a round spent on something a state read settles.
+
+The tool was not wasted (it found the metering-response gap, three missing
+patterns in the audit script's section 5, and that the log line cannot name the
+product at all), but it answered a question nobody needed answered that hour.
+
+### ARCHITECTURE DETAILS: "NONE OF THE ABOVE", AND IT IS NOT A JUDGEMENT CALL
+
+The listing's Architecture details tab wants an AWS hosting pattern. Read from
+the code rather than guessed:
+
+* **Option 1, "runs entirely on AWS", is FALSE.** It requires that *any 3rd
+  party dependencies* run on AWS. `/v1/metered/secret-scan` alone reaches
+  GitHub, npm, PyPI, Docker Hub, Hugging Face and Postman -- its own price
+  comment names all six -- and the other Bundle B endpoints add gopluslabs,
+  DexScreener, tonapi, RDAP, Helius, Hudson Rock and HIBP. None of those runs
+  in 239677749008.
+* **Option 2, replicate or migrate data to AWS**, is a different product shape.
+* **Option 3, "only the application plane runs on AWS", is ALSO FALSE**, and
+  picking it to look better would be a different false claim: it asserts the
+  CONTROL plane runs outside AWS, and ours does not. Key issuance, entitlement
+  resolution, metering and DynamoDB are all in 239677749008.
+* **Option 4 is what is left and it is accurate.** Its own text says the listing
+  continues to publish; the only cost is a designation we are not entitled to.
+
+**A public listing carries only claims that stay true without maintenance**, and
+"all third-party dependencies run on AWS" would stop being true the next time an
+endpoint adds a vendor. The conservative option is also the durable one.
+
+**UNVERIFIED: AWS's own Architecture guidelines page is egress-blocked from the
+container**, so whether they count an outbound SaaS API as a "3rd party
+dependency" is read from the option text itself rather than from their
+definition. The link is on that form. If it says they mean deployed components
+rather than called APIs, option 1 becomes arguable -- and the form is
+re-submittable ("if not approved, you can submit again"), so this is a cheap
+thing to get wrong and an expensive thing to overclaim.

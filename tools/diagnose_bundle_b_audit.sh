@@ -176,7 +176,16 @@ fi
 echo
 
 echo "== 5. Has BatchMeterUsage ever succeeded? (last 14 days)"
-for PAT in "Marketplace usage reported" "Marketplace usage reporting failed" "Skipping bundle usage report"; do
+# ALL SIX STRINGS THE FUNCTION WRITES. The first three were the whole list
+# until 2026-09-22, and the three that were missing are exactly the ones the
+# metering-response fix ADDED -- so a REJECTED record printed "none" here,
+# which reads identically to "nothing was ever metered" and is a different
+# finding with a different fix. For the product-code JOIN, use
+# tools/verify_bundle_b_metering.py: these lines log account= and dimension=
+# and never the product, so this section cannot say WHICH product landed.
+for PAT in "Marketplace usage reported" "Marketplace usage NOT metered" \
+           "Marketplace usage UNPROCESSED" "Marketplace usage reporting returned no Results" \
+           "Marketplace usage reporting failed" "Skipping bundle usage report"; do
   echo "   -- $PAT"
   OUT=$(aws_ logs filter-log-events \
           --log-group-name "/aws/lambda/relayshield-api" \

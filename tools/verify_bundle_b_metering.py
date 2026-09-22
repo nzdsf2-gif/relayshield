@@ -49,11 +49,26 @@ CODE_RE = re.compile(r"^[a-z0-9]{25}$")
 
 
 def aws(*args, **kw):
-    """Returns (ok, text). A CLI error is returned VERBATIM: a summary of a
-    refusal is how AccessDenied and ExpiredToken become one indistinguishable
-    'it did not work'."""
-    p = subprocess.run(["aws", "--no-cli-pager", *args],
-                       capture_output=True, text=True, timeout=kw.get("timeout", 180))
+    """Returns (ok, text). NEVER RAISES.
+
+    The first version let subprocess.TimeoutExpired propagate, so a slow read
+    killed the process before the VERDICT printed and the run produced a
+    traceback instead of an answer. Verdict-first is worthless if a failure in
+    gathering can prevent the verdict being reached at all: every read here
+    returns a recorded error and the verdict is always printed.
+
+    A CLI error comes back VERBATIM -- a summary of a refusal is how
+    AccessDenied and ExpiredToken become one indistinguishable 'it did not
+    work'."""
+    try:
+        p = subprocess.run(["aws", "--no-cli-pager", *args],
+                           capture_output=True, text=True,
+                           timeout=kw.get("timeout", 120))
+    except subprocess.TimeoutExpired:
+        return False, (f"timed out after {kw.get('timeout', 120)}s: aws "
+                       + " ".join(args[:3]))
+    except FileNotFoundError:
+        return False, "the AWS CLI is not on PATH."
     if p.returncode != 0:
         return False, (p.stderr or p.stdout).strip()
     return True, p.stdout.strip()
@@ -145,21 +160,69 @@ def main():
 
     accounts = {r.get("aws_account_id", "") for r in rows if r.get("aws_account_id")}
 
-    # 2. Every metering line, by pattern. filter-log-events with --max-items,
-    #    the form this repo has already proven returns rather than paginating
-    #    forever over a rare pattern.
-    since = int((time.time() - 14 * 86400) * 1000)
-    found, log_err = {}, ""
-    for pat in log_patterns():
-        print(f"  ... {pat}", file=sys.stderr)
-        ok, out = aws("logs", "filter-log-events", "--log-group-name", LOG_GROUP,
-                      "--start-time", str(since), "--filter-pattern", f'"{pat}"',
-                      "--max-items", "25", "--query", "events[].message",
-                      "--output", "text")
-        if not ok:
-            log_err = out
-            break
-        found[pat] = [l.strip() for l in out.splitlines() if l.strip() and l.strip() != "None"]
+    # 2. Every metering line, in ONE Logs Insights query.
+    #
+    # THIS SHIPPED ON filter-log-events AND TIMED OUT AFTER 180 SECONDS ON THE
+    # FIRST PATTERN, having printed nothing. filter-log-events is a SCAN: it
+    # returns a nextToken to keep walking log streams even when the page it
+    # just returned held no match, so a rare pattern over 14 days of
+    # /aws/lambda/relayshield-api -- the busiest group we have -- is thousands
+    # of sequential round trips. --max-items 25 does not bound it either; it
+    # bounds MATCHES, so a pattern with no matches walks the whole group.
+    #
+    # tools/miniapp_funnel.py and tools/ti_demo_metrics.py each paid for this
+    # already and CLAUDE.md records both. This is the third time, and writing
+    # it down twice evidently did not stop me, so the shape is here in the
+    # file that would otherwise repeat it: if a read is over a log group and
+    # it is not Insights, it is a scan.
+    #
+    # One query for all six substrings rather than six queries: the
+    # classification back to a pattern is done client-side below, so the
+    # filter and the classifier cannot drift apart.
+    since = int(time.time() - 14 * 86400)
+    now = int(time.time())
+    pats = log_patterns()
+    where = " or ".join(f'@message like "{p}"' for p in pats)
+    query = f"fields @timestamp, @message | filter {where} | sort @timestamp desc | limit 200"
+
+    found = {p: [] for p in pats}
+    log_err = ""
+    print("  querying Logs Insights (one query, ~15s) ...", file=sys.stderr, flush=True)
+    ok, out = aws("logs", "start-query", "--log-group-name", LOG_GROUP,
+                  "--start-time", str(since), "--end-time", str(now),
+                  "--query-string", query, "--limit", "200",
+                  "--query", "queryId", "--output", "text")
+    if not ok:
+        log_err = out
+    else:
+        qid, deadline = out.strip(), time.time() + 120
+        while True:
+            ok, raw = aws("logs", "get-query-results", "--query-id", qid,
+                          "--output", "json", timeout=60)
+            if not ok:
+                log_err = raw
+                break
+            resp = json.loads(raw)
+            status = resp.get("status")
+            if status == "Complete":
+                for row in resp.get("results", []):
+                    msg = next((f.get("value", "") for f in row
+                                if f.get("field") == "@message"), "")
+                    msg = msg.strip()
+                    for pat in pats:
+                        if pat in msg:
+                            found[pat].append(msg)
+                            break
+                break
+            if status in ("Failed", "Cancelled", "Timeout"):
+                log_err = f"Insights returned status {status} -- the query did not run."
+                break
+            if time.time() >= deadline:
+                aws("logs", "stop-query", "--query-id", qid, timeout=30)
+                log_err = ("Insights did not finish inside 120s. That is a fact "
+                           "about the query, NOT a zero.")
+                break
+            time.sleep(2)
 
     succeeded = [l for p, ls in found.items() if "status=Success" in p or "reported" in p
                  for l in ls if "status=Success" in l]

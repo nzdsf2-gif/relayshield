@@ -123,5 +123,60 @@ class AuditScriptSearchesAllSix(unittest.TestCase):
                 f"audit section 5 does not search for {head!r}")
 
 
+class ReadsNeverRaiseAndNeverScan(unittest.TestCase):
+    """The real run died with subprocess.TimeoutExpired after 180s on the
+    FIRST pattern, having printed nothing -- so verdict-first produced a
+    traceback instead of an answer, and filter-log-events was a SCAN for the
+    third time in this repo."""
+
+    def test_a_hanging_cli_returns_an_error_instead_of_raising(self):
+        mod = _load()
+        ok, msg = mod.aws("sleep-forever", timeout=1)   # no such subcommand
+        self.assertFalse(ok)
+        self.assertIsInstance(msg, str)
+
+    def test_a_missing_cli_returns_an_error_instead_of_raising(self):
+        import os
+        mod = _load()
+        old = os.environ["PATH"]
+        try:
+            os.environ["PATH"] = "/nonexistent"
+            ok, msg = mod.aws("sts", "get-caller-identity")
+        finally:
+            os.environ["PATH"] = old
+        self.assertFalse(ok)
+        self.assertIn("not on PATH", msg)
+
+    def test_no_read_is_a_log_scan(self):
+        """ANCHORED ON THE CALLS WITH ast, NOT ON THE FILE. The comment above
+        the Insights query explains why filter-log-events is wrong and
+        therefore contains the string -- grepping would pass on the defect,
+        which is the trap this same tool fell into an hour earlier."""
+        tree = ast.parse(TOOL.read_text(encoding="utf-8"))
+        banned = []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "aws"):
+                args = [a.value for a in node.args
+                        if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+                if "filter-log-events" in args:
+                    banned.append(args)
+        self.assertEqual(banned, [],
+                         "filter-log-events is a SCAN over the log group; use "
+                         "Logs Insights (start-query/get-query-results)")
+
+    def test_it_actually_uses_insights(self):
+        tree = ast.parse(TOOL.read_text(encoding="utf-8"))
+        called = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "aws"):
+                called.update(a.value for a in node.args
+                              if isinstance(a, ast.Constant)
+                              and isinstance(a.value, str))
+        self.assertIn("start-query", called)
+        self.assertIn("get-query-results", called)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

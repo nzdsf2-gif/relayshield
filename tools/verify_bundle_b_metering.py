@@ -160,6 +160,35 @@ def main():
 
     accounts = {r.get("aws_account_id", "") for r in rows if r.get("aws_account_id")}
 
+    # 1b. DOES THAT ACCOUNT METER FOR ANY OTHER PRODUCT?
+    #
+    # The log line names the ACCOUNT and the DIMENSION, never the product. So
+    # "a success line carrying an account that holds a key row for this product
+    # code" is one notch weaker than "metered against this product code", and
+    # the notch matters precisely here: three SaaS products carry the Bundle B
+    # display name, and if this account also holds a meterable key row under a
+    # DIFFERENT product code then the record could belong to that one.
+    #
+    # A key row can only meter when it carries a licence ARN, so the question
+    # is how many DISTINCT product codes this account holds a licenced row for.
+    # One means the attribution is unambiguous. More than one means it is not,
+    # and saying so is the whole reason this step exists.
+    siblings, sib_err = {}, ""
+    for acct in sorted(a for a in accounts if a):
+        ok, raw = aws("dynamodb", "scan", "--table-name", KEY_TABLE,
+                      "--filter-expression", "aws_account_id = :a",
+                      "--expression-attribute-values", json.dumps({":a": {"S": acct}}),
+                      "--projection-expression",
+                      "aws_product_code, aws_license_arn",
+                      "--output", "json")
+        if not ok:
+            sib_err = raw
+            break
+        for it in json.loads(raw).get("Items", []):
+            r = {k: list(v.values())[0] for k, v in it.items()}
+            if r.get("aws_license_arn"):
+                siblings.setdefault(r.get("aws_product_code", "(none)"), set()).add(acct)
+
     # 2. Every metering line, in ONE Logs Insights query.
     #
     # THIS SHIPPED ON filter-log-events AND TIMED OUT AFTER 180 SECONDS ON THE
@@ -246,10 +275,26 @@ def main():
         print("  BatchMeterUsage needs is only ever read off a key row.")
         print("  -> The fulfillment redirect for this product has not provisioned")
         print("     a key. Submitting for visibility now will be refused again.")
-    elif ours:
-        print(f"  YES. {len(ours)} successful metering record(s) against an account")
-        print("  that holds a key row for this product code.")
+    elif ours and len(siblings) == 1 and code in siblings:
+        print(f"  YES. {len(ours)} successful metering record(s), and the attribution")
+        print("  is unambiguous: the account that produced them holds a meterable")
+        print(f"  key row for {code} and for no other product code.")
         print("  -> This is the evidence AWS's audit error 2 asks for.")
+    elif ours and sib_err:
+        print(f"  PROBABLY, NOT PROVEN. {len(ours)} successful metering record(s) from")
+        print("  an account that holds a meterable key row for this product code.")
+        print("  The read that would rule out a sibling product was refused, so")
+        print("  the attribution is unconfirmed rather than confirmed.")
+    elif ours:
+        others = sorted(k for k in siblings if k != code)
+        print(f"  NOT PROVEN. {len(ours)} successful metering record(s) from an account")
+        print("  that holds a meterable key row for this product code -- AND for:")
+        for k in others:
+            print(f"      {k}")
+        print("  The log line names the account and the dimension, never the")
+        print("  product, so these records cannot be attributed to one of them.")
+        print("  -> Resolve the duplicate key rows before resubmitting, or the")
+        print("     audit may be reading the same ambiguity.")
     elif succeeded:
         print(f"  NO -- and this is the dangerous one. {len(succeeded)} metering call(s)")
         print("  SUCCEEDED, but none carries an account that holds a key row for")
@@ -285,6 +330,19 @@ def main():
               f"  customer={r.get('aws_customer_id','') or '(none)'}"
               f"  bundle_b_access={r.get('bundle_b_access','')}")
         print(f"    licence: {r.get('aws_license_arn','') or '(NONE -- cannot meter)'}")
+
+    print()
+    print("-" * 72)
+    print("EVIDENCE 1b. Product codes this account can meter for")
+    print("  (a key row can only meter if it carries a licence ARN)")
+    if sib_err:
+        print(f"  could not read, verbatim: {sib_err}")
+    elif not siblings:
+        print("  none")
+    for pc, accts in sorted(siblings.items()):
+        mark = "  <-- the one asked about" if pc == code else "  <-- ANOTHER PRODUCT"
+        print(f"  {pc}{mark}")
+        print(f"    accounts: {', '.join(sorted(accts))}")
 
     print()
     print("-" * 72)

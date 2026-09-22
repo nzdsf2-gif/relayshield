@@ -54,6 +54,14 @@ CONFIRM_TOKEN = "CREATE-NEW-PRODUCT"
 LIVE_ENTITIES = {
     "prod-kkvurtspreofy": "Bundle D, Agentic Attack Surface (LIVE, public)",
     "prod-f5qkfsxlxs4qg": "Bundle A, Core Identity Exposure (LIVE)",
+    # ADDED 2026-09-22, THE DAY THE WITHDRAW CHANGE SET WAS WRITTEN, because that
+    # file plus one mistyped --product-id takes the listing eight submissions
+    # bought straight back off the marketplace. Public since 2026-09-21, carries
+    # agreement agmt-29l852u6kqzmjh2me0pglvj9q and product code
+    # cmh79gzztkdtp0dlzbdepa643. The two duplicates differ from it only by a
+    # random suffix, which is precisely the shape that cost seven rounds.
+    "prod-szi2wdww3obry":
+        "Bundle B, Attack Surface & Supply Chain (LIVE, public since 2026-09-21)",
 }
 
 # THREE SaaS PRODUCTS CARRY THE BUNDLE B DISPLAY NAME, AND ONLY ONE CAN FULFIL.
@@ -223,6 +231,28 @@ def validate(doc: dict) -> list:
     for change in changes:
         ident = (change.get("Entity") or {}).get("Identifier", "")
         if ident in LIVE_ENTITIES:
+            # THE ROUTE NAMED HAS TO BE ONE THAT CAN DO THE THING. The first
+            # version of this message sent every refusal to
+            # marketplace_add_dimension.py, which cannot do UpdateVisibility at
+            # all -- the reader is then pointed at a second tool that also
+            # refuses them, which this repo has already paid for once.
+            if change.get("ChangeType") == "UpdateVisibility":
+                target = (change.get("DetailsDocument") or {}).get(
+                    "TargetVisibility", "?")
+                raise Refused(
+                    f"UpdateVisibility {target} targets {ident} -- "
+                    f"{LIVE_ENTITIES[ident]}.\n"
+                    "       REFUSING. This is a PUBLISHED listing, so Restricted "
+                    "takes it off the\n"
+                    "       marketplace and Limited is not a state a public "
+                    "product returns to.\n"
+                    "       If you meant to WITHDRAW A DUPLICATE, the ids differ "
+                    "only by suffix:\n"
+                    "       " + ", ".join(sorted(DUPLICATE_BUNDLE_B)) + "\n"
+                    "       Withdrawing this listing on purpose is a deliberate "
+                    "act: remove it from\n"
+                    "       LIVE_ENTITIES in this file, in its own commit, and "
+                    "say why there.")
             raise Refused(
                 f"a change targets {ident} -- {LIVE_ENTITIES[ident]}.\n"
                 "       REFUSING. A change set REPLACES the whole rate card of the "
@@ -640,6 +670,17 @@ def check_dates(doc: dict, today=None) -> None:
             "correct for one day.")
 
 
+# A FIELD WHOSE VALUES ARE A CLOSED SET IS NOT A LENGTH CONSTRAINT, and comparing
+# one against an accepted example produces a warning nobody can act on: the
+# withdraw change set's "Restricted" (10) reads as OVER against go-public's
+# "Public" (6), on a value that is correct and has no other spelling. A check
+# that cries wolf gets disabled, and then it is not a check at all -- so enum
+# fields are compared for membership by AWS and by nothing here.
+ENUM_CLASS_PATHS = {
+    "UpdateVisibility.TargetVisibility",   # Public | Restricted | Limited
+}
+
+
 def check_field_limits(doc: dict, reference="auto") -> None:
     classes = field_classes(doc)
 
@@ -669,6 +710,8 @@ def check_field_limits(doc: dict, reference="auto") -> None:
           f"({Path(reference).name}):")
     longer = []
     for path, values in sorted(classes.items()):
+        if path in ENUM_CLASS_PATHS:
+            continue
         mine = max(len(v) for v in values)
         theirs = ref.get(path)
         if not theirs:

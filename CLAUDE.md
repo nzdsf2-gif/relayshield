@@ -7490,3 +7490,170 @@ for it.* So the artefact changed in the same commit:
 **A portal that lists three identically-named rows is not a thing a reader can
 get right, however carefully the step is worded.** The fix is the id in the
 input and the refusal in the tool.
+
+## BUNDLE B IS PUBLIC. prod-szi2wdww3obry, 2026-09-21.
+
+    Product ID    prod-szi2wdww3obry          Status: Public
+    Product code  cmh79gzztkdtp0dlzbdepa643
+    Product ARN   arn:aws:aws-marketplace:us-east-1:239677749008:AWSMarketplace/
+                  SaaSProduct/prod-szi2wdww3obry
+    bundle_b_go_public   Succeeded  Sep 21 2026 8:48 PM EDT -> 9:51 PM EDT
+
+Eight submissions: one create, one failed go-public (Sep 19), one succeeded
+(Sep 21). **The entity that went public is the one the accepted agreement names**
+-- `agmt-29l852u6kqzmjh2me0pglvj9q` -- so submitting by ID through
+`marketplace_changeset.yml` rather than by display name in the portal is what
+closed it, exactly as the seven-rejections section predicted.
+
+**`prod-v5nr5gjtdnofi` AND `prod-p3ei5nmgufnnq` ARE STILL LIMITED AND STILL
+CARRY THE SAME DISPLAY NAME.** Now that one of the three is Public that is no
+longer cosmetic: a buyer searching the Marketplace sees one listing, and the
+other two are duplicates that cannot fulfil. `marketplace_submit_changeset.py`
+refuses to publish either and allows `Restricted`, which is the withdrawal.
+
+### I BUILT A VERIFIER FOR A QUESTION THE PORTAL HAD ALREADY ANSWERED
+
+Asked as "verify whether the metered call landed before I burn another rejected
+submission". I read that as the question and built
+`tools/verify_bundle_b_metering.py` for it. **The submission had already
+succeeded three hours earlier**, and the Requests log on the product page says
+so in one line.
+
+**THE ORDERING RULE, and it is the cheap half of every diagnosis: before
+building a check for whether something is READY to be attempted, check whether
+it has already been ATTEMPTED and what happened.** The Requests log is one
+glance and it is the authoritative record of every change set this programme
+has submitted. It costs nothing and it is the first thing to look at, not the
+last. This is the same shape as asking the founder to read a value out of a log
+I could read myself -- a round spent on something a state read settles.
+
+The tool was not wasted (it found the metering-response gap, three missing
+patterns in the audit script's section 5, and that the log line cannot name the
+product at all), but it answered a question nobody needed answered that hour.
+
+### ARCHITECTURE DETAILS: "NONE OF THE ABOVE", AND IT IS NOT A JUDGEMENT CALL
+
+The listing's Architecture details tab wants an AWS hosting pattern. Read from
+the code rather than guessed:
+
+* **Option 1, "runs entirely on AWS", is FALSE.** It requires that *any 3rd
+  party dependencies* run on AWS. `/v1/metered/secret-scan` alone reaches
+  GitHub, npm, PyPI, Docker Hub, Hugging Face and Postman -- its own price
+  comment names all six -- and the other Bundle B endpoints add gopluslabs,
+  DexScreener, tonapi, RDAP, Helius, Hudson Rock and HIBP. None of those runs
+  in 239677749008.
+* **Option 2, replicate or migrate data to AWS**, is a different product shape.
+* **Option 3, "only the application plane runs on AWS", is ALSO FALSE**, and
+  picking it to look better would be a different false claim: it asserts the
+  CONTROL plane runs outside AWS, and ours does not. Key issuance, entitlement
+  resolution, metering and DynamoDB are all in 239677749008.
+* **Option 4 is what is left and it is accurate.** Its own text says the listing
+  continues to publish; the only cost is a designation we are not entitled to.
+
+**A public listing carries only claims that stay true without maintenance**, and
+"all third-party dependencies run on AWS" would stop being true the next time an
+endpoint adds a vendor. The conservative option is also the durable one.
+
+**UNVERIFIED: AWS's own Architecture guidelines page is egress-blocked from the
+container**, so whether they count an outbound SaaS API as a "3rd party
+dependency" is read from the option text itself rather than from their
+definition. The link is on that form. If it says they mean deployed components
+rather than called APIs, option 1 becomes arguable -- and the form is
+re-submittable ("if not approved, you can submit again"), so this is a cheap
+thing to get wrong and an expensive thing to overclaim.
+
+## THE DANGEROUS DIRECTION INVERTED THE DAY BUNDLE B WENT PUBLIC
+
+**2026-09-22.** `bundle_b_withdraw.json` exists now (one `UpdateVisibility` to
+`Restricted`, id from `--product-id`) so the two duplicates can be taken off the
+board. Writing it opened a hole the same hour.
+
+**`prod-szi2wdww3obry` WAS NOT IN `LIVE_ENTITIES`**, because that dict was
+written the day before go-public succeeded. So the withdraw change set plus one
+mistyped id would have taken the listing eight submissions bought straight off
+the marketplace, past every guard, silently. **The three ids differ only by a
+random suffix**, which is the shape that already cost seven rounds.
+
+**The guard that was correct on Monday was the wrong guard on Tuesday.** It
+refused `UpdateVisibility` to `Public` against a duplicate -- narrow on purpose,
+so the withdrawal still worked. Nothing refused `Restricted` against the real
+one, because on Monday the real one was not public and there was nothing to
+protect. **A state change inverts which direction is dangerous, and a guard
+pinned to the old direction reads as protection while covering nothing.**
+
+`test_publishing_the_real_entity_is_allowed` had to be rewritten for the same
+reason: it REQUIRED that publishing `prod-szi2wdww3obry` succeeds, which was
+right on the day it was written and became wrong the moment it did. **A guard
+that encodes today's answer rather than what the answer must ACHIEVE eventually
+fails on correct code, and the temptation then is to loosen it.**
+
+**Two smaller things found by RUNNING it rather than reading it:**
+
+* **The field-size check reported `Restricted` (10) as OVER against the accepted
+  `Public` (6).** An enum is not a length constraint, and a warning nobody can
+  act on is how a check gets ignored. `ENUM_CLASS_PATHS` skips it.
+* **The `LIVE_ENTITIES` refusal sent every case to
+  `marketplace_add_dimension.py`, which cannot do `UpdateVisibility` at all** --
+  a second tool that would also refuse them. It names the duplicate ids now,
+  which is what the reader almost certainly meant. This file already recorded
+  that misdirection once, in a comment forty lines above the code that did it.
+
+All four proven by reintroducing the defect. **`Restricted` on a `Limited`
+product is UNVERIFIED**: `docs.aws.amazon.com` returns 000 from the container and
+no accepted change set in this repo uses that transition, so AWS's own
+validation is the first thing that can answer it. It is an immediate refusal
+rather than a review cycle, so getting it wrong costs seconds.
+
+## THE MUSE BLOCKER WAS OVER-SCOPED BY HALF A DAY, BY ME, IN THE SCOPE DOCUMENT
+
+`muse_connector_scope_2026-09-21.md` called the partner key *"a small build ...
+Half a day."* **There is no build.** `relayshield_api.py:13073` already skips
+`_check_keyless_ip_quota` on any valid `X-RS-API-KEY` and falls through to
+`return handler(params)` with no free-tier decrement, no metering and no counter
+inside `_verify_rs_api_key`. The cap's own comment names it as the intended
+answer: *"The durable fix is per-install free-tier keys."*
+
+**So it gates the LAUNCH, not the submission**, and the two run in parallel.
+**Over-scoping a blocker is how a finished thing sits untouched**: half a day
+gets scheduled behind other work, one existing operation gets done. The cost is
+the same shape as claiming something is missing when it is merely unfetched.
+
+`?source=muse` is registered in `_SOURCE_BANNERS` BEFORE anything is submitted,
+with **no referer hosts** deliberately -- a connector platform's pages are not
+where a click originates, and claiming `muse.ai` would attribute unrelated
+arrivals to this listing. Verified by EXECUTING `_resolve_source`, not reading
+it: `muse` logs `muse` and banners, an unregistered key logs `unmatched:` and
+renders nothing.
+
+## AWS MARKETPLACE ARRIVALS ARE ATTRIBUTED. THE BANNER WAS NAMING ONE BUNDLE OF TWO.
+
+A note carried into this session said an AWS Marketplace arrival was
+unattributable. **It is not**, and one grep settles it: the `aws` key in
+`_SOURCE_BANNERS` has carried `aws.amazon.com` and `console.aws.amazon.com` as
+referer hosts all along. **An absence needs the same evidence a presence does**,
+and I nearly recommended work against one I had not checked.
+
+**What WAS wrong is smaller and was caused by yesterday:** that banner named only
+Bundle D's contents, so a buyer arriving from the Bundle B listing published on
+2026-09-21 read a paragraph about a different product. Both are named now, in
+capabilities rather than counts, because it is a page we cannot cheaply edit.
+
+## NO ANNOUNCEMENT POST FOR BUNDLE B. THE PUBLISHABLE STORY IS THE TRAP, NOT THE SHIP.
+
+Asked as whether Bundle B going public is worth a blog post. **Not as an
+announcement.** The XSOAR rule already decides it: the angle is never "we
+shipped an integration", it is what the thing DOES that a reader cannot do
+today. A change set succeeding on the eighth attempt is a fact about our
+paperwork and reaches nobody.
+
+**There IS a real post in it and it is the failure rather than the success:**
+three SaaS products carrying one display name, a Management Portal that selects
+by name, seven refusals, and the one-command read (`list-entities`) that
+separates them. Other AWS sellers hit this and nothing on the internet describes
+it. The material is already written and it costs an afternoon.
+
+**Gated on withdrawing the duplicates first**, which is also the post's ending:
+here is the trap, here is how to detect it, here is how to fix it, here is the
+guard now in our own tooling. Publishing it while two duplicates are still
+listed is a claim anyone can check and find only half true. **Omit the entity
+ids**; they are ours and they add nothing to the argument.

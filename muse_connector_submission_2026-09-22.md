@@ -158,6 +158,96 @@ connector returns before they test it.
 
 ---
 
+## WHY NOT EMAIL CHECKING, AND WHAT ELSE IS ACTUALLY AVAILABLE
+
+Asked 2026-09-22: *"Why not also add email checking to the connector. Are there any other
+consumer-friendly APIs we can add? We get one chance to impress and link and wallet checking
+dont seem compelling enough."*
+
+**The critique is right and the free set is thin for a general consumer.** Read from
+`KEYLESS_SCAN_ENDPOINTS` in `relayshield_api.py` rather than recalled: there are **fourteen**
+keyless endpoints, not two, and **twelve of them are crypto** --
+`/v1/token-security`, `/v1/nft-security`, `/v1/dapp-security`, `/v1/approval-security`,
+`/v1/nft-floor`, three Solana, `/v1/ton-address`, `/v1/xrp-address`, `/v1/scan-wallet`,
+`/v1/wallet-inbound`. For somebody with Gmail, a calendar and a music subscription those are
+as narrow as the two the scope picked. **Only `/v1/link-check` is universal.**
+
+### THERE IS NO EMAIL-CHECK ENDPOINT TO ADD
+
+`checkemail@relayshield.net` is a **Cloudflare Worker, not an API route.** The verdict scoring
+that makes it good -- brand impersonation, sender mismatch, the weighting model, the 78 verdict
+tests -- lives in `cloudflare_worker_checkemail.js` as JavaScript. The only API calls it makes
+are `/v1/scan-url` and `/v1/result`, and **`/v1/scan-url` is not keyless**: it is VirusTotal, a
+real per-call bill, already $0.05 on the PAYG rail.
+
+So "add email checking" is a BUILD -- moving a scoring model out of a Worker into an endpoint --
+and not a field on a form.
+
+### AND `/v1/breach` IS THE ONE THAT WOULD ACTUALLY HURT
+
+It is the most consumer-compelling check we own: *has my email been in a breach*. It is also the
+one addition that would damage a live product, and the reason is not cost.
+
+    handle_breach -> haveibeenpwned.com/api/v3/breachedaccount/
+    ONE subscription key, from _hibp_api_key()
+    NO CACHE ANYWHERE in the function
+    429 is handled explicitly: "HIBP rate limit reached"
+
+**The $0.10 on our rate card is our RESALE price, not our cost.** HIBP bills a subscription with
+a rate limit, so the constraint is requests per minute against one key -- and that key is shared
+by the Telegram bot, the WhatsApp bot, the OAuth watchlist and every paying API customer.
+
+**A consumer platform pointed at it does not run up a bill, it runs us into the rate limit, and
+the 429 lands on the paying customers too.** That is a worse failure than the connector simply
+not offering the feature, and it is invisible until it happens.
+
+### THE RECOMMENDATION: DO NOT ADD AN ENDPOINT. CHANGE WHAT THE CONNECTOR IS FOR.
+
+**`/v1/link-check` is not compelling as "check a link". It is compelling as "check every link in
+my inbox", and Muse reads the inbox.** That is the same endpoint, the same zero vendor cost, and
+a question a general consumer actually has. The example prompts and the description lead with the
+message a link arrived in rather than with the link, because the agent has the message.
+
+Nothing is built for this and nothing needs to be: an agent that walks a user's mail and calls
+`/v1/link-check` per link costs us nothing at any volume, once the partner key lifts the per-IP
+cap.
+
+**Breach is the right v2 and it needs two things first, neither of which is a connector change:**
+
+1. **A cache on `handle_breach`.** A breach result for an address is stable for days -- HIBP's
+   data changes when a new breach is loaded, not per-minute -- and there is no cache at all
+   today. Worth doing whatever happens with Muse: it also speeds up the bot.
+2. **A separate HIBP key or an explicit rate budget for partner traffic**, so a consumer
+   platform cannot starve paying customers through the shared key.
+
+Roughly a day for both. **Until they exist, adding breach to this connector is a decision to
+degrade the breach check for every existing customer**, and that is not a trade the connector is
+worth.
+
+### PAYMENTS: NO
+
+Asked directly. **Do not select "My connector accepts payments".**
+
+Both endpoints are free and keyless, nothing is sold inside the host, and there is no checkout,
+subscription or upgrade path reachable from the connector. Selecting it claims a billing surface
+that does not exist, which invites a review of something we cannot show them.
+
+It is also the FD-14 shape pointed at a different host: selling digital goods inside a platform
+is what gets an integration restricted, and the whole reason this connector is two free endpoints
+is to have nothing there to review.
+
+### THE ICON PATH, EXACTLY
+
+    assets/miniapp/relayshield_icon_512.png
+
+**There is no `rs_icon`.** That directory holds six images and five of them are `idcheck_*`,
+which is the Mini App's brand mark and the wrong one here. Measured: PNG, 512x512, 8-bit RGB, no
+alpha, non-interlaced, 68 KB. It is tracked in git and on `origin/main`, so the merge puts a
+byte-identical copy on the Mac -- upload THAT file, never a copy that has been through chat,
+which arrives re-encoded as `.webp` and cannot be selected in an upload dialog.
+
+---
+
 ## Before the form
 
 1. **Merge**, so `?source=muse` is deployed. An unregistered key renders no

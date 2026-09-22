@@ -2153,6 +2153,155 @@ ENDPOINTS = [
         ),
     },
 
+    # ---------------- Free checks, no API key ----------------
+    # ADDED 2026-09-22. Both have been live and KEYLESS for months and neither
+    # was in this spec, which lists only /v1/metered/*. A partner that generates
+    # a client from this file -- which is the documented integration route, and
+    # the one the Muse connector uses -- could not see either of the two
+    # endpoints a consumer integration is actually built on, and would have been
+    # pointed at the metered surface instead.
+    #
+    # That is "a route added to the handler's dispatch table is not a route",
+    # landing on the spec rather than on the gateway. Both routes exist at the
+    # edge already; only the contract was missing.
+    {
+        "path": "/v1/link-check",
+        "price_cents": 0,
+        "tag": "Free checks (no API key)",
+        "summary": "Check one link, or every link in a message, for known abuse",
+        "description": (
+            "Keyless and free. Returns the three signals that are immediate and carry no vendor "
+            "cost: RelayShield's criminal IOC corpus, Google Safe Browsing, and domain registration "
+            "age. Send `url` for one link, or `urls` for up to 25 at once -- the batch form "
+            "deduplicates by domain and resolves the whole set in a single Safe Browsing request, "
+            "so screening a mailbox costs one call rather than one per link.\n\n"
+            "It never answers `safe`. The best available verdict is `unknown`, meaning nothing is "
+            "known against the domain, because an absence of evidence is not evidence of absence. "
+            "Unauthenticated callers share a per-IP daily allowance and a batch counts once per "
+            "URL; send an API key to lift it."
+        ),
+        "request": {
+            "props": {
+                "url": _str(
+                    "A single link. Must start with `http://` or `https://`. "
+                    "Omit when sending `urls`.",
+                    examples=["https://example-shop.co/checkout"],
+                ),
+                "urls": _arr(
+                    "Up to 25 links to check in one call. Omit when sending `url`. "
+                    "Results come back in the order submitted, including duplicates.",
+                    _str("A link starting with `http://` or `https://`."),
+                ),
+                "source": _str(
+                    "Optional integration identifier, recorded so a channel can be measured.",
+                    examples=["muse"],
+                ),
+            },
+            "example": {"urls": ["https://example-shop.co/checkout",
+                                 "https://login.example-bank.co/verify"],
+                        "source": "muse"},
+            "body_note": ("Send either `url` or `urls`, not both. `url` returns a single verdict "
+                          "object; `urls` returns a `results` array plus `counts`."),
+        },
+        "response": {
+            "props": {
+                "target": _str("The link this verdict is about. Single-link form only."),
+                "level": _str(
+                    "`high` for an IOC corpus or Safe Browsing hit, `medium` for a domain "
+                    "registered in the last 30 days, `unknown` otherwise. Never `safe`. "
+                    "Single-link form only.",
+                    enum=["high", "medium", "unknown"],
+                ),
+                "flagged": _bool("True when any signal fired. Single-link form only."),
+                "reasons": _arr("Plain-language reasons, one per signal that fired.",
+                                _str("A reason.")),
+                "signals": _obj(
+                    "Structured mirror of `reasons`. The signals are not equivalent and must not "
+                    "be summed: a corpus or Safe Browsing hit is blocklist grade, a young domain "
+                    "is a soft signal every new project also trips. `null` means the signal could "
+                    "not be resolved, which is NOT the same as false.",
+                    {
+                        "ioc_corpus": _bool("Domain appears in RelayShield's criminal IOC corpus."),
+                        "safe_browsing": _bool("Google Safe Browsing flags the domain."),
+                        "domain_age_days": _int("Days since registration, or null if unknown."),
+                    },
+                ),
+                "results": _arr(
+                    "Batch form only. One entry per submitted URL, in order, each carrying "
+                    "`target`, `level`, `flagged`, `reasons` and `signals`.",
+                    _obj("A per-link verdict.", {}),
+                ),
+                "counts": _obj(
+                    "Batch form only.",
+                    {
+                        "submitted": _int("URLs received."),
+                        "checked": _int("URLs actually resolved."),
+                        "flagged": _int("URLs with at least one signal."),
+                        "incomplete": _int("URLs NOT resolved in time. Read this before "
+                                           "presenting the batch as clean."),
+                    },
+                ),
+                "incomplete_urls": _arr(
+                    "Batch form, present only when something was not resolved. These were not "
+                    "checked and are NOT a clean result. Send them again.",
+                    _str("A URL that was not checked."),
+                ),
+                "note": _str("Standing caveat on what a heuristic verdict does and does not mean."),
+            },
+            "example": {
+                "results": [
+                    {"target": "https://example-shop.co/checkout", "level": "unknown",
+                     "flagged": False, "reasons": [],
+                     "signals": {"ioc_corpus": False, "safe_browsing": False,
+                                 "domain_age_days": 1400}},
+                    {"target": "https://login.example-bank.co/verify", "level": "high",
+                     "flagged": True,
+                     "reasons": ["Google Safe Browsing flags this domain"],
+                     "signals": {"ioc_corpus": False, "safe_browsing": True,
+                                 "domain_age_days": 6}},
+                ],
+                "counts": {"submitted": 2, "checked": 2, "flagged": 1, "incomplete": 0},
+            },
+        },
+        "notes": ("No API key required. A key is still accepted and removes the per-IP daily "
+                  "allowance, which is what an integration serving many users should send."),
+    },
+    {
+        "path": "/v1/wallet-risk",
+        "price_cents": 0,
+        "tag": "Free checks (no API key)",
+        "summary": "Screen a crypto wallet address before sending to it",
+        "description": (
+            "Keyless and free. Detects the chain from the address and screens it against sanctions "
+            "and abuse sources. Answers the question a person actually has before paying an address "
+            "they were given, rather than after."
+        ),
+        "request": {
+            "props": {
+                "address": _str(
+                    "A wallet address. The chain is detected from the address format.",
+                    examples=["0x0000000000000000000000000000000000000000"],
+                ),
+                "source": _str("Optional integration identifier.", examples=["muse"]),
+            },
+            "required": ["address"],
+            "example": {"address": "0x0000000000000000000000000000000000000000",
+                        "source": "muse"},
+        },
+        "response": {
+            "props": {
+                "address": _str("The address that was screened."),
+                "chain": _str("Detected chain."),
+                "risk_level": _str("Severity, or `unknown` when nothing is known.",
+                                   enum=_SEVERITY + ["unknown"]),
+                "risk_flags": _arr("Reasons the address was flagged.", _str("A flag.")),
+            },
+            "example": {"address": "0x0000000000000000000000000000000000000000",
+                        "chain": "ethereum", "risk_level": "unknown", "risk_flags": []},
+        },
+        "notes": "No API key required, on the same terms as /v1/link-check.",
+    },
+
     # ---------------- Account ----------------
     {
         "path": "/v1/account/info",

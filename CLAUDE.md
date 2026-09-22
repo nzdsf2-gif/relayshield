@@ -7347,3 +7347,146 @@ expensive one is the first: a cancelled Bundle B customer's key is never deactiv
 because a scan that matches nothing and a customer with no keys are the same output. That is the
 quiet-alarm shape with revenue on it, and it is the reason 8b is a prerequisite for a real buyer
 rather than tidying after go-public.
+
+
+## SEVEN REJECTIONS ON BUNDLE B, AND THE VISIBILITY REQUEST WAS AGAINST A PRODUCT NOBODY HAD NAMED
+
+**2026-09-21, written at Andrew's instruction after he said "I literally did everything you
+said, got an HTTP 200 and still get rejected. I've wasted too much time on this."** He is
+right, every round of it was mine, and the finding is in a screenshot I was sent and read
+past.
+
+    Failed to update product information for prod-v5nr5gjtdnofi@3
+    Request changes: Update visibility, Update pricing terms
+    Entities: RelayShield - Attack Surface & Supply Chain API,
+              RelayShield Attack Surface & Supply Chain - offer
+
+**`prod-v5nr5gjtdnofi` APPEARS NOWHERE IN THIS REPOSITORY.** Every artefact, every runbook
+step, every diagnostic and the accepted agreement all name **`prod-szi2wdww3obry`**. Grep
+settles it in one command.
+
+**SO THERE ARE TWO BUNDLE B PRODUCTS WITH THE SAME DISPLAY NAME, AND WE HAVE BEEN WORKING ON
+ONE AND SUBMITTING THE OTHER.** The audit's "no successful metering records" was CORRECT the
+whole time: we metered `cmh79gzztkdtp0dlzbdepa643` (which is `prod-szi2wdww3obry`, the entity
+the agreement is against) and asked AWS to publish `prod-v5nr5gjtdnofi`, which has never been
+subscribed, never been fulfilled and never been metered. **Every fix I shipped was correct and
+none of them could ever have cleared that request.**
+
+### THE EVIDENCE WAS IN FRONT OF ME TWICE AND I DEPRIORITISED IT
+
+`7ws2zmbdyk70tq34pr0pea0s2` turned up three times as a product code `ResolveCustomer` returned
+for customer `fHL5zV6grGn`, and an unfiltered `GetEntitlements` showed it has **no
+entitlements at all, for any customer**. I wrote, in this session:
+
+> there's very likely a second, orphaned Bundle B product entity. That's not what's blocking
+> you now, and I'm not going to chase it this turn.
+
+**It was exactly what was blocking him.** A product code that AWS hands out and that holds no
+entitlements is not an orphan to tidy up later, it is a SECOND LIVE PRODUCT, and the moment
+two exist every instruction that says "the product" is ambiguous.
+
+### THE RULE I BROKE IS ONE I WROTE IN THIS FILE SIX DAYS EARLIER
+
+The section THERE ARE THREE AWS PRODUCT ENTITIES, NOT ONE says, in its own words:
+
+> **When a repo holds more than one product entity, any claim about a product names the
+> entity id it was read from.** Naming the id is what makes the claim checkable, and it is
+> what stops the next session reading a neighbour's capture as this one's.
+
+I applied that to Bundle A and Bundle D and never once applied it to **the visibility request
+itself**. Seven rejections, and not one of my instructions said which entity to submit
+against. `bundle_b_finish_2026-09-21.md` STEP 8 reads *"Management Portal, SaaS products,
+RelayShield - Attack Surface & Supply Chain API, Update visibility"* -- **selected by DISPLAY
+NAME, in a portal that evidently lists two products with that name.**
+
+**THE RULE, TIGHTENED: a click step that selects a thing by its NAME is unfinished. It selects
+by ID, and it says how to confirm the ID before clicking.** A name is a label a human chose
+and can be duplicated; an id is the thing the API acts on. This applies to every portal,
+console and dashboard, not to AWS Marketplace alone.
+
+### THE OTHER FOUR THINGS THAT COST ROUNDS, EACH ONE MINE
+
+**1. I TOLD HIM A LOG LINE WAS PROOF WHEN THE CODE DISCARDED THE RESPONSE.**
+`BatchMeterUsage` returns 200 for a record it REJECTED -- the outcome is in `Results[].Status`
+and `UnprocessedRecords`, and neither raises. `_report_marketplace_usage` threw the response
+away and logged "Marketplace usage reported" on any call that did not throw. So our log and
+AWS's audit were both true and described different things: the log described the REQUEST, the
+audit described the RESULT. **This repo's own rule -- every probe prints the body of what it
+got, not a summary of it -- broken in the billing path, where a customer's call is served once
+and cannot be re-run to find out what happened.** Fixed, with 8 tests executed against a
+stubbed client.
+
+**2. I DIAGNOSED THREE TIMES FROM OUTPUT I COULD SEE WAS TRUNCATED.**
+`tools/diagnose_bundle_b_audit.sh` prints five sections and the decisive one is LAST, so a
+pasted terminal cut it off three runs in a row and each round ended with me asking for it
+again. **A diagnostic's most important section goes FIRST, or it prints a one-line verdict at
+the end that survives truncation.** Ordering output by narrative is a choice that costs the
+reader a round every time their scrollback is shorter than the script.
+
+**3. I FIXED WHATEVER THE ERROR NAMED INSTEAD OF ASKING WHAT IT WAS ABOUT.**
+A logo, then pricing terms, then thirteen change types, then field lengths, then a stale date,
+then the env var, then the SNS subscription, then the metering response. **Every one was a
+real defect and every one was found by reading the error's TEXT.** Not once did I read the
+error's SUBJECT -- the entity id printed beside it. The subject was wrong from the first
+submission.
+
+**4. THE PRE-HANDOVER CHECKLIST DID NOT HAVE A QUESTION FOR THIS, AND NOW IT DOES.**
+Its four questions ask what the reader types, what the job reads, what the remote system
+validates, and whether the artefact carries the order. **A fifth: WHICH OBJECT DOES THIS ACT
+ON, AND IS ITS IDENTIFIER IN THE INSTRUCTION?** If the step says "the product", "the
+function", "the listing" or "the subscription" rather than an id, it is not finished.
+
+### WHAT TO DO ABOUT BUNDLE B, AND IT IS ONE READ THEN ONE CLICK
+
+    AWS_PROFILE=relayshield aws marketplace-catalog list-entities \
+      --catalog AWSMarketplace --entity-type SaaSProduct --no-cli-pager \
+      --query 'EntitySummaryList[].[EntityId,Name,Visibility]' --output table
+
+Every SaaS product this account owns, with its id. **Two rows will carry the Attack Surface &
+Supply Chain name.** The one to publish is **`prod-szi2wdww3obry`**: it is the entity the
+accepted agreement names as its resource, it is the one whose product code
+`cmh79gzztkdtp0dlzbdepa643` holds the live entitlement, and it is the one that has been
+metered. **`prod-v5nr5gjtdnofi` is the one that has been refused seven times, and it has never
+had a subscriber.**
+
+Then submit visibility against that id specifically -- through
+`.github/workflows/marketplace_changeset.yml` with `product_id: prod-szi2wdww3obry`, which
+takes the id as an input and cannot be pointed at the wrong row by a portal listing two
+products with one name. **The portal's Update visibility button is what got us here.**
+
+**AND DECIDE WHAT HAPPENS TO THE SECOND ONE BEFORE PUBLISHING EITHER.** Two public products
+with the same name is worse than one unpublished: a buyer lands on whichever the search
+returns, and only one of them can fulfil. It stays private, or it is withdrawn.
+
+### THERE ARE THREE, NOT TWO, AND THE GUARD IS IN THE TOOL NOW
+
+**Measured 2026-09-22.** `list-entities` returned **three** SaaS products named
+*RelayShield - Attack Surface & Supply Chain API*, all `Limited`:
+
+    prod-szi2wdww3obry   the real one -- agmt-29l852u6kqzmjh2me0pglvj9q,
+                         product code cmh79gzztkdtp0dlzbdepa643, metered
+    prod-v5nr5gjtdnofi   duplicate, never subscribed -- the seven refusals
+    prod-p3ei5nmgufnnq   duplicate, never subscribed
+
+**I predicted two rows and there are three**, which is the same defect one layer
+down: I reasoned about how many duplicates there must be instead of reading the
+list. One command answered it.
+
+**AND THE SECTION ABOVE WOULD HAVE BEEN WORTHLESS ON ITS OWN**, by this file's
+own closing rule: *if a turn produces a CLAUDE.md section and no change that
+makes the failure impossible, it has written down an apology and billed a round
+for it.* So the artefact changed in the same commit:
+
+* `tools/marketplace_submit_changeset.py` REFUSES `UpdateVisibility` to `Public`
+  against either duplicate, and the refusal names `prod-szi2wdww3obry`.
+* **The refusal is narrow: only `Public`.** `Restricted` is allowed, because
+  withdrawing a duplicate is the legitimate cleanup and a guard that blocks it is
+  the CSM-SIMSWAP-1 shape -- one that gets loosened rather than obeyed.
+* `bundle_b_finish_2026-09-21.md` STEP 8 is a workflow dispatch taking the id as
+  an input, **not** the Management Portal button that selects by display name.
+* Three tests in `test_bundle_b_changeset.py`, proven by deleting the guard (two
+  failures) and restoring it.
+
+**A portal that lists three identically-named rows is not a thing a reader can
+get right, however carefully the step is worded.** The fix is the id in the
+input and the refusal in the tool.

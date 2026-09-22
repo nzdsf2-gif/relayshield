@@ -178,13 +178,46 @@ as zero either way.
 **A served call and a metered call are different events, and only the second clears audit issue
 2.** This is the step that has no substitute.
 
-## STEP 8 -- ANDREW CLICKS THIS. Resubmit the visibility request.
+## STEP 8 -- ANDREW CLICKS THIS. Resubmit the visibility request, BY ID.
 
-AWS Marketplace Management Portal -> SaaS products ->
-**RelayShield - Attack Surface & Supply Chain API** -> **Update visibility** -> Public.
+**GitHub -> Actions -> Marketplace Change Set -> Run workflow.**
+
+    changeset    aws_marketplace/bundle_b_go_public.json
+    mode         apply
+    confirm      CREATE-NEW-PRODUCT
+    product_id   prod-szi2wdww3obry
+
+EXPECT: `SUBMITTED  ChangeSetId ...` and, above it, `1. UpdateVisibility  SaaSProduct@1.0
+prod-szi2wdww3obry`.
+STOP IF: `REFUSED: UpdateVisibility Public targets prod-...` -- the wrong id was typed. The
+refusal names the right one.
+
+**NOT the Management Portal's Update visibility button, and this is the whole reason the first
+seven requests were refused.** `list-entities` on 2026-09-22 returned **three** SaaS products
+named *RelayShield - Attack Surface & Supply Chain API*, all Limited:
+
+    prod-szi2wdww3obry    the real one: agreement agmt-29l852u6kqzmjh2me0pglvj9q,
+                          product code cmh79gzztkdtp0dlzbdepa643, metered
+    prod-v5nr5gjtdnofi    duplicate, never subscribed. The seven refusals were
+                          against THIS one, which is why "no successful metering
+                          records" was correct every time
+    prod-p3ei5nmgufnnq    duplicate, never subscribed
+
+The portal selects by DISPLAY NAME, so it cannot tell those three apart. The workflow takes the
+id as an input, and `tools/marketplace_submit_changeset.py` refuses to publish either duplicate.
 
 **Only after steps 5 and 7 have both shown their EXPECT line.** Both audit issues must be true
 at once and each is a different event; resubmitting on one of them costs another audit cycle.
+
+## STEP 8c -- ANDREW DECIDES. What happens to the two duplicates.
+
+**Two public products with one name is worse than one unpublished**: a buyer lands on whichever
+the search returns and only `prod-szi2wdww3obry` can fulfil. Both duplicates are Limited today,
+so nothing is exposed and this is not urgent -- but it is the reason not to leave them.
+
+My recommendation: **withdraw both**, `TargetVisibility: Restricted`, through the same workflow
+with `product_id` set to each in turn. The guard allows that deliberately; it blocks only
+`Public`. Costs one click each and removes a row the next session would have to re-establish.
 
 ---
 

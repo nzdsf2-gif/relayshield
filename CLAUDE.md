@@ -7783,3 +7783,45 @@ behaviour exactly. `sh tools/setup_breach_cache.sh` creates it, **enables TTL**
 step means the cache never expires and serves a months-old verdict forever), and
 asks the cheap question -- whether the role can already write to it -- before
 proposing a grant the shared role has no inline budget left to make.
+
+## ON DECK FOR THE NEXT SESSION: CREATE `relayshield_breach_cache` IN AWS
+
+**Recorded 2026-09-22 at Andrew's request, in his words: "Add AWS rs_breach_cache as
+ondeck ToDo for next session."** The table name is `relayshield_breach_cache`.
+
+**ANDREW RUNS THIS, after the merge:**
+
+    AWS_PROFILE=relayshield sh tools/setup_breach_cache.sh
+
+**EXPECT**, and this is read out of the script's own `echo` lines rather than written from
+memory, because an EXPECT invented by the writer is how a correct run reads as a failure:
+section 1 prints `   239677749008  (correct)`; section 2 prints either `already exists --
+leaving it alone` or `not present -- creating` then `created`; section 3 prints
+`current: <status>` and then either `already on -- nothing to do` or `enabling on attribute
+'ttl'` followed by `ENABLING`; section 4 prints the role name and **exactly two** decision
+lines, `dynamodb:GetItem` and `dynamodb:PutItem`, each reading `allowed`.
+
+**STOP IF** it prints `implicitDeny` on either write: the shared role
+`relayshield-breach-check-role-1sapnwdl` is at 26 inline policies of a 10,240-byte budget
+and 11 attached managed policies of 10 allowed, so the grant is not a one-liner and the
+script deliberately does not attempt it. That is the IAM SPLIT runbook, not a quick fix.
+
+**NOTHING IS BROKEN UNTIL THIS RUNS, AND THAT IS THE DESIGN.** `_breach_cache_get` fails
+soft to `None`, so every call falls through to a live HIBP request, which is today's
+behaviour exactly. The cache starts working the moment the table exists, **with no deploy**
+-- so this is a state change in AWS and not a release.
+
+**THE TTL STEP IS THE ONE THAT CANNOT BE SKIPPED.** DynamoDB IGNORES a `ttl` attribute
+unless time-to-live is switched on for that attribute name. A table created without it
+caches forever and serves a months-old breach verdict as current, which is worse than no
+cache: a stale "no breaches" is a wrong answer rather than a slow one, and nothing raises.
+
+**WHY IT MATTERS MORE THAN A CACHE USUALLY DOES.** HIBP is a **subscription with a rate
+limit**, not a per-call bill, and the $0.10 on our rate card is a RESALE price, not a cost.
+One key is shared by the Telegram bot, the WhatsApp bot, the OAuth watchlist and every
+paying API customer, so **a 429 earned by one caller is served to all of them.** That is a
+blast-radius question rather than a cost question, and it is invisible until it happens.
+
+**And the cache is what keeps a partner inside its budget**, which is why the ordering in
+`handle_breach` is cache read THEN budget charge: a cache hit costs a partner nothing.
+Charging first spends the budget on answers we already had. A test pins that order.

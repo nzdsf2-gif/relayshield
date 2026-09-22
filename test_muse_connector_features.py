@@ -550,5 +550,57 @@ class TheOnwardRoute(unittest.TestCase):
         self.assertIn(".get(", src)
 
 
+class TheSpecTheConnectorGeneratesFrom(unittest.TestCase):
+    """Muse writes the integration from the OpenAPI document, so the document
+    IS the integration. Two things about it are load-bearing and neither is
+    visible by reading the endpoint tables.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import relayshield_openapi_spec
+        cls.spec = relayshield_openapi_spec.build_spec()
+
+    def test_both_free_endpoints_are_in_it(self):
+        """They were live and keyless for months and the spec listed only
+        /v1/metered/*, so a partner generating a client could not see either
+        of the two endpoints this connector is built on."""
+        for path in ("/v1/link-check", "/v1/wallet-risk"):
+            self.assertIn(path, self.spec["paths"], f"{path} missing from the spec")
+
+    def test_the_free_endpoints_REQUIRE_NO_CREDENTIAL(self):
+        """The document's top-level `security` requires an API key. An
+        operation that inherits it tells every generated client that a
+        credential is mandatory on an endpoint that needs none -- which is
+        precisely the thing the keyless scope exists to avoid, and would have
+        been found by a reviewer rather than by us.
+
+        `security: []` is OpenAPI's explicit 'no security', distinct from
+        omitting the field, which inherits.
+        """
+        for path in ("/v1/link-check", "/v1/wallet-risk"):
+            op = self.spec["paths"][path]["post"]
+            self.assertEqual(op.get("security"), [],
+                             f"{path} inherits the document's security and would "
+                             f"generate a client demanding an API key")
+
+    def test_a_METERED_endpoint_still_demands_one(self):
+        """The guard above must not be satisfiable by deleting security
+        everywhere. A paid route with no security is a free route."""
+        op = self.spec["paths"]["/v1/metered/breach"]["post"]
+        self.assertTrue(op.get("security"),
+                        "a metered endpoint advertising no auth is a paid route "
+                        "documented as free")
+
+    def test_link_check_documents_the_BATCH_form(self):
+        """`urls` is the whole reason this connector is interesting: an agent
+        reading a mailbox checks every link in one call. A spec documenting
+        only `url` makes the generated client loop, which is 25x the quota."""
+        props = (self.spec["paths"]["/v1/link-check"]["post"]["requestBody"]
+                 ["content"]["application/json"]["schema"]["properties"])
+        self.assertIn("urls", props)
+        self.assertIn("url", props)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

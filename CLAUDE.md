@@ -7783,3 +7783,173 @@ behaviour exactly. `sh tools/setup_breach_cache.sh` creates it, **enables TTL**
 step means the cache never expires and serves a months-old verdict forever), and
 asks the cheap question -- whether the role can already write to it -- before
 proposing a grant the shared role has no inline budget left to make.
+
+## ON DECK FOR THE NEXT SESSION: CREATE `relayshield_breach_cache` IN AWS
+
+**Recorded 2026-09-22 at Andrew's request, in his words: "Add AWS rs_breach_cache as
+ondeck ToDo for next session."** The table name is `relayshield_breach_cache`.
+
+**ANDREW RUNS THIS, after the merge:**
+
+    AWS_PROFILE=relayshield sh tools/setup_breach_cache.sh
+
+**EXPECT**, and this is read out of the script's own `echo` lines rather than written from
+memory, because an EXPECT invented by the writer is how a correct run reads as a failure:
+section 1 prints `   239677749008  (correct)`; section 2 prints either `already exists --
+leaving it alone` or `not present -- creating` then `created`; section 3 prints
+`current: <status>` and then either `already on -- nothing to do` or `enabling on attribute
+'ttl'` followed by `ENABLING`; section 4 prints the role name and **exactly two** decision
+lines, `dynamodb:GetItem` and `dynamodb:PutItem`, each reading `allowed`.
+
+**STOP IF** it prints `implicitDeny` on either write: the shared role
+`relayshield-breach-check-role-1sapnwdl` is at 26 inline policies of a 10,240-byte budget
+and 11 attached managed policies of 10 allowed, so the grant is not a one-liner and the
+script deliberately does not attempt it. That is the IAM SPLIT runbook, not a quick fix.
+
+**NOTHING IS BROKEN UNTIL THIS RUNS, AND THAT IS THE DESIGN.** `_breach_cache_get` fails
+soft to `None`, so every call falls through to a live HIBP request, which is today's
+behaviour exactly. The cache starts working the moment the table exists, **with no deploy**
+-- so this is a state change in AWS and not a release.
+
+**THE TTL STEP IS THE ONE THAT CANNOT BE SKIPPED.** DynamoDB IGNORES a `ttl` attribute
+unless time-to-live is switched on for that attribute name. A table created without it
+caches forever and serves a months-old breach verdict as current, which is worse than no
+cache: a stale "no breaches" is a wrong answer rather than a slow one, and nothing raises.
+
+**WHY IT MATTERS MORE THAN A CACHE USUALLY DOES.** HIBP is a **subscription with a rate
+limit**, not a per-call bill, and the $0.10 on our rate card is a RESALE price, not a cost.
+One key is shared by the Telegram bot, the WhatsApp bot, the OAuth watchlist and every
+paying API customer, so **a 429 earned by one caller is served to all of them.** That is a
+blast-radius question rather than a cost question, and it is invisible until it happens.
+
+**And the cache is what keeps a partner inside its budget**, which is why the ordering in
+`handle_breach` is cache read THEN budget charge: a cache hit costs a partner nothing.
+Charging first spends the budget on answers we already had. A test pins that order.
+
+## EVERY KEYLESS ENDPOINT WAS 502ing IN PRODUCTION AND EVERY CHECK WE OWN WAS GREEN
+
+**2026-09-22. Deploy run 161 shipped `d0c9477` to AWS at 16:48 UTC, conclusion SUCCESS, and it
+took `/v1/link-check`, `/v1/wallet-risk` and twelve other keyless endpoints off the air.** Found
+two hours later by a test written for something else entirely.
+
+    _check_keyless_ip_quota(_source_ip, _link_check_units(path, params))
+
+**`params` was bound forty lines further down.** The only earlier assignment is inside the
+`/v1/app/feedback` arm, which returns, so on the keyless path the name was never bound at all.
+And that call sits **ABOVE the try block**, so the `except Exception` two screens down never sees
+it: the UnboundLocalError propagates out of `lambda_handler`, API Gateway answers **502**, and the
+handler writes **no log line**. Reproduced by executing `origin/main`'s exact bytes.
+
+**IT WAS MINE, SHIPPED THIS MORNING**, in the commit that made the keyless cap count UNITS rather
+than requests so a 25-URL batch could not multiply the daily allowance by 25. The counting change
+was right. Reading the body to do the counting, above the line that parses the body, was not.
+
+### THE THREE THINGS THAT SHOULD HAVE CAUGHT IT AND STRUCTURALLY COULD NOT
+
+**1. Forty-five tests, every one of them green, and every one called a HANDLER.**
+`handle_link_check(params)`, `handle_breach(params)`, `handle_wallet_risk(params)`. **Nothing in
+the suite had ever invoked `lambda_handler`**, so the dispatcher -- the code between the edge and
+every handler in the file -- was untested in its entirety. A suite can be thorough about
+functions and know nothing about the thing that calls them.
+
+**2. `ci.import-probe` cannot reach it, and this file already says so.** The probe payload carries
+no `path`, so it falls through to the 404 branch without ever entering the keyless block. The
+deploy went green because the module IMPORTS, which was never in question. **"Deployed and the
+probe passed" means the file parses and imports. It has never meant a request works.**
+
+**3. `node --check` has a Python twin and this is it.** Syntactically perfect, runtime dead,
+invisible to a reader -- the `INLINE_TEXT` and temporal-dead-zone family, in the dispatcher of the
+API rather than in a Worker's page.
+
+**THE RULE: a test that calls a handler proves the handler. The dispatcher needs its own tests,
+and they go through `lambda_handler` with an event.** `TheOnwardRoute` in
+`test_muse_connector_features.py` is now the first class in this repo that does, and it found this
+on its first run while looking for something else. Every new keyless endpoint gets at least one
+test that arrives the way a client arrives.
+
+**And the ordering is pinned with `ast`, deliberately, because a behavioural test cannot hold it.**
+Once the parse is above the quota check both orderings behave identically on the happy path, so
+the only thing that can fail on a regression is an assertion about the LINE NUMBERS. Proven by
+moving the parse back: six errors plus the ordering guard.
+
+### THE SAME TEST FOUND THE HALF-APPLIED FIX SITTING ON TOP OF IT
+
+The `onward` consumer route was attached inside the two link-check handlers, **leaving
+`/v1/wallet-risk` -- the other half of the Muse connector -- with no route back at all.** Half the
+fix, which is the shape of nearly every defect in this file: the reasoning was right and it was
+applied to the endpoint in front of me rather than to the surface.
+
+`_with_onward` is the single owner now, at the dispatcher, for every keyless endpoint. It attaches
+only to a 200 carrying an `ok: true` envelope (an advert under a 4xx reads as a product deflecting
+its own failure) and **it never raises** -- losing an onward link is a missed impression, losing
+the verdict tells a user the product is broken. A test asserts `_onward_route` is called in
+exactly ONE place, with `ast`, because a comment naming a helper is not a call to it.
+
+## ON DECK: `/v1/email-check`. THE SCORING HALF PORTS. THE PARSING HALF DOES NOT NEED TO.
+
+**Recorded 2026-09-22 at Andrew's request: "Add email checking as an endpoint as a ToDo for next
+session."**
+
+**`cloudflare_worker_checkemail.js` IS 1,707 LINES AND ROUGHLY HALF OF IT IS MIME PLUMBING WE DO
+NOT NEED.** `splitHeadersAndBody`, `decodePart`, `extractText`, `stripHtml`, `decodeEncodedWords`,
+`parseAddress`, `extractLinks`, `unwrap` and `detectForwardedOriginal` exist because email arrives
+at that Worker as **raw RFC822 from Cloudflare Email Routing**. An agent reading a mailbox has
+already parsed it: Gmail hands over the sender, the display name, the subject, the body text and
+the links as fields.
+
+**So the endpoint takes structured JSON and ports the SIGNALS and the WEIGHTING, not the parser:**
+
+    POST /v1/email-check
+    { from, display_name, subject, body_text, links[], auth_results?, attachment_names? }
+
+The functions that must move are `parseAuthResults`, `domainOf`, `normaliseBrandText`,
+`impersonatedBrand`, `attachmentSignals`, `publicHostSignal`, `pressureSignals`, `headerSignals`
+and the weighting model underneath them. **Two to three days, and that is an estimate from the
+function list rather than a measurement** -- the weighting has not been read line by line, and
+this file has been wrong about a scope in exactly this way before.
+
+**THREE THINGS THAT DECIDE WHETHER IT IS WORTH IT, and they are not obvious:**
+
+1. **It is the first keyless endpoint whose answer is not a lookup.** Every other one asks a
+   corpus or a vendor. This one REASONS about a document, and the 78 verdict tests are the asset:
+   the model exists and is proven, it is just trapped behind an email address.
+2. **It calls `/v1/scan-url` today and must NOT in the API version.** VirusTotal is $0.05 a call
+   and has never been keyless. The link half of an email check goes through `_assess_domain`, the
+   same zero-cost path `/v1/link-check` uses, so the endpoint can be keyless for the same reason.
+   **Wiring it to `/v1/scan-url` would silently attach a per-call vendor bill to a free surface.**
+3. **`checkemail@` stays exactly as it is.** It is live, it works, and it reaches people with no
+   account and no agent. The endpoint is a second door onto one model, not a migration.
+
+**The guard to write FIRST, before any of the port:** a test that fails if the endpoint's verdict
+disagrees with the Worker's on any of the 78 fixtures. Two implementations of one scoring model
+is this repo's most-repeated defect wearing its most expensive hat -- a security verdict that
+differs by surface is a product that tells two users different things about the same email.
+
+## MUSE'S TELEGRAM INTEGRATION DOES NOT POINT AT OUR BOT. IT MAKES THE USER CREATE ONE.
+
+**2026-09-22, from a TestingCatalog screenshot: Muse Settings -> Messaging channels -> Telegram ->
+"Bot token ... Get a token by contacting @BotFather and sending the /newbot command."**
+
+**THE NAIVE READ IS WRONG AND IT IS WORTH KILLING BEFORE A SESSION BUILDS ON IT.** Muse is not
+going to connect to `@relayshield_bot`. A Muse user creates **their own** bot and pastes its token
+into a third-party web UI, and Muse's agent then operates inside their Telegram. There is no
+inbound route from Muse to any bot we own, and nothing we can register to create one.
+
+**WHAT IT ACTUALLY CHANGES, AND ONE OF THE THREE IS A PRODUCT ANGLE RATHER THAN A LINK:**
+
+1. **The onward route stops being a context switch.** `t.me/relayshield_bot/idcheck?startapp=...`
+   returned to an agent that is already inside Telegram opens **in the same app, one tap**. Every
+   keyless verdict we serve that user now carries it, both endpoints, after the dispatcher fix.
+2. **Messenger and Signal do not change this.** The route is a `t.me` link either way; it simply
+   costs an app switch there, which is what it cost everywhere before today.
+3. **A BOT TOKEN PASTED INTO A THIRD-PARTY WEB UI IS THE EXACT CREDENTIAL CLASS WE DETECT**, and
+   Muse's own onboarding step creates the exposure. BOT-TOKEN-1 phase 0 shipped those patterns on
+   2026-09-13, and the Mini App already recognises a bare `@handle` and answers with what a token
+   is worth to a thief and why the fix is `/revoke` in BotFather rather than a rotation.
+
+**THE HONEST LIMIT ON THAT THIRD ONE, because it is the tempting thing to overstate:** the Mini
+App's bot branch says in its own copy *"We have not looked at your bot. This is what we check for,
+not a finding about you."* BOT-TOKEN-1 phase 1 -- `getMe` liveness and a corpus lookup -- is Top
+15 item 9 and is **NOT BUILT**. So this is a real editorial angle and a real reason for a Muse
+user to open our Mini App. **It is not yet a check.** Claiming otherwise is the `_APIFY_BANNER`
+mistake with a credential on the end of it.

@@ -84,11 +84,19 @@ endpoint because every invocation would arrive from one NAT address. The WhatsAp
 door's `keyless_check()` carries the same limit, written down on 2026-09-21. **A partner
 platform is the same shape with a much larger multiplier.**
 
-**So a Muse connector needs a partner key before it needs anything else**, and that is a
-small build rather than a new product: an API key issued to the connector, sent as
-`X-RS-API-KEY`, which lifts the per-IP cap and makes the traffic countable per partner
-instead of vanishing into one bucket. Half a day. **It does not make the endpoints paid**
-and must not: the whole argument above rests on them staying free.
+**So a Muse connector needs a partner key before it goes live**, sent as `X-RS-API-KEY`,
+which lifts the per-IP cap and makes the traffic countable per partner instead of vanishing
+into one bucket. **It does not make the endpoints paid** and must not: the whole argument
+above rests on them staying free.
+
+**CORRECTED 2026-09-22: THIS IS NOT A BUILD AND THIS DOCUMENT SAID HALF A DAY.** Read out of
+the dispatch at `relayshield_api.py:13073` rather than recalled: a valid `X-RS-API-KEY`
+already skips `_check_keyless_ip_quota` entirely and falls through to `return handler(params)`
+with no free-tier decrement, no metering, and no counter inside `_verify_rs_api_key`, which is
+a pure read. The cap's own comment names this as the intended answer -- *"The durable fix is
+per-install free-tier keys."* **Issuing the key is an existing operation**, so it gates the
+LAUNCH and not the submission, and the two run in parallel. Over-scoping a blocker is how an
+open item sits untouched: half a day gets scheduled, one existing operation gets done.
 
 ## The order, and reading is genuinely the first task
 

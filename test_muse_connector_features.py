@@ -12,6 +12,7 @@ fail-open, and a partial result rendering as a clean one. None of them is
 visible to a reader of the source, which is how the first two shipped.
 """
 import ast
+import contextlib
 import json
 import pathlib
 import sys
@@ -474,6 +475,217 @@ class GsbBatching(unittest.TestCase):
                                         lambda ds, k: {"bad.com"}):
             self.assertTrue(api._check_gsb("bad.com", "k"))
             self.assertFalse(api._check_gsb("ok.com", "k"))
+
+
+class TheOnwardRoute(unittest.TestCase):
+    """A free check served to a partner is a check with no route back.
+
+    Before this, nothing in relayshield_api.py named the bot, the Mini App or
+    WhatsApp at all -- the note pointed at /v1/scan-url with an API key, a
+    DEVELOPER upsell served to consumers. That is the inline-mode defect: live,
+    working, pointed at by nothing.
+
+    THESE GO THROUGH THE DISPATCHER, NOT THE HANDLER, and that is deliberate.
+    The first version of this feature wrote the field inside the two
+    link-check handlers and called the class done -- leaving /v1/wallet-risk,
+    the OTHER half of the Muse connector, with no route back. Testing the
+    handler would have stayed green through that. Testing the ROUTE cannot.
+    """
+
+    def _call(self, path, payload):
+        ev = {"path": path, "httpMethod": "POST", "body": json.dumps(payload),
+              "headers": {}, "requestContext": {"identity": {"sourceIp": "1.2.3.4"}}}
+        with unittest.mock.patch.object(api, "_check_keyless_ip_quota", lambda *a, **k: True):
+            return body(api.lambda_handler(ev, None))["data"]
+
+    def _link(self, source):
+        with unittest.mock.patch.object(
+                api, "_heuristic_url_check",
+                lambda u: {"flagged": False, "reasons": [],
+                           "signals": {"ioc_corpus": False, "safe_browsing": False,
+                                       "domain_age_days": None}}):
+            return self._call("/v1/link-check", {"url": "https://a.com/", "source": source})
+
+    def test_the_WIDGET_gets_no_onward_link(self):
+        """relayshield-widget.js is copied into OTHER PEOPLE'S BOTS. Injecting
+        'open our app' into somebody else's reply hijacks their user inside
+        their own product, and is how an integration gets removed."""
+        self.assertNotIn("onward", self._link("tg-widget"))
+
+    def test_an_unnamed_source_gets_no_onward_link(self):
+        self.assertNotIn("onward", self._link(""))
+        self.assertNotIn("onward", self._link("some-random-caller"))
+
+    def test_muse_gets_one_and_it_names_where_it_goes(self):
+        d = self._link("muse")
+        self.assertIn("onward", d)
+        self.assertIn("t.me/relayshield_bot/idcheck", d["onward"]["url"])
+        self.assertIn("telegram", d["onward"]["label"].lower(),
+                      "a link that does not say where it goes is worse than none")
+
+    def test_the_batch_form_carries_it_too(self):
+        with unittest.mock.patch.object(
+                api, "_heuristic_url_check_many",
+                lambda urls: {u: {"flagged": False, "reasons": [],
+                                  "signals": {"ioc_corpus": False,
+                                              "safe_browsing": False,
+                                              "domain_age_days": None}}
+                              for u in urls}):
+            d = self._call("/v1/link-check",
+                           {"urls": ["https://a.com/"], "source": "muse"})
+        self.assertIn("onward", d)
+
+    def test_WALLET_RISK_carries_it_too(self):
+        """The half that had none. /v1/wallet-risk is one of the connector's
+        two endpoints, so a verdict from it with no route back is half the
+        connector giving our answer away with nothing to come back to."""
+        with unittest.mock.patch.object(api, "_detect_chain_api", lambda a: "ethereum"), \
+             unittest.mock.patch.object(api, "dynamodb", _empty_ddb()), \
+             unittest.mock.patch.object(api, "_screen_sanctions", lambda *a, **k: (False, [])) \
+                 if hasattr(api, "_screen_sanctions") else contextlib.nullcontext():
+            d = self._call("/v1/wallet-risk",
+                           {"address": "0x" + "0" * 40, "source": "muse"})
+        self.assertIn("onward", d,
+                      "wallet-risk is half the connector and had no route back")
+
+    def test_a_FAILED_check_carries_no_advert(self):
+        """A 4xx says what went wrong. An onward link underneath it is noise,
+        and it reads as a product deflecting its own failure."""
+        resp = None
+        ev = {"path": "/v1/wallet-risk", "httpMethod": "POST",
+              "body": json.dumps({"source": "muse"}), "headers": {},
+              "requestContext": {"identity": {"sourceIp": "1.2.3.4"}}}
+        with unittest.mock.patch.object(api, "_check_keyless_ip_quota", lambda *a, **k: True):
+            resp = api.lambda_handler(ev, None)
+        self.assertNotEqual(resp["statusCode"], 200)
+        self.assertNotIn("onward", resp["body"])
+
+    def test_the_BODY_IS_PARSED_before_the_quota_reads_it(self):
+        """THE LIVE DEFECT THIS CLASS FOUND, pinned as a property.
+
+        _check_keyless_ip_quota(ip, _link_check_units(path, params)) sits ABOVE
+        the try block, so an UnboundLocalError there is not caught: API Gateway
+        returns 502 and no handler log line is written. It raised on every
+        request to all fourteen keyless endpoints -- the widget, the Mini App,
+        and both halves of the Muse connector.
+
+        Forty-five tests were green, because every one called a HANDLER. The
+        dispatcher was never exercised. Asserting the LINE ORDER is what a
+        behavioural test cannot do once the bug is fixed, because by then both
+        orders behave identically on the happy path.
+        """
+        tree = ast.parse((ROOT / "relayshield_api.py").read_text())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "lambda_handler")
+        uses = [n.lineno for n in ast.walk(fn)
+                if isinstance(n, ast.Call)
+                and getattr(n.func, "id", "") == "_link_check_units"]
+        self.assertTrue(uses, "_link_check_units is no longer called; the "
+                              "keyless cap may have stopped counting units")
+        # Only top-level binds count. One inside a branch that returns (the
+        # /v1/app/feedback arm) does not reach the quota check at all, which is
+        # precisely how this shipped looking correct.
+        binds = [n.lineno for n in fn.body
+                 if isinstance(n, ast.Assign)
+                 and any(getattr(t, "id", "") == "params" for t in n.targets)]
+        self.assertTrue(binds, "params is never bound at the top level of "
+                               "lambda_handler, so the quota check reads an "
+                               "unbound name and 502s")
+        self.assertLess(min(binds), min(uses),
+                        "params is bound AFTER the quota check reads it: "
+                        "UnboundLocalError on every keyless request")
+
+    def test_it_is_attached_in_exactly_ONE_place(self):
+        """N copies of a three-line attach is N chances for one endpoint to be
+        missed, which is exactly what happened. Asserted with ast rather than
+        by counting a string, because a comment naming the helper is not a
+        call to it."""
+        tree = ast.parse((ROOT / "relayshield_api.py").read_text())
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", "") == "_onward_route"]
+        # One inside _with_onward, and nowhere else.
+        self.assertEqual(len(calls), 1,
+                         "_onward_route is called in more than one place; the "
+                         "dispatcher wrapper is the single owner")
+
+    def test_every_onward_key_is_REGISTERED_at_the_worker_edge(self):
+        """An unregistered startapp key is silently downgraded to the generic
+        tg-miniapp, which is attribution that looks like it worked -- FD-8, and
+        four months of it. The route and the gate are two files that must
+        agree, so this reads both rather than trusting either."""
+        import re
+        worker = (ROOT / "cloudflare_worker_miniapp.js").read_text()
+        allowed = set(re.findall(r'"(tg-miniapp[a-z0-9-]*)"', worker))
+        for src, route in api.CONSUMER_ROUTES.items():
+            m = re.search(r"startapp=([a-z0-9-]+)", route["url"])
+            if not m:
+                continue
+            self.assertIn(m.group(1), allowed,
+                          f"{src}'s onward key is not in ALLOWED_SOURCES, so "
+                          f"every arrival through it logs as generic")
+
+    def test_it_is_an_ALLOWLIST_not_an_echo_of_whatever_was_sent(self):
+        """The property, not today's contents: a route is returned because the
+        source is NAMED, never because a source was merely supplied."""
+        tree = ast.parse((ROOT / "relayshield_api.py").read_text())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_onward_route")
+        src = ast.unparse(fn)
+        self.assertIn("CONSUMER_ROUTES", src)
+        self.assertIn(".get(", src)
+
+
+class TheSpecTheConnectorGeneratesFrom(unittest.TestCase):
+    """Muse writes the integration from the OpenAPI document, so the document
+    IS the integration. Two things about it are load-bearing and neither is
+    visible by reading the endpoint tables.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import relayshield_openapi_spec
+        cls.spec = relayshield_openapi_spec.build_spec()
+
+    def test_both_free_endpoints_are_in_it(self):
+        """They were live and keyless for months and the spec listed only
+        /v1/metered/*, so a partner generating a client could not see either
+        of the two endpoints this connector is built on."""
+        for path in ("/v1/link-check", "/v1/wallet-risk"):
+            self.assertIn(path, self.spec["paths"], f"{path} missing from the spec")
+
+    def test_the_free_endpoints_REQUIRE_NO_CREDENTIAL(self):
+        """The document's top-level `security` requires an API key. An
+        operation that inherits it tells every generated client that a
+        credential is mandatory on an endpoint that needs none -- which is
+        precisely the thing the keyless scope exists to avoid, and would have
+        been found by a reviewer rather than by us.
+
+        `security: []` is OpenAPI's explicit 'no security', distinct from
+        omitting the field, which inherits.
+        """
+        for path in ("/v1/link-check", "/v1/wallet-risk"):
+            op = self.spec["paths"][path]["post"]
+            self.assertEqual(op.get("security"), [],
+                             f"{path} inherits the document's security and would "
+                             f"generate a client demanding an API key")
+
+    def test_a_METERED_endpoint_still_demands_one(self):
+        """The guard above must not be satisfiable by deleting security
+        everywhere. A paid route with no security is a free route."""
+        op = self.spec["paths"]["/v1/metered/breach"]["post"]
+        self.assertTrue(op.get("security"),
+                        "a metered endpoint advertising no auth is a paid route "
+                        "documented as free")
+
+    def test_link_check_documents_the_BATCH_form(self):
+        """`urls` is the whole reason this connector is interesting: an agent
+        reading a mailbox checks every link in one call. A spec documenting
+        only `url` makes the generated client loop, which is 25x the quota."""
+        props = (self.spec["paths"]["/v1/link-check"]["post"]["requestBody"]
+                 ["content"]["application/json"]["schema"]["properties"])
+        self.assertIn("urls", props)
+        self.assertIn("url", props)
 
 
 if __name__ == "__main__":

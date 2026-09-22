@@ -138,6 +138,12 @@ const ALLOWED_SOURCES = new Set([
   "tg-miniapp-tgapp",
   "tg-miniapp-tgboard",
   "tg-miniapp-awesome",
+  // The Meta Muse connector's onward route. Registered BEFORE the connector is
+  // submitted: an unregistered key is downgraded to the generic tg-miniapp here
+  // and logs unmatched: on the landing page, which is attribution that looks
+  // like it worked. Its authority is CONSUMER_ROUTES in relayshield_api.py,
+  // which is the only place that emits this link.
+  "tg-miniapp-muse",
   // Two destinations registered 2026-09-19, BEFORE either is submitted to.
   // dappradar is a dapp catalogue whose audience holds TON, which is the one
   // audience for whom a TON-only Check tab is the headline. producthunt is

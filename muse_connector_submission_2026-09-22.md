@@ -248,6 +248,180 @@ which arrives re-encoded as `.webp` and cannot be selected in an upload dialog.
 
 ---
 
+## PAGE 2 OF THE FORM, FIELD BY FIELD
+
+**UNVERIFIED and it stays labelled:** `muse.ai` is egress-blocked from this container, so
+these are answers to the fields in the screenshot and nothing anticipates a field not in it.
+
+### Connection type
+
+    Raw API
+
+**Not MCP, and the reasoning is the scope's, unchanged.** Our MCP server is the HuggingFace
+Space, whose fourteen tools are questions a security engineer asks -- CVEs against a declared
+tech stack, non-human identity exposure in a package registry. A Muse user has Gmail, a
+calendar and a music subscription. Selecting MCP points the connector at that surface, which
+is the whole thing the scope decided against.
+
+### API base URL
+
+    https://api.relayshield.net
+
+**The HOST, not `/developers`.** This is the field the generated client concatenates paths
+onto, so `/developers` here produces `https://api.relayshield.net/developers/v1/link-check`,
+which 404s. The landing page belongs in the documentation field below and nowhere else.
+
+### OpenAPI specification URL
+
+    https://api.relayshield.net/openapi.json
+
+**Verified as a real route rather than assumed**, because a spec URL that 404s fails the
+integration at generation time: `relayshield_api.py` serves `/openapi.json`,
+`/openapi.json/` and `/.well-known/openapi.json`, and `handle_robots_txt` carries
+`Allow: /openapi.json` explicitly. `/docs` is Swagger UI over the same document.
+
+**AND A DEFECT IN IT WAS FIXED IN THE SAME SESSION AS THIS FILE, WHICH IS THE POINT OF
+FETCHING WHAT THE OTHER SIDE WILL FETCH.** Both free endpoints inherited the document's
+top-level `security`, so a client generated from it would have demanded an API key on the
+two endpoints this connector is built on. They now carry `security: []`, OpenAPI's explicit
+"no credential required". A reviewer would have found that, and a reviewer finding it costs
+a cycle.
+
+The document builds to 64 paths, OpenAPI 3.1, `servers` pointing at the host above.
+
+### Documentation URL
+
+    https://api.relayshield.net/developers?source=muse
+
+**This is where the landing page goes**, and `?source=muse` renders only on `/developers`,
+because `_SOURCE_BANNERS` is read by `handle_landing_page` and nowhere else. A `?source=` on
+the bare host is sent, accepted and never logged, which is FD-8 and four months of it.
+
+### Access requirements
+
+> No account, no API key and no OAuth. Both endpoints are unauthenticated and free.
+>
+> Unauthenticated calls share a daily allowance per source IP, which exists to stop the
+> endpoints being used as an open proxy rather than to protect a vendor bill. Platform
+> traffic arrives from a small set of egress addresses, so we issue integration partners a
+> key sent as X-RS-API-KEY which removes that allowance. It does not make the endpoints
+> paid, it does not change what they return, and it is not needed to test the connector.
+> Tell us where to send it.
+
+**The cap is named here rather than discovered at launch.** It is the one operational fact
+that would otherwise surface as "the connector stopped working in its first busy hour", and
+a reviewer reading it understands the key request when it arrives.
+
+### Authentication methods
+
+    API keys  -- ticked, and described as OPTIONAL in the text above.
+
+**If the field forces a required/none choice, choose NONE.** The endpoints genuinely need no
+credential, the spec now says so, and claiming a required credential makes the platform build
+a key-entry step in front of an integration that has nothing to put in it.
+
+---
+
+## DEVIL'S ADVOCATE: WHY NOT CHARGE THROUGH THE CONNECTOR
+
+Asked directly, and **my earlier flat "no, it is FD-14's shape" was over-confident and is
+corrected here.** FD-14 is OpenAI's rule and the Stars rule is Telegram's. Neither is Meta's,
+`muse.ai` is egress-blocked from the container, and **their form has a "Payments category"
+field at all**, which is evidence they anticipate paid connectors. So "the host forbids it"
+is a claim about two other hosts and I have not read this one's.
+
+**The answer is still no, and the real reason is that we have nothing to sell through it.**
+
+**Both endpoints in this connector are free and cost us nothing.** `/v1/link-check` consults
+our own DynamoDB corpus, Safe Browsing's free tier and RDAP. `/v1/wallet-risk` has been
+keyless since Crypto Shield Mobile. Charging for either would REMOVE a free feature rather
+than add a paid one, which is the standing principle in one line: **Stars pay vendor bills,
+they never tax the free tier**, and that rule is about the economics rather than about
+Telegram.
+
+**And the two checks that WOULD be worth charging for are exactly the two that are blocked.**
+`/v1/breach` runs on a shared HIBP subscription whose scarce resource is requests per minute
+against one key, so pointing a consumer platform at it starves paying customers rather than
+running up a bill -- and the cache and the partner budget that fix it shipped this session
+but the cache table does not exist in AWS yet. `/v1/scan-url` is VirusTotal at a real per-call
+cost. **So the paid candidates are a v2 gated on infrastructure, not a checkbox on this form.**
+
+**What declaring a payment surface costs us today:** it invites review of billing we cannot
+show, on an integration whose entire submission argument is that there is nothing to review.
+That is the cheap half of the trade. **The form is re-submittable and the field is editable**,
+so the sequencing is free: ship free, measure, and add the paid tier when the thing being sold
+exists.
+
+**The one condition that changes the answer**, so this is not re-litigated on a hunch: a
+breach check with a cache and a partner rate budget both live, at which point there is a real
+product to sell through the connector and the question is worth reopening with Muse's own
+terms read first.
+
+---
+
+## HOW IT CONCRETELY EXPANDS THE DISCOVERY SURFACE
+
+Asked in those words, and **the honest answer before this session was: it barely did.**
+
+Grepped rather than reasoned about: `t.me/relayshield_bot`, `idcheck` and WhatsApp appear
+**nowhere** in `relayshield_api.py`. The only onward pointer any keyless caller ever received
+was `_LINK_CHECK_NOTE`'s *"POST /v1/scan-url with an API key"* -- a **developer** upsell
+served to a consumer who will never send one. So the connector would have given our verdict
+away with our name on it and nothing to come back to.
+
+**That is the inline-mode defect exactly** -- live, working, and pointed at by nothing --
+caught before launch this time rather than weeks after.
+
+**FIXED IN THIS SESSION. Every `/v1/link-check` response to `source=muse` now carries:**
+
+```json
+"onward": {
+  "label": "Check links and TON addresses yourself, free, in Telegram",
+  "url": "https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-muse"
+}
+```
+
+**Four things about it that are decisions rather than details:**
+
+1. **It is an ALLOWLIST, not an echo of whatever `source=` was sent.** A route is returned
+   because the source is NAMED. A test asserts that property with `ast` rather than asserting
+   today's contents.
+2. **The widget is deliberately NOT on it.** `widget/relayshield-widget.js` is copied into
+   other people's bots, and injecting "open our app" into somebody else's reply hijacks their
+   user inside their own product. A partner platform that lists us as a connector chose us;
+   a third-party bot's users did not.
+3. **The Mini App, not the developers page.** A Muse user is a consumer, and a consumer sent
+   to API documentation has been sent nowhere. `/developers?source=muse` is still the
+   documentation field on the form, which is where a developer looks.
+4. **`tg-miniapp-muse` is registered in all three lists that must agree** -- `miniapp_routes.json`,
+   `ALLOWED_SOURCES` at the Worker edge, and `_SOURCE_ALIASES` -- BEFORE anything is
+   submitted, and a test reads the route table and the Worker's gate and fails if they
+   disagree. An unregistered `startapp` key is silently downgraded to the generic
+   `tg-miniapp` and logs `unmatched:`.
+
+**The three surfaces, and what each one actually gets:**
+
+| Surface | Route from the connector | Countable as |
+|---|---|---|
+| Mini App / Telegram bot | the `onward` field on every link-check verdict | `tg-miniapp-muse` |
+| API landing page | the form's Documentation URL | `muse` |
+| WhatsApp bot | **nothing, and that is honest** | -- |
+
+**WhatsApp gets no route and should not get one yet.** `WA_NUMBER` is still the empty string
+in both Workers, so the front door renders nothing anywhere, and a `wa.me` link with a hole in
+it answers HTTP 200 with an "invalid" page rather than failing -- a broken link that looks live
+to every probe we own. And the WhatsApp bot cannot run a check for somebody without an account,
+so a consumer sent there hits a closed door. Fill `WA_NUMBER` first (Top 15 item 1), then this
+row is a one-line addition to `CONSUMER_ROUTES`.
+
+**What this is NOT: a shelf.** `miniapp_routes.json` records the Muse row as structurally
+unlike every other one in that table. A catalogue listing sits there and keeps returning
+arrivals; a connector has no browse page, so **reach here is a function of connector USE**. If
+nobody installs it, the route returns nothing and the funnel will say so honestly rather than
+flattering it -- which is the whole reason the key is separate.
+
+---
+
 ## Before the form
 
 1. **Merge**, so `?source=muse` is deployed. An unregistered key renders no

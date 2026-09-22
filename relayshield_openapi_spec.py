@@ -2263,6 +2263,17 @@ ENDPOINTS = [
                 "counts": {"submitted": 2, "checked": 2, "flagged": 1, "incomplete": 0},
             },
         },
+        # EXPLICITLY EMPTY, and this is the field that decides whether a
+        # generated client can call it at all. The top-level `security` on this
+        # document requires an API key, so inheriting it would tell every
+        # partner that generates from this spec -- which is the documented
+        # integration route -- that a credential is mandatory on an endpoint
+        # that needs none. That is the single thing the keyless scope exists to
+        # avoid, and it would have been discovered by a reviewer rather than by
+        # us. A key is still ACCEPTED, and that is said in `notes` rather than
+        # encoded here: OpenAPI has no "optional auth", and advertising the
+        # scheme makes a generator prompt for a key nobody has yet.
+        "auth": [],
         "notes": ("No API key required. A key is still accepted and removes the per-IP daily "
                   "allowance, which is what an integration serving many users should send."),
     },
@@ -2299,6 +2310,8 @@ ENDPOINTS = [
             "example": {"address": "0x0000000000000000000000000000000000000000",
                         "chain": "ethereum", "risk_level": "unknown", "risk_flags": []},
         },
+        "auth": [],   # see /v1/link-check above -- inheriting the document's
+                      # security would make a keyless endpoint require a key.
         "notes": "No API key required, on the same terms as /v1/link-check.",
     },
 

@@ -711,27 +711,47 @@ KEYLESS_SCAN_ENDPOINTS = frozenset({
 KEYLESS_IP_DAILY_CAP = 300
 
 
-def _check_keyless_ip_quota(source_ip: str) -> bool:
+def _check_keyless_ip_quota(source_ip: str, units: int = 1) -> bool:
     """Per-IP daily cap for unauthenticated scan calls. Returns True if allowed.
 
     Fails OPEN on a DynamoDB error, matching _check_demo_quota — this is a cost
     guardrail, not a security control, and an infra blip must not break scanning
-    for every free-tier user at once."""
+    for every free-tier user at once.
+
+    UNITS, added 2026-09-22 with the batch form of /v1/link-check. A batch is
+    one HTTP call and N domains of upstream work, so charging it as one call
+    would multiply this cap by the batch size and turn the endpoint into
+    precisely the unmetered upstream proxy the comment above says it exists to
+    prevent. The cap counts WORK, not requests."""
     if not source_ip:
         return True
+    units = max(1, int(units or 1))
     usage_key = f"ip#{source_ip}#{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
     try:
         table = dynamodb.Table(DEMO_QUOTA_TABLE)
         resp  = table.update_item(
             Key={"usage_key": usage_key},
-            UpdateExpression="ADD call_count :one SET expires_at = if_not_exists(expires_at, :ttl)",
-            ExpressionAttributeValues={":one": 1, ":ttl": int(time.time()) + 3 * 86400},
+            UpdateExpression="ADD call_count :n SET expires_at = if_not_exists(expires_at, :ttl)",
+            ExpressionAttributeValues={":n": units, ":ttl": int(time.time()) + 3 * 86400},
             ReturnValues="UPDATED_NEW",
         )
         return int(resp["Attributes"]["call_count"]) <= KEYLESS_IP_DAILY_CAP
     except Exception as exc:
         logger.error("keyless IP quota check failed ip=%s error=%s", source_ip, exc)
         return True
+
+
+def _link_check_units(path: str, params: dict) -> int:
+    """How many quota units this request costs. One per URL for a batch."""
+    if path != "/v1/link-check":
+        return 1
+    try:
+        raw = params.get("urls")
+    except Exception:
+        return 1
+    if isinstance(raw, list) and raw:
+        return min(len(raw), LINK_CHECK_MAX_URLS)
+    return 1
 
 
 def _check_demo_quota(key_record: dict) -> bool:
@@ -1674,10 +1694,147 @@ def _body(event: dict) -> dict:
 # DataClasses. Full HIBP schema preserved so callers can apply their own
 # filtering logic.
 
-def handle_breach(params: dict) -> dict:
+# ---------------------------------------------------------------------------
+# BREACH RESULT CACHE  (added 2026-09-22)
+# ---------------------------------------------------------------------------
+# handle_breach called HIBP live on EVERY request and cached nothing, and HIBP
+# is a SUBSCRIPTION WITH A RATE LIMIT rather than a per-call bill -- so the
+# scarce thing is requests per minute against ONE key, and that key is shared by
+# the Telegram bot, the WhatsApp bot, the OAuth watchlist and every paying API
+# customer. A 429 earned by one caller is served to all of them.
+#
+# The $0.10 on the rate card is our RESALE price. Reading it as our cost is what
+# made this look like a cost question instead of a blast-radius question.
+#
+# THE EMAIL IS NEVER STORED. The key is _sha256(email), which is what
+# relayshield_stolen_sessions already uses for matched_email, so a dump of this
+# table is not a list of who asked about whom.
+BREACH_CACHE_TABLE   = "relayshield_breach_cache"
+BREACH_CACHE_SECONDS = 24 * 3600   # HIBP publishes in batches, days to weeks
+                                    # apart, so a day is conservative against
+                                    # how fast the underlying data can move.
+
+
+def _breach_cache_get(email: str) -> list | None:
+    """Cached HIBP breach list for an address, or None. Never raises.
+
+    Fails SOFT and deliberately: the table may not exist yet, and a cache that
+    cannot be read must degrade to a live call rather than to an error. That
+    also means this ships inert and starts working the moment the table is
+    created, with no code change.
+    """
+    try:
+        item = dynamodb.Table(BREACH_CACHE_TABLE).get_item(
+            Key={"email_hash": _sha256(email)}).get("Item")
+        if not item or "breaches" not in item:
+            return None
+        return _decimals_to_plain(item["breaches"])
+    except Exception as exc:
+        logger.warning("breach cache read failed for %s: %s", _redact(email, "em"), exc)
+        return None
+
+
+def _breach_cache_put(email: str, breaches: list) -> None:
+    """Cache a REAL verdict. Never called on an upstream failure.
+
+    handle_breach returns 4xx/5xx on every HIBP error path, so by the time this
+    is reached a 200 is a real answer by construction -- which is the property
+    that makes caching safe here and would not hold if any failure fell through
+    to an empty list. Caching a 429 as "no breaches" would serve an outage as
+    good news for a day, which is this repo's "we could not check must never
+    render as it is gone" rule with somebody's credentials on the end of it.
+    """
+    try:
+        dynamodb.Table(BREACH_CACHE_TABLE).put_item(Item={
+            "email_hash": _sha256(email),
+            "breaches":   breaches,
+            "cached_at":  datetime.now(timezone.utc).isoformat(),
+            "ttl":        int(time.time()) + BREACH_CACHE_SECONDS,
+        })
+    except Exception as exc:
+        logger.warning("breach cache write failed for %s: %s", _redact(email, "em"), exc)
+
+
+# ---------------------------------------------------------------------------
+# PARTNER UPSTREAM BUDGET  (added 2026-09-22)
+# ---------------------------------------------------------------------------
+# A partner key is one issued to an integration rather than to a customer -- a
+# connector platform, say -- and its traffic arrives from a handful of egress
+# addresses at a volume no individual produces. On a KEYLESS endpoint that is
+# harmless, which is why a valid key skips the per-IP cap entirely. On an
+# endpoint backed by a SHARED, RATE-LIMITED upstream it is not: the partner
+# cannot spend money we do not have, but it can spend the rate limit that
+# paying customers depend on.
+#
+# Set `partner_daily_cap` on the key record to opt a key in. A key without it is
+# completely unaffected, which is every key issued to date.
+PARTNER_CAP_FIELD = "partner_daily_cap"
+
+
+def _check_partner_upstream_budget(key_record: dict, upstream: str) -> bool:
+    """Daily budget for a PARTNER key against a shared upstream. True if allowed.
+
+    FAILS CLOSED, and that is a deliberate divergence from _check_keyless_ip_quota
+    and _check_demo_quota two hundred lines up, which both fail OPEN. Do not
+    "fix" this to match them.
+
+    Those two are cost guardrails, and failing them open costs us money. This one
+    protects OTHER CUSTOMERS' access to a shared rate limit, so failing it open
+    hands a partner the ability to starve paying customers during exactly the
+    infrastructure blip that made the check unavailable. The thing at risk from
+    failing closed is one partner's calls; the thing at risk from failing open is
+    everybody else's. Those are not comparable and the quieter failure is the
+    wrong one.
+    """
+    if not key_record:
+        return True
+    try:
+        cap = int(key_record.get(PARTNER_CAP_FIELD) or 0)
+    except (TypeError, ValueError):
+        cap = 0
+    if cap <= 0:
+        return True                      # not a partner key: unaffected
+
+    api_key   = key_record.get("api_key", "")
+    usage_key = f"partner#{api_key}#{upstream}#{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+    try:
+        resp = dynamodb.Table(DEMO_QUOTA_TABLE).update_item(
+            Key={"usage_key": usage_key},
+            UpdateExpression="ADD call_count :one SET expires_at = if_not_exists(expires_at, :ttl)",
+            ExpressionAttributeValues={":one": 1, ":ttl": int(time.time()) + 3 * 86400},
+            ReturnValues="UPDATED_NEW",
+        )
+        used = int(resp["Attributes"]["call_count"])
+        if used > cap:
+            logger.warning("partner budget exceeded key=%s upstream=%s used=%d cap=%d",
+                           _redact(api_key, "key"), upstream, used, cap)
+            return False
+        return True
+    except Exception as exc:
+        logger.error("partner budget check FAILED CLOSED key=%s upstream=%s error=%s",
+                     _redact(api_key, "key"), upstream, exc)
+        return False
+
+
+def handle_breach(params: dict, api_key_record: dict | None = None) -> dict:
     email = (params.get("email") or "").strip().lower()
     if not email or "@" not in email:
         return _err("email is required and must be a valid address")
+
+    # ORDER IS THE DESIGN. The cache is read BEFORE the partner budget is
+    # charged, so a cache hit costs a partner nothing -- which is what makes the
+    # cache the thing that keeps a partner inside its budget rather than a
+    # separate optimisation. Charging first would spend the budget on answers we
+    # already had.
+    cached = _breach_cache_get(email)
+    if cached is not None:
+        logger.info("breach check (cached) — email=%s count=%d",
+                    _redact(email, "em"), len(cached))
+        return _breach_response(email, cached, cached=True)
+
+    if not _check_partner_upstream_budget(api_key_record or {}, "hibp"):
+        return _err("daily breach-check budget reached for this integration key. "
+                    "It resets at 00:00 UTC.", 429)
 
     api_key = _hibp_api_key()
     url     = f"{HIBP_BASE_URL}{urllib.parse.quote(email)}?truncateResponse=false"
@@ -1712,12 +1869,21 @@ def handle_breach(params: dict) -> dict:
         for b in breaches
     ]
 
+    # Only a real verdict is cached. Every failure above returned already.
+    _breach_cache_put(email, summary)
+
     logger.info("breach check — email=%s count=%d", _redact(email, "em"), len(summary))
+    return _breach_response(email, summary, cached=False)
+
+
+def _breach_response(email: str, summary: list, cached: bool) -> dict:
+    """One response shape for the cached and live paths, so they cannot drift."""
     return _ok({
         "email":        email,
         "record_type":  "credential_exposure",
         "breach_count": len(summary),
         "breaches":     summary,
+        "cached":       cached,
         # degraded is always False here: every upstream failure path above
         # returns 4xx/5xx rather than an empty result, so a 200 is a real
         # verdict by construction.
@@ -2479,29 +2645,86 @@ def _enrich_lookalikes(domains: list[str], gsb_api_key: str, max_workers: int = 
     return [results[d] for d in domains], unenriched
 
 
+# GSB's threatMatches:find ALREADY takes a list of threatEntries, and this file
+# had been sending exactly two (http:// and https:// for one domain) since it
+# was written. So the batch version below is not a new capability, it is the
+# existing request shape used for what it can already do -- which is the whole
+# reason an inbox scan costs one Safe Browsing call rather than fifty.
+#
+# GSB's own documented cap is 500 entries per request. We send two per domain,
+# so the domain cap is 250; _gsb_flagged_domains chunks rather than truncating,
+# because a silently dropped domain reports as "nothing known against it",
+# which is the one answer this product must never produce by accident.
+_GSB_MAX_ENTRIES_PER_REQUEST = 500
+
+
+def _gsb_flagged_domains(domains: list, api_key: str) -> set:
+    """Which of these domains does Safe Browsing flag? One request per chunk.
+
+    Returns a SET of flagged domains. A failed request returns no flags for the
+    domains in that chunk rather than raising: Safe Browsing is one of three
+    signals and an outage in it must not fail the whole check. That is the same
+    fail-soft the single-domain path has always had, and the caller cannot tell
+    the difference between "clean" and "GSB did not answer" -- which is why the
+    per-domain signal stays False in both cases and the note on the response
+    says an absence of flags is not proof of safety.
+    """
+    uniq = [d for d in dict.fromkeys(d for d in domains if d)]
+    if not uniq or not api_key:
+        return set()
+
+    per_domain = 2                       # http:// and https://
+    chunk_size = max(1, _GSB_MAX_ENTRIES_PER_REQUEST // per_domain)
+    flagged: set = set()
+
+    for start in range(0, len(uniq), chunk_size):
+        chunk   = uniq[start:start + chunk_size]
+        by_url  = {}
+        entries = []
+        for d in chunk:
+            for u in (f"http://{d}/", f"https://{d}/"):
+                by_url[u] = d
+                entries.append({"url": u})
+        payload = json.dumps({
+            "client": {"clientId": "relayshield", "clientVersion": "1.0"},
+            "threatInfo": {
+                "threatTypes":      ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE"],
+                "platformTypes":    ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries":    entries,
+            },
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{GSB_URL}?key={api_key}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                for match in (json.loads(resp.read()).get("matches") or []):
+                    hit = ((match.get("threat") or {}).get("url") or "")
+                    # Map the matched URL back to the domain we asked about.
+                    # GSB may canonicalise, so fall back to a netloc parse
+                    # rather than dropping a real hit on an exact-match miss.
+                    d = by_url.get(hit)
+                    if not d:
+                        try:
+                            host = urllib.parse.urlparse(hit).netloc.lower()
+                            d = host[4:] if host.startswith("www.") else host
+                        except Exception:
+                            d = None
+                    if d in by_url.values() or d in chunk:
+                        flagged.add(d)
+        except Exception as exc:
+            logger.warning("GSB batch check failed for %d domains: %s", len(chunk), exc)
+
+    return flagged
+
+
 def _check_gsb(domain: str, api_key: str) -> bool:
-    urls    = [f"http://{domain}/", f"https://{domain}/"]
-    payload = json.dumps({
-        "client": {"clientId": "relayshield", "clientVersion": "1.0"},
-        "threatInfo": {
-            "threatTypes":      ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE"],
-            "platformTypes":    ["ANY_PLATFORM"],
-            "threatEntryTypes": ["URL"],
-            "threatEntries":    [{"url": u} for u in urls],
-        },
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{GSB_URL}?key={api_key}",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return bool(json.loads(resp.read()).get("matches"))
-    except Exception as exc:
-        logger.warning("GSB check failed for %s: %s", domain, exc)
-        return False
+    """Single-domain form, unchanged for every existing caller."""
+    return domain in _gsb_flagged_domains([domain], api_key)
 
 
 def _rdap_registration_age_days(domain: str) -> int | None:
@@ -2524,29 +2747,28 @@ def _rdap_registration_age_days(domain: str) -> int | None:
     return None
 
 
-def _heuristic_url_check(url: str) -> dict:
-    """Fast, VT-independent red-flag check — unifies /v1/scan-url with the
-    same three signals Telegram's /scan and WhatsApp's SCAN/ATTACH already
-    use: RelayShield's own criminal IOC corpus, Google Safe Browsing's
-    real-time blocklist, and very recent domain registration. Added
-    2026-07-16. Not as authoritative as a real multi-engine VT verdict —
-    callers should word a heuristic-only "flagged" result more cautiously
-    than a VT one. Returns {"flagged": bool, "reasons": [str, ...]}."""
+def _domain_of(url: str) -> str:
+    """The registrable-ish host for a URL, or "" if it has none."""
     try:
         domain = urllib.parse.urlparse(url).netloc.lower()
-        if domain.startswith("www."):
-            domain = domain[4:]
     except Exception:
-        domain = ""
+        return ""
+    if "@" in domain:                    # strip any userinfo
+        domain = domain.rsplit("@", 1)[-1]
+    if domain.startswith("www."):
+        domain = domain[4:]
+    return domain
 
+
+def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
+    """The per-domain half of a link check, with Safe Browsing ALREADY decided.
+
+    SPLIT OUT 2026-09-22 so the single-URL and batch paths cannot drift. The
+    caller supplies the GSB verdict because the batch path resolves every
+    domain in one request -- this file has four copies of one pattern table
+    already and does not need two copies of a verdict rule.
+    """
     reasons: list[str] = []
-    # Structured mirror of `reasons`, added 2026-09-03 for /v1/link-check.
-    # The three signals are NOT equivalent: a hit in the IOC corpus or on Safe
-    # Browsing is blocklist grade, while a young domain is a soft signal that
-    # every legitimate new project also trips. A caller that wants to grade the
-    # verdict had to substring-match the prose to tell them apart, which breaks
-    # the moment the wording is improved. Additive: `flagged` and `reasons` are
-    # unchanged, so every existing caller is untouched.
     signals = {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}
     if not domain:
         return {"flagged": False, "reasons": reasons, "signals": signals}
@@ -2564,12 +2786,9 @@ def _heuristic_url_check(url: str) -> dict:
     except Exception as exc:
         logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
 
-    try:
-        if _check_gsb(domain, _gsb_api_key()):
-            reasons.append("Google Safe Browsing flags this domain")
-            signals["safe_browsing"] = True
-    except Exception as exc:
-        logger.warning("Heuristic GSB check failed for %s: %s", domain, exc)
+    if gsb_flagged:
+        reasons.append("Google Safe Browsing flags this domain")
+        signals["safe_browsing"] = True
 
     age_days = _rdap_registration_age_days(domain)
     signals["domain_age_days"] = age_days
@@ -2577,6 +2796,93 @@ def _heuristic_url_check(url: str) -> dict:
         reasons.append(f"the domain was registered only {age_days} day{'s' if age_days != 1 else ''} ago")
 
     return {"flagged": bool(reasons), "reasons": reasons, "signals": signals}
+
+
+def _heuristic_url_check(url: str) -> dict:
+    """Fast, VT-independent red-flag check — unifies /v1/scan-url with the
+    same three signals Telegram's /scan and WhatsApp's SCAN/ATTACH already
+    use: RelayShield's own criminal IOC corpus, Google Safe Browsing's
+    real-time blocklist, and very recent domain registration. Added
+    2026-07-16. Not as authoritative as a real multi-engine VT verdict —
+    callers should word a heuristic-only "flagged" result more cautiously
+    than a VT one. Returns {"flagged": bool, "reasons": [str, ...]}."""
+    domain = _domain_of(url)
+    if not domain:
+        return {"flagged": False, "reasons": [], "signals":
+                {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}}
+    try:
+        gsb = _check_gsb(domain, _gsb_api_key())
+    except Exception as exc:
+        logger.warning("Heuristic GSB check failed for %s: %s", domain, exc)
+        gsb = False
+    return _assess_domain(domain, gsb)
+
+
+# How many URLs one batch call may carry. 25 is a deliberate ceiling rather
+# than a round number: it is what an inbox page holds, it keeps the RDAP fan-out
+# inside the wall-clock budget below, and every unit of it is charged against
+# the caller's quota (see _link_check_units) so a batch cannot be used to
+# multiply the keyless cap.
+LINK_CHECK_MAX_URLS      = 25
+_LINK_CHECK_BATCH_BUDGET = 12.0   # seconds of wall clock for the whole fan-out
+_LINK_CHECK_WORKERS      = 8      # modest on purpose; RDAP rate-limits a burst
+
+
+def _heuristic_url_check_many(urls: list) -> dict:
+    """Check many URLs, deduplicated by DOMAIN, with one Safe Browsing request.
+
+    Returns {url: assessment}. An inbox is mostly repeats -- fifty links across
+    a dozen hosts -- so deduplication, not concurrency, is what makes this
+    cheap: twelve domains cost one GSB call and twelve RDAP lookups however
+    many links pointed at them.
+
+    A domain that does not finish inside the budget is returned with its
+    signals UNSET rather than clean, and the caller is told which ones those
+    were. "We could not check" rendering as "nothing known against it" is the
+    single failure this product cannot afford, and a partial batch is exactly
+    where it would appear.
+    """
+    domains = list(dict.fromkeys(_domain_of(u) for u in urls))
+    domains = [d for d in domains if d]
+
+    try:
+        flagged = _gsb_flagged_domains(domains, _gsb_api_key())
+    except Exception as exc:
+        logger.warning("link-check batch GSB failed for %d domains: %s", len(domains), exc)
+        flagged = set()
+
+    assessed: dict = {}
+    # Explicit executor and shutdown(wait=False): a `with` block calls
+    # shutdown(wait=True) on exit and blocks past the timeout above, which is
+    # the 2026-07-18 incident recorded on _enrich_lookalikes.
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=_LINK_CHECK_WORKERS)
+    try:
+        futures = {ex.submit(_assess_domain, d, d in flagged): d for d in domains}
+        done, _ = concurrent.futures.wait(futures, timeout=_LINK_CHECK_BATCH_BUDGET)
+        for fut in done:
+            d = futures[fut]
+            try:
+                assessed[d] = fut.result()
+            except Exception as exc:
+                logger.warning("link-check batch assessment failed for %s: %s", d, exc)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+    out: dict = {}
+    for u in urls:
+        d = _domain_of(u)
+        if d and d in assessed:
+            out[u] = assessed[d]
+        else:
+            # Unfinished or unparseable. NOT a clean result.
+            out[u] = {
+                "flagged": False,
+                "reasons": [],
+                "signals": {"ioc_corpus": None, "safe_browsing": None,
+                            "domain_age_days": None},
+                "incomplete": True,
+            }
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2632,10 +2938,98 @@ def _link_check_level(signals: dict) -> str:
     return "unknown"
 
 
+_LINK_CHECK_NOTE = ("Heuristic verdict from RelayShield's IOC corpus, Google Safe "
+                    "Browsing and domain registration age. An absence of flags is "
+                    "not proof of safety. POST /v1/scan-url with an API key adds a "
+                    "multi-engine VirusTotal analysis.")
+
+
+def _link_check_urls(params: dict) -> list:
+    """The URLs this request is asking about, in order, or [] for the single form."""
+    raw = params.get("urls")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [str(u).strip() for u in raw]
+
+
+def handle_link_check_batch(params: dict) -> dict:
+    """Many URLs, one call, one Safe Browsing request. Added 2026-09-22.
+
+    WHY THIS EXISTS: the single form answers "is this link safe", which is a
+    question almost nobody sits down to ask. The question people actually have
+    is "is anything in my inbox trying to scam me", and an agent holding a
+    mailbox can only ask that if it can hand over every link at once. Fifty
+    separate calls is not the same feature with more round trips -- it is a
+    feature nobody ships.
+    """
+    urls = _link_check_urls(params)
+    if not urls:
+        return _err("urls must be a non-empty array of http(s) URLs")
+    if len(urls) > LINK_CHECK_MAX_URLS:
+        return _err(f"urls accepts at most {LINK_CHECK_MAX_URLS} per call; "
+                    f"got {len(urls)}. Send them in batches.")
+
+    bad = [u for u in urls if not u.startswith(("http://", "https://"))]
+    if bad:
+        return _err(f"every url must start with http:// or https://; "
+                    f"{len(bad)} did not")
+
+    assessed = _heuristic_url_check_many(urls)
+
+    results     = []
+    incomplete  = []
+    for u in urls:
+        a       = assessed.get(u) or {}
+        signals = a.get("signals") or {}
+        entry   = {
+            "target":  u,
+            "level":   _link_check_level(signals),
+            "flagged": bool(a.get("flagged")),
+            "reasons": a.get("reasons") or [],
+            "signals": signals,
+        }
+        if a.get("incomplete"):
+            entry["checked"] = False
+            incomplete.append(u)
+        results.append(entry)
+
+    source = (params.get("source") or "")[:40]
+    logger.info("link-check batch urls=%d domains=%d flagged=%d incomplete=%d source=%s",
+                len(urls), len({_domain_of(u) for u in urls}),
+                sum(1 for r in results if r["flagged"]), len(incomplete),
+                source or "unattributed")
+
+    body = {
+        "results": results,
+        "counts": {
+            "submitted":  len(urls),
+            "checked":    len(urls) - len(incomplete),
+            "flagged":    sum(1 for r in results if r["flagged"]),
+            "incomplete": len(incomplete),
+        },
+        "note": _LINK_CHECK_NOTE,
+    }
+    if incomplete:
+        # NAMED, not summarised. A caller that cannot see which ones were
+        # missed will present the whole batch as checked, and a link we never
+        # looked at rendering as "nothing known against it" is the one answer
+        # this product must never produce by accident.
+        body["incomplete_urls"] = incomplete
+        body["incomplete_note"] = ("These were not checked in time and are NOT a "
+                                   "clean result. Send them again.")
+    return _ok(body)
+
+
 def handle_link_check(params: dict) -> dict:
+    if _link_check_urls(params):
+        return handle_link_check_batch(params)
+
     url = (params.get("url") or "").strip()
     if not url.startswith(("http://", "https://")):
-        return _err("url is required and must start with http:// or https://")
+        return _err("url is required and must start with http:// or https://, "
+                    "or pass urls[] to check several at once")
 
     heuristics = _heuristic_url_check(url)
     signals    = heuristics.get("signals") or {}
@@ -13075,7 +13469,7 @@ def lambda_handler(event: dict, context) -> dict:
         _scan_key     = _header(_scan_headers, "X-RS-API-KEY") or _header(_scan_headers, "X-API-Key")
         if not (_scan_key and _verify_rs_api_key(_scan_key)):
             _source_ip = ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or ""
-            if not _check_keyless_ip_quota(_source_ip):
+            if not _check_keyless_ip_quota(_source_ip, _link_check_units(path, params)):
                 logger.warning("keyless scan quota exceeded path=%s ip=%s", path, _source_ip)
                 return {
                     "statusCode": 429,
@@ -13112,6 +13506,11 @@ def lambda_handler(event: dict, context) -> dict:
         # is why simply having an api_key_record kwarg is not enough.
         if path in ("/v1/intel/telegram", "/v1/intel/cve", "/v1/intel/actor", "/v1/intel/trending",
                     "/v1/account/info",
+                    # /v1/breach joins this branch so handle_breach can see a
+                    # partner_daily_cap on the key record. It defaults the kwarg
+                    # to None, so the metered dispatcher's handler(params) call
+                    # is unaffected.
+                    "/v1/breach",
                     "/v1/sim-swap/enroll", "/v1/sim-swap/confirm", "/v1/sim-swap/withdraw"):
             headers    = event.get("headers") or {}
             api_key    = _header(headers, "X-API-Key") or _header(headers, "X-RS-API-KEY")

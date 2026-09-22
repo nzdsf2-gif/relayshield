@@ -7697,3 +7697,89 @@ touched the new surface.
 **Payments on the connector: NO**, and it is not a judgement call. Nothing is sold inside the
 host, so claiming a payment surface invites review of billing we cannot show, and it is FD-14's
 restriction shape with a different host's name on it.
+
+## THE THREE MUSE FEATURES, AND THE TWO DEFECTS THAT ONLY EXECUTION FOUND
+
+**Built 2026-09-22.** Batch link-check, a breach cache, and a partner budget on a
+shared upstream. All three are runtime-shaped, which is why
+`test_muse_connector_features.py` EXECUTES the handlers with boto3 and urllib
+stubbed rather than reading them: an ordering, a fail-open and a partial result
+rendering as a clean one are all invisible to a reader of the source.
+
+**1. `/v1/link-check` TAKES `urls[]`.** Safe Browsing's `threatMatches:find`
+already accepted a list and this file had been sending exactly two entries
+(http and https for one domain) since it was written, so the batch is the
+existing request shape used for what it could already do. **Deduplication by
+DOMAIN is what makes it cheap** -- an inbox is fifty links across a dozen hosts
+-- not concurrency. `_assess_domain` is shared by the single and batch paths so
+they cannot drift.
+
+**THE GUARD THAT MATTERS IS THE QUOTA, AND IT IS NOT OBVIOUS.** A batch is one
+HTTP call and N domains of upstream work, so charging it as one call would have
+**multiplied `KEYLESS_IP_DAILY_CAP` by 25** and turned link-check into precisely
+the unmetered upstream proxy the cap's own comment says it exists to prevent.
+`_check_keyless_ip_quota` counts UNITS now. A batch of 25 costs 25.
+
+**2. `handle_breach` CACHES, keyed on `_sha256(email)` and never the address.**
+Every failure path in that function returns 4xx/5xx before the cache write, so a
+200 is a real verdict by construction -- which is the property that makes
+caching safe and would not hold if any failure fell through to an empty list.
+**Caching a 429 as "no breaches" serves an outage as good news for a day.**
+
+**3. `_check_partner_upstream_budget` FAILS CLOSED, and that is a deliberate
+divergence** from `_check_keyless_ip_quota` and `_check_demo_quota` two hundred
+lines up, which both fail open. Those are cost guardrails and failing them open
+costs us money. This one protects **other customers' access to a shared rate
+limit**, so failing it open hands a partner the ability to starve paying
+customers during exactly the blip that made the check unavailable. A comment in
+the function says do not "fix" it to match its neighbours.
+
+**THE ORDERING IS THE DESIGN: cache read, THEN budget charge.** A cache hit
+costs a partner nothing, which is what makes the cache the thing that keeps a
+partner inside its budget rather than a separate optimisation. Charging first
+spends the budget on answers we already had. Proven by moving the call.
+
+### THE SPEC LISTED ONLY THE PAID ENDPOINTS, AND THAT WOULD HAVE BLOCKED THE CONNECTOR
+
+`relayshield_openapi_spec.py` carried 62 paths and **every one was
+`/v1/metered/*`**. Neither `/v1/link-check` nor `/v1/wallet-risk` -- both live
+and keyless for months -- was in it. **Muse generates its integration from the
+spec**, so the connector would have pointed at a document describing only the
+metered surface and none of what it is built on, which is also the FD-14
+compliance trap pointed at the wrong endpoints.
+
+That is **"a route added to the dispatch table is not a route", landing on the
+SPEC rather than on the gateway.** Both routes exist at the edge already; only
+the contract was missing, and the spec's own docstring says *"a spec that drifts
+is worse than no spec"*. Verified by BUILDING it: 64 paths, both present, and
+`urls` in link-check's request properties.
+
+**The batch deliberately shares `/v1/link-check` rather than taking a new path.**
+A new path needs an API Gateway resource, and this repo has paid for that
+mistake more than once. The existing route carries it with no AWS change at all.
+
+### AND MY OWN TEST STUB MADE EVERY VERDICT "high"
+
+A bare `MagicMock` for `dynamodb` means `resp.get("Items")` returns a truthy
+MagicMock, so **every domain scored an IOC-corpus hit** and the whole
+link-check class passed with verdicts it had not earned. Only the one test
+asserting a domain should NOT be flagged caught it.
+
+**A stub that answers every question affirmatively is not a stub, it is a second
+implementation that always says yes.** `_empty_ddb()` returns real empty
+results. Worth remembering before writing `MagicMock()` for anything whose
+return value a branch reads.
+
+**Six defects reintroduced to prove the guards**: units dropped from the
+dispatcher call, budget failing open, budget charged before the cache read, a
+429 falling through to the cache, an unchecked URL presented as checked, and GSB
+truncating past one chunk instead of chunking. Each fired on exactly its own
+test.
+
+**`relayshield_breach_cache` does not exist in AWS yet and the code SHIPS INERT
+without it** -- `_breach_cache_get` fails soft to a live call, which is today's
+behaviour exactly. `sh tools/setup_breach_cache.sh` creates it, **enables TTL**
+(DynamoDB ignores a `ttl` attribute unless TTL is switched on, so skipping that
+step means the cache never expires and serves a months-old verdict forever), and
+asks the cheap question -- whether the role can already write to it -- before
+proposing a grant the shared role has no inline budget left to make.

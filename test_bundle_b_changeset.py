@@ -332,16 +332,100 @@ class DuplicateBundleBEntities(unittest.TestCase):
                 self.assertIn("prod-szi2wdww3obry", r.stdout + r.stderr,
                               "the refusal must name the entity to use instead")
 
-    def test_publishing_the_real_entity_is_allowed(self):
+    def test_publishing_the_real_entity_is_refused_now_that_it_is_public(self):
+        """CHANGED 2026-09-22, AND THE CHANGE IS THE POINT.
+
+        This test used to require that publishing prod-szi2wdww3obry SUCCEEDS,
+        which was right on the day it was written and became wrong the moment
+        go-public succeeded. The dangerous direction inverted with the state: it
+        was publishing a duplicate, and it is now touching the live listing at
+        all. A guard that pins today's answer rather than what the answer must
+        ACHIEVE eventually fails on correct code, and the temptation then is to
+        loosen it.
+        """
         r = self._submit("prod-szi2wdww3obry")
-        self.assertEqual(r.returncode, 0,
-                         f"the real Bundle B entity was refused:\n{r.stdout}")
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0,
+                            "the LIVE Bundle B listing accepted a visibility "
+                            "change:\n" + out)
+        self.assertIn("REFUSED", out)
 
     def test_withdrawing_a_duplicate_is_allowed(self):
         """A guard that blocks the cleanup step is one that gets loosened."""
         r = self._submit("prod-v5nr5gjtdnofi", visibility="Restricted")
         self.assertEqual(r.returncode, 0,
                          f"withdrawing a duplicate was refused:\n{r.stdout}")
+
+
+class WithdrawingTheDuplicates(unittest.TestCase):
+    """The withdraw change set, and the hole it opened the day it was written.
+
+    bundle_b_withdraw.json plus one mistyped --product-id takes the listing
+    eight submissions bought straight off the marketplace, and the three ids
+    differ only by a random suffix. The duplicate guard was narrow to Public on
+    purpose; the inverse direction needed its own.
+    """
+
+    DOC = ROOT / "aws_marketplace" / "bundle_b_withdraw.json"
+    TOOL = ROOT / "tools" / "marketplace_submit_changeset.py"
+
+    def _run(self, product_id, doc=None):
+        import subprocess
+        return subprocess.run(
+            [sys.executable, str(self.TOOL), str(doc or self.DOC),
+             "--product-id", product_id],
+            capture_output=True, text=True)
+
+    def test_it_carries_a_placeholder_and_never_a_literal_id(self):
+        """The id arrives from --product-id, so one file serves both duplicates
+        and no committed file can name the live listing."""
+        raw = self.DOC.read_text()
+        self.assertIn("__BUNDLE_B_PRODUCT_ID__", raw)
+        self.assertNotIn("prod-szi2wdww3obry", raw)
+        doc = json.loads(raw)
+        self.assertEqual(len(doc["ChangeSet"]), 1)
+        self.assertEqual(doc["ChangeSet"][0]["ChangeType"], "UpdateVisibility")
+        self.assertEqual(
+            doc["ChangeSet"][0]["DetailsDocument"]["TargetVisibility"],
+            "Restricted")
+
+    def test_each_duplicate_can_be_withdrawn(self):
+        for dup in ("prod-v5nr5gjtdnofi", "prod-p3ei5nmgufnnq"):
+            with self.subTest(dup=dup):
+                r = self._run(dup)
+                self.assertEqual(r.returncode, 0,
+                                 f"withdrawing {dup} was refused:\n{r.stdout}")
+
+    def test_withdrawing_the_live_listing_is_refused(self):
+        r = self._run("prod-szi2wdww3obry")
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0,
+                            "THE LIVE BUNDLE B LISTING WAS WITHDRAWN:\n" + out)
+        self.assertIn("REFUSED", out)
+
+    def test_the_visibility_refusal_names_a_route_that_can_do_the_job(self):
+        """marketplace_add_dimension.py CANNOT do UpdateVisibility.
+
+        Naming it in this refusal sends the reader to a second tool that also
+        refuses them, which this repo has already paid for once. The refusal has
+        to name the duplicates, which is what the reader almost certainly meant.
+        """
+        out = self._run("prod-szi2wdww3obry")
+        text = out.stdout + out.stderr
+        self.assertNotIn("marketplace_add_dimension.py", text)
+        for dup in ("prod-v5nr5gjtdnofi", "prod-p3ei5nmgufnnq"):
+            self.assertIn(dup, text,
+                          "the refusal must name the ids the reader meant")
+
+    def test_an_enum_value_is_not_reported_as_over_length(self):
+        """"Restricted" is 10 characters and "Public" is 6, and the accepted
+        example carries the latter. Reporting that as OVER is a warning nobody
+        can act on, on a value that has no other spelling."""
+        r = self._run("prod-v5nr5gjtdnofi")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertNotIn("OVER", r.stdout,
+                         "an enum field was length-compared against the "
+                         "accepted example:\n" + r.stdout)
 
 
 if __name__ == "__main__":

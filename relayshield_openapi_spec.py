@@ -655,6 +655,77 @@ ENDPOINTS = [
         ),
     },
     {
+        "path": "/v1/metered/incident-timeline",
+        "price_cents": 50,
+        "tag": "Identity exposure",
+        "summary": "Correlate breach, session, SIM swap and domain signals for one identity",
+        "description": (
+            "Runs the breach and stolen-session checks for the supplied email (always), plus SIM "
+            "swap when a phone is supplied and a domain lookalike sweep when a domain is supplied, "
+            "then matches the resulting signal set against the same coordinated-attack-chain table "
+            "the WhatsApp monitor uses in the background -- on demand, for any identity, in one "
+            "call. A chain match (for example breach + SIM swap within the same identity) is a "
+            "materially higher-confidence finding than either signal alone: attackers commonly "
+            "combine credential theft with a SIM swap to intercept SMS 2FA."
+        ),
+        "request": {
+            "props": {
+                "email":  _str("Email address to check. Always run.", format="email"),
+                "phone":  _str("E.164 phone number. Optional -- adds the SIM swap check.", examples=["+14155551234"]),
+                "domain": _str("Domain to sweep for lookalikes. Optional -- adds the domain-lookalike check.", examples=["acme.com"]),
+            },
+            "required": ["email"],
+            "example": {"email": "user@example.com", "phone": "+14155551234", "domain": "acme.com"},
+        },
+        "response": {
+            "props": {
+                "identity": _obj("Which inputs were supplied.", {
+                    "email":          _str("The normalised address that was checked."),
+                    "phone_checked":  _bool("True when a phone was supplied and the SIM swap check ran."),
+                    "domain_checked": _bool("True when a domain was supplied and the lookalike sweep ran."),
+                }),
+                "signals_detected": _arr("ATTACK_CHAINS signal types found present, e.g. `breach_alert`.", _str("")),
+                "chain_matched": _obj(
+                    "The matched attack chain, or null when no known chain's full signal set is present.",
+                    {
+                        "chain":    _str("Machine-readable chain id, e.g. `breach_sim_swap`."),
+                        "severity": _sev("CRITICAL or HIGH."),
+                        "label":    _str("Human-readable chain name."),
+                        "what":     _str("Plain-language explanation of the pattern and why it matters."),
+                    },
+                ),
+                "checks": _obj("Per-check detail, keyed by check name. sim_swap and domain are present only when run.", {}),
+                "checks_skipped": _arr("Checks not run and why, e.g. `sim_swap (no phone supplied)`.", _str("")),
+                "checked_at": _CHECKED_AT,
+            },
+            "example": {
+                "identity": {"email": "user@example.com", "phone_checked": True, "domain_checked": False},
+                "signals_detected": ["breach_alert", "sim_swap"],
+                "chain_matched": {
+                    "chain": "breach_sim_swap",
+                    "severity": "CRITICAL",
+                    "label": "Credential Breach + SIM Swap",
+                    "what": "Credentials found in a breach and the SIM swapped or ported in the same window -- SMS 2FA may already be compromised.",
+                },
+                "checks": {
+                    "breach": {"checked": True, "flagged": True, "breach_count": 3},
+                    "session_risk": {"checked": True, "flagged": False, "highest_severity": None},
+                    "sim_swap": {"checked": True, "flagged": True},
+                },
+                "checks_skipped": ["domain (none supplied)"],
+                "checked_at": "2026-09-23T11:02:07.481923+00:00",
+            },
+        },
+        "errors": {"400": "`email` is missing or contains no '@'."},
+        "notes": (
+            "Each sub-check keeps its own failure behaviour -- a SIM swap check the carrier could "
+            "not answer, or a session-risk query that failed, is reported as checked: false rather "
+            "than folded into 'not present'. Only smishing_to_sim_swap and breach_otp_intercept can "
+            "never fire here: both require an SMS or OTP event observed inside a monitored "
+            "conversation, which this endpoint has no way to check for an arbitrary identity."
+        ),
+    },
+    {
         "path": "/v1/metered/cert-expiry",
         "price_cents": 5,
         "tag": "Domain and infrastructure",

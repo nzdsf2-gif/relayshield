@@ -416,6 +416,7 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/cert-expiry":         "relayshield_cert_expiry_calls",       # TLS cert expiry/renewal risk (crt.sh)
     "/v1/metered/ip-intel":            "relayshield_ip_intel_calls",          # passive DNS + IP reputation (VirusTotal)
     "/v1/metered/card-exposure":       "relayshield_card_exposure_calls",     # BIN/stolen-card monitoring — CREATE METER IN DASHBOARD
+    "/v1/metered/incident-timeline":   "relayshield_incident_timeline_calls", # composite: breach+session-risk+sim-swap+domain, ATTACK_CHAINS-correlated
 }
 
 # Credits deducted per successful call (1 credit = $0.01)
@@ -461,6 +462,12 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/ip-intel":            10,   # $0.10/call — mirrors PAYG price, new endpoint 2026-07-21
     "/v1/metered/card-exposure":       30,   # $0.30/call — compromised-card lookup (Flashpoint/SOCRadar-competitor), new endpoint 2026-07-24
     "/v1/metered/wallet-risk":         5,    # $0.05/call — matches the published PAYG price exactly, see routing note
+    # $0.50/call — composite: breach ($0.10) + session-risk ($0.30) always run
+    # (=$0.40 floor), plus sim-swap ($0.25) and/or a domain lookalike sweep
+    # ($0.30) when phone/domain are supplied (up to $0.95 fanned out). Priced
+    # as a bundle below the full-fan-out sum, above the always-run floor —
+    # see the endpoint's own comment for the reasoning, never re-derive it.
+    "/v1/metered/incident-timeline":   50,
 }
 
 # Endpoints the no-card free tier will NOT serve. Added 2026-08-09 alongside
@@ -1259,6 +1266,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # audit the Snap is deliberately scoped to avoid. Same handler, same
         # $0.05, just reachable with the caller's own API key.
         "/v1/metered/wallet-risk":         handle_wallet_risk,
+        "/v1/metered/incident-timeline":   handle_incident_timeline,
         "/v1/webhook/configure":       lambda p: handle_webhook_configure(p, api_key_str),
         "/v1/siem/configure":          lambda p: handle_siem_configure(p, api_key_str),
         "/v1/watch":                   lambda p: handle_watch_add(p, api_key_str),
@@ -2461,6 +2469,185 @@ def handle_domain(params: dict) -> dict:
         "candidates_unchecked": unchecked,
         "checked_at":         datetime.now(timezone.utc).isoformat(),
         **_freshness_for("/v1/metered/domain", flagged=bool(active), degraded=degraded),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/metered/incident-timeline
+# ---------------------------------------------------------------------------
+# Request:  { "email": "user@example.com", "phone": "+14155551234"?, "domain": "acme.com"? }
+# Response: {
+#   "identity":         {"email": "...", "phone_checked": bool, "domain_checked": bool},
+#   "signals_detected": ["breach_alert", "sim_swap", ...],
+#   "chain_matched":    {"chain": "...", "severity": "...", "label": "...", "what": "..."} | null,
+#   "checks":           {"breach": {...}, "session_risk": {...}, "sim_swap": {...}?, "domain": {...}?},
+#   "checks_skipped":   ["sim_swap (no phone supplied)", ...],
+#   "checked_at":       "..."
+# }
+#
+# ITEM 4 — the on-demand, chargeable version of the WhatsApp monitor's
+# ATTACK_CHAINS correlation (relayshield_breach_monitor.py). That engine is
+# PROACTIVE: it fires an alert when a second signal lands on top of a first,
+# for our own subscribed WhatsApp users, built from state accumulated over
+# days inside relayshield_users.recent_signals. This is the opposite shape —
+# ON DEMAND, for any identity a caller names, right now, from a single
+# request with no prior account or monitoring relationship. Confirmed with
+# the founder 2026-09-23 that this is wanted as its own build, distinct from
+# the proactive engine (see CLAUDE.md "ITEM 4 IS NOT A GAP").
+#
+# THE CHAIN TABLE IS IMPORTED, NEVER COPIED. Two copies of one correlation
+# model — the pattern tables, the three source lists, the LAMBDA_MAP/invoke-
+# policy pair — is this repo's single most-repeated defect. ATTACK_CHAINS
+# comes from relayshield_breach_monitor.py, so a severity or signal-set
+# change there is picked up here with no second edit.
+#
+# WHAT THIS DOES NOT CHECK, deliberately, and why: `suspicious_sms` and
+# `otp_warning` are EVENTS inside a monitored WhatsApp conversation, not
+# identity properties — there is no "check for one" outside that
+# conversation, and treating "never observed" as "clean" is exactly the
+# false-negative shape MEASUREMENT DOCTRINE and the SIM-swap monitor's "we
+# could not check must never render as it is gone" rule both forbid. Only
+# the two chains built entirely from identity properties this endpoint can
+# actually query — breach_sim_swap and domain_phishing_breach — can ever
+# fire here. smishing_to_sim_swap and breach_otp_intercept never will, and
+# that is correct rather than a gap: this endpoint has no SMS or OTP event
+# to check.
+#
+# PRICED AS A BUNDLE, NOT SUMMED. email is required and always runs breach
+# ($0.10) + session-risk ($0.30) = $0.40 of underlying work. phone and domain
+# are optional and add sim-swap ($0.25) and the domain lookalike sweep
+# ($0.30) when supplied, for up to $0.95 of underlying work. $0.50 sits above
+# the always-run floor and below the full-fan-out sum, the same bundle-
+# discount shape as bulk-identity-risk's $2.00 for up to 10 domains x 5
+# agents — see METERED_CREDIT_COSTS below for the arithmetic in one place.
+#
+# NO PAYG/x402 TWIN in this build — nine other metered endpoints (asset-intel,
+# brand-monitor, bulk-ioc, card-exposure, crypto-intel, cve-identity-risk,
+# dependency-risk, ioc-pivot, threat-actor) already ship metered-only, so
+# this is established precedent rather than a shortcut.
+#
+# REUSES THE LIVE HANDLERS, NEVER THEIR HTTP CALLS A SECOND TIME. Each
+# sub-check calls handle_breach / handle_session_risk / handle_sim_swap /
+# handle_domain directly — the same cache, the same partner-budget gate, the
+# same Twilio error_code handling, the same typosquat sweep — rather than a
+# second copy of any of those upstream calls.
+
+from relayshield_breach_monitor import ATTACK_CHAINS
+
+
+def _unwrap(resp: dict) -> tuple[bool, dict]:
+    """(ok, data) from a handler's Lambda-proxy response. ok=False on any
+    non-2xx or malformed body — never raises, so one degraded sub-check
+    cannot take the whole composite down."""
+    try:
+        status = resp.get("statusCode", 500)
+        body   = json.loads(resp.get("body") or "{}")
+        if 200 <= status < 300 and body.get("ok"):
+            return True, (body.get("data") or {})
+        return False, {}
+    except Exception:
+        return False, {}
+
+
+def handle_incident_timeline(params: dict) -> dict:
+    email = (params.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return _err("email is required and must be a valid address")
+    phone  = (params.get("phone") or "").strip()
+    domain = (params.get("domain") or "").strip().lower()
+    for prefix in ("https://", "http://", "www."):
+        if domain.startswith(prefix):
+            domain = domain[len(prefix):]
+
+    checks_run: list[str] = []
+    checks_skipped: list[str] = []
+    signal_types: set[str] = set()
+    checks: dict = {}
+
+    breach_ok, breach_data = _unwrap(handle_breach({"email": email}))
+    checks_run.append("breach")
+    breach_found = bool(breach_data.get("breach_count"))
+    if breach_ok and breach_found:
+        signal_types.add("breach_alert")
+    checks["breach"] = {
+        "checked":      breach_ok,
+        "flagged":      breach_ok and breach_found,
+        "breach_count": breach_data.get("breach_count") if breach_ok else None,
+    }
+
+    # session_risk is reported as context. It is not one of ATTACK_CHAINS'
+    # own signal types (that chain table predates this endpoint and was built
+    # for WhatsApp-observed events), so it never joins signal_types and never
+    # decides chain_matched — reporting it as a signal it is not would be a
+    # silent second definition of "session_risk" alongside the real one.
+    session_ok, session_data = _unwrap(handle_session_risk({"email": email}))
+    checks_run.append("session_risk")
+    checks["session_risk"] = {
+        "checked":          session_ok,
+        "flagged":          session_ok and bool(session_data.get("found")),
+        "highest_severity": session_data.get("highest_severity") if session_ok else None,
+    }
+
+    if phone:
+        swap_ok, swap_data = _unwrap(handle_sim_swap({"phone": phone}))
+        checks_run.append("sim_swap")
+        swap_found = bool(swap_data.get("swapped"))
+        if swap_ok and swap_found:
+            signal_types.add("sim_swap")
+        # A 4xx/5xx here (no carrier answer, coverage unavailable) is NOT
+        # "not swapped" — checked stays False and the chain that needs
+        # sim_swap simply cannot fire, exactly as a real monitor run with no
+        # data would not fire it either. See handle_sim_swap's own comment.
+        checks["sim_swap"] = {"checked": swap_ok, "flagged": swap_ok and swap_found}
+    else:
+        checks_skipped.append("sim_swap (no phone supplied)")
+
+    if domain and "." in domain:
+        domain_ok, domain_data = _unwrap(handle_domain({"domain": domain}))
+        checks_run.append("domain")
+        domain_found = bool(domain_data.get("lookalikes_found"))
+        if domain_ok and domain_found:
+            signal_types.add("domain_lookalike")
+        checks["domain"] = {
+            "checked":          domain_ok,
+            "flagged":          domain_ok and domain_found,
+            "lookalikes_found": domain_data.get("lookalikes_found") if domain_ok else None,
+        }
+    else:
+        checks_skipped.append("domain (none supplied)")
+
+    # ATTACK_CHAINS order is the priority order — first match wins, exactly
+    # as check_and_fire_correlation does, so the two never disagree about
+    # which chain fires when a signal set could match more than one.
+    chain_matched = None
+    for chain in ATTACK_CHAINS:
+        if chain["signals"].issubset(signal_types):
+            chain_matched = {
+                "chain":    chain["chain"],
+                "severity": chain["severity"],
+                "label":    chain["label"],
+                "what":     chain["what"],
+            }
+            break
+
+    logger.info(
+        "incident-timeline — email=%s checks=%s signals=%s chain=%s",
+        _redact(email, "em"), checks_run, sorted(signal_types),
+        chain_matched["chain"] if chain_matched else None,
+    )
+
+    return _ok({
+        "identity": {
+            "email":          email,
+            "phone_checked":  bool(phone),
+            "domain_checked": bool(domain and "." in domain),
+        },
+        "signals_detected": sorted(signal_types),
+        "chain_matched":    chain_matched,
+        "checks":           checks,
+        "checks_skipped":   checks_skipped,
+        "checked_at":        datetime.now(timezone.utc).isoformat(),
+        **_freshness_for("/v1/metered/incident-timeline", flagged=bool(chain_matched)),
     })
 
 

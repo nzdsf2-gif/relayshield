@@ -8464,3 +8464,48 @@ succeed" (exit code, `git status` after) says nothing about whether the CONTENT 
 is still full of markers -- that requires reading the file, or grepping for the marker patterns
 specifically. Worth adding to any future merge-block EXPECT: after a conflict resolution, `grep -c
 "^<<<<<<<\|^=======\|^>>>>>>>" <file>` must print 0, not just "the merge command exited 0".
+
+## `relayshield-intel-feed` IS ALREADY SPLIT ONTO ITS OWN ROLE. MEASURED 2026-09-24, THIS SUPERSEDES EVERY "IAM split, first migration" LINE ABOVE.
+
+Confirmed directly against AWS, by Andrew, not inferred:
+
+    AWS_PROFILE=relayshield aws lambda get-function-configuration \
+      --function-name relayshield-intel-feed --query 'Role' --output text
+    arn:aws:iam::239677749008:role/relayshield-intel-feed-role
+
+That is not `relayshield-breach-check-role-1sapnwdl`. The split for this one function ran,
+successfully, in a prior session -- by Andrew's own account, painfully -- and the repo never
+learned about it.
+
+**WHY NOTHING HERE COULD EVER HAVE SHOWN THIS, and it is worth saying plainly rather than
+defending the miss: a Lambda's execution role is pure AWS state.** Nothing in this codebase
+records which role a function runs under. `tools/iam_split_roles.py` derives and WRITES the
+policy; the role ASSIGNMENT is a separate `aws lambda update-function-configuration --role ...`
+call with no file behind it to diff. So a successful `--apply` leaves the identical repo it
+started from -- confirmed the previous turn by blob hash: `tools/iam_split_roles.py` is
+byte-identical across all 14 branches on GitHub, because running the tool does not change the
+tool. There was never going to be a commit to find.
+
+**AND THIS REPO HAD ALREADY PAID FOR THE IDENTICAL SHAPE ONCE, IN THE STARS WATCHLIST GRANT, AND
+THE CONNECTION WAS NOT MADE.** "THE STARS GRANT IS CLOSED" above records, four days earlier in
+this same file: *"the script's `--apply` path ran at some point and nobody recorded it. A DOC
+RECORDING AN OPEN ITEM IS A LEAD, NOT A FACT, EXACTLY AS A DOC RECORDING A DONE ONE IS."* That
+sentence describes this incident exactly and was sitting in the file while it was diagnosed from
+scratch instead of recognised as the same pattern with a different grant's name on it.
+
+**THE GAP IS PROCEDURAL, NOT A READING FAILURE.** An AWS action that succeeds outside a session
+that can commit is invisible to every future session, forever, unless someone closes the loop
+with a follow-up note. The fix: whoever runs an `--apply` -- a session, or Andrew on the Mac --
+pastes the confirming output back in afterward, specifically so it gets written down, the way
+this section exists now. Every "IAM split, first migration" line in every Top 15/Top 10 above
+(2026-09-14 item 2, 2026-09-17 item 4, 2026-09-22 item 8, 2026-09-23's carried list) is now
+closed for `relayshield-intel-feed`. Those lists are historical snapshots per this file's own
+rule and are not edited in place, but nothing after this section should read any of them as
+still open for this function.
+
+**STILL UNKNOWN, cheap and not urgent:** whether `relayshield-intel-feed` was the only function
+migrated, or others moved too, and the shared role's current policy counts. Read-only:
+
+    AWS_PROFILE=relayshield aws iam list-attached-role-policies \
+      --role-name relayshield-breach-check-role-1sapnwdl --no-cli-pager \
+      --query 'length(AttachedPolicies)' --output text

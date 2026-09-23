@@ -1813,7 +1813,8 @@ ENDPOINTS = [
         "summary": "Register assets and sweep them against the IOC corpus",
         "description": (
             "A watchlist scoped to your API key. `register` adds domains and IPs, `sweep` checks "
-            "them against the 494K+ distinct indicator corpus (5.8M+ sightings), `list` returns what is registered, `remove` "
+            "them against the IOC corpus (7.8M+ citations, from 113 monitored criminal Telegram "
+            "marketplaces and authoritative feeds), `list` returns what is registered, `remove` "
             "deletes entries. Once a webhook is configured, new matches against registered assets "
             "are pushed to you automatically."
         ),
@@ -2313,6 +2314,96 @@ ENDPOINTS = [
         "auth": [],   # see /v1/link-check above -- inheriting the document's
                       # security would make a keyless endpoint require a key.
         "notes": "No API key required, on the same terms as /v1/link-check.",
+    },
+    {
+        "path": "/v1/email-check",
+        "price_cents": 0,
+        "tag": "Free checks (no API key)",
+        "summary": "Score a phishing email an agent has already parsed",
+        "description": (
+            "Keyless and free. The same scoring model as checkemail@relayshield.net, for a caller "
+            "that has already parsed a message -- an agent reading a mailbox through the Gmail or "
+            "Graph API -- rather than a raw RFC822 blob. Scores SPF/DKIM/DMARC, brand impersonation "
+            "in the display name, ask-plus-pressure phrasing, links to public file-hosting services, "
+            "and attachment names by extension. Links are checked through the same keyless path as "
+            "`/v1/link-check`, never `/v1/scan-url`, so this endpoint has no per-call vendor cost.\n\n"
+            "This does not parse raw email. Extract from_address, from_name, subject, body_text, "
+            "links and attachment_names yourself before calling."
+        ),
+        "request": {
+            "props": {
+                "from_address": _str("The claimed sender's address.", examples=["alert@phrase.com"]),
+                "from_name": _str("The claimed sender's display name.",
+                                  examples=["ApplyAML Meta Mask Details"]),
+                "reply_to": _str("Reply-To address, if present and different from from_address."),
+                "return_path": _str("Envelope sender, if available. Informational only."),
+                "subject": _str("Message subject."),
+                "body_text": _str("Plain-text body, used for ask/deadline/threat phrasing."),
+                "links": _arr("Links found in the body, up to 25.", _str("A URL.")),
+                "attachment_names": _arr("Attachment filenames, checked by extension only. "
+                                         "Nothing is opened, decoded or stored.", _str("A filename.")),
+                "auth_results": _obj(
+                    "Structured SPF/DKIM/DMARC verdict, if the caller already has it.",
+                    {"spf": _str("pass, fail, softfail or neutral."),
+                     "dkim": _str("pass or fail."),
+                     "dmarc": _str("pass or fail.")},
+                ),
+                "authentication_results": _str(
+                    "Raw Authentication-Results header text. Parsed only when auth_results is absent."),
+                "forwarded": _bool(
+                    "True when this is an inline forward. Forwarding strips the original SPF/DKIM/"
+                    "DMARC and re-signs the message as the forwarder's own provider, so auth signals "
+                    "are not scored when this is true -- they would describe the forwarder, not the "
+                    "message being asked about."),
+                "source": _str("Optional integration identifier.", examples=["muse"]),
+            },
+            "example": {
+                "from_address": "alert@phrase.com",
+                "from_name": "ApplyAML Meta Mask Details",
+                "subject": "Action required: verify your wallet",
+                "body_text": "Please add your email now to avoid permanently deleted access.",
+                "links": ["https://storage.googleapis.com/example/verify.html"],
+                "attachment_names": [],
+                "source": "muse",
+            },
+        },
+        "response": {
+            "props": {
+                "risk": _str("Overall verdict.", enum=["high", "medium", "low"]),
+                "score": _int("The weighted score behind `risk`."),
+                "claimed_sender": _str("from_address as sent, or null."),
+                "flags": _arr("Findings that raised the score.",
+                              _obj("A flag.", {"weight": _int("Points this flag added."),
+                                                "text": _str("Plain-language explanation.")})),
+                "notes": _arr("Observations stated but not scored.", _str("A note.")),
+                "auth": _obj("The authentication verdict as scored.",
+                             {"present": _bool("An auth result was supplied."),
+                              "spf": _str("pass, fail, softfail, neutral or null."),
+                              "dkim": _str("pass, fail or null."),
+                              "dmarc": _str("pass, fail or null."),
+                              "about_original": _bool(
+                                  "False when forwarded is true -- the auth fields describe the "
+                                  "forwarder, not the original sender, and were not scored.")}),
+                "links": _arr("Per-link verdicts, same shape as /v1/link-check's batch results.",
+                              _obj("A link verdict.", {})),
+                "attachments": _obj("Attachment names as received.",
+                                    {"names": _arr("Filenames.", _str("A filename."))}),
+                "note": _str("Standing caveat on what a heuristic verdict does and does not mean."),
+            },
+            "example": {
+                "risk": "high", "score": 6, "claimed_sender": "alert@phrase.com",
+                "flags": [{"weight": 3, "text": "The display name says \"ApplyAML Meta Mask "
+                          "Details\", but the message was sent from phrase.com. That domain does "
+                          "not belong to Metamask."}],
+                "notes": [], "auth": {"present": False, "spf": None, "dkim": None, "dmarc": None,
+                                       "about_original": True},
+                "links": [], "attachments": {"names": []},
+            },
+        },
+        "auth": [],   # see /v1/link-check above -- inheriting the document's
+                      # security would make a keyless endpoint require a key.
+        "notes": ("No API key required. checkemail@relayshield.net runs the same model over raw "
+                  "forwarded mail; this is a second door for a caller that has already parsed one."),
     },
 
     # ---------------- Account ----------------
@@ -3265,8 +3356,9 @@ _DESCRIPTION = """
 Identity-compromise and threat-intelligence checks over a plain REST API. Every endpoint is
 `POST`, takes a JSON body, and returns a JSON envelope. Pay per call in USDC over x402 with no
 signup and no API key, or use a key with prepaid credits and a free tier of 100 calls. Screen a
-counterparty wallet, a token contract, an MCP server, a domain or an email against a corpus of
-over 494,000 distinct indicators, drawn from more than 5.8 million sightings.
+counterparty wallet, a token contract, an MCP server, a domain or an email against a corpus
+collected continuously from 113 monitored criminal Telegram marketplaces, infostealer log dumps
+and authoritative public indicator feeds -- more than 7.8 million citations to date.
 
 ## Authentication
 

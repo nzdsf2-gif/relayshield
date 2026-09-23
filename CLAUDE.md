@@ -8112,3 +8112,77 @@ Bundle B's remaining duplicate cleanup follow-through, BOT-TOKEN-1 phase 1, the 
 submissions still pending review). This section is intentionally NOT a renumbered Top 15 --
 regenerating that list means reviewing every open item in this file, which this session did not
 do, and this file's own rule is that a doc claiming something is done is a lead, not a fact.
+
+### ITEM 4 (THE COMPOSITE ENDPOINT) IS NOT A GAP. IT ALREADY EXISTS, AS A DIFFERENT SHAPE.
+
+**Corrected same session, at Andrew's instruction.** The "demo version" the item-4 note above
+refers to searching for is `relayshield_breach_monitor.py`'s `ATTACK_CHAINS` /
+`check_and_fire_correlation` engine: a 72-hour cross-surface correlation window, eleven named
+attack chains, and predictive warnings fired mid-chain, imported by
+`relayshield_whatsapp_webhook.py`, `relayshield_domain_monitor.py`,
+`relayshield_telegram_webhook.py` and `relayshield_sim_swap_monitor.py`. It already correlates
+breach + SIM-swap + domain + wallet-risk signals for a given user.
+
+**It is PROACTIVE, not on-demand, and that is the entire difference from item 4's ask.** It fires
+Telegram/WhatsApp alerts from background monitor runs against signals already recorded for a
+verified user; it is not a callable, priced JSON endpoint a caller can invoke for an arbitrary
+identity. Productising it as a `/v1/metered/*` endpoint (the second half of Andrew's original
+framing -- "productize a JS chargeable endpoint") is therefore still a real, unscoped build: request
+shape, price point, and whether an on-demand read of `ATTACK_CHAINS`-tracked signals needs a new
+query path or can reuse the existing per-user record. Not attempted this session; item 4 is closed
+as "the correlation logic exists," not as "the endpoint exists."
+
+### BOT-TOKEN-1 PHASE 1 IS BUILT: `getMe` LIVENESS, HASH-ONLY STORAGE, SEVERITY SPLIT
+
+Scoped in `leaked_bot_token_finding_scope.md` section 6 ("One day. Gated on nothing.") and built
+to that scope, no more: `check_telegram_bot_token_liveness` and `_store_bot_token_finding` in
+`relayshield_intel_monitor.py`, wired into `_parse_passwords_file`'s existing NHI loop for both
+`telegram_bot_token` and `telegram_bot_token_url` matches.
+
+**The hard boundary from section 3 is enforced by a test that reads the two functions' SOURCE, not
+by a comment.** `check_telegram_bot_token_liveness` calls `getMe` and nothing else; a second test
+asserts `_store_bot_token_finding` makes no Telegram call at all (it delegates). Comments and
+docstrings are stripped before either check runs -- the "guard fooled by its own comment" shape has
+hit this exact class of guard six times before in this repo, and the first version of THIS test
+walked straight into it: the docstring's own prose describing what the function delegates to
+("the one getMe call") made the un-stripped guard fail on correct code.
+
+**Storage is keyed on `sha256(token)`, mirroring `relayshield_stolen_cards`'s `pan_hash` key.** The
+token itself never leaves the two functions that touch it; a test executes `_store_bot_token_finding`
+and asserts the raw token string does not appear in any value of the DynamoDB item it writes.
+
+**Idempotent on the hash: a token re-observed across channel sweeps gets ONE `getMe` call, not one
+per sighting.** `_store_bot_token_finding` checks for an existing row before calling the liveness
+function; a test proves the liveness function is never invoked a second time for the same token.
+
+**Severity: CRITICAL when live, MEDIUM when a live `getMe` call reports the token dead (HTTP 401),
+and something else -- `UNKNOWN` -- when the call could not be completed at all.** The third state
+is the one this phase exists to protect: a timed-out `getMe` call must never render as "dead",
+which would tell a bot developer a live credential is safe. A test fabricates a timeout and asserts
+the stored severity is neither `CRITICAL` nor `MEDIUM`.
+
+**A pre-existing bug in the customer-facing NHI alert was fixed in the same commit.** Every NHI
+finding, bot tokens included, closed with an unconditional *"Rotate these credentials
+immediately"* -- directly contradicting this file's own standing rule (*"Remediation says REVOKE
+IN BOTFATHER, never rotate"*) and the finding's own per-item description, which already said so.
+The alert now names BotFather specifically when any bot-token finding is present, and drops the
+rotate line entirely when EVERY finding in the batch is a bot token.
+
+**NOT BUILT THIS SESSION, and correctly so per the scope doc's own gate:** Phase 2 (the Mini App /
+bot-command username lookup) is gated on a NON-ZERO corpus count, not a date -- exactly the
+ABS-1/OpenRouter-webhook shape this repo has already paid for building against zero rows.
+
+**SHIPS INERT UNTIL THE TABLE EXISTS, ON PURPOSE**, same pattern as the breach cache:
+`_store_bot_token_finding` catches every DynamoDB error and logs a warning, so nothing in the
+ingestion pipeline breaks while this is outstanding -- the corpus simply does not accumulate
+bot-token findings yet. `tools/setup_bot_tokens_table.sh` creates `relayshield_bot_tokens` (keyed
+on `token_hash`), enables TTL, and checks whether `relayshield-intel-monitor`'s role can already
+write to it before proposing a grant the shared role's inline budget cannot make.
+
+    AWS_PROFILE=relayshield sh tools/setup_bot_tokens_table.sh
+
+19 tests, `test_bot_token_liveness.py`, all executed against stubbed `urllib` and `boto3` rather
+than read: a live `getMe` response, a 401 (checked-dead, not inconclusive), a timeout and a 5xx
+(both inconclusive, never dead), the source-level `getMe`-only boundary, hash-only storage,
+severity assignment for all three liveness states, the once-per-token dedup, the wiring from
+`_parse_passwords_file` for both pattern shapes, and the remediation-text fix.

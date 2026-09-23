@@ -10494,9 +10494,9 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
     ),
     "/v1/payg/infostealer": (
         "Check whether an email address's credentials were harvested by infostealer malware "
-        "and appear in a criminal stealer-log marketplace, detected 24-72 hours ahead of "
-        "public breach databases. Call to catch device-level compromise before stolen session "
-        "cookies or saved passwords are used for account takeover."
+        "and appear in a criminal stealer-log marketplace. Call to catch device-level "
+        "compromise before stolen session cookies or saved passwords are used for account "
+        "takeover."
     ),
     "/v1/payg/supply-chain": (
         "Check up to 10 vendor domains for combined breach, infostealer, and dark-web risk "

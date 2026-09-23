@@ -2880,7 +2880,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
     },
     '/v1/payg/infostealer': {
         'summary': 'Check an email address against infostealer malware logs',
-        'description': "Check whether an email address's credentials were harvested by infostealer malware and appear in a criminal stealer-log marketplace, detected 24-72 hours ahead of public breach databases. Call to catch device-level compromise before stolen session cookies or saved passwords are used for account takeover.",
+        'description': "Check whether an email address's credentials were harvested by infostealer malware and appear in a criminal stealer-log marketplace. Call to catch device-level compromise before stolen session cookies or saved passwords are used for account takeover.",
         'price_units': 150000,
         'x402_version': 2,
         'body': {'type': 'object',

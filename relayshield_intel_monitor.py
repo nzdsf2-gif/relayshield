@@ -109,6 +109,12 @@ FIRST_SEEN_TABLE      = "relayshield_intel_first_seen"
 INTEL_CHANNELS_TABLE  = "relayshield_intel_channels"
 STOLEN_SESSIONS_TABLE  = "relayshield_stolen_sessions"
 OPERATORS_TABLE        = "relayshield_operator_identities"
+# BOT-TOKEN-1 phase 1, 2026-09-23. Keyed on token_hash rather than a random
+# id, the same shape as STOLEN_CARDS_TABLE below -- the key IS the dedup, so a
+# token seen across many channel sweeps gets ONE getMe call rather than one
+# per sighting. See leaked_bot_token_finding_scope.md section 3 for why the
+# raw token is never written here.
+BOT_TOKENS_TABLE       = "relayshield_bot_tokens"
 
 # A5, 2026-08-25. All three original `ransomware`-category Telegram channels
 # (ransomwatch, RansomwareUpdates, darkfeed_io) are confirmed dead -- checked
@@ -1605,7 +1611,7 @@ def _parse_netscape_cookies(text: str) -> list[dict]:
     return results
 
 
-def _parse_passwords_file(text: str) -> list[dict]:
+def _parse_passwords_file(text: str, channel: str = "") -> list[dict]:
     results = []
     url_re  = re.compile(r"https?://[^\s|]+", re.IGNORECASE)
     for line in text.splitlines():
@@ -1754,6 +1760,12 @@ def _parse_passwords_file(text: str) -> list[dict]:
                 continue
             # context-anchored patterns capture the secret in group(1)
             val = m.group(1) if m.re.groups else m.group(0)
+            # BOT-TOKEN-1 phase 1. The raw token is used HERE, inside this
+            # loop, and nowhere else -- _store_bot_token_finding hashes it
+            # immediately and the hash, never the token, is what leaves this
+            # function. See the function's own docstring for why.
+            if nhi_type in ("telegram_bot_token", "telegram_bot_token_url"):
+                _store_bot_token_finding(val, channel)
             if nhi_prov == "unknown_openai_compatible":
                 if val in _attributed:
                     continue
@@ -1974,6 +1986,116 @@ def _store_observed_session(session: dict, channel: str) -> None:
         })
     except Exception as exc:
         logger.warning("Observed session write failed domain=%s: %s", session.get("domain"), exc)
+
+
+# ---------------------------------------------------------------------------
+# BOT-TOKEN-1 phase 1 — verify and attribute a leaked Telegram bot token
+# ---------------------------------------------------------------------------
+# Scoped in leaked_bot_token_finding_scope.md section 3, which is the hard
+# boundary this code exists to enforce, not merely to describe:
+#
+#   getMe, once per distinct token. NEVER getUpdates, setWebhook or
+#   deleteWebhook against a token that is not ours.
+#
+# getUpdates is what a pentest tool like soxoj/telegram-bot-dumper uses, and
+# it is correct THERE because that tool runs with the owner's authorization.
+# We have none. It also ACKNOWLEDGES AND DRAINS the pending update queue, so
+# the owner permanently loses messages they had not processed -- a read that
+# deletes the victim's data is not a read. getMe is read-only, unauthenticated
+# in the sense that possessing the token is the only credential it checks,
+# and returns nothing but the bot's own username.
+#
+# test_bot_token_liveness.py asserts, by reading this function's own source,
+# that it names no method but getMe. That is deliberate: a comment describing
+# the boundary is not the boundary, and this repo has been fooled by its own
+# prose before.
+
+def check_telegram_bot_token_liveness(token: str) -> dict:
+    """One getMe call. Returns {"checked": bool, "live": bool | None,
+    "username": str | None}.
+
+    "checked": False means the call could not be completed -- a timeout, a
+    connection failure, or an HTTP status Telegram does not use to mean
+    "invalid token". That is NEVER the same as "live": False, and callers
+    must not collapse them: relayshield_watchlist_monitor.py's own rule is
+    that "we could not check" must never render as "it is gone", and the
+    parallel failure here is a live token reported dead because a getMe call
+    timed out -- which tells a bot developer their credential is safe when
+    nothing has been established either way.
+
+    Telegram answers a bad token with HTTP 401 and ok: false, which IS a
+    checked, definite answer (the token is dead), not an inconclusive one.
+    """
+    url = f"https://api.telegram.org/bot{token}/getMe"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            body = json.loads(resp.read())
+        if body.get("ok") is True and isinstance(body.get("result"), dict):
+            return {"checked": True, "live": True,
+                    "username": body["result"].get("username") or None}
+        # A 200 with ok: false is not a shape Telegram's own API documents,
+        # but is handled the same as a definite dead answer rather than
+        # raising, since the alternative is treating an unexpected-but-valid
+        # response as a network failure.
+        return {"checked": True, "live": False, "username": None}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return {"checked": True, "live": False, "username": None}
+        logger.warning("bot-token liveness check inconclusive: HTTP %s", exc.code)
+        return {"checked": False, "live": None, "username": None}
+    except Exception as exc:
+        logger.warning("bot-token liveness check inconclusive: %s", exc)
+        return {"checked": False, "live": None, "username": None}
+
+
+def _store_bot_token_finding(token: str, channel: str) -> None:
+    """A candidate Telegram bot token found in the corpus. The token itself
+    is used ONLY inside this function, to key the idempotency check and to
+    make the one getMe call -- it is never passed to a caller and never
+    written anywhere. Only sha256(token) is stored, which is what
+    relayshield_bot_tokens is keyed on.
+
+    Idempotent on token_hash: a token re-observed across many channel sweeps
+    gets ONE getMe call, made the first time it is seen, not one per
+    sighting -- "getMe, once per distinct token" from the scope doc.
+    """
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    table = _dynamodb.Table(BOT_TOKENS_TABLE)
+    try:
+        if table.get_item(Key={"token_hash": token_hash}).get("Item"):
+            return
+    except Exception as exc:
+        logger.warning("bot-token existence check failed: %s", exc)
+        return  # do not risk a duplicate getMe call on a table we can't read
+
+    result = check_telegram_bot_token_liveness(token)
+    if result["live"]:
+        severity = "CRITICAL"
+    elif result["checked"]:
+        severity = "MEDIUM"
+    else:
+        # Could not be verified either way. Recorded as UNKNOWN rather than
+        # skipped, so a later run (or a future re-check pass) can retry --
+        # but crucially never as MEDIUM or CRITICAL, both of which assert an
+        # answer this call did not get.
+        severity = "UNKNOWN"
+    now = datetime.now(timezone.utc).isoformat()
+    ttl = Decimal(int(time.time()) + ALERT_TTL_DAYS * 86400)
+    try:
+        table.put_item(Item={
+            "token_hash":     token_hash,
+            "username":       result["username"] or "",
+            "severity":       severity,
+            "checked":        result["checked"],
+            "channel_source": channel,
+            "first_seen":     now,
+            "ttl":            ttl,
+        })
+        logger.info("bot-token finding stored severity=%s checked=%s username=%s",
+                     severity, result["checked"], result["username"] or "(none)")
+    except Exception as exc:
+        logger.warning("bot-token finding write failed: %s", exc)
 
 
 def _extract_marketplace_listing(text: str, channel: str, category: str) -> dict | None:
@@ -2391,7 +2513,7 @@ async def _process_stealer_archive(client, message, channel: str,
             elif any(kw in low_name for kw in ("password", "login", "credential", "pass")):
                 if low_name.endswith((".txt", ".csv", ".log", "")):
                     raw = zf.read(name).decode("utf-8", errors="ignore")
-                    all_sessions.extend(_parse_passwords_file(raw))
+                    all_sessions.extend(_parse_passwords_file(raw, channel))
             elif any(kw in low_name for kw in ("autofill", "card", "cc_", "creditcard")):
                 # BIN/stolen-card monitoring, added 2026-07-24. Real stealer
                 # log packages commonly include an Autofill/CreditCards file
@@ -2507,11 +2629,26 @@ async def _process_stealer_archive(client, message, channel: str,
             stats["alerts_fired"] += 1
             logger.info("INTEL-5 session alert fired user_id=%s", user_id)
         if nhi_findings:
+            # BOT-TOKEN-1: a Telegram bot token is session-shaped, not
+            # key-shaped -- rotating anything else does nothing, and this
+            # blanket "Rotate these credentials immediately" line told a bot
+            # developer to do the one thing that does not help. The remediation
+            # text on each finding already says the right thing per-type; the
+            # closing line must not contradict it.
+            _bot_token_nhi_types = {"telegram_bot_token", "telegram_bot_token_url"}
+            _has_bot_token   = any(f.get("nhi_type") in _bot_token_nhi_types for f in nhi_findings)
+            _has_other       = any(f.get("nhi_type") not in _bot_token_nhi_types for f in nhi_findings)
+            _remediation = []
+            if _has_other:
+                _remediation.append("*Rotate these credentials immediately.*")
+            if _has_bot_token:
+                _remediation.append(
+                    "*A Telegram bot token cannot be rotated \u2014 revoke it in BotFather.*")
             nhi_msg = (
                 f"\U0001f6a8 *CRITICAL \u2014 API Key / Token Found in Stealer Log*\n\n"
                 f"Non-human credentials linked to *{email}* found in criminal stealer archive:\n\n"
                 + "\n".join(f"  \U0001f534 {f['nhi_description']} detected" for f in nhi_findings[:5])
-                + "\n\n*Rotate these credentials immediately.*\n"
+                + "\n\n" + "\n".join(_remediation) + "\n"
                 "Check IAM/cloud provider logs for unauthorised activity.\n\n"
                 "\U0001f6e1\ufe0f _RelayShield NHI Detection_"
             )

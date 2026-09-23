@@ -700,6 +700,10 @@ KEYLESS_SCAN_ENDPOINTS = frozenset({
     # Browsing's free tier and RDAP. The per-IP cap is here to stop it becoming
     # an open proxy, not to protect a vendor bill.
     "/v1/link-check",
+    # Added 2026-09-23. Its links go through the same _assess_domain path as
+    # /v1/link-check above -- no VirusTotal, no per-call vendor bill -- so it
+    # is keyless for the same reason.
+    "/v1/email-check",
 })
 
 # Deliberately generous. These are MOBILE clients, and carrier-grade NAT puts
@@ -3124,6 +3128,445 @@ def handle_link_check(params: dict) -> dict:
     return _ok(body)
 
 
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/email-check     (KEYLESS, built 2026-09-23)
+# ---------------------------------------------------------------------------
+# A second door onto the checkemail@relayshield.net scoring model, for a
+# caller that has ALREADY parsed a message -- an agent reading a mailbox
+# through the Gmail/Graph API, not a raw RFC822 blob. checkemail@ itself is
+# unchanged and keeps running; this is not a migration.
+#
+# WHAT IS DELIBERATELY NOT PORTED, per the 2026-09-22 scope note this repo
+# already carries: every MIME-parsing function in
+# cloudflare_worker_checkemail.js (splitHeadersAndBody, decodePart,
+# extractText, stripHtml, decodeEncodedWords, parseAddress, extractLinks,
+# unwrap, detectForwardedOriginal, extractAttachmentNames). An agent handing
+# over structured JSON has already done that work; re-parsing raw MIME here
+# would duplicate a parser this endpoint's callers do not need.
+#
+# WHAT IS PORTED: the SIGNALS and the WEIGHTING -- the actual asset, proven
+# against 78 fixtures in the Worker's own test suite. BRAND_DOMAINS,
+# AUTHORITY_WORDS, WEBMAIL, PUBLIC_PAGE_HOSTS, the ask/deadline/threat
+# phrase lists and the attachment extension tables are the SAME data as the
+# Worker's; test_email_check.py reads both files and fails if they diverge,
+# because two copies of one scoring model that can silently disagree is
+# this repo's most-repeated defect and a security verdict that differs by
+# surface is a product telling two users different things about one email.
+#
+# LINKS GO THROUGH _heuristic_url_check_many -- THE SAME ZERO-COST PATH
+# /v1/link-check USES -- NEVER /v1/scan-url. VirusTotal is $0.05/call and
+# has never been keyless; wiring it here would silently attach a per-call
+# vendor bill to a free surface. See CLAUDE.md "THE CONSUMER-COMPELLING
+# CHECKS ALL HAVE A VENDOR BILL".
+
+# Same table as BRAND_DOMAINS in cloudflare_worker_checkemail.js, deliberately.
+# See the file-agreement note above.
+_EMAIL_BRAND_DOMAINS = {
+    "paypal": ["paypal.com", "paypal.co.uk", "paypal-communication.com"],
+    "stripe": ["stripe.com"],
+    "venmo": ["venmo.com"],
+    "cash app": ["cash.app", "square.com", "block.xyz"],
+    "wise": ["wise.com", "transferwise.com"],
+    "revolut": ["revolut.com"],
+    "monzo": ["monzo.com"],
+    "chase": ["chase.com", "jpmorgan.com"],
+    "wells fargo": ["wellsfargo.com"],
+    "bank of america": ["bankofamerica.com", "bofa.com"],
+    "citibank": ["citi.com", "citibank.com"],
+    "capital one": ["capitalone.com"],
+    "hsbc": ["hsbc.com", "hsbc.co.uk"],
+    "barclays": ["barclays.co.uk", "barclays.com"],
+    "lloyds": ["lloydsbank.com", "lloydsbank.co.uk"],
+    "natwest": ["natwest.com"],
+    "santander": ["santander.co.uk", "santander.com"],
+    "american express": ["americanexpress.com", "aexp.com"],
+    "amex": ["americanexpress.com", "aexp.com"],
+    "coinbase": ["coinbase.com"],
+    "binance": ["binance.com"],
+    "kraken": ["kraken.com"],
+    "gemini": ["gemini.com"],
+    "metamask": ["metamask.io", "consensys.net", "consensys.io"],
+    "ledger": ["ledger.com"],
+    "trezor": ["trezor.io"],
+    "phantom": ["phantom.app"],
+    "uniswap": ["uniswap.org"],
+    "opensea": ["opensea.io"],
+    "microsoft": ["microsoft.com", "office.com", "office365.com", "live.com", "outlook.com"],
+    "office 365": ["microsoft.com", "office.com", "office365.com"],
+    "apple": ["apple.com", "icloud.com"],
+    "icloud": ["apple.com", "icloud.com"],
+    "google": ["google.com", "gmail.com", "youtube.com"],
+    "gmail": ["google.com", "gmail.com"],
+    "amazon": ["amazon.com", "amazon.co.uk", "aws.amazon.com"],
+    "meta": ["meta.com", "facebook.com", "facebookmail.com"],
+    "facebook": ["facebook.com", "facebookmail.com", "meta.com"],
+    "instagram": ["instagram.com", "mail.instagram.com", "meta.com"],
+    "whatsapp": ["whatsapp.com", "meta.com"],
+    "linkedin": ["linkedin.com"],
+    "netflix": ["netflix.com"],
+    "spotify": ["spotify.com"],
+    "dropbox": ["dropbox.com", "dropboxmail.com"],
+    "docusign": ["docusign.com", "docusign.net"],
+    "adobe": ["adobe.com"],
+    "ebay": ["ebay.com", "ebay.co.uk"],
+    "irs": ["irs.gov"],
+    "hmrc": ["hmrc.gov.uk", "gov.uk"],
+    "social security": ["ssa.gov"],
+    "medicare": ["medicare.gov", "cms.gov"],
+    "dvla": ["dvla.gov.uk", "gov.uk"],
+    "dhl": ["dhl.com", "dhl.co.uk"],
+    "fedex": ["fedex.com"],
+    "ups": ["ups.com"],
+    "usps": ["usps.com", "usps.gov"],
+    "royal mail": ["royalmail.com", "royalmail.co.uk"],
+    "evri": ["evri.com"],
+    "dpd": ["dpd.co.uk", "dpd.com"],
+    "norton": ["norton.com", "nortonlifelock.com", "gendigital.com"],
+    "mcafee": ["mcafee.com"],
+    "geek squad": ["bestbuy.com", "geeksquad.com"],
+}
+
+_EMAIL_AUTHORITY_WORDS = [
+    "support", "security", "helpdesk", "help desk", "billing", "accounts",
+    "account services", "service desk", "customer service", "customer care",
+    "fraud", "verification", "no-reply", "noreply", "administrator", "admin team",
+    "it department", "payroll", "hr department",
+]
+
+_EMAIL_WEBMAIL = frozenset({
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk", "outlook.com",
+    "hotmail.com", "hotmail.co.uk", "icloud.com", "me.com", "aol.com",
+    "live.com", "live.co.uk", "protonmail.com", "proton.me", "mail.com",
+    "gmx.com", "yandex.com", "zoho.com", "msn.com",
+})
+
+_EMAIL_EXECUTABLE_EXT = frozenset({
+    "exe", "scr", "com", "pif", "bat", "cmd", "msi", "msp", "cpl", "dll",
+    "js", "jse", "vbs", "vbe", "wsf", "wsh", "hta", "ps1", "psm1", "reg",
+    "jar", "apk", "app", "dmg", "pkg", "sh", "py", "scpt",
+})
+_EMAIL_CONTAINER_EXT = frozenset({"iso", "img", "vhd", "vhdx", "lnk", "url"})
+_EMAIL_MACRO_EXT = frozenset({"docm", "xlsm", "xlsb", "pptm", "dotm", "xltm", "potm"})
+_EMAIL_ARCHIVE_EXT = frozenset({"zip", "rar", "7z", "gz", "tar", "cab", "ace"})
+_EMAIL_DOCUMENT_EXT = frozenset({
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv",
+    "jpg", "jpeg", "png", "gif", "htm", "html",
+})
+
+_EMAIL_PUBLIC_PAGE_HOSTS = [
+    "storage.googleapis.com", "s3.amazonaws.com", "amazonaws.com",
+    "blob.core.windows.net", "web.core.windows.net", "digitaloceanspaces.com",
+    "r2.dev", "backblazeb2.com", "wasabisys.com",
+    "firebaseapp.com", "web.app", "pages.dev", "workers.dev", "netlify.app",
+    "vercel.app", "github.io", "gitlab.io", "glitch.me", "repl.co",
+    "weeblysite.com", "wixsite.com", "square.site", "godaddysites.com",
+    "000webhostapp.com", "herokuapp.com", "onrender.com", "surge.sh",
+    "forms.gle", "docs.google.com/forms",
+]
+
+_EMAIL_ASK_PHRASES = [
+    "update your payment", "update your billing", "update your card",
+    "verify your account", "verify your identity", "confirm your identity",
+    "confirm your account", "validate your account", "reactivate your account",
+    "update your details", "update your information", "confirm your password",
+    "sign in to continue", "log in to continue", "click here to", "click below to",
+    "re-enter your", "reconfirm your", "restore your account",
+    "add your email", "add your email address", "confirm your email",
+    "verify your email", "update your email", "email-based sign-in",
+    "email based sign in", "link your email", "we need your email",
+    "just click the button", "click the button below",
+]
+_EMAIL_DEADLINE_PHRASES = [
+    "within 24 hours", "within 48 hours", "within 72 hours", "in the next 24",
+    "expires today", "expires tomorrow", "final notice", "last warning",
+    "final reminder", "immediately to avoid", "act now", "urgent action",
+]
+_EMAIL_THREAT_PHRASES = [
+    "permanently deleted", "will be deleted", "will be suspended",
+    "will be closed", "will be terminated", "will be locked", "lose access",
+    "loss of access", "legal action", "account has been suspended",
+    "unauthorized access", "unauthorised access", "unusual activity",
+]
+
+
+def _email_domain_of(addr: str) -> str:
+    m = re.search(r"@([^\s>@]+)", addr or "")
+    return m.group(1).lower().rstrip(".") if m else ""
+
+
+def _normalise_brand_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def _impersonated_brand(display_name: str, from_domain: str) -> str:
+    """Does this display name claim a brand the sending domain does not belong
+    to? Returns the brand name, or "" if there is nothing to say."""
+    name = _normalise_brand_text(display_name)
+    domain = (from_domain or "").lower()
+    if not name or not domain:
+        return ""
+    for brand, domains in _EMAIL_BRAND_DOMAINS.items():
+        key = _normalise_brand_text(brand)
+        if key not in name:
+            continue
+        if any(domain == d or domain.endswith("." + d) for d in domains):
+            return ""
+        if key in _normalise_brand_text(domain):
+            return ""
+        return brand
+    return ""
+
+
+def _email_attachment_signals(names: list) -> dict:
+    flags: list = []
+    notes: list = []
+    for name in names:
+        lower = str(name).lower()
+        parts = lower.split(".")
+        ext = parts[-1] if len(parts) > 1 else ""
+        prev = parts[-2] if len(parts) > 2 else ""
+
+        if prev and prev in _EMAIL_DOCUMENT_EXT and (
+                ext in _EMAIL_EXECUTABLE_EXT or ext in _EMAIL_CONTAINER_EXT):
+            flags.append({"weight": 3, "text":
+                f'The attachment "{name}" has two extensions. It is a .{ext} file '
+                f'wearing a .{prev} name, and the only reason to do that is to look '
+                "like a document in a file manager that hides known extensions."})
+            continue
+        if ext in _EMAIL_EXECUTABLE_EXT:
+            flags.append({"weight": 3, "text":
+                f'The attachment "{name}" is a .{ext} file, which is a program, not '
+                "a document. Opening it runs code on your computer."})
+            continue
+        if ext in _EMAIL_CONTAINER_EXT:
+            flags.append({"weight": 2, "text":
+                f'The attachment "{name}" is a .{ext}, which mounts as a drive or '
+                "opens a target when double-clicked. It is a common way to carry a "
+                "program past a mail filter."})
+            continue
+        if ext in _EMAIL_MACRO_EXT:
+            flags.append({"weight": 2, "text":
+                f'The attachment "{name}" is a macro-enabled Office file (.{ext}). '
+                "It is a document that can run code. Do not enable content if it "
+                "asks you to."})
+            continue
+        if ext in _EMAIL_ARCHIVE_EXT:
+            notes.append(
+                f'"{name}" is an archive. We check attachments by name and type '
+                "only and do not open them, so we cannot tell you what is inside "
+                "this one.")
+    return {"flags": flags, "notes": notes, "names": list(names)}
+
+
+def _email_public_host_signal(links: list) -> list:
+    hits: list = []
+    seen_hosts: set = set()
+    for url in links:
+        host = _domain_of(url)
+        if not host:
+            continue
+        match = next((h for h in _EMAIL_PUBLIC_PAGE_HOSTS
+                      if host == h or host.endswith("." + h)), None)
+        if match and host not in seen_hosts:
+            seen_hosts.add(host)
+            hits.append({"host": host, "url": url, "service": match})
+    return hits
+
+
+def _email_pressure_signals(body_text: str) -> dict:
+    t = (body_text or "").lower()
+    ask = next((p for p in _EMAIL_ASK_PHRASES if p in t), None)
+    deadline = next((p for p in _EMAIL_DEADLINE_PHRASES if p in t), None)
+    threat = next((p for p in _EMAIL_THREAT_PHRASES if p in t), None)
+    return {"ask": ask, "deadline": deadline, "threat": threat}
+
+
+def _parse_auth_results_header(raw: str) -> dict:
+    """Read a raw Authentication-Results header, as a fallback when the
+    caller does not already hand over structured spf/dkim/dmarc values."""
+    low = (raw or "").lower()
+    if not low:
+        return {"present": False, "spf": None, "dkim": None, "dmarc": None}
+
+    def grab(mech):
+        m = re.search(rf"\b{mech}=(\w+)", low)
+        return m.group(1) if m else None
+
+    return {"present": True, "spf": grab("spf"), "dkim": grab("dkim"),
+            "dmarc": grab("dmarc")}
+
+
+def _score_email(params: dict) -> dict:
+    """Header, brand and pressure signals. Pure function of the caller's
+    already-parsed fields; no network call. Mirrors headerSignals() in
+    cloudflare_worker_checkemail.js, minus everything that needs raw MIME."""
+    flags: list = []
+    notes: list = []
+
+    forwarded = bool(params.get("forwarded"))
+    auth_in = params.get("auth_results")
+    if isinstance(auth_in, dict):
+        auth = {"present": True,
+                 "spf": auth_in.get("spf"), "dkim": auth_in.get("dkim"),
+                 "dmarc": auth_in.get("dmarc")}
+    else:
+        auth = _parse_auth_results_header(str(params.get("authentication_results") or ""))
+    auth_about_original = not forwarded
+
+    if auth["present"] and auth_about_original:
+        if auth["dmarc"] == "fail":
+            flags.append({"weight": 3, "text":
+                "DMARC FAILED. The receiving provider checked whether this message "
+                "was really authorised by the domain it claims to come from, and "
+                "the answer was no. That is the strongest single signal available "
+                "here."})
+        if auth["spf"] == "fail":
+            flags.append({"weight": 2, "text":
+                "SPF FAILED. The server that sent this is not one the claimed "
+                "domain lists as its own."})
+        elif auth["spf"] == "softfail":
+            flags.append({"weight": 1, "text":
+                "SPF SOFTFAIL. The claimed domain does not list this sending "
+                "server, but stops short of saying the mail is forged. Common on "
+                "forwarded mail."})
+        if auth["dkim"] == "fail":
+            flags.append({"weight": 2, "text":
+                "DKIM FAILED. The message signature does not verify, so the "
+                "content may have been altered after it was sent."})
+
+    from_addr = str(params.get("from_address") or "").strip()
+    from_name = str(params.get("from_name") or "").strip()
+    from_domain = _email_domain_of(from_addr)
+
+    reply_to = str(params.get("reply_to") or "").strip()
+    if not forwarded and reply_to and _email_domain_of(reply_to) \
+            and _email_domain_of(reply_to) != from_domain:
+        shown_from = from_addr or "the claimed sender"
+        flags.append({"weight": 2, "text":
+            f"Reply-To mismatch. It appears to come from {shown_from}, but a "
+            f"reply would go to {reply_to} instead, on a different domain. That "
+            "is how business email compromise usually works."})
+
+    return_path = str(params.get("return_path") or "").strip()
+    rp_domain = _email_domain_of(return_path)
+    if rp_domain and from_domain and rp_domain != from_domain:
+        notes.append(
+            f"The envelope sender is {rp_domain} while the message header says "
+            f"{from_domain}. That is normal for newsletters, mailing lists and "
+            "forwarded mail, so on its own it means nothing.")
+
+    brand = _impersonated_brand(from_name, from_domain)
+    if brand:
+        brand_title = brand.title()
+        flags.append({"weight": 3, "text":
+            f'The display name says "{from_name}", but the message was sent from '
+            f"{from_domain}. That domain does not belong to {brand_title}. A "
+            "display name is typed by whoever sent the message and is not "
+            "checked by anything, so it is the cheapest thing in an email to "
+            f"fake. If you have an account with {brand_title}, go to their site "
+            "or app yourself and look there. Nothing in this message should be "
+            "clicked to get to it."})
+    elif from_name and from_domain in _EMAIL_WEBMAIL:
+        name_lower = from_name.lower()
+        authority = next((w for w in _EMAIL_AUTHORITY_WORDS if w in name_lower), None)
+        if authority:
+            flags.append({"weight": 2, "text":
+                f'The display name "{from_name}" presents as a department or a '
+                f"support desk, but the address is a free {from_domain} account. "
+                "A real organisation writes from its own domain."})
+
+    pressure = _email_pressure_signals(str(params.get("body_text") or ""))
+    if pressure["ask"] and (pressure["deadline"] or pressure["threat"]):
+        lever = (f'and pressures you with the phrase "{pressure["threat"]}"'
+                 if pressure["threat"]
+                 else f'and puts a deadline on it: "{pressure["deadline"]}"')
+        flags.append({"weight": 2, "text":
+            f'The message asks you to "{pressure["ask"]}" {lever}. Being asked to '
+            "act on your account AND being hurried are the two halves of almost "
+            "every phishing message. A real company that needs something from "
+            "you can wait for you to go to their site yourself."})
+
+    for hit in _email_public_host_signal(params.get("links") or []):
+        flags.append({"weight": 2, "text":
+            f'The link goes to {hit["host"]}, which is a public file-hosting '
+            "service, not a company's own website. Anyone can upload a page "
+            "there, and the page borrows the host's good reputation: no threat "
+            f'database will ever flag {hit["service"]}, because blocking it '
+            "would break a large part of the internet. A real company sends you "
+            "to its own domain, because it has one."})
+
+    attachments = _email_attachment_signals(params.get("attachment_names") or [])
+    flags.extend(attachments["flags"])
+    notes.extend(attachments["notes"])
+
+    score = sum(f["weight"] for f in flags)
+    return {"flags": flags, "notes": notes, "score": score, "auth": auth,
+            "auth_about_original": auth_about_original, "from_addr": from_addr,
+            "from_name": from_name, "from_domain": from_domain,
+            "attachment_names": attachments["names"]}
+
+
+def handle_email_check(params: dict) -> dict:
+    """POST /v1/email-check -- keyless. Same scoring model as
+    checkemail@relayshield.net, for a caller that has already parsed the
+    message (an agent reading a mailbox), not a raw RFC822 blob."""
+    if not any(params.get(k) for k in
+               ("from_address", "from_name", "body_text", "links",
+                "subject", "authentication_results", "auth_results")):
+        return _err("send at least one of from_address, from_name, subject, "
+                    "body_text, links or auth_results")
+
+    sig = _score_email(params)
+
+    links = [str(u).strip() for u in (params.get("links") or []) if str(u).strip()]
+    links = links[:LINK_CHECK_MAX_URLS]
+    link_results = []
+    high_links = 0
+    medium_links = 0
+    if links:
+        assessed = _heuristic_url_check_many(links)
+        for u in links:
+            a = assessed.get(u) or {}
+            signals = a.get("signals") or {}
+            level = _link_check_level(signals)
+            if level == "high":
+                high_links += 1
+            elif level == "medium":
+                medium_links += 1
+            link_results.append({
+                "target": u, "level": level, "flagged": bool(a.get("flagged")),
+                "reasons": a.get("reasons") or [], "signals": signals,
+            })
+
+    # Same combination as buildReply() in the Worker: header/brand/pressure
+    # score plus 3 per HIGH link and 2 per MEDIUM link.
+    score = sig["score"] + high_links * 3 + medium_links * 2
+    risk = "high" if score >= 3 else ("medium" if score == 2 else "low")
+
+    source = (params.get("source") or "")[:40]
+    logger.info("email-check from_domain=%s risk=%s score=%d flags=%d links=%d source=%s",
+                sig["from_domain"], risk, score, len(sig["flags"]), len(links),
+                source or "unattributed")
+
+    body = {
+        "risk": risk,
+        "score": score,
+        "claimed_sender": sig["from_addr"] or None,
+        "flags": sig["flags"],
+        "notes": sig["notes"],
+        "auth": {**sig["auth"], "about_original": sig["auth_about_original"]},
+        "links": link_results,
+        "attachments": {"names": sig["attachment_names"]},
+        "note": ("Heuristic verdict over fields the caller already parsed. "
+                 "Links are checked against RelayShield's IOC corpus, Google Safe "
+                 "Browsing and domain registration age -- the same keyless path "
+                 "as /v1/link-check. On an inline forward (forwarded: true), SPF/"
+                 "DKIM/DMARC describe the forwarder's own provider, not the "
+                 "original sender, and are not scored."),
+    }
+    return _ok(body)
+
+
 def _check_ct(domain: str) -> dict:
     url = CRT_SH_URL.format(domain=urllib.parse.quote(domain))
     req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
@@ -5311,7 +5754,7 @@ def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
             # IOCs, and _ingest_github_tool_repos which writes a different
             # table). The AWS Marketplace listing's "20+ feeds" was correct all
             # along; this discovery document was the understated one.
-            "description": "RelayShield TAXII 2.1 server. 494,000+ distinct indicators from 5,800,000+ sightings, collected from 95 monitored channels and 20 authoritative feeds",
+            "description": "RelayShield TAXII 2.1 server. 7.8M+ citations, collected from 113 monitored criminal Telegram marketplaces and 20 authoritative feeds",
             "contact":     "support@relayshield.net",
             # Must be the branded host: a TAXII 2.1 client reads api_roots from
             # this discovery document and follows it for every subsequent
@@ -5348,7 +5791,7 @@ def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
 TAXII_COLLECTION = {
     "id":          "iocs",
     "title":       "RelayShield IOCs",
-    "description": "Malicious IPs, domains, URLs, and file hashes from 95 monitored channels and 20 authoritative threat feeds. 3,800+ malware families tracked.",
+    "description": "Malicious IPs, domains, URLs, and file hashes from 113 monitored criminal Telegram marketplaces and 20 authoritative threat feeds. 3,800+ malware families tracked.",
     "can_read":    True,
     "can_write":   False,
     "media_types": ["application/stix+json;version=2.1"],
@@ -12804,6 +13247,7 @@ ROUTES = {
     "/v1/breach":           handle_breach,
     "/v1/scan-url":         handle_scan_url,
     "/v1/link-check":       handle_link_check,      # keyless, heuristic-only, widget front door
+    "/v1/email-check":      handle_email_check,     # keyless, same scoring model as checkemail@
     "/v1/scan-file":        handle_scan_file,
     "/v1/sim-swap":         handle_sim_swap,
     "/v1/domain":           handle_domain,

@@ -7954,6 +7954,7 @@ not a finding about you."* BOT-TOKEN-1 phase 1 -- `getMe` liveness and a corpus 
 user to open our Mini App. **It is not yet a check.** Claiming otherwise is the `_APIFY_BANNER`
 mistake with a credential on the end of it.
 
+<<<<<<< ours
 ## WHERE 2026-09-22 LEFT THINGS. READ THIS FIRST; IT SUPERSEDES THE 2026-09-17 TOP 15.
 
 ### THE ONE THING THAT MATTERS BEFORE ANYTHING ELSE: THE 502 FIX IS NOT ON MAIN
@@ -8123,3 +8124,237 @@ names both bundles.
 Workers; StoreBot submission; the WhatsApp Channel question (can a Twilio-hosted number own
 one); FD-11 Smithery; mapping `relayshield_watchlist_monitor.py` and
 `relayshield-mpp-settlement` in the deployer; INTEL-5.
+=======
+## WHERE 2026-09-23 LEFT THINGS
+
+**Confirmed rather than re-derived, per the WHERE THE CURRENT WORK LIST LIVES rule: the two Bundle
+B duplicate product entities were withdrawn to `Restricted` in the prior session (see "THE
+DANGEROUS DIRECTION INVERTED THE DAY BUNDLE B WENT PUBLIC" above), and the TI demo Worker's cards
+were recovered and corrected in the prior session (see "THE TI DEMO CARDS ARE UPDATED" above).
+Neither needed re-checking this session; both sections above are the record.**
+
+### `/v1/email-check` IS BUILT: A SECOND DOOR ONTO `checkemail@`'S SCORING MODEL
+
+Per the ON DECK note this file already carried, and scoped exactly as that note specified. Keyless,
+registered in `KEYLESS_SCAN_ENDPOINTS` and `ROUTES`, wired into the onward-route and OpenAPI-spec
+guards the Muse connector session built. `handle_email_check` in `relayshield_api.py`; `_score_email`
+is the pure scoring core.
+
+**Ported: the SIGNALS and the WEIGHTING**, not the MIME parser -- a caller here has already parsed
+the message (Gmail API, an inbox connector), so `splitHeadersAndBody`, `decodePart`, `extractText`,
+`stripHtml`, `parseAddress`, `extractLinks`, `unwrap` and `detectForwardedOriginal` from
+`cloudflare_worker_checkemail.js` are deliberately NOT ported. What IS ported, verbatim as data:
+`BRAND_DOMAINS`, `AUTHORITY_WORDS`, `WEBMAIL`, `PUBLIC_PAGE_HOSTS`, the ask/deadline/threat phrase
+lists, and the attachment extension tables (`_EMAIL_*` prefix in `relayshield_api.py`).
+
+**LINKS GO THROUGH `_heuristic_url_check_many` -- THE SAME ZERO-COST PATH `/v1/link-check` USES --
+NEVER `/v1/scan-url`.** Per "THE CONSUMER-COMPELLING CHECKS ALL HAVE A VENDOR BILL" above: wiring
+this to VirusTotal would have silently attached a per-call vendor bill to a keyless surface.
+
+**TWO COPIES OF ONE SCORING MODEL IS THIS REPO'S MOST-REPEATED DEFECT, SO THE TWO COPIES ARE PINNED
+TO AGREE BY TEST, NOT BY EYE.** `test_email_check.py`'s `TableAgreement` class reads
+`cloudflare_worker_checkemail.js` and asserts the API's Python tables match it exactly. Its first
+run failed on `ASK_PHRASES`: the comment two lines above that table quotes two example phrases
+("please add your email now", "verify or lose access") as prose, and an unstripped regex counted
+both as table entries that do not exist -- the guard-fooled-by-its-own-comment shape, for the
+seventh time in this file, caught before it shipped rather than after. Comments are stripped in
+the FIRST version now, not the second.
+
+35 tests, `test_email_check.py`, three classes: `HandlerBehaviour` (executed against the handler
+directly -- DMARC fail, brand impersonation on a real company domain, the unrelated-small-business
+guard, ask-alone-is-not-a-flag, forwarded-mail auth is not scored), `Dispatcher` (through
+`lambda_handler`, because that is where the UnboundLocalError and missing-onward defects both
+lived and a handler-only suite cannot see either class), and `TableAgreement`.
+
+**`checkemail@relayshield.net` is unchanged and keeps running.** This is a second door onto the
+same model, not a migration.
+
+### SPEC HYGIENE: 113 CHANNELS, 7.8M CITATIONS. THE UNIQUE-INDICATOR COUNT IS NOT GUESSED.
+
+The API docs intro (`_DESCRIPTION` in `relayshield_openapi_spec.py`), the `asset-intel` endpoint
+description, and the live TAXII discovery/collection responses in `relayshield_api.py`
+(`handle_taxii_discovery`'s `description` field and `TAXII_COLLECTION`) all quoted **95 monitored
+channels** and **5.8 million sightings**, both stale. Updated to **113 monitored criminal Telegram
+marketplaces** and **7.8 million citations**, the current figures Andrew supplied.
+
+**THE DISTINCT-INDICATOR COUNT (previously "494,000+") WAS NOT BUMPED TO A GUESSED NUMBER.**
+Andrew flagged it needs checking since it has grown, and MEASUREMENT DOCTRINE is explicit: never
+invent a number for a customer-facing document. The intro now describes the corpus by its SOURCES
+("collected continuously from 113 monitored criminal Telegram marketplaces, infostealer log dumps
+and authoritative public indicator feeds") rather than repeating an unmeasured distinct count --
+the same resolution this file already reached for the AWS Marketplace listing and the TI demo
+cards, both of which paid for quoting a count that drifted.
+
+**ON DECK: measure the current distinct-indicator count** and, if it is worth quoting at all,
+add it back as a fresh, dated figure. `tools/ti_demo_metrics.py --distinct` already does a full
+`relayshield_intel_iocs` scan for this and states the cost before it runs (this is the tool the
+TI demo Worker's own cards are refreshed from). It needs `AWS_PROFILE=relayshield` and has not
+been run this session:
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/ti_demo_metrics.py --distinct
+
+### HEAVYGRAM: `tools/triage_channels.py` GAINED `--add`, FOR A CHANNEL THE CRAWLER WOULD NOT REACH ON ITS OWN
+
+Asked as: add Heavygram to the bot-token discovery corpus, since it matches the leaked-bot-token /
+C2 shape BOT-TOKEN-1 already targets. There was no route to seed a channel that has never been
+discovered -- `relayshield_intel_discovery.py`'s cross-promotion crawler only walks OUTWARD from
+channels already `active=True`, and `triage_channels.py --activate` only promotes a row already
+sitting in `pending_review`. Neither reaches a channel named by hand that the crawler has not
+found yet.
+
+`--add` seeds a brand-new row directly (`update_item` on a key that does not exist creates it --
+there is no separate insert path on this table), defaulting `category` to `credential_dump` rather
+than `infostealer`, because a leaked bot token is a credential, not an infostealer log.
+
+**THIS IS AN AWS WRITE AND CANNOT RUN FROM THIS CONTAINER.** Per "NO AWS IN THIS SANDBOX IS NEVER
+A REASON TO SKIP A CHECK", the work moved into a committed script rather than stopping:
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/triage_channels.py --add heavygram --apply
+
+Dry-run (omit `--apply`) first if you want to see what it would do before writing. It also
+handles any future manually-named channel the same way, not just this one.
+
+### FOUR NEW ROADMAP ITEMS, ADDED AT ANDREW'S REQUEST 2026-09-23
+
+**None of these has been scoped or built.** Recorded here so they survive to the next session
+rather than living only in a chat reply, per "A SESSION THAT CANNOT PUSH HAS NOT DELIVERED
+ANYTHING" applied to backlog items generally: an item that exists only in conversation is an item
+the next session cannot see.
+
+1. **Scam-kit fingerprinting.** Bigger than link/wallet flagging -- clusters REUSABLE KITS
+   (phishing kits, wallet drainers, credential-theft kits, fake-support kits, investment-fraud
+   kits, malicious OAuth flows) rather than scoring one URL at a time. Candidate fingerprint
+   surfaces: DOM/page structure, form flow, wording (including repeated translation mistakes),
+   logo/favicon/CSS/JS/asset hashes, screenshot perceptual similarity, redirect chains,
+   shortener/QR routes, exfiltration endpoints, registration/TLS/DNS/hosting/ASN data, drainer
+   scripts and crypto addresses, and campaign clustering across related domains. Response shape:
+   kit family, confidence, matched fingerprints, related infrastructure, first/last seen,
+   recommended action. **Sensible MVP, per Andrew's own framing:** DOM/asset/screenshot
+   similarity plus infrastructure clustering, fed by URLs the product already sees through
+   `/v1/link-check` and `/v1/scan-url`. **Run any rendering/fetching in an isolated sandbox, never
+   with real credentials** -- this is the same boundary `relayshield-agent-bait` already draws
+   around reading a repository's agent-facing files. Natural charge points: per-fingerprint API
+   lookups, and a campaign-tracking tier layered on top of watchlist monitoring. Unscoped: needs a
+   sizing pass (sandbox infra, hashing/similarity library choice, storage shape for a
+   fingerprint-to-campaign join) before a build estimate is honest.
+
+2. **A separate MCP server for free RS Identity & Scam Checks.** Distinct from the existing
+   16-tool `relayshield-mcp` (PyPI, stdio, paid endpoints) and the HF-hosted Bundle D server --
+   this one is scoped to the KEYLESS surface: `/v1/link-check`, `/v1/wallet-risk`, and (now)
+   `/v1/email-check`, plus identity-protection checks worth adding keyless: breached-password
+   exposure, phone-number risk, package/repo reputation, and MCP-server/tool risk (the
+   `relayshield-agent-bait` logic, exposed as a callable tool rather than only a skill). **The
+   framing worth keeping: one-click install in Claude, Cursor and Windsurf is the agent-era
+   equivalent of a directory listing** -- FD-11/FD-12/FD-13/FD-14 are all "get listed where agents
+   look", and a free, no-signup MCP server is a listing that also does the work. Unscoped: needs a
+   decision on hosting (a new HF Space vs. a mode flag on the existing one) and on which of the
+   "strong identity-protection checks" already have a keyless code path today vs. need one built
+   (breached-password and phone-number risk both currently sit behind `/v1/breach` and
+   `/v1/metered/*`, which are NOT keyless).
+
+3. ~~Spec hygiene~~ **DONE THIS SESSION**, see above.
+
+4. **A single-identity "incident timeline" composite endpoint.** Correlates breach + infostealer +
+   SIM-swap + session-risk into one verdict for one identity, productised as a chargeable JSON
+   endpoint. Andrew's framing: **"We have a demo version but should productize a JS chargeable
+   endpoint."** Unscoped from this session: the demo referenced has not been located or read, so
+   before building, find it (likely candidates by name: something under `relayshield_watchlist*`,
+   `relayshield_oauth_watchlist*`, or a `tools/*demo*` / `*timeline*` script) and read what it
+   already correlates before designing the endpoint's request/response shape and its price point.
+
+5. **Dev-facing free doors, three of them:**
+   - **A GitHub Action wrapping `secret-scan-text`** (per Andrew: "scans diffs for secrets --
+     developers adopt it, then buy credits"). `rsscan` already does the equivalent locally via a
+     pre-commit hook (`scan.py`, `--staged` default, `--rev-range A...B` for CI) -- check whether
+     this is "package the existing rsscan CI mode as a published Action" (cheap) or a distinct
+     build before estimating.
+   - **An embeddable "check this link" JS widget** for forums and marketplaces. Note
+     `widget/relayshield-widget.js` already exists and is described elsewhere in this file as "a
+     copy-in file... for third-party Telegram bots", built against `/v1/link-check` and
+     `/v1/wallet-risk`. Check whether that file already covers this ask (a generic embed, not
+     Telegram-specific) or whether a forum/marketplace embed is a genuinely different shape
+     (DOM injection into someone else's page vs. a bot handler) before scoping as new work.
+   - **A browser extension on the free `/v1/link-check` endpoint.** Genuinely new; no existing
+     artifact in this repo does this. Unscoped.
+
+**All five items above (1, 2, 4, and the two unbuilt items in 5) need a sizing pass before the
+next session's Top 15 can rank them honestly against what is already in flight** (the IAM split,
+Bundle B's remaining duplicate cleanup follow-through, BOT-TOKEN-1 phase 1, the catalogue
+submissions still pending review). This section is intentionally NOT a renumbered Top 15 --
+regenerating that list means reviewing every open item in this file, which this session did not
+do, and this file's own rule is that a doc claiming something is done is a lead, not a fact.
+
+### ITEM 4 (THE COMPOSITE ENDPOINT) IS NOT A GAP. IT ALREADY EXISTS, AS A DIFFERENT SHAPE.
+
+**Corrected same session, at Andrew's instruction.** The "demo version" the item-4 note above
+refers to searching for is `relayshield_breach_monitor.py`'s `ATTACK_CHAINS` /
+`check_and_fire_correlation` engine: a 72-hour cross-surface correlation window, eleven named
+attack chains, and predictive warnings fired mid-chain, imported by
+`relayshield_whatsapp_webhook.py`, `relayshield_domain_monitor.py`,
+`relayshield_telegram_webhook.py` and `relayshield_sim_swap_monitor.py`. It already correlates
+breach + SIM-swap + domain + wallet-risk signals for a given user.
+
+**It is PROACTIVE, not on-demand, and that is the entire difference from item 4's ask.** It fires
+Telegram/WhatsApp alerts from background monitor runs against signals already recorded for a
+verified user; it is not a callable, priced JSON endpoint a caller can invoke for an arbitrary
+identity. Productising it as a `/v1/metered/*` endpoint (the second half of Andrew's original
+framing -- "productize a JS chargeable endpoint") is therefore still a real, unscoped build: request
+shape, price point, and whether an on-demand read of `ATTACK_CHAINS`-tracked signals needs a new
+query path or can reuse the existing per-user record. Not attempted this session; item 4 is closed
+as "the correlation logic exists," not as "the endpoint exists."
+
+### BOT-TOKEN-1 PHASE 1 IS BUILT: `getMe` LIVENESS, HASH-ONLY STORAGE, SEVERITY SPLIT
+
+Scoped in `leaked_bot_token_finding_scope.md` section 6 ("One day. Gated on nothing.") and built
+to that scope, no more: `check_telegram_bot_token_liveness` and `_store_bot_token_finding` in
+`relayshield_intel_monitor.py`, wired into `_parse_passwords_file`'s existing NHI loop for both
+`telegram_bot_token` and `telegram_bot_token_url` matches.
+
+**The hard boundary from section 3 is enforced by a test that reads the two functions' SOURCE, not
+by a comment.** `check_telegram_bot_token_liveness` calls `getMe` and nothing else; a second test
+asserts `_store_bot_token_finding` makes no Telegram call at all (it delegates). Comments and
+docstrings are stripped before either check runs -- the "guard fooled by its own comment" shape has
+hit this exact class of guard six times before in this repo, and the first version of THIS test
+walked straight into it: the docstring's own prose describing what the function delegates to
+("the one getMe call") made the un-stripped guard fail on correct code.
+
+**Storage is keyed on `sha256(token)`, mirroring `relayshield_stolen_cards`'s `pan_hash` key.** The
+token itself never leaves the two functions that touch it; a test executes `_store_bot_token_finding`
+and asserts the raw token string does not appear in any value of the DynamoDB item it writes.
+
+**Idempotent on the hash: a token re-observed across channel sweeps gets ONE `getMe` call, not one
+per sighting.** `_store_bot_token_finding` checks for an existing row before calling the liveness
+function; a test proves the liveness function is never invoked a second time for the same token.
+
+**Severity: CRITICAL when live, MEDIUM when a live `getMe` call reports the token dead (HTTP 401),
+and something else -- `UNKNOWN` -- when the call could not be completed at all.** The third state
+is the one this phase exists to protect: a timed-out `getMe` call must never render as "dead",
+which would tell a bot developer a live credential is safe. A test fabricates a timeout and asserts
+the stored severity is neither `CRITICAL` nor `MEDIUM`.
+
+**A pre-existing bug in the customer-facing NHI alert was fixed in the same commit.** Every NHI
+finding, bot tokens included, closed with an unconditional *"Rotate these credentials
+immediately"* -- directly contradicting this file's own standing rule (*"Remediation says REVOKE
+IN BOTFATHER, never rotate"*) and the finding's own per-item description, which already said so.
+The alert now names BotFather specifically when any bot-token finding is present, and drops the
+rotate line entirely when EVERY finding in the batch is a bot token.
+
+**NOT BUILT THIS SESSION, and correctly so per the scope doc's own gate:** Phase 2 (the Mini App /
+bot-command username lookup) is gated on a NON-ZERO corpus count, not a date -- exactly the
+ABS-1/OpenRouter-webhook shape this repo has already paid for building against zero rows.
+
+**SHIPS INERT UNTIL THE TABLE EXISTS, ON PURPOSE**, same pattern as the breach cache:
+`_store_bot_token_finding` catches every DynamoDB error and logs a warning, so nothing in the
+ingestion pipeline breaks while this is outstanding -- the corpus simply does not accumulate
+bot-token findings yet. `tools/setup_bot_tokens_table.sh` creates `relayshield_bot_tokens` (keyed
+on `token_hash`), enables TTL, and checks whether `relayshield-intel-monitor`'s role can already
+write to it before proposing a grant the shared role's inline budget cannot make.
+
+    AWS_PROFILE=relayshield sh tools/setup_bot_tokens_table.sh
+
+19 tests, `test_bot_token_liveness.py`, all executed against stubbed `urllib` and `boto3` rather
+than read: a live `getMe` response, a 401 (checked-dead, not inconclusive), a timeout and a 5xx
+(both inconclusive, never dead), the source-level `getMe`-only boundary, hash-only storage,
+severity assignment for all three liveness states, the once-per-token dedup, the wiring from
+`_parse_passwords_file` for both pattern shapes, and the remediation-text fix.
+>>>>>>> theirs

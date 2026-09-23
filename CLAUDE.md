@@ -8427,3 +8427,40 @@ scheme/`www.` stripping, `ATTACK_CHAINS` order deciding priority when a signal s
 more than one chain, the chain-table identity guard, and the dispatcher/spec-agreement guards --
 the last of which was proven by deleting the `metered_routes` entry and watching it fail before
 restoring it.
+
+## `origin/main` HAD LIVE CONFLICT MARKERS COMMITTED INTO IT. THE IAM SPLIT IS STILL NOT DONE.
+
+**2026-09-23, second session, after Andrew asked "didn't we already split the IAM role" and the
+answer required checking rather than trusting either of us.**
+
+**Repo-wide search found no evidence the split was ever applied**, per the rule two sections up:
+`git fetch --all --prune` then search with no pathspec, across every ref this container could
+reach. `tools/iam_split_roles.py` and the read-only snapshot exist; no derived per-function role,
+no commit saying it ran, no AWS confirmation artifact. Two independent sessions' own most-current
+status write-ups -- one dated 2026-09-22, one 2026-09-23 -- **both still list it as pending**:
+*"IAM split, first migration. `relayshield-intel-feed`, command ready, policy read."* Neither says
+applied. **If it was run on the Mac, the result was never committed back**, which this file's own
+rule already covers: work that cannot push has not been delivered.
+
+**AND FINDING THAT ANSWER SURFACED A WORSE PROBLEM ON THE WAY.** `origin/main` at `b60d17f`
+("Merge branch 'claude/awesome-fermi-yntdwk'") carried **literal, uncommitted-looking git conflict
+markers baked into a committed file** -- `<<<<<<< ours` / `=======` / `>>>>>>> theirs` sitting in
+CLAUDE.md, around the "WHERE 2026-09-22 LEFT THINGS" / "WHERE 2026-09-23 LEFT THINGS" sections.
+Exactly the failure rule A exists to prevent (`git checkout --merge CLAUDE.md`, delete the marker
+lines BY HAND, keep both sides), except this time it happened ON MAIN rather than on a Mac clone --
+someone ran `git commit --no-edit` on a conflicted merge without resolving it first.
+
+**FIXED THE SAME SESSION, by merging `origin/main` into this branch and resolving by hand: every
+real section from BOTH the 2026-09-22 and 2026-09-23 write-ups kept, only the six literal marker
+lines deleted (three original broken ones, three new ones from this merge, since this branch's own
+unmerged "ITEM 4" section collided with the same region).** `grep -c` for all three marker patterns
+returns 0 in the result. Verified by reading both seams, not just by the grep returning empty --
+a grep that passes on a file with the WRONG content merged in would look identical to one that
+passes on the right content.
+
+**THE GENERAL FORM, and it is new: a merge conflict marker can survive INSIDE a successful-looking
+merge commit, not just as an aborted merge state.** Every check this repo runs for "did the merge
+succeed" (exit code, `git status` after) says nothing about whether the CONTENT of a resolved file
+is still full of markers -- that requires reading the file, or grepping for the marker patterns
+specifically. Worth adding to any future merge-block EXPECT: after a conflict resolution, `grep -c
+"^<<<<<<<\|^=======\|^>>>>>>>" <file>` must print 0, not just "the merge command exited 0".

@@ -7954,6 +7954,176 @@ not a finding about you."* BOT-TOKEN-1 phase 1 -- `getMe` liveness and a corpus 
 user to open our Mini App. **It is not yet a check.** Claiming otherwise is the `_APIFY_BANNER`
 mistake with a credential on the end of it.
 
+## WHERE 2026-09-22 LEFT THINGS. READ THIS FIRST; IT SUPERSEDES THE 2026-09-17 TOP 15.
+
+### THE ONE THING THAT MATTERS BEFORE ANYTHING ELSE: THE 502 FIX IS NOT ON MAIN
+
+**`origin/main` at `d0c9477` carries a dispatcher that raises `UnboundLocalError` before
+reaching any handler, and deploy run 161 shipped it to AWS at 16:48 UTC on 2026-09-22,
+conclusion SUCCESS.** Every keyless endpoint -- `/v1/link-check`, `/v1/wallet-risk` and
+twelve others -- answers **502** with no handler log line. Reproduced by executing
+`origin/main`'s exact bytes, not inferred. The fix is `aaa6b78` on
+`claude/tender-planck-cb2qrx` and it is pushed but **unmerged**. Full write-up in the
+section above. **Merge and push is the first action of the next session, before any
+question is answered.**
+
+### WHAT SHIPPED, all on `claude/tender-planck-cb2qrx`, five commits
+
+* **`_with_onward`**, the consumer route, at the DISPATCHER rather than in two handlers --
+  so `/v1/wallet-risk` carries it too. Attaches only to a 200 with an `ok: true` envelope,
+  never raises, and `_onward_route` is called in exactly one place (asserted with `ast`).
+* **`tg-miniapp-muse`** registered in all three lists that must agree, before submission.
+* **The OpenAPI spec learned the two free endpoints exist**, and then learned they need no
+  credential: both inherited the document's top-level `security`, so a client generated
+  from it -- which is how Muse integrates -- would have demanded an API key on the only
+  two endpoints the connector is built on.
+* **49 tests in `test_muse_connector_features.py`**, including the first class in this repo
+  that goes through `lambda_handler` rather than calling a handler.
+* Three CLAUDE.md records: the outage, the `/v1/email-check` scope, and what Muse's
+  Telegram step really is.
+
+### x402 PRICING: THERE IS NO SUMMARY DOCUMENT, AND THERE SHOULD NOT BE ONE
+
+Asked as "where can I find our summary pricing". **Nowhere, on purpose, and the live
+answer is better than a document would be:**
+
+    https://api.relayshield.net/.well-known/x402.json     machine-readable, all prices
+    https://api.relayshield.net/docs                      Swagger UI, x-price-usd per call
+    https://api.relayshield.net/openapi.json              the same document as JSON
+    https://api.relayshield.net/developers                the human pricing page
+
+**`handle_x402_manifest` builds every entry by calling `_build_payment_requirements`**, the
+same function the live 402 challenge uses, so the published price cannot drift from what a
+buyer is asked to pay. A committed markdown price list would be a fifth copy with no such
+property, and this repo's most-repeated defect is two files that must agree with nothing
+checking that they do. **Do not write one.**
+
+**MEASURED 2026-09-22, because a count in a reply is evidence the reader acts on:**
+
+    relayshield_api.py        PAYG_PRICE_UNITS   28 endpoints   $0.05 - $0.50
+    relayshield_agentic_api.py PAYG_PRICE_UNITS   3 endpoints   $0.35 - $0.50
+    distinct paths                                29
+
+The two tables share `mcp-registry-risk` and `prompt-injection-breach` and **both price
+them at $0.35, which agrees today and is checked by nothing.** That is the 402-at-the-
+wrong-price defect waiting to happen, in the two files that already produced it once.
+
+**AND `/v1/payg/agent-bait-scan` IS NOT IN THE MANIFEST.** `handle_x402_manifest` iterates
+`relayshield_api.py`'s table, and that endpoint lives only in the agentic file. So a paid
+endpoint we built, priced and deployed **cannot be discovered by any x402 indexer**, which
+is the inline-mode defect with a price on it: live, working, pointed at by nothing. One
+line to fix and a test to pin both halves. It is Top 10 item 4.
+
+### HEAVYGRAM: THE IOCs NEED NO WORK. THE BOT TOKEN IS THE PART THAT IS OURS.
+
+Asked as "worth adding to our TI corpus?" after a Group-IB write-up: 29 new samples tied
+with moderate confidence to Handala Hack, delivered over messaging apps as
+`Telegram_authenticator.exe` and `WhatssApp.exe`, a **Python Windows backdoor whose C2 is
+Telegram bots, users and groups**, with an `@@`-prefixed message running arbitrary system
+commands.
+
+**NO, not as an ingestion task, and the reason is the doctrine rather than laziness.**
+`relayshield_intel_feed.py` already pulls ThreatFox, URLhaus, Feodo, MalwareBazaar and
+Malpedia's family taxonomy. If anyone uploads a HEAVYGRAM sample those hashes arrive with
+**zero work**, and hand-loading one vendor's IOC list is precisely what MEASUREMENT
+DOCTRINE calls making the headline better and the product worse. **UNVERIFIED whether
+Malpedia already carries the family name:** `malpedia`, `bazaar.abuse.ch` and
+`group-ib.com` all return HTTP 000 from this container, which is a fact about the egress
+policy and nothing about those sites.
+
+**THE HALF THAT IS GENUINELY OURS IS BOT-TOKEN-1, AND THIS IS THE BEST ARGUMENT FOR PHASE 1
+THAT HAS TURNED UP.** HEAVYGRAM's command channel is a **Telegram bot token embedded in a
+Windows binary**. We shipped patterns for exactly that shape on 2026-09-13 -- `telegram_bot_token`
+and `telegram_bot_token_url`, in all four tables -- and phase 1 (`getMe` liveness) is Top
+15 item 9 and **NOT BUILT**. A token lifted from a sample and checked with `getMe` answers
+*is this C2 still live*, which is a question a malware report cannot answer and a vendor
+feed does not carry.
+
+**AND IT MAKES THIS REPO'S `getUpdates` PROHIBITION CONCRETE RATHER THAN PRINCIPLED.** That
+rule was written as "it drains the owner's pending update queue and returns other people's
+conversations". For a HEAVYGRAM token the owner is the OPERATOR and the queue holds
+**victims' exfiltrated data**. Calling `getUpdates` on it would pull stolen material into
+our systems and destroy the operator's evidence in one request. `getMe` only. The
+prohibition is not a nicety and now has a named case behind it.
+
+**Not worth building: a detector for the `@@` prefix or the green-circle check-in.** Those
+are host-artefact signatures for an EDR product. We screen counterparties and credentials;
+we do not analyse binaries, and claiming otherwise is the rsscan-as-server-control mistake.
+
+### TWO THINGS TO VERIFY WHEN THE MUSE CONNECTOR IS FIRST USED
+
+Andrew's, recorded because neither can be checked from here and both are cheap in the app:
+
+1. **Does the Muse agent render a connector-supplied link as TAPPABLE?** Most agent
+   surfaces render markdown links; **this is Meta's renderer, not ours**, and the `onward`
+   field is a JSON object rather than markdown. If it renders as bare text the route still
+   works and reads worse.
+2. **What does a non-Telegram user get?** `t.me` without Telegram installed drops to a web
+   preview plus an install prompt. That is an acceptable fallback and it is worth knowing
+   it is what happens rather than discovering it in a complaint.
+
+**His third point is already the design and is worth keeping stated:** the link is in the
+API RESPONSE rather than only in the connector wrapper, so every downstream surface
+inherits it -- Messenger and Signal when Muse ships them, and any future partner keyed into
+`CONSUMER_ROUTES`.
+
+### THE TOP 10, REGENERATED 2026-09-22
+
+**Regenerated, not annotated. This supersedes the 2026-09-17 Top 15.**
+
+**Closed since then:** Bundle B is PUBLIC (`prod-szi2wdww3obry`); the withdraw change set
+for the two duplicates exists and is guarded; the Muse connector's three features are built
+and its form copy is written; the OpenAPI spec carries the free endpoints; the AWS banner
+names both bundles.
+
+1. **MERGE AND PUSH `claude/tender-planck-cb2qrx`.** Every keyless endpoint is 502ing in
+   production right now. This is not a queue item, it is an outage with the fix already
+   written and pushed. After the deploy, prove it with a real request rather than the
+   import probe, which cannot reach the dispatcher.
+
+2. **Submit the Muse connector**, after that deploy so the spec and the key are live. Copy
+   is field by field in `muse_connector_submission_2026-09-22.md`, including the page-2
+   fields and the charging answer.
+
+3. **Create `relayshield_breach_cache`.** `AWS_PROFILE=relayshield sh
+   tools/setup_breach_cache.sh`. The code ships inert without it, the TTL step is the one
+   that cannot be skipped, and this unblocks adding breach to the connector.
+
+4. **`/v1/payg/agent-bait-scan` is missing from `/.well-known/x402.json`**, because the
+   manifest iterates one of two price tables. A paid endpoint no indexer can find. Fix the
+   iteration, and pin the two tables' shared prices with a test in the same commit.
+
+5. **Withdraw the two Bundle B duplicates.** `prod-v5nr5gjtdnofi` and
+   `prod-p3ei5nmgufnnq`, both still `Limited` and both still carrying the live listing's
+   display name. `bundle_b_withdraw.json` through `marketplace_changeset.yml` with the id
+   as an input. `Restricted` on a `Limited` product is UNVERIFIED and fails in seconds.
+
+6. **BOT-TOKEN-1 phase 1**, which HEAVYGRAM has just made concrete. `getMe` liveness,
+   hash-only storage, username indexing, severity split on liveness, and the `getUpdates`
+   prohibition as a test. One day, gated on nothing.
+
+7. **`/v1/email-check`.** Scoped in the section above: the signals and the weighting port,
+   the MIME parser does not, it must NOT call `/v1/scan-url`, and the 78 Worker fixtures
+   become a cross-implementation guard written FIRST.
+
+8. **IAM split, first migration.** `relayshield-intel-feed`, command ready, policy read.
+   Verify with the next scheduled run's log, never the import probe. The shared role is at
+   11 managed policies of 10 allowed.
+
+9. **Deploy the TI demo Worker, recovery FIRST.** Cards edited and unshipped since
+   2026-09-16. `sh tools/recover_live_worker.sh relayshield-ti-demo
+   cloudflare_worker_ti_demo.js`; only `IDENTICAL` makes the deploy safe.
+
+10. **The Bundle B duplicate-products post**, gated on item 5. Three SaaS products with one
+    display name, a portal that selects by name, seven refusals, and the one-command
+    `list-entities` read that separates them. An afternoon, and nothing on the internet
+    describes it. Omit the entity ids.
+
+**Carried and not in the ten**, so they are not lost: `WA_NUMBER` still empty in both
+Workers; StoreBot submission; the WhatsApp Channel question (can a Twilio-hosted number own
+one); FD-11 Smithery; mapping `relayshield_watchlist_monitor.py` and
+`relayshield-mpp-settlement` in the deployer; INTEL-5.
+
 ## WHERE 2026-09-23 LEFT THINGS
 
 **Confirmed rather than re-derived, per the WHERE THE CURRENT WORK LIST LIVES rule: the two Bundle

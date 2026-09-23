@@ -18,6 +18,11 @@ USAGE (on the founder's Mac)
     AWS_PROFILE=relayshield python3 tools/triage_channels.py --pending
     AWS_PROFILE=relayshield python3 tools/triage_channels.py --activate a,b,c --apply
 
+--add seeds a channel that has NEVER been discovered (not sitting in
+pending_review), e.g. one named by hand rather than found by the crawler:
+
+    AWS_PROFILE=relayshield python3 tools/triage_channels.py --add heavygram --apply
+
 Needs boto3. Homebrew Python is PEP 668 externally-managed, so use the throwaway
 venv the handoff describes:
 
@@ -153,11 +158,52 @@ def activate(table, names, apply_):
         print(f"activated @{name}")
 
 
+def add(table, names, category, apply_, rows_by_username):
+    """Seed a channel that has never been discovered, rather than one already
+    sitting in pending_review. update_item on a key that does not exist yet
+    CREATES it, which is the whole mechanism -- there is no separate insert
+    path in this table.
+
+    Added 2026-09-23 for Heavygram, which was named as a channel worth
+    watching for the bot-token-leak/C2 shape BOT-TOKEN-1 already targets, and
+    is not something the cross-promotion crawler (relayshield_intel_discovery.py)
+    would necessarily surface on its own -- that crawler only walks OUTWARD
+    from channels already active=True.
+
+    category defaults to credential_dump rather than infostealer, because a
+    leaked bot token is a credential, not an infostealer log.
+    """
+    for name in names:
+        name = name.strip().lstrip("@")
+        if not name:
+            continue
+        existing = rows_by_username.get(name)
+        if existing and existing.get("active") is True:
+            print(f"@{name} is already active=True (category={existing.get('category')}) — nothing to do")
+            continue
+        if not apply_:
+            verb = "re-activate" if existing else "create and activate"
+            print(f"DRY RUN would {verb} @{name} category={category}")
+            continue
+        table.update_item(
+            Key={"username": name},
+            UpdateExpression=("SET active = :t, category = :c, discovery_method = :d "
+                              "REMOVE consecutive_failures, last_error"),
+            ExpressionAttributeValues={":t": True, ":c": category,
+                                       ":d": "manual-add-2026-09-23"},
+        )
+        print(f"added @{name} category={category} active=True")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pending", action="store_true", help="list the pending_review backlog")
     ap.add_argument("--limit", type=int, default=80)
     ap.add_argument("--activate", default="", help="comma-separated usernames to activate")
+    ap.add_argument("--add", default="", help="comma-separated usernames to seed as NEW "
+                                               "channels (not already in pending_review)")
+    ap.add_argument("--category", default="credential_dump",
+                    help="category for --add (default: credential_dump)")
     ap.add_argument("--apply", action="store_true", help="actually write (default is dry run)")
     args = ap.parse_args()
 
@@ -172,6 +218,9 @@ def main():
         show_pending(rows, args.limit)
     if args.activate:
         activate(table, args.activate.split(","), args.apply)
+    if args.add:
+        rows_by_username = {r["username"]: r for r in rows}
+        add(table, args.add.split(","), args.category, args.apply, rows_by_username)
     return 0
 
 

@@ -8186,3 +8186,74 @@ than read: a live `getMe` response, a 401 (checked-dead, not inconclusive), a ti
 (both inconclusive, never dead), the source-level `getMe`-only boundary, hash-only storage,
 severity assignment for all three liveness states, the once-per-token dedup, the wiring from
 `_parse_passwords_file` for both pattern shapes, and the remediation-text fix.
+
+## ITEM 4, THE REST OF IT: `POST /v1/metered/incident-timeline` IS BUILT
+
+**2026-09-23, at Andrew's explicit follow-up: "I do want the JS chargeable endpoint for the
+attack sequencing chain."** The section above answered a different question -- whether the
+correlation logic existed -- and correctly said yes, proactively, for our own WhatsApp users.
+This is the thing that did not exist: an on-demand, priced, JSON endpoint any caller can hit for
+any identity, with no prior monitoring relationship.
+
+**THE CHAIN TABLE IS IMPORTED, NOT COPIED.** `relayshield_api.py` now carries
+`from relayshield_breach_monitor import ATTACK_CHAINS` and matches against the exact same table
+the WhatsApp monitor's `check_and_fire_correlation` does. Two copies of one correlation model is
+this repo's single most-repeated defect -- the pattern tables, the three source lists, the
+LAMBDA_MAP/invoke-policy pair, `BRAND_DOMAINS` between the Worker and the API twice already this
+week -- so this one is a reference, pinned by `test_incident_timeline.py`'s
+`test_atack_chains_is_the_same_object_not_a_second_copy` asserting object IDENTITY, not equality:
+equality would still pass the day someone forks the table by accident and only diverges later.
+
+**THE FOUR SUB-CHECKS ARE THE LIVE HANDLERS, CALLED DIRECTLY, NEVER THEIR HTTP CALLS AGAIN.**
+`handle_breach`, `handle_session_risk`, `handle_sim_swap`, `handle_domain` are invoked in-process
+and their Lambda-proxy responses unwrapped by one small `_unwrap()` helper. This gets the breach
+cache, the partner-budget gate, Twilio's `error_code=60606` handling and the typosquat sweep for
+free, and it means a fix to any one of those four (there have been several this quarter) fixes
+this endpoint too, with nothing to re-synchronise.
+
+**WHAT IT DOES NOT CHECK, ON PURPOSE.** `suspicious_sms` and `otp_warning` are EVENTS observed
+inside a monitored WhatsApp conversation, not identity properties -- there is no "check for one"
+for an arbitrary caller's identity, and treating "never observed" as "clean" would be exactly the
+false-negative shape MEASUREMENT DOCTRINE and the SIM-swap monitor's "we could not check must
+never render as it is gone" rule both forbid. So only `breach_sim_swap` and
+`domain_phishing_breach` can ever fire here; `smishing_to_sim_swap` and `breach_otp_intercept`
+never will, and a test pins that this is not merely likely but a property of what the endpoint can
+query, not an accident of the fixtures used to test it.
+
+**AND SESSION-RISK IS REPORTED, NEVER SCORED AS A SIGNAL.** It is not one of `ATTACK_CHAINS`' own
+signal types -- that table predates this endpoint and was built for WhatsApp-observed events --
+so folding a found session into `signal_types` would be a silent SECOND definition of what
+"session_risk" means to the correlation model. `test_session_risk_never_joins_signal_types_or_
+decides_the_chain` proves a CRITICAL session-risk hit alongside a lone breach still resolves
+`chain_matched: null`.
+
+**PRICED AS A BUNDLE, DERIVED IN A COMMENT RATHER THAN GUESSED.** `email` is required and always
+runs breach ($0.10) + session-risk ($0.30) = a $0.40 floor. `phone` and `domain` are optional and
+add sim-swap ($0.25) and/or the domain lookalike sweep ($0.30) when supplied, up to $0.95 fanned
+out. $0.50 sits between the two, the same bundle-discount shape `bulk-identity-risk` already uses
+for its $2.00/up-to-10-domains price. A test pins `METERED_CREDIT_COSTS` and the OpenAPI spec's
+`price_cents` equal, so the two cannot quietly disagree the way a public listing price and a
+billing table have disagreed before in this repo.
+
+**NO PAYG/x402 TWIN in this build.** Nine other metered endpoints already ship metered-only
+(asset-intel, brand-monitor, bulk-ioc, card-exposure, crypto-intel, cve-identity-risk,
+dependency-risk, ioc-pivot, threat-actor), so this is established precedent, not a shortcut taken
+under time pressure.
+
+**NO NEW API GATEWAY RESOURCE NEEDED.** Unlike `relayshield-watchlist` or
+`relayshield-bundle-fulfillment`, which are separate Lambda functions and have each cost a session
+a "route added to the dispatch table is not a route" lesson, this endpoint lives inside
+`relayshield_api.py` behind the existing `/v1/metered/{proxy+}`-style catch-all already serving
+every other `/v1/metered/*` path to the same `relayshield-api` function. Registration is therefore
+entirely in-Lambda: `METERED_CREDIT_COSTS`, the `metered_routes` dispatch dict inside
+`handle_metered_request`, and the OpenAPI spec. `relayshield_api.py` is already deployed on every
+push per the standard pipeline, so this ships on the next merge with no new AWS object to create.
+
+13 tests, `test_incident_timeline.py`, all executed against the real handler with the four
+sub-checks monkeypatched rather than hitting the network: email-required, the always-run-vs-
+skipped split, both reachable chain matches, no-chain-on-a-lone-signal, the session-risk
+non-signal guard, a failed sub-check reading as `checked: false` rather than clean, domain
+scheme/`www.` stripping, `ATTACK_CHAINS` order deciding priority when a signal set could satisfy
+more than one chain, the chain-table identity guard, and the dispatcher/spec-agreement guards --
+the last of which was proven by deleting the `metered_routes` entry and watching it fail before
+restoring it.

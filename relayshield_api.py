@@ -253,6 +253,11 @@ X402_V2_ENABLED_PATHS: set[str] = {
     "/v1/payg/domain",
     "/v1/payg/breach",
     "/v1/payg/sim-swap",
+    # Launched 2026-07-31, after every batch above had already closed
+    # (last one 2026-07-21) -- missed the migration by ten days rather than
+    # being deliberately held back like domain/supply-chain were. No prior
+    # V2 attempt/failure history for this path.
+    "/v1/payg/secret-scan-text",
 }
 
 # PAYG pricing in USDC base units (6 decimals): $0.10 = 100000

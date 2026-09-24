@@ -397,6 +397,111 @@ class PartnerBudget(unittest.TestCase):
         self.assertIn("_breach_cache_get", called)
 
 
+class PartnerBudgetThroughTheDispatcher(unittest.TestCase):
+    """PartnerBudget above proves _check_partner_upstream_budget itself, and
+    calls handle_breach DIRECTLY. Neither proves a real partner call ever
+    REACHES it: every developer -- a partner included -- is told to call
+    /v1/metered/breach (see _send_key_email's own quickstart curl), and that
+    path runs handle_metered_request's OWN credit/subscription/free-call gate
+    BEFORE handle_breach runs at all. Without threading api_key_record
+    through, a partner key with no credits, no subscription and no free
+    calls left 402s at that outer gate and never reaches the budget check --
+    the exact "fix landed on the endpoint in front of me, not the surface"
+    shape this file is full of. These go through lambda_handler, not the
+    handler, for the same reason TheOnwardRoute does.
+    """
+
+    PARTNER = {"api_key": "rs_live_muse", "active": True,
+               "source": "muse_connector", "partner_daily_cap": 500}
+
+    def _event(self):
+        return {
+            "path": "/v1/metered/breach", "httpMethod": "POST",
+            "body": json.dumps({"email": "a@b.com"}),
+            "headers": {"X-RS-API-KEY": "rs_live_muse"},
+            "requestContext": {"identity": {"sourceIp": "1.2.3.4"}},
+        }
+
+    def test_a_partner_key_with_no_credits_still_reaches_the_budget_check(self):
+        """Without is_partner_call this 402s at the outer billing gate and
+        _check_partner_upstream_budget never runs."""
+        with unittest.mock.patch.object(api, "_verify_rs_api_key", lambda k: self.PARTNER), \
+             unittest.mock.patch.object(api, "_breach_cache_get", lambda e: None), \
+             unittest.mock.patch.object(api, "_check_partner_upstream_budget",
+                                        lambda k, u: False):
+            resp = api.lambda_handler(self._event(), None)
+        self.assertEqual(resp["statusCode"], 429,
+                          "the budget gate never ran -- the dispatcher's own "
+                          "credit/subscription/free-call gate answered instead")
+
+    def test_handle_breach_ACTUALLY_SEES_the_real_key_record(self):
+        """The regression the test above cannot catch: mocking
+        _check_partner_upstream_budget to a fixed return value proves the
+        dispatcher's OWN gate was bypassed, but says nothing about what
+        handle_breach passed the check -- a metered_routes entry that still
+        called the bare `handle_breach` function (no api_key_record) would
+        pass that test too, because `None or {}` is still a dict the mock
+        accepts, and the partner's actual cap would then be silently
+        unenforced for real traffic. This spies on the CONTENT instead."""
+        seen = []
+
+        def spy(key_record, upstream):
+            seen.append(key_record)
+            return True
+
+        with unittest.mock.patch.object(api, "_verify_rs_api_key", lambda k: self.PARTNER), \
+             unittest.mock.patch.object(api, "_breach_cache_get", lambda e: None), \
+             unittest.mock.patch.object(api, "_check_partner_upstream_budget", spy), \
+             unittest.mock.patch.object(api, "_hibp_api_key", lambda: "k"), \
+             unittest.mock.patch.object(api.urllib.request, "urlopen",
+                                        lambda req, timeout=None: contextlib.nullcontext(
+                                            types.SimpleNamespace(read=lambda: b"[]"))):
+            resp = api.lambda_handler(self._event(), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertTrue(seen, "the budget check never ran at all")
+        self.assertEqual(seen[0].get("partner_daily_cap"), 500,
+                          "handle_breach saw an empty/default api_key_record, not "
+                          "the real key -- the partner's cap is silently unenforced")
+
+    def test_a_partner_key_with_no_credits_still_gets_a_real_answer(self):
+        """A key with no credit_balance, no subscription and no
+        free_calls_remaining must not 402 at the outer gate."""
+        with unittest.mock.patch.object(api, "_verify_rs_api_key", lambda k: self.PARTNER), \
+             unittest.mock.patch.object(api, "_breach_cache_get", lambda e: []):
+            resp = api.lambda_handler(self._event(), None)
+        self.assertEqual(resp["statusCode"], 200)
+
+    def test_a_partner_key_is_never_charged_credits(self):
+        """is_partner_call must bypass the credit-deduction branch too, not
+        just the 402 gate -- a partner key legitimately has none to deduct."""
+        with unittest.mock.patch.object(api, "_verify_rs_api_key", lambda k: self.PARTNER), \
+             unittest.mock.patch.object(api, "_breach_cache_get", lambda e: []), \
+             unittest.mock.patch.object(api, "dynamodb") as ddb:
+            resp = api.lambda_handler(self._event(), None)
+        self.assertEqual(resp["statusCode"], 200)
+        ddb.Table.return_value.update_item.assert_not_called()
+
+    def test_is_partner_call_is_scoped_to_breach_only(self):
+        """Same shape as is_cs_mobile_call/is_llm_license_call: a
+        partner_daily_cap must never unlock the rest of the metered catalog."""
+        src = (ROOT / "relayshield_api.py").read_text()
+        idx = src.index("is_partner_call = bool(key_record.get(PARTNER_CAP_FIELD))")
+        line = src[idx:src.index("\n", idx)]
+        self.assertIn('path == "/v1/metered/breach"', line)
+
+    def test_a_non_partner_key_is_unaffected(self):
+        """An ordinary free-tier key still hits the ordinary free-call path,
+        not the partner bypass."""
+        free_key = {"api_key": "rs_live_x", "active": True,
+                    "free_calls_remaining": 5}
+        with unittest.mock.patch.object(api, "_verify_rs_api_key", lambda k: free_key), \
+             unittest.mock.patch.object(api, "_breach_cache_get", lambda e: []), \
+             unittest.mock.patch.object(api, "dynamodb") as ddb:
+            resp = api.lambda_handler(self._event(), None)
+        self.assertEqual(resp["statusCode"], 200)
+        ddb.Table.return_value.update_item.assert_called_once()
+
+
 class GsbBatching(unittest.TestCase):
 
     def test_one_request_carries_every_domain(self):

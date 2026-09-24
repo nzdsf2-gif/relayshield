@@ -227,6 +227,25 @@ class Dispatcher(unittest.TestCase):
         self.assertIsNotNone(m, "spec entry not found")
         self.assertEqual(int(m.group(1)), api.METERED_CREDIT_COSTS["/v1/metered/incident-timeline"])
 
+    def test_it_has_a_price_card_on_the_landing_page(self):
+        """A price wired into billing with no card on api.relayshield.net/
+        developers is the inline-mode defect: live, charged, pointed at by
+        nobody who is not already reading the OpenAPI spec. This is a
+        generated-artefact check the same shape as the others -- read the
+        SERVED price grid, not a claim that a card exists."""
+        page_src = (ROOT / "relayshield_developer_signup.py").read_text()
+        m = re.search(
+            r'<div class="endpoint">/v1/metered/incident-timeline</div>\s*\n'
+            r'\s*<div class="price">\$([\d.]+)<span class="per"> / call</span></div>',
+            page_src)
+        self.assertIsNotNone(m, "no price-card found for /v1/metered/incident-timeline "
+                              "on the api.relayshield.net/developers price grid")
+        cents_on_page = round(float(m.group(1)) * 100)
+        self.assertEqual(cents_on_page, api.METERED_CREDIT_COSTS["/v1/metered/incident-timeline"],
+                          "the landing page quotes a different price than METERED_CREDIT_COSTS "
+                          "-- copy shown to a buyer that disagrees with what we charge is a "
+                          "price we do not honour")
+
 
 if __name__ == "__main__":
     unittest.main()

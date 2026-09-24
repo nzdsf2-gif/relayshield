@@ -968,6 +968,7 @@ POST {API_BASE_URL}/v1/metered/ioc-pivot               — related-infrastructur
 POST {API_BASE_URL}/v1/metered/brand-monitor           — brand name IOC corpus scan          $0.35/call
 POST {API_BASE_URL}/v1/metered/bulk-identity-risk      — hierarchical org + agent risk score $2.00/call
 POST {API_BASE_URL}/v1/metered/card-exposure           — stolen card BIN/hash exposure check $0.30/call
+POST {API_BASE_URL}/v1/metered/incident-timeline       — breach+session+SIM-swap+domain correlation $0.50/call
 
 Quick start
 -----------
@@ -2305,6 +2306,11 @@ LANDING_PAGE = """<!DOCTYPE html>
       <div class="endpoint">/v1/metered/ip-intel</div>
       <div class="price">$0.10<span class="per"> / call</span></div>
       <div class="desc">Passive DNS &amp; IP reputation: pass a domain to get its historical IP resolution history plus reputation, or pass an IP to get reverse resolution history (hostnames that have pointed to it), AS owner, country, and malicious/suspicious vendor detection counts</div>
+    </div>
+    <div class="price-card" id="ep-incident-timeline">
+      <div class="endpoint">/v1/metered/incident-timeline</div>
+      <div class="price">$0.50<span class="per"> / call</span></div>
+      <div class="desc">Correlate breach, session-hijack, SIM-swap and domain-lookalike signals for one identity in a single call: pass an email (always checked) plus an optional phone and domain, and get back which signals fired and whether they match a known coordinated-attack chain (e.g. breach + SIM swap, often used to intercept SMS 2FA). The on-demand version of the correlation that runs continuously in the background for our own monitored users</div>
     </div>
   </div>
 </div>

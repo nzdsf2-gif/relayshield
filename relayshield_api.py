@@ -1230,7 +1230,9 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         }
 
     metered_routes = {
-        "/v1/metered/breach":          handle_breach,
+        # Bound to key_record (not a bare function ref like its neighbours) so
+        # handle_breach can see partner_daily_cap — see is_partner_call above.
+        "/v1/metered/breach":          lambda p: handle_breach(p, key_record),
         "/v1/metered/sim-swap":        handle_sim_swap,
         "/v1/metered/infostealer":     handle_infostealer,
         "/v1/metered/domain":          handle_domain,
@@ -1416,6 +1418,21 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # and nothing else; the re-screens the watcher performs are covered by
         # the licence, so there is no per-call meter on this path either.
         is_watch_license_call = bool(key_record.get("watch_access")) and path in WATCH_LICENSE_ENDPOINTS
+        # Partner keys (Muse, 2026-09-24) — a scoped, credit-free bypass for
+        # exactly one endpoint, same shape as is_cs_mobile_call/is_llm_license_call.
+        #
+        # WITHOUT THIS, _check_partner_upstream_budget NEVER FIRES for a real
+        # partner integration. partner_daily_cap is wired into the standalone
+        # /v1/breach route (handle_breach's api_key_record kwarg), but every
+        # developer — including a partner given a normal RS API key — is told
+        # to call /v1/metered/breach (see _send_key_email's own quickstart
+        # curl). That path calls `handler(params)` with no api_key_record, so
+        # a partner key would fall straight into the ordinary credit/
+        # subscription/free-call gate below, 402 the moment its free calls run
+        # out, and never reach the shared-upstream protection at all — the
+        # exact "fix landed on the endpoint in front of me, not the surface"
+        # shape this file is full of.
+        is_partner_call = bool(key_record.get(PARTNER_CAP_FIELD)) and path == "/v1/metered/breach"
 
     if key_record.get("source") in DEMO_QUOTA_SOURCES and not _check_demo_quota(key_record):
         return {
@@ -1435,7 +1452,8 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             and not is_bundle_b_call and not is_bundle_b_direct_call
             and not is_bundle_d_included_call
             and not is_cs_mobile_call and not is_llm_license_call
-            and not is_watch_license_call and not is_free_tier_call):
+            and not is_watch_license_call and not is_free_tier_call
+            and not is_partner_call):
         logger.warning(
             "402 insufficient credits — path=%s key=%s credit_balance=%s source=%s",
             path, api_key_str[:24], credit_balance, key_record.get("source"),
@@ -1558,6 +1576,13 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             # Included in the flat-rate Verdict Watch licence. Nothing to bill
             # here by design: the customer pays for the watch, not the call
             # that registers it.
+            pass
+        elif is_partner_call:
+            # Free but capped by _check_partner_upstream_budget (already
+            # enforced inside handle_breach before this ran). No credits, no
+            # Stripe meter event -- explicit rather than relying on a partner
+            # key simply lacking a stripe_customer_id, which the fallback
+            # branch below would otherwise depend on.
             pass
         else:
             # Fall back to Stripe meter event. Gated on the path having a

@@ -8509,3 +8509,147 @@ migrated, or others moved too, and the shared role's current policy counts. Read
     AWS_PROFILE=relayshield aws iam list-attached-role-policies \
       --role-name relayshield-breach-check-role-1sapnwdl --no-cli-pager \
       --query 'length(AttachedPolicies)' --output text
+
+## THE BUNDLE B DUPLICATES WERE WITHDRAWN VIA A GITHUB ACTION. THIS REPO CANNOT SEE IT, ON PURPOSE.
+
+**Correction, 2026-09-24, from Andrew directly: "The two duplicate Bundle B product entities
+were removed in the prior session... As it was a GH action, I dont think you can see the code
+in origin/main."** He is right on both counts, and the second half is the more important one to
+get right going forward.
+
+**`prod-v5nr5gjtdnofi` and `prod-p3ei5nmgufnnq` were withdrawn (`UpdateVisibility` to `Restricted`)
+via `marketplace_changeset.yml`'s workflow dispatch in the prior session.** The real listing,
+`prod-szi2wdww3obry`, is Public and is the one visible on the Marketplace. This closes the item
+the 2026-09-22 Top 10 (item 5) still listed as open, and closes the guard concern in "THE
+DANGEROUS DIRECTION INVERTED THE DAY BUNDLE B WENT PUBLIC" above -- the tooling that refuses
+`UpdateVisibility` to `Public` against either duplicate was never exercised against a live
+attempt to re-publish them, because nobody has tried.
+
+**WHY THIS REPO WILL NEVER HOLD A COMMIT FOR IT, AND WHY THAT IS NOT A GAP TO CLOSE.** A workflow
+dispatch of `marketplace_changeset.yml` calls AWS's `StartChangeSet` API directly. It reads a
+committed JSON file (`bundle_b_withdraw.json`) as its INPUT and writes nothing back to the repo
+as its OUTPUT -- the change happens entirely in AWS, and the only record of it is AWS's own
+change-set history (`DescribeChangeSet` against the id the run logged) and whoever was watching
+the run. **This is the identical shape as "`relayshield-intel-feed` IS ALREADY SPLIT ONTO ITS OWN
+ROLE"** two sections above: an `aws lambda update-function-configuration --role ...` call and an
+AWS Marketplace `UpdateVisibility` change set are both actions that mutate AWS state with no file
+in this repo to diff. Running `iam_split_roles.py --apply` doesn't change `iam_split_roles.py`;
+running `marketplace_changeset.yml` against `bundle_b_withdraw.json` doesn't change
+`bundle_b_withdraw.json`. **The tool is not the action, and grepping the tool for evidence the
+action happened will always come back empty, forever, by design.**
+
+**THE PROCEDURAL FIX IS THE SAME ONE THAT SECTION ALREADY PRESCRIBES: whoever runs an `--apply`
+or dispatches a workflow that mutates AWS state pastes the confirming output back into the
+session, specifically so it gets written down.** Without that, the only way a later session
+learns the state changed is being told directly, as happened here. Read the Marketplace
+Management Portal (or `list-entities`) before asserting either duplicate's visibility from this
+container -- this file's own words, four sections up: **"a claim about a product names the entity
+id it was read from."**
+
+## THE MUSE PARTNER KEY GATE HAD A HOLE: THE CAP WAS WIRED TO A ROUTE NOBODY WOULD ACTUALLY CALL
+
+**2026-09-24, found while building what Andrew asked for ("run setup_breach_cache and setup the
+Muse partner_daily_cap key too").** The mechanism existed and was correctly designed. It was
+plumbed to the wrong endpoint.
+
+`_check_partner_upstream_budget` and `PARTNER_CAP_FIELD` (`partner_daily_cap`) were wired into
+`handle_breach` via the standalone `/v1/breach` route in the top-level `ROUTES` dict -- gated
+there by API Gateway's own key mechanism per that route's own comment ("Subscription routes: API
+key enforced by API Gateway"). **But `/v1/breach` is not the endpoint any real developer, partner
+included, is ever told to call.** `_send_key_email`'s own quickstart curl, and every other
+reference in this file, points at **`/v1/metered/breach`** -- a completely different dispatch
+path (`handle_metered_request`), which calls `handler(params)` with **no `api_key_record`
+argument at all**. `handle_breach`'s `api_key_record` kwarg defaults to `None`, so
+`_check_partner_upstream_budget(None or {}, "hibp")` sees an empty dict, `cap <= 0`, and returns
+`True` unconditionally -- **the partner cap silently never applies on the path a partner key
+would actually use.** Worse than that: because `handle_metered_request` runs its OWN
+credit/subscription/free-call billing gate *before* `handle_breach` is ever reached, a partner
+key with none of those (which a free-but-capped Muse key legitimately has none of) would 402 at
+that outer gate long before the inner budget check mattered at all.
+
+**Same shape as the Bundle B duplicate write and the intel-feed role split, one more time: a
+mechanism that exists and a mechanism that is reachable from where a real caller actually enters
+are different claims, and only the second one is worth anything.**
+
+**FIXED, in `relayshield_api.py`, matching the established `is_cs_mobile_call`/
+`is_llm_license_call`/`is_watch_license_call` scoped-bypass pattern exactly:**
+
+- `is_partner_call = bool(key_record.get(PARTNER_CAP_FIELD)) and path == "/v1/metered/breach"`,
+  added to the same `and not ...` chain that already lets those three licences through the outer
+  billing gate. **Scoped to exactly one path**, same as its neighbours -- a `partner_daily_cap`
+  must never unlock the rest of the metered catalog.
+- `metered_routes["/v1/metered/breach"]` changed from a bare `handle_breach` reference to
+  `lambda p: handle_breach(p, key_record)`, so the inner budget check finally sees the real key.
+- An explicit `elif is_partner_call: pass` in the post-success billing branch, rather than relying
+  on the fallback branch's implicit "no `stripe_customer_id`, so nothing bills" behaviour, which
+  would have been a silent trap the day a partner key ever did carry one.
+
+`test_muse_connector_features.py`'s new `PartnerBudgetThroughTheDispatcher` class goes through
+`lambda_handler`, not the handler directly -- the existing `PartnerBudget` class already proved
+`_check_partner_upstream_budget` itself and called `handle_breach` directly, which is exactly the
+class of test that could not have caught this. **One test in the new class had to be rewritten
+after it passed for the wrong reason**: mocking `_check_partner_upstream_budget` to a fixed
+return value proves the OUTER gate was bypassed, but says nothing about what it was actually
+CALLED WITH -- a metered_routes entry still pointing at bare `handle_breach` would have passed
+that version too, because `None or {}` is still a dict the mock happily accepts regardless of
+content. The fix is a spy recording the real argument and asserting `partner_daily_cap == 500`
+came through, which fails correctly when the `metered_routes` binding is reverted (proven by
+reverting it).
+
+**`tools/setup_muse_partner_key.py` issues the key** (idempotent on `source="muse_connector"`,
+`--apply` required to write, 500/day starting cap, never billed). **`tools/setup_breach_cache.sh`
+is unchanged and still the other half of "is the breach cache complete"** -- the code fails soft
+without the table (falls through to a live HIBP call every time), so nothing is broken while it
+is outstanding; the cache simply is not helping yet.
+
+## `/v1/metered/incident-timeline`: $0.50 FLAT, ALREADY WIRED TO STRIPE, NOW ON THE LANDING PAGE
+
+**Asked 2026-09-24: exact unit price, does it need adding to the landing site, does it need
+adding to Stripe, and how to stop it being overlooked.**
+
+**THE PRICE IS A FLAT $0.50 PER CALL, REGARDLESS OF WHICH OPTIONAL INPUTS ARE SUPPLIED.**
+`METERED_CREDIT_COSTS["/v1/metered/incident-timeline"] = 50` (cents), matching the OpenAPI spec's
+`price_cents: 50`, and the two are pinned equal by `test_incident_timeline.py`. Its own build
+comment ("PRICED AS A BUNDLE, NOT SUMMED") describes the *underlying* cost of the sub-checks it
+runs ($0.40 when only email is supplied, up to $0.95 fully fanned out) -- that is not a variable
+customer price, it is the justification for why $0.50 sits where it does. **The customer is
+charged $0.50 every time, full stop.**
+
+**IT DOES NOT NEED TO BE ADDED TO STRIPE, AND THIS IS TRUE FOR EVERY METERED ENDPOINT SINCE
+2026-08-04.** `_record_stripe_meter_event` posts to **one aggregate Stripe Billing Meter**
+(`relayshield_api_usage`, formula=sum, $0.01/unit price), with the call's price in cents as the
+payload value -- looked up from `METERED_CREDIT_COSTS` at billing time, not from a
+per-endpoint Stripe object. That rewrite happened specifically because Stripe Checkout rejects
+more than 20 recurring prices and the old one-meter-per-endpoint model had already broken
+self-serve signup once (HTTP 400, six days silent, 2026-06-24 to 2026-06-30). `STRIPE_METER_EVENTS`
+still carries a per-endpoint entry for incident-timeline, but its own comment says outright it is
+"NO LONGER USED FOR BILLING" -- kept only for the historical per-meter data and because
+`relayshield_agentic_api.py`'s AWS path reads its own separate copy for AWS dimension names,
+which is a different concern from this endpoint (it has none, per "NO PAYG/x402 TWIN"). **Since
+`METERED_CREDIT_COSTS` already had the $0.50 entry from the day it was built, billing was already
+fully live with zero Stripe dashboard action, before this question was even asked.**
+
+**IT WAS MISSING FROM THE LANDING PAGE, AND THAT WAS THE REAL GAP.** `api.relayshield.net/developers`
+has one hand-typed price-grid (`id="endpoints"`, "Endpoints & pricing") with one `.price-card` per
+metered endpoint. Every entry in `METERED_CREDIT_COSTS` had a card except three: `llm-credential-
+exposure` (has its own dedicated licence section further down the page, correctly excluded),
+`secret-scan-text` (built for the rsscan pre-commit hook, never marketed generally, plausible but
+unconfirmed exclusion), and **`incident-timeline`, which had no justification for its absence at
+all -- a plain oversight.** Added, at `id="ep-incident-timeline"`, in the same commit as the price
+guard below. Also added to `_send_key_email`'s hand-typed quickstart catalogue for the same reason.
+**Found in passing and NOT fixed, because it is a separate pre-existing gap: `/v1/metered/
+dependency-risk` is also missing from the price-grid with no visible justification.** Worth a
+look, not touched here to keep this change scoped to what was asked.
+
+**HOW IT DOES NOT GET OVERLOOKED AGAIN: a test now reads the SERVED price-grid HTML, not a claim
+that a card exists.** `test_incident_timeline.py`'s `Dispatcher.test_it_has_a_price_card_on_the_
+landing_page` extracts the `.price-card` for this endpoint from `relayshield_developer_signup.py`
+and asserts its price equals `METERED_CREDIT_COSTS`, in cents, both directions -- proven by
+checking it fails when the card is absent and when the price disagrees. Combined with the existing
+`Dispatcher` tests (registered in `METERED_CREDIT_COSTS`, in the dispatch table, and matching the
+OpenAPI spec), a new metered endpoint's price is now checked in three places by test rather than
+by someone remembering to update a fourth hand-typed HTML block. **This is the general mechanism,
+not a one-off**: the same test shape applies to any future endpoint, and the honest boundary is
+that nobody has yet extended the guard to *require* every `METERED_CREDIT_COSTS` entry to have a
+card (which would immediately fail on the pre-existing `dependency-risk` gap) -- that is a real,
+larger fix, deliberately left as a separate decision rather than folded silently into this one.

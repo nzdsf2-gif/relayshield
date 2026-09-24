@@ -3099,9 +3099,9 @@ PAYG_ENDPOINTS: dict[str, dict] = {
     },
     '/v1/payg/secret-scan-text': {
         'summary': 'Scan supplied text or a diff for secrets',
-        'description': '',
+        'description': 'Scan raw text content or a unified diff for exposed API keys, tokens and credentials, matched against the same pattern set used across RelayShield\'s corpus. Runs entirely locally with no external API call. Call before a commit, PR or pasted config ships with a live secret in it.',
         'price_units': 50000,
-        'x402_version': 1,
+        'x402_version': 2,
         'body': {'type': 'object',
  'properties': {'content': {'type': 'string',
                             'description': 'Raw file content to scan. Mutually exclusive with '

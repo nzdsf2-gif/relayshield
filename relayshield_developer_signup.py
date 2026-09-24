@@ -969,6 +969,7 @@ POST {API_BASE_URL}/v1/metered/brand-monitor           — brand name IOC corpus
 POST {API_BASE_URL}/v1/metered/bulk-identity-risk      — hierarchical org + agent risk score $2.00/call
 POST {API_BASE_URL}/v1/metered/card-exposure           — stolen card BIN/hash exposure check $0.30/call
 POST {API_BASE_URL}/v1/metered/incident-timeline       — breach+session+SIM-swap+domain correlation $0.50/call
+POST {API_BASE_URL}/v1/metered/dependency-risk         — npm maintainer-compromise screening $0.50/call
 
 Quick start
 -----------
@@ -2311,6 +2312,11 @@ LANDING_PAGE = """<!DOCTYPE html>
       <div class="endpoint">/v1/metered/incident-timeline</div>
       <div class="price">$0.50<span class="per"> / call</span></div>
       <div class="desc">Correlate breach, session-hijack, SIM-swap and domain-lookalike signals for one identity in a single call: pass an email (always checked) plus an optional phone and domain, and get back which signals fired and whether they match a known coordinated-attack chain (e.g. breach + SIM swap, often used to intercept SMS 2FA). The on-demand version of the correlation that runs continuously in the background for our own monitored users</div>
+    </div>
+    <div class="price-card" id="ep-dependency-risk">
+      <div class="endpoint">/v1/metered/dependency-risk</div>
+      <div class="price">$0.50<span class="per"> / call</span></div>
+      <div class="desc">Maintainer-compromise screening for your npm dependency tree: pass a package list or a package.json/package-lock.json manifest and RelayShield resolves every package to its publishing accounts, then checks those accounts against our infostealer-log corpus. A self-replicating supply-chain worm starts with a compromised maintainer, not malicious code, so this catches the leading indicator that artifact scanners (Socket, Snyk, Aikido) structurally cannot see because they only read the tarball. Findings are reported at the package level only, e.g. &quot;3 of your 412 dependencies are maintained by an account seen in a recent stealer log&quot; -- never a maintainer&apos;s identity. Up to 100 packages and 150 unique maintainer accounts per call</div>
     </div>
   </div>
 </div>

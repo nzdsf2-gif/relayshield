@@ -3343,6 +3343,23 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "infostealer exposure, SIM swap, leaked OAuth tokens and supply-chain "
             "risk. Free tier is 100 calls, no card.")),
     ),
+    # Registered 2026-09-24 alongside its own partner_daily_cap key, same
+    # reasoning as muse directly above: no referer hosts, because a connector
+    # platform's own pages are not where a click originates.
+    "openai": (
+        (),
+        _banner("Arriving from an OpenAI connector", _p(
+            "The connector calls the same free, keyless endpoints Muse does: "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">/v1/link-check</code>, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">/v1/wallet-risk</code> '
+            "and "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">/v1/email-check</code>. '
+            "None needs an account, a key or a payment method, and none ever "
+            "answers &ldquo;safe&rdquo; &mdash; the ceiling is nothing known "
+            "against it. The rest of the API below is the same corpus asked "
+            "harder questions: breach and infostealer exposure, SIM swap, leaked "
+            "OAuth tokens and supply-chain risk. Free tier is 100 calls, no card.")),
+    ),
     "github": (
         ("github.com",),
         _banner("Arriving from GitHub", _p(
@@ -3610,6 +3627,7 @@ _SOURCE_ALIASES = {
     "tg-miniapp-tgboard":       "tg-miniapp",
     "tg-miniapp-awesome":        "tg-miniapp",
     "tg-miniapp-muse":     "tg-miniapp",
+    "tg-miniapp-openai":   "tg-miniapp",
     # Registered 2026-09-19 before either destination is submitted to. An
     # unregistered key renders no banner and logs "unmatched:", which is
     # attribution that looks like it worked -- FD-8, four months of it.

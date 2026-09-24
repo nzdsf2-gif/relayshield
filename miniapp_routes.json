@@ -219,6 +219,19 @@
       "submission_note": null,
       "route_type": "partner_response",
       "state": "registered, connector not yet submitted"
+    },
+    {
+      "rank": 20,
+      "id": "openai",
+      "key": "tg-miniapp-openai",
+      "destination": "OpenAI's MCP connector's onward route, inside a check result",
+      "audience": null,
+      "audience_note": "UNMEASURED, same structural shape as muse (rank 19), registered 2026-09-24 alongside its own partner_daily_cap key (tools/setup_partner_key.py --source openai_connector). NOT a catalogue listing: the key is emitted by CONSUMER_ROUTES in relayshield_api.py, inside the response to a keyless /v1/link-check or /v1/wallet-risk call, so an arrival is somebody who asked a question through OpenAI's connector, got an answer, and followed the route in it. UNVERIFIED from the container which connector surface (ChatGPT app, GPT connector, Apps SDK) actually sends `source: \"openai\"` in its request params -- that string has to match what the connector's own integration sends or _onward_route never fires and the key never logs a real arrival.",
+      "status": null,
+      "submitted_at": null,
+      "submission_note": null,
+      "route_type": "partner_response",
+      "state": "registered, connector integration string UNVERIFIED"
     }
   ],
   "loop_keys": [

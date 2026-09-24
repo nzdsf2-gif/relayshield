@@ -8653,3 +8653,92 @@ not a one-off**: the same test shape applies to any future endpoint, and the hon
 that nobody has yet extended the guard to *require* every `METERED_CREDIT_COSTS` entry to have a
 card (which would immediately fail on the pre-existing `dependency-risk` gap) -- that is a real,
 larger fix, deliberately left as a separate decision rather than folded silently into this one.
+
+## THE METERED-PRICING/LANDING-PAGE GUARD IS BUILT, NOT JUST TWO ONE-OFF FIXES
+
+**2026-09-24.** The incident-timeline and dependency-risk sections above each record finding and
+fixing the identical gap by hand -- a metered endpoint live in `METERED_CREDIT_COSTS` with no
+price-card on `api.relayshield.net/developers` -- and both explicitly flagged that "nobody has yet
+extended the guard to require every entry to have a card." Built now: `test_metered_pricing_
+landing_page.py` walks every `METERED_CREDIT_COSTS` entry and fails if a non-exception path has no
+matching card, in **both directions** (a missing card, or a card whose price disagrees).
+
+**Three exceptions, each with evidence in the module docstring rather than asserted:**
+`llm-credential-exposure` (its own licence section), `secret-scan-text` (rsscan CI pricing, not
+marketed), `wallet-risk` (free at the bare keyless route; this is the MetaMask-Snap-only paid twin).
+A fourth test caps the exceptions list at 3 and requires a comment naming new evidence before it can
+grow -- the CSM-SIMSWAP-1 shape (loosen the guard instead of fixing the gap) closed off before it
+can recur here.
+
+Proven by injecting a fake `METERED_CREDIT_COSTS` entry with no card and watching it fail, then
+restoring cleanly.
+
+## THE MCP-SERVER AND "EXISTING CLAUDE PARTNER KEY" CLAIMS COULD NOT BE VERIFIED IN THIS REPO
+
+**Asked 2026-09-24: "Another AI built, committed and pushed a second new MCP server to main/origin
+... There is already a partner API key for 500 breach checks/day for Claude."** Checked per this
+file's own rule (`git fetch --all --prune`, then search with no pathspec, across every ref):
+**`origin/main` is unchanged at `c2dcc42`, and no commit dated 2026-09-24 exists anywhere in this
+repository except this session's own two.** No new MCP server file, no new partner-key script other
+than the one built for Muse two sessions ago.
+
+**This is not reported as "it does not exist"** -- that is exactly the mistake this file records
+twice already (the WhatsApp front door, `--all` is not all). It is reported as: **the code claim is
+checkable from here and did not check out; the AWS-state claim (a partner key already existing) is
+NOT checkable from here at all**, by the same logic as the intel-feed IAM role split and the Bundle B
+duplicate withdrawal -- an AWS write leaves no trace in this repository by construction. The most
+likely explanation for the MCP server claim, consistent with "THERE ARE FIVE MCP SURFACES" above:
+`relayshield-mcp`'s actual source lives in `~/mcp-live` on Andrew's Mac, a location this container
+has never had access to and is not part of this git repository at all. Work there would be
+genuinely invisible from here and would not contradict anything checked above.
+
+**What follows from that: the partner-key MECHANISM was built regardless of which repository the
+new MCP server's code lives in**, because it is enforced in `relayshield_api.py`, which this session
+does control. So the OpenAI key was issued using the identical, already-proven mechanism rather than
+waiting on an unverifiable premise.
+
+## `tools/setup_muse_partner_key.py` IS NOW `tools/setup_partner_key.py --source <name>`
+
+**Generalised rather than duplicated**, per this repo's own most-repeated defect (N near-identical
+copies is N chances to drift). `--source` is required and shape-checked
+(`^[a-z][a-z0-9_-]{2,40}$`); everything else -- the account guard, the idempotent scan-before-write,
+the refusal to mint a second key for the same source, the "never billed" reasoning -- is unchanged
+from the Muse-only version. Muse's key is issued the same way this script would issue any future
+one: `--source muse_connector`.
+
+**ANDREW RUNS THIS, after the merge, to issue the OpenAI key:**
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/setup_partner_key.py --source openai_connector --apply
+
+EXPECT: section 2 prints "none found -- would create one" (or, if the key genuinely already exists
+under this exact source string, reports it found rather than minting a second one); section 3 lists
+the item being written; the final block prints the `rs_live_...` key value once, to send to OpenAI
+as their `X-RS-API-KEY` header. It will not be printed again by a re-run.
+
+**Registered in every place `muse` already is, before any submission**, matching this repo's own
+"register the key before it ships" doctrine (FD-8, four months of `unmatched:` rows, is what
+skipping this costs):
+
+- `CONSUMER_ROUTES["openai"]` in `relayshield_api.py` -- the onward Telegram link a keyless check
+  response carries back to an OpenAI-connector caller, own `?startapp=tg-miniapp-openai` key so an
+  arrival is separable from Muse's in the logs.
+- `tg-miniapp-openai` in `cloudflare_worker_miniapp.js`'s `ALLOWED_SOURCES`, `miniapp_routes.json`
+  (rank 20, `route_type: partner_response`, same shape as Muse's rank-19 entry), and
+  `_SOURCE_ALIASES` in `relayshield_developer_signup.py`.
+- `"openai"` in `_SOURCE_BANNERS`, no referer hosts (same reasoning as `muse`: a connector
+  platform's own pages are not where a click originates), for `?source=openai` landing-page
+  arrivals.
+
+**UNVERIFIED, and labelled as such in the route table itself: which literal string OpenAI's
+connector actually sends as `source` in its request params.** `_onward_route` is an explicit
+allowlist keyed on that string -- if the deployed connector sends `"chatgpt"`, `"openai_connector"`
+or nothing at all instead of `"openai"`, the route never fires and the key logs no arrival even
+though it is correctly issued and correctly capped. This is the same open question this file
+already recorded for Muse and is not yet answered for either: read what the connector actually
+sends before treating a flat arrival count as evidence the integration itself is dead.
+
+`test_muse_connector_features.py`'s `TheOnwardRoute` class gained a matching test
+(`test_openai_gets_one_too_and_it_carries_its_own_key`), and the pre-existing
+`test_every_onward_key_is_REGISTERED_at_the_worker_edge` guard picked up the new key automatically
+and passed without modification -- the three-lists-must-agree check doing its job on the first try
+for once.

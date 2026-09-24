@@ -628,6 +628,16 @@ class TheOnwardRoute(unittest.TestCase):
         self.assertIn("telegram", d["onward"]["label"].lower(),
                       "a link that does not say where it goes is worse than none")
 
+    def test_openai_gets_one_too_and_it_carries_its_own_key(self):
+        """Registered 2026-09-24 alongside the OpenAI partner_daily_cap key.
+        Own startapp key so the arrival is separable from muse's in the logs
+        -- one key per DESTINATION, never a shared bucket two partners drown
+        each other out in."""
+        d = self._link("openai")
+        self.assertIn("onward", d)
+        self.assertIn("tg-miniapp-openai", d["onward"]["url"])
+        self.assertNotIn("tg-miniapp-muse", d["onward"]["url"])
+
     def test_the_batch_form_carries_it_too(self):
         with unittest.mock.patch.object(
                 api, "_heuristic_url_check_many",

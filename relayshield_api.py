@@ -3183,6 +3183,15 @@ CONSUMER_ROUTES = {
         "label": "Check links and TON addresses yourself, free, in Telegram",
         "url": "https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-muse",
     },
+    # OpenAI's MCP connector, registered 2026-09-24 alongside a
+    # partner_daily_cap key issued via tools/setup_partner_key.py --source
+    # openai_connector. Same reasoning as muse above: an agent surface that
+    # calls us on a stranger's behalf gets a route back to a place that
+    # stranger can check things themselves.
+    "openai": {
+        "label": "Check links and TON addresses yourself, free, in Telegram",
+        "url": "https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-openai",
+    },
 }
 
 

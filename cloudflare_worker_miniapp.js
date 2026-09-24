@@ -144,6 +144,10 @@ const ALLOWED_SOURCES = new Set([
   // like it worked. Its authority is CONSUMER_ROUTES in relayshield_api.py,
   // which is the only place that emits this link.
   "tg-miniapp-muse",
+  // OpenAI's MCP connector onward route, same shape as muse above, registered
+  // 2026-09-24 alongside its own partner_daily_cap key. Authority is the same
+  // CONSUMER_ROUTES table in relayshield_api.py.
+  "tg-miniapp-openai",
   // Two destinations registered 2026-09-19, BEFORE either is submitted to.
   // dappradar is a dapp catalogue whose audience holds TON, which is the one
   // audience for whom a TON-only Check tab is the headline. producthunt is

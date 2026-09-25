@@ -10302,6 +10302,30 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
             "data": {"domains_checked": 1, "found": False, "findings": [], "highest_severity": None},
         },
     ),
+    "/v1/payg/secret-scan-text": _bazaar_body_ext(
+        input_example={"content": "aws_access_key_id = AKIAIOSFODNN7EXAMPLE"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "content":  {"type": "string", "description": "Text or code to scan for leaked secrets"},
+                "diff":     {"type": "string", "description": "Optional: unified diff to scan instead of raw text"},
+                "filename": {"type": "string", "description": "Optional: filename for context in findings"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "found":            False,
+                "bytes_scanned":    40,
+                "findings":         [],
+                "findings_count":   0,
+                "severity_counts":  {},
+                "highest_severity": None,
+                "recommendation":   "No secrets detected.",
+                "checked_at":       "2026-09-25T12:00:00+00:00",
+            },
+        },
+    ),
     "/v1/payg/target-risk": _bazaar_body_ext(
         input_example={"domain": "acme.com"},
         input_schema={
@@ -10545,6 +10569,10 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "Repo-only scanners miss credentials shipped inside "
         "released packages and images. Every hit is verified against the credential "
         "pattern before it is reported."
+    ),
+    "/v1/payg/secret-scan-text": (
+        "Scan text or a unified diff for leaked secrets and credentials (49 NHI credential patterns). "
+        "Check before you commit or paste."
     ),
     "/v1/payg/target-risk": (
         "Score a domain's probability of being an active or upcoming cyberattack target using "

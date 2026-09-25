@@ -92,6 +92,12 @@ from boto3.dynamodb.conditions import Key
 # Runtime.ImportModuleError. See .claude/skills/relayshield-deploy step 3.
 import relayshield_openapi_spec
 
+# Scam-kit fingerprinting primitives — pure functions (stdlib only), no AWS.
+# Packaged into the deployment zip via deploy_lambdas.yml's transitive
+# relayshield_* import resolution, same as relayshield_openapi_spec.
+import relayshield_scamkit
+import relayshield_scamkit_fetch as _scamkit_fetch  # v1b: TLS/redirect/header telemetry (stdlib only)
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -253,6 +259,10 @@ X402_V2_ENABLED_PATHS: set[str] = {
     "/v1/payg/domain",
     "/v1/payg/breach",
     "/v1/payg/sim-swap",
+    # Scam-kit fingerprinting (added 2026-09-24) — v2 from launch.
+    "/v1/payg/scamkit-fingerprint",
+    "/v1/payg/scamkit-match",
+    "/v1/payg/campaign-scan",
     # Launched 2026-07-31, after every batch above had already closed
     # (last one 2026-07-21) -- missed the migration by ten days rather than
     # being deliberately held back like domain/supply-chain were. No prior
@@ -294,6 +304,11 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/prompt-injection-breach": 350000, # $0.35 — prompt-injection corpus exposure check
     "/v1/payg/cert-expiry":            50000,   # $0.05 — TLS cert expiry/renewal risk for your own domain (crt.sh, free source)
     "/v1/payg/ip-intel":              100000,   # $0.10 — passive DNS + IP reputation via VirusTotal
+    # Scam-kit fingerprinting (added 2026-09-24). Prices are authoritative
+    # here; the x402 manifest and OpenAPI spec both read this table.
+    "/v1/payg/scamkit-fingerprint":  500000,   # $0.50 — kit fingerprint from URL or HTML
+    "/v1/payg/scamkit-match":        100000,   # $0.10 — match a kit_<sha256> against the corpus
+    "/v1/payg/campaign-scan":       5500000,   # $5.50 flat — composite over the TI endpoints
 }
 
 GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
@@ -343,6 +358,10 @@ OAUTH_REVOCATION_URLS: dict[str, str] = {
 
 API_KEYS_TABLE          = "relayshield_api_keys"
 INTEL_IOCS_TABLE        = "relayshield_intel_iocs"
+# Scam-kit fingerprints (kit_<sha256>). Created by
+# tools/setup_kit_fingerprints_table.sh BEFORE the fingerprinting code ships;
+# handlers degrade gracefully (log + continue) when it is absent.
+KIT_FINGERPRINTS_TABLE  = "relayshield_kit_fingerprints"
 INTEL_CVE_TABLE         = "relayshield_intel_cve"
 STOLEN_CARDS_TABLE      = "relayshield_stolen_cards"
 ASSET_WATCHLIST_TABLE   = "relayshield_asset_watchlist"
@@ -422,6 +441,13 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/ip-intel":            "relayshield_ip_intel_calls",          # passive DNS + IP reputation (VirusTotal)
     "/v1/metered/card-exposure":       "relayshield_card_exposure_calls",     # BIN/stolen-card monitoring — CREATE METER IN DASHBOARD
     "/v1/metered/incident-timeline":   "relayshield_incident_timeline_calls", # composite: breach+session-risk+sim-swap+domain, ATTACK_CHAINS-correlated
+    # Scam-kit fingerprinting (added 2026-09-24). Each name needs a REAL
+    # Stripe meter object (dashboard-created) before the Stripe subscription
+    # path bills correctly — cf. the secret-scan-text 7x-overcharge comment
+    # above. CREATE METERS IN DASHBOARD.
+    "/v1/metered/scamkit-fingerprint": "relayshield_scamkit_fingerprint_calls",
+    "/v1/metered/scamkit-match":       "relayshield_scamkit_match_calls",
+    "/v1/metered/campaign-scan":       "relayshield_campaign_scan_calls",
 }
 
 # Credits deducted per successful call (1 credit = $0.01)
@@ -473,6 +499,11 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     # as a bundle below the full-fan-out sum, above the always-run floor —
     # see the endpoint's own comment for the reasoning, never re-derive it.
     "/v1/metered/incident-timeline":   50,
+    # Scam-kit fingerprinting (added 2026-09-24). Mirrors the x402 PAYG prices
+    # 1:1 (credits: 1 = $0.01), per the fiat/x402 parity convention.
+    "/v1/metered/scamkit-fingerprint": 50,   # $0.50/call
+    "/v1/metered/scamkit-match":       10,   # $0.10/call
+    "/v1/metered/campaign-scan":      550,   # $5.50/call flat composite
 }
 
 # Endpoints the no-card free tier will NOT serve. Added 2026-08-09 alongside
@@ -1272,6 +1303,11 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # $0.05, just reachable with the caller's own API key.
         "/v1/metered/wallet-risk":         handle_wallet_risk,
         "/v1/metered/incident-timeline":   handle_incident_timeline,
+        # Scam-kit fingerprinting (added 2026-09-24). Same handlers as the
+        # x402 rail — API-key auth and credit billing happen above.
+        "/v1/metered/scamkit-fingerprint": handle_scamkit_fingerprint,
+        "/v1/metered/scamkit-match":       handle_scamkit_match,
+        "/v1/metered/campaign-scan":       handle_campaign_scan,
         "/v1/webhook/configure":       lambda p: handle_webhook_configure(p, api_key_str),
         "/v1/siem/configure":          lambda p: handle_siem_configure(p, api_key_str),
         "/v1/watch":                   lambda p: handle_watch_add(p, api_key_str),
@@ -9685,6 +9721,638 @@ def handle_secret_scan_text(params: dict) -> dict:
     })
 
 
+# ---------------------------------------------------------------------------
+# Scam-kit fingerprinting
+# ---------------------------------------------------------------------------
+# v1 endpoints:
+#   POST /v1/payg/scamkit-fingerprint  ($0.50 — fingerprint a kit from URL or HTML)
+#   POST /v1/payg/scamkit-match        ($0.10 — match a kit_<sha256> against the corpus)
+#   POST /v1/payg/campaign-scan        ($5.50 flat — composite fan-out)
+# Also served on /v1/metered/* with the same handlers (Stripe credit rail).
+#
+# Pure fingerprinting math lives in relayshield_scamkit (stdlib only); these
+# handlers are the AWS/network glue: static HTML fetch, DynamoDB corpus
+# lookups, and the fingerprint-table upsert.
+#
+# HARD RULES (from the product spec — do not relax):
+#   * Secrets are stripped BEFORE hashing, inside relayshield_scamkit.
+#     Nothing credential-shaped is ever logged, returned, or stored.
+#   * Family status: the 13 FLAME TP-0067 families Andrew approved on
+#     2026-09-25 are emitted with family_status="approved" via
+#     relayshield_scamkit.family_status_for(); every other name stays
+#     "suggested". An existing "approved" is preserved, never downgraded.
+#     No code path approves a name outside the approved set — additional
+#     approvals are a manual act by Andrew, recorded directly on the item.
+#   * Verdict copy never says "safe"/"clean"/"legitimate". Best case is
+#     "no flags found" with an explicit not-a-guarantee caveat.
+
+SCAMKIT_FETCH_TIMEOUT   = 12              # static HTML fetch per URL (v1: no JS rendering)
+SCAMKIT_FETCH_MAX_BYTES = 2 * 1024 * 1024
+CAMPAIGN_MAX_INDICATORS = 25
+CAMPAIGN_BUDGET_SECONDS = 24              # must stay under API Gateway's 29s ceiling
+
+
+# v1b: custom TLS fetch pipeline (relayshield_scamkit_fetch) — redirects,
+# response headers, TLS facts, and up to 2 bounded secondary fetches
+# (Evilginx canary + remote favicon). Stdlib only; no JS rendering.
+_SCAMKIT_FETCH_NOTE = ("static HTML only in v1 — no JS rendering in the Lambda")
+
+
+def _scamkit_fetch_observations(url: str, observed_telemetry) -> tuple[str, dict | None, str]:
+    """v1b fetch wrapper. Returns (html, observations, error)."""
+    return _scamkit_fetch.fetch_kit_page(
+        url,
+        observed_telemetry=observed_telemetry,
+        timeout=SCAMKIT_FETCH_TIMEOUT,
+        max_bytes=SCAMKIT_FETCH_MAX_BYTES,
+    )
+
+
+def _scamkit_corpus_evidence(signals: dict) -> dict:
+    """Look up kit signal hashes in the TI corpus (INTEL_IOCS_TABLE).
+
+    Best-effort: any corpus error degrades to empty evidence — it never
+    fails the fingerprint call. The kit table (relayshield_kit_fingerprints)
+    is the system of record for families; the corpus is corroborating
+    evidence that the same kit shape has been seen in the wild.
+    """
+    evidence: dict = {}
+    try:
+        table = dynamodb.Table(INTEL_IOCS_TABLE)
+    except Exception as exc:
+        logger.warning("scamkit corpus evidence unavailable: %s", exc)
+        return evidence
+    lookups = [("dom_skeleton_hash", signals.get("dom_skeleton_hash"))]
+    for h in (signals.get("script_hashes") or [])[:5]:
+        lookups.append(("script_hash", h))
+    for label, value in lookups:
+        if not value:
+            continue
+        try:
+            resp = table.query(
+                KeyConditionExpression=Key("ioc_value").eq(value),
+                Limit=5,
+            )
+            items = resp.get("Items", []) or []
+        except Exception as exc:
+            logger.warning("scamkit corpus query failed for %s: %s", label, exc)
+            continue
+        if items:
+            seen = [i.get("seen_ts") or "" for i in items]
+            evidence[label] = {
+                "corpus_hits":  len(items),
+                "marketplaces": sorted({i.get("channel", "") for i in items if i.get("channel")}),
+                "first_seen":   min(seen) or None,
+                "last_seen":    max(seen) or None,
+            }
+    return evidence
+
+
+def _scamkit_known_families(limit: int = 100) -> list:
+    """Families already in the fingerprint table (suggested OR approved).
+
+    Used only as auto-suggest candidates for suggest_family(). The
+    family_status of the matched item is never changed by the suggestion —
+    see _scamkit_upsert. Best-effort: an empty list on any error.
+    """
+    try:
+        table = dynamodb.Table(KIT_FINGERPRINTS_TABLE)
+        resp = table.scan(
+            Limit=limit,
+            ProjectionExpression="fingerprint_id, kit_family, family_status, #s",
+            ExpressionAttributeNames={"#s": "signals"},
+        )
+    except Exception as exc:
+        logger.warning("scamkit known-family scan failed: %s", exc)
+        return []
+    fams = []
+    for item in resp.get("Items", []) or []:
+        if item.get("kit_family") and item.get("signals"):
+            fams.append({"family": item["kit_family"], "signals": item["signals"]})
+    return fams
+
+
+def _scamkit_resolve_family(existing: dict | None, caller_family: str | None,
+                            suggested_family: str | None) -> tuple[str | None, str | None]:
+    """Resolve (kit_family, family_status) for an upsert.
+
+    Precedence: existing item's family always wins (stable labels — a later
+    sighting never renames a kit). A brand-new fingerprint takes the
+    caller's explicit family label, else the corpus auto-suggestion.
+    The 13 FLAME TP-0067 families Andrew approved on 2026-09-25 are emitted
+    with status "approved" (family_status_for()); every other name stays
+    "suggested". An existing "approved" is preserved, never downgraded.
+    """
+    if existing and existing.get("kit_family"):
+        status = existing.get("family_status")
+        return existing["kit_family"], status if status in ("approved", "suggested") else "suggested"
+    fam = caller_family or suggested_family
+    if fam:
+        return fam, relayshield_scamkit.family_status_for(fam)
+    return None, None
+
+
+def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | None,
+                    suggested_family: str | None, source: str,
+                    corpus_candidates: dict | None = None) -> dict:
+    """Upsert the fingerprint into KIT_FINGERPRINTS_TABLE.
+
+    New item: stores family per _scamkit_resolve_family, sightings_count=1.
+    Existing item: bumps sightings_count, refreshes last_seen, appends the
+    source — but NEVER touches kit_family / family_status.
+
+    Dual-version backfill: when there is no skfp-v2 row, the skfp-v1
+    projection ID is looked up too. A hit means this kit was fingerprinted
+    before the v2 upgrade — the new v2 item carries the v1 family's
+    label/status, continues its sightings_count, and records
+    ``supersedes: <v1_id>`` instead of silently forking a new ID. skfp-v1
+    rows are never modified or deleted.
+
+    Returns {"stored", "kit_family", "family_status", "sightings_count"}.
+    "stored" is False only when the table is unavailable (not yet created,
+    no IAM) — the fingerprint response is still returned, just not persisted.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        table = dynamodb.Table(KIT_FINGERPRINTS_TABLE)
+    except Exception as exc:
+        logger.warning("scamkit store unavailable: %s", exc)
+        fam, status = _scamkit_resolve_family(None, caller_family, suggested_family)
+        return {"stored": False, "kit_family": fam, "family_status": status, "sightings_count": 1}
+    try:
+        existing = table.get_item(Key={"fingerprint_id": fingerprint_id}).get("Item")
+    except Exception as exc:
+        logger.warning("scamkit get failed for %s: %s", fingerprint_id[:20], exc)
+        existing = None
+    if existing:
+        fam, status = _scamkit_resolve_family(existing, None, None)
+        try:
+            update = ("SET sightings_count = if_not_exists(sightings_count, :one) + :one, "
+                      "last_seen = :now")
+            vals: dict = {":one": 1, ":now": now}
+            names: dict = {}
+            if source:
+                update += ", #src = list_append(if_not_exists(#src, :empty), :src)"
+                names["#src"] = "sources"
+                vals[":empty"] = []
+                vals[":src"] = [source]
+            kwargs: dict = {"UpdateExpression": update, "ExpressionAttributeValues": vals}
+            if names:
+                kwargs["ExpressionAttributeNames"] = names
+            table.update_item(Key={"fingerprint_id": fingerprint_id}, **kwargs)
+        except Exception as exc:
+            logger.warning("scamkit sighting bump failed: %s", exc)
+        return {"stored": True, "kit_family": fam, "family_status": status,
+                "sightings_count": (existing.get("sightings_count") or 0) + 1}
+    # No v2 row — try the v1 backfill link before creating a fresh item.
+    v1_item = None
+    supersedes = None
+    try:
+        v1_id = relayshield_scamkit.fingerprint_id(
+            relayshield_scamkit.v1_signal_projection(signals))
+        if v1_id != fingerprint_id:
+            v1_item = table.get_item(Key={"fingerprint_id": v1_id}).get("Item")
+            if v1_item:
+                supersedes = v1_id
+    except Exception as exc:
+        logger.warning("scamkit v1 backfill lookup failed: %s", exc)
+    if v1_item:
+        # Continuity, not a fork: keep the v1 family's label/status and
+        # continue its sighting count on the new v2 row.
+        fam, status = _scamkit_resolve_family(v1_item, None, None)
+        sightings_count = (v1_item.get("sightings_count") or 0) + 1
+    else:
+        fam, status = _scamkit_resolve_family(None, caller_family, suggested_family)
+        sightings_count = 1
+    item: dict = {
+        "fingerprint_id":      fingerprint_id,
+        "fingerprint_version": relayshield_scamkit.FINGERPRINT_VERSION,
+        "signals":             signals,
+        "corpus_candidates":   corpus_candidates or {},
+        "sightings_count":     sightings_count,
+        "first_seen":          now,
+        "last_seen":           now,
+    }
+    if supersedes:
+        item["supersedes"] = supersedes
+    if fam:
+        item["kit_family"] = fam
+    if status:
+        item["family_status"] = status
+    if source:
+        item["sources"] = [source]
+    try:
+        table.put_item(Item=item)
+    except Exception as exc:
+        logger.warning("scamkit put failed: %s", exc)
+        return {"stored": False, "kit_family": fam, "family_status": status, "sightings_count": 1}
+    return {"stored": True, "kit_family": fam, "family_status": status,
+            "sightings_count": sightings_count}
+
+
+# Request: POST /v1/payg/scamkit-fingerprint
+#   { "url": "https://...", "html": "<...>", "source": "optional tag",
+#     "family": "optional label",
+#     "observed_telemetry": {"ja3": ..., "ja4": ..., "user_agent_shifts": ...,
+#                            "app_ids": ..., "ip_anomalies": ...,
+#                            "session_anomalies": ...} }
+#   url XOR html required (both -> html wins, url not fetched).
+#   url is fetched as STATIC HTML ONLY in v1 (no JS rendering); for JS-heavy
+#   kits submit caller-rendered HTML via `html`.
+#   observed_telemetry is CALLER-SUPPLIED telemetry (their own proxy/EDR/IdP
+#   observations) — recorded verbatim, marked caller_supplied, never
+#   presented as server-measured. JA3/JA4 fingerprint the TLS client, so the
+#   fetch pipeline never computes them locally.
+#
+# Response:
+#   { ok: true, data: { fingerprint_id, kit_family, family_status,
+#     confidence, verdict, verdict_copy, sightings_count, signals,
+#     corpus_candidates, evidence, fetch, observations, stored } }
+def handle_scamkit_fingerprint(params: dict) -> dict:
+    params = params or {}
+    url    = (params.get("url") or "").strip()
+    html   = params.get("html") or ""
+    source = (params.get("source") or "").strip()[:120]
+    caller_family = (params.get("family") or "").strip()[:80] or None
+    observed_telemetry = params.get("observed_telemetry")
+
+    notes = []
+    if html and url:
+        notes.append("Both url and html supplied; html took precedence and the url was not fetched.")
+        url = ""
+    if not html and not url:
+        return _err("Provide either 'url' (live page — static HTML fetch only in v1, no JS rendering) "
+                    "or 'html' (caller-supplied kit HTML; submit rendered HTML for JS-heavy kits).", 400)
+    if observed_telemetry is not None and not isinstance(observed_telemetry, dict):
+        return _err("observed_telemetry must be an object (ja3/ja4/user_agent_shifts/app_ids/"
+                    "ip_anomalies/session_anomalies), or omit it.", 400)
+
+    observations = None
+    if not html:
+        # v1b fetch pipeline: (html, observations, error) — redirects, TLS
+        # facts, headers, canary/favicon fetches all feed the fingerprint.
+        html, observations, fetch_err = _scamkit_fetch_observations(url, observed_telemetry)
+        if fetch_err:
+            return _err(
+                f"Could not fetch a usable static page from the url ({fetch_err}). "
+                "For JS-heavy kits, render the page yourself and submit the HTML via the 'html' field.",
+                422,
+            )
+        tls = (observations or {}).get("tls") or {}
+        fetch: dict = {
+            "mode": "fetch_pipeline_v1b",
+            "final_url": (observations or {}).get("final_url"),
+            "redirect_count": (observations or {}).get("redirect_count"),
+            "x_evilginx": (observations or {}).get("x_evilginx"),
+            "tls": ({k: tls.get(k) for k in ("tls_version", "cipher", "verified")}
+                    if tls else None),
+            "secondary_fetches": len((observations or {}).get("secondary_fetches") or []),
+            "observed_telemetry": bool((observations or {}).get("observed_telemetry")),
+            "note": _SCAMKIT_FETCH_NOTE,
+        }
+    else:
+        if observed_telemetry is not None:
+            # Caller telemetry without a fetch: record it, marked as
+            # caller-supplied, so extraction still sees it.
+            observations = {"observed_telemetry":
+                            _scamkit_fetch._telemetry_observations(observed_telemetry)}
+        fetch = {"mode": "caller_supplied_html",
+                 "observed_telemetry": observations is not None}
+
+    signals = relayshield_scamkit.extract_signals(html, url, observations)
+    fid = relayshield_scamkit.fingerprint_id(signals)
+    # TI corpus load candidates (structured; this module writes nothing to
+    # the live corpus — the candidates ship in the response/stored item for
+    # later review and ingestion).
+    corpus_candidates = relayshield_scamkit.extract_corpus_candidates(html, url, signals)
+
+    evidence = _scamkit_corpus_evidence(signals)
+    suggested_family, _ = relayshield_scamkit.suggest_family(signals, _scamkit_known_families())
+    stored = _scamkit_upsert(fid, signals, caller_family, suggested_family, source,
+                             corpus_candidates)
+
+    sightings = stored["sightings_count"]
+    confidence, verdict = relayshield_scamkit.compute_confidence(
+        exact_sightings=sightings,
+        overlap_fraction=0.5 if stored["kit_family"] else 0.0,
+    )
+    family = stored["kit_family"]
+    logger.info("scamkit_fingerprint id=%s family=%s verdict=%s sightings=%d stored=%s",
+                fid[:20], family, verdict, sightings, stored["stored"])
+    return _ok({
+        "fingerprint_id":  fid,
+        "kit_family":      family,
+        "family_status":   stored["family_status"],
+        "confidence":      confidence,
+        "verdict":         verdict,
+        "verdict_copy":    relayshield_scamkit.verdict_copy(
+            verdict, family=family, sightings=sightings),
+        "sightings_count": sightings,
+        "signals":         signals,   # already secret-stripped — safe to return/store
+        "corpus_candidates": corpus_candidates,  # TI load candidates — not a live write
+        "evidence":        evidence,
+        "fetch":           fetch,
+        "observations":    observations,  # redirect chain, headers, TLS facts, secondary fetches
+        "stored":          stored["stored"],
+        "notes":           notes,
+    })
+
+
+# Request: POST /v1/payg/scamkit-match
+#   { "fingerprint_id": "kit_<64 hex>" }
+#
+# Response: { ok: true, data: { matched, fingerprint_id, kit_family,
+#   family_status, confidence, verdict, verdict_copy, sightings_count,
+#   first_seen, last_seen, evidence, url_pattern_class, brand_marks,
+#   fingerprint_version, corpus_candidates } }
+# Unknown IDs are NEVER reported as safe — see verdict_copy.
+def handle_scamkit_match(params: dict) -> dict:
+    params = params or {}
+    fid = (params.get("fingerprint_id") or "").strip()
+    if not relayshield_scamkit.valid_fingerprint_id(fid):
+        return _err("Provide a valid fingerprint_id of the form kit_<64 hex chars>.", 400)
+    try:
+        item = dynamodb.Table(KIT_FINGERPRINTS_TABLE).get_item(
+            Key={"fingerprint_id": fid}).get("Item")
+    except Exception as exc:
+        logger.warning("scamkit match lookup failed: %s", exc)
+        item = None
+    if not item:
+        return _ok({
+            "matched":        False,
+            "fingerprint_id": fid,
+            "verdict":        "unknown",
+            "verdict_copy":   relayshield_scamkit.verdict_copy("unknown"),
+            "confidence":     0.0,
+        })
+    signals = item.get("signals") or {}
+    evidence = _scamkit_corpus_evidence(signals)
+    sightings = item.get("sightings_count") or 1
+    confidence, verdict = relayshield_scamkit.compute_confidence(exact_sightings=sightings)
+    family = item.get("kit_family")
+    return _ok({
+        "matched":           True,
+        "fingerprint_id":    fid,
+        "kit_family":        family,
+        "family_status":     item.get("family_status"),
+        "confidence":        confidence,
+        "verdict":           verdict,
+        "verdict_copy":      relayshield_scamkit.verdict_copy(
+            verdict, family=family, sightings=sightings),
+        "sightings_count":   sightings,
+        "first_seen":        item.get("first_seen"),
+        "last_seen":         item.get("last_seen"),
+        "evidence":          evidence,
+        "url_pattern_class": signals.get("url_pattern_class"),
+        "brand_marks":       signals.get("brand_marks") or [],
+        "fingerprint_version": item.get("fingerprint_version", "skfp-v1"),
+        "corpus_candidates": item.get("corpus_candidates") or {},
+    })
+
+
+def _campaign_subcall(name: str, handler, hparams: dict) -> dict:
+    """One sub-endpoint call inside campaign-scan. Returns the handler's
+    response dict, or an error dict — a failing subcall never fails the
+    composite."""
+    try:
+        out = handler(dict(hparams))
+        if not isinstance(out, dict):
+            return {"ok": False, "error": f"{name}: non-dict response"}
+        return out
+    except Exception as exc:
+        logger.warning("campaign-scan subcall %s failed: %s", name, exc)
+        return {"ok": False, "error": f"{name}: {type(exc).__name__}: {exc}"}
+
+
+def _campaign_unwrap(out: dict) -> tuple[bool, dict]:
+    """(ok, data_or_error) from a sub-handler's Lambda-proxy response.
+
+    Handlers return the API Gateway proxy shape ({statusCode, body: JSON});
+    this parses it back to the inner {ok, data} / {ok:false, error} so the
+    composite can aggregate. Never raises — a malformed subcall response
+    becomes an endpoint-level error, never a composite failure.
+    """
+    if not isinstance(out, dict):
+        return False, {"error": "non-dict response"}
+    if "statusCode" not in out:
+        # Plain {ok, data|error} — _campaign_subcall's own shape when the
+        # handler itself raised. Kept distinct so the original error text
+        # survives instead of degrading to "status 500".
+        if out.get("ok"):
+            data = out.get("data")
+            return True, data if isinstance(data, dict) else {}
+        return False, {"error": out.get("error", "unknown error")}
+    try:
+        status = out.get("statusCode", 500)
+        body = json.loads(out.get("body") or "{}")
+        if not isinstance(body, dict):
+            return False, {"error": "non-dict body"}
+        if 200 <= status < 300 and body.get("ok"):
+            data = body.get("data")
+            return True, data if isinstance(data, dict) else {}
+        return False, {"error": body.get("error") or f"status {status}"}
+    except Exception as exc:
+        return False, {"error": f"unparseable response: {exc}"}
+
+
+def _campaign_risk(name: str, ok: bool, data: dict) -> int:
+    """Best-effort 0-100 risk for the composite's aggregate number.
+
+    Each endpoint's own verdict wording is authoritative; this is only a
+    roll-up heuristic. Unknown/no-match results score low but never zero
+    out the aggregate on their own — see aggregate computation.
+    """
+    if not ok or not data:
+        return 0
+    if name in ("scamkit-fingerprint", "scamkit-match"):
+        return int(round(float(data.get("confidence") or 0) * 100))
+    for key in ("risk_score", "risk", "aggregate_risk"):
+        v = data.get(key)
+        if isinstance(v, (int, float)) and 0 <= v <= 100:
+            return int(v)
+    verdict = str(data.get("verdict", "")).lower()
+    if verdict in ("malicious", "known_kit"):
+        return 95
+    if verdict in ("suspicious", "likely_variant"):
+        return 65
+    if data.get("matched") is True:
+        return 70
+    if isinstance(data.get("breach_count"), int) and data["breach_count"] > 0:
+        return 55
+    return 10
+
+
+# Request: POST /v1/payg/campaign-scan
+#   { "campaign_name": "...", "domains": [...], "urls": [...], "emails": [...],
+#     "wallets": [...], "phones": [...], "file_urls": [...], "fingerprint_ids": [...] }
+#   Max 25 indicators total per call. $5.50 flat — the fan-out below calls
+#   the existing handlers in-process; it does NOT re-bill per subcall.
+#
+# v1 fan-out (deliberately excludes mcp-registry-risk and
+# prompt-injection-breach — separate Lambda, not a marketplace fit):
+#   domains          -> domain, tech-stack-cve
+#   urls             -> scan-url, scamkit-fingerprint
+#   emails           -> breach, infostealer, session-risk, identity-graph, oauth-watchlist
+#   wallets          -> wallet-risk            (NOT token/nft/contract handlers:
+#                                              arbitrary wallets are not contracts)
+#   phones           -> sim-swap
+#   file_urls        -> scan-file
+#   fingerprint_ids  -> scamkit-match
+#
+# Response: per-indicator results + kit_families + shared exfil/fingerprint
+# links + aggregate_risk + corpus citations. Subcalls run in a thread pool
+# under CAMPAIGN_BUDGET_SECONDS; truncated indicators are reported via
+# degraded:true, never silently dropped.
+def handle_campaign_scan(params: dict) -> dict:
+    params = params or {}
+    campaign_name = (params.get("campaign_name") or "").strip()[:120]
+
+    buckets: dict[str, list] = {}
+    total = 0
+    for key in ("domains", "urls", "emails", "wallets", "phones",
+                "file_urls", "fingerprint_ids"):
+        vals = params.get(key) or []
+        if not isinstance(vals, list):
+            return _err(f"'{key}' must be a list of strings.", 400)
+        vals = [str(v).strip() for v in vals if str(v).strip()]
+        buckets[key] = vals
+        total += len(vals)
+    if total == 0:
+        return _err("Provide at least one indicator across domains, urls, emails, "
+                    "wallets, phones, file_urls, fingerprint_ids.", 400)
+    if total > CAMPAIGN_MAX_INDICATORS:
+        return _err(f"Max {CAMPAIGN_MAX_INDICATORS} indicators per campaign-scan call; "
+                    f"got {total}. Split the campaign across calls.", 400)
+    for fid in buckets["fingerprint_ids"]:
+        if not relayshield_scamkit.valid_fingerprint_id(fid):
+            return _err(f"Invalid fingerprint_id '{fid[:24]}...': expected kit_<64 hex chars>.", 400)
+
+    # Built inside the function (not at module level): handle_tech_stack_cve
+    # is defined later in this file, so a module-level table would NameError
+    # at import time.
+    fanout: list[tuple[str, str, object, str]] = []
+    for d in buckets["domains"]:
+        fanout.append(("domain", d, "domain", handle_domain, "domain"))
+        fanout.append(("domain", d, "tech-stack-cve", handle_tech_stack_cve, "domain"))
+    for u in buckets["urls"]:
+        fanout.append(("url", u, "scan-url", handle_scan_url, "url"))
+        fanout.append(("url", u, "scamkit-fingerprint", handle_scamkit_fingerprint, "url"))
+    for e in buckets["emails"]:
+        for name, handler in (("breach", handle_breach),
+                              ("infostealer", handle_infostealer),
+                              ("session-risk", handle_session_risk),
+                              ("identity-graph", handle_identity_graph),
+                              ("oauth-watchlist", handle_oauth_watchlist)):
+            fanout.append(("email", e, name, handler, "email"))
+    for w in buckets["wallets"]:
+        fanout.append(("wallet", w, "wallet-risk", handle_wallet_risk, "address"))
+    for p in buckets["phones"]:
+        fanout.append(("phone", p, "sim-swap", handle_sim_swap, "phone"))
+    for f in buckets["file_urls"]:
+        fanout.append(("file", f, "scan-file", handle_scan_file, "file_url"))
+    for fid in buckets["fingerprint_ids"]:
+        fanout.append(("fingerprint", fid, "scamkit-match", handle_scamkit_match, "fingerprint_id"))
+
+    # Thread-pool fan-out with a hard budget (same pattern as the lookalike
+    # DNS sweep and link-check batch: explicit executor, shutdown(wait=False)
+    # so stragglers never push past API Gateway's 29s ceiling).
+    results: dict[tuple[str, str, str], dict] = {}
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+    try:
+        futures = {ex.submit(_campaign_subcall, name, handler, {pkey: indicator}): (itype, indicator, name)
+                   for itype, indicator, name, handler, pkey in fanout}
+        done, not_done = concurrent.futures.wait(futures, timeout=CAMPAIGN_BUDGET_SECONDS)
+        for fut in done:
+            key = futures[fut]
+            try:
+                results[key] = fut.result()
+            except Exception as exc:  # _campaign_subcall shouldn't raise, belt and braces
+                results[key] = {"ok": False, "error": f"future failed: {exc}"}
+        truncated = len(not_done)
+        if truncated:
+            logger.warning("campaign-scan truncated: %d of %d subcalls unfinished after %ds",
+                           truncated, len(futures), CAMPAIGN_BUDGET_SECONDS)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+    # Assemble per-indicator results and cross-indicator links.
+    indicators_out = []
+    kit_families: set[str] = set()
+    exfil_by_indicator: dict[str, set] = {}
+    fp_by_indicator: dict[str, set] = {}
+    corpus_citations = 0
+    for key in ("domains", "urls", "emails", "wallets", "phones", "file_urls", "fingerprint_ids"):
+        itype = {"domains": "domain", "urls": "url", "emails": "email",
+                 "wallets": "wallet", "phones": "phone", "file_urls": "file",
+                 "fingerprint_ids": "fingerprint"}[key]
+        for indicator in buckets[key]:
+            sub: dict = {}
+            risk = 0
+            for (t, ind, name), out in results.items():
+                if t != itype or ind != indicator:
+                    continue
+                ok, data = _campaign_unwrap(out)
+                sub[name] = {"ok": ok, **({"data": data} if ok else {"error": data.get("error")})}
+                risk = max(risk, _campaign_risk(name, ok, data))
+                fam = data.get("kit_family") if ok else None
+                if fam:
+                    kit_families.add(fam)
+                if name == "scamkit-fingerprint" and ok:
+                    sig = data.get("signals") or {}
+                    hosts = set(sig.get("form_action_hosts") or []) | set(sig.get("exfil_endpoints") or [])
+                    if hosts:
+                        exfil_by_indicator.setdefault(indicator, set()).update(hosts)
+                    if data.get("fingerprint_id"):
+                        fp_by_indicator.setdefault(indicator, set()).add(data["fingerprint_id"])
+                    corpus_citations += sum(e.get("corpus_hits", 0)
+                                            for e in (data.get("evidence") or {}).values())
+                if name == "scamkit-match" and ok:
+                    corpus_citations += sum(e.get("corpus_hits", 0)
+                                            for e in (data.get("evidence") or {}).values())
+            indicators_out.append({
+                "indicator": indicator,
+                "type":      itype,
+                "risk":      risk,
+                "results":   sub,
+            })
+
+    # Cross-indicator links: shared exfil hosts / shared kit fingerprints.
+    def _shared(mapping: dict[str, set]) -> list[dict]:
+        by_host: dict[str, list] = {}
+        for ind, hosts in mapping.items():
+            for h in hosts:
+                by_host.setdefault(h, []).append(ind)
+        return [{"value": h, "indicators": sorted(inds)}
+                for h, inds in sorted(by_host.items()) if len(inds) > 1]
+
+    risks = [i["risk"] for i in indicators_out]
+    campaign_id = "cmp_" + hashlib.sha256(
+        json.dumps(sorted(f"{t}:{v}" for t, vals in
+                          (("domain", buckets["domains"]), ("url", buckets["urls"]),
+                           ("email", buckets["emails"]), ("wallet", buckets["wallets"]),
+                           ("phone", buckets["phones"]), ("file", buckets["file_urls"]),
+                           ("fingerprint", buckets["fingerprint_ids"]))
+                          for v in vals),
+                   sort_keys=True).encode()).hexdigest()[:32]
+    logger.info("campaign_scan id=%s indicators=%d families=%d risk=%s degraded=%s",
+                campaign_id[:12], total, len(kit_families),
+                round(sum(risks) / len(risks)) if risks else 0, bool(truncated))
+    return _ok({
+        "campaign_id":          campaign_id,
+        "campaign_name":        campaign_name or None,
+        "indicators_scanned":   total,
+        "indicators":           indicators_out,
+        "kit_families":         sorted(kit_families),
+        "shared_exfil_hosts":   _shared(exfil_by_indicator),
+        "shared_kit_fingerprints": _shared(fp_by_indicator),
+        "aggregate_risk":       round(sum(risks) / len(risks)) if risks else 0,
+        "max_indicator_risk":   max(risks) if risks else 0,
+        "corpus_citations":     corpus_citations,
+        "degraded":             bool(truncated),
+        "truncated_subcalls":   truncated,
+    })
+
+
 # Request: POST /v1/intel/telegram
 #   { "email": "...", "phone": "...", "domain": "...", "wallet": "..." }
 #   At least one field required. Each queried independently; results merged.
@@ -10302,6 +10970,30 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
             "data": {"domains_checked": 1, "found": False, "findings": [], "highest_severity": None},
         },
     ),
+    "/v1/payg/secret-scan-text": _bazaar_body_ext(
+        input_example={"content": "aws_access_key_id = AKIAIOSFODNN7EXAMPLE"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "content":  {"type": "string", "description": "Text or code to scan for leaked secrets"},
+                "diff":     {"type": "string", "description": "Optional: unified diff to scan instead of raw text"},
+                "filename": {"type": "string", "description": "Optional: filename for context in findings"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "found":            False,
+                "bytes_scanned":    40,
+                "findings":         [],
+                "findings_count":   0,
+                "severity_counts":  {},
+                "highest_severity": None,
+                "recommendation":   "No secrets detected.",
+                "checked_at":       "2026-09-25T12:00:00+00:00",
+            },
+        },
+    ),
     "/v1/payg/target-risk": _bazaar_body_ext(
         input_example={"domain": "acme.com"},
         input_schema={
@@ -10417,6 +11109,74 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
                 "resolutions": [
                     {"ip_address": "93.184.216.34", "date": "2026-06-01T00:00:00+00:00"},
                 ],
+            },
+        },
+    ),
+    # Scam-kit fingerprinting (added 2026-09-24).
+    "/v1/payg/scamkit-fingerprint": _bazaar_body_ext(
+        input_example={"url": "https://example.com/login"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Live URL to fingerprint (static HTML fetch only in v1 — no JS rendering)"},
+                "html": {"type": "string", "description": "Caller-supplied kit HTML (alternative to url; submit rendered HTML for JS-heavy kits)"},
+                "source": {"type": "string", "description": "Optional caller tag for the sighting"},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "fingerprint_id": "kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+                "kit_family": "parcel-smish-eu-04",
+                "family_status": "suggested",
+                "confidence": 0.92,
+                "verdict": "known_kit",
+                "sightings_count": 7,
+            },
+        },
+    ),
+    "/v1/payg/scamkit-match": _bazaar_body_ext(
+        input_example={"fingerprint_id": "kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "fingerprint_id": {"type": "string", "description": "kit_<sha256> fingerprint ID to match"},
+            },
+            "required": ["fingerprint_id"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "fingerprint_id": "kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+                "kit_family": "parcel-smish-eu-04",
+                "confidence": 0.92,
+                "verdict": "known_kit",
+                "sightings_count": 7,
+            },
+        },
+    ),
+    "/v1/payg/campaign-scan": _bazaar_body_ext(
+        input_example={"urls": ["https://example.com/login"], "emails": ["user@example.com"]},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "campaign_name": {"type": "string", "description": "Optional label for the campaign"},
+                "domains": {"type": "array", "items": {"type": "string"}},
+                "urls": {"type": "array", "items": {"type": "string"}},
+                "emails": {"type": "array", "items": {"type": "string"}},
+                "wallets": {"type": "array", "items": {"type": "string"}},
+                "phones": {"type": "array", "items": {"type": "string"}},
+                "file_urls": {"type": "array", "items": {"type": "string"}},
+                "fingerprint_ids": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "campaign_id": "cmp_1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+                "indicators_scanned": 2,
+                "kit_families": ["parcel-smish-eu-04"],
+                "aggregate_risk": 72,
             },
         },
     ),
@@ -10546,6 +11306,10 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "released packages and images. Every hit is verified against the credential "
         "pattern before it is reported."
     ),
+    "/v1/payg/secret-scan-text": (
+        "Scan text or a unified diff for leaked secrets and credentials (49 NHI credential patterns). "
+        "Check before you commit or paste."
+    ),
     "/v1/payg/target-risk": (
         "Score a domain's probability of being an active or upcoming cyberattack target using "
         "a 6-signal correlation model (breach, infostealer, ransomware, session, CVE, and "
@@ -10582,6 +11346,28 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "resolved to it, plus malicious/suspicious vendor detection counts. Call to pivot from "
         "an indicator to its infrastructure history during an investigation."
     ),
+    # Scam-kit fingerprinting (added 2026-09-24).
+    "/v1/payg/scamkit-fingerprint": (
+        "Fingerprint a suspected phishing/smishing kit from a live URL (static HTML fetch only "
+        "in v1 — no JS rendering in the Lambda; submit caller-rendered HTML via the html field "
+        "for JS-heavy kits) or from caller-supplied kit HTML. Returns a stable kit_<sha256> ID, "
+        "extracted kit signals, corpus evidence, and a best-effort family match. Per-victim "
+        "nonces and credentials are stripped before hashing, so the same kit fingerprints "
+        "identically across sightings. Call to turn one suspicious link into a matchable kit identity."
+    ),
+    "/v1/payg/scamkit-match": (
+        "Match an existing kit_<sha256> fingerprint ID against the kit corpus. Returns the kit "
+        "family (auto-suggested, pending approval), confidence, evidence, and sighting history. "
+        "Cheap re-check for dashboards and bots watching for kit reuse. An unknown ID is never "
+        "reported as safe — only as no-match with an explicit not-a-guarantee caveat."
+    ),
+    "/v1/payg/campaign-scan": (
+        "Composite campaign scan: fans out one indicator bundle (domains, URLs, emails, wallets, "
+        "phones, file URLs, kit fingerprint IDs — max 25 indicators) across the applicable "
+        "threat-intel endpoints in a single $5.50 flat call. Returns per-indicator results, kit "
+        "families, cross-indicator links (shared exfil hosts, shared kit fingerprints), and an "
+        "aggregate risk score with corpus citations. Call for campaign-level takedown intel."
+    ),
 }
 
 # SDK discovery tags (CDPX-4a) — up to 5 per endpoint per the bazaar spec,
@@ -10605,6 +11391,10 @@ PAYG_TAGS: dict[str, list[str]] = {
     "/v1/payg/scan-wallet":         ["defi", "wallet-screening", "crypto-security"],
     "/v1/payg/scan-url":            ["url-scanning", "malware-detection", "crypto-security"],
     "/v1/payg/scan-file":           ["file-scanning", "malware-detection", "crypto-security"],
+    # Scam-kit fingerprinting (added 2026-09-24).
+    "/v1/payg/scamkit-fingerprint": ["phishing-kit", "smishing", "threat-intelligence"],
+    "/v1/payg/scamkit-match":       ["phishing-kit", "smishing", "threat-intelligence"],
+    "/v1/payg/campaign-scan":       ["campaign-analysis", "threat-intelligence", "takedown-intel"],
 }
 
 
@@ -11190,6 +11980,10 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/identity-risk-score":   handle_identity_risk_score,
         "/v1/payg/cert-expiry":           handle_cert_expiry,
         "/v1/payg/ip-intel":              handle_ip_intel,
+        # Scam-kit fingerprinting (added 2026-09-24).
+        "/v1/payg/scamkit-fingerprint":  handle_scamkit_fingerprint,
+        "/v1/payg/scamkit-match":        handle_scamkit_match,
+        "/v1/payg/campaign-scan":        handle_campaign_scan,
     }
     handler = payg_routes.get(path)
     if not handler:

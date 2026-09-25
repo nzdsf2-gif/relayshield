@@ -11565,6 +11565,13 @@ def handle_x402_manifest() -> dict:
         PAYG_PRICE_UNITS, PAYG_DESCRIPTIONS, _build_payment_requirements)
 
     import relayshield_agentic_api as _agentic
+    # Dedupe: the agentic Lambda owns mcp-registry-risk, prompt-injection-breach,
+    # and agent-bait-scan (v2). relayshield_api.py's PAYG_PRICE_UNITS still lists
+    # the first two as v1 leftovers -- exclude them here so the manifest carries
+    # one v2 entry per URL instead of a stale v1 dupe alongside the correct v2.
+    _agentic_paths = set(_agentic.PAYG_PRICE_UNITS)
+    resources = [r for r in resources
+                 if r["url"].replace("https://api.relayshield.net", "") not in _agentic_paths]
     resources += _x402_manifest_entries(
         _agentic.PAYG_PRICE_UNITS, _agentic.PAYG_DESCRIPTIONS,
         _agentic._build_payment_requirements)

@@ -1,0 +1,13 @@
+{
+    "actorSpecification": 1,
+    "name": "relayshield-security-tools",
+    "title": "RelayShield Security Tools (MCP)",
+    "description": "Breach, SIM-swap, infostealer, MCP-registry-risk, prompt-injection-breach, LLMjacking, secret-scan, and other RelayShield security intelligence tools, exposed as an MCP server over Streamable HTTP for AI agents.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "usesStandbyMode": true,
+    "webServerMcpPath": "/mcp",
+    "webServerSchema": "./openapi.json",
+    "output": "./output_schema.json",
+    "dockerfile": "./Dockerfile"
+}

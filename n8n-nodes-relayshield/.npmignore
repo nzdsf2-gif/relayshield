@@ -1,6 +1,0 @@
-nodes/
-credentials/
-index.ts
-tsconfig.json
-*.map
-node_modules/

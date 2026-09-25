@@ -1,0 +1,61 @@
+# Smithery configuration for the FREE RelayShield MCP server.
+#
+# Smithery reads this from the repo it is listing. This file describes
+# `relayshield-free-mcp` — the keyless free-check server (URL, wallet, email
+# and breach checks) — NOT the paid `relayshield-mcp` subscription server.
+# The paid server keeps its own listing; do not merge the two configs.
+
+name: relayshield-free-mcp
+displayName: RelayShield Free Scam Checks
+description: >-
+  Free, no-signup scam checks for AI agents: screen URLs for phishing/malware,
+  screen crypto wallets before paying them, score suspicious emails, and check
+  emails against breach data — all against RelayShield's threat-intelligence
+  corpus. Keyless; nothing is required to start.
+homepage: https://api.relayshield.net/developers?source=smithery
+license: MIT
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    # NOTHING is required. check_link, check_wallet and check_email run keyless
+    # on the free tier. check_breach needs a RelayShield partner key; without
+    # one it returns setup guidance instead of failing.
+    properties:
+      relayshieldApiKey:
+        type: string
+        title: RelayShield partner key (optional)
+        description: >-
+          Optional partner key for check_breach. Distributors get their own key
+          with a per-key daily cap — one channel's abuse never takes down the
+          others. Never logged and never returned in a tool response.
+      rsSourceTag:
+        type: string
+        title: Channel attribution tag (optional)
+        description: >-
+          Label recorded by the API so per-channel usage can be measured.
+          Defaults to "smithery".
+        default: smithery
+  # uvx resolves and runs the published console script in its own environment,
+  # so the only prerequisite is uv. The >=0.3.0 floor is load-bearing: earlier
+  # versions do not ship the relayshield-free-mcp console script.
+  commandFunction: |
+    (config) => ({
+      command: 'uvx',
+      args: ['--from', 'relayshield-mcp>=0.3.0', 'relayshield-free-mcp'],
+      env: {
+        ...(config.relayshieldApiKey
+          ? { RELAYSHIELD_API_KEY: config.relayshieldApiKey }
+          : {}),
+        RS_SOURCE_TAG: config.rsSourceTag || 'smithery',
+      }
+    })
+
+# The four tools the published 0.3.0 free server actually serves, taken from a
+# live initialize/tools-list handshake rather than from memory.
+tools:
+  - check_link
+  - check_wallet
+  - check_email
+  - check_breach

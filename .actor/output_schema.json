@@ -1,0 +1,7 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "RelayShield Security Tools (MCP) output",
+    "description": "This Actor runs in Standby mode as a live MCP server and does not write to a dataset. Connect an MCP client to this Actor's Standby URL at /mcp -- see the Actor's README for the exact connection config.",
+    "type": "object",
+    "properties": {}
+}

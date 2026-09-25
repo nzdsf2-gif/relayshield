@@ -1,0 +1,8 @@
+{
+    "title": "RelayShield Security Tools (MCP) input",
+    "type": "object",
+    "schemaVersion": 1,
+    "description": "This Actor takes no run-time input. It's a Standby-mode MCP server -- configuration (RELAYSHIELD_API_URL/API_KEY/X_PAYMENT) is set once as Actor environment variables in Console, and per-call credentials (rs_api_key / x_payment) are supplied by each calling agent as MCP tool-call arguments, not as Actor input.",
+    "properties": {},
+    "required": []
+}

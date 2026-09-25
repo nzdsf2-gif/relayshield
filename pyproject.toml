@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "relayshield-mcp"
+version = "0.3.0"
+description = "MCP server for RelayShield — breach detection, SIM swap, domain lookalikes, OAuth watchlist, infostealer detection, URL/file scanning, MCP registry risk, and prompt-injection breach detection. Subscription (RapidAPI) and pay-as-you-go (x402 USDC on Base) access modes."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "RelayShield", email = "relayshieldadmin@gmail.com" }]
+keywords = ["mcp", "security", "breach", "phishing", "sim-swap", "infostealer", "claude", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Internet",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0,<2.0.0",
+    "httpx>=0.27.0",
+]
+
+[project.urls]
+Homepage = "https://relayshield.net"
+Documentation = "https://api.relayshield.net/developers"
+
+[project.scripts]
+relayshield-mcp = "relayshield_mcp.server:main_sync"
+relayshield-free-mcp = "relayshield_free.server:main_sync"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/relayshield_mcp", "src/relayshield_free"]

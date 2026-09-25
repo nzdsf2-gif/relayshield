@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "relayshield": {
-      "command": "uvx",
-      "args": ["--from", "relayshield-mcp>=0.2.10", "relayshield-mcp"]
-    }
-  }
-}

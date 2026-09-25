@@ -96,6 +96,7 @@ import relayshield_openapi_spec
 # Packaged into the deployment zip via deploy_lambdas.yml's transitive
 # relayshield_* import resolution, same as relayshield_openapi_spec.
 import relayshield_scamkit
+import relayshield_scamkit_fetch as _scamkit_fetch  # v1b: TLS/redirect/header telemetry (stdlib only)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -9731,10 +9732,12 @@ def handle_secret_scan_text(params: dict) -> dict:
 # HARD RULES (from the product spec — do not relax):
 #   * Secrets are stripped BEFORE hashing, inside relayshield_scamkit.
 #     Nothing credential-shaped is ever logged, returned, or stored.
-#   * kit_family is AUTO-SUGGEST ONLY. This code can write "suggested" and
-#     can preserve an existing "approved", but there is NO code path that
-#     writes "approved" — approval is a manual act by Andrew, recorded
-#     directly on the table item.
+#   * Family status: the 13 FLAME TP-0067 families Andrew approved on
+#     2026-09-25 are emitted with family_status="approved" via
+#     relayshield_scamkit.family_status_for(); every other name stays
+#     "suggested". An existing "approved" is preserved, never downgraded.
+#     No code path approves a name outside the approved set — additional
+#     approvals are a manual act by Andrew, recorded directly on the item.
 #   * Verdict copy never says "safe"/"clean"/"legitimate". Best case is
 #     "no flags found" with an explicit not-a-guarantee caveat.
 
@@ -9744,31 +9747,20 @@ CAMPAIGN_MAX_INDICATORS = 25
 CAMPAIGN_BUDGET_SECONDS = 24              # must stay under API Gateway's 29s ceiling
 
 
-def _scamkit_fetch_html(url: str) -> tuple[str, str]:
-    """Static HTML fetch for scamkit-fingerprint. Returns (html, error).
+# v1b: custom TLS fetch pipeline (relayshield_scamkit_fetch) — redirects,
+# response headers, TLS facts, and up to 2 bounded secondary fetches
+# (Evilginx canary + remote favicon). Stdlib only; no JS rendering.
+_SCAMKIT_FETCH_NOTE = ("static HTML only in v1 — no JS rendering in the Lambda")
 
-    v1 has NO JS rendering in the Lambda — this is a plain GET. Callers with
-    JS-heavy kits must render the page themselves and submit the rendered
-    HTML via the `html` field; the endpoint documents this limitation.
-    """
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "RelayShield/1.0 (+https://relayshield.net)"},
-        )
-        with urllib.request.urlopen(req, timeout=SCAMKIT_FETCH_TIMEOUT) as resp:
-            ctype = resp.headers.get("Content-Type", "")
-            if "html" not in ctype.lower():
-                return "", f"not_html (Content-Type: {ctype[:60]})"
-            raw = resp.read(SCAMKIT_FETCH_MAX_BYTES + 1)
-            if len(raw) > SCAMKIT_FETCH_MAX_BYTES:
-                return "", "page exceeds 2MB static-fetch limit"
-            html = raw.decode("utf-8", "replace")
-            if len(html.strip()) < 50:
-                return "", "page body empty or trivial"
-            return html, ""
-    except Exception as exc:
-        return "", f"{type(exc).__name__}: {exc}"
+
+def _scamkit_fetch_observations(url: str, observed_telemetry) -> tuple[str, dict | None, str]:
+    """v1b fetch wrapper. Returns (html, observations, error)."""
+    return _scamkit_fetch.fetch_kit_page(
+        url,
+        observed_telemetry=observed_telemetry,
+        timeout=SCAMKIT_FETCH_TIMEOUT,
+        max_bytes=SCAMKIT_FETCH_MAX_BYTES,
+    )
 
 
 def _scamkit_corpus_evidence(signals: dict) -> dict:
@@ -9842,16 +9834,16 @@ def _scamkit_resolve_family(existing: dict | None, caller_family: str | None,
     Precedence: existing item's family always wins (stable labels — a later
     sighting never renames a kit). A brand-new fingerprint takes the
     caller's explicit family label, else the corpus auto-suggestion.
-    Status can only ever be "suggested" here; an existing "approved" is
-    preserved, never downgraded, and never granted by this code.
+    The 13 FLAME TP-0067 families Andrew approved on 2026-09-25 are emitted
+    with status "approved" (family_status_for()); every other name stays
+    "suggested". An existing "approved" is preserved, never downgraded.
     """
     if existing and existing.get("kit_family"):
         status = existing.get("family_status")
         return existing["kit_family"], status if status in ("approved", "suggested") else "suggested"
-    if caller_family:
-        return caller_family, "suggested"
-    if suggested_family:
-        return suggested_family, "suggested"
+    fam = caller_family or suggested_family
+    if fam:
+        return fam, relayshield_scamkit.family_status_for(fam)
     return None, None
 
 
@@ -9954,21 +9946,30 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
 
 
 # Request: POST /v1/payg/scamkit-fingerprint
-#   { "url": "https://...", "html": "<...>", "source": "optional tag", "family": "optional label" }
+#   { "url": "https://...", "html": "<...>", "source": "optional tag",
+#     "family": "optional label",
+#     "observed_telemetry": {"ja3": ..., "ja4": ..., "user_agent_shifts": ...,
+#                            "app_ids": ..., "ip_anomalies": ...,
+#                            "session_anomalies": ...} }
 #   url XOR html required (both -> html wins, url not fetched).
 #   url is fetched as STATIC HTML ONLY in v1 (no JS rendering); for JS-heavy
 #   kits submit caller-rendered HTML via `html`.
+#   observed_telemetry is CALLER-SUPPLIED telemetry (their own proxy/EDR/IdP
+#   observations) — recorded verbatim, marked caller_supplied, never
+#   presented as server-measured. JA3/JA4 fingerprint the TLS client, so the
+#   fetch pipeline never computes them locally.
 #
 # Response:
 #   { ok: true, data: { fingerprint_id, kit_family, family_status,
 #     confidence, verdict, verdict_copy, sightings_count, signals,
-#     corpus_candidates, evidence, fetch, stored } }
+#     corpus_candidates, evidence, fetch, observations, stored } }
 def handle_scamkit_fingerprint(params: dict) -> dict:
     params = params or {}
     url    = (params.get("url") or "").strip()
     html   = params.get("html") or ""
     source = (params.get("source") or "").strip()[:120]
     caller_family = (params.get("family") or "").strip()[:80] or None
+    observed_telemetry = params.get("observed_telemetry")
 
     notes = []
     if html and url:
@@ -9977,21 +9978,43 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
     if not html and not url:
         return _err("Provide either 'url' (live page — static HTML fetch only in v1, no JS rendering) "
                     "or 'html' (caller-supplied kit HTML; submit rendered HTML for JS-heavy kits).", 400)
+    if observed_telemetry is not None and not isinstance(observed_telemetry, dict):
+        return _err("observed_telemetry must be an object (ja3/ja4/user_agent_shifts/app_ids/"
+                    "ip_anomalies/session_anomalies), or omit it.", 400)
 
+    observations = None
     if not html:
-        html, fetch_err = _scamkit_fetch_html(url)
+        # v1b fetch pipeline: (html, observations, error) — redirects, TLS
+        # facts, headers, canary/favicon fetches all feed the fingerprint.
+        html, observations, fetch_err = _scamkit_fetch_observations(url, observed_telemetry)
         if fetch_err:
             return _err(
                 f"Could not fetch a usable static page from the url ({fetch_err}). "
                 "For JS-heavy kits, render the page yourself and submit the HTML via the 'html' field.",
                 422,
             )
-        fetch: dict = {"mode": "static_fetch",
-                       "note": "static HTML only in v1 — no JS rendering in the Lambda"}
+        tls = (observations or {}).get("tls") or {}
+        fetch: dict = {
+            "mode": "fetch_pipeline_v1b",
+            "final_url": (observations or {}).get("final_url"),
+            "redirect_count": (observations or {}).get("redirect_count"),
+            "x_evilginx": (observations or {}).get("x_evilginx"),
+            "tls": ({k: tls.get(k) for k in ("tls_version", "cipher", "verified")}
+                    if tls else None),
+            "secondary_fetches": len((observations or {}).get("secondary_fetches") or []),
+            "observed_telemetry": bool((observations or {}).get("observed_telemetry")),
+            "note": _SCAMKIT_FETCH_NOTE,
+        }
     else:
-        fetch = {"mode": "caller_supplied_html"}
+        if observed_telemetry is not None:
+            # Caller telemetry without a fetch: record it, marked as
+            # caller-supplied, so extraction still sees it.
+            observations = {"observed_telemetry":
+                            _scamkit_fetch._telemetry_observations(observed_telemetry)}
+        fetch = {"mode": "caller_supplied_html",
+                 "observed_telemetry": observations is not None}
 
-    signals = relayshield_scamkit.extract_signals(html, url)
+    signals = relayshield_scamkit.extract_signals(html, url, observations)
     fid = relayshield_scamkit.fingerprint_id(signals)
     # TI corpus load candidates (structured; this module writes nothing to
     # the live corpus — the candidates ship in the response/stored item for
@@ -10024,6 +10047,7 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
         "corpus_candidates": corpus_candidates,  # TI load candidates — not a live write
         "evidence":        evidence,
         "fetch":           fetch,
+        "observations":    observations,  # redirect chain, headers, TLS facts, secondary fetches
         "stored":          stored["stored"],
         "notes":           notes,
     })

@@ -3297,8 +3297,16 @@ PAYG_ENDPOINTS: dict[str, dict] = {
             "as static HTML only. For JS-heavy kits, render the page yourself and submit the rendered "
             "HTML via the `html` field. Secrets, tokens, and machine identifiers are removed before "
             "hashing and are never returned or stored — two kits differing only in rotated credentials "
-            "fingerprint identically. The returned kit_family is an auto-SUGGESTION only "
-            "(family_status: suggested|approved); families are never approved automatically."
+            "fingerprint identically. The v1b fetch pipeline also captures server-side telemetry "
+            "nobody else ships in a kit API: up to 5 redirect hops, response headers (including "
+            "X-Evilginx), TLS version/cipher/certificate facts for the kit host, and up to 2 bounded "
+            "secondary fetches (Evilginx canary + remote favicon). "
+            "OPTIONAL `observed_telemetry` (ja3/ja4/user_agent_shifts/app_ids/ip_anomalies/"
+            "session_anomalies) records YOUR OWN proxy/EDR/IdP telemetry verbatim, marked "
+            "caller_supplied — the pipeline never computes JA3/JA4 locally (those fingerprint "
+            "the TLS client, not the kit server). The returned kit_family is auto-resolved: "
+            "the 13 FLAME TP-0067 families Andrew approved carry family_status approved; "
+            "every other name is suggested."
         ),
         "price_units": 500000,
         "x402_version": 2,
@@ -3319,7 +3327,15 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                 },
                 "family": {
                     "type": "string",
-                    "description": "Optional caller-supplied family label for a brand-new fingerprint (stored as suggested).",
+                    "description": "Optional caller-supplied family label for a brand-new fingerprint (approved if it names one of the 13 FLAME TP-0067 families, suggested otherwise).",
+                },
+                "observed_telemetry": {
+                    "type": "object",
+                    "description": ("Optional CALLER-SUPPLIED telemetry from your own proxy/EDR/IdP "
+                                    "(ja3, ja4, user_agent_shifts, app_ids, ip_anomalies, "
+                                    "session_anomalies). Recorded verbatim and marked caller_supplied; "
+                                    "never presented as server-measured. The pipeline never computes "
+                                    "JA3/JA4 locally — those fingerprint the TLS client, not the kit server."),
                 },
             },
         },
@@ -3346,7 +3362,14 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                     "sms_lure_template_hash": "c9d0e1f2",
                 },
                 "evidence": {},
-                "fetch": {"mode": "static_fetch", "note": "static HTML only in v1 — no JS rendering in the Lambda"},
+                "fetch": {"mode": "fetch_pipeline_v1b", "final_url": "https://example.com/login",
+                          "redirect_count": 0, "x_evilginx": False,
+                          "tls": {"tls_version": "TLSv1.3", "cipher": "TLS_AES_128_GCM_SHA256",
+                                  "verified": True},
+                          "secondary_fetches": 0, "observed_telemetry": False,
+                          "note": "static HTML only in v1 — no JS rendering in the Lambda"},
+                "observations": {"redirect_chain": [{"url": "https://example.com/login", "status": 200}],
+                                 "tls": {"tls_version": "TLSv1.3"}},
                 "stored": True,
                 "notes": [],
             },

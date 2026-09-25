@@ -9,10 +9,13 @@ Run:  python3 test_scamkit_fingerprinting.py
 
 import sys
 import hashlib
+import io
 import unittest
+import urllib.error
 
 sys.path.insert(0, "/tmp/rs")  # local dev; CI runs from the repo root
 import relayshield_scamkit as sk
+import relayshield_scamkit_fetch as skf
 
 
 KIT_A = """<html><head><title>PayPal Login</title></head><body>
@@ -478,10 +481,274 @@ class TestMarkerSuggestFamily(unittest.TestCase):
         self.assertGreaterEqual(score, 4)
         self.assertGreater(comparable, 0)
 
-    def test_never_auto_approves(self):
+    def test_nonapproved_family_stays_suggested(self):
+        # unknown / non-approved names are never auto-approved
         s1 = sk.extract_signals(KIT_FLAME, "https://a.example/")
         fam, status = sk.suggest_family(s1, [{"family": "flowerstorm-test", "signals": s1}])
-        self.assertNotEqual(status, "approved")
+        self.assertEqual(status, "suggested")
+
+    def test_approved_family_returns_approved(self):
+        # the 13 FLAME families Andrew approved on 2026-09-25 return approved
+        s1 = sk.extract_signals(KIT_FLAME, "https://a.example/")
+        fam, status = sk.suggest_family(s1, [{"family": "evilginx", "signals": s1}])
+        self.assertEqual(fam, "evilginx")
+        self.assertEqual(status, "approved")
+
+
+# ---------------------------------------------------------------------------
+# v1b: approved family names
+# ---------------------------------------------------------------------------
+
+class TestApprovedFamilies(unittest.TestCase):
+    EXPECTED = {
+        "tycoon-2fa", "evilginx", "sneaky-2fa", "mamba-2fa", "evilproxy",
+        "flowerstorm", "rockstar-2fa", "nakedpages", "w3ll-panel", "greatness",
+        "caffeine", "sessionshark", "darcula",
+    }
+
+    def test_thirteen_approved_names(self):
+        self.assertEqual(set(sk.APPROVED_FAMILIES), self.EXPECTED)
+
+    def test_family_status_for(self):
+        for name in self.EXPECTED:
+            self.assertEqual(sk.family_status_for(name), "approved", name)
+        self.assertEqual(sk.family_status_for("Evilginx"), "approved")  # case-insensitive
+        self.assertEqual(sk.family_status_for("parcel-smish-eu-04"), "suggested")
+        self.assertEqual(sk.family_status_for(None), "suggested")
+        self.assertEqual(sk.family_status_for(""), "suggested")
+
+
+# ---------------------------------------------------------------------------
+# v1b: fetch pipeline (mocked transport — no network)
+# ---------------------------------------------------------------------------
+
+class _FakeResp:
+    def __init__(self, url, status, headers, body):
+        self._url = url
+        self.status = status
+        self.headers = dict(headers)
+        self._body = body
+
+    def getcode(self):
+        return self.status
+
+    def read(self, n=-1):
+        return self._body if n is None or n < 0 else self._body[:n]
+
+    def geturl(self):
+        return self._url
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeOpener:
+    """url -> (status, headers, body) or an exception to raise."""
+    def __init__(self, routes):
+        self.routes = routes
+        self.calls = []
+
+    def open(self, req, timeout=None):
+        url = req.full_url
+        self.calls.append(url)
+        route = self.routes.get(url)
+        if route is None:
+            raise AssertionError(f"unexpected fetch: {url}")
+        if isinstance(route, Exception):
+            raise route
+        status, headers, body = route
+        return _FakeResp(url, status, headers, body)
+
+
+_HTML = ("<html><head><title>Sign in</title></head><body>"
+         "<form action='https://evil.example.com/submit'>"
+         "<input name='user'><input type='password' name='pass'></form>"
+         "</body></html>").encode()
+_HTML_HEADERS = {"Content-Type": "text/html; charset=utf-8"}
+
+_FAKE_TLS = {"host": "final.example", "tls_version": "TLSv1.3",
+             "cipher": "TLS_AES_128_GCM_SHA256", "cipher_bits": 128,
+             "verified": True, "issuer": {"CN": "Test CA"},
+             "san": ["final.example"], "age_days": 30, "expires_in_days": 60}
+
+
+def _fetch(url, routes, **kw):
+    kw.setdefault("opener", _FakeOpener(routes))
+    kw.setdefault("tls_probe", lambda h, p, t: dict(_FAKE_TLS))
+    kw.setdefault("host_check", lambda h: (True, ""))
+    return skf.fetch_kit_page(url, **kw)
+
+
+class TestFetchPipeline(unittest.TestCase):
+    def test_redirect_chain_recorded_and_rickroll_class_fires(self):
+        routes = {
+            "https://lure.example/go": (302, {"Location": "/r"}, b""),
+            "https://lure.example/r": (302, {"Location": "https://youtube.com/watch?v=dQw4w9WgXcQ"}, b""),
+            "https://youtube.com/watch?v=dQw4w9WgXcQ": (200, _HTML_HEADERS, _HTML),
+        }
+        html, obs, err = _fetch("https://lure.example/go", routes)
+        self.assertEqual(err, "")
+        self.assertTrue(html)
+        self.assertEqual(obs["redirect_count"], 2)
+        self.assertEqual([h["status"] for h in obs["redirect_chain"]], [302, 302, 200])
+        self.assertEqual(obs["final_url"], "https://youtube.com/watch?v=dQw4w9WgXcQ")
+        self.assertEqual(
+            sk.classify_url_pattern("https://lure.example/go", obs),
+            "evilginx-rickroll-redirect")
+
+    def test_wikipedia_antibot_class_fires(self):
+        routes = {
+            "https://lure.example/in": (302, {"Location": "https://en.wikipedia.org/wiki/X"}, b""),
+            "https://en.wikipedia.org/wiki/X": (200, _HTML_HEADERS, _HTML),
+        }
+        html, obs, err = _fetch("https://lure.example/in", routes)
+        self.assertEqual(err, "")
+        self.assertEqual(
+            sk.classify_url_pattern("https://lure.example/in", obs),
+            "w3ll-wikipedia-antibot-redirect")
+
+    def test_x_evilginx_header_flagged(self):
+        routes = {"https://kit.example/": (
+            200, {"Content-Type": "text/html", "X-Evilginx": "request-quality=good"}, _HTML)}
+        html, obs, err = _fetch("https://kit.example/", routes)
+        self.assertEqual(err, "")
+        self.assertTrue(obs["x_evilginx"])
+        self.assertEqual(obs["response_headers"]["X-Evilginx"], "request-quality=good")
+
+    def test_tls_facts_captured(self):
+        routes = {"https://kit.example/": (200, _HTML_HEADERS, _HTML)}
+        html, obs, err = _fetch("https://kit.example/", routes)
+        self.assertEqual(err, "")
+        tls = obs["tls"]
+        self.assertEqual(tls["tls_version"], "TLSv1.3")
+        self.assertEqual(tls["cipher"], "TLS_AES_128_GCM_SHA256")
+        self.assertTrue(tls["verified"])
+        self.assertEqual(tls["issuer"], {"CN": "Test CA"})
+        self.assertEqual(tls["san"], ["final.example"])
+        self.assertEqual(tls["age_days"], 30)
+
+    def test_tls_probe_failure_never_fails_fetch(self):
+        routes = {"https://kit.example/": (200, _HTML_HEADERS, _HTML)}
+        html, obs, err = _fetch(
+            "https://kit.example/", routes,
+            tls_probe=lambda h, p, t: (_ for _ in ()).throw(RuntimeError("boom")))
+        self.assertEqual(err, "")
+        self.assertTrue(html)
+        self.assertIn("error", obs["tls"])
+
+    def test_secondary_fetches_capped_at_two(self):
+        canary = "/s/" + "ab" * 32 + ".js"
+        page = (_HTML.decode()
+                + f"<script src='{canary}'></script>"
+                + "<link rel='icon' href='https://cdn.example.com/f.ico'>"
+                + "<link rel='icon' href='https://cdn.example.com/f2.ico'>").encode()
+        routes = {
+            "https://kit.example/": (200, _HTML_HEADERS, page),
+            "https://kit.example" + canary: (200, {"Content-Type": "application/javascript"}, b"//canary"),
+            "https://cdn.example.com/f.ico": (200, {"Content-Type": "image/x-icon"}, b"ICO1"),
+            "https://cdn.example.com/f2.ico": (200, {"Content-Type": "image/x-icon"}, b"ICO2"),
+        }
+        opener = _FakeOpener(routes)
+        html, obs, err = _fetch("https://kit.example/", routes, opener=opener)
+        self.assertEqual(err, "")
+        secs = obs["secondary_fetches"]
+        self.assertEqual(len(secs), 2)  # cap enforced
+        self.assertEqual([s["purpose"] for s in secs],
+                         ["evilginx-canary", "remote-favicon"])
+        self.assertEqual(secs[0]["status"], 200)
+        self.assertEqual(len(secs[0]["sha256"]), 64)
+        self.assertEqual(len(opener.calls), 3)  # main + 2 secondaries
+        self.assertNotIn("https://cdn.example.com/f2.ico", opener.calls)
+
+    def test_non_html_rejected(self):
+        routes = {"https://kit.example/": (
+            200, {"Content-Type": "application/json"}, b'{"a": 1}')}
+        html, obs, err = _fetch("https://kit.example/", routes)
+        self.assertEqual(html, "")
+        self.assertTrue(err.startswith("not_html"))
+
+    def test_trivial_body_rejected(self):
+        routes = {"https://kit.example/": (200, _HTML_HEADERS, b"<html></html>")}
+        html, obs, err = _fetch("https://kit.example/", routes)
+        self.assertEqual(html, "")
+        self.assertIn("trivial", err)
+
+    def test_too_many_redirects(self):
+        routes = {}
+        for i in range(7):
+            routes[f"https://hop.example/{i}"] = (
+                302, {"Location": f"https://hop.example/{i + 1}"}, b"")
+        html, obs, err = _fetch("https://hop.example/0", routes)
+        self.assertEqual(html, "")
+        self.assertIn("too many redirects", err)
+        self.assertEqual(obs["redirect_count"], 5)
+        self.assertEqual(len(obs["redirect_chain"]), 6)
+
+    def test_transport_error_surfaces(self):
+        routes = {"https://kit.example/": urllib.error.URLError("dns blew up")}
+        html, obs, err = _fetch("https://kit.example/", routes)
+        self.assertEqual(html, "")
+        self.assertIn("URLError", err)
+
+    def test_http_error_page_still_recorded(self):
+        fp = io.BytesIO(_HTML)
+        err_exc = urllib.error.HTTPError(
+            "https://kit.example/", 403, "Forbidden",
+            {"Content-Type": "text/html"}, fp)
+        routes = {"https://kit.example/": err_exc}
+        html, obs, err = _fetch("https://kit.example/", routes)
+        self.assertEqual(err, "")
+        self.assertTrue(html)
+        self.assertEqual(obs["redirect_chain"][0]["status"], 403)
+
+    def test_observed_telemetry_marked_caller_supplied(self):
+        routes = {"https://kit.example/": (200, _HTML_HEADERS, _HTML)}
+        html, obs, err = _fetch(
+            "https://kit.example/", routes,
+            observed_telemetry={"ja3": "abc123", "user_agent_shifts": ["a", "b"],
+                                "bogus_key": 1})
+        self.assertEqual(err, "")
+        ot = obs["observed_telemetry"]
+        self.assertTrue(ot["caller_supplied"])
+        self.assertEqual(ot["ja3"], "abc123")
+        self.assertEqual(ot["user_agent_shifts"], ["a", "b"])
+        self.assertNotIn("bogus_key", ot)
+
+    def test_no_ja3_computed_locally(self):
+        routes = {"https://kit.example/": (200, _HTML_HEADERS, _HTML)}
+        html, obs, err = _fetch("https://kit.example/", routes)
+        self.assertEqual(err, "")
+        self.assertIsNone(obs["observed_telemetry"])
+
+        def _keys(o):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    yield k
+                    yield from _keys(v)
+            elif isinstance(o, list):
+                for v in o:
+                    yield from _keys(v)
+
+        seen = {k.lower() for k in _keys(obs)}
+        self.assertNotIn("ja3", seen)
+        self.assertNotIn("ja4", seen)
+
+    def test_ssrf_guard_blocks_private_target(self):
+        html, obs, err = skf.fetch_kit_page("http://127.0.0.1/")
+        self.assertEqual(html, "")
+        self.assertIn("blocked", err)
+
+    def test_non_http_scheme_rejected(self):
+        html, obs, err = skf.fetch_kit_page(
+            "file:///etc/passwd", host_check=lambda h: (True, ""))
+        self.assertEqual(html, "")
+        self.assertIn("http(s)", err)
 
 
 if __name__ == "__main__":

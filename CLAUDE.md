@@ -8742,3 +8742,124 @@ sends before treating a flat arrival count as evidence the integration itself is
 `test_every_onward_key_is_REGISTERED_at_the_worker_edge` guard picked up the new key automatically
 and passed without modification -- the three-lists-must-agree check doing its job on the first try
 for once.
+
+## WHERE 2026-09-25 LEFT THINGS. TWO FIXES, ONE STILL PENDING ON ANDREW'S MAC.
+
+### THE OPENAI PARTNER KEY WAS NEVER ACTUALLY ISSUED
+
+`tools/setup_partner_key.py --source openai_connector --apply` was handed to Andrew as a command
+in the prior session's reply, **with no merge step in front of it** -- the exact top-of-file rule
+broken again. The file existed only on `claude/gallant-hawking-4oerzg` (commit `add6b75`), not on
+his local `main`, so it failed with `[Errno 2] No such file or directory`. The corrected
+merge-then-run block was given this session. **There is no confirmation it has been re-run since.**
+The OpenAI key has NOT been sent to anyone yet -- this is not a closed item, it is a blocked one,
+and it is the very first thing to check next session.
+
+### `secret-scan-text` WAS STUCK ON x402 V1 IN THE LIVE CODE, NOT JUST THE SPEC
+
+Reported as "`api.relayshield.net/openapi.json` still describes secret-scan-text as x402 v1. Needs
+fixing." Checking before fixing (per rule B: predicting a failure and shipping a wrong fix anyway
+is worse than not predicting it) found the spec was **accurate, not stale**: `/v1/payg/secret-scan-
+text` launched 2026-07-31, ten days after the last of five V2-migration batches closed on
+2026-07-21, and was simply never added to `X402_V2_ENABLED_PATHS` in `relayshield_api.py` -- it is
+the only one of 28 payg endpoints in that file left on V1, with zero comment nearby explaining a
+deliberate hold (unlike the domain/supply-chain saga, which is extensively commented). Rewriting
+only the spec's number would have shipped a client that expects a V2 challenge the live endpoint
+never sends -- worse than the original defect.
+
+**Fixed both together**: the path is now in the real allowlist, the spec says `x402_version: 2` to
+match, and its previously-blank `description` field is filled in. `test_x402_version_agreement.py`
+reads `X402_V2_ENABLED_PATHS` out of both `relayshield_api.py` and `relayshield_agentic_api.py` and
+the spec's `x402_version` fields directly, and fails if they ever disagree again for any payg path
+-- proven by reintroducing this exact defect and watching it fail before restoring. Committed as
+`839e709`, pushed. **This is on GitHub only until Andrew merges it** -- same as the OpenAI key
+script above, and the same failure class rule 14 exists to catch.
+
+**Same investigation surfaced a WORSE version of an already-known gap.** `/.well-known/x402.json`'s
+`handle_x402_manifest` iterates only `relayshield_api.py`'s own `PAYG_PRICE_UNITS`.
+`relayshield_agentic_api.py` has **no manifest handler of its own at all** (confirmed by grep, not
+assumed), so it is not just `agent-bait-scan` missing from the manifest as the 2026-09-22 Top 10
+recorded -- `mcp-registry-risk` and `prompt-injection-breach` are invisible to every x402 indexer
+too. Three paid, deployed, correctly-priced endpoints that no agent discovering us through the
+manifest can ever find. Not fixed this session; now item 4 below, corrected in scope.
+
+### VISHING: RECOMMENDATION GIVEN, NOTHING BUILT
+
+Asked whether to build call/voicemail audio deepfake detection to match Lookout's new Social
+Engineering Protection module. Checked what "our existing vishing service" actually is first: a
+static text warning appended to a breach alert (`VISHING_DATA_CLASSES` in
+`relayshield_breach_monitor.py`) advising the user not to confirm details to inbound callers --
+not detection, education. Lookout's module captures and transcribes live call/voicemail audio
+through an ML voice-clone model, on a mobile surface nothing in this codebase has. Recommended
+**not** building the audio-analysis piece -- it is a new product, not an enhancement, and needs
+mobile call-audio permissions we don't have anywhere. Recommended instead packaging what already
+exists (`/v1/link-check`'s smishing detection, `/v1/payg/sim-swap`'s carrier-port detection) as an
+explicit "vishing preparedness" bundle, since those two of Lookout's three pillars are things we're
+already close to. **No code changed. Andrew has not responded to the recommendation yet.**
+
+### THE TOP 10, REGENERATED 2026-09-25
+
+**Regenerated, not annotated. Checked against the actual code and file state, not recited from the
+2026-09-22 list** -- per WHERE THE CURRENT WORK LIST LIVES: a doc claiming something is done is a
+lead, not a fact, in both directions. Closed since 2026-09-22, confirmed rather than assumed: the
+502 dispatcher fix (its own descendants -- `_with_onward`, `is_partner_call`, `CONSUMER_ROUTES` --
+are live in the current file, so the merge that shipped it happened); both Bundle B duplicates
+withdrawn (confirmed directly by Andrew, 2026-09-23/24); BOT-TOKEN-1 phase 1's CODE (liveness,
+hash-only storage, severity split -- its AWS table is a separate open item, see #3); `/v1/email-
+check` built and tested; the IAM split for `relayshield-intel-feed` (measured directly against AWS
+by Andrew, 2026-09-24); the general metered-pricing/landing-page guard, which folded in the
+`dependency-risk` card fix by hand.
+
+1. **Confirm the OpenAI partner key was actually issued, and send it.** Run the merge block from
+   this session, then `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/setup_partner_key.py
+   --source openai_connector --apply` if it hasn't been run since the file-not-found failure.
+   Nothing has been sent to OpenAI yet.
+
+2. **Merge `839e709` (this session's x402 fix) onto main.** Same failure class as #1: pushed to
+   the branch, not yet on Andrew's Mac, not yet deployed. `secret-scan-text` stays on a V1
+   challenge in production until this merges and the next Lambda deploy ships it.
+
+3. **`/.well-known/x402.json` is missing THREE endpoints, not the one previously recorded.**
+   `relayshield_agentic_api.py` has no manifest handler at all, so `agent-bait-scan`,
+   `mcp-registry-risk` and `prompt-injection-breach` are all absent. Either give that file its own
+   manifest branch merged into the same response, or have `handle_x402_manifest` read both files'
+   `PAYG_PRICE_UNITS` tables. Pin with a test asserting every key in both tables appears in the
+   served manifest, proven by reintroducing the gap.
+
+4. **Create `relayshield_breach_cache` in AWS.** `AWS_PROFILE=relayshield sh
+   tools/setup_breach_cache.sh`. No confirmation this has been run since it was built 2026-09-22;
+   the breach-check code ships inert (falls through to a live HIBP call every time) without it.
+
+5. **Create `relayshield_bot_tokens` in AWS.** `tools/setup_bot_tokens_table.sh`. Same shape as
+   #4 -- BOT-TOKEN-1 phase 1's code is live and correctly gated to fail soft, but accumulates
+   nothing until this table exists.
+
+6. **Submit the Muse connector.** Copy is written in full
+   (`muse_connector_submission_2026-09-22.md`), the spec and the partner key are both live --
+   nothing found confirming the actual submission happened.
+
+7. **Deploy the TI demo Cloudflare Worker.** Cards were recovered and corrected 2026-09-16;
+   nothing confirms an actual `wrangler deploy` since. `sh tools/recover_live_worker.sh
+   relayshield-ti-demo cloudflare_worker_ti_demo.js` first -- only `IDENTICAL` makes the deploy
+   safe, per the standing rule for this Worker (no automated deploy path exists for it).
+
+8. **Map `relayshield_watchlist_monitor.py` and `relayshield-mpp-settlement` in
+   `deploy_lambdas.yml`'s `LAMBDA_MAP`.** Confirmed still open THIS session --
+   `test_workflows_parse.py`'s own output printed both as "granted but not in LAMBDA_MAP" during
+   this session's sanity check.
+
+9. **Verify what literal `source` string Muse's and OpenAI's connectors actually send.** Flagged
+   as UNVERIFIED for both when each was wired -- `_onward_route` is an explicit allowlist keyed on
+   an exact string, so a connector sending anything else means correctly-issued, correctly-capped
+   keys log zero arrivals while looking dead. Read the real request before drawing any conclusion
+   from an arrival count for either partner.
+
+10. **The Bundle B duplicate-products post.** No file found under `blog_markdown/` or elsewhere.
+    Material is fully specified from the incident itself: three SaaS products sharing one display
+    name, a Management Portal that selects by name instead of id, seven refusals, and the
+    one-command `list-entities` read that separates them. An afternoon, and nothing on the
+    internet describes this failure mode. Omit the entity ids.
+
+**Carried and not in the ten, so they are not lost:** `WA_NUMBER` still empty in both Workers;
+StoreBot submission; the WhatsApp Channel question (can a Twilio-hosted number own one); FD-11
+Smithery; INTEL-5; vishing packaging recommendation above, awaiting Andrew's decision.

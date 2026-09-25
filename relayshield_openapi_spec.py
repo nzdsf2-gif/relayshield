@@ -3286,6 +3286,176 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                        'degraded': False,
                        'error': None}]}},
     },
+    "/v1/payg/scamkit-fingerprint": {
+        "summary": "Fingerprint a suspected phishing/smishing kit",
+        "description": (
+            "Turn one suspicious link into a matchable kit identity: extract the kit's structural "
+            "signals (DOM skeleton, script hashes, form/exfil hosts, brand marks, URL pattern class), "
+            "strip per-victim nonces and credentials BEFORE hashing, and return a stable "
+            "kit_<sha256> fingerprint ID that is identical for the same kit across sightings. "
+            "INPUT LIMITATION (v1): the Lambda has no JS rendering, so the `url` field is fetched "
+            "as static HTML only. For JS-heavy kits, render the page yourself and submit the rendered "
+            "HTML via the `html` field. Secrets, tokens, and machine identifiers are removed before "
+            "hashing and are never returned or stored — two kits differing only in rotated credentials "
+            "fingerprint identically. The returned kit_family is an auto-SUGGESTION only "
+            "(family_status: suggested|approved); families are never approved automatically."
+        ),
+        "price_units": 500000,
+        "x402_version": 2,
+        "body": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Live URL to fingerprint. Fetched as static HTML only in v1 (no JS rendering).",
+                },
+                "html": {
+                    "type": "string",
+                    "description": "Caller-supplied kit HTML (alternative to url; takes precedence). Submit rendered HTML for JS-heavy kits.",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Optional caller tag recorded with the sighting (e.g. 'sms-feed-2026-09').",
+                },
+                "family": {
+                    "type": "string",
+                    "description": "Optional caller-supplied family label for a brand-new fingerprint (stored as suggested).",
+                },
+            },
+        },
+        "example": {"url": "https://example.com/login", "source": "sms-feed"},
+        "output_example": {
+            "ok": True,
+            "data": {
+                "fingerprint_id": "kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+                "kit_family": "parcel-smish-eu-04",
+                "family_status": "suggested",
+                "confidence": 0.92,
+                "verdict": "known_kit",
+                "verdict_copy": "Matches known kit family parcel-smish-eu-04 (7 sightings)",
+                "sightings_count": 7,
+                "signals": {
+                    "kind": "kit",
+                    "fingerprint_version": "skfp-v1",
+                    "url_pattern_class": "typosquat-brand",
+                    "brand_marks": ["paypal"],
+                    "dom_skeleton_hash": "a1b2c3d4",
+                    "script_hashes": ["e5f60718"],
+                    "form_action_hosts": ["evil.example.com"],
+                    "exfil_endpoints": ["evil.example.com"],
+                    "sms_lure_template_hash": "c9d0e1f2",
+                },
+                "evidence": {},
+                "fetch": {"mode": "static_fetch", "note": "static HTML only in v1 — no JS rendering in the Lambda"},
+                "stored": True,
+                "notes": [],
+            },
+        },
+    },
+    "/v1/payg/scamkit-match": {
+        "summary": "Match a kit fingerprint ID against the corpus",
+        "description": (
+            "Cheap re-check for dashboards and bots watching for kit reuse: look up an existing "
+            "kit_<sha256> fingerprint ID and get its family (auto-suggested, pending approval), "
+            "confidence, verdict, evidence, and sighting history. An unknown ID is never reported "
+            "as safe — only as no-match with an explicit not-a-guarantee caveat."
+        ),
+        "price_units": 100000,
+        "x402_version": 2,
+        "body": {
+            "type": "object",
+            "properties": {
+                "fingerprint_id": {
+                    "type": "string",
+                    "description": "kit_<sha256> fingerprint ID to match (64 hex chars after the kit_ prefix).",
+                },
+            },
+            "required": ["fingerprint_id"],
+        },
+        "example": {"fingerprint_id": "kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8"},
+        "output_example": {
+            "ok": True,
+            "data": {
+                "matched": True,
+                "fingerprint_id": "kit_9f2c4a1b3d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8",
+                "kit_family": "parcel-smish-eu-04",
+                "family_status": "suggested",
+                "confidence": 0.92,
+                "verdict": "known_kit",
+                "verdict_copy": "Matches known kit family parcel-smish-eu-04 (7 sightings)",
+                "sightings_count": 7,
+                "first_seen": "2026-09-01T00:00:00+00:00",
+                "last_seen": "2026-09-24T00:00:00+00:00",
+                "evidence": {},
+                "url_pattern_class": "typosquat-brand",
+                "brand_marks": ["paypal"],
+            },
+        },
+    },
+    "/v1/payg/campaign-scan": {
+        "summary": "Composite campaign scan across the threat-intel endpoints ($5.50 flat)",
+        "description": (
+            "One $5.50 flat call that fans an indicator bundle (max 25 indicators: domains, urls, "
+            "emails, wallets, phones, file URLs, kit fingerprint IDs) across the applicable "
+            "threat-intel endpoints in-process, then correlates: per-indicator results, kit families, "
+            "shared exfil hosts and shared kit fingerprints across indicators, an aggregate risk "
+            "score, and corpus citations — packaged for campaign-level takedown intel. Subcalls run "
+            "under a hard time budget; any truncation is reported via degraded:true, never silently "
+            "dropped. Individual subcall failures are captured as endpoint-level errors, never crash "
+            "the composite."
+        ),
+        "price_units": 5500000,
+        "x402_version": 2,
+        "body": {
+            "type": "object",
+            "properties": {
+                "campaign_name": {"type": "string", "description": "Optional label for the campaign."},
+                "domains": {"type": "array", "items": {"type": "string"}},
+                "urls": {"type": "array", "items": {"type": "string"}},
+                "emails": {"type": "array", "items": {"type": "string"}},
+                "wallets": {"type": "array", "items": {"type": "string"}},
+                "phones": {"type": "array", "items": {"type": "string"}},
+                "file_urls": {"type": "array", "items": {"type": "string"}},
+                "fingerprint_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "kit_<sha256> fingerprint IDs to re-check.",
+                },
+            },
+        },
+        "example": {
+            "campaign_name": "parcel-smish-sep",
+            "urls": ["https://example.com/login"],
+            "emails": ["user@example.com"],
+        },
+        "output_example": {
+            "ok": True,
+            "data": {
+                "campaign_id": "cmp_1a2b3c4d5e6f708192a3b4c5d6e7f80",
+                "campaign_name": "parcel-smish-sep",
+                "indicators_scanned": 2,
+                "indicators": [
+                    {
+                        "indicator": "https://example.com/login",
+                        "type": "url",
+                        "risk": 92,
+                        "results": {
+                            "scan-url": {"ok": True, "data": {}},
+                            "scamkit-fingerprint": {"ok": True, "data": {}},
+                        },
+                    },
+                ],
+                "kit_families": ["parcel-smish-eu-04"],
+                "shared_exfil_hosts": [],
+                "shared_kit_fingerprints": [],
+                "aggregate_risk": 74,
+                "max_indicator_risk": 92,
+                "corpus_citations": 3,
+                "degraded": False,
+                "truncated_subcalls": 0,
+            },
+        },
+    },
 }
 
 _PAYG_TAG = "x402 pay-per-call"

@@ -10717,6 +10717,34 @@ def _build_payment_requirements(path: str, price_units: int) -> dict:
     }
 
 
+def _x402_manifest_entries(price_units_table, descriptions_table, build_requirements_fn) -> list:
+    """Build manifest resource entries for one file's PAYG_PRICE_UNITS table.
+
+    Shared by relayshield_api.py's own 28 endpoints and relayshield_agentic_api.py's
+    3 (mcp-registry-risk, prompt-injection-breach, agent-bait-scan) so both go
+    through the identical entry shape rather than two hand-maintained copies.
+    """
+    entries = []
+    for path in sorted(price_units_table):
+        price_units = price_units_table[path]
+        reqs = build_requirements_fn(path, price_units)
+        entry = {
+            "url":         f"https://api.relayshield.net{path}",
+            "method":      "POST",
+            "description": descriptions_table.get(
+                path, f"RelayShield {path.split('/')[-1].replace('-', ' ')} check"),
+            "mimeType":    "application/json",
+            "priceUsd":    round(price_units / 1_000_000, 6),
+            "asset":       "USDC",
+            "x402Version": reqs.get("x402Version"),
+            "accepts":     reqs.get("accepts", []),
+        }
+        if reqs.get("resource", {}).get("tags"):
+            entry["tags"] = reqs["resource"]["tags"]
+        entries.append(entry)
+    return entries
+
+
 def handle_x402_manifest() -> dict:
     """Serve /.well-known/x402.json, the conventional discovery manifest.
 
@@ -10731,25 +10759,25 @@ def handle_x402_manifest() -> dict:
     Built by calling _build_payment_requirements for each path, so prices, payTo
     addresses and chain ids come from the same source the live 402 challenge uses
     and cannot drift away from what a buyer is actually asked to pay.
+
+    relayshield_agentic_api.py's 3 endpoints (agent-bait-scan, mcp-registry-risk,
+    prompt-injection-breach) are folded in here too -- found 2026-09-24 missing
+    entirely, not just agent-bait-scan as previously recorded, because this
+    function only ever read relayshield_api.py's own table. That file's
+    _build_payment_requirements and PAYG_PRICE_UNITS are deliberately NOT
+    imported at module level elsewhere in this file (relayshield_agentic_api.py
+    keeps its own deployment package independent of relayshield_api.py, the
+    reverse direction is fine and already precedented by
+    relayshield_mpp_settlement.py importing this same module). Imported here,
+    function-local, so the coupling is confined to the one place that needs it.
     """
-    resources = []
-    for path in sorted(PAYG_PRICE_UNITS):
-        price_units = PAYG_PRICE_UNITS[path]
-        reqs = _build_payment_requirements(path, price_units)
-        entry = {
-            "url":         f"https://api.relayshield.net{path}",
-            "method":      "POST",
-            "description": PAYG_DESCRIPTIONS.get(
-                path, f"RelayShield {path.split('/')[-1].replace('-', ' ')} check"),
-            "mimeType":    "application/json",
-            "priceUsd":    round(price_units / 1_000_000, 6),
-            "asset":       "USDC",
-            "x402Version": reqs.get("x402Version"),
-            "accepts":     reqs.get("accepts", []),
-        }
-        if reqs.get("resource", {}).get("tags"):
-            entry["tags"] = reqs["resource"]["tags"]
-        resources.append(entry)
+    resources = _x402_manifest_entries(
+        PAYG_PRICE_UNITS, PAYG_DESCRIPTIONS, _build_payment_requirements)
+
+    import relayshield_agentic_api as _agentic
+    resources += _x402_manifest_entries(
+        _agentic.PAYG_PRICE_UNITS, _agentic.PAYG_DESCRIPTIONS,
+        _agentic._build_payment_requirements)
 
     return {
         "statusCode": 200,

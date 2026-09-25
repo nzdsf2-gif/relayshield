@@ -20,9 +20,11 @@ Design rules (from the product spec):
     kit-attributable IOCs, not victim secrets; only *matched known-marker
     names* enter the hashed signal set, while raw values (AppIDs, hosts)
     are emitted separately in ``corpus_candidates`` for later TI loading.
-  * Family names are AUTO-SUGGESTED ONLY. This module can only ever emit
-    ``family_status="suggested"``. There is no code path that writes
-    ``"approved"`` — approval is a manual, out-of-band act by Andrew.
+  * Family names: the 13 FLAME TP-0067 kit families Andrew approved on
+    2026-09-25 are emitted with ``family_status="approved"`` (see
+    APPROVED_FAMILIES / family_status_for()); every other name is
+    ``"suggested"``. No code path approves a name outside that set —
+    additional approvals are a manual, out-of-band act by Andrew.
   * Verdict copy never says "safe". The best case is "no flags found" with
     an explicit not-a-guarantee caveat.
   * ``kind`` discriminates ``kit_`` from the planned ``malware_<sha256>``
@@ -416,7 +418,11 @@ def classify_url_pattern(url: str, observations: dict | None = None) -> str:
 
     # Fetch-pipeline behavior classes (dormant until observations exist).
     if observations:
-        chain = observations.get("redirect_chain") or []
+        raw_chain = observations.get("redirect_chain") or []
+        # v1b pipeline records hops as {"url", "status"} dicts; accept plain
+        # URL strings too (earlier contract).
+        chain = [h.get("url", "") if isinstance(h, dict) else h
+                 for h in raw_chain]
         if any(any(rid in u for rid in _RICKROLL_IDS) or "rickroll" in u.lower()
                for u in chain):
             return "evilginx-rickroll-redirect"
@@ -772,7 +778,27 @@ def valid_fingerprint_id(value: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Family auto-suggest (deterministic — never "approved")
+# Family names — Andrew-approved set
+# ---------------------------------------------------------------------------
+# Andrew approved these 13 FLAME TP-0067 kit family names on 2026-09-25.
+# They may be emitted with family_status="approved" via family_status_for();
+# every other name stays "suggested". Human review can still set approved
+# manually on any row via a direct table edit — approval logic never
+# fabricates sightings or corpus writes.
+APPROVED_FAMILIES = frozenset({
+    "tycoon-2fa", "evilginx", "sneaky-2fa", "mamba-2fa", "evilproxy",
+    "flowerstorm", "rockstar-2fa", "nakedpages", "w3ll-panel", "greatness",
+    "caffeine", "sessionshark", "darcula",
+})
+
+
+def family_status_for(name: str | None) -> str:
+    """``"approved"`` for an Andrew-approved family name, else ``"suggested"``."""
+    return "approved" if (name or "").strip().lower() in APPROVED_FAMILIES else "suggested"
+
+
+# ---------------------------------------------------------------------------
+# Family auto-suggest (deterministic)
 # ---------------------------------------------------------------------------
 # Signal weights for overlap scoring. The DOM skeleton is the strongest
 # kit-identity signal; hardcoded Entra App IDs are near-deterministic kit
@@ -829,12 +855,16 @@ def suggest_family(signals: dict, known_families: list[dict]) -> tuple[str | Non
     families whose status the caller has already resolved (suggested or
     approved; this function does not distinguish, it only matches shape).
 
-    Returns ``(family_name, "suggested")`` or ``(None, None)``.
+    Returns ``(family_name, family_status_for(family_name))`` or
+    ``(None, None)``. The 13 FLAME TP-0067 families Andrew approved on
+    2026-09-25 are returned with status ``"approved"``; every other name
+    is ``"suggested"``.
 
-    HARD RULE: this function can only ever emit ``"suggested"``. There is
-    deliberately no parameter, flag, or code path that returns ``"approved"``.
-    Marking a family approved is a manual act by Andrew, recorded directly
-    on the stored fingerprint item — never by this code.
+    HARD RULE: only names in APPROVED_FAMILIES can ever be emitted as
+    ``"approved"``. There is no parameter, flag, or code path that approves
+    any other name. Marking an additional family approved is a manual act by
+    Andrew, recorded directly on the stored fingerprint item — never by
+    this code.
     """
     best: str | None = None
     best_score = 0
@@ -847,7 +877,7 @@ def suggest_family(signals: dict, known_families: list[dict]) -> tuple[str | Non
         if score > best_score:
             best_score, best = score, name
     if best and best_score >= SUGGEST_THRESHOLD:
-        return best, "suggested"
+        return best, family_status_for(best)
     return None, None
 
 

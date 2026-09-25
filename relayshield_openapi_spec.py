@@ -3336,7 +3336,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                 "sightings_count": 7,
                 "signals": {
                     "kind": "kit",
-                    "fingerprint_version": "skfp-v1",
+                    "fingerprint_version": "skfp-v2",
                     "url_pattern_class": "typosquat-brand",
                     "brand_marks": ["paypal"],
                     "dom_skeleton_hash": "a1b2c3d4",

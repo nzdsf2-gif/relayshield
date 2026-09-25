@@ -9856,12 +9856,20 @@ def _scamkit_resolve_family(existing: dict | None, caller_family: str | None,
 
 
 def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | None,
-                    suggested_family: str | None, source: str) -> dict:
+                    suggested_family: str | None, source: str,
+                    corpus_candidates: dict | None = None) -> dict:
     """Upsert the fingerprint into KIT_FINGERPRINTS_TABLE.
 
     New item: stores family per _scamkit_resolve_family, sightings_count=1.
     Existing item: bumps sightings_count, refreshes last_seen, appends the
     source — but NEVER touches kit_family / family_status.
+
+    Dual-version backfill: when there is no skfp-v2 row, the skfp-v1
+    projection ID is looked up too. A hit means this kit was fingerprinted
+    before the v2 upgrade — the new v2 item carries the v1 family's
+    label/status, continues its sightings_count, and records
+    ``supersedes: <v1_id>`` instead of silently forking a new ID. skfp-v1
+    rows are never modified or deleted.
 
     Returns {"stored", "kit_family", "family_status", "sightings_count"}.
     "stored" is False only when the table is unavailable (not yet created,
@@ -9899,15 +9907,37 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
             logger.warning("scamkit sighting bump failed: %s", exc)
         return {"stored": True, "kit_family": fam, "family_status": status,
                 "sightings_count": (existing.get("sightings_count") or 0) + 1}
-    fam, status = _scamkit_resolve_family(None, caller_family, suggested_family)
+    # No v2 row — try the v1 backfill link before creating a fresh item.
+    v1_item = None
+    supersedes = None
+    try:
+        v1_id = relayshield_scamkit.fingerprint_id(
+            relayshield_scamkit.v1_signal_projection(signals))
+        if v1_id != fingerprint_id:
+            v1_item = table.get_item(Key={"fingerprint_id": v1_id}).get("Item")
+            if v1_item:
+                supersedes = v1_id
+    except Exception as exc:
+        logger.warning("scamkit v1 backfill lookup failed: %s", exc)
+    if v1_item:
+        # Continuity, not a fork: keep the v1 family's label/status and
+        # continue its sighting count on the new v2 row.
+        fam, status = _scamkit_resolve_family(v1_item, None, None)
+        sightings_count = (v1_item.get("sightings_count") or 0) + 1
+    else:
+        fam, status = _scamkit_resolve_family(None, caller_family, suggested_family)
+        sightings_count = 1
     item: dict = {
         "fingerprint_id":      fingerprint_id,
         "fingerprint_version": relayshield_scamkit.FINGERPRINT_VERSION,
         "signals":             signals,
-        "sightings_count":     1,
+        "corpus_candidates":   corpus_candidates or {},
+        "sightings_count":     sightings_count,
         "first_seen":          now,
         "last_seen":           now,
     }
+    if supersedes:
+        item["supersedes"] = supersedes
     if fam:
         item["kit_family"] = fam
     if status:
@@ -9919,7 +9949,8 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
     except Exception as exc:
         logger.warning("scamkit put failed: %s", exc)
         return {"stored": False, "kit_family": fam, "family_status": status, "sightings_count": 1}
-    return {"stored": True, "kit_family": fam, "family_status": status, "sightings_count": 1}
+    return {"stored": True, "kit_family": fam, "family_status": status,
+            "sightings_count": sightings_count}
 
 
 # Request: POST /v1/payg/scamkit-fingerprint
@@ -9930,8 +9961,8 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
 #
 # Response:
 #   { ok: true, data: { fingerprint_id, kit_family, family_status,
-#     confidence, verdict, verdict_copy, sightings_count, signals, evidence,
-#     fetch, stored } }
+#     confidence, verdict, verdict_copy, sightings_count, signals,
+#     corpus_candidates, evidence, fetch, stored } }
 def handle_scamkit_fingerprint(params: dict) -> dict:
     params = params or {}
     url    = (params.get("url") or "").strip()
@@ -9962,10 +9993,15 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
 
     signals = relayshield_scamkit.extract_signals(html, url)
     fid = relayshield_scamkit.fingerprint_id(signals)
+    # TI corpus load candidates (structured; this module writes nothing to
+    # the live corpus — the candidates ship in the response/stored item for
+    # later review and ingestion).
+    corpus_candidates = relayshield_scamkit.extract_corpus_candidates(html, url, signals)
 
     evidence = _scamkit_corpus_evidence(signals)
     suggested_family, _ = relayshield_scamkit.suggest_family(signals, _scamkit_known_families())
-    stored = _scamkit_upsert(fid, signals, caller_family, suggested_family, source)
+    stored = _scamkit_upsert(fid, signals, caller_family, suggested_family, source,
+                             corpus_candidates)
 
     sightings = stored["sightings_count"]
     confidence, verdict = relayshield_scamkit.compute_confidence(
@@ -9985,6 +10021,7 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
             verdict, family=family, sightings=sightings),
         "sightings_count": sightings,
         "signals":         signals,   # already secret-stripped — safe to return/store
+        "corpus_candidates": corpus_candidates,  # TI load candidates — not a live write
         "evidence":        evidence,
         "fetch":           fetch,
         "stored":          stored["stored"],
@@ -9997,7 +10034,8 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
 #
 # Response: { ok: true, data: { matched, fingerprint_id, kit_family,
 #   family_status, confidence, verdict, verdict_copy, sightings_count,
-#   first_seen, last_seen, evidence, url_pattern_class, brand_marks } }
+#   first_seen, last_seen, evidence, url_pattern_class, brand_marks,
+#   fingerprint_version, corpus_candidates } }
 # Unknown IDs are NEVER reported as safe — see verdict_copy.
 def handle_scamkit_match(params: dict) -> dict:
     params = params or {}
@@ -10038,6 +10076,8 @@ def handle_scamkit_match(params: dict) -> dict:
         "evidence":          evidence,
         "url_pattern_class": signals.get("url_pattern_class"),
         "brand_marks":       signals.get("brand_marks") or [],
+        "fingerprint_version": item.get("fingerprint_version", "skfp-v1"),
+        "corpus_candidates": item.get("corpus_candidates") or {},
     })
 
 

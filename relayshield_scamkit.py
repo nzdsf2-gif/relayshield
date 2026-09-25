@@ -11,6 +11,15 @@ Design rules (from the product spec):
     never influences a fingerprint, and never appears in signals, logs, or
     stored records. Two kits differing only in rotated secrets fingerprint
     identically — that is the point.
+  * EXCEPTION (FLAME v1a, deliberate): kit-infrastructure constants — known
+    phishing-kit URI paths, hardcoded Entra application IDs, hardcoded
+    User-Agent literals, Socket.IO event names — are extracted from the RAW
+    HTML *before* strip_secrets() runs, because strip_secrets() would redact
+    the GUIDs and long hex runs they depend on (e.g. the FlowerStorm Entra
+    application ID, Evilginx canary values). These are public,
+    kit-attributable IOCs, not victim secrets; only *matched known-marker
+    names* enter the hashed signal set, while raw values (AppIDs, hosts)
+    are emitted separately in ``corpus_candidates`` for later TI loading.
   * Family names are AUTO-SUGGESTED ONLY. This module can only ever emit
     ``family_status="suggested"``. There is no code path that writes
     ``"approved"`` — approval is a manual, out-of-band act by Andrew.
@@ -18,6 +27,14 @@ Design rules (from the product spec):
     an explicit not-a-guarantee caveat.
   * ``kind`` discriminates ``kit_`` from the planned ``malware_<sha256>``
     IDs (spec §8). v1 code paths only emit ``kit_``.
+
+FLAME v1a (2026-09-25): 13 static AiTM-kit indicators from FLAME TP-0067
+(AiTM Phishing Kit Infrastructure). Tycoon 2FA markers are HISTORICAL —
+taken down 2026-03-04 (Europol-led, 330 domains seized) — kept as
+backfill markers, not expectations of current activity. Values FLAME
+publishes only in truncated form (Sneaky 2FA favicon hash) or as theme
+descriptions (Rockstar/FlowerStorm titles) are NOT seeded; only complete,
+verifiable constants are.
 
 URL input limitation (v1): there is no JS rendering in the Lambda runtime,
 so server-side URL fetching is STATIC HTML ONLY. Callers dealing with
@@ -34,7 +51,23 @@ from urllib.parse import urlparse
 
 KIT_ID_PREFIX = "kit_"
 MALWARE_ID_PREFIX = "malware_"  # planned extension (spec §8) — not emitted by v1
-FINGERPRINT_VERSION = "skfp-v1"  # bump whenever normalization changes
+FINGERPRINT_VERSION = "skfp-v2"  # bump whenever normalization changes
+FINGERPRINT_VERSION_V1 = "skfp-v1"  # previous schema — rows remain valid (dual-version)
+SUPPORTED_FINGERPRINT_VERSIONS = (FINGERPRINT_VERSION_V1, FINGERPRINT_VERSION)
+
+# Exact skfp-v1 signal schema. v1_signal_projection() maps a v2 signal dict
+# back to this key set so a re-sighted kit resolves to its pre-v2 row
+# instead of silently forking a new fingerprint ID (no silent ID churn).
+V1_SIGNAL_KEYS = (
+    "brand_marks",
+    "dom_skeleton_hash",
+    "exfil_endpoints",
+    "form_action_hosts",
+    "kind",
+    "script_hashes",
+    "sms_lure_template_hash",
+    "url_pattern_class",
+)
 
 # ---------------------------------------------------------------------------
 # Secret stripping
@@ -202,6 +235,123 @@ _LURE_WORDS = frozenset({
 })
 
 
+# ---------------------------------------------------------------------------
+# FLAME v1a static kit markers (TP-0067 AiTM catalog, reviewed 2026-04-02)
+# ---------------------------------------------------------------------------
+# Every constant below is a COMPLETE, verifiable value published in FLAME
+# TP-0067. Deliberately NOT seeded, per data-hygiene rules:
+#   * Sneaky 2FA base64 favicon SHA256 — FLAME publishes it truncated
+#     ("5d91563b..."). favicon_data_hash still detects data-URI favicons;
+#     the known-bad list stays empty until a complete hash is published.
+#   * Rockstar 2FA "car-themed" / FlowerStorm "botanical-themed" titles —
+#     FLAME describes the themes but publishes no complete titles. Only the
+#     complete Sneaky 2FA title "Gourmet Delights" is seeded.
+# Tycoon 2FA markers are HISTORICAL (takedown 2026-03-04) — backfill only.
+
+HISTORICAL_FAMILIES = frozenset({"tycoon-2fa"})
+
+# marker_name -> (regex, family_hint). family_hint feeds corpus_candidates'
+# marker_family_hints only — it never auto-assigns kit_family (suggest-only).
+_KIT_URI_MARKERS: list[tuple[str, re.Pattern, str | None]] = [
+    ("greatness-admin-uri",
+     re.compile(r"/admin/js/mj\.php", re.IGNORECASE), "greatness"),
+    ("rockstar-flowerstorm-next-php",
+     re.compile(r"(?<![\w.-])next\.php\b", re.IGNORECASE), "flowerstorm"),
+    ("modlishka-panel",
+     re.compile(r"/SayHello2Modlishka"), "modlishka"),
+    ("muraena-instrument",
+     re.compile(r"/instrument\b"), "muraena"),
+    ("chenlun-resource-config",
+     re.compile(r"ResourceRedConfig\.js|/ResourceConfig/urlConfig\.json"), "chenlun"),
+    ("evilginx-canary-js",
+     re.compile(r"/s/[0-9a-fA-F]{64}\.js\b"), "evilginx"),
+    ("greatness-httpd-grt",
+     re.compile(r"httpd\.grt", re.IGNORECASE), "greatness"),
+]
+
+# guid -> (marker_name, family_hint). Public kit-infrastructure constants.
+_KNOWN_APP_IDS: dict[str, tuple[str, str | None]] = {
+    # Rockstar 2FA / FlowerStorm Office365 app (Storm-1575 lineage)
+    "72782ba9-4490-4f03-8d82-562370ea3566": ("rockstar-flowerstorm-appid", "flowerstorm"),
+    # OfficeHome app ID — commonly appears in AiTM token replay
+    "4765445b-32c6-49b0-83e6-1d93765276ca": ("officehome-token-replay-appid", None),
+}
+
+# Contexts in which a GUID is an application/client identifier (public IOC),
+# never a victim secret. Unknown GUIDs found ONLY in these contexts become
+# corpus candidates.
+_APPID_CONTEXT_RE = re.compile(
+    r"(?:client_id|clientid|appId|app_id|applicationId|x-client-id)"
+    r"\s*[\"':=]\s*[\"']?"
+    r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"[\"']?"
+    r"|api://([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+    re.IGNORECASE,
+)
+
+_KNOWN_UA_MARKS: list[tuple[str, re.Pattern, str | None]] = [
+    # Rockstar 2FA / FlowerStorm hardcoded WebView UA
+    ("rockstar-flowerstorm-webview-ua",
+     re.compile(r"WebView/3\.0"), "flowerstorm"),
+]
+_UA_LITERAL_RE = re.compile(r"""['"]Mozilla/5\.0[^'"]{0,160}['"]""")
+
+_SOCKETIO_LIB_RE = re.compile(r"socket\.io", re.IGNORECASE)
+_SOCKETIO_CONNECT_RE = re.compile(r"\bio\s*\(\s*['\"]|io\.connect\s*\(", re.IGNORECASE)
+# Mamba 2FA Socket.IO relay events — only counted with a socket.io context
+# present, so generic words like "new-session" don't false-positive.
+_KNOWN_SOCKETIO_EVENTS = ("new-session", "password_command", "otp_command")
+_SOCKETIO_EVENT_RE = re.compile(
+    r"(?:emit|on)\s*\(\s*['\"](new-session|password_command|otp_command)['\"]")
+
+_TURNSTILE_ARTIFACTS: list[tuple[str, re.Pattern]] = [
+    ("turnstile-script", re.compile(r"challenges\.cloudflare\.com/turnstile", re.IGNORECASE)),
+    ("cf-turnstile-div", re.compile(r"cf-turnstile", re.IGNORECASE)),
+    ("turnstile-explicit", re.compile(r"Cloudflare\s+Turnstile", re.IGNORECASE)),
+]
+# Tycoon 2FA's page text (FLAME TP-0067). HISTORICAL — takedown 2026-03-04.
+_TYCOON_BROWSER_CHECKS_RE = re.compile(r"browser checks", re.IGNORECASE)
+
+_LOGIN_PASSWORD_RE = re.compile(
+    r"""<input\b[^>]*\btype\s*=\s*["']password["'][^>]*>""", re.IGNORECASE)
+
+_FAVICON_LINK_RE = re.compile(
+    r"""<link\b[^>]*\brel\s*=\s*["'](?:shortcut\s+)?icon["'][^>]*>""", re.IGNORECASE)
+_HREF_ATTR_RE = re.compile(r"""\bhref\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+
+_EMPTY_TAG_RE = re.compile(
+    r"<(span|b|i|em|strong|u|font|div|p)\s*>\s*</\1\s*>", re.IGNORECASE)
+# Sneaky 2FA: "empty HTML tags between characters" (TP-0067).
+_EMPTY_TAG_STUFFING_THRESHOLD = 8
+
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+# Only complete, verifiable titles are seeded — never invented ones.
+_KNOWN_KIT_TITLES: list[tuple[str, re.Pattern, str | None]] = [
+    ("sneaky2fa-gourmet-delights",
+     re.compile(r"^\s*gourmet delights\s*$", re.IGNORECASE), "sneaky-2fa"),
+]
+
+_REACT_ARTIFACTS: list[tuple[str, re.Pattern]] = [
+    # Darcula ships React client-side rendering (TP-0067).
+    ("react-dom-script", re.compile(r"react-dom(?:\.production|\.development)?\.min\.js|react-dom@", re.IGNORECASE)),
+    ("react-script", re.compile(r"(?<!dom)react(?:\.production|\.development)?\.min\.js", re.IGNORECASE)),
+    ("data-reactroot", re.compile(r"data-reactroot", re.IGNORECASE)),
+    ("react-devtools-hook", re.compile(r"__REACT_DEVTOOLS_GLOBAL_HOOK__")),
+    ("reactdom-render", re.compile(r"ReactDOM\.(createRoot|render|hydrate)")),
+    ("nextjs-chunks", re.compile(r"/_next/static/chunks/")),
+]
+
+_ANCHOR_HREF_RE = re.compile(
+    r"""<a\b[^>]*\bhref\s*=\s*["'](https?://[^"'<>\s]+)["']""", re.IGNORECASE)
+_IFRAME_SRC_RE = re.compile(
+    r"""<iframe\b[^>]*\bsrc\s*=\s*["'](https?://[^"'<>\s]+)["']""", re.IGNORECASE)
+_SCRIPT_SRC_RE = re.compile(
+    r"""<script\b[^>]*\bsrc\s*=\s*["']([^"'<>\s]+)["']""", re.IGNORECASE)
+_MAILTO_RE = re.compile(
+    r"""mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})""", re.IGNORECASE)
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
 def _host_of(url: str) -> str:
     try:
         return (urlparse(url).hostname or "").lower()
@@ -209,8 +359,9 @@ def _host_of(url: str) -> str:
         return ""
 
 
-def classify_url_pattern(url: str) -> str:
-    """Coarse URL shape class — stable across per-victim nonce rotation."""
+def _classify_url_pattern_v1(url: str) -> str:
+    """skfp-v1 URL classifier — frozen. Used for the v1 backfill projection;
+    do not change its behavior."""
     if not url:
         return "not_provided"
     clean = _strip_url_nonces(url)
@@ -235,6 +386,63 @@ def classify_url_pattern(url: str) -> str:
     return "standard"
 
 
+# FLAME v1a kit URL patterns (TP-0067). Static-text classes fire on the URL
+# itself; redirect-behavior classes need fetch-pipeline observations and
+# never fire from static text alone.
+_EVILGINX_LURE_RE = re.compile(r"/[A-Za-z]{8}(?:[/?#]|$)")
+_EVILGINX_CANARY_RE = re.compile(r"/s/[0-9a-fA-F]{64}\.js(?:[?#]|$)")
+_MAMBA_PATH_RE = re.compile(r"^/[mno]/$")
+_MAMBA_QUERY_RE = re.compile(r"^[A-Za-z0-9%+/_=-]{8,}$")
+_GREATNESS_ADMIN_PATH = "/admin/js/mj.php"
+_RICKROLL_IDS = ("dQw4w9WgXcQ",)
+
+
+def classify_url_pattern(url: str, observations: dict | None = None) -> str:
+    """Coarse URL shape class — stable across per-victim nonce rotation.
+
+    v2 adds five FLAME TP-0067 kit classes (checked before the v1
+    fallbacks; the v1 class is preserved separately as
+    ``url_pattern_class_v1``). Two redirect-behavior classes
+    (``evilginx-rickroll-redirect``, ``w3ll-wikipedia-antibot-redirect``)
+    are reserved for fetch-pipeline ``observations`` (``redirect_chain``)
+    and never fire from static URL text alone.
+    """
+    if not url:
+        return "not_provided"
+    clean = _strip_url_nonces(url)
+    host = _host_of(clean)
+    if not host:
+        return "unparseable"
+
+    # Fetch-pipeline behavior classes (dormant until observations exist).
+    if observations:
+        chain = observations.get("redirect_chain") or []
+        if any(any(rid in u for rid in _RICKROLL_IDS) or "rickroll" in u.lower()
+               for u in chain):
+            return "evilginx-rickroll-redirect"
+        if chain and "wikipedia.org" in _host_of(chain[-1]):
+            return "w3ll-wikipedia-antibot-redirect"
+
+    parts = urlparse(clean)
+    path = parts.path or "/"
+
+    # FLAME v1a kit URL classes (static).
+    if _EVILGINX_CANARY_RE.search(path):
+        return "evilginx-canary"          # Evilginx /s/<64hex>.js canary
+    if _MAMBA_PATH_RE.match(path) and _MAMBA_QUERY_RE.match(parts.query or ""):
+        return "mamba-relay-url"           # Mamba 2FA /{m,n,o}/?{Base64}
+    if _GREATNESS_ADMIN_PATH in path.lower():
+        return "greatness-admin-uri"       # Greatness /admin/js/mj.php
+    if host.endswith(".buzz"):
+        labels = host.split(".")
+        if max((len(lb) for lb in labels), default=0) >= 12:
+            return "nakedpages-buzz-domain"  # NakedPages .buzz long-name domains
+    if _EVILGINX_LURE_RE.search(path):
+        return "evilginx-lure-path"        # Evilginx 8-char alpha lure paths
+
+    return _classify_url_pattern_v1(url)
+
+
 def _normalize_lure_text(text: str) -> str:
     """Reduce smishing lure text to its template: amounts, names, dates and
     tracking numbers become placeholders so the same lure with different
@@ -247,13 +455,223 @@ def _normalize_lure_text(text: str) -> str:
     return t
 
 
-def extract_signals(html_text: str, url: str = "") -> dict:
-    """Extract the v1 signal set from kit HTML. Pure; no network.
+def _extract_kit_markers(raw_html: str, url: str = "") -> tuple[dict, list[str]]:
+    """Extract FLAME v1a kit markers from RAW HTML — BEFORE strip_secrets().
+
+    Returns (markers, family_hints). family_hints are kit-family names
+    suggested by the markers; they are informational only (suggest-only —
+    this module never assigns kit_family).
+
+    CRITICAL ORDERING: strip_secrets() redacts GUIDs (uuid pattern) and
+    long hex runs (long_hex pattern). The FlowerStorm Entra application ID
+    and Evilginx canary values would be erased by it, so every marker here
+    is matched against the raw page. Marker *names* (not raw values) enter
+    the hashed signal set; raw IOC values go to corpus_candidates.
+    """
+    html = raw_html or ""
+    page_host = _host_of(url)
+    markers: dict = {}
+    hints: set[str] = set()
+
+    # 1. kit_uri_markers — known phishing-kit URI path markers in HTML/JS
+    uri_hits = []
+    for name, rx, fam in _KIT_URI_MARKERS:
+        if rx.search(html):
+            uri_hits.append(name)
+            if fam:
+                hints.add(fam)
+    markers["kit_uri_markers"] = sorted(uri_hits)
+
+    # 2. turnstile_browser_checks — Cloudflare Turnstile artifacts
+    t_artifacts = sorted(n for n, rx in _TURNSTILE_ARTIFACTS if rx.search(html))
+    tycoon_text = bool(_TYCOON_BROWSER_CHECKS_RE.search(html))
+    turnstile_present = bool(t_artifacts)
+    markers["turnstile_browser_checks"] = {
+        "present": turnstile_present,
+        "artifacts": t_artifacts,
+        # Tycoon 2FA's "browser checks" page text — HISTORICAL (takedown 2026-03-04)
+        "tycoon_browser_checks_text": tycoon_text,
+    }
+    if turnstile_present and tycoon_text:
+        hints.add("tycoon-2fa")
+
+    # 3. kit_appid_marks — hardcoded Entra application IDs (marker names only)
+    lowered = html.lower()
+    appid_hits = []
+    for guid, (name, fam) in _KNOWN_APP_IDS.items():
+        if guid in lowered:
+            appid_hits.append(name)
+            if fam:
+                hints.add(fam)
+    markers["kit_appid_marks"] = sorted(appid_hits)
+
+    # 4. hardcoded_ua_marks — hardcoded User-Agent strings used by kits
+    ua_hits = []
+    for name, rx, fam in _KNOWN_UA_MARKS:
+        if rx.search(html):
+            ua_hits.append(name)
+            if fam:
+                hints.add(fam)
+    ua_literals = {u.strip("'\"") for u in _UA_LITERAL_RE.findall(html)}
+    if len(ua_literals) >= 2:
+        # Sneaky 2FA analog: distinct hardcoded UAs per auth step
+        # (Safari/iOS for login, Edge/Windows for resume).
+        ua_hits.append("multiple-hardcoded-uas")
+    markers["hardcoded_ua_marks"] = sorted(set(ua_hits))
+
+    # 5. socketio_kit_events — Mamba 2FA Socket.IO relay event names
+    sio_context = bool(_SOCKETIO_LIB_RE.search(html) or _SOCKETIO_CONNECT_RE.search(html))
+    sio_events = sorted(set(_SOCKETIO_EVENT_RE.findall(html))) if sio_context else []
+    markers["socketio_kit_events"] = sio_events
+    if sio_events:
+        hints.add("mamba-2fa")
+
+    # 6. no_turnstile_with_login — negative signal: login form, no Turnstile
+    # (Mamba 2FA explicitly ships NO Cloudflare Turnstile). Corroborating
+    # only — never a verdict driver on its own.
+    has_login = bool(_LOGIN_PASSWORD_RE.search(html))
+    markers["no_turnstile_with_login"] = has_login and not turnstile_present
+
+    # 7. favicon_data_hash — sha256 of inline/data-URI favicon, when present.
+    # known_bad stays False: FLAME publishes Sneaky 2FA's base64 favicon
+    # SHA256 truncated ("5d91563b..."), so no complete hash can be seeded.
+    favicon_sha = None
+    for lm in _FAVICON_LINK_RE.finditer(html):
+        hm = _HREF_ATTR_RE.search(lm.group(0))
+        if not hm:
+            continue
+        href = hm.group(1)
+        if href.lower().startswith("data:"):
+            parts = href.split(",", 1)
+            if len(parts) == 2 and parts[1]:
+                favicon_sha = _sha256_hex(parts[1])
+                break
+    markers["favicon_data_hash"] = {"sha256": favicon_sha, "known_bad": False}
+
+    # 8. empty_tag_stuffing — Sneaky 2FA: empty HTML tags between characters
+    empty_count = len(_EMPTY_TAG_RE.findall(html))
+    markers["empty_tag_stuffing"] = {
+        "present": empty_count >= _EMPTY_TAG_STUFFING_THRESHOLD,
+        "empty_tag_count": empty_count,
+    }
+
+    # 9. title_marks — kit page-title markers (complete titles only)
+    title_m = _TITLE_RE.search(html)
+    title_text = title_m.group(1).strip() if title_m else ""
+    title_hits = []
+    for name, rx, fam in _KNOWN_KIT_TITLES:
+        if title_text and rx.search(title_text):
+            title_hits.append(name)
+            if fam:
+                hints.add(fam)
+    markers["title_marks"] = sorted(title_hits)
+
+    # 10. react_csr — React client-side-rendering artifacts (Darcula)
+    r_artifacts = sorted(n for n, rx in _REACT_ARTIFACTS if rx.search(html))
+    markers["react_csr"] = {"present": bool(r_artifacts), "artifacts": r_artifacts}
+
+    # 11. anchor_exfil_hosts — exfil hosts in anchor hrefs (≠ page host)
+    anchor_hosts = set()
+    for m in _ANCHOR_HREF_RE.finditer(html):
+        h = _host_of(m.group(1))
+        if h and h != page_host:
+            anchor_hosts.add(h)
+    markers["anchor_exfil_hosts"] = sorted(anchor_hosts)
+
+    # 12. email_hosts — email-address exfil hosts (mailto:), ≠ page host
+    email_hosts = set()
+    for m in _MAILTO_RE.finditer(html):
+        d = m.group(1).split("@")[-1].lower()
+        if d and d != page_host:
+            email_hosts.add(d)
+    markers["email_hosts"] = sorted(email_hosts)
+
+    return markers, sorted(hints)
+
+
+def extract_corpus_candidates(html: str, url: str = "",
+                              signals: dict | None = None) -> dict:
+    """Structured TI-corpus load candidates — NOT hashed into the fingerprint.
+
+    Emitted alongside each fingerprint so corpus loaders can review and
+    ingest them later. THIS MODULE WRITES TO NO LIVE STORE; callers decide
+    what to persist. Only kit-infrastructure values are included:
+
+      * app_ids: GUIDs in Entra-style auth contexts (client_id=, appId=,
+        api://…) plus any known kit App IDs found in the page. A bare GUID
+        in prose is NOT a candidate — context is required.
+      * exfil_hosts: external hosts from anchors, iframes, form actions,
+        and the exfil_endpoints signal (folded in when signals given).
+      * email_hosts / kit_uri_markers / socketio_hosts: as extracted.
+      * marker_family_hints: kit families suggested by markers
+        (suggest-only; "tycoon-2fa" hints are historical — see
+        HISTORICAL_FAMILIES).
+
+    Victim-shaped values (passwords, tokens, personal emails as identifiers)
+    are never candidates.
+    """
+    raw = html or ""
+    page_host = _host_of(url)
+    markers, hints = _extract_kit_markers(raw, url)
+
+    app_ids: set[str] = set()
+    lowered = raw.lower()
+    for guid in _KNOWN_APP_IDS:
+        if guid in lowered:
+            app_ids.add(guid)
+    for m in _APPID_CONTEXT_RE.finditer(raw):
+        app_ids.add((m.group(1) or m.group(2)).lower())
+
+    exfil_hosts: set[str] = set()
+    for rx in (_ANCHOR_HREF_RE, _IFRAME_SRC_RE):
+        for m in rx.finditer(raw):
+            h = _host_of(m.group(1))
+            if h and h != page_host:
+                exfil_hosts.add(h)
+    if signals:
+        for key in ("form_action_hosts", "anchor_exfil_hosts", "exfil_endpoints"):
+            for h in signals.get(key) or []:
+                if h and h != page_host:
+                    exfil_hosts.add(h)
+
+    socketio_hosts: set[str] = set()
+    if markers["socketio_kit_events"] or _SOCKETIO_LIB_RE.search(raw):
+        for m in _SCRIPT_SRC_RE.finditer(raw):
+            if "socket.io" in m.group(1).lower():
+                h = _host_of(m.group(1))
+                if h:
+                    socketio_hosts.add(h)
+
+    return {
+        "app_ids": sorted(app_ids),
+        "email_hosts": markers["email_hosts"],
+        "exfil_hosts": sorted(exfil_hosts),
+        "kit_uri_markers": markers["kit_uri_markers"],
+        "marker_family_hints": hints,
+        "socketio_hosts": sorted(socketio_hosts),
+    }
+
+
+def extract_signals(html_text: str, url: str = "",
+                    observations: dict | None = None) -> dict:
+    """Extract the v2 signal set from kit HTML. Pure; no network.
+
+    ORDERING (hard rule): FLAME v1a kit markers are extracted from the RAW
+    HTML FIRST — strip_secrets() would redact the GUIDs and long hex runs
+    they depend on (FlowerStorm App ID, Evilginx canary). The v1 signal
+    pipeline below it is byte-identical to skfp-v1 (see
+    v1_signal_projection()); only additive v2 fields follow it.
+
+    ``observations`` is the future fetch-pipeline hook (redirect chains,
+    TLS facts). When None, behavior is static-HTML-only.
 
     Returned dict is JSON-canonical (sorted keys) and fully stripped of
     secrets — safe to hash, log (at low verbosity), and store.
     """
-    clean = strip_secrets(html_text or "")
+    raw = html_text or ""
+    markers, _hints = _extract_kit_markers(raw, url)
+
+    clean = strip_secrets(raw)
     parser = _SkeletonParser()
     try:
         parser.feed(clean)
@@ -285,7 +703,7 @@ def extract_signals(html_text: str, url: str = "") -> dict:
 
     lure_hash = _sha256_hex(_normalize_lure_text(" ".join(parser.visible_text)))
 
-    return {
+    signals = {
         "brand_marks": brands,
         "dom_skeleton_hash": _sha256_hex("".join(parser.parts)),
         "exfil_endpoints": sorted(exfil),
@@ -294,26 +712,57 @@ def extract_signals(html_text: str, url: str = "") -> dict:
         "kind": "kit",
         "script_hashes": sorted(set(script_hashes)),
         "sms_lure_template_hash": lure_hash,
-        "url_pattern_class": classify_url_pattern(url),
+        "url_pattern_class": classify_url_pattern(url, observations),
+        # v1 fallback class — feeds v1_signal_projection() for the
+        # dual-version backfill (no silent ID churn on upgrade).
+        "url_pattern_class_v1": _classify_url_pattern_v1(url),
     }
+    # FLAME v1a additions (additive only — v1 keys above are untouched).
+    signals.update(markers)
+    return signals
 
 
 # ---------------------------------------------------------------------------
 # Fingerprint IDs
 # ---------------------------------------------------------------------------
-def fingerprint_id(signals: dict, kind: str = "kit") -> str:
+def v1_signal_projection(signals: dict) -> dict:
+    """Project a v2 signal dict back to the exact skfp-v1 schema.
+
+    Dual-version backfill: the v1 digest of a re-sighted kit must equal the
+    ID stored before the v2 upgrade, so the sighting links to the same
+    family record instead of silently forking a new fingerprint ID. The v1
+    extraction pipeline is unchanged by v1a (markers are additive), and the
+    v1 URL class is carried in every v2 signal dict as
+    ``url_pattern_class_v1`` for exactly this purpose.
+    """
+    proj = {k: signals.get(k) for k in V1_SIGNAL_KEYS}
+    proj["url_pattern_class"] = signals.get("url_pattern_class_v1")
+    proj["fingerprint_version"] = FINGERPRINT_VERSION_V1
+    return proj
+
+
+def fingerprint_id(signals: dict, kind: str = "kit",
+                   version: str | None = None) -> str:
     """Stable ID: ``kit_<sha256>`` over the canonical feature vector.
 
     Same kit ⇒ same ID across sightings. ``kind="malware"`` is the planned
     extension point (spec §8) and yields ``malware_<sha256>``; v1 callers
     must pass ``kind="kit"``.
+
+    ``version`` selects the digest namespace and defaults to the signal
+    dict's declared ``fingerprint_version`` (falling back to the current
+    ``FINGERPRINT_VERSION``). skfp-v1 rows hash under "skfp-v1" and stay
+    valid; new fingerprints hash under "skfp-v2".
     """
     if kind == "malware":
         prefix = MALWARE_ID_PREFIX
     else:
         prefix = KIT_ID_PREFIX
+    ver = version or signals.get("fingerprint_version") or FINGERPRINT_VERSION
+    if ver not in SUPPORTED_FINGERPRINT_VERSIONS:
+        raise ValueError(f"unsupported fingerprint version: {ver!r}")
     canonical = json.dumps(signals, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256((FINGERPRINT_VERSION + ":" + canonical).encode("utf-8")).hexdigest()
+    digest = hashlib.sha256((ver + ":" + canonical).encode("utf-8")).hexdigest()
     return f"{prefix}{digest}"
 
 
@@ -326,10 +775,17 @@ def valid_fingerprint_id(value: str) -> bool:
 # Family auto-suggest (deterministic — never "approved")
 # ---------------------------------------------------------------------------
 # Signal weights for overlap scoring. The DOM skeleton is the strongest
-# kit-identity signal; shared scripts next; hosts/brands are corroborating.
+# kit-identity signal; hardcoded Entra App IDs are near-deterministic kit
+# constants (FLAME TP-0067); shared scripts next; hosts/brands/markers are
+# corroborating.
 _SIGNAL_WEIGHTS = {
     "dom_skeleton_hash": 3,
+    "kit_appid_marks": 3,    # per shared App ID marker (FLAME v1a)
     "script_hashes": 2,      # per shared hash
+    "kit_uri_markers": 2,    # per shared URI marker (FLAME v1a)
+    "hardcoded_ua_marks": 2,  # per shared UA marker (FLAME v1a)
+    "socketio_kit_events": 2,  # per shared Socket.IO event (FLAME v1a)
+    "title_marks": 2,        # per shared title marker (FLAME v1a)
     "form_action_hosts": 1,  # per shared host
     "exfil_endpoints": 1,    # per shared host
     "brand_marks": 1,        # per shared brand
@@ -348,11 +804,21 @@ def _overlap_score(a: dict, b: dict) -> tuple[int, int]:
         comparable += 1
         if a["dom_skeleton_hash"] == b["dom_skeleton_hash"]:
             score += _SIGNAL_WEIGHTS["dom_skeleton_hash"]
-    for key in ("script_hashes", "form_action_hosts", "exfil_endpoints", "brand_marks"):
+    for key in ("script_hashes", "form_action_hosts", "exfil_endpoints",
+                "brand_marks", "kit_uri_markers", "kit_appid_marks",
+                "hardcoded_ua_marks", "socketio_kit_events", "title_marks"):
         sa, sb = set(a.get(key) or []), set(b.get(key) or [])
         if sa or sb:
             comparable += 1
             score += len(sa & sb) * _SIGNAL_WEIGHTS[key]
+    # Presence-style dict markers: 1 point when both pages exhibit them.
+    for key in ("turnstile_browser_checks", "react_csr"):
+        pa = bool((a.get(key) or {}).get("present"))
+        pb = bool((b.get(key) or {}).get("present"))
+        if pa or pb:
+            comparable += 1
+            if pa and pb:
+                score += 1
     return score, comparable
 
 

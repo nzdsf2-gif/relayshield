@@ -8509,3 +8509,99 @@ migrated, or others moved too, and the shared role's current policy counts. Read
     AWS_PROFILE=relayshield aws iam list-attached-role-policies \
       --role-name relayshield-breach-check-role-1sapnwdl --no-cli-pager \
       --query 'length(AttachedPolicies)' --output text
+
+## SESSION 2026-09-25: THE SECRET-SCAN-TEXT x402 FIX AND THE MANIFEST GAP ARE ON MAIN NOW.
+## MOST OF `claude/gallant-hawking-4oerzg` IS STILL NOT. READ THIS BEFORE TRUSTING THAT BRANCH.
+
+**Started from a user claim to verify**: *"secret-scan-text v2 is not on main -- `X402_V2_ENABLED_
+PATHS` has no entry and the spec still says `x402_version: 1`. Presumably unpushed or on a
+branch."* Checked directly against `origin/main` (then `c2dcc42`) rather than trusted: **both
+halves confirmed true**, and the "presumably on a branch" half was exactly right --
+`839e709` ("Move secret-scan-text onto x402 V2 for real, not just in the spec") already fixed
+it, sitting on `origin/claude/gallant-hawking-4oerzg`, pushed to GitHub, never merged.
+
+**That same read surfaced something bigger: an entire unmerged session's worth of work sitting on
+that branch, including its own already-regenerated Top 10** (commit `bde2a2b`, "Record this
+session's fixes and regenerate the Top 10 against actual code state", dated 2026-09-25). That
+write-up is accurate and is the best current status of several open items -- an OpenAI partner
+key that was never actually issued (the issuance script ran before a merge, so it hit
+file-not-found on Andrew's Mac), and the finding that the x402 manifest gap was WORSE than
+previously recorded: `relayshield_agentic_api.py` has NO manifest handler of its own at all, so
+it was never just `agent-bait-scan` missing, all three of its priced endpoints
+(`agent-bait-scan`, `mcp-registry-risk`, `prompt-injection-breach`) were invisible to every x402
+indexer. **None of that write-up is on main's CLAUDE.md** -- it only exists on the branch. This
+section is the record on main; treat `bde2a2b`'s content as accurate but not yet delivered here.
+
+### WHAT ACTUALLY SHIPPED TO `origin/main` THIS SESSION, two commits, both tested
+
+**1. `1b1f6ff` -- cherry-picked ONLY `839e709`, not the whole branch.** The user asked to merge
+that one specific fix. My first attempt did `git merge --no-ff origin/claude/gallant-hawking-
+4oerzg`, which pulled in the OpenAI partner key script, Muse connector changes, and unrelated
+CLAUDE.md notes along with it -- caught before committing, `git reset --hard` back to
+`origin/main`, redone as a clean `git cherry-pick 839e709`. **Match the scope of the request; a
+branch is not a commit.** `secret-scan-text` is now in `X402_V2_ENABLED_PATHS` in
+`relayshield_api.py` and the spec says `x402_version: 2`. `test_x402_version_agreement.py` (that
+commit's own guard) passes.
+
+**2. `3ad5641` -- the manifest fold-in, written fresh this session.** It did not exist as code
+anywhere reachable (the branch's own `bde2a2b` write-up correctly called it "not fixed this
+session; now item 4"). `handle_x402_manifest()` in `relayshield_api.py` only ever iterated its
+own `PAYG_PRICE_UNITS`; it now also reads `relayshield_agentic_api.py`'s table via a
+function-local `import relayshield_agentic_api` (precedented by `relayshield_mpp_settlement.py`
+already importing that same module -- the file's "deployment package independent" comment is a
+one-way rule about *it* not importing `relayshield_api.py`, not the reverse). New shared helper
+`_x402_manifest_entries()` so both tables go through one entry-building path rather than two.
+`test_x402_manifest_completeness.py` (5 tests) executes the real handler with boto3 stubbed and
+was proven against the regression by `git stash` on `relayshield_api.py` alone: 3 tests failed
+with the exact three missing URLs before the fix, all green after restoring.
+
+**Both are now on `origin/main` (`git log --oneline -2 origin/main` should show `3ad5641`,
+`1b1f6ff`) and will deploy on the next Lambda push per the standard `deploy_lambdas.yml`
+pipeline -- no separate deploy step needed.**
+
+### WHAT IS STILL ONLY ON `origin/claude/gallant-hawking-4oerzg`, NOT ON MAIN
+
+Four commits past `839e709` never made it into this session's push, because the user's request
+was scoped to one specific fix plus the manifest gap, not "merge the branch":
+
+    72d085f  Fix Muse partner-key gate reaching the wrong route, price and document
+             incident-timeline, and correct the Bundle B duplicate-entity record
+    dd44aa5  Add the missing /v1/metered/dependency-risk price card to the landing page
+    add6b75  Build the general METERED_CREDIT_COSTS/landing-page guard; issue an OpenAI
+             partner key alongside Muse's, generalizing the issuance tool
+    bde2a2b  Record this session's fixes and regenerate the Top 10 against actual code state
+
+**Concretely absent from main right now**: `tools/setup_partner_key.py` does not exist here, so
+the OpenAI partner key has still not been issued to anyone. `relayshield_developer_signup.py`,
+`cloudflare_worker_miniapp.js`, `miniapp_routes.json`, `test_dependency_risk.py`,
+`test_metered_pricing_landing_page.py` and `test_muse_connector_features.py` all carry changes on
+that branch that are not reflected here. **Checked for conflict risk before writing this down,
+not assumed**: `git diff main origin/claude/gallant-hawking-4oerzg -- relayshield_api.py` shows
+that branch's copy of `handle_x402_manifest()` is simply the OLD (pre-fix) version -- it branched
+before this session's fix existed, so there is no competing edit to that function waiting to
+collide, only an absence. A future merge of that branch should apply cleanly there. Whether the
+rest of the branch (the Muse route/price fix, the dependency-risk card, the landing-page guard)
+still applies cleanly against current main has NOT been checked.
+
+**Next session's first move: `git fetch --all --prune` then decide what to do with the rest of
+`claude/gallant-hawking-4oerzg`** -- merge it (after review, since the OpenAI/Muse changes were
+never independently verified here), or treat it as superseded and extract only what's still
+correct. Do not assume it is either fully live or fully stale; check it, per this file's own
+"a doc recording an open item is a lead, not a fact" rule, which applies to an unmerged branch's
+commits exactly as it applies to a status paragraph.
+
+### ITEM 3 OF THE USER'S THREE-PART REQUEST -- NOT CONFIRMED RUN
+
+`sh tools/setup_breach_cache.sh` (creates `relayshield_breach_cache` in DynamoDB) was handed to
+Andrew as an `ANDREW RUNS THIS` block, because this container's AWS credentials are dead
+placeholders. **No confirmation it has been run.** This is the first thing to check next session
+-- the breach-check code ships inert (falls through to a live HIBP call every time) without it,
+exactly as recorded in the 2026-09-22 section on this same table.
+
+### ONE MORE BRANCH SEEN IN PASSING, NOT EXAMINED
+
+`git branch -r --sort=-committerdate` this session listed `origin/feature/scam-kit-fingerprinting`
+as the single most recently committed branch in the whole repo, ahead of `gallant-hawking-4oerzg`.
+**Not opened, not read.** Worth a look before assuming scam-kit fingerprinting (recorded above as
+unscoped, item 1 of the four 2026-09-23 roadmap additions) is still just a roadmap entry -- it may
+no longer be.

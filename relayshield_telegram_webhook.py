@@ -2218,6 +2218,10 @@ _BOT_COMMANDS_FREE = [
     ("verify", "Callback rule, OTP rule, family safe word"),
     ("otp", "Unexpected OTP guidance"),
     ("scan", "Scan a suspicious link for malware or phishing"),
+    # Added alongside _BOT_COMMANDS_BASE's own "app" entry: the Mini App is
+    # KEYLESS for every plan and none, so the free tier's native menu must
+    # list it too, or a free user has no way to discover it exists.
+    ("app", "Open RelayShield IDCheck - scan a link or wallet address"),
     ("plan", "Your license type"),
 ]
 
@@ -6016,7 +6020,13 @@ def route_active_command(chat_id: int, text: str, user: dict) -> None:
                          # quickstart is orientation, not a remediation tool.
                          # Gating it would paywall the explanation of what the
                          # free tier can already do.
-                         "quickstart"}
+                         "quickstart",
+                         # app/idcheck/check open the Mini App, which is KEYLESS
+                         # by design (see the comment on _BOT_COMMANDS_BASE).
+                         # Missing here, a free-tier user typing /app got this
+                         # paywall instead of the Mini App button, which is the
+                         # opposite of the intended behavior.
+                         "app", "idcheck", "check"}
         base_cmd = cmd.split()[0] if cmd else ""
         if base_cmd not in _FREE_ALLOWED:
             send_message(

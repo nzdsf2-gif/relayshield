@@ -952,9 +952,9 @@ async function runScamkitFingerprint() {
 }
 
 const SCAMKIT_SAMPLES = {
-  tycoon: '<!DOCTYPE html><html><head><title>Security Check</title></head><body><div class="cf-turnstile">this page is running browser checks to ensure your security</div><script src="https://challenges.cloudflare.com/turnstile/v0/api.js"><\/script><form action="/verify"><input type="text" name="email" placeholder="Email"><\/form><\/body><\/html>',
-  mamba: '<!DOCTYPE html><html><head><title>Account Login</title></head><body><script src="/socket.io/socket.io.js"><\/script><script>var socket=io();socket.emit(\'new-session\',{u:1});socket.on(\'password_command\',function(d){});socket.on(\'otp_command\',function(d){});<\/script><form><input type="password" name="p"><input type="text" name="otp"><\/form><\/body><\/html>',
-  rockstar: '<!DOCTYPE html><html><head><title>Sign in to your account</title></head><body><script>var appId="72782ba9-a1b2-c3d4-e5f6-562370ea3566";<\/script><div id="login"><h1>Microsoft</h1><input type="email" placeholder="Email"><\/div><\/body><\/html>'
+  tycoon: '<!DOCTYPE html><html><head><title>Security Check</title></head><body><div class="cf-turnstile">this page is running browser checks to ensure your security</div><form action="/verify"><input type="text" name="email" placeholder="Email"></form></body></html>',
+  mamba: '<!DOCTYPE html><html><head><title>Account Login</title></head><body><div data-socketio="true" data-events="new-session,password_command,otp_command"></div><form><input type="password" name="p"><input type="text" name="otp"></form></body></html>',
+  rockstar: '<!DOCTYPE html><html><head><title>Sign in to your account</title></head><body><div data-entra-app="72782ba9-a1b2-c3d4-e5f6-562370ea3566"></div><div id="login"><h1>Microsoft</h1><input type="email" placeholder="Email"></div></body></html>'
 };
 
 async function runScamkitSample(family) {

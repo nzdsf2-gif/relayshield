@@ -507,7 +507,16 @@ function renderSupplyChain(data) {
 }
 
 function renderScamkitFingerprint(data) {
-  if (data.error) return `<div class="error">Error: ${data.error}</div>`;
+  if (data.error) {
+    const raw = String(data.error || '');
+    let friendly = 'Could not fingerprint that URL.';
+    if (/dns|resolution|fetch|static page|target blocked/i.test(raw)) {
+      friendly = 'Could not retrieve that page — it may be offline or blocking automated fetches. Try a live URL.';
+    } else if (/html/i.test(raw)) {
+      friendly = 'Could not extract kit code from that page. For JavaScript-heavy kits, paste the page HTML source directly.';
+    }
+    return `<div class="error">${friendly}</div>`;
+  }
   const kitId = data.kit_id || 'unknown';
   const family = data.family_name || 'unclassified';
   const status = data.family_status || 'suggested';
@@ -882,14 +891,14 @@ footer a{color:#00B5A5;text-decoration:none}
     </div>
   </div>
 
-</div>
+  </div>
 
   <div id="scamkit" class="panel">
     <p class="panel-desc">Fingerprint phishing kits by their code — get a deterministic <code style="background:#1e3a5f;padding:2px 6px;border-radius:4px;font-size:12px">kit_&lt;sha256&gt;</code> ID, suggested family name, extracted indicators, and redirect chain. Match against known kits or scan a full campaign (up to 25 indicators).</p>
     <div style="display:flex;gap:8px;margin-bottom:16px">
-      <button id="scamkit-tab-fp" class="tab active" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('fingerprint',this)">Fingerprint — $0.50</button>
-      <button id="scamkit-tab-match" class="tab" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('match',this)">Match — $0.10</button>
-      <button id="scamkit-tab-scan" class="tab" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('scan',this)">Campaign Scan — $5.50 flat</button>
+      <button id="scamkit-tab-fp" class="tab active" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('fingerprint',this)">Fingerprint</button>
+      <button id="scamkit-tab-match" class="tab" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('match',this)">Match</button>
+      <button id="scamkit-tab-scan" class="tab" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('scan',this)">Campaign Scan</button>
     </div>
     <div id="scamkit-fingerprint" class="scamkit-mode">
       <div class="input-row">
@@ -913,6 +922,8 @@ footer a{color:#00B5A5;text-decoration:none}
       <div id="scamkit-scan-result"></div>
     </div>
   </div>
+
+</div>
 
 <footer>
   RelayShield Threat Intelligence &mdash; <a href="https://api.relayshield.net/developers">api.relayshield.net/developers</a> &mdash; $499/month TI Starter

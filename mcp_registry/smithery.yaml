@@ -1,8 +1,29 @@
 # Copy this to the ROOT of the MCP server's own repository (~/mcp-live), not here.
 #
 # =============================================================================
-# REWRITTEN 2026-09-09. IT NOW DESCRIBES THE HOSTED SERVER, AND THE CLI READS
-# ALMOST NONE OF THIS FILE.
+# REPOINTED 2026-09-26. IT NOW TARGETS THE DEDICATED FREE/KEYLESS SPACE, NOT
+# THE BUNDLE D AGENTIC-ATTACK-SURFACE SPACE.
+# =============================================================================
+#
+# Bundle D's Space answers a keyless call with pricing, not a verdict --
+# correct for a paid product, wrong for the first thing a Smithery browser
+# tries. relayshieldadmin/relayshield-free-mcp is a SEPARATE Space built for
+# exactly this: check_link, check_wallet and check_email are genuinely
+# keyless (a real answer, not a price), check_breach needs a key and says so
+# rather than failing silently. That is the self-serve first use a directory
+# listing needs, and it is the same artefact FD-14 (OpenAI) needs too -- one
+# hosted URL for both, per FD-15.
+#
+# ALSO NEW: THIS SERVER SPEAKS STREAMABLE HTTP, NOT GRADIO'S SSE MOUNT. The
+# Bundle D Space is a Gradio app with mcp_server=True, mounted at
+# /gradio_api/mcp/sse. This one exposes a plain /mcp endpoint over the MCP
+# spec's Streamable HTTP transport (POST, not a long-lived GET stream) --
+# different framework, different path, different check. tools/check_hf_space.py
+# has a SEPARATE probe function for it; do not reuse the Gradio one.
+#
+# =============================================================================
+# REWRITTEN 2026-09-09 (kept below). IT DESCRIBES A HOSTED SERVER, AND THE CLI
+# READS ALMOST NONE OF THIS FILE.
 # =============================================================================
 #
 # Two separate corrections, and the second one is the surprise.
@@ -35,18 +56,21 @@
 # HOW A HOSTED SERVER IS ACTUALLY PUBLISHED, from the CLI's own README:
 #
 #     smithery auth login
-#     smithery mcp publish https://relayshieldadmin-relayshield-agentic-attack-surface.hf.space/gradio_api/mcp/sse -n relayshield/relayshield
+#     smithery mcp publish https://relayshieldadmin-relayshield-free-mcp.hf.space/mcp -n relayshield/relayshield
 #
 #   The auth step is not optional and is not "you logged in last time" -- tokens
 #   expire, and omitting the login step is exactly what cost a round on
 #   mcp-publisher. The cost of a redundant login is three seconds.
 #
-# THE URL IS WATCHED. `tools/check_hf_space.py` probes this exact path on both
-# Spaces every six hours from .github/workflows/hf_space_watch.yml and opens an
-# issue when it stops streaming. Publishing a URL that nothing watches is the
-# quiet-alarm failure with an audience, and test_miniapp.py's sibling check pins
-# the URL in this file against the one the watcher probes, because two files that
-# must agree with nothing checking them is the shape this repo keeps paying for.
+# THE URL IS WATCHED, and this one is NEW as of 2026-09-26 -- verify it fires
+# before trusting it on a schedule. `tools/check_hf_space.py --only free-mcp`
+# probes this exact URL with a real MCP `initialize` request; run it once from
+# somewhere that can reach hf.space (this repo's own container cannot) before
+# it goes into `.github/workflows/hf_space_watch.yml`'s unattended run.
+# Publishing a URL that nothing watches is the quiet-alarm failure with an
+# audience, and test_hosted_mcp_pointer.py pins the URL in this file against
+# the one the watcher probes, because two files that must agree with nothing
+# checking them is the shape this repo keeps paying for.
 
 name: relayshield
 target: remote
@@ -55,27 +79,28 @@ target: remote
 
 displayName: RelayShield
 description: >-
-  Screen what an agent is about to trust. Breach, SIM-swap, infostealer,
-  domain-lookalike, OAuth-watchlist and MCP-registry-risk checks, plus prompt
-  injection, tech-stack CVE and agent-bait scanning, against
-  identity-compromise and criminal-source threat intelligence.
+  Free, keyless checks for a link, a crypto wallet address, or a suspicious
+  email's signals -- before an agent or a person trusts any of them. Breach
+  lookup available with a free API key.
 homepage: https://api.relayshield.net/developers?source=mcp-registry
 license: MIT
 
-# The SAME URL the AWS Marketplace entity registers as Bundle D's EndpointUrl
-# (ApiType: MCP_SERVER), on the PUBLIC Space rather than the -aws one. The -aws
-# Space runs the same code with AWS_MARKETPLACE_MODE=true, which scrubs every
-# reference to the self-serve signup page because AWS's Tier-1 audit treats a
-# reachable link to an external payment page as a violation. A Smithery visitor
-# is not an AWS buyer and should see the signup page, so they get the public one.
+# A DIFFERENT Space from Bundle D's agentic-attack-surface, deliberately.
+# That Space answers a keyless call with a price, not a verdict -- correct for
+# a paid product, wrong for the first thing a directory visitor tries. This
+# Space's check_link/check_wallet/check_email tools are genuinely keyless,
+# which is the self-serve first use a listing needs. It also speaks the MCP
+# spec's Streamable HTTP transport (POST to /mcp), not Gradio's SSE mount --
+# see tools/check_hf_space.py's check_streamable() for why that needs its own
+# probe rather than reusing the Gradio one.
 remote:
-  url: https://relayshieldadmin-relayshield-agentic-attack-surface.hf.space/gradio_api/mcp/sse
-  transport: sse
+  url: https://relayshieldadmin-relayshield-free-mcp.hf.space/mcp
+  transport: streamable-http
 
-# Keyless by design. The server answers without a key and returns its payment
-# requirements, which is a usable discovery mode rather than an error. A listing
-# that demands a key before the first call blocks every trial, which is the whole
-# point of being in a directory.
+# Keyless by design for three of the four tools. check_breach needs a key and
+# returns setup instructions rather than failing silently without one -- a
+# listing that demands a key before the FIRST call blocks every trial, which
+# is the whole point of being in a directory.
 configSchema:
   type: object
   properties:
@@ -83,5 +108,6 @@ configSchema:
       type: string
       title: RelayShield API key (optional)
       description: >-
-        Optional. Free tier at api.relayshield.net/developers. Without it the
-        server still answers and returns pricing.
+        Optional, only needed for check_breach. Free tier at
+        api.relayshield.net/developers. The other three tools work with no key
+        at all.

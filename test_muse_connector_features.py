@@ -79,20 +79,30 @@ class BatchLinkCheck(unittest.TestCase):
     def setUp(self):
         self.gsb_calls = []
 
-    def _no_upstreams(self, flagged=()):
-        """Patch the three per-domain upstreams. Records GSB call count."""
+    def _no_upstreams(self, flagged=(), flagged_urls=()):
+        """Patch the four per-domain/per-url upstreams. Records GSB call count.
+
+        _gsb_flagged_exact must be patched here too, alongside
+        _gsb_flagged_domains -- without it, this fake key ("k") would drive a
+        REAL network call to Safe Browsing on every test that runs the real
+        handler, which is exactly the kind of thing that turns a fast test
+        suite flaky rather than a defect in the fix itself.
+        """
         def fake_gsb(domains, key):
             self.gsb_calls.append(list(domains))
             return set(flagged)
+        def fake_gsb_exact(urls, key):
+            return set(flagged_urls)
         return (
             unittest.mock.patch.object(api, "_gsb_flagged_domains", fake_gsb),
+            unittest.mock.patch.object(api, "_gsb_flagged_exact", fake_gsb_exact),
             unittest.mock.patch.object(api, "_gsb_api_key", lambda: "k"),
             unittest.mock.patch.object(api, "_rdap_registration_age_days", lambda d: None),
             unittest.mock.patch.object(api, "dynamodb", _empty_ddb()),
         )
 
-    def _run(self, params, flagged=()):
-        patches = self._no_upstreams(flagged)
+    def _run(self, params, flagged=(), flagged_urls=()):
+        patches = self._no_upstreams(flagged, flagged_urls)
         for p in patches:
             p.start()
         try:
@@ -141,6 +151,39 @@ class BatchLinkCheck(unittest.TestCase):
         r = self._run({"urls": urls})
         self.assertEqual(r["statusCode"], 400)
         self.assertIn("at most", body(r)["error"])
+
+    def test_an_exact_url_match_flags_only_that_url_not_its_siblings(self):
+        """The regression this fix exists for: found by running check_link
+        against Google's own testsafebrowsing.appspot.com canary, which is
+        deliberately clean at the domain root and flagged only at
+        /s/malware.html. A domain-only check reports it as unknown forever.
+
+        Two URLs share a clean domain; only one is exactly flagged. They must
+        NOT get the same result -- that would mean the per-domain dict got
+        mutated and leaked across siblings.
+        """
+        d = body(self._run(
+            {"urls": ["https://clean.example/s/malware.html", "https://clean.example/other"]},
+            flagged_urls=("https://clean.example/s/malware.html",),
+        ))["data"]
+        by = {x["target"]: x for x in d["results"]}
+        self.assertEqual(by["https://clean.example/s/malware.html"]["level"], "high")
+        self.assertTrue(by["https://clean.example/s/malware.html"]["flagged"])
+        self.assertEqual(by["https://clean.example/other"]["level"], "unknown")
+        self.assertFalse(by["https://clean.example/other"]["flagged"])
+        self.assertEqual(d["counts"]["flagged"], 1)
+
+    def test_an_already_flagged_domain_is_not_double_counted_by_exact_match(self):
+        """A domain-level flag already sets flagged=True; an exact-url match
+        on the same URL must not need to fire for the result to be correct,
+        and must not corrupt it if it does."""
+        d = body(self._run(
+            {"urls": ["https://bad.com/a"]},
+            flagged=("bad.com",),
+            flagged_urls=("https://bad.com/a",),
+        ))["data"]
+        self.assertEqual(d["results"][0]["level"], "high")
+        self.assertEqual(d["counts"]["flagged"], 1)
 
     def test_the_single_url_form_is_unchanged(self):
         """Every existing caller -- the widget, the bot, the Mini App -- sends
@@ -475,6 +518,107 @@ class GsbBatching(unittest.TestCase):
                                         lambda ds, k: {"bad.com"}):
             self.assertTrue(api._check_gsb("bad.com", "k"))
             self.assertFalse(api._check_gsb("ok.com", "k"))
+
+
+class GsbExactUrl(unittest.TestCase):
+    """_gsb_flagged_exact: the fix for the domain-root-only bug found by
+    running check_link against Google's own testsafebrowsing.appspot.com
+    canary and getting 'unknown' back for a URL Google itself flags."""
+
+    def test_exact_urls_are_sent_literally_not_as_domain_roots(self):
+        sent = []
+
+        class FakeResp:
+            def __enter__(s):
+                return s
+            def __exit__(s, *a):
+                return False
+            def read(s):
+                return json.dumps({"matches": []}).encode()
+
+        def fake_urlopen(req, timeout=None):
+            sent.append(json.loads(req.data))
+            return FakeResp()
+
+        with unittest.mock.patch.object(api.urllib.request, "urlopen", fake_urlopen):
+            api._gsb_flagged_exact(
+                ["https://testsafebrowsing.appspot.com/s/malware.html"], "k")
+        self.assertEqual(len(sent), 1)
+        urls = [e["url"] for e in sent[0]["threatInfo"]["threatEntries"]]
+        self.assertEqual(urls, ["https://testsafebrowsing.appspot.com/s/malware.html"])
+
+    def test_a_match_on_the_exact_url_is_returned(self):
+        class FakeResp:
+            def __enter__(s):
+                return s
+            def __exit__(s, *a):
+                return False
+            def read(s):
+                return json.dumps({"matches": [
+                    {"threat": {"url": "https://x.com/bad"}}]}).encode()
+
+        with unittest.mock.patch.object(api.urllib.request, "urlopen",
+                                        lambda r, timeout=None: FakeResp()):
+            got = api._gsb_flagged_exact(["https://x.com/bad", "https://x.com/ok"], "k")
+        self.assertEqual(got, {"https://x.com/bad"})
+
+    def test_a_canonicalised_match_still_maps_back(self):
+        """GSB can strip a trailing slash; a real hit must not be dropped."""
+        class FakeResp:
+            def __enter__(s):
+                return s
+            def __exit__(s, *a):
+                return False
+            def read(s):
+                return json.dumps({"matches": [
+                    {"threat": {"url": "https://x.com/bad"}}]}).encode()
+
+        with unittest.mock.patch.object(api.urllib.request, "urlopen",
+                                        lambda r, timeout=None: FakeResp()):
+            got = api._gsb_flagged_exact(["https://x.com/bad/"], "k")
+        self.assertEqual(got, {"https://x.com/bad/"})
+
+    def test_an_outage_flags_nothing_rather_than_raising(self):
+        def boom(r, timeout=None):
+            raise RuntimeError("gsb down")
+        with unittest.mock.patch.object(api.urllib.request, "urlopen", boom):
+            self.assertEqual(api._gsb_flagged_exact(["https://x.com/a"], "k"), set())
+
+    def test_no_key_or_no_urls_makes_no_request(self):
+        def boom(r, timeout=None):
+            raise AssertionError("must not be called")
+        with unittest.mock.patch.object(api.urllib.request, "urlopen", boom):
+            self.assertEqual(api._gsb_flagged_exact(["https://x.com/a"], ""), set())
+            self.assertEqual(api._gsb_flagged_exact([], "k"), set())
+
+    def test_single_url_check_falls_back_to_exact_match_when_domain_is_clean(self):
+        """The actual regression: _heuristic_url_check on a URL whose domain
+        root is clean but whose exact path is flagged."""
+        with unittest.mock.patch.object(api, "_gsb_api_key", lambda: "k"), \
+             unittest.mock.patch.object(api, "_check_gsb", lambda d, k: False), \
+             unittest.mock.patch.object(api, "_gsb_flagged_exact",
+                                        lambda urls, k: set(urls)), \
+             unittest.mock.patch.object(api, "_rdap_registration_age_days", lambda d: None), \
+             unittest.mock.patch.object(api, "dynamodb", _empty_ddb()):
+            r = api._heuristic_url_check(
+                "https://testsafebrowsing.appspot.com/s/malware.html")
+        self.assertTrue(r["flagged"])
+        self.assertTrue(r["signals"]["safe_browsing"])
+
+    def test_single_url_check_never_calls_exact_match_when_domain_already_flagged(self):
+        """Skip the second request when the cheaper domain check already
+        answered -- no point spending it."""
+        calls = []
+        def fake_exact(urls, k):
+            calls.append(urls)
+            return set()
+        with unittest.mock.patch.object(api, "_gsb_api_key", lambda: "k"), \
+             unittest.mock.patch.object(api, "_check_gsb", lambda d, k: True), \
+             unittest.mock.patch.object(api, "_gsb_flagged_exact", fake_exact), \
+             unittest.mock.patch.object(api, "_rdap_registration_age_days", lambda d: None), \
+             unittest.mock.patch.object(api, "dynamodb", _empty_ddb()):
+            api._heuristic_url_check("https://bad.com/x")
+        self.assertEqual(calls, [])
 
 
 class TheOnwardRoute(unittest.TestCase):

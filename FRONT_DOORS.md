@@ -24,7 +24,7 @@ when deciding what to build next — it just becomes an opinion.
 |---|---|---|---|---|
 | FD-1 | GitHub Marketplace Action (rsscan) | API / developer | Hours | **DONE 2026-09-02.** v0.2.1 published, Marketplace badge live |
 | FD-2 | pre-commit.com hooks index | rsscan | — | **DEAD AS SCOPED.** Curated page, >500 stars AND must operate on files. rsscan fails both |
-| FD-3 | MCP registries (Smithery, `modelcontextprotocol/servers`) | Agentic bundle, TI | 1 day | mcp.so now charges $39 — skip. FD-3b and FD-3c are free and next |
+| FD-3 | MCP registries (Smithery, `modelcontextprotocol/servers`) | Agentic bundle, TI | 1 day | mcp.so now charges $39 — skip. FD-3c is **DEAD, verified 2026-09-26** — see below. FD-3b is FD-11 |
 | FD-4 | Splunkbase app | TI corpus licences | 3-5 days | Not started |
 | FD-5 | OpenCTI connector (Filigran) | TI corpus licences | 2-3 days | Not started |
 | FD-6 | Chrome Web Store extension | Consumer bots, CS Mobile | 1 week | Not started |
@@ -190,24 +190,29 @@ cp ~/dev/relayshield/mcp_registry/smithery.yaml ~/mcp-live/smithery.yaml && cd ~
    grant access to that repo, then come back.
 5. Smithery reads `smithery.yaml` from the default branch. Confirm and deploy.
 
-### FD-3c — modelcontextprotocol/servers. Highest value, slowest.
+### FD-3c — modelcontextprotocol/servers. **DEAD AS SCOPED. Verified 2026-09-26. Do not open the PR.**
 
-A maintainer reviews this one, which is why it is worth the most.
+**This section previously described a "Community Servers" README PR as the highest-value, slowest
+door of the three registries.** That route no longer exists, and reading the destination's own
+current README (fetched directly from `raw.githubusercontent.com`, not recalled) settles it:
 
-**ANDREW CLICKS THIS:**
+    > [!IMPORTANT]
+    > If you are looking for a list of MCP servers, you can browse published servers on
+    > the MCP Registry. The repository served by this README is dedicated to housing just
+    > the small number of reference servers maintained by the MCP steering group.
 
-1. Go to <https://github.com/modelcontextprotocol/servers>.
-2. Open `README.md` → the **pencil** icon → accept the fork.
-3. Find (**Cmd-F**) **Community Servers**. That is the section for third-party servers. Do NOT add
-   to *Reference Servers* or *Official Integrations* — different admission rules, instant rejection.
-4. Add one row in the exact format of its neighbours, alphabetically. Content from
-   `mcp_registry/listing.md`.
-5. **Commit changes** → *Create a new branch* → **Propose changes**.
-6. PR title: `Add RelayShield MCP server`. Body: two sentences — what it does, and that it is live
-   and versioned. No marketing.
+This is the same shape as FD-2's own correction two rows up: a submission route that used to exist
+is described in an old note as still open, and the destination's OWN current page says otherwise.
+A PR against that README today, adding a third-party listing, would be closed on sight — the repo
+now explicitly disclaims being that kind of list at all.
 
-**Do not put a corpus number in any of the three.** MEASUREMENT DOCTRINE applies with force: these
-listings are read by people who check.
+**What replaces it is FD-8, and it is already done.** "Browse published servers on the MCP
+Registry" is `registry.modelcontextprotocol.io`, and RelayShield has been listed there since
+2026-05-10 with `?source=mcp-registry` attribution live since 2026-09-05. There is no separate
+README-PR door to walk through; the registry listing IS the door this repository now points
+everyone toward.
+
+**Nothing to do here. Do not re-propose this PR.**
 
 
 ## FD-8 — Official MCP Registry. **ALREADY OPEN. WAS UNATTRIBUTED.**

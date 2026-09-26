@@ -51,18 +51,39 @@ def _config_only() -> str:
 
 class TestHostedPointer(unittest.TestCase):
     def test_smithery_advertises_the_url_the_watcher_probes(self):
+        """Repointed 2026-09-26 at the free-mcp Space (FD-11). That Space
+        speaks Streamable HTTP, not Gradio's SSE mount, so this checks it
+        against STREAMABLE_SPACES/STREAMABLE_MCP_PATH -- the SAME shape of
+        defect as before (a listing pointing at a URL nothing watches), on a
+        watcher that now has to track two different transports."""
         advertised = re.search(r"^\s*url:\s*(\S+)\s*$", _config_only(), re.M).group(1)
+        transport = re.search(r"^\s*transport:\s*(\S+)\s*$", _config_only(), re.M).group(1)
+        self.assertEqual(transport, "streamable-http",
+                         "this test targets the streamable-http probe; update it if "
+                         "smithery.yaml moves to a different transport again")
 
         w = _watcher()
         owner = re.search(r'^OWNER\s*=\s*"([^"]+)"', w, re.M).group(1)
-        path = re.search(r'^MCP_PATH\s*=\s*"([^"]+)"', w, re.M).group(1)
-        # The public Space, which is the one a Smithery visitor gets: the -aws
-        # Space scrubs the signup page for AWS's Tier-1 audit and is wrong here.
-        space = re.search(r'\(\s*"public",\s*"([^"]+)"', w).group(1)
+        path = re.search(r'^STREAMABLE_MCP_PATH\s*=\s*"([^"]+)"', w, re.M).group(1)
+        space = re.search(r'STREAMABLE_SPACES\s*=\s*\[\s*\(\s*"[^"]+",\s*"([^"]+)"',
+                          w).group(1)
         probed = f"https://{owner}-{space}.hf.space{path}"
 
         self.assertEqual(advertised, probed,
                          "smithery.yaml advertises a URL the watcher does not probe")
+
+    def test_the_watcher_has_a_probe_for_the_declared_transport(self):
+        """FD-15's whole point is one URL everywhere. If the transport in
+        smithery.yaml ever changes to something the watcher has no probe
+        function for, that must fail loudly here rather than silently pass
+        the check above (which only compares strings, not capability)."""
+        transport = re.search(r"^\s*transport:\s*(\S+)\s*$", _config_only(), re.M).group(1)
+        w = _watcher()
+        known_probes = {"sse": "_probe_mcp", "streamable-http": "_probe_streamable_http"}
+        self.assertIn(transport, known_probes,
+                      f"no known probe for transport '{transport}' -- add one to "
+                      f"check_hf_space.py before pointing smithery.yaml at it")
+        self.assertIn(known_probes[transport], w)
 
     def test_it_is_the_public_space_not_the_aws_one(self):
         """The -aws Space runs the same code with AWS_MARKETPLACE_MODE=true,

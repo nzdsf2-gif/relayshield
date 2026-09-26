@@ -79,6 +79,30 @@ SPACES = [
      "Bundle D's registered MCP endpoint on AWS Marketplace"),
 ]
 
+# A THIRD SPACE, ADDED 2026-09-26, WITH A DIFFERENT TRANSPORT ENTIRELY.
+#
+# relayshieldadmin/relayshield-free-mcp is the dedicated free/keyless server
+# (check_link, check_wallet, check_email keyless; check_breach key-optional)
+# that mcp_registry/smithery.yaml (FD-11) now points at. It is a plain MCP
+# server speaking the spec's Streamable HTTP transport at /mcp -- POST a
+# JSON-RPC message, get one back -- not a Gradio app mounting mcp_server=True
+# at /gradio_api/mcp/sse. Different framework, different wire shape, so it
+# gets its own probe function (check_streamable) rather than being squeezed
+# into check_one's Gradio-specific SSE logic.
+#
+# UNVERIFIED FROM THIS CONTAINER: hf.space is not reachable through this
+# repo's egress proxy, so this probe has never actually been run against the
+# live server. Run `python3 tools/check_hf_space.py --only free-mcp` from
+# somewhere that can reach it and confirm it reports UP before this joins the
+# scheduled workflow -- a wrong probe running unattended either cries wolf
+# forever or, worse, stays green while the endpoint is actually down, which
+# is the exact quiet-alarm failure this whole file exists to prevent.
+STREAMABLE_SPACES = [
+    ("free-mcp", "relayshield-free-mcp",
+     "the keyless MCP server Smithery (FD-11) points at"),
+]
+STREAMABLE_MCP_PATH = "/mcp"
+
 # THE ADVERTISED PATH, AND THE ONE THAT REPLACES IT IF GRADIO EVER MOVES IT.
 #
 # `/gradio_api/mcp/sse` is what the AWS Marketplace entity registers as Bundle
@@ -141,6 +165,90 @@ def _probe_mcp(url, timeout=45):
         return e.code, (e.headers.get("content-type") or "").lower() if e.headers else "", b""
     except Exception as e:
         return None, "", str(e).encode()
+
+
+def _probe_streamable_http(url, timeout=45):
+    """POST a real MCP `initialize` request and read whatever comes back.
+
+    Streamable HTTP answers a POST with EITHER application/json (one
+    response) or text/event-stream (the same response framed as an SSE
+    event) -- both are valid per spec, so this reads the body and lets the
+    caller decide whether it parses as JSON-RPC, rather than assuming one
+    content-type is the only correct answer.
+    """
+    payload = json.dumps({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "relayshield-hf-space-watch", "version": "1.0"},
+        },
+    }).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, method="POST")
+    req.add_header("User-Agent", UA)
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json, text/event-stream")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as fh:
+            ctype = (fh.headers.get("content-type") or "").lower()
+            return fh.status, ctype, fh.read(4096)
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read(4096)
+        except Exception:
+            body = b""
+        ctype = (e.headers.get("content-type") or "").lower() if e.headers else ""
+        return e.code, ctype, body
+    except Exception as e:
+        return None, "", str(e).encode()
+
+
+def _is_jsonrpc_response(ctype: str, body: bytes) -> bool:
+    """A real server answers `initialize` with a JSON-RPC envelope, whether
+    delivered as a plain JSON body or as one `data:` line of an SSE event."""
+    try:
+        if "event-stream" in ctype:
+            for line in body.decode("utf-8", "replace").splitlines():
+                if line.startswith("data:"):
+                    return "jsonrpc" in json.loads(line[len("data:"):].strip())
+            return False
+        return "jsonrpc" in json.loads(body.decode("utf-8", "replace"))
+    except Exception:
+        return False
+
+
+def check_streamable(label: str, space: str, why: str) -> dict:
+    front = f"https://{OWNER}-{space}.hf.space/"
+    mcp_url = front.rstrip("/") + STREAMABLE_MCP_PATH
+    result = {"label": label, "space": f"{OWNER}/{space}", "why_it_matters": why,
+              "front_url": front, "mcp_url": mcp_url, "api_url": None, "stage": ""}
+
+    code, ctype, body = _probe_streamable_http(mcp_url)
+    result["mcp_status"] = code
+    result["mcp_content_type"] = ctype
+    ok = code == 200 and _is_jsonrpc_response(ctype, body)
+
+    if code is None:
+        result["verdict"], rc = "UNREACHABLE", 2
+        result["detail"] = ("Could not reach the endpoint at all. A fact about this "
+                            "runner's network, not proof the Space is down.")
+    elif code in (404, 405, 410):
+        result["verdict"], rc = "DOWN", 1
+        result["detail"] = f"{STREAMABLE_MCP_PATH} returned {code}: the MCP route is not there."
+    elif ok:
+        result["verdict"], rc = "UP", 0
+        result["detail"] = f"{STREAMABLE_MCP_PATH} answered a real JSON-RPC response to initialize."
+    else:
+        # Includes 5xx and a cold start: a probe that cannot tell has no
+        # standing to stop the work, same rule as the Gradio checker.
+        result["verdict"], rc = "UNCLEAR", 2
+        result["detail"] = (f"{STREAMABLE_MCP_PATH} returned {code} with content-type "
+                            f"'{ctype or 'none'}' and no recognisable JSON-RPC response. "
+                            "This probe's request shape has not been confirmed against a "
+                            "live run yet -- see the UNVERIFIED note above STREAMABLE_SPACES "
+                            "before treating a red result here as proof of an outage.")
+    result["exit"] = rc
+    return result
 
 
 def check_one(label: str, space: str, why: str) -> dict:
@@ -236,14 +344,17 @@ def check_one(label: str, space: str, why: str) -> dict:
 
 
 def main() -> int:
+    all_labels = [s[0] for s in SPACES] + [s[0] for s in STREAMABLE_SPACES]
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("--only", choices=[s[0] for s in SPACES],
-                    help="check one Space instead of both")
+    ap.add_argument("--only", choices=all_labels,
+                    help="check one Space instead of all of them")
     args = ap.parse_args()
 
-    targets = [s for s in SPACES if not args.only or s[0] == args.only]
-    results = [check_one(*t) for t in targets]
+    gradio_targets = [s for s in SPACES if not args.only or s[0] == args.only]
+    stream_targets = [s for s in STREAMABLE_SPACES if not args.only or s[0] == args.only]
+    results = [check_one(*t) for t in gradio_targets] + \
+              [check_streamable(*t) for t in stream_targets]
 
     if args.json:
         print(json.dumps({"spaces": results}, indent=2))
@@ -251,11 +362,13 @@ def main() -> int:
         for r in results:
             print(f"[{r['label']}] {r['verdict']}: {r['detail']}")
             print(f"    {r['why_it_matters']}")
-            print(f"    api   {r['api_url']} -> {r['api_status']}")
-            print(f"    front {r['front_url']} -> {r['front_status']}")
+            if r.get("api_url") is not None:
+                print(f"    api   {r['api_url']} -> {r.get('api_status')}")
+                print(f"    front {r['front_url']} -> {r.get('front_status')}")
             print(f"    mcp   {r['mcp_url']} -> {r['mcp_status']} "
                   f"({r['mcp_content_type'] or 'no content-type'})")
-            print(f"    alt   {r['mcp_alt_url']} -> {r['mcp_alt_status']}  (information only)")
+            if "mcp_alt_url" in r:
+                print(f"    alt   {r['mcp_alt_url']} -> {r['mcp_alt_status']}  (information only)")
             print(f"    stage {r['stage'] or '(none reported)'}")
 
     # The worst verdict wins. A DOWN on either Space is a DOWN overall, and the

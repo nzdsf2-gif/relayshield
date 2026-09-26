@@ -2959,6 +2959,64 @@ def _check_gsb(domain: str, api_key: str) -> bool:
     return domain in _gsb_flagged_domains([domain], api_key)
 
 
+def _gsb_flagged_exact(urls: list, api_key: str) -> set:
+    """Which of these EXACT URLs does Safe Browsing flag -- the full URL
+    including its path, not just the domain root.
+
+    _gsb_flagged_domains only ever asks about http://{domain}/ and
+    https://{domain}/, so a page flagged at a specific path on an otherwise
+    clean host was never checked. That is the common real shape for phishing
+    on shared hosting (Firebase, GitHub Pages, Netlify), and it is exactly
+    how Google's OWN testsafebrowsing.appspot.com canary is built: clean at
+    the domain root, flagged only at /s/malware.html, deliberately, so an
+    integration that only checks the root reports it as unknown. That is
+    what this function exists to catch.
+
+    Returns the SET of urls (as given) that matched. Fail-soft, same as
+    _gsb_flagged_domains: an outage here must not fail the whole check.
+    """
+    uniq = [u for u in dict.fromkeys(u for u in urls if u)]
+    if not uniq or not api_key:
+        return set()
+
+    flagged: set = set()
+    for start in range(0, len(uniq), _GSB_MAX_ENTRIES_PER_REQUEST):
+        chunk = uniq[start:start + _GSB_MAX_ENTRIES_PER_REQUEST]
+        payload = json.dumps({
+            "client": {"clientId": "relayshield", "clientVersion": "1.0"},
+            "threatInfo": {
+                "threatTypes":      ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE"],
+                "platformTypes":    ["ANY_PLATFORM"],
+                "threatEntryTypes": ["URL"],
+                "threatEntries":    [{"url": u} for u in chunk],
+            },
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{GSB_URL}?key={api_key}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                for match in (json.loads(resp.read()).get("matches") or []):
+                    hit = ((match.get("threat") or {}).get("url") or "")
+                    if hit in chunk:
+                        flagged.add(hit)
+                    else:
+                        # GSB can canonicalise (trailing slash, scheme case).
+                        # Fall back to matching against what we sent rather
+                        # than silently dropping a real hit.
+                        for u in chunk:
+                            if u.rstrip("/") == hit.rstrip("/"):
+                                flagged.add(u)
+                                break
+        except Exception as exc:
+            logger.warning("GSB exact-URL check failed for %d urls: %s", len(chunk), exc)
+
+    return flagged
+
+
 def _rdap_registration_age_days(domain: str) -> int | None:
     """Mirrors relayshield_agentic_api.py's / relayshield_telegram_webhook.py's
     helper of the same name."""
@@ -3042,11 +3100,20 @@ def _heuristic_url_check(url: str) -> dict:
     if not domain:
         return {"flagged": False, "reasons": [], "signals":
                 {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}}
+    api_key = _gsb_api_key()
     try:
-        gsb = _check_gsb(domain, _gsb_api_key())
+        gsb = _check_gsb(domain, api_key)
     except Exception as exc:
         logger.warning("Heuristic GSB check failed for %s: %s", domain, exc)
         gsb = False
+    if not gsb:
+        # The domain root can be clean while the exact page is not -- see
+        # _gsb_flagged_exact's docstring for why this second check exists.
+        try:
+            gsb = bool(_gsb_flagged_exact([url], api_key))
+        except Exception as exc:
+            logger.warning("Heuristic exact-URL GSB check failed for %s: %s",
+                            _redact(url, "url"), exc)
     return _assess_domain(domain, gsb)
 
 
@@ -3076,12 +3143,24 @@ def _heuristic_url_check_many(urls: list) -> dict:
     """
     domains = list(dict.fromkeys(_domain_of(u) for u in urls))
     domains = [d for d in domains if d]
+    unique_urls = list(dict.fromkeys(u for u in urls if u))
 
+    api_key = _gsb_api_key()
     try:
-        flagged = _gsb_flagged_domains(domains, _gsb_api_key())
+        flagged_domains = _gsb_flagged_domains(domains, api_key)
     except Exception as exc:
         logger.warning("link-check batch GSB failed for %d domains: %s", len(domains), exc)
-        flagged = set()
+        flagged_domains = set()
+
+    # A domain-root check misses a page flagged at a specific path on an
+    # otherwise clean host -- see _gsb_flagged_exact's docstring. One extra
+    # request for the whole batch, same fail-soft shape as the domain check.
+    try:
+        flagged_urls = _gsb_flagged_exact(unique_urls, api_key)
+    except Exception as exc:
+        logger.warning("link-check batch exact-URL GSB failed for %d urls: %s",
+                        len(unique_urls), exc)
+        flagged_urls = set()
 
     assessed: dict = {}
     # Explicit executor and shutdown(wait=False): a `with` block calls
@@ -3089,7 +3168,7 @@ def _heuristic_url_check_many(urls: list) -> dict:
     # the 2026-07-18 incident recorded on _enrich_lookalikes.
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=_LINK_CHECK_WORKERS)
     try:
-        futures = {ex.submit(_assess_domain, d, d in flagged): d for d in domains}
+        futures = {ex.submit(_assess_domain, d, d in flagged_domains): d for d in domains}
         done, _ = concurrent.futures.wait(futures, timeout=_LINK_CHECK_BATCH_BUDGET)
         for fut in done:
             d = futures[fut]
@@ -3104,7 +3183,19 @@ def _heuristic_url_check_many(urls: list) -> dict:
     for u in urls:
         d = _domain_of(u)
         if d and d in assessed:
-            out[u] = assessed[d]
+            result = assessed[d]
+            if u in flagged_urls and not result.get("flagged"):
+                # An exact-URL match the domain-level check missed. Build a
+                # NEW dict rather than mutate assessed[d]: that dict is
+                # shared across every URL on this domain, and a different
+                # URL on the same host must not inherit this one's flag.
+                result = {
+                    "flagged": True,
+                    "reasons": list(result.get("reasons") or []) +
+                               ["Google Safe Browsing flags this exact link"],
+                    "signals": {**(result.get("signals") or {}), "safe_browsing": True},
+                }
+            out[u] = result
         else:
             # Unfinished or unparseable. NOT a clean result.
             out[u] = {

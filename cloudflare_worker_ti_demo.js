@@ -903,7 +903,7 @@ footer a{color:#00B5A5;text-decoration:none}
         <input type="text" id="scamkit-fp-input" placeholder="Enter a suspicious URL" style="flex:1" />
         <button onclick="runScamkitFingerprint()">Fingerprint</button>
       </div>
-      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try a known family sample: <a href="javascript:void(0)" onclick="runScamkitSample('tycoon')" style="color:#00B5A5">Tycoon 2FA</a> &middot; <a href="javascript:void(0)" onclick="runScamkitSample('mamba')" style="color:#00B5A5">Mamba 2FA</a> &middot; <a href="javascript:void(0)" onclick="runScamkitSample('rockstar')" style="color:#00B5A5">Rockstar 2FA</a></div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try a known family sample: <a href="javascript:void(0)" onclick="runScamkitUrlSample('tycoon')" style="color:#00B5A5">Tycoon 2FA</a> &middot; <a href="javascript:void(0)" onclick="runScamkitUrlSample('mamba')" style="color:#00B5A5">Mamba 2FA</a> &middot; <a href="javascript:void(0)" onclick="runScamkitUrlSample('rockstar')" style="color:#00B5A5">Rockstar 2FA</a></div>
       <div id="scamkit-fp-result"></div>
     </div>
     <div id="scamkit-match" class="scamkit-mode" style="display:none">
@@ -948,27 +948,14 @@ async function runScamkitFingerprint() {
     body: JSON.stringify({url})
   });
   const data = await resp.json();
+  window._lastKitId = data.kit_id || null;
   document.getElementById('scamkit-fp-result').innerHTML = renderScamkitFingerprint(data);
 }
 
-const SCAMKIT_SAMPLES = {
-  tycoon: '<!DOCTYPE html><html><head><title>Security Check</title></head><body><div class="cf-turnstile">this page is running browser checks to ensure your security</div><form action="/verify"><input type="text" name="email" placeholder="Email"></form></body></html>',
-  mamba: '<!DOCTYPE html><html><head><title>Account Login</title></head><body><div data-socketio="true" data-events="new-session,password_command,otp_command"></div><form><input type="password" name="p"><input type="text" name="otp"></form></body></html>',
-  rockstar: '<!DOCTYPE html><html><head><title>Sign in to your account</title></head><body><div data-entra-app="72782ba9-a1b2-c3d4-e5f6-562370ea3566"></div><div id="login"><h1>Microsoft</h1><input type="email" placeholder="Email"></div></body></html>'
-};
-
-async function runScamkitSample(family) {
-  const html = SCAMKIT_SAMPLES[family];
-  if (!html) return;
-  setLoading('scamkit-fp-result');
-  const resp = await fetch('/demo/scamkit-fingerprint', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({html})
-  });
-  const data = await resp.json();
-  window._lastKitId = data.kit_id || null;
-  document.getElementById('scamkit-fp-result').innerHTML = renderScamkitFingerprint(data);
+function runScamkitUrlSample(family) {
+  const url = window.location.origin + '/demo/sample-kit/' + family;
+  document.getElementById('scamkit-fp-input').value = url;
+  runScamkitFingerprint();
 }
 
 function runScamkitScanSample() {
@@ -1000,13 +987,15 @@ async function tryScamkitMatchExample() {
   let kitId = window._lastKitId;
   if (!kitId) {
     setLoading('scamkit-match-result');
+    const url = window.location.origin + '/demo/sample-kit/tycoon';
     const resp = await fetch('/demo/scamkit-fingerprint', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({html: SCAMKIT_SAMPLES.tycoon})
+      body: JSON.stringify({url})
     });
     const data = await resp.json();
     kitId = data.kit_id;
+    window._lastKitId = kitId || null;
   }
   if (kitId) {
     document.getElementById('scamkit-match-input').value = kitId;
@@ -1421,8 +1410,25 @@ export default {
 
     if (path === "/demo/scamkit-fingerprint" && request.method === "POST") {
       const body = await request.json();
-      const data = await callAPI(env, "/v1/metered/scamkit-fingerprint", {url: body.url});
+      const payload = body.html ? {html: body.html} : {url: body.url};
+      const data = await callAPI(env, "/v1/metered/scamkit-fingerprint", payload);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+    }
+
+    // Sample kit pages for demo (serve realistic kit HTML with family tells)
+    if (path === "/demo/sample-kit/tycoon") {
+      const html = `<!DOCTYPE html><html><head><title>Security Verification</title></head><body><div class="challenge"><p>this page is running browser checks to ensure your security</p><div class="cf-turnstile" data-sitekey="0x4AAAAAAADnPIDROrmtRp5x"></div></div><form method="post" action="/auth/verify"><input type="email" name="username" required><input type="password" name="password" required><button type="submit">Sign in</button></form><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script></body></html>`;
+      return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" } });
+    }
+
+    if (path === "/demo/sample-kit/mamba") {
+      const html = `<!DOCTYPE html><html><head><title>Secure Login Portal</title></head><body><div id="login-form"><h2>Account Verification</h2><form id="auth"><input type="text" name="email" placeholder="Email address"><input type="password" name="pass" placeholder="Password"><input type="text" name="code" placeholder="2FA code"><button>Continue</button></form></div><!-- mamba2fa socket.io integration --><div data-socket-events="new-session,password_command,otp_command" style="display:none"></div></body></html>`;
+      return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" } });
+    }
+
+    if (path === "/demo/sample-kit/rockstar") {
+      const html = `<!DOCTYPE html><html><head><title>Sign in to your account</title></head><body><div id="lightbox"><h1>Microsoft</h1><p>Sign in</p><form><input type="email" name="loginfmt" placeholder="Email, phone, or Skype"><input type="submit" value="Next"></form></div><!-- Entra App: 72782ba9-f8c3-4a2e-9d1b-562370ea3566 --></body></html>`;
+      return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8", "Cache-Control": "no-store" } });
     }
 
     if (path === "/demo/scamkit-match" && request.method === "POST") {
@@ -1434,7 +1440,7 @@ export default {
     if (path === "/demo/scamkit-scan" && request.method === "POST") {
       const body = await request.json();
       const indicators = (body.indicators || []).slice(0, 25);
-      const data = await callAPI(env, "/v1/metered/scamkit-campaign-scan", {indicators});
+      const data = await callAPI(env, "/v1/metered/scamkit-scan", {indicators});
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 

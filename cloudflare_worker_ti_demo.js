@@ -979,7 +979,7 @@ function runScamkitScanSample() {
     'com-secure-login.example',
     'registry.magic-cat.world'
   ];
-  document.getElementById('scamkit-scan-input').value = indicators.join('\n');
+  document.getElementById('scamkit-scan-input').value = indicators.join('\\n');
   runScamkitScan();
 }
 

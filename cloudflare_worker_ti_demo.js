@@ -893,8 +893,8 @@ footer a{color:#00B5A5;text-decoration:none}
 
   </div>
 
-  <div id="scamkit" class="panel">
-    <p class="panel-desc">Fingerprint phishing kits by their code — get a deterministic <code style="background:#1e3a5f;padding:2px 6px;border-radius:4px;font-size:12px">kit_&lt;sha256&gt;</code> ID, suggested family name, extracted indicators, and redirect chain. Match against known kits or scan a full campaign (up to 25 indicators).</p>
+  <div id="scamkit" class="panel" style="padding-left:8px;padding-right:8px">
+    <p class="panel-desc" style="max-width:900px">Fingerprint phishing kits by their code — get a deterministic <code style="background:#1e3a5f;padding:2px 6px;border-radius:4px;font-size:12px">kit_&lt;sha256&gt;</code> ID, suggested family name, extracted indicators, and redirect chain. Match against known kits or scan a full campaign (up to 25 indicators).</p>
     <div style="display:flex;gap:8px;margin-bottom:16px">
       <button id="scamkit-tab-fp" class="tab active" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('fingerprint',this)">Fingerprint</button>
       <button id="scamkit-tab-match" class="tab" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('match',this)">Match</button>
@@ -902,23 +902,26 @@ footer a{color:#00B5A5;text-decoration:none}
     </div>
     <div id="scamkit-fingerprint" class="scamkit-mode">
       <div class="input-row">
-        <input type="text" id="scamkit-fp-input" placeholder="Enter a suspicious URL (e.g. https://example-phish.com/login)" style="flex:1" />
+        <input type="text" id="scamkit-fp-input" placeholder="Enter a suspicious URL" style="flex:1" />
         <button onclick="runScamkitFingerprint()">Fingerprint</button>
       </div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try: <a href="javascript:void(0)" onclick="document.getElementById('scamkit-fp-input').value='https://httpbin.org/html';runScamkitFingerprint()" style="color:#00B5A5">https://httpbin.org/html</a></div>
       <div id="scamkit-fp-result"></div>
     </div>
     <div id="scamkit-match" class="scamkit-mode" style="display:none">
       <div class="input-row">
-        <input type="text" id="scamkit-match-input" placeholder="Enter a kit ID (e.g. kit_a1b2c3...)" style="flex:1" />
+        <input type="text" id="scamkit-match-input" placeholder="Enter a kit ID (e.g. kit_9f2c…)" style="flex:1" />
         <button onclick="runScamkitMatch()">Match</button>
       </div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try: <a href="javascript:void(0)" onclick="tryScamkitMatchExample()" style="color:#00B5A5">fingerprint a URL first, then match its kit ID</a></div>
       <div id="scamkit-match-result"></div>
     </div>
     <div id="scamkit-scan" class="scamkit-mode" style="display:none">
       <div class="input-row">
-        <textarea id="scamkit-scan-input" placeholder="Enter up to 25 indicators, one per line (URLs, domains, IPs, hashes)" rows="4" style="flex:1;background:#0a1628;border:1px solid #1e3a5f;border-radius:6px;color:#e2e8f0;padding:10px;font-size:13px"></textarea>
+        <textarea id="scamkit-scan-input" placeholder="Enter up to 25 indicators, one per line" rows="4" style="flex:1;background:#0a1628;border:1px solid #1e3a5f;border-radius:6px;color:#e2e8f0;padding:10px;font-size:13px"></textarea>
         <button onclick="runScamkitScan()">Scan Campaign</button>
       </div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try: <a href="javascript:void(0)" onclick="document.getElementById('scamkit-scan-input').value='httpbin.org\n93.184.216.34';runScamkitScan()" style="color:#00B5A5">sample indicators</a></div>
       <div id="scamkit-scan-result"></div>
     </div>
   </div>
@@ -961,6 +964,22 @@ async function runScamkitMatch() {
   });
   const data = await resp.json();
   document.getElementById('scamkit-match-result').innerHTML = renderScamkitMatch(data);
+}
+
+async function tryScamkitMatchExample() {
+  setLoading('scamkit-match-result');
+  const resp = await fetch('/demo/scamkit-fingerprint', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: 'https://httpbin.org/html'})
+  });
+  const data = await resp.json();
+  if (data.kit_id) {
+    document.getElementById('scamkit-match-input').value = data.kit_id;
+    runScamkitMatch();
+  } else {
+    document.getElementById('scamkit-match-result').innerHTML = renderScamkitFingerprint(data);
+  }
 }
 
 async function runScamkitScan() {

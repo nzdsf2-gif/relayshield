@@ -903,6 +903,7 @@ footer a{color:#00B5A5;text-decoration:none}
         <input type="text" id="scamkit-fp-input" placeholder="Paste a suspicious URL (e.g. https://login-verify-secure.tld/signin)" style="flex:1" />
         <button onclick="runScamkitFingerprint()">Fingerprint</button>
       </div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Example: <a href="javascript:void(0)" onclick="loadScamkitFpExample()" style="color:#00B5A5">Mamba 2FA kit URL</a> (loads a sample verdict)</div>
       <div id="scamkit-fp-result"></div>
     </div>
     <div id="scamkit-match" class="scamkit-mode" style="display:none">
@@ -910,6 +911,7 @@ footer a{color:#00B5A5;text-decoration:none}
         <input type="text" id="scamkit-match-input" placeholder="Paste a kit ID from a fingerprint result (e.g. kit_9f2c…)" style="flex:1" />
         <button onclick="runScamkitMatch()">Match</button>
       </div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Example: <a href="javascript:void(0)" onclick="loadScamkitMatchExample()" style="color:#00B5A5">Mamba 2FA kit ID</a> (loads a sample match result)</div>
       <div id="scamkit-match-result"></div>
     </div>
     <div id="scamkit-scan" class="scamkit-mode" style="display:none">
@@ -917,6 +919,7 @@ footer a{color:#00B5A5;text-decoration:none}
         <textarea id="scamkit-scan-input" placeholder="Paste up to 25 indicators, one per line (URLs, domains, IPs, hashes)" rows="4" style="flex:1;background:#0a1628;border:1px solid #1e3a5f;border-radius:6px;color:#e2e8f0;padding:10px;font-size:13px"></textarea>
         <button onclick="runScamkitScan()">Scan Campaign</button>
       </div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Note: Campaign scan endpoint is not yet deployed on the backend.</div>
       <div id="scamkit-scan-result"></div>
     </div>
   </div>
@@ -933,6 +936,44 @@ function switchScamkitMode(mode, el) {
   document.querySelectorAll('[id^="scamkit-tab-"]').forEach(t => t.classList.remove('active'));
   document.getElementById('scamkit-' + mode).style.display = 'block';
   el.classList.add('active');
+}
+
+function loadScamkitFpExample() {
+  // Example using Mamba 2FA (one of the 13 approved FLAME TP-0067 families)
+  // The 13 families: Tycoon 2FA, Evilginx, Sneaky 2FA, Mamba 2FA, EvilProxy, FlowerStorm, Rockstar 2FA, NakedPages, W3LL Panel, Greatness, Caffeine, SessionShark, Darcula
+  const exampleData = {
+    kit_id: 'kit_' + 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    family_name: 'Mamba 2FA',
+    family_status: 'approved',
+    confidence: '0.94',
+    indicators: ['secure-verify-m365.example/auth/signin', 'socket.io: new-session', 'password_command', 'otp_command'],
+    redirect_chain: ['https://secure-verify-m365.example/auth/signin', 'https://secure-verify-m365.example/panel/verify'],
+    kit_tells: ['Socket.IO real-time C2 channel', 'Password + OTP exfiltration commands', 'AiTM session relay'],
+    stored: true
+  };
+  document.getElementById('scamkit-fp-input').value = 'https://secure-verify-m365.example/auth/signin';
+  document.getElementById('scamkit-fp-result').innerHTML = renderScamkitFingerprint(exampleData) + '<div style="font-size:11px;color:#64748b;margin-top:8px;font-style:italic">Example verdict — replace with a live URL for real fingerprinting.</div>';
+}
+
+function loadScamkitMatchExample() {
+  // Example match result for Mamba 2FA kit
+  const kitId = 'kit_' + 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  document.getElementById('scamkit-match-input').value = kitId;
+  const exampleData = {
+    matches: [{
+      kit_id: kitId,
+      family_name: 'Mamba 2FA',
+      family_status: 'approved',
+      confidence: 0.94,
+      first_seen: '2026-08-15',
+      last_seen: '2026-09-26'
+    }],
+    sightings: Array(47).fill(null).map((_, i) => ({
+      url: 'https://phish-' + (1000 + i) + '.example/signin',
+      seen: '2026-09-' + String(1 + (i % 26)).padStart(2, '0')
+    }))
+  };
+  document.getElementById('scamkit-match-result').innerHTML = renderScamkitMatch(exampleData) + '<div style="font-size:11px;color:#64748b;margin-top:8px;font-style:italic">Example result — 47 sightings of this Mamba 2FA kit in the corpus.</div>';
 }
 
 async function runScamkitFingerprint() {

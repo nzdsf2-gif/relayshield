@@ -955,7 +955,7 @@ async function runScamkitMatch() {
 async function runScamkitScan() {
   const text = document.getElementById('scamkit-scan-input').value.trim();
   if (!text) return;
-  const indicators = text.split('\n').map(s => s.trim()).filter(s => s).slice(0, 25);
+  const indicators = text.split('\\n').map(s => s.trim()).filter(s => s).slice(0, 25);
   if (!indicators.length) return;
   setLoading('scamkit-scan-result');
   const resp = await fetch('/demo/scamkit-scan', {

@@ -891,8 +891,6 @@ footer a{color:#00B5A5;text-decoration:none}
     </div>
   </div>
 
-  </div>
-
   <div id="scamkit" class="panel" style="padding-left:8px;padding-right:8px">
     <p class="panel-desc" style="max-width:900px">Fingerprint phishing kits by their code — get a deterministic <code style="background:#1e3a5f;padding:2px 6px;border-radius:4px;font-size:12px">kit_&lt;sha256&gt;</code> ID, suggested family name, extracted indicators, and redirect chain. Match against known kits or scan a full campaign (up to 25 indicators).</p>
     <div style="display:flex;gap:8px;margin-bottom:16px">
@@ -905,7 +903,7 @@ footer a{color:#00B5A5;text-decoration:none}
         <input type="text" id="scamkit-fp-input" placeholder="Enter a suspicious URL" style="flex:1" />
         <button onclick="runScamkitFingerprint()">Fingerprint</button>
       </div>
-      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try: <a href="javascript:void(0)" onclick="document.getElementById('scamkit-fp-input').value='https://httpbin.org/html';runScamkitFingerprint()" style="color:#00B5A5">https://httpbin.org/html</a></div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try a known family sample: <a href="javascript:void(0)" onclick="runScamkitSample('tycoon')" style="color:#00B5A5">Tycoon 2FA</a> &middot; <a href="javascript:void(0)" onclick="runScamkitSample('mamba')" style="color:#00B5A5">Mamba 2FA</a> &middot; <a href="javascript:void(0)" onclick="runScamkitSample('rockstar')" style="color:#00B5A5">Rockstar 2FA</a></div>
       <div id="scamkit-fp-result"></div>
     </div>
     <div id="scamkit-match" class="scamkit-mode" style="display:none">
@@ -913,7 +911,7 @@ footer a{color:#00B5A5;text-decoration:none}
         <input type="text" id="scamkit-match-input" placeholder="Enter a kit ID (e.g. kit_9f2c…)" style="flex:1" />
         <button onclick="runScamkitMatch()">Match</button>
       </div>
-      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try: <a href="javascript:void(0)" onclick="tryScamkitMatchExample()" style="color:#00B5A5">fingerprint a URL first, then match its kit ID</a></div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try: <a href="javascript:void(0)" onclick="tryScamkitMatchExample()" style="color:#00B5A5">fingerprint the Tycoon 2FA sample, then match its kit ID</a></div>
       <div id="scamkit-match-result"></div>
     </div>
     <div id="scamkit-scan" class="scamkit-mode" style="display:none">
@@ -921,7 +919,7 @@ footer a{color:#00B5A5;text-decoration:none}
         <textarea id="scamkit-scan-input" placeholder="Enter up to 25 indicators, one per line" rows="4" style="flex:1;background:#0a1628;border:1px solid #1e3a5f;border-radius:6px;color:#e2e8f0;padding:10px;font-size:13px"></textarea>
         <button onclick="runScamkitScan()">Scan Campaign</button>
       </div>
-      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try: <a href="javascript:void(0)" onclick="document.getElementById('scamkit-scan-input').value='httpbin.org\n93.184.216.34';runScamkitScan()" style="color:#00B5A5">sample indicators</a></div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Try: <a href="javascript:void(0)" onclick="runScamkitScanSample()" style="color:#00B5A5">AiTM family indicators</a> (domains and paths tied to known kits)</div>
       <div id="scamkit-scan-result"></div>
     </div>
   </div>
@@ -953,6 +951,38 @@ async function runScamkitFingerprint() {
   document.getElementById('scamkit-fp-result').innerHTML = renderScamkitFingerprint(data);
 }
 
+const SCAMKIT_SAMPLES = {
+  tycoon: '<!DOCTYPE html><html><head><title>Security Check</title></head><body><div class="cf-turnstile">this page is running browser checks to ensure your security</div><script src="https://challenges.cloudflare.com/turnstile/v0/api.js"><\/script><form action="/verify"><input type="text" name="email" placeholder="Email"><\/form><\/body><\/html>',
+  mamba: '<!DOCTYPE html><html><head><title>Account Login</title></head><body><script src="/socket.io/socket.io.js"><\/script><script>var socket=io();socket.emit(\'new-session\',{u:1});socket.on(\'password_command\',function(d){});socket.on(\'otp_command\',function(d){});<\/script><form><input type="password" name="p"><input type="text" name="otp"><\/form><\/body><\/html>',
+  rockstar: '<!DOCTYPE html><html><head><title>Sign in to your account</title></head><body><script>var appId="72782ba9-a1b2-c3d4-e5f6-562370ea3566";<\/script><div id="login"><h1>Microsoft</h1><input type="email" placeholder="Email"><\/div><\/body><\/html>'
+};
+
+async function runScamkitSample(family) {
+  const html = SCAMKIT_SAMPLES[family];
+  if (!html) return;
+  setLoading('scamkit-fp-result');
+  const resp = await fetch('/demo/scamkit-fingerprint', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({html})
+  });
+  const data = await resp.json();
+  window._lastKitId = data.kit_id || null;
+  document.getElementById('scamkit-fp-result').innerHTML = renderScamkitFingerprint(data);
+}
+
+function runScamkitScanSample() {
+  const indicators = [
+    'login-secure.buzz',
+    'verify-account.buzz',
+    'href.li',
+    'com-secure-login.example',
+    'registry.magic-cat.world'
+  ];
+  document.getElementById('scamkit-scan-input').value = indicators.join('\n');
+  runScamkitScan();
+}
+
 async function runScamkitMatch() {
   const kit_id = document.getElementById('scamkit-match-input').value.trim();
   if (!kit_id) return;
@@ -967,18 +997,22 @@ async function runScamkitMatch() {
 }
 
 async function tryScamkitMatchExample() {
-  setLoading('scamkit-match-result');
-  const resp = await fetch('/demo/scamkit-fingerprint', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({url: 'https://httpbin.org/html'})
-  });
-  const data = await resp.json();
-  if (data.kit_id) {
-    document.getElementById('scamkit-match-input').value = data.kit_id;
+  let kitId = window._lastKitId;
+  if (!kitId) {
+    setLoading('scamkit-match-result');
+    const resp = await fetch('/demo/scamkit-fingerprint', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({html: SCAMKIT_SAMPLES.tycoon})
+    });
+    const data = await resp.json();
+    kitId = data.kit_id;
+  }
+  if (kitId) {
+    document.getElementById('scamkit-match-input').value = kitId;
     runScamkitMatch();
   } else {
-    document.getElementById('scamkit-match-result').innerHTML = renderScamkitFingerprint(data);
+    document.getElementById('scamkit-match-result').innerHTML = '<div class="error">Could not generate a sample kit ID. Try the Tycoon 2FA sample on the Fingerprint tab first.</div>';
   }
 }
 

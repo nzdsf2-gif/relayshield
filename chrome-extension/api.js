@@ -49,6 +49,38 @@ async function rsCheckWallet(address) {
   return json.data;
 }
 
+// /v1/email-check is built for a caller that has ALREADY PARSED the message
+// (an agent reading a mailbox), not a raw pasted blob -- it does not extract
+// links itself. The extension is exactly that caller here: pull links out of
+// the pasted body text client-side before sending, the same way a mailbox
+// agent would have them already split out.
+function rsExtractLinks(text) {
+  const matches = text.match(/https?:\/\/[^\s<>"')]+/g) || [];
+  return [...new Set(matches)].slice(0, 25);
+}
+
+async function rsCheckEmail({ fromAddress, subject, bodyText }) {
+  if (!fromAddress && !subject && !bodyText) {
+    throw new Error("Fill in at least the sender address, subject, or body.");
+  }
+  const resp = await fetch(`${RS_API_BASE}/v1/email-check`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from_address: fromAddress || undefined,
+      subject: subject || undefined,
+      body_text: bodyText || undefined,
+      links: bodyText ? rsExtractLinks(bodyText) : undefined,
+      source: RS_SOURCE,
+    }),
+  });
+  const json = await resp.json();
+  if (!resp.ok || !json.ok) {
+    throw new Error(json.error || `email-check failed (${resp.status})`);
+  }
+  return json.data;
+}
+
 // One entry point for "the user gave me a string, figure out what to check."
 // Never guesses past what the two detectors above already decide, and never
 // silently treats "unknown" as "safe" -- the level a clean answer renders is

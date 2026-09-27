@@ -111,3 +111,19 @@ a content script. That needs per-provider DOM scraping, which breaks silently wh
 sites change their markup — a real, ongoing maintenance cost. Worth it only if the manual
 paste-in tab proves people actually use email checking from here; build the cheap version first,
 measure, then decide.
+
+## v0.2.1: explorer/DEX URLs check the embedded address, icon redesigned, footer wording fixed
+
+- **Embedded-address extraction.** A Jupiter/Solscan/Etherscan/etc. URL only ever checked the
+  DOMAIN before this — a scam token page on jup.ag read as clean because jup.ag itself is
+  clean. `rsExtractEmbeddedAddress()` walks the URL's path segments and query values through the
+  same chain-detection regex the bare-address path already trusts, and checks the domain and the
+  embedded address in parallel, worse-wins.
+- **Icon redesigned.** The old one was a brand asset built for a large dark tile (16% opacity
+  fill); at toolbar size it read as muted/grey compared to other extensions. New source is
+  `assets/miniapp/relayshield_icon_action.html` — solid fill, transparent background.
+- **Generic share added.** A footer button that copies a shareable link, decoupled from having
+  just run a check.
+- **Footer wording fixed.** Two lines referenced breach/infostealer/SIM-swap checks as if they
+  were features of this extension. They aren't — link, wallet and email are the only three, all
+  keyless. Both lines now say so plainly rather than implying a gated feature that isn't here.

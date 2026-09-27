@@ -3624,6 +3624,10 @@ _SOURCE_ALIASES = {
     "tg-miniapp-tgboard":       "tg-miniapp",
     "tg-miniapp-awesome":        "tg-miniapp",
     "tg-miniapp-muse":     "tg-miniapp",
+    # The Chrome extension's popup, same shape as muse: our own product
+    # linking back, not a catalogue submission. Registered before the
+    # extension ships to the Chrome Web Store.
+    "tg-miniapp-chromeext": "tg-miniapp",
     # Registered 2026-09-19 before either destination is submitted to. An
     # unregistered key renders no banner and logs "unmatched:", which is
     # attribution that looks like it worked -- FD-8, four months of it.

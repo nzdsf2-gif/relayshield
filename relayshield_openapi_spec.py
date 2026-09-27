@@ -3329,6 +3329,18 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                     "type": "string",
                     "description": "Optional caller-supplied family label for a brand-new fingerprint (approved if it names one of the 13 FLAME TP-0067 families, suggested otherwise).",
                 },
+                "kind": {
+                    "type": "string",
+                    "description": "Fingerprint kind: 'kit' (default — phishing-kit HTML flow) or 'malware' (malware-sample flow; requires 'signals').",
+                },
+                "signals": {
+                    "type": "object",
+                    "description": "REQUIRED for kind='malware': caller-computed feature dict for the sample (v1 does no binary extraction in Lambda). Ignored for kind='kit'.",
+                },
+                "malware_family": {
+                    "type": "string",
+                    "description": "Optional Malpedia family_id for kind='malware' (e.g. 'win.beavertail'). Resolved live against the Malpedia taxonomy; the 5 Andrew-approved WaterPlum families emit family_status approved, everything else suggested.",
+                },
                 "observed_telemetry": {
                     "type": "object",
                     "description": ("Optional CALLER-SUPPLIED telemetry from your own proxy/EDR/IdP "
@@ -3376,11 +3388,12 @@ PAYG_ENDPOINTS: dict[str, dict] = {
         },
     },
     "/v1/payg/scamkit-match": {
-        "summary": "Match a kit fingerprint ID against the corpus",
+        "summary": "Match a kit or malware fingerprint ID against the corpus",
         "description": (
             "Cheap re-check for dashboards and bots watching for kit reuse: look up an existing "
-            "kit_<sha256> fingerprint ID and get its family (auto-suggested, pending approval), "
-            "confidence, verdict, evidence, and sighting history. An unknown ID is never reported "
+            "kit_<sha256> or malware_<sha256> fingerprint ID and get its family (auto-suggested, pending approval), "
+            "confidence, verdict, evidence, and sighting history. Malware rows return "
+            "malware_family plus the live Malpedia detail record. An unknown ID is never reported "
             "as safe — only as no-match with an explicit not-a-guarantee caveat."
         ),
         "price_units": 100000,
@@ -3390,7 +3403,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
             "properties": {
                 "fingerprint_id": {
                     "type": "string",
-                    "description": "kit_<sha256> fingerprint ID to match (64 hex chars after the kit_ prefix).",
+                    "description": "kit_<sha256> or malware_<sha256> fingerprint ID to match (64 hex chars after the prefix).",
                 },
             },
             "required": ["fingerprint_id"],
@@ -3419,8 +3432,9 @@ PAYG_ENDPOINTS: dict[str, dict] = {
         "summary": "Composite campaign scan across the threat-intel endpoints ($5.50 flat)",
         "description": (
             "One $5.50 flat call that fans an indicator bundle (max 25 indicators: domains, urls, "
-            "emails, wallets, phones, file URLs, kit fingerprint IDs) across the applicable "
+            "emails, wallets, phones, file URLs, kit/malware fingerprint IDs) across the applicable "
             "threat-intel endpoints in-process, then correlates: per-indicator results, kit families, "
+            "malware families (Malpedia common names), "
             "shared exfil hosts and shared kit fingerprints across indicators, an aggregate risk "
             "score, and corpus citations — packaged for campaign-level takedown intel. Subcalls run "
             "under a hard time budget; any truncation is reported via degraded:true, never silently "
@@ -3442,7 +3456,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                 "fingerprint_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "kit_<sha256> fingerprint IDs to re-check.",
+                    "description": "kit_<sha256> or malware_<sha256> fingerprint IDs to re-check.",
                 },
             },
         },
@@ -3469,6 +3483,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                     },
                 ],
                 "kit_families": ["parcel-smish-eu-04"],
+                "malware_families": ["BeaverTail"],
                 "shared_exfil_hosts": [],
                 "shared_kit_fingerprints": [],
                 "aggregate_risk": 74,

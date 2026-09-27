@@ -7,6 +7,30 @@
 const RS_API_BASE = "https://api.relayshield.net";
 const RS_SOURCE = "chrome-extension";
 
+// Filled in once the extension is actually live on the Chrome Web Store --
+// its item id is assigned by Chrome at publish time, so there is nothing
+// real to put here before then. Left empty rather than guessed, same
+// pattern as WA_NUMBER in cloudflare_worker_miniapp.js: the share feature
+// below falls back to a link that already works today (the Mini App) until
+// this is set, rather than ever sharing a broken or placeholder URL.
+const RS_STORE_URL = "";
+
+// What a "share" actually links to: the store listing once it exists, and
+// the Mini App (live today, no install needed) until then. A friend without
+// the extension can still get real value from either.
+function rsShareUrl() {
+  return RS_STORE_URL ||
+    "https://t.me/relayshield_bot/idcheck?startapp=tg-miniapp-chromeext";
+}
+
+// The message a "share" action copies. Framed around what the check just
+// found, not a generic "try this extension" -- the moment right after a
+// result is the one point where the value is concrete rather than abstract.
+function rsShareText(summary) {
+  return `I just checked ${summary} with RelayShield -- free scam/phishing ` +
+    `and wallet-risk screening, no signup: ${rsShareUrl()}`;
+}
+
 // Mirrors relayshield_api.py's _detect_chain_api exactly. The SERVER is the
 // authority -- if this guesses wrong, the API answers "unrecognised address
 // format" rather than a silently wrong verdict, so drift here is a UX papercut,

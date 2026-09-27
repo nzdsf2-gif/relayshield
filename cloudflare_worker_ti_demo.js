@@ -510,6 +510,64 @@ function renderSupplyChain(data) {
   </div>`;
 }
 
+// Map the live scamkit-fingerprint response onto the shape the demo
+// renderers were written against (kit_id / family_name / indicators /
+// redirect_chain / kit_tells). 2026-09-27: the tabs were reading fields the
+// backend never returned, so real results rendered as "unknown".
+function mapFingerprintForDemo(d) {
+  const isMalware = d.kind === "malware";
+  const det = d.malware_family_detail || {};
+  const signals = d.signals || {};
+  const observations = d.observations || {};
+  const hosts = [...new Set([
+    ...(signals.form_action_hosts || []),
+    ...(signals.exfil_endpoints || []),
+  ])];
+  const redirectChain = (observations.redirect_chain || []).map(r =>
+    typeof r === "string" ? r : (r.url || JSON.stringify(r)));
+  const kitTells = [];
+  if (!isMalware) {
+    if (signals.url_pattern_class) kitTells.push(`URL pattern class: ${signals.url_pattern_class}`);
+    if ((signals.brand_marks || []).length) kitTells.push(`Brand marks: ${signals.brand_marks.join(", ")}`);
+    if (observations.x_evilginx) kitTells.push("X-Evilginx header present (reverse-proxy phishing kit)");
+  }
+  return {
+    kit_id: d.fingerprint_id || "unknown",
+    family_name: isMalware ? (det.common_name || d.malware_family || "unclassified")
+                           : (d.kit_family || "unclassified"),
+    family_status: d.family_status || "suggested",
+    confidence: (d.confidence !== undefined && d.confidence !== null)
+      ? `${Math.round(d.confidence * 100)}%` : null,
+    indicators: hosts,
+    redirect_chain: redirectChain,
+    kit_tells: kitTells,
+    stored: d.stored,
+    malware_families: d.malware_families || [],
+    verdict_copy: d.verdict_copy || null,
+  };
+}
+
+// Map the live scamkit-match response (single object, fingerprint_id in)
+// onto the renderer's matches[] shape.
+function mapMatchForDemo(d) {
+  if (!d.matched) return { matches: [], sightings: [] };
+  const isMalware = d.kind === "malware";
+  const det = d.malware_family_detail || {};
+  return {
+    matches: [{
+      kit_id: d.fingerprint_id || "unknown",
+      family_name: isMalware ? (det.common_name || d.malware_family || "unclassified")
+                             : (d.kit_family || "unclassified"),
+      family_status: d.family_status || "suggested",
+      confidence: (d.confidence !== undefined && d.confidence !== null)
+        ? `${Math.round(d.confidence * 100)}%` : null,
+      first_seen: d.first_seen || null,
+      last_seen: d.last_seen || null,
+    }],
+    sightings: [],
+  };
+}
+
 function renderScamkitFingerprint(data) {
   if (data.error) {
     const raw = String(data.error || '');
@@ -1479,13 +1537,15 @@ export default {
     if (path === "/demo/scamkit-fingerprint" && request.method === "POST") {
       const body = await request.json();
       const payload = body.html ? {html: body.html} : {url: body.url};
-      const data = await callAPI(env, "/v1/metered/scamkit-fingerprint", payload);
+      let data = await callAPI(env, "/v1/metered/scamkit-fingerprint", payload);
+      if (!data.error) data = mapFingerprintForDemo(data);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 
     if (path === "/demo/scamkit-match" && request.method === "POST") {
       const body = await request.json();
-      const data = await callAPI(env, "/v1/metered/scamkit-match", {kit_id: body.kit_id});
+      let data = await callAPI(env, "/v1/metered/scamkit-match", {fingerprint_id: body.kit_id});
+      if (!data.error) data = mapMatchForDemo(data);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 

@@ -25,7 +25,7 @@
     "inline_bytes_limit": 10240,
     "inline_bytes_free": 113,
     "inline_policy_count": 26,
-    "managed_attached": 10,
+    "managed_attached": 11,
     "managed_attach_limit": 10,
     "per_policy_bytes": {
       "InvokeTelegramWebhook": 179,
@@ -569,6 +569,31 @@
         ]
       }
     },
+    "arn:aws:iam::239677749008:policy/relayshield-stars-watchlist-grant": {
+      "name": "relayshield-stars-watchlist-grant",
+      "default_version": "v1",
+      "aws_managed": false,
+      "document": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "StarsWatchlistGrant",
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:GetItem",
+              "dynamodb:PutItem"
+            ],
+            "Resource": "arn:aws:dynamodb:us-east-1:239677749008:table/relayshield_watchlist"
+          },
+          {
+            "Sid": "StarsWatchlistPepper",
+            "Effect": "Allow",
+            "Action": "secretsmanager:GetSecretValue",
+            "Resource": "arn:aws:secretsmanager:us-east-1:239677749008:secret:relayshield/watchlist-pepper-*"
+          }
+        ]
+      }
+    },
     "arn:aws:iam::239677749008:policy/RelayShieldIntelTables": {
       "name": "RelayShieldIntelTables",
       "default_version": "v1",
@@ -728,7 +753,7 @@
     },
     {
       "name": "relayshield-api",
-      "last_modified": "2026-08-28T11:56:45.000+0000",
+      "last_modified": "2026-09-25T14:52:40.000+0000",
       "vpc": false
     },
     {
@@ -773,7 +798,7 @@
     },
     {
       "name": "relayshield-developer-signup",
-      "last_modified": "2026-08-17T19:50:51.000+0000",
+      "last_modified": "2026-09-22T18:15:19.000+0000",
       "vpc": false
     },
     {
@@ -817,11 +842,6 @@
       "vpc": false
     },
     {
-      "name": "relayshield-intel-feed",
-      "last_modified": "2026-08-29T22:06:20.000+0000",
-      "vpc": false
-    },
-    {
       "name": "relayshield-intel-kev",
       "last_modified": "2026-08-29T22:06:13.000+0000",
       "vpc": false
@@ -833,7 +853,7 @@
     },
     {
       "name": "relayshield-intel-monitor",
-      "last_modified": "2026-08-28T11:56:52.000+0000",
+      "last_modified": "2026-09-23T16:03:54.000+0000",
       "vpc": false
     },
     {
@@ -908,7 +928,7 @@
     },
     {
       "name": "relayshield-telegram-webhook",
-      "last_modified": "2026-08-27T11:11:47.000+0000",
+      "last_modified": "2026-09-12T22:19:18.000+0000",
       "vpc": false
     },
     {

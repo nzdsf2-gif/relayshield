@@ -5007,7 +5007,8 @@ def handle_wallet_risk(params: dict) -> dict:
 
     risk_flags    = []
     metadata      = {}
-    sanctions_hit = False
+    sanctions_hit     = False
+    token_critical_hit = False
 
     if chain == "bitcoin":
         try:
@@ -5092,6 +5093,68 @@ def handle_wallet_risk(params: dict) -> dict:
             logger.error("GoPlus wallet-risk failed address=%s: %s", address, exc)
             metadata["goplus_error"] = "upstream unavailable"
 
+        # ADDRESS_SECURITY answers "does this ACCOUNT have a history of bad
+        # behaviour" -- phishing, dark web, sanctions. It has nothing to say
+        # about a freshly-minted SCAM TOKEN CONTRACT, which by definition has
+        # no history yet. That is a different question GoPlus answers with a
+        # SEPARATE endpoint (token_security, already used by the paid
+        # /v1/token-security handler above) -- and every Solana/EVM address a
+        # consumer pastes into a scam checker is at least as likely to be a
+        # token contract as a plain wallet. Both GoPlus calls are free and
+        # keyless upstream (no API key on either URL), so there is no vendor
+        # cost gating this from the keyless surface -- only the fuller paid
+        # report (DexScreener liquidity, CoinGecko lookalike cross-check)
+        # stays behind /v1/token-security.
+        #
+        # An empty `result` for token_security means GoPlus does not
+        # recognise this address as a token at all (an ordinary wallet), so
+        # it is a safe no-op for the common case and only fires when there is
+        # something to check.
+        token_chain_id = "solana" if chain == "solana" else "1"
+        try:
+            t_url = (GOPLUS_TOKEN_URL.format(chain_id=token_chain_id)
+                     + f"?contract_addresses={address}")
+            t_req = urllib.request.Request(t_url, headers={"User-Agent": "RelayShield/1.0"})
+            with urllib.request.urlopen(t_req, timeout=8) as t_resp:
+                t_data = json.loads(t_resp.read())
+            t_result = t_data.get("result") or {}
+            t_raw = t_result.get(address) or t_result.get(address.lower()) or {}
+            if t_raw:
+                metadata["is_token_contract"] = True
+                _TOKEN_CRITICAL = {
+                    "is_honeypot":     "honeypot — cannot sell after buying",
+                    "is_airdrop_scam": "flagged as an airdrop scam token",
+                    "fake_token":      "impersonates a different, real token",
+                }
+                token_flags = [label for k, label in _TOKEN_CRITICAL.items()
+                               if str(t_raw.get(k, "0")) == "1"]
+                try:
+                    sell_tax = float(t_raw.get("sell_tax", 0))
+                    if sell_tax >= 0.5:
+                        token_flags.append(
+                            f"sell tax {sell_tax*100:.0f}% — you would likely not "
+                            "be able to sell what you buy")
+                except (TypeError, ValueError):
+                    pass
+                risk_flags.extend(token_flags)
+                # Mirrors /v1/token-security's own scoring exactly: any ONE of
+                # these three is definitive on its own (a honeypot doesn't
+                # need a second corroborating flag to be worth a HIGH verdict,
+                # same reasoning as sanctions_hit above), so it is graded
+                # here rather than folded into the generic len(risk_flags)>=2
+                # count threshold below, which is calibrated for the softer
+                # address-reputation flags.
+                token_critical_hit = bool(token_flags)
+        except Exception as exc:
+            logger.warning("GoPlus token-security cross-check failed address=%s: %s",
+                            address, exc)
+            # A failed cross-check narrows what was checked -- it does not
+            # invalidate the address-security verdict above, which may have
+            # completed fine. Marked *_error anyway so _freshness() below
+            # reports degraded=True rather than silently rendering an
+            # incomplete check as a confident clean result.
+            metadata["goplus_token_error"] = "upstream unavailable"
+
     elif chain == "ton":
         try:
             ton_url = TONAPI_ACCOUNTS_URL.format(
@@ -5108,7 +5171,8 @@ def handle_wallet_risk(params: dict) -> dict:
             logger.error("TONAPI wallet-risk failed address=%s: %s", address, exc)
             metadata["tonapi_error"] = "upstream unavailable"
 
-    risk_level = "HIGH" if sanctions_hit or len(risk_flags) >= 2 else "MEDIUM" if risk_flags else "LOW"
+    risk_level = "HIGH" if sanctions_hit or token_critical_hit or len(risk_flags) >= 2 \
+        else "MEDIUM" if risk_flags else "LOW"
     _record_first_seen(address, chain)
     # source= HERE, not only on /v1/ton-address, and the difference is the whole
     # measurement. The Mini App and the widget both go through check(), which

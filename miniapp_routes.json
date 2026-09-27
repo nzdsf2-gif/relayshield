@@ -219,6 +219,19 @@
       "submission_note": null,
       "route_type": "partner_response",
       "state": "registered, connector not yet submitted"
+    },
+    {
+      "rank": 20,
+      "id": "chromeext",
+      "key": "tg-miniapp-chromeext",
+      "destination": "The Chrome extension's popup, a link back to try RelayShield in Telegram",
+      "audience": null,
+      "audience_note": "UNMEASURED and structurally like the Muse row: not a catalogue listing, no shelf and no browse page. The key is a static link in chrome-extension/popup.html, so an arrival is a desktop-extension user choosing to also try the mobile/Telegram surface, not somebody discovering us through a directory.",
+      "status": null,
+      "submitted_at": null,
+      "submission_note": null,
+      "route_type": "own_surface_crosslink",
+      "state": "registered, extension not yet published to the Chrome Web Store"
     }
   ],
   "loop_keys": [

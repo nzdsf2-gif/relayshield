@@ -168,6 +168,10 @@ const ALLOWED_SOURCES = new Set([
   // Retired. Links published before 2026-09-11 carry it, and dropping it
   // would break attribution on every one of them at once.
   "tg-miniapp-channel",
+  // The Chrome extension's popup, same shape as tg-miniapp-muse: a static
+  // link in our own product, not a catalogue submission. Registered BEFORE
+  // the extension ships to the Chrome Web Store.
+  "tg-miniapp-chromeext",
 ]);
 
 function sourceFor(startParam) {

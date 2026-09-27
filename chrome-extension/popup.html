@@ -131,6 +131,14 @@
   footer a { color: var(--accent); text-decoration: none; }
   footer p { margin: 0 0 6px; }
   footer p:last-child { margin-bottom: 0; }
+  footer button.link-like {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -169,6 +177,9 @@
       <a href="https://t.me/relayshield_bot?start=SRC_chromeext" target="_blank" rel="noopener">Telegram</a>
       ·
       <a href="https://wa.me/17407373961?text=SRC_chromeext" target="_blank" rel="noopener">WhatsApp</a>
+    </p>
+    <p>Know someone who'd use this? —
+      <button class="link-like" id="share-generic">Copy a link to send them</button>
     </p>
   </footer>
 

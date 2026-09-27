@@ -7,8 +7,23 @@ const checkEmailBtn = document.getElementById("check-email");
 const resultEl = document.getElementById("result");
 const errorEl = document.getElementById("error");
 const apiKeyLink = document.getElementById("apikey");
+const shareGenericBtn = document.getElementById("share-generic");
 
 apiKeyLink.href = `${RS_API_BASE}/developers?source=${RS_SOURCE}`;
+
+// Decoupled from any specific check result -- somebody who just likes the
+// extension has nothing to reference, and shouldn't have to run a check
+// first to get something worth sending a friend.
+shareGenericBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(rsGenericShareText());
+    const original = shareGenericBtn.textContent;
+    shareGenericBtn.textContent = "Copied — paste it anywhere";
+    setTimeout(() => { shareGenericBtn.textContent = original; }, 2000);
+  } catch {
+    shareGenericBtn.textContent = "Couldn't copy — try again";
+  }
+});
 
 // Tabs. Two independent forms sharing one result/error area below them.
 document.querySelectorAll(".tab").forEach((btn) => {
@@ -96,8 +111,15 @@ function renderLinkOrWallet(result) {
   const noteHtml = !result.reasons.length
     ? '<div class="note">Absence of flags is not proof of safety.</div>'
     : "";
+  // A URL like a Jupiter/Solscan/Etherscan page carries the actual on-chain
+  // address in its own path -- say so explicitly, even on a clean result, so
+  // "nothing known against it" reads as "checked both", not "only checked
+  // the domain and never looked at the token."
+  const embeddedHtml = result.embeddedAddress
+    ? `<div class="note">Also checked the ${result.embeddedChain.toUpperCase()} address in this URL: ${escapeHtml(result.embeddedAddress)}</div>`
+    : "";
   resultEl.innerHTML =
-    `<div class="level ${result.level}">${label}</div>${reasonsHtml}${noteHtml}${SHARE_BTN_HTML}`;
+    `<div class="level ${result.level}">${label}</div>${reasonsHtml}${noteHtml}${embeddedHtml}${SHARE_BTN_HTML}`;
   // The link/address itself is already public (it's what was just pasted or
   // right-clicked), so it's fine to include in what gets shared -- unlike an
   // email's content below, which is never put in a share message.

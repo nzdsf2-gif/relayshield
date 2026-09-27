@@ -3131,6 +3131,31 @@ def _url_malware_families(url: str) -> list[str]:
         return []
 
 
+def _domain_malware_families(domain: str) -> list[str]:
+    """Malware families attributed to a bare domain by the IOC corpus.
+
+    Campaign-scan fans domains out to handle_domain (a lookalike sweep)
+    and handle_tech_stack_cve -- neither returns malware labels -- so the
+    corpus lookup for domain indicators happens here, with the same label
+    parsing as the scan-url path. Enrichment only: never raises, returns []
+    when the table is unreachable or nothing matches.
+    """
+    domain = (domain or "").strip().lower()
+    if not domain:
+        return []
+    try:
+        table = dynamodb.Table(INTEL_IOCS_TABLE)
+        resp = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(domain),
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").is_in(["domain", "url"]),
+            Limit=5,
+        )
+        return _ioc_malware_labels(resp.get("Items"))
+    except Exception as exc:
+        logger.warning("Domain malware-attribution lookup failed domain=%s: %s", domain[:80], exc)
+        return []
+
+
 # How many URLs one batch call may carry. 25 is a deliberate ceiling rather
 # than a round number: it is what an inbox page holds, it keeps the RDAP fan-out
 # inside the wall-clock budget below, and every unit of it is charged against
@@ -10593,6 +10618,13 @@ def handle_campaign_scan(params: dict) -> dict:
                 if name == "scamkit-match" and ok:
                     corpus_citations += sum(e.get("corpus_hits", 0)
                                             for e in (data.get("evidence") or {}).values())
+            if itype == "domain":
+                # Domain -> malware-family attribution from the IOC corpus.
+                # handle_domain is a lookalike sweep and never returns
+                # malware labels, so the corpus lookup happens here; same
+                # label parsing as the scan-url path. Never raises.
+                for f in _domain_malware_families(indicator):
+                    malware_families.add(f)
             indicators_out.append({
                 "indicator": indicator,
                 "type":      itype,

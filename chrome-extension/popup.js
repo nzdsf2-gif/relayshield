@@ -75,6 +75,11 @@ async function runEmailCheck() {
   }
 }
 
+// One share button markup, reused by both render paths, and one delegated
+// click handler below -- innerHTML is replaced wholesale on every check, so
+// a listener bound to the button itself would be destroyed with it.
+const SHARE_BTN_HTML = '<button class="share" data-share="1">Share this check</button>';
+
 function renderLinkOrWallet(result) {
   const labels = {
     high: "⚠️ Flagged",
@@ -92,7 +97,11 @@ function renderLinkOrWallet(result) {
     ? '<div class="note">Absence of flags is not proof of safety.</div>'
     : "";
   resultEl.innerHTML =
-    `<div class="level ${result.level}">${label}</div>${reasonsHtml}${noteHtml}`;
+    `<div class="level ${result.level}">${label}</div>${reasonsHtml}${noteHtml}${SHARE_BTN_HTML}`;
+  // The link/address itself is already public (it's what was just pasted or
+  // right-clicked), so it's fine to include in what gets shared -- unlike an
+  // email's content below, which is never put in a share message.
+  resultEl.dataset.shareText = rsShareText(result.target);
   show(resultEl);
 }
 
@@ -113,9 +122,27 @@ function renderEmail(data) {
     ? '<div class="note">Absence of flags is not proof this email is safe.</div>'
     : "";
   resultEl.innerHTML =
-    `<div class="level ${data.risk}">${label}</div>${flagsHtml}${linksHtml}${noteHtml}`;
+    `<div class="level ${data.risk}">${label}</div>${flagsHtml}${linksHtml}${noteHtml}${SHARE_BTN_HTML}`;
+  // Never include the pasted sender/subject/body in a share message -- that
+  // content is the user's own inbox, not something to copy into a message to
+  // a friend on their behalf.
+  resultEl.dataset.shareText = rsShareText("a suspicious email");
   show(resultEl);
 }
+
+// Delegated: bound once to the container, works for every re-render.
+resultEl.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-share]");
+  if (!btn) return;
+  try {
+    await navigator.clipboard.writeText(resultEl.dataset.shareText || "");
+    const original = btn.textContent;
+    btn.textContent = "Copied — paste it anywhere";
+    setTimeout(() => { btn.textContent = original; }, 2000);
+  } catch (err) {
+    btn.textContent = "Couldn't copy — select and copy manually";
+  }
+});
 
 function show(el) { el.classList.add("show"); }
 function hide(el) { el.classList.remove("show"); }

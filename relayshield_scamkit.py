@@ -52,7 +52,7 @@ from html.parser import HTMLParser
 from urllib.parse import urlparse
 
 KIT_ID_PREFIX = "kit_"
-MALWARE_ID_PREFIX = "malware_"  # planned extension (spec §8) — not emitted by v1
+MALWARE_ID_PREFIX = "malware_"  # malware track — emitted for kind="malware"
 FINGERPRINT_VERSION = "skfp-v2"  # bump whenever normalization changes
 FINGERPRINT_VERSION_V1 = "skfp-v1"  # previous schema — rows remain valid (dual-version)
 SUPPORTED_FINGERPRINT_VERSIONS = (FINGERPRINT_VERSION_V1, FINGERPRINT_VERSION)
@@ -773,8 +773,8 @@ def fingerprint_id(signals: dict, kind: str = "kit",
 
 
 def valid_fingerprint_id(value: str) -> bool:
-    """Shape check for caller-supplied IDs: ``kit_`` + 64 hex chars."""
-    return bool(re.fullmatch(r"kit_[0-9a-f]{64}", value or ""))
+    """Shape check for caller-supplied IDs: ``kit_`` or ``malware_`` + 64 hex chars."""
+    return bool(re.fullmatch(r"(kit|malware)_[0-9a-f]{64}", value or ""))
 
 
 # ---------------------------------------------------------------------------
@@ -795,6 +795,30 @@ APPROVED_FAMILIES = frozenset({
 def family_status_for(name: str | None) -> str:
     """``"approved"`` for an Andrew-approved family name, else ``"suggested"``."""
     return "approved" if (name or "").strip().lower() in APPROVED_FAMILIES else "suggested"
+
+
+# ---------------------------------------------------------------------------
+# Malware family names — Andrew-approved seed set
+# ---------------------------------------------------------------------------
+# WaterPlum / Contagious Interview (joint advisory: JP NPA + FBI + DoD Cyber
+# Crime Center + Australia + Germany, 2026-09). Malpedia family_ids, resolved
+# via relayshield_malpedia_families at read time. Same approval semantics as
+# APPROVED_FAMILIES: these may be emitted with family_status="approved" via
+# malware_family_status_for(); every other name stays "suggested". Human
+# review can still set approved manually on any row via a direct table edit —
+# approval logic never fabricates sightings or corpus writes.
+APPROVED_MALWARE_FAMILIES = frozenset({
+    "win.beavertail",      # BeaverTail
+    "py.invisibleferret",  # InvisibleFerret
+    "js.otter_cookie",     # OtterCookie
+    "js.ottercandy",       # OtterCandy
+    "js.stoatwaffle",      # StoatWaffle
+})
+
+
+def malware_family_status_for(family_id: str | None) -> str:
+    """``"approved"`` for an Andrew-approved Malpedia family_id, else ``"suggested"``."""
+    return "approved" if (family_id or "").strip().lower() in APPROVED_MALWARE_FAMILIES else "suggested"
 
 
 # ---------------------------------------------------------------------------
@@ -913,12 +937,14 @@ def confidence_band(confidence: float) -> str:
 
 
 def verdict_copy(verdict: str, *, family: str | None = None,
-                 sightings: int = 0, shared: int = 0, total: int = 0) -> str:
+                 sightings: int = 0, shared: int = 0, total: int = 0,
+                 kind: str = "kit") -> str:
     """Human-readable verdict. NEVER renders "safe"/"clean"/"legitimate"."""
+    label = "malware family" if kind == "malware" else "kit family"
     if verdict == "known_kit" and family:
-        return f"Matches known kit family {family} ({sightings} sightings)"
+        return f"Matches known {label} {family} ({sightings} sightings)"
     if verdict == "likely_variant" and family:
-        return (f"Shares {shared} of {total} signals with kit family {family} — "
+        return (f"Shares {shared} of {total} signals with {label} {family} — "
                 "likely variant. Treat as suspicious.")
     if verdict == "likely_variant":
         return "Weak similarity to known kits — treat as suspicious."

@@ -70,11 +70,18 @@ def _no_link_findings(urls):
 class HandlerBehaviour(unittest.TestCase):
     """Executed directly against handle_email_check, no dispatcher."""
 
-    def _call(self, params, links_result=None):
+    def _call(self, params, links_result=None, sender_age_days=None):
+        # Mocked to a fixed value rather than left to hit the real network:
+        # every existing test here asserts on FLAGS unrelated to sender-domain
+        # age, and a real RDAP call would make them depend on whether egress
+        # happens to be reachable from wherever the suite runs.
         with unittest.mock.patch.object(
                 api, "_heuristic_url_check_many",
                 lambda urls: links_result if links_result is not None
-                else _no_link_findings(urls)):
+                else _no_link_findings(urls)), \
+             unittest.mock.patch.object(
+                api, "_rdap_registration_age_days",
+                lambda domain: sender_age_days):
             return body(api.handle_email_check(params))
 
     def test_empty_request_is_refused(self):
@@ -216,6 +223,58 @@ class HandlerBehaviour(unittest.TestCase):
                 lambda passed: _no_link_findings(passed)) as mocked:
             d = self._call({"from_address": "a@acme.com", "links": urls})
         self.assertLessEqual(len(d["data"]["links"]), api.LINK_CHECK_MAX_URLS)
+
+
+class SenderDomainAge(unittest.TestCase):
+    """_heuristic_url_check already ages every LINK in the body via RDAP.
+    Nothing aged the domain the mail itself claims to be FROM, so a brand-new
+    sending domain with no links, no auth failure and no impersonated brand
+    scored a flat 0 -- 'no strong signals' rather than the one real signal
+    this input actually carries."""
+
+    def _call(self, params, sender_age_days):
+        with unittest.mock.patch.object(
+                api, "_heuristic_url_check_many",
+                lambda urls: _no_link_findings(urls)), \
+             unittest.mock.patch.object(
+                api, "_rdap_registration_age_days",
+                lambda domain: sender_age_days):
+            return body(api.handle_email_check(params))
+
+    def test_a_domain_registered_days_ago_is_flagged(self):
+        d = self._call({"from_address": "team@updates.typesafe.ai"}, sender_age_days=3)
+        texts = " ".join(f["text"] for f in d["data"]["flags"])
+        self.assertIn("registered 3 day(s) ago", texts)
+        self.assertEqual(d["data"]["risk"], "medium")
+
+    def test_a_long_established_domain_is_not_flagged(self):
+        d = self._call({"from_address": "team@updates.typesafe.ai"}, sender_age_days=3650)
+        self.assertEqual(d["data"]["flags"], [])
+
+    def test_an_unresolvable_age_never_flags(self):
+        """A check that could not complete must never render as a signal --
+        the same rule the SIM-swap monitor and the link-check age gate both
+        already hold: 'we could not check' is not 'it is risky'."""
+        d = self._call({"from_address": "team@updates.typesafe.ai"}, sender_age_days=None)
+        self.assertEqual(d["data"]["flags"], [])
+
+    def test_webmail_senders_are_never_rdap_queried(self):
+        calls = []
+        with unittest.mock.patch.object(
+                api, "_heuristic_url_check_many",
+                lambda urls: _no_link_findings(urls)), \
+             unittest.mock.patch.object(
+                api, "_rdap_registration_age_days",
+                lambda domain: calls.append(domain) or 1):
+            body(api.handle_email_check({"from_address": "x@gmail.com"}))
+        self.assertEqual(calls, [])
+
+    def test_a_young_domain_alone_is_medium_not_high(self):
+        """Mirrors _link_check_level's own rule: age alone warns, and never
+        by itself produces the top severity -- it also describes every real
+        company in its first weeks."""
+        d = self._call({"from_address": "team@updates.typesafe.ai"}, sender_age_days=1)
+        self.assertEqual(d["data"]["risk"], "medium")
 
 
 class Dispatcher(unittest.TestCase):

@@ -3905,6 +3905,24 @@ def _score_email(params: dict) -> dict:
                 f"support desk, but the address is a free {from_domain} account. "
                 "A real organisation writes from its own domain."})
 
+    # The sender's OWN domain age. _heuristic_url_check already does this for
+    # every link in the body; nothing did it for the domain the mail itself
+    # claims to be FROM. A domain registered days ago sending "updates" is a
+    # real signal on its own -- and also describes every legitimate company
+    # in its first weeks, so this warns (weight 2) and never becomes the sole
+    # reason for a "high" verdict, mirroring _link_check_level's <30-day rule
+    # exactly. Skipped for webmail (gmail.com etc. are never young) and when
+    # there is no domain to look up at all.
+    if from_domain and from_domain not in _EMAIL_WEBMAIL:
+        age_days = _rdap_registration_age_days(from_domain)
+        if age_days is not None and age_days < 30:
+            flags.append({"weight": 2, "text":
+                f"The sending domain {from_domain} was registered {age_days} "
+                "day(s) ago. That is not proof of anything by itself -- it "
+                "also describes a brand-new legitimate company -- but a very "
+                "young domain sending mail is worth knowing before you act on "
+                "anything it asks for."})
+
     pressure = _email_pressure_signals(str(params.get("body_text") or ""))
     if pressure["ask"] and (pressure["deadline"] or pressure["threat"]):
         lever = (f'and pressures you with the phrase "{pressure["threat"]}"'

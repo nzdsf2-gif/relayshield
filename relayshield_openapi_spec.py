@@ -3049,7 +3049,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
     },
     '/v1/payg/scan-url': {
         'summary': 'Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis',
-        'description': 'Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis. Returns an async analysis ID to poll. Call before an agent clicks, fetches, or shares a link from an untrusted source.',
+        'description': 'Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis. Returns an async analysis ID to poll. URL -> malware-family attribution: when RelayShield\'s IOC corpus already knows the URL or its domain as malware infrastructure, the response includes malware_families (corpus labels) with malware_attribution=relayshield_ioc_corpus — independent of the pending VirusTotal verdict. Call before an agent clicks, fetches, or shares a link from an untrusted source.',
         'price_units': 50000,
         'x402_version': 2,
         'body': {'type': 'object',
@@ -3062,6 +3062,10 @@ PAYG_ENDPOINTS: dict[str, dict] = {
           'target': 'https://suspicious-site.example.com',
           'analysis_id': 'u-abc123def456',
           'poll_endpoint': '/v1/result/u-abc123def456',
+          'immediate_signal': 'flagged',
+          'immediate_reasons': ["this domain appears in RelayShield's criminal IOC corpus"],
+          'malware_families': ['clearfake'],
+          'malware_attribution': 'relayshield_ioc_corpus',
           'note': 'Poll /v1/result/{analysis_id} every 5s until status is completed'}},
     },
     '/v1/payg/scan-wallet': {
@@ -3306,7 +3310,11 @@ PAYG_ENDPOINTS: dict[str, dict] = {
             "caller_supplied — the pipeline never computes JA3/JA4 locally (those fingerprint "
             "the TLS client, not the kit server). The returned kit_family is auto-resolved: "
             "the 13 FLAME TP-0067 families Andrew approved carry family_status approved; "
-            "every other name is suggested."
+            "every other name is suggested. "
+            "URL -> malware-family attribution: for kind='kit' with a fetched URL, the response "
+            "also carries malware_families from RelayShield's IOC corpus (empty when the corpus "
+            "has no malware label for the URL) with malware_attribution='relayshield_ioc_corpus' "
+            "when attributed, else null. Caller-supplied html gets no URL attribution."
         ),
         "price_units": 500000,
         "x402_version": 2,
@@ -3328,6 +3336,18 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                 "family": {
                     "type": "string",
                     "description": "Optional caller-supplied family label for a brand-new fingerprint (approved if it names one of the 13 FLAME TP-0067 families, suggested otherwise).",
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Fingerprint kind: 'kit' (default — phishing-kit HTML flow) or 'malware' (malware-sample flow; requires 'signals').",
+                },
+                "signals": {
+                    "type": "object",
+                    "description": "REQUIRED for kind='malware': caller-computed feature dict for the sample (v1 does no binary extraction in Lambda). Ignored for kind='kit'.",
+                },
+                "malware_family": {
+                    "type": "string",
+                    "description": "Optional Malpedia family_id for kind='malware' (e.g. 'win.beavertail'). Resolved live against the Malpedia taxonomy; the 5 Andrew-approved WaterPlum families emit family_status approved, everything else suggested.",
                 },
                 "observed_telemetry": {
                     "type": "object",
@@ -3372,15 +3392,18 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                                  "tls": {"tls_version": "TLSv1.3"}},
                 "stored": True,
                 "notes": [],
+                "malware_families": [],
+                "malware_attribution": None,
             },
         },
     },
     "/v1/payg/scamkit-match": {
-        "summary": "Match a kit fingerprint ID against the corpus",
+        "summary": "Match a kit or malware fingerprint ID against the corpus",
         "description": (
             "Cheap re-check for dashboards and bots watching for kit reuse: look up an existing "
-            "kit_<sha256> fingerprint ID and get its family (auto-suggested, pending approval), "
-            "confidence, verdict, evidence, and sighting history. An unknown ID is never reported "
+            "kit_<sha256> or malware_<sha256> fingerprint ID and get its family (auto-suggested, pending approval), "
+            "confidence, verdict, evidence, and sighting history. Malware rows return "
+            "malware_family plus the live Malpedia detail record. An unknown ID is never reported "
             "as safe — only as no-match with an explicit not-a-guarantee caveat."
         ),
         "price_units": 100000,
@@ -3390,7 +3413,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
             "properties": {
                 "fingerprint_id": {
                     "type": "string",
-                    "description": "kit_<sha256> fingerprint ID to match (64 hex chars after the kit_ prefix).",
+                    "description": "kit_<sha256> or malware_<sha256> fingerprint ID to match (64 hex chars after the prefix).",
                 },
             },
             "required": ["fingerprint_id"],
@@ -3419,8 +3442,10 @@ PAYG_ENDPOINTS: dict[str, dict] = {
         "summary": "Composite campaign scan across the threat-intel endpoints ($5.50 flat)",
         "description": (
             "One $5.50 flat call that fans an indicator bundle (max 25 indicators: domains, urls, "
-            "emails, wallets, phones, file URLs, kit fingerprint IDs) across the applicable "
+            "emails, wallets, phones, file URLs, kit/malware fingerprint IDs) across the applicable "
             "threat-intel endpoints in-process, then correlates: per-indicator results, kit families, "
+            "malware families (Malpedia common names plus IOC-corpus attribution for known-malware "
+            "domains/URLs), "
             "shared exfil hosts and shared kit fingerprints across indicators, an aggregate risk "
             "score, and corpus citations — packaged for campaign-level takedown intel. Subcalls run "
             "under a hard time budget; any truncation is reported via degraded:true, never silently "
@@ -3442,7 +3467,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                 "fingerprint_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "kit_<sha256> fingerprint IDs to re-check.",
+                    "description": "kit_<sha256> or malware_<sha256> fingerprint IDs to re-check.",
                 },
             },
         },
@@ -3469,6 +3494,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                     },
                 ],
                 "kit_families": ["parcel-smish-eu-04"],
+                "malware_families": ["BeaverTail"],
                 "shared_exfil_hosts": [],
                 "shared_kit_fingerprints": [],
                 "aggregate_risk": 74,

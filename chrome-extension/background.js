@@ -1,0 +1,67 @@
+importScripts("api.js");
+
+const MENU_LINK = "relayshield-check-link";
+const MENU_SELECTION = "relayshield-check-selection";
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: MENU_LINK,
+    title: "Check this link with RelayShield",
+    contexts: ["link"],
+  });
+  chrome.contextMenus.create({
+    id: MENU_SELECTION,
+    title: "Check this with RelayShield",
+    contexts: ["selection"],
+  });
+});
+
+chrome.contextMenus.onClicked.addListener(async (info) => {
+  const raw = info.menuItemId === MENU_LINK ? info.linkUrl : info.selectionText;
+  if (!raw) return;
+  await runCheck(raw);
+});
+
+async function runCheck(raw) {
+  let result;
+  try {
+    result = await rsCheckAny(raw);
+  } catch (err) {
+    notify("Could not check that", err.message || String(err));
+    return;
+  }
+
+  // Stored so the popup shows the last result if opened right after a
+  // context-menu check -- a context menu has no surface of its own to
+  // render a verdict into beyond a system notification.
+  await chrome.storage.session.set({
+    rsLastResult: { ...result, checkedAt: Date.now() },
+  });
+
+  const levelLabel = {
+    high: "⚠️ FLAGGED",
+    medium: "⚠️ Caution",
+    low: "Low risk",
+    unknown: "Nothing known against it",
+  }[result.level] || result.level;
+
+  const bodyLines = result.reasons.length
+    ? result.reasons.join("\n")
+    : "No flags in RelayShield's corpus, Safe Browsing, or (for links) domain age. Absence of evidence is not proof of safety.";
+
+  notify(`${levelLabel}: ${truncate(result.target, 60)}`, bodyLines);
+}
+
+function notify(title, message) {
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title,
+    message,
+    priority: 1,
+  });
+}
+
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}

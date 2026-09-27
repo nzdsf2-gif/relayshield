@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "RelayShield — Link & Wallet Check",
+  "version": "0.1.0",
+  "description": "Right-click a link or paste a wallet address to check it against RelayShield's criminal threat corpus, Google Safe Browsing, and domain age. Free, no signup.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "contextMenus",
+    "notifications",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.relayshield.net/*"
+  ]
+}

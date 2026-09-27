@@ -48,6 +48,39 @@ Then: toggle **Developer mode** (top right) → **Load unpacked** → select
 `~/dev/relayshield/chrome-extension`. Right-click any link on any page and look for "Check
 this link with RelayShield" in the context menu.
 
+## Store listing copy
+
+**Title** (manifest `name`, 44/75 chars): `RelayShield: Link, Wallet & Email Scam Check`
+
+**Summary** (manifest `description`, becomes the store card's short description, 116/132 chars):
+`Right-click a link, paste a wallet address, or check a suspicious email. Free scam screening,
+no signup, no account.`
+
+**Detailed description** (the listing page, under the screenshots):
+
+> Right-click any link on any page — or open the popup — to check it before you trust it.
+> RelayShield screens against a criminal threat corpus built from monitored underground
+> channels, Google Safe Browsing's live blocklist, and how recently the domain was
+> registered.
+>
+> Paste a wallet address (EVM, Solana, TON, or Bitcoin) for a risk screen against known
+> scam, drainer, and sanctions activity — before you send anything to it.
+>
+> Paste a suspicious email's sender, subject, and body to check it for phishing signals:
+> brand impersonation, urgency language, mismatched sending domains, and any links inside
+> it — checked the same way as the link tab.
+>
+> **No signup. No account. No card.** Every check here is free, with nothing to configure
+> first.
+>
+> **We never tell you something is "safe."** Absence of a flag means nothing is known
+> against it right now — not that it's clean forever. A phishing site registered five
+> minutes ago is in no database yet, and we say so rather than pretending otherwise.
+>
+> Want ongoing monitoring instead of one-off checks — breach alerts, SIM-swap protection,
+> infostealer exposure? RelayShield's Telegram and WhatsApp bots do that continuously; this
+> extension is the free, no-signup front door to the same underlying checks.
+
 ## Before submitting to the Chrome Web Store
 
 1. **$5 one-time developer registration fee**, paid once, covers every extension you ever
@@ -55,18 +88,26 @@ this link with RelayShield" in the context menu.
    from an unrelated store.
 2. **Privacy practices disclosure is mandatory**, not optional paperwork: the Developer
    Dashboard's Privacy tab requires stating that the extension transmits user-provided text
-   (pasted links/addresses) to a remote server, and a privacy policy URL —
+   (pasted links/addresses/email content) to a remote server, and a privacy policy URL —
    `relayshield.net/privacy` already exists and covers this.
-3. **Screenshots and a short description** for the store listing — none exist yet. 1280×800 or
-   640×400, at least one showing the popup with a real verdict.
+3. **Screenshots for the store listing, at 1280×800 or 640×400.** Two working previews are
+   attached to this session's reply for visual reference — built from mocked results (this
+   container can't reach the live API), and at the popup's natural 372×520 size, not the store's
+   required dimensions. Take the final ones yourself, against a real result, at the correct size.
 4. **Icon**: reused from the existing brand asset (`relayshield_icon_512.png`), not
    IDCheck-specific — this is the general RelayShield mark, matching the same reasoning
    `relayshield_icon_512.html`'s own comment gives for the Telegram bot's icon: same shield,
    different surface, each labelled as itself.
 
-## What's deliberately NOT in v1
+## v0.2.0: email check added
 
-`/v1/email-check` isn't wired in — it scores a full message (from/subject/body/links), not a
-bare pasted string, so it doesn't fit a single paste box the way link and wallet checks do.
-Worth a fast-follow with its own UI (a small form, not a text area) rather than forcing it into
-this one.
+`/v1/email-check` is now a second tab in the popup (Sender / Subject / Body fields, since it
+scores a parsed message rather than a single pasted string). Links inside the pasted body are
+extracted client-side and sent alongside the text, matching what the endpoint expects from "a
+caller that has already parsed the message" — the extension IS that caller here.
+
+**Deliberately not built**: automatically reading the currently-open email in Gmail/Outlook via
+a content script. That needs per-provider DOM scraping, which breaks silently whenever those
+sites change their markup — a real, ongoing maintenance cost. Worth it only if the manual
+paste-in tab proves people actually use email checking from here; build the cheap version first,
+measure, then decide.

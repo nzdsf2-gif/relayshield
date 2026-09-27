@@ -2925,6 +2925,21 @@ _APIFY_BANNER = _banner("Arriving from Apify", _p(
 
 
 _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
+    "chrome-extension": (
+        # No referer hosts: a browser extension calls the API directly from a
+        # service worker, never via a page navigation, so there is no Referer
+        # header to match on at all. Every arrival here is the explicit
+        # ?source=chrome-extension link in the popup's own "get an API key"
+        # row, registered before the extension shipped, per the standing rule.
+        (),
+        _banner("Arriving from the RelayShield Chrome extension", _p(
+            "The extension checks a link or a wallet address the moment you paste it "
+            "or right-click it, no signup. Everything it does -- our IOC corpus, Google "
+            "Safe Browsing, RDAP domain age, and multi-chain wallet risk -- is free and "
+            "keyless here too. An API key adds breach and infostealer exposure lookups, "
+            "and lifts the per-IP call cap the extension shares with every keyless "
+            "caller. Free tier is 100 calls, no card.")),
+    ),
     "discord-bot": (
         ("top.gg", "discordbotlist.com", "discord.bots.gg"),
         _banner("Arriving from the RelayShield Discord bot", _p(

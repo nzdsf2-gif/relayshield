@@ -547,11 +547,32 @@ function renderScamkitMatch(data) {
   return `<div class="result-card">
     ${matches.length ? `<div class="section-label">Fingerprint Matches (${matches.length})</div>${matches.map(m=>`
       <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px;margin-bottom:8px">
-        <div style="font-family:monospace;font-size:13px;color:#00B5A5">${m.kit_id || 'unknown'}</div>
+        <div style="font-family:monospace;font-size:13px;color:#00B5A5;word-break:break-all">${m.kit_id || 'unknown'}</div>
         <div style="font-size:13px;margin-top:4px">Family: <strong>${m.family_name || 'unclassified'}</strong> <span style="color:#64748b;font-size:11px">(${m.family_status || 'suggested'})</span></div>
         ${m.similarity ? `<div style="font-size:12px;color:#94a3b8">Similarity: ${m.similarity}</div>` : ''}
+        ${m.confidence ? `<div style="font-size:12px;color:#94a3b8">Confidence: ${Math.round(m.confidence * 100)}%</div>` : ''}
+        ${m.first_seen ? `<div style="font-size:12px;color:#64748b;margin-top:4px">First seen: ${m.first_seen} · Last seen: ${m.last_seen || 'recent'}</div>` : ''}
       </div>`).join("")}` : ''}
-    ${sightings.length ? `<div class="section-label">Sightings (${sightings.length})</div><ul class="factors">${sightings.map(s=>`<li style="font-size:12px">${s}</li>`).join("")}</ul>` : ''}
+    ${sightings.length ? `<div class="section-label">Sightings (${sightings.length})</div>
+      <div style="max-height:300px;overflow-y:auto;border:1px solid #1e3a5f;border-radius:8px">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="background:#0f1f3a;position:sticky;top:0">
+          <th style="text-align:left;padding:8px;color:#64748b;font-weight:600">URL</th>
+          <th style="text-align:left;padding:8px;color:#64748b;font-weight:600">Seen</th>
+        </tr></thead>
+        <tbody>
+          ${sightings.slice(0, 50).map(s=>{
+            const url = typeof s === 'string' ? s : (s.url || s.indicator || JSON.stringify(s));
+            const seen = typeof s === 'object' && s.seen ? s.seen : '';
+            return `<tr style="border-top:1px solid #1e3a5f">
+              <td style="padding:8px;font-family:monospace;color:#94a3b8;word-break:break-all">${url}</td>
+              <td style="padding:8px;color:#64748b;white-space:nowrap">${seen}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+      </div>
+      ${sightings.length > 50 ? `<div style="font-size:11px;color:#64748b;margin-top:4px">Showing 50 of ${sightings.length} sightings</div>` : ''}` : ''}
   </div>`;
 }
 

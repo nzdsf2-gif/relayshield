@@ -442,6 +442,7 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     # above. CREATE METERS IN DASHBOARD.
     "/v1/metered/scamkit-fingerprint": "relayshield_scamkit_fingerprint_calls",
     "/v1/metered/scamkit-match":       "relayshield_scamkit_match_calls",
+    "/v1/metered/scamkit-campaign-scan": "relayshield_scamkit_campaign_scan_calls",
     "/v1/metered/campaign-scan":       "relayshield_campaign_scan_calls",
 }
 
@@ -498,6 +499,7 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     # 1:1 (credits: 1 = $0.01), per the fiat/x402 parity convention.
     "/v1/metered/scamkit-fingerprint": 50,   # $0.50/call
     "/v1/metered/scamkit-match":       10,   # $0.10/call
+    "/v1/metered/scamkit-campaign-scan": 550,  # $5.50/call
     "/v1/metered/campaign-scan":      550,   # $5.50/call flat composite
 }
 
@@ -1302,6 +1304,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # x402 rail — API-key auth and credit billing happen above.
         "/v1/metered/scamkit-fingerprint": handle_scamkit_fingerprint,
         "/v1/metered/scamkit-match":       handle_scamkit_match,
+        "/v1/metered/scamkit-campaign-scan": handle_campaign_scan,
         "/v1/metered/campaign-scan":       handle_campaign_scan,
         "/v1/webhook/configure":       lambda p: handle_webhook_configure(p, api_key_str),
         "/v1/siem/configure":          lambda p: handle_siem_configure(p, api_key_str),

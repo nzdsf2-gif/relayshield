@@ -20,7 +20,11 @@ async function _parseApiResponse(resp) {
     data = JSON.parse(text);
   } catch (e) {
     if (!resp.ok) {
-      return { error: "Upstream lookup temporarily unavailable (rate-limited or busy) — please try again in a moment." };
+      // Include the HTTP status: the backend's own errors are always JSON, so a
+      // non-JSON error body is an edge/gateway-level failure and the status is
+      // the only diagnostic that survives. 2026-09-27: campaign-scan surfaced
+      // this branch with no status to go on.
+      return { error: `Upstream lookup temporarily unavailable (HTTP ${resp.status}) — please try again in a moment.` };
     }
     return { error: "Unexpected response from API" };
   }
@@ -506,6 +510,203 @@ function renderSupplyChain(data) {
   </div>`;
 }
 
+// Map the live scamkit-fingerprint response onto the shape the demo
+// renderers were written against (kit_id / family_name / indicators /
+// redirect_chain / kit_tells). 2026-09-27: the tabs were reading fields the
+// backend never returned, so real results rendered as "unknown".
+function mapFingerprintForDemo(d) {
+  const isMalware = d.kind === "malware";
+  const det = d.malware_family_detail || {};
+  const signals = d.signals || {};
+  const observations = d.observations || {};
+  const hosts = [...new Set([
+    ...(signals.form_action_hosts || []),
+    ...(signals.exfil_endpoints || []),
+  ])];
+  const redirectChain = (observations.redirect_chain || []).map(r =>
+    typeof r === "string" ? r : (r.url || JSON.stringify(r)));
+  const kitTells = [];
+  if (!isMalware) {
+    if (signals.url_pattern_class) kitTells.push(`URL pattern class: ${signals.url_pattern_class}`);
+    if ((signals.brand_marks || []).length) kitTells.push(`Brand marks: ${signals.brand_marks.join(", ")}`);
+    if (observations.x_evilginx) kitTells.push("X-Evilginx header present (reverse-proxy phishing kit)");
+  }
+  return {
+    kit_id: d.fingerprint_id || "unknown",
+    family_name: isMalware ? (det.common_name || d.malware_family || "unclassified")
+                           : (d.kit_family || "unclassified"),
+    family_status: d.family_status || "suggested",
+    confidence: (d.confidence !== undefined && d.confidence !== null)
+      ? `${Math.round(d.confidence * 100)}%` : null,
+    indicators: hosts,
+    redirect_chain: redirectChain,
+    kit_tells: kitTells,
+    stored: d.stored,
+    malware_families: d.malware_families || [],
+    verdict_copy: d.verdict_copy || null,
+  };
+}
+
+// Map the live scamkit-match response (single object, fingerprint_id in)
+// onto the renderer's matches[] shape.
+function mapMatchForDemo(d) {
+  if (!d.matched) return { matches: [], sightings: [] };
+  const isMalware = d.kind === "malware";
+  const det = d.malware_family_detail || {};
+  return {
+    matches: [{
+      kit_id: d.fingerprint_id || "unknown",
+      family_name: isMalware ? (det.common_name || d.malware_family || "unclassified")
+                             : (d.kit_family || "unclassified"),
+      family_status: d.family_status || "suggested",
+      confidence: (d.confidence !== undefined && d.confidence !== null)
+        ? `${Math.round(d.confidence * 100)}%` : null,
+      first_seen: d.first_seen || null,
+      last_seen: d.last_seen || null,
+    }],
+    sightings: [],
+  };
+}
+
+function renderScamkitFingerprint(data) {
+  if (data.error) {
+    const raw = String(data.error || '');
+    let friendly = 'Could not fingerprint that URL.';
+    if (/dns|resolution|fetch|static page|target blocked/i.test(raw)) {
+      friendly = 'Could not retrieve that page — it may be offline or blocking automated fetches. Try a live URL.';
+    } else if (/html/i.test(raw)) {
+      friendly = 'Could not extract kit code from that page. For JavaScript-heavy kits, paste the page HTML source directly.';
+    }
+    return `<div class="error">${friendly}</div>`;
+  }
+  const kitId = data.kit_id || 'unknown';
+  const family = data.family_name || 'unclassified';
+  const status = data.family_status || 'suggested';
+  const indicators = data.indicators || [];
+  const redirectChain = data.redirect_chain || [];
+  const kitTells = data.kit_tells || [];
+  return `<div class="result-card">
+    <div style="margin-bottom:12px">
+      <div class="section-label">Kit ID</div>
+      <div style="font-family:monospace;font-size:14px;color:#00B5A5;word-break:break-all">${kitId}</div>
+    </div>
+    <div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+      <div><div class="section-label">Family</div><div style="font-size:15px;font-weight:600">${family}</div><div style="font-size:11px;color:#64748b">${status}</div></div>
+      ${data.confidence ? `<div><div class="section-label">Confidence</div><div style="font-size:15px">${data.confidence}</div></div>` : ''}
+    </div>
+    ${indicators.length ? `<div class="section-label">Extracted Indicators (${indicators.length})</div><ul class="factors">${indicators.map(i=>`<li style="font-family:monospace;font-size:12px">${i}</li>`).join("")}</ul>` : ''}
+    ${(data.malware_families && data.malware_families.length) ? `<div class="section-label">Malware Families (URL attribution)</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${data.malware_families.map(f=>`<span style="background:#0f1f3a;border:1px solid #7c3aed;border-radius:16px;padding:4px 12px;font-size:12px">${f}</span>`).join("")}</div><div style="font-size:11px;color:#64748b;margin:-8px 0 12px">Attributed from RelayShield's IOC corpus — the URL is known malware infrastructure.</div>` : ''}
+    ${redirectChain.length ? `<div class="section-label">Redirect Chain</div><ul class="factors">${redirectChain.map(r=>`<li style="font-family:monospace;font-size:12px">${r}</li>`).join("")}</ul>` : ''}
+    ${kitTells.length ? `<div class="section-label">Kit Tells</div><ul class="factors">${kitTells.map(t=>`<li>${t}</li>`).join("")}</ul>` : ''}
+    ${data.stored !== undefined ? `<div style="font-size:11px;color:#64748b;margin-top:8px">Stored in corpus: ${data.stored ? 'yes' : 'no'}</div>` : ''}
+  </div>`;
+}
+
+function renderScamkitMatch(data) {
+  if (data.error) return `<div class="error">Error: ${data.error}</div>`;
+  const matches = data.matches || [];
+  const sightings = data.sightings || [];
+  if (!matches.length && !sightings.length) return `<div class="no-result">No flags found — no matching fingerprints in the corpus.</div>`;
+  return `<div class="result-card">
+    ${matches.length ? `<div class="section-label">Fingerprint Matches (${matches.length})</div>${matches.map(m=>`
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px;margin-bottom:8px">
+        <div style="font-family:monospace;font-size:13px;color:#00B5A5;word-break:break-all">${m.kit_id || 'unknown'}</div>
+        <div style="font-size:13px;margin-top:4px">Family: <strong>${m.family_name || 'unclassified'}</strong> <span style="color:#64748b;font-size:11px">(${m.family_status || 'suggested'})</span></div>
+        ${m.similarity ? `<div style="font-size:12px;color:#94a3b8">Similarity: ${m.similarity}</div>` : ''}
+        ${m.confidence ? `<div style="font-size:12px;color:#94a3b8">Confidence: ${Math.round(m.confidence * 100)}%</div>` : ''}
+        ${m.first_seen ? `<div style="font-size:12px;color:#64748b;margin-top:4px">First seen: ${m.first_seen} · Last seen: ${m.last_seen || 'recent'}</div>` : ''}
+      </div>`).join("")}` : ''}
+    ${sightings.length ? `<div class="section-label">Sightings (${sightings.length})</div>
+      <div style="max-height:300px;overflow-y:auto;border:1px solid #1e3a5f;border-radius:8px">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="background:#0f1f3a;position:sticky;top:0">
+          <th style="text-align:left;padding:8px;color:#64748b;font-weight:600">URL</th>
+          <th style="text-align:left;padding:8px;color:#64748b;font-weight:600">Seen</th>
+        </tr></thead>
+        <tbody>
+          ${sightings.slice(0, 50).map(s=>{
+            const url = typeof s === 'string' ? s : (s.url || s.indicator || JSON.stringify(s));
+            const seen = typeof s === 'object' && s.seen ? s.seen : '';
+            return `<tr style="border-top:1px solid #1e3a5f">
+              <td style="padding:8px;font-family:monospace;color:#94a3b8;word-break:break-all">${url}</td>
+              <td style="padding:8px;color:#64748b;white-space:nowrap">${seen}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+      </div>
+      ${sightings.length > 50 ? `<div style="font-size:11px;color:#64748b;margin-top:4px">Showing 50 of ${sightings.length} sightings</div>` : ''}` : ''}
+  </div>`;
+}
+
+function renderScamkitScan(data) {
+  if (data.error) return `<div class="error">Error: ${data.error}</div>`;
+  const indicatorsScanned = data.indicators_scanned || 0;
+  const indicators = data.indicators || [];
+  const families = data.kit_families || [];
+  const malwareFamilies = data.malware_families || [];
+  const aggregateRisk = data.aggregate_risk;
+  const maxRisk = data.max_indicator_risk;
+  const campaignId = data.campaign_id || '';
+
+  // Extract fingerprinted kits from indicators
+  const kits = [];
+  // Extract fingerprinted malware samples from indicators (same subcall, kind="malware")
+  const malwareSamples = [];
+  for (const ind of indicators) {
+    const fp = ind.results && ind.results["scamkit-fingerprint"];
+    if (fp && fp.ok && fp.data && fp.data.fingerprint_id) {
+      if (fp.data.kind === "malware" || String(fp.data.fingerprint_id).startsWith("malware_")) {
+        const det = fp.data.malware_family_detail || {};
+        malwareSamples.push({
+          mw_id: fp.data.fingerprint_id,
+          family_name: det.common_name || fp.data.malware_family,
+          family_status: fp.data.family_status,
+          indicator: ind.indicator,
+          risk: ind.risk
+        });
+      } else {
+        kits.push({
+          kit_id: fp.data.fingerprint_id,
+          family_name: fp.data.kit_family,
+          family_status: fp.data.family_status,
+          indicator: ind.indicator,
+          risk: ind.risk
+        });
+      }
+    }
+  }
+
+  return `<div class="result-card">
+    <div class="section-label">Campaign Summary</div>
+    ${campaignId ? `<div style="font-family:monospace;font-size:12px;color:#64748b;margin-bottom:12px">${campaignId}</div>` : ''}
+    <div style="display:flex;gap:20px;margin-bottom:16px;flex-wrap:wrap">
+      <div><div style="font-size:24px;font-weight:700;color:#00B5A5">${indicatorsScanned}</div><div style="font-size:11px;color:#64748b">Indicators scanned</div></div>
+      <div><div style="font-size:24px;font-weight:700;color:#00B5A5">${kits.length}</div><div style="font-size:11px;color:#64748b">Kits fingerprinted</div></div>
+      <div><div style="font-size:24px;font-weight:700;color:#00B5A5">${families.length}</div><div style="font-size:11px;color:#64748b">Kit families detected</div></div>
+      <div><div style="font-size:24px;font-weight:700;color:#00B5A5">${malwareFamilies.length}</div><div style="font-size:11px;color:#64748b">Malware families</div></div>
+      ${aggregateRisk !== undefined ? `<div><div style="font-size:24px;font-weight:700;color:#00B5A5">${aggregateRisk}</div><div style="font-size:11px;color:#64748b">Aggregate risk</div></div>` : ''}
+      ${maxRisk !== undefined ? `<div><div style="font-size:24px;font-weight:700;color:#00B5A5">${maxRisk}</div><div style="font-size:11px;color:#64748b">Max indicator risk</div></div>` : ''}
+    </div>
+    ${families.length ? `<div class="section-label">Kit families</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${families.map(f=>`<span style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:16px;padding:4px 12px;font-size:12px">${f}</span>`).join("")}</div>` : ''}
+    ${malwareFamilies.length ? `<div class="section-label">Malware families</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${malwareFamilies.map(f=>`<span style="background:#0f1f3a;border:1px solid #7c3aed;border-radius:16px;padding:4px 12px;font-size:12px">${f}</span>`).join("")}</div>` : ''}
+    ${kits.length ? `<div class="section-label">Fingerprinted Kits</div>${kits.map(k=>`
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:10px;margin-bottom:8px">
+        <div style="font-family:monospace;font-size:12px;color:#00B5A5">${k.kit_id || 'unknown'}</div>
+        <div style="font-size:12px;margin-top:4px">${k.family_name || 'unclassified'} <span style="color:#64748b">(${k.family_status || 'suggested'})</span></div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;word-break:break-all">${k.indicator || ''}</div>
+      </div>`).join("")}` : '<div class="no-result">No flags found across scanned indicators.</div>'}
+    ${malwareSamples.length ? `<div class="section-label">Fingerprinted Malware</div>${malwareSamples.map(k=>`
+      <div style="background:#0f1f3a;border:1px solid #7c3aed;border-radius:8px;padding:10px;margin-bottom:8px">
+        <div style="font-family:monospace;font-size:12px;color:#c4b5fd">${k.mw_id || 'unknown'}</div>
+        <div style="font-size:12px;margin-top:4px">${k.family_name || 'unclassified'} <span style="color:#64748b">(${k.family_status || 'suggested'})</span></div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;word-break:break-all">${k.indicator || ''}</div>
+      </div>`).join("")}` : ''}
+  </div>`;
+}
+
+
+
 const PAGE = (content, token) => `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -651,9 +852,9 @@ footer a{color:#00B5A5;text-decoration:none}
          under "OPTION A". Showing counts here is the founder's call, taken with
          that trade-off on the table; the unit being correct is not optional
          either way. -->
-    <div class="stat-card"><div class="stat-num">7.6M+</div><div class="stat-label">Indicator sightings</div></div>
+    <div class="stat-card"><div class="stat-num">7.8M+</div><div class="stat-label">Indicator sightings</div></div>
     <div class="stat-card"><div class="stat-num">3,815</div><div class="stat-label">Malware families</div></div>
-    <div class="stat-card"><div class="stat-num">113</div><div class="stat-label">Active criminal Telegram channels</div></div>
+    <div class="stat-card"><div class="stat-num">115</div><div class="stat-label">Active criminal Telegram channels</div></div>
     <div class="stat-card"><div class="stat-num">193</div><div class="stat-label">MITRE ATT&CK groups</div></div>
   </div>
 
@@ -666,6 +867,7 @@ footer a{color:#00B5A5;text-decoration:none}
     <div class="tab" onclick="switchTab('llmjacking',this)">LLM Credential Exposure</div>
     <div class="tab" onclick="switchTab('ipintel',this)">IP Reputation &amp; pDNS</div>
     <div class="tab" onclick="switchTab('msp',this)">MSP Portfolio</div>
+    <div class="tab" onclick="switchTab('scamkit',this)">Scam-Kit Fingerprinting</div>
   </div>
 
   <div id="identity" class="panel active">
@@ -818,12 +1020,132 @@ footer a{color:#00B5A5;text-decoration:none}
     </div>
   </div>
 
+  <div id="scamkit" class="panel" style="padding-left:8px;padding-right:8px">
+    <p class="panel-desc" style="max-width:900px">Fingerprint phishing kits by their code — get a deterministic <code style="background:#1e3a5f;padding:2px 6px;border-radius:4px;font-size:12px">kit_&lt;sha256&gt;</code> ID, suggested family name, extracted indicators, and redirect chain. Match against known kits or scan a full campaign (up to 25 indicators).</p>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button id="scamkit-tab-fp" class="tab active" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('fingerprint',this)">Fingerprint</button>
+      <button id="scamkit-tab-match" class="tab" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('match',this)">Match</button>
+      <button id="scamkit-tab-scan" class="tab" style="border:1px solid #1e3a5f;border-radius:6px;background:#0f1f3a" onclick="switchScamkitMode('scan',this)">Campaign Scan</button>
+    </div>
+    <div id="scamkit-fingerprint" class="scamkit-mode">
+      <div class="input-row">
+        <input type="text" id="scamkit-fp-input" placeholder="Paste a suspicious URL (e.g. https://login-verify-secure.tld/signin)" style="flex:1" />
+        <button onclick="runScamkitFingerprint()">Fingerprint</button>
+      </div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Example: <a href="javascript:void(0)" onclick="loadScamkitFpExample()" style="color:#00B5A5">Mamba 2FA kit URL</a> (loads a sample verdict)</div>
+      <div id="scamkit-fp-result"></div>
+    </div>
+    <div id="scamkit-match" class="scamkit-mode" style="display:none">
+      <div class="input-row">
+        <input type="text" id="scamkit-match-input" placeholder="Paste a kit ID from a fingerprint result (e.g. kit_9f2c…)" style="flex:1" />
+        <button onclick="runScamkitMatch()">Match</button>
+      </div>
+      <div style="font-size:12px;color:#64748b;margin:-8px 0 16px">Example: <a href="javascript:void(0)" onclick="loadScamkitMatchExample()" style="color:#00B5A5">Mamba 2FA kit ID</a> (loads a sample match result)</div>
+      <div id="scamkit-match-result"></div>
+    </div>
+    <div id="scamkit-scan" class="scamkit-mode" style="display:none">
+      <div class="input-row">
+        <textarea id="scamkit-scan-input" placeholder="Paste up to 25 indicators, one per line (URLs, domains, IPs, hashes)" rows="4" style="flex:1;background:#0a1628;border:1px solid #1e3a5f;border-radius:6px;color:#e2e8f0;padding:10px;font-size:13px"></textarea>
+        <button onclick="runScamkitScan()">Scan Campaign</button>
+      </div>
+      <div id="scamkit-scan-result"></div>
+    </div>
+  </div>
+
 </div>
+
 <footer>
   RelayShield Threat Intelligence &mdash; <a href="https://api.relayshield.net/developers">api.relayshield.net/developers</a> &mdash; $499/month TI Starter
 </footer>
 
 <script>
+function switchScamkitMode(mode, el) {
+  document.querySelectorAll('.scamkit-mode').forEach(m => m.style.display = 'none');
+  document.querySelectorAll('[id^="scamkit-tab-"]').forEach(t => t.classList.remove('active'));
+  document.getElementById('scamkit-' + mode).style.display = 'block';
+  el.classList.add('active');
+}
+
+function loadScamkitFpExample() {
+  // Example using Mamba 2FA (one of the 13 approved FLAME TP-0067 families)
+  // The 13 families: Tycoon 2FA, Evilginx, Sneaky 2FA, Mamba 2FA, EvilProxy, FlowerStorm, Rockstar 2FA, NakedPages, W3LL Panel, Greatness, Caffeine, SessionShark, Darcula
+  const exampleData = {
+    kit_id: 'kit_' + 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    family_name: 'Mamba 2FA',
+    family_status: 'approved',
+    confidence: '0.94',
+    indicators: ['secure-verify-m365.example/auth/signin', 'socket.io: new-session', 'password_command', 'otp_command'],
+    redirect_chain: ['https://secure-verify-m365.example/auth/signin', 'https://secure-verify-m365.example/panel/verify'],
+    kit_tells: ['Socket.IO real-time C2 channel', 'Password + OTP exfiltration commands', 'AiTM session relay'],
+    stored: true
+  };
+  document.getElementById('scamkit-fp-input').value = 'https://secure-verify-m365.example/auth/signin';
+  document.getElementById('scamkit-fp-result').innerHTML = renderScamkitFingerprint(exampleData) + '<div style="font-size:11px;color:#64748b;margin-top:8px;font-style:italic">Example verdict — replace with a live URL for real fingerprinting.</div>';
+}
+
+function loadScamkitMatchExample() {
+  // Example match result for Mamba 2FA kit
+  const kitId = 'kit_' + 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  document.getElementById('scamkit-match-input').value = kitId;
+  const exampleData = {
+    matches: [{
+      kit_id: kitId,
+      family_name: 'Mamba 2FA',
+      family_status: 'approved',
+      confidence: 0.94,
+      first_seen: '2026-08-15',
+      last_seen: '2026-09-26'
+    }],
+    sightings: Array(47).fill(null).map((_, i) => ({
+      url: 'https://phish-' + (1000 + i) + '.example/signin',
+      seen: '2026-09-' + String(1 + (i % 26)).padStart(2, '0')
+    }))
+  };
+  document.getElementById('scamkit-match-result').innerHTML = renderScamkitMatch(exampleData) + '<div style="font-size:11px;color:#64748b;margin-top:8px;font-style:italic">Example result — 47 sightings of this Mamba 2FA kit in the corpus.</div>';
+}
+
+async function runScamkitFingerprint() {
+  const url = document.getElementById('scamkit-fp-input').value.trim();
+  if (!url) return;
+  setLoading('scamkit-fp-result');
+  const resp = await fetch('/demo/scamkit-fingerprint', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url})
+  });
+  const data = await resp.json();
+  window._lastKitId = data.kit_id || null;
+  document.getElementById('scamkit-fp-result').innerHTML = renderScamkitFingerprint(data);
+}
+
+async function runScamkitMatch() {
+  const kit_id = document.getElementById('scamkit-match-input').value.trim();
+  if (!kit_id) return;
+  setLoading('scamkit-match-result');
+  const resp = await fetch('/demo/scamkit-match', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({kit_id})
+  });
+  const data = await resp.json();
+  document.getElementById('scamkit-match-result').innerHTML = renderScamkitMatch(data);
+}
+
+async function runScamkitScan() {
+  const text = document.getElementById('scamkit-scan-input').value.trim();
+  if (!text) return;
+  const indicators = text.split('\\n').map(s => s.trim()).filter(s => s).slice(0, 25);
+  if (!indicators.length) return;
+  setLoading('scamkit-scan-result');
+  const resp = await fetch('/demo/scamkit-scan', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({indicators})
+  });
+  const data = await resp.json();
+  document.getElementById('scamkit-scan-result').innerHTML = renderScamkitScan(data);
+}
+
 function mspTriage(domain, level, score, detail) {
   const box = document.getElementById('msp-detail');
   const rc = level === 'CRITICAL' ? '#ef4444' : level === 'HIGH' ? '#f97316' : level === 'MEDIUM' ? '#facc15' : '#22c55e';
@@ -1060,6 +1382,9 @@ ${ipIntelRiskLevel.toString()}
 ${renderIpIntel.toString()}
 ${renderBulkIdentity.toString()}
 ${renderSupplyChain.toString()}
+${renderScamkitFingerprint.toString()}
+${renderScamkitMatch.toString()}
+${renderScamkitScan.toString()}
 `;
 }
 
@@ -1207,6 +1532,48 @@ export default {
         }]
       };
       return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (path === "/demo/scamkit-fingerprint" && request.method === "POST") {
+      const body = await request.json();
+      const payload = body.html ? {html: body.html} : {url: body.url};
+      let data = await callAPI(env, "/v1/metered/scamkit-fingerprint", payload);
+      if (!data.error) data = mapFingerprintForDemo(data);
+      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (path === "/demo/scamkit-match" && request.method === "POST") {
+      const body = await request.json();
+      let data = await callAPI(env, "/v1/metered/scamkit-match", {fingerprint_id: body.kit_id});
+      if (!data.error) data = mapMatchForDemo(data);
+      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (path === "/demo/scamkit-scan" && request.method === "POST") {
+      const body = await request.json();
+      const indicators = (body.indicators || []).slice(0, 25);
+      // Categorize indicators: URLs vs IPs/domains
+      const urls = [];
+      const domains = [];
+      const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+      for (const ind of indicators) {
+        const trimmed = ind.trim();
+        if (!trimmed) continue;
+        if (ipv4Regex.test(trimmed)) {
+          domains.push(trimmed);
+        } else if (/^https?:\/\//i.test(trimmed)) {
+          urls.push(trimmed);
+        } else if (trimmed.includes('.') && !trimmed.includes(' ') && !trimmed.includes('/')) {
+          domains.push(trimmed);
+        } else {
+          urls.push(trimmed);
+        }
+      }
+      const payload = {};
+      if (urls.length) payload.urls = urls;
+      if (domains.length) payload.domains = domains;
+      const data = await callAPI(env, "/v1/metered/scamkit-campaign-scan", payload);
+      return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
     }
 
     // Serve the demo page (set auth cookie so token doesn't need to stay in URL)

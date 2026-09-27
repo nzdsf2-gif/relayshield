@@ -357,6 +357,10 @@ INTEL_IOCS_TABLE        = "relayshield_intel_iocs"
 # tools/setup_kit_fingerprints_table.sh BEFORE the fingerprinting code ships;
 # handlers degrade gracefully (log + continue) when it is absent.
 KIT_FINGERPRINTS_TABLE  = "relayshield_kit_fingerprints"
+# Malpedia malware-family taxonomy (family_id PK; common_name, alt_names,
+# attribution, description, url). Weekly ingest; read at match/display time.
+# Malware fingerprint rows live in KIT_FINGERPRINTS_TABLE with kind="malware".
+MALPEDIA_TABLE          = "relayshield_malpedia_families"
 INTEL_CVE_TABLE         = "relayshield_intel_cve"
 STOLEN_CARDS_TABLE      = "relayshield_stolen_cards"
 ASSET_WATCHLIST_TABLE   = "relayshield_asset_watchlist"
@@ -1994,6 +1998,12 @@ def handle_scan_url(params: dict) -> dict:
         "poll_endpoint":        f"/v1/result/{analysis_id}",
         "immediate_signal":     "flagged" if heuristics["flagged"] else "no_immediate_red_flags",
         "immediate_reasons":    heuristics["reasons"],
+        # URL -> malware-family attribution from RelayShield's IOC corpus.
+        # Independent of the pending VT verdict: when the corpus already
+        # knows this URL/domain as malware infrastructure, say which family.
+        "malware_families":     heuristics.get("malware_families") or [],
+        "malware_attribution":  ("relayshield_ioc_corpus"
+                                 if heuristics.get("malware_families") else None),
         "note":                 "Poll /v1/result/{analysis_id} every 5s until status is completed",
     })
 
@@ -2990,6 +3000,30 @@ def _domain_of(url: str) -> str:
     return domain
 
 
+def _ioc_malware_labels(items) -> list[str]:
+    """Family labels from IOC rows' comma-joined malware field.
+
+    Mirrors the TAXII label logic (split commas, drop placeholders,
+    de-duplicate case-insensitively) so scan-url, fingerprint and campaign
+    attribution spell families the same way the feeds do. Pure: never raises.
+    """
+    fams: list[str] = []
+    seen: set[str] = set()
+    for item in items or []:
+        raw = (item or {}).get("malware", "")
+        vals = raw if isinstance(raw, list) else str(raw or "").split(",")
+        for val in vals:
+            val = str(val).strip()
+            if not val or val.lower() in ("none", "n/a", "unknown", "null"):
+                continue
+            key = val.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            fams.append(val[:50])
+    return sorted(fams, key=str.lower)
+
+
 def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     """The per-domain half of a link check, with Safe Browsing ALREADY decided.
 
@@ -3001,8 +3035,10 @@ def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     reasons: list[str] = []
     signals = {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}
     if not domain:
-        return {"flagged": False, "reasons": reasons, "signals": signals}
+        return {"flagged": False, "reasons": reasons, "signals": signals,
+                "malware_families": []}
 
+    ioc_items: list = []
     try:
         table = dynamodb.Table(INTEL_IOCS_TABLE)
         resp = table.query(
@@ -3010,11 +3046,13 @@ def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
             FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").is_in(["domain", "url"]),
             Limit=5,
         )
-        if resp.get("Items"):
+        ioc_items = resp.get("Items") or []
+        if ioc_items:
             reasons.append("this domain appears in RelayShield's criminal IOC corpus")
             signals["ioc_corpus"] = True
     except Exception as exc:
         logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
+    malware_families = _ioc_malware_labels(ioc_items)
 
     if gsb_flagged:
         reasons.append("Google Safe Browsing flags this domain")
@@ -3025,7 +3063,8 @@ def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     if age_days is not None and age_days < 30:
         reasons.append(f"the domain was registered only {age_days} day{'s' if age_days != 1 else ''} ago")
 
-    return {"flagged": bool(reasons), "reasons": reasons, "signals": signals}
+    return {"flagged": bool(reasons), "reasons": reasons, "signals": signals,
+            "malware_families": malware_families}
 
 
 def _heuristic_url_check(url: str) -> dict:
@@ -3039,13 +3078,82 @@ def _heuristic_url_check(url: str) -> dict:
     domain = _domain_of(url)
     if not domain:
         return {"flagged": False, "reasons": [], "signals":
-                {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}}
+                {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None},
+                "malware_families": []}
     try:
         gsb = _check_gsb(domain, _gsb_api_key())
     except Exception as exc:
         logger.warning("Heuristic GSB check failed for %s: %s", domain, exc)
         gsb = False
-    return _assess_domain(domain, gsb)
+    out = _assess_domain(domain, gsb)
+    # URL-level attribution: a trending-threat URL is keyed in the corpus by
+    # its full ioc_value, which the domain query above cannot see.
+    url_fams = _url_malware_families(url)
+    if url_fams:
+        # Case-insensitive dedupe across the two queries: the domain row and
+        # the URL row may spell the same family differently.
+        merged: list[str] = []
+        seen_m: set[str] = set()
+        for f in (out.get("malware_families") or []) + url_fams:
+            k = str(f).lower()
+            if k not in seen_m:
+                seen_m.add(k)
+                merged.append(f)
+        out["malware_families"] = sorted(merged, key=str.lower)
+        if not out["flagged"]:
+            out["flagged"] = True
+            out["reasons"] = [*out["reasons"],
+                              "this URL appears in RelayShield's criminal IOC corpus"]
+            out["signals"]["ioc_corpus"] = True
+    return out
+
+
+def _url_malware_families(url: str) -> list[str]:
+    """Malware families attributed to a full URL by the IOC corpus.
+
+    The intel IOC table keys URL rows by their complete ioc_value, so a
+    domain-level query never sees them. Enrichment only: never raises,
+    returns [] when the table is unreachable or nothing matches.
+    """
+    url = (url or "").strip()
+    if not url:
+        return []
+    try:
+        table = dynamodb.Table(INTEL_IOCS_TABLE)
+        resp = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(url),
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").eq("url"),
+            Limit=5,
+        )
+        return _ioc_malware_labels(resp.get("Items"))
+    except Exception as exc:
+        logger.warning("URL malware-attribution lookup failed url=%s: %s", url[:80], exc)
+        return []
+
+
+def _domain_malware_families(domain: str) -> list[str]:
+    """Malware families attributed to a bare domain by the IOC corpus.
+
+    Campaign-scan fans domains out to handle_domain (a lookalike sweep)
+    and handle_tech_stack_cve -- neither returns malware labels -- so the
+    corpus lookup for domain indicators happens here, with the same label
+    parsing as the scan-url path. Enrichment only: never raises, returns []
+    when the table is unreachable or nothing matches.
+    """
+    domain = (domain or "").strip().lower()
+    if not domain:
+        return []
+    try:
+        table = dynamodb.Table(INTEL_IOCS_TABLE)
+        resp = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(domain),
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").is_in(["domain", "url"]),
+            Limit=5,
+        )
+        return _ioc_malware_labels(resp.get("Items"))
+    except Exception as exc:
+        logger.warning("Domain malware-attribution lookup failed domain=%s: %s", domain[:80], exc)
+        return []
 
 
 # How many URLs one batch call may carry. 25 is a deliberate ceiling rather
@@ -9830,6 +9938,30 @@ def _scamkit_known_families(limit: int = 100) -> list:
     return fams
 
 
+def _resolve_malware_family(family_id: str) -> dict | None:
+    """Read one malware family record from the Malpedia taxonomy table.
+
+    Returns family_id, common_name, alt_names, attribution, description, url —
+    or None when absent/unreadable. Degrades gracefully; never raises.
+    """
+    try:
+        resp = dynamodb.Table(MALPEDIA_TABLE).get_item(Key={"family_id": family_id})
+        item = resp.get("Item")
+        if not item:
+            return None
+        return {
+            "family_id":   family_id,
+            "common_name": item.get("common_name", family_id),
+            "alt_names":   item.get("alt_names", []),
+            "attribution": item.get("attribution", ""),
+            "description": (item.get("description") or "")[:300],
+            "url":         item.get("url", ""),
+        }
+    except Exception as exc:
+        logger.debug("Malpedia lookup failed family_id=%s: %s", family_id, exc)
+        return None
+
+
 def _scamkit_resolve_family(existing: dict | None, caller_family: str | None,
                             suggested_family: str | None) -> tuple[str | None, str | None]:
     """Resolve (kit_family, family_status) for an upsert.
@@ -9850,40 +9982,90 @@ def _scamkit_resolve_family(existing: dict | None, caller_family: str | None,
     return None, None
 
 
+def _malware_resolve_family(existing: dict | None,
+                            malware_family: str | None
+                            ) -> tuple[str | None, str | None, dict | None]:
+    """Resolve (malware_family, family_status, malware_family_detail) for an upsert.
+
+    Precedence: existing item's family always wins (stable labels — a later
+    sighting never renames a sample). A brand-new fingerprint takes the
+    caller's Malpedia family_id; the detail record is resolved live from
+    relayshield_malpedia_families. The 5 WaterPlum families Andrew approved
+    are emitted with status "approved" (malware_family_status_for()); every
+    other name stays "suggested". An existing "approved" is preserved, never
+    downgraded. No signal auto-suggest for malware in v1.
+    """
+    if existing and existing.get("malware_family"):
+        fam = existing["malware_family"]
+        status = existing.get("family_status")
+        return fam, status if status in ("approved", "suggested") else "suggested", \
+            _resolve_malware_family(fam)
+    fam = (malware_family or "").strip() or None
+    if fam:
+        return fam, relayshield_scamkit.malware_family_status_for(fam), \
+            _resolve_malware_family(fam)
+    return None, None, None
+
+
 def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | None,
                     suggested_family: str | None, source: str,
-                    corpus_candidates: dict | None = None) -> dict:
+                    corpus_candidates: dict | None = None,
+                    kind: str = "kit", malware_family: str | None = None) -> dict:
     """Upsert the fingerprint into KIT_FINGERPRINTS_TABLE.
 
-    New item: stores family per _scamkit_resolve_family, sightings_count=1.
+    kind="kit" (default) preserves the exact v1 kit behavior. kind="malware"
+    stores the row with kind="malware" and the family under "malware_family"
+    (caller-attributed Malpedia family_id, detail resolved live via
+    _resolve_malware_family); there is no signal auto-suggest for malware in
+    v1. Rows without a kind attribute are treated as "kit".
+
+    New item: stores family per _scamkit_resolve_family (kit) or
+    _malware_resolve_family (malware), sightings_count=1.
     Existing item: bumps sightings_count, refreshes last_seen, appends the
-    source — but NEVER touches kit_family / family_status.
+    source — but NEVER touches the family / family_status.
 
     Dual-version backfill: when there is no skfp-v2 row, the skfp-v1
-    projection ID is looked up too. A hit means this kit was fingerprinted
-    before the v2 upgrade — the new v2 item carries the v1 family's
-    label/status, continues its sightings_count, and records
-    ``supersedes: <v1_id>`` instead of silently forking a new ID. skfp-v1
-    rows are never modified or deleted.
+    projection ID is looked up too, in the same kind namespace. A hit means
+    this kit was fingerprinted before the v2 upgrade — the new v2 item
+    carries the v1 family's label/status, continues its sightings_count, and
+    records ``supersedes: <v1_id>`` instead of silently forking a new ID.
+    skfp-v1 rows are never modified or deleted.
 
-    Returns {"stored", "kit_family", "family_status", "sightings_count"}.
+    Returns {"stored", "kit_family"|"malware_family", "family_status",
+    "sightings_count"}, plus "malware_family_detail" for kind="malware".
     "stored" is False only when the table is unavailable (not yet created,
     no IAM) — the fingerprint response is still returned, just not persisted.
     """
+    kind = (kind or "kit").strip().lower()
+    if kind not in ("kit", "malware"):
+        kind = "kit"
+    fam_key = "malware_family" if kind == "malware" else "kit_family"
     now = datetime.now(timezone.utc).isoformat()
     try:
         table = dynamodb.Table(KIT_FINGERPRINTS_TABLE)
     except Exception as exc:
         logger.warning("scamkit store unavailable: %s", exc)
-        fam, status = _scamkit_resolve_family(None, caller_family, suggested_family)
-        return {"stored": False, "kit_family": fam, "family_status": status, "sightings_count": 1}
+        if kind == "malware":
+            fam, status, detail = _malware_resolve_family(None, malware_family)
+        else:
+            fam, status = _scamkit_resolve_family(None, caller_family, suggested_family)
+            detail = None
+        out = {"stored": False, fam_key: fam, "family_status": status,
+               "sightings_count": 1}
+        if kind == "malware":
+            out["malware_family_detail"] = detail
+        return out
     try:
         existing = table.get_item(Key={"fingerprint_id": fingerprint_id}).get("Item")
     except Exception as exc:
         logger.warning("scamkit get failed for %s: %s", fingerprint_id[:20], exc)
         existing = None
     if existing:
-        fam, status = _scamkit_resolve_family(existing, None, None)
+        if kind == "malware":
+            fam, status, detail = _malware_resolve_family(existing, None)
+        else:
+            fam, status = _scamkit_resolve_family(existing, None, None)
+            detail = None
         try:
             update = ("SET sightings_count = if_not_exists(sightings_count, :one) + :one, "
                       "last_seen = :now")
@@ -9900,14 +10082,17 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
             table.update_item(Key={"fingerprint_id": fingerprint_id}, **kwargs)
         except Exception as exc:
             logger.warning("scamkit sighting bump failed: %s", exc)
-        return {"stored": True, "kit_family": fam, "family_status": status,
-                "sightings_count": (existing.get("sightings_count") or 0) + 1}
+        out = {"stored": True, fam_key: fam, "family_status": status,
+               "sightings_count": (existing.get("sightings_count") or 0) + 1}
+        if kind == "malware":
+            out["malware_family_detail"] = detail
+        return out
     # No v2 row — try the v1 backfill link before creating a fresh item.
     v1_item = None
     supersedes = None
     try:
         v1_id = relayshield_scamkit.fingerprint_id(
-            relayshield_scamkit.v1_signal_projection(signals))
+            relayshield_scamkit.v1_signal_projection(signals), kind=kind)
         if v1_id != fingerprint_id:
             v1_item = table.get_item(Key={"fingerprint_id": v1_id}).get("Item")
             if v1_item:
@@ -9917,13 +10102,22 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
     if v1_item:
         # Continuity, not a fork: keep the v1 family's label/status and
         # continue its sighting count on the new v2 row.
-        fam, status = _scamkit_resolve_family(v1_item, None, None)
+        if kind == "malware":
+            fam, status, detail = _malware_resolve_family(v1_item, None)
+        else:
+            fam, status = _scamkit_resolve_family(v1_item, None, None)
+            detail = None
         sightings_count = (v1_item.get("sightings_count") or 0) + 1
     else:
-        fam, status = _scamkit_resolve_family(None, caller_family, suggested_family)
+        if kind == "malware":
+            fam, status, detail = _malware_resolve_family(None, malware_family)
+        else:
+            fam, status = _scamkit_resolve_family(None, caller_family, suggested_family)
+            detail = None
         sightings_count = 1
     item: dict = {
         "fingerprint_id":      fingerprint_id,
+        "kind":                kind,
         "fingerprint_version": relayshield_scamkit.FINGERPRINT_VERSION,
         "signals":             signals,
         "corpus_candidates":   corpus_candidates or {},
@@ -9934,7 +10128,7 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
     if supersedes:
         item["supersedes"] = supersedes
     if fam:
-        item["kit_family"] = fam
+        item[fam_key] = fam
     if status:
         item["family_status"] = status
     if source:
@@ -9943,14 +10137,24 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
         table.put_item(Item=item)
     except Exception as exc:
         logger.warning("scamkit put failed: %s", exc)
-        return {"stored": False, "kit_family": fam, "family_status": status, "sightings_count": 1}
-    return {"stored": True, "kit_family": fam, "family_status": status,
-            "sightings_count": sightings_count}
+        out = {"stored": False, fam_key: fam, "family_status": status,
+               "sightings_count": 1}
+        if kind == "malware":
+            out["malware_family_detail"] = detail
+        return out
+    out = {"stored": True, fam_key: fam, "family_status": status,
+           "sightings_count": sightings_count}
+    if kind == "malware":
+        out["malware_family_detail"] = detail
+    return out
 
 
 # Request: POST /v1/payg/scamkit-fingerprint
 #   { "url": "https://...", "html": "<...>", "source": "optional tag",
 #     "family": "optional label",
+#     "kind": "kit (default) | malware",
+#     "signals": "required for kind=malware — caller-computed feature dict",
+#     "malware_family": "optional Malpedia family_id, kind=malware only",
 #     "observed_telemetry": {"ja3": ..., "ja4": ..., "user_agent_shifts": ...,
 #                            "app_ids": ..., "ip_anomalies": ...,
 #                            "session_anomalies": ...} }
@@ -9966,13 +10170,69 @@ def _scamkit_upsert(fingerprint_id: str, signals: dict, caller_family: str | Non
 #   { ok: true, data: { fingerprint_id, kit_family, family_status,
 #     confidence, verdict, verdict_copy, sightings_count, signals,
 #     corpus_candidates, evidence, fetch, observations, stored } }
+# Request: POST /v1/payg/scamkit-fingerprint with kind="malware"
+#   { "kind": "malware", "signals": {...caller-computed features...},
+#     "malware_family": "win.beavertail (optional Malpedia family_id)",
+#     "source": "optional tag" }
+#   signals is REQUIRED in v1 (no binary extraction in Lambda); the family is
+#   caller-attributed and resolved live against relayshield_malpedia_families.
+#   The 5 Andrew-approved WaterPlum families emit family_status="approved".
+#
+# Response:
+#   { ok: true, data: { fingerprint_id, kind, malware_family,
+#     malware_family_detail, family_status, confidence, verdict, verdict_copy,
+#     sightings_count, signals, threat_graph, stored } }
+def _handle_malware_fingerprint(params: dict, source: str,
+                               malware_family: str | None) -> dict:
+    signals = params.get("signals")
+    if not isinstance(signals, dict) or not signals:
+        return _err("For kind='malware', provide 'signals' as a non-empty object "
+                    "of caller-computed features.", 400)
+    fid = relayshield_scamkit.fingerprint_id(signals, kind="malware")
+    stored = _scamkit_upsert(fid, signals, None, None, source, {},
+                             kind="malware", malware_family=malware_family)
+    sightings = stored["sightings_count"]
+    confidence, verdict = relayshield_scamkit.compute_confidence(
+        exact_sightings=sightings,
+        overlap_fraction=0.5 if stored["malware_family"] else 0.0,
+    )
+    family = stored["malware_family"]
+    detail = stored["malware_family_detail"] or {}
+    display = detail.get("common_name") or family
+    threat_graph = _build_threat_graph(display) if display else None
+    logger.info("malware_fingerprint id=%s family=%s verdict=%s sightings=%d stored=%s",
+                fid[:20], family, verdict, sightings, stored["stored"])
+    return _ok({
+        "fingerprint_id":        fid,
+        "kind":                  "malware",
+        "malware_family":        family,
+        "malware_family_detail": stored["malware_family_detail"],
+        "family_status":         stored["family_status"],
+        "confidence":            confidence,
+        "verdict":               verdict,
+        "verdict_copy":          relayshield_scamkit.verdict_copy(
+            verdict, family=display, sightings=sightings, kind="malware"),
+        "sightings_count":       sightings,
+        "signals":               signals,
+        "threat_graph":          threat_graph,
+        "stored":                stored["stored"],
+    })
+
+
 def handle_scamkit_fingerprint(params: dict) -> dict:
     params = params or {}
+    kind = (params.get("kind") or "kit").strip().lower()
+    if kind not in ("kit", "malware"):
+        return _err("kind must be 'kit' or 'malware'.", 400)
     url    = (params.get("url") or "").strip()
     html   = params.get("html") or ""
     source = (params.get("source") or "").strip()[:120]
     caller_family = (params.get("family") or "").strip()[:80] or None
+    malware_family = (params.get("malware_family") or "").strip()[:80] or None
     observed_telemetry = params.get("observed_telemetry")
+
+    if kind == "malware":
+        return _handle_malware_fingerprint(params, source, malware_family)
 
     notes = []
     if html and url:
@@ -10037,6 +10297,12 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
     family = stored["kit_family"]
     logger.info("scamkit_fingerprint id=%s family=%s verdict=%s sightings=%d stored=%s",
                 fid[:20], family, verdict, sightings, stored["stored"])
+    url_malware_families: list[str] = []
+    if url and (fetch.get("mode") == "fetch_pipeline_v1b"):
+        # URL -> malware-family attribution from the IOC corpus. The kit
+        # fingerprint above classifies the page's code; this attributes the
+        # URL itself when the corpus already knows it as malware infrastructure.
+        url_malware_families = _url_malware_families(url)
     return _ok({
         "fingerprint_id":  fid,
         "kit_family":      family,
@@ -10046,6 +10312,9 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
         "verdict_copy":    relayshield_scamkit.verdict_copy(
             verdict, family=family, sightings=sightings),
         "sightings_count": sightings,
+        "malware_families": url_malware_families,
+        "malware_attribution": ("relayshield_ioc_corpus"
+                                if url_malware_families else None),
         "signals":         signals,   # already secret-stripped — safe to return/store
         "corpus_candidates": corpus_candidates,  # TI load candidates — not a live write
         "evidence":        evidence,
@@ -10057,9 +10326,10 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
 
 
 # Request: POST /v1/payg/scamkit-match
-#   { "fingerprint_id": "kit_<64 hex>" }
+#   { "fingerprint_id": "kit_<64 hex> | malware_<64 hex>" }
 #
-# Response: { ok: true, data: { matched, fingerprint_id, kit_family,
+# Response: { ok: true, data: { matched, fingerprint_id, kind,
+#   kit_family | malware_family (+malware_family_detail for kind=malware),
 #   family_status, confidence, verdict, verdict_copy, sightings_count,
 #   first_seen, last_seen, evidence, url_pattern_class, brand_marks,
 #   fingerprint_version, corpus_candidates } }
@@ -10068,7 +10338,8 @@ def handle_scamkit_match(params: dict) -> dict:
     params = params or {}
     fid = (params.get("fingerprint_id") or "").strip()
     if not relayshield_scamkit.valid_fingerprint_id(fid):
-        return _err("Provide a valid fingerprint_id of the form kit_<64 hex chars>.", 400)
+        return _err("Provide a valid fingerprint_id of the form kit_<64 hex chars> "
+                    "or malware_<64 hex chars>.", 400)
     try:
         item = dynamodb.Table(KIT_FINGERPRINTS_TABLE).get_item(
             Key={"fingerprint_id": fid}).get("Item")
@@ -10087,6 +10358,32 @@ def handle_scamkit_match(params: dict) -> dict:
     evidence = _scamkit_corpus_evidence(signals)
     sightings = item.get("sightings_count") or 1
     confidence, verdict = relayshield_scamkit.compute_confidence(exact_sightings=sightings)
+    kind = (item.get("kind") or "kit").strip().lower()
+    if kind == "malware":
+        mfam = item.get("malware_family")
+        mdetail = _resolve_malware_family(mfam) if mfam else None
+        mstatus = item.get("family_status")
+        if mstatus not in ("approved", "suggested"):
+            mstatus = relayshield_scamkit.malware_family_status_for(mfam)
+        mdisplay = (mdetail or {}).get("common_name") or mfam
+        return _ok({
+            "matched":               True,
+            "fingerprint_id":        fid,
+            "kind":                  "malware",
+            "malware_family":        mfam,
+            "malware_family_detail": mdetail,
+            "family_status":         mstatus,
+            "confidence":            confidence,
+            "verdict":               verdict,
+            "verdict_copy":          relayshield_scamkit.verdict_copy(
+                verdict, family=mdisplay, sightings=sightings, kind="malware"),
+            "sightings_count":       sightings,
+            "first_seen":            item.get("first_seen"),
+            "last_seen":             item.get("last_seen"),
+            "evidence":              evidence,
+            "fingerprint_version":   item.get("fingerprint_version", "skfp-v1"),
+            "corpus_candidates":     item.get("corpus_candidates") or {},
+        })
     family = item.get("kit_family")
     return _ok({
         "matched":           True,
@@ -10276,6 +10573,7 @@ def handle_campaign_scan(params: dict) -> dict:
     # Assemble per-indicator results and cross-indicator links.
     indicators_out = []
     kit_families: set[str] = set()
+    malware_families: set[str] = set()
     exfil_by_indicator: dict[str, set] = {}
     fp_by_indicator: dict[str, set] = {}
     corpus_citations = 0
@@ -10295,6 +10593,19 @@ def handle_campaign_scan(params: dict) -> dict:
                 fam = data.get("kit_family") if ok else None
                 if fam:
                     kit_families.add(fam)
+                mfam = data.get("malware_family") if ok else None
+                if mfam:
+                    # Display the Malpedia common name ("BeaverTail"),
+                    # falling back to the family_id when no detail resolved.
+                    mfam_detail = data.get("malware_family_detail") or {}
+                    malware_families.add(mfam_detail.get("common_name") or mfam)
+                mfams = data.get("malware_families") if ok else None
+                if mfams:
+                    # URL -> malware-family attribution (scan-url, fingerprint):
+                    # list form, straight from the IOC corpus labels.
+                    for f in mfams:
+                        if f:
+                            malware_families.add(str(f)[:50])
                 if name == "scamkit-fingerprint" and ok:
                     sig = data.get("signals") or {}
                     hosts = set(sig.get("form_action_hosts") or []) | set(sig.get("exfil_endpoints") or [])
@@ -10307,6 +10618,13 @@ def handle_campaign_scan(params: dict) -> dict:
                 if name == "scamkit-match" and ok:
                     corpus_citations += sum(e.get("corpus_hits", 0)
                                             for e in (data.get("evidence") or {}).values())
+            if itype == "domain":
+                # Domain -> malware-family attribution from the IOC corpus.
+                # handle_domain is a lookalike sweep and never returns
+                # malware labels, so the corpus lookup happens here; same
+                # label parsing as the scan-url path. Never raises.
+                for f in _domain_malware_families(indicator):
+                    malware_families.add(f)
             indicators_out.append({
                 "indicator": indicator,
                 "type":      itype,
@@ -10341,6 +10659,7 @@ def handle_campaign_scan(params: dict) -> dict:
         "indicators_scanned":   total,
         "indicators":           indicators_out,
         "kit_families":         sorted(kit_families),
+        "malware_families":     sorted(malware_families),
         "shared_exfil_hosts":   _shared(exfil_by_indicator),
         "shared_kit_fingerprints": _shared(fp_by_indicator),
         "aggregate_risk":       round(sum(risks) / len(risks)) if risks else 0,

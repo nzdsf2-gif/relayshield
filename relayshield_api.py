@@ -1998,6 +1998,12 @@ def handle_scan_url(params: dict) -> dict:
         "poll_endpoint":        f"/v1/result/{analysis_id}",
         "immediate_signal":     "flagged" if heuristics["flagged"] else "no_immediate_red_flags",
         "immediate_reasons":    heuristics["reasons"],
+        # URL -> malware-family attribution from RelayShield's IOC corpus.
+        # Independent of the pending VT verdict: when the corpus already
+        # knows this URL/domain as malware infrastructure, say which family.
+        "malware_families":     heuristics.get("malware_families") or [],
+        "malware_attribution":  ("relayshield_ioc_corpus"
+                                 if heuristics.get("malware_families") else None),
         "note":                 "Poll /v1/result/{analysis_id} every 5s until status is completed",
     })
 
@@ -2994,6 +3000,30 @@ def _domain_of(url: str) -> str:
     return domain
 
 
+def _ioc_malware_labels(items) -> list[str]:
+    """Family labels from IOC rows' comma-joined malware field.
+
+    Mirrors the TAXII label logic (split commas, drop placeholders,
+    de-duplicate case-insensitively) so scan-url, fingerprint and campaign
+    attribution spell families the same way the feeds do. Pure: never raises.
+    """
+    fams: list[str] = []
+    seen: set[str] = set()
+    for item in items or []:
+        raw = (item or {}).get("malware", "")
+        vals = raw if isinstance(raw, list) else str(raw or "").split(",")
+        for val in vals:
+            val = str(val).strip()
+            if not val or val.lower() in ("none", "n/a", "unknown", "null"):
+                continue
+            key = val.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            fams.append(val[:50])
+    return sorted(fams, key=str.lower)
+
+
 def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     """The per-domain half of a link check, with Safe Browsing ALREADY decided.
 
@@ -3005,8 +3035,10 @@ def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     reasons: list[str] = []
     signals = {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}
     if not domain:
-        return {"flagged": False, "reasons": reasons, "signals": signals}
+        return {"flagged": False, "reasons": reasons, "signals": signals,
+                "malware_families": []}
 
+    ioc_items: list = []
     try:
         table = dynamodb.Table(INTEL_IOCS_TABLE)
         resp = table.query(
@@ -3014,11 +3046,13 @@ def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
             FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").is_in(["domain", "url"]),
             Limit=5,
         )
-        if resp.get("Items"):
+        ioc_items = resp.get("Items") or []
+        if ioc_items:
             reasons.append("this domain appears in RelayShield's criminal IOC corpus")
             signals["ioc_corpus"] = True
     except Exception as exc:
         logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
+    malware_families = _ioc_malware_labels(ioc_items)
 
     if gsb_flagged:
         reasons.append("Google Safe Browsing flags this domain")
@@ -3029,7 +3063,8 @@ def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     if age_days is not None and age_days < 30:
         reasons.append(f"the domain was registered only {age_days} day{'s' if age_days != 1 else ''} ago")
 
-    return {"flagged": bool(reasons), "reasons": reasons, "signals": signals}
+    return {"flagged": bool(reasons), "reasons": reasons, "signals": signals,
+            "malware_families": malware_families}
 
 
 def _heuristic_url_check(url: str) -> dict:
@@ -3043,13 +3078,57 @@ def _heuristic_url_check(url: str) -> dict:
     domain = _domain_of(url)
     if not domain:
         return {"flagged": False, "reasons": [], "signals":
-                {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}}
+                {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None},
+                "malware_families": []}
     try:
         gsb = _check_gsb(domain, _gsb_api_key())
     except Exception as exc:
         logger.warning("Heuristic GSB check failed for %s: %s", domain, exc)
         gsb = False
-    return _assess_domain(domain, gsb)
+    out = _assess_domain(domain, gsb)
+    # URL-level attribution: a trending-threat URL is keyed in the corpus by
+    # its full ioc_value, which the domain query above cannot see.
+    url_fams = _url_malware_families(url)
+    if url_fams:
+        # Case-insensitive dedupe across the two queries: the domain row and
+        # the URL row may spell the same family differently.
+        merged: list[str] = []
+        seen_m: set[str] = set()
+        for f in (out.get("malware_families") or []) + url_fams:
+            k = str(f).lower()
+            if k not in seen_m:
+                seen_m.add(k)
+                merged.append(f)
+        out["malware_families"] = sorted(merged, key=str.lower)
+        if not out["flagged"]:
+            out["flagged"] = True
+            out["reasons"] = [*out["reasons"],
+                              "this URL appears in RelayShield's criminal IOC corpus"]
+            out["signals"]["ioc_corpus"] = True
+    return out
+
+
+def _url_malware_families(url: str) -> list[str]:
+    """Malware families attributed to a full URL by the IOC corpus.
+
+    The intel IOC table keys URL rows by their complete ioc_value, so a
+    domain-level query never sees them. Enrichment only: never raises,
+    returns [] when the table is unreachable or nothing matches.
+    """
+    url = (url or "").strip()
+    if not url:
+        return []
+    try:
+        table = dynamodb.Table(INTEL_IOCS_TABLE)
+        resp = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("ioc_value").eq(url),
+            FilterExpression=boto3.dynamodb.conditions.Attr("ioc_type").eq("url"),
+            Limit=5,
+        )
+        return _ioc_malware_labels(resp.get("Items"))
+    except Exception as exc:
+        logger.warning("URL malware-attribution lookup failed url=%s: %s", url[:80], exc)
+        return []
 
 
 # How many URLs one batch call may carry. 25 is a deliberate ceiling rather
@@ -10193,6 +10272,12 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
     family = stored["kit_family"]
     logger.info("scamkit_fingerprint id=%s family=%s verdict=%s sightings=%d stored=%s",
                 fid[:20], family, verdict, sightings, stored["stored"])
+    url_malware_families: list[str] = []
+    if url and (fetch.get("mode") == "fetch_pipeline_v1b"):
+        # URL -> malware-family attribution from the IOC corpus. The kit
+        # fingerprint above classifies the page's code; this attributes the
+        # URL itself when the corpus already knows it as malware infrastructure.
+        url_malware_families = _url_malware_families(url)
     return _ok({
         "fingerprint_id":  fid,
         "kit_family":      family,
@@ -10202,6 +10287,9 @@ def handle_scamkit_fingerprint(params: dict) -> dict:
         "verdict_copy":    relayshield_scamkit.verdict_copy(
             verdict, family=family, sightings=sightings),
         "sightings_count": sightings,
+        "malware_families": url_malware_families,
+        "malware_attribution": ("relayshield_ioc_corpus"
+                                if url_malware_families else None),
         "signals":         signals,   # already secret-stripped — safe to return/store
         "corpus_candidates": corpus_candidates,  # TI load candidates — not a live write
         "evidence":        evidence,
@@ -10486,6 +10574,13 @@ def handle_campaign_scan(params: dict) -> dict:
                     # falling back to the family_id when no detail resolved.
                     mfam_detail = data.get("malware_family_detail") or {}
                     malware_families.add(mfam_detail.get("common_name") or mfam)
+                mfams = data.get("malware_families") if ok else None
+                if mfams:
+                    # URL -> malware-family attribution (scan-url, fingerprint):
+                    # list form, straight from the IOC corpus labels.
+                    for f in mfams:
+                        if f:
+                            malware_families.add(str(f)[:50])
                 if name == "scamkit-fingerprint" and ok:
                     sig = data.get("signals") or {}
                     hosts = set(sig.get("form_action_hosts") or []) | set(sig.get("exfil_endpoints") or [])

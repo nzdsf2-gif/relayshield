@@ -31,6 +31,15 @@ function rsShareText(summary) {
     `and wallet-risk screening, no signup: ${rsShareUrl()}`;
 }
 
+// A SEPARATE share, decoupled from having just run a check -- somebody who
+// likes the extension in general has no specific verdict to reference, and
+// making that person wait for a flagged result before they can recommend it
+// is the same gap as never offering the check-result share at all.
+function rsGenericShareText() {
+  return "Check any link, wallet address, or suspicious email for scams -- " +
+    `free, no signup: ${rsShareUrl()}`;
+}
+
 // Mirrors relayshield_api.py's _detect_chain_api exactly. The SERVER is the
 // authority -- if this guesses wrong, the API answers "unrecognised address
 // format" rather than a silently wrong verdict, so drift here is a UX papercut,
@@ -45,6 +54,33 @@ function rsDetectChain(address) {
 
 function rsLooksLikeUrl(s) {
   return /^https?:\/\//i.test(s.trim());
+}
+
+// Explorer/DEX/aggregator pages put the actual on-chain address IN THE URL
+// (jup.ag/tokens/<mint>, solscan.io/token/<mint>, etherscan.io/token/<addr>,
+// dexscreener.com/solana/<pair>, birdeye.so/token/<mint>, ...) -- checking
+// only the domain (jup.ag, solscan.io, etherscan.io -- all huge, legitimate
+// platforms) answers a question nobody asked and misses the one thing the
+// user actually wants screened. Rather than hard-coding a pattern per site,
+// this walks every path segment and query value and reuses rsDetectChain,
+// the same authority the bare-address path already trusts -- one host-agnostic
+// rule instead of an every-growing per-platform list.
+function rsExtractEmbeddedAddress(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const candidates = [
+    ...parsed.pathname.split("/").filter(Boolean),
+    ...[...parsed.searchParams.values()],
+  ];
+  for (const segment of candidates) {
+    const chain = rsDetectChain(segment);
+    if (chain !== "unknown") return { address: segment, chain };
+  }
+  return null;
 }
 
 async function rsCheckLink(url) {
@@ -105,6 +141,11 @@ async function rsCheckEmail({ fromAddress, subject, bodyText }) {
   return json.data;
 }
 
+// Worse wins: a clean domain carrying a flagged token must never render as
+// the clean verdict just because the domain check happened to be listed
+// first. Same ordering the API's own _link_check_level uses.
+const RS_LEVEL_RANK = { high: 3, medium: 2, low: 1, unknown: 0 };
+
 // One entry point for "the user gave me a string, figure out what to check."
 // Never guesses past what the two detectors above already decide, and never
 // silently treats "unknown" as "safe" -- the level a clean answer renders is
@@ -112,10 +153,32 @@ async function rsCheckEmail({ fromAddress, subject, bodyText }) {
 async function rsCheckAny(raw) {
   const s = raw.trim();
   if (!s) throw new Error("Paste a link or a wallet address first.");
+
   if (rsLooksLikeUrl(s)) {
-    const data = await rsCheckLink(s);
-    return { kind: "link", target: s, level: data.level, reasons: data.reasons || [] };
+    const embedded = rsExtractEmbeddedAddress(s);
+    if (!embedded) {
+      const data = await rsCheckLink(s);
+      return { kind: "link", target: s, level: data.level, reasons: data.reasons || [] };
+    }
+    // Explorer/DEX page: check the domain AND the address it's actually
+    // showing, in parallel, and let the worse of the two decide the headline.
+    const [linkData, walletData] = await Promise.all([
+      rsCheckLink(s),
+      rsCheckWallet(embedded.address),
+    ]);
+    const linkLevel = linkData.level;
+    const walletLevel = (walletData.risk_level || "unknown").toLowerCase();
+    const worse = RS_LEVEL_RANK[walletLevel] > RS_LEVEL_RANK[linkLevel] ? walletLevel : linkLevel;
+    const reasons = [
+      ...(linkData.reasons || []).map((r) => `Domain (${new URL(s).hostname}): ${r}`),
+      ...(walletData.risk_flags || []).map((r) => `${embedded.chain.toUpperCase()} address in the URL: ${r}`),
+    ];
+    return {
+      kind: "link", target: s, level: worse, reasons,
+      embeddedAddress: embedded.address, embeddedChain: embedded.chain,
+    };
   }
+
   const chain = rsDetectChain(s);
   if (chain === "unknown") {
     throw new Error("That doesn't look like a link (http/https) or a supported wallet address (EVM, Solana, TON, Bitcoin).");

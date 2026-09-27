@@ -537,6 +537,7 @@ function renderScamkitFingerprint(data) {
       ${data.confidence ? `<div><div class="section-label">Confidence</div><div style="font-size:15px">${data.confidence}</div></div>` : ''}
     </div>
     ${indicators.length ? `<div class="section-label">Extracted Indicators (${indicators.length})</div><ul class="factors">${indicators.map(i=>`<li style="font-family:monospace;font-size:12px">${i}</li>`).join("")}</ul>` : ''}
+    ${(data.malware_families && data.malware_families.length) ? `<div class="section-label">Malware Families (URL attribution)</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${data.malware_families.map(f=>`<span style="background:#0f1f3a;border:1px solid #7c3aed;border-radius:16px;padding:4px 12px;font-size:12px">${f}</span>`).join("")}</div><div style="font-size:11px;color:#64748b;margin:-8px 0 12px">Attributed from RelayShield's IOC corpus — the URL is known malware infrastructure.</div>` : ''}
     ${redirectChain.length ? `<div class="section-label">Redirect Chain</div><ul class="factors">${redirectChain.map(r=>`<li style="font-family:monospace;font-size:12px">${r}</li>`).join("")}</ul>` : ''}
     ${kitTells.length ? `<div class="section-label">Kit Tells</div><ul class="factors">${kitTells.map(t=>`<li>${t}</li>`).join("")}</ul>` : ''}
     ${data.stored !== undefined ? `<div style="font-size:11px;color:#64748b;margin-top:8px">Stored in corpus: ${data.stored ? 'yes' : 'no'}</div>` : ''}

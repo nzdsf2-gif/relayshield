@@ -3049,7 +3049,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
     },
     '/v1/payg/scan-url': {
         'summary': 'Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis',
-        'description': 'Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis. Returns an async analysis ID to poll. Call before an agent clicks, fetches, or shares a link from an untrusted source.',
+        'description': 'Scan a URL for phishing or malware using heuristic signals (Google Safe Browsing, RDAP domain age, known IOC corpus) plus VirusTotal multi-engine analysis. Returns an async analysis ID to poll. URL -> malware-family attribution: when RelayShield\'s IOC corpus already knows the URL or its domain as malware infrastructure, the response includes malware_families (corpus labels) with malware_attribution=relayshield_ioc_corpus — independent of the pending VirusTotal verdict. Call before an agent clicks, fetches, or shares a link from an untrusted source.',
         'price_units': 50000,
         'x402_version': 2,
         'body': {'type': 'object',
@@ -3062,6 +3062,10 @@ PAYG_ENDPOINTS: dict[str, dict] = {
           'target': 'https://suspicious-site.example.com',
           'analysis_id': 'u-abc123def456',
           'poll_endpoint': '/v1/result/u-abc123def456',
+          'immediate_signal': 'flagged',
+          'immediate_reasons': ["this domain appears in RelayShield's criminal IOC corpus"],
+          'malware_families': ['clearfake'],
+          'malware_attribution': 'relayshield_ioc_corpus',
           'note': 'Poll /v1/result/{analysis_id} every 5s until status is completed'}},
     },
     '/v1/payg/scan-wallet': {
@@ -3306,7 +3310,11 @@ PAYG_ENDPOINTS: dict[str, dict] = {
             "caller_supplied — the pipeline never computes JA3/JA4 locally (those fingerprint "
             "the TLS client, not the kit server). The returned kit_family is auto-resolved: "
             "the 13 FLAME TP-0067 families Andrew approved carry family_status approved; "
-            "every other name is suggested."
+            "every other name is suggested. "
+            "URL -> malware-family attribution: for kind='kit' with a fetched URL, the response "
+            "also carries malware_families from RelayShield's IOC corpus (empty when the corpus "
+            "has no malware label for the URL) with malware_attribution='relayshield_ioc_corpus' "
+            "when attributed, else null. Caller-supplied html gets no URL attribution."
         ),
         "price_units": 500000,
         "x402_version": 2,
@@ -3384,6 +3392,8 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                                  "tls": {"tls_version": "TLSv1.3"}},
                 "stored": True,
                 "notes": [],
+                "malware_families": [],
+                "malware_attribution": None,
             },
         },
     },

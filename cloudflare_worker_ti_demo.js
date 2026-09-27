@@ -20,7 +20,11 @@ async function _parseApiResponse(resp) {
     data = JSON.parse(text);
   } catch (e) {
     if (!resp.ok) {
-      return { error: "Upstream lookup temporarily unavailable (rate-limited or busy) — please try again in a moment." };
+      // Include the HTTP status: the backend's own errors are always JSON, so a
+      // non-JSON error body is an edge/gateway-level failure and the status is
+      // the only diagnostic that survives. 2026-09-27: campaign-scan surfaced
+      // this branch with no status to go on.
+      return { error: `Upstream lookup temporarily unavailable (HTTP ${resp.status}) — please try again in a moment.` };
     }
     return { error: "Unexpected response from API" };
   }

@@ -313,6 +313,15 @@ PAYG_PRICE_UNITS: dict[str, int] = {
 
 GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
 GOPLUS_TOKEN_URL       = "https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
+# Solana is NOT "just another chain_id" on GOPLUS_TOKEN_URL -- it is a
+# separately versioned ("beta") endpoint with the path segments in the
+# OPPOSITE order, confirmed from GoPlus's own official Python SDK
+# (`pip download goplus`, swagger_client/api/token_security_api_for_solana__
+# beta_api.py: resource_path '/api/v1/solana/token_security'), because
+# api.gopluslabs.io itself is not reachable from this container to verify
+# directly. Guessing this was substituting "solana" into the EVM template
+# would have produced a URL that never matched anything real.
+GOPLUS_SOLANA_TOKEN_URL = "https://api.gopluslabs.io/api/v1/solana/token_security"
 GOPLUS_NFT_URL         = "https://api.gopluslabs.io/api/v1/nft_security"
 TONAPI_ACCOUNTS_URL    = "https://tonapi.io/v2/accounts/{address}"
 
@@ -5110,10 +5119,22 @@ def handle_wallet_risk(params: dict) -> dict:
         # recognise this address as a token at all (an ordinary wallet), so
         # it is a safe no-op for the common case and only fires when there is
         # something to check.
-        token_chain_id = "solana" if chain == "solana" else "1"
+        #
+        # EVM and Solana are TWO DIFFERENT GoPlus APIs, not one API taking a
+        # chain_id parameter -- confirmed from GoPlus's own official SDK
+        # (see GOPLUS_SOLANA_TOKEN_URL's comment), because api.gopluslabs.io
+        # itself is not reachable from this container. The first version of
+        # this cross-check assumed Solana was "chain_id=solana" on the EVM
+        # URL template and reused the EVM field names (is_honeypot,
+        # is_airdrop_scam, fake_token, sell_tax) for both -- none of which
+        # exist in Solana's real response shape, so every Solana check
+        # silently no-opped. Found when three separate confirmed-scam Solana
+        # tokens all still came back "Low risk" after that fix shipped.
         try:
-            t_url = (GOPLUS_TOKEN_URL.format(chain_id=token_chain_id)
-                     + f"?contract_addresses={address}")
+            if chain == "solana":
+                t_url = GOPLUS_SOLANA_TOKEN_URL + f"?contract_addresses={address}"
+            else:
+                t_url = GOPLUS_TOKEN_URL.format(chain_id="1") + f"?contract_addresses={address}"
             t_req = urllib.request.Request(t_url, headers={"User-Agent": "RelayShield/1.0"})
             with urllib.request.urlopen(t_req, timeout=8) as t_resp:
                 t_data = json.loads(t_resp.read())
@@ -5121,30 +5142,72 @@ def handle_wallet_risk(params: dict) -> dict:
             t_raw = t_result.get(address) or t_result.get(address.lower()) or {}
             if t_raw:
                 metadata["is_token_contract"] = True
-                _TOKEN_CRITICAL = {
-                    "is_honeypot":     "honeypot — cannot sell after buying",
-                    "is_airdrop_scam": "flagged as an airdrop scam token",
-                    "fake_token":      "impersonates a different, real token",
-                }
-                token_flags = [label for k, label in _TOKEN_CRITICAL.items()
-                               if str(t_raw.get(k, "0")) == "1"]
-                try:
-                    sell_tax = float(t_raw.get("sell_tax", 0))
-                    if sell_tax >= 0.5:
-                        token_flags.append(
-                            f"sell tax {sell_tax*100:.0f}% — you would likely not "
-                            "be able to sell what you buy")
-                except (TypeError, ValueError):
-                    pass
-                risk_flags.extend(token_flags)
-                # Mirrors /v1/token-security's own scoring exactly: any ONE of
-                # these three is definitive on its own (a honeypot doesn't
-                # need a second corroborating flag to be worth a HIGH verdict,
-                # same reasoning as sanctions_hit above), so it is graded
-                # here rather than folded into the generic len(risk_flags)>=2
-                # count threshold below, which is calibrated for the softer
-                # address-reputation flags.
-                token_critical_hit = bool(token_flags)
+                if chain == "solana":
+                    # Solana's schema is program-capability flags, each a
+                    # nested {"status": "0"|"1", "authority": [...]} object --
+                    # not the flat is_x booleans EVM uses. "status" == "1"
+                    # means the capability is ACTIVE (mirrors GoPlus's
+                    # established "0"/"1" string convention, confirmed live
+                    # on the EVM side; the exact string values for Solana's
+                    # own fields are UNVERIFIED against a real response,
+                    # since the live API could not be reached to confirm).
+                    def _status_on(field):
+                        return str((t_raw.get(field) or {}).get("status", "0")) == "1"
+
+                    # CRITICAL: an active mechanism to trap or drain funds
+                    # AFTER purchase -- the direct Solana analogue of a
+                    # honeypot, graded the same way (decisive alone).
+                    critical_flags = []
+                    if _status_on("freezable"):
+                        critical_flags.append(
+                            "freeze authority active — the deployer can freeze your "
+                            "tokens after you buy, preventing you from selling")
+                    if _status_on("balance_mutable_authority"):
+                        critical_flags.append(
+                            "an authority can directly alter token balances — funds "
+                            "can be drained or created without a transfer")
+                    if str(t_raw.get("none_transferable", "0")) == "1":
+                        critical_flags.append("token cannot be transferred at all")
+
+                    # WARNING: control the team may legitimately still need
+                    # early on, but worth knowing -- mirrors EVM's is_mintable/
+                    # hidden_owner/can_take_back_ownership tier.
+                    warning_flags = []
+                    if _status_on("mintable"):
+                        warning_flags.append("mint authority active — supply can be inflated")
+                    if _status_on("closable"):
+                        warning_flags.append("the token account can be closed")
+                    if _status_on("metadata_mutable"):
+                        warning_flags.append("name/symbol/image can be changed after launch")
+
+                    token_flags = critical_flags + warning_flags
+                    risk_flags.extend(token_flags)
+                    token_critical_hit = bool(critical_flags)
+                else:
+                    _TOKEN_CRITICAL = {
+                        "is_honeypot":     "honeypot — cannot sell after buying",
+                        "is_airdrop_scam": "flagged as an airdrop scam token",
+                        "fake_token":      "impersonates a different, real token",
+                    }
+                    token_flags = [label for k, label in _TOKEN_CRITICAL.items()
+                                   if str(t_raw.get(k, "0")) == "1"]
+                    try:
+                        sell_tax = float(t_raw.get("sell_tax", 0))
+                        if sell_tax >= 0.5:
+                            token_flags.append(
+                                f"sell tax {sell_tax*100:.0f}% — you would likely not "
+                                "be able to sell what you buy")
+                    except (TypeError, ValueError):
+                        pass
+                    risk_flags.extend(token_flags)
+                    # Mirrors /v1/token-security's own scoring exactly: any ONE
+                    # of these is definitive on its own (a honeypot doesn't
+                    # need a second corroborating flag to be worth a HIGH
+                    # verdict, same reasoning as sanctions_hit above), so it
+                    # is graded here rather than folded into the generic
+                    # len(risk_flags)>=2 threshold below, which is calibrated
+                    # for the softer address-reputation flags.
+                    token_critical_hit = bool(token_flags)
         except Exception as exc:
             logger.warning("GoPlus token-security cross-check failed address=%s: %s",
                             address, exc)

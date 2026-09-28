@@ -3038,8 +3038,25 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
     # Registered BEFORE the server.json websiteUrl is updated, in that order,
     # so the key exists the moment the first attributed arrival lands.
     "mcp-registry": (
+        # mcp.directory, zplatform.ai and pulsemcp.com added 2026-09-28,
+        # registered BEFORE any of the three submissions -- same rule as every
+        # other front door in this file. They join this key rather than each
+        # getting their own: all three are the same kind of thing glama.ai and
+        # smithery.ai already are here -- a directory a developer browses to
+        # find an MCP server, not a vendor-run registry with its own product
+        # story -- so one shared banner is accurate for all of them, the way
+        # it already is for the first two. mcp.directory auto-pulls metadata
+        # from our public GitHub repo rather than taking a submitted
+        # description, so the Referer host is the only attribution path that
+        # can work there; zplatform.ai and pulsemcp.com are read-only ranking
+        # pages with no submission form of their own (zplatform.ai ranks
+        # servers already on the official registry; pulsemcp.com's own
+        # submission form states new submissions are PAUSED while they rework
+        # ingestion -- registered anyway so a visitor who clicks through once
+        # they reopen still attributes correctly).
         ("registry.modelcontextprotocol.io", "modelcontextprotocol.io",
-         "glama.ai", "smithery.ai", "mcp.so"),
+         "glama.ai", "smithery.ai", "mcp.so",
+         "mcp.directory", "zplatform.ai", "pulsemcp.com"),
         _banner("Arriving from an MCP registry", _p(
             "The RelayShield MCP server is published to the official registry and "
             "installs with your client's usual command. It exposes the same checks "
@@ -3358,7 +3375,12 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "risk. Free tier is 100 calls, no card.")),
     ),
     "github": (
-        ("github.com",),
+        # libhunt.com added 2026-09-28, registered before submission. LibHunt
+        # is a general open-source discovery site (not MCP-specific, unlike
+        # the mcp-registry cluster above), so a visitor arriving from it is
+        # the same "developer comparing tools" audience this banner already
+        # addresses, not a narrower one that needs its own paragraph.
+        ("github.com", "libhunt.com"),
         _banner("Arriving from GitHub", _p(
             "Client libraries and integrations are open source: LangChain, LlamaIndex, OpenAI Agents SDK, n8n, Zapier "
             "and an MCP server. Every one of them talks to the same REST API documented below, so you can drop to raw "
@@ -3642,6 +3664,9 @@ _SOURCE_ALIASES = {
     # is no longer handed out: a rising count on it means somebody is using a
     # stale link.
     "tg-miniapp-channel":   "tg-miniapp",
+    # Dramex/telegram-mini-apps-catalog on GitHub, registered 2026-09-28 before
+    # the PR ships. Same shape as tg-miniapp-awesome: a developer-audience list.
+    "tg-miniapp-dramex":    "tg-miniapp",
     "tg-miniapp-bot":       "tg-miniapp",
     # The share card is the growth loop: a verdict forwarded into the group chat
     # where the scam was posted. Registered when the Worker started allowing it,

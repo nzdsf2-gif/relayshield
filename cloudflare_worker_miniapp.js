@@ -172,6 +172,10 @@ const ALLOWED_SOURCES = new Set([
   // link in our own product, not a catalogue submission. Registered BEFORE
   // the extension ships to the Chrome Web Store.
   "tg-miniapp-chromeext",
+  // Dramex/telegram-mini-apps-catalog on GitHub, a PR-based developer list.
+  // Registered BEFORE the PR ships -- an unregistered key here downgrades to
+  // the generic key and logs unmatched: on the landing page.
+  "tg-miniapp-dramex",
 ]);
 
 function sourceFor(startParam) {

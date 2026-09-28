@@ -657,9 +657,12 @@ question the section below leaves open is answered: we are listed, and `glama.js
    `repository.url`, and it is a better reason than tidiness.** It could not be checked from the
    container: `github.com` returns 403 to the agent proxy for HTML.
 
-**ANDREW CLICKS THIS:** open <https://github.com/relayshield/relayshield-mcp>. A 404 means the
-registry record and the Glama listing both point at nothing, and the FD-8 re-publish below should
-correct `repository.url` at the same time as `websiteUrl`.
+**CHECKED 2026-09-28: the repo EXISTS and loads.** `github.com/relayshield/relayshield-mcp` returns
+its own README ("MCP server for RelayShield — breach detection, URL scanning, SIM swap detection,
+and domain lookalike monitoring"), not a 404. So the registry record's `repository.url` and the
+Glama listing both point at a real repo -- the open question this section left is answered, and
+there is nothing to fix here. (`github.com` is reachable from the container as of this session;
+the earlier "403 to the agent proxy for HTML" note above no longer holds.)
 
 ---
 

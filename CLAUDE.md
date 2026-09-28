@@ -8794,3 +8794,100 @@ current install will not.
     session's work was entirely the Chrome extension and Crypto Shield Mobile; none of the wider
     AWS/IAM/catalogue backlog was touched or re-verified. Re-read that section before assuming any
     of it has moved.
+
+## SESSION 2026-09-28: WEEKLY METRICS GAINED TWO REAL CORPUS FIELDS, AND HAS NO DEPLOY PATH
+
+Asked for: monitored-marketplace count and unique-indicator count in the weekly metrics
+report's Alerts Fired section, plus whether any CS Mobile trial signups have happened.
+
+**THE TRIAL DATA ALREADY EXISTS.** `_cs_mobile_stats()` has tracked the 7-day trial cohort
+(started/active/converted/lapsed, conversion rate over DECIDED trials only) since
+2026-08-27, and it is already in the weekly email. Nothing needed building there. What
+CANNOT be answered, checked rather than assumed: **the Stripe Payment Links CS Mobile
+uses (`PaywallScreen.tsx`) carry no platform or distribution-channel tag at all** --
+`Linking.openURL(STRIPE_MONTHLY_URL)` with no `client_reference_id` or metadata. So today,
+while the app is live ONLY on the Solana dApp Store, every trial in the report IS a Solana
+dApp Store trial by elimination. The moment the Google Play build ships, that stops being
+true and the two channels' trials become indistinguishable in this report -- worth adding a
+platform tag to the Payment Link URL before that build goes out, not after.
+
+**THE TWO NEW FIELDS, added the same way the TI demo's cards were corrected on 2026-09-16
+rather than by inventing numbers:**
+
+- **Monitored Telegram marketplaces (active)** -- `_monitored_marketplaces()`, a filtered
+  scan of `relayshield_intel_channels` on `active=True`. Same definition
+  `tools/ti_demo_metrics.py` already uses for its own card, reused rather than re-derived.
+- **Unique indicators (all-time, distinct)** -- `_unique_indicators()`, the ROW COUNT of
+  `relayshield_intel_first_seen`. That table writes exactly one row per `ioc_value` ever
+  (a conditional put in `_record_first_seen`, no TTL by design), so its count IS the
+  distinct-indicator number directly -- cheaper and more honest than scanning and collapsing
+  `relayshield_intel_iocs` (millions of sighting rows) the way `--distinct` mode does for the
+  TI demo. The pre-existing `ioc_total` row is relabeled "IOC sightings (total, incl.
+  repeats)" rather than removed, so the report stops implying a sightings count IS the
+  indicator count -- the exact defect the TI demo's cards paid for once already.
+
+Both are additive; 8 new tests in `test_weekly_metrics.py` (a file that did not exist before
+this session -- `relayshield_weekly_metrics.py` had NO test suite at all), executed against a
+fake DynamoDB that actually applies the filter expression rather than a MagicMock that
+answers every scan the same way regardless of it.
+
+**AND THIS FUNCTION IS THE SIXTH-OR-SEVENTH INSTANCE OF THIS REPO'S MOST-REPEATED DEFECT:
+source in the repo, live weekly traffic (it has clearly been hand-deployed and re-deployed
+many times -- every fix described above `_cs_mobile_stats` is a dated comment written
+in-file, which only makes sense if each one made it to AWS), and `relayshield_weekly_metrics`
+is in NEITHER `deploy_lambdas.yml`, NOR `lambda_drift_check.yml`, NOR
+`iam_github_deploy_invoke.json`.** Confirmed by grep, not assumed. The live function name is
+`relayshield-weekly-metrics`, read from `tools/rotate_stripe_key.py` and the IAM snapshot --
+it runs under the shared `relayshield-breach-check-role-1sapnwdl` role. This change cannot
+reach AWS by merging; it needs a hand deploy. Unlike `relayshield_bundle_fulfillment.py`,
+this file imports nothing else in the repo (stdlib + boto3 only), so a drift recovery here
+would be a pure single-file diff with nothing else at risk -- the safest shape this repo's
+own drift rule describes, but the check is one command and costs nothing to run first.
+
+## MINI APP AND DIRECTORY REGISTRATIONS, SAME SESSION
+
+**`tg-miniapp-dramex` registered in all three lists** (`miniapp_routes.json` rank 21,
+`ALLOWED_SOURCES` in `cloudflare_worker_miniapp.js`, `_SOURCE_ALIASES` in
+`relayshield_developer_signup.py`) BEFORE any submission, per the standing rule.
+`Dramex/telegram-mini-apps-catalog`'s own `CONTRIBUTING.md` (read via
+raw.githubusercontent.com, github.com is reachable from the container) states a PR-based
+submission, one app per PR, a decision within 7 days, and a `data/apps.json` entry with
+required fields `name`, `url`, `description`, `category` (one of
+`Products`/`Games`/`Open Source Projects`/`Libraries & Templates`), `contributedBy`,
+`lastChecked`, `status`. **This session could not open the PR itself** -- `add_repo` and
+`fork_repository` both refuse `Dramex/telegram-mini-apps-catalog` outright (`Access denied:
+repository ... is not configured for this session`), and `list_repos` confirms it is not
+reachable from this account's GitHub App installation. The prior PR to
+`telegram-mini-apps-dev/awesome-telegram-mini-apps` (#77) was evidently opened under looser
+constraints than this session has; that route is not available here. The exact JSON entry
+and PR text are handed to Andrew to paste via GitHub's own web editor (which auto-forks on
+edit for a repo you don't own).
+
+**Four directories (`MCP.Directory`, `LibHunt`, `ZPlatform.ai`, `PulseMCP`) were researched
+via WebSearch, since all four are egress-blocked for WebFetch from this container** (same
+policy as `docs.stripe.com`, `glama.ai` etc. elsewhere in this file):
+
+- **MCP.Directory** (`mcp.directory/submit`) auto-pulls metadata from a public GitHub repo
+  within 24 hours -- confirmed the repo it would read, `github.com/relayshield/relayshield-mcp`,
+  actually loads (this ALSO closes the open "ANDREW CLICKS THIS" verification FD-9 left
+  hanging: the repo is real, not a 404, so the registry record's and Glama's `repository.url`
+  need no fix).
+- **PulseMCP** currently has submissions PAUSED while they rework ingestion -- their own
+  submit page says so. Do not submit now; the key is registered so a later submission
+  attributes correctly once they reopen.
+- **ZPlatform.ai** appears to be a pure automated ranking page pulling from the official MCP
+  registry and GitHub adoption data, with no self-serve submission form found in search
+  results. If that holds, there is nothing to submit -- RelayShield's presence there (if any)
+  rides on already being on the official registry, which it is (FD-8/FD-9).
+- **LibHunt** is a general open-source directory (not MCP-specific), so it was NOT folded
+  into the `mcp-registry` banner; `libhunt.com` was added as a referer host to the existing
+  `github` banner instead, since its audience (developers comparing tools) is the one that
+  banner already addresses. Its exact submission form URL could not be confirmed from search
+  results alone (libhunt.com itself is egress-blocked); Andrew's own read of the site settles
+  it in one look, the same "a website shows its navigation in one look" finding this file
+  already recorded for Mini App directories.
+
+`mcp.directory`, `zplatform.ai`, `pulsemcp.com` were added as referer hosts to the existing
+`mcp-registry` banner (already shared by glama.ai, smithery.ai and mcp.so) rather than each
+getting a new banner -- same kind of destination, same accurate copy, no reason to write it
+three more times.

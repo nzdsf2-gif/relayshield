@@ -5,10 +5,13 @@ Queries DynamoDB + Stripe to produce a snapshot of:
   - Subscribers (B2C WhatsApp/Telegram)
   - Monitored emails
   - B2A API keys + intel access
-  - Alerts fired this week
+  - Alerts fired this week, plus corpus size: active monitored Telegram
+    marketplaces and the all-time DISTINCT indicator count (not the
+    sightings row count -- see _unique_indicators()'s own docstring)
   - Stripe metered call counts (per endpoint)
   - Stripe MRR / revenue
   - x402 PAYG calls
+  - Crypto Shield Mobile 7-day trial cohort (started/active/converted/lapsed)
 """
 
 import html
@@ -120,6 +123,52 @@ def _new_this_week(table_name: str, date_field: str) -> int:
         )
         count += resp["Count"]
     return count
+
+
+def _filtered_count(table_name: str, filter_expression) -> int:
+    """Row count under an arbitrary filter, same pagination shape as
+    _scan_count/_new_this_week. Generalized so a new filtered count (added
+    2026-09-28 for the active-marketplace count) doesn't need its own bespoke
+    scan loop."""
+    table = dynamodb.Table(table_name)
+    resp  = table.scan(FilterExpression=filter_expression, Select="COUNT")
+    count = resp["Count"]
+    while "LastEvaluatedKey" in resp:
+        resp   = table.scan(FilterExpression=filter_expression, Select="COUNT",
+                             ExclusiveStartKey=resp["LastEvaluatedKey"])
+        count += resp["Count"]
+    return count
+
+
+def _monitored_marketplaces() -> int:
+    """Active criminal Telegram marketplaces under monitoring right now.
+
+    Same definition tools/ti_demo_metrics.py already measures against
+    relayshield_intel_channels (active=True) for the TI demo's own card --
+    reused rather than re-derived, so "monitored marketplaces" doesn't end up
+    meaning two different things on two different reports."""
+    return _filtered_count("relayshield_intel_channels", Attr("active").eq(True))
+
+
+def _unique_indicators() -> int:
+    """All-time DISTINCT indicator count -- not the sighting count.
+
+    relayshield_intel_iocs is keyed (ioc_value, seen_ts): a value seen on five
+    days is five rows, so its row count (ioc_total, below) is sightings, not
+    indicators -- this is the exact defect MEASUREMENT DOCTRINE and the TI
+    demo cards paid for once already (a 5.4M+ "IOC indicators" card that was
+    actually a sightings count wearing the wrong label).
+
+    relayshield_intel_first_seen is the table that answers this directly.
+    _record_first_seen() in relayshield_intel_monitor.py writes exactly ONE
+    row per ioc_value, ever -- a conditional put on
+    attribute_not_exists(ioc_value), and that table deliberately carries no
+    TTL ("sightings expire; first-seen must not"). So its row count IS the
+    distinct-indicator count, with no need to scan and collapse the much
+    larger sightings table the way tools/ti_demo_metrics.py's --distinct mode
+    does. This is also the table the hourly intel-monitor run logs new
+    first-seen writes against."""
+    return _scan_count("relayshield_intel_first_seen")
 
 
 AWS_MARKETPLACE_TIER_PRICES = {
@@ -691,7 +740,9 @@ def _build_email(metrics: dict) -> str:
   <tr><td>SIM swap alerts (this week)</td><td><b>{s['sim_alerts_new']}</b></td></tr>
   <tr><td>Intel alerts (total)</td><td><b>{s['intel_alerts_total']}</b></td></tr>
   <tr><td>Intel alerts (this week)</td><td><b>{s['intel_alerts_new']}</b></td></tr>
-  <tr><td>TI feed IOCs (total)</td><td><b>{s['ioc_total']:,}</b></td></tr>
+  <tr><td>Monitored Telegram marketplaces (active)</td><td><b>{s['monitored_marketplaces']:,}</b></td></tr>
+  <tr><td>Unique indicators (all-time, distinct)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
+  <tr><td>TI feed IOC sightings (total, incl. repeats)</td><td><b>{s['ioc_total']:,}</b></td></tr>
   <tr><td>Stolen session records</td><td><b>{s['stolen_sessions']:,}</b></td></tr>
   <tr><td>Identity graph correlations</td><td><b>{s['identity_graph']:,}</b></td></tr>
   <tr><td>Ransomware victim records</td><td><b>{s['ransomware_victims']:,}</b></td></tr>
@@ -992,6 +1043,8 @@ and includes this same section.</p>
         "intel_alerts_total":   _scan_count("relayshield_intel_alerts"),
         "intel_alerts_new":     _new_this_week("relayshield_intel_alerts", "created_at"),
         "ioc_total":            _scan_count("relayshield_intel_iocs"),
+        "monitored_marketplaces": _monitored_marketplaces(),
+        "unique_indicators":    _unique_indicators(),
         "lambda_health":        _scheduled_lambda_health(),
         "stolen_sessions":      _scan_count("relayshield_stolen_sessions"),
         "identity_graph":       _scan_count("relayshield_identity_graph"),

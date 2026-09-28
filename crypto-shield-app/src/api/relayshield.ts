@@ -17,7 +17,22 @@ async function rsPost(endpoint: string, body: object, apiKey?: string | null) {
     headers,
     body: JSON.stringify(body),
   });
-  if (!resp.ok) throw new Error(`RS API error ${resp.status}`);
+  // Every server-side rejection (_err() in relayshield_api.py) fills the body
+  // with {"ok": false, "error": "<the actual reason>"}. Throwing on the bare
+  // status code before ever reading that body is why "RS API error 400" is
+  // the whole report a user can give -- it discards the one thing that would
+  // make the failure self-diagnosing instead of a screenshot-and-guess.
+  if (!resp.ok) {
+    let reason = `HTTP ${resp.status}`;
+    try {
+      const errJson = await resp.json();
+      if (errJson?.error) reason = errJson.error;
+    } catch {
+      // Body wasn't JSON (an API Gateway-level rejection, say) -- the bare
+      // status is still better than nothing, so fall through with it.
+    }
+    throw new Error(`RS API error ${resp.status}: ${reason}`);
+  }
   const json = await resp.json();
   // Unwrap { ok: true, data: {...} } envelope if present
   return json?.data ?? json;
@@ -27,7 +42,16 @@ async function rsGet(endpoint: string, apiKey: string) {
   const resp = await fetch(`${RS_BASE}${endpoint}`, {
     headers: { "X-API-Key": apiKey },
   });
-  if (!resp.ok) throw new Error(`RS API error ${resp.status}`);
+  if (!resp.ok) {
+    let reason = `HTTP ${resp.status}`;
+    try {
+      const errJson = await resp.json();
+      if (errJson?.error) reason = errJson.error;
+    } catch {
+      // not JSON -- keep the bare status
+    }
+    throw new Error(`RS API error ${resp.status}: ${reason}`);
+  }
   return resp.json();
 }
 

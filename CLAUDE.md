@@ -8605,3 +8605,192 @@ as the single most recently committed branch in the whole repo, ahead of `gallan
 **Not opened, not read.** Worth a look before assuming scam-kit fingerprinting (recorded above as
 unscoped, item 1 of the four 2026-09-23 roadmap additions) is still just a roadmap entry -- it may
 no longer be.
+
+## SESSION 2026-09-28: THE CHROME EXTENSION (FD-6) IS SUBMITTED FOR REVIEW. TWO REAL GOPLUS/API
+## BUGS FOUND AND FIXED ALONG THE WAY, ONE STILL OPEN ON CS MOBILE.
+
+**A note on continuity, first, because it matters for how to read everything below.** This session
+started with a large amount of prior narrative in context, running through material dated as late
+as 2026-09-27/28 -- specifics about an IAM split, a duplicate Bundle B product, WhatsApp front-door
+work. Checked directly against `origin/main`'s actual tracked `CLAUDE.md` at the END of this
+session: **none of that material is in the file.** The real, tracked file's last entry before this
+one is "SESSION 2026-09-25" above, at line 8513, and the file is exactly 8607 lines through the end
+of that section -- confirmed by fetching `origin/main` fresh and reading it directly, not assumed
+from memory. Whatever produced that extra material, it was never committed here. **This section
+continues from the real, verified state (SESSION 2026-09-25), not from the phantom one.** Recording
+this so a future session that also gets handed a large context block knows to check it against the
+tracked file the same way, per this file's own "a doc recording an open item is a lead, not a fact"
+rule -- which turns out to apply to an entire session's worth of assumed history, not just a status
+paragraph.
+
+### THE CHROME EXTENSION: BUILT, TESTED, SUBMITTED. FOUR REAL BUGS FOUND TESTING IT WITH ANDREW.
+
+`chrome-extension/` reached v0.2.1 this session and was submitted to the Chrome Web Store for
+review by the end of it (as `relayshieldadmin@gmail.com`, publisher ID
+`44788069-4790-4e5d-8791-894fe1052258`). Along the way, testing with real input rather than mocks
+found four genuine defects, each the same shape this file has recorded before: **built, and wrong
+in a way only a real check catches.**
+
+1. **Explorer/DEX URLs only checked the domain, never the embedded address.** A Jupiter token page
+   for a confirmed scam token read as "nothing known against it" because `jup.ag` itself is a
+   legitimate platform and nothing extracted the mint from the URL path. Fixed with
+   `rsExtractEmbeddedAddress()` -- walks path segments and query values through the same
+   chain-detection regex the bare-address path already trusts, then checks the domain AND the
+   embedded address in parallel, worse wins.
+2. **The toolbar icon was muted.** It reused a brand asset built for a large dark tile (16%-opacity
+   fill, solid dark background); at 16-32px it read as grey next to other extensions' icons.
+   Rebuilt from a new source (`assets/miniapp/relayshield_icon_action.html`) with a transparent
+   background and solid fill.
+3. **The footer implied features the extension doesn't have, TWICE, and I introduced the second
+   instance myself while fixing the first.** "Breach and infostealer checks need a free key" sat
+   right below the extension's own three (unrelated) checks, implying they were gated -- fixed by
+   rewording it as a generic developer CTA. The SIBLING line, "Want ongoing monitoring, not just
+   one-off checks?", carried the identical implication (that the extension does a lesser version of
+   breach/SIM-swap checking) and I caught it myself immediately after fixing the first, before
+   Andrew had to point it out a second time.
+4. **No version bump across three real fixes.** 0.2.0 shipped the embedded-address fix, the icon,
+   and the footer wording with no version change between them, so `chrome://extensions`'s own
+   version number gave Andrew no way to tell "reloaded the old code" from "reloaded the new code"
+   when something didn't look different. Bumped to 0.2.1 specifically to restore that signal --
+   same shape as the Mini App's BUILD id, a different surface.
+
+**Registration mechanics worth remembering, since none of this is written down anywhere else in
+this repo:**
+- **$5 one-time fee, not $25** -- confirmed against Google's own current developer docs; the $25
+  figure belongs to a different store.
+- **A payment decline reading `[OR_FGPMH_11]` on two different cards was resolved by registering
+  from an Incognito window instead** -- root cause UNCONFIRMED (a stale Google payment session in
+  the normal browser profile is the leading guess, since a bank decline shows a different message
+  and two different cards hitting the identical Google-side error code rules out the cards
+  themselves). If it recurs, Incognito is the known workaround, not a diagnosed fix.
+- **Trader declaration**: RelayShield LLC is a trader account by Andrew's own decision, and the
+  address/phone/DUNS (`14-989-2087`) that gets posted PUBLICLY on the listing footer is the same
+  address already public via Massachusetts state business registration -- a knowing choice, not an
+  oversight, recorded here so it isn't re-litigated.
+- **"Are you using remote code?" was wrongly set to Yes.** The extension fetches JSON from
+  `api.relayshield.net` and renders it as escaped text -- no `eval`, no injected remote `<script>`
+  tag -- which is a data fetch, not remote code execution in Chrome's policy sense. Corrected to No,
+  which should also reduce the compounding review delay that answer adds on top of the (separate,
+  expected, largely unavoidable) host-permission review.
+- **`support@relayshield.net` was flagged by Chrome's own validator as unreachable.** Could not
+  verify why from this container -- every DNS tool (local `dig`/`host`/`nslookup`, and two different
+  DNS-over-HTTPS providers) is blocked by this container's egress policy. Worked around by pointing
+  the Support URL field at `https://api.relayshield.net/developers?source=chrome-extension` instead,
+  which is confirmed live. **Andrew was asked to send a real test email to confirm whether the
+  mailbox is genuinely dead -- no confirmation received this session.**
+
+### THE GOPLUS SOLANA SCHEMA STORY -- A METHOD WORTH REMEMBERING, NOT JUST A BUG
+
+Testing the Chrome extension's wallet check against real confirmed-scam Solana tokens (found by
+Andrew, not invented) surfaced a genuine gap in `/v1/wallet-risk`: GoPlus's `address_security` API
+answers "does this ACCOUNT have a history of bad behaviour" -- phishing, dark web, sanctions. A
+freshly-minted scam token contract has no such history by definition, so that call alone can never
+catch one. The check that WOULD catch it -- mint authority, honeypot, impersonation -- is a
+separate GoPlus endpoint, `token_security`, already used by the paid `/v1/token-security` handler
+but never called from the free `/v1/wallet-risk` path.
+
+**The first fix shipped wrong, silently, and stayed wrong until Andrew tested three more scam
+tokens and none of them changed.** It assumed Solana was "just another chain_id" on the same URL
+GoPlus uses for EVM (`/api/v1/token_security/{chain_id}`) and reused EVM's field names
+(`is_honeypot`, `is_airdrop_scam`, `fake_token`, `sell_tax`). Both assumptions were wrong:
+
+- **The real Solana endpoint is `/api/v1/solana/token_security`** -- the same two path segments,
+  opposite order, a separately-versioned ("beta") API entirely, not a parameter on the EVM one.
+- **The real response schema is nested capability objects**, `{"status": "0"|"1", "authority":
+  [...]}`, one per field (`freezable`, `mintable`, `closable`, `balance_mutable_authority`,
+  `metadata_mutable`, `none_transferable`) -- nothing resembling EVM's flat booleans.
+
+**How this was found, and it is the reusable part: `api.gopluslabs.io` is not reachable from this
+container (403 on every attempt), and neither is `docs.gopluslabs.io`. `pypi.org` is.** GoPlus
+publishes an official Python SDK (`pip install goplus`), generated by swagger-codegen straight from
+their own OpenAPI spec, and downloading the wheel (`pip download goplus --no-deps`) and reading the
+generated `api/token_security_api_for_solana__beta_api.py` and its response models gave the exact
+real endpoint path and field names with no live API access needed at all. **The same
+"BLOCKED SOURCE WAS REACHABLE ALL ALONG" shape this file has recorded for Stripe's `mppx` package
+and Smithery's CLI, in a third vendor.** When a vendor's docs and live API are both blocked, check
+whether they publish an official SDK on PyPI or npm before concluding the shape is unverifiable --
+a generated client is a more literal contract than prose anyway.
+
+Corrected: `freezable` and `balance_mutable_authority` graded CRITICAL (the direct Solana analogues
+of a honeypot -- an active mechanism to trap or drain funds after purchase, decisive alone, same
+reasoning as `sanctions_hit`); `mintable`/`closable`/`metadata_mutable` graded WARNING, mirroring
+EVM's own `is_mintable` tier. 15 tests. **One thing still genuinely unverified and labelled as such
+in the code**: the exact `"0"`/`"1"` string convention for Solana's own fields is inferred from
+GoPlus's established EVM convention, never confirmed against a live Solana response, because the
+live API still cannot be reached from here. The first real honeypot/scam SOL token to hit this path
+in production is the actual test.
+
+### CS MOBILE: A REAL 400, ROOT CAUSE STILL UNKNOWN -- BUT A REAL BUG FOUND ON THE WAY THAT EXPLAINS WHY IT'S UNKNOWN
+
+Arjen reported `RS API error 400` scanning a Solana token mint
+(`5aXSfstoUYp4uBEpJoMyMrzLFNFyrMQZ5d2u7yVFD`) via the SOL Token scan type in Crypto Shield Mobile.
+**Executed `handle_solana_token_risk` directly with that exact address rather than guessing**: the
+mint passes format validation (41 chars, valid base58), and every code path in the handler returns
+200 regardless of whether the upstream vendors (Rugcheck.xyz, DexScreener) succeed or fail. The one
+dispatcher-level check that could plausibly reject a keyless call before reaching the handler --
+the daily per-IP quota -- returns 429, not 400. **Nothing in the code that runs today can produce
+this 400 for this input.** Genuinely unresolved; the leading unverifiable-from-here guess is a
+corrupted or malformed stored API key on Arjen's device causing a header-level rejection before
+Lambda is even invoked.
+
+**The real, fixable bug found on the way: the app's own API client was throwing away the reason.**
+`rsPost`/`rsGet` in `crypto-shield-app/src/api/relayshield.ts` threw on the bare HTTP status code
+before ever reading the response body -- and every server-side rejection (`_err()` in
+`relayshield_api.py`) puts the actual reason in that body. So "RS API error 400" was not an
+incomplete report Arjen gave; it was the entire report the app was CAPABLE of producing, because
+the one piece of information that would explain it was discarded before the user ever saw it. Three
+other functions in that same file (`getSubscriptionByEmail`, `confirmCheckoutSession`,
+`openBillingPortal`) already read the body correctly -- it was specifically the two most-used
+helpers that didn't. Fixed: both now parse the JSON body first and surface the server's own error
+text, falling back to the bare status only if the body isn't JSON.
+
+**This fix is on `main` and does NOT reach any device on its own.** Unlike every Lambda change this
+session (which deploy automatically via `deploy_lambdas.yml` on push), `crypto-shield-app` is the
+Expo mobile app and only reaches a device through an actual EAS build and store submission. The next
+time this error fires in a build that includes this commit, the message will say why; Arjen's
+current install will not.
+
+### THE TOP 10 FOR THE NEXT SESSION
+
+1. **Check the Chrome Web Store review outcome** -- the account is `relayshieldadmin@gmail.com`, the
+   Developer Dashboard shows status directly. If rejected, get the specific reason and fix it; if
+   approved, get the listing URL (see item 7).
+2. **Confirm whether `support@relayshield.net` is a real, monitored mailbox.** Andrew was asked to
+   send it a real test email; no confirmation happened this session. If it's dead, decide whether to
+   provision it for real or make the developers-page URL the permanent public support contact
+   everywhere this repo references one, not just a one-field workaround.
+3. **EAS rebuild and republish Crypto Shield Mobile** so the `rsPost`/`rsGet` error-surfacing fix
+   actually reaches a device -- it is on `main` and nowhere else right now.
+4. **Once that new build is live, have Arjen retry the exact same SOL Token scan**
+   (`5aXSfstoUYp4uBEpJoMyMrzLFNFyrMQZ5d2u7yVFD`) and report whatever specific error text now
+   appears, if it recurs. That is the only way left to learn the actual root cause of the original
+   400 rather than continue guessing at it.
+5. **Check whether Arjen's stored API key is corrupted or malformed** -- a plausible cause for a 400
+   that never reaches Lambda at all (a malformed header value rejected at the edge), and something
+   this container cannot verify without AWS/CloudWatch access.
+6. **The GoPlus Solana `"0"`/`"1"` status convention is still unverified against a live response.**
+   Watch for the first live hit on `metadata.is_token_contract` in `/v1/wallet-risk`'s logs and
+   confirm the flags it produces make sense against the actual token, since `api.gopluslabs.io` still
+   cannot be reached from this container to test directly.
+7. **Once the Chrome extension is approved, wire it as a discovery surface**, not just a published
+   artefact: link the Store listing from the developers page and the Mini App, and register a NEW
+   `?source=` key for arrivals FROM the Store listing itself (distinct from `chrome-extension`,
+   which is for people already using the installed extension and is registered in all three of
+   `miniapp_routes.json`, `ALLOWED_SOURCES`, and `_SOURCE_ALIASES` already) -- a listing is a
+   standing shelf, per this file's own established doctrine, and needs its own attribution to be
+   measurable separately from the extension's own footer traffic.
+8. **A third Chrome extension screenshot** (the Email tab, or a clean "nothing known" result) was
+   offered and not built. Worth doing once real usage data exists to screenshot against.
+9. **`/v1/wallet-risk` returns `risk_level: "LOW"` -- a positive, reassuring label -- whenever
+   nothing is found, unlike `_link_check_level`'s explicit "never low, only unknown" rule.** This is
+   a real, deliberate inconsistency, confirmed by grep to touch two dozen-plus files across Crypto
+   Shield Mobile, the Mini App, the widget, and the Chrome extension. Recommended fix (rename to
+   `"unknown"`), NOT made this session given the blast radius -- this needs Andrew's explicit
+   sign-off before touching, since it changes what every existing surface shows for the majority of
+   addresses checked (most addresses are clean).
+10. **Everything in "SESSION 2026-09-25" above -- the `gallant-hawking-4oerzg` branch
+    reconciliation, the unconfirmed `relayshield_breach_cache` table creation, the unexamined
+    `feature/scam-kit-fingerprinting` branch -- is UNCHANGED and UNREVIEWED this session.** This
+    session's work was entirely the Chrome extension and Crypto Shield Mobile; none of the wider
+    AWS/IAM/catalogue backlog was touched or re-verified. Re-read that section before assuming any
+    of it has moved.

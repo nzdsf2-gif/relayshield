@@ -240,7 +240,9 @@
       "destination": "Dramex/telegram-mini-apps-catalog on GitHub",
       "audience": null,
       "audience_note": "UNMEASURED, and a developer-audience list like tg-miniapp-awesome rather than a consumer catalogue -- an arrival here is more likely a bot developer than a person checking an address. Its own CONTRIBUTING.md (read via raw.githubusercontent.com, github.com is reachable from the container) states a PR-based submission, 'a decision within 7 days', one app per PR, and a required data/apps.json entry: name, url, description, category (one of Products/Games/Open Source Projects/Libraries & Templates), contributedBy, lastChecked, status. Entries cite a sourcePR when cross-posted from telegram-mini-apps-dev/awesome-telegram-mini-apps, which is exactly where our own PR #77 (the tg-miniapp-awesome row) already sits -- so this submission cites that PR as provenance rather than inventing a second, unrelated one.",
-      "status": "ready",
+      "status": "submitted",
+      "submitted_at": "2026-09-28",
+      "submission_note": "SUBMITTED 2026-09-28 as pull request #2 to Dramex/telegram-mini-apps-catalog, from nzdsf2-gif:patch-1 into Dramex:main -- via GitHub's own web editor, which auto-forks on an edit to a repo you don't own, exactly the awesome-telegram-mini-apps route. VERIFIED live 2026-09-28: Open, 'No conflicts with base branch', no reviews yet. That is the expected state, not a stall -- CONTRIBUTING.md's own SLA is a decision within 7 days. Nothing further to do until then.",
       "why_first": "Registered BEFORE the PR ships, per this file's own standing rule: an unregistered key is silently downgraded to the generic tg-miniapp at the Worker's edge and logs unmatched: on the landing page, which is FD-8's shape."
     }
   ],

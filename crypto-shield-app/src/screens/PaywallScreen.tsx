@@ -7,8 +7,25 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 // ── Stripe Payment Links (create in Stripe Dashboard → Payment Links) ──────────
 // Replace these with real plink_ IDs from your Stripe dashboard.
-const STRIPE_MONTHLY_URL = "https://buy.stripe.com/4gMdRa7Yq7OZf9aesn0Ny0g";
-const STRIPE_ANNUAL_URL  = "https://buy.stripe.com/6oUdRabaC4CN4uwbgb0Ny0h";
+//
+// ?client_reference_id=solana, added 2026-09-28. The app is live ONLY on the
+// Solana dApp Store today, so every trial/subscription in the weekly report
+// has been a Solana arrival by elimination -- that stops being true the
+// moment a Google Play build ships, and the two channels become
+// indistinguishable with no way to recover the split after the fact.
+// Stripe copies this value onto the Checkout Session it creates from the
+// Payment Link; relayshield_weekly_metrics.py reads it back per subscription
+// via GET /v1/checkout/sessions?subscription=... A future Google Play build
+// tags its own copy of these two URLs "googleplay" in this same spot -- do
+// not invent a third value, and do not reuse "solana" for it.
+//
+// THIS TAG ONLY REACHES A REAL CHECKOUT ONCE THIS BUILD REACHES A DEVICE.
+// Editing this file is not a release: a new EAS build and a new Solana
+// dApp Store submission carry it, same as every other change to this repo's
+// mobile app. Subscriptions from the CURRENTLY LIVE build predate the tag
+// and report "unattributed", which is correct and not a bug.
+const STRIPE_MONTHLY_URL = "https://buy.stripe.com/4gMdRa7Yq7OZf9aesn0Ny0g?client_reference_id=solana";
+const STRIPE_ANNUAL_URL  = "https://buy.stripe.com/6oUdRabaC4CN4uwbgb0Ny0h?client_reference_id=solana";
 
 interface Props {
   onClose?: () => void;

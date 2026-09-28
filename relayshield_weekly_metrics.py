@@ -348,6 +348,35 @@ CS_MOBILE_PRICE_IDS = {
 }
 
 
+def _checkout_platform_tag(sub_id: str, stripe_key: str) -> str:
+    """The distribution channel a subscription came in through, added
+    2026-09-28 alongside the ?client_reference_id= tag PaywallScreen.tsx now
+    appends to both Payment Link URLs ("solana" today, a future build's own
+    value once Google Play ships).
+
+    client_reference_id is a CHECKOUT SESSION field, not a Subscription
+    field, so it has to be read back via the session that created the
+    subscription rather than off the subscription object itself. Every
+    subscription created before this tag shipped -- which today is ALL of
+    them -- has no such session and correctly reads "unattributed", not
+    "solana": the tag records where a checkout STARTED, and inferring the
+    only live channel onto historical data would misattribute the moment
+    a second channel exists and there is no way to tell them apart in
+    hindsight.
+    """
+    try:
+        data = _stripe_get(
+            f"/v1/checkout/sessions?subscription={sub_id}&limit=1", stripe_key)
+        sessions = data.get("data", [])
+        if sessions:
+            ref = sessions[0].get("client_reference_id")
+            if ref:
+                return ref
+        return "unattributed"
+    except Exception:
+        return "unattributed"
+
+
 def _cs_mobile_stats() -> dict:
     """Crypto Shield Mobile subscriber activations and revenue, monthly + YTD.
     In review on Solana dApp Store as of 2026-07-04 — likely near-zero real
@@ -365,6 +394,8 @@ def _cs_mobile_stats() -> dict:
         activations_month, activations_ytd = 0, 0
         week_start = int(now.timestamp()) - 7 * 86400
         trials_started_week = trials_active = trials_converted = trials_lapsed = 0
+        platform_trials_started_week: dict[str, int] = {}
+        platform_activations_month: dict[str, int] = {}
         for price_id in CS_MOBILE_PRICE_IDS:
             starting_after = None
             while True:
@@ -390,11 +421,27 @@ def _cs_mobile_stats() -> dict:
                     # then charged has trial_end in the past AND a status of
                     # active; one that trialled and left is canceled with a
                     # trial_end it never passed while active.
+                    #
+                    # The platform lookup is one extra Stripe call per
+                    # subscription, so it only runs for rows one of the two
+                    # platform-broken-out counters below actually needs --
+                    # week_start can fall in the PREVIOUS calendar month (the
+                    # 3rd of the month looking back 7 days), so it is its own
+                    # condition rather than reusing month_start's.
                     status    = sub.get("status", "")
                     trial_end = sub.get("trial_end") or 0
+                    needs_platform = created >= month_start or (
+                        trial_end and created >= week_start)
+                    platform = (_checkout_platform_tag(sub["id"], stripe_key)
+                                if needs_platform else None)
+                    if created >= month_start:
+                        platform_activations_month[platform] = (
+                            platform_activations_month.get(platform, 0) + 1)
                     if trial_end:
                         if created >= week_start:
                             trials_started_week += 1
+                            platform_trials_started_week[platform] = (
+                                platform_trials_started_week.get(platform, 0) + 1)
                         if status == "trialing":
                             trials_active += 1
                         elif status in ("active", "past_due"):
@@ -446,12 +493,20 @@ def _cs_mobile_stats() -> dict:
             "trial_conversion_pct": (
                 round(100.0 * trials_converted / converted_total, 1) if converted_total else None
             ),
+            # By distribution channel, added 2026-09-28 alongside the
+            # ?client_reference_id= tag. "unattributed" is every subscription
+            # that predates the tag -- today, that is all of them, since the
+            # tagged build has not shipped yet. Not a bug; see
+            # _checkout_platform_tag's own docstring.
+            "activations_month_by_platform":   platform_activations_month,
+            "trials_started_week_by_platform": platform_trials_started_week,
         }
     except Exception as exc:
         logger.warning("CS Mobile stats fetch failed: %s", exc)
         return {"activations_month": 0, "activations_ytd": 0, "revenue_month": 0.0,
                 "revenue_ytd": 0.0, "trials_started_week": 0, "trials_active": 0,
-                "trials_converted": 0, "trials_lapsed": 0, "trial_conversion_pct": None}
+                "trials_converted": 0, "trials_lapsed": 0, "trial_conversion_pct": None,
+                "activations_month_by_platform": {}, "trials_started_week_by_platform": {}}
 
 
 def _stripe_ytd_revenue(stripe_key: str) -> float:
@@ -803,9 +858,11 @@ def _build_email(metrics: dict) -> str:
 <h3 style="color: #e94560;">Crypto Shield Mobile — Activations & Revenue</h3>
 <table border="0" cellpadding="4">
   <tr><td>New subscriber activations (this month)</td><td><b>{s['cs_mobile_stats']['activations_month']}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;by platform</td><td style="color:#888;font-size:12px">{_by_platform(s['cs_mobile_stats']['activations_month_by_platform'])}</td></tr>
   <tr><td>New subscriber activations (YTD)</td><td><b>{s['cs_mobile_stats']['activations_ytd']}</b></td></tr>
   <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">7-day trial cohort</td></tr>
   <tr><td>&nbsp;&nbsp;Trials started this week</td><td><b>{s['cs_mobile_stats']['trials_started_week']}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;&nbsp;&nbsp;by platform</td><td style="color:#888;font-size:12px">{_by_platform(s['cs_mobile_stats']['trials_started_week_by_platform'])}</td></tr>
   <tr><td>&nbsp;&nbsp;Currently in trial</td><td><b>{s['cs_mobile_stats']['trials_active']}</b></td></tr>
   <tr><td>&nbsp;&nbsp;Trial converted to paid</td><td><b>{s['cs_mobile_stats']['trials_converted']}</b></td></tr>
   <tr><td>&nbsp;&nbsp;Trial lapsed</td><td><b>{s['cs_mobile_stats']['trials_lapsed']}</b></td></tr>
@@ -968,6 +1025,16 @@ def _lambda_health_html(h: dict) -> str:
 def _pct(v) -> str:
     """A conversion rate with no decided trials is unknown, not zero percent."""
     return "n/a" if v is None else f"{v}%"
+
+
+def _by_platform(counts: dict) -> str:
+    """'solana: 2, unattributed: 1' or a plain dash for an empty window --
+    empty and 'nothing happened' both look like nothing, and the distinction
+    is that empty renders no comma-joined string rather than crashing on
+    one."""
+    if not counts:
+        return "-"
+    return ", ".join(f"{k}: {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1]))
 
 
 def _rows(by_source: dict) -> str:

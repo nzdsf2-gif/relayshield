@@ -1,5 +1,6 @@
-"""relayshield_weekly_metrics.py -- the two metrics added 2026-09-28: the
-active-marketplace count and the all-time DISTINCT indicator count.
+"""relayshield_weekly_metrics.py -- the metrics added 2026-09-28: the
+active-marketplace count, the all-time DISTINCT indicator count, and the
+CS Mobile trial/activation breakdown by distribution platform.
 
 Both are new definitions layered onto an existing report, and both are the
 kind of thing this repo has gotten wrong before (a sightings count wearing an
@@ -170,6 +171,59 @@ class LambdaHandlerWiring(unittest.TestCase):
                           "_unique_indicators")
 
 
+class CheckoutPlatformTag(unittest.TestCase):
+    """_checkout_platform_tag reads a Checkout Session's client_reference_id
+    back via the subscription it created -- added 2026-09-28 alongside the
+    ?client_reference_id=solana tag on the Payment Link URLs in
+    PaywallScreen.tsx. urlopen is stubbed directly since this hits Stripe,
+    not DynamoDB."""
+
+    def _stub_stripe(self, sessions: list):
+        import json as _json
+
+        class _Resp:
+            def __init__(self, body):
+                self._body = body
+
+            def read(self):
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def _fake_urlopen(req, timeout=10):
+            return _Resp(_json.dumps({"data": sessions}).encode())
+
+        wm.urllib.request.urlopen = _fake_urlopen
+
+    def test_reads_the_tag_off_the_originating_session(self):
+        self._stub_stripe([{"client_reference_id": "solana"}])
+        self.assertEqual(wm._checkout_platform_tag("sub_1", "sk_test"), "solana")
+
+    def test_a_subscription_with_no_session_is_unattributed(self):
+        self._stub_stripe([])
+        self.assertEqual(wm._checkout_platform_tag("sub_1", "sk_test"), "unattributed")
+
+    def test_a_session_with_no_reference_id_is_unattributed(self):
+        # Every subscription created before the tag shipped -- which today is
+        # all of them, since the tagged build has not reached a device yet.
+        self._stub_stripe([{"client_reference_id": None}])
+        self.assertEqual(wm._checkout_platform_tag("sub_1", "sk_test"), "unattributed")
+
+
+class ByPlatform(unittest.TestCase):
+    def test_empty_dict_renders_a_dash_not_a_crash(self):
+        self.assertEqual(wm._by_platform({}), "-")
+
+    def test_renders_every_platform_present(self):
+        out = wm._by_platform({"solana": 2, "unattributed": 1})
+        self.assertIn("solana: 2", out)
+        self.assertIn("unattributed: 1", out)
+
+
 class EmailRendering(unittest.TestCase):
     def _fixture(self, **overrides):
         base = {
@@ -204,7 +258,10 @@ class EmailRendering(unittest.TestCase):
                                   "revenue_month": 0.0, "revenue_ytd": 0.0,
                                   "trials_started_week": 0, "trials_active": 0,
                                   "trials_converted": 0, "trials_lapsed": 0,
-                                  "trial_conversion_pct": None},
+                                  "trial_conversion_pct": None,
+                                  "activations_month_by_platform": {"solana": 1},
+                                  "trials_started_week_by_platform": {"solana": 1,
+                                                                        "unattributed": 1}},
             "cs_mobile_feedback": {"total": 0, "up": 0, "down": 0,
                                      "pct_positive": None,
                                      "testimonial_candidates": []},
@@ -225,6 +282,11 @@ class EmailRendering(unittest.TestCase):
         # silently removed in favor of the new distinct count.
         html = wm._build_email(self._fixture())
         self.assertIn("7,602,575", html)
+
+    def test_renders_the_platform_breakdown_for_trials(self):
+        html = wm._build_email(self._fixture())
+        self.assertIn("solana: 1", html)
+        self.assertIn("unattributed: 1", html)
 
 
 if __name__ == "__main__":

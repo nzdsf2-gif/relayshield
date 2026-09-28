@@ -8891,3 +8891,62 @@ policy as `docs.stripe.com`, `glama.ai` etc. elsewhere in this file):
 `mcp-registry` banner (already shared by glama.ai, smithery.ai and mcp.so) rather than each
 getting a new banner -- same kind of destination, same accurate copy, no reason to write it
 three more times.
+
+## SESSION 2026-09-28 (second): STRIPE CHECKOUT NOW TAGS SOLANA VS FUTURE GOOGLE PLAY
+
+Asked for: measure unique indicators and 7-day trial starts, add a platform tag to CS
+Mobile's Stripe checkout so Solana and a future Google Play build stay distinguishable,
+and help with three directory submissions plus verifying the Dramex PR.
+
+**THE TAG.** `PaywallScreen.tsx`'s two Payment Link URLs now carry
+`?client_reference_id=solana`. Stripe copies that onto the Checkout Session it creates;
+`relayshield_weekly_metrics.py` reads it back per subscription via
+`GET /v1/checkout/sessions?subscription=...` (`client_reference_id` lives on the
+session, not the subscription, so there is no cheaper read). New helper
+`_checkout_platform_tag()`, wired into `_cs_mobile_stats()`'s activation and trial-start
+counters, rendered as a "by platform" sub-row under each in the email. **Every
+subscription on the currently-live build predates the tag and reads "unattributed" --
+that is correct, not a bug**, and will stay the only value until a build carrying this
+edit reaches a device via EAS + a new Solana dApp Store submission. Editing the file is
+not a release. A future Google Play build tags its own copy `"googleplay"` in the same
+spot; do not reuse `"solana"` for it. 6 new tests in `test_weekly_metrics.py`.
+
+**MEASURING THE TWO NUMBERS ASKED FOR NEEDS THE PRIOR SESSION'S DEPLOY TO HAVE RUN,
+WHICH IS UNCONFIRMED.** The monitored-marketplace and unique-indicator fields, and this
+session's platform tags, only reach AWS through the hand-deploy steps the prior session
+handed Andrew (`relayshield_weekly_metrics` has no CI deploy path -- see that session's
+entry). The reply hands him one merge → drift-check → deploy → **invoke** sequence that
+also fires the report immediately by hand rather than waiting for Monday, so the numbers
+land in his inbox in the same round rather than requiring a second one.
+
+## DRAMEX PR #2: OPEN, NO CONFLICTS, NO REVIEW YET -- THAT IS THE EXPECTED STATE
+
+Verified live via WebFetch (github.com is reachable) rather than trusting the
+screenshot alone: **Open**, "No conflicts with base branch", zero reviews so far.
+`Dramex/telegram-mini-apps-catalog`'s own `CONTRIBUTING.md` states a decision within 7
+days, so an unreviewed PR at this stage is the SLA working, not a stall. Nothing to do
+until then. `miniapp_routes.json`'s `dramex` row updated `ready` → `submitted`.
+
+## THREE MORE DIRECTORY SUBMISSIONS, RESEARCHED AND HANDED OVER AS FORM VALUES
+
+**MCP.Directory** -- Andrew reports submitted. Nothing further.
+
+**ZPlatform.ai** -- a generic AI-tool submission form (name/email/tool
+name/URL/category/pricing URL/one-line description), distinct from their
+**registry-derived** MCP Servers page (163 servers pulled automatically from the
+official MCP registry, per the 2026-09-28 first-session research -- so relayshield-mcp's
+presence there needs no manual submission at all). Recommended submitting the **API
+product** (`api.relayshield.net/developers`) rather than a bot username or the Mini App,
+because the form's own fields (a URL, a price, "what does it do, for whom, what does it
+cost") match a priced product page, not a Telegram surface. **The user's personal email
+(`nzdsf2@gmail.com`, this session's own userEmail context) was deliberately NOT
+prefilled into this third-party form** -- that context says explicitly not to send it to
+an unrelated service unless asked, and `andrew@relayshield.net` is the more appropriate
+contact for a business tool submission besides.
+
+**LibHunt** -- a GitHub-repo-based submission (repo/description/topics/website/docs
+URL/language/license/self-hosted), matching `github.com/relayshield/relayshield-mcp`
+directly. **The License field could not be filled**: no `LICENSE` file was found at
+that repo's root (`raw.githubusercontent.com/.../main/LICENSE` returns 404) and no
+license badge was visible on the repo page. Left for Andrew to fill from what is
+actually there rather than guessed -- a license claim is not one to invent.

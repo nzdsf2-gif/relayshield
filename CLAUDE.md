@@ -9017,3 +9017,73 @@ for `relayshield-mcp` stays live. **If Andrew already knows a genuine, comparabl
 project**, it is a five-second edit with real (if small) upside -- more "alternative to X" pages
 we might get cross-listed on -- but that is his call to make from something he actually knows, not
 something to be guessed here.
+
+## THE MISSING FIELDS WERE TWO STACKED PROBLEMS, AND THE DIAGNOSTIC FOUND BOTH IN ONE RUN
+
+**2026-09-29.** The log tail Andrew ran shows TWO invocations, 61 seconds apart, both right after
+the 23:52:37 deploy:
+
+    23:52:38  RequestId 5b4e...  "Weekly metrics report starting" -> "...email sent" (82s, succeeded)
+    23:53:39  RequestId 412362...  "Weekly metrics report starting" -> CRASHED (53s)
+
+**AccessDeniedException, confirmed rather than guessed at:**
+
+    ClientError: An error occurred (AccessDeniedException) when calling the Scan operation:
+    User: .../assumed-role/relayshield-breach-check-role-1sapnwdl/relayshield-weekly-metrics
+    is not authorized to perform: dynamodb:Scan on resource:
+    .../table/relayshield_intel_first_seen ... no identity-based policy allows the action
+    ... File "relayshield_weekly_metrics.py", line 1114, in lambda_handler
+        "unique_indicators":    _unique_indicators(),
+
+**THIS IS THE STORY, AND IT IS TWO SEPARATE THINGS, NOT ONE:**
+
+1. **The email Andrew actually received (23:54:01) came from the FIRST invocation, and that one
+   almost certainly ran the OLD, PRE-FIX code.** It started 1.6 seconds after `LastModified` --
+   inside the ordinary window where a fresh Lambda execution environment can still be running code
+   from before an `update-function-code` finishes propagating to it, the same "a create/update call
+   returning is not the same as it finishing" shape this file has already paid for with Lambda
+   `Pending` states and API Gateway stage propagation. It has no `_unique_indicators()` call in it
+   at all (nothing in the old code does), so it could never have shown the new fields, and it
+   completed cleanly precisely BECAUSE it never touched the thing that was broken.
+2. **The SECOND invocation, 61 seconds later, got a fresh environment that had picked up the new
+   code, hit the real bug, and crashed before `ses.send_email()` -- so it sent no email at all.**
+   `relayshield-weekly-metrics` runs under the SAME shared role
+   (`relayshield-breach-check-role-1sapnwdl`) that `tools/setup_first_seen.sh` already granted
+   `dynamodb:PutItem` on this exact table, for `relayshield-intel-monitor` -- **but that grant was
+   WRITE ONLY.** Nothing has ever granted this role READ access to `relayshield_intel_first_seen`,
+   so a `Scan` from ANY function under it, not just this one, was always going to fail. The A6
+   section elsewhere in this file recorded the PutItem grant; nobody ever needed to read the table
+   back from a Lambda until this session added `_unique_indicators()`.
+
+**`tools/grant_weekly_metrics_first_seen_scan.sh` fixes it, and it is a READ-MERGE-WRITE on
+purpose.** `put-role-policy` REPLACES the named policy's whole document rather than merging into
+it -- the exact hazard this file already recorded for Lambda's `update-function-configuration
+--environment`. Writing a Scan-only document under the existing `relayshield-first-seen-write`
+policy name would silently delete the PutItem grant the intel monitor depends on. So the script
+reads whatever Actions are already there, unions in `dynamodb:Scan` only if it's missing, and
+writes the union back under the same name -- falling back to a fresh inline policy, then a
+customer-managed one, then naming `tools/iam_split_roles.py` as the last resort, in that order,
+matching `tools/setup_first_seen.sh`'s own established shape.
+
+**The CS Mobile trial numbers in the email Andrew got are real, not evidence of anything broken**
+-- they came from the OLD code's unmodified logic, so whatever they show (very likely near-zero,
+since the report has shown zero trials in every session that has looked) is the honest current
+answer to his question, just not carrying the platform breakdown yet. That only appears once a
+build carrying the `?client_reference_id=solana` tag reaches a device, which is unrelated to this
+bug and was already recorded as pending.
+
+**ANDREW RUNS THIS:**
+```zsh
+cd ~/dev/relayshield
+sh tools/grant_weekly_metrics_first_seen_scan.sh
+AWS_PROFILE=relayshield aws lambda invoke --no-cli-pager --function-name relayshield-weekly-metrics /tmp/weekly_metrics_out.json
+cat /tmp/weekly_metrics_out.json
+```
+**EXPECT:** the script prints which policy it extended or created, `cat` prints
+`{"statusCode": 200, ...}` or similar with no `errorMessage` key, and a NEW email arrives within a
+minute or two showing all three new fields plus the existing CS Mobile numbers, this time from a
+fully-settled deploy with no propagation race in play.
+**STOP IF** the grant script prints `NOT GRANTED` -- both IAM budgets on the shared role are
+spent and this becomes the IAM-split job, not a quick grant.
+**STOP IF** the invoke's JSON contains `errorMessage` -- paste it exactly; it will name whatever
+comes next rather than repeating this same one.

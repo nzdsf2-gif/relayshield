@@ -8950,3 +8950,70 @@ directly. **The License field could not be filled**: no `LICENSE` file was found
 that repo's root (`raw.githubusercontent.com/.../main/LICENSE` returns 404) and no
 license badge was visible on the repo page. Left for Andrew to fill from what is
 actually there rather than guessed -- a license claim is not one to invent.
+
+## THE DEPLOYED REPORT CAME BACK MISSING BOTH NEW FIELDS. DIAGNOSING RATHER THAN GUESSING AGAIN.
+
+**2026-09-29.** Andrew ran the merge/drift-check block and the deploy/invoke block from the prior
+session and received a Weekly Metrics email, but it shows none of: the active-marketplace count,
+the unique-indicator count, or a usable CS Mobile trial number -- which is exactly the input his
+Solana-vs-Google-Play decision needs and does not have.
+
+**THREE DIFFERENT FAILURES PRODUCE THIS IDENTICAL SYMPTOM, AND THIS FILE'S OWN RULE IS TO NAME
+WHICH ONE RATHER THAN GUESS A FIX.** `monitored_marketplaces` and `unique_indicators` are two bare
+calls inside the `metrics` dict literal with NO try/except around them -- if either raised, the
+whole `lambda_handler` would raise before `ses.send_email()` and Andrew would have gotten no email
+at all, not an incomplete one. He got an email, so either (a) those two calls ran fine and are IN
+it (and something about the layout made them easy to miss), or (b) the merge before his deploy did
+not actually bring the new code onto disk, so the OLD `relayshield_weekly_metrics.py` got zipped
+and deployed. Separately, `_cs_mobile_stats()` wraps its ENTIRE body in one broad try/except that
+returns an all-zeros dict on any exception -- so if the new `_checkout_platform_tag()` call (an
+extra Stripe API round trip per subscription that did not exist before this session) throws for
+any reason, every CS Mobile number in the email reads 0, which would look exactly like "no trial
+information" even though the report itself did not fail.
+
+**THE DIAGNOSTIC, READ-ONLY, NO MERGE (this only inspects what is already on disk and already
+deployed -- nothing here writes anything):**
+
+    ANDREW RUNS THIS:
+    ```zsh
+    cd ~/dev/relayshield
+    grep -c "_checkout_platform_tag\|_monitored_marketplaces" relayshield_weekly_metrics.py
+    AWS_PROFILE=relayshield aws lambda get-function-configuration --no-cli-pager \
+      --function-name relayshield-weekly-metrics --query 'LastModified' --output text
+    AWS_PROFILE=relayshield aws logs tail /aws/lambda/relayshield-weekly-metrics --no-cli-pager --since 2h
+    ```
+    EXPECT: line 1 prints `2` (both new functions are in the file that's on disk right now -- if
+    it prints less than that, the merge never landed the fix and the deploy shipped stale code).
+    Line 2 prints a timestamp matching roughly when the deploy command was run. Line 3 prints the
+    actual log lines from the invoke, ending in "Weekly metrics email sent to ..." with no
+    traceback and no "CS Mobile stats fetch failed" warning anywhere in between.
+    STOP IF line 1 is `0` or `1` -- paste `git --no-pager log --oneline -3` from the same
+    directory; the file that got zipped was never updated.
+    STOP IF line 3 contains "CS Mobile stats fetch failed" or a Python traceback -- paste that
+    exact line. That is the real cause, not a guess at one.
+    STOP IF the `aws logs tail` line prints nothing at all -- the log group name may differ; run
+    `AWS_PROFILE=relayshield aws logs describe-log-groups --no-cli-pager --log-group-name-prefix
+    /aws/lambda/relayshield-weekly` and paste what comes back.
+
+**Not yet run. This is the first thing to act on next.**
+
+## LIBHUNT'S "SUGGEST AN ALTERNATIVE" BOX IS THEIRS TO BENEFIT FROM, NOT OURS. SKIP IT.
+
+Asked 2026-09-29: LibHunt approved `relayshield-mcp` automatically and then showed a secondary,
+explicitly OPTIONAL form ("Please suggest an alternative, if you know one...") with Repo URL /
+comment / email fields. Andrew asked whether to fill it in.
+
+**Recommendation: skip it, and this is not a close call.** The box asks us to name a DIFFERENT,
+competing project for LibHunt to also catalogue -- it enriches LibHunt's own comparison graph, not
+our listing, which is already approved and live regardless of whether this is filled in. Filling
+it would mean naming a specific competing MCP security/threat-intel server as a genuine
+alternative to `relayshield-mcp`, and **no such server has been verified as a real, comparable
+product from inside this repo** -- naming one to satisfy an optional field is inventing a
+competitive claim for a public third-party site, which is the same failure MEASUREMENT DOCTRINE
+already forbids in the other direction (asserting a fact about ourselves nobody checked). It costs
+nothing to leave blank, and there is no traffic or attribution benefit to filling it: it does not
+create a backlink, does not announce our own listing, and does not affect whether LibHunt's page
+for `relayshield-mcp` stays live. **If Andrew already knows a genuine, comparable open-source
+project**, it is a five-second edit with real (if small) upside -- more "alternative to X" pages
+we might get cross-listed on -- but that is his call to make from something he actually knows, not
+something to be guessed here.

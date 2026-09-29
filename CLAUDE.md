@@ -9087,3 +9087,45 @@ fully-settled deploy with no propagation race in play.
 spent and this becomes the IAM-split job, not a quick grant.
 **STOP IF** the invoke's JSON contains `errorMessage` -- paste it exactly; it will name whatever
 comes next rather than repeating this same one.
+
+## THE GRANT SCRIPT'S FIRST VERSION REFUSED THE EXACT CASE IT HIT, AND THAT WAS THE WRONG ANSWER
+
+**2026-09-29, same run.** `relayshield-first-seen-write` turned out to be a MANAGED policy, not
+inline -- `tools/setup_first_seen.sh`'s own fallback path took, on some earlier run nobody
+recorded, exactly the shape "A doc recording an open item is a lead, not a fact" already warns
+about. My script's managed-policy branch correctly detected this and correctly refused to blindly
+overwrite it, but then just printed the document and told Andrew to run
+`create-policy-version` **by hand** -- which is the pre-handover checklist's own rule broken one
+turn after being applied to the inline case: *"the fix is the artefact change in the same commit... a
+warning depends on the reader; a refusal does not."* A read-only print-and-punt is a third
+round trip for a problem I already had every piece needed to solve.
+
+**Fixed in the same commit.** The managed branch now does the identical read-merge-write the
+inline branch already did: read the current `Statement[0].Action` and `Resource` off the live
+default version, union in `dynamodb:Scan` if missing, and call `create-policy-version
+--set-as-default` with the merged document -- **after pruning the oldest non-default version if
+already at IAM's 5-version cap**, the same guard `tools/setup_first_seen.sh` already carries for
+this exact policy family, so a second grant on this same policy later does not start failing with
+`LimitExceeded`. A verify line re-reads the new default version's Action list immediately after,
+so the script's own output proves the grant rather than trusting the write silently succeeded.
+
+**ANDREW RUNS THIS (same commands as above, re-pasted since the script itself changed):**
+```zsh
+cd ~/dev/relayshield
+git checkout main
+git --no-pager fetch origin claude/gallant-heisenberg-x2fnos
+git rm -rf --cached -q --ignore-unmatch ansible-relayshield relayshield-snap
+git stash push --include-untracked -m "pre-merge untracked"
+git -c pull.rebase=false merge --no-edit FETCH_HEAD
+sh tools/grant_weekly_metrics_first_seen_scan.sh
+AWS_PROFILE=relayshield aws lambda invoke --no-cli-pager --function-name relayshield-weekly-metrics /tmp/weekly_metrics_out.json
+cat /tmp/weekly_metrics_out.json
+```
+**EXPECT:** section 4 now prints `new document: ...` with BOTH `dynamodb:PutItem` and
+`dynamodb:Scan` in the Action list, then `new default version created on
+arn:...policy/relayshield-first-seen-write`, then the verify line printing both actions again.
+The invoke's JSON has no `errorMessage`, and a complete Weekly Metrics email arrives within a
+couple of minutes.
+**STOP IF** the verify line's Action list is missing `dynamodb:Scan` -- IAM propagation can lag a
+few seconds even after a successful `create-policy-version`; wait 30s and re-run only the invoke
+line before treating it as a real second failure.

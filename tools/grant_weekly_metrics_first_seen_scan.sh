@@ -123,13 +123,52 @@ if [ -n "$FOUND_POLICY" ] && [ "$FOUND_IS_MANAGED" = "0" ]; then
   aws iam put-role-policy --role-name "$ROLE" --policy-name "$FOUND_POLICY" --policy-document "$DOC"
   echo "   updated $FOUND_POLICY"
 elif [ -n "$FOUND_POLICY" ] && [ "$FOUND_IS_MANAGED" = "1" ]; then
-  echo "== 4. $FOUND_POLICY is a MANAGED policy. This script will not auto-edit a managed"
-  echo "      policy version. Printing its current document -- merge Scan in by hand and"
-  echo "      run 'aws iam create-policy-version --set-as-default' yourself:"
-  aws iam get-policy-version --policy-arn "$FOUND_POLICY" \
-    --version-id "$(aws iam get-policy --policy-arn "$FOUND_POLICY" --query 'Policy.DefaultVersionId' --output text)" \
-    --query 'PolicyVersion.Document'
-  exit 1
+  echo "== 4. Extending managed policy $FOUND_POLICY: adding dynamodb:Scan, keeping every existing action"
+  # Same read-merge-write as the inline branch, and for the identical reason:
+  # create-policy-version --set-as-default REPLACES the policy's document, it
+  # does not merge, so writing a Scan-only doc here would delete the PutItem
+  # grant relayshield-intel-monitor depends on.
+  VID=$(aws iam get-policy --policy-arn "$FOUND_POLICY" --query 'Policy.DefaultVersionId' --output text)
+  CUR=$(aws iam get-policy-version --policy-arn "$FOUND_POLICY" --version-id "$VID" \
+          --query 'PolicyVersion.Document.Statement[0].Action' --output json)
+  RES=$(aws iam get-policy-version --policy-arn "$FOUND_POLICY" --version-id "$VID" \
+          --query 'PolicyVersion.Document.Statement[0].Resource' --output json)
+  case "$CUR" in
+    \[*) ACTIONS=$(printf '%s' "$CUR" | tr -d '[]"' | tr ',' '\n' | sed '/^[[:space:]]*$/d') ;;
+    *)   ACTIONS=$(printf '%s' "$CUR" | tr -d '"') ;;
+  esac
+  NEW_LIST=""
+  HAS_SCAN=0
+  for A in $ACTIONS; do
+    [ "$A" = "dynamodb:Scan" ] && HAS_SCAN=1
+    NEW_LIST="${NEW_LIST}\"$A\","
+  done
+  if [ "$HAS_SCAN" = "1" ]; then
+    echo "   (Scan already present on re-read -- nothing to do)"
+    exit 0
+  fi
+  NEW_LIST="${NEW_LIST}\"dynamodb:Scan\""
+  DOC="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[${NEW_LIST}],\"Resource\":${RES}}]}"
+  echo "   new document: $DOC"
+  # A managed policy keeps at most 5 versions. Prune the oldest non-default
+  # one first, or a role that has been through this once already starts
+  # refusing every subsequent grant with LimitExceeded.
+  COUNT=$(aws iam list-policy-versions --policy-arn "$FOUND_POLICY" --query 'length(Versions)' --output text)
+  if [ "$COUNT" -ge 5 ]; then
+    OLD=$(aws iam list-policy-versions --policy-arn "$FOUND_POLICY" \
+            --query 'sort_by(Versions[?IsDefaultVersion==`false`], &CreateDate)[0].VersionId' --output text)
+    if [ -n "$OLD" ] && [ "$OLD" != "None" ]; then
+      aws iam delete-policy-version --policy-arn "$FOUND_POLICY" --version-id "$OLD"
+      echo "   pruned oldest non-default version $OLD (5-version cap)"
+    fi
+  fi
+  aws iam create-policy-version --policy-arn "$FOUND_POLICY" --policy-document "$DOC" --set-as-default \
+    --query 'PolicyVersion.VersionId' --output text
+  echo "   new default version created on $FOUND_POLICY"
+  echo -n "   verify -- new default version's Action list: "
+  NEWVID=$(aws iam get-policy --policy-arn "$FOUND_POLICY" --query 'Policy.DefaultVersionId' --output text)
+  aws iam get-policy-version --policy-arn "$FOUND_POLICY" --version-id "$NEWVID" \
+    --query 'PolicyVersion.Document.Statement[0].Action' --output text
 else
   echo "== 4. No existing policy references $TABLE at all. Granting fresh read access"
   echo "      (GetItem, Query, Scan -- this role has never had any of the three)."

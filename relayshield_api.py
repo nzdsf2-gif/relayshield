@@ -98,6 +98,13 @@ import relayshield_openapi_spec
 import relayshield_scamkit
 import relayshield_scamkit_fetch as _scamkit_fetch  # v1b: TLS/redirect/header telemetry (stdlib only)
 
+# Scam-kit Stripe billing — checkout sessions, webhook, meter events.
+# Pure functions live in the module; the Lambda only wires secrets, the API
+# key record, and DynamoDB. Packaged into the deployment zip via
+# deploy_lambdas.yml's transitive relayshield_* import resolution, same as
+# relayshield_scamkit.
+import relayshield_scamkit_billing as scamkit_billing
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -388,6 +395,12 @@ FROM_EMAIL              = "noreply@relayshield.net"
 INTEL_WARN_80_CALLS = 8_000   # 80% — nudge to upgrade, still 2K calls left
 INTEL_WARN_95_CALLS = 9_500   # 95% — urgent, 500 calls remaining
 STRIPE_SECRET_NAME = "relayshield/stripe_secret_key"
+# Signing secret for POST /v1/billing/webhook (scam-kit tiers). Copied from
+# the Stripe dashboard when the webhook endpoint is registered — a different
+# secret from relayshield/stripe_webhook_secret, which belongs to the
+# WhatsApp-onboarding webhook Lambda. MUST exist before the billing webhook
+# can verify anything (see scamkit_stripe_billing.md).
+STRIPE_BILLING_WEBHOOK_SECRET_NAME = "relayshield/stripe_billing_webhook_secret"
 STRIPE_METER_API   = "https://api.stripe.com/v1/billing/meter_events"
 
 # Threat Intelligence API subscription tiers — monthly call caps.
@@ -1256,6 +1269,75 @@ def _check_and_increment_intel_quota(api_key_str: str, key_record: dict) -> dict
     return None
 
 
+# ---------------------------------------------------------------------------
+# Scam-kit Stripe billing endpoints (added 2026-09-28)
+# ---------------------------------------------------------------------------
+# POST /v1/billing/checkout-session — authenticated. Creates the per-customer
+# Stripe Checkout Session (subscription mode) for the monthly or PAYG tier
+# and returns its URL. This is the replacement for Payment Links, which
+# cannot carry metered prices. Session creation itself is free: no credit
+# deduction, no meter event.
+#
+# POST /v1/billing/webhook — public, Stripe-signature-verified. On
+# checkout.session.completed it stamps the caller's key record with
+# stripe_customer_id / stripe_subscription_id / scamkit_tier; on
+# customer.subscription.deleted it clears the tier. Unknown event types are
+# acknowledged and ignored so Stripe stops retrying them.
+
+def handle_billing_checkout_session(params: dict, api_key_str: str) -> dict:
+    tier = (params.get("tier") or "monthly").strip().lower()
+    if tier not in scamkit_billing.VALID_TIERS:
+        return _err(f"Unknown tier {tier!r}. Use one of: monthly, payg.", 400)
+    try:
+        session = scamkit_billing.create_checkout_session(
+            secret_key=_stripe_secret_key(),
+            tier=tier,
+            client_reference_id=api_key_str,
+            success_url=params.get("success_url") or scamkit_billing.DEFAULT_SUCCESS_URL,
+            cancel_url=params.get("cancel_url") or scamkit_billing.DEFAULT_CANCEL_URL,
+        )
+    except ValueError as exc:
+        return _err(str(exc), 400)
+    except Exception:
+        logger.exception("checkout session creation failed tier=%s", tier)
+        return _err("Could not create a checkout session. Try again shortly.", 502)
+    return _ok({
+        "tier": tier,
+        "checkout_url": session["url"],
+        "session_id": session["id"],
+    })
+
+
+def handle_billing_webhook(event: dict) -> dict:
+    headers = event.get("headers") or {}
+    sig_header = _header(headers, "Stripe-Signature")
+    raw = scamkit_billing.raw_body_bytes(event)
+    try:
+        webhook_secret = _get_secret(STRIPE_BILLING_WEBHOOK_SECRET_NAME)
+    except Exception:
+        logger.exception("billing webhook secret unavailable")
+        # 500 (not 400): Stripe retries, and the failure is ours, not theirs.
+        return _err("Billing webhook not configured.", 500)
+    if not scamkit_billing.verify_stripe_signature(raw, sig_header, webhook_secret):
+        return _err("Invalid webhook signature.", 400)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return _err("Invalid JSON body.", 400)
+    action, data = scamkit_billing.dispatch_billing_event(payload)
+    if action != "ignore":
+        try:
+            table = scamkit_billing.api_keys_table()
+            if action == "activate":
+                scamkit_billing.store_subscription_mapping(table, data)
+            else:  # deactivate
+                scamkit_billing.clear_subscription_tier(table, data)
+        except Exception:
+            logger.exception("billing webhook persistence failed action=%s", action)
+            return _err("Webhook processing failed; Stripe will retry.", 500)
+    return _ok({"received": True, "action": action})
+
+
 def handle_metered_request(path: str, method: str, event: dict) -> dict:
     """Auth + dispatch for /v1/metered/* routes. Verifies RS API key, runs handler,
     then records a Stripe Billing Meter event on success."""
@@ -1473,6 +1555,18 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # and nothing else; the re-screens the watcher performs are covered by
         # the licence, so there is no per-call meter on this path either.
         is_watch_license_call = bool(key_record.get("watch_access")) and path in WATCH_LICENSE_ENDPOINTS
+        # Scam-kit Stripe tiers (added 2026-09-28). scamkit_tier is set ONLY
+        # by POST /v1/billing/webhook on checkout.session.completed (and
+        # cleared on customer.subscription.deleted) — never by signup, admin
+        # edits, or any other code path — so a key carrying it has a live
+        # Stripe subscription for exactly this product. Scoped to the three
+        # scam-kit endpoints: a scam-kit subscriber gets no blanket grant on
+        # the rest of the catalog (same scoping discipline as cs_mobile /
+        # llm / watch). The x402 /v1/payg/ rail never reaches this function.
+        is_scamkit_subscription_call = (
+            key_record.get("scamkit_tier") in ("monthly", "payg")
+            and path in scamkit_billing.SCAMKIT_METERED_PATHS
+        )
 
     if key_record.get("source") in DEMO_QUOTA_SOURCES and not _check_demo_quota(key_record):
         return {
@@ -1492,7 +1586,8 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             and not is_bundle_b_call and not is_bundle_b_direct_call
             and not is_bundle_d_included_call
             and not is_cs_mobile_call and not is_llm_license_call
-            and not is_watch_license_call and not is_free_tier_call):
+            and not is_watch_license_call and not is_free_tier_call
+            and not is_scamkit_subscription_call):
         logger.warning(
             "402 insufficient credits — path=%s key=%s credit_balance=%s source=%s",
             path, api_key_str[:24], credit_balance, key_record.get("source"),
@@ -1562,6 +1657,23 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
             # copy shown to a buyer that disagrees with what we charge is a
             # price we do not honour.
             _record_stripe_meter_event(key_record.get("stripe_customer_id", ""), path)
+        elif is_scamkit_subscription_call:
+            # Scam-kit Stripe tiers. One count event per execution against the
+            # tier's dedicated meter — never the aggregate meter, never
+            # credits. Monthly executions all report scamkit_monthly_execution
+            # (500 included, then $0.40/unit); PAYG executions report the
+            # per-endpoint event ($0.50/$0.10/$5.50). POSITION MATTERS, same
+            # as the bundle branches above: this must sit above `elif
+            # use_credits`, or a subscriber who also carries a credit balance
+            # would silently burn credits for calls their subscription covers.
+            event_name = scamkit_billing.scamkit_meter_event_for(
+                key_record.get("scamkit_tier", ""), path)
+            if event_name:
+                scamkit_billing.report_scamkit_meter_event(
+                    _stripe_secret_key(),
+                    key_record.get("stripe_customer_id", ""),
+                    event_name,
+                )
         elif is_bundle_d_included_call:
             # Included in the flat $299/mo Bundle D licence. No AWS dimension,
             # no Stripe meter event, no credit deduction, nothing to record.
@@ -15504,6 +15616,22 @@ def lambda_handler(event: dict, context) -> dict:
     # like /v1/webhook/configure above.
     if path in WATCH_LICENSE_ENDPOINTS:
         return handle_metered_request(path, method, event)
+
+    # Scam-kit Stripe billing (added 2026-09-28). checkout-session is
+    # authenticated (API key verified here, same pattern as /v1/report/share);
+    # the webhook is public and Stripe-signature-verified inside its handler.
+    if method == "POST" and path == "/v1/billing/checkout-session":
+        headers     = event.get("headers") or {}
+        api_key_str = (
+            _header(headers, "X-RS-API-KEY")
+            or _header(headers, "Authorization").removeprefix("Bearer ").strip()
+        )
+        key_record = _verify_rs_api_key(api_key_str)
+        if not key_record:
+            return _err("Active RS API key required. Pass it as X-RS-API-KEY.", 401)
+        return handle_billing_checkout_session(_body(event), api_key_str)
+    if method == "POST" and path == "/v1/billing/webhook":
+        return handle_billing_webhook(event)
 
     # Stripe metered billing routes (RS API key verified inside Lambda)
     if path.startswith("/v1/metered/"):

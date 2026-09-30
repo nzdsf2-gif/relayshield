@@ -3160,6 +3160,32 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "criminal channels and infostealer dumps we collect from. Neither says &quot;safe&quot;: "
             "the ceiling is &quot;nothing known against it&quot;, and the response says so itself.")),
     ),
+    # Cortex XSOAR content pack post, registered 2026-09-30 BEFORE the post ships.
+    # Same rule every entry above states: an unregistered key logs unmatched: and
+    # renders nothing, which is attribution that looks like it worked.
+    #
+    # NAMED "xsoar-post", NOT "xsoar" -- an "xsoar" key already exists further
+    # down, keyed on referer hosts (xsoar.pan.dev, paloaltonetworks.com,
+    # demisto.com) for arrivals FROM those domains. A dict literal silently lets
+    # a later same-named key overwrite an earlier one, which is exactly the
+    # "two files that must agree with nothing checking that they do" defect
+    # this file warns about repeatedly, just inside one file instead of two.
+    "xsoar-post": (
+        ("cortex-xsoar-dbotscore-good",),
+        _banner("Arriving from the Cortex XSOAR post", _p(
+            "RelayShield ships as a Cortex XSOAR content pack: the generic "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">domain</code>, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">ip</code> and '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">email</code> '
+            "reputation commands, wired into any playbook that already calls them, plus "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">relayshield-mcp-registry-risk</code>, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">relayshield-cert-expiry</code> and '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">relayshield-supply-chain</code>. '
+            "A free-tier API key is all the integration needs to configure. "
+            "A clean result never sets DBotScore to Good, only Unknown: &quot;no known finding&quot; "
+            "means nothing was flagged in the sources we queried, which is not the same claim as "
+            "verified-safe.")),
+    ),
     "agent-bait": (
         ("your-agent-reads-the-readme-that-is-the-attack-surface-nobody-scans",
          "your-agent-reads-the-readme",
@@ -3690,6 +3716,7 @@ _SOURCE_ALIASES = {
     "rapuncel-farcaster":    "rapuncel",
     "rapuncel-mastodon":     "rapuncel",
     "gitlab-cve-blog":       "gitlab-cve",
+    "xsoar-blog":            "xsoar-post",
     "gitlab-cve-medium":     "gitlab-cve",
     "gitlab-cve-devto":      "gitlab-cve",
     "gitlab-cve-linkedin":   "gitlab-cve",

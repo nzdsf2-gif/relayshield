@@ -9187,3 +9187,161 @@ change" are different questions, and the wildcard resource is exactly the input 
 answering the first correctly gives the wrong answer to the second.** Whenever a value that would
 satisfy a broader test (an ARN suffix, a resource wildcard, a type union) is used to pick a
 mutation target, ask separately whether that same value should ever be written into.
+
+## THE REAL CORPUS COUNT IS MEASURED: 661,609 DISTINCT INDICATORS. XSOAR PACK IS ON MASTER.
+
+**2026-09-30.** `tools/backfill_first_seen.py`'s dry run completed (the progress-printing fix from
+earlier in this session made the multi-minute scan visible rather than silent):
+
+    scanned 8,409,724 sighting(s)
+    661,609 distinct indicator(s)
+    first-seen range: 2026-06-21T06:00:38 .. 2026-09-30T06:50:26
+
+**This is the real, measured, current distinct-indicator count, and it is well above every prior
+figure this file has quoted** (494K on 2026-09-03, the corrected-but-still-stale number the AWS
+listing and the API docs intro were rewritten to avoid quoting directly). Per MEASUREMENT
+DOCTRINE, this number is not yet written into any customer-facing surface -- the API docs intro
+and the AWS listing both already describe the corpus by its SOURCES rather than a count, which is
+the durable form, and that does not need to change. This section exists so the next session has
+the current figure on hand rather than re-running the scan or quoting 494K.
+
+**`--apply` HAS NOT BEEN CONFIRMED RUN.** Only the dry-run output was pasted back. `--apply` is
+what permanently seeds `relayshield_intel_first_seen` with this full historical scan (conditional
+on `attribute_not_exists`, so it is safe to run once the table exists and cannot overwrite a row
+the live monitor already wrote). Until it runs, `_unique_indicators()` in
+`relayshield_weekly_metrics.py` is reading a table that only holds rows from 2026-08-27 onward
+plus whatever the live monitor has added since -- i.e. undercounting -- rather than the true
+all-time figure above. **Run it next:**
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/backfill_first_seen.py --apply
+
+EXPECT: `wrote <written>, skipped <skipped> already present, 0 failure(s)`, with `written` roughly
+in the low hundreds of thousands (most of the 661,609 predate 2026-08-27 and have never been
+written; a handful will be skipped as already present from the live monitor).
+
+**THE XSOAR / PALO ALTO CONTENT PACK IS ON `demisto/content` MASTER, RIGHT NOW, VERIFIED
+DIRECTLY.** Every status this file has recorded since 2026-09-03 said NOT YET -- PR #45206
+merged into Palo Alto's internal pipeline, internal PR #45742 open and approved with one failing
+check that is their own internal GitLab CI, and `Packs/RelayShield/pack_metadata.json` 404ing on
+master. That has changed and nobody recorded it. Checked this session by fetching the file
+directly rather than reciting the stale write-up, per this file's own "a doc claiming something is
+done is a lead, not a fact" rule:
+
+    curl -s https://raw.githubusercontent.com/demisto/content/master/Packs/RelayShield/pack_metadata.json
+    -> 200, real content:
+       "name": "RelayShield", "currentVersion": "1.0.0", "author": "RelayShield",
+       "created": "2026-07-22T00:00:00Z", "url": "https://api.relayshield.net/developers",
+       "email": "support@relayshield.net", "categories": ["Data Enrichment", ...]
+
+**This is the moment Moshe Eichler's written confirmation said unlocks two things, per the
+2026-08-29/09-02 record: a Marketplace listing page for the pack, and a named entry in Palo Alto's
+own Release Notes.** Both are now checkable and neither has been checked this session -- that is
+the next action, not a status to assume. Once confirmed:
+
+1. **The blog post this file has gated on this exact event since 2026-08-29** -- canonical on
+   `blog.relayshield.net` first, angle is what the pack DOES (enriches an XSOAR incident with
+   indicators from monitored criminal Telegram channels, the exclusive half of the corpus) rather
+   than "we shipped an integration." No corpus count in it; describe by source, as the API intro
+   now does.
+2. **The landing-page line**: *"Available as a Cortex XSOAR content pack,"* linking the
+   Marketplace listing page directly.
+3. **Link Palo Alto's own Release Notes entry** from the post -- third-party proof, worth more
+   than our own claim.
+4. Re-run the master-file check immediately before publishing either, since the gap between
+   writing this and publishing could see something change.
+
+**`support@relayshield.net` is the email address the LIVE PACK ITSELF carries**, read straight out
+of its `pack_metadata.json` above. This is the same mailbox the Chrome Web Store's validator
+flagged as unreachable on 2026-09-28, with no confirmation yet from Andrew on whether it is
+actually a real, monitored inbox (see that session's Top 10 item 2). It is no longer only the
+Chrome extension's problem: it is the support contact on a pack about to go live in Palo Alto's
+own Marketplace. **Confirming that mailbox is real moved up in priority accordingly.**
+
+### THE AWS KMS FREE TIER ALERT: EXPECTED, NOT URGENT
+
+Andrew received an AWS Free Tier usage alert: KMS requests at 17,048 of 20,000 (85%+) for the
+month, account 239677749008. **Grepped rather than guessed**: KMS (encrypt/decrypt) is used
+across roughly 29 files in this repo -- `relayshield_watchlist.py`'s chat_id encryption,
+`relayshield_sim_swap_consent.py`, `relayshield_breach_monitor.py`'s correlation engine, and every
+scheduled digest/reminder sender (`relayshield_day3_sender.py`,
+`relayshield_quarterly_sweep_sender.py`, `relayshield_monthly_oauth_reminder.py`, etc.) each
+decrypt a chat_id or phone number per row scanned. **This is organic growth, not a defect**: more
+watchlist rows, more monitored users and more scheduled sender runs each month means more KMS
+calls, and the free tier's 20,000/month ceiling was always going to be crossed as the user base
+grew past whatever it was when these were built.
+
+**Recommendation: let it happen, do nothing.** AWS KMS pricing beyond the free tier is $0.03 per
+10,000 requests -- even doubling the free allowance costs a few cents a month. There is no
+product, security or correctness reason to reduce KMS call volume, and doing so (batching
+decrypts, caching plaintext) would trade a trivial cost for either code complexity or a real risk
+of caching decrypted PII longer than necessary. **Not worth a session's time**, and no further
+action is recommended unless the bill for KMS specifically becomes visible and non-trivial, which
+at this rate would take a very large multiple of current volume.
+
+## WHERE 2026-09-30 LEFT THINGS — READ THIS FIRST. IT SUPERSEDES EVERY EARLIER "TOP" LIST.
+
+### THE TOP 10, REGENERATED 2026-09-30
+
+**Regenerated, not annotated.** Closed since the 2026-09-28 list: the weekly-metrics IAM grant
+script's two real defects (whole-document substring matching, wildcard write-target selection),
+both fixed and documented above; the true distinct-indicator count is measured (661,609); the
+XSOAR/Palo Alto pack is confirmed LIVE on `demisto/content` master, verified directly rather than
+recited from a 2026-09-03 status line.
+
+1. **Run `tools/backfill_first_seen.py --apply`.** The dry run is done and measured; the write
+   has not been confirmed. This is what makes `relayshield_weekly_metrics.py`'s
+   `unique_indicators` field correct going forward without re-running the scan.
+
+2. **Invoke `relayshield-weekly-metrics` once more and read the actual email.** The IAM grant
+   fix (however messily it landed, on `RekognitionOCR`) should mean `_unique_indicators()` no
+   longer raises. Confirm a COMPLETE email arrives with all three new fields (monitored
+   marketplaces, unique indicators, CS Mobile trial-by-platform) before assuming this thread is
+   closed -- the last confirmed state was still an `AccessDeniedException` traceback moments after
+   the grant, which is exactly the "wait ~30-60s for IAM propagation, then retry once" case this
+   file has recorded before, never confirmed to have actually cleared.
+
+3. **Confirm the Palo Alto Marketplace listing page and Release Notes entry exist**, now that the
+   pack is on master -- both were promised in writing (Moshe Eichler) to appear on merge. Then run
+   the blog post + landing-page line + Release Notes link sequence this file has gated on this
+   exact event since 2026-08-29.
+
+4. **Confirm `support@relayshield.net` is a real, monitored mailbox.** It is now the public
+   support contact on a pack about to appear in Palo Alto's own Marketplace, in addition to being
+   flagged unreachable by the Chrome Web Store's validator on 2026-09-28. Andrew was asked to send
+   a real test email; still unconfirmed.
+
+5. **Check the Chrome Web Store review outcome** (`relayshieldadmin@gmail.com` dashboard). If
+   rejected, get the specific reason; if approved, get the listing URL and wire it as a discovery
+   surface with its own `?source=` key, per that session's own item 7.
+
+6. **EAS rebuild and republish Crypto Shield Mobile**, so the `rsPost`/`rsGet` error-surfacing fix
+   (2026-09-28) actually reaches a device, then have Arjen retry the SOL Token scan that produced
+   the unexplained 400 and report whatever specific error text now appears.
+
+7. **Confirm `relayshield_breach_cache` was created in DynamoDB** (`tools/setup_breach_cache.sh`,
+   handed to Andrew 2026-09-25) -- unconfirmed whether it has been run; the breach-check code
+   ships inert (falls through to a live HIBP call every time) without it.
+
+8. **Decide what to do with `origin/claude/gallant-hawking-4oerzg`** (2026-09-25's unmerged
+   branch: Muse partner-key route/price fix, dependency-risk landing-page card, general
+   pricing-agreement guard, OpenAI partner key issuance). Checked once for conflict risk against
+   the x402-manifest fix that landed on main since; the rest of the branch's mergeability against
+   current main has not been re-checked.
+
+9. **Look at `origin/feature/scam-kit-fingerprinting`** -- seen in passing on 2026-09-25 as the
+   most recently committed branch in the repo, never opened or read. May mean item 1 of the
+   2026-09-23 roadmap additions (scam-kit fingerprinting, recorded there as wholly unscoped) is
+   further along than that record assumes.
+
+10. **The GoPlus Solana `"0"`/`"1"` status-field convention is still unverified against a live
+    response** (`api.gopluslabs.io` remains unreachable from this container). Watch the first real
+    hit on `metadata.is_token_contract` in `/v1/wallet-risk`'s logs once one occurs.
+
+**Carried without re-verification, so not lost**: the IAM split's broader scope beyond
+`relayshield-intel-feed` (which is confirmed done, per the 2026-09-24 section); `WA_NUMBER` still
+empty in both Cloudflare Workers; the StoreBot bot-directory submission; the WhatsApp Channel
+question (can a Twilio-hosted number own one); FD-11 Smithery; mapping
+`relayshield_watchlist_monitor.py` and `relayshield-mpp-settlement` in the deployer; INTEL-5; the
+Dramex Mini App catalogue PR (#2, open, no conflicts, awaiting their 7-day SLA as of 2026-09-28);
+ZPlatform.ai and LibHunt submissions (handed to Andrew 2026-09-28/29, outcome unconfirmed);
+BOT-TOKEN-1 phase 2 (still correctly gated on a non-zero corpus count, not a date).

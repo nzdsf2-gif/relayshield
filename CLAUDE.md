@@ -9447,3 +9447,44 @@ mistaken for a test that has always been red.
    a Marketplace listing or Release Notes, only about the pack's real, verified contents on
    `demisto/content` master), so it can ship regardless. The landing-page line and the Release
    Notes link are the only two things still gated on Andrew's read.
+
+## THE MARKETPLACE LISTING IS CONFIRMED LIVE, BY SCREENSHOT. THE HIGHLIGHT NEEDED NO URL.
+
+**2026-09-30, same day.** Andrew opened the Cortex Marketplace himself and sent three screenshots
+of the rendered RelayShield listing page: Details tab, Setup steps, the DBotScore table, and the
+Support section (`support@relayshield.net`, Pack Contributors: RelayShield). **Every field on it
+matches what this session already extracted straight from `demisto/content` master and wrote into
+`blog_markdown/cortex-xsoar-dbotscore-good.md`** -- same command list, same DBotScore mapping, same
+category, same platforms (Cortex XSOAR, Cortex XSIAM). This is the confirmation Item 3's own "STILL
+TO DO" list was waiting on for the Marketplace half.
+
+**DBotScore: NOTHING TO CLEAN UP.** The live table reads CRITICAL/HIGH -> 3 (Bad), MEDIUM/LOW -> 2
+(Suspicious), no known finding -> 0 (Unknown), never 1 (Good) -- exactly the mapping this file
+already recorded from the pack's own README, and exactly what the blog post states. Nothing on the
+live listing disagrees with anything in the repo.
+
+**THE LANDING-PAGE HIGHLIGHT NEEDED NO MARKETPLACE URL, AND THAT IS NOT A GAP -- IT IS HOW THE
+SURFACE WORKS.** Unlike the AWS Marketplace or the Chrome Web Store, a Cortex Marketplace listing
+has no single public browsable URL to link from outside a tenant: a customer finds it by searching
+"RelayShield" inside their OWN Cortex XSOAR/XSIAM instance's Marketplace tab, which is exactly what
+the screenshots show and exactly what Andrew just did. So the highlight added to the SIEM/TI-feed
+section of `api.relayshield.net/developers` (next to the existing Elastic Security callout, same
+style) says **"install from the Cortex Marketplace inside your tenant"** rather than linking a URL
+that does not exist to link -- and links the blog post instead, which is the artefact that can
+carry a real address. This is the same distinction this file has drawn before between an entity ID
+and a display name: the right reference here is not a URL, it is "search your own tenant's catalog
+for this name," and writing it as if a URL were merely missing would have been inventing a gap that
+isn't real.
+
+**RELEASE NOTES: STILL NOT CONFIRMED, AND NOTHING WAS ADDED FOR IT.** The screenshots are of the
+listing page only, not of Palo Alto's Content release notes. Per the gate above, that half stays
+unlinked from both the landing page and the blog post until it is separately confirmed the same
+way -- Andrew opening the actual release notes and sending what's there, since
+`docs-cortex.paloaltonetworks.com` and every candidate host for it are still egress-blocked from
+this container.
+
+**THE BLOG POST NEEDED NO CHANGE.** `blog_markdown/cortex-xsoar-dbotscore-good.md` was already
+built, tested and pushed in the prior turn from the pack's real GitHub source, and the screenshots
+confirm that source matches what actually ships. It makes no claim about the Marketplace listing or
+Release Notes existing, so nothing in it was invalidated or needed updating now that the listing is
+confirmed -- it was already accurate.

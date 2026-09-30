@@ -52,9 +52,20 @@ def main() -> int:
 
     earliest: dict[str, tuple[str, str, str]] = {}
     scanned = 0
+    pages = 0
+    # This table holds millions of sighting rows and a full scan is genuinely slow --
+    # several minutes, not seconds. With no output in between, a long-running scan and
+    # a hung process look identical, which is exactly the "a tool that goes quiet is
+    # indistinguishable from a tool that has hung" defect this repo has already paid
+    # for in tools/miniapp_funnel.py and tools/ti_demo_metrics.py --distinct. So this
+    # prints a line every 500,000 rows -- silence for a minute or two between lines is
+    # normal, silence for many minutes with no line at all means something is wrong.
+    print(f"scanning {IOCS} -- this can take several minutes on a multi-million-row "
+          f"table, progress every 500,000 rows:", file=sys.stderr)
     kwargs: dict = {"ProjectionExpression": "ioc_value, seen_ts, channel, category"}
     while True:
         resp = src.scan(**kwargs)
+        pages += 1
         for it in resp.get("Items", []):
             scanned += 1
             v, ts = it.get("ioc_value"), it.get("seen_ts")
@@ -63,6 +74,9 @@ def main() -> int:
             cur = earliest.get(v)
             if cur is None or ts < cur[0]:
                 earliest[v] = (ts, it.get("channel", ""), it.get("category", ""))
+            if scanned % 500_000 == 0:
+                print(f"  ...{scanned} scanned, {len(earliest)} distinct so far "
+                      f"({pages} page(s))", file=sys.stderr, flush=True)
         last = resp.get("LastEvaluatedKey")
         if not last:
             break

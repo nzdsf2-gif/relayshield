@@ -1884,7 +1884,7 @@ ENDPOINTS = [
         "summary": "Register assets and sweep them against the IOC corpus",
         "description": (
             "A watchlist scoped to your API key. `register` adds domains and IPs, `sweep` checks "
-            "them against the IOC corpus (7.8M+ citations, from 113 monitored criminal Telegram "
+            "them against the IOC corpus (8.3M+ citations, from 123 monitored criminal Telegram "
             "marketplaces and authoritative feeds), `list` returns what is registered, `remove` "
             "deletes entries. Once a webhook is configured, new matches against registered assets "
             "are pushed to you automatically."
@@ -3647,8 +3647,8 @@ Identity-compromise and threat-intelligence checks over a plain REST API. Every 
 `POST`, takes a JSON body, and returns a JSON envelope. Pay per call in USDC over x402 with no
 signup and no API key, or use a key with prepaid credits and a free tier of 100 calls. Screen a
 counterparty wallet, a token contract, an MCP server, a domain or an email against a corpus
-collected continuously from 113 monitored criminal Telegram marketplaces, infostealer log dumps
-and authoritative public indicator feeds -- more than 7.8 million citations to date.
+collected continuously from 123 monitored criminal Telegram marketplaces, infostealer log dumps
+and authoritative public indicator feeds -- more than 8.3 million citations to date.
 
 ## Authentication
 

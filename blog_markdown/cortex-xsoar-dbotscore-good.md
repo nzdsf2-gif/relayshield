@@ -54,7 +54,7 @@ it does not actually know.
 ## Where the intelligence comes from
 
 RelayShield's corpus is collected continuously from monitored criminal Telegram marketplaces,
-infostealer log dumps, and authoritative public indicator feeds: 113 monitored channels and 7.8
+infostealer log dumps, and authoritative public indicator feeds: 123 monitored channels and 8.3
 million citations as of this release. The first two categories are the ones a standard TAXII feed
 subscription does not reach, and they are the reason a RelayShield hit on an indicator is worth
 pulling into the incident rather than filed alongside everything else. We quote specific, measured

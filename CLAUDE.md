@@ -9605,3 +9605,34 @@ directly above this one), PLUS the new item found while rewriting the blog post:
 StoreBot bot-directory submission; the WhatsApp Channel question; FD-11 Smithery; mapping
 `relayshield_watchlist_monitor.py` and `relayshield-mpp-settlement` in the deployer; INTEL-5; the
 Dramex Mini App catalogue PR (#2); ZPlatform.ai and LibHunt submissions; BOT-TOKEN-1 phase 2.
+
+## THE 113/7.8M FIGURE WAS ALREADY STALE WHEN THIS SESSION QUOTED IT. THE CORRECT ONE WAS IN THE WEEKLY METRICS EMAIL THE WHOLE TIME.
+
+**2026-09-30, same day, corrected on Andrew's word: "We're at 123 channels. That metric was in
+this week's Metrics report and so was 8.3M citations."** 113 monitored channels and 7.8M
+citations was the figure `relayshield_openapi_spec.py` and `relayshield_api.py` carried going
+into this session -- itself a correction made on 2026-09-23, replacing a stale 95/5.8M. It had
+already drifted again by the time this session quoted it back into the rewritten blog post,
+because **`_monitored_marketplaces()`, built THIS SESSION into `relayshield_weekly_metrics.py`,
+was already reporting the true current count in Andrew's inbox and nobody cross-checked the two.**
+The corpus grows continuously; a figure copied from one file into another is stale from the
+moment it's typed, and the freshest live measurement in this repo was one email away.
+
+**Fixed to 123 monitored channels / 8.3M+ citations in every place that previously said
+113/7.8M**: `relayshield_openapi_spec.py` (the API docs intro and the `asset-intel` endpoint
+description), `relayshield_api.py` (the TAXII discovery `description` and the `iocs` collection
+description), and `blog_markdown/cortex-xsoar-dbotscore-good.md` (rebuilt, pushed). **Deliberately
+NOT touched**: the two already-published, frozen posts in `blog_content/` that still quote the
+older 494K/115 pairing -- that is a separate, already-tracked backlog item (Top 10 item 10 above),
+and this file's own house-style rule already says a frozen post is not rewritten after the fact
+except for the specific defect that rule was written for. No test in this repo pins either number
+as a literal string, so nothing else needed updating to stay green.
+
+**THE RULE, and it generalizes past this one pair of numbers: when a value exists both as a
+STORED figure (a docstring, a spec description, a blog paragraph) and as something a LIVE query
+in this repo can produce right now, the live query is authoritative and the stored figure is a
+snapshot that starts decaying the moment it's written.** `_monitored_marketplaces()` and
+`_unique_indicators()` exist precisely so this number never has to be typed by hand again --
+before quoting a corpus figure into a new customer-facing surface, check whether this session (or
+a very recent one) already has a fresher live measurement sitting in an email, a tool's output, or
+a just-built function, rather than copying the last string that happened to be in a source file.

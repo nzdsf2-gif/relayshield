@@ -90,6 +90,7 @@ KMS_PHONE_KEY_ALIAS = "alias/relayshield-data-key"
 PHONE_HASH_INDEX = "phone_hash-index"
 
 import relayshield_sim_swap_consent as simswap_consent
+import relayshield_community_reports as community_reports
 
 USERS_TABLE = "relayshield_users"
 MONITORED_EMAILS_TABLE = "relayshield_monitored_emails"
@@ -163,7 +164,7 @@ ALL_COMMAND_KEYWORDS = frozenset({
     "PLAN", "LICENSE", "LICTYPE", "ADD", "REMOVE", "STATUS", "DOMAIN",
     "SETDOMAIN", "DELEGATE", "REVOKE", "HELP", "HELPTEXT", "YES", "NO", "DONE", "ACK",
     "ADDTECH", "MYTECH", "REMOVETECH", "LINKEDDEVICES", "SAFE",
-    "QUICKSTART",
+    "QUICKSTART", "REPORT",
 })
 GSB_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 VT_BASE_URL = "https://www.virustotal.com/api/v3"
@@ -2786,7 +2787,9 @@ def msg_help(is_business: bool, is_employee: bool = False, is_domain_tier: bool 
         "• *OTP* — Unexpected verification code\n"
         "• *WASCAM* — Suspicious WA/call/browser scam\n"
         "• *CALL* — Suspicious phone call guidance\n"
-        "• *VERIFY* — Verification protocol\n\n"
+        "• *VERIFY* — Verification protocol\n"
+        + ("• *REPORT* — Report a missed scam after a scan\n" if community_reports.reports_enabled() else "")
+        + "\n"
 
         "*📡 Phone Protection*\n"
         "• *PHONE* — SIM swap + smishing hardening\n"
@@ -3798,6 +3801,107 @@ def handle_employee_more_emails(
 # Active command handlers
 # ---------------------------------------------------------------------------
 
+# --- Community reports ("Report this") -------------------------------------
+# Quarantined community reports for the WhatsApp bot. Reports land in the
+# quarantine table only -- never in relayshield_intel_iocs -- and sit behind
+# the COMMUNITY_REPORTS_ENABLED feature flag (default off).
+
+WA_REPORT_HINT_TEXT = (
+    "\n\n🚩 Think we missed a scam? Reply *REPORT* — it goes to a human "
+    "review queue. Community reports are never added to our threat data "
+    "automatically."
+)
+
+
+def _wa_remember_scan_for_report(user_id: str, indicator: str,
+                                 indicator_type: str, verdict: str) -> None:
+    """Stash the just-scanned indicator on the user record so REPORT knows
+    what is being reported. No-op unless the feature flag is on. Never
+    raises -- a reporting affordance must not break a scan reply."""
+    if not community_reports.reports_enabled():
+        return
+    try:
+        update_user(user_id, {"last_scan": {
+            "indicator": indicator,
+            "indicator_type": indicator_type,
+            "verdict": verdict,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }})
+    except Exception as exc:
+        logger.warning("WA last_scan stash failed user_id=%s: %s", user_id, exc)
+
+
+def _wa_report_extras(indicator: str, indicator_type: str) -> str:
+    """Labeled demand-side count for a scan verdict. Never verdict-affecting,
+    never raises."""
+    if not community_reports.reports_enabled():
+        return ""
+    try:
+        count = community_reports.community_report_count(indicator, indicator_type)
+        label = community_reports.demand_side_label(count)
+    except Exception as exc:
+        logger.warning("WA community report count failed: %s", exc)
+        label = ""
+    return label + WA_REPORT_HINT_TEXT
+
+
+def handle_wa_report_command(user: dict, to_number: str, account_sid: str,
+                             auth_token: str, from_number: str) -> str:
+    """REPORT — file a quarantined community report for the user's last scan."""
+    user_id = user["user_id"]
+    if not community_reports.reports_enabled():
+        send_whatsapp(to_number,
+                      "Reporting isn't available right now.",
+                      account_sid, auth_token, from_number)
+        return "report_disabled"
+    last = user.get("last_scan") or {}
+    indicator = last.get("indicator")
+    if not indicator:
+        send_whatsapp(
+            to_number,
+            "There's nothing recent to report — run *SCAN* on a link or "
+            "*MSGSCAN* on a suspicious message first, then reply *REPORT*.",
+            account_sid, auth_token, from_number,
+        )
+        return "report_no_recent_scan"
+    try:
+        report = community_reports.submit_report(
+            indicator,
+            channel="wa",
+            user_id=user_id,
+            verdict_at_report=last.get("verdict", "unknown"),
+            indicator_type=last.get("indicator_type"),
+        )
+        send_whatsapp(
+            to_number,
+            "🚩 *Report received.*\n\n"
+            "It's queued for human review. Community reports are never added "
+            "to our threat data automatically — thanks for flagging it.",
+            account_sid, auth_token, from_number,
+        )
+        logger.info("WA community report filed pk=%s reporter=%.12s",
+                    report["pk"], report["reporter_hash"])
+        return "report_filed"
+    except community_reports.RateLimited:
+        send_whatsapp(
+            to_number,
+            "You've hit the daily report limit (10 per 24h). Try again tomorrow — "
+            "and thanks for the vigilance.",
+            account_sid, auth_token, from_number,
+        )
+        return "report_rate_limited"
+    except community_reports.ReportRefused as exc:
+        send_whatsapp(to_number, f"Couldn't file that report: {exc}",
+                      account_sid, auth_token, from_number)
+        return "report_refused"
+    except Exception as exc:
+        logger.warning("WA report command failed user_id=%s: %s", user_id, exc)
+        send_whatsapp(to_number,
+                      "Something went wrong filing the report — please try again.",
+                      account_sid, auth_token, from_number)
+        return "report_failed"
+
+
 def handle_active_message(
     user: dict,
     message_body: str,
@@ -4243,6 +4347,12 @@ def handle_active_message(
         )
         return "suspicious_email_analyzed"
 
+    # --- Community reports ("Report this") — quarantined, dark unless
+    # COMMUNITY_REPORTS_ENABLED is set. See relayshield_community_reports.py.
+    if body == "REPORT":
+        return handle_wa_report_command(user, to_number, account_sid,
+                                       auth_token, from_number)
+
     # --- MSGSCAN — paste email/SMS body or send screenshot for fraud pattern analysis ---
     if body in ("MSGSCAN", "EMAILSCAN"):
         send_whatsapp(
@@ -4264,6 +4374,9 @@ def handle_active_message(
         prefix_len = 8 if body.startswith("MSGSCAN ") else 10
         email_body_text = message_body.strip()[prefix_len:].strip()
         response = _build_msgscan_response(email_body_text)
+        response += _wa_report_extras(email_body_text, "message")
+        _wa_remember_scan_for_report(user_id, email_body_text, "message",
+                                     "unknown")
         send_whatsapp(to_number, response, account_sid, auth_token, from_number)
         return "emailscan_complete"
 
@@ -4311,6 +4424,8 @@ def handle_active_message(
         heuristics = _heuristic_url_check(scan_url)
 
         verdict = build_verdict_response(stats, heuristics, "that URL")
+        verdict += _wa_report_extras(scan_url, "url")
+        _wa_remember_scan_for_report(user_id, scan_url, "url", "unknown")
         send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)
         logger.info("VT URL scan complete — url=%s stats=%s heuristics=%s", scan_url, stats, heuristics)
         return "vt_url_scanned"

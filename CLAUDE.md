@@ -9345,3 +9345,105 @@ question (can a Twilio-hosted number own one); FD-11 Smithery; mapping
 Dramex Mini App catalogue PR (#2, open, no conflicts, awaiting their 7-day SLA as of 2026-09-28);
 ZPlatform.ai and LibHunt submissions (handed to Andrew 2026-09-28/29, outcome unconfirmed);
 BOT-TOKEN-1 phase 2 (still correctly gated on a non-zero corpus count, not a date).
+
+## ITEM 3 WORKED: THE MARKETPLACE LISTING AND RELEASE NOTES ARE UNCHECKABLE FROM HERE. THE BLOG POST IS WRITTEN FROM THE REAL PACK, NOT A SUMMARY OF IT.
+
+**2026-09-30, same day.** Tried every candidate host for Palo Alto's Cortex Marketplace catalog
+and Content release notes -- `xsoar.pan.dev`, `docs-cortex.paloaltonetworks.com`,
+`cortex.marketplace.pan.dev` -- **all four returned HTTP 000.** Egress-blocked, the same shape as
+`docs.aws.amazon.com`, `api.gopluslabs.io` and every other vendor console this file has already
+hit. **This is genuinely unverifiable from this container**, not merely inconvenient: the
+Marketplace listing page and the Palo Alto Release Notes entry both live behind surfaces nobody
+here can browse. Moshe Eichler's written promise that both appear on merge is still just that, a
+promise, until someone with a browser looks.
+
+**What COULD be checked, and was, rather than assumed: the pack's actual file contents on
+`demisto/content` master.** `api.github.com`'s Contents API refuses this session (the repo isn't
+attached, and `add_repo` doesn't apply to a read this narrow), but `raw.githubusercontent.com` --
+already established as reachable -- serves individual files directly. Pulled the real integration
+YAML and README rather than describing the pack from the metadata alone:
+
+    display: RelayShield  |  category: Data Enrichment & Threat Intelligence  |  fromversion: 6.8.0
+    marketplaces: xsoar, marketplacev2, platform   (XSOAR, XSIAM, and the newer Cortex platform)
+    commands: domain, ip, email (the GENERIC reputation commands -- auto-wired into any existing
+              enrichment playbook with no rework) plus relayshield-mcp-registry-risk,
+              relayshield-cert-expiry, relayshield-supply-chain
+    DBotScore mapping, verbatim from the README: CRITICAL/HIGH -> 3 (Bad), MEDIUM/LOW ->
+              2 (Suspicious), "No known finding" -> 0 (Unknown), NEVER 1 (Good) -- with the
+              README's own stated reason: a clean result is not the same claim as verified-safe.
+
+**That DBotScore design decision is real, it is the pack's own README talking, and it is the same
+principle this repo has stated about every other surface** ("it never says safe... the ceiling is
+nothing known against it") applied to XSOAR's own scoring scale. It became the post's hook rather
+than an invented angle, per the XSOAR rule this file has carried since 2026-08-29: the angle is
+never "we shipped an integration," it is what the pack DOES.
+
+`blog_markdown/cortex-xsoar-dbotscore-good.md` is written, built (`build_blog.py`), and passes
+`test_blog_publish_hygiene.py` with zero failures against it specifically. No corpus count
+anywhere in it, per MEASUREMENT DOCTRINE -- the corpus is described by source
+("collected continuously from monitored criminal Telegram marketplaces, infostealer log dumps,
+and authoritative public indicator feeds"), matching the resolution this file already reached for
+the API docs intro and the AWS listing.
+
+**`?source=xsoar-blog` is registered BEFORE the post ships**, per the standing rule. And doing
+that found a real defect worth recording on its own:
+
+### A DICTIONARY KEY COLLISION, CAUGHT BY EXECUTING THE RESOLVER RATHER THAN READING THE DICT
+
+The first draft added a new `_SOURCE_BANNERS` entry named `"xsoar"`. **An entry with that exact
+name already existed**, keyed on REFERER HOSTS (`xsoar.pan.dev`, `paloaltonetworks.com`,
+`demisto.com`) for someone arriving FROM those domains -- a live, working banner, registered in an
+earlier session, that this session never read before writing a second one with the identical key.
+A Python dict literal lets a later key silently overwrite an earlier one with no error, so the
+first sign of trouble would have been the referer-based Cortex XSOAR banner going quietly dead --
+**the exact "two files that must agree with nothing checking that they do" defect this file
+warns about constantly, except inside one file instead of two**, and it would never have shown up
+in any test that only checks the NEW key resolves, which is exactly the test that gets written
+first.
+
+**Caught by a script that walked the actual `_SOURCE_BANNERS` AST for duplicate keys**, not by
+rereading the diff -- reading catches what you already expect to look for; walking every key
+catches what you don't. Renamed the new entry to `"xsoar-post"` (with a comment explaining why it
+isn't `"xsoar"`), pointed the `xsoar-blog` alias at the new name, and then **executed
+`_resolve_source` and `_banner_for` against a boto3-stubbed import of the real module** to prove
+three things at once rather than trust the rename: the new alias resolves and renders the new
+banner; the pre-existing referer-based `xsoar` banner still fires, unharmed; an unregistered key
+still falls through to `unmatched:` rather than silently matching either. All three true. Existing
+suite (`test_developer_signup_banners.py`, 7 tests) still green.
+
+**The general form, and it is a narrower, more mechanical version of "check both directories
+agree": before adding a key to a dict this large, check for the collision by parsing the dict's
+own keys, not by grepping for the name once and assuming a clean hit means no prior entry.** A
+`grep -n '"xsoar"'` run before writing would have shown two hits from the start; the check that
+actually caught it here ran after the damage was already typed, which worked this time and is
+still the wrong order to rely on going forward.
+
+### TWO PRE-EXISTING, UNRELATED HYGIENE FAILURES SPOTTED IN PASSING, NOT FIXED THIS TURN
+
+Running `test_blog_publish_hygiene.py` also failed on two ALREADY-LIVE posts this session never
+touched: `muse-side-door-connector` (commit `9c5ece6`) and
+`the-boss-scam-whatsapp-account-takeover` (commit `1fc8166`), both carrying an em-dash in
+published HTML, both dated after the 2026-08-31 cutoff so the guard is right to flag them. **Left
+alone rather than fixed as a drive-by**, because they are unrelated, already-published posts from
+prior sessions and fixing them was not what this turn was for -- but they are a real, cheap
+follow-up (each is almost certainly one or two character replacements) and should not be
+mistaken for a test that has always been red.
+
+### STILL TO DO ON ITEM 3, AND IT IS ANDREW'S READ NOW, NOT A BUILD
+
+1. **Open the Cortex Marketplace (inside an XSOAR/XSIAM instance, or its public catalog if one
+   exists) and search RelayShield.** This settles whether the listing page Moshe promised is
+   actually there -- the read this container cannot do, per every "blocked container is not a
+   blocked fact, except when the fact genuinely needs a browser Andrew has and this container
+   doesn't" case this file has recorded.
+2. **Check Palo Alto's own Content release notes for a RelayShield entry.** Same reason.
+3. **If both are confirmed**: merge `blog_markdown/cortex-xsoar-dbotscore-good.md` to main (push
+   deploys it automatically via the existing blog pipeline, no separate step), add the
+   landing-page line ("Available as a Cortex XSOAR content pack") linking the Marketplace listing
+   page directly, and link the Release Notes entry from the post. **None of that is done yet** --
+   deliberately, because linking a page nobody has confirmed exists is the exact failure this
+   gate was built to prevent.
+4. **If either is NOT there yet**: the blog post still stands on its own (it makes no claim about
+   a Marketplace listing or Release Notes, only about the pack's real, verified contents on
+   `demisto/content` master), so it can ship regardless. The landing-page line and the Release
+   Notes link are the only two things still gated on Andrew's read.

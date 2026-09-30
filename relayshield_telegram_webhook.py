@@ -60,6 +60,8 @@ from datetime import datetime, timedelta, timezone
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
+import relayshield_community_reports as community_reports
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -3034,17 +3036,120 @@ def check_url_sync(url: str) -> dict:
         return {"status": "unknown", "detail": "Scan service temporarily unavailable"}
 
 
+# ---------------------------------------------------------------------------
+# Community reports ("Report this") -- quarantined, dark unless
+# COMMUNITY_REPORTS_ENABLED is set. See relayshield_community_reports.py.
+# ---------------------------------------------------------------------------
+
+REPORT_BUTTON_MARKUP = {"inline_keyboard": [[
+    {"text": "🚩 Report this as a scam", "callback_data": "rsreport"},
+]]}
+
+REPORT_HINT_TEXT = (
+    "\n\n🚩 Think we missed a scam? Tap *Report this* — it goes to a human "
+    "review queue. Community reports are never added to our threat data "
+    "automatically."
+)
+
+
+def _remember_scan_for_report(chat_id: int, indicator: str,
+                              indicator_type: str, verdict: str) -> None:
+    """Stash the just-scanned indicator on the user record so the Report-this
+    button knows what is being reported. No-op unless the feature flag is on.
+    Never raises -- a reporting affordance must not break a scan reply."""
+    if not community_reports.reports_enabled():
+        return
+    try:
+        user = get_user_by_chat_id(chat_id)
+        if not user:
+            return
+        update_user(user["user_id"], {"last_scan": {
+            "indicator": indicator,
+            "indicator_type": indicator_type,
+            "verdict": verdict,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }})
+    except Exception as exc:
+        logger.warning("last_scan stash failed chat_id=%s: %s", chat_id, exc)
+
+
+def _report_extras(indicator: str, indicator_type: str) -> tuple[str, dict | None]:
+    """(append_text, reply_markup) for a scan verdict when community reports
+    are enabled. The demand-side count is labeled and never verdict-affecting.
+    Never raises."""
+    if not community_reports.reports_enabled():
+        return "", None
+    try:
+        count = community_reports.community_report_count(indicator, indicator_type)
+        label = community_reports.demand_side_label(count)
+    except Exception as exc:
+        logger.warning("community report count failed: %s", exc)
+        label = ""
+    return label + REPORT_HINT_TEXT, REPORT_BUTTON_MARKUP
+
+
+def handle_report_callback(chat_id: int, callback_query_id: str) -> None:
+    """The 'Report this as a scam' inline button under a scan verdict."""
+    answer_callback(callback_query_id)
+    if not community_reports.reports_enabled():
+        return
+    try:
+        user = get_user_by_chat_id(chat_id)
+        last = (user or {}).get("last_scan") or {}
+        indicator = last.get("indicator")
+        if not user or not indicator:
+            send_message(
+                chat_id,
+                "There's nothing recent to report — run /scan on a link or "
+                "paste a suspicious message first, then tap *Report this*.",
+                parse_mode="Markdown",
+            )
+            return
+        report = community_reports.submit_report(
+            indicator,
+            channel="tg",
+            user_id=user["user_id"],
+            verdict_at_report=last.get("verdict", "unknown"),
+            indicator_type=last.get("indicator_type"),
+        )
+        send_message(
+            chat_id,
+            "🚩 *Report received.*\n\n"
+            "It's queued for human review. Community reports are never added "
+            "to our threat data automatically — thanks for flagging it.",
+            parse_mode="Markdown",
+        )
+        logger.info("Community report filed pk=%s reporter=%.12s",
+                    report["pk"], report["reporter_hash"])
+    except community_reports.RateLimited:
+        send_message(
+            chat_id,
+            "You've hit the daily report limit (10 per 24h). Try again tomorrow — "
+            "and thanks for the vigilance.",
+        )
+    except community_reports.ReportRefused as exc:
+        send_message(chat_id, f"Couldn't file that report: {exc}")
+    except Exception as exc:
+        logger.warning("Report callback failed chat_id=%s: %s", chat_id, exc)
+        send_message(chat_id,
+                     "Something went wrong filing the report — please try again.")
+
+
 def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, prefix: str = "Scan result") -> None:
     """Shared formatting for a scan verdict — used by both the immediate
     handle_scan reply and handle_deferred_url_scan's follow-up, so the two
     messages read consistently."""
+    _remember_scan_for_report(chat_id, target, "url", verdict)
+    extra_text, extra_markup = _report_extras(target, "url")
     if verdict in ("malicious", "suspicious"):
         send_message(
             chat_id,
             f"⚠️ *{prefix} for* `{target}`\n\n"
             f"{detail}.\n\n"
-            "Do not click this link. Report it and delete the message if it was sent to you.",
+            "Do not click this link. Report it and delete the message if it was sent to you."
+            f"{extra_text}",
             parse_mode="Markdown",
+            reply_markup=extra_markup,
         )
     elif verdict == "clean":
         send_message(
@@ -3055,8 +3160,10 @@ def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, pre
             "→ Check the domain's registration date (whois)\n"
             "→ Watch for URL shorteners hiding the real destination\n"
             "→ Look for mismatched domains (paypa1.com, g00gle.com)\n\n"
-            "Still unsure? Don't click — ask us.",
+            "Still unsure? Don't click — ask us."
+            f"{extra_text}",
             parse_mode="Markdown",
+            reply_markup=extra_markup,
         )
     else:
         send_message(
@@ -3068,8 +3175,10 @@ def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, pre
             "→ Look for mismatched domains (paypa1.com, g00gle.com)\n"
             "→ Confirm HTTPS, not HTTP\n"
             "→ Be wary of urgent language pushing you to act immediately\n\n"
-            "Still unsure? Don't click — ask us.",
+            "Still unsure? Don't click — ask us."
+            f"{extra_text}",
             parse_mode="Markdown",
+            reply_markup=extra_markup,
         )
 
 
@@ -3542,6 +3651,10 @@ def handle_analyze(chat_id: int, content: str | None = None,
 
     fwd_block = f"{forward_note}\n\n———\n\n" if forward_note else ""
 
+    # Community reports affordance (dark unless COMMUNITY_REPORTS_ENABLED).
+    _remember_scan_for_report(chat_id, content, "message", severity.lower())
+    analyze_extra_text, analyze_extra_markup = _report_extras(content, "message")
+
     if flags:
         flag_text = "\n".join(flags)
         callback_warn = ""
@@ -3560,8 +3673,10 @@ def handle_analyze(chat_id: int, content: str | None = None,
             f"{image_note}\n"
             f"*Recommended action:* Do not click, reply, or call any number in this message. "
             f"If this claims to be from a company, contact them directly via their official website.\n\n"
-            f"Reply /vishing for a full guide on phone-based scam tactics.",
+            f"Reply /vishing for a full guide on phone-based scam tactics."
+            f"{analyze_extra_text}",
             parse_mode="Markdown",
+            reply_markup=analyze_extra_markup,
         )
     else:
         send_message(
@@ -3574,8 +3689,10 @@ def handle_analyze(chat_id: int, content: str | None = None,
             "This doesn't guarantee the message is safe — always verify unexpected requests "
             "by calling back on a number you look up yourself. And no dollar signs doesn't "
             "mean it's genuine — a stranger building rapport fast or pushing to move platforms "
-            "is a manipulation pattern too. If you don't know them, consider blocking.",
+            "is a manipulation pattern too. If you don't know them, consider blocking."
+            f"{analyze_extra_text}",
             parse_mode="Markdown",
+            reply_markup=analyze_extra_markup,
         )
 
 
@@ -7036,6 +7153,11 @@ def handle_callback_query(update: dict) -> None:
         answer_callback(cq_id)
         tier = (user.get("tier") or user.get("subscription_tier", TIER_PERSONAL)) if user else TIER_PERSONAL
         send_message(chat_id, msg_help(tier))
+
+    elif data == "rsreport":
+        # "Report this as a scam" button under a scan verdict. The handler
+        # answers the callback itself.
+        handle_report_callback(chat_id, cq_id)
 
     # Category shortcut from the Quick Start card. Falls back to the full
     # list if the section is missing for this tier, so a stale button can

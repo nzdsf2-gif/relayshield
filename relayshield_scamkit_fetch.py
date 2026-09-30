@@ -255,6 +255,109 @@ def _secondary_candidates(html, final_url):
     return cands[:MAX_SECONDARY_FETCHES]
 
 
+def _probe_status(opener, url, timeout):
+    """Status code and headers for url WITHOUT downloading the body.
+
+    HEAD first; servers that reject HEAD (405/501) fall back to GET with an
+    immediate close so no body bytes are read. HTTPError (4xx/5xx) is a
+    terminal answer, returned as-is. Raises _FetchError on transport failure.
+    """
+    last_exc = None
+    for method in ("HEAD", "GET"):
+        req = urllib.request.Request(url, method=method,
+                                     headers={"User-Agent": USER_AGENT})
+        try:
+            resp = opener.open(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if method == "HEAD" and exc.code in (405, 501):
+                last_exc = exc
+                continue
+            return exc.code, dict(exc.headers.items())
+        except Exception as exc:
+            raise _FetchError(f"{type(exc).__name__}: {exc}")
+        try:
+            status = getattr(resp, "status", None) or resp.getcode()
+            return status, dict(resp.headers.items())
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+    raise _FetchError(f"HEAD and GET both rejected ({last_exc})")
+
+
+def resolve_redirects(url, timeout=4.0, overall_timeout=8.0, max_hops=None,
+                      opener=None, host_check=None):
+    """Follow http(s) redirects recording each hop, downloading no bodies.
+
+    The redirect-only sibling of fetch_kit_page: same _NoRedirect opener,
+    same MAX_REDIRECT_FOLLOWS hop cap, same _host_check SSRF guard applied
+    to EVERY hop's hostname (a shortener redirecting at 169.254.169.254 is
+    the attack this exists to stop), same injectable opener/host_check for
+    tests. No credentials are ever forwarded; only http(s) targets are
+    followed.
+
+    Returns ``(final_url, chain, error)`` where chain is a list of
+    ``{"url": ..., "status": ...}`` including the submitted URL, final_url
+    is the last http(s) URL reached, and error is None on success or a
+    short human-readable reason ("too many redirects", "redirect loop",
+    "resolution timed out", "target blocked: ...", ...). Never raises.
+    """
+    host_check = host_check or _host_check
+    opener = opener or _default_opener()
+    max_hops = MAX_REDIRECT_FOLLOWS if max_hops is None else max_hops
+    deadline = time.monotonic() + overall_timeout
+
+    def fail(chain, reason):
+        final = chain[-1]["url"] if chain else None
+        return final, chain, reason
+
+    parts = urllib.parse.urlparse(url or "")
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None, [], "url must be http(s) with a hostname"
+    ok, reason = host_check(parts.hostname)
+    if not ok:
+        return None, [], f"target blocked: {reason}"
+
+    chain = []
+    visited = set()
+    current = url
+    try:
+        for _ in range(max_hops + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return fail(chain, "resolution timed out")
+            if current in visited:
+                return fail(chain, "redirect loop")
+            visited.add(current)
+            status, headers = _probe_status(
+                opener, current, min(timeout, remaining))
+            chain.append({"url": current, "status": status})
+            location = _hget(headers, "location")
+            if status in _REDIRECT_STATUSES and location:
+                if len(chain) - 1 >= max_hops:
+                    return fail(chain,
+                                f"too many redirects (>{max_hops})")
+                nxt = urllib.parse.urljoin(current, location)
+                nparts = urllib.parse.urlparse(nxt)
+                if nparts.scheme not in ("http", "https") or not nparts.hostname:
+                    # Redirect target is not fetchable http(s) (app deep
+                    # link, intent:, ...). Stop here; the last http(s) hop
+                    # is the final destination we can assess.
+                    break
+                ok, reason = host_check(nparts.hostname)
+                if not ok:
+                    return fail(chain, f"redirect target blocked: {reason}")
+                current = nxt
+                continue
+            break
+        return chain[-1]["url"], chain, None
+    except _FetchError as exc:
+        return fail(chain, f"resolution failed: {exc}")
+    except Exception as exc:  # never let a resolver crash a verdict
+        return fail(chain, f"resolver error: {type(exc).__name__}")
+
+
 def fetch_kit_page(url, observed_telemetry=None, *, timeout=FETCH_TIMEOUT,
                    max_bytes=FETCH_MAX_BYTES, opener=None,
                    tls_probe=None, host_check=None):

@@ -64,7 +64,9 @@ filed alongside the rest.
 Category: Data Enrichment & Threat Intelligence. Requires Cortex XSOAR 6.8.0 or later, and it also
 ships for Cortex XSIAM and the Cortex platform. Configuration takes a Server URL (defaults to
 `api.relayshield.net`) and a RelayShield API key. Get a free-tier key at
-[api.relayshield.net/developers](https://api.relayshield.net/developers?source=xsoar-blog).
+[api.relayshield.net/developers](https://api.relayshield.net/developers?source=xsoar-blog), then
+follow the [full integration reference](https://xsoar.pan.dev/docs/reference/integrations/relay-shield)
+for every command's inputs and context outputs.
 
 Free checks that need no key at all, if you want to see a verdict before configuring anything:
 forward a suspicious email to

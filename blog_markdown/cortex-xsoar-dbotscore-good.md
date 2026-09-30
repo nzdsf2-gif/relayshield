@@ -1,26 +1,47 @@
 ---
-title: Why Our Cortex XSOAR Integration Never Sets DBotScore to Good
+title: RelayShield's Agentic Attack Surface Intelligence Now Ships as a Cortex XSOAR Content Pack
 slug: cortex-xsoar-dbotscore-good
 date: 2026-09-30
 ---
 
-# Why Our Cortex XSOAR Integration Never Sets DBotScore to Good
+# RelayShield's Agentic Attack Surface Intelligence Now Ships as a Cortex XSOAR Content Pack
 
-RelayShield is now a Cortex XSOAR content pack, and the one design decision inside it worth
-reading before the setup steps is a mapping table most vendors would have written the other way.
+An agent that reads a repository's setup instructions, connects to an MCP server, or follows a
+tool's README is extending trust to whatever domain, package or command those instructions name.
+Nothing else in the Cortex XSOAR content marketplace looks at that trust before the agent acts on
+it. RelayShield does, and as of this release a SOC or MSSP running Cortex XSOAR, XSIAM or the
+Cortex platform can pull that intelligence straight into an incident without building anything.
 
-A clean result from any of our commands maps to DBotScore **Unknown (0)**, never **Good (1)**.
-That is not an oversight. "No known finding" means nothing was flagged in the sources RelayShield
-actually queried, which is not the same claim as verified-safe. A domain that has never been
-reported is not the same thing as a domain that has been checked and cleared, and a reputation
-integration that conflates the two is telling an analyst something it does not know.
+## What nothing else in the marketplace runs
 
-## What it plugs into, with no new playbook work
+Three commands answer questions specific to the agentic attack surface, not the general reputation
+questions every other feed already covers:
 
-The pack implements the generic `domain`, `ip` and `email` reputation commands, which is the part
-that matters operationally: any enrichment playbook already calling those commands picks up
-RelayShield the moment the integration is enabled and a reliability weight is set. Nothing to
-rewire.
+- `relayshield-mcp-registry-risk` assesses an MCP server URL or package name for typosquat,
+  supply-chain or registry risk before an agent connects to it. This is the same logic behind our
+  agent-bait screening, exposed as a command a SOC can run against anything an agent is about to be
+  pointed at.
+- `relayshield-cert-expiry` checks a domain's TLS certificate expiry risk, which matters for the
+  same reason: a certificate quietly expiring on infrastructure an agent depends on is an outage an
+  automated system will not notice on its own.
+- `relayshield-supply-chain` checks up to ten vendor domains or emails in one call for combined
+  breach and infostealer risk, sized for the shape a vendor-risk review actually comes in.
+
+## The part that costs nothing to adopt: it's the format your playbooks already speak
+
+The pack also implements the generic `domain`, `ip` and `email` reputation commands. That is the
+part that matters operationally as much as the agentic-specific commands do: any enrichment
+playbook already calling those three commands picks up RelayShield the moment the integration is
+enabled and a reliability weight is set. No rewiring, no new playbook logic, no waiting for a
+custom integration to be written and reviewed. `domain` checks phishing-lookalike and typosquat
+risk; `email` checks breach exposure and active stolen-session risk, the thing a password reset
+does not fix; `ip` checks reputation against malicious and suspicious votes.
+
+One design decision inside that mapping is worth knowing before you configure it: a clean result
+from any of these commands sets DBotScore to Unknown (0), never Good (1). "No known finding" means
+nothing was flagged in the sources RelayShield queried, which is a narrower claim than
+verified-safe, and a reputation integration that conflates the two is telling an analyst something
+it does not actually know.
 
 | RelayShield verdict | DBotScore |
 |---|---|
@@ -30,34 +51,17 @@ rewire.
 | LOW | 2 (Suspicious) |
 | No known finding | 0 (Unknown) |
 
-`domain` checks for phishing-lookalike and typosquat risk against our IOC corpus. `email` checks
-breach exposure and active stolen-session risk, the thing a password reset does not fix: whether a
-session token was taken, which no rotation revokes. `ip` checks reputation against malicious and
-suspicious votes. All three set the score above; none of them set Good.
+## Where the intelligence comes from
 
-## Three commands nothing else in the marketplace runs
-
-Past the generic three, the pack carries commands with no equivalent we're aware of in the Cortex
-XSOAR content marketplace, because they answer questions specific to what RelayShield collects:
-
-- `relayshield-mcp-registry-risk` assesses an MCP server URL or package name for typosquat,
-  supply-chain or registry risk before an agent connects to it. This is the same check behind our
-  agent-bait screening: an agent that reads a repository's setup instructions and follows them is
-  trusting whatever domain those instructions name, and this command is how a SOC checks that
-  domain before the agent does.
-- `relayshield-cert-expiry` checks a domain's TLS certificate expiry risk.
-- `relayshield-supply-chain` checks up to ten vendor domains or emails in one call for combined
-  breach and infostealer risk, sized for the shape a vendor-risk review actually comes in.
-
-## Where the indicators come from, stated as capability rather than a count
-
-We do not quote a corpus headline, here or anywhere. Most of any threat-intel vendor's total is
-ingested public feeds a SOC already has through other packs, and the number that actually matters
-is what is in it that those feeds are not. Our corpus is collected continuously from monitored
-criminal Telegram marketplaces, infostealer log dumps, and authoritative public indicator feeds.
-The first two categories are the ones a standard TAXII feed subscription does not reach, and they
-are the reason a RelayShield hit on an indicator is worth pulling into the incident rather than
-filed alongside the rest.
+RelayShield's corpus is collected continuously from monitored criminal Telegram marketplaces,
+infostealer log dumps, and authoritative public indicator feeds: 113 monitored channels and 7.8
+million citations as of this release. The first two categories are the ones a standard TAXII feed
+subscription does not reach, and they are the reason a RelayShield hit on an indicator is worth
+pulling into the incident rather than filed alongside everything else. We quote specific, measured
+figures like these when they are current and worth knowing; what we do not do is lean on a single
+aggregate corpus headline, since most of any threat-intel vendor's total volume is ingested public
+feeds a SOC already has through other packs, and the number that actually matters is what is in it
+that those feeds are not.
 
 ## Setup
 

@@ -9520,3 +9520,88 @@ and `test_blog_publish_hygiene.py` both still pass against the new content (the 
 failures are the pre-existing, unrelated `muse-side-door-connector` and
 `the-boss-scam-whatsapp-account-takeover` em-dash defects spotted in passing the same session,
 recorded above, still not fixed as a drive-by).
+
+## THE BLOG POST WAS REWRITTEN THE SAME DAY: DBOTSCORE WAS THE WRONG LEAD, AND THE CORPUS-METRICS CLAIM WAS FALSE ON ITS OWN EVIDENCE
+
+**2026-09-30, right after the section above.** Andrew's own read on the finished post: dull, and
+wrong to lead with DBotScore, and **the "we do not quote a corpus headline, here or anywhere" line
+was not true.** He is right on the last point specifically, and the evidence was sitting in this
+same file: `relayshield_openapi_spec.py`, `relayshield_api.py`'s TAXII descriptions, and the
+`cortex-xsoar-dbotscore-good` post's OWN sibling pages all already quote **113 monitored channels
+and 7.8M+ citations** as a matter of course. The post's blanket denial was written against
+MEASUREMENT DOCTRINE's real rule (never quote the ~500K-indicator aggregate headline, because most
+of it is public feeds every buyer already has) but stated it as an absolute that the rest of the
+product does not actually follow.
+
+**`blog_markdown/cortex-xsoar-dbotscore-good.md` is rewritten, same slug and URL, so nothing that
+already links or references it (the `xsoar-blog`/`xsoar-post` source keys, the developers-page
+banner, the integration-reference link) needed to change.** The new lead is the thing nothing else
+in the Cortex XSOAR marketplace does: `relayshield-mcp-registry-risk`, `relayshield-cert-expiry`
+and `relayshield-supply-chain` screen the agentic attack surface -- the domain, package or command
+an agent is about to trust -- before the pack ever gets to the generic `domain`/`ip`/`email`
+commands. The standard-format SIEM/SOAR half (wired into any existing playbook with no rework) is
+the second headline, right behind it. **DBotScore moved down to a subsection inside that generic-
+commands section, framed as one design decision worth knowing, not the reason to read the post.**
+The corpus section now states the actual published figures (113 channels, 7.8M+ citations, matching
+what `relayshield_api.py`'s own TAXII descriptions already say) rather than a blanket "we never
+quote a number" claim, with the real distinction kept: we quote specific, current, measured figures
+when they're worth knowing, and we do not lean on the single aggregate headline dominated by
+ingested public feeds every SOC already has through other packs.
+
+Rebuilt (`python3 build_blog.py`, 33 posts, 225 KB) and re-checked: the new content introduces zero
+em-dashes and zero quote-bar lines, and `test_blog_publish_hygiene.py` still shows exactly the same
+three pre-existing, unrelated failures on `muse-side-door-connector` and
+`the-boss-scam-whatsapp-account-takeover` as before this edit -- nothing new, nothing regressed.
+Committed and pushed to `claude/gallant-heisenberg-x2fnos`.
+
+**NOT TOUCHED THIS TURN, ON PURPOSE, SCOPED TO WHAT WAS ASKED:** the developers-page banner for
+`xsoar-post` in `relayshield_developer_signup.py` (still fine as written -- it's aimed at someone
+who already clicked through, not the announcement itself) and the stale `494K+ indicators... 115
+monitored Telegram marketplaces` meta-description/OG-tag copy still sitting in
+`relayshield_developer_signup.py` (lines ~1900-1916, ~2237, ~3492) and `cloudflare_worker_ti_demo.js`
+-- those disagree with the corrected 113-channel/7.8M-citation figures `relayshield_api.py` and
+`relayshield_openapi_spec.py` already carry, which is exactly the "two files that must agree with
+nothing checking that they do" defect this file names repeatedly. Found in passing while verifying
+the new blog post's numbers against the rest of the codebase; not fixed as a drive-by, since it
+touches customer-facing meta tags well outside what was asked this turn.
+
+### THE TOP 10 FOR THE NEXT SESSION (reboot pending, 2026-09-30)
+
+Carried forward unchanged from the "WHERE 2026-09-30 LEFT THINGS" list above, MINUS item 3 (the
+Marketplace listing and integration-reference page are now both confirmed -- see the two sections
+directly above this one), PLUS the new item found while rewriting the blog post:
+
+1. **Run `tools/backfill_first_seen.py --apply`.** Dry run done and measured (661,609 distinct
+   indicators); the write itself is still unconfirmed.
+2. **Confirm the `relayshield-weekly-metrics` re-invoke produced a complete email** with all three
+   new fields (monitored marketplaces, unique indicators, CS Mobile trial-by-platform) -- last
+   confirmed state was an `AccessDeniedException` moments after the IAM grant fix, never confirmed
+   cleared.
+3. ~~Confirm the Palo Alto Marketplace listing and Release Notes~~ **DONE 2026-09-30** -- listing
+   confirmed by screenshot, integration reference confirmed by direct navigation
+   (`xsoar.pan.dev/docs/reference/integrations/relay-shield`); the specific dated Release Notes
+   changelog entry was deliberately not chased further, per the recommendation two sections up.
+4. **Confirm `support@relayshield.net` is a real, monitored mailbox** -- it is the support contact
+   on both the live XSOAR pack metadata and the Chrome Web Store submission; still unconfirmed.
+5. **Check the Chrome Web Store review outcome** (`relayshieldadmin@gmail.com` dashboard).
+6. **EAS rebuild and republish Crypto Shield Mobile**, then have Arjen retry the SOL Token scan
+   that produced the unexplained 400.
+7. **Confirm `relayshield_breach_cache` was created** (`tools/setup_breach_cache.sh`) -- still
+   unconfirmed whether it has been run; the breach-check code ships inert without it.
+8. **Decide what to do with `origin/claude/gallant-hawking-4oerzg`** (unmerged Muse/pricing/OpenAI
+   branch from 2026-09-25).
+9. **Look at `origin/feature/scam-kit-fingerprinting`** -- seen in passing 2026-09-25, never opened.
+10. **NEW: reconcile the stale `494K+ indicators / 115 monitored Telegram marketplaces` copy** in
+    `relayshield_developer_signup.py` (meta tags, OG/Twitter descriptions, the asset-watchlist
+    endpoint description, the TAXII-arrival banner around line 3492) and
+    `cloudflare_worker_ti_demo.js` against the corrected `113 monitored channels / 7.8M+ citations`
+    figures `relayshield_api.py` and `relayshield_openapi_spec.py` already carry. Found this session
+    while checking the new blog post's numbers; a public-facing meta description quoting a
+    superseded channel count and indicator figure is exactly the two-files-disagree shape this file
+    keeps paying for.
+
+**Carried without re-verification, unchanged from the prior list:** the IAM split's scope beyond
+`relayshield-intel-feed` (confirmed done); `WA_NUMBER` still empty in both Cloudflare Workers; the
+StoreBot bot-directory submission; the WhatsApp Channel question; FD-11 Smithery; mapping
+`relayshield_watchlist_monitor.py` and `relayshield-mpp-settlement` in the deployer; INTEL-5; the
+Dramex Mini App catalogue PR (#2); ZPlatform.ai and LibHunt submissions; BOT-TOKEN-1 phase 2.

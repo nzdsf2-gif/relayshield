@@ -31,6 +31,22 @@ whose Resource actually references relayshield_intel_first_seen, adds Scan
 to that statement's Action list only, and writes the WHOLE document back
 unchanged except for that one list. Every other statement is untouched.
 
+SECOND DEFECT, FOUND 2026-09-30 ON THIS SCRIPT'S OWN FIRST REAL RUN: the
+statement-matcher treated a bare Resource "*" as "covers this table" for the
+purpose of picking WHERE TO WRITE, and the loop stops at the first match. So
+it found RekognitionOCR -- Resource "*", Action rekognition:DetectText,
+nothing to do with this table -- before it ever reached the real,
+table-specific relayshield-first-seen-write policy, and added dynamodb:Scan
+there instead. The grant worked (a wildcard resource genuinely does cover the
+table), but it landed in an unrelated, over-broad, hard-to-audit place. Fixed
+by splitting the question in two: _resource_covers_table (exact ARN, suffix,
+OR wildcard) answers "is Scan already available somewhere" and is checked
+FIRST, across every statement, before anything is written; only
+_resource_matches_specific (exact ARN or suffix, NEVER "*") may be chosen as
+a write target. The RekognitionOCR grant from that run is left in place --
+it is correct, if messy -- and a re-run now reports it under 3a and does
+nothing further, rather than touching it again or missing it.
+
 Prints the real document it found and the real document it wrote, not a
 yes/no summary -- the summary is exactly what was wrong last time.
 """
@@ -48,9 +64,30 @@ def _as_list(x):
     return x if isinstance(x, list) else [x]
 
 
-def _resource_matches(resource) -> bool:
+def _resource_covers_table(resource) -> bool:
+    """True if this Resource value would apply to TABLE_ARN when IAM evaluates it --
+    an exact ARN, a table-name-suffix match, OR a bare wildcard. Used only to answer
+    "is this table ALREADY covered by something", never to pick a statement to WRITE
+    into -- see _resource_matches_specific for that, and the reason they differ."""
     return any(
         v == TABLE_ARN or v == "*" or (isinstance(v, str) and v.endswith(f"table/{TABLE}"))
+        for v in _as_list(resource)
+    )
+
+
+def _resource_matches_specific(resource) -> bool:
+    """True only for a resource that names THIS table specifically -- never a bare
+    "*". A statement with Resource: "*" technically covers the table (see above),
+    but it also covers every OTHER resource the principal can touch, so extending
+    ONE would silently grant dynamodb:Scan account-wide. That is exactly what
+    happened on 2026-09-30: this function used to accept "*" too, the loop stops at
+    the first match, and RekognitionOCR -- Resource "*", nothing to do with this
+    table -- was found before the real, table-specific relayshield-first-seen-write
+    policy ever got checked. The grant worked (a wildcard resource does cover the
+    table), but it landed in the wrong, over-broad place. Never again: a statement
+    is only a WRITE target when its own Resource actually names this table."""
+    return any(
+        v == TABLE_ARN or (isinstance(v, str) and v.endswith(f"table/{TABLE}"))
         for v in _as_list(resource)
     )
 
@@ -66,20 +103,28 @@ def _add_scan(action):
     return vals
 
 
-def _find_statement(doc: dict, label: str):
-    """Returns (index, statement) for the ONE statement in doc whose Resource
-    covers TABLE_ARN, or (None, None). Prints what it found, in full, rather
-    than summarizing -- the summary is what was wrong before."""
-    stmts = doc.get("Statement", [])
-    stmts = stmts if isinstance(stmts, list) else [stmts]
-    for i, st in enumerate(stmts):
-        res = st.get("Resource")
-        if res is not None and _resource_matches(res):
-            print(f"   {label}: statement[{i}] covers {TABLE}")
-            print(f"     Action   : {json.dumps(st.get('Action'))}")
-            print(f"     Resource : {json.dumps(res)}")
-            return i, st
-    return None, None
+def _load_all_statements(iam, role: str):
+    """Every (label, doc, idx, statement, is_managed, name_or_arn) across every
+    inline and attached-managed policy on the role, inline first. One shared
+    walk so the broad-coverage check and the specific-write-target search see
+    the identical, already-fetched documents rather than two separate passes
+    racing the API."""
+    entries = []
+    for name in iam.list_role_policies(RoleName=role)["PolicyNames"]:
+        doc = iam.get_role_policy(RoleName=role, PolicyName=name)["PolicyDocument"]
+        stmts = doc.get("Statement", [])
+        stmts = stmts if isinstance(stmts, list) else [stmts]
+        for i, st in enumerate(stmts):
+            entries.append((f"inline:{name}", doc, i, st, False, name))
+    for ap in iam.list_attached_role_policies(RoleName=role)["AttachedPolicies"]:
+        arn = ap["PolicyArn"]
+        vid = iam.get_policy(PolicyArn=arn)["Policy"]["DefaultVersionId"]
+        doc = iam.get_policy_version(PolicyArn=arn, VersionId=vid)["PolicyVersion"]["Document"]
+        stmts = doc.get("Statement", [])
+        stmts = stmts if isinstance(stmts, list) else [stmts]
+        for i, st in enumerate(stmts):
+            entries.append((f"managed:{arn}", doc, i, st, True, arn))
+    return entries
 
 
 def main() -> int:
@@ -101,66 +146,57 @@ def main() -> int:
     role = role_arn.rsplit("/", 1)[-1]
     print(f"   {role}")
 
-    print(f"\n== 3. Checking every statement of every policy on {role} for one covering {TABLE}")
-    print("   (not just whether Scan and the table name each appear SOMEWHERE in the doc)")
+    entries = _load_all_statements(iam, role)
 
-    inline_hit = None
-    for name in iam.list_role_policies(RoleName=role)["PolicyNames"]:
-        doc = iam.get_role_policy(RoleName=role, PolicyName=name)["PolicyDocument"]
-        idx, st = _find_statement(doc, f"inline:{name}")
-        if st is not None:
-            inline_hit = (name, doc, idx, st)
+    print(f"\n== 3a. Does ANYTHING already cover {TABLE} with Scan -- exact match OR a wildcard?")
+    for label, _doc, idx, st, _is_managed, key in entries:
+        res = st.get("Resource")
+        if res is not None and _resource_covers_table(res) and _has_scan(st.get("Action")):
+            print(f"   {label}: statement[{idx}] already grants Scan on this table")
+            print(f"     Action   : {json.dumps(st.get('Action'))}")
+            print(f"     Resource : {json.dumps(res)}")
+            print("\n   Nothing to do. If the function is still denied, this genuinely is not")
+            print("   the cause -- paste the fresh CloudWatch traceback rather than assuming")
+            print("   this script's job.")
+            return 0
+    print("   no. Looking for the specific, table-named statement to extend")
+    print("   (never a bare \"*\" -- see _resource_matches_specific's own docstring for why:")
+    print("   that is exactly the mistake that put the last grant on RekognitionOCR).")
+
+    print(f"\n== 3b. Checking every statement for one whose Resource NAMES {TABLE} specifically")
+    hit = None
+    for label, doc, idx, st, is_managed, key in entries:
+        res = st.get("Resource")
+        if res is not None and _resource_matches_specific(res):
+            print(f"   {label}: statement[{idx}] names {TABLE} specifically")
+            print(f"     Action   : {json.dumps(st.get('Action'))}")
+            print(f"     Resource : {json.dumps(res)}")
+            hit = (label, doc, idx, st, is_managed, key)
             break
 
-    managed_hit = None
-    if not inline_hit:
-        for ap in iam.list_attached_role_policies(RoleName=role)["AttachedPolicies"]:
-            arn = ap["PolicyArn"]
-            vid = iam.get_policy(PolicyArn=arn)["Policy"]["DefaultVersionId"]
-            doc = iam.get_policy_version(PolicyArn=arn, VersionId=vid)["PolicyVersion"]["Document"]
-            idx, st = _find_statement(doc, f"managed:{arn}")
-            if st is not None:
-                managed_hit = (arn, doc, idx, st)
-                break
-
-    if inline_hit:
-        name, doc, idx, st = inline_hit
-        if _has_scan(st.get("Action")):
-            print(f"\n   statement[{idx}] of inline policy {name} ALREADY has Scan on THIS resource.")
-            print("   If the function is still denied, this genuinely is not the cause --")
-            print("   paste the fresh CloudWatch traceback rather than assuming this script's job.")
-            return 0
-        print(f"\n== 4. Adding dynamodb:Scan to statement[{idx}] of inline policy {name}")
+    if hit:
+        label, doc, idx, st, is_managed, key = hit
+        print(f"\n== 4. Adding dynamodb:Scan to statement[{idx}] of {label}")
         print("      (every other statement in this document is left byte-for-byte alone)")
         st["Action"] = _add_scan(st.get("Action"))
-        iam.put_role_policy(RoleName=role, PolicyName=name, PolicyDocument=json.dumps(doc))
-        verify = iam.get_role_policy(RoleName=role, PolicyName=name)["PolicyDocument"]
-        print("   written. Verify -- the full document as AWS now has it:")
-        print(json.dumps(verify, indent=2))
-        return 0
-
-    if managed_hit:
-        arn, doc, idx, st = managed_hit
-        if _has_scan(st.get("Action")):
-            print(f"\n   statement[{idx}] of managed policy {arn} ALREADY has Scan on THIS resource.")
-            print("   If the function is still denied, this genuinely is not the cause --")
-            print("   paste the fresh CloudWatch traceback rather than assuming this script's job.")
+        if not is_managed:
+            iam.put_role_policy(RoleName=role, PolicyName=key, PolicyDocument=json.dumps(doc))
+            verify = iam.get_role_policy(RoleName=role, PolicyName=key)["PolicyDocument"]
+            print("   written. Verify -- the full document as AWS now has it:")
+            print(json.dumps(verify, indent=2))
             return 0
-        print(f"\n== 4. Adding dynamodb:Scan to statement[{idx}] of managed policy {arn}")
-        print("      (every other statement in this document is left byte-for-byte alone)")
-        st["Action"] = _add_scan(st.get("Action"))
-        versions = iam.list_policy_versions(PolicyArn=arn)["Versions"]
+        versions = iam.list_policy_versions(PolicyArn=key)["Versions"]
         if len(versions) >= 5:
             non_default = sorted(
                 (v for v in versions if not v["IsDefaultVersion"]), key=lambda v: v["CreateDate"]
             )
             if non_default:
                 old_vid = non_default[0]["VersionId"]
-                iam.delete_policy_version(PolicyArn=arn, VersionId=old_vid)
+                iam.delete_policy_version(PolicyArn=key, VersionId=old_vid)
                 print(f"   pruned oldest non-default version {old_vid} (5-version cap)")
-        iam.create_policy_version(PolicyArn=arn, PolicyDocument=json.dumps(doc), SetAsDefault=True)
-        new_vid = iam.get_policy(PolicyArn=arn)["Policy"]["DefaultVersionId"]
-        verify = iam.get_policy_version(PolicyArn=arn, VersionId=new_vid)["PolicyVersion"]["Document"]
+        iam.create_policy_version(PolicyArn=key, PolicyDocument=json.dumps(doc), SetAsDefault=True)
+        new_vid = iam.get_policy(PolicyArn=key)["Policy"]["DefaultVersionId"]
+        verify = iam.get_policy_version(PolicyArn=key, VersionId=new_vid)["PolicyVersion"]["Document"]
         print(f"   new default version {new_vid} created. Verify -- the full document as AWS now has it:")
         print(json.dumps(verify, indent=2))
         return 0

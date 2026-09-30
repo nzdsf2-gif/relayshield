@@ -9154,3 +9154,36 @@ to have checked.** A whole-document substring match answers "does this string ap
 which is a different and much weaker question than "does the statement governing this exact
 resource grant this exact action" -- and the difference is invisible until the real call fails
 right next to the check that just said it wouldn't.
+
+## THE PYTHON REWRITE'S OWN FIRST RUN ADDED `dynamodb:Scan` TO A REKOGNITION POLICY
+
+**2026-09-30, same afternoon.** The corrected script's `_resource_matches()` treated a bare
+`Resource: "*"` as "covers this table" for the purpose of picking WHERE TO WRITE, and the loop
+stops at the first match. `RekognitionOCR` -- an inline policy whose whole job is
+`rekognition:DetectText` on `*`, nothing to do with DynamoDB -- was found before the loop ever
+reached the real, table-specific `relayshield-first-seen-write` managed policy, and `dynamodb:Scan`
+was added there instead.
+
+**The grant almost certainly worked anyway**, which is worth separating from where it landed:
+`Resource: "*"` really does cover `relayshield_intel_first_seen`, so the Lambda's continued
+`AccessDeniedException` immediately after is most likely ordinary IAM propagation lag, not evidence
+the grant failed -- the same "wait 30s" caveat this table has already needed once. But the grant is
+now hiding an account-wide DynamoDB Scan permission inside an OCR-purposed statement, which is a
+real over-grant found by running the script, not by reading it.
+
+**Fixed by splitting one question into two.** `_resource_covers_table` (exact ARN, suffix, or a
+wildcard) answers "is Scan already available somewhere" and is checked FIRST, across every
+statement in every policy, before any write is considered. `_resource_matches_specific` (exact ARN
+or suffix, `"*"` explicitly excluded) is the only kind of match that may be chosen as a WRITE
+target. **The RekognitionOCR grant is left as-is, deliberately** -- reverting it without also
+confirming the real grant works would risk re-breaking something that already functions, for a
+cosmetic cleanup that costs nothing to defer. A re-run of the script now reports it under its own
+"is anything already covering this" check and does nothing further; it does not touch it again and
+does not miss it.
+
+**The general form, and it is the wildcard-resource shape of the whole-document-substring defect
+two sections up: a check for "is this already covered" and a check for "which statement should I
+change" are different questions, and the wildcard resource is exactly the input where a matcher
+answering the first correctly gives the wrong answer to the second.** Whenever a value that would
+satisfy a broader test (an ARN suffix, a resource wildcard, a type union) is used to pick a
+mutation target, ask separately whether that same value should ever be written into.

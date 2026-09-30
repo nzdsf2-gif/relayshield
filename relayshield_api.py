@@ -91,6 +91,7 @@ from boto3.dynamodb.conditions import Key
 # function's deployment zip; without it every invocation dies at import with
 # Runtime.ImportModuleError. See .claude/skills/relayshield-deploy step 3.
 import relayshield_openapi_spec
+import relayshield_phone_reputation as _phone_reputation  # v1: keyed + keyless-degraded (stdlib + lazy boto3)
 
 # Scam-kit fingerprinting primitives — pure functions (stdlib only), no AWS.
 # Packaged into the deployment zip via deploy_lambdas.yml's transitive
@@ -281,6 +282,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/scan-file":             100000,
     # Crypto Shield intelligence endpoints
     "/v1/payg/wallet-risk":           50000,    # $0.05 — multi-chain EVM/Solana/TON (teaser price, CDPX-3)
+    "/v1/payg/phone-reputation":      50000,    # $0.05 — stranger-number reputation: corpus + attack-graph + Twilio SIM-swap/line-type
     "/v1/payg/token-security":        50000,    # $0.05 — GoPlus token risk (teaser price, CDPX-3)
     "/v1/payg/nft-security":          100000,   # $0.10 — GoPlus NFT risk
     "/v1/payg/wallet-screen-batch":   500000,   # $0.50 — up to 10 addresses
@@ -432,6 +434,7 @@ STRIPE_METER_EVENTS: dict[str, str] = {
     "/v1/metered/nhi-exposure":     "relayshield_nhi_exposure_calls",
     "/v1/metered/llm-credential-exposure": "relayshield_llm_credential_exposure_calls",
     "/v1/metered/secret-scan":      "relayshield_secret_scan_calls",
+    "/v1/metered/phone-reputation":  "relayshield_phone_reputation_calls",  # CREATE METER IN DASHBOARD
     # Its OWN meter, not secret-scan's. Reusing secret-scan's meter looked like
     # it avoided creating Stripe objects, but _record_stripe_meter_event always
     # posts value:1 and that meter's only price is $0.35/unit -- so every
@@ -507,6 +510,7 @@ METERED_CREDIT_COSTS: dict[str, int] = {
     "/v1/metered/ip-intel":            10,   # $0.10/call — mirrors PAYG price, new endpoint 2026-07-21
     "/v1/metered/card-exposure":       30,   # $0.30/call — compromised-card lookup (Flashpoint/SOCRadar-competitor), new endpoint 2026-07-24
     "/v1/metered/wallet-risk":         5,    # $0.05/call — matches the published PAYG price exactly, see routing note
+    "/v1/metered/phone-reputation":   5,    # $0.05/call — corpus + attack-graph + Twilio SIM-swap/line-type (cached 24h)
     # $0.50/call — composite: breach ($0.10) + session-risk ($0.30) always run
     # (=$0.40 floor), plus sim-swap ($0.25) and/or a domain lookalike sweep
     # ($0.30) when phone/domain are supplied (up to $0.95 fanned out). Priced
@@ -762,6 +766,10 @@ KEYLESS_SCAN_ENDPOINTS = frozenset({
     # /v1/link-check above -- no VirusTotal, no per-call vendor bill -- so it
     # is keyless for the same reason.
     "/v1/email-check",
+    # Added 2026-09-30. Corpus sightings + attack-graph pivots are internal
+    # (DynamoDB, ~zero marginal cost); the Twilio Lookup is keyed-only and
+    # never runs on this path. Same per-IP cap rationale as /v1/link-check.
+    "/v1/phone-reputation",
 })
 
 # Deliberately generous. These are MOBILE clients, and carrier-grade NAT puts
@@ -1317,6 +1325,7 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
         # audit the Snap is deliberately scoped to avoid. Same handler, same
         # $0.05, just reachable with the caller's own API key.
         "/v1/metered/wallet-risk":         handle_wallet_risk,
+        "/v1/metered/phone-reputation":   handle_phone_reputation,
         "/v1/metered/incident-timeline":   handle_incident_timeline,
         # Scam-kit fingerprinting (added 2026-09-24). Same handlers as the
         # x402 rail — API-key auth and credit billing happen above.
@@ -2487,6 +2496,59 @@ def handle_sim_swap(params: dict) -> dict:
     logger.info("sim-swap check — phone=%s swapped=%s carrier=%s",
                 _redact(phone, "ph"), result["swapped"], result["carrier"] or "unknown")
     return _ok(result)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/payg/phone-reputation (keyed, $0.05)
+#           POST /v1/metered/phone-reputation (keyed, 5 credits)
+#           POST /v1/phone-reputation (KEYLESS, degraded)
+# ---------------------------------------------------------------------------
+# Stranger-number reputation: is this number criminal infrastructure, and was
+# it just SIM-swapped? Corpus sightings + attack-graph paths are always
+# checked; the keyed tier adds Twilio Lookup v2 sim_swap + line_type
+# intelligence, cached ~24h per number so repeats don't re-burn the ~$0.01
+# lookup. The KEYLESS tier never touches Twilio — the keyless handler passes
+# no credentials and the lookup is unreachable on that path, not just unused.
+#
+# Verdict grading: corpus/attack-graph hit -> high; SIM-swap-only or
+# VoIP/premium-only -> medium; nothing -> unknown. Never "low", never "safe".
+def handle_phone_reputation(params: dict) -> dict:
+    """Keyed handler shared by the x402 PAYG and Stripe-metered rails."""
+    phone = (params.get("phone") or "")
+    try:
+        creds = _twilio_creds()
+    except Exception as exc:
+        # Twilio secrets missing on this deployment: serve the corpus verdict
+        # with the Twilio halves honestly marked unchecked, never clean.
+        logger.warning("phone-reputation: Twilio creds unavailable: %s", exc)
+        creds = None
+    try:
+        data = _phone_reputation.assess_phone_reputation(
+            phone, keyless=False, twilio_creds=creds)
+    except _phone_reputation.BadPhone as exc:
+        return _err(str(exc), 400)
+    logger.info("phone-reputation keyed target=%s level=%s",
+                _redact(data.get("target", ""), "phone"), data.get("level"))
+    return _ok(data)
+
+
+def handle_phone_reputation_keyless(params: dict) -> dict:
+    """Keyless front door: corpus + attack-graph only. NO Twilio.
+
+    Structural guarantee, not a convention: this handler never obtains Twilio
+    credentials, so relayshield_phone_reputation.twilio_lookup is unreachable
+    from here. The response labels the unchecked halves explicitly.
+    """
+    try:
+        data = _phone_reputation.assess_phone_reputation(
+            (params.get("phone") or ""),
+            keyless=True,
+        )
+    except _phone_reputation.BadPhone as exc:
+        return _err(str(exc), 400)
+    logger.info("phone-reputation keyless target=%s level=%s",
+                _redact(data.get("target", ""), "phone"), data.get("level"))
+    return _ok(data)
 
 
 # ---------------------------------------------------------------------------
@@ -11339,6 +11401,35 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
             },
         },
     ),
+    "/v1/payg/phone-reputation": _bazaar_body_ext(
+        input_example={"phone": "+15551234567"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "phone": {
+                    "type": "string",
+                    "description": "Phone number in E.164 format (e.g. +15551234567)",
+                },
+            },
+            "required": ["phone"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "target":   "+15551234567",
+                "level":    "high",
+                "flagged":  True,
+                "reasons":  ["seen in 3 criminal marketplace posts (most recent 2026-09-28)"],
+                "signals":  {
+                    "corpus_sightings": {"count": 3, "most_recent": "2026-09-28T14:02:11+00:00"},
+                    "attack_paths":     [],
+                    "sim_swap":         {"checked": True, "swapped": False},
+                    "line_type":        {"checked": True, "line_type": "voip"},
+                },
+                "note": "An absence of flags is not proof of safety.",
+            },
+        },
+    ),
     "/v1/payg/token-security": _bazaar_body_ext(
         input_example={"contract_address": "0x6982508145454ce325ddbe47a25d4ec3d2311933", "chain_id": "1"},
         input_schema={
@@ -11797,6 +11888,13 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "risk level and specific risk flags. The recommended first call for any autonomous "
         "trading or DeFi agent before interacting with a new counterparty wallet."
     ),
+    "/v1/payg/phone-reputation": (
+        "Check whether a phone number appears in criminal marketplace infrastructure or "
+        "pivots to known scam wallets, kits, or actors via RelayShield's threat-intelligence "
+        "corpus, and whether its SIM/eSIM was recently swapped (Twilio Lookup v2, cached "
+        "24h). Returns a high/medium/unknown verdict with timestamped evidence reasons. "
+        "Call before your agent trusts an unknown caller or smishing sender."
+    ),
     "/v1/payg/token-security": (
         "Screen an ERC-20/BEP-20 token contract for honeypot, mintable-supply, hidden-owner, "
         "and other rug-pull risk signals before your agent trades it. Returns risk level, "
@@ -11944,6 +12042,7 @@ PAYG_TAGS: dict[str, list[str]] = {
     # had crypto-forward descriptions live but no tags, so they weren't
     # surfacing in category-based Bazaar discovery.
     "/v1/payg/wallet-risk":         ["defi", "wallet-screening", "crypto-security"],
+    "/v1/payg/phone-reputation":    ["fraud-prevention", "identity-verification", "threat-intelligence"],
     "/v1/payg/token-security":      ["defi", "token-security", "crypto-security"],
     "/v1/payg/nft-security":        ["defi", "nft-security", "crypto-security"],
     "/v1/payg/scan-wallet":         ["defi", "wallet-screening", "crypto-security"],
@@ -12527,6 +12626,7 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/scan-url":              handle_scan_url,
         "/v1/payg/scan-file":             handle_scan_file,
         "/v1/payg/wallet-risk":           handle_wallet_risk,
+        "/v1/payg/phone-reputation":      handle_phone_reputation,
         "/v1/payg/token-security":        handle_token_security,
         "/v1/payg/nft-security":          handle_nft_security,
         "/v1/payg/wallet-screen-batch":   handle_wallet_screen_batch,
@@ -14826,6 +14926,7 @@ ROUTES = {
     "/v1/breach":           handle_breach,
     "/v1/scan-url":         handle_scan_url,
     "/v1/link-check":       handle_link_check,      # keyless, heuristic-only, widget front door
+    "/v1/phone-reputation": handle_phone_reputation_keyless,  # keyless, corpus + attack-graph only (never Twilio)
     "/v1/email-check":      handle_email_check,     # keyless, same scoring model as checkemail@
     "/v1/scan-file":        handle_scan_file,
     "/v1/sim-swap":         handle_sim_swap,

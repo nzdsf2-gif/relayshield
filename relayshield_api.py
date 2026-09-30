@@ -3526,6 +3526,137 @@ def _link_check_urls(params: dict) -> list:
     return [str(u).strip() for u in raw]
 
 
+# ---------------------------------------------------------------------------
+# REDIRECT EXPANSION FOR /v1/link-check  (added 2026-09-30)
+# ---------------------------------------------------------------------------
+# A short link is judged by its DESTINATION, not by bit.ly. Before this, the
+# heuristic below evaluated the submitted URL's domain as-is, so a shortened
+# link to a criminal host came back "unknown" wearing bit.ly's reputation.
+#
+# The resolution reuses relayshield_scamkit_fetch.resolve_redirects -- the
+# same _NoRedirect hop recorder, MAX_REDIRECT_FOLLOWS cap and _host_check
+# SSRF guard as the kit pipeline -- in redirect-only mode (HEAD, falling back
+# to GET-with-immediate-close; no bodies are downloaded). There is exactly
+# one redirect follower in this repo, not two.
+#
+# BOTH the submitted URL and the final destination run the existing
+# heuristic; a flag on either flags the result. A URL whose destination
+# cannot be resolved is INCOMPLETE, never clean: presenting a link we never
+# actually looked at as "nothing known against it" is the one failure this
+# product cannot afford.
+_LINK_CHECK_REDIRECT_BUDGET  = 5.0   # seconds for the whole resolution phase
+_LINK_CHECK_REDIRECT_TIMEOUT = 3.0  # per-request socket timeout while resolving
+
+
+def _resolve_redirects(url: str):
+    """(final_url, chain, error) for one URL. The seam tests patch. Never raises."""
+    try:
+        return _scamkit_fetch.resolve_redirects(
+            url,
+            timeout=_LINK_CHECK_REDIRECT_TIMEOUT,
+            overall_timeout=_LINK_CHECK_REDIRECT_BUDGET,
+        )
+    except Exception as exc:  # resolve_redirects already never raises; belt and braces
+        logger.warning("redirect resolution crashed for %s: %s",
+                       _redact(url, "url"), exc)
+        return url, [], f"resolver error: {type(exc).__name__}"
+
+
+def _resolve_redirects_many(urls: list) -> dict:
+    """{url: (final_url, chain, error)} for a batch, inside one phase budget.
+
+    Same executor discipline as _heuristic_url_check_many: explicit executor,
+    shutdown(wait=False), unfinished futures become incomplete entries rather
+    than silent skips.
+    """
+    out: dict = {}
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=_LINK_CHECK_WORKERS)
+    try:
+        futures = {ex.submit(_resolve_redirects, u): u for u in urls}
+        done, pending = concurrent.futures.wait(
+            futures, timeout=_LINK_CHECK_REDIRECT_BUDGET)
+        for fut in done:
+            u = futures[fut]
+            try:
+                out[u] = fut.result()
+            except Exception as exc:
+                logger.warning("redirect resolution failed for %s: %s",
+                               _redact(u, "url"), exc)
+                out[u] = (u, [], f"resolver error: {type(exc).__name__}")
+        for fut in pending:
+            u = futures[fut]
+            out[u] = (u, [], "redirect resolution timed out")
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    return out
+
+
+def _younger_domain_age(a, b):
+    """The more suspicious of two domain ages: younger wins, None never wins."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
+def _merge_link_assessments(first: dict, second: dict | None,
+                            final_url: str | None) -> dict:
+    """Merge two heuristic assessments: submitted URL and its destination.
+
+    A flag on either flags the result. Reasons from the destination are
+    labelled so a caller can see which hop earned the flag; signals merge by
+    OR, with the younger domain age winning. Pure: both inputs are
+    _heuristic_url_check-shaped dicts, however they were produced.
+    """
+    first = first or {}
+    flagged = bool(first.get("flagged"))
+    reasons = list(first.get("reasons") or [])
+    if second:
+        if second.get("flagged"):
+            flagged = True
+        fdom = _domain_of(final_url) or (final_url or "")
+        reasons.extend(f"final destination ({fdom}): {r}"
+                       for r in (second.get("reasons") or []))
+    s1 = first.get("signals") or {}
+    s2 = (second.get("signals") or {}) if second else {}
+    signals = {
+        "ioc_corpus": bool(s1.get("ioc_corpus")) or bool(s2.get("ioc_corpus")),
+        "safe_browsing": bool(s1.get("safe_browsing")) or bool(s2.get("safe_browsing")),
+        "domain_age_days": _younger_domain_age(s1.get("domain_age_days"),
+                                               s2.get("domain_age_days")),
+    }
+    fams1 = first.get("malware_families") or []
+    fams2 = (second.get("malware_families") or []) if second else []
+    merged_fams = sorted(set(fams1) | set(fams2), key=str.lower)
+    return {"flagged": flagged, "reasons": reasons, "signals": signals,
+            "malware_families": merged_fams}
+
+
+def _link_check_incomplete(url: str, chain: list, err: str) -> dict:
+    """The honest answer when a destination could not be resolved.
+
+    checked=False, level unknown (the ceiling -- never "low", never "safe"),
+    signals UNSET rather than clean, and the reason named. Partial hops stay
+    in the evidence so a caller can see how far resolution got.
+    """
+    return {
+        "target": url,
+        "checked": False,
+        "level": "unknown",
+        "flagged": False,
+        "reasons": [],
+        "signals": {"ioc_corpus": None, "safe_browsing": None,
+                    "domain_age_days": None},
+        "redirect_chain": chain,
+        "final_url": None,
+        "redirect_count": max(0, len(chain) - 1),
+        "note": (_LINK_CHECK_NOTE + " The redirect destination could not be "
+                 f"fully resolved ({err}); this link was NOT fully checked "
+                 "and is not a clean result. Send it again."),
+    }
+
+
 def handle_link_check_batch(params: dict) -> dict:
     """Many URLs, one call, one Safe Browsing request. Added 2026-09-22.
 
@@ -3548,23 +3679,51 @@ def handle_link_check_batch(params: dict) -> dict:
         return _err(f"every url must start with http:// or https://; "
                     f"{len(bad)} did not")
 
-    assessed = _heuristic_url_check_many(urls)
+    # Redirect expansion FIRST: a short link is judged by its destination.
+    # Both the submitted URL and the final destination run the same
+    # zero-cost heuristic below; the many-form dedupes by domain, so feeding
+    # every destination in is cheap -- a hundred short links to three
+    # criminal hosts cost three domains, not a hundred.
+    resolutions = _resolve_redirects_many(urls)
+    expand = []
+    for u in urls:
+        final_url, _rch, _rerr = resolutions.get(u) or (u, [], "no resolution")
+        expand.append(u)
+        if final_url and final_url != u and final_url not in expand:
+            expand.append(final_url)
+    assessed = _heuristic_url_check_many(expand)
 
     results     = []
     incomplete  = []
     for u in urls:
-        a       = assessed.get(u) or {}
-        signals = a.get("signals") or {}
+        final_url, chain, resolve_err = resolutions.get(u) or (u, [], "no resolution")
+        if resolve_err:
+            results.append(_link_check_incomplete(u, chain, resolve_err))
+            incomplete.append(u)
+            continue
+        a_sub = assessed.get(u) or {}
+        a_fin = (assessed.get(final_url) or {}) \
+            if final_url and final_url != u else None
+        if a_sub.get("incomplete") or (a_fin and a_fin.get("incomplete")):
+            # The destination never finished assessing: the submitted URL is
+            # not checkable either. NOT a clean result.
+            results.append(_link_check_incomplete(
+                u, chain, "destination check did not finish in time"))
+            incomplete.append(u)
+            continue
+        merged  = _merge_link_assessments(a_sub, a_fin, final_url)
+        signals = merged["signals"]
         entry   = {
             "target":  u,
+            "checked": True,
             "level":   _link_check_level(signals),
-            "flagged": bool(a.get("flagged")),
-            "reasons": a.get("reasons") or [],
+            "flagged": merged["flagged"],
+            "reasons": merged["reasons"],
             "signals": signals,
+            "redirect_chain": chain,
+            "final_url": final_url,
+            "redirect_count": max(0, len(chain) - 1),
         }
-        if a.get("incomplete"):
-            entry["checked"] = False
-            incomplete.append(u)
         results.append(entry)
 
     source = (params.get("source") or "")[:40]
@@ -3603,28 +3762,39 @@ def handle_link_check(params: dict) -> dict:
         return _err("url is required and must start with http:// or https://, "
                     "or pass urls[] to check several at once")
 
-    heuristics = _heuristic_url_check(url)
-    signals    = heuristics.get("signals") or {}
-    level      = _link_check_level(signals)
+    final_url, chain, err = _resolve_redirects(url)
+    source = (params.get("source") or "")[:40]
+    if err:
+        # The destination could not be resolved: incomplete, never clean.
+        logger.info("link-check url=%s redirect-unresolved err=%s source=%s",
+                    _redact(url, "url"), err, source or "unattributed")
+        return _ok(_link_check_incomplete(url, chain, err))
+
+    first  = _heuristic_url_check(url)
+    second = _heuristic_url_check(final_url) if final_url != url else None
+    merged  = _merge_link_assessments(first, second, final_url)
+    signals = merged["signals"]
+    level   = _link_check_level(signals)
 
     # Which integration this call came from. Free measurement: without it a
     # widget install is indistinguishable from any other keyless caller, and
     # "we cannot measure the channel" is how a front door stays open for four
     # months with nobody knowing (see FRONT_DOORS.md).
-    source = (params.get("source") or "")[:40]
-    logger.info("link-check url=%s level=%s signals=%s source=%s",
-                _redact(url, "url"), level, signals, source or "unattributed")
+    logger.info("link-check url=%s final=%s hops=%d level=%s signals=%s source=%s",
+                _redact(url, "url"), _redact(final_url, "url"),
+                max(0, len(chain) - 1), level, signals, source or "unattributed")
 
     body = {
         "target":  url,
+        "checked": True,
         "level":   level,
-        "flagged": bool(heuristics.get("flagged")),
-        "reasons": heuristics.get("reasons") or [],
+        "flagged": merged["flagged"],
+        "reasons": merged["reasons"],
         "signals": signals,
-        "note":    "Heuristic verdict from RelayShield's IOC corpus, Google Safe "
-                   "Browsing and domain registration age. An absence of flags is "
-                   "not proof of safety. POST /v1/scan-url with an API key adds a "
-                   "multi-engine VirusTotal analysis.",
+        "redirect_chain": chain,
+        "final_url": final_url,
+        "redirect_count": max(0, len(chain) - 1),
+        "note":    _LINK_CHECK_NOTE,
     }
     return _ok(body)
 

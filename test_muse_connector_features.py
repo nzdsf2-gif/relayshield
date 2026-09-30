@@ -93,12 +93,17 @@ class BatchLinkCheck(unittest.TestCase):
             return set(flagged)
         def fake_gsb_exact(urls, key):
             return set(flagged_urls)
+        def identity_resolve(url, *a, **k):
+            # No redirects in these tests: resolution is declared, never
+            # network. test_link_check_redirect.py covers redirect behaviour.
+            return url, [{"url": url, "status": 200}], None
         return (
             unittest.mock.patch.object(api, "_gsb_flagged_domains", fake_gsb),
             unittest.mock.patch.object(api, "_gsb_flagged_exact", fake_gsb_exact),
             unittest.mock.patch.object(api, "_gsb_api_key", lambda: "k"),
             unittest.mock.patch.object(api, "_rdap_registration_age_days", lambda d: None),
             unittest.mock.patch.object(api, "dynamodb", _empty_ddb()),
+            unittest.mock.patch.object(api, "_resolve_redirects", identity_resolve),
         )
 
     def _run(self, params, flagged=(), flagged_urls=()):
@@ -192,7 +197,9 @@ class BatchLinkCheck(unittest.TestCase):
                                         lambda u: {"flagged": False, "reasons": [],
                                                    "signals": {"ioc_corpus": False,
                                                                "safe_browsing": False,
-                                                               "domain_age_days": None}}):
+                                                               "domain_age_days": None}}), \
+             unittest.mock.patch.object(api, "_resolve_redirects",
+                                        lambda u, *a, **k: (u, [{"url": u, "status": 200}], None)):
             d = body(api.handle_link_check({"url": "https://a.com/"}))["data"]
         self.assertEqual(d["target"], "https://a.com/")
         self.assertNotIn("results", d)

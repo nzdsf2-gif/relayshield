@@ -9488,3 +9488,35 @@ built, tested and pushed in the prior turn from the pack's real GitHub source, a
 confirm that source matches what actually ships. It makes no claim about the Marketplace listing or
 Release Notes existing, so nothing in it was invalidated or needed updating now that the listing is
 confirmed -- it was already accurate.
+
+## THE PUBLIC DOCS PAGE IS REAL. THE RELEASE NOTES ENTRY IS STILL NOT, AND THAT IS FINE.
+
+**Same day.** Asked for a URL to search for release notes, and the first thing that came back was
+an AI search engine's synthesized answer (Perplexity, labelled "Researched") rather than a browsed
+page -- treated as a lead, not a fact, per this file's own standing rule for secondary sources (the
+`@app_moderation_bot` mistake was built on exactly this shape of evidence). Two of its three
+"Official links" were general guidance pages about how release notes work, not a dated entry
+naming RelayShield.
+
+**Andrew then navigated directly to `https://xsoar.pan.dev/docs/reference/integrations/relay-shield`
+and it is real.** Re-confirmed from this container that `xsoar.pan.dev` is still egress-blocked
+(identical `connect_rejected` as every earlier attempt), so this had to come from his own browser,
+not from anything reachable here. Its content matches our own extraction from `demisto/content`
+exactly -- same three generic commands, same three RelayShield-specific commands, same "integrated
+and tested with version 1.0" line -- which is independent corroboration from a second source that
+the pack is genuinely published, not merely a claim in one place.
+
+**This is the auto-generated integration REFERENCE doc, not the Release Notes changelog entry
+Moshe promised.** It never claimed to be that, and it isn't. Recommendation, and this is the call:
+**stop here rather than spend another round hunting for the specific dated entry.** The load-bearing
+claim was always "the pack is live and publicly documented," and that is now confirmed twice over --
+the Marketplace listing screenshots, and this docs page. The Release Notes link was the nice-to-have
+third-party proof, not a blocker; it can be added later if it surfaces on its own.
+
+**Both the blog post and the landing-page highlight now link this real URL** rather than the vaguer
+"search your tenant" wording from the prior section -- a verified, direct-navigation URL is strictly
+better than an instruction to go and search for one. `test_developer_signup_banners.py` (7 tests)
+and `test_blog_publish_hygiene.py` both still pass against the new content (the suite's other two
+failures are the pre-existing, unrelated `muse-side-door-connector` and
+`the-boss-scam-whatsapp-account-takeover` em-dash defects spotted in passing the same session,
+recorded above, still not fixed as a drive-by).

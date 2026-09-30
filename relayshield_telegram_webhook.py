@@ -1433,7 +1433,8 @@ def msg_help(tier: str) -> str:
         "*🚨 Threat Analysis*\n"
         "• /otp — Unexpected OTP guidance\n"
         "• /scam — Suspicious message, bot, or call? Get guidance, including what\n"
-        "  to do during a live phone scam (was also /vishing)\n"
+        "  to do during a live phone scam (was also /vishing). Reply with the\n"
+        "  caller's number to check it against our threat-intelligence corpus\n"
         "• /scan — Check a link, message or screenshot. Paste a URL, forward a "
         "suspicious email or SMS, or send a screenshot of one\n"
         "• /infostealer <email> — Check if an email was stolen by malware\n"
@@ -3674,8 +3675,72 @@ def handle_wascam(chat_id: int, reply_markup: dict | None = None) -> None:
         "→ Allow remote access to your device, under any circumstances\n"
         "→ Confirm or correct personal details the caller already seems to know\n\n"
         "*After a suspected call:* run /sweep, which now also signs you out of "
-        "hijacked sessions, then /verify to set your callback rule and safe word.",
+        "hijacked sessions, then /verify to set your callback rule and safe word.\n\n"
+        "📲 *Check the caller's number:* reply with the phone number "
+        "(e.g. +15551234567) and I'll look it up in our criminal "
+        "threat-intelligence corpus — marketplace posts, linked wallets and kits.",
     )
+    # Grouped number check (2026-09-30): no new top-level command. The reply
+    # to this message is intercepted in handle_message via pending_caller_check
+    # and routed to the keyless /v1/phone-reputation endpoint (corpus +
+    # attack-graph, never Twilio).
+    _wascam_user = get_user_by_chat_id(chat_id)
+    if _wascam_user:
+        update_user(_wascam_user["user_id"], {"pending_caller_check": True})
+
+
+_TG_PHONEISH = re.compile(r"^\+?[1-9][\d\s\-().]{6,20}$")
+_TG_KEYLESS_API_BASE = "https://api.relayshield.net"
+
+
+def check_caller_number(chat_id: int, text: str) -> None:
+    """Keyless phone-reputation check for the /scam voice flow.
+
+    Calls POST /v1/phone-reputation (keyless tier: corpus + attack-graph,
+    never Twilio). Never raises, never says safe — mirrors the WhatsApp
+    front-door contract in relayshield_whatsapp_webhook.keyless_check.
+    """
+    target = (text or "").strip()
+    verdict = "We could not complete that check. Treat it as *unchecked*, not as safe."
+    try:
+        req = urllib.request.Request(
+            _TG_KEYLESS_API_BASE + "/v1/phone-reputation",
+            data=json.dumps({"phone": target, "source": "tg-scam-flow"}).encode(),
+            headers={"Content-Type": "application/json",
+                     "User-Agent": "relayshield-tg/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            body = json.loads(resp.read().decode())
+        data = body.get("data") if isinstance(body, dict) and body.get("ok") else None
+        if data:
+            level = str(data.get("level") or "unknown").lower()
+            reasons = data.get("reasons") or []
+            reasons = [str(r) for r in reasons if isinstance(r, str)][:4]
+            heads = {
+                "high":    "⚠️ *High risk.* Do not proceed.",
+                "medium":  "⚠️ *Treat with caution.*",
+                "unknown": "Nothing known against it.",
+            }
+            lines = [heads.get(level, heads["unknown"]), "", target]
+            if reasons:
+                lines.append("")
+                lines.extend("• " + r for r in reasons)
+            if level == "unknown":
+                lines += ["", "_An absence of flags is not proof of safety._"]
+            lines += ["",
+                      "_Free check: criminal-corpus and attack-graph evidence only — "
+                      "no SIM-swap or line-type lookup. The full number check adds those._"]
+            verdict = "\n".join(lines)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            logger.warning("tg caller-number check hit the per-IP cap")
+            verdict = ("We could not check that one right now, the free check is "
+                       "busy. Treat it as *unchecked*, not as safe, and try again shortly.")
+        else:
+            logger.warning("tg caller-number check failed code=%s", exc.code)
+    except Exception as exc:
+        logger.warning("tg caller-number check failed: %s", exc)
+    send_message(chat_id, verdict, parse_mode="Markdown")
 
 
 def handle_extensions(chat_id: int) -> None:
@@ -6874,6 +6939,15 @@ def handle_message(update: dict) -> None:
             return
         _send_free_breach_result(chat_id, email, breaches)
     elif state in ("ACTIVE", "FREE_ACTIVE"):
+        # Grouped caller-number check: the reply to /scam's phone-call
+        # guidance. One-shot — cleared whether or not the text is a number,
+        # so a normal message afterwards routes as usual.
+        if user.get("pending_caller_check") and not (text or "").startswith("/"):
+            update_user(user["user_id"], {"pending_caller_check": None})
+            user["pending_caller_check"] = None
+            if _TG_PHONEISH.match(text or ""):
+                check_caller_number(chat_id, text)
+                return
         route_active_command(chat_id, text, user)
     else:
         send_message(chat_id, "Type /start to begin your setup.")

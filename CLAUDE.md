@@ -9129,3 +9129,28 @@ couple of minutes.
 **STOP IF** the verify line's Action list is missing `dynamodb:Scan` -- IAM propagation can lag a
 few seconds even after a successful `create-policy-version`; wait 30s and re-run only the invoke
 line before treating it as a real second failure.
+
+## THE GRANT SCRIPT'S "ALREADY GRANTED" CHECK WAS FALSE, AND IT SAID SO ON EVERY RUN
+
+**2026-09-30.** The corrected shell script from the section above reported "-- already includes
+Scan. Nothing to do." on its very first real run -- and the Lambda invoke immediately after it
+was STILL denied on the identical action and resource. Those two outputs cannot both be true, and
+they weren't: **the check was substring-matching the whole policy DOCUMENT, not the one STATEMENT
+that actually covers `relayshield_intel_first_seen`.** The role carries ~11 attached managed
+policies; a document covering many tables can easily contain `"dynamodb:Scan"` on some unrelated
+statement while the statement that actually names this table still only has `PutItem`, and a
+whole-document substring search cannot tell those apart. Same defect as the write logic it was
+guarding, one level up: both assumed `Statement[0]` is the only statement that matters.
+
+**Rewritten in Python against boto3** (`tools/grant_weekly_metrics_first_seen_scan.py`, the shell
+version deleted) rather than patched again in shell: it walks every statement of every policy,
+matches a statement only when ITS OWN `Resource` covers the table ARN, checks/merges `Scan` onto
+THAT statement specifically, and -- because a summary is exactly what was wrong here -- prints the
+real document it found and the real document it wrote, never a yes/no verdict standing in for it.
+
+**The general form, and it is the same one this file has recorded for a probe before: a check
+that reports "already done" is a claim, not a fact, until it's shown the specific thing it claims
+to have checked.** A whole-document substring match answers "does this string appear somewhere,"
+which is a different and much weaker question than "does the statement governing this exact
+resource grant this exact action" -- and the difference is invisible until the real call fails
+right next to the check that just said it wouldn't.

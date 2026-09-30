@@ -2498,6 +2498,11 @@ _WA_URLISH = re.compile(
     r"|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?:[/?#]\S*)?)$",
     re.I,
 )
+# Phone-number reputation front door (2026-09-30): a bare phone-looking number
+# routes to the KEYLESS /v1/phone-reputation endpoint — corpus + attack-graph
+# only, never Twilio. Grouped with the voice/phone family (CALL/PHONE/VISHING/
+# SIM): the CALL flow prompts for the caller's number and it lands here.
+_WA_PHONEISH = re.compile(r"^\+?[1-9][\d\s\-().]{6,20}$")
 # One permissive pattern covering EVM, TON friendly and raw, Bitcoin, Solana
 # and XRP. ronin: is stripped because every wallet regex rejects the prefix and
 # the address behind it is ordinary EVM -- a rejected message that should have
@@ -2535,6 +2540,11 @@ def keyless_check(text: str) -> str:
             payload = {"url": "https://" + target}
     elif _WA_ADDRESSISH.match(target):
         path, payload = "/v1/wallet-risk", {"address": target}
+    elif _WA_PHONEISH.match(target):
+        # Phone reputation front door: keyless tier only (corpus + attack-graph,
+        # never Twilio). Server re-validates strict E.164 and 4xx-rejects
+        # anything that only looked phone-ish.
+        path, payload = "/v1/phone-reputation", {"phone": target}
     else:
         return ""
     payload["source"] = KEYLESS_SOURCE
@@ -2591,6 +2601,11 @@ def keyless_check(text: str) -> str:
         lines.extend("• " + r for r in reasons)
     if level in ("low", "unknown"):
         lines += ["", "_An absence of flags is not proof of safety._"]
+    if path == "/v1/phone-reputation":
+        # Keyless/keyed distinction, stated plainly. No "safe" anywhere.
+        lines += ["",
+                  "_Free check: criminal-corpus and attack-graph evidence only — "
+                  "no SIM-swap or line-type lookup. The full number check adds those._"]
     return "\n".join(lines)
 
 
@@ -3174,7 +3189,7 @@ def msg_vishing() -> str:
         "→ Confirm personal details the caller seems to already know\n"
         "→ Act within any time limit they set — urgency is the weapon\n\n"
         "After a suspected call:\n"
-        "→ Reply *CALL* — step-by-step recovery actions\n"
+        "→ Reply *CALL* — step-by-step recovery actions, then check the caller's number\n"
         "→ Reply *SWEEP* — check for inbox backdoors\n"
         "→ Reply *VERIFY* — set up your Callback Rule and Safe Word\n\n"
         "🛡️ RelayShield"
@@ -3197,6 +3212,9 @@ def msg_vishing_call() -> str:
         "→ Your carrier fraud line: AT&T 1-800-331-0500 / T-Mobile 1-877-778-2106 / Verizon 1-800-922-0204\n\n"
         "*Step 4 — Run your Email Security Sweep*\n"
         "Vishing often runs alongside inbox takeover. Reply *SWEEP* to check for backdoors now.\n\n"
+        "*Step 5 — Check the caller's number*\n"
+        "Reply with the phone number that called you (e.g. +15551234567) and I'll look it up "
+        "in our criminal threat-intelligence corpus — marketplace posts, linked wallets and kits.\n\n"
         "— RelayShield"
     )
 
@@ -4211,8 +4229,27 @@ def handle_active_message(
         return "vishing_guide_sent"
 
     # --- CALL (user received a suspicious call) ---
-    if body == "CALL":
+    # Grouped number check: bare CALL sends the vishing guide and arms a
+    # one-shot pending_command, so the user's next message — the caller's
+    # number — arrives as "CALL <number>" and is checked against the keyless
+    # phone-reputation endpoint (corpus + attack-graph, never Twilio). No new
+    # top-level command: this lives inside the existing voice/phone family.
+    if body == "CALL" or body.startswith("CALL "):
+        call_arg = body[4:].strip()
+        if call_arg:
+            verdict = keyless_check(call_arg)
+            if not verdict:
+                send_whatsapp(
+                    to_number,
+                    "That doesn't look like a phone number. Reply with the caller's "
+                    "number in international format, e.g. +15551234567, and I'll check it.",
+                    account_sid, auth_token, from_number,
+                )
+            else:
+                send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)
+            return "caller_number_checked"
         send_whatsapp(to_number, msg_vishing_call(), account_sid, auth_token, from_number)
+        update_user(user_id, {"pending_command": "CALL"})
         return "vishing_call_reported"
 
     # --- VERIFY (personal verification protocol — four rules to set before an attack) ---

@@ -784,6 +784,9 @@ def valid_fingerprint_id(value: str) -> bool:
 # On 2026-09-29 he approved four more from the weekly kit-family loop's
 # proof run: irontoll, wazza, n0va, ghostcode (evidence-backed candidates
 # from September 2026 threat reports).
+# On 2026-10-01 he approved knight-office (Huntress 2026-09-01 report:
+# Flask operator console, Cloudflare Turnstile, token-replay engine;
+# surfaced by the family-discovery loop).
 # They may be emitted with family_status="approved" via family_status_for();
 # every other name stays "suggested". Human review can still set approved
 # manually on any row via a direct table edit — approval logic never
@@ -793,12 +796,14 @@ APPROVED_FAMILIES = frozenset({
     "flowerstorm", "rockstar-2fa", "nakedpages", "w3ll-panel", "greatness",
     "caffeine", "sessionshark", "darcula",
     "irontoll", "wazza", "n0va", "ghostcode",
+    "knight-office",
 })
 
 
 def family_status_for(name: str | None) -> str:
     """``"approved"`` for an Andrew-approved family name, else ``"suggested"``."""
-    return "approved" if (name or "").strip().lower() in APPROVED_FAMILIES else "suggested"
+    norm = re.sub(r"[\s_]+", "-", (name or "").strip().lower())
+    return "approved" if norm in APPROVED_FAMILIES else "suggested"
 
 
 # ---------------------------------------------------------------------------

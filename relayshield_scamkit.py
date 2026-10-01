@@ -781,6 +781,9 @@ def valid_fingerprint_id(value: str) -> bool:
 # Family names — Andrew-approved set
 # ---------------------------------------------------------------------------
 # Andrew approved these 13 FLAME TP-0067 kit family names on 2026-09-25.
+# On 2026-09-29 he approved four more from the weekly kit-family loop's
+# proof run: irontoll, wazza, n0va, ghostcode (evidence-backed candidates
+# from September 2026 threat reports).
 # They may be emitted with family_status="approved" via family_status_for();
 # every other name stays "suggested". Human review can still set approved
 # manually on any row via a direct table edit — approval logic never
@@ -789,6 +792,7 @@ APPROVED_FAMILIES = frozenset({
     "tycoon-2fa", "evilginx", "sneaky-2fa", "mamba-2fa", "evilproxy",
     "flowerstorm", "rockstar-2fa", "nakedpages", "w3ll-panel", "greatness",
     "caffeine", "sessionshark", "darcula",
+    "irontoll", "wazza", "n0va", "ghostcode",
 })
 
 

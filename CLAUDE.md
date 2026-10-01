@@ -9704,3 +9704,63 @@ here. The one cheap check worth doing before fully dismissing it: open its own D
 if it names RelayShield LLC or the same DUNS, that is impersonation worth reporting; if it names
 an unrelated developer, it is an ordinary name collision (Chrome Web Store does not enforce unique
 names) and needs no action at all.
+
+## WHERE 2026-10-01 LEFT THINGS — READ THIS FIRST. ITEM 1 IS TOP PRIORITY FOR THE NEXT SESSION.
+
+**This session**: confirmed the Chrome Web Store listing is live and publicly searchable;
+correctly identified and left alone a duplicate "RelayShield" listing that is not ours (per
+Andrew's own read -- the UI doesn't match anything built in this repo, consistent with no
+manifest or source existing here); registered `?source=chrome-webstore` as its own attribution
+key, distinct from the in-extension `chrome-extension` key, so "found the Store listing" and
+"already installed it" stay separable, per the standing `tg-miniapp-channel` lesson; corrected the
+Mini App route's stale "extension not yet published" state; and decided on In Out Parcel
+(no-monthly-fee virtual mailbox) to keep the home address off the Store's public Trader field,
+over the bigger, paid, unnecessary option of touching the Massachusetts state registered-agent
+record.
+
+**THIS ENTIRE BRANCH (`claude/gallant-heisenberg-x2fnos`) IS STILL UNMERGED, AND `origin/main` HAS
+MOVED ON WITHOUT IT.** `origin/main` is at `f7ab0c4` ("kit families, HEAVYGRAM post, support
+page") and carries NONE of this branch's eight commits -- not the rewritten XSOAR blog post, not
+the corpus-figure correction, not the chrome-webstore source key, not the developers-page XSOAR
+highlight, not the In Out Parcel decision. Both branches have diverged from a common ancestor, so
+the next session's first move is the standard merge block. Per rule A, a conflict in CLAUDE.md
+alone is expected and resolved by KEEPING BOTH SIDES; a conflict in any other file means two
+sessions touched the same code and needs reading, not a reflexive `--ours`.
+
+1. **In Out Parcel. TOP PRIORITY.** Andrew signs up, completes the notarized USPS Form 1583, and
+   updates the Chrome Web Store Developer Dashboard's Trader address field with the issued
+   address. The full three-step procedure is in the section immediately above this one -- nothing
+   here can run without Andrew's own identity, payment and dashboard access, so this is his to
+   execute with the next session only handing over the link and confirming the field update once
+   it's done.
+
+2. **The XSOAR blog post.** Merge this branch to main (brings in
+   `blog_markdown/cortex-xsoar-dbotscore-good.md` plus everything else listed above in one go);
+   the push deploys it automatically via the existing `deploy_blog.yml` pipeline, no separate step
+   needed. Confirm it's actually live at the canonical URL before moving to the rest of the
+   channel order (Medium, dev.to, LinkedIn, etc.) per house convention. The post itself is
+   finished and tested -- `test_blog_publish_hygiene.py` and `test_developer_signup_banners.py`
+   both green against it -- the only remaining step is getting it onto `origin/main`.
+
+**Carried forward from the 2026-09-30 Top 10, re-checked against this session's work:**
+
+- ~~Check the Chrome Web Store review outcome~~ **CLOSED THIS SESSION** -- confirmed live by
+  Andrew's own screenshot.
+- **NEW, blocked on Andrew:** get the actual Store listing URL (extension ID) from the address
+  bar on the listing page, so it can be linked outward from the developers page, blog footer and
+  Mini App -- not guessable, Chrome assigns it at publish time, nowhere in this repo.
+- Confirm `tools/backfill_first_seen.py --apply` was run (dry run measured 661,609 distinct
+  indicators; the write itself is still unconfirmed).
+- Confirm the re-invoked `relayshield-weekly-metrics` produced a complete email with all three new
+  fields.
+- Confirm `support@relayshield.net` is a real, monitored mailbox -- it is now the public support
+  contact on both the live XSOAR pack and the Chrome extension submission.
+- EAS rebuild and republish Crypto Shield Mobile, then have Arjen retry the SOL Token scan that
+  produced the unexplained 400.
+- Confirm `relayshield_breach_cache` was created in DynamoDB.
+- Decide what to do with `origin/claude/gallant-hawking-4oerzg` (unmerged Muse/pricing/OpenAI
+  branch from 2026-09-25).
+- Look at `origin/feature/scam-kit-fingerprinting` -- seen in passing, never opened.
+- Reconcile the stale `494K+ indicators / 115 monitored Telegram marketplaces` copy in
+  `relayshield_developer_signup.py`'s meta tags and `cloudflare_worker_ti_demo.js` against the
+  current, measured figures.

@@ -9680,3 +9680,27 @@ with the real options (switch out of Trader declaration if the EU DSA actually d
 for a free product, or keep Trader status but swap in a registered-agent/virtual-mailbox address
 instead of the home/business address currently on file) rather than acted on, since it's a
 compliance call only he can make.
+
+**DECIDED: In Out Parcel, the no-monthly-fee virtual mailbox ($4.25 per item received, $0
+otherwise).** Andrew agreed to this option specifically, over Anytime Mailbox/iPostal1 (flat
+monthly) and over touching the Massachusetts state registered-agent record (bigger, paid, and
+unnecessary -- the Chrome Web Store's Trader address field is self-entered and does not read from
+the state filing, so fixing it needs no state-level change at all). Deferred to the next session
+to execute, because every remaining step needs ANDREW's own identity and accounts and cannot run
+from this container:
+
+1. **ANDREW signs up at In Out Parcel** and completes USPS Form 1583 (two forms of ID, remote
+   online notarization -- a real step, not instant, budget it its own sitting rather than
+   expecting it inside a single chat round).
+2. **Once approved, ANDREW gets the assigned street address** (e.g. "123 Main St, Suite 456").
+3. **ANDREW updates the Trader address field** in the Chrome Web Store Developer Dashboard to
+   that address, leaving the LLC name and DUNS number unchanged -- neither of those alone
+   discloses the home address, only the address field does.
+
+**The duplicate "RelayShield" listing (broken icon, "manage your RelayShield email aliases") is
+confirmed NOT ours and left alone, per Andrew's own read: the UI doesn't match anything built in
+this repo**, which is consistent with the earlier finding that no manifest or source for it exists
+here. The one cheap check worth doing before fully dismissing it: open its own Developer field --
+if it names RelayShield LLC or the same DUNS, that is impersonation worth reporting; if it names
+an unrelated developer, it is an ordinary name collision (Chrome Web Store does not enforce unique
+names) and needs no action at all.

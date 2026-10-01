@@ -9636,3 +9636,47 @@ snapshot that starts decaying the moment it's written.** `_monitored_marketplace
 before quoting a corpus figure into a new customer-facing surface, check whether this session (or
 a very recent one) already has a fresher live measurement sitting in an email, a tool's output, or
 a just-built function, rather than copying the last string that happened to be in a source file.
+
+## THE STORE LISTING IS LIVE. A NEW SOURCE KEY SEPARATES "FOUND THE LISTING" FROM "ALREADY INSTALLED IT."
+
+**2026-10-01.** Andrew confirmed the Chrome Web Store listing is live and searchable
+(`chromewebstore.google.com/search/RelayShield` shows it with the real icon and description).
+A second, unrelated "RelayShield" listing also appears in that search -- "Manage your RelayShield
+email aliases from any website," broken icon, `Workflow & Planning` category, a generic sign-in
+mockup as its only screenshot. **Nothing in this repo built it.** The only `manifest.json` here is
+`chrome-extension/`'s, which is the scam-check extension. No session's CLAUDE.md record mentions an
+email-alias-manager extension. It predates this repo's tracked history or was never committed here --
+recommended for removal (dead stub, zero installs, confuses the real listing's search placement),
+but the delete itself is Andrew's: a Chrome Web Store removal is not reachable from this container.
+
+**`?source=chrome-webstore` registered in `_SOURCE_BANNERS`**, distinct from the existing
+`chrome-extension` key on purpose -- that key is for someone who ALREADY installed the extension
+clicking its own footer link; this one is for someone who found the Store LISTING and clicked
+through before installing anything. Conflating the two would be the `tg-miniapp-channel` mistake
+again: two different funnel stages sharing one key, so neither number means anything. Unlike the
+extension's service-worker calls, a click from the listing page is an ordinary page navigation, so
+`chromewebstore.google.com` is registered as a real referer host too, not just the explicit param.
+`test_developer_signup_banners.py` (7 tests) still green; checked for key collisions via `ast`
+before adding, per the XSOAR-banner lesson earlier this file.
+
+**THE ACTUAL SUPPORT URL FIELD ON THE LISTING STILL POINTS AT THE WRONG KEY.** Per the 2026-09-28
+record, it was set to `https://api.relayshield.net/developers?source=chrome-extension` -- the
+already-installed key, not the new discovery one. **Fix: change it to
+`?source=chrome-webstore`.** ANDREW CLICKS THIS, in the Developer Dashboard's Store Listing tab.
+
+**`miniapp_routes.json`'s `chromeext` row corrected**: state was still "extension not yet published
+to the Chrome Web Store," stale as of this confirmation. Now reads published and live.
+
+**STILL OPEN, BLOCKED ON INFORMATION ONLY ANDREW HAS:** the actual listing URL (extension ID), so
+it can be linked outward FROM the developers page, blog footer and Mini App. Not guessable --
+Chrome assigns it at publish time and it is nowhere in this repo. Copy it from the address bar on
+the listing page.
+
+**ON THE PUBLIC ADDRESS**: the Trader disclosure (RelayShield LLC, 140 Hidden Rd Andover MA,
+D-U-N-S 149892087) showing on the live listing is the SAME choice the 2026-09-28 session already
+recorded -- "the same address already public via Massachusetts state business registration, a
+knowing choice, not an oversight." Andrew asked again whether to anonymize it; flagged back to him
+with the real options (switch out of Trader declaration if the EU DSA actually doesn't require it
+for a free product, or keep Trader status but swap in a registered-agent/virtual-mailbox address
+instead of the home/business address currently on file) rather than acted on, since it's a
+compliance call only he can make.

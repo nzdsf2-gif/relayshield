@@ -2943,6 +2943,24 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "and lifts the per-IP call cap the extension shares with every keyless "
             "caller. Free tier is 100 calls, no card.")),
     ),
+    "chrome-webstore": (
+        # Distinct from "chrome-extension" on purpose: that key is traffic from
+        # someone who ALREADY installed the extension, clicking its own footer.
+        # This key is someone who found the Store LISTING and clicked through
+        # before installing anything -- a different stage of the funnel, and
+        # merging the two would be the tg-miniapp-channel mistake again: two
+        # different surfaces sharing one key, so neither's number means anything.
+        # The referer host is real here (an ordinary page click, not a service
+        # worker call), unlike chrome-extension.
+        ("chromewebstore.google.com",),
+        _banner("Arriving from the Chrome Web Store listing", _p(
+            "You're looking at the extension before installing it -- or you already "
+            "did and want more. The same checks it runs (link, wallet and email "
+            "screening against our IOC corpus, Google Safe Browsing, RDAP domain age "
+            "and multi-chain wallet risk) are free and keyless from this API too, no "
+            "install required. An API key adds breach and infostealer exposure "
+            "lookups. Free tier is 100 calls, no card.")),
+    ),
     "discord-bot": (
         ("top.gg", "discordbotlist.com", "discord.bots.gg"),
         _banner("Arriving from the RelayShield Discord bot", _p(

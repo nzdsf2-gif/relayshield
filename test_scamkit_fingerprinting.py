@@ -504,9 +504,10 @@ class TestApprovedFamilies(unittest.TestCase):
         "tycoon-2fa", "evilginx", "sneaky-2fa", "mamba-2fa", "evilproxy",
         "flowerstorm", "rockstar-2fa", "nakedpages", "w3ll-panel", "greatness",
         "caffeine", "sessionshark", "darcula",
+        "irontoll", "wazza", "n0va", "ghostcode",
     }
 
-    def test_thirteen_approved_names(self):
+    def test_seventeen_approved_names(self):
         self.assertEqual(set(sk.APPROVED_FAMILIES), self.EXPECTED)
 
     def test_family_status_for(self):

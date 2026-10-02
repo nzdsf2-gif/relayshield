@@ -787,6 +787,9 @@ def valid_fingerprint_id(value: str) -> bool:
 # On 2026-10-01 he approved knight-office (Huntress 2026-09-01 report:
 # Flask operator console, Cloudflare Turnstile, token-replay engine;
 # surfaced by the family-discovery loop).
+# On 2026-10-01 he approved milk-dragon (Group-IB report: AiTM PhaaS kit
+# aka NaiLong, BytePress plugin, real-time 3DS OTP relay; corroborated by
+# Threadlinqs and HuntAegis).
 # They may be emitted with family_status="approved" via family_status_for();
 # every other name stays "suggested". Human review can still set approved
 # manually on any row via a direct table edit — approval logic never
@@ -797,6 +800,7 @@ APPROVED_FAMILIES = frozenset({
     "caffeine", "sessionshark", "darcula",
     "irontoll", "wazza", "n0va", "ghostcode",
     "knight-office",
+    "milk-dragon",
 })
 
 

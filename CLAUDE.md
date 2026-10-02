@@ -9849,3 +9849,18 @@ post until the slug is deliberately dropped.
 
 **Rule: before deleting anything from the repo that looks like a duplicate, check it is not live.**
 `git log --all -S <slug>` plus the last `deploy_blog.yml` run answers it in one read.
+
+## THE XSOAR QUESTION IS POSTED ON PALO ALTO LIVECOMMUNITY. 2026-10-02.
+
+Posted by Andrew to the Cortex XSOAR Discussions board:
+`https://live.paloaltonetworks.com/t5/cortex-xsoar-discussions/should-a-reputation-integration-return-dbotscore-0-unknown-for-a/m-p/1265516#M4277`
+
+* **Framed as a question, not an announcement**: "Should a reputation integration return DBotScore 0
+  (Unknown) for a clean result, never 1 (Good)?", with affiliation disclosed in the first line.
+* **The board's own notice asks only two things**: search first (done, "DBotScore Unknown" and
+  "DBotScore Good reputation integration" both returned nothing on that board) and share nothing
+  private. It says nothing about vendor posts. The full guidelines page was NOT read.
+* **No `?source=` link is in the post, deliberately**, so arrivals from it are NOT attributable and
+  `xsoar-livecommunity` will log nothing. Judge it by replies, not by `source_arrivals.py`. A tagged
+  link goes in a reply only if somebody asks for more detail.
+* **If it is moved or removed**, record the rule the moderator cites here and drop the route.

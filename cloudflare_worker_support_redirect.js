@@ -53,8 +53,8 @@ const HTML = `<!DOCTYPE html>
 
   <h2>What is RelayShield Free Scam Checks?</h2>
   <p>A free set of four read-only tools that screen what you're about to click, pay, or reply to
-  against RelayShield's threat-intelligence corpus: <strong>115 monitored Telegram marketplaces</strong>,
-  <strong>494K+ indicators</strong>, and <strong>7.8M+ citations</strong>. No signup, no API key, no cost.</p>
+  against RelayShield's threat-intelligence corpus: <strong>123 monitored Telegram marketplaces</strong>,
+  <strong>661K+ indicators</strong>, and <strong>8.4M+ citations</strong>. No signup, no API key, no cost.</p>
 
   <div class="card">
     <h3>The four tools</h3>

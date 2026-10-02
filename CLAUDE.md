@@ -9785,8 +9785,9 @@ and with the SPACED and the unspaced spelling.** Merged to `main` at `2a9b04e`.
   duplicate post I wrote earlier the same day was removed. Channel order next: Medium (import
   with canonical, never paste), dev.to (generate the `-devto` file, send with
   `tools/publish_devto.py`), LinkedIn, Telegram, Farcaster, Mastodon.
-* **In Out Parcel sign-up is in progress (Andrew).** Letter Mail Handling choice recommended:
-  Open & Scan. Still to do after approval: the notarized Form 1583, then replace the Trader
+* **In Out Parcel sign-up is in progress (Andrew).** Letter Mail Handling: Andrew chose DO NOT ACCEPT
+  (the address is only on the Chrome listing, so no real mail is expected; changeable up to 3 times a year,
+  so switch to Open & Scan if Google ever sends a verification letter). Still to do after approval: the notarized Form 1583, then replace the Trader
   address in the Developer Dashboard. A CMRA (mailbox) address MAY be refused by Google's
   trader verification; unverified, so the first thing to check if the update is rejected.
 * **Still Andrew's:** Support URL field to `?source=chrome-webstore`; confirm

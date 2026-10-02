@@ -9809,3 +9809,23 @@ and with the SPACED and the unspaced spelling.** Merged to `main` at `2a9b04e`.
   refused, that is the first thing to suspect.
 * The Trader contact email shown on the listing is still unconfirmed as a monitored inbox. If it is
   `support@relayshield.net`, switch it to `relayshieldadmin@gmail.com` for the same reason.
+
+## 2026-10-02 (end): THE CHROME TRADER ADDRESS CANNOT BE CHANGED IN CHROME. IT IS THE D&B RECORD.
+
+Found by following the dashboard rather than guessing. The trader address is **Settings (under
+PUBLISHER) > Account verification**, which reads from the **Google payments profile**. In that
+profile **Organization address is locked to the D-U-N-S record** (Verified Sep 27, 2026) and says
+*"To change your organization's address, contact Dun & Bradstreet."* So the In Out Parcel address
+cannot be entered in Chrome at all.
+
+**Decision (recommended to Andrew, his call): leave 140 Hidden Rd on the listing.** The same address
+is already public via the Massachusetts LLC registration and D&B. A D&B change is slow, and a
+Washington mailbox for a Massachusetts LLC probably will not pass their address proof
+(UNVERIFIED). Declaring non-trader to hide it would misstate a business publisher's status.
+
+In Out Parcel (Do Not Accept, $4.25 only per item) can be ignored. If the address is ever worth
+fighting for, the route is D&B first, then wait for the Google payments profile to resync.
+
+My first two answers about where the trader field lives were wrong (guessed from memory, not
+checked); the real path above came from Andrew's screenshots. The listing also publishes a phone
+number (+1 978 ...) whose source is unclear; the payments profile phone field looked blank.

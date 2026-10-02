@@ -9829,3 +9829,23 @@ fighting for, the route is D&B first, then wait for the Google payments profile 
 My first two answers about where the trader field lives were wrong (guessed from memory, not
 checked); the real path above came from Andrew's screenshots. The listing also publishes a phone
 number (+1 978 ...) whose source is unclear; the payments profile phone field looked blank.
+
+## THE XSOAR CANONICAL 404'd BECAUSE I DELETED A LIVE POST FROM THE REPO. THE DEPLOY GUARD WAS RIGHT.
+
+**2026-10-02.** `deploy_blog.yml` runs 18 and 19 failed with `These posts are live but absent from
+this repo ... what-an-xsoar-playbook-cannot-see-about-an-identity`. That slug was published by run 17
+(commit `560b648`) and is the XSOAR post Andrew saw live. Earlier this session I removed it from the
+repo as "a duplicate I wrote", without checking that it was deployed. The guard refused to deploy
+anything that would delete it, so `cortex-xsoar-dbotscore-good` (the post the channel doc and every
+source key point at) never went live: the canonical 404'd, Medium's importer got "could not access the
+page", and `publish_devto.py` refused to publish.
+
+**Two symptoms, one cause, and the Medium error text was true.** Check the deploy runs before
+diagnosing an importer.
+
+**Fix: the live post is restored to `blog_markdown/` so both ship.** There are now TWO XSOAR posts on
+the blog. Retiring one is a decision for Andrew; the guard will block any deploy that deletes a live
+post until the slug is deliberately dropped.
+
+**Rule: before deleting anything from the repo that looks like a duplicate, check it is not live.**
+`git log --all -S <slug>` plus the last `deploy_blog.yml` run answers it in one read.

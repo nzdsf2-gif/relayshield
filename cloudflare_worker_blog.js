@@ -173,6 +173,14 @@ ${body}
      or a wallet address. The verdict posts straight into that conversation, so
      you can check something in the group where it was shared without adding a
      bot to it or leaving the chat.</p>
+  <!-- Chrome Web Store listing, ADDED 2026-10-02 once the listing was live.
+       The Store assigns the extension id at publish time, so it is read from
+       the live listing's address bar, not derived. -->
+  <p>Prefer to check as you browse? The
+     <a href="https://chromewebstore.google.com/detail/relayshield-link-wallet-e/fjpgbkdoekbmdfcbdpgnepbhaceilpbk">RelayShield
+     Chrome extension</a> checks a link, a wallet address or an email with no
+     signup and no key. It reports what is known, and never says a thing is
+     safe.</p>
   ${WA_NUMBER ? `<p>On WhatsApp instead? <a href="https://wa.me/${WA_NUMBER}?text=SRC_${WA_SOURCE}">Message
      RelayShield there</a> and we will monitor your email, phone and wallets
      for breaches, infostealer logs and SIM-swap attempts, and alert you in

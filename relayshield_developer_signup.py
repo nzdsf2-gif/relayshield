@@ -2475,6 +2475,9 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
     <div style="background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:.85rem 1rem;margin-bottom:1rem;font-size:.85rem">
       <strong style="color:var(--accent)">Elastic Security users:</strong> <span style="color:var(--muted)">RelayShield works with Elastic's built-in <em>Custom Threat Intelligence</em> integration (switch on <em>Enable TAXII 2.1</em>) or its <em>MISP</em> integration, configuration only, no connector to build. Point it at <code>https://api.relayshield.net/v1/intel/taxii/collections/iocs/objects/</code> with <code>Authorization: Bearer YOUR_API_KEY</code>. <a href="https://blog.relayshield.net/elastic-security-threat-intelligence-integration" style="color:var(--accent)">Full step-by-step guide &rarr;</a></span>
     </div>
+    <div style="background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:.85rem 1rem;margin-bottom:1rem;font-size:.85rem">
+      <strong style="color:var(--accent)">Cortex XSOAR &amp; XSIAM users:</strong> <span style="color:var(--muted)">RelayShield ships as a content pack &mdash; install from the Cortex Marketplace inside your tenant, or read the <a href="https://xsoar.pan.dev/docs/reference/integrations/relay-shield" style="color:var(--accent)">integration reference</a> first. It implements the generic <code>domain</code>, <code>ip</code> and <code>email</code> reputation commands, so an existing enrichment playbook picks it up the moment the integration is enabled, plus <code>relayshield-mcp-registry-risk</code>, <code>relayshield-cert-expiry</code> and <code>relayshield-supply-chain</code>. A clean result maps to DBotScore Unknown (0), never Good (1): &quot;no known finding&quot; is not a verified-safe claim. Configuration takes a Server URL and a free-tier API key from this page. <a href="https://blog.relayshield.net/cortex-xsoar-dbotscore-good" style="color:var(--accent)">Why we never set Good &rarr;</a></span>
+    </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;font-size:.85rem">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem">
         <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">GET /v1/intel/taxii/*</div>
@@ -2940,6 +2943,24 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "and lifts the per-IP call cap the extension shares with every keyless "
             "caller. Free tier is 100 calls, no card.")),
     ),
+    "chrome-webstore": (
+        # Distinct from "chrome-extension" on purpose: that key is traffic from
+        # someone who ALREADY installed the extension, clicking its own footer.
+        # This key is someone who found the Store LISTING and clicked through
+        # before installing anything -- a different stage of the funnel, and
+        # merging the two would be the tg-miniapp-channel mistake again: two
+        # different surfaces sharing one key, so neither's number means anything.
+        # The referer host is real here (an ordinary page click, not a service
+        # worker call), unlike chrome-extension.
+        ("chromewebstore.google.com",),
+        _banner("Arriving from the Chrome Web Store listing", _p(
+            "You're looking at the extension before installing it -- or you already "
+            "did and want more. The same checks it runs (link, wallet and email "
+            "screening against our IOC corpus, Google Safe Browsing, RDAP domain age "
+            "and multi-chain wallet risk) are free and keyless from this API too, no "
+            "install required. An API key adds breach and infostealer exposure "
+            "lookups. Free tier is 100 calls, no card.")),
+    ),
     "discord-bot": (
         ("top.gg", "discordbotlist.com", "discord.bots.gg"),
         _banner("Arriving from the RelayShield Discord bot", _p(
@@ -3159,6 +3180,32 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             "answers the other half, which is whether a credential has already surfaced in the "
             "criminal channels and infostealer dumps we collect from. Neither says &quot;safe&quot;: "
             "the ceiling is &quot;nothing known against it&quot;, and the response says so itself.")),
+    ),
+    # Cortex XSOAR content pack post, registered 2026-09-30 BEFORE the post ships.
+    # Same rule every entry above states: an unregistered key logs unmatched: and
+    # renders nothing, which is attribution that looks like it worked.
+    #
+    # NAMED "xsoar-post", NOT "xsoar" -- an "xsoar" key already exists further
+    # down, keyed on referer hosts (xsoar.pan.dev, paloaltonetworks.com,
+    # demisto.com) for arrivals FROM those domains. A dict literal silently lets
+    # a later same-named key overwrite an earlier one, which is exactly the
+    # "two files that must agree with nothing checking that they do" defect
+    # this file warns about repeatedly, just inside one file instead of two.
+    "xsoar-post": (
+        ("cortex-xsoar-dbotscore-good",),
+        _banner("Arriving from the Cortex XSOAR post", _p(
+            "RelayShield ships as a Cortex XSOAR content pack: the generic "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">domain</code>, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">ip</code> and '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">email</code> '
+            "reputation commands, wired into any playbook that already calls them, plus "
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">relayshield-mcp-registry-risk</code>, '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">relayshield-cert-expiry</code> and '
+            '<code style="background:var(--bg);border-radius:5px;padding:.15rem .4rem">relayshield-supply-chain</code>. '
+            "A free-tier API key is all the integration needs to configure. "
+            "A clean result never sets DBotScore to Good, only Unknown: &quot;no known finding&quot; "
+            "means nothing was flagged in the sources we queried, which is not the same claim as "
+            "verified-safe.")),
     ),
     "agent-bait": (
         ("your-agent-reads-the-readme-that-is-the-attack-surface-nobody-scans",
@@ -3690,6 +3737,7 @@ _SOURCE_ALIASES = {
     "rapuncel-farcaster":    "rapuncel",
     "rapuncel-mastodon":     "rapuncel",
     "gitlab-cve-blog":       "gitlab-cve",
+    "xsoar-blog":            "xsoar-post",
     "gitlab-cve-medium":     "gitlab-cve",
     "gitlab-cve-devto":      "gitlab-cve",
     "gitlab-cve-linkedin":   "gitlab-cve",

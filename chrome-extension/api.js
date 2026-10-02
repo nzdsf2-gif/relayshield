@@ -83,30 +83,86 @@ function rsExtractEmbeddedAddress(url) {
   return null;
 }
 
-async function rsCheckLink(url) {
-  const resp = await fetch(`${RS_API_BASE}/v1/link-check`, {
+// v1.1: one call for the whole counterparty. The server fans out to the
+// individual checks and applies riskiest-signal-wins, returning a single
+// level + score with a per-signal breakdown. Keyless like the endpoints it
+// replaces.
+async function rsCheckComposite({ url, wallet, email }) {
+  const body = { source: RS_SOURCE };
+  if (url) body.url = url;
+  if (wallet) body.wallet = wallet;
+  if (email) body.email = email;
+  const resp = await fetch(`${RS_API_BASE}/v1/composite-check`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, source: RS_SOURCE }),
+    body: JSON.stringify(body),
   });
   const json = await resp.json();
   if (!resp.ok || !json.ok) {
-    throw new Error(json.error || `link-check failed (${resp.status})`);
+    throw new Error(json.error || `composite-check failed (${resp.status})`);
   }
   return json.data;
 }
 
-async function rsCheckWallet(address) {
-  const resp = await fetch(`${RS_API_BASE}/v1/wallet-risk`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address, source: RS_SOURCE }),
-  });
-  const json = await resp.json();
-  if (!resp.ok || !json.ok) {
-    throw new Error(json.error || `wallet-risk failed (${resp.status})`);
+// The server's "all clear" placeholder reasons. Filtered so a clean
+// composite renders as "nothing known against it" with the absence-of-
+// evidence note, not as a list of all-clears.
+const RS_NO_FLAGS_RE = /^no (flags found|risk flags|email risk flags)/;
+
+// One entry point for "the user gave me a string, figure out what to check."
+// Replaces rsCheckAny's client-side fan-out: explorer/DEX pages contribute
+// BOTH the page URL and the on-chain address embedded in it, in a single
+// POST, and the server decides the headline. Never guesses past what the
+// two detectors above already decide, and never silently treats "unknown"
+// as "safe" -- the level a clean answer renders is "unknown", not "safe",
+// matching the API's own never-says-safe rule.
+async function rsCheckCounterparty(raw) {
+  const s = raw.trim();
+  if (!s) throw new Error("Paste a link or a wallet address first.");
+
+  let url = null;
+  let wallet = null;
+  let embedded = null;
+  if (rsLooksLikeUrl(s)) {
+    url = s;
+    // Explorer/DEX/aggregator pages put the actual on-chain address IN THE
+    // URL (jup.ag/tokens/<mint>, solscan.io/token/<addr>, ...). Checking
+    // only the domain answers a question nobody asked; the address rides
+    // along in the same composite call.
+    embedded = rsExtractEmbeddedAddress(s);
+    if (embedded) wallet = embedded.address;
+  } else {
+    const chain = rsDetectChain(s);
+    if (chain === "unknown") {
+      throw new Error("That doesn't look like a link (http/https) or a supported wallet address (EVM, Solana, TON, Bitcoin).");
+    }
+    wallet = s;
   }
-  return json.data;
+
+  const data = await rsCheckComposite({ url, wallet });
+
+  // Flatten per-signal reasons. When both signals fired (explorer URL), the
+  // address's reasons are prefixed so a flagged token can't hide behind a
+  // clean domain in the rendered list.
+  const reasons = [];
+  for (const sig of data.signals || []) {
+    const prefix = url && wallet && sig.type === "wallet" ? "Address: " : "";
+    for (const r of (sig && sig.reasons) || []) {
+      const reason = String(r);
+      if (RS_NO_FLAGS_RE.test(reason)) continue;
+      reasons.push(prefix + reason);
+    }
+  }
+
+  return {
+    kind: url ? "link" : "wallet",
+    target: s,
+    level: data.level,
+    score: data.score,
+    reasons,
+    embeddedAddress: embedded ? embedded.address : null,
+    embeddedChain: embedded ? embedded.chain : null,
+  };
 }
 
 // /v1/email-check is built for a caller that has ALREADY PARSED the message
@@ -141,48 +197,6 @@ async function rsCheckEmail({ fromAddress, subject, bodyText }) {
   return json.data;
 }
 
-// Worse wins: a clean domain carrying a flagged token must never render as
-// the clean verdict just because the domain check happened to be listed
-// first. Same ordering the API's own _link_check_level uses.
-const RS_LEVEL_RANK = { high: 3, medium: 2, low: 1, unknown: 0 };
-
-// One entry point for "the user gave me a string, figure out what to check."
-// Never guesses past what the two detectors above already decide, and never
-// silently treats "unknown" as "safe" -- the level a clean answer renders is
-// "unknown", not "safe", matching the API's own never-says-safe rule.
-async function rsCheckAny(raw) {
-  const s = raw.trim();
-  if (!s) throw new Error("Paste a link or a wallet address first.");
-
-  if (rsLooksLikeUrl(s)) {
-    const embedded = rsExtractEmbeddedAddress(s);
-    if (!embedded) {
-      const data = await rsCheckLink(s);
-      return { kind: "link", target: s, level: data.level, reasons: data.reasons || [] };
-    }
-    // Explorer/DEX page: check the domain AND the address it's actually
-    // showing, in parallel, and let the worse of the two decide the headline.
-    const [linkData, walletData] = await Promise.all([
-      rsCheckLink(s),
-      rsCheckWallet(embedded.address),
-    ]);
-    const linkLevel = linkData.level;
-    const walletLevel = (walletData.risk_level || "unknown").toLowerCase();
-    const worse = RS_LEVEL_RANK[walletLevel] > RS_LEVEL_RANK[linkLevel] ? walletLevel : linkLevel;
-    const reasons = [
-      ...(linkData.reasons || []).map((r) => `Domain (${new URL(s).hostname}): ${r}`),
-      ...(walletData.risk_flags || []).map((r) => `${embedded.chain.toUpperCase()} address in the URL: ${r}`),
-    ];
-    return {
-      kind: "link", target: s, level: worse, reasons,
-      embeddedAddress: embedded.address, embeddedChain: embedded.chain,
-    };
-  }
-
-  const chain = rsDetectChain(s);
-  if (chain === "unknown") {
-    throw new Error("That doesn't look like a link (http/https) or a supported wallet address (EVM, Solana, TON, Bitcoin).");
-  }
-  const data = await rsCheckWallet(s);
-  return { kind: "wallet", target: s, level: (data.risk_level || "unknown").toLowerCase(), reasons: data.risk_flags || [] };
-}
+// (The old per-kind rsCheckLink/rsCheckWallet/rsCheckAny client-side fan-out
+// was removed in v1.1: rsCheckCounterparty above is the single entry point,
+// and the server applies riskiest-signal-wins in one call.)

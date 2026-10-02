@@ -29,8 +29,10 @@
  * code span, which legacy Markdown treats as literal. Use .html with
  * parse_mode "HTML" if you prefer.
  *
- * Both endpoints are KEYLESS: no signup, no key, no card for the first call,
- * with a per-IP daily cap rather than a bill. Pass apiKey once you have one:
+ * The composite endpoint (POST /v1/composite-check) is KEYLESS: no signup, no key, no card for the first call,
+ * with a per-IP daily cap rather than a bill. One call carries the URL or
+ * wallet; the server fans out to the individual checks and returns the
+ * riskiest signal wins. Pass apiKey once you have one:
  * https://api.relayshield.net/developers?source=tg-widget
  */
 
@@ -163,12 +165,16 @@ export async function check(target, opts = {}) {
     return new Verdict({ target: String(target ?? "").trim(), kind, ok: true, level: "unknown" });
   }
 
-  const path = kind === "url" ? "/v1/link-check" : "/v1/wallet-risk";
-  const payload = kind === "url" ? { url: normalised, source } : { address: normalised, source };
+  // ONE CALL. The server fans out to the individual checks and applies
+  // riskiest-signal-wins, so the widget no longer needs one path per kind.
+  // The composite is keyless, like the endpoints it replaces.
+  const payload = kind === "url"
+    ? { url: normalised, source }
+    : { wallet: normalised, source };
 
   let body;
   try {
-    body = await (transport || post)(apiBase + path, payload, timeoutMs, apiKey);
+    body = await (transport || post)(apiBase + "/v1/composite-check", payload, timeoutMs, apiKey);
   } catch {
     // Deliberately catch-all. Anything going wrong out here must produce an
     // unchecked verdict rather than an exception in someone else's handler.
@@ -183,19 +189,20 @@ export async function check(target, opts = {}) {
   }
 
   const data = body.data || {};
-  let level;
-  let reasons;
-  if (kind === "url") {
-    level = String(data.level ?? "unknown").toLowerCase();
-    reasons = Array.isArray(data.reasons) ? data.reasons.map(String) : [];
-  } else {
-    level = String(data.risk_level ?? "unknown").toLowerCase();
-    if (level === "clean") level = "low";
-    reasons = Array.isArray(data.risk_flags)
-      ? data.risk_flags.map((f) => String(f).split("_").join(" "))
-      : [];
-  }
+  let level = String(data.level ?? "unknown").toLowerCase();
   if (!LEVELS.has(level)) level = "unknown";
+  // Flatten the per-signal reasons. The server's "no flags" placeholders
+  // would otherwise render as findings on a clean result, so they are
+  // dropped -- a clean composite reads as "nothing known against it" with
+  // the absence-of-evidence caveat, exactly as before.
+  const reasons = [];
+  for (const sig of data.signals || []) {
+    for (const r of (sig && sig.reasons) || []) {
+      const s = String(r);
+      if (/^no (flags found|risk flags|email risk flags)/.test(s)) continue;
+      reasons.push(s);
+    }
+  }
 
   return new Verdict({ target: normalised, kind, ok: true, level, reasons, raw: data });
 }

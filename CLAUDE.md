@@ -9864,3 +9864,29 @@ Posted by Andrew to the Cortex XSOAR Discussions board:
   `xsoar-livecommunity` will log nothing. Judge it by replies, not by `source_arrivals.py`. A tagged
   link goes in a reply only if somebody asks for more detail.
 * **If it is moved or removed**, record the rule the moderator cites here and drop the route.
+
+## XSOAR POST: ALL CHANNELS PUBLISHED. ONE FOLLOW-UP IS OPEN. 2026-10-02.
+
+Andrew confirmed `cortex-xsoar-dbotscore-good` is published on every channel in the plan and the
+canonical now loads (the blog deploy guard was cleared by restoring the live post, see the section
+above). `blog-cortex-xsoar-dbotscore-good-channels.md` is the record of what went where.
+
+### OPEN TODO: FOLLOW UP ON THE LIVECOMMUNITY THREAD
+
+`https://live.paloaltonetworks.com/t5/cortex-xsoar-discussions/should-a-reputation-integration-return-dbotscore-0-unknown-for-a/m-p/1265516#M4277`
+
+**ANDREW, over the next week:**
+1. Check the thread has not been moved or removed. If it was, record the rule the moderator cites in
+   this file and drop the route.
+2. Answer every reply promptly and plainly, disclosing affiliation. A reply is the real result of
+   this post.
+3. Add the tagged link only if somebody asks for more detail:
+   `https://api.relayshield.net/developers?source=xsoar-livecommunity`
+4. **Do not bump the thread.** A follow-up from us with no new reply to answer reads as advertising.
+
+**CLAUDE, next session:** ask for the thread's state (views, replies, moved or removed) BEFORE doing
+anything else on XSOAR, and write the answer here. If a practitioner reports that DBotScore 0 breaks
+a playbook condition, that is a product finding about the pack and goes to the front of the list.
+The mapping lives in the pack's README on `demisto/content`, not in this repo.
+
+**No attribution exists for this post** (no tagged link was included), so no tool will report on it.

@@ -233,6 +233,9 @@ Good for a clean result from a corpus that is not a safelist. Disclose affiliati
 
 Key: `xsoar-livecommunity`.
 
+**POSTED 2026-10-02**: https://live.paloaltonetworks.com/t5/cortex-xsoar-discussions/should-a-reputation-integration-return-dbotscore-0-unknown-for-a/m-p/1265516#M4277
+No tagged link was included, so the key logs nothing; judge by replies.
+
 ---
 
 ## 8. Reddit (optional, strict rules, probably skip)

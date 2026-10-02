@@ -25,9 +25,9 @@ that ships as an artifact rather than a library — `node --check` answers "does
 never "does it run."
 
 **Not yet tested**: an actual context-menu click end-to-end against the live API (background.js's
-`runCheck` → `rsCheckAny` → `fetch`), since that needs a real network call this container can't
+`runCheck` → `rsCheckCounterparty` → `fetch`), since that needs a real network call this container can't
 make to `api.relayshield.net`. The request/response shapes were read directly from
-`relayshield_api.py`'s `handle_link_check` and `handle_wallet_risk` (field names verified, not
+`relayshield_api.py`'s `handle_composite_check` (field names verified, not
 guessed), but load it unpacked and try it against a live link before submitting.
 
 ## Attribution

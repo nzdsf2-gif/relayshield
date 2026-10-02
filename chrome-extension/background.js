@@ -25,7 +25,9 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
 async function runCheck(raw) {
   let result;
   try {
-    result = await rsCheckAny(raw);
+    // v1.1: the right-click check runs through the composite endpoint -- one
+    // call, riskiest signal wins.
+    result = await rsCheckCounterparty(raw);
   } catch (err) {
     notify("Could not check that", err.message || String(err));
     return;

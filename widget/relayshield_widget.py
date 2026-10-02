@@ -11,11 +11,13 @@ is a plain function over stdlib, not a framework integration. Python 3.9+.
 
 WHAT IT CHECKS, AND WHAT IT COSTS
 ---------------------------------
-A URL goes to POST /v1/link-check, which answers immediately from RelayShield's
-criminal IOC corpus, Google Safe Browsing and domain registration age. A wallet
-address goes to POST /v1/wallet-risk, which covers EVM, Solana, TON and Bitcoin.
+One call carries the URL or wallet to POST /v1/composite-check. The server
+fans out to the individual checks (criminal IOC corpus, Google Safe Browsing,
+domain registration age for URLs; multi-chain screening for EVM, Solana, TON
+and Bitcoin wallets) and returns riskiest-signal-wins with a per-signal
+breakdown.
 
-Both are KEYLESS. There is no signup, no key and no card for the first call, and
+It is KEYLESS. There is no signup, no key and no card for the first call, and
 a per-IP daily cap rather than a bill. Pass api_key= once you have one and the
 cap stops applying:
 
@@ -194,14 +196,17 @@ def check(
     if kind == "unsupported":
         return Verdict(target=(target or "").strip(), kind=kind, ok=True, level="unknown")
 
+    # ONE CALL. The server fans out to the individual checks and applies
+    # riskiest-signal-wins, so the widget no longer needs one path per kind.
+    # The composite is keyless, like the endpoints it replaces.
     if kind == "url":
-        path, payload = "/v1/link-check", {"url": normalised, "source": source}
+        payload = {"url": normalised, "source": source}
     else:
-        path, payload = "/v1/wallet-risk", {"address": normalised, "source": source}
+        payload = {"wallet": normalised, "source": source}
 
     post = _transport or _post
     try:
-        body = post(api_base + path, payload, timeout, api_key)
+        body = post(api_base + "/v1/composite-check", payload, timeout, api_key)
     except Exception:
         # Deliberately bare. Anything at all going wrong out here -- DNS, TLS,
         # a proxy, a JSON change -- must produce an unchecked verdict rather
@@ -213,17 +218,20 @@ def check(
                        raw=body if isinstance(body, dict) else {})
 
     data = body.get("data") or {}
-    if kind == "url":
-        level = str(data.get("level") or "unknown").lower()
-        reasons = list(data.get("reasons") or [])
-    else:
-        level = str(data.get("risk_level") or "unknown").lower()
-        if level == "clean":
-            level = "low"
-        reasons = [str(f).replace("_", " ") for f in (data.get("risk_flags") or [])]
-
+    level = str(data.get("level") or "unknown").lower()
     if level not in ("critical", "high", "medium", "low", "unknown"):
         level = "unknown"
+    # Flatten the per-signal reasons. The server's "no flags" placeholders
+    # would otherwise render as findings on a clean result, so they are
+    # dropped -- a clean composite reads as "nothing known against it" with
+    # the absence-of-evidence caveat, exactly as before.
+    reasons = []
+    for sig in (data.get("signals") or []):
+        for r in ((sig or {}).get("reasons") or []):
+            s = str(r)
+            if re.match(r"^no (flags found|risk flags|email risk flags)", s):
+                continue
+            reasons.append(s)
     return Verdict(target=normalised, kind=kind, ok=True, level=level,
                    reasons=reasons, raw=data)
 

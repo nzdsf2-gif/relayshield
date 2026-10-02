@@ -9792,3 +9792,20 @@ and with the SPACED and the unspaced spelling.** Merged to `main` at `2a9b04e`.
   trader verification; unverified, so the first thing to check if the update is rejected.
 * **Still Andrew's:** Support URL field to `?source=chrome-webstore`; confirm
   `support@relayshield.net` is a real inbox.
+
+## 2026-10-02 (later): CHROME LISTING SUPPORT URL AND TRADER ADDRESS DECIDED
+
+* **Support URL: `https://support.relayshield.net/`.** Andrew confirmed it works. It is a full
+  support page (`cloudflare_worker_support_redirect.js`, despite the filename) whose contact is
+  `relayshieldadmin@gmail.com`, deliberately not `support@relayshield.net`, because Cloudflare Email
+  Routing has silently dropped inbound mail before. It replaces the `api.relayshield.net/developers`
+  stopgap. The Chrome Web Store has no `?source=` attribution on this field anymore, so
+  `chrome-webstore` arrivals via the Support URL are not separable; the blog footer link carries
+  the discovery path instead. Andrew's click in the Developer Dashboard.
+* **Trader address (In Out Parcel, issued): 145 Tyee Dr, PMB 59213, Point Roberts, WA 98281.**
+  The In Out account name is "Andrew Gibbs". Andrew typed "PMC"; the account screenshot says
+  **PMB**. Use PMB: mail is matched on the mailbox number. Keep the LLC name and DUNS unchanged.
+  UNVERIFIED: Google may reject a PMB/CMRA address in trader verification. If the update is
+  refused, that is the first thing to suspect.
+* The Trader contact email shown on the listing is still unconfirmed as a monitored inbox. If it is
+  `support@relayshield.net`, switch it to `relayshieldadmin@gmail.com` for the same reason.

@@ -9764,3 +9764,30 @@ sessions touched the same code and needs reading, not a reflexive `--ours`.
 - Reconcile the stale `494K+ indicators / 115 monitored Telegram marketplaces` copy in
   `relayshield_developer_signup.py`'s meta tags and `cloudflare_worker_ti_demo.js` against the
   current, measured figures.
+
+## WHERE 2026-10-02 LEFT THINGS. THE RECORDS EXISTED; THE SEARCH WAS WRONG.
+
+**The In Out Parcel decision, the duplicate-listing disposition and the XSOAR post were all
+committed on `claude/gallant-heisenberg-x2fnos` on 2026-10-01 and were reported as "not recorded
+anywhere" on 2026-10-02.** Two causes, both mine: the search used "InOut" while the record says
+"In Out Parcel", and the branch was unmerged, so `main` carried none of it. **Rule: before any
+claim that something was not recorded, `git fetch --all --prune`, then search with NO pathspec
+and with the SPACED and the unspaced spelling.** Merged to `main` at `2a9b04e`.
+
+* **Chrome Web Store listing is LIVE, v0.2.1.** Extension id `fjpgbkdoekbmdfcbdpgnepbhaceilpbk`,
+  URL `https://chromewebstore.google.com/detail/relayshield-link-wallet-e/fjpgbkdoekbmdfcbdpgnepbhaceilpbk`.
+  Developer RelayShield LLC, trader, DUNS shown. The container's proxy 403s the Web Store, so
+  this is from Andrew's screenshots, not a fetch.
+* **The listing is now linked from the blog footer** (`cloudflare_worker_blog.js`, every page).
+  Executed the Worker rather than only `node --check`: 200, link present. Not yet on the
+  developers page or the Mini App.
+* **XSOAR post `cortex-xsoar-dbotscore-good` is LIVE on the blog**, confirmed by Andrew. A
+  duplicate post I wrote earlier the same day was removed. Channel order next: Medium (import
+  with canonical, never paste), dev.to (generate the `-devto` file, send with
+  `tools/publish_devto.py`), LinkedIn, Telegram, Farcaster, Mastodon.
+* **In Out Parcel sign-up is in progress (Andrew).** Letter Mail Handling choice recommended:
+  Open & Scan. Still to do after approval: the notarized Form 1583, then replace the Trader
+  address in the Developer Dashboard. A CMRA (mailbox) address MAY be refused by Google's
+  trader verification; unverified, so the first thing to check if the update is rejected.
+* **Still Andrew's:** Support URL field to `?source=chrome-webstore`; confirm
+  `support@relayshield.net` is a real inbox.

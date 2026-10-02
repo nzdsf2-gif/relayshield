@@ -766,6 +766,10 @@ KEYLESS_SCAN_ENDPOINTS = frozenset({
     # /v1/link-check above -- no VirusTotal, no per-call vendor bill -- so it
     # is keyless for the same reason.
     "/v1/email-check",
+    # Added 2026-10-01. Fans out to link-check / wallet-risk / email-check
+    # server-side -- same cost profile as the checks it wraps, so keyless
+    # for the same reason; quota counts one unit per supplied input.
+    "/v1/composite-check",
     # Added 2026-09-30. Corpus sightings + attack-graph pivots are internal
     # (DynamoDB, ~zero marginal cost); the Twilio Lookup is keyed-only and
     # never runs on this path. Same per-IP cap rationale as /v1/link-check.
@@ -813,6 +817,15 @@ def _check_keyless_ip_quota(source_ip: str, units: int = 1) -> bool:
 
 def _link_check_units(path: str, params: dict) -> int:
     """How many quota units this request costs. One per URL for a batch."""
+    if path == "/v1/composite-check":
+        # The composite fans out to up to three sub-checks; charging one
+        # unit per supplied input keeps it from becoming a 3-for-1 quota
+        # bypass while staying free for single-input callers.
+        try:
+            n = sum(1 for k in ("url", "wallet", "email") if params.get(k))
+            return max(1, min(n, 3))
+        except Exception:
+            return 1
     if path != "/v1/link-check":
         return 1
     try:
@@ -4254,6 +4267,140 @@ def handle_email_check(params: dict) -> dict:
                  "original sender, and are not scored."),
     }
     return _ok(body)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /v1/composite-check   (KEYLESS)
+# ---------------------------------------------------------------------------
+# Composite counterparty score: one POST taking url / wallet / email (any
+# subset), fanning out to the existing keyless check handlers server-side,
+# returning a single risk score + level + per-signal breakdown.
+#
+# Combination rule: RISKIEST SIGNAL WINS for the top-level level. The score
+# is monotonic in the worst signal:
+#     worst level   base score
+#     high          90
+#     medium        55
+#     unknown       15
+# plus 5 for each ADDITIONAL signal at medium or high (corroboration across
+# independent checks raises confidence), capped at 100. "unknown" signals
+# never corroborate -- unknown means "could not determine", not evidence.
+#
+# Sub-check level mapping (composite levels are only high/medium/unknown):
+#   link-check  -> level as-is
+#   wallet-risk -> HIGH->high, MEDIUM->medium, LOW->unknown
+#   email-check -> risk high->high, medium->medium, low->unknown
+# ("low" is the email scorer's internal grade, not a verdict level; mapping
+# it to unknown keeps the never-below-unknown invariant.)
+#
+# Fail-soft: a sub-check that errors (or returns non-200) becomes an
+# "unknown" signal with the failure noted -- one bad check never kills the
+# composite. A verdict NEVER says "safe"; the best case is "unknown" with
+# per-signal reasons explaining what was (and wasn't) found.
+
+_COMPOSITE_BASE_SCORE = {"high": 90, "medium": 55, "unknown": 15}
+_COMPOSITE_LEVEL_RANK = {"unknown": 0, "medium": 1, "high": 2}
+
+
+def _composite_subcall(handler, sub_params):
+    """Call a sub-check handler; return (True, data) or (False, err_message).
+
+    Handlers return Lambda-proxy dicts (statusCode + JSON body). Never raises.
+    """
+    try:
+        resp = handler(sub_params)
+    except Exception as exc:
+        return False, "sub-check raised %s: %s" % (type(exc).__name__, exc)
+    try:
+        body = json.loads((resp or {}).get("body") or "{}")
+    except Exception:
+        return False, "sub-check returned an unparseable response"
+    if (resp or {}).get("statusCode") == 200 and body.get("ok"):
+        return True, body.get("data") or {}
+    return False, body.get("error") or "sub-check HTTP %s" % (resp or {}).get("statusCode")
+
+
+def _composite_signal_url(url):
+    ok, data = _composite_subcall(handle_link_check, {"url": url})
+    if not ok:
+        return {"type": "url", "target": url, "level": "unknown",
+                "flagged": False, "reasons": ["url check failed: %s" % data]}
+    level = data.get("level")
+    if level not in _COMPOSITE_LEVEL_RANK:
+        level = "unknown"
+    reasons = list(data.get("reasons") or [])
+    if not reasons:
+        reasons = ["no flags found by link check"]
+    return {"type": "url", "target": url, "level": level,
+            "flagged": bool(data.get("flagged")), "reasons": reasons}
+
+
+def _composite_signal_wallet(address):
+    ok, data = _composite_subcall(handle_wallet_risk, {"address": address})
+    if not ok:
+        return {"type": "wallet", "target": address, "level": "unknown",
+                "flagged": False, "reasons": ["wallet check failed: %s" % data]}
+    raw = (data.get("risk_level") or "").upper()
+    level = {"HIGH": "high", "MEDIUM": "medium"}.get(raw, "unknown")
+    flags = data.get("risk_flags") or []
+    reasons = list(flags) if flags else ["no risk flags from wallet screening"]
+    return {"type": "wallet", "target": address, "level": level,
+            "flagged": level == "high",
+            "chain": data.get("chain"), "reasons": reasons}
+
+
+def _composite_signal_email(email_params):
+    ok, data = _composite_subcall(handle_email_check, email_params)
+    if not ok:
+        return {"type": "email", "level": "unknown",
+                "flagged": False, "reasons": ["email check failed: %s" % data]}
+    raw = (data.get("risk") or "").lower()
+    level = {"high": "high", "medium": "medium"}.get(raw, "unknown")
+    reasons = list(data.get("flags") or [])
+    if not reasons:
+        reasons = ["no email risk flags"]
+    return {"type": "email", "level": level,
+            "flagged": level == "high", "reasons": reasons}
+
+
+def handle_composite_check(params: dict) -> dict:
+    """POST /v1/composite-check -- keyless composite counterparty score."""
+    params = params or {}
+    url = (params.get("url") or "").strip()
+    wallet = (params.get("wallet") or "").strip()
+    email_params = params.get("email")
+
+    if email_params is not None and not isinstance(email_params, dict):
+        return _err("email must be an object of email-check fields "
+                    "(from_address, subject, body_text, links, ...)")
+    if not url and not wallet and not email_params:
+        return _err("send at least one of url, wallet or email")
+
+    signals = []
+    if url:
+        signals.append(_composite_signal_url(url))
+    if wallet:
+        signals.append(_composite_signal_wallet(wallet))
+    if email_params:
+        signals.append(_composite_signal_email(email_params))
+
+    worst_rank = max(_COMPOSITE_LEVEL_RANK[s["level"]] for s in signals)
+    level = next(lvl for lvl, rank in _COMPOSITE_LEVEL_RANK.items()
+                 if rank == worst_rank)
+    n_risky = sum(1 for s in signals if _COMPOSITE_LEVEL_RANK[s["level"]] >= 1)
+    score = min(100, _COMPOSITE_BASE_SCORE[level] + 5 * max(0, n_risky - 1))
+
+    logger.info("composite-check signals=%d worst=%s score=%d",
+                len(signals), level, score)
+    return _ok({
+        "level": level,
+        "score": score,
+        "signals": signals,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "note": ("Composite of independent keyless checks; riskiest signal "
+                 "wins. A signal graded unknown means that check could not "
+                 "determine risk, not that the target is clear."),
+    })
 
 
 def _check_ct(domain: str) -> dict:
@@ -15098,6 +15245,7 @@ ROUTES = {
     "/v1/link-check":       handle_link_check,      # keyless, heuristic-only, widget front door
     "/v1/phone-reputation": handle_phone_reputation_keyless,  # keyless, corpus + attack-graph only (never Twilio)
     "/v1/email-check":      handle_email_check,     # keyless, same scoring model as checkemail@
+    "/v1/composite-check":   handle_composite_check,  # keyless, url/wallet/email fan-out
     "/v1/scan-file":        handle_scan_file,
     "/v1/sim-swap":         handle_sim_swap,
     "/v1/domain":           handle_domain,

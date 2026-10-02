@@ -9890,3 +9890,9 @@ a playbook condition, that is a product finding about the pack and goes to the f
 The mapping lives in the pack's README on `demisto/content`, not in this repo.
 
 **No attribution exists for this post** (no tagged link was included), so no tool will report on it.
+
+## NEXT-SESSION REMINDERS, ADDED 2026-10-02 AT ANDREW'S REQUEST
+
+1. **LIVEcommunity XSOAR thread**: ask for its state (moved, removed, replies) BEFORE anything else on XSOAR. Full procedure is in "XSOAR POST: ALL CHANNELS PUBLISHED" above.
+2. **Chrome listing trader info and D&B**: the listing shows a stale stored copy (+1 978-501-3199). The D&B record has a phone typo (339 298-7368, correct is 339 298-7059). D&B editing needs "Verify Now" (director-level identity verification) first. Also open a Chrome Web Store support ticket, because the listing reads a copy taken at Google payments-profile verification, not D&B live. Address change to a mailbox is UNVERIFIED and probably will not pass D&B address proof.
+3. **Big-ticket sequencing decided in conversation 2026-10-02**: send the outreach (`outreach_bot_prospects_curated.md`, batch 2) and submit the Muse connector first (no build), then wire CSM-SIMSWAP-1 plus the platform tag, then Google Play. Splunk (FD-4) stays parked. Mine to be overruled.

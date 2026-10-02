@@ -6561,7 +6561,7 @@ def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
             # IOCs, and _ingest_github_tool_repos which writes a different
             # table). The AWS Marketplace listing's "20+ feeds" was correct all
             # along; this discovery document was the understated one.
-            "description": "RelayShield TAXII 2.1 server. 7.8M+ citations, collected from 113 monitored criminal Telegram marketplaces and 20 authoritative feeds",
+            "description": "RelayShield TAXII 2.1 server. 8.3M+ citations, collected from 123 monitored criminal Telegram marketplaces and 20 authoritative feeds",
             "contact":     "support@relayshield.net",
             # Must be the branded host: a TAXII 2.1 client reads api_roots from
             # this discovery document and follows it for every subsequent
@@ -6598,7 +6598,7 @@ def handle_taxii_discovery(params: dict, api_key_record: dict) -> dict:
 TAXII_COLLECTION = {
     "id":          "iocs",
     "title":       "RelayShield IOCs",
-    "description": "Malicious IPs, domains, URLs, and file hashes from 113 monitored criminal Telegram marketplaces and 20 authoritative threat feeds. 3,800+ malware families tracked.",
+    "description": "Malicious IPs, domains, URLs, and file hashes from 123 monitored criminal Telegram marketplaces and 20 authoritative threat feeds. 3,800+ malware families tracked.",
     "can_read":    True,
     "can_write":   False,
     "media_types": ["application/stix+json;version=2.1"],

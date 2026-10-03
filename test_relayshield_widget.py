@@ -30,12 +30,24 @@ def transport(response, *, raises=None):
     return _t
 
 
+def composite(level, signals=(), score=15):
+    """Builds the /v1/composite-check envelope the widget now consumes."""
+    return {"ok": True, "data": {
+        "level": level, "score": score,
+        "signals": [{"type": t, "target": tgt, "level": lvl, "flagged": lvl == "high",
+                     "reasons": list(reasons)}
+                    for (t, tgt, lvl, reasons) in signals],
+    }}
+
+
 def link(level, reasons=()):
-    return {"ok": True, "data": {"level": level, "reasons": list(reasons)}}
+    return composite(level, [("url", "https://a.example", level, reasons)])
 
 
 def wallet(risk_level, flags=()):
-    return {"ok": True, "data": {"risk_level": risk_level, "risk_flags": list(flags)}}
+    lvl = {"HIGH": "high", "MEDIUM": "medium", "LOW": "unknown",
+           "CLEAN": "unknown"}.get(risk_level, risk_level.lower())
+    return composite(lvl, [("wallet", "0x" + "0" * 40, lvl, flags)])
 
 
 class TestClassify(unittest.TestCase):
@@ -69,17 +81,18 @@ class TestClassify(unittest.TestCase):
 
 
 class TestRouting(unittest.TestCase):
-    def test_url_goes_to_link_check_with_attribution(self):
+    def test_url_goes_to_composite_check_with_attribution(self):
         t = transport(link("high", ["listed"]))
         w.check("https://a.example", _transport=t)
-        self.assertTrue(t.calls[0]["url"].endswith("/v1/link-check"))
+        self.assertTrue(t.calls[0]["url"].endswith("/v1/composite-check"))
         self.assertEqual(t.calls[0]["payload"]["source"], "tg-widget")
+        self.assertEqual(t.calls[0]["payload"]["url"], "https://a.example")
 
-    def test_address_goes_to_wallet_risk(self):
+    def test_address_goes_to_composite_check(self):
         t = transport(wallet("LOW"))
         w.check("0x" + "c" * 40, _transport=t)
-        self.assertTrue(t.calls[0]["url"].endswith("/v1/wallet-risk"))
-        self.assertEqual(t.calls[0]["payload"]["address"], "0x" + "c" * 40)
+        self.assertTrue(t.calls[0]["url"].endswith("/v1/composite-check"))
+        self.assertEqual(t.calls[0]["payload"]["wallet"], "0x" + "c" * 40)
 
     def test_unsupported_makes_no_call(self):
         t = transport(link("high"))
@@ -96,6 +109,20 @@ class TestRouting(unittest.TestCase):
         t = transport(link("unknown"))
         w.check("https://a.example", _transport=t)
         self.assertLessEqual(t.calls[0]["timeout"], 5)
+
+
+class TestCompositeMapping(unittest.TestCase):
+    def test_all_clear_placeholders_are_dropped(self):
+        v = w.check("https://a.example", _transport=transport(
+            composite("unknown", [("url", "https://a.example", "unknown",
+                                   ["no flags found by link check"])])))
+        self.assertEqual(v.reasons, [])
+        self.assertIn("Nothing known against it", v.text)
+
+    def test_signal_reasons_survive(self):
+        v = w.check("https://a.example", _transport=transport(
+            composite("high", [("url", "https://a.example", "high", ["listed in corpus"])])))
+        self.assertIn("listed in corpus", v.reasons)
 
 
 class TestNeverRaises(unittest.TestCase):
@@ -139,21 +166,24 @@ class TestNeverSaysSafe(unittest.TestCase):
 
 
 class TestBlocked(unittest.TestCase):
-    def test_high_and_critical_block(self):
-        for level in ("high", "critical"):
-            self.assertTrue(w.check("https://a.example", _transport=transport(link(level))).blocked)
+    def test_high_blocks(self):
+        v = w.check("https://a.example", _transport=transport(link("high", ["listed"])))
+        self.assertTrue(v.blocked)
 
     def test_medium_warns_but_does_not_block(self):
         self.assertFalse(w.check("https://a.example", _transport=transport(link("medium"))).blocked)
 
-    def test_wallet_clean_maps_to_low(self):
+    def test_wallet_clean_maps_to_unknown_not_low(self):
+        # The composite only ever emits high/medium/unknown; a clean wallet
+        # reads as "nothing known against it", never as a low-risk pass.
         v = w.check("0x" + "d" * 40, _transport=transport(wallet("CLEAN")))
-        self.assertEqual(v.level, "low")
+        self.assertEqual(v.level, "unknown")
         self.assertFalse(v.blocked)
+        self.assertIn("not proof of safety", v.text)
 
     def test_wallet_flags_are_readable(self):
         v = w.check("0x" + "e" * 40,
-                    _transport=transport(wallet("HIGH", ["sanctions_hit", "high_tx_volume"])))
+                    _transport=transport(wallet("HIGH", ["sanctions hit", "high tx volume"])))
         self.assertTrue(v.blocked)
         self.assertIn("sanctions hit", v.reasons)
 

@@ -58,7 +58,8 @@ async function runLinkOrWalletCheck() {
   checkBtn.disabled = true;
   checkBtn.textContent = "Checking…";
   try {
-    const result = await rsCheckAny(input.value);
+    // v1.1: one composite call replaces the per-kind checks.
+    const result = await rsCheckCounterparty(input.value);
     renderLinkOrWallet(result);
   } catch (err) {
     errorEl.textContent = err.message || String(err);
@@ -103,6 +104,12 @@ function renderLinkOrWallet(result) {
     unknown: "Nothing known against it",
   };
   const label = labels[result.level] || result.level;
+  // v1.1: the composite endpoint returns a 0-100 risk score alongside the
+  // level -- surface it so a "caution" with score 55 reads differently from
+  // one with score 95.
+  const scoreHtml = typeof result.score === "number"
+    ? `<div class="note">Composite risk score: ${result.score}/100</div>`
+    : "";
   const reasonsHtml = result.reasons.length
     ? `<ul>${result.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`
     : "";
@@ -119,7 +126,7 @@ function renderLinkOrWallet(result) {
     ? `<div class="note">Also checked the ${result.embeddedChain.toUpperCase()} address in this URL: ${escapeHtml(result.embeddedAddress)}</div>`
     : "";
   resultEl.innerHTML =
-    `<div class="level ${result.level}">${label}</div>${reasonsHtml}${noteHtml}${embeddedHtml}${SHARE_BTN_HTML}`;
+    `<div class="level ${result.level}">${label}</div>${scoreHtml}${reasonsHtml}${noteHtml}${embeddedHtml}${SHARE_BTN_HTML}`;
   // The link/address itself is already public (it's what was just pasted or
   // right-clicked), so it's fine to include in what gets shared -- unlike an
   // email's content below, which is never put in a share message.

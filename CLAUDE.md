@@ -10040,3 +10040,25 @@ repo copy of the TI demo Worker still says 7.8M+ / 115**, and Andrew says the LI
 recently, so the repo copy is the stale one: run `sh tools/recover_live_worker.sh relayshield-ti-demo
 cloudflare_worker_ti_demo.js` before anyone edits or deploys it. `support.relayshield.net` is the
 Support URL on newer submissions (another session built that Worker).
+
+### DECISIONS AND STATE FROM ANDREW, 2026-10-03 (same session, so the next one does not re-ask)
+
+* **Attack chain behind the paywall** (a real upstream cost). Built that way.
+* **v1.6.0 goes to the Solana dApp Store, then HOLD further store updates until real trial or paywall
+  activity exists.** v1.6.0 is the build that makes the SIM swap promise true. The gap this exposes:
+  **nothing measures the paywall funnel**. Stripe sees only COMPLETED trials, so at near-zero volume it
+  cannot say whether nobody sees the paywall or everybody sees it and declines. A no-PII
+  `paywall_viewed` / `checkout_tapped` counter is the next app build, not part of 1.6.0, and needs a
+  Play Data safety / privacy-policy read first.
+* **LIVEcommunity XSOAR thread: still live, no replies** (checked by Andrew 2026-10-03, one day after
+  posting). Do not bump it.
+* **The twelve curated outreach prospects were re-sent to Andrew as a file; he will send them.** Batch 2
+  (`outreach_bot_prospects_batch2.md`) still needs `resolve_prospect_emails.py` run first.
+* **`support.relayshield.net` is the Support URL on newer submissions**, built by another session.
+  `support@relayshield.net` is still the contact in the live XSOAR pack metadata and is unconfirmed.
+* **The 2026-10-03 Lambda health email shows `relayshield-weekly-metrics` "recovered (2 clean runs in
+  48h)"**: the IAM grant fix took. 30 of 31 other scheduled functions are clean.
+* **The monthly intel-keyword routine cannot push**: its sources do not include
+  `nzdsf2-gif/relayshield`, so its commits died with the sandbox. Andrew adds the repo to the routine's
+  sources. Its keyword-yield question is still unanswered and needs
+  `AWS_PROFILE=relayshield python3 tools/triage_channels.py --keywords` on the Mac.

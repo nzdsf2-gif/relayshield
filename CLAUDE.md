@@ -9896,3 +9896,13 @@ The mapping lives in the pack's README on `demisto/content`, not in this repo.
 1. **LIVEcommunity XSOAR thread**: ask for its state (moved, removed, replies) BEFORE anything else on XSOAR. Full procedure is in "XSOAR POST: ALL CHANNELS PUBLISHED" above.
 2. **Chrome listing trader info and D&B**: the listing shows a stale stored copy (+1 978-501-3199). The D&B record has a phone typo (339 298-7368, correct is 339 298-7059). D&B editing needs "Verify Now" (director-level identity verification) first. Also open a Chrome Web Store support ticket, because the listing reads a copy taken at Google payments-profile verification, not D&B live. Address change to a mailbox is UNVERIFIED and probably will not pass D&B address proof.
 3. **Big-ticket sequencing decided in conversation 2026-10-02**: send the outreach (`outreach_bot_prospects_curated.md`, batch 2) and submit the Muse connector first (no build), then wire CSM-SIMSWAP-1 plus the platform tag, then Google Play. Splunk (FD-4) stays parked. Mine to be overruled.
+
+## STATUS UPDATE 2026-10-03, AT ANDREW'S REQUEST
+
+* **Muse connector: ALREADY SUBMITTED** (Andrew). The 2026-10-02 reminder that listed it as a not-yet-done step was wrong; treat it as awaiting their review.
+* **D&B change request SUBMITTED 2026-10-03** for D-U-N-S 149892087: phone corrected to the Google Voice number (339 298-7059) and the contact name replaced with RelayShield Admin. The business address was deliberately NOT changed. D&B says up to 7 days to approve (decision due about 2026-10-10). After approval, open the Chrome Web Store support ticket asking it to re-pull trader info, because the listing shows a copy stored at payments-profile verification.
+* **Outreach sends are UNKNOWN, not "unsent".** The 2026-10-02 claim that the twelve curated prospects were never sent came from finding no record in this repo; nothing records either way. Ask Andrew what was sent before planning outreach.
+
+## ON DECK (TODO): CRYPTO SHIELD MOBILE ON GOOGLE PLAY
+
+Added at Andrew's request 2026-10-03. Sequence agreed 2026-10-02: first wire CSM-SIMSWAP-1 (`enrollSimSwap` posting `/v1/sim-swap/enroll`, ~3 days) so the paywall promise is true, and ship the EAS build that carries `?client_reference_id=solana` (Google Play build tags `googleplay`). Then port. UNVERIFIED: Google Play policy for crypto-adjacent consumer apps and closed-testing requirements; read the Play Console policy pages before committing a week. Measure CS Mobile trial conversion on the Solana dApp Store first, since the weekly report has shown near-zero trials.

@@ -107,23 +107,23 @@ def _run(params, resolutions=None, flagged_domains=()):
 
 class SingleFormRedirects(unittest.TestCase):
     def test_short_url_to_flagged_destination_is_flagged(self):
-        """bit.ly -> evil.example, and GSB flags evil.example: the verdict is
+        """bit.ly -> criminal-host-4731.com, and GSB flags criminal-host-4731.com: the verdict is
         high, and the reason names the final destination, not bit.ly."""
         resolutions = {
             "https://bit.ly/abc": (
-                "https://evil.example/x",
+                "https://criminal-host-4731.com/x",
                 [{"url": "https://bit.ly/abc", "status": 301},
-                 {"url": "https://evil.example/x", "status": 200}],
+                 {"url": "https://criminal-host-4731.com/x", "status": 200}],
                 None),
         }
         d = body(_run({"url": "https://bit.ly/abc"},
-                           resolutions, flagged_domains=("evil.example",)))["data"]
+                           resolutions, flagged_domains=("criminal-host-4731.com",)))["data"]
         self.assertTrue(d["flagged"])
         self.assertEqual(d["level"], "high")
-        self.assertTrue(any("final destination (evil.example)" in r
+        self.assertTrue(any("final destination (criminal-host-4731.com)" in r
                             for r in d["reasons"]),
                         f"destination flag not attributed: {d['reasons']}")
-        self.assertEqual(d["final_url"], "https://evil.example/x")
+        self.assertEqual(d["final_url"], "https://criminal-host-4731.com/x")
         self.assertEqual(d["redirect_count"], 1)
 
     def test_short_url_to_clean_destination_is_unknown_with_chain(self):
@@ -192,8 +192,8 @@ class SingleFormRedirects(unittest.TestCase):
 
     def test_flag_on_submitted_url_still_flags(self):
         """The submitted domain itself flagged: no redirect needed, still high."""
-        d = body(_run({"url": "https://evil.example/landing"},
-                           flagged_domains=("evil.example",)))["data"]
+        d = body(_run({"url": "https://criminal-host-4731.com/landing"},
+                           flagged_domains=("criminal-host-4731.com",)))["data"]
         self.assertTrue(d["flagged"])
         self.assertEqual(d["level"], "high")
 
@@ -202,18 +202,18 @@ class BatchFormRedirects(unittest.TestCase):
     def test_batch_flags_short_url_via_destination(self):
         resolutions = {
             "https://bit.ly/abc": (
-                "https://evil.example/x",
+                "https://criminal-host-4731.com/x",
                 [{"url": "https://bit.ly/abc", "status": 301},
-                 {"url": "https://evil.example/x", "status": 200}],
+                 {"url": "https://criminal-host-4731.com/x", "status": 200}],
                 None),
         }
         d = body(_run({"urls": ["https://bit.ly/abc", "https://ok.example/"]},
-                           resolutions, flagged_domains=("evil.example",)))["data"]
+                           resolutions, flagged_domains=("criminal-host-4731.com",)))["data"]
         by = {x["target"]: x for x in d["results"]}
         self.assertTrue(by["https://bit.ly/abc"]["flagged"])
         self.assertEqual(by["https://bit.ly/abc"]["level"], "high")
         self.assertEqual(by["https://bit.ly/abc"]["final_url"],
-                         "https://evil.example/x")
+                         "https://criminal-host-4731.com/x")
         self.assertEqual(by["https://bit.ly/abc"]["redirect_count"], 1)
         self.assertEqual(by["https://ok.example/"]["level"], "unknown")
         self.assertEqual(d["counts"]["flagged"], 1)
@@ -221,9 +221,9 @@ class BatchFormRedirects(unittest.TestCase):
     def test_batch_chain_evidence_on_every_result(self):
         resolutions = {
             "https://bit.ly/abc": (
-                "https://evil.example/x",
+                "https://criminal-host-4731.com/x",
                 [{"url": "https://bit.ly/abc", "status": 301},
-                 {"url": "https://evil.example/x", "status": 200}],
+                 {"url": "https://criminal-host-4731.com/x", "status": 200}],
                 None),
         }
         d = body(_run({"urls": ["https://bit.ly/abc", "https://ok.example/"]},
@@ -270,17 +270,17 @@ class BatchFormRedirects(unittest.TestCase):
     def test_batch_dedupes_shared_destinations(self):
         """Two short links to one criminal host: one domain assessment."""
         resolutions = {
-            "https://bit.ly/a": ("https://evil.example/1",
+            "https://bit.ly/a": ("https://criminal-host-4731.com/1",
                                  [{"url": "https://bit.ly/a", "status": 301},
-                                  {"url": "https://evil.example/1", "status": 200}],
+                                  {"url": "https://criminal-host-4731.com/1", "status": 200}],
                                  None),
-            "https://bit.ly/b": ("https://evil.example/2",
+            "https://bit.ly/b": ("https://criminal-host-4731.com/2",
                                  [{"url": "https://bit.ly/b", "status": 301},
-                                  {"url": "https://evil.example/2", "status": 200}],
+                                  {"url": "https://criminal-host-4731.com/2", "status": 200}],
                                  None),
         }
         d = body(_run({"urls": ["https://bit.ly/a", "https://bit.ly/b"]},
-                           resolutions, flagged_domains=("evil.example",)))["data"]
+                           resolutions, flagged_domains=("criminal-host-4731.com",)))["data"]
         self.assertEqual(d["counts"]["flagged"], 2)
         self.assertTrue(all(r["checked"] for r in d["results"]))
 
@@ -316,12 +316,12 @@ class ResolverUnit(unittest.TestCase):
 
     def test_follows_chain_and_records_hops(self):
         resolve = self._fake({
-            "https://bit.ly/abc": (301, {"Location": "https://evil.example/x"}),
-            "https://evil.example/x": (200, {}),
+            "https://bit.ly/abc": (301, {"Location": "https://criminal-host-4731.com/x"}),
+            "https://criminal-host-4731.com/x": (200, {}),
         })
         final, chain, err = resolve("https://bit.ly/abc")
         self.assertIsNone(err)
-        self.assertEqual(final, "https://evil.example/x")
+        self.assertEqual(final, "https://criminal-host-4731.com/x")
         self.assertEqual([h["status"] for h in chain], [301, 200])
 
     def test_relative_location_is_resolved(self):

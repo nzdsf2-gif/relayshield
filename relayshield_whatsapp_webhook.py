@@ -91,6 +91,10 @@ PHONE_HASH_INDEX = "phone_hash-index"
 
 import relayshield_sim_swap_consent as simswap_consent
 import relayshield_community_reports as community_reports
+# Corpus cross-correlation for verdicts ("seen in N criminal marketplaces,
+# linked to M wallets, kit family X"). Lazy boto3 inside; packaged via the
+# deploy workflow's transitive relayshield_* import resolution.
+import relayshield_corpus_provenance as _provenance
 
 USERS_TABLE = "relayshield_users"
 MONITORED_EMAILS_TABLE = "relayshield_monitored_emails"
@@ -3849,6 +3853,42 @@ def _wa_remember_scan_for_report(user_id: str, indicator: str,
         logger.warning("WA last_scan stash failed user_id=%s: %s", user_id, exc)
 
 
+def _wa_provenance_suffix(target: str) -> str:
+    """Corpus cross-correlation line for a WhatsApp scan verdict, e.g.::
+
+        📊 Corpus cross-check: Seen in 3 criminal marketplaces · linked to
+        2 wallets · kit family milk-dragon
+
+    Best-effort: returns "" when the corpus knows nothing about the target
+    (or the lookup fails). Tries the full URL, then falls back to the bare
+    domain, since corpus rows key URLs by their complete ioc_value and
+    domains separately.
+    """
+    target = (target or "").strip()
+    if not target:
+        return ""
+    summary = None
+    try:
+        summary = _provenance.corpus_provenance_summary(target, "url").get("summary")
+        if not summary:
+            try:
+                netloc = urllib.parse.urlparse(
+                    target if "://" in target else "https://" + target
+                ).netloc.lower().split("@")[-1].split(":")[0]
+                if netloc.startswith("www."):
+                    netloc = netloc[4:]
+            except Exception:
+                netloc = ""
+            if netloc and netloc != target.strip().lower():
+                summary = _provenance.corpus_provenance_summary(
+                    netloc, "domain").get("summary")
+    except Exception as exc:
+        logger.warning("WA scan provenance lookup failed target=%s: %s",
+                       target[:80], exc)
+        return ""
+    return ("\n\n📊 Corpus cross-check: " + summary) if summary else ""
+
+
 def _wa_report_extras(indicator: str, indicator_type: str) -> str:
     """Labeled demand-side count for a scan verdict. Never verdict-affecting,
     never raises."""
@@ -4461,6 +4501,7 @@ def handle_active_message(
         heuristics = _heuristic_url_check(scan_url)
 
         verdict = build_verdict_response(stats, heuristics, "that URL")
+        verdict += _wa_provenance_suffix(scan_url)
         verdict += _wa_report_extras(scan_url, "url")
         _wa_remember_scan_for_report(user_id, scan_url, "url", "unknown")
         send_whatsapp(to_number, verdict, account_sid, auth_token, from_number)

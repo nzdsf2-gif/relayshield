@@ -99,6 +99,11 @@ import relayshield_phone_reputation as _phone_reputation  # v1: keyed + keyless-
 import relayshield_scamkit
 import relayshield_scamkit_fetch as _scamkit_fetch  # v1b: TLS/redirect/header telemetry (stdlib only)
 
+# Corpus cross-correlation for verdicts ("seen in N criminal marketplaces,
+# linked to M wallets, kit family X"). Lazy boto3 inside; packaged into the
+# deployment zip via the same transitive relayshield_* import resolution.
+import relayshield_corpus_provenance as _provenance
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -4507,6 +4512,76 @@ def handle_email_check(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Endpoint: POST /v1/composite-check   (KEYLESS)
 # ---------------------------------------------------------------------------
+def _composite_signal_domain(target):
+    """Bare domain for a URL target, or '' when it cannot be determined."""
+    try:
+        netloc = urllib.parse.urlparse(target if "://" in target else "https://" + target).netloc.lower()
+        netloc = netloc.split("@")[-1].split(":")[0]
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        return netloc if "." in netloc else ""
+    except Exception:
+        return ""
+
+
+def _composite_lookup_provenance(sig_type, target):
+    """One corpus_provenance entry dict, or None when the corpus knows
+    nothing about the target. Never raises."""
+    try:
+        prov = _provenance.corpus_provenance_summary(target, sig_type)
+    except Exception as exc:
+        logger.warning("composite provenance lookup failed target=%s: %s",
+                       str(target)[:80], exc)
+        return None
+    if not prov.get("summary"):
+        return None
+    return {
+        "type":               sig_type,
+        "target":             target,
+        "sightings_count":    prov["sightings_count"],
+        "markets_seen_count": prov["markets_seen_count"],
+        "market_names":       prov["market_names"],
+        "linked_wallets_count": prov["linked_wallets_count"],
+        "kit_families":       prov["kit_families"],
+        "malware_families":   prov["malware_families"],
+        "summary":            prov["summary"],
+    }
+
+
+def _composite_provenance_entries(url, wallet, email_params):
+    """Per-signal corpus provenance for composite-check.
+
+    Returns a list of provenance entry dicts -- one per input signal that
+    has at least one corpus sighting or family link. Empty list when the
+    corpus knows nothing about any target. Never raises.
+    """
+    entries = []
+    jobs = []
+    if url:
+        jobs.append(("url", url, True))  # allow domain fallback
+    if wallet:
+        jobs.append(("wallet", wallet, False))
+    if isinstance(email_params, dict):
+        from_addr = (email_params.get("from_address") or "").strip()
+        if "@" in from_addr:
+            jobs.append(("email", from_addr.split("@", 1)[1].lower(), False))
+    for sig_type, target, allow_fallback in jobs:
+        entry = _composite_lookup_provenance(sig_type, target)
+        if entry is None and allow_fallback:
+            domain = _composite_signal_domain(target)
+            if domain and domain != target.strip().lower():
+                entry = _composite_lookup_provenance("domain", domain)
+                if entry is not None:
+                    # Keep the original signal type/target for the caller;
+                    # the provenance itself describes the domain rows.
+                    entry = dict(entry, type=sig_type, target=target)
+        if entry is not None:
+            entries.append(entry)
+    return entries
+
+
+# Endpoint: POST /v1/composite-check   (KEYLESS)
+# ---------------------------------------------------------------------------
 # Composite counterparty score: one POST taking url / wallet / email (any
 # subset), fanning out to the existing keyless check handlers server-side,
 # returning a single risk score + level + per-signal breakdown.
@@ -4627,7 +4702,7 @@ def handle_composite_check(params: dict) -> dict:
 
     logger.info("composite-check signals=%d worst=%s score=%d",
                 len(signals), level, score)
-    return _ok({
+    response = {
         "level": level,
         "score": score,
         "signals": signals,
@@ -4635,7 +4710,13 @@ def handle_composite_check(params: dict) -> dict:
         "note": ("Composite of independent keyless checks; riskiest signal "
                  "wins. A signal graded unknown means that check could not "
                  "determine risk, not that the target is clear."),
-    })
+    }
+    # Corpus cross-correlation: per-signal provenance, only when the corpus
+    # actually knows the target (at least one sighting or family link).
+    provenance = _composite_provenance_entries(url, wallet, email_params)
+    if provenance:
+        response["corpus_provenance"] = provenance
+    return _ok(response)
 
 
 def _check_ct(domain: str) -> dict:

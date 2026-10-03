@@ -61,6 +61,10 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
 import relayshield_community_reports as community_reports
+# Corpus cross-correlation for verdicts ("seen in N criminal marketplaces,
+# linked to M wallets, kit family X"). Lazy boto3 inside; packaged via the
+# deploy workflow's transitive relayshield_* import resolution.
+import relayshield_corpus_provenance as _provenance
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -3136,18 +3140,57 @@ def handle_report_callback(chat_id: int, callback_query_id: str) -> None:
                      "Something went wrong filing the report — please try again.")
 
 
+def _provenance_suffix(target: str) -> str:
+    """Corpus cross-correlation line for a scan verdict, e.g.::
+
+        📊 Corpus cross-check: Seen in 3 criminal marketplaces · linked to
+        2 wallets · kit family milk-dragon
+
+    Best-effort: returns "" when the corpus knows nothing about the target
+    (or the lookup fails). Tries the full URL, then falls back to the bare
+    domain, since corpus rows key URLs by their complete ioc_value and
+    domains separately.
+    """
+    target = (target or "").strip()
+    if not target:
+        return ""
+    summary = None
+    try:
+        prov = _provenance.corpus_provenance_summary(target, "url")
+        summary = prov.get("summary")
+        if not summary:
+            try:
+                netloc = urllib.parse.urlparse(
+                    target if "://" in target else "https://" + target
+                ).netloc.lower().split("@")[-1].split(":")[0]
+                if netloc.startswith("www."):
+                    netloc = netloc[4:]
+            except Exception:
+                netloc = ""
+            if netloc and netloc != target.strip().lower():
+                summary = _provenance.corpus_provenance_summary(
+                    netloc, "domain").get("summary")
+    except Exception as exc:
+        logger.warning("scan provenance lookup failed target=%s: %s",
+                       target[:80], exc)
+        return ""
+    return ("\n\n📊 Corpus cross-check: " + summary) if summary else ""
+
+
 def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, prefix: str = "Scan result") -> None:
     """Shared formatting for a scan verdict — used by both the immediate
     handle_scan reply and handle_deferred_url_scan's follow-up, so the two
     messages read consistently."""
     _remember_scan_for_report(chat_id, target, "url", verdict)
     extra_text, extra_markup = _report_extras(target, "url")
+    prov_suffix = _provenance_suffix(target)
     if verdict in ("malicious", "suspicious"):
         send_message(
             chat_id,
             f"⚠️ *{prefix} for* `{target}`\n\n"
             f"{detail}.\n\n"
             "Do not click this link. Report it and delete the message if it was sent to you."
+            f"{prov_suffix}"
             f"{extra_text}",
             parse_mode="Markdown",
             reply_markup=extra_markup,
@@ -3162,6 +3205,7 @@ def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, pre
             "→ Watch for URL shorteners hiding the real destination\n"
             "→ Look for mismatched domains (paypa1.com, g00gle.com)\n\n"
             "Still unsure? Don't click — ask us."
+            f"{prov_suffix}"
             f"{extra_text}",
             parse_mode="Markdown",
             reply_markup=extra_markup,
@@ -3177,6 +3221,7 @@ def _send_scan_verdict(chat_id: int, target: str, verdict: str, detail: str, pre
             "→ Confirm HTTPS, not HTTP\n"
             "→ Be wary of urgent language pushing you to act immediately\n\n"
             "Still unsure? Don't click — ask us."
+            f"{prov_suffix}"
             f"{extra_text}",
             parse_mode="Markdown",
             reply_markup=extra_markup,

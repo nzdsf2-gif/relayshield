@@ -9956,3 +9956,87 @@ Open design point to settle first: the endpoint is $0.50 per call, so decide how
 ### ADDED TO NEXT-SESSION TODOS (item 0, ahead of the list above)
 0. **Wire the production attack-chain call into CS Mobile**, reusing the TI demo's sequenced graph rendering. Find the TI demo
    graph and the deployed call first; replace or feed `AttackChain.tsx`; ships only via EAS build. Fold into the same build as items 4-5.
+
+## SESSION 2026-10-03 (third): CS MOBILE v1.6.0 IS BUILT. THREE PLACES HAD TO AGREE AND NONE COULD SEE THE OTHERS FAIL.
+
+**Asked as "build the EAS for CS M with attack chain sequencing, the SIM swap fix and the Solana
+error fix".** Built and tested; **NOT shipped**: it needs a merge (deploys the API half), then an
+`eas build`, then the dApp Store submission. `app.json` is 1.6.0 / versionCode 6.
+
+**THE ATTACK CHAIN SCREEN CALLS `POST /v1/metered/incident-timeline`, AND THAT ENDPOINT WAS NOT IN
+`CS_MOBILE_ALLOWED_ENDPOINTS`.** A CS Mobile key is scoped to an explicit allowlist, so the call would
+have fallen through to the Stripe meter branch and 402'd for the one audience it is built for, with the
+endpoint's own tests green. Added, and included in the subscription like `/v1/metered/sim-swap`, which
+also carries a real Twilio cost. **Andrew's call: a real cost goes behind the paywall.** The screen is
+absent from `FREE_SCAN_TYPES`. UNVERIFIED: that no per-key cap exists, so watch Twilio and HIBP spend
+once this ships. The in-app reuse of a result is per app session and a courtesy, not a limit.
+
+**THE TI DEMO'S "ATTACK CHAIN" GRAPH AND THE APP'S `AttackChain.tsx` ARE THE SAME CLIENT-SIDE
+HEURISTIC OVER DOMAIN DIMENSIONS.** Neither calls the server. The "JavaScript production call" is
+the incident-timeline endpoint, and the new `IncidentTimeline.tsx` is the first thing in the app that
+uses it. It keeps three states separate: clear, **could not check** (`checked: false`, never rendered as
+clear) and not run (no phone or domain supplied). A test fails if a check that did not complete renders
+as clear or if the screen says an identity is "safe".
+
+**SIM SWAP ENROLMENT NEEDED A SERVER HALF, AND IT WAS THE HALF THAT WOULD HAVE HURT.** Self-enrolment
+is immediate (`enroll(enrollment_type="self")`, no confirm step), so the app flow is: show
+`CARRIER_CONSENT_TEXT` in full, an affirmative acceptance, then `/v1/sim-swap/enroll`. But a number
+enrolled from the app has no WhatsApp session and no Telegram chat. With no `delivery_channels` the
+monitor treats the record as a **legacy WhatsApp record**, so the user would have been watched, messaged
+on a channel they never opted in to, and told nothing on the one surface they have. Fixed three ways:
+
+  * `enroll()` takes `add_delivery_channel`, and the HTTP handler passes `"push"` only for
+    `consent_source == "cs_mobile"`. It ADDS to the list rather than replacing it: overwriting with
+    `["push"]` would silently turn off an existing Telegram user's alerts, and an existing record with no
+    list is written out as `["whatsapp", "push"]` before the new member is added.
+  * the monitor has a push channel (`send_push_alert`), joined on `enrolled_by_account` against the push
+    table's `user_id`, both holding the API key. A user with no registered device is NOT stamped as
+    delivered, so the next cycle retries once the app registers.
+  * a push-only user is skipped for the two WhatsApp follow-ups (predictive and correlation) and for the
+    port-out SMS fallback, which says "Open WhatsApp" and goes to the very number that was just ported.
+
+The app refuses to enrol until a push token is registered, since monitoring that cannot reach the
+user is the failure this exists to avoid. `test_csm_simswap_claims.py` unblocked the copy by detecting
+the enrol call, exactly as written: the Paywall bullet is back, the Settings wording is replaced, and
+the dApp Store listing source (`store-assets/dapp-store-metadata.md`) lists both features.
+**UNVERIFIED from the container:** that the shared role can `dynamodb:Scan` `relayshield_push_tokens`
+(`relayshield_push.py` runs under the same role, so almost certainly), and that Expo accepts a push to
+a token registered on a previous build. SIM swap is **US only** (Twilio approval); the listing says so.
+
+**THE SOLANA 400 IS STILL UNEXPLAINED. THE BUILD MAKES THE NEXT REPORT DIAGNOSTIC.** Errors now read
+`RS API error 400 on /v1/...: <server reason>`, and every call goes through `cleanKey()`, because a
+pasted key with a trailing newline is a malformed header that is rejected before our Lambda runs and
+reaches the user as a bare 400 with an empty body. That is a hypothesis, not a finding.
+
+**Verification actually run:** `test_cs_mobile_timeline_simswap.py` (23 tests, enrolment merge and the
+HTTP handler EXECUTED), nine new push tests in `test_sim_swap_monitor.py` (42 total; four defects
+reintroduced and each fired exactly its own test), and `tsc --noEmit` on the real app in a scratch copy
+with deps installed, proven to catch a deliberate type error first.
+
+**TEN TEST FILES FAIL ON CLEAN `origin/main` AND ARE NOT FROM THIS CHANGE**, found by running the same
+files on a fresh worktree: `test_day3` and `test_phone_reputation` need `boto3`/`pytest` the container
+lacks; `test_blog_publish_hygiene` is the two post-cutoff em-dash posts already recorded;
+**`test_x402_manifest_completeness` fails `33 != 35` and `test_bundle_b_gating` fails `13 != 5` on main,
+which are real drifts**; and `community_reports`, `corpus_provenance`, `langchain_gate`,
+`scamkit_fingerprinting`, `url_malware_attribution` were not investigated.
+
+**BRANCH TRUTH, checked rather than assumed.** `feature/scam-kit-fingerprinting` is merged (0 ahead).
+`claude/laughing-bell-gxagsd` shows 701 ahead but its content is on main (`parse_wa_source` is in the
+webhook), so the count is a history artefact. **`claude/gallant-hawking-4oerzg` is NOT merged and
+conflicts in three files** (`relayshield_api.py`, `relayshield_developer_signup.py`,
+`miniapp_routes.json`); its `tools/setup_partner_key.py`, `test_metered_pricing_landing_page.py` and
+`test_dependency_risk.py` do not exist on main.
+
+**GOOGLE PLAY'S CRYPTO POLICY, from secondary sources only** (`support.google.com` is egress-blocked):
+the 2025 update covers **exchanges and custodial software wallets** and requires licensing in about 15
+jurisdictions (a US MSB or money-transmitter registration, an EU CASP); **non-custodial wallets are
+excluded.** Crypto Shield Mobile holds no funds and moves none, so it most likely falls outside it,
+but "most likely" is an inference to confirm on Play's own page before a week is spent on a port.
+
+**Developers-page meta tags updated** to 660K+ indicators / 8.3M+ citations / 123 channels. 660K is the
+measured 661,609 distinct (2026-09-30), rounded down; 8.3M and 123 are from the weekly metrics email.
+Frozen blog HTML embedded in `relayshield_api.py` keeps the old figures, per the house rule. **The
+repo copy of the TI demo Worker still says 7.8M+ / 115**, and Andrew says the LIVE Worker was updated
+recently, so the repo copy is the stale one: run `sh tools/recover_live_worker.sh relayshield-ti-demo
+cloudflare_worker_ti_demo.js` before anyone edits or deploys it. `support.relayshield.net` is the
+Support URL on newer submissions (another session built that Worker).

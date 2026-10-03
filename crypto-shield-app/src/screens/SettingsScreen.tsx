@@ -11,6 +11,7 @@ import * as RS from "../api/relayshield";
 import { useNFTCollections, NFT_CHAINS, type NFTChain } from "../hooks/useNFTCollections";
 import Constants from "expo-constants";
 import { useUpdateCheck } from "../hooks/useUpdateCheck";
+import { PUSH_TOKEN_KEY } from "../hooks/usePushNotifications";
 
 const EMAILS_STORE = "cs_monitored_emails";
 const MAX_EMAILS   = 3;
@@ -203,20 +204,71 @@ const nft = StyleSheet.create({
   error:      { fontSize: 12, color: "#ef4444", marginTop: 6 },
 });
 
+const SIMSWAP_ENROLLED_STORE = "cs_simswap_enrolled"; // the E.164 number monitoring is on for
+const E164 = /^\+[1-9]\d{7,14}$/;
+
 function PhoneManager() {
+  const { apiKey } = useWallets();
   const [phone, setPhone] = useState("");
   const [saved, setSaved] = useState(false);
+  const [enrolledPhone, setEnrolledPhone] = useState("");
+  const [accepted, setAccepted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
 
   useEffect(() => {
     SecureStore.getItemAsync(PHONE_STORE).then(v => { if (v) setPhone(v); });
+    SecureStore.getItemAsync(SIMSWAP_ENROLLED_STORE).then(v => { if (v) setEnrolledPhone(v); });
   }, []);
 
+  const clean = phone.trim().replace(/\s/g, "");
+
   async function savePhone() {
-    const clean = phone.trim().replace(/\s/g, "");
     if (!clean) return;
     await SecureStore.setItemAsync(PHONE_STORE, clean);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function turnOn() {
+    setMsg("");
+    if (!E164.test(clean)) { setMsg("Enter the number with its country code, e.g. +12125551234."); return; }
+    if (!apiKey) { setMsg("SIM swap monitoring is part of the subscription. Link yours first."); return; }
+    // Monitoring that cannot reach the user is the failure this feature exists
+    // to avoid: the alert is a push notification, so there has to be a device
+    // registered to receive it. usePushNotifications stores the token once the
+    // user has granted notification permission.
+    const token = await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+    if (!token) {
+      setMsg("Allow notifications for Crypto Shield first, so an alert can reach you. Then try again.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await SecureStore.setItemAsync(PHONE_STORE, clean);
+      await RS.enrollSimSwap(clean, apiKey);
+      await SecureStore.setItemAsync(SIMSWAP_ENROLLED_STORE, clean);
+      setEnrolledPhone(clean);
+      setAccepted(false);
+    } catch (e: any) {
+      setMsg(e?.message || "Could not turn on monitoring. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function turnOff() {
+    if (!apiKey || !enrolledPhone) return;
+    setBusy(true); setMsg("");
+    try {
+      await RS.withdrawSimSwap(enrolledPhone, apiKey);
+      await SecureStore.deleteItemAsync(SIMSWAP_ENROLLED_STORE);
+      setEnrolledPhone("");
+    } catch (e: any) {
+      setMsg(e?.message || "Could not turn off monitoring. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -231,20 +283,53 @@ function PhoneManager() {
         keyboardType="phone-pad"
         autoCorrect={false}
       />
-      {/* CSM-SIMSWAP-1. THIS SAID "Used for SIM swap monitoring" AND NOTHING
-          USED IT. The number is written to SecureStore and read by nothing:
-          checkSimSwap() in src/api/relayshield.ts has zero callers, so
-          scan_sim_swap_users() has never had a Crypto Shield Mobile user in its
-          set. A field that tells the user what it is for, and is for nothing,
-          is worse than no field -- they believe they are monitored.
-          The wording is honest until the enrol call ships; at that point this
-          line is replaced by the carrier authorization clause, which
-          enroll(enrollment_type="self") REQUIRES via consent_acknowledged and
-          which a carrier audit rests on. */}
-      <Text style={[em.limitNote, { marginBottom: 6 }]}>Stored on this device only. Must include country code.</Text>
+      <Text style={[em.limitNote, { marginBottom: 6 }]}>
+        Saved on this device. Must include country code. If you turn on SIM swap monitoring
+        below, the number is sent to RelayShield, stored encrypted, and checked with your carrier.
+      </Text>
       <TouchableOpacity style={em.saveBtn} onPress={savePhone}>
         <Text style={em.saveBtnText}>{saved ? "✓ Saved" : "Save Phone Number"}</Text>
       </TouchableOpacity>
+
+      <View style={{ marginTop: 16 }}>
+        <Text style={em.slotLabel}>SIM swap monitoring</Text>
+        {enrolledPhone ? (
+          <>
+            <Text style={[em.limitNote, { fontStyle: "normal", color: "#22c55e" }]}>
+              ✓ On for {enrolledPhone}. If your carrier reports a SIM change or a port-out, you get a
+              notification on this phone.
+            </Text>
+            <TouchableOpacity
+              style={[em.saveBtn, { backgroundColor: "#1e3a5f", opacity: busy ? 0.6 : 1 }]}
+              onPress={turnOff} disabled={busy}
+            >
+              <Text style={[em.saveBtnText, { color: "#e2e8f0" }]}>Turn off monitoring</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            {/* The carrier authorization wording is shown IN FULL and accepted
+                affirmatively before enrol is callable. consent_acknowledged
+                records exactly this, and a carrier audit rests on it. */}
+            <Text style={[em.limitNote, { fontStyle: "normal" }]}>{RS.CARRIER_CONSENT_TEXT}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10 }}>
+              <Switch value={accepted} onValueChange={setAccepted} />
+              <Text style={[em.limitNote, { flex: 1, marginTop: 0, marginLeft: 10, fontStyle: "normal" }]}>
+                This is my own number and I accept the above.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[em.saveBtn, { opacity: accepted && !busy ? 1 : 0.4 }]}
+              onPress={turnOn} disabled={!accepted || busy}
+            >
+              {busy
+                ? <ActivityIndicator color="#0a1628" size="small" />
+                : <Text style={em.saveBtnText}>Turn on SIM swap monitoring</Text>}
+            </TouchableOpacity>
+          </>
+        )}
+        {msg ? <Text style={[em.limitNote, { color: "#f97316", fontStyle: "normal" }]}>⚠ {msg}</Text> : null}
+      </View>
     </View>
   );
 }
@@ -397,10 +482,9 @@ export function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Phone Number</Text>
           <Text style={styles.sectionDesc}>
-            {/* CSM-SIMSWAP-1: said "Used for SIM swap monitoring" over a number
-                that never leaves the device. Honest until the enrol call ships. */}
-            Stored on this device. Enter the phone number associated with your crypto
-            exchange accounts so it is ready when carrier monitoring is enabled.
+            Enter the phone number tied to your crypto exchange accounts. You can turn on SIM swap
+            monitoring for it below: we check your number with your carrier and send a notification
+            if its SIM changes or it is ported out.
           </Text>
           <PhoneManager />
         </View>

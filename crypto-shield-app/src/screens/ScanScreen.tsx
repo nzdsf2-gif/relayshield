@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -7,12 +7,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { RiskGauge } from "../components/RiskGauge";
 import { AttackChain } from "../components/AttackChain";
+import { IncidentTimeline } from "../components/IncidentTimeline";
+import * as SecureStore from "expo-secure-store";
 import { Speedometer } from "../components/Speedometer";
 import { useWallets } from "../hooks/useWallet";
 import * as RS from "../api/relayshield";
 import { FeedbackPrompt, notePositiveMoment } from "../components/FeedbackPrompt";
 
-type ScanType = "domain" | "token" | "sol" | "infostealer" | "airdrop" | "dapp" | "nft" | "nftsecurity" | "ton" | "base" | "bnb" | "xrp";
+type ScanType = "timeline" | "domain" | "token" | "sol" | "infostealer" | "airdrop" | "dapp" | "nft" | "nftsecurity" | "ton" | "base" | "bnb" | "xrp";
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 3000): Promise<T> {
   try {
@@ -42,7 +44,15 @@ const DEMO_AIRDROP_SCAM = {
   },
 };
 
+// The attack-sequence call fans out to several upstream checks, so the same
+// identity is not re-run on every tap. Per app session on purpose: a result
+// that survives a restart could still be showing "no SIM swap" after one.
+const TIMELINE_TTL_MS = 3 * 60 * 60 * 1000;
+const timelineCache = new Map<string, { at: number; data: any }>();
+const PHONE_STORE_KEY = "cs_phone_number"; // written by Settings and Onboarding
+
 const SCAN_TYPES: { key: ScanType; label: string; placeholder: string; icon: string }[] = [
+  { key: "timeline",    label: "Attack Chain",   placeholder: "Your email, e.g. you@example.com",   icon: "⛓" },
   { key: "domain",      label: "Domain Risk",    placeholder: "e.g. acme-corp.com",            icon: "🌐" },
   { key: "token",       label: "EVM Token",      placeholder: "Contract address — e.g. 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (Base USDC)", icon: "🪙" },
   { key: "sol",         label: "SOL Token",      placeholder: "Solana token mint address — e.g. EPjFW...",                                             icon: "◎" },
@@ -103,6 +113,13 @@ export function ScanScreen() {
   const [error, setError] = useState("");
   const [selectedChain, setSelectedChain] = useState("1"); // default Ethereum
   const [showFeedback, setShowFeedback] = useState(false);
+  // Attack Chain takes two optional extras beyond the required email.
+  const [tlPhone, setTlPhone] = useState("");
+  const [tlDomain, setTlDomain] = useState("");
+
+  useEffect(() => {
+    SecureStore.getItemAsync(PHONE_STORE_KEY).then(v => { if (v) setTlPhone(v); }).catch(() => {});
+  }, []);
 
   const current = SCAN_TYPES.find(s => s.key === scanType)!;
   const showChainPicker = (scanType === "token" || scanType === "airdrop" || scanType === "nftsecurity");
@@ -125,6 +142,9 @@ export function ScanScreen() {
         return `Enter a contract address, not a token name.\nEVM: starts with 0x (42 chars) · Solana: base58 string (32–44 chars)\nExample Base USDC: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`;
       }
     }
+    if (scanType === "timeline" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+      return "Enter the email address to check, e.g. you@example.com.";
+    }
     if (scanType === "nftsecurity" && !/^0x[0-9a-fA-F]{40}$/.test(v)) {
       return "Enter a valid EVM contract address — starts with 0x (42 chars). NFT Security only supports EVM chains.";
     }
@@ -146,6 +166,15 @@ export function ScanScreen() {
       const chainId = resolveChainId(addr);
       const data = await withRetry(async () => {
         let d: any;
+        if (scanType === "timeline") {
+          const phone = tlPhone.trim().replace(/\s/g, "");
+          const domain = tlDomain.trim();
+          const cacheKey = `${addr.toLowerCase()}|${phone}|${domain.toLowerCase()}`;
+          const hit = timelineCache.get(cacheKey);
+          if (hit && Date.now() - hit.at < TIMELINE_TTL_MS) return hit.data;
+          d = await RS.getIncidentTimeline(addr, apiKey!, phone || undefined, domain || undefined);
+          timelineCache.set(cacheKey, { at: Date.now(), data: d });
+        }
         if (scanType === "domain")      d = await RS.getIdentityRisk(addr, apiKey);
         if (scanType === "infostealer") d = await RS.checkInfostealer(addr, apiKey);
         if (scanType === "token")       d = await RS.checkTokenRisk(addr, chainId, apiKey);
@@ -239,6 +268,28 @@ export function ScanScreen() {
               autoCorrect={false}
               onSubmitEditing={runScan}
             />
+            {scanType === "timeline" && (
+              <>
+                <TextInput
+                  style={styles.input}
+                  value={tlPhone}
+                  onChangeText={setTlPhone}
+                  placeholder="Phone, optional, e.g. +12125551234 (adds SIM swap)"
+                  placeholderTextColor="#4a7fa5"
+                  keyboardType="phone-pad"
+                  autoCorrect={false}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={tlDomain}
+                  onChangeText={setTlDomain}
+                  placeholder="Your domain, optional, e.g. acme.com (adds lookalike check)"
+                  placeholderTextColor="#4a7fa5"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </>
+            )}
             <TouchableOpacity
               style={[styles.scanBtn, loading && { opacity: 0.6 }]}
               onPress={runScan}
@@ -296,6 +347,10 @@ function riskColor(level: string): string {
 
 function ScanResult({ result }: { result: any }) {
   const { type, data } = result;
+
+  if (type === "timeline") {
+    return <IncidentTimeline data={data} />;
+  }
 
   if (type === "domain") {
     const score  = data.risk_score ?? 0;

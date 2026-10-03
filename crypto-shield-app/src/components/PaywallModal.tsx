@@ -22,13 +22,12 @@ const PLAN_DETAILS = {
       "Breach & infostealer monitoring",
       "Address poisoning sweep",
       "Real-time wallet risk scoring",
-      // "SIM swap monitoring" WAS HERE AND IS REMOVED UNTIL IT WORKS.
-      // CSM-SIMSWAP-1: the app collects the phone number, labels it "Used for
-      // SIM swap monitoring" and never sends it -- checkSimSwap() in
-      // src/api/relayshield.ts has zero callers -- so nobody buying this plan
-      // was ever enrolled. Selling a feature that enrols nobody is the one part
-      // of that gap that is not merely missing but PAID FOR.
-      // Put it back in the same commit that ships the enrol call.
+      // Restored 2026-10-03 in the same commit that ships the enrol call
+      // (CSM-SIMSWAP-1): Settings posts /v1/sim-swap/enroll and the monitor
+      // delivers over Expo push. test_csm_simswap_claims.py unblocks this
+      // line by detecting that call, not by a date.
+      "SIM swap monitoring with push alerts",
+      "Attack chain sequencing",
     ],
   },
   ti: {

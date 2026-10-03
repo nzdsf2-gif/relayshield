@@ -25,6 +25,11 @@ function transport(response, { throws = null } = {}) {
 
 const link = (level, reasons = []) => ({ ok: true, data: { level, reasons } });
 const wallet = (risk_level, risk_flags = []) => ({ ok: true, data: { risk_level, risk_flags } });
+// The widget makes ONE call to the composite endpoint; the server fans out and
+// returns the riskiest signal wins. Fixtures below mirror that shape.
+const composite = (level, reasons = []) => ({
+  ok: true, data: { level, signals: [{ name: "test-signal", reasons }] },
+});
 
 test("classify: urls, bare domains, addresses, prose", () => {
   for (const raw of ["https://a.example/x", "http://a.example", "a.example.com/path"]) {
@@ -52,16 +57,27 @@ test("classify: ronin prefix is normalised, not rejected", () => {
   assert.equal(norm, "0x" + "b".repeat(40));
 });
 
-test("routing: url to link-check with attribution, address to wallet-risk", async () => {
-  const t1 = transport(link("high", ["listed"]));
-  await check("https://a.example", { transport: t1 });
-  assert.ok(t1.calls[0].url.endsWith("/v1/link-check"));
+test("routing: one composite call for urls and wallets, with attribution", async () => {
+  const t1 = transport(composite("high", ["listed"]));
+  const v1 = await check("https://a.example", { transport: t1 });
+  assert.ok(t1.calls[0].url.endsWith("/v1/composite-check"));
+  assert.equal(t1.calls[0].payload.url, "https://a.example");
   assert.equal(t1.calls[0].payload.source, SOURCE);
   assert.equal(t1.calls[0].url.startsWith(API_BASE), true);
+  assert.equal(v1.level, "high");
+  assert.ok(v1.reasons.includes("listed"));
 
-  const t2 = transport(wallet("LOW"));
-  await check("0x" + "c".repeat(40), { transport: t2 });
-  assert.ok(t2.calls[0].url.endsWith("/v1/wallet-risk"));
+  const t2 = transport(composite("low"));
+  const v2 = await check("0x" + "c".repeat(40), { transport: t2 });
+  assert.ok(t2.calls[0].url.endsWith("/v1/composite-check"));
+  assert.equal(t2.calls[0].payload.wallet, "0x" + "c".repeat(40));
+  assert.equal(v2.level, "low");
+
+  // The server's "no flags" placeholders must not render as findings.
+  const t3 = transport(composite("low", ["no flags found"]));
+  const v3 = await check("https://a.example", { transport: t3 });
+  assert.equal(v3.reasons.length, 0);
+  assert.match(v3.text, /not proof of safety/);
 });
 
 test("routing: unsupported input makes no call", async () => {
@@ -126,11 +142,12 @@ test("blocked: high and critical block, medium warns", async () => {
   assert.equal(med.blocked, false);
 });
 
-test("wallet: CLEAN maps to low, flags are readable", async () => {
-  const clean = await check("0x" + "d".repeat(40), { transport: transport(wallet("CLEAN")) });
+test("wallet: composite levels map through, signal reasons are readable", async () => {
+  const clean = await check("0x" + "d".repeat(40), { transport: transport(composite("low")) });
   assert.equal(clean.level, "low");
+  assert.match(clean.text, /not proof of safety/);
   const hit = await check("0x" + "e".repeat(40), {
-    transport: transport(wallet("HIGH", ["sanctions_hit", "high_tx_volume"])),
+    transport: transport(composite("high", ["sanctions hit", "high tx volume"])),
   });
   assert.equal(hit.blocked, true);
   assert.ok(hit.reasons.includes("sanctions hit"));

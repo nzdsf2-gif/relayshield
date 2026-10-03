@@ -1,0 +1,518 @@
+/**
+ * verify.relayshield.net — public rsr1 verdict-receipt verifier.
+ *
+ * Served by the "relayshield-receipt-verify" worker
+ * (wrangler.receipt-verify.toml), route verify.relayshield.net/*.
+ *
+ * The page is fully static: paste a receipt + public key and the Ed25519
+ * signature is checked in the visitor's browser. Nothing pasted is ever
+ * sent anywhere. The HTML below is GENERATED from verify_receipt.html --
+ * edit that file and re-run tools/build_receipt_verify_worker.py.
+ */
+
+const HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verify a Verdict Receipt — RelayShield</title>
+<meta name="description" content="Independently verify a RelayShield signed verdict receipt (rsr1) in your browser. Cryptographic proof of what was checked and what was answered — without trusting RelayShield.">
+<style>
+:root{--bg:#0d0f14;--surface:#161a23;--border:#252b38;--text:#e8ecf4;--muted:#98a2b8;--accent:#6c63ff;--accent2:#00B5A5;--green:#22c55e;--red:#ef4444;--amber:#f59e0b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:880px;margin:0 auto;padding:0 22px}
+header{border-bottom:1px solid var(--border);padding:1rem 0;position:sticky;top:0;background:rgba(13,15,20,.94);backdrop-filter:blur(8px);z-index:5}
+header .wrap{display:flex;align-items:center;justify-content:space-between}
+.brand{font-weight:700;color:var(--text);font-size:1rem}.brand span{color:var(--accent)}
+nav a{color:var(--muted);font-size:.9rem;margin-left:1.1rem}
+.hero{padding:2.6rem 0 1.2rem}
+.hero h1{font-size:1.9rem;margin:0 0 .6rem;line-height:1.3}
+.hero h1 .shield{color:var(--accent2)}
+.hero p{color:var(--muted);margin:.4rem 0;max-width:640px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.4rem 1.5rem;margin:1.2rem 0}
+.card h2{margin:0 0 .8rem;font-size:1.15rem}
+label{display:block;font-weight:600;font-size:.92rem;margin:1rem 0 .4rem}
+.hint{color:var(--muted);font-size:.85rem;font-weight:400}
+textarea{width:100%;min-height:170px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;line-height:1.55;padding:.8rem .9rem;resize:vertical}
+textarea:focus{outline:none;border-color:var(--accent)}
+input[type=text]{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;padding:.65rem .8rem}
+input[type=text]:focus{outline:none;border-color:var(--accent)}
+.btnrow{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1.1rem}
+button{cursor:pointer;border:0;border-radius:8px;font-weight:600;font-size:.95rem;padding:.7rem 1.4rem}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#5a52e0}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--muted)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--text)}
+.btn-ghost:disabled{opacity:.5;cursor:default}
+#result{display:none;margin-top:1.2rem;border-radius:10px;padding:1.3rem 1.5rem;border:1px solid var(--border)}
+#result.valid{border-color:var(--green);background:rgba(34,197,94,.07)}
+#result.invalid{border-color:var(--red);background:rgba(239,68,68,.07)}
+#result.unsigned,#result.no-key{border-color:var(--amber);background:rgba(245,158,11,.07)}
+#result.malformed{border-color:var(--border)}
+#result .badge{display:inline-block;font-weight:700;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;padding:.25rem .7rem;border-radius:20px;margin-bottom:.6rem}
+#result.valid .badge{background:var(--green);color:#06240f}
+#result.invalid .badge{background:var(--red);color:#2b0606}
+#result.unsigned .badge,#result.no-key .badge{background:var(--amber);color:#2b1a02}
+#result.malformed .badge{background:var(--border);color:var(--muted)}
+#result h3{margin:.2rem 0 .5rem;font-size:1.25rem}
+#result p{margin:.4rem 0;color:var(--text)}
+#result .sub{color:var(--muted);font-size:.9rem}
+details{margin-top:1rem;border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+summary{cursor:pointer;padding:.7rem 1rem;font-weight:600;font-size:.9rem;color:var(--muted)}
+summary:hover{color:var(--text)}
+.tech{padding:0 1rem 1rem;font-size:.85rem}
+.tech dl{display:grid;grid-template-columns:150px 1fr;gap:.35rem .8rem;margin:0}
+.tech dt{color:var(--muted);font-weight:600}
+.tech dd{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem;word-break:break-all}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.9rem 1rem;overflow-x:auto;font-size:.78rem;line-height:1.55;margin:.6rem 0 0}
+pre code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.how ol{margin:.4rem 0;padding-left:1.4rem;color:var(--muted)}
+.how li{margin:.5rem 0}
+.how li strong{color:var(--text)}
+.faq h3{font-size:1rem;margin:1.1rem 0 .3rem}
+.faq p{color:var(--muted);margin:.2rem 0 .8rem;font-size:.93rem}
+.warn{border-left:3px solid var(--amber);padding:.2rem 0 .2rem 1rem;color:var(--muted);font-size:.92rem;margin:.8rem 0}
+footer{border-top:1px solid var(--border);padding:2rem 0 3rem;color:var(--muted);font-size:.85rem;margin-top:2.5rem}
+footer a{color:var(--muted);text-decoration:underline}
+.kv{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.pill{font-size:.75rem;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:.1rem .6rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a class="brand" href="https://blog.relayshield.net">Relay<span>Shield</span></a>
+    <nav>
+      <a href="https://blog.relayshield.net">Blog</a>
+      <a href="https://api.relayshield.net/developers">Developers</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <h1><span class="shield">&#x1F6E1;&#xFE0E;</span> Verify a verdict receipt</h1>
+    <p>Every RelayShield check can come with a signed <strong>verdict receipt</strong> — cryptographic proof of what was asked and what was answered. Paste one below and this page checks its signature <strong>entirely in your browser</strong>. Nothing you paste is sent anywhere; the math runs locally, so you don't have to trust us — or this page.</p>
+    <p class="hint">Receipts look like <span class="pill">{"v":"rsr1", …}</span>. You'll find one in the <span class="pill">receipt</span> field of any API check response.</p>
+  </div>
+
+  <div class="card">
+    <h2>1 &middot; Paste the receipt</h2>
+    <label for="receipt">Receipt JSON <span class="hint">— the <span class="pill">receipt</span> object, or a full API response containing one</span></label>
+    <textarea id="receipt" spellcheck="false" placeholder='{"v":"rsr1","endpoint":"/v1/link-check",…}'></textarea>
+    <div class="btnrow">
+      <button class="btn-ghost" id="demoBtn" type="button">Load demo receipt</button>
+    </div>
+
+    <h2 style="margin-top:1.6rem">2 &middot; Provide the public key</h2>
+    <label for="pubkey">Ed25519 public key <span class="hint">(base64, 32 bytes)</span></label>
+    <input type="text" id="pubkey" spellcheck="false" placeholder="Paste the base64 public key, or fetch it below">
+    <div class="btnrow">
+      <button class="btn-ghost" id="fetchKeyBtn" type="button">Fetch live key from api.relayshield.net</button>
+    </div>
+    <p class="hint" id="keyHint" style="margin-top:.6rem"></p>
+
+    <div class="btnrow">
+      <button class="btn-primary" id="verifyBtn" type="button">Verify receipt</button>
+    </div>
+
+    <div id="result" role="status"></div>
+  </div>
+
+  <div class="card how">
+    <h2>How verification works</h2>
+    <ol>
+      <li><strong>You paste a receipt.</strong> It names the endpoint that was called, a hash of the input, the verdict, and when it was issued.</li>
+      <li><strong>You provide RelayShield's public key</strong> — pasted by hand, or fetched from our key endpoint. The private signing key never leaves our servers.</li>
+      <li><strong>Your browser re-hashes the receipt</strong> (every field except the signature, in a fixed canonical order) <strong>and checks the Ed25519 signature</strong> against the public key. If even one character was altered after signing, the check fails.</li>
+      <li><strong>You get an answer.</strong> Valid means RelayShield really issued exactly this verdict for exactly this input. Nothing more.</li>
+    </ol>
+    <div class="warn"><strong>What verification does not prove:</strong> that the checked link, wallet, or email is safe. A valid receipt only proves the verdict is authentically ours — RelayShield never declares anything "safe".</div>
+  </div>
+
+  <div class="card faq">
+    <h2>Questions</h2>
+    <h3>Does RelayShield see what I paste?</h3>
+    <p>No. The signature check runs with JavaScript on your device. The only network request this page ever makes is the optional key fetch, which downloads our <em>public</em> key — the same key anyone can read. Your receipt never leaves the page.</p>
+    <h3>What if my receipt has no signature?</h3>
+    <p>Then it was issued before we started signing verdicts. The page will tell you plainly: it can't be cryptographically verified, and that's expected for older receipts — not evidence of tampering.</p>
+    <h3>Where do I get the public key?</h3>
+    <p>Fetch it with the button above (it calls <span class="pill">GET https://api.relayshield.net/v1/verdict-key</span>), or paste one you obtained through another channel. If you're cautious, compare the fetched key against one you received out-of-band — the page shows you the key id it verified against.</p>
+    <h3>What is "key id"?</h3>
+    <p>Keys get replaced over time ("rotated"). Each receipt names the key that signed it (<span class="pill">rsvk_…</span>), so old receipts keep verifying against retired keys.</p>
+    <h3>Which checks issue receipts?</h3>
+    <p>All free check endpoints (link, wallet, email, breach, and the agent-facing endpoints) attach a receipt object to their response.</p>
+  </div>
+
+  <footer>
+    RelayShield &mdash; free threat-intelligence checks for links, wallets, emails, and breaches.
+    &middot; <a href="https://blog.relayshield.net">Blog</a> &middot; <a href="https://api.relayshield.net/developers">API docs</a>
+  </footer>
+</div>
+<script>
+/* Ed25519 verification (RFC 8032), self-contained, no dependencies.
+ *
+ * Ported from RelayShield's relayshield_ed25519.py (pure-stdlib reference),
+ * which is pinned against the RFC 8032 Section 7.1 test vectors. SHA-512
+ * comes from the browser's WebCrypto (crypto.subtle); the curve arithmetic
+ * below uses BigInt. Verification only — no signing, no key generation.
+ *
+ * This file is ALSO embedded verbatim in verify_receipt.html. Keep the two
+ * in sync (the page documents its own provenance).
+ */
+"use strict";
+
+const ED_Q = (1n << 255n) - 19n;
+const ED_L = (1n << 252n) + 27742317777372353535851937790883648493n;
+
+function edModPow(a, e, m) {
+  let r = 1n;
+  a = ((a % m) + m) % m;
+  while (e > 0n) {
+    if (e & 1n) r = (r * a) % m;
+    a = (a * a) % m;
+    e >>= 1n;
+  }
+  return r;
+}
+
+const ED_D = ((-121665n * edModPow(121666n, ED_Q - 2n, ED_Q)) % ED_Q + ED_Q) % ED_Q;
+const ED_I = edModPow(2n, (ED_Q - 1n) / 4n, ED_Q);
+
+function edXrecover(y) {
+  const xx = (((y * y - 1n) % ED_Q + ED_Q) % ED_Q) *
+             edModPow((ED_D * y * y + 1n) % ED_Q, ED_Q - 2n, ED_Q) % ED_Q;
+  let x = edModPow(xx, (ED_Q + 3n) / 8n, ED_Q);
+  if ((((x * x - xx) % ED_Q) + ED_Q) % ED_Q !== 0n) x = (x * ED_I) % ED_Q;
+  if (x & 1n) x = ED_Q - x;
+  return x;
+}
+
+// Extended coordinates [x, y, z, t].
+function edAdd(p, q) {
+  const [x1, y1, z1, t1] = p, [x2, y2, z2, t2] = q;
+  const A = (((y1 - x1) % ED_Q + ED_Q) % ED_Q) * (((y2 - x2) % ED_Q + ED_Q) % ED_Q) % ED_Q;
+  const B = ((y1 + x1) % ED_Q) * ((y2 + x2) % ED_Q) % ED_Q;
+  const C = (t1 * 2n * ED_D % ED_Q) * t2 % ED_Q;
+  const Dd = (z1 * 2n % ED_Q) * z2 % ED_Q;
+  const E = (((B - A) % ED_Q) + ED_Q) % ED_Q;
+  const F = (((Dd - C) % ED_Q) + ED_Q) % ED_Q;
+  const G = (Dd + C) % ED_Q;
+  const H = (B + A) % ED_Q;
+  return [(E * F) % ED_Q, (G * H) % ED_Q, (F * G) % ED_Q, (E * H) % ED_Q];
+}
+
+const ED_IDENTITY = [0n, 1n, 1n, 0n];
+
+function edIsIdentity(p) {
+  const [x, y, z] = p;
+  return ((x % ED_Q) + ED_Q) % ED_Q === 0n &&
+         ((((y - z) % ED_Q) + ED_Q) % ED_Q === 0n);
+}
+
+function edDecodePoint(s) {
+  // s: Uint8Array(32). Returns [x,y,z,t] or null.
+  if (!(s instanceof Uint8Array) || s.length !== 32) return null;
+  let v = 0n;
+  for (let i = 31; i >= 0; i--) v = (v << 8n) | BigInt(s[i]);
+  const sign = (v >> 255n) & 1n;
+  const y = v & ((1n << 255n) - 1n);
+  let x;
+  try { x = edXrecover(y); } catch (e) { return null; }
+  if ((x & 1n) !== sign) x = ED_Q - x;
+  return [x, y, 1n, (x * y) % ED_Q];
+}
+
+function edScalarmult(p, s) {
+  let acc = ED_IDENTITY.slice();
+  s = BigInt(s);
+  while (s > 0n) {
+    if (s & 1n) acc = edAdd(acc, p);
+    p = edAdd(p, p);
+    s >>= 1n;
+  }
+  return acc;
+}
+
+const ED_By = (4n * edModPow(5n, ED_Q - 2n, ED_Q)) % ED_Q;
+const ED_Bx = edXrecover(ED_By);
+const ED_BASE = [ED_Bx, ED_By, 1n, (ED_Bx * ED_By) % ED_Q];
+
+function edProjEq(p, q) {
+  const [x1, y1, z1] = p, [x2, y2, z2] = q;
+  return (((x1 * z2 - x2 * z1) % ED_Q) + ED_Q) % ED_Q === 0n &&
+         (((y1 * z2 - y2 * z1) % ED_Q) + ED_Q) % ED_Q === 0n;
+}
+
+function edLeBytesToBig(v) {
+  let n = 0n;
+  for (let i = v.length - 1; i >= 0; i--) n = (n << 8n) | BigInt(v[i]);
+  return n;
+}
+
+async function edSha512(bytes) {
+  const d = await crypto.subtle.digest("SHA-512", bytes);
+  return new Uint8Array(d);
+}
+
+/* Verify an Ed25519 signature. Never throws: returns true/false.
+ *  publicKey: Uint8Array(32), message: Uint8Array, signature: Uint8Array(64)
+ */
+async function ed25519Verify(publicKey, message, signature) {
+  try {
+    if (!(publicKey instanceof Uint8Array) || publicKey.length !== 32) return false;
+    if (!(signature instanceof Uint8Array) || signature.length !== 64) return false;
+    const R = edDecodePoint(signature.slice(0, 32));
+    const A = edDecodePoint(publicKey);
+    if (!R || !A) return false;
+    // Reject low-order public keys (small-subgroup confinement).
+    if (!edIsIdentity(edScalarmult(A, ED_L))) return false;
+    const S = edLeBytesToBig(signature.slice(32, 64));
+    if (S >= ED_L) return false;
+    const kh = await edSha512(
+      concatBytes(signature.slice(0, 32), publicKey, message));
+    const k = edLeBytesToBig(kh) % ED_L;
+    const lhs = edScalarmult(ED_BASE, S);
+    const rhs = edAdd(R, edScalarmult(A, k));
+    return edProjEq(lhs, rhs);
+  } catch (e) {
+    return false;
+  }
+}
+
+function concatBytes(...parts) {
+  let n = 0;
+  for (const p of parts) n += p.length;
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+/* Canonical JSON for rsr1: sorted keys (recursive), compact separators,
+ * UTF-8. Must match Python: json.dumps(obj, sort_keys=True,
+ * separators=(",", ":"), ensure_ascii=False).encode("utf-8").
+ */
+function rsr1Canonical(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map(rsr1Canonical).join(",") + "]";
+  const keys = Object.keys(value).sort();
+  return "{" + keys.map(k => JSON.stringify(k) + ":" + rsr1Canonical(value[k])).join(",") + "}";
+}
+
+const rsr1Encoder = new TextEncoder();
+function rsr1CanonicalBytes(obj) {
+  return rsr1Encoder.encode(rsr1Canonical(obj));
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(b64.replace(/\\s+/g, ""));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/* Full rsr1 receipt verification.
+ * Returns {status, ...} where status is one of:
+ *   "valid"        — signature checks out against the given public key
+ *   "invalid"      — signature present but does not verify (tampered/wrong key)
+ *   "unsigned"     — receipt has no signature (predates signing)
+ *   "no-key"       — signed receipt, but no usable public key was provided
+ *   "malformed"    — not a recognizable rsr1 receipt
+ */
+async function verifyRsr1Receipt(receipt, publicKeyB64) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
+    return { status: "malformed", detail: "Input is not a JSON object." };
+  }
+  if (receipt.v !== "rsr1") {
+    return { status: "malformed",
+             detail: "Not an rsr1 receipt (missing or unexpected \\"v\\" field)." };
+  }
+  if (!receipt.signature) {
+    return { status: "unsigned",
+             detail: receipt.unsigned_reason ||
+                    "This receipt was issued before RelayShield started signing verdicts, so there is no signature to check." };
+  }
+  let sig, pub;
+  try { sig = b64ToBytes(receipt.signature); }
+  catch (e) { return { status: "malformed", detail: "Signature is not valid base64." }; }
+  if (!publicKeyB64 || !String(publicKeyB64).trim()) {
+    return { status: "no-key",
+             detail: "This receipt is signed, but no public key was provided to check it against." };
+  }
+  try { pub = b64ToBytes(publicKeyB64); }
+  catch (e) { return { status: "no-key", detail: "The public key is not valid base64." }; }
+  if (pub.length !== 32) {
+    return { status: "no-key", detail: "The public key must decode to 32 bytes." };
+  }
+  const body = {};
+  for (const k of Object.keys(receipt)) if (k !== "signature") body[k] = receipt[k];
+  const ok = await ed25519Verify(pub, rsr1CanonicalBytes(body), sig);
+  if (ok) return { status: "valid", detail: "Signature verified." };
+  return { status: "invalid",
+           detail: "The signature does not match this receipt. It was altered after signing, or the wrong public key was used." };
+}
+
+
+
+"use strict";
+/* ---- page logic (the Ed25519 code above is embedded verbatim) ---- */
+const API_KEY_URL = "https://api.relayshield.net/v1/verdict-key";
+const DEMO_PUBKEY = "ExFRCwL/1tHAb1FTuAh/f3t+t9RH9zi5i+BuLQn4/E4=";
+const DEMO_RECEIPT = {"v":"rsr1","endpoint":"/v1/link-check","input_sha256":"2655e383930e474a6da843eb5c777069fa19d0be8d866583fb9027de06396271","verdict":{"level":"high","flagged":true,"reasons":["URL matches known phishing kit family 'milk-dragon'"],"signals":["kit_fingerprint_match"]},"provenance":[{"indicator":"example-evil.example","types":["domain"],"first_seen":"2026-09-15","seen_count":42,"families":["milk-dragon"],"kit_family":"milk-dragon"}],"corpus_version":"intel-iocs-v1","issued_at":"2026-10-02T19:23:29.389827+00:00","key_id":"rsvk_5c7339c7a65fc25c","signature":"pM7+Lr+SIhmrFnrwo7dUlPgg9n3nt/OnazUEN343Mf89U20zA32209kLzUbi/6pdWzySzucTAJNfMCXm/qqyAA=="};
+let keyring = {}; // key_id -> {public_key, retired:bool}
+
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function $(id){return document.getElementById(id);}
+
+function extractReceipt(text){
+  const t=(text||"").trim();
+  if(!t) return {error:"Paste a receipt first."};
+  let obj;
+  try{ obj=JSON.parse(t); }
+  catch(e){ return {error:"That isn't valid JSON. Copy the receipt object exactly as the API returned it."}; }
+  if(obj && typeof obj==="object" && !Array.isArray(obj)){
+    if(obj.receipt && typeof obj.receipt==="object") return {receipt:obj.receipt, wrapped:true};
+    return {receipt:obj, wrapped:false};
+  }
+  return {error:"That isn't valid JSON. Copy the receipt object exactly as the API returned it."};
+}
+
+function verdictWords(r){
+  const v=r.verdict||{};
+  const lvl=v.level||"unknown";
+  if(v.flagged) return "flagged ("+lvl+" risk)";
+  return "not flagged ("+lvl+")";
+}
+
+function renderTech(r, pubUsed, keyMatch){
+  const body={}; for(const k of Object.keys(r)) if(k!=="signature") body[k]=r[k];
+  const canonPretty=JSON.stringify(JSON.parse(rsr1Canonical(body)),null,2);
+  const rows=[
+    ["Receipt version", esc(r.v||"—")],
+    ["Endpoint", esc(r.endpoint||"—")],
+    ["Issued at", esc(r.issued_at||"—")],
+    ["Verdict", esc(verdictWords(r))],
+    ["Input hash (SHA-256)", esc(r.input_sha256||"—")],
+    ["Corpus version", esc(r.corpus_version||"—")],
+    ["Provenance entries", esc((r.provenance||[]).length)],
+    ["Signing key id", esc(r.key_id||"— (none — unsigned)")],
+    ["Key used for check", esc(pubUsed ? (keyMatch===true?"matches receipt key id":keyMatch===false?"does NOT match receipt key id":"provided") : "— (none provided)")],
+    ["Algorithm", "Ed25519 (RFC 8032)"],
+  ];
+  let sigHtml="";
+  if(r.signature){
+    sigHtml='<dt>Signature</dt><dd>'+esc(r.signature)+'</dd>';
+  }
+  return '<details><summary>Technical details</summary><div class="tech"><dl>'+
+    rows.map(x=>"<dt>"+x[0]+"</dt><dd>"+x[1]+"</dd>").join("")+sigHtml+
+    '</dl><p style="color:var(--muted)">Signed payload — the exact bytes that were hashed and signed (canonical JSON: sorted keys, no whitespace):</p>'+
+    '<pre><code>'+esc(canonPretty)+'</code></pre></div></details>';
+}
+
+function showResult(cls,badge,headline,sub,techHtml){
+  const el=$("result");
+  el.className=cls; el.style.display="block";
+  el.innerHTML='<span class="badge">'+esc(badge)+'</span><h3>'+headline+'</h3><p>'+sub+'</p>'+(techHtml||"");
+  el.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+
+async function doVerify(){
+  const btn=$("verifyBtn"); btn.disabled=true; btn.textContent="Checking…";
+  try{
+    const ex=extractReceipt($("receipt").value);
+    if(ex.error){ showResult("malformed","Not a receipt","That doesn't look like a verdict receipt.",esc(ex.error)+"", ""); return; }
+    const r=ex.receipt;
+    const pubB64=$("pubkey").value.trim();
+    const res=await verifyRsr1Receipt(r,pubB64);
+    let keyMatch=null, pubUsed=!!pubB64;
+    if(pubUsed && r.key_id && keyring[r.key_id]) keyMatch=true;
+    else if(pubUsed && r.key_id && Object.keys(keyring).length) keyMatch=false;
+    const tech=renderTech(r,pubUsed,keyMatch);
+    if(res.status==="valid"){
+      showResult("valid","Verified ✓",
+        "This verdict is authentically RelayShield's.",
+        "The signature checks out: <strong>"+esc(r.endpoint||"this endpoint")+"</strong> returned <strong>"+esc(verdictWords(r))+"</strong> for the input behind this receipt, and nothing was altered afterwards."+
+        (ex.wrapped?'<br><span class="sub">Extracted from the <span class="pill">receipt</span> field of a full API response.</span>':""),
+        tech);
+    }else if(res.status==="invalid"){
+      showResult("invalid","Failed ✗",
+        "This receipt does not check out.",
+        esc(res.detail)+" If you copied it by hand, try copying again — a single changed character breaks the signature.",
+        tech);
+    }else if(res.status==="unsigned"){
+      showResult("unsigned","Not signed",
+        "This receipt predates signing — it can't be verified.",
+        "RelayShield only started signing verdicts recently. Receipts issued before that carry no signature ("+esc(r.unsigned_reason||"no signature")+") — that's expected for older receipts, not evidence of tampering. Ask for a fresh check to get a signed receipt.",
+        tech);
+    }else if(res.status==="no-key"){
+      showResult("no-key","Key needed",
+        "This receipt is signed, but there's no key to check it against.",
+        esc(res.detail)+" Fetch the live key above, or paste the base64 public key you trust.",
+        tech);
+    }else{
+      showResult("malformed","Not a receipt","That doesn't look like a verdict receipt.",esc(res.detail),"");
+    }
+  }finally{ btn.disabled=false; btn.textContent="Verify receipt"; }
+}
+
+async function fetchKey(){
+  const hint=$("keyHint"), btn=$("fetchKeyBtn");
+  btn.disabled=true; hint.textContent="Fetching…";
+  try{
+    const resp=await fetch(API_KEY_URL,{headers:{"Accept":"application/json"}});
+    if(resp.status===503){
+      hint.textContent="RelayShield hasn't published a signing key yet (signing isn't configured on the live deployment). Receipts can't be verified until it is — paste a key manually if you have one.";
+      return;
+    }
+    if(!resp.ok){ hint.textContent="Couldn't fetch the key (HTTP "+resp.status+"). Paste the base64 public key by hand instead."; return; }
+    const doc=await resp.json();
+    if(!doc.public_key){ hint.textContent="The key endpoint didn't return a public key. Paste one by hand instead."; return; }
+    keyring={};
+    keyring[doc.key_id]={public_key:doc.public_key,retired:false};
+    for(const r of (doc.retired||[])) keyring[r.key_id]={public_key:r.public_key,retired:true};
+    $("pubkey").value=doc.public_key;
+    const nRet=(doc.retired||[]).length;
+    hint.textContent="Loaded key "+doc.key_id+(nRet?" plus "+nRet+" retired key"+(nRet>1?"s":""):"")+". Compare it against a key you trust if you want to be thorough.";
+  }catch(e){
+    hint.textContent="Couldn't reach the key endpoint (network error or blocked cross-origin request). Paste the base64 public key by hand instead.";
+  }finally{ btn.disabled=false; }
+}
+
+$("verifyBtn").addEventListener("click",doVerify);
+$("fetchKeyBtn").addEventListener("click",fetchKey);
+$("demoBtn").addEventListener("click",function(){
+  $("receipt").value=JSON.stringify(DEMO_RECEIPT,null,2);
+  $("pubkey").value=DEMO_PUBKEY;
+  keyring={};
+  $("keyHint").textContent="Demo receipt loaded — signed with a throwaway key, just for trying the page. Hit Verify receipt.";
+});
+
+<\/script>
+</body>
+</html>
+`;
+
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/healthz") {
+      return new Response("ok", { headers: { "content-type": "text/plain" } });
+    }
+    if (url.pathname !== "/") {
+      return new Response("Not found", { status: 404 });
+    }
+    return new Response(HTML, {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=300",
+      },
+    });
+  },
+};

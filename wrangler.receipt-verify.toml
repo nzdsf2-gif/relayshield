@@ -1,0 +1,7 @@
+name = "relayshield-receipt-verify"
+main = "cloudflare_worker_receipt_verify.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "verify.relayshield.net/*", zone_name = "relayshield.net" }
+]

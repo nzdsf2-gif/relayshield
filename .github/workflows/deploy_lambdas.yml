@@ -94,6 +94,13 @@ on:
       # own. This entry exists only so a change to it TRIGGERS the workflow --
       # without it, editing the scanner alone deploys nothing at all.
       - 'relayshield_agent_bait_scan.py'
+      # Shared module, not a handler: relayshield_api.py imports it for the
+      # scam-kit fingerprint/match endpoints, so the import walk packages it.
+      # This entry exists only so a change to it TRIGGERS the workflow --
+      # without it, approving a new kit family (which edits only this file)
+      # merges but never deploys. Added 2026-10-02: knight-office and
+      # milk-dragon merges shipped nothing.
+      - 'relayshield_scamkit.py'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:

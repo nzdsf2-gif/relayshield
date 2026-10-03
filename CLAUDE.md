@@ -9939,3 +9939,20 @@ build ships.** Leading unverified guess for the 400: a malformed stored API key 
 5. Wire CSM-SIMSWAP-1 (`enrollSimSwap` -> `/v1/sim-swap/enroll`), then Google Play (read Play crypto-app policy first).
 6. Verify GoPlus Solana "0"/"1" status convention on the first live hit.
 7. Carried: `tools/backfill_first_seen.py --apply`; confirm `relayshield_breach_cache` exists; `support@relayshield.net` mailbox; decide `gallant-hawking-4oerzg`; read `feature/scam-kit-fingerprinting`; stale 494K/115 copy; `WA_NUMBER`; StoreBot; Smithery.
+
+## CORRECTION 2026-10-03 (sign-off): THE CS MOBILE ATTACK CHAIN WIRING IS A SCHEDULED TODO, NOT A GAP I MAY DESCRIBE AS "UNSCOPED"
+
+Andrew's correction, which supersedes the "CS MOBILE ATTACK CHAIN GRAPH" paragraph above where they disagree:
+the **attack chain sequenced graphs were built for the TI demo**, and a **JavaScript production call has since been deployed**
+(`POST /v1/metered/incident-timeline`, see the ITEM 4 section). **Wiring that production call into the CS Mobile app was agreed
+and scheduled in a recent session.** My sign-off note called it "unbuilt and unscoped"; that was wrong about the decision, which
+was already made. What is still true and verified: today's `AttackChain.tsx` in `crypto-shield-app/` is a client-side display over
+domain-scan dimensions and does not call the endpoint, so the wiring is not done.
+
+UNVERIFIED, not checked this session: where the TI demo graph code lives (`cloudflare_worker_ti_demo.js` is the likely home) and
+whether the "JavaScript production call" is the incident-timeline endpoint or a separate artefact. Read both before building.
+Open design point to settle first: the endpoint is $0.50 per call, so decide how CS M pays for it (paywall tier, trial allowance).
+
+### ADDED TO NEXT-SESSION TODOS (item 0, ahead of the list above)
+0. **Wire the production attack-chain call into CS Mobile**, reusing the TI demo's sequenced graph rendering. Find the TI demo
+   graph and the deployed call first; replace or feed `AttackChain.tsx`; ships only via EAS build. Fold into the same build as items 4-5.

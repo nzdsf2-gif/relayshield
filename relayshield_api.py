@@ -3171,6 +3171,180 @@ def _ioc_malware_labels(items) -> list[str]:
     return sorted(fams, key=str.lower)
 
 
+# ---------------------------------------------------------------------------
+# RESERVED-DOMAIN EXCLUSION  (added 2026-10-01)
+# ---------------------------------------------------------------------------
+# IANA-reserved and special-use names are never real-world targets, so they
+# must never earn a threat verdict. example.com flagged HIGH in the 2026-09-30
+# live plugin test because the criminal IOC corpus holds rows keyed on it
+# (threat reports quote it as a placeholder) -- a false positive no blocklist
+# or corpus scrub can fix, because the rows are legitimate corpus content.
+# The fix is a short-circuit BEFORE any signal is gathered: reserved names
+# skip the corpus, Safe Browsing and RDAP entirely, which also saves the
+# vendor calls. This is a maintained list, not a one-off: extend the sets,
+# never add another inline "example.com" special case.
+_RESERVED_DOCUMENTATION_NAMES = frozenset({
+    # RFC 2606 section 3 -- reserved for documentation and testing.
+    "example.com", "example.net", "example.org", "example.edu",
+    # RFC 6761 -- special-use domain names that never resolve publicly.
+    "localhost", "invalid",
+})
+_RESERVED_SPECIAL_TLDS = frozenset({
+    # RFC 2606 / RFC 6761.
+    "test", "example", "invalid", "localhost",
+    # RFC 6762 -- multicast DNS; link-local by definition.
+    "local",
+    # RFC 9462 -- reserved for private-use internal names.
+    "internal",
+})
+
+
+def _reserved_documentation_domain(domain: str) -> str:
+    """The reserved name this domain matches, or "".
+
+    Matches the exact name, any subdomain of it (mail.example.com is as
+    reserved as example.com), and any name under a special-use TLD
+    (anything.test). Ports are stripped; the comparison is case-insensitive.
+    Pure: never raises, never touches the network."""
+    d = (domain or "").strip().lower().rstrip(".")
+    if not d:
+        return ""
+    if d.startswith("["):
+        return ""                      # IPv6 literal -- not a reserved name
+    if ":" in d and d.count(":") == 1:
+        host, _, port = d.partition(":")
+        if port.isdigit():
+            d = host
+    if d in _RESERVED_DOCUMENTATION_NAMES:
+        return d
+    for name in _RESERVED_DOCUMENTATION_NAMES:
+        if d.endswith("." + name):
+            return name
+    if "." in d:
+        tld = d.rsplit(".", 1)[-1]
+        if tld in _RESERVED_SPECIAL_TLDS:
+            return "." + tld
+    return ""
+
+
+def _reserved_domain_result(domain: str, matched: str) -> dict:
+    """The verdict shape for a reserved name: never flagged, never "safe".
+
+    flagged=False with level "unknown" (the floor -- see _link_check_level),
+    and a reason that says what the name IS rather than what it is not.
+    Same dict shape as _assess_domain so every caller keeps working."""
+    return {
+        "flagged": False,
+        "reasons": [f"{domain} is an IANA-reserved documentation name "
+                    f"({matched}); it is never a real-world target, so no "
+                    f"threat signals were checked."],
+        "signals": {"ioc_corpus": False, "safe_browsing": False,
+                    "domain_age_days": None, "lookalike": ""},
+        "malware_families": [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# CORPUS-MISS LOOKALIKE HEURISTIC  (added 2026-10-01)
+# ---------------------------------------------------------------------------
+# The corpus-miss path used to end in silence: no rows, no flag. The
+# 2026-09-30 live plugin test showed the gap -- paypa1-secure.com drew no
+# corpus match and left as "unknown" with no reason at all. This heuristic
+# runs ONLY on the corpus-miss path: when the corpus has no rows for the
+# domain, the domain is compared against the brand table the email check
+# already maintains (_EMAIL_BRAND_DOMAINS -- one table, not two) for
+# impersonation resemblance.
+#
+# Conservative by construction, because a wrong flag here is a false
+# accusation against a possibly-legitimate site:
+#   - official brand domains (and their subdomains) never hit;
+#   - a hit needs either the brand name at a token boundary (paypal-secure,
+#     login-paypal) or a single-edit resemblance after homoglyph folding
+#     (paypa1 -> paypal, paypla -> paypal);
+#   - anything uncertain returns "" and the caller keeps the existing
+#     no-match behaviour -- silence, not a weaker flag.
+# A hit grades "medium" (warns, never blocks): it is a string resemblance,
+# not a blocklist entry. The never-say-safe framing is untouched -- the best
+# case on this path is still "no flags found", never "safe".
+_LOOKALIKE_FOLD_MAP = str.maketrans({
+    "1": "l", "!": "l", "|": "l",
+    "0": "o", "@": "a", "$": "s", "5": "s",
+    "8": "b", "6": "g", "9": "g", "3": "e",
+})
+
+
+def _lookalike_fold(s: str) -> str:
+    """Fold the confusables phishers rely on: 1/l, 0/o, 5/s, rn/m, vv/w."""
+    s = (s or "").lower().translate(_LOOKALIKE_FOLD_MAP)
+    return s.replace("rn", "m").replace("vv", "w").replace("cl", "d")
+
+
+def _osa_distance_le1(a: str, b: str) -> bool:
+    """True when the Optimal String Alignment distance of a and b is <= 1.
+
+    One substitution, insertion, deletion, or adjacent transposition -- the
+    typo patterns behind lookalike domains. Pure."""
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        diffs = [i for i in range(la) if a[i] != b[i]]
+        if len(diffs) == 1:
+            return True
+        if len(diffs) == 2:
+            i, j = diffs
+            return j == i + 1 and a[i] == b[j] and a[j] == b[i]
+        return False
+    if la > lb:                            # insertion/deletion: a is shorter
+        a, b = b, a
+        la, lb = lb, la
+    i = j = 0
+    skipped = False
+    while i < la and j < lb:
+        if a[i] == b[j]:
+            i += 1
+            j += 1
+        elif skipped:
+            return False
+        else:
+            skipped = True
+            j += 1
+    return True
+
+
+def _lookalike_brand_hit(domain: str) -> str:
+    """The brand name this domain may be impersonating, or "".
+
+    Corpus-miss path only. Pure: never raises, never touches the network."""
+    d = (domain or "").lower().strip().strip(".")
+    if not d or "." not in d:
+        return ""
+    for _officials in _EMAIL_BRAND_DOMAINS.values():
+        if any(d == o or d.endswith("." + o) for o in _officials):
+            return ""
+    body = d.rsplit(".", 1)[0]
+    tokens = [t for t in re.split(r"[^a-z0-9]+", body) if t]
+    if not tokens:
+        return ""
+    for brand in _EMAIL_BRAND_DOMAINS:
+        key = _normalise_brand_text(brand)
+        if len(key) < 4:
+            continue
+        fkey = _lookalike_fold(key)
+        for tok in tokens:
+            ftok = _lookalike_fold(tok)
+            if ((key == tok or tok.startswith(key) or tok.endswith(key)
+                    or fkey == ftok or ftok.startswith(fkey)
+                    or ftok.endswith(fkey))
+                    and len(tok) <= len(key) + 10):
+                return brand
+            if len(key) >= 5 and _osa_distance_le1(ftok, fkey):
+                return brand
+    return ""
+
+
 def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     """The per-domain half of a link check, with Safe Browsing ALREADY decided.
 
@@ -3178,9 +3352,20 @@ def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     caller supplies the GSB verdict because the batch path resolves every
     domain in one request -- this file has four copies of one pattern table
     already and does not need two copies of a verdict rule.
+
+    Reserved documentation names (IANA) short-circuit here: they are never
+    real-world targets, so they skip every signal -- corpus, Safe Browsing
+    and RDAP -- rather than inheriting corpus rows that quote them as
+    placeholders. On the corpus-miss path (no corpus rows for the domain),
+    the brand-lookalike heuristic gets one conservative shot; anything
+    uncertain keeps the existing no-match behaviour.
     """
     reasons: list[str] = []
-    signals = {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None}
+    signals = {"ioc_corpus": False, "safe_browsing": False,
+               "domain_age_days": None, "lookalike": ""}
+    reserved = _reserved_documentation_domain(domain)
+    if reserved:
+        return _reserved_domain_result(domain, reserved)
     if not domain:
         return {"flagged": False, "reasons": reasons, "signals": signals,
                 "malware_families": []}
@@ -3200,6 +3385,18 @@ def _assess_domain(domain: str, gsb_flagged: bool) -> dict:
     except Exception as exc:
         logger.warning("Heuristic IOC lookup failed domain=%s: %s", domain, exc)
     malware_families = _ioc_malware_labels(ioc_items)
+
+    if not ioc_items:
+        # Corpus-miss path only: a brand-lookalike resemblance is the one
+        # conservative signal available when the corpus is silent.
+        brand = _lookalike_brand_hit(domain)
+        if brand:
+            official = _EMAIL_BRAND_DOMAINS[brand][0]
+            reasons.append(
+                f"this domain resembles {brand}'s branding but is not "
+                f"{brand}'s official site ({official}); treat any login or "
+                f"payment request from it with caution")
+            signals["lookalike"] = brand
 
     if gsb_flagged:
         reasons.append("Google Safe Browsing flags this domain")
@@ -3225,8 +3422,13 @@ def _heuristic_url_check(url: str) -> dict:
     domain = _domain_of(url)
     if not domain:
         return {"flagged": False, "reasons": [], "signals":
-                {"ioc_corpus": False, "safe_browsing": False, "domain_age_days": None},
+                {"ioc_corpus": False, "safe_browsing": False,
+                 "domain_age_days": None, "lookalike": ""},
                 "malware_families": []}
+    reserved = _reserved_documentation_domain(domain)
+    if reserved:
+        # Never spend a vendor call on a name that cannot be a real target.
+        return _reserved_domain_result(domain, reserved)
     api_key = _gsb_api_key()
     try:
         gsb = _check_gsb(domain, api_key)
@@ -3397,7 +3599,7 @@ def _heuristic_url_check_many(urls: list) -> dict:
                 "flagged": False,
                 "reasons": [],
                 "signals": {"ioc_corpus": None, "safe_browsing": None,
-                            "domain_age_days": None},
+                            "domain_age_days": None, "lookalike": None},
                 "incomplete": True,
             }
     return out
@@ -3446,10 +3648,14 @@ def _link_check_level(signals: dict) -> str:
       domain_age_days < 30 only  -> "medium". A young domain is a real signal
           in fraud and also describes every legitimate project launched this
           month, so on its own it warns and never blocks.
+      lookalike brand hit        -> "medium". A string resemblance warns
+          without claiming the site is criminal, which is all it can support.
       nothing                    -> "unknown", never "low". See above.
     """
     if signals.get("ioc_corpus") or signals.get("safe_browsing"):
         return "high"
+    if signals.get("lookalike"):
+        return "medium"
     age = signals.get("domain_age_days")
     if age is not None and age < 30:
         return "medium"
@@ -3638,6 +3844,7 @@ def _merge_link_assessments(first: dict, second: dict | None,
         "safe_browsing": bool(s1.get("safe_browsing")) or bool(s2.get("safe_browsing")),
         "domain_age_days": _younger_domain_age(s1.get("domain_age_days"),
                                                s2.get("domain_age_days")),
+        "lookalike": s1.get("lookalike") or s2.get("lookalike") or "",
     }
     fams1 = first.get("malware_families") or []
     fams2 = (second.get("malware_families") or []) if second else []
@@ -3649,10 +3856,38 @@ def _merge_link_assessments(first: dict, second: dict | None,
 def _link_check_incomplete(url: str, chain: list, err: str) -> dict:
     """The honest answer when a destination could not be resolved.
 
-    checked=False, level unknown (the ceiling -- never "low", never "safe"),
-    signals UNSET rather than clean, and the reason named. Partial hops stay
-    in the evidence so a caller can see how far resolution got.
+    checked=False, signals UNSET rather than clean, and the reason named.
+    Partial hops stay in the evidence so a caller can see how far resolution
+    got. One exception to the all-UNSET rule: the submitted domain itself
+    gets the brand-lookalike heuristic (2026-10-01). That check needs no
+    resolution -- it is a pure string comparison -- so a lookalike of a known
+    brand is still caught even when the destination cannot be reached. A hit
+    grades "medium" and the NOT-fully-checked note stays: the destination was
+    never examined, so this is a warning, never a verdict on the final page.
+    Level is otherwise "unknown" (the ceiling -- never "low", never "safe").
     """
+    domain = _domain_of(url) or ""
+    brand = "" if _reserved_documentation_domain(domain) else \
+        _lookalike_brand_hit(domain)
+    if brand:
+        official = _EMAIL_BRAND_DOMAINS[brand][0]
+        return {
+            "target": url,
+            "checked": False,
+            "level": "medium",
+            "flagged": True,
+            "reasons": [f"this domain resembles {brand}'s branding but is not "
+                        f"{brand}'s official site ({official}); treat any "
+                        f"login or payment request from it with caution"],
+            "signals": {"ioc_corpus": None, "safe_browsing": None,
+                        "domain_age_days": None, "lookalike": brand},
+            "redirect_chain": chain,
+            "final_url": None,
+            "redirect_count": max(0, len(chain) - 1),
+            "note": (_LINK_CHECK_NOTE + " The redirect destination could not be "
+                     f"fully resolved ({err}); this link was NOT fully checked "
+                     "and is not a clean result. Send it again."),
+        }
     return {
         "target": url,
         "checked": False,
@@ -3660,7 +3895,7 @@ def _link_check_incomplete(url: str, chain: list, err: str) -> dict:
         "flagged": False,
         "reasons": [],
         "signals": {"ioc_corpus": None, "safe_browsing": None,
-                    "domain_age_days": None},
+                    "domain_age_days": None, "lookalike": None},
         "redirect_chain": chain,
         "final_url": None,
         "redirect_count": max(0, len(chain) - 1),

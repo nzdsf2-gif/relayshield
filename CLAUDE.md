@@ -9906,3 +9906,36 @@ The mapping lives in the pack's README on `demisto/content`, not in this repo.
 ## ON DECK (TODO): CRYPTO SHIELD MOBILE ON GOOGLE PLAY
 
 Added at Andrew's request 2026-10-03. Sequence agreed 2026-10-02: first wire CSM-SIMSWAP-1 (`enrollSimSwap` posting `/v1/sim-swap/enroll`, ~3 days) so the paywall promise is true, and ship the EAS build that carries `?client_reference_id=solana` (Google Play build tags `googleplay`). Then port. UNVERIFIED: Google Play policy for crypto-adjacent consumer apps and closed-testing requirements; read the Play Console policy pages before committing a week. Measure CS Mobile trial conversion on the Solana dApp Store first, since the weekly report has shown near-zero trials.
+
+## SESSION 2026-10-03 SIGN-OFF: CS MOBILE ATTACK CHAIN GRAPH, ARJEN'S SOLANA BUG, NEXT-SESSION TODOS
+
+### CS MOBILE ATTACK CHAIN GRAPH: IT EXISTS, IT IS CLIENT-SIDE, AND IT IS DOMAIN-SCAN ONLY
+Checked in `crypto-shield-app/` rather than recalled. `src/components/AttackChain.tsx` renders four
+stages (Data Breach, Infostealer Hit, Session Stolen, Account Takeover) from the domain-scan result's
+`dimension_scores` (`breach_exposure`, `infostealer_density`, `session_exposure`) plus `score >= 45`
+for the takeover stage. It is mounted in `ScanScreen.tsx` only inside the `type === "domain"` result
+card. Stages are coloured by furthest active stage and carry a one-line warning.
+
+**It is NOT the `ATTACK_CHAINS` correlation engine and does NOT call `POST /v1/metered/incident-timeline`.**
+It is a display heuristic over the dimensions already returned. The two share a name and nothing else:
+the app graph shows how far one domain's signals have progressed; the server engine matches named
+multi-signal chains (`breach_sim_swap`, `domain_phishing_breach`) for an identity. Do not describe the
+app graph as running the correlation model. Wiring the app to `incident-timeline` is unbuilt and
+unscoped (price $0.50 per call, so it needs a paywall decision first). UNVERIFIED: what the user meant
+by "attack chain graph results" beyond this; if they meant the server endpoint's output, that is not in the app.
+
+### ARJEN'S SOLANA SCAN BUG: THE ERROR REPORTING IS FIXED, THE ROOT CAUSE IS NOT KNOWN
+SOL mint `5aXSfstoUYp4uBEpJoMyMrzLFNFyrMQZ5d2u7yVFD` returned "RS API error 400" in CS Mobile. Executing
+`handle_solana_token_risk` directly shows the current Lambda cannot return 400 for it (handler 200s,
+quota is 429). `rsPost`/`rsGet` in `src/api/relayshield.ts` threw the bare status before reading the
+body; they now surface the server's `error` text. **That fix is on main and on NO device until an EAS
+build ships.** Leading unverified guess for the 400: a malformed stored API key rejected before Lambda.
+
+### NEXT-SESSION TODOS, IN ORDER
+1. Ask Andrew for the LIVEcommunity XSOAR thread state (moved, removed, replies) before anything else on XSOAR.
+2. D&B change decision due about 2026-10-10; if approved, open a Chrome Web Store support ticket to re-pull trader info.
+3. Ask Andrew what outreach was actually sent (unknown, not "unsent"); Muse connector is already submitted.
+4. EAS rebuild of CS Mobile (platform tag `solana` + error-surfacing fix), then Arjen retries the SOL scan and reports the error text.
+5. Wire CSM-SIMSWAP-1 (`enrollSimSwap` -> `/v1/sim-swap/enroll`), then Google Play (read Play crypto-app policy first).
+6. Verify GoPlus Solana "0"/"1" status convention on the first live hit.
+7. Carried: `tools/backfill_first_seen.py --apply`; confirm `relayshield_breach_cache` exists; `support@relayshield.net` mailbox; decide `gallant-hawking-4oerzg`; read `feature/scam-kit-fingerprinting`; stale 494K/115 copy; `WA_NUMBER`; StoreBot; Smithery.

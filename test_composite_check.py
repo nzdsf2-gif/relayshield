@@ -368,5 +368,120 @@ class CompositeInvariants(unittest.TestCase):
         self.assertNotRegex(stripped, r"(?i)\blow\b")
 
 
+class VtFallbackUrlSignal(unittest.TestCase):
+    """VirusTotal fallback for the composite URL signal.
+
+    Approved behavior: heuristic URL check runs first; VT is consulted only
+    when it comes back unknown AND the VT cache misses. Short timeout, fail
+    soft, 24h cache, conservative mapping (any vendor flag -> medium, never
+    better than unknown on VT data alone).
+    """
+
+    VT_FUNCS = ("_vt_fallback_url_signal", "_vt_url_report",
+                "_vt_url_cache_get", "_vt_url_cache_put",
+                "_vt_stats_to_signal", "_vt_url_id")
+
+    def _patch_vt(self, cache=None, report=None, cache_put=None):
+        patches = [
+            unittest.mock.patch.object(api, "_vt_url_cache_get",
+                                       return_value=cache),
+            unittest.mock.patch.object(api, "_vt_url_report",
+                                       return_value=report),
+        ]
+        put = (unittest.mock.MagicMock() if cache_put is None else cache_put)
+        patches.append(unittest.mock.patch.object(api, "_vt_url_cache_put", put))
+        return patches, put
+
+    def _run(self, link_level, vt_kwargs):
+        patches, put = self._patch_vt(**vt_kwargs)
+        with _patch_subs(link=_fake_link(link_level))[0], \
+                patches[0], patches[1], patches[2]:
+            resp = api.handle_composite_check({"url": "https://u.example"})
+        return _data_of(resp), put
+
+    def test_unknown_upgraded_to_medium_on_vt_flags(self):
+        stats = {"malicious": 3, "suspicious": 1, "harmless": 70,
+                 "undetected": 16, "timeout": 0}
+        data, put = self._run("unknown", {"cache": None, "report": stats})
+        sig = data["signals"][0]
+        self.assertEqual(sig["level"], "medium")
+        self.assertFalse(sig["flagged"])
+        self.assertTrue(any("security vendors" in r and "4 of 90" in r
+                            for r in sig["reasons"]))
+        self.assertEqual(data["level"], "medium")
+        self.assertEqual(data["score"], 55)
+        put.assert_called_once()  # fresh VT report gets cached
+
+    def test_suspicious_only_still_medium(self):
+        stats = {"malicious": 0, "suspicious": 2, "harmless": 80,
+                 "undetected": 8, "timeout": 0}
+        data, _ = self._run("unknown", {"cache": None, "report": stats})
+        self.assertEqual(data["signals"][0]["level"], "medium")
+
+    def test_vt_clean_stays_unknown_never_safe(self):
+        stats = {"malicious": 0, "suspicious": 0, "harmless": 85,
+                 "undetected": 5, "timeout": 0}
+        data, put = self._run("unknown", {"cache": None, "report": stats})
+        sig = data["signals"][0]
+        self.assertEqual(sig["level"], "unknown")
+        self.assertEqual(data["level"], "unknown")
+        self.assertEqual(data["score"], 15)
+        put.assert_called_once()  # clean reports are cached too
+
+    def test_cache_hit_skips_vt_api(self):
+        stats = {"malicious": 5, "suspicious": 0, "harmless": 60,
+                 "undetected": 25, "timeout": 0}
+        report_mock = unittest.mock.MagicMock()
+        patches, _ = self._patch_vt(cache=stats, report=None)
+        with _patch_subs(link=_fake_link("unknown"))[0], \
+                patches[0], \
+                unittest.mock.patch.object(api, "_vt_url_report", report_mock), \
+                patches[2]:
+            data = _data_of(api.handle_composite_check({"url": "https://u.example"}))
+        report_mock.assert_not_called()
+        sig = data["signals"][0]
+        self.assertEqual(sig["level"], "medium")
+        self.assertTrue(any("cached report" in r for r in sig["reasons"]))
+
+    def test_vt_failure_fails_soft_to_unknown(self):
+        data, _ = self._run("unknown", {"cache": None, "report": None})
+        sig = data["signals"][0]
+        self.assertEqual(sig["level"], "unknown")
+        self.assertEqual(data["level"], "unknown")
+
+    def test_vt_not_consulted_when_heuristic_decides(self):
+        for lvl in ("high", "medium"):
+            report_mock = unittest.mock.MagicMock()
+            patches, _ = self._patch_vt(cache=None, report=None)
+            with _patch_subs(link=_fake_link(lvl))[0], \
+                    patches[0], \
+                    unittest.mock.patch.object(api, "_vt_url_report", report_mock), \
+                    patches[2]:
+                data = _data_of(api.handle_composite_check({"url": "https://u.example"}))
+            report_mock.assert_not_called()
+            self.assertEqual(data["signals"][0]["level"], lvl)
+
+    def test_vt_url_id_is_base64url_without_padding(self):
+        vid = api._vt_url_id("https://example.com/a?b=c")
+        self.assertNotIn("=", vid)
+        self.assertNotIn("+", vid)
+        self.assertNotIn("/", vid)
+        import base64
+        padded = vid + "=" * (-len(vid) % 4)
+        self.assertEqual(base64.urlsafe_b64decode(padded).decode(),
+                         "https://example.com/a?b=c")
+
+    def test_no_safe_or_low_in_vt_code(self):
+        src = "\n".join(inspect.getsource(getattr(api, f))
+                        for f in self.VT_FUNCS)
+        stripped = re.sub(r'"[^"]*"|\'[^\']*\'', "", src)
+        self.assertNotRegex(stripped, r"(?i)\bsafe\b")
+        self.assertNotRegex(stripped, r"(?i)\blow\b")
+
+    def test_short_timeout_and_day_cache(self):
+        self.assertEqual(api.VT_FALLBACK_TIMEOUT_S, 5)
+        self.assertEqual(api.VT_URL_CACHE_SECONDS, 24 * 3600)
+
+
 if __name__ == "__main__":
     unittest.main()

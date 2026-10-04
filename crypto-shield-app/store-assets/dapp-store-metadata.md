@@ -18,11 +18,11 @@ Crypto Shield is read-only wallet security monitoring for Solana, EVM (including
 TON, Bitcoin, and XRP — built by RelayShield, a threat intelligence company that also
 protects businesses and consumers against breaches, SIM-swap fraud, and infostealer malware.
 
-<!-- SIM SWAP IS DESCRIBED HERE AS SOMETHING RELAYSHIELD DOES, WHICH IS TRUE,
-     AND IS NO LONGER LISTED AS SOMETHING THIS APP DOES, WHICH IT DOes NOT.
-     CSM-SIMSWAP-1: checkSimSwap() has no callers and the phone number never
-     leaves the device. The keyword below stays because the company line above
-     is accurate; the feature bullet was removed. -->
+<!-- SIM swap monitoring is listed below as of v1.6.0 (2026-10-03): Settings now
+     posts /v1/sim-swap/enroll and the monitor delivers by push. Paste this
+     listing into the portal at the same time as the v1.6.0 build, never before:
+     a listing that promises it while the live build cannot do it is the
+     CSM-SIMSWAP-1 defect again, and the portal copy is not versioned. -->
 
 We never ask for your seed phrase or private keys. Crypto Shield can't move your funds —
 it watches your wallets and alerts you the moment something looks wrong.
@@ -33,9 +33,13 @@ it watches your wallets and alerts you the moment something looks wrong.
   into copying the wrong address from your transaction history
 - NFT security scanning — flags malicious/fake NFT contracts, not just floor prices
 - NFT floor price tracking and alerts
-- Criminal marketplace intelligence — 80+ monitored underground channels where stolen data
+- Criminal marketplace intelligence — 100+ monitored underground channels where stolen data
   and drainer kits are traded, so you're flagged before you know you're a target
 - Breach and infostealer exposure alerts for your linked email
+- SIM swap monitoring — turn it on for your own number and get a push notification if your
+  carrier reports a SIM change or a port-out (US carriers)
+- Attack chain sequencing — see whether a breach, a SIM swap and a lookalike domain line up
+  against you as one attack, instead of three unrelated alerts
 - Signature Guard — token/NFT approval monitoring, transaction simulation before you sign,
   and session hijack detection
 - Security Sweep — one-tap check across breach exposure, infostealer logs, and OAuth

@@ -277,8 +277,8 @@ export function OnboardingScreen({ onComplete }: Props) {
               <Text style={styles.stepDesc}>
                 SIM swaps are the #1 method attackers use to bypass exchange 2FA and drain crypto
                 accounts. The strongest defence is a port-out lock with your carrier, and Crypto
-                Shield shows you how to set one up. Enter the number you use for exchange logins
-                and we will keep it on this device, ready for carrier monitoring.
+                Shield shows you how to set one up. Enter the number you use for exchange logins; it
+                stays on this device until you choose to turn on SIM swap monitoring in Settings.
               </Text>
 
               <Text style={styles.fieldLabel}>Phone Number (optional)</Text>

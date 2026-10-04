@@ -479,5 +479,117 @@ class TestOneTokenUnwrap(unittest.TestCase):
         self.assertEqual(mon.TG_BOT_TOKEN_KEY, "telegram_bot_token")
 
 
+# ---------------------------------------------------------------------------
+# 2026-10-03: Crypto Shield Mobile enrols numbers with delivery_channels
+# ["push"]. Until this the monitor would have scanned an app user correctly and
+# told them nothing, or, with no channel list, messaged a number on WhatsApp
+# that never opted in to it.
+# ---------------------------------------------------------------------------
+
+class TestPushIsADeliveryChannel(DeliveryHarness):
+
+    def push_user(self, **kw):
+        u = {"user_id": "u3", "phone_number": "+15551230002",
+             "subscription_tier": mon.TIER_PERSONAL,
+             "delivery_channels": ["push"], "enrolled_by_account": "rs_key_abc"}
+        u.update(kw)
+        return u
+
+    def setUp(self):
+        super().setUp()
+        self.pushed = []
+        p = mock.patch.object(
+            mon, "send_push_alert",
+            side_effect=lambda acct, title, body, data=None: (self.pushed.append((acct, title, body)), True)[1])
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_an_app_user_gets_a_push_and_nothing_else(self):
+        result = self.run_user(self.push_user(), self.lookup("T-Mobile USA", swapped=True))
+        self.assertEqual(result, "sim_swap")
+        self.assertEqual(len(self.pushed), 1)
+        self.assertEqual(self.pushed[0][0], "rs_key_abc",
+                         "the push is joined on the enrolling API key")
+        self.assertEqual(self.wa, [], "a number that never opted in to WhatsApp must not be messaged there")
+        self.assertEqual(self.tg, [])
+
+    def test_a_push_alone_counts_as_delivered(self):
+        self.run_user(self.push_user(), self.lookup("T-Mobile USA", swapped=True))
+        self.assertTrue(any(kw.get("alert_fired") for _, kw in self.updates))
+
+    def test_a_push_only_user_gets_no_whatsapp_followups(self):
+        self.run_user(self.push_user(), self.lookup("T-Mobile USA", swapped=True))
+        mon.check_and_warn_predictive.assert_not_called()
+        mon.check_and_fire_correlation.assert_not_called()
+
+    def test_a_push_only_port_out_stores_no_sms_fallback(self):
+        """The fallback text says 'Open WhatsApp' and is sent to the very number
+        that was just ported, which for this user is the attacker's."""
+        self.run_user(
+            self.push_user(last_known_carrier="T-Mobile USA", last_known_network="310260"),
+            self.lookup("AT&T Mobility", network="310410"))
+        mon.store_pending_sms_fallback.assert_not_called()
+
+    def test_a_failed_push_is_not_stamped_as_delivered(self):
+        """No registered device means sent stays False, so the next cycle
+        retries once the app registers, instead of burying the alert."""
+        with mock.patch.object(mon, "send_push_alert", return_value=False):
+            result = self.run_user(self.push_user(), self.lookup("T-Mobile USA", swapped=True))
+        self.assertEqual(result, "error")
+        self.assertFalse(any(kw.get("alert_fired") for _, kw in self.updates))
+
+    def test_a_legacy_whatsapp_record_never_gains_push(self):
+        """Only an EXPLICIT entry enables a channel."""
+        self.run_user(self.wa_user(), self.lookup("T-Mobile USA", swapped=True))
+        self.assertEqual(self.pushed, [])
+
+
+class TestPushJoin(unittest.TestCase):
+    """send_push_alert itself, with the table and Expo stubbed."""
+
+    class _Attr:
+        def __init__(self, name): self.name = name
+        def eq(self, v): return _Cond((self.name, v))
+
+    def _run(self, items, expo_ok=True):
+        table = mock.MagicMock()
+        table.scan.return_value = {"Items": items}
+        db = mock.MagicMock()
+        db.Table.return_value = table
+        fake_push = types.ModuleType("relayshield_push")
+        sent = []
+        fake_push._send_expo_push = lambda tok, t, b, d=None: (sent.append(tok), expo_ok)[1]
+        with mock.patch.object(mon, "dynamodb", db), \
+             mock.patch.object(mon, "Attr", self._Attr), \
+             mock.patch.dict(sys.modules, {"relayshield_push": fake_push}):
+            return mon.send_push_alert("rs_key_abc", "t", "b"), sent, table
+
+    def test_it_filters_on_the_enrolling_key_and_sends_to_every_device(self):
+        ok, sent, table = self._run([{"push_token": "ExponentPushToken[a]"},
+                                     {"push_token": "ExponentPushToken[b]"}])
+        self.assertTrue(ok)
+        self.assertEqual(sent, ["ExponentPushToken[a]", "ExponentPushToken[b]"])
+        flt = table.scan.call_args.kwargs["FilterExpression"]
+        self.assertIn(("user_id", "rs_key_abc"), flt.parts)
+
+    def test_no_registered_device_is_not_delivered(self):
+        ok, sent, _ = self._run([])
+        self.assertFalse(ok)
+        self.assertEqual(sent, [])
+
+    def test_a_record_with_no_account_is_never_scanned(self):
+        db = mock.MagicMock()
+        with mock.patch.object(mon, "dynamodb", db):
+            self.assertFalse(mon.send_push_alert("", "t", "b"))
+        db.Table.assert_not_called()
+
+
+class _Cond:
+    """Just enough of a DynamoDB condition for `a.eq(x) & b.eq(y)`."""
+    def __init__(self, part): self.parts = [part]
+    def __and__(self, other):
+        c = _Cond(self.parts[0]); c.parts = self.parts + other.parts; return c
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

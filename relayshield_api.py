@@ -959,6 +959,16 @@ CS_MOBILE_ALLOWED_ENDPOINTS = frozenset({
     "/v1/metered/nhi-exposure",
     "/v1/metered/supply-chain",
     "/v1/metered/sim-swap",
+    # Added 2026-10-03: the attack-chain sequence screen. INCLUDED in the
+    # subscription like sim-swap above, which also carries a real per-call
+    # Twilio cost -- the paywall is the gate, not a second meter. Without this
+    # entry a CS Mobile key falls through to the Stripe meter branch and the
+    # screen 402s for the one audience it is built for. The app calls it only
+    # on an explicit tap and reuses a result for the same inputs within a few
+    # hours of an app session, so a subscriber cannot loop it by accident. That
+    # is a courtesy and not a limit: a determined caller can still call it
+    # freely, so watch Twilio and HIBP spend once this ships.
+    "/v1/metered/incident-timeline",
 })
 
 
@@ -14739,6 +14749,14 @@ def handle_sim_swap_enroll(params: dict, api_key_record: dict | None = None) -> 
             consent_source=(params.get("consent_source") or "").strip().lower(),
             consent_acknowledged=params.get("consent_acknowledged") is True,
             enrolled_by=(api_key_record or {}).get("api_key", ""),
+            # A number enrolled from the app is told about a swap by Expo push,
+            # because the app is the only surface that user has. Without a
+            # channel the monitor treats an absent delivery_channels as a legacy
+            # WhatsApp record and messages a number that never opted in to
+            # WhatsApp, while the app user hears nothing at all.
+            add_delivery_channel=(
+                "push" if (params.get("consent_source") or "").strip().lower() == "cs_mobile"
+                else None),
         )
     except simswap_consent.AmbiguousPhone as exc:
         return _ambiguous(exc)

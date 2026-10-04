@@ -151,6 +151,7 @@ def enroll(
     consent_acknowledged: bool = False,
     enrolled_by: str = "",
     extra_attrs: dict | None = None,
+    add_delivery_channel: str | None = None,
 ) -> dict:
     """Enroll a number, recording who consented and under which Terms.
 
@@ -201,6 +202,18 @@ def enroll(
         attrs["consent_requested_at"] = now
     if enrolled_by:
         attrs["enrolled_by_account"] = enrolled_by
+    if add_delivery_channel:
+        # ADD a channel, never replace the list. A number can already be on a
+        # Telegram or WhatsApp record, and overwriting delivery_channels with
+        # ["push"] would silently turn those alerts off. An EXISTING record with
+        # no list is a legacy WhatsApp record (the monitor's own convention),
+        # so that default is written out explicitly before the new one is added.
+        channels = list((existing or {}).get("delivery_channels") or [])
+        if existing and not channels:
+            channels = ["whatsapp"]
+        if add_delivery_channel not in channels:
+            channels.append(add_delivery_channel)
+        attrs["delivery_channels"] = channels
     if extra_attrs:
         attrs.update(extra_attrs)
 

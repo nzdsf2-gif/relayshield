@@ -724,6 +724,52 @@ def send_telegram_alert(tg_chat_id: int, message: str) -> bool:
     return sent
 
 
+PUSH_TOKENS_TABLE = "relayshield_push_tokens"
+
+
+def send_push_alert(enrolled_by_account: str, title: str, body: str, data: dict | None = None) -> bool:
+    """Deliver a SIM swap / port-out alert as an Expo push to the app that enrolled the number.
+
+    WHY THIS EXISTS. A number enrolled from Crypto Shield Mobile
+    (consent_source "cs_mobile") has no WhatsApp session and no Telegram chat:
+    the app is the only surface that user has. Without this the monitor scanned
+    them correctly and told them nothing, and a user with no delivery_channels
+    would have been messaged on WhatsApp instead, a channel they never opted in
+    to. The app enrols with delivery_channels = ["push"].
+
+    THE JOIN. enroll() stores the enrolling API key as enrolled_by_account and
+    the app registers its Expo token with user_id = that same key
+    (handle_register_push). The two tables mean different things by user_id, but
+    both hold the key, so a filtered scan finds the device(s). The table is small
+    and an alert is rare, so a scan is the honest cost of not adding an index.
+
+    True only if at least one ticket came back ok. An enrolled user with NO
+    registered token returns False, which is correct: `sent` stays False, the
+    state is not stamped and the next cycle tries again once the app registers.
+    """
+    if not enrolled_by_account:
+        logger.error("push alert: no enrolled_by_account on the record, nothing to join on")
+        return False
+    try:
+        from relayshield_push import _send_expo_push
+        table = dynamodb.Table(PUSH_TOKENS_TABLE)
+        kwargs = {"FilterExpression": Attr("user_id").eq(enrolled_by_account) & Attr("active").eq(True)}
+        tokens: list[str] = []
+        while True:
+            resp = table.scan(**kwargs)
+            tokens += [i["push_token"] for i in resp.get("Items", []) if i.get("push_token")]
+            if "LastEvaluatedKey" not in resp:
+                break
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+    except Exception as exc:
+        logger.exception("push alert lookup failed: %s", exc)
+        return False
+    if not tokens:
+        logger.warning("push alert: enrolled account has no registered device token")
+        return False
+    return any([_send_expo_push(t, title, body, data) for t in tokens])
+
+
 def _send_telegram_admin(tg_chat_id: int, message: str) -> bool:
     """Send a Telegram message directly to admin via Bot API for co-notification."""
     return _send_telegram(tg_chat_id, message, "admin notify")
@@ -1519,6 +1565,9 @@ def process_user(
     tg_chat_id = user.get("telegram_chat_id")
     wa_enabled = (not channels) or ("whatsapp" in channels)
     tg_enabled = bool(tg_chat_id) and "telegram" in channels
+    # Crypto Shield Mobile enrols with ["push"]. Only an EXPLICIT entry enables
+    # it, the same convention as Telegram, so no legacy record gains a channel.
+    push_enabled = "push" in channels
 
     # Build freeform alert body (tiered content, carrier-specific steps)
     def _body(is_telegram: bool) -> str:
@@ -1577,18 +1626,40 @@ def process_user(
             user_id, alert_type, tg_sent,
         )
 
-    if not wa_enabled and not tg_enabled:
+    # ── Expo push (Crypto Shield Mobile) ──────────────────────────────────
+    push_sent = False
+    if push_enabled:
+        if alert_type == "port_out":
+            push_title = "🚨 Your phone number appears to have been ported"
+            push_body = (
+                "Your carrier record changed. If you did not request this, call your "
+                "original carrier now and ask for a port-back. SMS 2FA is not safe."
+            )
+        else:
+            push_title = "🚨 Possible SIM swap on your number"
+            push_body = (
+                "Your carrier reported a recent SIM change. If you did not make it, "
+                "call your carrier now, then secure your exchange accounts."
+            )
+        push_sent = send_push_alert(
+            user.get("enrolled_by_account", ""), push_title, push_body,
+            {"type": alert_type, "screen": "Settings"},
+        )
+        logger.info("SIM swap push alert — user_id=%s alert_type=%s sent=%s",
+                    user_id, alert_type, push_sent)
+
+    if not wa_enabled and not tg_enabled and not push_enabled:
         logger.error(
             "user_id=%s is monitored for SIM swap with NO delivery channel — "
             "alert_type=%s could not be delivered anywhere.",
             user_id, alert_type,
         )
 
-    sent = wa_sent or tg_sent
+    sent = wa_sent or tg_sent or push_sent
 
     # For port-out (freeform primary, CRITICAL), store SMS fallback in case no session.
     # SMS fallback Lambda fires after 4 hours if user has not messaged RelayShield.
-    if alert_type == "port_out" and sent:
+    if alert_type == "port_out" and (wa_sent or tg_sent):
         fallback_summary = (
             f"🚨 RelayShield CRITICAL: Your phone number {phone_e164} appears to have "
             f"been ported to {carrier_name}. This means ALL SMS two-factor authentication "
@@ -1614,14 +1685,17 @@ def process_user(
         # Record signal, fire predictive warning, check for coordinated attack chain
         try:
             signals = record_signal(user_id, alert_type, {"carrier": carrier_name})
-            check_and_warn_predictive(
-                user_id, alert_type, signals,
-                to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
-            )
-            check_and_fire_correlation(
-                user_id, signals,
-                to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
-            )
+            # Push-only (Crypto Shield Mobile) skips the two WhatsApp follow-ups:
+            # this number never opted in to WhatsApp. The signal is still recorded.
+            if wa_enabled or tg_enabled:
+                check_and_warn_predictive(
+                    user_id, alert_type, signals,
+                    to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
+                )
+                check_and_fire_correlation(
+                    user_id, signals,
+                    to_whatsapp_number(phone_e164), account_sid, auth_token, from_number,
+                )
         except Exception as exc:
             logger.exception("Coordinated attack check failed user_id=%s: %s", user_id, exc)
 

@@ -3,6 +3,21 @@
 
 const RS_BASE = "https://api.relayshield.net";
 
+// A stored key can carry a trailing newline or space from a paste. fetch() does
+// not strip header values, and a malformed one is rejected before our Lambda is
+// ever invoked, so it reaches the user as a bare 400 with nothing in the body.
+// Trim at the one place every call passes through.
+function cleanKey(apiKey?: string | null): string {
+  return (apiKey ?? "").trim();
+}
+
+// Name WHICH call failed. "RS API error 400" over a screenshot cannot say
+// whether it was the scan, the paywall check or the enrolment, and that is the
+// whole report a user can give.
+function apiError(status: number, endpoint: string, reason: string): Error {
+  return new Error(`RS API error ${status} on ${endpoint}: ${reason}`);
+}
+
 async function rsPost(endpoint: string, body: object, apiKey?: string | null) {
   // Free-tier scans call the contract-reputation endpoints with no key at all
   // (see FREE_SCAN_TYPES in ScanScreen). apiKey is `string | null` upstream, so
@@ -10,7 +25,8 @@ async function rsPost(endpoint: string, body: object, apiKey?: string | null) {
   // works today only because these endpoints ignore it, and would silently break
   // the moment they start validating.
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (apiKey) headers["X-RS-API-KEY"] = apiKey;
+  const key = cleanKey(apiKey);
+  if (key) headers["X-RS-API-KEY"] = key;
 
   const resp = await fetch(`${RS_BASE}${endpoint}`, {
     method: "POST",
@@ -31,7 +47,7 @@ async function rsPost(endpoint: string, body: object, apiKey?: string | null) {
       // Body wasn't JSON (an API Gateway-level rejection, say) -- the bare
       // status is still better than nothing, so fall through with it.
     }
-    throw new Error(`RS API error ${resp.status}: ${reason}`);
+    throw apiError(resp.status, endpoint, reason);
   }
   const json = await resp.json();
   // Unwrap { ok: true, data: {...} } envelope if present
@@ -40,7 +56,7 @@ async function rsPost(endpoint: string, body: object, apiKey?: string | null) {
 
 async function rsGet(endpoint: string, apiKey: string) {
   const resp = await fetch(`${RS_BASE}${endpoint}`, {
-    headers: { "X-API-Key": apiKey },
+    headers: { "X-API-Key": cleanKey(apiKey) },
   });
   if (!resp.ok) {
     let reason = `HTTP ${resp.status}`;
@@ -50,7 +66,7 @@ async function rsGet(endpoint: string, apiKey: string) {
     } catch {
       // not JSON -- keep the bare status
     }
-    throw new Error(`RS API error ${resp.status}: ${reason}`);
+    throw apiError(resp.status, endpoint, reason);
   }
   return resp.json();
 }
@@ -93,7 +109,51 @@ export async function checkSupplyChain(vendorDomains: string[], apiKey: string) 
   return rsPost("/v1/metered/supply-chain", { vendor_domains: vendorDomains }, apiKey);
 }
 
-// SIM swap check
+// Attack-chain sequence for one identity: breach, SIM swap and lookalike-domain
+// signals correlated into a named chain. INCLUDED in the Crypto Shield
+// subscription (CS_MOBILE_ALLOWED_ENDPOINTS), so there is no per-call charge
+// to the user, but it fans out to real upstream calls, so the screen only calls
+// it on an explicit tap. Only `email` is required.
+export async function getIncidentTimeline(
+  email: string, apiKey: string, phone?: string, domain?: string,
+) {
+  const body: Record<string, string> = { email };
+  if (phone) body.phone = phone;
+  if (domain) body.domain = domain;
+  return rsPost("/v1/metered/incident-timeline", body, apiKey);
+}
+
+// The carrier authorization wording US carriers require before a number is
+// monitored. BYTE-IDENTICAL to CARRIER_CONSENT_TEXT in
+// relayshield_sim_swap_consent.py, which every enrolling surface shows; a test
+// fails if the two ever differ, because a carrier audit rests on this text.
+export const CARRIER_CONSENT_TEXT =
+  "You authorize your wireless carrier to use or disclose information about " +
+  "your account and your wireless device, if available, to RelayShield LLC or " +
+  "its service provider for the duration of your business relationship, solely " +
+  "to help them identify you or your wireless device and to prevent fraud. " +
+  "See our Privacy Policy for how we treat your data.";
+
+// Turn SIM swap MONITORING on for the owner's own number. This is
+// /v1/sim-swap/enroll, NOT checkSimSwap() below: that one posts the metered
+// one-shot lookup and enrols nobody. Self-enrolment takes effect immediately
+// and is only valid because the user has just been shown CARRIER_CONSENT_TEXT
+// and affirmatively accepted it, which is what consent_acknowledged records.
+export async function enrollSimSwap(phone: string, apiKey: string) {
+  return rsPost("/v1/sim-swap/enroll", {
+    phone,
+    enrollment_type: "self",
+    consent_source: "cs_mobile",
+    consent_acknowledged: true,
+  }, apiKey);
+}
+
+// Withdraw consent and stop monitoring. Promised by both published documents.
+export async function withdrawSimSwap(phone: string, apiKey: string) {
+  return rsPost("/v1/sim-swap/withdraw", { phone }, apiKey);
+}
+
+// SIM swap check (one-shot metered lookup; does NOT enrol, see enrollSimSwap)
 export async function checkSimSwap(phone: string, apiKey: string) {
   return rsPost("/v1/metered/sim-swap", { phone }, apiKey);
 }

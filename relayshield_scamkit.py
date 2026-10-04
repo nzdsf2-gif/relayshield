@@ -801,7 +801,8 @@ APPROVED_FAMILIES = frozenset({
     "irontoll", "wazza", "n0va", "ghostcode",
     "knight-office",
     "milk-dragon",
-})
+    "phantomsub",
+)
 
 
 def family_status_for(name: str | None) -> str:

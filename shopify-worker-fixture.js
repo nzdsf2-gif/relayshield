@@ -148,15 +148,17 @@ export function extractOrderSignals(order, shop) {
 /* DEV-ONLY FIXTURE. Returns a canned risk verdict for synthetic test
  * addresses, used to produce tagged orders + timeline notes for App Store
  * screenshots. Cannot leak to production: requires BOTH the dev shop domain
- * AND an @relayshield-fixture.test address. Real shops and real customers
+ * AND an @relayshield.net fixture address. Real shops and real customers
  * can never satisfy both conditions. */
 const FIXTURE_SHOP = "relayshield-test.myshopify.com";
-const FIXTURE_DOMAIN = "@relayshield-fixture.test";
+const FIXTURE_DOMAIN = "@relayshield.net";
+const FIXTURE_PREFIX = "fixture-";
 export function fixtureVerdict(signals) {
   const email = String(signals?.email?.from_address || "").toLowerCase();
   const shop = String(signals?.url || "").replace(/^https?:\/\//, "").split("/")[0].toLowerCase();
   if (shop !== FIXTURE_SHOP || !email.endsWith(FIXTURE_DOMAIN)) return null;
-  const level = email.startsWith("high-") ? "high" : "medium";
+  if (!email.split("@")[0].startsWith(FIXTURE_PREFIX)) return null;
+  const level = email.startsWith("fixture-high-") ? "high" : "medium";
   return {
     level,
     score: level === "high" ? 85 : 55,

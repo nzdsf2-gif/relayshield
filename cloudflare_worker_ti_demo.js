@@ -707,6 +707,48 @@ function renderScamkitScan(data) {
 
 
 
+
+function renderHfh(data) {
+  if (data.error) return `<div class="no-result">Error: ${data.error}</div>`;
+  const cats = (data.by_category||[]).map(c => {
+    const chans = Object.entries(c.channels||{}).map(([ch,n]) => `${ch} (${n})`).join(', ');
+    return `<div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+        <span style="font-weight:700;font-size:14px;color:#00B5A5">${c.category}</span>
+        <span style="font-size:12px;color:#94a3b8">${c.rows} rows · ${c.confidence} confidence</span>
+      </div>
+      <div style="font-size:12px;color:#64748b">Channels: ${chans}</div>
+    </div>`;
+  }).join('');
+  const rows = (data.sample||[]).map(r =>
+    `<tr style="border-bottom:1px solid #1e3a5f1a">
+      <td style="padding:8px 10px;font-size:11px;color:#64748b">${r.ioc_type}</td>
+      <td style="padding:8px 10px;font-size:11px;color:#e2e8f0;word-break:break-all;max-width:280px">${r.ioc_value}</td>
+      <td style="padding:8px 10px;font-size:11px;color:#94a3b8">${r.channel}</td>
+      <td style="padding:8px 10px;font-size:11px;color:#00B5A5;font-weight:600">${r.category}</td>
+      <td style="padding:8px 10px;font-size:11px;color:#64748b">${r.evidence}</td>
+    </tr>`).join('');
+  return `
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="stat-card"><div class="stat-num">${data.rows_scanned}</div><div class="stat-label">Corpus rows scanned</div></div>
+      <div class="stat-card"><div class="stat-num">${data.rows_suggested}</div><div class="stat-label">Suggested labels</div></div>
+      <div class="stat-card"><div class="stat-num">${(data.by_category||[]).length}</div><div class="stat-label">Categories hit</div></div>
+    </div>
+    <div class="section-label">Suggested by Category</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-bottom:20px">${cats}</div>
+    <div class="section-label">Sample Suggested Rows <span style="color:#64748b;font-weight:400">(status: suggested — human review required)</span></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#060b18;border-bottom:1px solid #1e3a5f">
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#4a7fa5;text-transform:uppercase">Type</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#4a7fa5;text-transform:uppercase">Indicator</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#4a7fa5;text-transform:uppercase">Channel</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#4a7fa5;text-transform:uppercase">Suggested</th>
+        <th style="padding:8px 10px;text-align:left;font-size:10px;color:#4a7fa5;text-transform:uppercase">Evidence</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <div style="font-size:11px;color:#64748b;margin-top:12px">Generated ${data.generated_at} · taxonomy hfh-v1 · classifier is deterministic and report-only.</div>`;
+}
 const PAGE = (content, token) => `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -817,14 +859,20 @@ footer a{color:#00B5A5;text-decoration:none}
 <div class="container">
   <div class="hero">
     <h1>Live Threat Intelligence</h1>
-    <p>Query 7,600,000+ indicator sightings collected continuously from monitored criminal Telegram channels, infostealer log dumps and public indicator feeds, alongside MITRE ATT&CK profiles, trending threats and identity risk scoring.</p>
+    <p>Query 8,400,000+ indicator sightings collected continuously from monitored criminal Telegram channels, infostealer log dumps and public indicator feeds, alongside MITRE ATT&CK profiles, trending threats and identity risk scoring.</p>
   </div>
 
   <div class="corpus-stats">
-    <!-- Measured 2026-09-16 by tools/ti_demo_metrics.py, which is the ONLY way
-         these should ever be refreshed. Re-run it rather than editing by hand:
+    <!-- Refreshed 2026-10-03 to founder-verified figures (123 monitored criminal
+         Telegram marketplaces, 8.4M+ citations, verified 2026-09-30). The
+         standing measurement route is tools/ti_demo_metrics.py --
 
            AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/ti_demo_metrics.py
+
+         -- which needs AWS and runs on the Mac, never in the build container;
+         this refresh used the founder's verified figures instead, with the unit
+         doctrine below left fully intact (labels and +/- conventions
+         unchanged). Last tool-measured baseline, 2026-09-16:
 
            intel_iocs rows            7,602,575   <- SIGHTINGS, not indicators
            malpedia_families          3,815
@@ -852,9 +900,9 @@ footer a{color:#00B5A5;text-decoration:none}
          under "OPTION A". Showing counts here is the founder's call, taken with
          that trade-off on the table; the unit being correct is not optional
          either way. -->
-    <div class="stat-card"><div class="stat-num">7.8M+</div><div class="stat-label">Indicator sightings</div></div>
+    <div class="stat-card"><div class="stat-num">8.4M+</div><div class="stat-label">Indicator sightings</div></div>
     <div class="stat-card"><div class="stat-num">3,815</div><div class="stat-label">Malware families</div></div>
-    <div class="stat-card"><div class="stat-num">115</div><div class="stat-label">Active criminal Telegram channels</div></div>
+    <div class="stat-card"><div class="stat-num">123</div><div class="stat-label">Active criminal Telegram channels</div></div>
     <div class="stat-card"><div class="stat-num">193</div><div class="stat-label">MITRE ATT&CK groups</div></div>
   </div>
 
@@ -868,6 +916,7 @@ footer a{color:#00B5A5;text-decoration:none}
     <div class="tab" onclick="switchTab('ipintel',this)">IP Reputation &amp; pDNS</div>
     <div class="tab" onclick="switchTab('msp',this)">MSP Portfolio</div>
     <div class="tab" onclick="switchTab('scamkit',this)">Scam-Kit Fingerprinting</div>
+    <div class="tab" onclick="switchTab('hfh',this)">Hacker-for-Hire</div>
   </div>
 
   <div id="identity" class="panel active">
@@ -1052,6 +1101,27 @@ footer a{color:#00B5A5;text-decoration:none}
     </div>
   </div>
 
+  <div id="hfh" class="panel" style="padding-left:8px;padding-right:8px">
+    <p class="panel-desc" style="max-width:900px">Hacker-for-hire service taxonomy: nine service categories mapped from criminal marketplace offerings (eight from Flare's published catalogue, plus malware-as-a-service). The classifier is deterministic and report-only — every label is <code style="background:#1e3a5f;padding:2px 6px;border-radius:4px;font-size:12px">suggested</code>, nothing is written to the corpus without human review.</p>
+    <div class="section-label">Service Categories</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:20px">
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">account-takeover</div><div style="font-size:12px;color:#94a3b8">Email, social media, and messaging account compromise: phishing, credential stuffing, SIM swapping, token theft.</div></div>
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">surveillance</div><div style="font-size:12px;color:#94a3b8">Spyware and RATs sold as a service: device, GPS, and communications interception.</div></div>
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">doxxing</div><div style="font-size:12px;color:#94a3b8">Doxxing and information collection: addresses, phones, family, financial details. OSINT-as-a-service.</div></div>
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">ddos-stresser</div><div style="font-size:12px;color:#94a3b8">Stresser/booter services against websites, competitors, and gaming platforms, including extortion.</div></div>
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">phishing-kits</div><div style="font-size:12px;color:#94a3b8">Phishing kits and phishing-as-a-service sold to other criminals: fake login builders, smishing kits.</div></div>
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">stealers-malware</div><div style="font-size:12px;color:#94a3b8">Stealer logs and builders: RedLine, Raccoon, Vidar, Lumma, crypters, FUD builders.</div></div>
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">malware-as-a-service</div><div style="font-size:12px;color:#94a3b8">RaaS, rented botnets, C2 panels, loaders, and exploit kits sold as ongoing services.</div></div>
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">reputation-destruction</div><div style="font-size:12px;color:#94a3b8">Impersonation, account takedowns, leaks, coordinated harassment, fake reviews.</div></div>
+      <div style="background:#0f1f3a;border:1px solid #1e3a5f;border-radius:8px;padding:12px"><div style="font-weight:700;font-size:13px;color:#e2e8f0;margin-bottom:4px">corporate-espionage</div><div style="font-size:12px;color:#94a3b8">Insider recruitment, source-code and database theft, business email compromise.</div></div>
+    </div>
+    <div class="section-label">Suggested Labels — Live Corpus Sample</div>
+    <div class="input-row">
+      <button onclick="runHfh()">Load Suggested Labels</button>
+    </div>
+    <div id="hfh-result"></div>
+  </div>
+
 </div>
 
 <footer>
@@ -1059,6 +1129,8 @@ footer a{color:#00B5A5;text-decoration:none}
 </footer>
 
 <script>
+
+
 function switchScamkitMode(mode, el) {
   document.querySelectorAll('.scamkit-mode').forEach(m => m.style.display = 'none');
   document.querySelectorAll('[id^="scamkit-tab-"]').forEach(t => t.classList.remove('active'));
@@ -1212,6 +1284,16 @@ async function runTrending() {
   });
   const data = await resp.json();
   document.getElementById('trending-result').innerHTML = renderTrending(data);
+}
+
+async function runHfh() {
+  setLoading('hfh-result');
+  const resp = await fetch('/demo/hfh', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({})
+  });
+  const data = await resp.json();
+  document.getElementById('hfh-result').innerHTML = renderHfh(data);
 }
 
 async function runNHI() {
@@ -1385,8 +1467,11 @@ ${renderSupplyChain.toString()}
 ${renderScamkitFingerprint.toString()}
 ${renderScamkitMatch.toString()}
 ${renderScamkitScan.toString()}
+${renderHfh.toString()}
 `;
 }
+
+const HFH_DEMO_DATA = {"generated_at": "2026-10-04T16:46:40.848025+00:00", "rows_scanned": 2000, "rows_suggested": 259, "status": "suggested", "by_category": [{"category": "malware-as-a-service", "rows": 253, "confidence": "high", "channels": {"feodo_aggressive": 240, "malwarebazaar": 13}}, {"category": "stealers-malware", "rows": 6, "confidence": "high", "channels": {"malwarebazaar": 6}}], "sample": [{"ioc_type": "ip", "ioc_value": "191.251.134.129", "channel": "feodo_aggressive", "category": "malware-as-a-service", "confidence": "high", "evidence": "malware family qakbot -> malware-as-a-service"}, {"ioc_type": "hash_sha256", "ioc_value": "2f51d5507b90d6da2dee09fb1d8c9c278a30104f2e28bb7efe4079b47aee5755", "channel": "malwarebazaar", "category": "malware-as-a-service", "confidence": "high", "evidence": "malware family mirai -> malware-as-a-service"}, {"ioc_type": "hash_sha256", "ioc_value": "beec9de861a22593ebec152e204e7daa92c819bb809226ea87c530a4b644b044", "channel": "malwarebazaar", "category": "malware-as-a-service", "confidence": "high", "evidence": "malware family mirai -> malware-as-a-service"}, {"ioc_type": "ip", "ioc_value": "88.148.122.16", "channel": "feodo_aggressive", "category": "malware-as-a-service", "confidence": "high", "evidence": "malware family trickbot -> malware-as-a-service"}, {"ioc_type": "hash_sha256", "ioc_value": "9c0eb19d1579fbc93030d42465b90e092889b930733ffda60b5acb137a346dac", "channel": "malwarebazaar", "category": "stealers-malware", "confidence": "high", "evidence": "malware family agenttesla -> stealers-malware"}, {"ioc_type": "hash_sha256", "ioc_value": "8718f3eb5708fa33c9e3d7925f9dafe377fefffafb106cf2c6f8158949abde72", "channel": "malwarebazaar", "category": "malware-as-a-service", "confidence": "high", "evidence": "malware family mirai -> malware-as-a-service"}, {"ioc_type": "ip", "ioc_value": "146.70.86.47", "channel": "feodo_aggressive", "category": "malware-as-a-service", "confidence": "high", "evidence": "malware family bumblebee -> malware-as-a-service"}, {"ioc_type": "hash_sha256", "ioc_value": "9522efdb20b0551b7d9c4717ad9d87874f87c1039fd9a9ff36e94e37ae606959", "channel": "malwarebazaar", "category": "malware-as-a-service", "confidence": "high", "evidence": "malware family mirai -> malware-as-a-service"}]};
 
 const GATE_HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RelayShield Demo</title>
 <style>body{font-family:sans-serif;background:#0a1628;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
@@ -1574,6 +1659,10 @@ export default {
       if (domains.length) payload.domains = domains;
       const data = await callAPI(env, "/v1/metered/scamkit-campaign-scan", payload);
       return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (path === "/demo/hfh" && request.method === "POST") {
+      return new Response(JSON.stringify(HFH_DEMO_DATA), { headers: { "Content-Type": "application/json" } });
     }
 
     // Serve the demo page (set auth cookie so token doesn't need to stay in URL)

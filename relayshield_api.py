@@ -4651,6 +4651,10 @@ def _composite_signal_url(url):
     reasons = list(data.get("reasons") or [])
     if not reasons:
         reasons = ["no flags found by link check"]
+    if level == "unknown":
+        vt_signal = _vt_fallback_url_signal(url)
+        if vt_signal is not None:
+            return vt_signal
     return {"type": "url", "target": url, "level": level,
             "flagged": bool(data.get("flagged")), "reasons": reasons}
 
@@ -4681,6 +4685,130 @@ def _composite_signal_email(email_params):
         reasons = ["no email risk flags"]
     return {"type": "email", "level": level,
             "flagged": level == "high", "reasons": reasons}
+
+
+# ---------------------------------------------------------------------------
+# VIRUSTOTAL FALLBACK FOR THE COMPOSITE URL SIGNAL (added 2026-10-03)
+# ---------------------------------------------------------------------------
+# The keyless heuristic URL check (corpus + GSB + RDAP) is
+# deliberately zero-marginal-cost. When it comes back "unknown", the
+# composite URL signal gets one more chance: a cached VirusTotal URL report.
+#
+# Order: composite URL check first -> VT cache -> VirusTotal, and VirusTotal
+# is consulted ONLY on unknown AND cache miss. VT costs ~$0.05/call on our
+# account and shares quota with /v1/scan-url and ip-intel, so the 24h cache
+# and the unknown-only gate are quota protection, not decoration.
+#
+# Mapping is deliberately conservative: any malicious/suspicious vendor
+# verdict -> "medium". Zero detections -> the signal stays "unknown": an
+# absence of VT detections is not evidence of cleanliness, so VT data alone
+# never improves a grade past unknown. VT alone never drives "high"; that
+# grade still requires our corpus or GSB.
+#
+# Fail-soft throughout: VT timeout/error, a missing API key, or a cache
+# failure all leave the signal "unknown" with the miss noted in the logs.
+# One bad upstream never kills the composite.
+
+VT_URL_CACHE_TABLE    = "relayshield_vt_url_cache"
+VT_URL_CACHE_SECONDS  = 24 * 3600  # VT vendor verdicts move slowly; quota first
+VT_FALLBACK_TIMEOUT_S = 5          # short: this is a fallback, not the check
+
+
+def _vt_url_id(url: str) -> str:
+    """VirusTotal URL identifier: base64url of the URL, no padding."""
+    return base64.urlsafe_b64encode(url.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _vt_url_cache_get(url_hash: str) -> dict | None:
+    try:
+        item = dynamodb.Table(VT_URL_CACHE_TABLE).get_item(
+            Key={"url_hash": url_hash}).get("Item")
+        return _decimals_to_plain(dict(item["stats"])) if item else None
+    except Exception as exc:
+        logger.warning("VT url cache read failed: %s", exc)
+        return None
+
+
+def _vt_url_cache_put(url_hash: str, url: str, stats: dict) -> None:
+    try:
+        dynamodb.Table(VT_URL_CACHE_TABLE).put_item(Item={
+            "url_hash": url_hash,
+            "url": url[:500],
+            "stats": stats,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "ttl": int(time.time()) + VT_URL_CACHE_SECONDS,
+        })
+    except Exception as exc:
+        logger.warning("VT url cache write failed: %s", exc)
+
+
+def _vt_url_report(url: str) -> dict | None:
+    """GET the VirusTotal URL report. Returns last_analysis_stats or None.
+
+    None means "no usable report" (missing key, HTTP error, timeout,
+    unparseable body) -- never raises.
+    """
+    try:
+        api_key = _vt_api_key()
+    except Exception:
+        api_key = None
+    if not api_key:
+        logger.warning("VT fallback skipped: no VirusTotal API key available")
+        return None
+    req = urllib.request.Request(
+        f"{VT_BASE_URL}/urls/{_vt_url_id(url)}",
+        headers={"x-apikey": api_key},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=VT_FALLBACK_TIMEOUT_S) as resp:
+            attrs = json.loads(resp.read()).get("data", {}).get("attributes", {})
+            return attrs.get("last_analysis_stats") or None
+    except Exception as exc:
+        logger.warning("VT fallback url report failed for %s: %s",
+                       _redact(url, "url"), exc)
+        return None
+
+
+def _vt_stats_to_signal(url: str, stats: dict, cached: bool) -> dict | None:
+    """Conservative mapping: any vendor flag -> medium. None -> keep unknown."""
+    malicious = int(stats.get("malicious") or 0)
+    suspicious = int(stats.get("suspicious") or 0)
+    if not (malicious or suspicious):
+        return None
+    total = sum(int(stats.get(k) or 0) for k in
+                ("malicious", "suspicious", "harmless", "undetected", "timeout"))
+    return {
+        "type": "url",
+        "target": url,
+        "level": "medium",
+        "flagged": False,
+        "reasons": ["heuristic checks found nothing; %d of %d security "
+                    "vendors flag this URL as malicious or suspicious%s"
+                    % (malicious + suspicious, total,
+                       " (cached report)" if cached else "")],
+    }
+
+
+def _vt_fallback_url_signal(url: str) -> dict | None:
+    """VirusTotal fallback for an unknown composite URL signal.
+
+    Returns a medium signal dict, or None to keep the signal unknown.
+    Never raises.
+    """
+    try:
+        url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        cached = _vt_url_cache_get(url_hash)
+        if cached is not None:
+            return _vt_stats_to_signal(url, cached, cached=True)
+        stats = _vt_url_report(url)
+        if stats is None:
+            return None
+        _vt_url_cache_put(url_hash, url, stats)
+        return _vt_stats_to_signal(url, stats, cached=False)
+    except Exception as exc:
+        logger.warning("VT fallback failed for %s: %s", _redact(url, "url"), exc)
+        return None
 
 
 def handle_composite_check(params: dict) -> dict:
@@ -4717,9 +4845,11 @@ def handle_composite_check(params: dict) -> dict:
         "score": score,
         "signals": signals,
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        "note": ("Composite of independent keyless checks; riskiest signal "
+        "note": ("Composite of independent checks; riskiest signal "
                  "wins. A signal graded unknown means that check could not "
-                 "determine risk, not that the target is clear."),
+                 "determine risk, not that the target is clear. URL results "
+                 "the heuristics cannot grade are re-checked against a cached "
+                 "multi-vendor security report before staying unknown."),
     }
     # Corpus cross-correlation: per-signal provenance, only when the corpus
     # actually knows the target (at least one sighting or family link).

@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Linking } from "react-native";
+import { track } from "../utils/analytics";
 
 interface Props {
   visible: boolean;
@@ -49,6 +50,7 @@ const PLAN_DETAILS = {
 
 export function PaywallModal({ visible, onClose, feature, requiredPlan }: Props) {
   const plan = PLAN_DETAILS[requiredPlan];
+  useEffect(() => { if (visible) track("paywall_viewed", "modal"); }, [visible]);
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={s.overlay}>
@@ -80,7 +82,7 @@ export function PaywallModal({ visible, onClose, feature, requiredPlan }: Props)
 
           <TouchableOpacity
             style={[s.upgradeBtn, { backgroundColor: plan.color }]}
-            onPress={() => { Linking.openURL(PRICING_URL); onClose(); }}
+            onPress={() => { track("checkout_tapped", "modal"); Linking.openURL(PRICING_URL); onClose(); }}
           >
             <Text style={s.upgradeBtnText}>Subscribe at relayshield.net →</Text>
           </TouchableOpacity>

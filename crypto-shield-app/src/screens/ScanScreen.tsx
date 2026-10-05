@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -13,6 +13,8 @@ import { Speedometer } from "../components/Speedometer";
 import { useWallets } from "../hooks/useWallet";
 import * as RS from "../api/relayshield";
 import { FeedbackPrompt, notePositiveMoment } from "../components/FeedbackPrompt";
+import { ExposureCard } from "../components/ExposureCard";
+import { getInstallId } from "../utils/installId";
 
 type ScanType = "timeline" | "domain" | "token" | "sol" | "infostealer" | "airdrop" | "dapp" | "nft" | "nftsecurity" | "ton" | "base" | "bnb" | "xrp";
 
@@ -105,8 +107,11 @@ const EVM_CHAINS: { id: string; label: string }[] = [
 export function ScanScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
-  const { apiKey } = useWallets();
+  const { apiKey, loading: walletsLoading } = useWallets();
   const [scanType, setScanType] = useState<ScanType>("domain");
+  // The one free exposure check (no key needed). See runFreeExposure below.
+  const [exposure, setExposure] = useState<RS.FreeExposureResult | null>(null);
+  const userPickedType = useRef(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -116,6 +121,14 @@ export function ScanScreen() {
   // Attack Chain takes two optional extras beyond the required email.
   const [tlPhone, setTlPhone] = useState("");
   const [tlDomain, setTlDomain] = useState("");
+
+  // A first-run install has no key, and "Domain Risk" (the default) answers it
+  // with "needs a subscription". Open on the one scan that works for it AND shows
+  // what the app is for. Never overrides a type the user chose, and never touches
+  // an install that has a key.
+  useEffect(() => {
+    if (!walletsLoading && !apiKey && !userPickedType.current) setScanType("infostealer");
+  }, [walletsLoading, apiKey]);
 
   useEffect(() => {
     SecureStore.getItemAsync(PHONE_STORE_KEY).then(v => { if (v) setTlPhone(v); }).catch(() => {});
@@ -151,8 +164,30 @@ export function ScanScreen() {
     return null;
   }
 
+  // ONE FREE EXPOSURE CHECK PER INSTALL. A subscriber (trial included) has a key
+  // and keeps the full paid Email Check below; this path is only for an install
+  // with no key. The server enforces the allowance (handle_free_exposure_check),
+  // so nothing here counts uses, and "already used" comes back as a normal result.
+  async function runFreeExposure() {
+    const email = input.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Enter an email address, e.g. you@example.com.");
+      return;
+    }
+    setLoading(true); setResult(null); setExposure(null); setError("");
+    try {
+      const installId = await getInstallId();
+      setExposure(await RS.freeExposureCheck(email, installId));
+    } catch (e: any) {
+      setError(e.message || "Couldn't run the check. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function runScan() {
     if (!input.trim()) return;
+    if (scanType === "infostealer" && !apiKey) { await runFreeExposure(); return; }
     if (!apiKey && !isFreeScan(scanType)) {
       const t = SCAN_TYPES.find(s => s.key === scanType);
       setError(`${t?.label ?? "This scan"} needs a subscription — link yours in Settings. Token, NFT, airdrop and dApp scans are free.`);
@@ -225,7 +260,7 @@ export function ScanScreen() {
             <TouchableOpacity
               key={t.key}
               style={[styles.typeBtn, scanType === t.key && styles.typeBtnActive]}
-              onPress={() => { setScanType(t.key); setResult(null); setInput(""); setError(""); }}
+              onPress={() => { userPickedType.current = true; setScanType(t.key); setResult(null); setExposure(null); setInput(""); setError(""); }}
             >
               <Text style={styles.typeIcon}>{t.icon}</Text>
               <Text style={[styles.typeLabel, scanType === t.key && { color: "#00B5A5" }]}>{t.label}</Text>
@@ -318,12 +353,22 @@ export function ScanScreen() {
 
           {result && <ScanResult result={result} />}
 
+          {exposure && (
+            <ExposureCard
+              result={exposure}
+              onUpgrade={() => navigation.navigate("Paywall", { from: "free_check" })}
+              onRetry={runFreeExposure}
+            />
+          )}
+
           {/* Free-tier guidance when no subscription is linked */}
-          {!apiKey && !result && !loading && (
+          {!apiKey && !result && !exposure && !loading && (
             <View style={styles.demoNote}>
               <Text style={styles.demoNoteText}>
                 {isFreeScan(scanType)
                   ? "✅ This scan is free — no subscription needed. Paste a contract or address above and tap Scan."
+                  : scanType === "infostealer"
+                  ? "🔎 Your first email check is free on this device, no subscription needed. Type your email above and tap Scan Now to see whether it has leaked."
                   : "🔒 This scan needs a subscription — link yours in Settings.\n\nFree without one: EVM/SOL/Base/BNB tokens, TON and XRP addresses, airdrop, NFT and dApp checks."}
               </Text>
             </View>
@@ -383,7 +428,9 @@ function ScanResult({ result }: { result: any }) {
 
   if (type === "infostealer") {
     const found = data.found ?? false;
-    const hits  = data.hits ?? 0;
+    // The paid endpoint returns stealer_count. This read `data.hits`, which the
+    // server has never sent, so a REAL finding rendered as "0 Infostealer Hits Found".
+    const hits  = data.stealer_count ?? data.hits ?? 0;
     return (
       <View style={styles.resultCard}>
         <View style={[styles.infoBanner, { borderColor: found ? "#ef4444" : "#22c55e" }]}>

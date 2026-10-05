@@ -10089,3 +10089,101 @@ Support URL on newer submissions (another session built that Worker).
   onboarding, and one free email exposure check per install (about $0.10 per install, bounded). The
   attack chain and SIM swap stay paid: Twilio cost, and a phone number is too big an ask of a cold user.
   This relaxes the 2026-10-03 rule "a real cost goes behind the paywall" for one bounded endpoint only.
+
+## 2026-10-05: THE API WAS DOWN FOR A SYNTAX ERROR, THE DEPLOY WAS GREEN, AND CS MOBILE v1.7.0 IS BUILT
+
+**A one-character slip took the whole API off the air and the deploy reported success.**
+`relayshield_scamkit.py` closed a frozenset with `)` where `})` belonged (the 2026-10-04 PhantomSub
+and Milk Dragon additions). `relayshield_api.py` imports that module at the top, so the function
+could not load. Found when a test failed at import, not by any alarm. Hotfix `7b0cf9b` is pushed.
+
+**WHY THE DEPLOY WAS GREEN.** The post-deploy import probe grepped for `ImportModuleError` and
+`No module named`. A syntax error is reported by Lambda as `Runtime.UserCodeSyntaxError`, which
+matched neither, so the probe printed "imports cleanly" over a function that could not start.
+That is the third time this file has recorded the probe saying yes for a reason unrelated to the
+question (run 134's denied invoke, the `ci.import-probe` early return that never reaches the
+dispatcher). **A probe that greps for the failures you thought of passes on the one you did not.**
+It matches `Runtime.[A-Za-z]+` now, and `test_python_sources_compile.py` parses every tracked
+`.py` before a push (asserting more than 100 files, so it cannot scope itself down to nothing),
+names the API's import chain explicitly, and reads the probe pattern out of the workflow rather
+than restating it.
+
+**UNVERIFIED from the container: whether production was actually down.** Nothing here can call the
+live API. The first move of the next session is
+`curl -sS -o /dev/null -w '%{http_code}\n' https://api.relayshield.net/v1/link-check -X POST -d '{}'`:
+anything but a 4xx JSON answer means the fix has not deployed.
+
+### THE FREE EMAIL CHECK (`POST /v1/app/free-exposure-check`)
+
+**Decided by Andrew 2026-10-05.** HIBP is a flat $5 a month, so one free check per install costs
+nothing at the margin. It is keyless, runs HIBP (via `handle_breach`, so it inherits the 24h cache)
+and Hudson Rock Cavalier (free, keyless), and returns `found`, `nothing_known` or `incomplete`.
+
+* **One per install, enforced by a reservation, not a counter.** reserve, then finalise on a
+  completed answer or RELEASE on an incomplete one, so a check that could not finish does not
+  burn the allowance. Written with UpdateItem only, because GetItem on the quota table is
+  unverified for the shared role. It fails CLOSED: if the allowance cannot be recorded the check
+  is refused rather than served unmetered, the opposite of the keyless IP cap, deliberately.
+* **Privacy posture is a property, tested.** The email is never stored or logged. The install id
+  is hashed (`sha256`, truncated) and is not derived from anything else. Counters carry no
+  identifier. `cloudflare_worker_privacy.js` discloses all of it and names HIBP and Hudson Rock as
+  recipients of the address, which it did not before. **A free check that quietly sends an email
+  to two third parties is a disclosure problem however good the feature is.**
+* **A subscriber keeps the paid check.** `ScanScreen` routes to the free path only when
+  `scanType === "infostealer" && !apiKey`.
+* **The words never say safe.** `exposureCopy.ts` is a pure function so the test EXECUTES it under
+  node; "nothing known" is the ceiling, an incomplete check is never worded as clean, and what WAS
+  found is shown even when the other half failed.
+
+### THE FUNNEL COUNTERS, AND THE REASON THEY EXIST
+
+Nothing could say whether "no trials" meant nobody saw the paywall or everybody did and declined:
+Stripe sees only COMPLETED trials. `POST /v1/app/event` accepts four names
+(`paywall_viewed`, `checkout_tapped`, `wallet_connected`, `onboarding_completed`) and writes
+`app_event name=... ctx=... v=... platform=...`. Fields are validated against `^[a-z0-9_.-]{1,24}$`
+rather than escaped, because they land in a line a regex parses and a space would forge another.
+
+**`tools/miniapp_funnel.py` reads them (`APP FREE`, `APP PAYWALL`, `APP TAPPED`)**, and
+`test_cs_mobile_free_check.py` matches each regex against the handler's own format string. A
+counter nobody reads is a feature nothing points at; a counter read with a wrong filter is a
+confident zero. `CHANNEL = "solana"` in `analytics.ts` is pinned equal to the Stripe
+`client_reference_id`, so the two platform splits cannot disagree. **A Google Play build sets
+`googleplay` in BOTH places.**
+
+### FINDINGS MADE ON THE WAY, EACH ONE REAL
+
+1. **`/v1/wallet-risk` is keyless and the free tier's one wallet could never be scanned.**
+   `WalletsScreen.scanWallet` returned "Subscription required" before sending anything. So the free
+   tier advertised on the paywall could not be used.
+2. **The paid Email Check always showed zero infostealer hits.** `ScanScreen` read `data.hits`; the
+   endpoint returns `stealer_count`. A paying user with a real exposure saw a clean result.
+3. **Onboarding's terms and privacy links were `relayshield.net/terms` and `/privacy`**, the Carrd
+   404 recorded on 2026-08-01. Fixed to the subdomains. The same class of mistake as the
+   developer-URL rule, in the one screen every new user sees.
+4. **Onboarding made a new user paste a 44-character address and then said the email check
+   "unlocks once your subscription is linked".** The connect button existed in WalletsScreen and
+   had one caller. Onboarding now connects, scans, and offers the check before asking for anything.
+
+### WHAT THIS BUILD CANNOT FIX, AND SAYING SO IS THE POINT
+
+**Nothing in v1.7.0 changes who can install the app.** The Solana dApp Store serves Solana Mobile
+hardware; whether it installs on an ordinary Android phone is UNVERIFIED and decisive for every
+plan to point the blog, the extension and the developers page at it. If it does not, the reason
+for low demand is distribution and no amount of copy fixes it, and Google Play is the real
+change. Read the Play crypto-app policy (secondary reporting says exchanges and custodial wallets
+need licensing and non-custodial are excluded) before porting.
+
+**Hold further store updates after this one** until the counters show real paywall traffic.
+
+### OPEN, AND NOT VERIFIED THIS SESSION
+
+* `relayshield_breach_cache` creation is still unconfirmed, so the free check's HIBP half falls
+  through to a live call every time until `sh tools/setup_breach_cache.sh` has run. HIBP's rate
+  limit is shared with the bots and every paying customer, so a promoted free check raises that
+  exposure.
+* Whether Hudson Rock's free Cavalier API permits commercial in-app use is UNREAD. Read their
+  terms before the free check is promoted.
+* The listing still says "Tech E&O and Cyber Insurance coverage" and "every alert is
+  cryptographically verified". Neither is verifiable from this repo. Confirm both or drop them.
+* The store copy must be pasted into the portal at the same time as the v1.7.0 build, never
+  before: the free check and connect-and-scan do not exist in v1.6.0.

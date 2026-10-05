@@ -205,6 +205,30 @@ STAGES = [
      "the wa.me links are placed and nobody taps them, OR the number in the "
      "Workers is unset so no link was ever rendered -- check that first"),
 
+    # CRYPTO SHIELD MOBILE, added 2026-10-05 with the counters themselves. Until
+    # then nothing could say whether "no trials" meant nobody saw the paywall or
+    # everybody saw it and declined: Stripe only sees COMPLETED trials. These read
+    # the anonymous lines handle_app_event and handle_free_exposure_check write
+    # (no identifier, no email), filtered on the line the code ACTUALLY WRITES --
+    # test_cs_mobile_free_check.py matches each regex against the handler's own
+    # format string, so a rename there cannot turn these into a confident zero.
+    ("APP FREE   free email checks served (CS Mobile)",
+     "/aws/lambda/relayshield-api", "free_exposure_check outcome=",
+     re.compile(r"free_exposure_check outcome=(served|incomplete)\b"),
+     "nobody ran the free check: the build is not installed, or the step is not "
+     "being reached. Check installs before blaming the offer"),
+
+    ("APP PAYWALL paywall screens viewed (CS Mobile)",
+     "/aws/lambda/relayshield-api", "app_event name=paywall_viewed",
+     re.compile(r"app_event name=paywall_viewed ctx=(\S*)"),
+     "either nobody reaches the paywall or the build with the counter is not out"),
+
+    ("APP TAPPED checkout taps (CS Mobile)",
+     "/aws/lambda/relayshield-api", "app_event name=checkout_tapped",
+     re.compile(r"app_event name=checkout_tapped ctx=(\S*)"),
+     "people see the paywall and do not start the trial: price, trust or "
+     "wording, in that order of cheapness to test"),
+
     ("DEVELOPERS arrivals on the API landing page",
      "/aws/lambda/relayshield-developer-signup", "developer-signup request",
      re.compile(r"developer-signup request .*?\bsource=(tg-miniapp[a-z-]*|tg-widget)"),

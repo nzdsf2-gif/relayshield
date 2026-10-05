@@ -332,29 +332,21 @@ export function WalletsScreen() {
     setConnecting(false);
   }
 
+  // /v1/wallet-risk is keyless (capped per source IP), so the free tier's one
+  // monitored wallet can really be scanned. This used to stop at
+  // "Subscription required" before sending anything.
   const scanWallet = useCallback(async (wallet: WatchedWallet) => {
-    if (!apiKey) {
-      Alert.alert(
-        "Subscription required",
-        "Link your subscription in Settings to scan wallets.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Go to Settings", onPress: () => navigation.navigate("Settings") },
-        ],
-      );
-      return;
-    }
     setScanningAddr(wallet.address);
     try {
-      const data = await RS.scanWalletRisk(wallet.address, apiKey);
+      const data = await RS.scanWalletRisk(wallet.address, apiKey ?? null);
       const SCORE_MAP: Record<string, number> = { LOW: 20, MEDIUM: 45, HIGH: 70, CRITICAL: 90 };
       const score = SCORE_MAP[(data.risk_level ?? "LOW").toUpperCase()] ?? 20;
       updateWalletRisk(wallet.address, score, (data.risk_level ?? "LOW").toUpperCase() as any);
     } catch (err: any) {
-      Alert.alert("Scan failed", err?.message ?? "Could not reach the risk API. Check your connection and subscription.");
+      Alert.alert("Scan failed", err?.message ?? "Could not reach the risk API. Check your connection and try again.");
     }
     setScanningAddr(null);
-  }, [apiKey, navigation]);
+  }, [apiKey]);
 
   async function handleAdd() {
     if (!address.trim()) return;

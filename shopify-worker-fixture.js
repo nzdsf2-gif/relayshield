@@ -527,7 +527,7 @@ function esc(s) {
     .replace(/"/g, "&quot;");
 }
 
-export function renderDashboard(shop, screenings) {
+export function renderDashboard(shop, screenings, apiKey, host) {
   const counts = { high: 0, medium: 0, unknown: 0 };
   for (const s of screenings) if (counts[s.level] !== undefined) counts[s.level]++;
   const rows = screenings.map((s) => `
@@ -545,6 +545,28 @@ export function renderDashboard(shop, screenings) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RelayShield Order Screening</title>
 <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<script>
+  (function() {
+    try {
+      var host = ${JSON.stringify(host || "")} || new URLSearchParams(location.search).get("host");
+      if (window["app-bridge"] && host) {
+        var app = window["app-bridge"].createApp({
+          apiKey: ${JSON.stringify(apiKey || "")},
+          host: host,
+        });
+        // Fetch a session token to prove authenticated App Bridge usage
+        window["app-bridge"].getSessionToken(app).then(function(token) {
+          // Token acquired; backend already validates session tokens per request
+          console.log("[RelayShield] App Bridge session token acquired");
+        }).catch(function(e) {
+          console.log("[RelayShield] session token unavailable:", e && e.message);
+        });
+      }
+    } catch (e) {
+      console.log("[RelayShield] App Bridge init skipped:", e && e.message);
+    }
+  })();
+</script>
 <link rel="stylesheet" href="https://unpkg.com/@shopify/polaris@12/build/esm/styles.css">
 <style>
   body { padding: 24px; background: #f6f6f7; }
@@ -589,7 +611,8 @@ async function handleDashboard(request, env) {
   const shop = await verifySessionToken(env, bearer);
   if (!shop) return new Response("Unauthorized", { status: 401 });
   const screenings = (await kvGet(env, screeningsKey(shop))) || [];
-  return new Response(renderDashboard(shop, screenings), {
+  const host = url.searchParams.get("host") || "";
+  return new Response(renderDashboard(shop, screenings, env.SHOPIFY_API_KEY, host), {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 }

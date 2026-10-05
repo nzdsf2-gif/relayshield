@@ -610,13 +610,13 @@ export default {
       if (url.pathname === "/webhooks/orders-create" && request.method === "POST") {
         return handleOrdersCreate(request, env);
       }
-      if (url.pathname === "/webhooks/gdpr/customers-data-request" && request.method === "POST") {
+      if ((url.pathname === "/webhooks/gdpr/customers-data-request" || url.pathname === "/webhooks/gdpr/customers/data-request") && request.method === "POST") {
         return handleGdpr(request, env, "customers-data-request");
       }
-      if (url.pathname === "/webhooks/gdpr/customers-redact" && request.method === "POST") {
+      if ((url.pathname === "/webhooks/gdpr/customers-redact" || url.pathname === "/webhooks/gdpr/customers/redact") && request.method === "POST") {
         return handleGdpr(request, env, "customers-redact");
       }
-      if (url.pathname === "/webhooks/gdpr/shop-redact" && request.method === "POST") {
+      if ((url.pathname === "/webhooks/gdpr/shop-redact" || url.pathname === "/webhooks/gdpr/shop/redact") && request.method === "POST") {
         return handleGdpr(request, env, "shop-redact");
       }
       if (url.pathname === "/" && request.method === "GET") {

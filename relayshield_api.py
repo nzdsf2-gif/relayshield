@@ -16068,6 +16068,270 @@ _GUIDE_HTML = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Crypto Shield Mobile: ONE FREE EXPOSURE CHECK PER INSTALL, and the anonymous
+# funnel counters. Added 2026-10-05.
+#
+# WHY IT EXISTS. The app's differentiator is the off-chain layer (is your email
+# already in a leak), and all of it sat behind the paywall, so a prospect could
+# never see it work. Nothing in the weekly report has shown a trial start.
+# Letting a keyless install run the check ONCE is the cheapest way to show the
+# product doing the thing the store listing claims.
+#
+# WHAT IT COSTS, read from the code rather than assumed: handle_infostealer
+# calls Hudson Rock's public Cavalier endpoint (no key), and handle_breach
+# calls HIBP on ONE subscription key. Andrew's position, 2026-10-05, is that
+# the HIBP fee is a fixed monthly subscription, so a free check adds no
+# dollars. It DOES still draw on that key's RATE limit, which is shared with
+# the Telegram bot, the WhatsApp bot and every paying caller -- so the limits
+# below protect other customers' access, not our margin.
+#
+# THE ORDER IS THE DESIGN, and every step is an UpdateItem because the quota
+# table is only ever written with update_item elsewhere in this file:
+#   1. per-IP cap       (cheap, and stops a script from enumerating install ids)
+#   2. RESERVE the install (a second tap or a replay is refused before any
+#      upstream call is made)
+#   3. global daily cap (a hard ceiling on this endpoint's draw on the shared
+#      HIBP rate limit; releases the reservation when it refuses)
+#   4. run both checks concurrently (one 15s timeout, not two in series, under
+#      API Gateway's 29s ceiling)
+#   5. FINALISE the allowance only if BOTH checks completed. An upstream blip
+#      must not spend the one check a user gets, so an incomplete answer is
+#      returned and the reservation is RELEASED.
+#
+# FAILS CLOSED, unlike _check_keyless_ip_quota two hundred lines up. That one
+# guards our own bill and fails open; this one guards a rate limit other
+# customers depend on, so a DynamoDB error refuses the call.
+#
+# NOTHING HERE STORES THE EMAIL OR THE RAW INSTALL ID. The allowance row is
+# keyed on a one-way hash, and the log line carries an outcome and a boolean.
+# The install id is minted by the app and SecureStore does not survive an
+# uninstall, so a reinstall is a new install: the bound on abuse is the global
+# cap, not the id.
+#
+# A RESULT NEVER SAYS "SAFE". "nothing_known" is the ceiling, for the same
+# reason /v1/link-check and the SIM swap monitor have one: an empty answer from
+# two lookups is an absence of evidence.
+# ---------------------------------------------------------------------------
+FREE_EXPOSURE_DAILY_CAP     = 150
+FREE_EXPOSURE_IP_UNITS      = 5          # 300/day per IP -> 60 free checks per IP
+FREE_EXPOSURE_RESERVE_TTL   = 120        # seconds a reservation blocks a second tap
+FREE_EXPOSURE_ALLOWANCE_TTL = 400 * 86400
+_FX_INSTALL_RE = re.compile(r"^[A-Za-z0-9-]{16,64}$")
+_FX_EMAIL_RE   = re.compile(r"^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$")
+
+
+def _fx_cond_code(exc: Exception) -> str:
+    """The DynamoDB error code off a ClientError, duck-typed rather than caught
+    by name (this file does not import botocore -- see the note near line 5789)."""
+    try:
+        return exc.response.get("Error", {}).get("Code", "")  # type: ignore[attr-defined]
+    except Exception:
+        return ""
+
+
+def _fx_reserve(install_hash: str) -> str:
+    """'reserved' | 'used' | 'busy' | 'error'. UpdateItem only."""
+    now = int(time.time())
+    kwargs = dict(
+        Key={"usage_key": f"fxi#{install_hash}"},
+        UpdateExpression="SET st = :r, rat = :now, expires_at = :ttl",
+        ConditionExpression=("attribute_not_exists(usage_key) OR st = :o "
+                             "OR (st = :r AND rat < :stale)"),
+        ExpressionAttributeValues={
+            ":r": "r", ":o": "o", ":now": now,
+            ":stale": now - FREE_EXPOSURE_RESERVE_TTL,
+            ":ttl": now + FREE_EXPOSURE_ALLOWANCE_TTL,
+        },
+    )
+    table = dynamodb.Table(DEMO_QUOTA_TABLE)
+    try:
+        try:
+            table.update_item(ReturnValuesOnConditionCheckFailure="ALL_OLD", **kwargs)
+        except Exception as exc:
+            # An older boto3 rejects the parameter BEFORE sending anything. That
+            # must not turn into a permanent 503 on a fail-closed endpoint, so
+            # retry without it: the only thing lost is telling 'busy' from 'used'.
+            if type(exc).__name__ != "ParamValidationError":
+                raise
+            table.update_item(**kwargs)
+        return "reserved"
+    except Exception as exc:
+        if _fx_cond_code(exc) == "ConditionalCheckFailedException":
+            old = getattr(exc, "response", {}).get("Item") or {}
+            # A live reservation is a check IN PROGRESS, not a spent allowance.
+            # When the old item is not returned (older boto3), 'used' is the
+            # conservative answer: it never grants a second check.
+            st = (old.get("st") or {})
+            st = st.get("S") if isinstance(st, dict) else st
+            return "busy" if st == "r" else "used"
+        logger.error("free exposure reserve failed: %s", exc)
+        return "error"
+
+
+def _fx_set_state(install_hash: str, state: str) -> None:
+    try:
+        dynamodb.Table(DEMO_QUOTA_TABLE).update_item(
+            Key={"usage_key": f"fxi#{install_hash}"},
+            UpdateExpression="SET st = :s",
+            ExpressionAttributeValues={":s": state},
+        )
+    except Exception as exc:
+        # A release that fails leaves the reservation to expire on its own
+        # after FREE_EXPOSURE_RESERVE_TTL, so this is a delay, never a leak.
+        logger.warning("free exposure state write failed state=%s: %s", state, exc)
+
+
+def _fx_day_count():
+    """Today's global count AFTER incrementing, or None on any error."""
+    try:
+        resp = dynamodb.Table(DEMO_QUOTA_TABLE).update_item(
+            Key={"usage_key": f"fxday#{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"},
+            UpdateExpression="ADD n :one SET expires_at = if_not_exists(expires_at, :ttl)",
+            ExpressionAttributeValues={":one": 1, ":ttl": int(time.time()) + 3 * 86400},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(resp["Attributes"]["n"])
+    except Exception as exc:
+        logger.error("free exposure day count failed: %s", exc)
+        return None
+
+
+def _fx_shape(breach_ok: bool, breach: dict, steal_ok: bool, steal: dict) -> dict:
+    """Facts only. The app words them; the server never asserts safety, and it
+    never returns a field that identifies a device (computer_name, malware_path)
+    -- the paid endpoint does, and a free check has no business handing that to
+    anyone who typed an email address."""
+    breaches = list(breach.get("breaches") or []) if breach_ok else []
+    breaches.sort(key=lambda b: b.get("breach_date") or "", reverse=True)
+    classes: dict[str, int] = {}
+    for b in breaches:
+        for c in (b.get("data_classes") or []):
+            classes[c] = classes.get(c, 0) + 1
+    exposed = [c for c, _ in sorted(classes.items(), key=lambda kv: (-kv[1], kv[0]))][:6]
+    steal_dates = sorted(
+        [s.get("date_compromised") for s in (steal.get("stealers") or []) if s.get("date_compromised")],
+        reverse=True) if steal_ok else []
+
+    b_found = len(breaches) > 0
+    s_found = bool(steal.get("found")) if steal_ok else False
+    complete = bool(breach_ok and steal_ok)
+    if b_found or s_found:
+        level = "found"
+    elif complete:
+        level = "nothing_known"
+    else:
+        level = "incomplete"
+    return {
+        "level":    level,
+        "complete": complete,
+        "breach": {
+            "checked":       bool(breach_ok),
+            "count":         len(breaches) if breach_ok else None,
+            "names":         [b.get("name") for b in breaches[:5] if b.get("name")],
+            "newest":        (breaches[0].get("breach_date") if breaches else None),
+            "exposed_data":  exposed,
+            "password_exposed": any("password" in (c or "").lower() for c in classes),
+        },
+        "infostealer": {
+            "checked": bool(steal_ok),
+            "found":   (s_found if steal_ok else None),
+            "count":   (int(steal.get("stealer_count") or 0) if steal_ok else None),
+            "newest":  (steal_dates[0] if steal_dates else None),
+        },
+        "allowance": {"used": complete, "remaining": 0 if complete else 1},
+    }
+
+
+def _fx_run(email: str) -> dict:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _safe(fn):
+        try:
+            return _unwrap(fn({"email": email}))
+        except Exception as exc:  # a lookup that raises is a lookup that did not complete
+            logger.warning("free exposure sub-check raised: %s", type(exc).__name__)
+            return False, {}
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_breach = pool.submit(_safe, handle_breach)
+        f_steal  = pool.submit(_safe, handle_infostealer)
+        breach_ok, breach = f_breach.result(timeout=25)
+        steal_ok,  steal  = f_steal.result(timeout=25)
+    return _fx_shape(breach_ok, breach, steal_ok, steal)
+
+
+def handle_free_exposure_check(params: dict, source_ip: str = "") -> dict:
+    email      = (params.get("email") or "").strip().lower()
+    install_id = (params.get("install_id") or "").strip()
+    if len(email) > 254 or not _FX_EMAIL_RE.match(email):
+        return _err("enter a valid email address")
+    if not _FX_INSTALL_RE.match(install_id):
+        return _err("install_id is required")
+
+    if not _check_keyless_ip_quota(source_ip, FREE_EXPOSURE_IP_UNITS):
+        logger.warning("free_exposure_check outcome=ip_capped")
+        return _err("too many checks from this network today, try again tomorrow", 429)
+
+    install_hash = _sha256(install_id)[:40]
+    state = _fx_reserve(install_hash)
+    if state == "used":
+        logger.info("free_exposure_check outcome=already_used")
+        return _ok({"already_used": True, "allowance": {"used": True, "remaining": 0}})
+    if state == "busy":
+        return _err("a free check is already running for this install, try again in a minute", 429)
+    if state == "error":
+        return _err("free checks are temporarily unavailable, try again shortly", 503)
+
+    try:
+        n = _fx_day_count()
+        if n is None or n > FREE_EXPOSURE_DAILY_CAP:
+            _fx_set_state(install_hash, "o")
+            logger.warning("free_exposure_check outcome=day_capped")
+            return _err("free checks are paused for today, try again tomorrow", 429)
+        data = _fx_run(email)
+    except Exception as exc:
+        _fx_set_state(install_hash, "o")
+        logger.exception("free exposure check failed: %s", exc)
+        return _err("exposure check failed, nothing was used, try again", 502)
+
+    _fx_set_state(install_hash, "u" if data["complete"] else "o")
+    logger.info("free_exposure_check outcome=%s level=%s",
+                "served" if data["complete"] else "incomplete", data["level"])
+    return _ok(data)
+
+
+# Anonymous funnel counters. NO identifier of any kind is accepted or logged:
+# not the install id, not the push token, not an IP. A counter that carried one
+# would be personal data and would need a different privacy answer; this one
+# only has to answer "did anybody reach the paywall, and did anybody tap it",
+# which Stripe cannot (it sees completed trials only).
+#
+# THE FIELDS ARE VALIDATED AGAINST A CHARACTER CLASS, NOT ESCAPED. They are
+# written into a log line the funnel tool parses with a regex, so a space or a
+# newline in a value would let a caller forge another line.
+APP_EVENT_NAMES = frozenset({
+    "paywall_viewed", "checkout_tapped", "wallet_connected", "onboarding_completed",
+})
+_APP_EVENT_FIELD_RE = re.compile(r"^[a-z0-9_.-]{1,24}$")
+
+
+def _app_event_field(value) -> str:
+    v = str(value or "").strip().lower()
+    return v if _APP_EVENT_FIELD_RE.match(v) else "-"
+
+
+def handle_app_event(params: dict) -> dict:
+    name = str(params.get("event") or "").strip()
+    if name not in APP_EVENT_NAMES:
+        return _err("unknown event")
+    logger.info("app_event name=%s ctx=%s v=%s platform=%s", name,
+                _app_event_field(params.get("ctx")),
+                _app_event_field(params.get("version")),
+                _app_event_field(params.get("platform")))
+    return _ok({"received": True})
+
+
 def lambda_handler(event: dict, context) -> dict:
     path   = event.get("path", "")
     method = event.get("httpMethod", "")
@@ -16239,6 +16503,15 @@ def lambda_handler(event: dict, context) -> dict:
         except Exception as exc:
             logger.warning("feedback submission failed: %s", exc)
             return _err("feedback submission failed", 500)
+
+    # ── Crypto Shield Mobile: one free exposure check per install, and the
+    # anonymous paywall-funnel counters. No auth: a key is exactly what a
+    # first-run install does not have. See the block above handle_free_exposure_check.
+    if method == "POST" and path in ("/v1/app/free-exposure-check", "/v1/app/free-exposure-check/"):
+        _fx_ip = ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or ""
+        return handle_free_exposure_check(_body(event), _fx_ip)
+    if method == "POST" and path in ("/v1/app/event", "/v1/app/event/"):
+        return handle_app_event(_body(event))
 
     # ── Public badge endpoint — no auth required ──────────────────────────────
     # GET/HEAD /v1/badge?domain=example.com&style=flat|shield

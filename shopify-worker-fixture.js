@@ -544,6 +544,7 @@ export function renderDashboard(shop, screenings) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RelayShield Order Screening</title>
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/@shopify/polaris@12/build/esm/styles.css">
 <style>
   body { padding: 24px; background: #f6f6f7; }

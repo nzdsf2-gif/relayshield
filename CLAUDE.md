@@ -10062,3 +10062,30 @@ Support URL on newer submissions (another session built that Worker).
   `nzdsf2-gif/relayshield`, so its commits died with the sandbox. Andrew adds the repo to the routine's
   sources. Its keyword-yield question is still unanswered and needs
   `AWS_PROFILE=relayshield python3 tools/triage_channels.py --keywords` on the Mac.
+
+## 2026-10-05: XSOAR POST FILTERED; CS MOBILE BUILD SCOPE, FROM FACTS CHECKED ON `origin/main`
+
+* **LIVEcommunity XSOAR thread was FILTERED** (Andrew, 2026-10-05; his profile screenshot shows 0 posts,
+  member since 10-02-2026). The cause is UNKNOWN: no moderator reason was seen, and a new account's first
+  post being held by a spam filter looks the same as a removal. Route closed: do not repost or bump. The
+  Marketplace listing and the blog post stand without it.
+* **The v1.6.0 API half is deployed and green**: `deploy_lambdas.yml` runs 187 and 188 both `success`,
+  on a history that contains `9243174` and `141dab9`. The EAS build is unblocked from the deploy side.
+* **Facts found while scoping the next app build, so they are not re-derived:**
+  * `connectSolanaWallet()` (MWA read-only authorize) has ONE caller, `WalletsScreen.tsx:324`. Onboarding
+    step 1 makes a new user paste an address by hand, so a first-run auto-scan is a wiring job, not a build
+    of new capability.
+  * Nothing counts `paywall_viewed` or `checkout_tapped` (grep of the app and `relayshield_api.py`: no
+    match). Stripe sees only completed trials, so "nobody sees the paywall" and "everybody declines" are
+    indistinguishable. Any build that ships without that counter leaves the next one equally blind.
+  * Free tier = ten on-chain scan types plus one monitored wallet. The off-chain differentiator the
+    store copy leads with (breach, infostealer, SIM swap, attack chain) is entirely behind the paywall,
+    so a prospect cannot see it work before paying.
+  * Paywall: 7 days free, then $10.99/mo or $105.99/yr.
+* **UNVERIFIED and decisive: whether the Solana dApp Store installs on an ordinary Android phone.** If it
+  only serves Solana Mobile hardware, pointing the blog, extension and developers page at it sends most
+  visitors to a dead end, and Google Play is the real distribution fix.
+* **Recommendation (mine, Andrew decides):** one build carrying the paywall counter, MWA auto-scan in
+  onboarding, and one free email exposure check per install (about $0.10 per install, bounded). The
+  attack chain and SIM swap stay paid: Twilio cost, and a phone number is too big an ask of a cold user.
+  This relaxes the 2026-10-03 rule "a real cost goes behind the paywall" for one bounded endpoint only.

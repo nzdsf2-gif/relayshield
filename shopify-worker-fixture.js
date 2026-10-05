@@ -610,6 +610,19 @@ export default {
       if (url.pathname === "/webhooks/orders-create" && request.method === "POST") {
         return handleOrdersCreate(request, env);
       }
+      if (url.pathname === "/webhooks/gdpr" && request.method === "POST") {
+        const topic = request.headers.get("X-Shopify-Topic") || "";
+        const kind =
+          topic === "customers/data_request"
+            ? "customers-data-request"
+            : topic === "customers/redact"
+              ? "customers-redact"
+              : topic === "shop/redact"
+                ? "shop-redact"
+                : "";
+        if (!kind) return new Response("Unknown topic", { status: 400 });
+        return handleGdpr(request, env, kind);
+      }
       if ((url.pathname === "/webhooks/gdpr/customers-data-request" || url.pathname === "/webhooks/gdpr/customers/data-request") && request.method === "POST") {
         return handleGdpr(request, env, "customers-data-request");
       }

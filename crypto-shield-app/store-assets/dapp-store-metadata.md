@@ -7,20 +7,30 @@ Crypto Shield
 RelayShield LLC
 
 ## Short Description / Tagline (~80 char limit — check portal's exact limit)
-The only wallet security app that watches your credentials, not just your chain.
+Is your crypto email already in a leak? Check it free, then watch your wallets and your logins.
 
 ## Category
 Utilities / Security (pick whichever the portal's category list calls closest to this — not Finance/DeFi, since this app doesn't move funds)
 
 ## Full Description
 
-Crypto Shield is read-only wallet security monitoring for Solana, EVM (including Base),
-TON, Bitcoin, and XRP — built by RelayShield, a threat intelligence company that also
-protects businesses and consumers against breaches, SIM-swap fraud, and infostealer malware.
+Most wallets are not drained by a clever contract. They are drained because the email
+behind them was already in a leak, a session was stolen by infostealer malware, or a SIM was
+swapped. Crypto Shield checks that off-chain layer as well as the chain.
+
+**Try it before you decide anything.** Connect Phantom or Solflare (read-only, we only see
+your public address) and your wallet is scanned straight away. Type in your email and get one
+free check against breach records and infostealer logs. No account, no card, no key. The
+result says what was found, or that nothing is known, which is not a promise nothing exists.
+
+Crypto Shield is read-only security monitoring for Solana, EVM (including Base), TON,
+Bitcoin, and XRP, built by RelayShield, a threat intelligence company that also protects
+businesses and consumers against breaches, SIM-swap fraud, and infostealer malware.
 
 <!-- SIM swap monitoring is listed below as of v1.6.0 (2026-10-03): Settings now
-     posts /v1/sim-swap/enroll and the monitor delivers by push. Paste this
-     listing into the portal at the same time as the v1.6.0 build, never before:
+     posts /v1/sim-swap/enroll and the monitor delivers by push. The free email
+     check and the connect-and-scan first run exist only as of v1.7.0 (2026-10-05).
+     Paste this listing into the portal at the same time as the v1.7.0 build, never before:
      a listing that promises it while the live build cannot do it is the
      CSM-SIMSWAP-1 defect again, and the portal copy is not versioned. -->
 
@@ -33,9 +43,11 @@ it watches your wallets and alerts you the moment something looks wrong.
   into copying the wrong address from your transaction history
 - NFT security scanning — flags malicious/fake NFT contracts, not just floor prices
 - NFT floor price tracking and alerts
-- Criminal marketplace intelligence — 100+ monitored underground channels where stolen data
-  and drainer kits are traded, so you're flagged before you know you're a target
-- Breach and infostealer exposure alerts for your linked email
+- Criminal marketplace intelligence, collected continuously from monitored underground
+  channels, infostealer log dumps and public indicator feeds, so you're flagged before you
+  know you're a target
+- One free email exposure check, and ongoing breach and infostealer alerts for your linked
+  email with the 7-day free trial
 - SIM swap monitoring — turn it on for your own number and get a push notification if your
   carrier reports a SIM change or a port-out (US carriers)
 - Attack chain sequencing — see whether a breach, a SIM swap and a lookalike domain line up
@@ -46,10 +58,10 @@ it watches your wallets and alerts you the moment something looks wrong.
   backdoors
 - Real-time push notifications the moment a threat is detected
 
-**Why it's different:** every competing wallet-security product watches on-chain activity
-only. Most real attacks start off-chain — a leaked password, a phished session, a SIM-swap
-— long before a malicious transaction ever gets signed. Crypto Shield is the only consumer
-product that treats the credential layer and the chain layer as one attack surface.
+**Why it's different:** most wallet-security tools watch on-chain activity. Many real
+attacks start off-chain: a leaked password, a stolen session, a SIM swap, long before a
+malicious transaction is signed. Crypto Shield treats the credential layer and the chain layer
+as one attack surface.
 
 Every alert is cryptographically verified before it reaches your phone. RelayShield
 carries active Tech E&O and Cyber Insurance coverage.
@@ -72,7 +84,7 @@ XRP wallet, Base chain, lookalike token detection
 - **Publisher wallet**: `E64PiTT7U8ZUWFKdkrBFw1YzdD2bU1gKcuGnBRVqp7M6` (`E64P...p7M6`) —
     must be the same publisher, both to keep the publisher account and because the update
     check looks up releases by this authority.
-- **Subtitle** (50 char max): `Watches your credentials, not just chain`
+- **Subtitle** (50 char max): `Is your crypto email already in a leak?` (39 chars)
 - **dApp Icon (512x512)**: `dapp-store/icon-512.png`
 - **Banner (1200x600)**: `dapp-store/banner-1200x600.png`
 - **dApp Preview (min 4)**: all 5 files in `screenshots/` (1080x2400, matching)

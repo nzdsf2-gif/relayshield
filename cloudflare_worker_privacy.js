@@ -19,7 +19,7 @@ export default {
 <body>
   <a href="https://relayshield.net" class="back">← RelayShield</a>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: June 2026</p>
+  <p class="meta">Last updated: October 2026</p>
 
   <p>RelayShield ("we", "us", or "our") operates relayshield.net and the CryptoShield mobile application. RelayShield is based in Massachusetts, United States. This policy explains how we collect, use, and protect your information.</p>
 
@@ -27,6 +27,9 @@ export default {
   <p><strong>Account &amp; API:</strong> When you sign up, we collect the email address and phone number you provide for monitoring, plus usage data (API call counts, timestamps, endpoint usage). We do not collect payment card data, billing address, or any other checkout details directly — these are collected and processed entirely by Stripe, our payment processor, and are never transmitted to or stored in RelayShield's systems.</p>
   <p><strong>Wallet addresses:</strong> Wallet addresses you add to CryptoShield are stored locally on your device using encrypted storage. We transmit them to our API solely to perform breach and risk checks on your behalf.</p>
   <p><strong>Usage data:</strong> We log API requests (endpoint, timestamp, response code) for security monitoring and rate limiting. We do not log request payloads beyond what is necessary to fulfill the request.</p>
+
+  <p><strong>Free email check (CryptoShield app):</strong> If you use the one free check, we send the email address you type to our API, which looks it up in two third-party sources: Have I Been Pwned (breach records) and Hudson Rock (infostealer logs). We do not store the email address and do not write it to our logs. To enforce the one-check allowance we store a one-way hash of a random identifier the app generates on your device; it is not derived from your email, your device hardware or your wallet, and cannot be turned back into any of them. To limit abuse we also count requests per network address per day, and those counters expire automatically. A short-lived breach result may be cached against a one-way hash of the email, never the address itself.</p>
+  <p><strong>Anonymous usage counters (CryptoShield app):</strong> The app reports a small number of events (for example that the subscription screen was viewed or that checkout was tapped), together with the app version and store channel. These carry no identifier of any kind: not the install identifier above, not your email, wallet address or device token. We use them only to count how far people get, so we can fix the places they stop.</p>
 
   <h2>2. How We Use Your Information</h2>
   <ul>
@@ -42,6 +45,7 @@ export default {
     <li><strong>Stripe</strong> — payment processing</li>
     <li><strong>AWS</strong> — infrastructure (data stored in us-east-1)</li>
     <li><strong>Twilio</strong> — WhatsApp alert delivery</li>
+    <li><strong>Have I Been Pwned</strong> and <strong>Hudson Rock</strong> — receive the email address you ask us to check, solely to return the result to you</li>
     <li>Law enforcement when required by valid legal process</li>
   </ul>
 

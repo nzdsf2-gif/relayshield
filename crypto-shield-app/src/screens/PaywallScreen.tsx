@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   Linking, ActivityIndicator, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { CHANNEL, track } from "../utils/analytics";
 
 // ── Stripe Payment Links (create in Stripe Dashboard → Payment Links) ──────────
 // Replace these with real plink_ IDs from your Stripe dashboard.
@@ -29,6 +30,9 @@ const STRIPE_ANNUAL_URL  = "https://buy.stripe.com/6oUdRabaC4CN4uwbgb0Ny0h?clien
 
 interface Props {
   onClose?: () => void;
+  // react-navigation passes `route`; `route.params.from` says which screen sent
+  // the user here ("free_check" is the one the funnel most wants to separate).
+  route?: { params?: { from?: string } };
 }
 
 const FEATURES_PRO = [
@@ -45,11 +49,21 @@ const FEATURES_PRO = [
   "Security sweep (email + OAuth)",
 ];
 
-export function PaywallScreen({ onClose }: Props) {
+export function PaywallScreen({ onClose, route }: Props) {
   const [loading, setLoading] = useState<"monthly" | "annual" | null>(null);
+
+  // paywall_viewed: Stripe only ever sees COMPLETED trials, so without this
+  // "nobody reaches the paywall" and "everybody reaches it and declines" are
+  // indistinguishable. No identifier is sent (see utils/analytics.ts).
+  useEffect(() => {
+    track("paywall_viewed", route?.params?.from ?? "screen");
+  }, []);
 
   async function openCheckout(plan: "monthly" | "annual") {
     const url = plan === "annual" ? STRIPE_ANNUAL_URL : STRIPE_MONTHLY_URL;
+    // A TAP, counted before the browser opens: whether checkout then completes
+    // is Stripe's number, and the gap between the two is the point.
+    track("checkout_tapped", plan);
     setLoading(plan);
     try {
       const supported = await Linking.canOpenURL(url);

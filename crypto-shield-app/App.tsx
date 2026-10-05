@@ -1,6 +1,6 @@
 import "./src/polyfills";
 import React, { useState, useEffect } from "react";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, useNavigationContainerRef } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createStackNavigator } from "@react-navigation/stack";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -107,6 +107,11 @@ export default function App() {
   const [booted,          setBooted]          = useState(false);
   const [onboarded,       setOnboarded]       = useState(false);
   const [showTour,        setShowTour]        = useState(false);
+  // Set when the user taps the trial CTA on the free email-check result during
+  // onboarding. The navigator does not exist yet at that point, so the request
+  // waits here and is served by NavigationContainer's onReady.
+  const [pendingPaywall,  setPendingPaywall]  = useState<string | null>(null);
+  const navRef = useNavigationContainerRef();
   const [nftCollections,  setNftCollections]  = useState<string[]>([]);
   useMonthlyLinkedDevicePush();
   const { updateAvailable, latestVersion, dismiss } = useUpdateCheck();
@@ -150,7 +155,13 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <ErrorBoundary screenName="Onboarding">
-          <OnboardingScreen onComplete={() => { setOnboarded(true); setShowTour(true); }} />
+          <OnboardingScreen
+            onComplete={(opts) => {
+              setOnboarded(true);
+              if (opts?.openPaywall) setPendingPaywall("onboarding_free_check");
+              else setShowTour(true);
+            }}
+          />
         </ErrorBoundary>
       </SafeAreaProvider>
     );
@@ -159,6 +170,13 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <NavigationContainer
+        ref={navRef}
+        onReady={() => {
+          if (pendingPaywall) {
+            (navRef as any).navigate("Paywall", { from: pendingPaywall });
+            setPendingPaywall(null);
+          }
+        }}
         theme={{
           dark: true,
           colors: {

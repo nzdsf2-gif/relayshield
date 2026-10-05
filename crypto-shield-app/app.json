@@ -2,7 +2,7 @@
   "expo": {
     "name": "Crypto Shield",
     "slug": "crypto-shield",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -15,7 +15,7 @@
         "backgroundColor": "#0a1628"
       },
       "package": "net.relayshield.cryptoshieldmobile",
-      "versionCode": 6,
+      "versionCode": 7,
       "minSdkVersion": 23,
       "googleServicesFile": "./google-services.json"
     },

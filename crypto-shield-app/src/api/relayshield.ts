@@ -153,6 +153,27 @@ export async function withdrawSimSwap(phone: string, apiKey: string) {
   return rsPost("/v1/sim-swap/withdraw", { phone }, apiKey);
 }
 
+// ONE FREE EXPOSURE CHECK PER INSTALL, no key required. Server side:
+// handle_free_exposure_check. The response is FACTS ONLY ({level, breach,
+// infostealer, allowance}); the wording lives in components/ExposureCard.tsx so
+// "nothing known" can never be rendered as "safe". `already_used: true` is a
+// normal answer, not an error, so the app can offer the trial instead.
+export interface FreeExposureResult {
+  already_used?: boolean;
+  level?: "found" | "nothing_known" | "incomplete";
+  complete?: boolean;
+  breach?: {
+    checked: boolean; count: number | null; names: string[];
+    newest: string | null; exposed_data: string[]; password_exposed: boolean;
+  };
+  infostealer?: { checked: boolean; found: boolean | null; count: number | null; newest: string | null };
+  allowance?: { used: boolean; remaining: number };
+}
+
+export async function freeExposureCheck(email: string, installId: string): Promise<FreeExposureResult> {
+  return rsPost("/v1/app/free-exposure-check", { email, install_id: installId }, null);
+}
+
 // SIM swap check (one-shot metered lookup; does NOT enrol, see enrollSimSwap)
 export async function checkSimSwap(phone: string, apiKey: string) {
   return rsPost("/v1/metered/sim-swap", { phone }, apiKey);
@@ -174,7 +195,11 @@ export async function getTrendingThreats(hours: number = 24, apiKey: string) {
 }
 
 // Wallet risk — multi-chain (EVM/Solana/TON/Bitcoin)
-export async function scanWalletRisk(address: string, apiKey: string) {
+// /v1/wallet-risk is in KEYLESS_SCAN_ENDPOINTS (capped per source IP), so a
+// free install can scan its own wallet. Typed `string | null` for that reason:
+// requiring a key here is what made the free tier's "1 monitored wallet" scan
+// nothing until a subscription was linked.
+export async function scanWalletRisk(address: string, apiKey?: string | null) {
   return rsPost("/v1/wallet-risk", { address }, apiKey);
 }
 

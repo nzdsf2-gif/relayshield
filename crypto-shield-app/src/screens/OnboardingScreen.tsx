@@ -6,6 +6,10 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as SecureStore from "expo-secure-store";
 import * as RS from "../api/relayshield";
+import { connectSolanaWallet } from "../utils/mwa";
+import { getInstallId } from "../utils/installId";
+import { track } from "../utils/analytics";
+import { ExposureCard } from "../components/ExposureCard";
 
 const WALLETS_KEY = "cs_wallets";
 const EMAILS_KEY  = "cs_monitored_emails";
@@ -44,7 +48,7 @@ const CHAIN_TIPS: Record<Chain, { icon: string; tip: string }[]> = {
   ],
 };
 
-interface Props { onComplete: () => void; }
+interface Props { onComplete: (opts?: { openPaywall?: boolean }) => void; }
 
 export function OnboardingScreen({ onComplete }: Props) {
   const insets = useSafeAreaInsets();
@@ -63,6 +67,17 @@ export function OnboardingScreen({ onComplete }: Props) {
   // "Unlock Live Scans") but never ported into onboarding, so every new or
   // reinstalling subscriber only ever saw the old manual-paste-or-go-
   // sign-up-separately flow below and never discovered the real mechanism.
+  // FIRST-RUN VALUE, before anything is asked for. Both of these used to be
+  // behind a key or a manual paste: a new user typed a 44-character address and
+  // was shown nothing, and the email step said "this unlocks once your
+  // subscription is linked". Now a connected wallet is scanned immediately and
+  // the email can be checked once for free. Neither needs an account.
+  const [connecting, setConnecting] = useState(false);
+  const [scanning,   setScanning]   = useState(false);
+  const [scan, setScan] = useState<{ level: string; flags: string[]; failed?: string } | null>(null);
+  const [exposure, setExposure]     = useState<RS.FreeExposureResult | null>(null);
+  const [checkingEmail, setCheckingEmail] = useState(false);
+  const [exposureError, setExposureError] = useState("");
   const [linkEmail, setLinkEmail] = useState("");
   const [linking,   setLinking]   = useState(false);
   const [linkError, setLinkError] = useState("");
@@ -84,10 +99,70 @@ export function OnboardingScreen({ onComplete }: Props) {
     setLinking(false);
   }
 
-  async function finish() {
-    // Persist whatever the user filled in
+  const SCORE_MAP: Record<string, number> = { LOW: 20, MEDIUM: 45, HIGH: 70, CRITICAL: 90 };
+
+  // Scan the address now, with NO key: /v1/wallet-risk is keyless (capped per
+  // source IP), so the free tier's one wallet can actually be scanned.
+  async function runFirstScan(address: string) {
+    const addr = address.trim();
+    if (!addr) return;
+    setScanning(true); setScan(null); setError("");
+    try {
+      const d: any = await RS.scanWalletRisk(addr, null);
+      const level = String(d?.risk_level ?? "LOW").toUpperCase();
+      const flags = Array.isArray(d?.risk_flags)
+        ? d.risk_flags.slice(0, 3).map((f: any) => (typeof f === "string" ? f : String(f?.label ?? f?.name ?? ""))).filter(Boolean)
+        : [];
+      setScan({ level, flags });
+    } catch (e: any) {
+      setScan({ level: "", flags: [], failed: e?.message ?? "Couldn't scan this wallet. You can try again from the Wallets tab." });
+    }
+    setScanning(false);
+  }
+
+  async function handleConnectWallet() {
+    setConnecting(true); setError("");
+    try {
+      const addr = await connectSolanaWallet();
+      setWalletChain("solana");
+      setWalletAddr(addr);
+      track("wallet_connected", "ok");
+      setConnecting(false);
+      await runFirstScan(addr);
+      return;
+    } catch (e: any) {
+      track("wallet_connected", "failed");
+      setError(e?.message ?? "Couldn't connect to a wallet app. Make sure Phantom or Solflare is installed, or paste the address below.");
+    }
+    setConnecting(false);
+  }
+
+  async function runFreeEmailCheck() {
+    const addr = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
+      setExposureError("Enter an email address, e.g. you@example.com.");
+      return;
+    }
+    setCheckingEmail(true); setExposure(null); setExposureError("");
+    try {
+      setExposure(await RS.freeExposureCheck(addr, await getInstallId()));
+    } catch (e: any) {
+      setExposureError(e?.message ?? "Couldn't run the check. Check your connection and try again.");
+    }
+    setCheckingEmail(false);
+  }
+
+  async function finish(opts?: { openPaywall?: boolean }) {
+    // Persist whatever the user filled in. A wallet that was scanned above keeps
+    // its result, so the Dashboard shows it instead of "not scanned yet".
     const wallets = walletAddr.trim()
-      ? [{ address: walletAddr.trim(), label: walletLabel || "Main Wallet", chain: walletChain, addedAt: new Date().toISOString() }]
+      ? [{
+          address: walletAddr.trim(), label: walletLabel || "Main Wallet", chain: walletChain,
+          addedAt: new Date().toISOString(),
+          ...(scan && scan.level && !scan.failed
+            ? { lastRiskScore: SCORE_MAP[scan.level] ?? 20, lastRiskLevel: scan.level, lastChecked: new Date().toISOString() }
+            : {}),
+        }]
       : [];
     const emails = email.trim() && email.includes("@") ? [email.trim().toLowerCase()] : [];
 
@@ -98,7 +173,11 @@ export function OnboardingScreen({ onComplete }: Props) {
       apiKey.trim() ? SecureStore.setItemAsync(APIKEY_KEY, apiKey.trim()) : Promise.resolve(),
       SecureStore.setItemAsync(ONBOARDED, "true"),
     ]);
-    onComplete();
+    track("onboarding_completed", [
+      walletAddr.trim() ? "wallet" : "nowallet",
+      exposure && !exposure.already_used ? "check" : "nocheck",
+    ].join("_"));
+    onComplete(opts);
   }
 
   function next() { setError(""); setStep(s => s + 1); }
@@ -175,7 +254,20 @@ export function OnboardingScreen({ onComplete }: Props) {
                 address poisoning attacks. You can add more wallets after setup.
               </Text>
 
-              <Text style={styles.fieldLabel}>Chain</Text>
+              <TouchableOpacity
+                style={[styles.connectBtn, (connecting || scanning) && { opacity: 0.6 }]}
+                onPress={handleConnectWallet}
+                disabled={connecting || scanning}
+              >
+                <Text style={styles.connectBtnText}>
+                  {connecting ? "Opening your wallet app…" : "◎ Connect Phantom or Solflare"}
+                </Text>
+              </TouchableOpacity>
+              <Text style={styles.skipHint}>
+                Read-only. We only see your public address; your wallet app keeps your keys and we never ask for them.
+              </Text>
+
+              <Text style={[styles.fieldLabel, { marginTop: 14 }]}>Or choose a chain and paste an address</Text>
               <View style={styles.chainRow}>
                 {(["solana", "evm", "bitcoin", "ton"] as Chain[]).map(c => (
                   <TouchableOpacity
@@ -194,7 +286,7 @@ export function OnboardingScreen({ onComplete }: Props) {
               <TextInput
                 style={styles.input}
                 value={walletAddr}
-                onChangeText={setWalletAddr}
+                onChangeText={(t) => { setWalletAddr(t); setScan(null); }}
                 placeholder={
                   walletChain === "solana"  ? "e.g. 7xKXtg2CW87d..." :
                   walletChain === "evm"     ? "e.g. 0x742d35Cc66..." :
@@ -205,6 +297,27 @@ export function OnboardingScreen({ onComplete }: Props) {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+
+              {!!walletAddr.trim() && !scan && !scanning && (
+                <TouchableOpacity style={styles.scanNowBtn} onPress={() => runFirstScan(walletAddr)}>
+                  <Text style={styles.scanNowText}>Scan this wallet now (free)</Text>
+                </TouchableOpacity>
+              )}
+              {scanning && <Text style={styles.scanLine}>Scanning…</Text>}
+              {scan && !scan.failed && (
+                <View style={[styles.scanCard, { borderColor: scan.level === "LOW" ? "#38bdf8" : scan.level === "MEDIUM" ? "#facc15" : "#ef4444" }]}>
+                  <Text style={styles.scanCardTitle}>
+                    {scan.level === "LOW" ? "No known risk flags on this wallet" : `Risk level: ${scan.level}`}
+                  </Text>
+                  {scan.flags.map((f, i) => <Text key={i} style={styles.scanLine}>• {f}</Text>)}
+                  <Text style={styles.scanLine}>
+                    {scan.level === "LOW"
+                      ? "That's what our sources know today, not a guarantee. Wallets can be drained by a signature you approve."
+                      : "Don't send funds to or approve anything from this wallet until you've looked into it."}
+                  </Text>
+                </View>
+              )}
+              {scan?.failed ? <Text style={styles.errorText}>{scan.failed}</Text> : null}
 
               <Text style={styles.fieldLabel}>Label (optional)</Text>
               <TextInput
@@ -237,9 +350,9 @@ export function OnboardingScreen({ onComplete }: Props) {
               <Text style={styles.stepNum}>2 of 4</Text>
               <Text style={styles.stepTitle}>Monitor your email</Text>
               <Text style={styles.stepDesc}>
-                Crypto Shield checks your email against breach databases and infostealer log markets —
-                credential theft is one of the primary ways wallets get drained. This unlocks once your
-                subscription is linked (step 4, or later in Settings).
+                Credential theft is one of the main ways wallets get drained, and it starts with an
+                email that is already in a leak. Check yours now: your first check is free, no
+                subscription needed. Ongoing monitoring is part of the 7-day free trial.
               </Text>
 
               <Text style={styles.fieldLabel}>Email Address (optional)</Text>
@@ -254,6 +367,24 @@ export function OnboardingScreen({ onComplete }: Props) {
                 autoCorrect={false}
               />
               <Text style={styles.skipHint}>Optional — skip if you prefer to add later in Settings.</Text>
+
+              {!exposure && (
+                <TouchableOpacity
+                  style={[styles.scanNowBtn, checkingEmail && { opacity: 0.6 }]}
+                  onPress={runFreeEmailCheck}
+                  disabled={checkingEmail}
+                >
+                  <Text style={styles.scanNowText}>{checkingEmail ? "Checking…" : "Check this email now (free)"}</Text>
+                </TouchableOpacity>
+              )}
+              {!!exposureError && <Text style={styles.errorText}>{exposureError}</Text>}
+              {exposure && (
+                <ExposureCard
+                  result={exposure}
+                  onRetry={runFreeEmailCheck}
+                  onUpgrade={() => finish({ openPaywall: true })}
+                />
+              )}
             </View>
           )}
 
@@ -384,7 +515,7 @@ export function OnboardingScreen({ onComplete }: Props) {
           )}
           <TouchableOpacity
             style={[styles.nextBtn, step === 0 && { flex: 1 }]}
-            onPress={step === TOTAL - 1 ? finish : next}
+            onPress={step === TOTAL - 1 ? () => finish() : next}
           >
             <Text style={styles.nextBtnText}>
               {step === 0 ? "Get Started" : step === TOTAL - 1 ? "Start Monitoring →" : "Next →"}
@@ -394,9 +525,9 @@ export function OnboardingScreen({ onComplete }: Props) {
         {step === 0 && (
           <Text style={styles.consentText}>
             By continuing, you agree to our{" "}
-            <Text style={styles.consentLink} onPress={() => Linking.openURL("https://relayshield.net/terms")}>Terms of Service</Text>
+            <Text style={styles.consentLink} onPress={() => Linking.openURL("https://terms.relayshield.net")}>Terms of Service</Text>
             {" "}and{" "}
-            <Text style={styles.consentLink} onPress={() => Linking.openURL("https://relayshield.net/privacy")}>Privacy Policy</Text>.
+            <Text style={styles.consentLink} onPress={() => Linking.openURL("https://privacy.relayshield.net")}>Privacy Policy</Text>.
           </Text>
         )}
 
@@ -416,6 +547,13 @@ const styles = StyleSheet.create({
   stepDesc:    { fontSize: 13, color: "#94a3b8", lineHeight: 20, marginBottom: 22 },
   fieldLabel:  { fontSize: 10, color: "#4a7fa5", fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 },
   input:       { backgroundColor: "#0F1F3D", borderWidth: 1, borderColor: "#1e3a5f", borderRadius: 10, padding: 13, color: "#e2e8f0", fontSize: 13, marginBottom: 16, fontFamily: "monospace" },
+  connectBtn:     { backgroundColor: "#00B5A5", borderRadius: 12, paddingVertical: 14, alignItems: "center", marginBottom: 6 },
+  connectBtnText: { color: "#0a1628", fontWeight: "800", fontSize: 14 },
+  scanNowBtn:     { borderWidth: 1, borderColor: "#00B5A5", borderRadius: 10, paddingVertical: 11, alignItems: "center", marginBottom: 12 },
+  scanNowText:    { color: "#00B5A5", fontWeight: "700", fontSize: 13 },
+  scanCard:       { backgroundColor: "#0F1F3D", borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 14 },
+  scanCardTitle:  { color: "#e2e8f0", fontWeight: "800", fontSize: 14, marginBottom: 6 },
+  scanLine:       { color: "#94a3b8", fontSize: 12.5, lineHeight: 18, marginBottom: 6 },
   chainRow:    { flexDirection: "row", gap: 8, marginBottom: 18 },
   chainBtn:    { flex: 1, backgroundColor: "#0F1F3D", borderRadius: 8, paddingVertical: 9, alignItems: "center", borderWidth: 1, borderColor: "#1e3a5f" },
   chainBtnActive: { borderColor: "#00B5A5", backgroundColor: "#00B5A510" },

@@ -548,19 +548,15 @@ export function renderDashboard(shop, screenings, apiKey, host) {
 <script>
   (function() {
     try {
-      var host = ${JSON.stringify(host || "")} || new URLSearchParams(location.search).get("host");
-      if (window["app-bridge"] && host) {
-        var app = window["app-bridge"].createApp({
-          apiKey: ${JSON.stringify(apiKey || "")},
-          host: host,
-        });
-        // Fetch a session token to prove authenticated App Bridge usage
-        window["app-bridge"].getSessionToken(app).then(function(token) {
-          // Token acquired; backend already validates session tokens per request
+      // App Bridge 4.x: window.shopify.idToken() returns a session token promise
+      if (window.shopify && typeof window.shopify.idToken === "function") {
+        window.shopify.idToken().then(function(token) {
           console.log("[RelayShield] App Bridge session token acquired");
         }).catch(function(e) {
           console.log("[RelayShield] session token unavailable:", e && e.message);
         });
+      } else {
+        console.log("[RelayShield] App Bridge not ready");
       }
     } catch (e) {
       console.log("[RelayShield] App Bridge init skipped:", e && e.message);

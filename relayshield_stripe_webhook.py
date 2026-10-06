@@ -834,7 +834,7 @@ def lambda_handler(event, context):
 
     # --- 4. Telegram-first flow (client_reference_id = telegram chat_id) ---
     # Check this BEFORE phone extraction — Telegram users have no phone in session
-    client_ref = session.get("client_reference_id", "")
+    client_ref = session.get("client_reference_id") or ""
 
     # PARTNER-1, 2026-08-29. client_reference_id now carries two different
     # things, so it has to be discriminated rather than assumed.

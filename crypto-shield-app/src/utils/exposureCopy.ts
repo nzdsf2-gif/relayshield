@@ -21,7 +21,7 @@ export interface ExposureView {
   canRetry: boolean;
 }
 
-const SOURCES = "Sources: Have I Been Pwned breach records and Hudson Rock infostealer logs.";
+const SOURCES = "Sources: breach records and infostealer logs.";
 
 function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many;

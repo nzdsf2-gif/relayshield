@@ -275,8 +275,25 @@ class TheListingMatchesTheBuild(unittest.TestCase):
 
     def test_the_privacy_policy_discloses_the_free_check(self):
         p = (ROOT / "cloudflare_worker_privacy.js").read_text(encoding="utf-8")
-        for needle in ("Free email check", "Have I Been Pwned", "Hudson Rock", "Anonymous usage counters"):
+        for needle in ("Free email check", "third-party data providers", "Anonymous usage counters"):
             self.assertIn(needle, p)
+
+    def test_no_customer_facing_surface_names_a_data_vendor(self):
+        """House rule: we never attribute a third-party partner in anything a
+        customer reads. The privacy policy still DISCLOSES that the address goes
+        to third parties; it just does not name them."""
+        banned = re.compile(r"have i been pwned|hudson ?rock|\bhibp\b", re.I)
+        files = [ROOT / "cloudflare_worker_privacy.js",
+                 APP / "store-assets" / "dapp-store-metadata.md",
+                 *[p for p in (APP / "src").rglob("*.ts*")], APP / "App.tsx"]
+        self.assertGreater(len(files), 10, "guard scoped itself down to nothing")
+        hits = []
+        for f in files:
+            text = f.read_text(encoding="utf-8")
+            text = strip_ts_comments(text) if f.suffix in (".ts", ".tsx", ".js") else text
+            if banned.search(text):
+                hits.append(str(f.relative_to(ROOT)))
+        self.assertEqual(hits, [], f"vendor named in customer-facing copy: {hits}")
 
 
 if __name__ == "__main__":

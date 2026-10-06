@@ -10187,3 +10187,92 @@ need licensing and non-custodial are excluded) before porting.
   cryptographically verified". Neither is verifiable from this repo. Confirm both or drop them.
 * The store copy must be pasted into the portal at the same time as the v1.7.0 build, never
   before: the free check and connect-and-scan do not exist in v1.6.0.
+
+## 2026-10-06: NO THIRD-PARTY ATTRIBUTION IN ANYTHING A CUSTOMER READS. I BROKE IT ONE TURN AFTER WRITING THE PRIVACY POLICY.
+
+**Andrew's rule of thumb, restated 2026-10-06: we never name a third-party data partner in our
+documents.** It was not written down in this file before today, which is why I put Have I Been
+Pwned and Hudson Rock by name into the privacy policy, the Data Sharing list and the in-app result
+card in the v1.7.0 work. `exposureCopy.ts`, `cloudflare_worker_privacy.js` and the listing now say
+"breach records and infostealer logs" and "third-party data providers".
+
+**The policy still DISCLOSES that the typed address goes to third parties, and that is not
+negotiable.** A free check that quietly sends an email address to two recipients is a disclosure
+failure however good the feature is. Not naming a vendor and not disclosing a recipient are different
+acts; the rule removes the first and never the second. **A distinct paragraph for each category
+("one for breach records, one for infostealer logs") keeps it specific without a name.**
+
+`test_cs_mobile_free_check.py::test_no_customer_facing_surface_names_a_data_vendor` fails on
+`have i been pwned`, `hudson rock` or `hibp` in the privacy Worker, the store listing and every app
+source file, proven by putting a vendor name back. This file, the code comments and internal docs are
+exempt on purpose: the rule is about what a customer reads.
+
+**OPEN, and it may collide with the rule:** Hudson Rock's free Cavalier API terms are still UNREAD.
+Free community APIs sometimes REQUIRE attribution as the condition of free use. If theirs does, the
+rule and the licence cannot both be kept, and the answer is a call for Andrew, not a guess. Read their
+terms before the free check is promoted.
+
+## 2026-10-06: THE v1.6.0 SCREENS FAILED FOR A PARTNER BECAUSE ENTITLEMENT IS FLAGS ON A RECORD NOBODY CAN SEE FROM THE REPO
+
+**Asked as "will the v1.7.0 changes work for Arjen?"** He is a RelayShield partner holding a free
+licence: not a trial user and not a paying subscriber. **The honest answer is that nothing in this
+repository can say**, and that is the finding.
+
+**What decides it, read from code rather than recalled.** Every paid CS Mobile call is admitted by
+`is_cs_mobile_call = bool(key_record.get("cs_mobile_access")) and path in
+CS_MOBILE_ALLOWED_ENDPOINTS` in `handle_metered_request`, and `cs_mobile_access` is written by exactly
+one path: the Stripe webhook provisioning a key for a `CS_MOBILE_PRICE_IDS` subscription. A person
+given a licence by hand never went through it, so unless somebody set the flag on his record the
+paid screens fall through to the Stripe meter branch and 402. **Both the app's key link
+(`/developer/cs-mobile-link`) and the billing portal also require the flag**, so a key without it
+cannot even be linked by email.
+
+`_find_key_by_email` does not check `active` either, while `_verify_rs_api_key` requires it. His
+history makes that a live question: the code's own comment calls his a duplicate checkout "that was
+later refunded/cancelled".
+
+**What v1.7.0 changes for him, and what it does not.** He has a key, so he keeps the PAID Email Check
+(the free check only runs for `!apiKey`), and the `stealer_count` fix helps him. Neither touches the
+flag. The attack chain screen, SIM swap and every other paid call depend on the flag alone.
+
+**`tools/diagnose_cs_partner_key.py --email <address>` is the read.** It prints every record for that
+address (key last six characters only), `active`, `cs_mobile_access`, subscription and customer ids
+present or absent, credits and free calls, and the endpoints the branch covers, parsed from
+`relayshield_api.py` so there is one copy. It evaluates only the cs_mobile branch and says so. **The
+fix is a write on a live record and goes in a separate step after Andrew has read the output**
+(rule C): set `cs_mobile_access` true and `active` true, leave Stripe fields absent so he can never
+be billed, and confirm the app's push token registers under that same key because the SIM swap
+push join is on the key.
+
+**The general form: an entitlement decided by flags written by one provisioning path is invisible to
+every person provisioned another way.** Partners, staff and test accounts all hit it, and each
+fails with a 402 that looks like a bug in the feature.
+
+## 2026-10-06: STATE FROM ANDREW, SO THE NEXT SESSION DOES NOT RE-ASK
+
+* **Solana dApp Store: hold further updates until real trial or paywall activity exists.** Agreed.
+  **Arjen is travelling to London for a Solana event this autumn and will promote the app there**, so
+  the Solana listing is the right surface for that moment even though Google Play is a roadmap item.
+* **The Tech E&O and Cyber Insurance claim is TRUE** (Andrew confirmed he carries both), and so is the
+  listing's "every alert is cryptographically verified" line per his instruction that the
+  unconfirmed claims are valid. The listing keeps both.
+* **I mislabelled the app.** I wrote that non-custodial wallets "like this one" are excluded from
+  Google Play's crypto policy. Crypto Shield Mobile is not a wallet of any kind: it holds no keys or
+  funds and is a read-only security monitor. Whether Play's wallet and exchange rules reach a
+  monitoring app that CONNECTS to a wallet is the real question and it is UNREAD: support.google.com
+  is egress-blocked, and only secondary reporting was seen (licensing for exchanges and custodial
+  wallets). Read Play's own cryptocurrency and Financial Features declaration pages before a port.
+* **FD-13, xAI Grok Build marketplace: PR #612 is still OPEN with no reviews, no assignees and no
+  maintainer comment**, read from the public PR page on 2026-10-06. Latest activity is the
+  2026-09-08 team-review request, so 28 days of silence. The rule recorded on 2026-09-08 stands: do
+  NOT push to its branch while it waits, because a push re-arms the first-time-contributor approval
+  gate.
+* **TODO, when v1.7.0 is uploaded: paste the strengthened store copy into the Solana publisher
+  portal.** It is already in `crypto-shield-app/store-assets/dapp-store-metadata.md` (subtitle "Is
+  your crypto email already in a leak?", the free-check lead, no vendor names). Never before the
+  build: the free check does not exist in v1.6.0.
+* **The v1.7.0 build is blocked on a JDK on Andrew's Mac**: `./gradlew assembleRelease` reported
+  "Unable to locate a Java Runtime". `TODO.md` item 57 records the real build route as gradle with
+  `cryptoshield-release.keystore`, so a JDK once existed and has gone, plausibly with the move of the
+  clone to `~/dev/relayshield`. The EXISTING path to find it first: `/usr/libexec/java_home -V`, then
+  Android Studio's bundled runtime.

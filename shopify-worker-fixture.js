@@ -552,6 +552,14 @@ export function renderDashboard(shop, screenings, apiKey, host) {
       if (window.shopify && typeof window.shopify.idToken === "function") {
         window.shopify.idToken().then(function(token) {
           console.log("[RelayShield] App Bridge session token acquired");
+          // Prove session-token auth: call backend with token in Authorization header
+          fetch("/api/session", {
+            headers: { "Authorization": "Bearer " + token },
+          }).then(function(r) {
+            console.log("[RelayShield] session auth check:", r.status);
+          }).catch(function(e) {
+            console.log("[RelayShield] session auth call failed:", e && e.message);
+          });
         }).catch(function(e) {
           console.log("[RelayShield] session token unavailable:", e && e.message);
         });
@@ -654,6 +662,17 @@ export default {
       }
       if (url.pathname === "/" && request.method === "GET") {
         return handleDashboard(request, env);
+      }
+      if (url.pathname === "/api/session" && request.method === "GET") {
+        const auth = request.headers.get("Authorization") || "";
+        const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        const shop = await verifySessionToken(env, bearer);
+        if (!shop) return new Response(JSON.stringify({ ok: false }), {
+          status: 401, headers: { "Content-Type": "application/json" },
+        });
+        return new Response(JSON.stringify({ ok: true, shop }), {
+          headers: { "Content-Type": "application/json" },
+        });
       }
       if (url.pathname === "/healthz") return new Response("ok");
       return new Response("Not found", { status: 404 });

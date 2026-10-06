@@ -345,6 +345,7 @@ def create_user_record(
     stripe_customer_id: str,
     stripe_subscription_id: str,
     referred_by: str = "",
+    channel: str = "whatsapp",
 ) -> str:
     """
     Create a new user record in relayshield_users.
@@ -367,6 +368,7 @@ def create_user_record(
         "password_manager_user": False,
         "sim_swap_monitoring": True,
         "active": True,
+        "channel": channel,
         "created_at": now,
         "updated_at": now,
     }
@@ -586,6 +588,7 @@ def advance_telegram_record(
             "stripe_customer_id = :cid, "
             "stripe_subscription_id = :sid, "
             "subscription_tier = :tier, "
+            "channel = :channel, "
             "#act = :active, "
             "updated_at = :now"
         ),
@@ -595,6 +598,7 @@ def advance_telegram_record(
             ":cid": stripe_customer_id,
             ":sid": stripe_subscription_id,
             ":tier": subscription_tier,
+            ":channel": "telegram",
             ":active": True,
             ":now": now,
         },

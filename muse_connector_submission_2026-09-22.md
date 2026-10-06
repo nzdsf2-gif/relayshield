@@ -443,3 +443,21 @@ build, and it must be done before the connector is live rather than before it is
 submitted. Until it is, the connector is capped at 300 calls per day across all
 of Meta's egress addresses combined, which a consumer platform exhausts in its
 first busy hour.
+
+---
+
+## PRIVACY AND DATA PAGE OF THE FORM (added 2026-10-06, from the form's own fields)
+
+Answers are taken from the code, not recalled. What the connector handles: a link or a public
+blockchain address that the user's agent passes in. No Meta account identifier, no profile data,
+no credential. Neither endpoint calls an AI model (grepped, no match in either handler).
+
+| Field | Answer |
+|---|---|
+| Purpose of access | The option closest to "provide the feature the user asked for". Never analytics, advertising or model training. |
+| Pass Meta personal data to any AI model | **No** |
+| Additional organizations / subprocessors | **Not "No additional organizations".** Hosting (AWS) and the URL-reputation and blockchain-risk lookup providers each receive the link or address. Describe by category, never by vendor name. |
+| Retention | **90 days**, IF the log groups are still at 90 days (set 2026-08-09, unverified live). The privacy policy page says 1 year and must be made to agree. |
+| Deletion | Support page; log lines expire on their own, per-address counters in 3 days. Do not promise per-line deletion: CloudWatch cannot delete single events. |
+| Trust center URL | Blank. None exists. |
+| Payment products or services | **No** (see PAYMENTS: NO above). The AML question is conditional on it. |

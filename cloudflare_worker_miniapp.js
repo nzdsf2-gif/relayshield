@@ -529,6 +529,22 @@ window.__rsBoot = true;
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 
+// Self-reported Mini App open telemetry. Fire-and-forget: a failed beacon
+// must never break the app. The Telegram user ID is SHA-256 hashed in the
+// browser before sending — the backend never sees the raw ID.
+try {
+  const uid = tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id;
+  const hashInput = uid ? String(uid) : "anonymous";
+  crypto.subtle.digest("SHA-256", new TextEncoder().encode("rs-miniapp:" + hashInput)).then(buf => {
+    const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+    fetch("https://api.relayshield.net/v1/telemetry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_type: "miniapp_open", client_hash: hash }),
+    }).catch(() => {});
+  }).catch(() => {});
+} catch {}
+
 const startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
 /* Plain prose, no parse mode, no formatting: it renders into textContent here
    and is the wording the share card and the bot should use too, so it has to

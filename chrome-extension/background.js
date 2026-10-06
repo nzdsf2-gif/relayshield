@@ -3,7 +3,7 @@ importScripts("api.js");
 const MENU_LINK = "relayshield-check-link";
 const MENU_SELECTION = "relayshield-check-selection";
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   chrome.contextMenus.create({
     id: MENU_LINK,
     title: "Check this link with RelayShield",
@@ -14,6 +14,22 @@ chrome.runtime.onInstalled.addListener(() => {
     title: "Check this with RelayShield",
     contexts: ["selection"],
   });
+
+  // Self-reported install telemetry. Fire-and-forget: a failed ping must
+  // never break the install flow. No PII — we send only the event type and
+  // extension version, no user identifier.
+  if (details.reason === "install") {
+    try {
+      await fetch("https://api.relayshield.net/v1/telemetry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_type: "chrome_install",
+          version: chrome.runtime.getManifest().version,
+        }),
+      });
+    } catch {}
+  }
 });
 
 chrome.contextMenus.onClicked.addListener(async (info) => {

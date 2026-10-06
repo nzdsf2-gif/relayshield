@@ -221,6 +221,61 @@ class ApiPaths(Base):
         self.assertEqual(api._VT_CTX["caller"], vtb.caller_id("k1"))
 
 
+class AnonymousCaller(Base):
+    """A caller with no key used to be "-" for everybody: indistinguishable in the log and
+    exempt from the per-caller cap. It is a day-rotating six-character label now."""
+
+    def _event(self, ip, headers=None):
+        return {"httpMethod": "GET", "path": "/v1/result/not-issued-id-123", "headers": headers or {},
+                "requestContext": {"identity": {"sourceIp": ip}}, "body": None}
+
+    def test_two_sources_get_different_labels_and_one_source_gets_a_stable_one(self):
+        with mock.patch.object(api.urllib.request, "urlopen"):
+            api.lambda_handler(self._event("203.0.113.5"), None)
+            a1 = api._VT_CTX["caller"]
+            api.lambda_handler(self._event("203.0.113.5"), None)
+            a2 = api._VT_CTX["caller"]
+            api.lambda_handler(self._event("198.51.100.9"), None)
+            b = api._VT_CTX["caller"]
+        self.assertEqual(a1, a2)
+        self.assertNotEqual(a1, b)
+        self.assertTrue(a1.startswith("ip-") and len(a1) == 9)
+
+    def test_the_label_never_contains_the_address(self):
+        self.assertNotIn("203", vtb.anon_caller("203.0.113.5").replace("ip-", ""))
+        self.assertNotIn("203.0.113.5", vtb.anon_caller("203.0.113.5"))
+
+    def test_the_label_rotates_with_the_day(self):
+        with mock.patch.object(vtb, "_day", return_value="2026-10-06"):
+            a = vtb.anon_caller("203.0.113.5")
+        with mock.patch.object(vtb, "_day", return_value="2026-10-07"):
+            b = vtb.anon_caller("203.0.113.5")
+        self.assertNotEqual(a, b)
+
+    def test_no_source_ip_stays_unlabelled_rather_than_inventing_one(self):
+        self.assertEqual(vtb.anon_caller(""), "-")
+
+    def test_a_key_still_wins_over_the_ip(self):
+        with mock.patch.object(api.urllib.request, "urlopen"):
+            api.lambda_handler(self._event("203.0.113.5", {"X-API-Key": "k1"}), None)
+        self.assertEqual(api._VT_CTX["caller"], vtb.caller_id("k1"))
+
+    def test_an_anonymous_source_is_now_held_to_the_per_caller_cap(self):
+        vtb.PER_CALLER_CAP = 2
+        caller = vtb.anon_caller("203.0.113.5")
+        self.assertTrue(vtb.charge("api", "poll", caller))
+        self.assertTrue(vtb.charge("api", "poll", caller))
+        self.assertFalse(vtb.charge("api", "poll", caller))
+        self.assertTrue(vtb.charge("api", "poll", vtb.anon_caller("198.51.100.9")))
+
+    def test_the_request_line_carries_the_caller_for_the_diagnostic(self):
+        import re
+        src = ast.unparse(ast.parse((ROOT / "relayshield_api.py").read_text(encoding="utf-8")))
+        self.assertRegex(src, r"API request.{0,40}caller=%s")
+        diag = (ROOT / "tools" / "diagnose_vt_usage.py").read_text()
+        self.assertIn('parse @message "caller=*"', diag)
+
+
 class EveryVtCallIsCharged(unittest.TestCase):
     """A VT request site with no charge() is a hole in the allowance. unparse drops
     comments, so prose that mentions the rule cannot satisfy this."""

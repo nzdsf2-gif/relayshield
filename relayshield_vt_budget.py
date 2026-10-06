@@ -74,6 +74,22 @@ def caller_id(api_key: str) -> str:
     return hashlib.sha256((api_key or "").encode()).hexdigest()[:8] if api_key else "-"
 
 
+def anon_caller(source_ip: str) -> str:
+    """A label for a caller with NO api key, so the next spike is attributable.
+
+    Six hex characters of a hash of the UTC day plus the source IP, so it rotates every
+    midnight and cannot be followed across days. Six characters is 24 bits: it tells the
+    few hundred callers of one day apart, and is far too short to reverse to an address
+    (about 256 candidate IPv4 addresses share each value). It is only ever LOGGED and
+    used as a per-day counter key; no IP is stored. Before this, every anonymous caller
+    was "-", so a scraper and an honest user were the same line in the log and the
+    per-caller cap never applied to anyone without a key.
+    """
+    if not source_ip:
+        return "-"
+    return "ip-" + hashlib.sha256(f"{_day()}|{source_ip}".encode()).hexdigest()[:6]
+
+
 def _add(table, key: str, ttl_s: int) -> int:
     resp = table.update_item(
         Key={"usage_key": key},

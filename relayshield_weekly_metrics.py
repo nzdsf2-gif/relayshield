@@ -107,6 +107,30 @@ def _scan_count(table_name: str) -> int:
     return count
 
 
+
+def _users_by_channel() -> dict:
+    """Count relayshield_users grouped by the channel attribute (telegram/whatsapp)."""
+    table = dynamodb.Table("relayshield_users")
+    counts = {"telegram": 0, "whatsapp": 0, "unknown": 0}
+    resp = table.scan(ProjectionExpression="channel")
+    items = resp.get("Items", [])
+    while True:
+        for item in items:
+            ch = (item.get("channel") or "").lower()
+            if ch in ("telegram", "whatsapp"):
+                counts[ch] += 1
+            else:
+                counts["unknown"] += 1
+        if "LastEvaluatedKey" not in resp:
+            break
+        resp = table.scan(
+            ProjectionExpression="channel",
+            ExclusiveStartKey=resp["LastEvaluatedKey"],
+        )
+        items = resp.get("Items", [])
+    return counts
+
+
 def _new_this_week(table_name: str, date_field: str) -> int:
     cutoff = _week_ago_iso()
     table  = dynamodb.Table(table_name)
@@ -765,6 +789,10 @@ def _build_email(metrics: dict) -> str:
 <table border="0" cellpadding="4">
   <tr><td>Total users</td><td><b>{s['users_total']}</b></td></tr>
   <tr><td>New this week</td><td><b>{s['users_new']}</b></td></tr>
+  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">By channel</td></tr>
+  <tr><td>&nbsp;&nbsp;WhatsApp</td><td><b>{s['users_by_channel']['whatsapp']}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;Telegram</td><td><b>{s['users_by_channel']['telegram']}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;Unknown</td><td><b>{s['users_by_channel']['unknown']}</b></td></tr>
   <tr><td>Monitored emails</td><td><b>{s['monitored_emails']}</b></td></tr>
   <tr><td>New monitored emails (week)</td><td><b>{s['monitored_emails_new']}</b></td></tr>
 </table>
@@ -1100,6 +1128,7 @@ and includes this same section.</p>
     metrics = {
         "users_total":          _scan_count("relayshield_users"),
         "users_new":            _new_this_week("relayshield_users", "created_at"),
+        "users_by_channel":     _users_by_channel(),
         "monitored_emails":     _scan_count("relayshield_monitored_emails"),
         "monitored_emails_new": _new_this_week("relayshield_monitored_emails", "created_at"),
         "api_keys":             _api_key_stats(),

@@ -39,5 +39,36 @@ class Merge(unittest.TestCase):
         self.assertIn(g.TABLE, src)
 
 
+class SecondTable(unittest.TestCase):
+    VT = "relayshield_vt_url_cache"
+
+    def test_each_table_has_its_own_sid(self):
+        self.assertEqual(len(set(g.CACHE_SIDS.values())), len(g.CACHE_SIDS))
+
+    def test_granting_the_second_table_keeps_the_first(self):
+        doc = g.merged_document({"Statement": []})
+        doc = g.merged_document(doc, self.VT)
+        resources = sorted(s["Resource"] for s in doc["Statement"])
+        self.assertEqual(resources, sorted([g.table_arn(g.TABLE), g.table_arn(self.VT)]))
+
+    def test_vt_grant_is_exact_arn_and_two_actions(self):
+        st = g.merged_document({"Statement": []}, self.VT)["Statement"][0]
+        self.assertEqual(st["Resource"], g.table_arn(self.VT))
+        self.assertNotIn("*", st["Resource"])
+        self.assertEqual(sorted(st["Action"]), ["dynamodb:GetItem", "dynamodb:PutItem"])
+
+    def test_vt_idempotent(self):
+        once = g.merged_document({"Statement": []}, self.VT)
+        self.assertEqual(g.merged_document(once, self.VT), once)
+
+    def test_actions_match_what_the_vt_cache_code_calls(self):
+        src = (ROOT / "relayshield_api.py").read_text()
+        for fn, call in (("_vt_url_cache_get", "get_item"), ("_vt_url_cache_put", "put_item")):
+            m = re.search(rf"def {fn}\(.*?(?=\ndef )", src, re.S)
+            self.assertIsNotNone(m, fn)
+            self.assertIn(call, m.group(0))
+        self.assertIn(self.VT, src)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1550,6 +1550,39 @@ function makeReply(message, text) {
 /** The actual scan. Split out of the email handler so that a throw here is
  *  logged with a stack rather than surfacing only as an error count on the
  *  Cloudflare dashboard. */
+// Front-door measurement. One ping per message actually processed, so the weekly
+// report can say how many different people use the email checker and how many are
+// new. The identifier is an HMAC of the sender keyed with a Worker secret, never
+// the address: a bare SHA-256 of an email can be reversed by hashing a list of
+// candidate addresses, and this is a stored record about who used a security
+// service. The truncated digest still dedupes.
+//
+// FAIL-OPEN, and awaited by nothing the reply depends on: a telemetry outage must
+// never delay or lose a verdict, so every failure is swallowed. Skipped when no
+// key is configured (nothing to key the HMAC with) and for the exempt allowlist,
+// whose testing would otherwise inflate the count.
+async function senderHash(sender, key) {
+  const enc = new TextEncoder();
+  const k = await crypto.subtle.importKey(
+    "raw", enc.encode(`checkemail-telemetry:${key}`),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, enc.encode(sender));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0"))
+    .join("").slice(0, 32);
+}
+
+async function recordUse(sender, env) {
+  try {
+    if (!env.RS_API_KEY) return;
+    const client_hash = await senderHash(sender, env.RS_API_KEY);
+    await fetch(`${API_BASE}/v1/telemetry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ event_type: "checkemail_use", client_hash }),
+    });
+  } catch (_) { /* measurement must never cost a verdict */ }
+}
+
 async function scanAndReply(message, env, ctx, replyState) {
   const sender = (message.from || "").toLowerCase();
 
@@ -1593,6 +1626,10 @@ async function scanAndReply(message, env, ctx, replyState) {
   const exempt = (env.CHECKEMAIL_UNLIMITED || "")
     .toLowerCase().split(",").map((a) => a.trim()).filter(Boolean)
     .includes(sender);
+
+  // Counted BEFORE the rate limit: somebody turned away at the limit is still a
+  // person who used the front door, and leaving them out would understate it.
+  if (!exempt && ctx && ctx.waitUntil) ctx.waitUntil(recordUse(sender, env));
 
   if (!exempt && await rateLimited(env.CHECKEMAIL_RL, sender)) {
     if (replyState) replyState.attempted = true;

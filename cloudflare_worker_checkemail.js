@@ -1104,7 +1104,7 @@ async function scanLink(url, apiKey, deadline) {
   try {
     const resp = await fetch(`${API_BASE}/v1/scan-url`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": apiKey },
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "x-rs-source": "checkemail" },
       body: JSON.stringify({ url }),
     });
     if (!resp.ok) {
@@ -1138,7 +1138,7 @@ async function scanLink(url, apiKey, deadline) {
     try {
       const resp = await fetch(
         `${API_BASE}/v1/result/${encodeURIComponent(analysisId)}`,
-        { headers: { "x-api-key": apiKey } });
+        { headers: { "x-api-key": apiKey, "x-rs-source": "checkemail" } });
       if (!resp.ok) break;
       const data = unwrap(await resp.json());
       if (data.status === "pending") continue;

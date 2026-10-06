@@ -16409,15 +16409,22 @@ def lambda_handler(event: dict, context) -> dict:
     path   = event.get("path", "")
     method = event.get("httpMethod", "")
 
-    logger.info("API request — method=%s path=%s", method, path)
-
     # Who is spending VirusTotal requests this invocation (see _vt_charge).
     # X-RS-Source is the caller's own label (the checkemail Worker sends
-    # "checkemail"); a key is hashed to eight characters and never logged.
+    # "checkemail"); a key is hashed to eight characters and never logged. A caller
+    # with NO key gets a day-rotating six-character label from its source IP
+    # (anon_caller), because "-" for everybody made a scraper indistinguishable
+    # from an honest user in every log and exempt from the per-caller cap.
     _vh = event.get("headers") or {}
     _vsrc = re.sub(r"[^a-z0-9_-]", "", (_header(_vh, "X-RS-Source") or "api").lower())[:24] or "api"
+    _vkey = _header(_vh, "X-RS-API-KEY") or _header(_vh, "X-API-Key") or ""
     _VT_CTX["surface"] = _vsrc
-    _VT_CTX["caller"] = _vtb.caller_id(_header(_vh, "X-RS-API-KEY") or _header(_vh, "X-API-Key") or "")
+    _VT_CTX["caller"] = _vtb.caller_id(_vkey) if _vkey else _vtb.anon_caller(
+        ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or "")
+
+    # The caller label is on the request line itself so tools/diagnose_vt_usage.py can
+    # group /v1/result calls by who made them.
+    logger.info("API request — method=%s path=%s caller=%s", method, path, _VT_CTX["caller"])
 
     # AWS Marketplace fulfillment — forward to marketplace Lambda (GET or POST)
     if "/marketplace/fulfillment" in path:

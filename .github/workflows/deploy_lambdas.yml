@@ -32,6 +32,7 @@ on:
       - 'relayshield_quarterly_sweep_sender.py'
       - 'relayshield_sms_fallback_sender.py'
       - 'relayshield_telegram_webhook.py'
+      - 'relayshield_telemetry.py'
       - 'relayshield_intel_monitor.py'
       - 'relayshield_alchemy_webhook.py'
       - 'relayshield_approval_monitor.py'

@@ -65,6 +65,7 @@ from boto3.dynamodb.conditions import Attr, Key
 # sender, and that wording lives in the shared renderer rather than in this
 # file precisely so it cannot be edited away on one platform only.
 import relayshield_forward_analysis as fwd
+import relayshield_vt_budget as _vt_budget  # shared 500/day VirusTotal allowance
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -1120,6 +1121,8 @@ def check_existing_vt_report(url: str, api_key: str) -> dict | None:
     poll_vt_analysis (malicious/suspicious/harmless/undetected), or None
     if VT has no existing report (404) or the lookup failed."""
     url_id = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+    if not _vt_budget.charge("whatsapp", "report"):
+        return None
     req = urllib.request.Request(
         f"{VT_BASE_URL}/urls/{url_id}",
         headers={"x-apikey": api_key},
@@ -1144,6 +1147,8 @@ def submit_url_to_vt(url: str, api_key: str) -> str | None:
     POST /urls with form-encoded url= parameter.
     Returns the analysis ID string, or None on failure.
     """
+    if not _vt_budget.charge("whatsapp", "submit"):
+        return None
     payload = urllib.parse.urlencode({"url": url}).encode("utf-8")
     req = urllib.request.Request(
         f"{VT_BASE_URL}/urls",
@@ -1211,6 +1216,8 @@ def submit_file_to_vt(
     Submit a file binary to VirusTotal via multipart/form-data POST to /files.
     Returns the analysis ID string, or None on failure.
     """
+    if not _vt_budget.charge("whatsapp", "submit-file"):
+        return None
     boundary = uuid.uuid4().hex
     body = (
         f"--{boundary}\r\n"
@@ -1249,6 +1256,8 @@ def poll_vt_analysis(analysis_id: str, api_key: str, max_wait: int = VT_URL_MAX_
     )
     waited = 0
     while waited <= max_wait:
+        if not _vt_budget.charge("whatsapp", "poll"):
+            return None
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())

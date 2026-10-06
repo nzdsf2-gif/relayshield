@@ -52,7 +52,17 @@ def main() -> int:
 
     summary = []
     for label, group, term in (
+        # EVERY request is logged with its path, so these are exact request counts, not
+        # lower bounds. /v1/result was unauthenticated and spent one VT request per call
+        # until 2026-10-06, and its failures log only at ERROR, so a probing crawler
+        # leaves almost nothing else behind. A big number here is the leak.
+        ("GET /v1/result requests (each was one VT request)", API, "path=/v1/result"),
+        ("GET /v1/payg/result requests (each was one VT request)", API, "path=/v1/payg/result"),
+        ("result polls that FAILED (probing for ids that do not exist)", API, "VT result poll failed"),
+        ("POST /v1/scan-url requests", API, "path=/v1/scan-url"),
         ("scan-url submissions (1 VT call each, plus polls)", API, "scan-url submitted"),
+        ("vt_call lines (after the budget shipped: every allowed request)", API, "vt_call surface="),
+        ("vt_refused lines (budget said no)", API, "vt_refused"),
         ("scan-file submissions", API, "scan-file submitted"),
         ("VT results returned by /v1/result", API, "VT result"),
         ("ip-intel lookups (cache hits and own-corpus hits INCLUDED)", API, "ip-intel query_type"),

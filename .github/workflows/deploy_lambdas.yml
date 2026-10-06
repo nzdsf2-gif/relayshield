@@ -60,6 +60,10 @@ on:
       # it, editing only this file would change what both bots say to users and
       # deploy nothing.
       - 'relayshield_forward_analysis.py'
+      # Added 2026-10-06. Shared VirusTotal budget, imported by the API and both bot
+      # handlers. The import walk maps it to all three on its own; this entry only
+      # makes a change to it trigger the workflow at all.
+      - 'relayshield_vt_budget.py'
       # Added 2026-09-03, after its first drift diff was finally read. It had
       # been the FIFTH handler with source in the repo, live traffic, and no
       # deploy path -- so no edit to it had ever shipped automatically, and the

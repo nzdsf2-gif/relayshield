@@ -547,27 +547,40 @@ export function renderDashboard(shop, screenings, apiKey, host) {
 <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 <script>
   (function() {
-    try {
-      // App Bridge 4.x: window.shopify.idToken() returns a session token promise
-      if (window.shopify && typeof window.shopify.idToken === "function") {
-        window.shopify.idToken().then(function(token) {
-          console.log("[RelayShield] App Bridge session token acquired");
-          // Prove session-token auth: call backend with token in Authorization header
-          fetch("/api/session", {
-            headers: { "Authorization": "Bearer " + token },
-          }).then(function(r) {
-            console.log("[RelayShield] session auth check:", r.status);
+    var attempts = 0;
+    function tryInit() {
+      attempts++;
+      try {
+        // App Bridge 4.x: window.shopify.idToken() returns a session token promise
+        if (window.shopify && typeof window.shopify.idToken === "function") {
+          window.shopify.idToken().then(function(token) {
+            console.log("[RelayShield] App Bridge session token acquired");
+            // Prove session-token auth: call backend with token in Authorization header
+            fetch("/api/session", {
+              headers: { "Authorization": "Bearer " + token },
+            }).then(function(r) {
+              console.log("[RelayShield] session auth check:", r.status);
+            }).catch(function(e) {
+              console.log("[RelayShield] session auth call failed:", e && e.message);
+            });
           }).catch(function(e) {
-            console.log("[RelayShield] session auth call failed:", e && e.message);
+            console.log("[RelayShield] session token unavailable:", e && e.message);
           });
-        }).catch(function(e) {
-          console.log("[RelayShield] session token unavailable:", e && e.message);
-        });
-      } else {
-        console.log("[RelayShield] App Bridge not ready");
+        } else if (attempts < 20) {
+          // Script may not have loaded yet; retry
+          setTimeout(tryInit, 500);
+        } else {
+          console.log("[RelayShield] App Bridge not ready after retries");
+        }
+      } catch (e) {
+        console.log("[RelayShield] App Bridge init skipped:", e && e.message);
       }
-    } catch (e) {
-      console.log("[RelayShield] App Bridge init skipped:", e && e.message);
+    }
+    // Start after DOM is ready to give the CDN script time to load
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", tryInit);
+    } else {
+      tryInit();
     }
   })();
 </script>

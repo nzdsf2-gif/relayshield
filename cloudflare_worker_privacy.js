@@ -50,7 +50,7 @@ export default {
   </ul>
 
   <h2>4. Data Retention</h2>
-  <p>API logs are retained for 1 year. Account data is retained until you request deletion. Wallet addresses stored on-device are under your control and can be deleted at any time from the app.</p>
+  <p>API logs are retained for 90 days. Account data is retained until you request deletion. Wallet addresses stored on-device are under your control and can be deleted at any time from the app.</p>
 
   <h2>5. Your Rights</h2>
   <p>You may request access to, correction of, or deletion of your personal data at any time by contacting <a href="mailto:support@relayshield.net">support@relayshield.net</a>.</p>

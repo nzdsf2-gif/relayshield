@@ -131,6 +131,48 @@ def _users_by_channel() -> dict:
     return counts
 
 
+
+def _telemetry_stats() -> dict:
+    """Count self-reported installs/opens from relayshield_telemetry.
+
+    Returns unique client counts per event type (deduped by client_hash),
+    plus raw event totals. Missing table or no data yields zeros — the
+    report must not break before the first ping arrives.
+    """
+    stats = {
+        "chrome_installs_unique": 0,
+        "chrome_installs_total": 0,
+        "miniapp_opens_unique": 0,
+        "miniapp_opens_total": 0,
+    }
+    try:
+        table = dynamodb.Table("relayshield_telemetry")
+        seen = {"chrome_install": set(), "miniapp_open": set()}
+        totals = {"chrome_install": 0, "miniapp_open": 0}
+        resp = table.scan(ProjectionExpression="event_type, client_hash")
+        while True:
+            for item in resp.get("Items", []):
+                et = (item.get("event_type") or "").lower()
+                if et in totals:
+                    totals[et] += 1
+                    ch = item.get("client_hash")
+                    if ch:
+                        seen[et].add(ch)
+            if "LastEvaluatedKey" not in resp:
+                break
+            resp = table.scan(
+                ProjectionExpression="event_type, client_hash",
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+        stats["chrome_installs_unique"] = len(seen["chrome_install"])
+        stats["chrome_installs_total"] = totals["chrome_install"]
+        stats["miniapp_opens_unique"] = len(seen["miniapp_open"])
+        stats["miniapp_opens_total"] = totals["miniapp_open"]
+    except Exception as exc:
+        logger.warning("Telemetry stats unavailable: %s", exc)
+    return stats
+
+
 def _new_this_week(table_name: str, date_field: str) -> int:
     cutoff = _week_ago_iso()
     table  = dynamodb.Table(table_name)
@@ -797,6 +839,14 @@ def _build_email(metrics: dict) -> str:
   <tr><td>New monitored emails (week)</td><td><b>{s['monitored_emails_new']}</b></td></tr>
 </table>
 
+<h3 style="color: #e94560;">Self-Reported Telemetry</h3>
+<table border="0" cellpadding="4">
+  <tr><td>Chrome installs (unique)</td><td><b>{s['telemetry']['chrome_installs_unique']}</b></td></tr>
+  <tr><td>Chrome installs (total pings)</td><td><b>{s['telemetry']['chrome_installs_total']}</b></td></tr>
+  <tr><td>MiniApp opens (unique)</td><td><b>{s['telemetry']['miniapp_opens_unique']}</b></td></tr>
+  <tr><td>MiniApp opens (total pings)</td><td><b>{s['telemetry']['miniapp_opens_total']}</b></td></tr>
+</table>
+
 <h3 style="color: #e94560;">B2A API Keys</h3>
 <table border="0" cellpadding="4">
   <tr><td>Total API keys</td><td><b>{s['api_keys']['total']}</b></td></tr>
@@ -1129,6 +1179,7 @@ and includes this same section.</p>
         "users_total":          _scan_count("relayshield_users"),
         "users_new":            _new_this_week("relayshield_users", "created_at"),
         "users_by_channel":     _users_by_channel(),
+        "telemetry":            _telemetry_stats(),
         "monitored_emails":     _scan_count("relayshield_monitored_emails"),
         "monitored_emails_new": _new_this_week("relayshield_monitored_emails", "created_at"),
         "api_keys":             _api_key_stats(),

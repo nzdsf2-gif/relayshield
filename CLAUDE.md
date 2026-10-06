@@ -10276,3 +10276,30 @@ fails with a 402 that looks like a bug in the feature.
   `cryptoshield-release.keystore`, so a JDK once existed and has gone, plausibly with the move of the
   clone to `~/dev/relayshield`. The EXISTING path to find it first: `/usr/libexec/java_home -V`, then
   Android Studio's bundled runtime.
+
+## 2026-10-06: THE VIRUSTOTAL KEY WAS UNCOUNTED, AND ONE ENDPOINT LET ANYONE SPEND IT
+
+VirusTotal emailed that the free key's 500-a-day allowance (resets 00:00 UTC, every request counts: lookup,
+submission and each poll) was spent. **The first diagnostic returned ZERO for every log line it knew about**,
+which is the finding: the burn was not coming from any surface that logs a VT call.
+
+**THE LEAK.** `GET /v1/result/{id}` and `GET /v1/payg/result/{id}` were unauthenticated, uncapped, and spent one
+VT request per call on our key whatever id was supplied. A failed poll logs only at ERROR, so a probing crawler
+leaves almost nothing behind. UNPROVEN as the cause: the diagnostic now counts `path=/v1/result` requests
+exactly (every request logs its path), so run it for the answer rather than trusting this paragraph.
+
+**WHAT SHIPPED (`d42f48b`).** `relayshield_vt_budget.py`: a daily budget with per-caller, bulk and global caps
+(fails OPEN, the opposite of the breach partner budget, because here failing open is exactly the old behaviour),
+a 6h/24h verdict cache and an analysis-id mapping, all in the existing `relayshield_demo_key_usage` table so no
+IAM grant is needed (the shared role has no room). `handle_result` now polls only analyses this API issued.
+Every VT request site in the API and both bots charges first, and `test_vt_budget.py` fails if one does not.
+Every allowed call logs `vt_call surface= kind= caller=`. The checkemail Worker now sends `x-rs-source`
+(needs a Worker deploy to take effect). The scan-url log lines no longer carry the raw URL.
+
+**THE EXISTING `relayshield_vt_url_cache` TABLE HAS NO CREATION SCRIPT AND NO IAM REFERENCE ANYWHERE**, so the
+composite check's "24h cache" is very probably inert, the breach cache's twin. Not created: the new cache does
+not use it.
+
+**PRIVACY POLICY.** Another session rewrote it on `main` (Section 11, 90 days). Mine was the stale one; main is
+the base now, with the free-email-check disclosure re-added. UNVERIFIED claim in it: the bot section says links
+are not logged readably, but the WhatsApp handler logs `url=%s` in plaintext (`VT URL scan complete`).

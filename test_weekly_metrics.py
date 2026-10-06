@@ -228,6 +228,10 @@ class EmailRendering(unittest.TestCase):
     def _fixture(self, **overrides):
         base = {
             "users_total": 1, "users_new": 0,
+            "users_by_channel": {"whatsapp": 1, "telegram": 0, "unknown": 0},
+            "telemetry": {f"{pre}_{suf}": 0
+                           for pre in ("chrome_installs", "miniapp_opens", "checkemail_users")
+                           for suf in ("unique", "total", "new_week")},
             "monitored_emails": 1, "monitored_emails_new": 0,
             "api_keys": {"total": 1, "new_this_week": 0, "intel_enabled": 0,
                           "intel_calls_period": 0,
@@ -287,6 +291,136 @@ class EmailRendering(unittest.TestCase):
         html = wm._build_email(self._fixture())
         self.assertIn("solana: 1", html)
         self.assertIn("unattributed: 1", html)
+
+
+class TelemetryStats(unittest.TestCase):
+    """_telemetry_stats executed against a fake table, so the first-seen logic
+    is checked by what it returns, not by what the source looks like."""
+
+    class _Table:
+        def __init__(self, items):
+            self.items = items
+
+        def scan(self, ProjectionExpression=None, ExclusiveStartKey=None, **kw):
+            start = (ExclusiveStartKey or {}).get("o", 0)
+            page = self.items[start:start + 2]
+            out = {"Items": page}
+            if start + 2 < len(self.items):
+                out["LastEvaluatedKey"] = {"o": start + 2}
+            return out
+
+    def _run(self, items):
+        fake = _FakeDynamo({"relayshield_telemetry": self._Table(items)})
+        with unittest.mock.patch.object(wm, "dynamodb", fake):
+            return wm._telemetry_stats()
+
+    @staticmethod
+    def _ts(days_ago):
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+
+    def test_new_means_first_seen_this_week_not_seen_this_week(self):
+        items = [
+            {"event_type": "checkemail_use", "client_hash": "old", "created_at": self._ts(30)},
+            {"event_type": "checkemail_use", "client_hash": "old", "created_at": self._ts(1)},
+            {"event_type": "checkemail_use", "client_hash": "new", "created_at": self._ts(2)},
+        ]
+        st = self._run(items)
+        self.assertEqual(st["checkemail_users_unique"], 2)
+        self.assertEqual(st["checkemail_users_total"], 3)
+        self.assertEqual(st["checkemail_users_new_week"], 1)
+
+    def test_order_of_rows_does_not_change_who_is_new(self):
+        a = {"event_type": "checkemail_use", "client_hash": "x", "created_at": self._ts(1)}
+        b = {"event_type": "checkemail_use", "client_hash": "x", "created_at": self._ts(40)}
+        self.assertEqual(self._run([a, b])["checkemail_users_new_week"], 0)
+        self.assertEqual(self._run([b, a])["checkemail_users_new_week"], 0)
+
+    def test_event_types_are_counted_separately(self):
+        items = [
+            {"event_type": "checkemail_use", "client_hash": "h", "created_at": self._ts(1)},
+            {"event_type": "chrome_install", "client_hash": "h", "created_at": self._ts(1)},
+            {"event_type": "miniapp_open", "client_hash": "h", "created_at": self._ts(40)},
+            {"event_type": "unknown_event", "client_hash": "h", "created_at": self._ts(1)},
+        ]
+        st = self._run(items)
+        self.assertEqual(st["checkemail_users_unique"], 1)
+        self.assertEqual(st["chrome_installs_new_week"], 1)
+        self.assertEqual(st["miniapp_opens_new_week"], 0)
+
+    def test_a_ping_with_no_hash_counts_toward_total_only(self):
+        st = self._run([{"event_type": "checkemail_use", "created_at": self._ts(1)}])
+        self.assertEqual(st["checkemail_users_total"], 1)
+        self.assertEqual(st["checkemail_users_unique"], 0)
+        self.assertEqual(st["checkemail_users_new_week"], 0)
+
+    def test_a_missing_timestamp_is_not_new(self):
+        st = self._run([{"event_type": "checkemail_use", "client_hash": "h"}])
+        self.assertEqual(st["checkemail_users_unique"], 1)
+        self.assertEqual(st["checkemail_users_new_week"], 0)
+
+    def test_an_unreadable_table_yields_zeros_not_a_crash(self):
+        class Boom:
+            def Table(self, n):
+                raise RuntimeError("no table")
+        with unittest.mock.patch.object(wm, "dynamodb", Boom()):
+            st = wm._telemetry_stats()
+        self.assertEqual(st["checkemail_users_unique"], 0)
+        self.assertIn("checkemail_users_new_week", st)
+
+    def test_the_email_renders_the_checker_rows(self):
+        er = EmailRendering()
+        fx = er._fixture()
+        fx["telemetry"]["checkemail_users_unique"] = 7
+        fx["telemetry"]["checkemail_users_new_week"] = 3
+        html = wm._build_email(fx)
+        self.assertIn("Email checker users (unique)", html)
+        self.assertRegex(html, r"Email checker users \(unique\)</td><td><b>7<")
+        self.assertRegex(html, r"Email checker users \(new this week\)</td><td><b>3<")
+
+
+class TelemetryWiring(unittest.TestCase):
+    def test_the_lambda_accepts_the_event_the_worker_sends(self):
+        import re
+        tele = (ROOT / "relayshield_telemetry.py").read_text()
+        worker = (ROOT / "cloudflare_worker_checkemail.js").read_text()
+        sent = re.search(r'event_type:\s*"([a-z_]+)"', worker).group(1)
+        self.assertEqual(sent, "checkemail_use")
+        m = re.search(r"VALID_EVENTS\s*=\s*\{([^}]*)\}", tele)
+        self.assertIn(f'"{sent}"', m.group(1))
+
+    def test_every_valid_event_is_reported_on(self):
+        import re
+        tele = (ROOT / "relayshield_telemetry.py").read_text()
+        m = re.search(r"VALID_EVENTS\s*=\s*\{([^}]*)\}", tele)
+        valid = set(re.findall(r'"([a-z_]+)"', m.group(1)))
+        self.assertEqual(valid, set(wm.TELEMETRY_EVENTS))
+
+    def test_the_worker_never_sends_the_address(self):
+        import re
+        worker = (ROOT / "cloudflare_worker_checkemail.js").read_text()
+        worker = re.sub(r"/\*.*?\*/", "", worker, flags=re.S)
+        worker = re.sub(r"(?m)^\s*//.*$", "", worker)
+        body = re.search(r"async function recordUse.*?\n}\n", worker, re.S).group(0)
+        self.assertIn("senderHash(sender", body)
+        self.assertNotRegex(body, r"JSON\.stringify\(\{[^}]*\bsender\b")
+
+    def test_the_ping_is_skipped_for_exempt_senders_and_is_fail_open(self):
+        import re
+        worker = (ROOT / "cloudflare_worker_checkemail.js").read_text()
+        worker = re.sub(r"/\*.*?\*/", "", worker, flags=re.S)
+        worker = re.sub(r"(?m)^\s*//.*$", "", worker)
+        self.assertIn("if (!exempt && ctx && ctx.waitUntil) ctx.waitUntil(recordUse(sender, env));", worker)
+        body = re.search(r"async function recordUse.*?\n}\n", worker, re.S).group(0)
+        self.assertIn("catch", body)
+
+    def test_the_ping_precedes_the_rate_limit_so_limited_users_still_count(self):
+        import re
+        worker = (ROOT / "cloudflare_worker_checkemail.js").read_text()
+        worker = re.sub(r"/\*.*?\*/", "", worker, flags=re.S)
+        worker = re.sub(r"(?m)^\s*//.*$", "", worker)
+        self.assertLess(worker.index("ctx.waitUntil(recordUse(sender, env))"),
+                        worker.index("await rateLimited(env.CHECKEMAIL_RL, sender)"))
 
 
 if __name__ == "__main__":

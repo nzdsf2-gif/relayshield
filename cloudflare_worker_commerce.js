@@ -67,6 +67,10 @@ const HTML = `<!doctype html>
       <h3>ChatGPT</h3>
       <p>Free scam checks inside ChatGPT via the RelayShield Scam Checks plugin. No signup, no API key.</p>
     </div>
+    <div class="card">
+      <h3>TAP Verifier</h3>
+      <p>Merchant-side Visa Trusted Agent Protocol verification with TI corpus screening. <code>POST https://api.relayshield.net/v1/tap/verify</code></p>
+    </div>
   </div>
   <h2>Pricing</h2>
   <p>Flat monthly pricing. Free tier for low-volume sellers. No per-order fees, no revenue share.</p>

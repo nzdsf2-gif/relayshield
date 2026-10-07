@@ -35,7 +35,7 @@ NOW = 1790000000
 
 def make_request(priv, jwk, alg, label="sig1", created=NOW, expires=None,
                  nonce="n1", tag="agent-payer-auth", tamper_base=False,
-                 extra_headers=None):
+                 extra_headers=None, intent=None, path="/v1/pay"):
     """Build a fully-signed fake TAP request."""
     components = ["@authority", "@path"]
     params = {"created": created, "keyid": jwk["kid"], "alg": alg, "nonce": nonce}
@@ -43,7 +43,9 @@ def make_request(priv, jwk, alg, label="sig1", created=NOW, expires=None,
         params["expires"] = expires
     if tag is not None:
         params["tag"] = tag
-    req = {"authority": "merchant.example", "path": "/v1/pay",
+    if intent is not None:
+        params["intent"] = intent
+    req = {"authority": "merchant.example", "path": path,
            "method": "POST", "headers": dict(extra_headers or {})}
     base = tap.build_signature_base(components, params, req)
     if tamper_base:
@@ -338,6 +340,110 @@ class TestVerifyPipeline(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 200)
         body = json.loads(resp["body"])
         self.assertEqual(body["decision"], "accept")
+
+
+class TestIntentMismatch(unittest.TestCase):
+    def test_browse_intent_pay_path_rejects(self):
+        # Agent holds a browse token but attempts checkout: scope violation.
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="browse",
+                           path="/v1/checkout")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "reject")
+        self.assertIn("intent_mismatch", v.reasons)
+        self.assertEqual(v.details.get("intent"), "browse")
+        self.assertEqual(v.details.get("intent_source"), "signature_params")
+
+    def test_price_check_intent_pay_path_rejects(self):
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="price-check",
+                           path="/v1/pay")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "reject")
+        self.assertIn("intent_mismatch", v.reasons)
+
+    def test_checkout_intent_pay_path_accepts(self):
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="checkout",
+                           path="/v1/pay")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "accept")
+
+    def test_browse_intent_browse_path_accepts(self):
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="browse",
+                           path="/v1/products/search")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "accept")
+
+    def test_pay_intent_read_path_accepts(self):
+        # Downgrade is fine: a payment-capable token used for browsing.
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="pay",
+                           path="/v1/products")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "accept")
+
+    def test_no_intent_skips_check(self):
+        # Backward compatible: tokens without intent are unaffected.
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", path="/v1/pay")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "accept")
+        self.assertNotIn("intent", v.details)
+
+    def test_unrecognised_intent_pay_path_reviews(self):
+        # Cannot verify scope: review, not reject.
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="quantum-browse",
+                           path="/v1/pay")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "review")
+        self.assertIn("intent_mismatch", v.reasons)
+
+    def test_unrecognised_intent_read_path_accepts(self):
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="quantum-browse",
+                           path="/v1/products")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "accept")
+
+    def test_intent_from_request_field(self):
+        # Tokens carrying intent outside Signature-Input still get checked.
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", path="/v1/checkout")
+        req["intent"] = "browse"
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "reject")
+        self.assertIn("intent_mismatch", v.reasons)
+        self.assertEqual(v.details.get("intent_source"), "request_field")
+
+    def test_intent_from_header(self):
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", path="/v1/checkout")
+        req["headers"]["tap-intent"] = "search"
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "reject")
+        self.assertIn("intent_mismatch", v.reasons)
+        self.assertEqual(v.details.get("intent_source"), "tap_intent_header")
+
+    def test_explicit_action_field(self):
+        # Explicit action overrides path heuristics.
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="browse",
+                           path="/v1/products")
+        req["action"] = "purchase"
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "reject")
+        self.assertIn("intent_mismatch", v.reasons)
+
+    def test_intent_case_insensitive(self):
+        priv, jwk = ed_jwk()
+        req = make_request(priv, jwk, "ed25519", intent="BROWSE",
+                           path="/v1/pay")
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual(v.decision, "reject")
+        self.assertIn("intent_mismatch", v.reasons)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RelayShield: how your data is used</title>
+<style>
+  :root { --bg: #17212b; --panel: #1e2a35; --text: #f5f5f5; --muted: #9aa7b0; --accent: #3b82f6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  .wrap { max-width: 560px; margin: 48px auto; padding: 32px; background: var(--panel);
+    border-radius: 12px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p.lead { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  ul { padding-left: 20px; margin: 0 0 20px; }
+  li { font-size: 14px; margin-bottom: 10px; line-height: 1.5; }
+  .note { font-size: 13px; color: var(--muted); margin-bottom: 24px; line-height: 1.5; }
+  .note a { color: var(--accent); }
+  .row { display: flex; gap: 12px; }
+  button { flex: 1; padding: 12px; border: 0; border-radius: 8px; font-size: 15px;
+    font-weight: 600; cursor: pointer; }
+  #agree { background: var(--accent); color: #fff; }
+  #decline { background: transparent; color: var(--muted); border: 1px solid #2a3a47; }
+  #declined { display: none; font-size: 14px; color: var(--muted); line-height: 1.6; }
+  #declined a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap" id="main">
+  <h1>Before you start: how RelayShield uses your data</h1>
+  <p class="lead">RelayShield only receives what you choose to check. Nothing is collected automatically.</p>
+  <ul>
+    <li><strong>Links and wallet addresses you check.</strong> Anything you paste into the popup or right-click to check is sent to RelayShield's servers so a verdict can be computed against our threat-intelligence corpus.</li>
+    <li><strong>Text you select and right-click.</strong> The selected text is sent with the check request, the same as a pasted link.</li>
+    <li><strong>Email details you paste.</strong> If you use the email checker, the sender address, subject, and body text you paste are sent to our servers for analysis. Pasted email content is never used for anything else and never shared.</li>
+  </ul>
+  <p class="note">
+    Checked items are used only to run the check. They are never sold, never used for
+    advertising, and never used to build a profile of you. Verdicts are stored only on
+    this device. Full details are in our
+    <a href="https://privacy.relayshield.net" target="_blank" rel="noopener">privacy policy</a>.
+  </p>
+  <div class="row">
+    <button id="agree">I agree, start checking</button>
+    <button id="decline">Decline</button>
+  </div>
+</div>
+<div class="wrap" id="declined">
+  <h1>No problem</h1>
+  <p>Without your agreement, RelayShield cannot run checks. The extension will stay
+  installed but every check stays blocked until you accept.</p>
+  <p>To remove it: open <strong>chrome://extensions</strong>, find RelayShield, and click
+  <strong>Remove</strong>. You can reinstall any time and accept then.</p>
+</div>
+<script src="consent.js"></script>
+</body>
+</html>

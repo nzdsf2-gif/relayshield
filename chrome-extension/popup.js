@@ -181,3 +181,19 @@ function escapeHtml(s) {
   div.textContent = s;
   return div.innerHTML;
 }
+
+// Block all checks until the user has accepted the first-run data notice.
+chrome.storage.local.get("rsConsent", ({ rsConsent }) => {
+  if (rsConsent) return;
+  const gate = document.createElement("div");
+  gate.style.cssText = "position:fixed;inset:0;background:#17212b;z-index:50;padding:32px 24px;display:flex;flex-direction:column;justify-content:center;gap:12px;";
+  gate.innerHTML =
+    '<h1 style="font-size:16px;margin:0;">One quick step first</h1>' +
+    '<p style="font-size:13px;color:#9aa7b0;margin:0;">RelayShield needs your agreement on how checked links, selections, and pasted email text are used before it can run any checks.</p>' +
+    '<button id="rs-open-consent" style="padding:10px;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">Review the data notice</button>';
+  document.body.appendChild(gate);
+  document.getElementById("rs-open-consent").addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("consent.html") });
+  });
+});
+

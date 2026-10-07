@@ -461,3 +461,29 @@ no credential. Neither endpoint calls an AI model (grepped, no match in either h
 | Deletion | Support page; log lines expire on their own, per-address counters in 3 days. Do not promise per-line deletion: CloudWatch cannot delete single events. |
 | Trust center URL | Blank. None exists. |
 | Payment products or services | **No** (see PAYMENTS: NO above). The AML question is conditional on it. |
+
+
+## CREDENTIALS INTEGRATION PAGE OF THE FORM ("Provide access for integration and validation")
+
+Added 2026-10-06. The form asks for a credential the platform uses to validate the connector.
+
+| Field | Value |
+|---|---|
+| Credential type | API key |
+| Credential label | `RelayShield partner key (send as X-RS-API-KEY)` |
+| API key | a key issued for this one purpose by `tools/setup_partner_key.py --source muse_connector` |
+
+**Why a key at all when the endpoints are keyless.** A valid key skips the per-IP daily cap on every
+keyless endpoint (the `KEYLESS_SCAN_ENDPOINTS` block in `lambda_handler`), and Muse's validation and live traffic
+come from a small set of egress addresses that would otherwise share ONE allowance. Giving the validator the key
+also means the reviewer cannot be rate limited out of a pass.
+
+**What the key is, read from the code rather than recalled.** `_verify_rs_api_key` needs only an `rs_live_` prefix
+and `active`. The issued record carries no Stripe fields, so nothing can bill it. It is NOT scoped to the connector's
+endpoints: on main it also satisfies any endpoint that accepts a valid key, and it has no daily cap on the keyless
+endpoints. `partner_daily_cap` (500) only bounds `/v1/metered/breach`. Revoke by setting `active` false.
+
+**The tool's closing text says "scoped to /v1/metered/breach only".** That is true of the unmerged branch it came from
+and is not a complete description on main. Trust this section over that line.
+
+**Never paste the key into chat, a commit or a screenshot.** It prints once in the terminal that issues it.

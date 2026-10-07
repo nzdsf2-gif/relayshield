@@ -663,6 +663,23 @@ def _vt_api_key() -> str:
     return _get_secret_json(VT_SECRET_NAME, "virustotal_api_key")
 
 
+# Every VirusTotal request spends one share of a single 500-a-day allowance, and
+# until 2026-10-06 nothing counted it. See relayshield_vt_budget.py. The context
+# is set once per invocation in lambda_handler (Lambda is single-threaded per
+# environment, so a module global is safe here).
+import relayshield_vt_budget as _vtb
+
+_VT_CTX = {"surface": "api", "caller": "-"}
+
+
+def _vt_charge(kind: str) -> bool:
+    return _vtb.charge(_VT_CTX["surface"], kind, _VT_CTX["caller"])
+
+
+_VT_BUDGET_MSG = ("VirusTotal check unavailable: the daily scan budget is used up. "
+                  "It resets at 00:00 UTC.")
+
+
 def _twilio_creds() -> tuple[str, str]:
     sid   = _get_secret_json(TWILIO_SID_SECRET, "TWILIO_ACCOUNT_SID")
     token = _get_secret_json(TWILIO_TOK_SECRET, "TWILIO_AUTH_TOKEN")
@@ -2006,10 +2023,40 @@ def _breach_response(email: str, summary: list, cached: bool) -> dict:
 # Submits to VirusTotal and returns immediately with an analysis_id.
 # Caller polls GET /v1/result/{analysis_id} for the verdict.
 
+def _scan_url_response(url: str, analysis_id: str, heuristics: dict) -> dict:
+    return _ok({
+        "status":               "pending",
+        "target":               url,
+        "analysis_id":          analysis_id,
+        "poll_endpoint":        f"/v1/result/{analysis_id}",
+        "immediate_signal":     "flagged" if heuristics["flagged"] else "no_immediate_red_flags",
+        "immediate_reasons":    heuristics["reasons"],
+        # URL -> malware-family attribution from RelayShield's IOC corpus.
+        # Independent of the pending VT verdict: when the corpus already
+        # knows this URL/domain as malware infrastructure, say which family.
+        "malware_families":     heuristics.get("malware_families") or [],
+        "malware_attribution":  ("relayshield_ioc_corpus"
+                                 if heuristics.get("malware_families") else None),
+        "note":                 "Poll /v1/result/{analysis_id} every 5s until status is completed",
+    })
+
+
 def handle_scan_url(params: dict) -> dict:
     url = (params.get("url") or "").strip()
     if not url.startswith(("http://", "https://")):
         return _err("url is required and must start with http:// or https://")
+
+    # A verdict we already hold costs no VirusTotal request. The caller still
+    # gets an analysis_id and polls /v1/result, so no client has to change: the
+    # "rsc-" prefix tells handle_result to answer from the cache.
+    url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
+    if _vtb.cache_get(url_hash) is not None:
+        heuristics = _heuristic_url_check(url)
+        logger.info("scan-url cache hit url=%s", _redact(url, "url"))
+        return _scan_url_response(url, "rsc-" + url_hash, heuristics)
+
+    if not _vt_charge("submit"):
+        return _err(_VT_BUDGET_MSG, 503)
 
     api_key = _vt_api_key()
     payload = urllib.parse.urlencode({"url": url}).encode("utf-8")
@@ -2026,13 +2073,17 @@ def handle_scan_url(params: dict) -> dict:
         with urllib.request.urlopen(req, timeout=10) as resp:
             analysis_id = json.loads(resp.read()).get("data", {}).get("id")
     except Exception as exc:
-        logger.error("VT URL submit failed for %s: %s", url, exc)
+        logger.error("VT URL submit failed for %s: %s", _redact(url, "url"), exc)
         return _err("URL submission to VirusTotal failed", 502)
 
     if not analysis_id:
         return _err("VirusTotal did not return an analysis ID", 502)
 
-    # Immediate heuristic signal — added 2026-07-16 to unify this endpoint
+    # Remember that THIS API issued this analysis, and for which URL, so
+    # /v1/result polls only ids we handed out and can cache the verdict.
+    _vtb.mapping_put(analysis_id, url_hash)
+
+    # Immediate heuristic signal -- added 2026-07-16 to unify this endpoint
     # with Telegram's /scan and WhatsApp's SCAN/ATTACH, which already
     # combine VT with RelayShield's IOC corpus + Google Safe Browsing +
     # RDAP domain-age. VT's own submit-then-poll model means the definitive
@@ -2041,22 +2092,9 @@ def handle_scan_url(params: dict) -> dict:
     # red flag right now.
     heuristics = _heuristic_url_check(url)
 
-    logger.info("scan-url submitted — url=%s analysis_id=%s heuristics=%s", url, analysis_id, heuristics)
-    return _ok({
-        "status":               "pending",
-        "target":               url,
-        "analysis_id":          analysis_id,
-        "poll_endpoint":        f"/v1/result/{analysis_id}",
-        "immediate_signal":     "flagged" if heuristics["flagged"] else "no_immediate_red_flags",
-        "immediate_reasons":    heuristics["reasons"],
-        # URL -> malware-family attribution from RelayShield's IOC corpus.
-        # Independent of the pending VT verdict: when the corpus already
-        # knows this URL/domain as malware infrastructure, say which family.
-        "malware_families":     heuristics.get("malware_families") or [],
-        "malware_attribution":  ("relayshield_ioc_corpus"
-                                 if heuristics.get("malware_families") else None),
-        "note":                 "Poll /v1/result/{analysis_id} every 5s until status is completed",
-    })
+    logger.info("scan-url submitted url=%s analysis_id=%s heuristics=%s",
+                _redact(url, "url"), analysis_id, heuristics)
+    return _scan_url_response(url, analysis_id, heuristics)
 
 
 # ---------------------------------------------------------------------------
@@ -2089,6 +2127,8 @@ def handle_scan_file(params: dict) -> dict:
     if not file_bytes:
         return _err("downloaded file was empty", 400)
 
+    if not _vt_charge("submit-file"):
+        return _err(_VT_BUDGET_MSG, 503)
     api_key  = _vt_api_key()
     boundary = uuid.uuid4().hex
     body = (
@@ -2117,6 +2157,7 @@ def handle_scan_file(params: dict) -> dict:
     if not analysis_id:
         return _err("VirusTotal did not return an analysis ID", 502)
 
+    _vtb.mapping_put(analysis_id, "-")
     logger.info("scan-file submitted — file_url=%s analysis_id=%s", file_url, analysis_id)
     return _ok({
         "status":        "pending",
@@ -2137,6 +2178,8 @@ def _poll_vt(analysis_id: str, api_key: str, max_wait: int) -> dict | None:
     )
     waited = 0
     while waited <= max_wait:
+        if not _vt_charge("poll"):
+            return None
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data  = json.loads(resp.read())
@@ -2186,6 +2229,8 @@ def _vt_response(target: str, analysis_id: str, stats: dict | None) -> dict:
 
 
 def _vt_get(path: str, api_key: str) -> dict | None:
+    if not _vt_charge("get"):
+        raise RuntimeError("VirusTotal daily budget used up")
     req = urllib.request.Request(f"{VT_BASE_URL}{path}", headers={"x-apikey": api_key}, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -4755,6 +4800,8 @@ def _vt_url_report(url: str) -> dict | None:
     if not api_key:
         logger.warning("VT fallback skipped: no VirusTotal API key available")
         return None
+    if not _vt_charge("report"):
+        return None
     req = urllib.request.Request(
         f"{VT_BASE_URL}/urls/{_vt_url_id(url)}",
         headers={"x-apikey": api_key},
@@ -4996,9 +5043,33 @@ def handle_cert_expiry(params: dict) -> dict:
 # Polls VirusTotal for the result of a previously submitted scan-url or scan-file.
 # Returns verdict once completed, or {"status":"pending"} if still processing.
 
+_ANALYSIS_ID_RE = re.compile(r"[A-Za-z0-9=_-]{8,200}")
+
+
 def handle_result(analysis_id: str) -> dict:
     if not analysis_id:
         return _err("analysis_id is required")
+    if not _ANALYSIS_ID_RE.fullmatch(analysis_id):
+        return _err("invalid analysis_id", 400)
+
+    # Answered from our own cache: no VirusTotal request.
+    if analysis_id.startswith("rsc-"):
+        stats = _vtb.cache_get(analysis_id[4:])
+        if stats is None:
+            return _err("the cached result expired, resubmit the URL", 410)
+        return _vt_response(analysis_id, analysis_id, stats)
+
+    # THIS ENDPOINT WAS UNAUTHENTICATED AND UNCAPPED, and each call spent one
+    # request of our shared 500-a-day VirusTotal allowance whatever id was
+    # supplied, so anyone could drain the day. It now polls only analyses this
+    # API submitted. 'error' (the table could not be read) is NOT a refusal: a
+    # DynamoDB blip must not break a legitimate scan in flight.
+    state, url_hash = _vtb.mapping_check(analysis_id)
+    if state == "no":
+        return _err("unknown analysis_id", 404)
+    if not _vt_charge("poll"):
+        return _err(_VT_BUDGET_MSG, 503)
+
     api_key = _vt_api_key()
     req = urllib.request.Request(
         f"{VT_BASE_URL}/analyses/{analysis_id}",
@@ -5013,6 +5084,8 @@ def handle_result(analysis_id: str) -> dict:
             if status != "completed":
                 return _ok({"status": "pending", "analysis_id": analysis_id})
             stats = attrs.get("stats", {})
+            if url_hash and url_hash != "-":
+                _vtb.cache_put(url_hash, stats)
             return _vt_response(analysis_id, analysis_id, stats)
     except Exception as exc:
         logger.error("VT result poll failed for %s: %s", analysis_id, exc)
@@ -16336,7 +16409,22 @@ def lambda_handler(event: dict, context) -> dict:
     path   = event.get("path", "")
     method = event.get("httpMethod", "")
 
-    logger.info("API request — method=%s path=%s", method, path)
+    # Who is spending VirusTotal requests this invocation (see _vt_charge).
+    # X-RS-Source is the caller's own label (the checkemail Worker sends
+    # "checkemail"); a key is hashed to eight characters and never logged. A caller
+    # with NO key gets a day-rotating six-character label from its source IP
+    # (anon_caller), because "-" for everybody made a scraper indistinguishable
+    # from an honest user in every log and exempt from the per-caller cap.
+    _vh = event.get("headers") or {}
+    _vsrc = re.sub(r"[^a-z0-9_-]", "", (_header(_vh, "X-RS-Source") or "api").lower())[:24] or "api"
+    _vkey = _header(_vh, "X-RS-API-KEY") or _header(_vh, "X-API-Key") or ""
+    _VT_CTX["surface"] = _vsrc
+    _VT_CTX["caller"] = _vtb.caller_id(_vkey) if _vkey else _vtb.anon_caller(
+        ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or "")
+
+    # The caller label is on the request line itself so tools/diagnose_vt_usage.py can
+    # group /v1/result calls by who made them.
+    logger.info("API request — method=%s path=%s caller=%s", method, path, _VT_CTX["caller"])
 
     # AWS Marketplace fulfillment — forward to marketplace Lambda (GET or POST)
     if "/marketplace/fulfillment" in path:

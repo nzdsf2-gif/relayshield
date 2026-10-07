@@ -4,12 +4,14 @@ relayshield_telemetry — self-reported install/open telemetry.
 Receives pings from:
   - Chrome extension on install (chrome.runtime.onInstalled, reason=install)
   - Telegram Mini App on page open (beacon from the worker page)
+  - checkemail@ Worker, once per message it actually processes (checkemail_use).
+    The client hash there is an HMAC of the sender, never the address itself.
 
 Stores events in DynamoDB relayshield_telemetry for the weekly metrics report.
 No PII: client identifiers are hashed by the caller before sending.
 
 Endpoint: POST /v1/telemetry
-Body: {"event_type": "chrome_install" | "miniapp_open", "client_hash": "<sha256>", "version": "<optional>"}
+Body: {"event_type": "chrome_install" | "miniapp_open" | "checkemail_use", "client_hash": "<sha256>", "version": "<optional>"}
 """
 
 import hashlib
@@ -27,7 +29,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 TABLE_NAME = os.environ.get("TELEMETRY_TABLE", "relayshield_telemetry")
 
-VALID_EVENTS = {"chrome_install", "miniapp_open"}
+VALID_EVENTS = {"chrome_install", "miniapp_open", "checkemail_use"}
 
 
 def lambda_handler(event, context):

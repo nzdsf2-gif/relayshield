@@ -82,3 +82,5 @@ def _resp(status, body):
         },
         "body": json.dumps(body),
     }
+
+# Deploy trigger: workflow paths now include this file.

@@ -19,6 +19,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // never break the install flow. No PII — we send only the event type and
   // extension version, no user identifier.
   if (details.reason === "install") {
+    // Prominent disclosure: first-run consent screen per July 2026 store rules.
+    const { rsConsent } = await chrome.storage.local.get("rsConsent");
+    if (!rsConsent) chrome.tabs.create({ url: chrome.runtime.getURL("consent.html") });
     try {
       await fetch("https://api.relayshield.net/v1/telemetry", {
         method: "POST",
@@ -39,6 +42,12 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
 });
 
 async function runCheck(raw) {
+  const { rsConsent } = await chrome.storage.local.get("rsConsent");
+  if (!rsConsent) {
+    notify("RelayShield needs your OK first",
+      "Open the RelayShield popup and accept the data notice to start checking.");
+    return;
+  }
   let result;
   try {
     // v1.1: the right-click check runs through the composite endpoint -- one

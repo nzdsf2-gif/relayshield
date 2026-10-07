@@ -16,13 +16,16 @@ Pipeline:
   4. Verify the signature (Ed25519 or RSASSA-PSS/SHA-256)
   5. Freshness: created within the 8-minute window, not expired
   6. Replay: nonce must be unseen (pluggable store)
-  7. TI screen: wallet / merchant domain against the corpus (pluggable)
-  8. Verdict: accept / review / reject
+  7. Intent scoping: declared intent must cover the attempted action
+  8. TI screen: wallet / merchant domain against the corpus (pluggable)
+  9. Verdict: accept / review / reject
 
 Verdict policy:
-  - reject: bad signature, expired, replay, unknown key, TI high/critical
-  - review:  TI medium/flagged, TI unavailable, tag not recognised
-  - accept:  signature valid, fresh, nonce new, TI clean
+  - reject: bad signature, expired, replay, unknown key, TI high/critical,
+            read-only intent attempting a payment action
+  - review:  TI medium/flagged, TI unavailable, tag not recognised,
+            unrecognised intent attempting a payment action
+  - accept:  signature valid, fresh, nonce new, intent covers action, TI clean
 """
 
 import base64
@@ -340,6 +343,62 @@ class MemoryNonceStore:
 
 
 # ---------------------------------------------------------------------------
+# Intent scoping (Visa TAP intent-scoped tokens)
+# ---------------------------------------------------------------------------
+# TAP credentials are minted against a declared purchasing intent: the token
+# is only valid where that intent allows. The merchant must enforce the
+# boundary, e.g. an agent holding a "browse" token must not check out.
+# Intent levels: 0 = read-only, 1 = may move money. A token whose intent
+# level is below the attempted action level is an intent mismatch.
+
+INTENT_LEVELS = {
+    # read-only: browsing, discovery, price comparison
+    "browse": 0, "search": 0, "read": 0, "lookup": 0,
+    "price-check": 0, "pricecheck": 0, "quote": 0, "discover": 0,
+    # transactional: the agent is authorized to move money
+    "checkout": 1, "purchase": 1, "pay": 1, "payment": 1,
+    "order": 1, "buy": 1, "transact": 1,
+}
+
+# Path fragments indicating a money-moving action.
+PAYMENT_PATH_HINTS = (
+    "pay", "checkout", "purchase", "order", "payment",
+    "charge", "buy", "transaction", "authorize",
+)
+
+
+def _derive_action_level(request):
+    """Classify the attempted action: 1 = moves money, 0 = read-only,
+    None = cannot be determined."""
+    explicit = request.get("action")
+    if explicit is not None:
+        lvl = INTENT_LEVELS.get(str(explicit).strip().lower())
+        if lvl is not None:
+            return lvl
+        # explicit but unrecognised: fall through to path heuristics
+    path = str(request.get("path") or "").lower()
+    if any(h in path for h in PAYMENT_PATH_HINTS):
+        return 1
+    if path:
+        return 0
+    return None
+
+
+def _intent_claim(params, request):
+    """Return (intent, source). Prefers the signature-covered param, since
+    only that value is authenticated; falls back to header then request
+    field for tokens that carry intent outside Signature-Input."""
+    if params.get("intent"):
+        return str(params["intent"]), "signature_params"
+    headers = {k.lower(): v for k, v in (request.get("headers") or {}).items()}
+    if headers.get("tap-intent"):
+        return str(headers["tap-intent"]), "tap_intent_header"
+    if request.get("intent"):
+        return str(request["intent"]), "request_field"
+    return None, "none"
+
+
+# ---------------------------------------------------------------------------
 # Verdict
 # ---------------------------------------------------------------------------
 
@@ -496,6 +555,26 @@ def verify_tap_request(request: dict,
     if tag is not None and str(tag) not in VALID_TAGS:
         details["tag"] = str(tag)
         return _review("unrecognised_tag", **details)
+
+    # Intent scoping: the credential is only valid where the declared
+    # intent allows. A read-only intent attempting payment is a reject
+    # (scope violation); an unrecognised intent attempting payment is a
+    # review (cannot verify scope). Absent intent skips the check.
+    intent, intent_src = _intent_claim(params, request)
+    if intent is not None:
+        intent_norm = intent.strip().lower()
+        details["intent"] = intent_norm
+        details["intent_source"] = intent_src
+        intent_level = INTENT_LEVELS.get(intent_norm)
+        action_level = _derive_action_level(request)
+        if intent_level is None:
+            if action_level == 1:
+                details["intent_issue"] = (
+                    "unrecognised_intent_for_payment_action")
+                return _review("intent_mismatch", **details)
+        elif action_level is not None and intent_level < action_level:
+            details["intent_issue"] = "read_only_intent_attempted_payment"
+            return _reject("intent_mismatch", **details)
 
     # TI corpus screening: the differentiator beyond signature-only verifiers
     wallet = request.get("wallet")

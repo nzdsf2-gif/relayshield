@@ -63,6 +63,10 @@ const HTML = `<!doctype html>
       <h3>Agent Commerce</h3>
       <p>TAP signature verification plus counterparty screening for Visa Intelligent Commerce and x402 agent transactions.</p>
     </div>
+    <div class="card">
+      <h3>ChatGPT</h3>
+      <p>Free scam checks inside ChatGPT via the RelayShield Scam Checks plugin. No signup, no API key.</p>
+    </div>
   </div>
   <h2>Pricing</h2>
   <p>Flat monthly pricing. Free tier for low-volume sellers. No per-order fees, no revenue share.</p>

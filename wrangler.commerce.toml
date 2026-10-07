@@ -2,14 +2,12 @@ name = "relayshield-commerce"
 main = "cloudflare_worker_commerce.js"
 compatibility_date = "2024-01-01"
 
-# Serves the commerce protection landing page at api.relayshield.net/commerce.
-# This uses a path route on the existing api.relayshield.net hostname.
-# Requires api.relayshield.net to be Cloudflare-proxied (orange cloud) for the
-# Worker route to intercept. If the hostname points directly at API Gateway
-# without Cloudflare proxying, this route will not trigger and you'll need to
-# either proxy the hostname through Cloudflare or use a dedicated subdomain
-# like commerce.relayshield.net instead.
+# Serves the commerce protection landing page at commerce.relayshield.net.
+# Uses custom_domain so wrangler creates the DNS record automatically.
+# api.relayshield.net points directly to API Gateway (not Cloudflare-proxied),
+# so a path route there cannot trigger a Worker. A dedicated subdomain is the
+# clean solution.
 
 routes = [
-  { pattern = "api.relayshield.net/commerce*", zone_name = "relayshield.net" }
+  { pattern = "commerce.relayshield.net", custom_domain = true }
 ]

@@ -10331,3 +10331,32 @@ Asked as whether a scraper drained the VT quota. **It cannot be determined from 
 **What changed so the next spike is attributable:** callers with no key now get `anon_caller()`, a six-character hash of the UTC day plus the source IP (24 bits, rotates at midnight, about 256 candidate IPv4 addresses per value, logged and used as a per-day counter key, never stored). It is on the request line as `caller=`, in the `vt_call` lines, and the diagnostic groups `/v1/result` by it and prints a reading-aid verdict. **Side effect worth knowing: anonymous sources are now held to the 120-a-day per-caller cap**, which they were exempt from before. A shared NAT or office is one bucket.
 
 The `/v1/result` leak itself was closed by the analysis-id mapping gate and does not depend on this. 7 new tests in `test_vt_budget.py`; the guard was proven by dropping the label and watching it fail.
+
+## WHERE 2026-10-07 LEFT THINGS. READ THIS FIRST; IT SUPERSEDES THE 2026-10-06 FRAGMENTS ABOVE FOR "WHAT IS NEXT".
+
+**Andrew stopped for the night.** Branch `claude/compassionate-bell-e3cfej`, last code commit `86053e8`, all of it pushed and unmerged.
+
+### THE OPENAI LISTING IS LIVE, AND NO SESSION RECORDED IT UNTIL THE SCREENSHOTS
+
+**"RelayShield Scam Checks", v1.0.0, Security, ChatGPT plugin directory.** Four tools (link check, wallet screening, email phishing scoring, breached-email lookup), free, no key, and it says it never reports anything as safe. This is FD-14 closing; `FRONT_DOORS.md` is updated. **The repo carried no record of the submission**: a `git grep` of `origin/main` for an OpenAI key finds only `package-lock.json` hits. The route/key work (`CONSUMER_ROUTES["openai"]`, `?source=openai`, `tg-miniapp-openai`, the `openai_connector` partner key) exists only on unmerged `claude/gallant-hawking-4oerzg`, and whether that key was ever issued is unconfirmed. A free MCP server was built on `feature/scamkit-demo-screen` (`6f1c602`, "free-server 0.3.0"); an `mcp__...free-mcp_hf_space` server is also attached to some sessions.
+
+**Three things to settle, in this order, none checked yet:**
+1. **Its description quotes stale figures** ("115 monitored Telegram marketplaces, 494K+ indicators, 7.8M+ citations"). Measured: 123 channels, 661,609 distinct indicators (2026-09-30), 8.3M+ citations. Per the standing rule, propose copy that names sources, not counts, since we cannot cheaply edit the listing. The edit is Andrew's to submit.
+2. **Which attribution string does the connector send?** Without one, ChatGPT arrivals are indistinguishable. Register the key in all three lists BEFORE changing anything.
+3. **Does it hit the keyless endpoints, and under the 300/day per-IP cap?** A partner key lifts the cap, but ChatGPT's egress IPs are shared, so the cap may bite all users at once. The breach tool shares the HIBP key with every paying customer, so `relayshield_breach_cache` must exist first (below). Keep it keyless: the compliance gate forbids selling digital goods inside the host.
+
+### NEXT-SESSION TODOS, IN ORDER
+
+1. **Andrew's stuck merge.** His clone reported `cloudflare_worker_privacy.js: needs merge`. Ask for the output of the read-only diagnostic (branch, last commit, `git status --short`, MERGE_HEAD present?). Expect `UU cloudflare_worker_privacy.js`. His rule: the live privacy page is current and valid, so keep that version, then `git add` it and `git commit --no-edit`, or `git merge --abort`. Then the standard merge block; a conflict in CLAUDE.md alone means keep both sides. Never `git add -A`.
+2. **Apply the cache grants, dry run first, and send me the output before `--apply`.**
+   `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/grant_breach_cache_access.py` then `--apply`.
+   For the VT cache: `AWS_PROFILE=relayshield sh tools/setup_vt_url_cache.sh`, then the same grant tool with `--table relayshield_vt_url_cache`.
+   `relayshield_breach_cache` creation (`sh tools/setup_breach_cache.sh`) is **still unconfirmed**. A role cannot widen its own permissions, so Actions cannot do the grants.
+3. **Hand deploys, none of which CI does.** The telemetry Lambda (`relayshield_telemetry.py` is in the `paths:` trigger but NOT `LAMBDA_MAP`; run `sh tools/handler_drift.sh relayshield_telemetry.py` to resolve the live name and read the diff first). `relayshield-weekly-metrics`. The checkemail Worker (needs the new `recordUse` call). **Until the telemetry Lambda is updated it answers 400 to `checkemail_use` and the Worker swallows it, so nothing is counted and nothing errors.**
+4. **Run `tools/diagnose_vt_usage.py --date 2026-10-05` and `--date 2026-10-06`** after the merge deploys. For those days the answer is volume only: there is no caller label. The next spike carries `caller=`. Anonymous sources are now capped at 120 a day; Andrew decides whether to keep the day-rotating hashed-IP logging.
+5. **Hudson Rock Cavalier terms: still UNREAD** (all their hosts are egress-blocked). Andrew's read: the Terms link on `cavalier.hudsonrock.com/docs`, looking for commercial use, attribution and redistribution. If attribution is required it collides with the no-vendor-names rule and the choice is his.
+6. **Muse**: connector shows "Submitted"; the Business verification error was Muse-side. Nothing to do; if it recurs, contact Muse support.
+7. **Arjen**: 100% Stripe discount exists. **Do not cancel his subscription**, because cancelling revokes `cs_mobile_access`. If he still gets a 402 on paid screens in v1.7.0, suspect his other key record (`...84a19f`, flag false); `tools/set_cs_mobile_access.py` sets it.
+
+### CARRIED, UNCHANGED
+Privacy-policy claim vs the WhatsApp `url=%s` plaintext log line (a code question, not a page question). CS Mobile v1.7.0 build blocked on a JDK on his Mac (`/usr/libexec/java_home -V`, or Android Studio's `jbr`); paste the store copy only together with the build. Grok PR #612: leave untouched. D&B change decision about 2026-10-10, then the Chrome Web Store support ticket. `support@relayshield.net` mailbox unconfirmed. `tools/backfill_first_seen.py --apply` unconfirmed. Decision on `claude/gallant-hawking-4oerzg` (it holds the OpenAI route work, so item 1 above feeds it). `WA_NUMBER` in the Mini App Worker. StoreBot. Smithery FD-11. IAM split beyond `relayshield-intel-feed`.

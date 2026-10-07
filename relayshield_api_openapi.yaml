@@ -332,6 +332,59 @@ paths:
         "502":
           $ref: "#/components/responses/UpstreamError"
 
+  /v1/tap/verify:
+    post:
+      operationId: verifyTap
+      summary: Verify Visa Trusted Agent Protocol signature
+      description: |
+        Merchant-side TAP signature verification with RelayShield TI corpus screening.
+        Verifies RFC 9421 HTTP Message Signatures from Visa Intelligent Commerce agents,
+        then screens the agent wallet/merchant domain against the threat-intel corpus.
+        Returns accept/review/reject verdicts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: TAP-signed request with Signature-Input and Signature headers
+            examples:
+              basic:
+                value:
+                  note: "Include Signature-Input and Signature headers per RFC 9421"
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decision:
+                    type: string
+                    enum: [accept, review, reject]
+                    description: Verdict based on signature validity and TI corpus screening
+                  reasons:
+                    type: array
+                    items:
+                      type: string
+                    description: List of reasons for the decision
+                  details:
+                    type: object
+                    description: Additional verification details
+              examples:
+                accept:
+                  value:
+                    decision: accept
+                    reasons: []
+                    details: {}
+                reject:
+                  value:
+                    decision: reject
+                    reasons: ["missing_signature_headers"]
+                    details: {}
+
+
 components:
   securitySchemes:
     ApiKeyAuth:

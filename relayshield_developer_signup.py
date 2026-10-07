@@ -2595,6 +2595,23 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
 </div>
 
 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem 1.75rem;margin:2rem 0">
+  <h2 class="section-title" id="plugins" style="font-size:1.2rem;margin:0 0 1rem">Plugins &amp; integrations</h2>
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem">RelayShield scam checks where you already work: inside Claude Code and inside ChatGPT.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.85rem">
+    <a href="https://github.com/nzdsf2-gif/relayshield-claude-plugin" target="_blank" rel="noopener" style="text-decoration:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem">
+      <p style="color:var(--text);font-size:.9rem;font-weight:600;margin:0 0 .35rem">RelayShield Guard</p>
+      <p style="color:var(--muted);font-size:.82rem;margin:0 0 .5rem">Scam checks inside Claude Code. 128 installs, live in the Anthropic directory.</p>
+      <span style="color:var(--accent);font-size:.82rem;font-weight:600">View on GitHub &rarr;</span>
+    </a>
+    <a href="https://chatgpt.com/plugins/plugin_asdk_app_6abb1a5d9bcc8191a2c68a7324c7307b" target="_blank" rel="noopener" style="text-decoration:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem">
+      <p style="color:var(--text);font-size:.9rem;font-weight:600;margin:0 0 .35rem">RelayShield Scam Checks</p>
+      <p style="color:var(--muted);font-size:.82rem;margin:0 0 .5rem">Free scam checks for links, wallets, emails, and breach exposure. No signup.</p>
+      <span style="color:var(--accent);font-size:.82rem;font-weight:600">Open in ChatGPT &rarr;</span>
+    </a>
+  </div>
+</div>
+
+<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem 1.75rem;margin:2rem 0">
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.6rem;margin-bottom:1rem">
     <h2 class="section-title" id="templates" style="font-size:1.2rem;margin:0">What practitioners are building</h2>
     <div style="display:flex;align-items:center;gap:.4rem;background:rgba(255,109,90,.12);border:1px solid rgba(255,109,90,.3);border-radius:20px;padding:.35rem .8rem">

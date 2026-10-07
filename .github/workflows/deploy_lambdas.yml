@@ -182,6 +182,7 @@ jobs:
             ["relayshield_sim_swap_monitor.py"]="relayshield-sim-swap-monitor"
             ["relayshield_bundle_fulfillment.py"]="relayshield-bundle-fulfillment"
             ["relayshield_api.py"]="relayshield-api"
+            ["relayshield_developer_signup.py"]="relayshield-signup-api"
             ["relayshield_digest_sender.py"]="relayshield-digest-sender"
             ["relayshield_day3_sender.py"]="relayshield-day3-sender"
             ["relayshield_oauth_watchlist_monitor.py"]="relayshield-oauth-watchlist-monitor"

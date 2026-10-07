@@ -96,6 +96,7 @@ import relayshield_sim_swap_consent as simswap_consent
 # drawn there, and for why the sender lookup runs on Telegram and cannot run
 # on WhatsApp.
 import relayshield_forward_analysis as fwd
+import relayshield_vt_budget as _vt_budget  # shared 500/day VirusTotal allowance
 
 USERS_TABLE             = "relayshield_users"
 MONITORED_EMAILS_TABLE  = "relayshield_monitored_emails"
@@ -3003,6 +3004,8 @@ def check_url_sync(url: str) -> dict:
     except Exception as exc:
         logger.error("VT secret unavailable: %s", exc)
         return {"status": "unknown", "detail": "Scan service temporarily unavailable"}
+    if not _vt_budget.charge("telegram", "report"):
+        return {"status": "unknown", "detail": "Scan service temporarily unavailable"}
 
     req = urllib.request.Request(
         f"{VT_BASE_URL}/urls/{url_id}",
@@ -3024,6 +3027,8 @@ def check_url_sync(url: str) -> dict:
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             try:
+                if not _vt_budget.charge("telegram", "submit"):
+                    raise RuntimeError("VirusTotal daily budget used up")
                 submit_body = urllib.parse.urlencode({"url": url}).encode("utf-8")
                 submit_req = urllib.request.Request(
                     f"{VT_BASE_URL}/urls", data=submit_body,

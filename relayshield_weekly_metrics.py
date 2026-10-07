@@ -132,42 +132,60 @@ def _users_by_channel() -> dict:
 
 
 
-def _telemetry_stats() -> dict:
-    """Count self-reported installs/opens from relayshield_telemetry.
+TELEMETRY_EVENTS = {
+    "chrome_install": "chrome_installs",
+    "miniapp_open":   "miniapp_opens",
+    "checkemail_use": "checkemail_users",
+}
 
-    Returns unique client counts per event type (deduped by client_hash),
-    plus raw event totals. Missing table or no data yields zeros — the
-    report must not break before the first ping arrives.
+
+def _telemetry_stats() -> dict:
+    """Count self-reported front-door use from relayshield_telemetry.
+
+    Per event type: unique clients (deduped by client_hash), raw pings, and
+    NEW clients this week -- a client whose EARLIEST ping is inside the last
+    seven days. "New" is first-seen, not seen-this-week: a returning user is
+    active, not new, and counting them would make the number grow with
+    engagement rather than reach. Pings with no client_hash cannot be placed
+    as new or returning, so they count toward the total only.
+
+    Missing table or no data yields zeros -- the report must not break before
+    the first ping arrives.
     """
-    stats = {
-        "chrome_installs_unique": 0,
-        "chrome_installs_total": 0,
-        "miniapp_opens_unique": 0,
-        "miniapp_opens_total": 0,
-    }
+    stats = {}
+    for prefix in TELEMETRY_EVENTS.values():
+        stats[f"{prefix}_unique"] = 0
+        stats[f"{prefix}_total"] = 0
+        stats[f"{prefix}_new_week"] = 0
     try:
         table = dynamodb.Table("relayshield_telemetry")
-        seen = {"chrome_install": set(), "miniapp_open": set()}
-        totals = {"chrome_install": 0, "miniapp_open": 0}
-        resp = table.scan(ProjectionExpression="event_type, client_hash")
+        cutoff = _week_ago_iso()
+        first_seen = {et: {} for et in TELEMETRY_EVENTS}
+        totals = {et: 0 for et in TELEMETRY_EVENTS}
+        proj = "event_type, client_hash, created_at"
+        resp = table.scan(ProjectionExpression=proj)
         while True:
             for item in resp.get("Items", []):
                 et = (item.get("event_type") or "").lower()
-                if et in totals:
-                    totals[et] += 1
-                    ch = item.get("client_hash")
-                    if ch:
-                        seen[et].add(ch)
+                if et not in totals:
+                    continue
+                totals[et] += 1
+                ch = item.get("client_hash")
+                if ch:
+                    ts = item.get("created_at") or ""
+                    prev = first_seen[et].get(ch)
+                    if prev is None or (ts and ts < prev):
+                        first_seen[et][ch] = ts
             if "LastEvaluatedKey" not in resp:
                 break
-            resp = table.scan(
-                ProjectionExpression="event_type, client_hash",
-                ExclusiveStartKey=resp["LastEvaluatedKey"],
-            )
-        stats["chrome_installs_unique"] = len(seen["chrome_install"])
-        stats["chrome_installs_total"] = totals["chrome_install"]
-        stats["miniapp_opens_unique"] = len(seen["miniapp_open"])
-        stats["miniapp_opens_total"] = totals["miniapp_open"]
+            resp = table.scan(ProjectionExpression=proj,
+                              ExclusiveStartKey=resp["LastEvaluatedKey"])
+        for et, prefix in TELEMETRY_EVENTS.items():
+            stats[f"{prefix}_unique"] = len(first_seen[et])
+            stats[f"{prefix}_total"] = totals[et]
+            # An empty timestamp is not provably recent, so it is not "new".
+            stats[f"{prefix}_new_week"] = sum(
+                1 for ts in first_seen[et].values() if ts and ts >= cutoff)
     except Exception as exc:
         logger.warning("Telemetry stats unavailable: %s", exc)
     return stats
@@ -845,6 +863,11 @@ def _build_email(metrics: dict) -> str:
   <tr><td>Chrome installs (total pings)</td><td><b>{s['telemetry']['chrome_installs_total']}</b></td></tr>
   <tr><td>MiniApp opens (unique)</td><td><b>{s['telemetry']['miniapp_opens_unique']}</b></td></tr>
   <tr><td>MiniApp opens (total pings)</td><td><b>{s['telemetry']['miniapp_opens_total']}</b></td></tr>
+  <tr><td>Chrome installs (new this week)</td><td><b>{s['telemetry'].get('chrome_installs_new_week', 0)}</b></td></tr>
+  <tr><td>MiniApp users (new this week)</td><td><b>{s['telemetry'].get('miniapp_opens_new_week', 0)}</b></td></tr>
+  <tr><td>Email checker users (unique)</td><td><b>{s['telemetry'].get('checkemail_users_unique', 0)}</b></td></tr>
+  <tr><td>Email checker users (new this week)</td><td><b>{s['telemetry'].get('checkemail_users_new_week', 0)}</b></td></tr>
+  <tr><td>Email checker messages checked (total)</td><td><b>{s['telemetry'].get('checkemail_users_total', 0)}</b></td></tr>
 </table>
 
 <h3 style="color: #e94560;">B2A API Keys</h3>

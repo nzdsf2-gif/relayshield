@@ -52,7 +52,17 @@ def main() -> int:
 
     summary = []
     for label, group, term in (
+        # EVERY request is logged with its path, so these are exact request counts, not
+        # lower bounds. /v1/result was unauthenticated and spent one VT request per call
+        # until 2026-10-06, and its failures log only at ERROR, so a probing crawler
+        # leaves almost nothing else behind. A big number here is the leak.
+        ("GET /v1/result requests (each was one VT request)", API, "path=/v1/result"),
+        ("GET /v1/payg/result requests (each was one VT request)", API, "path=/v1/payg/result"),
+        ("result polls that FAILED (probing for ids that do not exist)", API, "VT result poll failed"),
+        ("POST /v1/scan-url requests", API, "path=/v1/scan-url"),
         ("scan-url submissions (1 VT call each, plus polls)", API, "scan-url submitted"),
+        ("vt_call lines (after the budget shipped: every allowed request)", API, "vt_call surface="),
+        ("vt_refused lines (budget said no)", API, "vt_refused"),
         ("scan-file submissions", API, "scan-file submitted"),
         ("VT results returned by /v1/result", API, "VT result"),
         ("ip-intel lookups (cache hits and own-corpus hits INCLUDED)", API, "ip-intel query_type"),
@@ -74,6 +84,42 @@ def main() -> int:
     print("   (the same URL many times in a day is a loop or a spam wave; a spread of distinct URLs is real use)")
     for r in rows:
         print(f"   {r.get('n'):>4}  {(r.get('url') or '')[:100]}")
+    # WHO. The request line carries caller=<label> only after the 2026-10-06 build; before
+    # it every anonymous caller was "-", so for an earlier day this section can show the
+    # shape (one caller or none) but not identify anyone.
+    callers = {}
+    for label, term in (("/v1/result", "path=/v1/result"), ("/v1/payg/result", "path=/v1/payg/result")):
+        rows, _, st = run(logs, API, f'filter @message like "{term}" | parse @message "caller=*" as c '
+                          '| stats count() as n by c | sort n desc | limit 10', s, e)
+        callers[label] = rows
+        print(f"== {label} requests by caller  [{st}]")
+        print("   ('-' = no caller label: a day before the label existed, or a request with no source IP)")
+        for r in rows:
+            print(f"   {r.get('n'):>5}  {r.get('c') or '-'}")
+        print()
+    rows, _, st = run(logs, API, 'filter @message like "vt_call surface=" | parse @message "surface=* kind=* caller=*" '
+                      'as surf, kind, c | stats count() as n by surf, c | sort n desc | limit 10', s, e)
+    print(f"== VT requests actually spent, by surface and caller  [{st}]")
+    for r in rows:
+        print(f"   {r.get('n'):>5}  {r.get('surf')}  {r.get('c')}")
+
+    print("\n== VERDICT ON THE SCRAPER THEORY (a reading aid, not a measurement)")
+    result_total = sum(t for lbl, t, _ in summary if lbl.startswith("GET /v1/result") or lbl.startswith("GET /v1/payg/result"))
+    ranked = sorted((int(r.get("n") or 0) for rows_ in callers.values() for r in rows_), reverse=True)
+    if result_total < 100:
+        print(f"   {result_total} result requests: too few to have spent a 500-request day. The theory is NOT supported;")
+        print("   look at the checkemail and WhatsApp rows above instead.")
+    else:
+        top = ranked[0] if ranked else 0
+        labelled = any((r.get("c") or "-") != "-" for rows_ in callers.values() for r in rows_)
+        print(f"   {result_total} result requests, each one VT request before the fix: enough to drain the day by themselves.")
+        if not labelled:
+            print("   They carry no caller label, so WHO cannot be read from this day. Volume says the leak was big enough;")
+            print("   it does not say a scraper did it. The label exists from the 2026-10-06 build, so the next spike will say.")
+        elif top >= 0.6 * result_total:
+            print(f"   One caller made {top} of them: consistent with a single scraper or a stuck client.")
+        else:
+            print("   Spread across many callers: consistent with a crawler pool or broad probing, not one source.")
     print("\n== SUMMARY (lower bounds; polls are not logged)")
     for label, total, st in summary:
         print(f"   {total:>5}  {label}  [{st}]")

@@ -10276,3 +10276,87 @@ fails with a 402 that looks like a bug in the feature.
   `cryptoshield-release.keystore`, so a JDK once existed and has gone, plausibly with the move of the
   clone to `~/dev/relayshield`. The EXISTING path to find it first: `/usr/libexec/java_home -V`, then
   Android Studio's bundled runtime.
+
+## 2026-10-06: THE VIRUSTOTAL KEY WAS UNCOUNTED, AND ONE ENDPOINT LET ANYONE SPEND IT
+
+VirusTotal emailed that the free key's 500-a-day allowance (resets 00:00 UTC, every request counts: lookup,
+submission and each poll) was spent. **The first diagnostic returned ZERO for every log line it knew about**,
+which is the finding: the burn was not coming from any surface that logs a VT call.
+
+**THE LEAK.** `GET /v1/result/{id}` and `GET /v1/payg/result/{id}` were unauthenticated, uncapped, and spent one
+VT request per call on our key whatever id was supplied. A failed poll logs only at ERROR, so a probing crawler
+leaves almost nothing behind. UNPROVEN as the cause: the diagnostic now counts `path=/v1/result` requests
+exactly (every request logs its path), so run it for the answer rather than trusting this paragraph.
+
+**WHAT SHIPPED (`d42f48b`).** `relayshield_vt_budget.py`: a daily budget with per-caller, bulk and global caps
+(fails OPEN, the opposite of the breach partner budget, because here failing open is exactly the old behaviour),
+a 6h/24h verdict cache and an analysis-id mapping, all in the existing `relayshield_demo_key_usage` table so no
+IAM grant is needed (the shared role has no room). `handle_result` now polls only analyses this API issued.
+Every VT request site in the API and both bots charges first, and `test_vt_budget.py` fails if one does not.
+Every allowed call logs `vt_call surface= kind= caller=`. The checkemail Worker now sends `x-rs-source`
+(needs a Worker deploy to take effect). The scan-url log lines no longer carry the raw URL.
+
+**THE EXISTING `relayshield_vt_url_cache` TABLE HAS NO CREATION SCRIPT AND NO IAM REFERENCE ANYWHERE**, so the
+composite check's "24h cache" is very probably inert, the breach cache's twin. Not created: the new cache does
+not use it.
+
+**PRIVACY POLICY.** Another session rewrote it on `main` (Section 11, 90 days). Mine was the stale one; main is
+the base now, with the free-email-check disclosure re-added. UNVERIFIED claim in it: the bot section says links
+are not logged readably, but the WhatsApp handler logs `url=%s` in plaintext (`VT URL scan complete`).
+
+## 2026-10-06: THE VT URL CACHE HAS A SCRIPT, THE EMAIL CHECKER IS COUNTED, AND THE MUSE KEY IS A TOOL NOW
+
+* **`relayshield_vt_url_cache` was never created and no script ever created it**, so the composite check's "24h cache" was inert and every fallback spent a VT request. `tools/setup_vt_url_cache.sh` creates it (hash key `url_hash`, TTL on `ttl`), and `tools/grant_breach_cache_access.py --table relayshield_vt_url_cache` extends the existing managed policy. Each table has its OWN statement Sid, because the merge drops a statement with its Sid before appending and a shared Sid would make the second grant delete the first. Dry run first, then `--apply`.
+* **`checkemail_use` is a telemetry event.** The Worker posts one ping per message it actually processes, BEFORE the rate limit (a person turned away is still a user), skipped for the exempt allowlist, fail-open via `ctx.waitUntil`. The identifier is an HMAC of the sender keyed with `RS_API_KEY`, never the address: a bare SHA-256 of an email is reversible by hashing candidates. The weekly report gained unique, new-this-week and total rows for the checker, and new-this-week for Chrome and Mini App. **"New" means FIRST seen this week**, not seen this week.
+* **DEPLOY TRAP, UNFIXED: `relayshield_telemetry.py` is in the `paths:` trigger of `deploy_lambdas.yml` and NOT in `LAMBDA_MAP`.** A push deploys nothing, and the file looks wired. The live function name is UNVERIFIED (nothing in the repo names it); `sh tools/handler_drift.sh relayshield_telemetry.py` resolves it from AWS and reads the diff. `relayshield_weekly_metrics` and the checkemail Worker likewise need hand deploys. Until the telemetry Lambda is updated it answers 400 to `checkemail_use`, and the Worker swallows that, so nothing is counted and nothing errors.
+* **`tools/setup_partner_key.py` was brought in from the unmerged `claude/gallant-hawking-4oerzg` on its own**, not the branch. Its closing text says the key is "scoped to /v1/metered/breach only", which is true of that branch and incomplete on main: here a valid key skips the per-IP cap on every keyless endpoint. See the credentials section in `muse_connector_submission_2026-09-22.md`.
+* **Stale bytecode lies after a same-size mutation proof.** `<` to `>` keeps the file size, `cp` restores within the same second, and Python keeps the mutated `.pyc`: a correct file failed three tests. `rm -rf __pycache__` between proof steps.
+* **`test_weekly_metrics.py`'s email fixture was missing `users_by_channel` and `telemetry`**, so three tests errored on clean main. Repaired.
+
+## 2026-10-06 (later): STATE FROM ANDREW, THE HUDSON ROCK TERMS ARE STILL UNREAD, AND CANCELLING ARJEN'S STRIPE SUBSCRIPTION WOULD REVOKE HIS ACCESS
+
+* **Breach-cache grant: NOT closed. I misread "close the outcome" as "it is done"; Andrew meant the CODE for the grant should exist so the table stops being inert.** The code does: `tools/grant_breach_cache_access.py` (tested, 10 tests), measured need being `implicitDeny` on `GetItem` and `PutItem` for `relayshield_breach_cache` against `relayshield-api`'s role. What remains is the operator run, dry run first then `--apply`, which cannot be automated: a role cannot widen its own permissions, so Actions' deploy role cannot make this grant. The VT URL cache is the same pattern with `--table relayshield_vt_url_cache`.
+* **The Muse partner key already exists and Andrew has entered it in the Muse credentials form.** `tools/setup_partner_key.py` does not need to run for `muse_connector`.
+* **The privacy page is settled.** The live version is current and valid; do not diff or redeploy it. The WhatsApp `url=%s` plaintext log line versus the policy's "not recorded in a readable form" claim was NOT examined and stays open as a code question, not a page question.
+* **Hudson Rock Cavalier terms: NOT READ.** `docs.hudsonrock.com`, `cavalier.hudsonrock.com` and `www.hudsonrock.com` are all egress-blocked (WebFetch refuses, curl returns 000), and search returned nothing quoting terms: the one result that mentioned terms was Ransomware.live's, which is a different company and says nothing about Cavalier. Secondary sources describe it as a free community API needing no key; none states attribution or commercial-use conditions, and absence from a summary is not absence from the terms. **Andrew's read, one look in a browser:** the Terms link on `cavalier.hudsonrock.com/docs`, looking for commercial use, attribution and redistribution. If attribution is required, it collides with the no-vendor-names rule and the choice is his.
+* **ARJEN ALREADY HAS A 100% DISCOUNT ON HIS STRIPE SUBSCRIPTION (Andrew, 2026-10-06), so there is nothing to cancel and the flag stays.** The note below is the reason NOT to cancel it.
+* **CANCELLING A CS MOBILE SUBSCRIPTION IN STRIPE REVOKES THE FLAG.** `customer.subscription.deleted` for a `CS_MOBILE_PRICE_IDS` price calls `_revoke_cs_mobile_access` on the key record whose `stripe_subscription_id` matches (`relayshield_developer_signup.py`, around line 1769). Arjen's two records both carry Stripe ids, so the obvious fix for "do not bill him" removes the access we set on purpose. Order matters: read the subscription status first (Stripe dashboard, customer by his email), cancel only an active or trialing one, wait for the webhook, THEN run `tools/set_cs_mobile_access.py --email ... --key-suffix <suffix> --apply`. A replayed deletion event would revoke it again; nothing here prevents that.
+
+* **Muse Business verification fails after the emailed code is entered**: the page answers "We couldn't confirm the latest status. Reload the saved details before trying again" every time. That is a Muse platform message, not ours, and nothing in this repo or container can see their backend. The email field already shows masked and greyed, which suggests the address is saved and the page is showing stale state. Steps in cheapest-first order are in the reply of 2026-10-06; the outcome is not yet known.
+
+## 2026-10-06 (later): "WAS IT A SCRAPER" CANNOT BE ANSWERED FOR THE DAY IT HAPPENED, AND THE REASON WAS A PRIVACY CHOICE
+
+Asked as whether a scraper drained the VT quota. **It cannot be determined from anything that exists for 2026-10-05 or 06.** The API's per-request log line carried `method` and `path` only, `relayshield_vt_budget.py` states "no IP is written", and every caller without a key was `-`, so a scraper and an honest user were the same line. The CloudWatch counts (`tools/diagnose_vt_usage.py`) can say whether `/v1/result` volume was big enough to spend the day, not who made it.
+
+**What changed so the next spike is attributable:** callers with no key now get `anon_caller()`, a six-character hash of the UTC day plus the source IP (24 bits, rotates at midnight, about 256 candidate IPv4 addresses per value, logged and used as a per-day counter key, never stored). It is on the request line as `caller=`, in the `vt_call` lines, and the diagnostic groups `/v1/result` by it and prints a reading-aid verdict. **Side effect worth knowing: anonymous sources are now held to the 120-a-day per-caller cap**, which they were exempt from before. A shared NAT or office is one bucket.
+
+The `/v1/result` leak itself was closed by the analysis-id mapping gate and does not depend on this. 7 new tests in `test_vt_budget.py`; the guard was proven by dropping the label and watching it fail.
+
+## WHERE 2026-10-07 LEFT THINGS. READ THIS FIRST; IT SUPERSEDES THE 2026-10-06 FRAGMENTS ABOVE FOR "WHAT IS NEXT".
+
+**Andrew stopped for the night.** Branch `claude/compassionate-bell-e3cfej`, last code commit `86053e8`, all of it pushed and unmerged.
+
+### THE OPENAI LISTING IS LIVE, AND NO SESSION RECORDED IT UNTIL THE SCREENSHOTS
+
+**"RelayShield Scam Checks", v1.0.0, Security, ChatGPT plugin directory.** Four tools (link check, wallet screening, email phishing scoring, breached-email lookup), free, no key, and it says it never reports anything as safe. This is FD-14 closing; `FRONT_DOORS.md` is updated. **The repo carried no record of the submission**: a `git grep` of `origin/main` for an OpenAI key finds only `package-lock.json` hits. The route/key work (`CONSUMER_ROUTES["openai"]`, `?source=openai`, `tg-miniapp-openai`, the `openai_connector` partner key) exists only on unmerged `claude/gallant-hawking-4oerzg`, and whether that key was ever issued is unconfirmed. A free MCP server was built on `feature/scamkit-demo-screen` (`6f1c602`, "free-server 0.3.0"); an `mcp__...free-mcp_hf_space` server is also attached to some sessions.
+
+**Three things to settle, in this order, none checked yet:**
+1. **Its description quotes stale figures** ("115 monitored Telegram marketplaces, 494K+ indicators, 7.8M+ citations"). Measured: 123 channels, 661,609 distinct indicators (2026-09-30), 8.3M+ citations. Per the standing rule, propose copy that names sources, not counts, since we cannot cheaply edit the listing. The edit is Andrew's to submit.
+2. **Which attribution string does the connector send?** Without one, ChatGPT arrivals are indistinguishable. Register the key in all three lists BEFORE changing anything.
+3. **Does it hit the keyless endpoints, and under the 300/day per-IP cap?** A partner key lifts the cap, but ChatGPT's egress IPs are shared, so the cap may bite all users at once. The breach tool shares the HIBP key with every paying customer, so `relayshield_breach_cache` must exist first (below). Keep it keyless: the compliance gate forbids selling digital goods inside the host.
+
+### NEXT-SESSION TODOS, IN ORDER
+
+1. **Andrew's stuck merge.** His clone reported `cloudflare_worker_privacy.js: needs merge`. Ask for the output of the read-only diagnostic (branch, last commit, `git status --short`, MERGE_HEAD present?). Expect `UU cloudflare_worker_privacy.js`. His rule: the live privacy page is current and valid, so keep that version, then `git add` it and `git commit --no-edit`, or `git merge --abort`. Then the standard merge block; a conflict in CLAUDE.md alone means keep both sides. Never `git add -A`.
+2. **Apply the cache grants, dry run first, and send me the output before `--apply`.**
+   `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/grant_breach_cache_access.py` then `--apply`.
+   For the VT cache: `AWS_PROFILE=relayshield sh tools/setup_vt_url_cache.sh`, then the same grant tool with `--table relayshield_vt_url_cache`.
+   `relayshield_breach_cache` creation (`sh tools/setup_breach_cache.sh`) is **still unconfirmed**. A role cannot widen its own permissions, so Actions cannot do the grants.
+3. **Hand deploys, none of which CI does.** The telemetry Lambda (`relayshield_telemetry.py` is in the `paths:` trigger but NOT `LAMBDA_MAP`; run `sh tools/handler_drift.sh relayshield_telemetry.py` to resolve the live name and read the diff first). `relayshield-weekly-metrics`. The checkemail Worker (needs the new `recordUse` call). **Until the telemetry Lambda is updated it answers 400 to `checkemail_use` and the Worker swallows it, so nothing is counted and nothing errors.**
+4. **Run `tools/diagnose_vt_usage.py --date 2026-10-05` and `--date 2026-10-06`** after the merge deploys. For those days the answer is volume only: there is no caller label. The next spike carries `caller=`. Anonymous sources are now capped at 120 a day; Andrew decides whether to keep the day-rotating hashed-IP logging.
+5. **Hudson Rock Cavalier terms: still UNREAD** (all their hosts are egress-blocked). Andrew's read: the Terms link on `cavalier.hudsonrock.com/docs`, looking for commercial use, attribution and redistribution. If attribution is required it collides with the no-vendor-names rule and the choice is his.
+6. **Muse**: connector shows "Submitted"; the Business verification error was Muse-side. Nothing to do; if it recurs, contact Muse support.
+7. **Arjen**: 100% Stripe discount exists. **Do not cancel his subscription**, because cancelling revokes `cs_mobile_access`. If he still gets a 402 on paid screens in v1.7.0, suspect his other key record (`...84a19f`, flag false); `tools/set_cs_mobile_access.py` sets it.
+
+### CARRIED, UNCHANGED
+Privacy-policy claim vs the WhatsApp `url=%s` plaintext log line (a code question, not a page question). CS Mobile v1.7.0 build blocked on a JDK on his Mac (`/usr/libexec/java_home -V`, or Android Studio's `jbr`); paste the store copy only together with the build. Grok PR #612: leave untouched. D&B change decision about 2026-10-10, then the Chrome Web Store support ticket. `support@relayshield.net` mailbox unconfirmed. `tools/backfill_first_seen.py --apply` unconfirmed. Decision on `claude/gallant-hawking-4oerzg` (it holds the OpenAI route work, so item 1 above feeds it). `WA_NUMBER` in the Mini App Worker. StoreBot. Smithery FD-11. IAM split beyond `relayshield-intel-feed`.

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RelayShield MCP Proxy Firewall: Live Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: #0d1117; color: #e6edf3; padding: 24px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: #8b949e; font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+  .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;
+             color: #8b949e; margin-bottom: 12px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px;
+           font-size: 12px; font-weight: 600; }
+  .badge.clean { background: #1a3a1a; color: #3fb950; }
+  .badge.suspicious { background: #3a2e1a; color: #d29922; }
+  .badge.quarantined { background: #3a1a1a; color: #f85149; }
+  .badge.block { background: #3a1a1a; color: #f85149; }
+  .badge.flag { background: #3a2e1a; color: #d29922; }
+  .badge.allow { background: #1a3a1a; color: #3fb950; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: #8b949e; font-weight: 600; padding: 6px 8px;
+       border-bottom: 1px solid #30363d; }
+  td { padding: 8px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .feed { max-height: 420px; overflow-y: auto; }
+  .feed-item { padding: 10px 0; border-bottom: 1px solid #21262d; font-size: 13px; }
+  .feed-item:last-child { border-bottom: none; }
+  .feed-time { color: #8b949e; font-size: 11px; }
+  .cat { font-weight: 600; }
+  .sig { color: #8b949e; font-size: 11px; }
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                margin-right: 6px; }
+  .dot-green { background: #3fb950; }
+  .dot-yellow { background: #d29922; }
+  .dot-red { background: #f85149; }
+  .footer { color: #8b949e; font-size: 12px; margin-top: 16px; text-align: center; }
+  #conn { font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>RelayShield MCP Proxy Firewall</h1>
+<div class="sub">Live screening dashboard &middot; <span id="conn"><span class="status-dot dot-yellow"></span>connecting...</span></div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Neighbor servers</h2>
+    <table id="neighbors">
+      <thead><tr><th>Server</th><th>Reputation</th><th>Flags</th></tr></thead>
+      <tbody><tr><td colspan="3" style="color:#8b949e">waiting for data...</td></tr></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Quarantine events</h2>
+    <div id="quarantine" style="font-size:13px;color:#8b949e">none</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <h2>Screening feed (live)</h2>
+  <div class="feed" id="feed">
+    <div style="color:#8b949e;font-size:13px">Waiting for tool-call activity...</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Verdict signing</h2>
+  <div id="signing" style="font-size:13px">...</div>
+</div>
+
+<div class="footer">RelayShield MCP Proxy Firewall &middot; every verdict is signed and auditable</div>
+
+<script>
+const feed = document.getElementById('feed');
+const MAX_ITEMS = 50;
+
+function badgeFor(verdict) {
+  const v = (verdict || '').toLowerCase();
+  if (v === 'block' || v === 'blocked') return '<span class="badge block">BLOCKED</span>';
+  if (v === 'flag' || v === 'flagged') return '<span class="badge flag">FLAGGED</span>';
+  return '<span class="badge allow">ALLOWED</span>';
+}
+function badgeForRep(rep) {
+  const r = (rep || '').toLowerCase();
+  if (r === 'quarantined') return '<span class="badge quarantined">QUARANTINED</span>';
+  if (r === 'suspicious') return '<span class="badge suspicious">SUSPICIOUS</span>';
+  return '<span class="badge clean">CLEAN</span>';
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+function addFeed(html) {
+  const div = document.createElement('div');
+  div.className = 'feed-item';
+  div.innerHTML = html;
+  feed.prepend(div);
+  while (feed.children.length > MAX_ITEMS) feed.removeChild(feed.lastChild);
+}
+function setConn(ok) {
+  document.getElementById('conn').innerHTML = ok
+    ? '<span class="status-dot dot-green"></span>live'
+    : '<span class="status-dot dot-red"></span>proxy unreachable';
+}
+
+let lastEventCount = 0;
+
+async function poll() {
+  try {
+    const r = await fetch('/_rs/neighbors');
+    if (!r.ok) throw new Error('bad status');
+    const data = await r.json();
+    setConn(true);
+
+    // Neighbors table
+    const rows = Object.entries(data.neighbors || {}).map(([url, rep]) =>
+      `<tr><td class="mono">${esc(url)}</td><td>${badgeForRep(rep.reputation)}</td>` +
+      `<td>${(rep.flags || []).length}</td></tr>`).join('');
+    document.querySelector('#neighbors tbody').innerHTML =
+      rows || '<tr><td colspan="3" style="color:#8b949e">no servers registered</td></tr>';
+
+    // Quarantine events
+    const evts = data.quarantine_events || [];
+    document.getElementById('quarantine').innerHTML = evts.length
+      ? evts.slice().reverse().map(e =>
+          `<div style="margin-bottom:8px"><span class="badge quarantined">QUARANTINED</span><br>` +
+          `<span class="mono">${esc(e.url || '')}</span><br>` +
+          `<span style="color:#8b949e;font-size:12px">${esc(e.reason || '')}</span></div>`).join('')
+      : '<span style="color:#8b949e">none</span>';
+
+    // New flags become feed items
+    let newFlags = 0;
+    for (const [url, rep] of Object.entries(data.neighbors || {})) {
+      for (const f of (rep.flags || [])) newFlags++;
+    }
+    if (newFlags > lastEventCount) {
+      lastEventCount = newFlags;
+      // Surface the latest flag details
+      for (const [url, rep] of Object.entries(data.neighbors || {})) {
+        const latest = (rep.flags || [])[ (rep.flags || []).length - 1 ];
+        if (latest) {
+          addFeed(`${badgeForRep(rep.reputation)} <span class="mono">${esc(url)}</span><br>` +
+            `<span style="color:#8b949e">${esc(latest.reason || 'flagged')}</span> ` +
+            `<span class="feed-time">${esc(latest.at || '')}</span>`);
+        }
+      }
+    }
+
+    // Signing status
+    document.getElementById('signing').innerHTML =
+      (data.verdicts_signed
+        ? '<span class="status-dot dot-green"></span>verdicts are Ed25519-signed'
+        : '<span class="status-dot dot-yellow"></span>verdicts unsigned (no signing key)') +
+      (data.verdict_pubkey
+        ? `<br><span class="mono sig">pubkey: ${esc(data.verdict_pubkey.slice(0, 32))}...</span>` : '');
+  } catch (e) {
+    setConn(false);
+  }
+}
+setInterval(poll, 2000);
+poll();
+</script>
+</body>
+</html>

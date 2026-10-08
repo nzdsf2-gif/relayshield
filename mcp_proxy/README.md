@@ -46,7 +46,26 @@ python3 -m mcp_proxy.demo --fast   # no delays
 ```
 
 TI URL lookups are stubbed in demo mode; all content checks run the
-real local detectors.
+real local detectors. Scenarios 7-9 cover OAuth attacks: tampered
+OAuth URLs blocked on arguments, credential exfiltration flagged in
+tool results, and legitimate IdP endpoints passing clean.
+
+## Visual dashboard
+
+A live HTML dashboard for partner demos. When the proxy is running,
+open `http://localhost:8090/_rs/dashboard` in a browser: it polls
+`/_rs/neighbors` every 2 seconds and shows neighbor reputations,
+quarantine events, a live screening feed, and verdict-signing status.
+
+For a standalone visual demo without a live proxy:
+
+```bash
+python3 -m mcp_proxy.dashboard --demo
+# then open http://127.0.0.1:8091/_rs/dashboard
+```
+
+The dashboard is a single self-contained HTML file (inline CSS/JS,
+no external dependencies).
 
 ## Configuration
 

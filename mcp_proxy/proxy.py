@@ -108,6 +108,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         cfg: ProxyConfig = self.server.cfg
+        if self.path == "/_rs/dashboard" or self.path == "/_rs/dashboard/":
+            try:
+                html_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "dashboard.html")
+                with open(html_path, "r", encoding="utf-8") as f:
+                    html = f.read().encode("utf-8")
+            except OSError:
+                self._send_json({"error": "dashboard.html not found"}, 500)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+            return
         if self.path == "/_rs/neighbors":
             neighbors = {
                 url: rep.to_dict()

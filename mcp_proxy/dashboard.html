@@ -67,8 +67,9 @@
                    padding: 8px 28px; border-radius: 12px; letter-spacing: 1px; }
   #verdict-badge.allow { background: #1a3a1a; color: #3fb950;
                          border: 2px solid #3fb950; }
-  #verdict-badge.block { background: #3a1a1a; color: #f85149;
-                         border: 2px solid #f85149; }
+  #verdict-badge.block { background: #f85149; color: #0d1117;
+                         border: 2px solid #ff7b72;
+                         box-shadow: 0 0 18px rgba(248,81,73,0.55); }
   #verdict-badge.quarantine { background: #3a2e1a; color: #f0883e;
                               border: 2px solid #f0883e; }
   #verdict-badge.idle { background: #21262d; color: #8b949e;
@@ -95,12 +96,62 @@
 
   .footer { color: #8b949e; font-size: 12px; margin-top: 8px; text-align: center; }
   #status { font-size: 12px; color: #8b949e; margin-bottom: 12px; min-height: 18px; }
+
+  /* Speed control */
+  .speed-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+               font-size: 12px; color: #8b949e; }
+  .spd-btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+             border-radius: 6px; padding: 5px 14px; font-size: 12px;
+             cursor: pointer; }
+  .spd-btn:hover { border-color: #58a6ff; }
+  .spd-btn.active { border-color: #58a6ff; background: #1a2a44; color: #e6edf3; }
+
+  /* Category badge */
+  #cat-badge { display: inline-block; font-size: 15px; font-weight: 700;
+               padding: 6px 18px; border-radius: 20px; margin-top: 12px;
+               font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #cat-badge.cat-idle { background: #21262d; color: #8b949e;
+                        border: 1px solid #30363d; }
+  #cat-badge.cat-clean { background: #1a3a1a; color: #3fb950;
+                         border: 1px solid #3fb950; }
+  #cat-badge.cat-bad { background: #f85149; color: #0d1117;
+                       border: 1px solid #ff7b72; font-weight: 800; }
+  #cat-badge.cat-warn { background: #3a2e1a; color: #f0883e;
+                        border: 1px solid #f0883e; }
+  #cat-desc { font-size: 12px; color: #8b949e; margin-top: 6px; min-height: 16px; }
+
+  /* Taxonomy reference */
+  details.taxonomy { margin-top: 12px; font-size: 12px; }
+  details.taxonomy summary { cursor: pointer; color: #58a6ff; font-size: 12px; }
+  details.taxonomy table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  details.taxonomy td { padding: 5px 8px; border-bottom: 1px solid #21262d;
+                        vertical-align: top; }
+  details.taxonomy td.c { font-family: ui-monospace, monospace; color: #79c0ff;
+                          white-space: nowrap; font-size: 11px; }
+  details.taxonomy td.d { color: #8b949e; }
+
+  /* Raw JSON */
+  .json-note { font-size: 12px; color: #8b949e; margin-bottom: 8px; }
+  .json-note strong { color: #e6edf3; }
+  pre#v-json { background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+               padding: 12px; font-size: 11.5px; line-height: 1.55;
+               overflow-x: auto; max-height: 320px; overflow-y: auto;
+               font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .j-key { color: #79c0ff; } .j-str { color: #a5d6ff; }
+  .j-num { color: #f0883e; } .j-bool { color: #ff7b72; } .j-null { color: #8b949e; }
+  details.rawjson summary { cursor: pointer; color: #58a6ff; font-size: 12px;
+                            margin-bottom: 8px; }
 </style>
 </head>
 <body>
 <h1>RelayShield MCP Proxy Firewall</h1>
 <div class="sub"><span class="live-dot"></span>interactive demo: pick a scenario, watch the proxy work</div>
 
+<div class="speed-row">Animation speed:
+  <button class="spd-btn" id="spd-slow" onclick="setSpeed(2000)">Slow</button>
+  <button class="spd-btn active" id="spd-normal" onclick="setSpeed(1200)">Normal</button>
+  <button class="spd-btn" id="spd-fast" onclick="setSpeed(500)">Fast</button>
+</div>
 <div class="scenarios" id="scn-grid"></div>
 <div id="status"></div>
 
@@ -127,11 +178,29 @@
     <div class="card">
       <h2>Verdict</h2>
       <div><span id="verdict-badge" class="idle">STANDBY</span></div>
-      <div class="vrow"><span class="k">Poison category</span><span id="v-cat" class="mono">-</span></div>
+      <div><span id="cat-badge" class="cat-idle">no category yet</span></div>
+      <div id="cat-desc"></div>
+      <details class="taxonomy">
+        <summary>Verdict taxonomy reference (all poison categories)</summary>
+        <table id="taxonomy-table"></table>
+      </details>
       <div class="vrow"><span class="k">Evidence</span></div>
       <ul class="ev-list" id="v-ev"><li style="color:#8b949e">none yet</li></ul>
       <div class="vrow"><span class="k">Signature</span><span id="v-sig" class="mono">-</span>
         <span id="v-sig-ok" style="margin-left:8px"></span></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Raw verdict JSON</h2>
+      <details class="rawjson" open>
+        <summary>Show / hide</summary>
+        <div class="json-note"><strong>This is what your logs would capture.</strong>
+        Every verdict the proxy issues is signed and auditable; ship this
+        object to your SIEM or log store.</div>
+        <pre id="v-json">Run a scenario to see the signed verdict JSON.</pre>
+      </details>
     </div>
   </div>
 
@@ -222,6 +291,52 @@ function setPhase(html) {
 }
 
 let running = false;
+let speedMs = 1200;
+
+const CAT_DESC = {
+  clean: "No threat detected. The call was allowed.",
+  prompt_injection: "Hidden instructions embedded in a tool response.",
+  kit_match: "Response matches a known phishing kit fingerprint.",
+  pii_leak: "Unredacted PII detected. Values are never logged.",
+  malicious_url: "Tool arguments contain a TI-flagged URL.",
+  secret_leak: "Secret material detected in a response.",
+  oauth_tampering: "OAuth endpoint mimics a known IdP on a foreign domain.",
+  credential_exfiltration: "OAuth credential material bound for a non-IdP domain. Values never logged.",
+  unknown_synthetic: "OAuth flow toward a domain with no reputation history. Flagged for review.",
+};
+
+function setSpeed(ms) {
+  speedMs = ms;
+  document.querySelectorAll('.spd-btn').forEach(b => b.classList.remove('active'));
+  const map = {2000: 'spd-slow', 1200: 'spd-normal', 500: 'spd-fast'};
+  const el = document.getElementById(map[ms]);
+  if (el) el.classList.add('active');
+}
+
+function renderTaxonomy() {
+  const t = document.getElementById('taxonomy-table');
+  t.innerHTML = Object.entries(CAT_DESC).map(([c, d]) =>
+    '<tr><td class="c">' + esc(c) + '</td><td class="d">' + esc(d) + '</td></tr>'
+  ).join('');
+}
+renderTaxonomy();
+
+function syntaxHighlight(json) {
+  const s = String(json).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (m) {
+    let cls = 'j-num';
+    if (/^"/.test(m)) { cls = /:$/.test(m) ? 'j-key' : 'j-str'; }
+    else if (/true|false/.test(m)) { cls = 'j-bool'; }
+    else if (/null/.test(m)) { cls = 'j-null'; }
+    return '<span class="' + cls + '">' + m + '</span>';
+  });
+}
+
+function catClass(cat) {
+  if (cat === 'clean') return 'cat-clean';
+  if (cat === 'unknown_synthetic') return 'cat-warn';
+  return 'cat-bad';
+}
 
 async function runScenario(id) {
   if (running) return;
@@ -265,7 +380,7 @@ async function runScenario(id) {
     }
     setPhase('<strong>' + esc(st.label) + '</strong>' +
              (st.detail ? '<br>' + esc(st.detail) : ''));
-    await sleep(650);
+    await sleep(speedMs);
     if (wid) document.getElementById(wid).classList.remove('flow');
     if (nid) document.getElementById(nid).classList.remove('active');
   }
@@ -275,7 +390,24 @@ async function runScenario(id) {
   const badge = document.getElementById('verdict-badge');
   badge.textContent = v === 'QUARANTINE' ? 'QUARANTINED' : (v === 'BLOCK' ? 'BLOCKED' : 'ALLOWED');
   badge.className = v === 'QUARANTINE' ? 'quarantine' : v.toLowerCase();
-  document.getElementById('v-cat').textContent = result.poison_category || '-';
+  const cat = result.poison_category || 'clean';
+  const cb = document.getElementById('cat-badge');
+  cb.textContent = cat;
+  cb.className = catClass(cat);
+  document.getElementById('cat-desc').textContent = CAT_DESC[cat] || '';
+
+  const vj = result.verdict_obj || {
+    v: 1,
+    verdict_id: 'n/a',
+    decision: (result.verdict || 'ALLOW').toLowerCase(),
+    server: result.server || 'n/a',
+    poison_category: cat,
+    evidence: result.evidence || [],
+    sig: result.signature || '(unsigned: demo mode)',
+    pubkey: '(unsigned: demo mode)',
+  };
+  document.getElementById('v-json').innerHTML =
+    syntaxHighlight(JSON.stringify(vj, null, 2));
   const ev = document.getElementById('v-ev');
   ev.innerHTML = (result.evidence && result.evidence.length)
     ? result.evidence.map(e => '<li>' + esc(e) + '</li>').join('')

@@ -255,6 +255,18 @@ def _unique_indicators() -> int:
     return _scan_count("relayshield_intel_first_seen")
 
 
+def _new_unique_indicators() -> int:
+    """Indicators FIRST seen in the last 7 days -- the weekly increment that
+    sits beside the cumulative figure from _unique_indicators().
+
+    Same table, so the two numbers share one definition: the cumulative count
+    is every row, this is the rows whose `first_seen` falls inside the window,
+    and the cumulative figure minus this one is last week's total. `first_seen`
+    is an ISO-8601 UTC string on both write paths (the live monitor and the
+    backfill), so the string comparison in _new_this_week is a time comparison."""
+    return _new_this_week("relayshield_intel_first_seen", "first_seen")
+
+
 AWS_MARKETPLACE_TIER_PRICES = {
     "ti_starter":   499,
     "ti_unlimited": 999,
@@ -897,7 +909,8 @@ def _build_email(metrics: dict) -> str:
   <tr><td>Intel alerts (total)</td><td><b>{s['intel_alerts_total']}</b></td></tr>
   <tr><td>Intel alerts (this week)</td><td><b>{s['intel_alerts_new']}</b></td></tr>
   <tr><td>Monitored Telegram marketplaces (active)</td><td><b>{s['monitored_marketplaces']:,}</b></td></tr>
-  <tr><td>Unique indicators (all-time, distinct)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
+  <tr><td>Unique indicators (cumulative, all-time)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;New unique indicators (this week)</td><td><b>+{s['unique_indicators_new']:,}</b></td></tr>
   <tr><td>TI feed IOC sightings (total, incl. repeats)</td><td><b>{s['ioc_total']:,}</b></td></tr>
   <tr><td>Stolen session records</td><td><b>{s['stolen_sessions']:,}</b></td></tr>
   <tr><td>Identity graph correlations</td><td><b>{s['identity_graph']:,}</b></td></tr>
@@ -1215,6 +1228,7 @@ and includes this same section.</p>
         "ioc_total":            _scan_count("relayshield_intel_iocs"),
         "monitored_marketplaces": _monitored_marketplaces(),
         "unique_indicators":    _unique_indicators(),
+        "unique_indicators_new": _new_unique_indicators(),
         "lambda_health":        _scheduled_lambda_health(),
         "stolen_sessions":      _scan_count("relayshield_stolen_sessions"),
         "identity_graph":       _scan_count("relayshield_identity_graph"),

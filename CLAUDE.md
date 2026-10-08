@@ -10360,3 +10360,31 @@ The `/v1/result` leak itself was closed by the analysis-id mapping gate and does
 
 ### CARRIED, UNCHANGED
 Privacy-policy claim vs the WhatsApp `url=%s` plaintext log line (a code question, not a page question). CS Mobile v1.7.0 build blocked on a JDK on his Mac (`/usr/libexec/java_home -V`, or Android Studio's `jbr`); paste the store copy only together with the build. Grok PR #612: leave untouched. D&B change decision about 2026-10-10, then the Chrome Web Store support ticket. `support@relayshield.net` mailbox unconfirmed. `tools/backfill_first_seen.py --apply` unconfirmed. Decision on `claude/gallant-hawking-4oerzg` (it holds the OpenAI route work, so item 1 above feeds it). `WA_NUMBER` in the Mini App Worker. StoreBot. Smithery FD-11. IAM split beyond `relayshield-intel-feed`.
+
+## 2026-10-08: THE VT DRAIN IS CLOSED IN CODE, BOTH CACHES ARE GRANTED, AND THE ONLY THING LEFT IS TO WATCH IT
+
+**Root cause (strongly supported, not proven).** `/v1/composite-check` is keyless and, from 2026-10-04
+(579de4c), fell back to a VirusTotal URL report on an unknown URL. The Mini App, the Chrome extension and the
+Telegram widget have all called it since 2026-10-02 (aa697dd). On 2026-10-06 and 10-07 one client looping on
+429s (capped at 300 served a day) plus a pool of about 37 cloud IPs each under the 300 per-IP cap spent the
+500-a-day key: roughly 300 + 845 against 1,100 composite requests. The per-IP cap cannot stop a pool.
+Inferred from the counts, not proven; Telegram `/scan` and any other use of the same VT account are unmeasured.
+
+**Fix, on main and deployed (deploy_lambdas run 199, `331aec3`).** The fallback runs for callers with a
+VERIFIED API key only. `_VT_CTX["keyed"]` is reset every invocation and set from `_verify_rs_api_key`; an
+invented key does not count. Anonymous requests log `vt_fallback_withheld`. Tests go through `lambda_handler`.
+
+**AWS-side, done 2026-10-08 by Andrew and confirmed from the script's own output:**
+- `relayshield_vt_url_cache` grant APPLIED: GetItem and PutItem `allowed` (were `implicitDeny`, so that cache
+  had never worked and every repeat URL for a keyed caller was a fresh VT request).
+- `relayshield_breach_cache` grant APPLIED: same result (also `implicitDeny` before, so every breach check was
+  a live HIBP call on a key shared with the bots and paying customers).
+- `relayshield_breach_cache` exists, ACTIVE, TTL ENABLED on `ttl`.
+- Both live as statements `VtUrlCacheReadWrite` and `BreachCacheReadWrite` in the managed policy
+  `relayshield-first-seen-write` (552 of 6144 characters). The grant script pruned v1 to stay inside IAM's
+  5-version cap. Roles cannot widen their own permissions, so Actions could not have done this.
+
+**To confirm it held, after a day of traffic:**
+`AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/diagnose_vt_usage.py | grep -A12 "VT requests actually spent"`
+Expect no anonymous composite spend. The "VT fallback skipped or failed" row will be large, which is the gate
+working. If the VirusTotal quota email does not arrive tomorrow, that is the first sign it held.

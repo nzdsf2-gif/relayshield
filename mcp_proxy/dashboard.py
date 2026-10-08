@@ -67,6 +67,10 @@ SCENARIOS = [
      "desc": "read file to network send to email: exfiltration chain."},
     {"id": 12, "name": "Lateral movement",
      "desc": "Rapid calls across 5 servers: lateral probe flagged."},
+    {"id": 13, "name": "Policy deny",
+     "desc": "Admin policy blocks exec_shell for this agent."},
+    {"id": 14, "name": "Policy approval",
+     "desc": "Sensitive tool flagged for operator approval."},
 ]
 _SCENARIO_SERVER = {
     1: CLEAN_UPSTREAM,
@@ -81,6 +85,8 @@ _SCENARIO_SERVER = {
     10: CLEAN_UPSTREAM,
     11: POISONED_UPSTREAM,
     12: "multiple servers",
+    13: CLEAN_UPSTREAM,
+    14: CLEAN_UPSTREAM,
 }
 
 
@@ -93,6 +99,7 @@ def _get_components():
         from .verdicts import VerdictSigner
         from .behavior import BehaviorTracker
         from .reputation import ReputationStore
+        from .policy import PolicyEngine
     except ImportError:
         # Fallback for direct script execution / testing
         from screener import Screener
@@ -101,8 +108,9 @@ def _get_components():
         from verdicts import VerdictSigner
         from behavior import BehaviorTracker
         from reputation import ReputationStore
+        from policy import PolicyEngine
     return (Screener, NeighborRegistry, QuarantineManager, VerdictSigner,
-            BehaviorTracker, ReputationStore)
+            BehaviorTracker, ReputationStore, PolicyEngine)
 
 
 def _stub_ti(self, url):
@@ -114,7 +122,7 @@ def _stub_ti(self, url):
 def _new_components():
     """Fresh screening components with TI stubbed for offline demo."""
     (Screener, NeighborRegistry, QuarantineManager, VerdictSigner,
-     BehaviorTracker, ReputationStore) = _get_components()
+     BehaviorTracker, ReputationStore, PolicyEngine) = _get_components()
     screener = Screener(api_base="https://api.relayshield.net")
     # Stub TI URL lookups: offline demo, content checks still run for real.
     screener._check_url = _stub_ti.__get__(screener, type(screener))
@@ -124,11 +132,30 @@ def _new_components():
     # Phase 3: behavioral baselining + reputation.
     behavior = BehaviorTracker(enabled=True)
     reputation = ReputationStore()
+    # Phase 4: policy engine with a demo policy (in-memory, no file).
+    policy = PolicyEngine()
+    policy._policy = {
+        "agents": {
+            "demo-agent": {
+                "allow_tools": ["read_file", "search_docs", "get_help",
+                                "start_oauth", "delete_database"],
+                "deny_tools": ["exec_shell"],
+            },
+        },
+        "servers": {},
+        "tools": {
+            "delete_database": {"require_approval": True},
+            "exec_shell": {"rate_limit": "10/minute"},
+        },
+    }
+    policy.policy_path = "(demo policy: in-memory)"
+    policy._loaded_at = 1.0
     registry.register(CLEAN_UPSTREAM)
     registry.register(POISONED_UPSTREAM)
     reputation.get_or_create(CLEAN_UPSTREAM)
     reputation.get_or_create(POISONED_UPSTREAM)
-    return screener, registry, quarantine, signer, behavior, reputation
+    return (screener, registry, quarantine, signer, behavior, reputation,
+            policy)
 
 
 def _rep_of(registry, quarantine, url):
@@ -211,8 +238,8 @@ def run_scenario(scenario_id):
       signature_valid: bool
       server_states: {url: {reputation, flags}} after the scenario
     """
-    screener, registry, quarantine, signer, behavior, reputation = \
-        _new_components()
+    (screener, registry, quarantine, signer, behavior, reputation,
+     policy) = _new_components()
     steps = []
 
     def add(phase, label, detail=""):
@@ -504,6 +531,34 @@ def run_scenario(scenario_id):
             f"risk: {bres.get('risk_score', 0):.1f}/100")
         finish("BLOCK", cat, ev)
 
+    elif scenario_id == 13:
+        # Phase 4: policy deny. Agent tries a denied tool.
+        agent = "demo-agent"
+        add("agent", "AI Agent sends tool call",
+            "tools/call: exec_shell (rm -rf /)")
+        pres = policy.evaluate(agent, "exec_shell", CLEAN_UPSTREAM)
+        cat = pres.get("poison_category", "policy_deny")
+        ev = pres.get("reasons", ["policy denied the tool call"])
+        add("proxy", "Policy engine evaluated",
+            "deny: exec_shell is denied for demo-agent")
+        add("verdict", "Call blocked before screening",
+            "no TI lookup needed: deterministic deny")
+        finish("BLOCK", cat, ev)
+
+    elif scenario_id == 14:
+        # Phase 4: policy approval. Sensitive tool flagged for review.
+        agent = "demo-agent"
+        add("agent", "AI Agent sends tool call",
+            "tools/call: delete_database")
+        pres = policy.evaluate(agent, "delete_database", CLEAN_UPSTREAM)
+        cat = pres.get("poison_category", "policy_approval")
+        ev = pres.get("reasons", ["tool requires operator approval"])
+        add("proxy", "Policy engine evaluated",
+            "approval_required: delete_database needs a human")
+        add("verdict", "Flagged for operator review",
+            "call held: not blocked, not forwarded")
+        finish("BLOCK", cat, ev)
+
     else:
         finish("ALLOW", "clean", [f"unknown scenario: {scenario_id}"])
 
@@ -521,11 +576,42 @@ _DEMO_REPUTATION = None
 def _demo_reputation():
     global _DEMO_REPUTATION
     if _DEMO_REPUTATION is None:
-        _, _, _, _, _, ReputationStore = _get_components()
+        (_, _, _, _, _, ReputationStore,
+         _) = _get_components()
         _DEMO_REPUTATION = ReputationStore()
         _DEMO_REPUTATION.get_or_create(CLEAN_UPSTREAM)
         _DEMO_REPUTATION.get_or_create(POISONED_UPSTREAM)
     return _DEMO_REPUTATION
+
+
+# Phase 4: persistent demo policy so the dashboard policy panel has
+# stable content across requests.
+_DEMO_POLICY = None
+
+
+def _demo_policy():
+    global _DEMO_POLICY
+    if _DEMO_POLICY is None:
+        (_, _, _, _, _, _,
+         PolicyEngine) = _get_components()
+        _DEMO_POLICY = PolicyEngine()
+        _DEMO_POLICY._policy = {
+            "agents": {
+                "demo-agent": {
+                    "allow_tools": ["read_file", "search_docs", "get_help",
+                                    "start_oauth", "delete_database"],
+                    "deny_tools": ["exec_shell"],
+                },
+            },
+            "servers": {},
+            "tools": {
+                "delete_database": {"require_approval": True},
+                "exec_shell": {"rate_limit": "10/minute"},
+            },
+        }
+        _DEMO_POLICY.policy_path = "(demo policy: in-memory)"
+        _DEMO_POLICY._loaded_at = 1.0
+    return _DEMO_POLICY
 
 
 class _DemoHandler(http.server.BaseHTTPRequestHandler):
@@ -549,6 +635,16 @@ class _DemoHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/_rs/reputation":
             # Phase 3: reputation graph data for the dashboard.
             self._send(json.dumps(_demo_reputation().summary()))
+        elif path == "/_rs/policy":
+            # Phase 4: active policy rules for the dashboard panel.
+            pol = _demo_policy()
+            self._send(json.dumps({
+                "enabled": pol.enabled,
+                "path": pol.policy_path,
+                "agents": pol._policy.get("agents", {}),
+                "servers": pol._policy.get("servers", {}),
+                "tools": pol._policy.get("tools", {}),
+            }))
         elif path == "/_rs/health":
             self._send(json.dumps({"status": "ok",
                                    "version": "RelayShield-MCP-Proxy/demo",

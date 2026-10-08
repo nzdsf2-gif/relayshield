@@ -10569,3 +10569,22 @@ live-only, nothing to recover. It lacks the three 2026-10-06 commits (channel br
 email-checker rows) and the cumulative-plus-weekly indicator rows, and it is a single-file package.
 It is still in neither `deploy_lambdas.yml` nor the invoke policy, so a deploy is a hand
 `update-function-code` until it is mapped (the mapping commit must touch the `.py`).
+
+## 2026-10-08 (later): THE SIX MARKETPLACE SAAS PRODUCTS, BY ID, READ FROM `list-entities`
+
+Read by Andrew from AWS (`aws marketplace-catalog list-entities`, SaaSProduct), not recalled. **The
+Name column is the entity name, and it does NOT match the "Agentic Attack Surface" label this file
+has used for `prod-kkvurtspreofy`.**
+
+    prod-kkvurtspreofy   RelayShield - Consumption Security API Bundles            Public   (the old "Bundle D")
+    prod-szi2wdww3obry   RelayShield - Attack Surface & Supply Chain API            Public   (Bundle B, the live one)
+    prod-v5nr5gjtdnofi   RelayShield - Attack Surface & Supply Chain API            Restricted (duplicate)
+    prod-p3ei5nmgufnnq   RelayShield - Attack Surface & Supply Chain API            Restricted (duplicate)
+    prod-f5qkfsxlxs4qg   RelayShield - Core Identity Exposure API Bundle            Public   (Bundle A)
+    prod-kb3ftelx44wlk   RelayShield - Threat Intelligence & Identity Security API  Public   (TI product)
+
+**The Partner Central FTR solution ("RS Agentic Attack Surface API") was linked to a product Andrew
+picked by display name as "Agentic Attack Surface and Supply Chain API", a title that appears in NO row
+above.** The nearest match is the Attack Surface & Supply Chain API (Bundle B). Which entity it is
+linked to is UNVERIFIED until the solution's Products section is read. Select by id, not name: this is
+the seven-rejections lesson again, in a picker.

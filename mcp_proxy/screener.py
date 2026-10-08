@@ -31,6 +31,10 @@ _SKIP_DOMAINS = {
     "localhost", "example.com", "example.org", "example.net",
 }
 
+# Scam-kit fingerprint IDs embedded in tool results. A poisoned MCP
+# server serving kit-identified content is strong evidence of compromise.
+_KIT_ID_RE = re.compile(r"\bkit_[0-9a-f]{64}\b", re.IGNORECASE)
+
 # Prompt-injection phrases commonly found in poisoned tool results.
 # Matched case-insensitively against result text.
 _PROMPT_INJECTION_PATTERNS = [
@@ -112,11 +116,14 @@ class Screener:
     """Screens tool call arguments against RelayShield TI."""
 
     def __init__(self, api_base: str, api_key: str = "", timeout: float = 5.0,
-                 block_levels: set = None):
+                 block_levels: set = None, kit_lookup_enabled: bool = False):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
         self.block_levels = block_levels or {"high", "medium"}
+        # When True, kit_<sha256> IDs found in results are enriched via
+        # the /v1/payg/scamkit-match API.
+        self.kit_lookup_enabled = kit_lookup_enabled
 
     def screen_indicators(self, indicators: dict) -> dict:
         """Screen extracted indicators. Returns a verdict dict.
@@ -185,6 +192,28 @@ class Screener:
             reasons = [f"composite-check level={level} score={score}"]
         return {"level": level, "score": score, "reasons": reasons}
 
+    def _lookup_kit(self, kit_id: str) -> dict:
+        """Look up a kit fingerprint via the scamkit-match API.
+
+        Returns {"kit_id": ..., "family": ..., "verdict": ...} or None
+        when the kit is unknown.
+        """
+        body = _post_json(
+            f"{self.api_base}/v1/payg/scamkit-match",
+            {"kit_id": kit_id},
+            timeout=self.timeout,
+            api_key=self.api_key,
+        )
+        data = body.get("data", body)
+        if not data or data.get("verdict") == "no-match":
+            return None
+        return {
+            "kit_id": kit_id,
+            "family": data.get("family", "unknown"),
+            "verdict": data.get("verdict", "unknown"),
+            "confidence": data.get("confidence", 0),
+        }
+
     def screen_tool_call(self, tool_name: str, arguments: dict) -> dict:
         """Full screening for a tools/call invocation."""
         indicators = extract_indicators(arguments)
@@ -196,14 +225,16 @@ class Screener:
         """Screen an upstream tools/call result for poisoned content.
 
         Checks result text for prompt-injection phrases, embedded
-        malicious URLs (via TI), and leaked secret material.
+        malicious URLs (via TI), leaked secret material, and known
+        scam-kit fingerprint IDs.
 
         Returns {"verdict": "clean"|"flagged", "reasons": [...],
-                 "details": {...}}.
+                 "details": {...}, "kit_ids": [...]}.
         """
         texts = _extract_result_text(result_obj)
         reasons = []
         details = {"text_chunks": len(texts)}
+        kit_ids = []
 
         # 1. Prompt-injection heuristics.
         for text in texts:
@@ -248,10 +279,42 @@ class Screener:
             )
             details["url_reasons"] = worst["reasons"]
 
+        # 4. Scam-kit fingerprint IDs. A kit_<sha256> in a tool result
+        # ties the content to a known phishing kit family.
+        seen_kits = set()
+        for text in texts:
+            for m in _KIT_ID_RE.finditer(text):
+                kit_id = m.group(0).lower()
+                if kit_id not in seen_kits:
+                    seen_kits.add(kit_id)
+                    kit_ids.append(kit_id)
+        if kit_ids:
+            reasons.append(
+                f"scam-kit fingerprint(s) in tool result: "
+                f"{', '.join(kit_ids[:3])}"
+                + ("..." if len(kit_ids) > 3 else "")
+            )
+            details["kit_ids"] = kit_ids
+
+        # 5. Kit fingerprint lookup via scamkit-match API (if configured).
+        # Enriches kit_ids with family/verdict from the TI corpus.
+        kit_evidence = []
+        if kit_ids and getattr(self, "kit_lookup_enabled", False):
+            for kit_id in kit_ids[:5]:
+                try:
+                    match = self._lookup_kit(kit_id)
+                    if match:
+                        kit_evidence.append(match)
+                except Exception as exc:
+                    log.warning("kit lookup failed for %s: %s", kit_id, exc)
+        if kit_evidence:
+            details["kit_evidence"] = kit_evidence
+
         return {
             "verdict": "flagged" if reasons else "clean",
             "reasons": reasons,
             "details": details,
+            "kit_ids": kit_ids,
         }
 
 

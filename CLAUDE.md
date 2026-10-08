@@ -10588,3 +10588,5 @@ picked by display name as "Agentic Attack Surface and Supply Chain API", a title
 above.** The nearest match is the Attack Surface & Supply Chain API (Bundle B). Which entity it is
 linked to is UNVERIFIED until the solution's Products section is read. Select by id, not name: this is
 the seven-rejections lesson again, in a picker.
+
+**RESOLVED 2026-10-08 (screenshot of the solution's Products tab):** solution `soln-aicwx4eiyofnm` ("RS Agentic Attack Surface API") is linked to **`prod-szi2wdww3obry`**, the live Attack Surface & Supply Chain API (Bundle B), not `prod-kkvurtspreofy`. The Products tab has an **Edit products** button, so the link is changeable. Recommendation given: keep Bundle B (public, real agreement, fulfillment and metering proven in our account) and rewrite the use-case details to match its capabilities. The use-case texts drafted earlier the same day describe agent screening and identity exposure and no longer fit.

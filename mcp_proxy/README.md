@@ -40,6 +40,9 @@ Point your MCP client at `http://localhost:8090`.
 | `RELAYSHIELD_API_KEY` | (empty) | Optional; enables deeper checks |
 | `MCP_PROXY_SCREEN_TIMEOUT` | `5.0` | TI check timeout in seconds |
 | `MCP_PROXY_BLOCK_LEVELS` | `high,medium` | Verdict levels that block |
+| `MCP_PROXY_RESULT_SCREENING` | `true` | Screen upstream tool results for poisoned content |
+| `MCP_PROXY_QUARANTINE_AFTER` | `3` | Flags before a server is auto-quarantined |
+| `MCP_PROXY_ALERT_WEBHOOK` | (empty) | Webhook URL for quarantine/flag alerts (POST JSON) |
 
 ## Screening behavior
 
@@ -60,10 +63,27 @@ Every proxied call emits a structured JSON log line:
  "screen_ms": 120.5, "total_ms": 135.2, "screening_enabled": true}
 ```
 
+## Phase 2: poisoned neighbor detection
+
+The proxy tracks the reputation of each upstream MCP server:
+
+- **Registration:** each upstream's domain is TI-screened on first sight.
+- **Result screening:** every `tools/call` response is checked for
+  prompt-injection phrases, embedded malicious URLs, and leaked secret
+  material. Flagged responses mark the server suspicious (fail-open: the
+  response still reaches the caller, but the flag is recorded).
+- **Quarantine:** after `MCP_PROXY_QUARANTINE_AFTER` flags (default 3),
+  the server is auto-quarantined. Quarantined servers get zero traffic
+  (fail-closed) until cleared.
+- **Admin:** `GET /_rs/neighbors` lists server reputations;
+  `POST /_rs/neighbors/clear {"url": ...}` clears a quarantine.
+  `GET /_rs/health` is a liveness check.
+
 ## Tests
 
 ```bash
-python3 -m unittest mcp_proxy.test_proxy -v
+python3 -m unittest mcp_proxy.test_proxy -v      # Phase 1: 19 tests
+python3 -m unittest mcp_proxy.test_neighbor -v  # Phase 2: 24 tests
 ```
 
 Covers: indicator extraction, screener verdicts (block/allow/fail-open),
@@ -72,6 +92,12 @@ call error format, and proxy overhead under 50ms.
 
 ## Phase 1 scope
 
-Passthrough + TI screening. Not yet built: behavioral baselining,
-poisoned-neighbor detection, cross-tool correlation, policy enforcement.
+Passthrough + TI screening on tool call arguments.
+
+## Phase 2 scope
+
+Poisoned neighbor detection: upstream reputation tracking, tool result
+screening (prompt injection, malicious URLs, secret material),
+per-server quarantine (fail-closed), admin endpoints. Not yet built:
+behavioral baselining, cross-tool correlation, policy enforcement.
 See the MCP Proxy build scope doc for the full roadmap.

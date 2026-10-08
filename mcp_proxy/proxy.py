@@ -365,6 +365,7 @@ class ProxyServer(HTTPServer):
             block_levels=cfg.block_level_set,
             kit_lookup_enabled=cfg.kit_lookup_enabled,
             pii_screening_enabled=cfg.pii_screening_enabled,
+            oauth_screening_enabled=cfg.oauth_screening_enabled,
         )
         # Phase 2: neighbor reputation + quarantine.
         self.neighbors = NeighborRegistry(screener=self.screener)

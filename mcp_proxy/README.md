@@ -29,6 +29,25 @@ python3 -m mcp_proxy
 
 Point your MCP client at `http://localhost:8090`.
 
+## Demo
+
+Watch the proxy catch a poisoned neighbor in real time, no network
+required. The demo wires the real Screener, NeighborRegistry,
+QuarantineManager, and VerdictSigner in-process against two simulated
+MCP servers (one clean, one poisoned) and streams every screening
+step: argument screening, per-check result screening (prompt
+injection, secret material, kit fingerprints, unredacted PII, novel
+instruction phrasing), signed verdicts, reputation escalation, and
+auto-quarantine after 3 flags.
+
+```bash
+python3 -m mcp_proxy.demo          # streaming, ~30 seconds
+python3 -m mcp_proxy.demo --fast   # no delays
+```
+
+TI URL lookups are stubbed in demo mode; all content checks run the
+real local detectors.
+
 ## Configuration
 
 | Variable | Default | Description |

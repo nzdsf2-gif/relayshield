@@ -39,7 +39,7 @@ _IDP_PATH_SIGNATURES = {
     "microsoft": ["/oauth2/v2.0/", "/common/oauth2/",
                   "/organizations/oauth2/"],
     "auth0": ["/oauth/token"],
-    "okta": ["/oauth2/v1/"],,
+    "okta": ["/oauth2/v1/"],
     "apple": ["/auth/authorize"],
 }
 

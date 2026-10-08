@@ -16,8 +16,10 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .config import ProxyConfig
+from .behavior import BehaviorTracker
 from .neighbor import NeighborRegistry
 from .quarantine import QuarantineManager
+from .reputation import ReputationStore
 from .screener import Screener
 from .verdicts import VerdictSigner, content_hash_of
 
@@ -139,9 +141,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/_rs/health":
             self._send_json({"status": "ok", "version":
-                             "RelayShield-MCP-Proxy/0.2.5",
+                             "RelayShield-MCP-Proxy/0.3.0",
                              "verdicts_signed":
-                                 self.server.signer.signing_enabled})
+                                 self.server.signer.signing_enabled,
+                             "behavior_enabled":
+                                 self.server.behavior.enabled})
+            return
+        if self.path == "/_rs/reputation":
+            self._send_json(self.server.reputation.summary())
+            return
+        if self.path == "/_rs/behavior":
+            self._send_json({
+                "agents": self.server.behavior.profiles(),
+                "enabled": self.server.behavior.enabled,
+            })
             return
         self._send_json({"error": "not found"}, 404)
 
@@ -156,6 +169,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 body = {}
             url = body.get("url", "")
             ok = self.server.quarantine.clear(url)
+            if ok:
+                # Phase 3: reputation recovery on manual clear.
+                self.server.reputation.record_quarantine_cleared(
+                    url, "cleared by operator")
             self._send_json({"cleared": ok, "url": url})
             return
         self._send_json({"error": "unknown admin endpoint"}, 404)
@@ -204,7 +221,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
         upstream_url = cfg.upstream_url
         neighbors = self.server.neighbors
         quarantine = self.server.quarantine
+        behavior = self.server.behavior
+        reputation = self.server.reputation
         t0 = time.monotonic()
+
+        # Phase 3: agent identity for behavioral baselining. The client
+        # IP is the available signal; deployments with authenticated
+        # agents should override this with a stable agent ID.
+        agent_id = self.client_address[0]
 
         # Fail-closed: quarantined servers get no traffic at all.
         if quarantine.is_quarantined(upstream_url):
@@ -235,6 +259,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 verdict = {"verdict": "allow", "level": "unknown",
                            "reasons": [f"screener error, allowed: {exc}"]}
 
+        # Phase 3: behavioral screening runs on every call, even when
+        # TI screening is disabled. It never blocks on its own; it
+        # flags, scores risk, and feeds the reputation graph.
+        behavior_result = {"verdict": "allow", "poison_category": "clean",
+                           "reasons": [], "risk_score": 0.0}
+        if behavior.enabled:
+            try:
+                behavior_result = behavior.check(
+                    agent_id, tool_name, arguments,
+                    server_url=upstream_url)
+            except Exception as exc:
+                log.error("behavior tracker error: %s", exc)
+
         total_ms = (time.monotonic() - t0) * 1000
         log.info(json.dumps({
             "event": "tools_call",
@@ -244,10 +281,45 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "level": verdict.get("level"),
             "score": verdict.get("score", 0),
             "reasons": verdict.get("reasons", []),
+            "behavior_verdict": behavior_result.get("verdict"),
+            "behavior_category": behavior_result.get("poison_category"),
+            "behavior_reasons": behavior_result.get("reasons", []),
+            "risk_score": round(behavior_result.get("risk_score", 0.0), 1),
             "screen_ms": round(screen_ms, 1),
             "total_ms": round(total_ms, 1),
             "screening_enabled": cfg.screening_enabled,
         }))
+
+        # Phase 3: behavioral flags feed server reputation. High risk
+        # scores can trigger quarantine evaluation.
+        if behavior_result.get("verdict") == "flag":
+            bcat = behavior_result.get("poison_category", "clean")
+            for reason in behavior_result.get("reasons", []):
+                if bcat == "attack_chain":
+                    reputation.record_attack_chain(upstream_url, reason)
+                else:
+                    reputation.record_behavior_anomaly(upstream_url,
+                                                       reason)
+            risk = behavior_result.get("risk_score", 0.0)
+            if risk >= cfg.behavior_quarantine_score:
+                log.warning(json.dumps({
+                    "event": "behavior_risk_quarantine",
+                    "tool": tool_name,
+                    "upstream": upstream_url,
+                    "risk_score": round(risk, 1),
+                    "threshold": cfg.behavior_quarantine_score,
+                }))
+                neighbors.flag(
+                    upstream_url,
+                    f"behavioral risk score {risk:.1f} reached "
+                    f"quarantine threshold",
+                    behavior_result.get("reasons", []))
+                if quarantine.evaluate(upstream_url):
+                    reputation.record_quarantine(
+                        upstream_url,
+                        f"behavioral risk {risk:.1f}")
+        else:
+            reputation.record_clean_call(upstream_url)
 
         if verdict.get("verdict") == "block":
             # Phase 2.5: issue a signed verdict tying the block to TI
@@ -366,7 +438,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
         neighbors.flag(upstream_url,
                        f"poisoned tool result from '{tool_name}'",
                        [e["detail"] for e in evidence])
-        quarantine.evaluate(upstream_url, evidence=evidence)
+        # Phase 3: feed the reputation graph.
+        reputation = self.server.reputation
+        reputation.record_flag(upstream_url,
+                               f"{poison_category}: {tool_name}")
+        if result_verdict.get("kit_ids"):
+            reputation.record_ti_hit(
+                upstream_url,
+                f"kit fingerprint: {result_verdict['kit_ids'][0][:20]}...")
+        if quarantine.evaluate(upstream_url, evidence=evidence):
+            reputation.record_quarantine(
+                upstream_url, "auto-quarantine: poisoned neighbor")
 
 
 class ProxyServer(HTTPServer):
@@ -393,10 +475,14 @@ class ProxyServer(HTTPServer):
         # Phase 2.5: signed verdicts. The private key comes only from
         # the environment; it is never logged or stored.
         self.signer = VerdictSigner(cfg.signing_key_hex)
+        # Phase 3: behavioral baselining + server reputation graph.
+        self.behavior = BehaviorTracker(enabled=cfg.behavior_enabled)
+        self.reputation = ReputationStore()
         super().__init__(("0.0.0.0", cfg.listen_port), ProxyHandler)
         # Register (and TI-check) the upstream on startup.
         if cfg.upstream_url:
             self.neighbors.register(cfg.upstream_url)
+            self.reputation.get_or_create(cfg.upstream_url)
 
 
 def run():

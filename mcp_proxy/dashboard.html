@@ -210,6 +210,15 @@
       <div id="servers"><div style="color:#8b949e;font-size:12px">run a scenario to populate</div></div>
     </div>
     <div class="card">
+      <h2>Reputation graph</h2>
+      <div id="rep-graph" style="color:#8b949e;font-size:12px">run a scenario to populate</div>
+      <div style="font-size:11px;color:#8b949e;margin-top:8px;line-height:1.5">
+        Scores 0-100 (higher is more trustworthy). Bands: trusted 70+,
+        watch 40-69, untrusted below 40. Scores drop on TI hits, flags,
+        and quarantines; they recover slowly on clean operation.
+      </div>
+    </div>
+    <div class="card">
       <h2>How to read this</h2>
       <div style="font-size:12px;color:#8b949e;line-height:1.6">
         Every tool call passes through the proxy. The proxy screens
@@ -235,6 +244,9 @@ const SCENARIOS = [
   {id:7, name:"OAuth tampering", desc:"Google OAuth path on an attacker domain."},
   {id:8, name:"Credential exfiltration", desc:"JWT bound for a non-IdP domain."},
   {id:9, name:"Legitimate OAuth", desc:"Real Google OAuth flow passes clean."},
+  {id:10, name:"Volume anomaly", desc:"Agent floods 30 calls: 10x baseline rate."},
+  {id:11, name:"Attack chain", desc:"Read file to network to email: exfiltration."},
+  {id:12, name:"Lateral movement", desc:"Rapid calls across 5 servers: probe flagged."},
 ];
 
 const grid = document.getElementById('scn-grid');
@@ -303,6 +315,8 @@ const CAT_DESC = {
   oauth_tampering: "OAuth endpoint mimics a known IdP on a foreign domain.",
   credential_exfiltration: "OAuth credential material bound for a non-IdP domain. Values never logged.",
   unknown_synthetic: "OAuth flow toward a domain with no reputation history. Flagged for review.",
+  behavioral_anomaly: "Agent behavior deviates from its baseline: volume, sequence, or timing.",
+  attack_chain: "Known malicious tool sequence detected: exfiltration, lateral movement, or escalation.",
 };
 
 function setSpeed(ms) {
@@ -448,12 +462,71 @@ async function runScenario(id) {
   setStatus('Done. Pick another scenario.');
   running = false;
   document.querySelectorAll('.scn-btn').forEach(b => b.disabled = false);
+  // Phase 3: refresh the reputation graph after each scenario.
+  renderReputationGraph();
 }
 
 function setStatus(t) {
   document.getElementById('status').textContent = t;
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Phase 3: reputation graph. Fetches GET /_rs/reputation and renders
+// a per-server score history as SVG sparklines with band coloring.
+async function renderReputationGraph() {
+  const el = document.getElementById('rep-graph');
+  let data;
+  try {
+    const r = await fetch('/_rs/reputation');
+    data = await r.json();
+  } catch (e) {
+    el.innerHTML = '<div style="color:#8b949e;font-size:12px">reputation endpoint unreachable</div>';
+    return;
+  }
+  const servers = data.servers || [];
+  if (!servers.length) {
+    el.innerHTML = '<div style="color:#8b949e;font-size:12px">no servers tracked yet</div>';
+    return;
+  }
+  const W = 260, H = 56, PAD = 4;
+  el.innerHTML = servers.map(s => {
+    const hist = s.history || [];
+    const bandColor = s.band === 'trusted' ? '#3fb950'
+      : s.band === 'watch' ? '#d29922' : '#f85149';
+    let svg;
+    if (hist.length < 2) {
+      const y = H - PAD - (s.score / 100) * (H - 2 * PAD);
+      svg = `<svg width="${W}" height="${H}" style="display:block">` +
+        `<line x1="${PAD}" y1="${y}" x2="${W-PAD}" y2="${y}" ` +
+        `stroke="${bandColor}" stroke-width="2"/>` +
+        `<circle cx="${W-PAD}" cy="${y}" r="3" fill="${bandColor}"/></svg>`;
+    } else {
+      const n = hist.length;
+      const pts = hist.map((h, i) => {
+        const x = PAD + (i / (n - 1)) * (W - 2 * PAD);
+        const y = H - PAD - (Math.max(0, Math.min(100, h.score)) / 100) * (H - 2 * PAD);
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      // Band background zones
+      const y70 = H - PAD - 0.70 * (H - 2 * PAD);
+      const y40 = H - PAD - 0.40 * (H - 2 * PAD);
+      svg = `<svg width="${W}" height="${H}" style="display:block">` +
+        `<rect x="0" y="0" width="${W}" height="${y70}" fill="#3fb950" opacity="0.07"/>` +
+        `<rect x="0" y="${y70}" width="${W}" height="${y40-y70}" fill="#d29922" opacity="0.07"/>` +
+        `<rect x="0" y="${y40}" width="${W}" height="${H-y40}" fill="#f85149" opacity="0.07"/>` +
+        `<polyline points="${pts}" fill="none" stroke="${bandColor}" stroke-width="2"/>` +
+        `</svg>`;
+    }
+    return `<div style="margin-bottom:12px">` +
+      `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">` +
+      `<span class="mono" style="font-size:11px;word-break:break-all">${esc(s.domain || s.url)}</span>` +
+      `<span style="font-size:13px;font-weight:700;color:${bandColor}">${esc(String(s.score))}</span>` +
+      `</div>${svg}</div>`;
+  }).join('');
+}
+
+// Initial load (proxy-served mode has live data).
+renderReputationGraph();
 </script>
 </body>
 </html>

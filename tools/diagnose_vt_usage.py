@@ -11,9 +11,14 @@ call VirusTotal on ONE shared key: /v1/scan-url + /v1/result (the checkemail@ Wo
 calls these for up to five links per email and polls every 2.5s for up to 12s), /v1/scan-file,
 /v1/ip-intel, the composite check's fallback, the Telegram /scan path and the WhatsApp bot
 (report lookup, submission, then a poll every 3s for up to 30s per URL, 45s per file).
-/v1/link-check and the Mini App do not call it. CORRECTED 2026-10-08: this line used to say the
-Chrome extension and the widget do not either, which was true until 2026-10-04 and false after
-it: both call /v1/composite-check, which falls back to VirusTotal on an unknown URL.
+/v1/link-check does not call it. CORRECTED 2026-10-08: this line used to say the Mini App, the Chrome
+extension and the widget do not either. That was true until 2026-10-02 and false from then on: all
+three call /v1/composite-check (commit aa697dd), and from 2026-10-04 (579de4c) that endpoint fell
+back to VirusTotal on an unknown URL, with no cache table until 2026-10-07. The per-IP cap did not
+stop it: one client looped on 429s and a pool of cloud IPs each stayed under 300. From 2026-10-08
+the fallback runs for callers with a VERIFIED API KEY only, so a keyless request can no longer
+spend VirusTotal quota through composite-check, and `vt_fallback_withheld` lines count the ones
+it turned away.
 
 WHAT IT CAN AND CANNOT SEE. Polls are not logged, so these counts are LOWER BOUNDS on VT
 requests, and the multiplier is large: one unknown link is 1 submission plus up to ~5 polls

@@ -41,6 +41,36 @@ class ProxyConfig:
         # "medium" blocks high and medium. "unknown" never blocks.
         self.block_levels = os.environ.get("MCP_PROXY_BLOCK_LEVELS", "high,medium")
 
+        # Phase 2: poisoned-neighbor detection.
+        # Flags before a server is auto-quarantined.
+        self.quarantine_after = int(
+            os.environ.get("MCP_PROXY_QUARANTINE_AFTER", "3")
+        )
+        # Optional webhook URL for quarantine/flag alerts (POST JSON).
+        self.alert_webhook = os.environ.get("MCP_PROXY_ALERT_WEBHOOK", "")
+        # Screen upstream tool *results* for poisoned content.
+        self.result_screening_enabled = (
+            os.environ.get("MCP_PROXY_RESULT_SCREENING", "true").lower()
+            != "false"
+        )
+        # Check tool results for unredacted PII (SSN, credit card,
+        # bulk email). Disable in trusted environments where results
+        # legitimately carry PII.
+        self.pii_screening_enabled = (
+            os.environ.get("MCP_PROXY_PII_SCREENING", "true").lower()
+            != "false"
+        )
+
+        # Phase 2.5: barbed wire.
+        # Ed25519 signing key for verdicts (64 hex chars = 32 bytes).
+        # NEVER commit a key; set it only via the environment.
+        self.signing_key_hex = os.environ.get("MCP_PROXY_SIGNING_KEY", "")
+        # Enrich kit_<sha256> IDs via the scamkit-match API.
+        self.kit_lookup_enabled = (
+            os.environ.get("MCP_PROXY_KIT_LOOKUP", "false").lower()
+            not in ("false", "", "0", "no")
+        )
+
     @property
     def block_level_set(self) -> set:
         return {lvl.strip().lower() for lvl in self.block_levels.split(",")}

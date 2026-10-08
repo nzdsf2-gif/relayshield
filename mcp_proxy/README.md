@@ -29,6 +29,25 @@ python3 -m mcp_proxy
 
 Point your MCP client at `http://localhost:8090`.
 
+## Demo
+
+Watch the proxy catch a poisoned neighbor in real time, no network
+required. The demo wires the real Screener, NeighborRegistry,
+QuarantineManager, and VerdictSigner in-process against two simulated
+MCP servers (one clean, one poisoned) and streams every screening
+step: argument screening, per-check result screening (prompt
+injection, secret material, kit fingerprints, unredacted PII, novel
+instruction phrasing), signed verdicts, reputation escalation, and
+auto-quarantine after 3 flags.
+
+```bash
+python3 -m mcp_proxy.demo          # streaming, ~30 seconds
+python3 -m mcp_proxy.demo --fast   # no delays
+```
+
+TI URL lookups are stubbed in demo mode; all content checks run the
+real local detectors.
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -40,6 +59,9 @@ Point your MCP client at `http://localhost:8090`.
 | `RELAYSHIELD_API_KEY` | (empty) | Optional; enables deeper checks |
 | `MCP_PROXY_SCREEN_TIMEOUT` | `5.0` | TI check timeout in seconds |
 | `MCP_PROXY_BLOCK_LEVELS` | `high,medium` | Verdict levels that block |
+| `MCP_PROXY_RESULT_SCREENING` | `true` | Screen upstream tool results for poisoned content |
+| `MCP_PROXY_QUARANTINE_AFTER` | `3` | Flags before a server is auto-quarantined |
+| `MCP_PROXY_ALERT_WEBHOOK` | (empty) | Webhook URL for quarantine/flag alerts (POST JSON) |
 
 ## Screening behavior
 
@@ -60,10 +82,40 @@ Every proxied call emits a structured JSON log line:
  "screen_ms": 120.5, "total_ms": 135.2, "screening_enabled": true}
 ```
 
+## Phase 2: poisoned neighbor detection
+
+The proxy tracks the reputation of each upstream MCP server:
+
+- **Registration:** each upstream's domain is TI-screened on first sight.
+- **Result screening:** every `tools/call` response is checked for
+  prompt-injection phrases, embedded malicious URLs, leaked secret
+  material, scam-kit fingerprints, and unredacted PII (SSN, credit
+  card via Luhn, bulk email). PII verdicts carry pattern types and
+  counts only; matched values are never logged or returned. Flagged
+  responses mark the server suspicious (fail-open: the response still
+  reaches the caller, but the flag is recorded). Toggle with
+  `MCP_PROXY_PII_SCREENING` (default true).
+- **Poison categories:** every screening verdict carries a
+  `poison_category` taxonomy field, included in signed verdicts, MCP
+  error responses, and structured logs. Categories, highest severity
+  first: `kit_match` (scam-kit fingerprint) > `malicious_url` (TI
+  hit) > `prompt_injection` (known phrases) > `secret_leak` (private
+  keys/credentials) > `pii_leak` (unredacted PII) >
+  `unknown_synthetic` (novel instruction-like phrasing with no known
+  pattern match; placeholder for the Phase 3 classifier) > `clean`.
+  When several detections fire, the highest-severity category wins.
+- **Quarantine:** after `MCP_PROXY_QUARANTINE_AFTER` flags (default 3),
+  the server is auto-quarantined. Quarantined servers get zero traffic
+  (fail-closed) until cleared.
+- **Admin:** `GET /_rs/neighbors` lists server reputations;
+  `POST /_rs/neighbors/clear {"url": ...}` clears a quarantine.
+  `GET /_rs/health` is a liveness check.
+
 ## Tests
 
 ```bash
-python3 -m unittest mcp_proxy.test_proxy -v
+python3 -m unittest mcp_proxy.test_proxy -v      # Phase 1: 19 tests
+python3 -m unittest mcp_proxy.test_neighbor -v  # Phase 2/2.5: 43 tests
 ```
 
 Covers: indicator extraction, screener verdicts (block/allow/fail-open),
@@ -72,6 +124,34 @@ call error format, and proxy overhead under 50ms.
 
 ## Phase 1 scope
 
-Passthrough + TI screening. Not yet built: behavioral baselining,
-poisoned-neighbor detection, cross-tool correlation, policy enforcement.
+Passthrough + TI screening on tool call arguments.
+
+## Phase 2 scope
+
+Poisoned neighbor detection: upstream reputation tracking, tool result
+screening (prompt injection, malicious URLs, secret material, unredacted
+PII), auto-quarantine with per-server fail-closed enforcement.
+
+## Phase 2.5 scope: barbed wire
+
+Signed verdicts plus kit fingerprint integration make the proxy's
+decisions cryptographically provable and tied to RelayShield's TI
+corpus. A copied proxy without the live backend and signing key
+produces verdicts nobody can verify.
+
+- **Signed verdicts** (`mcp_proxy/verdicts.py`): every block/flag
+  decision gets an Ed25519 signature (pure-Python RFC 8032, zero
+  dependencies). The private key comes only from `MCP_PROXY_SIGNING_KEY`
+  (64 hex chars); it is never logged. Without a key, verdicts are
+  unsigned but still carry full TI evidence.
+- **Kit fingerprints**: tool results are scanned for `kit_<sha256>`
+  IDs. Matches are included in verdict evidence as
+  `kit_fingerprint` entries, optionally enriched via the
+  `/v1/payg/scamkit-match` API (`MCP_PROXY_KIT_LOOKUP=true`).
+- **Evidence-backed quarantine**: quarantine events carry structured
+  TI evidence (`{"type", "id", "detail"}`), visible via
+  `GET /_rs/neighbors`. The verdict public key is published at
+  `GET /_rs/neighbors` (`verdict_pubkey`) for partner verification.
+per-server quarantine (fail-closed), admin endpoints. Not yet built:
+behavioral baselining, cross-tool correlation, policy enforcement.
 See the MCP Proxy build scope doc for the full roadmap.

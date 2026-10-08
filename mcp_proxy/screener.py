@@ -26,6 +26,67 @@ _IPV4_RE = re.compile(
     r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
 )
 
+# Poison categories for screening verdicts. When several detections fire
+# on one result, the highest-severity category wins. The taxonomy is
+# deliberately small so partners can build policy on it.
+POISON_PROMPT_INJECTION = "prompt_injection"
+POISON_PII_LEAK = "pii_leak"
+POISON_MALICIOUS_URL = "malicious_url"
+POISON_KIT_MATCH = "kit_match"
+POISON_SECRET_LEAK = "secret_leak"
+POISON_UNKNOWN_SYNTHETIC = "unknown_synthetic"
+POISON_CLEAN = "clean"
+
+_CATEGORY_RANK = {
+    POISON_CLEAN: 0,
+    POISON_UNKNOWN_SYNTHETIC: 1,
+    POISON_PII_LEAK: 2,
+    POISON_SECRET_LEAK: 3,
+    POISON_PROMPT_INJECTION: 4,
+    POISON_MALICIOUS_URL: 5,
+    POISON_KIT_MATCH: 6,
+}
+
+
+def worst_category(categories) -> str:
+    """Highest-severity poison category wins."""
+    best = POISON_CLEAN
+    for c in categories:
+        if _CATEGORY_RANK.get(c, 0) > _CATEGORY_RANK.get(best, 0):
+            best = c
+    return best
+
+
+# Instruction-like phrasing that does not match any known
+# prompt-injection pattern above. Content carrying these hints is
+# suspicious but novel: classified as unknown_synthetic, a placeholder
+# until the Phase 3 classifier can judge model-generated attacks.
+_SYNTHETIC_INSTRUCTION_HINTS = [
+    "you should ",
+    "you must now",
+    "as an ai",
+    "act as ",
+    "pretend to be",
+    "pretend you are",
+    "roleplay",
+    "system:",
+    "developer:",
+    "your new role",
+    "your new instructions",
+    "follow these new",
+    "disobey",
+]
+
+
+def _has_synthetic_hints(texts: list) -> bool:
+    """Instruction-like phrasing not matching known patterns."""
+    for text in texts:
+        lowered = text.lower()
+        for hint in _SYNTHETIC_INSTRUCTION_HINTS:
+            if hint in lowered:
+                return True
+    return False
+
 # Skip obvious non-indicators.
 _SKIP_DOMAINS = {
     "localhost", "example.com", "example.org", "example.net",
@@ -151,7 +212,7 @@ class Screener:
 
         Verdict: {"verdict": "allow"|"block"|"unknown",
                   "level": str, "score": int, "reasons": [...],
-                  "screened": {...}}
+                  "poison_category": str, "screened": {...}}
         """
         urls = indicators.get("urls", [])
         if not urls:
@@ -161,6 +222,7 @@ class Screener:
                 "level": "unknown",
                 "score": 0,
                 "reasons": ["no screenable indicators in tool arguments"],
+                "poison_category": POISON_CLEAN,
                 "screened": indicators,
             }
 
@@ -186,11 +248,15 @@ class Screener:
                 "level": "unknown",
                 "score": 0,
                 "reasons": [f"TI screening unavailable ({errors} errors); allowed"],
+                "poison_category": POISON_CLEAN,
                 "screened": indicators,
             }
 
         verdict = "block" if worst["level"] in self.block_levels else "allow"
         worst["verdict"] = verdict
+        worst["poison_category"] = (
+            POISON_MALICIOUS_URL if verdict == "block" else POISON_CLEAN
+        )
         worst["screened"] = indicators
         return worst
 
@@ -251,7 +317,8 @@ class Screener:
         card, bulk email).
 
         Returns {"verdict": "clean"|"flagged", "reasons": [...],
-                 "details": {...}, "kit_ids": [...], "pii_leak": bool}.
+                 "details": {...}, "kit_ids": [...], "pii_leak": bool,
+                 "poison_category": str}.
         PII reasons and details carry pattern types and counts only;
         matched PII values are never logged or returned.
         """
@@ -259,8 +326,10 @@ class Screener:
         reasons = []
         details = {"text_chunks": len(texts)}
         kit_ids = []
+        categories = set()
 
         # 1. Prompt-injection heuristics.
+        prompt_injection_hit = False
         for text in texts:
             lowered = text.lower()
             for pattern in _PROMPT_INJECTION_PATTERNS:
@@ -269,9 +338,13 @@ class Screener:
                         f"prompt-injection phrase in tool result: "
                         f"'{pattern}'"
                     )
+                    prompt_injection_hit = True
                     break
+        if prompt_injection_hit:
+            categories.add(POISON_PROMPT_INJECTION)
 
         # 2. Secret material in results.
+        secret_hit = False
         for text in texts:
             for pattern in _SECRET_PATTERNS:
                 if pattern in text:
@@ -279,7 +352,10 @@ class Screener:
                         "secret material in tool result "
                         f"({pattern.strip('-')[:24].strip()}...)"
                     )
+                    secret_hit = True
                     break
+        if secret_hit:
+            categories.add(POISON_SECRET_LEAK)
 
         # 3. Malicious URLs embedded in result text.
         indicators = extract_indicators({"texts": texts})
@@ -302,6 +378,7 @@ class Screener:
                 f"score={worst['score']}"
             )
             details["url_reasons"] = worst["reasons"]
+            categories.add(POISON_MALICIOUS_URL)
 
         # 4. Scam-kit fingerprint IDs. A kit_<sha256> in a tool result
         # ties the content to a known phishing kit family.
@@ -319,6 +396,7 @@ class Screener:
                 + ("..." if len(kit_ids) > 3 else "")
             )
             details["kit_ids"] = kit_ids
+            categories.add(POISON_KIT_MATCH)
 
         # 5. Kit fingerprint lookup via scamkit-match API (if configured).
         # Enriches kit_ids with family/verdict from the TI corpus.
@@ -354,9 +432,24 @@ class Screener:
                     f"({count} occurrence{plural})"
                 )
             details["pii"] = pii_found
+            categories.add(POISON_PII_LEAK)
+
+        # 7. Synthetic/novel instruction-like content. If no known
+        # prompt-injection pattern fired but the result carries
+        # instruction-like phrasing, classify it as unknown_synthetic:
+        # suspicious and novel, awaiting the Phase 3 classifier.
+        if (POISON_PROMPT_INJECTION not in categories
+                and _has_synthetic_hints(texts)):
+            reasons.append(
+                "novel instruction-like phrasing in tool result "
+                "(unknown_synthetic: no known pattern matched)"
+            )
+            details["synthetic_hints"] = True
+            categories.add(POISON_UNKNOWN_SYNTHETIC)
 
         return {
             "verdict": "flagged" if reasons else "clean",
+            "poison_category": worst_category(categories),
             "reasons": reasons,
             "details": details,
             "kit_ids": kit_ids,

@@ -224,6 +224,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "event": "tools_call",
             "tool": tool_name,
             "verdict": verdict.get("verdict"),
+            "poison_category": verdict.get("poison_category", "clean"),
             "level": verdict.get("level"),
             "score": verdict.get("score", 0),
             "reasons": verdict.get("reasons", []),
@@ -240,6 +241,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 {"type": "ti_signal", "id": f"reason-{i}", "detail": r}
                 for i, r in enumerate(verdict.get("reasons", []))
             ]
+            poison_category = verdict.get("poison_category", "clean")
             signed = signer.issue(
                 decision="block",
                 tool_name=tool_name,
@@ -248,9 +250,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 level=verdict.get("level", ""),
                 score=verdict.get("score", 0),
                 reasons=verdict.get("reasons", []),
+                poison_category=poison_category,
             )
             log.info(json.dumps({
                 "event": "tools_call_verdict",
+                "poison_category": poison_category,
                 "verdict_sig": signed.get("sig", "")[:16] + "..." if signed.get("sig") else "unsigned",
                 "signed": bool(signed.get("sig")),
             }))
@@ -263,6 +267,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     "tool": tool_name,
                     "level": verdict.get("level"),
                     "score": verdict.get("score", 0),
+                    "poison_category": poison_category,
                     "reasons": verdict.get("reasons", []),
                     "verdict": signed,
                 },
@@ -321,12 +326,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         # Issue a signed verdict for the poisoned-neighbor flag.
         signer = self.server.signer
+        poison_category = result_verdict.get("poison_category", "clean")
         signed = signer.issue(
             decision="flag",
             tool_name=tool_name,
             content_hash=content_hash_of(upstream_resp),
             evidence=evidence,
             reasons=reasons,
+            poison_category=poison_category,
             extra={"upstream": upstream_url, "kit_ids": kit_ids},
         )
 
@@ -334,6 +341,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "event": "poisoned_result_detected",
             "tool": tool_name,
             "upstream": upstream_url,
+            "poison_category": poison_category,
             "reasons": reasons,
             "details": details,
             "kit_ids": kit_ids,

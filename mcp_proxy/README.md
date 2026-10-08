@@ -76,6 +76,15 @@ The proxy tracks the reputation of each upstream MCP server:
   responses mark the server suspicious (fail-open: the response still
   reaches the caller, but the flag is recorded). Toggle with
   `MCP_PROXY_PII_SCREENING` (default true).
+- **Poison categories:** every screening verdict carries a
+  `poison_category` taxonomy field, included in signed verdicts, MCP
+  error responses, and structured logs. Categories, highest severity
+  first: `kit_match` (scam-kit fingerprint) > `malicious_url` (TI
+  hit) > `prompt_injection` (known phrases) > `secret_leak` (private
+  keys/credentials) > `pii_leak` (unredacted PII) >
+  `unknown_synthetic` (novel instruction-like phrasing with no known
+  pattern match; placeholder for the Phase 3 classifier) > `clean`.
+  When several detections fire, the highest-severity category wins.
 - **Quarantine:** after `MCP_PROXY_QUARANTINE_AFTER` flags (default 3),
   the server is auto-quarantined. Quarantined servers get zero traffic
   (fail-closed) until cleared.

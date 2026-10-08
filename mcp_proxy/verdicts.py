@@ -181,11 +181,15 @@ class VerdictSigner:
 
     def issue(self, decision: str, tool_name: str, content_hash: str,
               evidence: list, level: str = "", score: int = 0,
-              reasons: list = None, extra: dict = None) -> dict:
+              reasons: list = None, extra: dict = None,
+              poison_category: str = "clean") -> dict:
         """Build a verdict dict, signed when a key is configured.
 
         decision: "block" | "quarantine" | "flag" | "allow"
         evidence: list of {"type": ..., "id": ..., "detail": ...}
+        poison_category: attack taxonomy (prompt_injection, pii_leak,
+            malicious_url, kit_match, secret_leak, unknown_synthetic,
+            clean)
         """
         verdict = {
             "v": 1,
@@ -197,6 +201,7 @@ class VerdictSigner:
             "score": score,
             "reasons": reasons or [],
             "evidence": evidence or [],
+            "poison_category": poison_category,
         }
         if extra:
             verdict["extra"] = extra

@@ -669,7 +669,14 @@ def _vt_api_key() -> str:
 # environment, so a module global is safe here).
 import relayshield_vt_budget as _vtb
 
-_VT_CTX = {"surface": "api", "caller": "-"}
+# "keyed" is True ONLY when the request carried an API key that _verify_rs_api_key
+# accepted. It gates the composite check's VirusTotal fallback (see
+# _composite_signal_url): a keyless caller is on the free tier, and VirusTotal is a
+# metered upstream on one shared 500-a-day key. It is reset on EVERY invocation
+# because a warm Lambda environment keeps this module global between requests, and a
+# flag left True by one caller's request would unlock the fallback for the next
+# stranger's.
+_VT_CTX = {"surface": "api", "caller": "-", "keyed": False}
 
 
 def _vt_charge(kind: str) -> bool:
@@ -4697,9 +4704,18 @@ def _composite_signal_url(url):
     if not reasons:
         reasons = ["no flags found by link check"]
     if level == "unknown":
-        vt_signal = _vt_fallback_url_signal(url)
-        if vt_signal is not None:
-            return vt_signal
+        # KEYED CALLERS ONLY. This endpoint is keyless and free, and VirusTotal is a
+        # metered upstream on one shared 500-a-day key. On 2026-10-06 and 2026-10-07 the
+        # fallback let anonymous traffic spend that whole allowance: a client looping on
+        # 429s plus a pool of cloud IPs each under the per-IP cap, which cannot stop a
+        # pool. /v1/link-check is documented as having no paid upstream; the fallback
+        # (added 2026-10-04) broke that, and this restores it for the free tier.
+        if _VT_CTX.get("keyed"):
+            vt_signal = _vt_fallback_url_signal(url)
+            if vt_signal is not None:
+                return vt_signal
+        else:
+            logger.info("vt_fallback_withheld reason=keyless")
     return {"type": "url", "target": url, "level": level,
             "flagged": bool(data.get("flagged")), "reasons": reasons}
 
@@ -4896,7 +4912,8 @@ def handle_composite_check(params: dict) -> dict:
                  "wins. A signal graded unknown means that check could not "
                  "determine risk, not that the target is clear. URL results "
                  "the heuristics cannot grade are re-checked against a cached "
-                 "multi-vendor security report before staying unknown."),
+                 "multi-vendor security report before staying unknown, "
+                 "for callers who send an API key."),
     }
     # Corpus cross-correlation: per-signal provenance, only when the corpus
     # actually knows the target (at least one sighting or family link).
@@ -16419,6 +16436,7 @@ def lambda_handler(event: dict, context) -> dict:
     _vsrc = re.sub(r"[^a-z0-9_-]", "", (_header(_vh, "X-RS-Source") or "api").lower())[:24] or "api"
     _vkey = _header(_vh, "X-RS-API-KEY") or _header(_vh, "X-API-Key") or ""
     _VT_CTX["surface"] = _vsrc
+    _VT_CTX["keyed"] = False  # set True later, and only from a VERIFIED key
     _VT_CTX["caller"] = _vtb.caller_id(_vkey) if _vkey else _vtb.anon_caller(
         ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or "")
 
@@ -16817,7 +16835,11 @@ def lambda_handler(event: dict, context) -> dict:
     if path in KEYLESS_SCAN_ENDPOINTS:
         _scan_headers = event.get("headers") or {}
         _scan_key     = _header(_scan_headers, "X-RS-API-KEY") or _header(_scan_headers, "X-API-Key")
-        if not (_scan_key and _verify_rs_api_key(_scan_key)):
+        # Verified once, here, and recorded for the VirusTotal fallback. An unverified or
+        # invented key header is NOT "keyed": presenting a string must never unlock a
+        # metered upstream.
+        _VT_CTX["keyed"] = bool(_scan_key and _verify_rs_api_key(_scan_key))
+        if not _VT_CTX["keyed"]:
             _source_ip = ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or ""
             if not _check_keyless_ip_quota(_source_ip, _link_check_units(path, params)):
                 logger.warning("keyless scan quota exceeded path=%s ip=%s", path, _source_ip)

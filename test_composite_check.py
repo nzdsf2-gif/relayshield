@@ -381,6 +381,14 @@ class VtFallbackUrlSignal(unittest.TestCase):
                 "_vt_url_cache_get", "_vt_url_cache_put",
                 "_vt_stats_to_signal", "_vt_url_id")
 
+    def setUp(self):
+        # These tests describe the fallback AS A KEYED CALLER SEES IT. Since 2026-10-08 a
+        # keyless request never reaches VirusTotal (see VtFallbackIsKeyedOnly below), so
+        # without this every test here would be asserting on a path they never take.
+        p = unittest.mock.patch.dict(api._VT_CTX, {"keyed": True})
+        p.start()
+        self.addCleanup(p.stop)
+
     def _patch_vt(self, cache=None, report=None, cache_put=None):
         patches = [
             unittest.mock.patch.object(api, "_vt_url_cache_get",
@@ -481,6 +489,103 @@ class VtFallbackUrlSignal(unittest.TestCase):
     def test_short_timeout_and_day_cache(self):
         self.assertEqual(api.VT_FALLBACK_TIMEOUT_S, 5)
         self.assertEqual(api.VT_URL_CACHE_SECONDS, 24 * 3600)
+
+
+class VtFallbackIsKeyedOnly(unittest.TestCase):
+    """The composite check's VirusTotal fallback is for callers with a VERIFIED API key.
+
+    WHY. /v1/composite-check is keyless and free. On 2026-10-06 and 10-07 anonymous traffic
+    spent the whole 500-a-day VirusTotal allowance through the fallback: one client looping on
+    429s and a pool of cloud IPs each under the 300-per-IP cap, which cannot stop a pool.
+
+    THESE GO THROUGH lambda_handler, NOT THE HANDLER. The flag is set in the dispatcher from a
+    verified key, so a test that calls handle_composite_check directly cannot tell whether the
+    wiring exists. The first defect of the Muse work (the dispatcher raising UnboundLocalError
+    before any handler ran) passed every handler-level test.
+    """
+
+    FLAGGED = {"malicious": 4, "suspicious": 0, "harmless": 60, "undetected": 20, "timeout": 0}
+
+    def _call(self, key=None, verified=False, report=None):
+        headers = {"X-RS-API-KEY": key} if key else {}
+        ev = {"path": "/v1/composite-check", "httpMethod": "POST",
+              "body": json.dumps({"url": "https://u.example"}), "headers": headers,
+              "requestContext": {"identity": {"sourceIp": "1.2.3.4"}}}
+        report_mock = unittest.mock.MagicMock(return_value=report)
+        cache_get = unittest.mock.MagicMock(return_value=None)
+        with unittest.mock.patch.object(api, "_check_keyless_ip_quota", lambda *a, **k: True), \
+                unittest.mock.patch.object(api, "_verify_rs_api_key", return_value=verified), \
+                unittest.mock.patch.object(api, "handle_link_check", _fake_link("unknown")), \
+                unittest.mock.patch.object(api, "_vt_url_cache_get", cache_get), \
+                unittest.mock.patch.object(api, "_vt_url_cache_put", unittest.mock.MagicMock()), \
+                unittest.mock.patch.object(api, "_vt_url_report", report_mock):
+            resp = api.lambda_handler(ev, None)
+        return resp, report_mock, cache_get
+
+    def test_a_keyless_caller_never_reaches_virustotal(self):
+        resp, report, cache_get = self._call(key=None)
+        self.assertEqual(resp["statusCode"], 200)
+        report.assert_not_called()
+        cache_get.assert_not_called()
+        self.assertEqual(_data_of(resp)["signals"][0]["level"], "unknown")
+
+    def test_an_invented_key_is_not_a_key(self):
+        """Presenting a string must never unlock a metered upstream."""
+        resp, report, _ = self._call(key="rs_live_not_a_real_key", verified=False)
+        report.assert_not_called()
+        self.assertEqual(_data_of(resp)["signals"][0]["level"], "unknown")
+
+    def test_a_verified_key_still_gets_the_fallback(self):
+        """The paid door must keep working, or this is a removal, not a gate."""
+        resp, report, _ = self._call(key="rs_live_real", verified=True, report=self.FLAGGED)
+        report.assert_called_once()
+        self.assertEqual(_data_of(resp)["signals"][0]["level"], "medium")
+
+    def test_a_keyed_request_does_not_unlock_the_next_keyless_one(self):
+        """A warm Lambda keeps module globals between requests. A flag left True by one
+        caller would hand the fallback to the next stranger."""
+        self._call(key="rs_live_real", verified=True, report=self.FLAGGED)
+        self.assertIs(api._VT_CTX["keyed"], True)
+        resp, report, _ = self._call(key=None)
+        report.assert_not_called()
+        self.assertIs(api._VT_CTX["keyed"], False)
+
+    def test_the_gate_sits_on_the_call_site(self):
+        """Read the call site, not the file: a comment naming the gate must not satisfy this."""
+        import ast
+        tree = ast.parse((ROOT / "relayshield_api.py").read_text(encoding="utf-8"))
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_composite_signal_url")
+        parents = {}
+        for node in ast.walk(fn):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", "") == "_vt_fallback_url_signal"]
+        self.assertEqual(len(calls), 1)
+        node, gated = calls[0], False
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, ast.If) and "keyed" in ast.unparse(node.test):
+                gated = True
+        self.assertTrue(gated, "the VirusTotal fallback call is not under a keyed check")
+
+    def test_the_context_is_reset_every_invocation(self):
+        import ast
+        tree = ast.parse((ROOT / "relayshield_api.py").read_text(encoding="utf-8"))
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "lambda_handler")
+        def _is_keyed_slot(t):
+            return (isinstance(t, ast.Subscript) and getattr(t.value, "id", "") == "_VT_CTX"
+                    and isinstance(t.slice, ast.Constant) and t.slice.value == "keyed")
+        resets = [n for n in ast.walk(fn) if isinstance(n, ast.Assign)
+                  and any(_is_keyed_slot(t) for t in n.targets)
+                  and isinstance(n.value, ast.Constant) and n.value.value is False]
+        self.assertTrue(resets, "lambda_handler never resets _VT_CTX['keyed'] to False")
+
+    def test_the_response_note_does_not_overclaim(self):
+        resp, _, _ = self._call(key=None)
+        self.assertIn("API key", _data_of(resp)["note"])
 
 
 if __name__ == "__main__":

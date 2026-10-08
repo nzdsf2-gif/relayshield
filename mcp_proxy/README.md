@@ -29,6 +29,32 @@ python3 -m mcp_proxy
 
 Point your MCP client at `http://localhost:8090`.
 
+## Config scanner (free)
+
+Before deploying the proxy, scan your MCP client config for security
+issues. The scanner reads Claude Desktop style configs and flags:
+
+- Hardcoded secrets (API keys, tokens, private keys) in env vars and args
+- Filesystem servers rooted at `/` or your home directory
+- Server versions with known advisories (e.g. mcp-server-git prompt
+  injection before the 2025-12-08 fix)
+- Remote servers with no authentication configured
+- Servers that expose dangerous tools (shell exec, broad file write)
+
+```bash
+python3 -m mcp_proxy.scanner                      # auto-detect config
+python3 -m mcp_proxy.scanner /path/to/config.json
+python3 -m mcp_proxy.scanner --format json         # machine-readable
+python3 -m mcp_proxy.scanner --ci                 # for CI pipelines
+```
+
+Findings are color-coded by severity (CRITICAL red, HIGH orange,
+MEDIUM yellow, LOW blue) with remediation advice for each. Exit code
+1 when CRITICAL or HIGH findings exist, so it works in CI.
+
+Fix what the scanner finds, then deploy the proxy for runtime
+protection of every tool call.
+
 ## Demo
 
 Watch the proxy catch a poisoned neighbor in real time, no network
@@ -138,6 +164,8 @@ The proxy tracks the reputation of each upstream MCP server:
 ```bash
 python3 -m unittest mcp_proxy.test_proxy -v      # Phase 1: 19 tests
 python3 -m unittest mcp_proxy.test_neighbor -v  # Phase 2/2.5: 43 tests
+python3 -m unittest mcp_proxy.test_oauth -v      # OAuth: 26 tests
+python3 -m unittest mcp_proxy.test_scanner -v   # scanner: 16 tests
 ```
 
 Covers: indicator extraction, screener verdicts (block/allow/fail-open),

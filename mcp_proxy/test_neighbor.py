@@ -4,6 +4,7 @@ Run: python3 -m unittest mcp_proxy.test_neighbor -v
 """
 
 import json
+import os
 import threading
 import unittest
 import urllib.request
@@ -342,6 +343,127 @@ class TestPoisonedNeighborProxy(unittest.TestCase):
         rep = server.neighbors.get(self.upstream_url)
         self.assertEqual(rep.reputation, CLEAN)
         self.assertEqual(len(rep.flags), 0)
+
+    def test_blocked_call_carries_signed_verdict(self):
+        """A blocked tools/call returns a signed verdict in the error."""
+        from mcp_proxy.verdicts import VerdictSigner
+        signer = VerdictSigner(os.urandom(32).hex())
+        url, server = self._start_proxy()
+        server.signer = signer
+        # Enable arg screening and force the TI check to flag.
+        server.cfg.screening_enabled = True
+        server.screener._check_url = mock.Mock(
+            return_value={"level": "high", "score": 95,
+                          "reasons": ["phishing kit"]})
+        req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": "fetch",
+                          "arguments": {"url": "http://evil.example/x"}}}
+        data = json.dumps(req).encode()
+        r = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            body = json.loads(resp.read())
+        self.assertIn("error", body)
+        verdict = body["error"]["data"]["verdict"]
+        self.assertTrue(verdict["sig"])
+        self.assertTrue(signer.verify(verdict))
+        self.assertEqual(verdict["decision"], "block")
+
+    def test_admin_exposes_pubkey(self):
+        from mcp_proxy.verdicts import VerdictSigner
+        signer = VerdictSigner(os.urandom(32).hex())
+        url, server = self._start_proxy()
+        server.signer = signer
+        data = _get(url + "/_rs/neighbors")
+        self.assertEqual(data["verdict_pubkey"], signer.public_key_hex)
+        self.assertTrue(data["verdicts_signed"])
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5: signed verdicts + kit fingerprints
+# ---------------------------------------------------------------------------
+
+class TestSignedVerdicts(unittest.TestCase):
+    def _signer(self):
+        from mcp_proxy.verdicts import VerdictSigner
+        return VerdictSigner(os.urandom(32).hex())
+
+    def test_sign_verify_roundtrip(self):
+        s = self._signer()
+        v = s.issue("block", "fetch", "abc123",
+                    [{"type": "indicator", "id": "i-1", "detail": "phishing"}],
+                    level="high", score=95, reasons=["bad url"])
+        self.assertTrue(v["sig"])
+        self.assertTrue(s.verify(v))
+
+    def test_tampered_verdict_rejected(self):
+        s = self._signer()
+        v = s.issue("block", "fetch", "abc123", [], level="high")
+        v2 = dict(v)
+        v2["score"] = 1
+        self.assertFalse(s.verify(v2))
+
+    def test_unsigned_graceful(self):
+        from mcp_proxy.verdicts import VerdictSigner
+        s = VerdictSigner("")
+        self.assertFalse(s.signing_enabled)
+        v = s.issue("block", "fetch", "x", [{"type": "t", "id": "1"}])
+        self.assertEqual(v["sig"], "")
+        self.assertFalse(s.verify(v))
+        # Evidence still present without a key.
+        self.assertEqual(v["evidence"], [{"type": "t", "id": "1"}])
+
+
+class TestKitFingerprints(unittest.TestCase):
+    def test_kit_id_extracted_from_result(self):
+        from mcp_proxy.screener import Screener
+        s = Screener(api_base="https://example.invalid")
+        kit = "kit_" + "ab" * 32
+        result = {"result": {"content": [
+            {"type": "text", "text": f"matched {kit} in campaign"}]}}
+        v = s.screen_tool_result(result)
+        self.assertEqual(v["verdict"], "flagged")
+        self.assertIn(kit, v["kit_ids"])
+
+    def test_kit_id_in_verdict_evidence(self):
+        from mcp_proxy.verdicts import VerdictSigner, content_hash_of
+        signer = self._signer()
+        kit = "kit_" + "cd" * 32
+        v = signer.issue(
+            "flag", "search", content_hash_of({"q": "x"}),
+            [{"type": "kit_fingerprint", "id": kit,
+              "detail": "scam-kit fingerprint in tool result"}],
+            reasons=["kit fingerprint found"])
+        self.assertTrue(signer.verify(v))
+        self.assertEqual(v["evidence"][0]["id"], kit)
+        self.assertEqual(v["evidence"][0]["type"], "kit_fingerprint")
+
+    def _signer(self):
+        from mcp_proxy.verdicts import VerdictSigner
+        return VerdictSigner(os.urandom(32).hex())
+
+
+class TestEvidenceBackedQuarantine(unittest.TestCase):
+    def test_quarantine_event_carries_evidence(self):
+        reg = NeighborRegistry(screener=_clean_screener())
+        qm = QuarantineManager(reg)
+        url = "https://evil.example/mcp"
+        ev = [{"type": "kit_fingerprint", "id": "kit_" + "ab" * 32,
+               "detail": "known phishing kit"}]
+        event = qm.quarantine(url, "test quarantine", evidence=ev)
+        self.assertIn("evidence", event)
+        self.assertEqual(event["evidence"][0]["type"], "kit_fingerprint")
+
+    def test_evaluate_passes_evidence(self):
+        reg = NeighborRegistry(screener=_clean_screener())
+        qm = QuarantineManager(reg, auto_quarantine_after=1)
+        url = "https://evil2.example/mcp"
+        reg.flag(url, "flag 1", [{"type": "ti_signal", "id": "x"}])
+        ev = [{"type": "indicator", "id": "ioc-9", "detail": "c2 server"}]
+        self.assertTrue(qm.evaluate(url, evidence=ev))
+        event = qm.events[-1]
+        self.assertTrue(any(e["id"] == "ioc-9" for e in event["evidence"]))
 
 
 if __name__ == "__main__":

@@ -61,6 +61,12 @@ SCENARIOS = [
      "desc": "JWT credential material bound for a non-IdP domain."},
     {"id": 9, "name": "Legitimate OAuth",
      "desc": "Real Google OAuth flow passes clean, no false positive."},
+    {"id": 10, "name": "Volume anomaly",
+     "desc": "Agent floods 30 calls in seconds: 10x baseline rate."},
+    {"id": 11, "name": "Attack chain",
+     "desc": "read file to network send to email: exfiltration chain."},
+    {"id": 12, "name": "Lateral movement",
+     "desc": "Rapid calls across 5 servers: lateral probe flagged."},
 ]
 _SCENARIO_SERVER = {
     1: CLEAN_UPSTREAM,
@@ -72,6 +78,9 @@ _SCENARIO_SERVER = {
     7: "blocked before forward: no upstream contact",
     8: POISONED_UPSTREAM,
     9: CLEAN_UPSTREAM,
+    10: CLEAN_UPSTREAM,
+    11: POISONED_UPSTREAM,
+    12: "multiple servers",
 }
 
 
@@ -82,13 +91,18 @@ def _get_components():
         from .neighbor import NeighborRegistry
         from .quarantine import QuarantineManager
         from .verdicts import VerdictSigner
+        from .behavior import BehaviorTracker
+        from .reputation import ReputationStore
     except ImportError:
         # Fallback for direct script execution / testing
         from screener import Screener
         from neighbor import NeighborRegistry
         from quarantine import QuarantineManager
         from verdicts import VerdictSigner
-    return Screener, NeighborRegistry, QuarantineManager, VerdictSigner
+        from behavior import BehaviorTracker
+        from reputation import ReputationStore
+    return (Screener, NeighborRegistry, QuarantineManager, VerdictSigner,
+            BehaviorTracker, ReputationStore)
 
 
 def _stub_ti(self, url):
@@ -99,16 +113,22 @@ def _stub_ti(self, url):
 
 def _new_components():
     """Fresh screening components with TI stubbed for offline demo."""
-    Screener, NeighborRegistry, QuarantineManager, VerdictSigner = _get_components()
+    (Screener, NeighborRegistry, QuarantineManager, VerdictSigner,
+     BehaviorTracker, ReputationStore) = _get_components()
     screener = Screener(api_base="https://api.relayshield.net")
     # Stub TI URL lookups: offline demo, content checks still run for real.
     screener._check_url = _stub_ti.__get__(screener, type(screener))
     registry = NeighborRegistry()  # no screener: skip TI on register
     quarantine = QuarantineManager(registry)
     signer = VerdictSigner()
+    # Phase 3: behavioral baselining + reputation.
+    behavior = BehaviorTracker(enabled=True)
+    reputation = ReputationStore()
     registry.register(CLEAN_UPSTREAM)
     registry.register(POISONED_UPSTREAM)
-    return screener, registry, quarantine, signer
+    reputation.get_or_create(CLEAN_UPSTREAM)
+    reputation.get_or_create(POISONED_UPSTREAM)
+    return screener, registry, quarantine, signer, behavior, reputation
 
 
 def _rep_of(registry, quarantine, url):
@@ -191,7 +211,8 @@ def run_scenario(scenario_id):
       signature_valid: bool
       server_states: {url: {reputation, flags}} after the scenario
     """
-    screener, registry, quarantine, signer = _new_components()
+    screener, registry, quarantine, signer, behavior, reputation = \
+        _new_components()
     steps = []
 
     def add(phase, label, detail=""):
@@ -218,6 +239,25 @@ def run_scenario(scenario_id):
               "quarantine" if verdict == "QUARANTINE"
               else ("block" if verdict == "BLOCK" else "allow"))
         _server_states(result, registry, quarantine)
+        # Phase 3: feed the persistent demo reputation store so the
+        # dashboard graph accumulates across scenario runs.
+        try:
+            demo_rep = _demo_reputation()
+            srv = result["server"]
+            if srv and srv.startswith("http"):
+                if verdict == "QUARANTINE":
+                    demo_rep.record_quarantine(srv, f"scenario {scenario_id}")
+                elif verdict == "BLOCK":
+                    if category == "attack_chain":
+                        demo_rep.record_attack_chain(srv, f"scenario {scenario_id}")
+                    elif category == "behavioral_anomaly":
+                        demo_rep.record_behavior_anomaly(srv, f"scenario {scenario_id}")
+                    else:
+                        demo_rep.record_flag(srv, f"{category}: scenario {scenario_id}")
+                else:
+                    demo_rep.record_clean_call(srv)
+        except Exception:
+            pass
 
     if scenario_id == 1:
         add("agent", "AI Agent sends tool call", "tools/call: get_help")
@@ -388,6 +428,82 @@ def run_scenario(scenario_id):
                ["known IdP endpoint: accounts.google.com",
                 "no tampering indicators"])
 
+    elif scenario_id == 10:
+        # Phase 3: volume anomaly. Build a baseline, then flood.
+        import time as _time
+        agent = "demo-agent-volume"
+        base = _time.time() - 3600
+        add("agent", "Building agent baseline",
+            "25 normal calls over the past hour")
+        for i in range(25):
+            behavior.check(agent, "search_docs", {"q": "x"},
+                           server_url=CLEAN_UPSTREAM, ts=base + i * 120)
+        add("proxy", "Baseline established",
+            "0.4 calls/min, tool: search_docs")
+        add("agent", "Agent floods the proxy",
+            "30 calls in 3 seconds")
+        now = _time.time()
+        bres = None
+        for i in range(30):
+            bres = behavior.check(agent, "search_docs", {"q": "flood"},
+                                  server_url=CLEAN_UPSTREAM,
+                                  ts=now + i * 0.1)
+        cat = bres.get("poison_category", "behavioral_anomaly")
+        ev = bres.get("reasons", ["volume anomaly detected"])
+        add("corpus", "Behavioral engine fired",
+            f"category: {cat}")
+        add("verdict", "Risk score updated",
+            f"risk: {bres.get('risk_score', 0):.1f}/100")
+        reputation.record_behavior_anomaly(CLEAN_UPSTREAM,
+                                           "volume anomaly: demo flood")
+        finish("BLOCK", cat, ev)
+
+    elif scenario_id == 11:
+        # Phase 3: data exfiltration attack chain.
+        agent = "demo-agent-chain"
+        add("agent", "AI Agent sends tool call",
+            "tools/call: read_customer_file")
+        behavior.check(agent, "read_customer_file", {},
+                       server_url=POISONED_UPSTREAM)
+        add("proxy", "Call 1 recorded", "read_customer_file")
+        add("agent", "AI Agent sends tool call",
+            "tools/call: http_post_external")
+        behavior.check(agent, "http_post_external", {},
+                       server_url=POISONED_UPSTREAM)
+        add("proxy", "Call 2 recorded", "http_post_external")
+        add("agent", "AI Agent sends tool call",
+            "tools/call: send_email_report")
+        bres = behavior.check(agent, "send_email_report", {},
+                              server_url=POISONED_UPSTREAM)
+        cat = bres.get("poison_category", "attack_chain")
+        ev = bres.get("reasons", ["attack chain detected"])
+        add("corpus", "Attack chain matched",
+            "read -> network -> email: data exfiltration")
+        add("verdict", "Risk score updated",
+            f"risk: {bres.get('risk_score', 0):.1f}/100")
+        reputation.record_attack_chain(POISONED_UPSTREAM,
+                                       "data_exfiltration chain")
+        finish("BLOCK", cat, ev)
+
+    elif scenario_id == 12:
+        # Phase 3: lateral movement across servers.
+        agent = "demo-agent-lateral"
+        add("agent", "Agent probes multiple servers",
+            "rapid tools/call across 5 servers")
+        bres = None
+        for i in range(5):
+            srv = f"http://server-{i}.example/mcp"
+            bres = behavior.check(agent, "list_tools", {},
+                                  server_url=srv)
+            reputation.get_or_create(srv)
+        cat = bres.get("poison_category", "attack_chain")
+        ev = bres.get("reasons", ["lateral movement detected"])
+        add("corpus", "Lateral movement detected",
+            "5 distinct servers in 2 minutes")
+        add("verdict", "Risk score updated",
+            f"risk: {bres.get('risk_score', 0):.1f}/100")
+        finish("BLOCK", cat, ev)
+
     else:
         finish("ALLOW", "clean", [f"unknown scenario: {scenario_id}"])
 
@@ -395,6 +511,21 @@ def run_scenario(scenario_id):
 def load_html():
     with open(_HTML_PATH, "r", encoding="utf-8") as f:
         return f.read()
+
+
+# Phase 3: persistent demo reputation store so the graph accumulates
+# across scenario runs in demo mode.
+_DEMO_REPUTATION = None
+
+
+def _demo_reputation():
+    global _DEMO_REPUTATION
+    if _DEMO_REPUTATION is None:
+        _, _, _, _, _, ReputationStore = _get_components()
+        _DEMO_REPUTATION = ReputationStore()
+        _DEMO_REPUTATION.get_or_create(CLEAN_UPSTREAM)
+        _DEMO_REPUTATION.get_or_create(POISONED_UPSTREAM)
+    return _DEMO_REPUTATION
 
 
 class _DemoHandler(http.server.BaseHTTPRequestHandler):
@@ -415,6 +546,9 @@ class _DemoHandler(http.server.BaseHTTPRequestHandler):
             self._send(load_html(), "text/html; charset=utf-8")
         elif path == "/_rs/demo/scenarios":
             self._send(json.dumps({"scenarios": SCENARIOS}))
+        elif path == "/_rs/reputation":
+            # Phase 3: reputation graph data for the dashboard.
+            self._send(json.dumps(_demo_reputation().summary()))
         elif path == "/_rs/health":
             self._send(json.dumps({"status": "ok",
                                    "version": "RelayShield-MCP-Proxy/demo",

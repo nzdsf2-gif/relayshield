@@ -29,6 +29,32 @@ python3 -m mcp_proxy
 
 Point your MCP client at `http://localhost:8090`.
 
+## Config scanner (free)
+
+Before deploying the proxy, scan your MCP client config for security
+issues. The scanner reads Claude Desktop style configs and flags:
+
+- Hardcoded secrets (API keys, tokens, private keys) in env vars and args
+- Filesystem servers rooted at `/` or your home directory
+- Server versions with known advisories (e.g. mcp-server-git prompt
+  injection before the 2025-12-08 fix)
+- Remote servers with no authentication configured
+- Servers that expose dangerous tools (shell exec, broad file write)
+
+```bash
+python3 -m mcp_proxy.scanner                      # auto-detect config
+python3 -m mcp_proxy.scanner /path/to/config.json
+python3 -m mcp_proxy.scanner --format json         # machine-readable
+python3 -m mcp_proxy.scanner --ci                 # for CI pipelines
+```
+
+Findings are color-coded by severity (CRITICAL red, HIGH orange,
+MEDIUM yellow, LOW blue) with remediation advice for each. Exit code
+1 when CRITICAL or HIGH findings exist, so it works in CI.
+
+Fix what the scanner finds, then deploy the proxy for runtime
+protection of every tool call.
+
 ## Demo
 
 Watch the proxy catch a poisoned neighbor in real time, no network
@@ -138,6 +164,8 @@ The proxy tracks the reputation of each upstream MCP server:
 ```bash
 python3 -m unittest mcp_proxy.test_proxy -v      # Phase 1: 19 tests
 python3 -m unittest mcp_proxy.test_neighbor -v  # Phase 2/2.5: 43 tests
+python3 -m unittest mcp_proxy.test_oauth -v      # OAuth: 26 tests
+python3 -m unittest mcp_proxy.test_scanner -v   # scanner: 16 tests
 ```
 
 Covers: indicator extraction, screener verdicts (block/allow/fail-open),
@@ -206,4 +234,45 @@ Run the OAuth tests:
 
 ```bash
 python3 -m unittest mcp_proxy.test_oauth -v   # 26 tests
+```
+
+## Phase 3: Behavioral baselining and reputation graph
+
+Learns normal tool call patterns per agent and flags deviations, plus
+maintains per-server reputation scores for the dashboard graph.
+
+- **Behavioral baselining** (`mcp_proxy/behavior.py`): per-agent
+  profiles track tool frequencies, tool bigrams (consecutive pairs),
+  and hourly call distributions. Flags volume anomalies (10x baseline
+  rate), sequence anomalies (never-seen tool transitions), and time
+  anomalies (calls outside normal hours). Toggle:
+  `MCP_PROXY_BEHAVIOR` (default true).
+- **Attack chain detection**: matches known malicious sequences
+  within a 2-minute window: `read` to `network` to `email` (data
+  exfiltration), rapid calls across 5+ servers (lateral movement),
+  and injection-flagged responses followed by privileged tools
+  (escalation). Flagged as `poison_category: attack_chain`.
+- **Risk scoring**: 0-100 per-agent score, decays with a 10-minute
+  half-life. Scores at or above `MCP_PROXY_BEHAVIOR_QUARANTINE_SCORE`
+  (default 80.0) trigger quarantine evaluation.
+- **Server reputation graph** (`mcp_proxy/reputation.py`): per-server
+  scores 0-100 (higher is more trustworthy). Bands: trusted (70+),
+  watch (40-69), untrusted (below 40). Scores drop on TI hits (-25),
+  flags (-10), quarantines (-40), and attack chains (-20); they
+  recover slowly on clean operation. Served at `GET /_rs/reputation`
+  with per-server score history for the dashboard graph.
+- **New poison categories**: `behavioral_anomaly` (rank 6) and
+  `attack_chain` (rank 9) added to the taxonomy.
+
+Run the Phase 3 tests:
+
+```bash
+python3 -m pytest mcp_proxy/test_behavior.py mcp_proxy/test_reputation.py -v
+```
+
+Try the new demo scenarios (10-12) in the interactive dashboard:
+
+```bash
+python3 -m mcp_proxy.dashboard --demo
+# open http://127.0.0.1:8091/_rs/dashboard
 ```

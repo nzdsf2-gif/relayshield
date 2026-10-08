@@ -10388,3 +10388,107 @@ invented key does not count. Anonymous requests log `vt_fallback_withheld`. Test
 `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/diagnose_vt_usage.py | grep -A12 "VT requests actually spent"`
 Expect no anonymous composite spend. The "VT fallback skipped or failed" row will be large, which is the gate
 working. If the VirusTotal quota email does not arrive tomorrow, that is the first sign it held.
+
+## WHERE 2026-10-08 LEFT THINGS. READ THIS FIRST; IT SUPERSEDES THE 2026-10-07 LIST FOR "WHAT IS NEXT".
+
+Everything below was established this session and is not recorded elsewhere. The VT root cause, fix and the
+two cache grants are in the section directly above this one and are not repeated.
+
+### HOW THE VT DIAGNOSIS ACTUALLY WENT, BECAUSE THE FIRST ANSWER WAS WRONG
+
+**I told Andrew the free surfaces had been "ruled out". They had not.** `tools/diagnose_vt_usage.py`'s
+docstring said the Mini App, the Chrome extension and the widget do not call VirusTotal. That was true until
+2026-10-02 (`aa697dd`, all three moved to `/v1/composite-check`) and false from 2026-10-04 (`579de4c`, the
+composite check gained a VT fallback). **A docstring that rules a surface out is a lead, not a fact**, and this
+one had been stale for four days while two quota emails arrived. It is corrected in the tool, and the tool now
+counts `composite-check signals=` lines (an upper bound on fallback spend) and `VT fallback` lines.
+
+**The measurement that settled it was a different table.** The composite log line carries no source, so the
+diagnostic could say HOW MANY but not WHO. `_check_keyless_ip_quota` already wrote one counter per source IP per
+UTC day to `relayshield_demo_key_usage` (key `ip#<ip>#<YYYY-MM-DD>`, 3-day TTL), so the answer was already in
+DynamoDB. `tools/keyless_ip_top.py` reads it (read-only, masks to two octets by default; IPs are personal data
+and are not recorded here). Shape on 2026-10-06/07: one client looping on 429s (5,113 attempts one day, 2,120 the
+next, capped at 300 served) plus a pool of about 37 cloud addresses each under the per-IP cap. **A per-IP cap
+cannot stop a pool**, which is why the fix is a gate on who may spend the key and not a lower cap.
+
+**The counter keeps incrementing past the cap**, so "5,113" is attempts and "300" is what was served. Quoting
+the first as spend would overstate it.
+
+**Not covered by this fix and still unmeasured:** Telegram `/scan` (logs nothing countable), anything else on the
+same VT account, and Andrew's own use of the VT web UI on that login.
+
+### THREE TEST-WRITING SLIPS, ALL CAUGHT BY RUNNING, ALL THE SAME FAMILY
+
+1. **A splice guard matched my own comment.** `"VtFallbackIsKeyedOnly" not in s` was satisfied by a comment
+   that named the class, so the splice refused, and my first "proof" runs then ran against a file that did not
+   contain the new tests and proved nothing. The guard is `"class VtFallbackIsKeyedOnly" not in s`. This is the
+   seventh occurrence of a guard fooled by prose in this repo; the rule stays: strip comments in the FIRST version.
+2. **An `ast.unparse` comparison assumed double quotes.** `ast.unparse` emits single quotes, so a test comparing
+   to `'_VT_CTX["keyed"]'` failed on correct code. Check the node (Subscript, Constant), never its string form.
+3. **A decoy row was counted.** The stub test for `keyless_ip_top.py` surfaced a `demo#abc#...` row because the
+   filter was server-side only. The tool re-checks `startswith("ip#")` and the day suffix client-side.
+
+### AWS PARTNER CENTRAL, DONE THIS SESSION (all Andrew's clicks)
+
+* **Enrolled in the Software Path** (Partner Scorecard confirmed it pointed the same way). APN membership is
+  not automatic from account `239677749008`; Dave Shapiro's "self-service for early stage partners" means
+  Marketplace listing needs no APN tier, but co-sell programmes do.
+* **A Partner Central solution was created** from the four public Marketplace products (Bundle A, B, D and the
+  TI product). **"Update visibility" was deliberately NOT clicked.** Reason: the Partner Solutions Finder is a
+  Partner Central surface, not AWS Marketplace, and nothing needs to be public for the Foundational Technical
+  Review to start. A multi-product solution is possible later.
+* **THE RULE FROM ANDREW: no "Bundle D" (or any internal bundle name) in anything a buyer or AWS reviewer reads.**
+  The solution Value proposition, Description, Integration details and the three use-case details were rewritten
+  to describe capabilities and sources only, with no corpus counts (MEASUREMENT DOCTRINE). The copy lives in the
+  chat only; if it is needed again, rebuild it from `aws_bundle_d_short_description.txt` and
+  `aws_marketplace/bundle_d_listing_copy.json` and strip the names.
+* **UNVERIFIED, AWS pages are egress-blocked from the container:** ISV Accelerate's thresholds (I recalled "5
+  launched plus 15 qualified opportunities in 12 months" and a small revenue floor). Read AWS's own page before
+  relying on either number. Andrew's catch-22 is real: ISV Accelerate wants ACE opportunities, ACE needs the
+  Software Path, and the first opportunities have to come from somewhere.
+
+### THE STATE OF EACH SURFACE THE VT QUESTION TOUCHED, FROM ANDREW
+
+* **Mini App: not the source.** He has run no URL scans.
+* **Chrome extension: tabled.** A zip submitted after the store's privacy-policy change did not pass; changes are
+  resubmitted and pending review. (This sits oddly beside the 2026-10-02 record of a live v0.2.1 listing; both
+  are Andrew's reports. Treat the CURRENT review status as unknown until he reads the dashboard.)
+* **Shopify screening Worker** calls composite-check with a per-shop key, so it is a keyed caller and keeps the
+  VT fallback. It returns 200 on failure, so a failing upstream does not become a retry storm.
+
+### NEXT-SESSION TODOS, IN ORDER
+
+1. **Prove the VT fix held.** After a full UTC day of traffic:
+   `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/diagnose_vt_usage.py | grep -A12 "VT requests actually spent"`.
+   Expect no anonymous composite spend and a large "VT fallback skipped or failed" row. If a quota email arrives
+   anyway, send the output: it names the surface, and Telegram `/scan` is the spender still uncounted.
+2. **Hand deploys that CI does not do, status UNKNOWN since 2026-10-07:** the telemetry Lambda
+   (`relayshield_telemetry.py` is in the `paths:` trigger but not `LAMBDA_MAP`; `sh tools/handler_drift.sh
+   relayshield_telemetry.py` resolves the live name and reads the diff first), `relayshield-weekly-metrics`,
+   and the checkemail Worker. Until the telemetry Lambda is updated it answers 400 to `checkemail_use` and
+   nothing is counted or logged as an error.
+3. **Partner Central, in this order:** start the Foundational Technical Review on the solution; log the first
+   ACE opportunities and confirm the Opportunities page works (there was a migration banner); open the
+   Co-Selling with AWS module; ask Dave Shapiro for a Partner Development Manager intro; read AWS's ISV
+   Accelerate page for the real thresholds. Do not click "Update visibility".
+4. **OpenAI listing ("RelayShield Scam Checks", live).** Its description quotes stale figures (115 channels,
+   494K indicators, 7.8M citations; measured 123, 661,609 distinct, 8.3M+). Propose copy that names sources, not
+   counts. Settle which attribution key it sends and register it in all three lists BEFORE changing anything.
+   The route/key work for it sits on unmerged `claude/gallant-hawking-4oerzg`.
+5. **Hudson Rock Cavalier terms: still UNREAD.** Andrew's one look: the Terms link on
+   `cavalier.hudsonrock.com/docs` for commercial use, attribution, redistribution. If attribution is required it
+   collides with the no-vendor-names rule and the choice is his.
+6. **CS Mobile v1.7.0 build is blocked on a JDK on Andrew's Mac**
+   (`/usr/libexec/java_home -V`, else Android Studio's bundled `jbr`). Paste the store copy only together with
+   the build. Arjen: 100% Stripe discount exists, so do NOT cancel his subscription (cancelling revokes
+   `cs_mobile_access`); if he still gets a 402 on paid screens, suspect his other key record.
+7. **Chrome Web Store:** read the CURRENT review status on the dashboard. D&B change decision is due about
+   2026-10-10; if approved, open a Chrome support ticket asking it to re-pull trader info.
+8. **`support@relayshield.net` mailbox is still unconfirmed** and is the contact on the live XSOAR pack.
+9. **`relayshield-signup-api` is reported by `check_deploy_invoke_policy.py` as missing from the invoke
+   policy.** Seen in passing, unrelated to the VT work, not investigated. It is run 134's shape waiting for its
+   first mapped deploy.
+10. **Carried, unchanged:** `tools/backfill_first_seen.py --apply` unconfirmed; `WA_NUMBER` empty in both
+    Workers; StoreBot submission; Smithery FD-11; the decision on `claude/gallant-hawking-4oerzg`; mapping
+    `relayshield_watchlist_monitor.py` and `relayshield-mpp-settlement` in the deployer; INTEL-5; the IAM split
+    beyond `relayshield-intel-feed`; the WhatsApp plaintext `url=%s` log line versus the privacy page's claim.

@@ -544,7 +544,7 @@ export function renderDashboard(shop, screenings, apiKey, host) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RelayShield Order Screening</title>
-<meta name="shopify-api-key" content="90f65a62330a8c5a12cd198ea32ef2d4" />
+<meta name="shopify-api-key" content="${esc(apiKey)}" />
 <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 <script>
   (function() {

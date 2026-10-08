@@ -10553,11 +10553,19 @@ unknown, so read `sh tools/handler_drift.sh relayshield_weekly_metrics.py` befor
 The single-product Partner Central solution for the FTR links ONE Marketplace product, the
 Agentic Attack Surface listing (`prod-kkvurtspreofy`). Names carry no internal bundle letter, per
 Andrew's rule that nothing a buyer or AWS reviewer reads says "Bundle D". Solution name
-`RelayShield Agentic Attack Surface API - FTR`, external title `RelayShield Agentic Attack Surface
-API`. Both are unverified against uniqueness: the form says each must be unique, so a collision with
+`RelayShield Agentic Attack Surface API` for BOTH the internal name and the external title (Andrew
+dropped the " - FTR" suffix I first suggested, 2026-10-08). Both are unverified against uniqueness: the form says each must be unique, so a collision with
 the four-product solution's name is possible and the form will say so.
 
 The Well-Architected review scope is the `api.relayshield.net` stack in account `239677749008`,
 region `us-east-1` (read from `deploy_lambdas.yml`), described by capability and with no corpus
 counts. Which lens AWS expects for the FTR is UNVERIFIED (docs.aws.amazon.com is egress-blocked):
 the Framework lens is the baseline, and the FTR Guide inside Partner Central is the authority.
+
+**Drift read 2026-10-08, `sh tools/handler_drift.sh relayshield_weekly_metrics.py`:** live
+`relayshield-weekly-metrics` (python3.12, handler `relayshield_weekly_metrics.lambda_handler`,
+LastModified 2026-09-28T23:52:37Z) is byte-identical to commit `a56ee4ad` and merely STALE: nothing
+live-only, nothing to recover. It lacks the three 2026-10-06 commits (channel breakdown, telemetry,
+email-checker rows) and the cumulative-plus-weekly indicator rows, and it is a single-file package.
+It is still in neither `deploy_lambdas.yml` nor the invoke policy, so a deploy is a hand
+`update-function-code` until it is mapped (the mapping commit must touch the `.py`).

@@ -71,6 +71,14 @@ class ProxyConfig:
             not in ("false", "", "0", "no")
         )
 
+        # OAuth flow protection: validate OAuth URLs against known
+        # identity providers and check tool results for credential
+        # exfiltration toward non-IdP infrastructure.
+        self.oauth_screening_enabled = (
+            os.environ.get("MCP_PROXY_OAUTH_SCREENING", "true").lower()
+            != "false"
+        )
+
     @property
     def block_level_set(self) -> set:
         return {lvl.strip().lower() for lvl in self.block_levels.split(",")}

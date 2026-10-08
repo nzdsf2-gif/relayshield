@@ -98,11 +98,14 @@ The proxy tracks the reputation of each upstream MCP server:
 - **Poison categories:** every screening verdict carries a
   `poison_category` taxonomy field, included in signed verdicts, MCP
   error responses, and structured logs. Categories, highest severity
-  first: `kit_match` (scam-kit fingerprint) > `malicious_url` (TI
-  hit) > `prompt_injection` (known phrases) > `secret_leak` (private
-  keys/credentials) > `pii_leak` (unredacted PII) >
-  `unknown_synthetic` (novel instruction-like phrasing with no known
-  pattern match; placeholder for the Phase 3 classifier) > `clean`.
+  first: `credential_exfiltration` (OAuth/JWT material bound for
+  non-IdP infrastructure) > `kit_match` (scam-kit fingerprint) >
+  `malicious_url` (TI hit) > `oauth_tampering` (OAuth flow on a
+  foreign, unaffiliated domain) > `prompt_injection` (known phrases)
+  > `secret_leak` (private keys/credentials) > `pii_leak` (unredacted
+  PII) > `unknown_synthetic` (novel instruction-like phrasing with
+  no known pattern match; placeholder for the Phase 3 classifier)
+  > `clean`.
   When several detections fire, the highest-severity category wins.
 - **Quarantine:** after `MCP_PROXY_QUARANTINE_AFTER` flags (default 3),
   the server is auto-quarantined. Quarantined servers get zero traffic
@@ -155,3 +158,33 @@ produces verdicts nobody can verify.
 per-server quarantine (fail-closed), admin endpoints. Not yet built:
 behavioral baselining, cross-tool correlation, policy enforcement.
 See the MCP Proxy build scope doc for the full roadmap.
+
+## OAuth flow protection
+
+Catches the OAuth discovery-tampering attack class disclosed against
+MCP SDKs in 2026: a malicious server alters the OAuth flow so the
+victim's login still runs at the legitimate identity provider while
+credentials are redirected to attacker infrastructure.
+
+- **Endpoint validation** (`mcp_proxy/oauth.py`): OAuth URLs in tool
+  call arguments and tool results are checked against known identity
+  providers (Google, GitHub, Microsoft, Auth0, Okta, including
+  wildcard tenants). An IdP-specific path (or any OAuth flow) on a
+  foreign, unaffiliated domain is `oauth_tampering` and blocks the
+  call. Toggle: `MCP_PROXY_OAUTH_SCREENING` (default true).
+- **Credential exfiltration**: tool results are scanned for JWTs,
+  authorization codes, PKCE verifiers, and client secrets. When this
+  material appears bound for non-IdP infrastructure it is flagged as
+  `credential_exfiltration` (highest severity). Matched credential
+  values are never logged or returned; only pattern types, counts,
+  and destination domains appear in verdicts. Query strings are
+  stripped from URLs in reasons via `redacted_url`.
+- **New-domain caution**: OAuth flows toward plausible first-party
+  auth hosts with no reputation history are flagged as
+  `unknown_synthetic` (medium severity, caution only, no block).
+
+Run the OAuth tests:
+
+```bash
+python3 -m unittest mcp_proxy.test_oauth -v   # 26 tests
+```

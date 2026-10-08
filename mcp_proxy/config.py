@@ -53,6 +53,13 @@ class ProxyConfig:
             os.environ.get("MCP_PROXY_RESULT_SCREENING", "true").lower()
             != "false"
         )
+        # Check tool results for unredacted PII (SSN, credit card,
+        # bulk email). Disable in trusted environments where results
+        # legitimately carry PII.
+        self.pii_screening_enabled = (
+            os.environ.get("MCP_PROXY_PII_SCREENING", "true").lower()
+            != "false"
+        )
 
         # Phase 2.5: barbed wire.
         # Ed25519 signing key for verdicts (64 hex chars = 32 bytes).

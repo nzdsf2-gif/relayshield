@@ -69,9 +69,13 @@ The proxy tracks the reputation of each upstream MCP server:
 
 - **Registration:** each upstream's domain is TI-screened on first sight.
 - **Result screening:** every `tools/call` response is checked for
-  prompt-injection phrases, embedded malicious URLs, and leaked secret
-  material. Flagged responses mark the server suspicious (fail-open: the
-  response still reaches the caller, but the flag is recorded).
+  prompt-injection phrases, embedded malicious URLs, leaked secret
+  material, scam-kit fingerprints, and unredacted PII (SSN, credit
+  card via Luhn, bulk email). PII verdicts carry pattern types and
+  counts only; matched values are never logged or returned. Flagged
+  responses mark the server suspicious (fail-open: the response still
+  reaches the caller, but the flag is recorded). Toggle with
+  `MCP_PROXY_PII_SCREENING` (default true).
 - **Quarantine:** after `MCP_PROXY_QUARANTINE_AFTER` flags (default 3),
   the server is auto-quarantined. Quarantined servers get zero traffic
   (fail-closed) until cleared.
@@ -83,7 +87,7 @@ The proxy tracks the reputation of each upstream MCP server:
 
 ```bash
 python3 -m unittest mcp_proxy.test_proxy -v      # Phase 1: 19 tests
-python3 -m unittest mcp_proxy.test_neighbor -v  # Phase 2/2.5: 33 tests
+python3 -m unittest mcp_proxy.test_neighbor -v  # Phase 2/2.5: 43 tests
 ```
 
 Covers: indicator extraction, screener verdicts (block/allow/fail-open),
@@ -97,8 +101,8 @@ Passthrough + TI screening on tool call arguments.
 ## Phase 2 scope
 
 Poisoned neighbor detection: upstream reputation tracking, tool result
-screening (prompt injection, malicious URLs, secret material),
-auto-quarantine with per-server fail-closed enforcement.
+screening (prompt injection, malicious URLs, secret material, unredacted
+PII), auto-quarantine with per-server fail-closed enforcement.
 
 ## Phase 2.5 scope: barbed wire
 

@@ -27,6 +27,7 @@ KNOWN_IDPS = {
     "microsoft": ["login.microsoftonline.com"],
     "auth0": ["*.auth0.com"],
     "okta": ["*.okta.com"],
+    "apple": ["appleid.apple.com"],
 }
 
 # Path signatures characteristic of each IdP's OAuth flow. An OAuth
@@ -38,7 +39,8 @@ _IDP_PATH_SIGNATURES = {
     "microsoft": ["/oauth2/v2.0/", "/common/oauth2/",
                   "/organizations/oauth2/"],
     "auth0": ["/oauth/token"],
-    "okta": ["/oauth2/v1/"],
+    "okta": ["/oauth2/v1/"],,
+    "apple": ["/auth/authorize"],
 }
 
 # Generic OAuth path markers. Any URL carrying one of these is

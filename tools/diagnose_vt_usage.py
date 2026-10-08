@@ -11,7 +11,9 @@ call VirusTotal on ONE shared key: /v1/scan-url + /v1/result (the checkemail@ Wo
 calls these for up to five links per email and polls every 2.5s for up to 12s), /v1/scan-file,
 /v1/ip-intel, the composite check's fallback, the Telegram /scan path and the WhatsApp bot
 (report lookup, submission, then a poll every 3s for up to 30s per URL, 45s per file).
-None of the FREE front doors (Mini App, Chrome extension, widget, /v1/link-check) calls it.
+/v1/link-check and the Mini App do not call it. CORRECTED 2026-10-08: this line used to say the
+Chrome extension and the widget do not either, which was true until 2026-10-04 and false after
+it: both call /v1/composite-check, which falls back to VirusTotal on an unknown URL.
 
 WHAT IT CAN AND CANNOT SEE. Polls are not logged, so these counts are LOWER BOUNDS on VT
 requests, and the multiplier is large: one unknown link is 1 submission plus up to ~5 polls
@@ -66,6 +68,14 @@ def main() -> int:
         ("scan-file submissions", API, "scan-file submitted"),
         ("VT results returned by /v1/result", API, "VT result"),
         ("ip-intel lookups (cache hits and own-corpus hits INCLUDED)", API, "ip-intel query_type"),
+        # THE SEVENTH SPENDER THIS TOOL DID NOT COUNT. /v1/composite-check falls back to a VT URL
+        # report on an "unknown" URL (added 2026-10-04) and its cache table did not exist until
+        # 2026-10-07, so every unknown URL was one VT request. Callers: the Chrome extension, the
+        # Shopify order-screening Worker, the Telegram widget. Every one of those lines is an UPPER
+        # bound on that spend (a known-bad or cached URL never reaches VT), so a small number here
+        # rules the composite out and a large one names it.
+        ("composite-check requests (upper bound on VT fallback spend)", API, "composite-check signals="),
+        ("VT fallback skipped or failed (no key, quota, or upstream error)", API, "VT fallback"),
         ("WhatsApp URL scans completed", WA, "VT URL scan complete"),
         ("WhatsApp analyses that TIMED OUT (each burned ~10 polls)", WA, "did not complete within"),
     ):

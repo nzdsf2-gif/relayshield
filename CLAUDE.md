@@ -10492,3 +10492,37 @@ same VT account, and Andrew's own use of the VT web UI on that login.
     Workers; StoreBot submission; Smithery FD-11; the decision on `claude/gallant-hawking-4oerzg`; mapping
     `relayshield_watchlist_monitor.py` and `relayshield-mpp-settlement` in the deployer; INTEL-5; the IAM split
     beyond `relayshield-intel-feed`; the WhatsApp plaintext `url=%s` log line versus the privacy page's claim.
+
+## 2026-10-08: THE AWS FTR NEEDS A SINGLE-PRODUCT SOLUTION, AND THE PARTNER CENTRAL SOLUTION WE BUILT HAS FOUR
+
+**Found by reading AWS's FTR request guide (via search results quoting it; docs.aws.amazon.com is
+egress-blocked, so this is SECONDARY evidence, and the FTR Guide inside Partner Central is the
+authority).** The Validation tab's prerequisite check requires the solution to link to EXACTLY ONE
+AWS Marketplace product, of a software type (SaaS, AMI, Container or ML), and checks run in
+sequence so later ones stay blocked until earlier ones pass.
+
+**The solution created on 2026-10-08 was built from FOUR public products (Bundle A, Bundle B,
+Bundle D and the TI product), so it will fail that first check.** Do not edit it and do not click
+"Update visibility" on it. The FTR needs a SEPARATE single-product solution.
+
+**Route** (navigation from search results, unverified): Partner Central, Build, Solutions, open the
+solution, Validation tab, Request validation, then the self-assessment checklist and evidence
+uploads (3 MB each). AWS says review is AI-assisted, with an expert contact within two weeks if it
+fails. Approval validity is reported as two years by one source and three by another; read the FTR
+Guide.
+
+**Evidence required: a SOC 2 Type II report OR a Well-Architected Framework Review (WAFR)** covering
+the solution's primary AWS-hosted workload. We have no SOC 2, so the WAFR (run in the Well-Architected
+Tool, account 239677749008) is the realistic route and the longest lead item. It does NOT depend on
+the solution existing, only on its scope matching the product the solution links.
+
+**The product must also show it runs on AWS, with an architecture diagram uploaded in the
+Marketplace Management Portal.** Bundle B's Architecture details tab was left on "None of the above"
+because third-party vendor APIs run outside AWS; check what the chosen product's tab says before
+requesting validation. `bundle_b_architecture_details_2026-09-20.md` has that reasoning.
+
+**Chosen product: Bundle D (`prod-kkvurtspreofy`)**, the longest-public and strongest listing. Its
+declared MCP endpoint is a Hugging Face Space, but `hf-space-mcp-server/app.py` is a thin proxy that
+posts to `API_BASE_URL = https://api.relayshield.net`, so the compute and data are API Gateway,
+Lambda and DynamoDB in 239677749008. Say so in the diagram and the WAFR scope rather than leaving
+the HF host to read as the workload.

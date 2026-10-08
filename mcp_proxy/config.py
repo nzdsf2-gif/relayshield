@@ -41,6 +41,19 @@ class ProxyConfig:
         # "medium" blocks high and medium. "unknown" never blocks.
         self.block_levels = os.environ.get("MCP_PROXY_BLOCK_LEVELS", "high,medium")
 
+        # Phase 2: poisoned-neighbor detection.
+        # Flags before a server is auto-quarantined.
+        self.quarantine_after = int(
+            os.environ.get("MCP_PROXY_QUARANTINE_AFTER", "3")
+        )
+        # Optional webhook URL for quarantine/flag alerts (POST JSON).
+        self.alert_webhook = os.environ.get("MCP_PROXY_ALERT_WEBHOOK", "")
+        # Screen upstream tool *results* for poisoned content.
+        self.result_screening_enabled = (
+            os.environ.get("MCP_PROXY_RESULT_SCREENING", "true").lower()
+            != "false"
+        )
+
     @property
     def block_level_set(self) -> set:
         return {lvl.strip().lower() for lvl in self.block_levels.split(",")}

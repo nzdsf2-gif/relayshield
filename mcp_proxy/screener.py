@@ -31,6 +31,30 @@ _SKIP_DOMAINS = {
     "localhost", "example.com", "example.org", "example.net",
 }
 
+# Prompt-injection phrases commonly found in poisoned tool results.
+# Matched case-insensitively against result text.
+_PROMPT_INJECTION_PATTERNS = [
+    "ignore previous instructions",
+    "ignore all previous instructions",
+    "disregard previous instructions",
+    "disregard all prior instructions",
+    "override your instructions",
+    "do not follow your instructions",
+    "you are now ",
+    "new system prompt",
+    "[system]",
+    "bypass your safety",
+    "forget your instructions",
+]
+
+# Secret material that should never appear in a tool result; its
+# presence suggests exfiltration or a poisoned payload.
+_SECRET_PATTERNS = [
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+]
+
 
 def extract_indicators(obj, _depth=0, _seen=None) -> dict:
     """Recursively extract URLs, domains, and IPs from tool arguments.
@@ -168,6 +192,101 @@ class Screener:
         verdict["tool_name"] = tool_name
         return verdict
 
+    def screen_tool_result(self, result_obj) -> dict:
+        """Screen an upstream tools/call result for poisoned content.
+
+        Checks result text for prompt-injection phrases, embedded
+        malicious URLs (via TI), and leaked secret material.
+
+        Returns {"verdict": "clean"|"flagged", "reasons": [...],
+                 "details": {...}}.
+        """
+        texts = _extract_result_text(result_obj)
+        reasons = []
+        details = {"text_chunks": len(texts)}
+
+        # 1. Prompt-injection heuristics.
+        for text in texts:
+            lowered = text.lower()
+            for pattern in _PROMPT_INJECTION_PATTERNS:
+                if pattern in lowered:
+                    reasons.append(
+                        f"prompt-injection phrase in tool result: "
+                        f"'{pattern}'"
+                    )
+                    break
+
+        # 2. Secret material in results.
+        for text in texts:
+            for pattern in _SECRET_PATTERNS:
+                if pattern in text:
+                    reasons.append(
+                        "secret material in tool result "
+                        f"({pattern.strip('-')[:24].strip()}...)"
+                    )
+                    break
+
+        # 3. Malicious URLs embedded in result text.
+        indicators = extract_indicators({"texts": texts})
+        urls = indicators.get("urls", [])
+        details["urls_found"] = len(urls)
+        worst = None
+        for url in urls[:10]:
+            try:
+                check = self._check_url(url)
+            except Exception as exc:
+                log.warning("result URL screening failed for %s: %s",
+                            url, exc)
+                continue
+            if _level_rank(check["level"]) > _level_rank(
+                    worst["level"] if worst else "unknown"):
+                worst = check
+        if worst and worst["level"] in self.block_levels:
+            reasons.append(
+                f"malicious URL in tool result: level={worst['level']} "
+                f"score={worst['score']}"
+            )
+            details["url_reasons"] = worst["reasons"]
+
+        return {
+            "verdict": "flagged" if reasons else "clean",
+            "reasons": reasons,
+            "details": details,
+        }
+
 
 def _level_rank(level: str) -> int:
     return {"unknown": 0, "medium": 1, "high": 2}.get(level, 0)
+
+
+def _extract_result_text(result_obj) -> list:
+    """Pull text chunks out of an MCP tools/call result object.
+
+    Handles {"result": {"content": [{"type": "text", "text": ...}]}},
+    plain {"content": [...]}, and raw strings. Cycle-safe.
+    """
+    texts = []
+    seen = set()
+
+    def _walk(node, depth):
+        if depth > 10 or id(node) in seen:
+            return
+        if isinstance(node, (dict, list)):
+            seen.add(id(node))
+        if isinstance(node, str):
+            if node.strip():
+                texts.append(node)
+        elif isinstance(node, dict):
+            # MCP content blocks carry the text directly.
+            if node.get("type") == "text" and isinstance(node.get("text"),
+                                                         str):
+                texts.append(node["text"])
+            else:
+                for v in node.values():
+                    _walk(v, depth + 1)
+        elif isinstance(node, (list, tuple)):
+            for v in node:
+                _walk(v, depth + 1)
+
+    _walk(result_obj, 0)
+    return texts

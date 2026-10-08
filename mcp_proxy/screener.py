@@ -59,6 +59,22 @@ _SECRET_PATTERNS = [
     "-----BEGIN OPENSSH PRIVATE KEY-----",
 ]
 
+# Unredacted PII patterns in tool results. Detecting these catches the
+# leak class seen in the 2026-10 federal MCP disclosures (veterans'
+# names, SSNs, and DOBs sitting in unredacted server logs): tool
+# results must never carry raw PII. Only pattern types and counts are
+# ever reported; matched values are never logged or returned.
+_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+# PAN-shaped digit runs (13-19 digits, ISO/IEC 7812), optional
+# spaces or dashes between groups.
+_CARD_SEQ_RE = re.compile(r"\b(?:\d[ \-]?){13,19}\b")
+_EMAIL_RE = re.compile(
+    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+)
+# More distinct email addresses than this in one result suggests a
+# bulk data leak rather than ordinary contact info.
+_BULK_EMAIL_THRESHOLD = 5
+
 
 def extract_indicators(obj, _depth=0, _seen=None) -> dict:
     """Recursively extract URLs, domains, and IPs from tool arguments.
@@ -116,7 +132,8 @@ class Screener:
     """Screens tool call arguments against RelayShield TI."""
 
     def __init__(self, api_base: str, api_key: str = "", timeout: float = 5.0,
-                 block_levels: set = None, kit_lookup_enabled: bool = False):
+                 block_levels: set = None, kit_lookup_enabled: bool = False,
+                 pii_screening_enabled: bool = True):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
@@ -124,6 +141,10 @@ class Screener:
         # When True, kit_<sha256> IDs found in results are enriched via
         # the /v1/payg/scamkit-match API.
         self.kit_lookup_enabled = kit_lookup_enabled
+        # When True, tool results are checked for unredacted PII
+        # (SSN, credit card, bulk email). Disable in trusted
+        # environments where results legitimately carry PII.
+        self.pii_screening_enabled = pii_screening_enabled
 
     def screen_indicators(self, indicators: dict) -> dict:
         """Screen extracted indicators. Returns a verdict dict.
@@ -225,11 +246,14 @@ class Screener:
         """Screen an upstream tools/call result for poisoned content.
 
         Checks result text for prompt-injection phrases, embedded
-        malicious URLs (via TI), leaked secret material, and known
-        scam-kit fingerprint IDs.
+        malicious URLs (via TI), leaked secret material, known
+        scam-kit fingerprint IDs, and unredacted PII (SSN, credit
+        card, bulk email).
 
         Returns {"verdict": "clean"|"flagged", "reasons": [...],
-                 "details": {...}, "kit_ids": [...]}.
+                 "details": {...}, "kit_ids": [...], "pii_leak": bool}.
+        PII reasons and details carry pattern types and counts only;
+        matched PII values are never logged or returned.
         """
         texts = _extract_result_text(result_obj)
         reasons = []
@@ -310,16 +334,89 @@ class Screener:
         if kit_evidence:
             details["kit_evidence"] = kit_evidence
 
+        # 6. Unredacted PII in tool results. Reasons and details carry
+        # pattern types and counts only; matched values never leave
+        # this function.
+        pii_counts = _find_pii(texts) if self.pii_screening_enabled else {}
+        pii_found = {k: c for k, c in pii_counts.items() if c}
+        if pii_found:
+            _PII_LABELS = {
+                "ssn": "SSN",
+                "credit_card": "credit card",
+                "bulk_email": "bulk email",
+            }
+            for kind in sorted(pii_found):
+                count = pii_found[kind]
+                label = _PII_LABELS[kind]
+                plural = "s" if count != 1 else ""
+                reasons.append(
+                    f"pii_leak: unredacted {label} pattern in tool result "
+                    f"({count} occurrence{plural})"
+                )
+            details["pii"] = pii_found
+
         return {
             "verdict": "flagged" if reasons else "clean",
             "reasons": reasons,
             "details": details,
             "kit_ids": kit_ids,
+            "pii_leak": bool(pii_found),
         }
 
 
 def _level_rank(level: str) -> int:
     return {"unknown": 0, "medium": 1, "high": 2}.get(level, 0)
+
+
+def _luhn_ok(digits: str) -> bool:
+    """Luhn checksum for a digit string (no separators)."""
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = ord(ch) - 48
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total > 0 and total % 10 == 0
+
+
+def _looks_like_ssn(value: str) -> bool:
+    """Reject SSN-shaped strings that cannot be real SSNs.
+
+    Excludes the never-issued area numbers (000, 666, 900-999),
+    group 00, and serial 0000. Returns True for plausible SSNs.
+    """
+    area, group, serial = value.split("-")
+    if area in ("000", "666") or area.startswith("9"):
+        return False
+    if group == "00" or serial == "0000":
+        return False
+    return True
+
+
+def _find_pii(texts: list) -> dict:
+    """Detect unredacted PII across result texts.
+
+    Returns {"ssn": n, "credit_card": n, "bulk_email": n} with counts
+    only. Matched PII values are discarded, never returned or logged.
+    """
+    counts = {"ssn": 0, "credit_card": 0, "bulk_email": 0}
+    emails = set()
+    for text in texts:
+        for m in _SSN_RE.finditer(text):
+            if _looks_like_ssn(m.group(0)):
+                counts["ssn"] += 1
+        for m in _CARD_SEQ_RE.finditer(text):
+            digits = re.sub(r"[ \-]", "", m.group(0))
+            if (13 <= len(digits) <= 19 and len(set(digits)) > 1
+                    and _luhn_ok(digits)):
+                counts["credit_card"] += 1
+        for m in _EMAIL_RE.finditer(text):
+            emails.add(m.group(0).lower())
+    if len(emails) > _BULK_EMAIL_THRESHOLD:
+        counts["bulk_email"] = len(emails)
+    return counts
 
 
 def _extract_result_text(result_obj) -> list:

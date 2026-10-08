@@ -182,6 +182,185 @@ class TestScreenToolResult(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# PII redaction checks in tool results
+# ---------------------------------------------------------------------------
+
+class TestPIIRedaction(unittest.TestCase):
+    SSN = "123-45-6789"
+    CARD = "4111-1111-1111-1111"
+
+    def _result_with(self, text):
+        return {"result": {"content": [{"type": "text", "text": text}]}}
+
+    def test_ssn_flagged_as_pii_leak(self):
+        s = _clean_screener()
+        v = s.screen_tool_result(
+            self._result_with(f"Claim for SSN {self.SSN} processed."))
+        self.assertEqual(v["verdict"], "flagged")
+        self.assertTrue(v["pii_leak"])
+        self.assertTrue(any("pii_leak" in r and "SSN" in r
+                            for r in v["reasons"]))
+        self.assertEqual(v["details"]["pii"]["ssn"], 1)
+
+    def test_invalid_ssn_not_flagged(self):
+        # 000-00-0000 is never issued; must not trigger.
+        s = _clean_screener()
+        v = s.screen_tool_result(
+            self._result_with("Code 000-00-0000 is invalid."))
+        self.assertFalse(v["pii_leak"])
+        self.assertEqual(v["verdict"], "clean")
+
+    def test_credit_card_flagged(self):
+        s = _clean_screener()
+        v = s.screen_tool_result(
+            self._result_with(f"Charge card {self.CARD} now."))
+        self.assertEqual(v["verdict"], "flagged")
+        self.assertTrue(v["pii_leak"])
+        self.assertTrue(any("pii_leak" in r and "credit card" in r
+                            for r in v["reasons"]))
+        self.assertEqual(v["details"]["pii"]["credit_card"], 1)
+
+    def test_luhn_invalid_digits_not_flagged(self):
+        # 16 digits that fail Luhn are not a PAN.
+        s = _clean_screener()
+        v = s.screen_tool_result(
+            self._result_with("Reference 1234567890123456 archived."))
+        self.assertFalse(v["pii_leak"])
+        self.assertEqual(v["verdict"], "clean")
+
+    def test_bulk_email_flagged(self):
+        s = _clean_screener()
+        emails = " ".join(f"user{i}@example.com" for i in range(6))
+        v = s.screen_tool_result(self._result_with(f"Leads: {emails}"))
+        self.assertEqual(v["verdict"], "flagged")
+        self.assertTrue(v["pii_leak"])
+        self.assertTrue(any("pii_leak" in r and "bulk email" in r
+                            for r in v["reasons"]))
+        self.assertEqual(v["details"]["pii"]["bulk_email"], 6)
+
+    def test_few_emails_not_flagged(self):
+        s = _clean_screener()
+        v = s.screen_tool_result(
+            self._result_with("Contact alice@example.com or bob@example.com."))
+        self.assertFalse(v["pii_leak"])
+        self.assertEqual(v["verdict"], "clean")
+
+    def test_pii_counts_only_no_values_in_verdict(self):
+        s = _clean_screener()
+        v = s.screen_tool_result(
+            self._result_with(
+                f"A {self.SSN} and {self.SSN} with card {self.CARD}."))
+        blob = json.dumps({"reasons": v["reasons"],
+                           "details": v["details"]})
+        self.assertNotIn(self.SSN, blob)
+        self.assertNotIn(self.CARD, blob)
+        self.assertNotIn(self.CARD.replace("-", ""), blob)
+        self.assertEqual(v["details"]["pii"], {"ssn": 2, "credit_card": 1})
+
+    def test_pii_values_never_logged(self):
+        import logging as _logging
+        records = []
+
+        class _Cap(_logging.Handler):
+            def emit(self, record):
+                records.append(self.format(record))
+
+        logger = _logging.getLogger("mcp_proxy.screener")
+        handler = _Cap()
+        logger.addHandler(handler)
+        old_level = logger.level
+        logger.setLevel(_logging.DEBUG)
+        try:
+            s = _clean_screener()
+            s.screen_tool_result(
+                self._result_with(
+                    f"Leak: SSN {self.SSN}, card {self.CARD}."))
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+        blob = "\n".join(records)
+        self.assertNotIn(self.SSN, blob)
+        self.assertNotIn(self.CARD, blob)
+
+    def test_pii_screening_can_be_disabled(self):
+        from mcp_proxy.screener import Screener
+        s = Screener(api_base="https://example.invalid",
+                     pii_screening_enabled=False)
+        v = s.screen_tool_result(
+            self._result_with(f"SSN {self.SSN} on file."))
+        self.assertFalse(v["pii_leak"])
+        self.assertEqual(v["verdict"], "clean")
+
+    def test_pii_flagged_result_marks_neighbor(self):
+        # End-to-end: a PII-carrying upstream response flags the server.
+        url, server = self._start_proxy_like(pii_text=True)
+        resp = self._call_like(url)
+        self.assertIn("result", resp)  # fail-open: response still passes
+        rep = server.neighbors.get(server.upstream_url_for_test)
+        self.assertEqual(rep.reputation, SUSPICIOUS)
+        self.assertTrue(any("pii_leak" in f.get("reason", "")
+                            or "pii_leak" in str(f.get("evidence", []))
+                            for f in rep.flags))
+
+    # -- lightweight proxy harness for the PII end-to-end test --------
+
+    def _start_proxy_like(self, pii_text=False):
+        text = ("Benefits record: SSN 123-45-6789, DOB on file."
+                if pii_text else "Normal result, nothing suspicious.")
+
+        class _PIIUpstream(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                req_id = body.get("id")
+                if body.get("method") == "tools/call":
+                    result = {"content": [{"type": "text", "text": text}]}
+                else:
+                    result = {}
+                raw = json.dumps({"jsonrpc": "2.0", "id": req_id,
+                                  "result": result}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        upstream = HTTPServer(("127.0.0.1", 0), _PIIUpstream)
+        threading.Thread(target=upstream.serve_forever,
+                         daemon=True).start()
+        upstream_url = f"http://127.0.0.1:{upstream.server_address[1]}"
+        self.addCleanup(upstream.shutdown)
+
+        cfg = ProxyConfig()
+        cfg.upstream_url = upstream_url
+        cfg.listen_port = 0
+        cfg.screening_enabled = False
+        cfg.result_screening_enabled = True
+        cfg.quarantine_after = 10
+        server = ProxyServer(cfg)
+        server.screener._check_url = mock.Mock(
+            return_value={"level": "unknown", "score": 5,
+                          "reasons": ["clean"]})
+        server.neighbors = NeighborRegistry(screener=server.screener)
+        server.neighbors.register(upstream_url)
+        from mcp_proxy.quarantine import QuarantineManager
+        server.quarantine = QuarantineManager(
+            server.neighbors, auto_quarantine_after=10)
+        server.upstream_url_for_test = upstream_url
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}", server
+
+    def _call_like(self, url):
+        return _post(url, {"jsonrpc": "2.0", "id": 1,
+                           "method": "tools/call",
+                           "params": {"name": "fetch", "arguments": {}}})
+
+
+# ---------------------------------------------------------------------------
 # Proxy integration: poisoned neighbor end-to-end
 # ---------------------------------------------------------------------------
 

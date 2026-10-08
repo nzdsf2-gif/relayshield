@@ -145,6 +145,27 @@ class UniqueIndicators(unittest.TestCase):
         self.assertEqual(wm._unique_indicators(), 4)
 
 
+class NewUniqueIndicators(unittest.TestCase):
+    def test_counts_only_indicators_first_seen_inside_the_window(self):
+        old = "2026-01-01T00:00:00+00:00"
+        new = wm.datetime.now(wm.timezone.utc).isoformat()
+        wm.dynamodb = _FakeDynamo({
+            "relayshield_intel_first_seen": _FakeTable(
+                [{"ioc_value": "a", "first_seen": old}] * 5
+                + [{"ioc_value": "b", "first_seen": new}] * 3),
+        })
+        self.assertEqual(wm._unique_indicators(), 8)
+        self.assertEqual(wm._new_unique_indicators(), 3)
+
+    def test_reads_first_seen_not_the_sightings_table(self):
+        new = wm.datetime.now(wm.timezone.utc).isoformat()
+        wm.dynamodb = _FakeDynamo({
+            "relayshield_intel_first_seen": _FakeTable([{"first_seen": new}] * 2),
+            "relayshield_intel_iocs": _FakeTable([{"first_seen": new}] * 50),
+        })
+        self.assertEqual(wm._new_unique_indicators(), 2)
+
+
 class LambdaHandlerWiring(unittest.TestCase):
     """Read-only check that the metrics dict built inside lambda_handler
     actually calls the two new functions, via ast rather than by running the
@@ -169,6 +190,8 @@ class LambdaHandlerWiring(unittest.TestCase):
                           "_monitored_marketplaces")
         self.assertEqual(dict_keys_to_calls.get("unique_indicators"),
                           "_unique_indicators")
+        self.assertEqual(dict_keys_to_calls.get("unique_indicators_new"),
+                          "_new_unique_indicators")
 
 
 class CheckoutPlatformTag(unittest.TestCase):
@@ -245,6 +268,7 @@ class EmailRendering(unittest.TestCase):
             "intel_alerts_total": 0, "intel_alerts_new": 0,
             "monitored_marketplaces": 115,
             "unique_indicators": 512345,
+            "unique_indicators_new": 4321,
             "ioc_total": 7602575,
             "stolen_sessions": 0, "identity_graph": 0, "ransomware_victims": 0,
             "stripe": {"active_subscriptions": 0, "mrr_usd": 0.0,
@@ -280,6 +304,12 @@ class EmailRendering(unittest.TestCase):
         self.assertIn("115", html)
         self.assertIn("Unique indicators", html)
         self.assertIn("512,345", html)
+
+    def test_renders_cumulative_and_weekly_increment_together(self):
+        html = wm._build_email(self._fixture())
+        self.assertIn("cumulative", html)
+        self.assertIn("512,345", html)
+        self.assertIn("+4,321", html)
 
     def test_does_not_drop_the_existing_sightings_row(self):
         # The pre-existing ioc_total row must survive relabeling, not be

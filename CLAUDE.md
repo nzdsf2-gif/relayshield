@@ -10526,3 +10526,38 @@ declared MCP endpoint is a Hugging Face Space, but `hf-space-mcp-server/app.py` 
 posts to `API_BASE_URL = https://api.relayshield.net`, so the compute and data are API Gateway,
 Lambda and DynamoDB in 239677749008. Say so in the diagram and the WAFR scope rather than leaving
 the HF host to read as the workload.
+
+## 2026-10-08 (later): WEEKLY METRICS SHOWS THE CUMULATIVE INDICATOR COUNT BESIDE THE WEEKLY INCREMENT
+
+**Measured by the backfill's own output, 2026-10-08: 687,011 distinct indicators, first-seen range
+2026-06-21 to 2026-10-08.** It was 661,609 on 2026-09-30, so the distinct count grows by tens of
+thousands a week. Per MEASUREMENT DOCTRINE this is internal reporting, not a number for a listing.
+**Whether `--apply` ran is NOT established**: the dry run and the apply both print that line, and the
+`wrote N, skipped M ... failure(s)` line that proves a write was not pasted back.
+
+**The report was already cumulative in code.** `_unique_indicators()` counts every row of
+`relayshield_intel_first_seen`, so a small figure in the email meant the table was under-seeded, not
+that the query was incremental. What was missing was the weekly increment beside it. Added:
+`_new_unique_indicators()` = rows whose `first_seen` falls in the last 7 days, same table and same
+definition, so cumulative minus new is last week's cumulative. The email now reads "Unique indicators
+(cumulative, all-time)" with "+N new this week" under it. Three tests added to
+`test_weekly_metrics.py` (29 pass), each proven by reintroducing its defect: wrong table, and the
+dispatcher entry removed.
+
+**NOT DEPLOYED.** `relayshield_weekly_metrics.py` has no CI deploy path, so the merge alone changes
+nothing in AWS. Three commits to it landed 2026-10-06 and whether they were hand-deployed is
+unknown, so read `sh tools/handler_drift.sh relayshield_weekly_metrics.py` before deploying.
+
+## 2026-10-08 (later): FTR SOLUTION VALUES, AND WHAT THE WAFR MUST COVER
+
+The single-product Partner Central solution for the FTR links ONE Marketplace product, the
+Agentic Attack Surface listing (`prod-kkvurtspreofy`). Names carry no internal bundle letter, per
+Andrew's rule that nothing a buyer or AWS reviewer reads says "Bundle D". Solution name
+`RelayShield Agentic Attack Surface API - FTR`, external title `RelayShield Agentic Attack Surface
+API`. Both are unverified against uniqueness: the form says each must be unique, so a collision with
+the four-product solution's name is possible and the form will say so.
+
+The Well-Architected review scope is the `api.relayshield.net` stack in account `239677749008`,
+region `us-east-1` (read from `deploy_lambdas.yml`), described by capability and with no corpus
+counts. Which lens AWS expects for the FTR is UNVERIFIED (docs.aws.amazon.com is egress-blocked):
+the Framework lens is the baseline, and the FTR Guide inside Partner Central is the authority.

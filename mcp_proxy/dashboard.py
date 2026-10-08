@@ -62,6 +62,17 @@ SCENARIOS = [
     {"id": 9, "name": "Legitimate OAuth",
      "desc": "Real Google OAuth flow passes clean, no false positive."},
 ]
+_SCENARIO_SERVER = {
+    1: CLEAN_UPSTREAM,
+    2: POISONED_UPSTREAM,
+    3: POISONED_UPSTREAM,
+    4: POISONED_UPSTREAM,
+    5: POISONED_UPSTREAM,
+    6: CLEAN_UPSTREAM,
+    7: "blocked before forward: no upstream contact",
+    8: POISONED_UPSTREAM,
+    9: CLEAN_UPSTREAM,
+}
 
 
 def _get_components():
@@ -132,6 +143,17 @@ def _sign(result, signer, decision):
             poison_category=result.get("poison_category", "clean"),
         )
         sig = v.get("sig", "") or v.get("signature", "")
+        obj = dict(v)
+        if not sig:
+            obj["sig"] = "(unsigned: demo mode)"
+            obj["pubkey"] = "(unsigned: demo mode)"
+        obj["verdict_id"] = (sig[:16] if sig
+                             else "demo-%d" % result.get("scenario_id", 0))
+        obj["timestamp"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ",
+            time.gmtime(v.get("ts", time.time())))
+        obj["server"] = result.get("server", "n/a")
+        result["verdict_obj"] = obj
         result["signature"] = (sig[:48] + "...") if sig else ""
         try:
             result["signature_valid"] = bool(sig) and signer.verify(v)
@@ -190,6 +212,8 @@ def run_scenario(scenario_id):
         result["verdict"] = verdict
         result["poison_category"] = category
         result["evidence"] = [str(e) for e in evidence]
+        result["server"] = _SCENARIO_SERVER.get(
+            result["scenario_id"], "n/a")
         _sign(result, signer,
               "quarantine" if verdict == "QUARANTINE"
               else ("block" if verdict == "BLOCK" else "allow"))

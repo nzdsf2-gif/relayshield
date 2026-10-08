@@ -83,7 +83,7 @@ The proxy tracks the reputation of each upstream MCP server:
 
 ```bash
 python3 -m unittest mcp_proxy.test_proxy -v      # Phase 1: 19 tests
-python3 -m unittest mcp_proxy.test_neighbor -v  # Phase 2: 24 tests
+python3 -m unittest mcp_proxy.test_neighbor -v  # Phase 2/2.5: 33 tests
 ```
 
 Covers: indicator extraction, screener verdicts (block/allow/fail-open),
@@ -98,6 +98,28 @@ Passthrough + TI screening on tool call arguments.
 
 Poisoned neighbor detection: upstream reputation tracking, tool result
 screening (prompt injection, malicious URLs, secret material),
+auto-quarantine with per-server fail-closed enforcement.
+
+## Phase 2.5 scope: barbed wire
+
+Signed verdicts plus kit fingerprint integration make the proxy's
+decisions cryptographically provable and tied to RelayShield's TI
+corpus. A copied proxy without the live backend and signing key
+produces verdicts nobody can verify.
+
+- **Signed verdicts** (`mcp_proxy/verdicts.py`): every block/flag
+  decision gets an Ed25519 signature (pure-Python RFC 8032, zero
+  dependencies). The private key comes only from `MCP_PROXY_SIGNING_KEY`
+  (64 hex chars); it is never logged. Without a key, verdicts are
+  unsigned but still carry full TI evidence.
+- **Kit fingerprints**: tool results are scanned for `kit_<sha256>`
+  IDs. Matches are included in verdict evidence as
+  `kit_fingerprint` entries, optionally enriched via the
+  `/v1/payg/scamkit-match` API (`MCP_PROXY_KIT_LOOKUP=true`).
+- **Evidence-backed quarantine**: quarantine events carry structured
+  TI evidence (`{"type", "id", "detail"}`), visible via
+  `GET /_rs/neighbors`. The verdict public key is published at
+  `GET /_rs/neighbors` (`verdict_pubkey`) for partner verification.
 per-server quarantine (fail-closed), admin endpoints. Not yet built:
 behavioral baselining, cross-tool correlation, policy enforcement.
 See the MCP Proxy build scope doc for the full roadmap.

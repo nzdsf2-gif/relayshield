@@ -16,8 +16,10 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .config import ProxyConfig
+from .audit import AuditTrail
 from .behavior import BehaviorTracker
 from .neighbor import NeighborRegistry
+from .policy import PolicyEngine
 from .quarantine import QuarantineManager
 from .reputation import ReputationStore
 from .screener import Screener
@@ -156,6 +158,32 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "enabled": self.server.behavior.enabled,
             })
             return
+        if self.path == "/_rs/policy":
+            self._send_json(self.server.policy.summary())
+            return
+        if self.path == "/_rs/audit":
+            self._send_json(self.server.audit.summary())
+            return
+        if self.path.startswith("/_rs/audit/export"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            fmt = (qs.get("format", ["json"])[0] or "json").lower()
+            limit = int(qs.get("limit", ["1000"])[0] or 1000)
+            limit = max(1, min(limit, 10000))
+            if fmt == "csv":
+                body = self.server.audit.export_csv(
+                    limit=limit).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self._send_json({
+                    "entries": self.server.audit.export_json(limit=limit),
+                    "chain": self.server.audit.verify_chain(),
+                })
+            return
         self._send_json({"error": "not found"}, 404)
 
     def _handle_admin(self, cfg: ProxyConfig):
@@ -174,6 +202,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.server.reputation.record_quarantine_cleared(
                     url, "cleared by operator")
             self._send_json({"cleared": ok, "url": url})
+            return
+        if self.path == "/_rs/policy/reload":
+            ok = self.server.policy.reload()
+            self._send_json({"reloaded": ok,
+                             "summary": self.server.policy.summary()})
             return
         self._send_json({"error": "unknown admin endpoint"}, 404)
 
@@ -237,6 +270,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "tool": tool_name,
                 "upstream": upstream_url,
             }))
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block", poison_category="quarantined_server",
+                reasons=["upstream server is quarantined"],
+                policy_decision="",
+            )
             return _error_response(
                 req_id,
                 ERR_SERVER_QUARANTINED,
@@ -245,6 +284,60 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "POST /_rs/neighbors/clear.",
                 {"tool": tool_name, "upstream": upstream_url},
             )
+
+        # Phase 4: policy enforcement runs before TI screening. Policy
+        # denies are fast and deterministic: no network, no corpus.
+        policy = self.server.policy
+        policy_result = {"decision": "allow", "reasons": [],
+                         "poison_category": "clean"}
+        if policy.enabled:
+            try:
+                policy_result = policy.evaluate(
+                    agent_id, tool_name, upstream_url, arguments)
+            except Exception as exc:
+                log.error("policy engine error: %s", exc)
+        if policy_result.get("decision") == "deny":
+            signer = self.server.signer
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(arguments),
+                evidence=[{"type": "policy_rule", "id": "policy-deny",
+                           "detail": r}
+                          for r in policy_result.get("reasons", [])],
+                reasons=policy_result.get("reasons", []),
+                poison_category=policy_result.get(
+                    "poison_category", "policy_deny"),
+            )
+            log.warning(json.dumps({
+                "event": "tools_call_blocked_policy",
+                "tool": tool_name,
+                "agent": agent_id,
+                "reasons": policy_result.get("reasons", []),
+            }))
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block",
+                poison_category=policy_result.get(
+                    "poison_category", "policy_deny"),
+                reasons=policy_result.get("reasons", []),
+                evidence=signed.get("evidence", []),
+                policy_decision="deny",
+            )
+            return _error_response(
+                req_id,
+                ERR_BLOCKED_BY_POLICY,
+                f"Blocked by RelayShield policy: "
+                f"{'; '.join(policy_result.get('reasons', []))}",
+                {
+                    "tool": tool_name,
+                    "poison_category": policy_result.get(
+                        "poison_category", "policy_deny"),
+                    "reasons": policy_result.get("reasons", []),
+                    "verdict": signed,
+                },
+            )
+        policy_decision = policy_result.get("decision", "allow")
 
         verdict = {"verdict": "allow", "level": "unknown",
                    "reasons": ["screening disabled"]}
@@ -346,6 +439,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "verdict_sig": signed.get("sig", "")[:16] + "..." if signed.get("sig") else "unsigned",
                 "signed": bool(signed.get("sig")),
             }))
+            # Phase 4: audit the block decision.
+            self.server.audit.record(
+                agent_id, upstream_url, tool_name, arguments,
+                decision="block", poison_category=poison_category,
+                reasons=verdict.get("reasons", []),
+                evidence=evidence,
+                risk_score=behavior_result.get("risk_score", 0.0),
+                policy_decision=policy_decision,
+                duration_ms=total_ms,
+            )
             return _error_response(
                 req_id,
                 ERR_BLOCKED_BY_POLICY,
@@ -374,6 +477,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Phase 2: screen the tool *result* for poisoned content.
         self._screen_result(upstream_url, tool_name, upstream_resp,
                             cfg, screener, neighbors, quarantine)
+
+        # Phase 4: audit the allowed call.
+        self.server.audit.record(
+            agent_id, upstream_url, tool_name, arguments,
+            decision="allow",
+            poison_category=behavior_result.get(
+                "poison_category", "clean"),
+            reasons=behavior_result.get("reasons", []),
+            risk_score=behavior_result.get("risk_score", 0.0),
+            policy_decision=policy_decision,
+            duration_ms=(time.monotonic() - t0) * 1000,
+        )
 
         return upstream_resp
 
@@ -478,6 +593,12 @@ class ProxyServer(HTTPServer):
         # Phase 3: behavioral baselining + server reputation graph.
         self.behavior = BehaviorTracker(enabled=cfg.behavior_enabled)
         self.reputation = ReputationStore()
+        # Phase 4: policy enforcement + signed audit trail. The audit
+        # trail shares the verdict signer's identity.
+        self.policy = PolicyEngine(cfg.policy_file)
+        self.audit = AuditTrail(capacity=cfg.audit_capacity,
+                                persist_path=cfg.audit_file)
+        self.audit.signer = self.signer
         super().__init__(("0.0.0.0", cfg.listen_port), ProxyHandler)
         # Register (and TI-check) the upstream on startup.
         if cfg.upstream_url:

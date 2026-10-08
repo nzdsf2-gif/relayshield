@@ -1,0 +1,41 @@
+# RelayShield MCP Proxy Firewall: example policy file.
+#
+# Copy to your own location and point MCP_PROXY_POLICY_FILE at it.
+# Reload without restart: POST /_rs/policy/reload
+#
+# Keys support glob patterns ("agent-*", "http://internal:*").
+
+agents:
+  # Restrict a specific agent to read-only tools.
+  "agent-123":
+    allow_tools: ["read_file", "search", "list_directory"]
+    deny_tools: ["exec_shell", "write_file"]
+
+  # Block dangerous tools for all agents matching the pattern.
+  "agent-*":
+    deny_tools: ["rm_rf", "format_disk"]
+
+servers:
+  # Trusted internal server: relaxed screening.
+  "http://internal:9000":
+    trust: high
+    strictness: relaxed
+
+  # Untrusted external server: strict screening.
+  "https://external.example.com/*":
+    trust: low
+    strictness: strict
+
+tools:
+  # Shell execution requires operator approval.
+  "exec_shell":
+    require_approval: true
+
+  # Rate-limit expensive queries per agent.
+  "expensive_query":
+    rate_limit: 10/minute
+
+  # Wildcard tool pattern.
+  "admin_*":
+    require_approval: true
+    rate_limit: 5/hour

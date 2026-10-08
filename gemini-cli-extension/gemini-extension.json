@@ -1,0 +1,11 @@
+{
+  "name": "relayshield-scam-checks",
+  "version": "1.0.0",
+  "description": "Free scam checks for links, wallets, emails, and breach exposure. No signup.",
+  "mcpServers": {
+    "relayshield": {
+      "httpUrl": "https://relayshieldadmin-relayshield-free-mcp.hf.space/mcp"
+    }
+  },
+  "contextFileName": "GEMINI.md"
+}

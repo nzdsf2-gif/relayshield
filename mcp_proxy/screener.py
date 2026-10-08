@@ -11,6 +11,8 @@ import re
 import urllib.parse
 import urllib.request
 
+from . import oauth
+
 log = logging.getLogger(__name__)
 
 # Regexes for indicator extraction.
@@ -35,6 +37,8 @@ POISON_MALICIOUS_URL = "malicious_url"
 POISON_KIT_MATCH = "kit_match"
 POISON_SECRET_LEAK = "secret_leak"
 POISON_UNKNOWN_SYNTHETIC = "unknown_synthetic"
+POISON_OAUTH_TAMPERING = "oauth_tampering"
+POISON_CREDENTIAL_EXFILTRATION = "credential_exfiltration"
 POISON_CLEAN = "clean"
 
 _CATEGORY_RANK = {
@@ -43,8 +47,10 @@ _CATEGORY_RANK = {
     POISON_PII_LEAK: 2,
     POISON_SECRET_LEAK: 3,
     POISON_PROMPT_INJECTION: 4,
-    POISON_MALICIOUS_URL: 5,
-    POISON_KIT_MATCH: 6,
+    POISON_OAUTH_TAMPERING: 5,
+    POISON_MALICIOUS_URL: 6,
+    POISON_KIT_MATCH: 7,
+    POISON_CREDENTIAL_EXFILTRATION: 8,
 }
 
 
@@ -120,6 +126,21 @@ _SECRET_PATTERNS = [
     "-----BEGIN OPENSSH PRIVATE KEY-----",
 ]
 
+# OAuth credential material that must never leave a tool result
+# toward non-identity-provider infrastructure. Only pattern types
+# and counts are ever reported; matched values are never logged or
+# returned.
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+_AUTH_CODE_RE = re.compile(r"[?&#]code=([A-Za-z0-9_\-/]{20,})")
+_PKCE_VERIFIER_RE = re.compile(r"code_verifier=([A-Za-z0-9_-]{43,128})")
+_CLIENT_SECRET_RE = re.compile(r"client_secret=([^&\s'\"]{8,})")
+_CRED_LABELS = {
+    "jwt": "JWT",
+    "authorization_code": "authorization code",
+    "pkce_verifier": "PKCE verifier",
+    "client_secret": "client secret",
+}
+
 # Unredacted PII patterns in tool results. Detecting these catches the
 # leak class seen in the 2026-10 federal MCP disclosures (veterans'
 # names, SSNs, and DOBs sitting in unredacted server logs): tool
@@ -194,7 +215,8 @@ class Screener:
 
     def __init__(self, api_base: str, api_key: str = "", timeout: float = 5.0,
                  block_levels: set = None, kit_lookup_enabled: bool = False,
-                 pii_screening_enabled: bool = True):
+                 pii_screening_enabled: bool = True,
+                 oauth_screening_enabled: bool = True):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
@@ -206,6 +228,10 @@ class Screener:
         # (SSN, credit card, bulk email). Disable in trusted
         # environments where results legitimately carry PII.
         self.pii_screening_enabled = pii_screening_enabled
+        # When True, OAuth URLs are validated against known identity
+        # providers and tool results are checked for credential
+        # exfiltration toward non-IdP infrastructure.
+        self.oauth_screening_enabled = oauth_screening_enabled
 
     def screen_indicators(self, indicators: dict) -> dict:
         """Screen extracted indicators. Returns a verdict dict.
@@ -304,9 +330,35 @@ class Screener:
     def screen_tool_call(self, tool_name: str, arguments: dict) -> dict:
         """Full screening for a tools/call invocation."""
         indicators = extract_indicators(arguments)
+        if self.oauth_screening_enabled:
+            oauth_verdict = self._screen_oauth_arguments(indicators)
+            if oauth_verdict is not None:
+                oauth_verdict["tool_name"] = tool_name
+                return oauth_verdict
         verdict = self.screen_indicators(indicators)
         verdict["tool_name"] = tool_name
         return verdict
+
+    def _screen_oauth_arguments(self, indicators: dict):
+        """Block tampered OAuth URLs in tool call arguments.
+
+        Returns a block verdict on oauth_tampering, or None to let
+        normal screening continue.
+        """
+        for url in indicators.get("urls", []):
+            if not oauth.is_oauth_url(url):
+                continue
+            check = oauth.check_oauth_url(url)
+            if check["status"] == "tampered":
+                return {
+                    "verdict": "block",
+                    "level": "high",
+                    "score": 90,
+                    "reasons": [f"oauth_tampering: {check['reason']}"],
+                    "poison_category": POISON_OAUTH_TAMPERING,
+                    "screened": indicators,
+                }
+        return None
 
     def screen_tool_result(self, result_obj) -> dict:
         """Screen an upstream tools/call result for poisoned content.
@@ -320,7 +372,9 @@ class Screener:
                  "details": {...}, "kit_ids": [...], "pii_leak": bool,
                  "poison_category": str}.
         PII reasons and details carry pattern types and counts only;
-        matched PII values are never logged or returned.
+        matched PII values are never logged or returned. The same
+        holds for OAuth credential material: only pattern types are
+        ever reported.
         """
         texts = _extract_result_text(result_obj)
         reasons = []
@@ -447,6 +501,69 @@ class Screener:
             details["synthetic_hints"] = True
             categories.add(POISON_UNKNOWN_SYNTHETIC)
 
+        # 8. OAuth flow integrity. OAuth URLs in tool results must
+        # belong to known identity providers. Tampered flows are a
+        # high-severity finding; flows toward unknown auth hosts are
+        # cautioned as unknown_synthetic (medium, not blocking).
+        if self.oauth_screening_enabled:
+            tampered_urls = []
+            unknown_oauth_domains = set()
+            for url in urls:
+                if not oauth.is_oauth_url(url):
+                    continue
+                check = oauth.check_oauth_url(url)
+                if check["status"] == "tampered":
+                    tampered_urls.append(oauth.redacted_url(url))
+                elif check["status"] == "unknown_domain":
+                    unknown_oauth_domains.add(check["domain"])
+            if tampered_urls:
+                reasons.append(
+                    "oauth_tampering: OAuth flow toward unaffiliated "
+                    f"domain in tool result: "
+                    f"{', '.join(tampered_urls[:3])}"
+                    + ("..." if len(tampered_urls) > 3 else "")
+                )
+                details["oauth_tampered_urls"] = tampered_urls[:5]
+                categories.add(POISON_OAUTH_TAMPERING)
+            for domain in sorted(unknown_oauth_domains):
+                reasons.append(
+                    f"OAuth redirect to unknown domain {domain or '(unparseable)'} "
+                    f"(unknown_synthetic: no reputation history)"
+                )
+            if unknown_oauth_domains:
+                details["oauth_unknown_domains"] = sorted(
+                    unknown_oauth_domains)
+                categories.add(POISON_UNKNOWN_SYNTHETIC)
+
+        # 9. Credential exfiltration. OAuth credential material (JWTs,
+        # authorization codes, PKCE verifiers, client secrets) in a
+        # tool result that is bound for non-IdP infrastructure is
+        # credential theft in progress. Matched values are discarded;
+        # only pattern types and destination domains are reported.
+        if self.oauth_screening_enabled:
+            cred_counts = _find_credentials(texts)
+            cred_found = {k: c for k, c in cred_counts.items() if c}
+            if cred_found:
+                dest_domains = {oauth.host_of(u) for u in urls}
+                non_idp = sorted(
+                    d for d in dest_domains
+                    if d and not oauth.is_known_idp_domain(d))
+                if non_idp:
+                    for kind in sorted(cred_found):
+                        count = cred_found[kind]
+                        label = _CRED_LABELS[kind]
+                        plural = "s" if count != 1 else ""
+                        reasons.append(
+                            f"credential_exfiltration: {label} in tool "
+                            f"result bound for non-IdP domain(s) "
+                            f"({count} occurrence{plural})"
+                        )
+                    details["credential_exfiltration"] = {
+                        "patterns": sorted(cred_found),
+                        "dest_domains": non_idp[:5],
+                    }
+                    categories.add(POISON_CREDENTIAL_EXFILTRATION)
+
         return {
             "verdict": "flagged" if reasons else "clean",
             "poison_category": worst_category(categories),
@@ -509,6 +626,23 @@ def _find_pii(texts: list) -> dict:
             emails.add(m.group(0).lower())
     if len(emails) > _BULK_EMAIL_THRESHOLD:
         counts["bulk_email"] = len(emails)
+    return counts
+
+
+def _find_credentials(texts: list) -> dict:
+    """Detect OAuth credential material across result texts.
+
+    Returns {"jwt": n, "authorization_code": n, "pkce_verifier": n,
+    "client_secret": n} with counts only. Matched credential values
+    are discarded, never returned or logged.
+    """
+    counts = {"jwt": 0, "authorization_code": 0, "pkce_verifier": 0,
+              "client_secret": 0}
+    for text in texts:
+        counts["jwt"] += len(_JWT_RE.findall(text))
+        counts["authorization_code"] += len(_AUTH_CODE_RE.findall(text))
+        counts["pkce_verifier"] += len(_PKCE_VERIFIER_RE.findall(text))
+        counts["client_secret"] += len(_CLIENT_SECRET_RE.findall(text))
     return counts
 
 

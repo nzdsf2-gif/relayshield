@@ -5,4 +5,4 @@ servers, screening tool calls against RelayShield's threat intelligence
 corpus before forwarding.
 """
 
-__version__ = "0.2.7"
+__version__ = "0.3.0"

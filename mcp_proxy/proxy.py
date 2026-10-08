@@ -19,6 +19,7 @@ from .config import ProxyConfig
 from .neighbor import NeighborRegistry
 from .quarantine import QuarantineManager
 from .screener import Screener
+from .verdicts import VerdictSigner, content_hash_of
 
 log = logging.getLogger(__name__)
 
@@ -114,11 +115,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
             }
             self._send_json({"neighbors": neighbors,
                              "quarantine_events":
-                                 self.server.quarantine.events[-20:]})
+                                 self.server.quarantine.events[-20:],
+                             "verdict_pubkey":
+                                 self.server.signer.public_key_hex,
+                             "verdicts_signed":
+                                 self.server.signer.signing_enabled})
             return
         if self.path == "/_rs/health":
             self._send_json({"status": "ok", "version":
-                             "RelayShield-MCP-Proxy/0.2.0"})
+                             "RelayShield-MCP-Proxy/0.2.5",
+                             "verdicts_signed":
+                                 self.server.signer.signing_enabled})
             return
         self._send_json({"error": "not found"}, 404)
 
@@ -226,6 +233,27 @@ class ProxyHandler(BaseHTTPRequestHandler):
         }))
 
         if verdict.get("verdict") == "block":
+            # Phase 2.5: issue a signed verdict tying the block to TI
+            # evidence. A copied proxy cannot forge this signature.
+            signer = self.server.signer
+            evidence = [
+                {"type": "ti_signal", "id": f"reason-{i}", "detail": r}
+                for i, r in enumerate(verdict.get("reasons", []))
+            ]
+            signed = signer.issue(
+                decision="block",
+                tool_name=tool_name,
+                content_hash=content_hash_of(arguments),
+                evidence=evidence,
+                level=verdict.get("level", ""),
+                score=verdict.get("score", 0),
+                reasons=verdict.get("reasons", []),
+            )
+            log.info(json.dumps({
+                "event": "tools_call_verdict",
+                "verdict_sig": signed.get("sig", "")[:16] + "..." if signed.get("sig") else "unsigned",
+                "signed": bool(signed.get("sig")),
+            }))
             return _error_response(
                 req_id,
                 ERR_BLOCKED_BY_POLICY,
@@ -236,6 +264,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     "level": verdict.get("level"),
                     "score": verdict.get("score", 0),
                     "reasons": verdict.get("reasons", []),
+                    "verdict": signed,
                 },
             )
 
@@ -270,17 +299,50 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if result_verdict.get("verdict") != "flagged":
             return
         reasons = result_verdict.get("reasons", [])
+        details = result_verdict.get("details", {})
+        kit_ids = result_verdict.get("kit_ids", [])
+
+        # Phase 2.5: build TI evidence entries, including kit fingerprints.
+        evidence = [
+            {"type": "ti_signal", "id": f"result-reason-{i}", "detail": r}
+            for i, r in enumerate(reasons)
+        ]
+        for kit_id in kit_ids:
+            entry = {"type": "kit_fingerprint", "id": kit_id,
+                     "detail": "scam-kit fingerprint in tool result"}
+            evidence.append(entry)
+        for ke in details.get("kit_evidence", []):
+            evidence.append({
+                "type": "kit_match",
+                "id": ke.get("kit_id", ""),
+                "detail": f"family={ke.get('family')} "
+                          f"verdict={ke.get('verdict')}",
+            })
+
+        # Issue a signed verdict for the poisoned-neighbor flag.
+        signer = self.server.signer
+        signed = signer.issue(
+            decision="flag",
+            tool_name=tool_name,
+            content_hash=content_hash_of(upstream_resp),
+            evidence=evidence,
+            reasons=reasons,
+            extra={"upstream": upstream_url, "kit_ids": kit_ids},
+        )
+
         log.warning(json.dumps({
             "event": "poisoned_result_detected",
             "tool": tool_name,
             "upstream": upstream_url,
             "reasons": reasons,
-            "details": result_verdict.get("details", {}),
+            "details": details,
+            "kit_ids": kit_ids,
+            "verdict_signed": bool(signed.get("sig")),
         }))
         neighbors.flag(upstream_url,
                        f"poisoned tool result from '{tool_name}'",
-                       reasons)
-        quarantine.evaluate(upstream_url)
+                       [e["detail"] for e in evidence])
+        quarantine.evaluate(upstream_url, evidence=evidence)
 
 
 class ProxyServer(HTTPServer):
@@ -293,6 +355,7 @@ class ProxyServer(HTTPServer):
             api_key=cfg.rs_api_key,
             timeout=cfg.screen_timeout,
             block_levels=cfg.block_level_set,
+            kit_lookup_enabled=cfg.kit_lookup_enabled,
         )
         # Phase 2: neighbor reputation + quarantine.
         self.neighbors = NeighborRegistry(screener=self.screener)
@@ -301,6 +364,9 @@ class ProxyServer(HTTPServer):
             alert_webhook=cfg.alert_webhook,
             auto_quarantine_after=cfg.quarantine_after,
         )
+        # Phase 2.5: signed verdicts. The private key comes only from
+        # the environment; it is never logged or stored.
+        self.signer = VerdictSigner(cfg.signing_key_hex)
         super().__init__(("0.0.0.0", cfg.listen_port), ProxyHandler)
         # Register (and TI-check) the upstream on startup.
         if cfg.upstream_url:

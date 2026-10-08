@@ -219,13 +219,24 @@
       </div>
     </div>
     <div class="card">
+      <h2>Policy status</h2>
+      <div id="policy-panel" style="color:#8b949e;font-size:12px">loading policy...</div>
+      <div style="font-size:11px;color:#8b949e;margin-top:8px;line-height:1.5">
+        Phase 4 policy engine: deterministic allow/deny rules evaluated
+        before TI screening. Denies are fast and need no network.
+      </div>
+    </div>
+    <div class="card">
       <h2>How to read this</h2>
       <div style="font-size:12px;color:#8b949e;line-height:1.6">
-        Every tool call passes through the proxy. The proxy screens
-        arguments and responses against the TI corpus, then issues a
-        signed verdict. ALLOW means the call proceeded. BLOCK means the
-        call or response was stopped. QUARANTINE means the server earned
-        three strikes and is now fail-closed.
+        Every tool call passes through the proxy in layers. Phase 4
+        policy rules run first (deterministic allow/deny). Then the
+        proxy screens arguments and responses against the TI corpus.
+        Phase 3 behavioral baselining watches for anomalous agents and
+        attack chains. Every decision gets a signed verdict. ALLOW means
+        the call proceeded. BLOCK means the call or response was
+        stopped. QUARANTINE means the server earned three strikes and
+        is now fail-closed.
       </div>
     </div>
   </div>
@@ -247,6 +258,8 @@ const SCENARIOS = [
   {id:10, name:"Volume anomaly", desc:"Agent floods 30 calls: 10x baseline rate."},
   {id:11, name:"Attack chain", desc:"Read file to network to email: exfiltration."},
   {id:12, name:"Lateral movement", desc:"Rapid calls across 5 servers: probe flagged."},
+  {id:13, name:"Policy deny", desc:"Admin policy blocks exec_shell for this agent."},
+  {id:14, name:"Policy approval", desc:"Sensitive tool flagged for operator approval."},
 ];
 
 const grid = document.getElementById('scn-grid');
@@ -317,6 +330,8 @@ const CAT_DESC = {
   unknown_synthetic: "OAuth flow toward a domain with no reputation history. Flagged for review.",
   behavioral_anomaly: "Agent behavior deviates from its baseline: volume, sequence, or timing.",
   attack_chain: "Known malicious tool sequence detected: exfiltration, lateral movement, or escalation.",
+  policy_deny: "Administrator policy denied this tool call. Deterministic, no TI lookup needed.",
+  policy_approval: "Tool requires operator approval before it may run. Held for human review.",
 };
 
 function setSpeed(ms) {
@@ -464,6 +479,7 @@ async function runScenario(id) {
   document.querySelectorAll('.scn-btn').forEach(b => b.disabled = false);
   // Phase 3: refresh the reputation graph after each scenario.
   renderReputationGraph();
+  renderPolicy();
 }
 
 function setStatus(t) {
@@ -473,6 +489,47 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // Phase 3: reputation graph. Fetches GET /_rs/reputation and renders
 // a per-server score history as SVG sparklines with band coloring.
+// Phase 4: policy panel. Fetches GET /_rs/policy and renders
+// the active demo policy rules.
+async function renderPolicy() {
+  const el = document.getElementById('policy-panel');
+  let data;
+  try {
+    const r = await fetch('/_rs/policy');
+    data = await r.json();
+  } catch (e) {
+    el.innerHTML = '<div style="color:#8b949e;font-size:12px">policy endpoint unreachable</div>';
+    return;
+  }
+  let html = '<div style="font-size:12px;margin-bottom:6px">'
+    + '<span style="color:#3fb950">enabled</span>'
+    + ' <span style="color:#6e7681">' + esc(data.path || '') + '</span></div>';
+  const agents = data.agents || {};
+  const tools = data.tools || {};
+  for (const [a, rules] of Object.entries(agents)) {
+    html += '<div style="margin-bottom:6px"><span style="color:#79c0ff">agent: '
+      + esc(a) + '</span><br>';
+    if (rules.allow_tools) {
+      html += '<span style="color:#6e7681">allow: </span>'
+        + esc(rules.allow_tools.join(', ')) + '<br>';
+    }
+    if (rules.deny_tools) {
+      html += '<span style="color:#f85149">deny: </span>'
+        + esc(rules.deny_tools.join(', ')) + '<br>';
+    }
+    html += '</div>';
+  }
+  for (const [t, rules] of Object.entries(tools)) {
+    html += '<div style="margin-bottom:4px"><span style="color:#d2a8ff">tool: '
+      + esc(t) + '</span> ';
+    const bits = [];
+    if (rules.require_approval) bits.push('requires approval');
+    if (rules.rate_limit) bits.push('rate limit ' + rules.rate_limit);
+    html += '<span style="color:#6e7681">' + esc(bits.join('; ')) + '</span></div>';
+  }
+  el.innerHTML = html;
+}
+
 async function renderReputationGraph() {
   const el = document.getElementById('rep-graph');
   let data;
@@ -527,6 +584,7 @@ async function renderReputationGraph() {
 
 // Initial load (proxy-served mode has live data).
 renderReputationGraph();
+renderPolicy();
 </script>
 </body>
 </html>

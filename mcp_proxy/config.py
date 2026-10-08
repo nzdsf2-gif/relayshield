@@ -54,6 +54,16 @@ class ProxyConfig:
             != "false"
         )
 
+        # Phase 2.5: barbed wire.
+        # Ed25519 signing key for verdicts (64 hex chars = 32 bytes).
+        # NEVER commit a key; set it only via the environment.
+        self.signing_key_hex = os.environ.get("MCP_PROXY_SIGNING_KEY", "")
+        # Enrich kit_<sha256> IDs via the scamkit-match API.
+        self.kit_lookup_enabled = (
+            os.environ.get("MCP_PROXY_KIT_LOOKUP", "false").lower()
+            not in ("false", "", "0", "no")
+        )
+
     @property
     def block_level_set(self) -> set:
         return {lvl.strip().lower() for lvl in self.block_levels.split(",")}

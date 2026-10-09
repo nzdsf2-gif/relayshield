@@ -119,37 +119,43 @@ def _stub_ti(self, url):
             "reasons": ["demo mode: TI lookup stubbed (offline)"]}
 
 
+# Shared stateless demo components, built once at server start.
+# Screener (TI stubbed) and VerdictSigner carry no per-scenario state,
+# so they are safe to reuse across runs. The demo PolicyEngine is
+# already a singleton via _demo_policy() below.
+_SHARED_COMPONENTS = None
+
+
+def _shared_components():
+    global _SHARED_COMPONENTS
+    if _SHARED_COMPONENTS is None:
+        (Screener, _, _, VerdictSigner, _, _, _) = _get_components()
+        screener = Screener(api_base="https://api.relayshield.net")
+        # Stub TI URL lookups: offline demo, content checks still run.
+        screener._check_url = _stub_ti.__get__(screener, type(screener))
+        signer = VerdictSigner()
+        _SHARED_COMPONENTS = (screener, signer)
+    return _SHARED_COMPONENTS
+
+
 def _new_components():
-    """Fresh screening components with TI stubbed for offline demo."""
-    (Screener, NeighborRegistry, QuarantineManager, VerdictSigner,
-     BehaviorTracker, ReputationStore, PolicyEngine) = _get_components()
-    screener = Screener(api_base="https://api.relayshield.net")
-    # Stub TI URL lookups: offline demo, content checks still run for real.
-    screener._check_url = _stub_ti.__get__(screener, type(screener))
+    """Per-scenario screening components with TI stubbed for offline demo.
+
+    The stateless screener, signer, and policy engine are shared
+    singletons built once. Registry, quarantine, behavior tracker, and
+    reputation store are fresh per scenario so each demo run starts
+    from a clean slate and verdict output stays deterministic.
+    """
+    (screener, signer) = _shared_components()
+    (_, NeighborRegistry, QuarantineManager, _, BehaviorTracker,
+     ReputationStore, _) = _get_components()
     registry = NeighborRegistry()  # no screener: skip TI on register
     quarantine = QuarantineManager(registry)
-    signer = VerdictSigner()
     # Phase 3: behavioral baselining + reputation.
     behavior = BehaviorTracker(enabled=True)
     reputation = ReputationStore()
-    # Phase 4: policy engine with a demo policy (in-memory, no file).
-    policy = PolicyEngine()
-    policy._policy = {
-        "agents": {
-            "demo-agent": {
-                "allow_tools": ["read_file", "search_docs", "get_help",
-                                "start_oauth", "delete_database"],
-                "deny_tools": ["exec_shell"],
-            },
-        },
-        "servers": {},
-        "tools": {
-            "delete_database": {"require_approval": True},
-            "exec_shell": {"rate_limit": "10/minute"},
-        },
-    }
-    policy.policy_path = "(demo policy: in-memory)"
-    policy._loaded_at = 1.0
+    # Phase 4: demo policy engine (in-memory singleton, static policy).
+    policy = _demo_policy()
     registry.register(CLEAN_UPSTREAM)
     registry.register(POISONED_UPSTREAM)
     reputation.get_or_create(CLEAN_UPSTREAM)
@@ -337,6 +343,13 @@ def run_scenario(scenario_id):
                     demo_rep.record_clean_call(srv)
         except Exception:
             pass
+        # Include the accumulated reputation summary so the dashboard
+        # can refresh the graph from this response without a second
+        # HTTP request.
+        try:
+            result["reputation"] = _demo_reputation().summary()
+        except Exception:
+            result["reputation"] = {"servers": []}
 
     if scenario_id == 1:
         add("agent", "AI Agent sends tool call", "tools/call: get_help")
@@ -681,9 +694,17 @@ def run_scenario(scenario_id):
         finish("ALLOW", "clean", [f"unknown scenario: {scenario_id}"])
 
     return result
+
+
+_HTML_CACHE = None
+
+
 def load_html():
-    with open(_HTML_PATH, "r", encoding="utf-8") as f:
-        return f.read()
+    global _HTML_CACHE
+    if _HTML_CACHE is None:
+        with open(_HTML_PATH, "r", encoding="utf-8") as f:
+            _HTML_CACHE = f.read()
+    return _HTML_CACHE
 
 
 # Phase 3: persistent demo reputation store so the graph accumulates
@@ -856,7 +877,7 @@ class _DemoHandler(http.server.BaseHTTPRequestHandler):
 
 
 def run_demo_server(port=DEMO_PORT):
-    srv = http.server.HTTPServer(("127.0.0.1", port), _DemoHandler)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), _DemoHandler)
     print("RelayShield MCP Proxy dashboard (interactive demo mode)")
     print(f"Open http://127.0.0.1:{port}/_rs/dashboard in your browser.")
     print("Press Ctrl-C to stop.")

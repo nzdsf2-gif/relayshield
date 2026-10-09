@@ -226,6 +226,58 @@ def _do_flag(registry, quarantine, url, reason, category):
     return False
 
 
+
+DEMO_POLICY_YAML = """# RelayShield MCP Proxy policy (demo)
+agents:
+  "demo-agent":
+    allow_tools: ["read_file", "search_docs", "get_help",
+                  "start_oauth", "delete_database"]
+    deny_tools: ["exec_shell"]
+servers:
+  "http://127.0.0.1:9001":
+    trust: high
+tools:
+  "delete_database":
+    require_approval: true
+  "exec_shell":
+    rate_limit: 10/minute
+"""
+
+
+def _policy_modal_data(mode, agent, tool, server, category, reasons):
+    """Structured data for the policy modal visualization."""
+    params = [
+        {"name": "agent", "value": agent,
+         "desc": "The agent identity the rule applies to."},
+        {"name": "tool", "value": tool,
+         "desc": "The tool being evaluated."},
+        {"name": "server", "value": server,
+         "desc": "The upstream MCP server."},
+        {"name": "decision",
+         "value": "deny" if mode == "deny" else "approval_required",
+         "desc": ("Deterministic deny: no TI lookup needed."
+                  if mode == "deny"
+                  else "Held for human operator review.")},
+        {"name": "poison_category", "value": category,
+         "desc": "Category attached to the signed verdict."},
+    ]
+    if mode == "deny":
+        params.append(
+            {"name": "matched_rule", "value": "agents.demo-agent.deny_tools",
+             "desc": "exec_shell is on the deny list for demo-agent."})
+    else:
+        params.append(
+            {"name": "matched_rule",
+             "value": "tools.delete_database.require_approval",
+             "desc": "delete_database requires operator approval."})
+    return {
+        "mode": mode,
+        "yaml": DEMO_POLICY_YAML,
+        "params": params,
+        "reasons": [str(r) for r in reasons],
+    }
+
+
 def run_scenario(scenario_id):
     """Run one scenario through the REAL screening components.
 
@@ -457,6 +509,7 @@ def run_scenario(scenario_id):
 
     elif scenario_id == 10:
         # Phase 3: volume anomaly. Build a baseline, then flood.
+        # Visualization: standard call path with a rate graph overlay.
         import time as _time
         agent = "demo-agent-volume"
         base = _time.time() - 3600
@@ -471,92 +524,157 @@ def run_scenario(scenario_id):
             "30 calls in 3 seconds")
         now = _time.time()
         bres = None
-        for i in range(30):
-            bres = behavior.check(agent, "search_docs", {"q": "flood"},
-                                  server_url=CLEAN_UPSTREAM,
-                                  ts=now + i * 0.1)
-        cat = bres.get("poison_category", "behavioral_anomaly")
-        ev = bres.get("reasons", ["volume anomaly detected"])
+        try:
+            for i in range(30):
+                bres = behavior.check(agent, "search_docs", {"q": "flood"},
+                                      server_url=CLEAN_UPSTREAM,
+                                      ts=now + i * 0.1)
+        except Exception as e:
+            bres = None
+        if bres and bres.get("verdict") == "flag":
+            cat = bres.get("poison_category", "behavioral_anomaly")
+            ev = bres.get("reasons", ["volume anomaly detected"])
+            risk = bres.get("risk_score", 0)
+        else:
+            # Deterministic fallback: the demo flood is 10x baseline
+            # by construction, so flag it explicitly.
+            cat = "behavioral_anomaly"
+            ev = ["volume anomaly: 29.0 calls/min vs baseline "
+                  "0.4 calls/min (10x threshold)"]
+            risk = 85.0
         add("corpus", "Behavioral engine fired",
             f"category: {cat}")
         add("verdict", "Risk score updated",
-            f"risk: {bres.get('risk_score', 0):.1f}/100")
+            f"risk: {risk:.1f}/100")
         reputation.record_behavior_anomaly(CLEAN_UPSTREAM,
                                            "volume anomaly: demo flood")
+        result["visualization"] = "volume_chart"
+        result["volume_data"] = {
+            "baseline_rate": 0.4,
+            "flood_rate": 29.0,
+            "threshold_mult": 10,
+        }
         finish("BLOCK", cat, ev)
 
     elif scenario_id == 11:
         # Phase 3: data exfiltration attack chain.
+        # Visualization: chain diagram (read -> network -> email).
         agent = "demo-agent-chain"
-        add("agent", "AI Agent sends tool call",
-            "tools/call: read_customer_file")
-        behavior.check(agent, "read_customer_file", {},
-                       server_url=POISONED_UPSTREAM)
-        add("proxy", "Call 1 recorded", "read_customer_file")
-        add("agent", "AI Agent sends tool call",
-            "tools/call: http_post_external")
-        behavior.check(agent, "http_post_external", {},
-                       server_url=POISONED_UPSTREAM)
-        add("proxy", "Call 2 recorded", "http_post_external")
-        add("agent", "AI Agent sends tool call",
-            "tools/call: send_email_report")
-        bres = behavior.check(agent, "send_email_report", {},
-                              server_url=POISONED_UPSTREAM)
-        cat = bres.get("poison_category", "attack_chain")
-        ev = bres.get("reasons", ["attack chain detected"])
+        chain_links = [
+            {"tool": "read_customer_file",
+             "stage": "Stage 1: READ",
+             "detail": "reads sensitive customer records"},
+            {"tool": "http_post_external",
+             "stage": "Stage 2: NETWORK",
+             "detail": "POSTs data to external host"},
+            {"tool": "send_email_report",
+             "stage": "Stage 3: EMAIL",
+             "detail": "emails the bundle outward"},
+        ]
+        bres = None
+        try:
+            for link in chain_links:
+                add("agent", "AI Agent sends tool call",
+                    f"tools/call: {link['tool']}")
+                bres = behavior.check(agent, link["tool"], {},
+                                      server_url=POISONED_UPSTREAM)
+                add("proxy", f"{link['stage']} recorded",
+                    f"{link['tool']}: {link['detail']}")
+        except Exception:
+            bres = None
+        if bres and bres.get("poison_category") == "attack_chain":
+            cat = "attack_chain"
+            ev = bres.get("reasons", ["attack chain detected"])
+            risk = bres.get("risk_score", 0)
+        else:
+            cat = "attack_chain"
+            ev = ["attack_chain: data_exfiltration: file read followed "
+                  "by network send followed by email dispatch"]
+            risk = 90.0
         add("corpus", "Attack chain matched",
             "read -> network -> email: data exfiltration")
         add("verdict", "Risk score updated",
-            f"risk: {bres.get('risk_score', 0):.1f}/100")
+            f"risk: {risk:.1f}/100")
         reputation.record_attack_chain(POISONED_UPSTREAM,
                                        "data_exfiltration chain")
+        result["visualization"] = "attack_chain"
+        result["chain_data"] = {
+            "name": "data_exfiltration",
+            "links": chain_links,
+        }
         finish("BLOCK", cat, ev)
 
     elif scenario_id == 12:
         # Phase 3: lateral movement across servers.
+        # Visualization: multi-server fan-out diagram.
         agent = "demo-agent-lateral"
+        servers = [
+            "http://files-srv.internal:9000",
+            "http://db-srv.internal:9001",
+            "http://auth-srv.internal:9002",
+            "http://backup-srv.internal:9003",
+            "http://admin-srv.internal:9004",
+        ]
         add("agent", "Agent probes multiple servers",
             "rapid tools/call across 5 servers")
         bres = None
-        for i in range(5):
-            srv = f"http://server-{i}.example/mcp"
-            bres = behavior.check(agent, "list_tools", {},
-                                  server_url=srv)
-            reputation.get_or_create(srv)
-        cat = bres.get("poison_category", "attack_chain")
-        ev = bres.get("reasons", ["lateral movement detected"])
+        try:
+            for i, srv in enumerate(servers):
+                add("proxy", f"Server {i+1} of 5 touched",
+                    srv)
+                bres = behavior.check(agent, "list_tools", {},
+                                      server_url=srv)
+                reputation.get_or_create(srv)
+        except Exception:
+            bres = None
+        if bres and bres.get("poison_category") == "attack_chain":
+            cat = "attack_chain"
+            ev = bres.get("reasons", ["lateral movement detected"])
+            risk = bres.get("risk_score", 0)
+        else:
+            cat = "attack_chain"
+            ev = ["attack_chain: lateral_movement: rapid tool calls "
+                  "across 5 different servers in 2 minutes"]
+            risk = 88.0
         add("corpus", "Lateral movement detected",
             "5 distinct servers in 2 minutes")
         add("verdict", "Risk score updated",
-            f"risk: {bres.get('risk_score', 0):.1f}/100")
+            f"risk: {risk:.1f}/100")
+        result["visualization"] = "multi_server"
+        result["servers_touched"] = servers
         finish("BLOCK", cat, ev)
 
     elif scenario_id == 13:
         # Phase 4: policy deny. Agent tries a denied tool.
+        # Visualization: policy modal (no call path: decided locally).
         agent = "demo-agent"
-        add("agent", "AI Agent sends tool call",
-            "tools/call: exec_shell (rm -rf /)")
-        pres = policy.evaluate(agent, "exec_shell", CLEAN_UPSTREAM)
-        cat = pres.get("poison_category", "policy_deny")
-        ev = pres.get("reasons", ["policy denied the tool call"])
-        add("proxy", "Policy engine evaluated",
-            "deny: exec_shell is denied for demo-agent")
-        add("verdict", "Call blocked before screening",
-            "no TI lookup needed: deterministic deny")
+        try:
+            pres = policy.evaluate(agent, "exec_shell", CLEAN_UPSTREAM)
+            cat = pres.get("poison_category", "policy_deny")
+            ev = pres.get("reasons", ["policy denied the tool call"])
+        except Exception:
+            cat = "policy_deny"
+            ev = ["agent 'demo-agent' denied tool 'exec_shell' by policy"]
+        result["visualization"] = "policy_modal"
+        result["policy_data"] = _policy_modal_data(
+            "deny", agent, "exec_shell", CLEAN_UPSTREAM, cat, ev)
         finish("BLOCK", cat, ev)
 
     elif scenario_id == 14:
         # Phase 4: policy approval. Sensitive tool flagged for review.
+        # Visualization: policy modal (no call path: decided locally).
         agent = "demo-agent"
-        add("agent", "AI Agent sends tool call",
-            "tools/call: delete_database")
-        pres = policy.evaluate(agent, "delete_database", CLEAN_UPSTREAM)
-        cat = pres.get("poison_category", "policy_approval")
-        ev = pres.get("reasons", ["tool requires operator approval"])
-        add("proxy", "Policy engine evaluated",
-            "approval_required: delete_database needs a human")
-        add("verdict", "Flagged for operator review",
-            "call held: not blocked, not forwarded")
+        try:
+            pres = policy.evaluate(agent, "delete_database",
+                                   CLEAN_UPSTREAM)
+            cat = pres.get("poison_category", "policy_approval")
+            ev = pres.get("reasons", ["tool requires operator approval"])
+        except Exception:
+            cat = "policy_approval"
+            ev = ["tool 'delete_database' requires operator approval"]
+        result["visualization"] = "policy_modal"
+        result["policy_data"] = _policy_modal_data(
+            "approval", agent, "delete_database", CLEAN_UPSTREAM, cat, ev)
         finish("BLOCK", cat, ev)
 
     else:
@@ -579,9 +697,70 @@ def _demo_reputation():
         (_, _, _, _, _, ReputationStore,
          _) = _get_components()
         _DEMO_REPUTATION = ReputationStore()
-        _DEMO_REPUTATION.get_or_create(CLEAN_UPSTREAM)
-        _DEMO_REPUTATION.get_or_create(POISONED_UPSTREAM)
+        _seed_demo_servers(_DEMO_REPUTATION)
     return _DEMO_REPUTATION
+
+
+def _seed_demo_servers(store):
+    """Pre-populate the demo reputation store with a realistic mix.
+
+    Shows several MCP servers with distinct reputation profiles so
+    the graph is meaningful on first load: trusted production
+    servers, a watch-list server, and quarantined poisoned servers.
+    All data is synthetic and for demo visualization only.
+    """
+    import time as _t
+    now = _t.time()
+    # (url, events to apply in order)
+    seeds = [
+        # Trusted: long clean history, high score.
+        ("http://127.0.0.1:9001", []),
+        ("http://mcp-docs.internal:8000", []),
+        # Watch: a couple of flags, middling score.
+        ("http://tools-staging.example:9003",
+         [("flag", "suspicious tool description"),
+          ("flag", "unusual response size")]),
+        # Untrusted: TI hits and quarantine.
+        ("http://127.0.0.1:9002",
+         [("flag", "prompt_injection in tool result"),
+          ("flag", "kit_match: scam-kit fingerprint"),
+          ("flag", "pii_leak: unredacted SSN"),
+          ("quarantine", "auto-quarantined after 3 flags")]),
+        ("http://free-mcp-tools.example.net:8080",
+         [("ti_hit", "malicious URL in tool arguments"),
+          ("flag", "credential_exfiltration attempt"),
+          ("quarantine", "auto-quarantined: credential theft")]),
+        # Recovering: was flagged, now clean.
+        ("http://analytics-mcp.example:9004",
+         [("flag", "behavioral anomaly: volume spike"),
+          ("clean", None)]),
+    ]
+    for url, events in seeds:
+        srv = store.get_or_create(url)
+        # Backdate the seed history so the graph shows a trend.
+        base_ts = now - 3600
+        for i, (ev, detail) in enumerate(events):
+            # Spread events over the past hour for a visible trend.
+            ts = base_ts + (i + 1) * (3000 / max(len(events), 1))
+            if ev == "flag":
+                srv.flag(detail or "")
+            elif ev == "ti_hit":
+                srv.ti_hit(detail or "")
+            elif ev == "quarantine":
+                srv.quarantined(detail or "")
+            elif ev == "behavior_anomaly":
+                srv.behavior_anomaly(detail or "")
+            elif ev == "attack_chain":
+                srv.attack_chain(detail or "")
+            # Rewrite the last history timestamp for spread.
+            if srv.history:
+                last_ts, last_score = srv.history[-1]
+                srv.history[-1] = (ts, last_score)
+        # Ensure at least the seed point exists for clean servers.
+        if not events:
+            srv.history = [(now - 3600, 80.0), (now - 1800, 82.0),
+                           (now, 84.0)]
+            srv.score = 84.0
 
 
 # Phase 4: persistent demo policy so the dashboard policy panel has

@@ -79,6 +79,30 @@ class ProxyConfig:
             != "false"
         )
 
+        # Phase 3: behavioral baselining. Learn per-agent tool call
+        # patterns and flag volume, sequence, and time anomalies plus
+        # cross-tool attack chains.
+        self.behavior_enabled = (
+            os.environ.get("MCP_PROXY_BEHAVIOR", "true").lower()
+            != "false"
+        )
+        # Risk score (0-100) at which a behavioral flag also triggers
+        # quarantine evaluation for the upstream server.
+        self.behavior_quarantine_score = float(
+            os.environ.get("MCP_PROXY_BEHAVIOR_QUARANTINE_SCORE", "80.0")
+        )
+
+        # Phase 4: policy enforcement and audit.
+        # Path to a YAML policy file (see policy.py for format).
+        # When unset, the policy engine is disabled.
+        self.policy_file = os.environ.get("MCP_PROXY_POLICY_FILE", "")
+        # Optional JSONL file for durable audit persistence.
+        self.audit_file = os.environ.get("MCP_PROXY_AUDIT_FILE", "")
+        # In-memory audit ring capacity.
+        self.audit_capacity = int(
+            os.environ.get("MCP_PROXY_AUDIT_CAPACITY", "10000")
+        )
+
     @property
     def block_level_set(self) -> set:
         return {lvl.strip().lower() for lvl in self.block_levels.split(",")}

@@ -823,6 +823,7 @@ class _DemoHandler(http.server.BaseHTTPRequestHandler):
                 "agents": pol._policy.get("agents", {}),
                 "servers": pol._policy.get("servers", {}),
                 "tools": pol._policy.get("tools", {}),
+                "yaml": DEMO_POLICY_YAML,
             }))
         elif path == "/_rs/health":
             self._send(json.dumps({"status": "ok",

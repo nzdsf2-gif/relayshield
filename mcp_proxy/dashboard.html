@@ -665,9 +665,10 @@ async function runScenario(id) {
   setStatus('Done. Pick another scenario.');
   running = false;
   document.querySelectorAll('.scn-btn').forEach(b => b.disabled = false);
-  // Phase 3: refresh the reputation graph after each scenario.
-  renderReputationGraph();
-  renderPolicy();
+  // Refresh the reputation graph from the scenario response data.
+  // No extra HTTP request. The policy panel is static for the demo
+  // session and renders once on page load.
+  renderReputationGraph(result.reputation);
 }
 
 function setStatus(t) {
@@ -726,17 +727,21 @@ async function renderPolicy() {
 }
 
 
-async function renderReputationGraph() {
+async function renderReputationGraph(provided) {
   const el = document.getElementById('rep-graph');
-  let data;
-  try {
-    const r = await fetch('/_rs/reputation');
-    data = await r.json();
-  } catch (e) {
-    el.innerHTML = '<div style="color:#8b949e;font-size:12px">reputation endpoint unreachable</div>';
-    return;
+  // When the scenario response already carries the reputation summary,
+  // render from it directly: no extra HTTP request. Otherwise fetch.
+  let data = provided;
+  if (!data) {
+    try {
+      const r = await fetch('/_rs/reputation');
+      data = await r.json();
+    } catch (e) {
+      el.innerHTML = '<div style="color:#8b949e;font-size:12px">reputation endpoint unreachable</div>';
+      return;
+    }
   }
-  const servers = data.servers || [];
+  const servers = (data && data.servers) || [];
   if (!servers.length) {
     el.innerHTML = '<div style="color:#8b949e;font-size:12px">no servers tracked yet</div>';
     return;

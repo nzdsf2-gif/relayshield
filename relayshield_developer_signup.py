@@ -2520,13 +2520,13 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
       <div class="endpoint" style="color:var(--accent)">TAP Verifier</div>
       <div class="price">$49<span class="per"> / mo</span></div>
       <div class="desc">Flat monthly pricing for merchants running regular agent transaction volume. Includes RFC 9421 signature verification, Visa JWKS validation, TI corpus screening, intent-mismatch detection, and signed verification receipts. Fair use: 1,000 verifications per month.</div>
-      <div style="display:block;margin-top:1rem;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600">Stripe billing link coming soon</div>
+      <a href="https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l" style="display:block;margin-top:1rem;background:var(--accent);border:1px solid var(--accent);color:#fff;text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600;text-decoration:none">Subscribe via Stripe</a>
     </div>
     <div class="price-card" style="border-color:var(--accent)">
       <div class="endpoint" style="color:var(--accent)">TAP Verifier</div>
       <div class="price">$0.10<span class="per"> / verification</span></div>
       <div class="desc">Pay as you go for developers and low-volume use. Same verification, same signed receipts, metered per call. No monthly commitment.</div>
-      <div style="display:block;margin-top:1rem;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600">Stripe metered billing coming soon</div>
+      <div style="display:block;margin-top:1rem;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600">Contact us for metered billing</div>
     </div>
   </div>
   <p style="margin-top:1rem;font-size:.88rem;color:var(--muted)">Background reading: the TAP verifier launch post on <a href="https://blog.relayshield.net/" style="color:var(--accent)">blog.relayshield.net</a> (direct post link added when it publishes).</p>

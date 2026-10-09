@@ -3,167 +3,530 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RelayShield MCP Proxy Firewall: Live Dashboard</title>
+<title>RelayShield MCP Proxy Firewall: Interactive Demo</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-         background: #0d1117; color: #e6edf3; padding: 24px; }
+         background: #0d1117; color: #e6edf3; padding: 20px; min-height: 100vh; }
   h1 { font-size: 22px; margin-bottom: 4px; }
-  .sub { color: #8b949e; font-size: 13px; margin-bottom: 20px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
-  .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;
+  .sub { color: #8b949e; font-size: 13px; margin-bottom: 18px; }
+  .sub .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                   background: #3fb950; margin-right: 6px; }
+
+  /* Scenario buttons */
+  .scenarios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+               margin-bottom: 18px; }
+  .scn-btn { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+             padding: 12px; cursor: pointer; text-align: left; color: #e6edf3;
+             transition: border-color 0.15s, background 0.15s; }
+  .scn-btn:hover { border-color: #58a6ff; background: #1a2230; }
+  .scn-btn.active { border-color: #58a6ff; background: #1a2a44; }
+  .scn-btn:disabled { opacity: 0.55; cursor: wait; }
+  .scn-btn .num { display: inline-block; background: #30363d; color: #e6edf3;
+                  font-size: 11px; font-weight: 700; border-radius: 10px;
+                  padding: 1px 8px; margin-right: 6px; }
+  .scn-btn .nm { font-size: 13px; font-weight: 600; }
+  .scn-btn .ds { font-size: 11px; color: #8b949e; margin-top: 4px; }
+
+  .main-grid { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+          padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;
              color: #8b949e; margin-bottom: 12px; }
+
+  /* Call path diagram */
+  #diagram { position: relative; height: 300px; }
+  .node { position: absolute; background: #21262d; border: 1px solid #30363d;
+          border-radius: 10px; padding: 10px 14px; font-size: 12px; font-weight: 600;
+          text-align: center; min-width: 110px; transition: all 0.3s; }
+  .node .sub2 { display: block; font-size: 10px; font-weight: 400; color: #8b949e;
+                margin-top: 2px; }
+  .node.active { border-color: #58a6ff; box-shadow: 0 0 12px rgba(88,166,255,0.35); }
+  .node.bad { border-color: #f85149; box-shadow: 0 0 12px rgba(248,81,73,0.4); }
+  .node.good { border-color: #3fb950; box-shadow: 0 0 12px rgba(63,185,80,0.35); }
+  #n-agent { left: 2%; top: 40px; }
+  #n-proxy { left: 38%; top: 40px; }
+  #n-server { left: 74%; top: 40px; }
+  #n-corpus { left: 38%; top: 190px; }
+  svg.wires { position: absolute; inset: 0; width: 100%; height: 100%;
+              pointer-events: none; }
+  .wire { stroke: #30363d; stroke-width: 2; fill: none; }
+  .wire.flow { stroke: #58a6ff; stroke-width: 2.5;
+               stroke-dasharray: 8 6; animation: dashflow 0.6s linear infinite; }
+  .wire.blocked { stroke: #f85149; }
+  .wire.ok { stroke: #3fb950; }
+  @keyframes dashflow { to { stroke-dashoffset: -14; } }
+  .pkt { fill: #58a6ff; }
+  #phase-label { text-align: center; font-size: 13px; color: #8b949e;
+                 margin-top: 8px; min-height: 36px; }
+  #phase-label strong { color: #e6edf3; }
+
+  /* Verdict panel */
+  #verdict-badge { display: inline-block; font-size: 28px; font-weight: 800;
+                   padding: 8px 28px; border-radius: 12px; letter-spacing: 1px; }
+  #verdict-badge.allow { background: #1a3a1a; color: #3fb950;
+                         border: 2px solid #3fb950; }
+  #verdict-badge.block { background: #f85149; color: #0d1117;
+                         border: 2px solid #ff7b72;
+                         box-shadow: 0 0 18px rgba(248,81,73,0.55); }
+  #verdict-badge.quarantine { background: #3a2e1a; color: #f0883e;
+                              border: 2px solid #f0883e; }
+  #verdict-badge.idle { background: #21262d; color: #8b949e;
+                        border: 2px solid #30363d; }
+  .vrow { margin-top: 10px; font-size: 13px; }
+  .vrow .k { color: #8b949e; display: inline-block; width: 130px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 12px; }
+  .ev-list { margin: 6px 0 0 130px; font-size: 12px; color: #c9d1d9; }
+  .ev-list li { margin-bottom: 3px; }
+  .sig-ok { color: #3fb950; } .sig-bad { color: #f85149; }
+
+  /* Server reputation panel */
+  .srv { background: #21262d; border: 1px solid #30363d; border-radius: 8px;
+         padding: 10px 12px; margin-bottom: 10px; font-size: 12px; }
+  .srv .url { font-family: ui-monospace, monospace; font-size: 11px;
+              word-break: break-all; }
   .badge { display: inline-block; padding: 2px 10px; border-radius: 12px;
-           font-size: 12px; font-weight: 600; }
+           font-size: 11px; font-weight: 700; margin-top: 6px; }
   .badge.clean { background: #1a3a1a; color: #3fb950; }
   .badge.suspicious { background: #3a2e1a; color: #d29922; }
   .badge.quarantined { background: #3a1a1a; color: #f85149; }
-  .badge.block { background: #3a1a1a; color: #f85149; }
-  .badge.flag { background: #3a2e1a; color: #d29922; }
-  .badge.allow { background: #1a3a1a; color: #3fb950; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; color: #8b949e; font-weight: 600; padding: 6px 8px;
-       border-bottom: 1px solid #30363d; }
-  td { padding: 8px; border-bottom: 1px solid #21262d; vertical-align: top; }
-  tr:last-child td { border-bottom: none; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  .feed { max-height: 420px; overflow-y: auto; }
-  .feed-item { padding: 10px 0; border-bottom: 1px solid #21262d; font-size: 13px; }
-  .feed-item:last-child { border-bottom: none; }
-  .feed-time { color: #8b949e; font-size: 11px; }
-  .cat { font-weight: 600; }
-  .sig { color: #8b949e; font-size: 11px; }
-  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-                margin-right: 6px; }
-  .dot-green { background: #3fb950; }
-  .dot-yellow { background: #d29922; }
-  .dot-red { background: #f85149; }
-  .footer { color: #8b949e; font-size: 12px; margin-top: 16px; text-align: center; }
-  #conn { font-size: 12px; }
+  .badge.qorange { background: #3a2e1a; color: #f0883e; }
+
+  .footer { color: #8b949e; font-size: 12px; margin-top: 8px; text-align: center; }
+  #status { font-size: 12px; color: #8b949e; margin-bottom: 12px; min-height: 18px; }
+
+  /* Speed control */
+  .speed-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+               font-size: 12px; color: #8b949e; }
+  .spd-btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+             border-radius: 6px; padding: 5px 14px; font-size: 12px;
+             cursor: pointer; }
+  .spd-btn:hover { border-color: #58a6ff; }
+  .spd-btn.active { border-color: #58a6ff; background: #1a2a44; color: #e6edf3; }
+
+  /* Category badge */
+  #cat-badge { display: inline-block; font-size: 15px; font-weight: 700;
+               padding: 6px 18px; border-radius: 20px; margin-top: 12px;
+               font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #cat-badge.cat-idle { background: #21262d; color: #8b949e;
+                        border: 1px solid #30363d; }
+  #cat-badge.cat-clean { background: #1a3a1a; color: #3fb950;
+                         border: 1px solid #3fb950; }
+  #cat-badge.cat-bad { background: #f85149; color: #0d1117;
+                       border: 1px solid #ff7b72; font-weight: 800; }
+  #cat-badge.cat-warn { background: #3a2e1a; color: #f0883e;
+                        border: 1px solid #f0883e; }
+  #cat-desc { font-size: 12px; color: #8b949e; margin-top: 6px; min-height: 16px; }
+
+  /* Taxonomy reference */
+  details.taxonomy { margin-top: 12px; font-size: 12px; }
+  details.taxonomy summary { cursor: pointer; color: #58a6ff; font-size: 12px; }
+  details.taxonomy table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  details.taxonomy td { padding: 5px 8px; border-bottom: 1px solid #21262d;
+                        vertical-align: top; }
+  details.taxonomy td.c { font-family: ui-monospace, monospace; color: #79c0ff;
+                          white-space: nowrap; font-size: 11px; }
+  details.taxonomy td.d { color: #8b949e; }
+
+  /* Raw JSON */
+  .json-note { font-size: 12px; color: #8b949e; margin-bottom: 8px; }
+  .json-note strong { color: #e6edf3; }
+  pre#v-json { background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+               padding: 12px; font-size: 11.5px; line-height: 1.55;
+               overflow-x: auto; max-height: 320px; overflow-y: auto;
+               font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .j-key { color: #79c0ff; } .j-str { color: #a5d6ff; }
+  .j-num { color: #f0883e; } .j-bool { color: #ff7b72; } .j-null { color: #8b949e; }
+  details.rawjson summary { cursor: pointer; color: #58a6ff; font-size: 12px;
+                            margin-bottom: 8px; }
 </style>
 </head>
 <body>
 <h1>RelayShield MCP Proxy Firewall</h1>
-<div class="sub">Live screening dashboard &middot; <span id="conn"><span class="status-dot dot-yellow"></span>connecting...</span></div>
+<div class="sub"><span class="live-dot"></span>interactive demo: pick a scenario, watch the proxy work</div>
 
-<div class="grid">
-  <div class="card">
-    <h2>Neighbor servers</h2>
-    <table id="neighbors">
-      <thead><tr><th>Server</th><th>Reputation</th><th>Flags</th></tr></thead>
-      <tbody><tr><td colspan="3" style="color:#8b949e">waiting for data...</td></tr></tbody>
-    </table>
-  </div>
-  <div class="card">
-    <h2>Quarantine events</h2>
-    <div id="quarantine" style="font-size:13px;color:#8b949e">none</div>
-  </div>
+<div class="speed-row">Animation speed:
+  <button class="spd-btn" id="spd-slow" onclick="setSpeed(2000)">Slow</button>
+  <button class="spd-btn active" id="spd-normal" onclick="setSpeed(1200)">Normal</button>
+  <button class="spd-btn" id="spd-fast" onclick="setSpeed(500)">Fast</button>
 </div>
+<div class="scenarios" id="scn-grid"></div>
+<div id="status"></div>
 
-<div class="card" style="margin-bottom:16px">
-  <h2>Screening feed (live)</h2>
-  <div class="feed" id="feed">
-    <div style="color:#8b949e;font-size:13px">Waiting for tool-call activity...</div>
+<div class="main-grid">
+  <div>
+    <div class="card">
+      <h2>Call path</h2>
+      <div id="diagram">
+        <svg class="wires" id="wires" viewBox="0 0 1000 300" preserveAspectRatio="none">
+          <path id="w-agent-proxy" class="wire" d="M 150 70 L 400 70"/>
+          <path id="w-proxy-corpus" class="wire" d="M 450 110 L 450 200"/>
+          <path id="w-proxy-server" class="wire" d="M 530 70 L 760 70"/>
+          <path id="w-server-proxy" class="wire" d="M 760 100 L 530 100"/>
+          <path id="w-proxy-agent" class="wire" d="M 400 100 L 150 100"/>
+        </svg>
+        <div class="node" id="n-agent">AI Agent<span class="sub2">MCP client</span></div>
+        <div class="node" id="n-proxy">MCP Proxy<span class="sub2">RelayShield screening</span></div>
+        <div class="node" id="n-server">Target MCP Server<span class="sub2" id="server-sub">upstream</span></div>
+        <div class="node" id="n-corpus">TI Corpus<span class="sub2">687K+ indicators</span></div>
+      </div>
+      <div id="phase-label">Select a scenario above to begin.</div>
+    </div>
+
+    <div class="card">
+      <h2>Verdict</h2>
+      <div><span id="verdict-badge" class="idle">STANDBY</span></div>
+      <div><span id="cat-badge" class="cat-idle">no category yet</span></div>
+      <div id="cat-desc"></div>
+      <details class="taxonomy">
+        <summary>Verdict taxonomy reference (all poison categories)</summary>
+        <table id="taxonomy-table"></table>
+      </details>
+      <div class="vrow"><span class="k">Evidence</span></div>
+      <ul class="ev-list" id="v-ev"><li style="color:#8b949e">none yet</li></ul>
+      <div class="vrow"><span class="k">Signature</span><span id="v-sig" class="mono">-</span>
+        <span id="v-sig-ok" style="margin-left:8px"></span></div>
+    </div>
   </div>
-</div>
 
-<div class="card">
-  <h2>Verdict signing</h2>
-  <div id="signing" style="font-size:13px">...</div>
+  <div>
+    <div class="card">
+      <h2>Raw verdict JSON</h2>
+      <details class="rawjson" open>
+        <summary>Show / hide</summary>
+        <div class="json-note"><strong>This is what your logs would capture.</strong>
+        Every verdict the proxy issues is signed and auditable; ship this
+        object to your SIEM or log store.</div>
+        <pre id="v-json">Run a scenario to see the signed verdict JSON.</pre>
+      </details>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Server reputation</h2>
+      <div id="servers"><div style="color:#8b949e;font-size:12px">run a scenario to populate</div></div>
+    </div>
+    <div class="card">
+      <h2>Reputation graph</h2>
+      <div id="rep-graph" style="color:#8b949e;font-size:12px">run a scenario to populate</div>
+      <div style="font-size:11px;color:#8b949e;margin-top:8px;line-height:1.5">
+        Scores 0-100 (higher is more trustworthy). Bands: trusted 70+,
+        watch 40-69, untrusted below 40. Scores drop on TI hits, flags,
+        and quarantines; they recover slowly on clean operation.
+      </div>
+    </div>
+    <div class="card">
+      <h2>How to read this</h2>
+      <div style="font-size:12px;color:#8b949e;line-height:1.6">
+        Every tool call passes through the proxy. The proxy screens
+        arguments and responses against the TI corpus, then issues a
+        signed verdict. ALLOW means the call proceeded. BLOCK means the
+        call or response was stopped. QUARANTINE means the server earned
+        three strikes and is now fail-closed.
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="footer">RelayShield MCP Proxy Firewall &middot; every verdict is signed and auditable</div>
 
 <script>
-const feed = document.getElementById('feed');
-const MAX_ITEMS = 50;
+const SCENARIOS = [
+  {id:1, name:"Clean traffic", desc:"Normal call passes through untouched."},
+  {id:2, name:"Prompt injection", desc:"Hidden instructions in a tool response."},
+  {id:3, name:"Kit fingerprint", desc:"Response matches a phishing kit fingerprint."},
+  {id:4, name:"PII leak", desc:"Unredacted SSN pattern in a tool response."},
+  {id:5, name:"Quarantine trigger", desc:"Third strike: server auto-quarantined."},
+  {id:6, name:"Isolation check", desc:"Clean server works after neighbor quarantined."},
+  {id:7, name:"OAuth tampering", desc:"Google OAuth path on an attacker domain."},
+  {id:8, name:"Credential exfiltration", desc:"JWT bound for a non-IdP domain."},
+  {id:9, name:"Legitimate OAuth", desc:"Real Google OAuth flow passes clean."},
+  {id:10, name:"Volume anomaly", desc:"Agent floods 30 calls: 10x baseline rate."},
+  {id:11, name:"Attack chain", desc:"Read file to network to email: exfiltration."},
+  {id:12, name:"Lateral movement", desc:"Rapid calls across 5 servers: probe flagged."},
+];
 
-function badgeFor(verdict) {
-  const v = (verdict || '').toLowerCase();
-  if (v === 'block' || v === 'blocked') return '<span class="badge block">BLOCKED</span>';
-  if (v === 'flag' || v === 'flagged') return '<span class="badge flag">FLAGGED</span>';
-  return '<span class="badge allow">ALLOWED</span>';
-}
-function badgeForRep(rep) {
-  const r = (rep || '').toLowerCase();
-  if (r === 'quarantined') return '<span class="badge quarantined">QUARANTINED</span>';
-  if (r === 'suspicious') return '<span class="badge suspicious">SUSPICIOUS</span>';
-  return '<span class="badge clean">CLEAN</span>';
-}
+const grid = document.getElementById('scn-grid');
+SCENARIOS.forEach(s => {
+  const b = document.createElement('button');
+  b.className = 'scn-btn';
+  b.id = 'scn-' + s.id;
+  b.innerHTML = `<span class="num">${s.id}</span><span class="nm">${esc(s.name)}</span><div class="ds">${esc(s.desc)}</div>`;
+  b.onclick = () => runScenario(s.id);
+  grid.appendChild(b);
+});
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
-function addFeed(html) {
-  const div = document.createElement('div');
-  div.className = 'feed-item';
-  div.innerHTML = html;
-  feed.prepend(div);
-  while (feed.children.length > MAX_ITEMS) feed.removeChild(feed.lastChild);
-}
-function setConn(ok) {
-  document.getElementById('conn').innerHTML = ok
-    ? '<span class="status-dot dot-green"></span>live'
-    : '<span class="status-dot dot-red"></span>proxy unreachable';
+
+const wires = {
+  'agent': 'w-agent-proxy',
+  'proxy': 'w-proxy-corpus',
+  'forward': 'w-proxy-server',
+  'response': 'w-server-proxy',
+  'verdict': 'w-proxy-agent',
+  'corpus': 'w-proxy-corpus',
+  'blocked': 'w-proxy-server',
+  'quarantine': null,
+  'attack': null,
+  'reputation': null,
+};
+const nodes = {
+  'agent': 'n-agent',
+  'proxy': 'n-proxy',
+  'forward': 'n-server',
+  'response': 'n-server',
+  'corpus': 'n-corpus',
+  'verdict': 'n-proxy',
+  'blocked': 'n-proxy',
+  'quarantine': 'n-server',
+  'attack': 'n-server',
+  'reputation': 'n-server',
+};
+
+function resetDiagram() {
+  document.querySelectorAll('.wire').forEach(w => {
+    w.classList.remove('flow', 'blocked', 'ok');
+  });
+  document.querySelectorAll('.node').forEach(n => {
+    n.classList.remove('active', 'bad', 'good');
+  });
 }
 
-let lastEventCount = 0;
+function setPhase(html) {
+  document.getElementById('phase-label').innerHTML = html;
+}
 
-async function poll() {
+let running = false;
+let speedMs = 1200;
+
+const CAT_DESC = {
+  clean: "No threat detected. The call was allowed.",
+  prompt_injection: "Hidden instructions embedded in a tool response.",
+  kit_match: "Response matches a known phishing kit fingerprint.",
+  pii_leak: "Unredacted PII detected. Values are never logged.",
+  malicious_url: "Tool arguments contain a TI-flagged URL.",
+  secret_leak: "Secret material detected in a response.",
+  oauth_tampering: "OAuth endpoint mimics a known IdP on a foreign domain.",
+  credential_exfiltration: "OAuth credential material bound for a non-IdP domain. Values never logged.",
+  unknown_synthetic: "OAuth flow toward a domain with no reputation history. Flagged for review.",
+  behavioral_anomaly: "Agent behavior deviates from its baseline: volume, sequence, or timing.",
+  attack_chain: "Known malicious tool sequence detected: exfiltration, lateral movement, or escalation.",
+};
+
+function setSpeed(ms) {
+  speedMs = ms;
+  document.querySelectorAll('.spd-btn').forEach(b => b.classList.remove('active'));
+  const map = {2000: 'spd-slow', 1200: 'spd-normal', 500: 'spd-fast'};
+  const el = document.getElementById(map[ms]);
+  if (el) el.classList.add('active');
+}
+
+function renderTaxonomy() {
+  const t = document.getElementById('taxonomy-table');
+  t.innerHTML = Object.entries(CAT_DESC).map(([c, d]) =>
+    '<tr><td class="c">' + esc(c) + '</td><td class="d">' + esc(d) + '</td></tr>'
+  ).join('');
+}
+renderTaxonomy();
+
+function syntaxHighlight(json) {
+  const s = String(json).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (m) {
+    let cls = 'j-num';
+    if (/^"/.test(m)) { cls = /:$/.test(m) ? 'j-key' : 'j-str'; }
+    else if (/true|false/.test(m)) { cls = 'j-bool'; }
+    else if (/null/.test(m)) { cls = 'j-null'; }
+    return '<span class="' + cls + '">' + m + '</span>';
+  });
+}
+
+function catClass(cat) {
+  if (cat === 'clean') return 'cat-clean';
+  if (cat === 'unknown_synthetic') return 'cat-warn';
+  return 'cat-bad';
+}
+
+async function runScenario(id) {
+  if (running) return;
+  running = true;
+  document.querySelectorAll('.scn-btn').forEach(b => b.disabled = true);
+  document.querySelectorAll('.scn-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('scn-' + id).classList.add('active');
+  resetDiagram();
+  setPhase('<strong>Running scenario ' + id + '...</strong> contacting proxy');
+  setStatus('Running scenario ' + id + ': ' + SCENARIOS[id-1].name);
+
+  let result;
   try {
-    const r = await fetch('/_rs/neighbors');
-    if (!r.ok) throw new Error('bad status');
-    const data = await r.json();
-    setConn(true);
-
-    // Neighbors table
-    const rows = Object.entries(data.neighbors || {}).map(([url, rep]) =>
-      `<tr><td class="mono">${esc(url)}</td><td>${badgeForRep(rep.reputation)}</td>` +
-      `<td>${(rep.flags || []).length}</td></tr>`).join('');
-    document.querySelector('#neighbors tbody').innerHTML =
-      rows || '<tr><td colspan="3" style="color:#8b949e">no servers registered</td></tr>';
-
-    // Quarantine events
-    const evts = data.quarantine_events || [];
-    document.getElementById('quarantine').innerHTML = evts.length
-      ? evts.slice().reverse().map(e =>
-          `<div style="margin-bottom:8px"><span class="badge quarantined">QUARANTINED</span><br>` +
-          `<span class="mono">${esc(e.url || '')}</span><br>` +
-          `<span style="color:#8b949e;font-size:12px">${esc(e.reason || '')}</span></div>`).join('')
-      : '<span style="color:#8b949e">none</span>';
-
-    // New flags become feed items
-    let newFlags = 0;
-    for (const [url, rep] of Object.entries(data.neighbors || {})) {
-      for (const f of (rep.flags || [])) newFlags++;
-    }
-    if (newFlags > lastEventCount) {
-      lastEventCount = newFlags;
-      // Surface the latest flag details
-      for (const [url, rep] of Object.entries(data.neighbors || {})) {
-        const latest = (rep.flags || [])[ (rep.flags || []).length - 1 ];
-        if (latest) {
-          addFeed(`${badgeForRep(rep.reputation)} <span class="mono">${esc(url)}</span><br>` +
-            `<span style="color:#8b949e">${esc(latest.reason || 'flagged')}</span> ` +
-            `<span class="feed-time">${esc(latest.at || '')}</span>`);
-        }
-      }
-    }
-
-    // Signing status
-    document.getElementById('signing').innerHTML =
-      (data.verdicts_signed
-        ? '<span class="status-dot dot-green"></span>verdicts are Ed25519-signed'
-        : '<span class="status-dot dot-yellow"></span>verdicts unsigned (no signing key)') +
-      (data.verdict_pubkey
-        ? `<br><span class="mono sig">pubkey: ${esc(data.verdict_pubkey.slice(0, 32))}...</span>` : '');
+    const r = await fetch('/_rs/demo/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scenario: id}),
+    });
+    result = await r.json();
   } catch (e) {
-    setConn(false);
+    setPhase('<strong>Error:</strong> could not reach the demo backend.');
+    setStatus('Backend unreachable.');
+    running = false;
+    document.querySelectorAll('.scn-btn').forEach(b => b.disabled = false);
+    return;
   }
+
+  // Animate steps
+  for (const st of (result.steps || [])) {
+    const wid = wires[st.phase];
+    const nid = nodes[st.phase];
+    if (wid) {
+      const w = document.getElementById(wid);
+      w.classList.remove('blocked', 'ok');
+      w.classList.add('flow');
+    }
+    if (nid) {
+      const n = document.getElementById(nid);
+      n.classList.remove('bad', 'good');
+      n.classList.add('active');
+    }
+    setPhase('<strong>' + esc(st.label) + '</strong>' +
+             (st.detail ? '<br>' + esc(st.detail) : ''));
+    await sleep(speedMs);
+    if (wid) document.getElementById(wid).classList.remove('flow');
+    if (nid) document.getElementById(nid).classList.remove('active');
+  }
+
+  // Final verdict visuals
+  const v = (result.verdict || 'ALLOW').toUpperCase();
+  const badge = document.getElementById('verdict-badge');
+  badge.textContent = v === 'QUARANTINE' ? 'QUARANTINED' : (v === 'BLOCK' ? 'BLOCKED' : 'ALLOWED');
+  badge.className = v === 'QUARANTINE' ? 'quarantine' : v.toLowerCase();
+  const cat = result.poison_category || 'clean';
+  const cb = document.getElementById('cat-badge');
+  cb.textContent = cat;
+  cb.className = catClass(cat);
+  document.getElementById('cat-desc').textContent = CAT_DESC[cat] || '';
+
+  const vj = result.verdict_obj || {
+    v: 1,
+    verdict_id: 'n/a',
+    decision: (result.verdict || 'ALLOW').toLowerCase(),
+    server: result.server || 'n/a',
+    poison_category: cat,
+    evidence: result.evidence || [],
+    sig: result.signature || '(unsigned: demo mode)',
+    pubkey: '(unsigned: demo mode)',
+  };
+  document.getElementById('v-json').innerHTML =
+    syntaxHighlight(JSON.stringify(vj, null, 2));
+  const ev = document.getElementById('v-ev');
+  ev.innerHTML = (result.evidence && result.evidence.length)
+    ? result.evidence.map(e => '<li>' + esc(e) + '</li>').join('')
+    : '<li style="color:#8b949e">none</li>';
+  document.getElementById('v-sig').textContent = result.signature || '(unsigned in demo)';
+  document.getElementById('v-sig-ok').innerHTML = result.signature_valid
+    ? '<span class="sig-ok">signature verifies</span>'
+    : '<span class="sig-bad">unverified</span>';
+
+  // Mark end-state wires
+  if (v === 'BLOCK') {
+    document.getElementById('w-proxy-server').classList.add('blocked');
+    document.getElementById('n-proxy').classList.add('bad');
+  } else if (v === 'QUARANTINE') {
+    document.getElementById('n-server').classList.add('bad');
+    document.getElementById('w-proxy-server').classList.add('blocked');
+  } else {
+    document.getElementById('w-proxy-server').classList.add('ok');
+    document.getElementById('w-proxy-agent').classList.add('ok');
+    document.getElementById('n-proxy').classList.add('good');
+  }
+
+  // Server reputation panel
+  const states = result.server_states || {};
+  const srv = document.getElementById('servers');
+  const entries = Object.entries(states);
+  srv.innerHTML = entries.length ? entries.map(([url, st]) => {
+    const rep = (st.reputation || 'clean').toLowerCase();
+    const cls = rep === 'quarantined' ? 'quarantined'
+              : rep === 'suspicious' ? 'suspicious' : 'clean';
+    return `<div class="srv"><div class="url">${esc(url)}</div>` +
+           `<span class="badge ${cls}">${esc(st.reputation.toUpperCase())}</span> ` +
+           `<span style="color:#8b949e">flags: ${st.flags}</span></div>`;
+  }).join('') : '<div style="color:#8b949e;font-size:12px">no data</div>';
+
+  setPhase('<strong>Scenario ' + id + ' complete:</strong> ' +
+           esc(SCENARIOS[id-1].name) + ' &rarr; ' + badge.textContent);
+  setStatus('Done. Pick another scenario.');
+  running = false;
+  document.querySelectorAll('.scn-btn').forEach(b => b.disabled = false);
+  // Phase 3: refresh the reputation graph after each scenario.
+  renderReputationGraph();
 }
-setInterval(poll, 2000);
-poll();
+
+function setStatus(t) {
+  document.getElementById('status').textContent = t;
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Phase 3: reputation graph. Fetches GET /_rs/reputation and renders
+// a per-server score history as SVG sparklines with band coloring.
+async function renderReputationGraph() {
+  const el = document.getElementById('rep-graph');
+  let data;
+  try {
+    const r = await fetch('/_rs/reputation');
+    data = await r.json();
+  } catch (e) {
+    el.innerHTML = '<div style="color:#8b949e;font-size:12px">reputation endpoint unreachable</div>';
+    return;
+  }
+  const servers = data.servers || [];
+  if (!servers.length) {
+    el.innerHTML = '<div style="color:#8b949e;font-size:12px">no servers tracked yet</div>';
+    return;
+  }
+  const W = 260, H = 56, PAD = 4;
+  el.innerHTML = servers.map(s => {
+    const hist = s.history || [];
+    const bandColor = s.band === 'trusted' ? '#3fb950'
+      : s.band === 'watch' ? '#d29922' : '#f85149';
+    let svg;
+    if (hist.length < 2) {
+      const y = H - PAD - (s.score / 100) * (H - 2 * PAD);
+      svg = `<svg width="${W}" height="${H}" style="display:block">` +
+        `<line x1="${PAD}" y1="${y}" x2="${W-PAD}" y2="${y}" ` +
+        `stroke="${bandColor}" stroke-width="2"/>` +
+        `<circle cx="${W-PAD}" cy="${y}" r="3" fill="${bandColor}"/></svg>`;
+    } else {
+      const n = hist.length;
+      const pts = hist.map((h, i) => {
+        const x = PAD + (i / (n - 1)) * (W - 2 * PAD);
+        const y = H - PAD - (Math.max(0, Math.min(100, h.score)) / 100) * (H - 2 * PAD);
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      // Band background zones
+      const y70 = H - PAD - 0.70 * (H - 2 * PAD);
+      const y40 = H - PAD - 0.40 * (H - 2 * PAD);
+      svg = `<svg width="${W}" height="${H}" style="display:block">` +
+        `<rect x="0" y="0" width="${W}" height="${y70}" fill="#3fb950" opacity="0.07"/>` +
+        `<rect x="0" y="${y70}" width="${W}" height="${y40-y70}" fill="#d29922" opacity="0.07"/>` +
+        `<rect x="0" y="${y40}" width="${W}" height="${H-y40}" fill="#f85149" opacity="0.07"/>` +
+        `<polyline points="${pts}" fill="none" stroke="${bandColor}" stroke-width="2"/>` +
+        `</svg>`;
+    }
+    return `<div style="margin-bottom:12px">` +
+      `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">` +
+      `<span class="mono" style="font-size:11px;word-break:break-all">${esc(s.domain || s.url)}</span>` +
+      `<span style="font-size:13px;font-weight:700;color:${bandColor}">${esc(String(s.score))}</span>` +
+      `</div>${svg}</div>`;
+  }).join('');
+}
+
+// Initial load (proxy-served mode has live data).
+renderReputationGraph();
 </script>
 </body>
 </html>

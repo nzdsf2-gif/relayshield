@@ -2121,8 +2121,9 @@ LANDING_PAGE = """<!DOCTYPE html>
        per-call catalogue the hero is actually describing. -->
   <p style="margin-top:1rem;font-size:.88rem;color:var(--muted)">
     Prefer a flat rate? There are optional subscriptions for
-    <a href="#llmjacking-license">LLMjacking detection</a> and
-    <a href="#threat-intelligence">bulk threat intelligence</a>. Neither is required to use the API.
+    <a href="#llmjacking-license">LLMjacking detection</a>,
+    <a href="#threat-intelligence">bulk threat intelligence</a>, and
+    <a href="#tap-verifier">TAP agent verification</a>. Neither is required to use the API.
   </p>
 </div>
 
@@ -2502,6 +2503,33 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
       <div style="color:var(--muted)">Returns a <code>report_id</code> and public <code>share_url</code> for the summary you submit.</div>
     </div>
   </div>
+</div>
+
+<!-- TAP verifier pricing, added 2026-10-08. Merchant-side agent identity
+     verification for Visa's Trusted Agent Protocol. Two purchase paths:
+     flat monthly for regular merchant volume, PAYG for developers. -->
+<div class="section" style="margin-top:2rem">
+  <h2 class="section-title" id="tap-verifier">TAP Verifier <span style="background:var(--accent);color:#fff;font-size:.7rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem;vertical-align:middle">NEW</span></h2>
+  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">Verify AI agent identity before they transact. Visa&apos;s Trusted Agent Protocol lets agents act on a buyer&apos;s behalf, and the merchant is left holding the question: is this agent who it claims to be? The TAP verifier checks the agent&apos;s RFC 9421 message signature, validates its key against Visa&apos;s JWKS, screens the agent identity against RelayShield&apos;s threat-intel corpus, and flags intent mismatch when an agent&apos;s actions do not match its stated purpose. One verification per agent transaction.</p>
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1rem;font-size:.85rem;margin-bottom:1.25rem">
+    <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">POST /v1/tap/verify</div>
+    <div style="color:var(--muted)">Live now. Submit the agent&apos;s signed request and get back a signed verification receipt with the TI screening result. Documented in the <a href="/docs" style="color:var(--accent)">API reference</a>.</div>
+  </div>
+  <div class="price-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">TAP Verifier</div>
+      <div class="price">$49<span class="per"> / mo</span></div>
+      <div class="desc">Flat monthly pricing for merchants running regular agent transaction volume. Includes RFC 9421 signature verification, Visa JWKS validation, TI corpus screening, intent-mismatch detection, and signed verification receipts. Fair use: 1,000 verifications per month.</div>
+      <div style="display:block;margin-top:1rem;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600">Stripe billing link coming soon</div>
+    </div>
+    <div class="price-card" style="border-color:var(--accent)">
+      <div class="endpoint" style="color:var(--accent)">TAP Verifier</div>
+      <div class="price">$0.10<span class="per"> / verification</span></div>
+      <div class="desc">Pay as you go for developers and low-volume use. Same verification, same signed receipts, metered per call. No monthly commitment.</div>
+      <div style="display:block;margin-top:1rem;background:var(--surface);border:1px solid var(--border);color:var(--muted);text-align:center;padding:.5rem;border-radius:6px;font-size:.85rem;font-weight:600">Stripe metered billing coming soon</div>
+    </div>
+  </div>
+  <p style="margin-top:1rem;font-size:.88rem;color:var(--muted)">Background reading: the TAP verifier launch post on <a href="https://blog.relayshield.net/" style="color:var(--accent)">blog.relayshield.net</a> (direct post link added when it publishes).</p>
 </div>
 
 <div class="code-section">

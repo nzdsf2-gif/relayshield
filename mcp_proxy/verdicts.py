@@ -189,7 +189,8 @@ class VerdictSigner:
         evidence: list of {"type": ..., "id": ..., "detail": ...}
         poison_category: attack taxonomy (prompt_injection, pii_leak,
             malicious_url, kit_match, secret_leak, unknown_synthetic,
-            oauth_tampering, credential_exfiltration, clean)
+            oauth_tampering, credential_exfiltration, behavioral_anomaly,
+            attack_chain, policy_deny, policy_approval, clean)
         """
         verdict = {
             "v": 1,

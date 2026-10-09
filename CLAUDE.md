@@ -10601,3 +10601,8 @@ Read during the Well-Architected review for the AWS FTR, from Andrew's console a
 * **`relayshield-github-deploy`'s trust policy is scoped** to `repo:nzdsf2-gif/relayshield:ref:refs/heads/main` with `aud=sts.amazonaws.com`. The `sub` list names that same line twice, harmless but untidy. Only the main branch of this repo can assume the deploy role.
 * **IAM Access Analyzer is NOT enabled in us-east-1**: `list-analyzers` returned nothing. It may exist in another region, unchecked. An account-type analyzer is free.
 * `relayshield-deployer` is an IAM user, so its CLI credentials are long-lived keys, not temporary credentials.
+
+## 2026-10-09 (later): ROOT KEY DEACTIVATED, ACCESS ANALYZER ENABLED. CONFIRMED BY ANDREW'S OUTPUT.
+
+* **The root access key (ends `N2XZ`) was DEACTIVATED by Andrew on 2026-10-09**, not deleted. Delete it on or after 2026-10-16 if nothing has broken. Deactivation is reversible; deletion is not.
+* **IAM Access Analyzer is ENABLED in us-east-1**: `arn:aws:access-analyzer:us-east-1:239677749008:analyzer/relayshield-account-analyzer`, type ACCOUNT (free external-access analyzer), created by the `relayshield-deployer` identity, so that identity holds `access-analyzer:CreateAnalyzer`. It has produced no reviewed findings yet; the WAFR box for analysing public and cross-account access stays unticked until Andrew has read the first findings in the console.

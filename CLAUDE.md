@@ -10629,3 +10629,59 @@ succeeds outside a session that can commit is invisible to every later session, 
   for rollback, GuardDuty and Security Hub, Dependabot, a written data classification scheme, tracing and
   dashboards.
 * WAFR answers given so far are in the session transcript only; OPS 1-11 and SEC 1-8 are done, SEC 9 is next.
+
+## WHERE 2026-10-10 LEFT THINGS. THE AWS FTR WAFR IS HALF DONE. READ THIS FIRST FOR "WHAT IS NEXT".
+
+**State, from Andrew's console and CLI, not recalled.** AWS Partner Central solution `soln-aicwx4eiyofnm`
+("RS Agentic Attack Surface API") is linked to `prod-kkvurtspreofy`. The Well-Architected review is
+workload "RelayShield API", Production, us-east-1, account 239677749008, Framework lens, 57 questions.
+**Done: OPS 1-11 and SEC 1-11 (the whole Security pillar).** Next question: **REL 1**. About 40 remain
+across Reliability, Performance Efficiency, Cost Optimization and Sustainability. Paste-ready answers were
+given in chat only; the texts are not saved, so the rule for each remaining question is: tick only what
+we can back up, state gaps in Notes, never claim a tool or practice we have not verified.
+
+**How the review is evaluated (secondary sources; docs.aws.amazon.com is egress-blocked, the FTR Guide in
+Partner Central is the authority).** The WAFR is a self-assessment: unticked practices become flagged risks,
+nobody has a clean report. The FTR is the real review and uses the WAFR as evidence; AI-assisted, expert
+contact within about two weeks if it fails, resubmittable. UNVERIFIED: the FTR checklist itself, and whether
+unresolved high risks block approval. READ THAT SECTION OF THE FTR GUIDE BEFORE REQUESTING VALIDATION. An
+overclaimed answer is what fails, because the evidence upload will not match it.
+
+**What approval buys: credibility and co-sell eligibility (ACE), not a discovery flood.** Marketplace
+search is the discovery surface that already works. UNVERIFIED: exact badge wording and programme
+dependencies.
+
+**Dave Shapiro and a Partner Development Manager.** His own words were "self-service for early stage
+partners", so the likelier reason there is no PDM yet is that none is assigned at this stage, not that he is
+unfamiliar with onboarding. Andrew chose to finish the WAFR and submit the validation request FIRST, then
+write to Dave with the evidence. Ask WHO OWNS co-sell for early-stage ISVs, not for a PDM by name.
+
+### TODOS FOR THE NEXT SESSION, IN ORDER
+
+1. **Finish the WAFR: REL 1 onward.** Then Save milestone, Generate report (PDF under 3 MB).
+2. **Optional reads that sharpen answers, all read-only, none run yet:** AWS Config recorder
+   (`aws configservice describe-configuration-recorders`), and re-run `aws wafv2 list-web-acls --scope
+   REGIONAL --region us-east-1` ALONE to confirm no WAF (the earlier run had an extra output line).
+3. **Read Bundle D's Architecture details tab** (`prod-kkvurtspreofy`) in the Marketplace Management
+   Portal, then produce an architecture diagram showing the Hugging Face Space as a thin proxy over
+   API Gateway, Lambda and DynamoDB in 239677749008.
+4. **Request validation** on the solution (Validation tab) with the WAFR report. Do NOT click "Update
+   visibility" on the four-product solution.
+5. **Email Dave Shapiro** after item 4, specifics first: Software Path enrollment, the single-product
+   solution, the WAFR report attached, and the co-sell question. Claude drafts it.
+6. **Delete the deactivated root access key** (ends N2XZ) on or after 2026-10-16 if nothing has broken.
+7. **Decide on the Access Analyzer box in SEC 3** after reading the first findings in the console.
+8. **Fixes the review exposed, cheapest first:** regional WAF with a rate-based rule on the API; run the
+   test suite in CI (65 test files, none run by any workflow; some fail on clean main, so fix or exclude
+   those first); Lambda versions plus aliases for rollback; Dependabot; a one-page written incident
+   runbook (credential compromise, key leak, customer notification) if the Notes promised it; GuardDuty
+   and Security Hub; a written data classification scheme; the IAM role split beyond
+   `relayshield-intel-feed`.
+9. **Hand-deploy `relayshield_weekly_metrics.py`**; the drift read says live is merely stale, nothing
+   live-only. It is still in neither the deployer nor the invoke policy.
+10. **Confirm `tools/backfill_first_seen.py --apply` ran** (dry run measured 687,011 distinct indicators
+    on 2026-10-08).
+
+**Carried, unchanged:** the 2026-10-08 list above (VT fix proof, telemetry Lambda hand deploy, Hudson Rock
+terms, CS Mobile v1.7.0 build blocked on a JDK, Chrome Web Store review state, `support@relayshield.net`
+mailbox, the OpenAI listing's stale figures, `relayshield-signup-api` missing from the invoke policy).

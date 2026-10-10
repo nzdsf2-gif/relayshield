@@ -631,7 +631,10 @@ async function handleDashboard(request, env) {
   const screenings = (await kvGet(env, screeningsKey(shop))) || [];
   const host = url.searchParams.get("host") || "";
   return new Response(renderDashboard(shop, screenings, env.SHOPIFY_API_KEY, host), {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": "frame-ancestors https://*.myshopify.com https://admin.shopify.com;",
+    },
   });
 }
 

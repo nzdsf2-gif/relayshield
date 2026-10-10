@@ -2515,6 +2515,7 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
     <div style="font-family:monospace;color:var(--accent);margin-bottom:.5rem">POST /v1/tap/verify</div>
     <div style="color:var(--muted)">Live now. Submit the agent&apos;s signed request and get back a signed verification receipt with the TI screening result. Documented in the <a href="/docs" style="color:var(--accent)">API reference</a>.</div>
   </div>
+  <div style="margin-bottom:1.25rem"><a href="https://relayshield-tap-demo.relayshieldadmin.workers.dev" style="display:inline-block;background:var(--surface);border:1px solid var(--accent);color:var(--accent);text-align:center;padding:.55rem 1.5rem;border-radius:6px;font-size:.9rem;font-weight:600;text-decoration:none">Try the live demo</a></div>
   <div class="price-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
     <div class="price-card" style="border-color:var(--accent)">
       <div class="endpoint" style="color:var(--accent)">TAP Verifier</div>

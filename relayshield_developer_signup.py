@@ -1897,7 +1897,7 @@ LANDING_PAGE = """<!DOCTYPE html>
   Slack, Discord, LinkedIn, X and Telegram, throwing away the click-through
   at the last inch of a funnel we were paying for everywhere else.
 -->
-<meta name="description" content="Threat intelligence and identity-compromise APIs for developers and AI agents. 660K+ indicators (8.3M+ citations) from 123 monitored Telegram marketplaces and 20 feeds. Breach, infostealer, SIM-swap, LLM credential exposure, MCP registry risk. Pay-as-you-go, no minimum.">
+<meta name="description" content="Threat intelligence and identity-compromise APIs for developers and AI agents. 700K+ indicators (8.7M citations) from 125 monitored Telegram marketplaces and 20 feeds. Breach, infostealer, SIM-swap, LLM credential exposure, MCP registry risk. Pay-as-you-go, no minimum.">
 <link rel="canonical" href="https://api.relayshield.net/developers">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
 
@@ -1905,7 +1905,7 @@ LANDING_PAGE = """<!DOCTYPE html>
 <meta property="og:site_name" content="RelayShield">
 <meta property="og:url" content="https://api.relayshield.net/developers">
 <meta property="og:title" content="RelayShield API: Security Intelligence for Developers &amp; Agents">
-<meta property="og:description" content="660K+ indicators (8.3M+ citations) from 123 monitored Telegram marketplaces and 20 authoritative feeds. Breach, infostealer, SIM-swap, LLM credential exposure and MCP registry risk, over REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
+<meta property="og:description" content="700K+ indicators (8.7M citations) from 125 monitored Telegram marketplaces and 20 authoritative feeds. Breach, infostealer, SIM-swap, LLM credential exposure and MCP registry risk, over REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
 <meta property="og:image" content="https://blog.relayshield.net/developers-og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -1913,7 +1913,7 @@ LANDING_PAGE = """<!DOCTYPE html>
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="RelayShield API: Security Intelligence for Developers &amp; Agents">
-<meta name="twitter:description" content="660K+ indicators (8.3M+ citations) from 123 monitored Telegram marketplaces and 20 authoritative feeds. REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
+<meta name="twitter:description" content="700K+ indicators (8.7M citations) from 125 monitored Telegram marketplaces and 20 authoritative feeds. REST, MCP, STIX/TAXII and x402. Pay-as-you-go, no minimum.">
 <meta name="twitter:image" content="https://blog.relayshield.net/developers-og.png">
 
 <link rel="alternate" type="application/json" href="https://api.relayshield.net/openapi.json" title="RelayShield OpenAPI specification">
@@ -2235,7 +2235,7 @@ LANDING_PAGE = """<!DOCTYPE html>
     <div class="price-card">
       <div class="endpoint">/v1/metered/asset-intel</div>
       <div class="price">$0.15<span class="per"> / call</span></div>
-      <div class="desc">Asset watchlist &amp; continuous monitoring: register domains and IPs for ongoing IOC surveillance. Actions: <code>register</code> assets, <code>sweep</code> all registered assets against the 660K+ indicator corpus (8.3M+ citations), <code>list</code> or <code>remove</code>. Webhook push alerts fire automatically when new IOCs match your registered assets</div>
+      <div class="desc">Asset watchlist &amp; continuous monitoring: register domains and IPs for ongoing IOC surveillance. Actions: <code>register</code> assets, <code>sweep</code> all registered assets against the 700K+ indicator corpus (8.7M citations), <code>list</code> or <code>remove</code>. Webhook push alerts fire automatically when new IOCs match your registered assets</div>
     </div>
     <div class="price-card">
       <div class="endpoint">/v1/metered/threat-actor</div>
@@ -2392,7 +2392,7 @@ curl -X POST https://api.relayshield.net/v1/webhook/configure \
 
 <div class="section" style="margin-top:2rem">
   <h2 class="section-title" id="threat-intelligence">Threat Intelligence API <span style="background:var(--accent);color:#fff;font-size:.7rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem;vertical-align:middle">NEW</span></h2>
-  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">RelayShield&apos;s edge is OSINT threat hunting most vendors can&apos;t reach: our own collection pipeline runs continuous, verified monitoring across <strong>123 monitored Telegram marketplaces</strong> (infostealer markets, credential dumps, breach announcements), not a static feed subscription. That&apos;s layered with <strong>660K+ indicators</strong> (8.3M+ citations) aggregated from <strong>20 authoritative external sources</strong> (abuse.ch, Spamhaus, AbuseIPDB, AlienVault OTX, PhishTank, CISA KEV, MITRE ATT&amp;CK/ATLAS, and more), covering emails, domains, IPs, hashes, phone numbers, and wallet addresses.</p>
+  <p style="color:var(--muted);font-size:.95rem;margin:.5rem 0 1.25rem">RelayShield&apos;s edge is OSINT threat hunting most vendors can&apos;t reach: our own collection pipeline runs continuous, verified monitoring across <strong>125 monitored Telegram marketplaces</strong> (infostealer markets, credential dumps, breach announcements), not a static feed subscription. That&apos;s layered with <strong>700K+ indicators</strong> (8.7M citations) aggregated from <strong>20 authoritative external sources</strong> (abuse.ch, Spamhaus, AbuseIPDB, AlienVault OTX, PhishTank, CISA KEV, MITRE ATT&amp;CK/ATLAS, and more), covering emails, domains, IPs, hashes, phone numbers, and wallet addresses.</p>
   <p style="color:var(--muted);font-size:.9rem;margin:.5rem 0 1.25rem;background:rgba(108,99,255,.07);border:1px solid rgba(108,99,255,.2);border-radius:8px;padding:.75rem 1rem"><strong style="color:var(--accent)">All 30 metered endpoints included.</strong> Both TI subscription tiers cover unlimited access to all metered API endpoints above: breach, SIM swap, infostealer, domain, OAuth &amp; token exposure, supply chain, session hijack detection, crypto asset surface, asset intel monitoring, threat actor intelligence, CVE × identity risk correlation, domain identity risk scoring, bulk IOC enrichment, IOC pivot, brand monitoring, bulk identity risk, agent framework exploit monitoring, MCP registry risk, prompt-injection breach detection, certificate expiry risk, passive DNS/IP reputation, scam-kit fingerprinting, scam-kit match, and campaign scan, in addition to the Threat Intelligence IOC and CVE feeds. No per-endpoint add-ons. One subscription, full access.</p>
   <table style="width:100%;border-collapse:collapse;font-size:.88rem;margin-bottom:1.5rem">
     <thead>
@@ -3554,7 +3554,7 @@ _SOURCE_BANNERS: dict[str, tuple[tuple[str, ...], str]] = {
             '  -H "Content-Type: application/json" \\\n'
             "  -d '{\"domain\": \"yourcompany.com\"}'</code></pre>"
             '<span style="display:block;margin-top:.7rem">We match 19 LLM credential formats across 14 '
-            "providers against 660K+ indicators (8.3M+ citations) from 123 monitored Telegram marketplaces. A clean result means "
+            "providers against 700K+ indicators (8.7M citations) from 125 monitored Telegram marketplaces. A clean result means "
             "nothing was found in the sources we queried, which is not the same as proof your keys are safe."
             "</span>")),
     ),

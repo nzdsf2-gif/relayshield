@@ -76,6 +76,14 @@
                         border: 2px solid #30363d; }
   .vrow { margin-top: 10px; font-size: 13px; }
   .vrow .k { color: #8b949e; display: inline-block; width: 130px; }
+  #conf-bar { width: 220px; height: 8px; background: #21262d;
+              border-radius: 4px; margin-top: 6px; overflow: hidden; }
+  #conf-fill { height: 100%; width: 0%; border-radius: 4px;
+               background: #3fb950; transition: width 0.4s; }
+  #conf-score { font-size: 16px; font-weight: 700; }
+  .cause-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: 12px; color: #f0883e; }
+  .cause-desc { color: #8b949e; font-size: 12px; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
           font-size: 12px; }
   .ev-list { margin: 6px 0 0 130px; font-size: 12px; color: #c9d1d9; }
@@ -141,6 +149,54 @@
   .j-num { color: #f0883e; } .j-bool { color: #ff7b72; } .j-null { color: #8b949e; }
   details.rawjson summary { cursor: pointer; color: #58a6ff; font-size: 12px;
                             margin-bottom: 8px; }
+
+  /* Attack chain diagram */
+  #chain-diagram { display: none; margin: 16px 0; }
+  .chain-links { display: flex; align-items: center; justify-content: center;
+                 gap: 0; margin: 12px 0; }
+  .chain-link { background: #21262d; border: 1px solid #30363d; border-radius: 10px;
+                padding: 12px 16px; text-align: center; min-width: 140px;
+                transition: all 0.4s; }
+  .chain-link .stage { font-size: 10px; color: #8b949e; text-transform: uppercase;
+                       letter-spacing: 0.5px; }
+  .chain-link .tool { font-size: 13px; font-weight: 700; margin: 4px 0;
+                      font-family: ui-monospace, monospace; }
+  .chain-link .detail { font-size: 11px; color: #8b949e; }
+  .chain-link.lit { border-color: #f85149;
+                    box-shadow: 0 0 14px rgba(248,81,73,0.45); }
+  .chain-link.lit .tool { color: #ff7b72; }
+  .chain-arrow { font-size: 24px; color: #30363d; padding: 0 8px; }
+  .chain-arrow.lit { color: #f85149; }
+
+  /* Multi-server fan-out */
+  #multiserver-diagram { display: none; margin: 16px 0; }
+  .ms-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+             margin: 12px 0; }
+  .ms-srv { background: #21262d; border: 1px solid #30363d; border-radius: 8px;
+            padding: 10px 6px; text-align: center; font-size: 10px;
+            font-family: ui-monospace, monospace; word-break: break-all;
+            transition: all 0.4s; }
+  .ms-srv.lit { border-color: #f85149;
+                box-shadow: 0 0 12px rgba(248,81,73,0.4); color: #ff7b72; }
+
+  /* Volume chart */
+  #volume-chart { display: none; margin: 16px 0; }
+
+  /* Policy modal */
+  #policy-modal { display: none; }
+  #policy-modal.open { display: block; }
+  .pm-yaml { background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+             padding: 12px; font-family: ui-monospace, monospace; font-size: 11.5px;
+             line-height: 1.6; overflow-x: auto; white-space: pre;
+             color: #a5d6ff; margin: 10px 0; }
+  .pm-params { width: 100%; border-collapse: collapse; margin: 10px 0;
+               font-size: 12px; }
+  .pm-params td { padding: 6px 8px; border-bottom: 1px solid #21262d;
+                  vertical-align: top; }
+  .pm-params td.pn { font-family: ui-monospace, monospace; color: #79c0ff;
+                     white-space: nowrap; }
+  .pm-params td.pv { font-family: ui-monospace, monospace; color: #e6edf3; }
+  .pm-params td.pd { color: #8b949e; }
 </style>
 </head>
 <body>
@@ -173,6 +229,26 @@
         <div class="node" id="n-corpus">TI Corpus<span class="sub2">687K+ indicators</span></div>
       </div>
       <div id="phase-label">Select a scenario above to begin.</div>
+      <div id="chain-diagram">
+        <div style="font-size:12px;color:#8b949e;text-align:center;margin-bottom:4px">
+          Attack chain: each stage lights up as the agent executes it</div>
+        <div class="chain-links" id="chain-links"></div>
+      </div>
+      <div id="multiserver-diagram">
+        <div style="font-size:12px;color:#8b949e;text-align:center;margin-bottom:4px">
+          Lateral movement: one agent touching many servers</div>
+        <div class="ms-grid" id="ms-grid"></div>
+      </div>
+      <div id="volume-chart"></div>
+      <div id="policy-modal">
+        <div style="font-size:12px;color:#8b949e;margin-bottom:8px">
+          Policy decisions are made locally before any network call.
+          No call path is shown because nothing leaves the proxy.</div>
+        <h3 style="font-size:13px;margin:12px 0 4px">Demo policy (YAML)</h3>
+        <div class="pm-yaml" id="pm-yaml"></div>
+        <h3 style="font-size:13px;margin:12px 0 4px">Evaluation parameters</h3>
+        <table class="pm-params" id="pm-params"></table>
+      </div>
     </div>
 
     <div class="card">
@@ -180,6 +256,12 @@
       <div><span id="verdict-badge" class="idle">STANDBY</span></div>
       <div><span id="cat-badge" class="cat-idle">no category yet</span></div>
       <div id="cat-desc"></div>
+      <div class="vrow"><span class="k">Confidence</span>
+        <span id="conf-score" class="mono">-</span>
+        <div id="conf-bar"><div id="conf-fill"></div></div>
+      </div>
+      <div class="vrow"><span class="k">Cause codes</span></div>
+      <ul class="ev-list" id="v-causes"><li style="color:#8b949e">none yet</li></ul>
       <details class="taxonomy">
         <summary>Verdict taxonomy reference (all poison categories)</summary>
         <table id="taxonomy-table"></table>
@@ -219,13 +301,28 @@
       </div>
     </div>
     <div class="card">
+      <h2>Policy Engine</h2>
+      <div style="font-size:12px;color:#8b949e;line-height:1.6;margin-bottom:10px">
+        What the merchant controls. Merchants define which tools each
+        agent can use. Denies are instant, no network needed.
+      </div>
+      <div id="policy-panel" style="color:#8b949e;font-size:12px">loading policy...</div>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;color:#58a6ff;font-size:12px">View policy config</summary>
+        <pre id="policy-yaml" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px;font-size:11px;line-height:1.5;overflow-x:auto;margin-top:8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9d1d9">loading...</pre>
+      </details>
+    </div>
+    <div class="card">
       <h2>How to read this</h2>
       <div style="font-size:12px;color:#8b949e;line-height:1.6">
-        Every tool call passes through the proxy. The proxy screens
-        arguments and responses against the TI corpus, then issues a
-        signed verdict. ALLOW means the call proceeded. BLOCK means the
-        call or response was stopped. QUARANTINE means the server earned
-        three strikes and is now fail-closed.
+        Every tool call passes through the proxy in layers. Phase 4
+        policy rules run first (deterministic allow/deny). Then the
+        proxy screens arguments and responses against the TI corpus.
+        Phase 3 behavioral baselining watches for anomalous agents and
+        attack chains. Every decision gets a signed verdict. ALLOW means
+        the call proceeded. BLOCK means the call or response was
+        stopped. QUARANTINE means the server earned three strikes and
+        is now fail-closed.
       </div>
     </div>
   </div>
@@ -247,6 +344,8 @@ const SCENARIOS = [
   {id:10, name:"Volume anomaly", desc:"Agent floods 30 calls: 10x baseline rate."},
   {id:11, name:"Attack chain", desc:"Read file to network to email: exfiltration."},
   {id:12, name:"Lateral movement", desc:"Rapid calls across 5 servers: probe flagged."},
+  {id:13, name:"Policy deny", desc:"Admin policy blocks exec_shell for this agent."},
+  {id:14, name:"Policy approval", desc:"Sensitive tool flagged for operator approval."},
 ];
 
 const grid = document.getElementById('scn-grid');
@@ -317,6 +416,8 @@ const CAT_DESC = {
   unknown_synthetic: "OAuth flow toward a domain with no reputation history. Flagged for review.",
   behavioral_anomaly: "Agent behavior deviates from its baseline: volume, sequence, or timing.",
   attack_chain: "Known malicious tool sequence detected: exfiltration, lateral movement, or escalation.",
+  policy_deny: "Administrator policy denied this tool call. Deterministic, no TI lookup needed.",
+  policy_approval: "Tool requires operator approval before it may run. Held for human review.",
 };
 
 function setSpeed(ms) {
@@ -350,6 +451,101 @@ function catClass(cat) {
   if (cat === 'clean') return 'cat-clean';
   if (cat === 'unknown_synthetic') return 'cat-warn';
   return 'cat-bad';
+}
+
+
+// === Scenario-specific visualizations ===
+
+function renderChainDiagram(chainData) {
+  const container = document.getElementById('chain-diagram');
+  const links = document.getElementById('chain-links');
+  container.style.display = 'block';
+  const items = chainData.links || [];
+  links.innerHTML = items.map((l, i) =>
+    `<div class="chain-link" id="chain-${i}">` +
+    `<div class="stage">${esc(l.stage)}</div>` +
+    `<div class="tool">${esc(l.tool)}</div>` +
+    `<div class="detail">${esc(l.detail)}</div></div>` +
+    (i < items.length - 1 ? `<div class="chain-arrow" id="chain-arrow-${i}">&#8594;</div>` : '')
+  ).join('');
+  // Animate: light up each link in sequence
+  items.forEach((l, i) => {
+    setTimeout(() => {
+      const el = document.getElementById('chain-' + i);
+      if (el) el.classList.add('lit');
+      const arr = document.getElementById('chain-arrow-' + i);
+      if (arr) arr.classList.add('lit');
+    }, 400 * (i + 1));
+  });
+}
+
+function renderMultiServer(servers) {
+  const container = document.getElementById('multiserver-diagram');
+  const grid = document.getElementById('ms-grid');
+  container.style.display = 'block';
+  grid.innerHTML = servers.map((s, i) => {
+    let short = s;
+    try {
+      const u = new URL(s);
+      short = u.hostname + (u.port ? ':' + u.port : '');
+    } catch (e) {}
+    return `<div class="ms-srv" id="ms-${i}">${esc(short)}<br>` +
+           `<span style="color:#8b949e">touched</span></div>`;
+  }).join('');
+  servers.forEach((s, i) => {
+    setTimeout(() => {
+      const el = document.getElementById('ms-' + i);
+      if (el) el.classList.add('lit');
+    }, 350 * (i + 1));
+  });
+}
+
+function renderVolumeChart(volData) {
+  const el = document.getElementById('volume-chart');
+  el.style.display = 'block';
+  const base = volData.baseline_rate || 0.4;
+  const flood = volData.flood_rate || 29.0;
+  const mult = volData.threshold_mult || 10;
+  const maxV = Math.max(flood, base * mult) * 1.15;
+  const W = 560, H = 160, PAD = 36;
+  const bw = (W - 2 * PAD) / 3;
+  const yFor = v => H - PAD - (v / maxV) * (H - 2 * PAD);
+  const threshY = yFor(base * mult);
+  const bar = (x, v, color, label, sub) => {
+    const y = yFor(v);
+    return `<rect x="${x}" y="${y}" width="${bw * 0.62}" height="${H - PAD - y}"` +
+      ` fill="${color}" rx="4"/>` +
+      `<text x="${x + bw * 0.31}" y="${H - PAD + 16}" text-anchor="middle"` +
+      ` fill="#8b949e" font-size="11">${label}</text>` +
+      `<text x="${x + bw * 0.31}" y="${y - 8}" text-anchor="middle"` +
+      ` fill="#e6edf3" font-size="12" font-weight="700">${v}/min</text>` +
+      `<text x="${x + bw * 0.31}" y="${H - PAD + 30}" text-anchor="middle"` +
+      ` fill="#6e7681" font-size="10">${sub}</text>`;
+  };
+  el.innerHTML =
+    `<div style="font-size:12px;color:#8b949e;text-align:center;margin-bottom:8px">` +
+    `Call rate: baseline vs flood vs 10x trip threshold</div>` +
+    `<svg width="${W}" height="${H + 36}" style="display:block;margin:0 auto">` +
+    `<line x1="${PAD}" y1="${threshY}" x2="${W - PAD}" y2="${threshY}"` +
+    ` stroke="#f85149" stroke-width="1.5" stroke-dasharray="6 4"/>` +
+    `<text x="${W - PAD}" y="${threshY - 6}" text-anchor="end"` +
+    ` fill="#f85149" font-size="11">10x threshold (${(base * mult).toFixed(1)}/min)</text>` +
+    bar(PAD + bw * 0.2, base, '#3fb950', 'Baseline', 'normal') +
+    bar(PAD + bw * 1.2, flood, '#f85149', 'Flood', 'blocked') +
+    `</svg>`;
+}
+
+function renderPolicyModal(policyData) {
+  const modal = document.getElementById('policy-modal');
+  modal.classList.add('open');
+  document.getElementById('pm-yaml').textContent = policyData.yaml || '';
+  const params = policyData.params || [];
+  document.getElementById('pm-params').innerHTML = params.map(p =>
+    `<tr><td class="pn">${esc(p.name)}</td><td class="pv">${esc(p.value)}</td>` +
+    `<td class="pd">${esc(p.desc)}</td></tr>`
+  ).join('') +
+    `<tr><td class="pn">reasons</td><td class="pv" colspan="2">` +
+    (policyData.reasons || []).map(r => esc(r)).join('<br>') + `</td></tr>`;
 }
 
 async function runScenario(id) {
@@ -399,6 +595,27 @@ async function runScenario(id) {
     if (nid) document.getElementById(nid).classList.remove('active');
   }
 
+  // Visualization-specific rendering
+  const viz = result.visualization || 'callpath';
+  // Hide all special visualizations by default
+  document.getElementById('chain-diagram').style.display = 'none';
+  document.getElementById('multiserver-diagram').style.display = 'none';
+  document.getElementById('volume-chart').style.display = 'none';
+  document.getElementById('policy-modal').classList.remove('open');
+  document.getElementById('diagram').style.display = '';
+
+  if (viz === 'attack_chain' && result.chain_data) {
+    renderChainDiagram(result.chain_data);
+  } else if (viz === 'multi_server' && result.servers_touched) {
+    renderMultiServer(result.servers_touched);
+  } else if (viz === 'policy_modal' && result.policy_data) {
+    // Hide the call path for policy decisions: nothing leaves the proxy
+    document.getElementById('diagram').style.display = 'none';
+    renderPolicyModal(result.policy_data);
+  } else if (viz === 'volume_chart' && result.volume_data) {
+    renderVolumeChart(result.volume_data);
+  }
+
   // Final verdict visuals
   const v = (result.verdict || 'ALLOW').toUpperCase();
   const badge = document.getElementById('verdict-badge');
@@ -410,6 +627,26 @@ async function runScenario(id) {
   cb.className = catClass(cat);
   document.getElementById('cat-desc').textContent = CAT_DESC[cat] || '';
 
+  // Confidence score with cause codes (explainable verdict)
+  const conf = (typeof result.confidence === 'number') ? result.confidence : null;
+  const cs = document.getElementById('conf-score');
+  const cf = document.getElementById('conf-fill');
+  if (conf !== null) {
+    cs.textContent = conf + ' / 100';
+    cf.style.width = conf + '%';
+    cf.style.background = conf >= 85 ? '#3fb950' : conf >= 65 ? '#f0883e' : '#f85149';
+  } else {
+    cs.textContent = '-';
+    cf.style.width = '0%';
+  }
+  const causes = result.cause_codes || [];
+  document.getElementById('v-causes').innerHTML = causes.length
+    ? causes.map(c => '<li><span class="cause-code">' + esc(c.code) + '</span> ' +
+        '<span class="cause-desc">' + esc(c.description || '') +
+        (c.detail ? ' - ' + esc(c.detail) : '') +
+        ' (weight ' + (c.weight || 0) + ', +' + (c.marginal_gain || 0) + ' pts)</span></li>').join('')
+    : '<li style="color:#8b949e">none</li>';
+
   const vj = result.verdict_obj || {
     v: 1,
     verdict_id: 'n/a',
@@ -420,6 +657,8 @@ async function runScenario(id) {
     sig: result.signature || '(unsigned: demo mode)',
     pubkey: '(unsigned: demo mode)',
   };
+  vj.confidence = result.confidence;
+  vj.cause_codes = result.cause_codes;
   document.getElementById('v-json').innerHTML =
     syntaxHighlight(JSON.stringify(vj, null, 2));
   const ev = document.getElementById('v-ev');
@@ -462,8 +701,10 @@ async function runScenario(id) {
   setStatus('Done. Pick another scenario.');
   running = false;
   document.querySelectorAll('.scn-btn').forEach(b => b.disabled = false);
-  // Phase 3: refresh the reputation graph after each scenario.
-  renderReputationGraph();
+  // Refresh the reputation graph from the scenario response data.
+  // No extra HTTP request. The policy panel is static for the demo
+  // session and renders once on page load.
+  renderReputationGraph(result.reputation);
 }
 
 function setStatus(t) {
@@ -473,60 +714,129 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // Phase 3: reputation graph. Fetches GET /_rs/reputation and renders
 // a per-server score history as SVG sparklines with band coloring.
-async function renderReputationGraph() {
-  const el = document.getElementById('rep-graph');
+// Phase 4: policy panel. Fetches GET /_rs/policy and renders
+// the active demo policy rules.
+async function renderPolicy() {
+  const el = document.getElementById('policy-panel');
+  const yamlEl = document.getElementById('policy-yaml');
   let data;
   try {
-    const r = await fetch('/_rs/reputation');
+    const r = await fetch('/_rs/policy');
     data = await r.json();
   } catch (e) {
-    el.innerHTML = '<div style="color:#8b949e;font-size:12px">reputation endpoint unreachable</div>';
+    el.innerHTML = '<div style="color:#8b949e;font-size:12px">policy endpoint unreachable</div>';
     return;
   }
-  const servers = data.servers || [];
+  const agents = data.agents || {};
+  const tools = data.tools || {};
+  let html = '';
+  for (const [a, rules] of Object.entries(agents)) {
+    if (rules.deny_tools && rules.deny_tools.length) {
+      html += '<div style="margin-bottom:8px;font-size:12px">' +
+        '<span style="color:#f85149;font-weight:700">Blocked tools:</span> ' +
+        '<span class="mono">' + esc(rules.deny_tools.join(', ')) + '</span><br>' +
+        '<span style="color:#6e7681">denied for agent ' + esc(a) + '</span></div>';
+    }
+    if (rules.allow_tools && rules.allow_tools.length) {
+      html += '<div style="margin-bottom:8px;font-size:12px">' +
+        '<span style="color:#3fb950;font-weight:700">Allowed tools:</span> ' +
+        '<span class="mono">' + esc(rules.allow_tools.join(', ')) + '</span><br>' +
+        '<span style="color:#6e7681">permitted for agent ' + esc(a) + '</span></div>';
+    }
+  }
+  for (const [t, rules] of Object.entries(tools)) {
+    const bits = [];
+    if (rules.require_approval) bits.push('needs operator approval');
+    if (rules.rate_limit) bits.push('limited to ' + rules.rate_limit);
+    if (bits.length) {
+      html += '<div style="margin-bottom:8px;font-size:12px">' +
+        '<span style="color:#d29922;font-weight:700">Restricted:</span> ' +
+        '<span class="mono">' + esc(t) + '</span> ' +
+        '<span style="color:#6e7681">' + esc(bits.join(', ')) + '</span></div>';
+    }
+  }
+  if (!html) html = '<div style="color:#8b949e;font-size:12px">no policy rules active</div>';
+  el.innerHTML = html;
+  if (yamlEl) {
+    yamlEl.textContent = data.yaml || 'policy config not available';
+  }
+}
+
+
+async function renderReputationGraph(provided) {
+  const el = document.getElementById('rep-graph');
+  // When the scenario response already carries the reputation summary,
+  // render from it directly: no extra HTTP request. Otherwise fetch.
+  let data = provided;
+  if (!data) {
+    try {
+      const r = await fetch('/_rs/reputation');
+      data = await r.json();
+    } catch (e) {
+      el.innerHTML = '<div style="color:#8b949e;font-size:12px">reputation endpoint unreachable</div>';
+      return;
+    }
+  }
+  const servers = (data && data.servers) || [];
   if (!servers.length) {
     el.innerHTML = '<div style="color:#8b949e;font-size:12px">no servers tracked yet</div>';
     return;
   }
-  const W = 260, H = 56, PAD = 4;
-  el.innerHTML = servers.map(s => {
-    const hist = s.history || [];
-    const bandColor = s.band === 'trusted' ? '#3fb950'
-      : s.band === 'watch' ? '#d29922' : '#f85149';
-    let svg;
-    if (hist.length < 2) {
-      const y = H - PAD - (s.score / 100) * (H - 2 * PAD);
-      svg = `<svg width="${W}" height="${H}" style="display:block">` +
-        `<line x1="${PAD}" y1="${y}" x2="${W-PAD}" y2="${y}" ` +
-        `stroke="${bandColor}" stroke-width="2"/>` +
-        `<circle cx="${W-PAD}" cy="${y}" r="3" fill="${bandColor}"/></svg>`;
-    } else {
-      const n = hist.length;
-      const pts = hist.map((h, i) => {
-        const x = PAD + (i / (n - 1)) * (W - 2 * PAD);
-        const y = H - PAD - (Math.max(0, Math.min(100, h.score)) / 100) * (H - 2 * PAD);
-        return x.toFixed(1) + ',' + y.toFixed(1);
-      }).join(' ');
-      // Band background zones
-      const y70 = H - PAD - 0.70 * (H - 2 * PAD);
-      const y40 = H - PAD - 0.40 * (H - 2 * PAD);
-      svg = `<svg width="${W}" height="${H}" style="display:block">` +
-        `<rect x="0" y="0" width="${W}" height="${y70}" fill="#3fb950" opacity="0.07"/>` +
-        `<rect x="0" y="${y70}" width="${W}" height="${y40-y70}" fill="#d29922" opacity="0.07"/>` +
-        `<rect x="0" y="${y40}" width="${W}" height="${H-y40}" fill="#f85149" opacity="0.07"/>` +
-        `<polyline points="${pts}" fill="none" stroke="${bandColor}" stroke-width="2"/>` +
-        `</svg>`;
-    }
-    return `<div style="margin-bottom:12px">` +
-      `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">` +
-      `<span class="mono" style="font-size:11px;word-break:break-all">${esc(s.domain || s.url)}</span>` +
-      `<span style="font-size:13px;font-weight:700;color:${bandColor}">${esc(String(s.score))}</span>` +
-      `</div>${svg}</div>`;
-  }).join('');
+  // Sort: lowest score first (most concerning at top)
+  const sorted = [...servers].sort((a, b) => a.score - b.score);
+  const W = 280, BH = 14;
+  const barW = W;
+
+  const bandColor = s => s >= 70 ? '#3fb950' : s >= 40 ? '#d29922' : '#f85149';
+  const bandName = s => s >= 70 ? 'TRUSTED' : s >= 40 ? 'WATCH' : 'POISONED';
+
+  let rows = '';
+  sorted.forEach((s) => {
+    const w = Math.max(2, (s.score / 100) * barW);
+    const c = bandColor(s.score);
+    const full = s.domain || s.url || 'unknown';
+    let short = full;
+    if (short.length > 34) short = short.slice(0, 32) + '..';
+    // Label row above the bar: hostname (truncated, full name on hover),
+    // band and score at the right. Text never overlaps the bar.
+    rows += '<div style="margin-bottom:12px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:4px">' +
+      '<span class="mono" title="' + esc(full) + '" ' +
+      'style="font-size:11px;color:#c9d1d9;white-space:nowrap;overflow:hidden;' +
+      'text-overflow:ellipsis;max-width:175px">' + esc(short) + '</span>' +
+      '<span style="font-size:10px;font-weight:700;color:' + c + ';white-space:nowrap">' +
+      bandName(s.score) + ' ' + esc(String(s.score)) + '</span></div>' +
+      '<svg width="' + W + '" height="' + BH + '" style="display:block;max-width:100%">' +
+      '<rect x="0" y="0" width="' + barW + '" height="' + BH + '" fill="#21262d" rx="4"/>' +
+      '<rect x="' + (barW * 0.7) + '" y="0" width="' + (barW * 0.3) + '" height="' + BH +
+      '" fill="#3fb950" opacity="0.08"/>' +
+      '<rect x="' + (barW * 0.4) + '" y="0" width="' + (barW * 0.3) + '" height="' + BH +
+      '" fill="#d29922" opacity="0.08"/>' +
+      '<rect x="0" y="0" width="' + (barW * 0.4) + '" height="' + BH +
+      '" fill="#f85149" opacity="0.08"/>' +
+      '<rect x="0" y="0" width="' + w + '" height="' + BH + '" fill="' + c +
+      '" rx="4" opacity="0.85">' +
+      '<animate attributeName="width" from="0" to="' + w + '" dur="0.5s" fill="freeze"/>' +
+      '</rect></svg></div>';
+  });
+
+  // Legend
+  const legend =
+    '<div style="display:flex;gap:12px;font-size:11px;color:#8b949e;margin-bottom:10px">' +
+    '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#3fb950;margin-right:4px"></span>Trusted 70+</span>' +
+    '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#d29922;margin-right:4px"></span>Watch 40-69</span>' +
+    '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#f85149;margin-right:4px"></span>Poisoned &lt;40</span>' +
+    '</div>';
+
+  el.innerHTML = legend + rows +
+    '<div style="font-size:11px;color:#6e7681;margin-top:6px">' +
+    sorted.length + ' servers tracked. ' +
+    'Scores drop on TI hits, flags, quarantines; recover slowly when clean.</div>';
 }
 
 // Initial load (proxy-served mode has live data).
 renderReputationGraph();
+renderPolicy();
 </script>
 </body>
 </html>

@@ -12,8 +12,56 @@ import urllib.parse
 import urllib.request
 
 from . import oauth
+from . import confidence as _confidence
 
 log = logging.getLogger(__name__)
+
+
+def _confidence_for_result(categories, details):
+    """Build explainable confidence for a screen_tool_result verdict.
+
+    Maps fired poison categories to cause codes, enriching each with
+    details collected during screening. Returns the score_verdict dict.
+    """
+    signals = []
+    if "prompt_injection" in categories:
+        signals.append({"code": "PROMPT_INJECTION",
+                        "detail": "known phrase matched in result text"})
+    if "kit_match" in categories:
+        n = len(details.get("kit_ids", []))
+        signals.append({"code": "KIT_MATCH",
+                        "detail": f"{n} kit fingerprint(s) in result"})
+    if "malicious_url" in categories:
+        level = details.get("url_level", "high")
+        code = ("MALICIOUS_URL_HIGH" if level == "high"
+                else "MALICIOUS_URL_MEDIUM")
+        signals.append({"code": code,
+                        "detail": f"TI level={level}"})
+    if "secret_leak" in categories:
+        signals.append({"code": "SECRET_LEAK",
+                        "detail": "private key or secret pattern in result"})
+    if "credential_exfiltration" in categories:
+        pats = (details.get("credential_exfiltration", {})
+                .get("patterns", []))
+        signals.append({"code": "CREDENTIAL_EXFILTRATION",
+                        "detail": f"patterns: {', '.join(pats)}"})
+    if "oauth_tampering" in categories:
+        n = len(details.get("oauth_tampered_urls", []))
+        signals.append({"code": "OAUTH_TAMPERING",
+                        "detail": f"{n} tampered OAuth URL(s)"})
+    if "pii_leak" in categories:
+        pii = details.get("pii", {})
+        parts = [f"{k}:{v}" for k, v in sorted(pii.items())]
+        signals.append({"code": "PII_LEAK",
+                        "detail": f"unredacted patterns ({', '.join(parts)})"})
+    if "unknown_synthetic" in categories:
+        signals.append({"code": "SYNTHETIC_INSTRUCTION",
+                        "detail": "instruction-like phrasing, no known pattern"})
+    verdict = "BLOCK" if signals else "ALLOW"
+    if verdict == "ALLOW":
+        signals = [{"code": "CONTENT_SCREEN_CLEAN",
+                    "detail": "no poison patterns in result text"}]
+    return _confidence.score_verdict(verdict, signals)
 
 # Regexes for indicator extraction.
 _URL_RE = re.compile(
@@ -251,6 +299,10 @@ class Screener:
         urls = indicators.get("urls", [])
         if not urls:
             # Nothing URL-shaped to check; allow.
+            scored = _confidence.score_verdict("ALLOW", [{
+                "code": "TI_SCREEN_CLEAN",
+                "detail": "no URL-shaped indicators in tool arguments",
+            }])
             return {
                 "verdict": "allow",
                 "level": "unknown",
@@ -258,6 +310,8 @@ class Screener:
                 "reasons": ["no screenable indicators in tool arguments"],
                 "poison_category": POISON_CLEAN,
                 "screened": indicators,
+                "confidence": scored["confidence"],
+                "cause_codes": scored["cause_codes"],
             }
 
         # Check each URL via composite-check (keyless). Take the worst.
@@ -277,6 +331,10 @@ class Screener:
 
         if checked == 0:
             # All screening calls failed: fail open, but say so.
+            scored = _confidence.score_verdict("ALLOW", [{
+                "code": "SCREENING_UNAVAILABLE",
+                "detail": f"{errors} TI errors; allowed fail-open",
+            }])
             return {
                 "verdict": "allow",
                 "level": "unknown",
@@ -284,6 +342,8 @@ class Screener:
                 "reasons": [f"TI screening unavailable ({errors} errors); allowed"],
                 "poison_category": POISON_CLEAN,
                 "screened": indicators,
+                "confidence": scored["confidence"],
+                "cause_codes": scored["cause_codes"],
             }
 
         verdict = "block" if worst["level"] in self.block_levels else "allow"
@@ -292,6 +352,21 @@ class Screener:
             POISON_MALICIOUS_URL if verdict == "block" else POISON_CLEAN
         )
         worst["screened"] = indicators
+        if verdict == "block":
+            code = ("MALICIOUS_URL_HIGH" if worst["level"] == "high"
+                    else "MALICIOUS_URL_MEDIUM")
+            scored = _confidence.score_verdict("BLOCK", [{
+                "code": code,
+                "detail": (f"TI level={worst['level']} "
+                           f"score={worst['score']}"),
+            }])
+        else:
+            scored = _confidence.score_verdict("ALLOW", [{
+                "code": "TI_SCREEN_CLEAN",
+                "detail": "TI check: no indicators matched",
+            }])
+        worst["confidence"] = scored["confidence"]
+        worst["cause_codes"] = scored["cause_codes"]
         return worst
 
     def _check_url(self, url: str) -> dict:
@@ -358,6 +433,10 @@ class Screener:
                 continue
             check = oauth.check_oauth_url(url)
             if check["status"] == "tampered":
+                scored = _confidence.score_verdict("BLOCK", [{
+                    "code": "OAUTH_TAMPERING",
+                    "detail": check["reason"],
+                }])
                 return {
                     "verdict": "block",
                     "level": "high",
@@ -365,6 +444,8 @@ class Screener:
                     "reasons": [f"oauth_tampering: {check['reason']}"],
                     "poison_category": POISON_OAUTH_TAMPERING,
                     "screened": indicators,
+                    "confidence": scored["confidence"],
+                    "cause_codes": scored["cause_codes"],
                 }
         return None
 
@@ -440,6 +521,7 @@ class Screener:
                 f"score={worst['score']}"
             )
             details["url_reasons"] = worst["reasons"]
+            details["url_level"] = worst["level"]
             categories.add(POISON_MALICIOUS_URL)
 
         # 4. Scam-kit fingerprint IDs. A kit_<sha256> in a tool result
@@ -572,6 +654,7 @@ class Screener:
                     }
                     categories.add(POISON_CREDENTIAL_EXFILTRATION)
 
+        scored = _confidence_for_result(categories, details)
         return {
             "verdict": "flagged" if reasons else "clean",
             "poison_category": worst_category(categories),
@@ -579,6 +662,8 @@ class Screener:
             "details": details,
             "kit_ids": kit_ids,
             "pii_leak": bool(pii_found),
+            "confidence": scored["confidence"],
+            "cause_codes": scored["cause_codes"],
         }
 
 

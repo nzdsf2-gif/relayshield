@@ -128,13 +128,16 @@ const HTML = `<!DOCTYPE html>
   /* pricing */
   .price-card { background: var(--card); border: 1px solid var(--purple-d); border-radius: 14px; padding: 32px; display: flex; flex-direction: column; box-shadow: 0 0 16px rgba(124,58,237,0.12); }
   .price-card.featured { border: 2px solid var(--purple); box-shadow: 0 0 34px rgba(168,85,247,0.3); }
+  .price-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
+  .price-card:hover { transform: translateY(-3px); }
+  .price-card.selected { border-color: var(--purple); box-shadow: 0 0 30px rgba(168,85,247,0.35); }
   .price-card h3 { font-size: 1.25rem; margin-bottom: 6px; }
   .price-card .for { color: var(--muted); font-size: .9rem; margin-bottom: 16px; }
   .price-card .amount { font-size: 2.2rem; font-weight: 800; margin-bottom: 4px; color: var(--green); text-shadow: 0 0 14px rgba(0,255,65,0.4); }
   .price-card .per { color: var(--muted); font-size: .9rem; margin-bottom: 20px; }
   .price-card ul { list-style: none; margin-bottom: 20px; }
   .price-card li { padding: 6px 0; color: var(--muted); font-size: .95rem; }
-  .price-card li::before { content: "\2713  "; color: var(--green); font-weight: 700; }
+  .price-card li::before { content: "\\2713  "; color: var(--green); font-weight: 700; }
   .price-card .tos { font-size: .8rem; color: var(--muted); margin-bottom: 12px; }
   .plan-btn { display: block; text-align: center; margin-bottom: 8px; }
 
@@ -164,7 +167,7 @@ const HTML = `<!DOCTYPE html>
   .modal p.body { color: var(--muted); margin-bottom: 18px; }
   .modal ul { list-style: none; margin-bottom: 22px; }
   .modal li { padding: 7px 0; color: var(--text); font-size: .97rem; border-bottom: 1px solid #2c2c2c; }
-  .modal li::before { content: "\25B8  "; color: var(--green); }
+  .modal li::before { content: "\\25B8  "; color: var(--green); }
   .modal .m-links { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .modal-close { position: absolute; top: 14px; right: 18px; background: transparent; border: none; color: var(--muted); font-size: 1.6rem; cursor: pointer; }
   .modal-close:hover { color: var(--green); }
@@ -262,6 +265,41 @@ const HTML = `<!DOCTYPE html>
     </div>
 
     <div class="subsec">
+      <h3><span class="accent">Threat Intelligence APIs</span></h3>
+      <p class="tagline">The corpus behind the verdicts. 700K+ indicators, 8.7M citations.</p>
+    </div>
+    <div class="grid">
+      <div class="card" data-drill="ti">
+        <span class="tag">Live</span>
+        <div class="icon">&#x1F50D;</div>
+        <h3>Threat Intelligence APIs</h3>
+        <p>REST, MCP, and x402 pay-per-call access to the RelayShield corpus. Now with live licenses on AWS Marketplace.</p>
+        <div class="links">
+          <a class="btn btn-primary btn-sm" href="https://api.relayshield.net/developers">Browse the API</a>
+        </div>
+        <div class="aws-links">
+          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-z3izf6val3jb2">AWS: Threat Intelligence and Identity Security API</a>
+          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq">AWS: Consumption Security API Bundles</a>
+          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-zgdxyqfd63hog">AWS: Attack Surface and Supply Chain API</a>
+          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-bn2q7auacucho">AWS: Core Identity Exposure API Bundle</a>
+        </div>
+        <div class="drill-hint">Click for details &#x25B8;</div>
+      </div>
+      <div class="card" data-drill="shopify">
+        <span class="tag">Live</span>
+        <div class="icon">&#x1F6D2;</div>
+        <h3>Order Screening for Shopify</h3>
+        <p>Threat-intel layer for Shopify merchants: screens buyer identity against the RelayShield corpus to flag high-risk orders.</p>
+        <div class="links">
+          <a class="btn btn-ghost btn-sm" href="https://api.relayshield.net/developers">$29/mo on the App Store</a>
+        </div>
+        <div class="drill-hint">Click for details &#x25B8;</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+    <div class="subsec">
       <h3><span class="accent">Threat Monitoring</span></h3>
       <p class="tagline">Know when you are exposed. Act before it is too late.</p>
     </div>
@@ -307,39 +345,6 @@ const HTML = `<!DOCTYPE html>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
-    </div>
-
-    <div class="subsec">
-      <h3><span class="accent">Threat Intelligence APIs</span></h3>
-      <p class="tagline">The corpus behind the verdicts. 700K+ indicators, 8.7M citations.</p>
-    </div>
-    <div class="grid">
-      <div class="card" data-drill="ti">
-        <span class="tag">Live</span>
-        <div class="icon">&#x1F50D;</div>
-        <h3>Threat Intelligence APIs</h3>
-        <p>REST, MCP, and x402 pay-per-call access to the RelayShield corpus. Now with live licenses on AWS Marketplace.</p>
-        <div class="links">
-          <a class="btn btn-primary btn-sm" href="https://api.relayshield.net/developers">Browse the API</a>
-        </div>
-        <div class="aws-links">
-          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-z3izf6val3jb2">AWS: Threat Intelligence and Identity Security API</a>
-          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq">AWS: Consumption Security API Bundles</a>
-          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-zgdxyqfd63hog">AWS: Attack Surface and Supply Chain API</a>
-          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-bn2q7auacucho">AWS: Core Identity Exposure API Bundle</a>
-        </div>
-        <div class="drill-hint">Click for details &#x25B8;</div>
-      </div>
-      <div class="card" data-drill="shopify">
-        <span class="tag">Live</span>
-        <div class="icon">&#x1F6D2;</div>
-        <h3>Order Screening for Shopify</h3>
-        <p>Threat-intel layer for Shopify merchants: screens buyer identity against the RelayShield corpus to flag high-risk orders.</p>
-        <div class="links">
-          <a class="btn btn-ghost btn-sm" href="https://api.relayshield.net/developers">$29/mo on the App Store</a>
-        </div>
-        <div class="drill-hint">Click for details &#x25B8;</div>
-      </div>
       <div class="card" data-drill="chrome">
         <span class="tag">Live</span>
         <div class="icon">&#x1F310;</div>
@@ -351,8 +356,8 @@ const HTML = `<!DOCTYPE html>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
     </div>
-  </div>
-</section>
+
+
 
 <section class="block panel" id="pricing" data-panel="pricing">
   <div class="wrap">
@@ -716,6 +721,15 @@ var PRODUCT_DETAILS = {
   document.getElementById('modalClose').addEventListener('click', closeModal);
   overlay.addEventListener('click', function (e) { if (e.target === overlay) { closeModal(); } });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeModal(); } });
+  var priceCards = document.querySelectorAll('.price-card');
+  for (var m = 0; m < priceCards.length; m++) {
+    priceCards[m].addEventListener('click', function (e) {
+      if (e.target.closest('a')) { return; }
+      for (var n = 0; n < priceCards.length; n++) { priceCards[n].classList.remove('selected'); }
+      this.classList.add('selected');
+    });
+  }
+
   var cards = document.querySelectorAll('.card[data-drill]');
   for (var k = 0; k < cards.length; k++) {
     cards[k].addEventListener('click', function (e) {

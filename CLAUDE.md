@@ -10606,3 +10606,26 @@ Read during the Well-Architected review for the AWS FTR, from Andrew's console a
 
 * **The root access key (ends `N2XZ`) was DEACTIVATED by Andrew on 2026-10-09**, not deleted. Delete it on or after 2026-10-16 if nothing has broken. Deactivation is reversible; deletion is not.
 * **IAM Access Analyzer is ENABLED in us-east-1**: `arn:aws:access-analyzer:us-east-1:239677749008:analyzer/relayshield-account-analyzer`, type ACCOUNT (free external-access analyzer), created by the `relayshield-deployer` identity, so that identity holds `access-analyzer:CreateAnalyzer`. It has produced no reviewed findings yet; the WAFR box for analysing public and cross-account access stays unticked until Andrew has read the first findings in the console.
+
+## 2026-10-10: WAFR SECURITY READS, AND KMS ROTATION TURNED ON. CONFIRMED BY ANDREW'S OUTPUT.
+
+Read during the Well-Architected review for the AWS FTR, from his CLI, not recalled. An AWS write that
+succeeds outside a session that can commit is invisible to every later session, so it is recorded here.
+
+* **KMS automatic rotation was OFF on both customer-managed keys and is now ON** (enabled by Andrew
+  2026-10-10, re-read `True` on both): `alias/relayshield-data-key` (`1479c3fa-88e9-4096-a736-32968ba5812f`)
+  and `alias/relayshield-dynamodb-key` (`2ece080e-0cb0-499e-b2d1-6a496bbb4a1a`).
+* **CloudTrail:** one multi-region trail, `relayshield-trail`, delivering to S3 bucket
+  `relayshield-config-logs`. Log file validation and encryption on it are UNVERIFIED.
+* **GuardDuty: no detector in us-east-1** (other regions unchecked). **Security Hub: not subscribed.**
+  AWS Config recorder status UNVERIFIED.
+* **No regional WAF web ACL found** (the first read printed nothing; the run had an extra output line, so
+  re-run `aws wafv2 list-web-acls --scope REGIONAL --region us-east-1` alone to be certain). One API Gateway
+  usage plan, `relayshield-growth`, throttles at 50 rps with burst 100, and applies to keyed requests only.
+* **Zero Lambda functions are VPC-attached.**
+* `.github/workflows/security_audit.yml` runs Bandit (fails on high), pip-audit and gitleaks on every push and
+  pull request. No Dependabot or CodeQL.
+* **Post-FTR improvement list:** regional WAF with a rate-based rule on the API, Lambda versions plus aliases
+  for rollback, GuardDuty and Security Hub, Dependabot, a written data classification scheme, tracing and
+  dashboards.
+* WAFR answers given so far are in the session transcript only; OPS 1-11 and SEC 1-8 are done, SEC 9 is next.

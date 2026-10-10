@@ -24,6 +24,11 @@ import sys
 import time
 import urllib.parse
 
+try:
+    from . import confidence as _confidence
+except ImportError:  # direct script execution / testing
+    import confidence as _confidence
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _HTML_PATH = os.path.join(_HERE, "dashboard.html")
 
@@ -314,10 +319,18 @@ def run_scenario(scenario_id):
         "server_states": {},
     }
 
-    def finish(verdict, category, evidence):
+    def finish(verdict, category, evidence, signals=None):
         result["verdict"] = verdict
         result["poison_category"] = category
         result["evidence"] = [str(e) for e in evidence]
+        # Explainable confidence: explicit per-scenario signals, or a
+        # default derived from the poison category.
+        if signals is None:
+            signals = _confidence.signals_for_category(category)
+        scored = _confidence.score_verdict(verdict, signals)
+        result["confidence"] = scored["confidence"]
+        result["cause_codes"] = scored["cause_codes"]
+        result["confidence_method"] = scored["method"]
         result["server"] = _SCENARIO_SERVER.get(
             result["scenario_id"], "n/a")
         _sign(result, signer,
@@ -365,7 +378,13 @@ def run_scenario(scenario_id):
             "Contact support for help.")
         cat = rv.get("poison_category", "clean")
         add("verdict", "Verdict issued", f"category: {cat}")
-        finish("ALLOW", cat, ["no indicators matched", "clean response"])
+        finish("ALLOW", cat, ["no indicators matched", "clean response"],
+               signals=[
+                   {"code": "TI_SCREEN_CLEAN",
+                    "detail": "no indicators matched in arguments"},
+                   {"code": "CONTENT_SCREEN_CLEAN",
+                    "detail": "no poison patterns in response"},
+               ])
 
     elif scenario_id == 2:
         add("agent", "AI Agent sends tool call", "tools/call: get_article")
@@ -385,7 +404,9 @@ def run_scenario(scenario_id):
         add("reputation",
             f"Server reputation: clean -> {rep['reputation']}",
             f"flag 1: {reason[:60]}")
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "PROMPT_INJECTION",
+                         "detail": "known phrase 'ignore previous instructions' in result"}])
 
     elif scenario_id == 3:
         add("agent", "AI Agent sends tool call", "tools/call: render_widget")
@@ -405,7 +426,9 @@ def run_scenario(scenario_id):
         add("reputation",
             f"Server reputation: clean -> {rep['reputation']}",
             f"flag 1: {reason[:60]}")
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "KIT_MATCH",
+                         "detail": "scam-kit fingerprint in tool result"}])
 
     elif scenario_id == 4:
         add("agent", "AI Agent sends tool call", "tools/call: get_customer")
@@ -425,7 +448,9 @@ def run_scenario(scenario_id):
         add("reputation",
             f"Server reputation: clean -> {rep['reputation']}",
             f"flag 1: {reason[:60]}")
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "PII_LEAK",
+                         "detail": "unredacted SSN pattern (1 occurrence)"}])
 
     elif scenario_id == 5:
         strikes = [
@@ -450,7 +475,15 @@ def run_scenario(scenario_id):
             "fail-closed: error -32002")
         finish("QUARANTINE", "pii_leak",
                ["3 strikes: prompt_injection, kit_match, pii_leak",
-                "server auto-quarantined, fail-closed"])
+                "server auto-quarantined, fail-closed"],
+               signals=[
+                   {"code": "PROMPT_INJECTION",
+                    "detail": "strike 1: hidden instructions in result"},
+                   {"code": "KIT_MATCH",
+                    "detail": "strike 2: scam-kit fingerprint"},
+                   {"code": "PII_LEAK",
+                    "detail": "strike 3: unredacted SSN pattern"},
+               ])
 
     elif scenario_id == 6:
         quarantine.quarantine(
@@ -464,7 +497,13 @@ def run_scenario(scenario_id):
             "clean server unaffected by neighbor quarantine")
         finish("ALLOW", "clean",
                ["per-server isolation confirmed",
-                "quarantined neighbor does not affect clean server"])
+                "quarantined neighbor does not affect clean server"],
+               signals=[
+                   {"code": "CONTENT_SCREEN_CLEAN",
+                    "detail": "clean server traffic screened"},
+                   {"code": "ISOLATION_VERIFIED",
+                    "detail": "quarantined neighbor does not affect clean server"},
+               ])
 
     elif scenario_id == 7:
         evil_oauth = ("https://evil-auth.example.net/o/oauth2/auth"
@@ -479,7 +518,9 @@ def run_scenario(scenario_id):
             f"category: {cat}")
         add("blocked", "Call blocked before reaching upstream",
             "no upstream contact made")
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "OAUTH_TAMPERING",
+                         "detail": "OAuth path mimics google on foreign domain"}])
 
     elif scenario_id == 8:
         add("agent", "AI Agent sends tool call", "tools/call: get_token")
@@ -502,7 +543,9 @@ def run_scenario(scenario_id):
         add("reputation",
             f"Server reputation: clean -> {rep['reputation']}",
             f"flag 1: {reason[:60]}")
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "CREDENTIAL_EXFILTRATION",
+                         "detail": "JWT bound for non-IdP domain"}])
 
     elif scenario_id == 9:
         good_oauth = ("https://accounts.google.com/o/oauth2/v2/auth"
@@ -518,7 +561,15 @@ def run_scenario(scenario_id):
             "legitimate OAuth flow, no false positive")
         finish("ALLOW", "clean",
                ["known IdP endpoint: accounts.google.com",
-                "no tampering indicators"])
+                "no tampering indicators"],
+               signals=[
+                   {"code": "OAUTH_IDP_VALIDATED",
+                    "detail": "accounts.google.com is a known IdP"},
+                   {"code": "TI_SCREEN_CLEAN",
+                    "detail": "OAuth URL screened clean"},
+                   {"code": "CONTENT_SCREEN_CLEAN",
+                    "detail": "no tampering indicators"},
+               ])
 
     elif scenario_id == 10:
         # Phase 3: volume anomaly. Build a baseline, then flood.
@@ -567,7 +618,10 @@ def run_scenario(scenario_id):
             "flood_rate": 29.0,
             "threshold_mult": 10,
         }
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "BEHAVIOR_ANOMALY",
+                         "detail": "29.0 calls/min vs baseline 0.4 calls/min",
+                         "risk": risk}])
 
     elif scenario_id == 11:
         # Phase 3: data exfiltration attack chain.
@@ -615,7 +669,9 @@ def run_scenario(scenario_id):
             "name": "data_exfiltration",
             "links": chain_links,
         }
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "ATTACK_CHAIN",
+                         "detail": "data_exfiltration: read, network, email stages"}])
 
     elif scenario_id == 12:
         # Phase 3: lateral movement across servers.
@@ -655,7 +711,9 @@ def run_scenario(scenario_id):
             f"risk: {risk:.1f}/100")
         result["visualization"] = "multi_server"
         result["servers_touched"] = servers
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "ATTACK_CHAIN",
+                         "detail": "lateral_movement: 5 servers in 2 minutes"}])
 
     elif scenario_id == 13:
         # Phase 4: policy deny. Agent tries a denied tool.
@@ -671,7 +729,9 @@ def run_scenario(scenario_id):
         result["visualization"] = "policy_modal"
         result["policy_data"] = _policy_modal_data(
             "deny", agent, "exec_shell", CLEAN_UPSTREAM, cat, ev)
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "POLICY_DENY",
+                         "detail": "agents.demo-agent.deny_tools: exec_shell"}])
 
     elif scenario_id == 14:
         # Phase 4: policy approval. Sensitive tool flagged for review.
@@ -688,7 +748,9 @@ def run_scenario(scenario_id):
         result["visualization"] = "policy_modal"
         result["policy_data"] = _policy_modal_data(
             "approval", agent, "delete_database", CLEAN_UPSTREAM, cat, ev)
-        finish("BLOCK", cat, ev)
+        finish("BLOCK", cat, ev,
+               signals=[{"code": "POLICY_APPROVAL",
+                         "detail": "tools.delete_database.require_approval"}])
 
     else:
         finish("ALLOW", "clean", [f"unknown scenario: {scenario_id}"])

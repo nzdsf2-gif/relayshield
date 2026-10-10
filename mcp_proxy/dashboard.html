@@ -76,6 +76,14 @@
                         border: 2px solid #30363d; }
   .vrow { margin-top: 10px; font-size: 13px; }
   .vrow .k { color: #8b949e; display: inline-block; width: 130px; }
+  #conf-bar { width: 220px; height: 8px; background: #21262d;
+              border-radius: 4px; margin-top: 6px; overflow: hidden; }
+  #conf-fill { height: 100%; width: 0%; border-radius: 4px;
+               background: #3fb950; transition: width 0.4s; }
+  #conf-score { font-size: 16px; font-weight: 700; }
+  .cause-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: 12px; color: #f0883e; }
+  .cause-desc { color: #8b949e; font-size: 12px; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
           font-size: 12px; }
   .ev-list { margin: 6px 0 0 130px; font-size: 12px; color: #c9d1d9; }
@@ -248,6 +256,12 @@
       <div><span id="verdict-badge" class="idle">STANDBY</span></div>
       <div><span id="cat-badge" class="cat-idle">no category yet</span></div>
       <div id="cat-desc"></div>
+      <div class="vrow"><span class="k">Confidence</span>
+        <span id="conf-score" class="mono">-</span>
+        <div id="conf-bar"><div id="conf-fill"></div></div>
+      </div>
+      <div class="vrow"><span class="k">Cause codes</span></div>
+      <ul class="ev-list" id="v-causes"><li style="color:#8b949e">none yet</li></ul>
       <details class="taxonomy">
         <summary>Verdict taxonomy reference (all poison categories)</summary>
         <table id="taxonomy-table"></table>
@@ -613,6 +627,26 @@ async function runScenario(id) {
   cb.className = catClass(cat);
   document.getElementById('cat-desc').textContent = CAT_DESC[cat] || '';
 
+  // Confidence score with cause codes (explainable verdict)
+  const conf = (typeof result.confidence === 'number') ? result.confidence : null;
+  const cs = document.getElementById('conf-score');
+  const cf = document.getElementById('conf-fill');
+  if (conf !== null) {
+    cs.textContent = conf + ' / 100';
+    cf.style.width = conf + '%';
+    cf.style.background = conf >= 85 ? '#3fb950' : conf >= 65 ? '#f0883e' : '#f85149';
+  } else {
+    cs.textContent = '-';
+    cf.style.width = '0%';
+  }
+  const causes = result.cause_codes || [];
+  document.getElementById('v-causes').innerHTML = causes.length
+    ? causes.map(c => '<li><span class="cause-code">' + esc(c.code) + '</span> ' +
+        '<span class="cause-desc">' + esc(c.description || '') +
+        (c.detail ? ' - ' + esc(c.detail) : '') +
+        ' (weight ' + (c.weight || 0) + ', +' + (c.marginal_gain || 0) + ' pts)</span></li>').join('')
+    : '<li style="color:#8b949e">none</li>';
+
   const vj = result.verdict_obj || {
     v: 1,
     verdict_id: 'n/a',
@@ -623,6 +657,8 @@ async function runScenario(id) {
     sig: result.signature || '(unsigned: demo mode)',
     pubkey: '(unsigned: demo mode)',
   };
+  vj.confidence = result.confidence;
+  vj.cause_codes = result.cause_codes;
   document.getElementById('v-json').innerHTML =
     syntaxHighlight(JSON.stringify(vj, null, 2));
   const ev = document.getElementById('v-ev');

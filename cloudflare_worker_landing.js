@@ -114,7 +114,16 @@ const HTML = `<!DOCTYPE html>
   .card .tag { display: inline-block; font-size: .75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--green); border: 1px solid var(--green-dim); padding: 4px 10px; border-radius: 999px; margin-bottom: 14px; align-self: flex-start; }
   .card .links { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .card .links a.more { font-size: .92rem; }
+  .card .aws-links { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  .card .aws-links a.more { font-size: .85rem; }
   .card .drill-hint { margin-top: 14px; font-size: .8rem; color: var(--purple); }
+  /* comparison table (monitoring drilldown) */
+  .compare { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: .82rem; }
+  .compare th, .compare td { padding: 7px 5px; border-bottom: 1px solid #2c2c2c; text-align: center; vertical-align: top; }
+  .compare th:first-child, .compare td:first-child { text-align: left; }
+  .compare th { color: var(--purple); font-size: .78rem; line-height: 1.3; }
+  .compare th span, .compare td span { display: block; font-size: .7rem; color: var(--muted); font-weight: 400; }
+  .compare tr.sec td { color: var(--green); text-transform: uppercase; letter-spacing: 1px; font-size: .72rem; font-weight: 700; padding-top: 14px; text-align: left; }
 
   /* pricing */
   .price-card { background: var(--card); border: 1px solid var(--purple-d); border-radius: 14px; padding: 32px; display: flex; flex-direction: column; box-shadow: 0 0 16px rgba(124,58,237,0.12); }
@@ -125,7 +134,7 @@ const HTML = `<!DOCTYPE html>
   .price-card .per { color: var(--muted); font-size: .9rem; margin-bottom: 20px; }
   .price-card ul { list-style: none; margin-bottom: 20px; }
   .price-card li { padding: 6px 0; color: var(--muted); font-size: .95rem; }
-  .price-card li::before { content: "\\2713  "; color: var(--green); font-weight: 700; }
+  .price-card li::before { content: "\2713  "; color: var(--green); font-weight: 700; }
   .price-card .tos { font-size: .8rem; color: var(--muted); margin-bottom: 12px; }
   .plan-btn { display: block; text-align: center; margin-bottom: 8px; }
 
@@ -155,7 +164,7 @@ const HTML = `<!DOCTYPE html>
   .modal p.body { color: var(--muted); margin-bottom: 18px; }
   .modal ul { list-style: none; margin-bottom: 22px; }
   .modal li { padding: 7px 0; color: var(--text); font-size: .97rem; border-bottom: 1px solid #2c2c2c; }
-  .modal li::before { content: "\\25B8  "; color: var(--green); }
+  .modal li::before { content: "\25B8  "; color: var(--green); }
   .modal .m-links { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .modal-close { position: absolute; top: 14px; right: 18px; background: transparent; border: none; color: var(--muted); font-size: 1.6rem; cursor: pointer; }
   .modal-close:hover { color: var(--green); }
@@ -245,6 +254,7 @@ const HTML = `<!DOCTYPE html>
         <h3>MCP Proxy Firewall</h3>
         <p>Runtime security between AI agents and MCP servers. Screens every tool call and response, quarantines suspicious servers, and scores each verdict with confidence and cause codes.</p>
         <div class="links">
+          <a class="btn btn-primary btn-sm" href="https://api.relayshield.net/developers">$49/mo cloud</a>
           <a class="btn btn-ghost btn-sm" href="https://api.relayshield.net/developers">Enterprise: custom from $3,000/mo</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
@@ -311,7 +321,12 @@ const HTML = `<!DOCTYPE html>
         <p>REST, MCP, and x402 pay-per-call access to the RelayShield corpus. Now with live licenses on AWS Marketplace.</p>
         <div class="links">
           <a class="btn btn-primary btn-sm" href="https://api.relayshield.net/developers">Browse the API</a>
-          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq">AWS Marketplace</a>
+        </div>
+        <div class="aws-links">
+          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-z3izf6val3jb2">AWS: Threat Intelligence and Identity Security API</a>
+          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq">AWS: Consumption Security API Bundles</a>
+          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-zgdxyqfd63hog">AWS: Attack Surface and Supply Chain API</a>
+          <a class="more" href="https://aws.amazon.com/marketplace/pp/prodview-bn2q7auacucho">AWS: Core Identity Exposure API Bundle</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
@@ -361,15 +376,29 @@ const HTML = `<!DOCTYPE html>
         <a class="btn btn-primary" href="https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l">Subscribe</a>
       </div>
       <div class="price-card">
-        <h3>MCP Proxy Firewall</h3>
+        <h3>MCP Proxy Firewall Cloud</h3>
         <div class="for">Teams running agents on MCP</div>
-        <div class="amount">Custom</div>
-        <div class="per">from $3,000/mo, onsite available</div>
+        <div class="amount">$49</div>
+        <div class="per">flat monthly pricing</div>
         <ul>
           <li>Runtime tool-call screening</li>
           <li>Confidence scores with cause codes</li>
           <li>Policy engine and audit trail</li>
           <li>Free pre-deployment scanner</li>
+        </ul>
+        <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
+        <a class="btn btn-primary" href="https://api.relayshield.net/developers">Get started</a>
+      </div>
+      <div class="price-card">
+        <h3>MCP Proxy Firewall On-Premise</h3>
+        <div class="for">Enterprise teams with custom needs</div>
+        <div class="amount">Custom</div>
+        <div class="per">from $3,000/mo, onsite available</div>
+        <ul>
+          <li>Everything in Cloud</li>
+          <li>White glove customization including dedicated support and policy configuration</li>
+          <li>Dedicated support</li>
+          <li>Custom policy configuration</li>
         </ul>
         <p class="tos">By engaging you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
         <a class="btn btn-ghost" href="https://api.relayshield.net/developers">Contact us</a>
@@ -488,6 +517,7 @@ const HTML = `<!DOCTYPE html>
     <div class="m-sub" id="mSub"></div>
     <p class="body" id="mBody"></p>
     <ul id="mList"></ul>
+    <div id="mTable" style="display:none; overflow-x:auto;"></div>
     <div class="m-links" id="mLinks"></div>
   </div>
 </div>
@@ -566,10 +596,11 @@ var PRODUCT_DETAILS = {
   mcp: {
     tag: 'Live', title: 'MCP Proxy Firewall',
     sub: 'Runtime security for AI agents on MCP',
-    body: 'A reverse proxy that sits between the AI agent and its MCP servers. Every tool call and every tool response passes through the proxy, where it is screened before reaching the agent. Suspicious calls are blocked or quarantined. Clean calls pass with negligible latency.',
+    body: 'A reverse proxy that sits between the AI agent and its MCP servers. Every tool call and every tool response passes through the proxy, where it is screened before reaching the agent. Suspicious calls are blocked or quarantined. Clean calls pass with negligible latency. Available as a $49/mo cloud service or a $3,000/mo on-premise deployment with white glove customization including dedicated support and policy configuration.',
     list: ['Free pre-deployment scanner: audits tool definitions before you connect, CI ready', 'Runtime screening of every tool call and tool response', 'Confidence scores with machine-readable cause codes on every verdict', 'Declarative allow and deny policy engine per agent, tool, and server', 'Server reputation graph that tracks repeat offenders over time', 'Complete audit trail for compliance and incident review', 'Behavioral baselining that flags novel attack patterns'],
     links: [
-      { text: 'Enterprise: custom from $3,000/mo', href: 'https://api.relayshield.net/developers', cls: 'btn btn-ghost btn-sm' }
+      { text: '$49/mo cloud', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' },
+      { text: 'On-premise: custom from $3,000/mo', href: 'https://api.relayshield.net/developers', cls: 'btn btn-ghost btn-sm' }
     ]
   },
   ti: {
@@ -579,8 +610,8 @@ var PRODUCT_DETAILS = {
     list: ['Live licenses on AWS Marketplace', 'REST, MCP, STIX/TAXII, and x402 rails', 'Breach, infostealer, SIM swap, wallet, domain, and MCP registry coverage', 'Free checks with no signup', 'Pay per call when you scale'],
     links: [
       { text: 'Browse the API', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' },
+      { text: 'AWS: Threat Intelligence and Identity Security API (30 endpoints)', href: 'https://aws.amazon.com/marketplace/pp/prodview-z3izf6val3jb2', cls: '' },
       { text: 'AWS: Consumption Security API Bundles', href: 'https://aws.amazon.com/marketplace/pp/prodview-6p6csngrcg3zq', cls: '' },
-      { text: 'AWS: Threat Intelligence and Identity Security API', href: 'https://aws.amazon.com/marketplace/pp/prodview-z3izf6val3jb2', cls: '' },
       { text: 'AWS: Attack Surface and Supply Chain API', href: 'https://aws.amazon.com/marketplace/pp/prodview-zgdxyqfd63hog', cls: '' },
       { text: 'AWS: Core Identity Exposure API Bundle', href: 'https://aws.amazon.com/marketplace/pp/prodview-bn2q7auacucho', cls: '' }
     ]
@@ -588,8 +619,9 @@ var PRODUCT_DETAILS = {
   msg: {
     tag: 'Free', title: 'Telegram and WhatsApp Monitoring',
     sub: 'Free discovery surfaces',
-    body: 'Our free bots are the front door to RelayShield intelligence. Paste a link, wallet address, or email and get a verdict in seconds. No signup, no API key. The same checks developers call over the API, delivered where people already chat.',
+    body: 'Our free bots are the front door to RelayShield intelligence. Paste a link, wallet address, or email and get a verdict in seconds. No signup, no API key. The same checks developers call over the API, delivered where people already chat. Paid plans add continuous monitoring, AI remediation guidance, and team features. Compare below.',
     list: ['Free scam checks on Telegram: @relayshield_bot', 'Free scam checks on WhatsApp: message +1 740 737 3961', 'Screenshot to verdict on photo messages', 'Breach exposure lookups by email', 'No signup, no API key'],
+    table: '<table class="compare"><thead><tr><th></th><th>Personal Shield<br><span>Individuals and families</span></th><th>Business Starter<br><span>Sole proprietors and freelancers</span></th><th>Starter + Domain<br><span>Sole proprietors with a business website</span></th><th>Business Basic<br><span>Teams up to 5</span></th><th>Business Shield<br><span>Teams up to 10</span></th></tr></thead><tbody><tr class="sec"><td colspan="6">Core protection</td></tr><tr><td>Breach monitoring</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>WhatsApp alerts</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>AI remediation guidance</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>SIM swap monitoring</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>Session hijacking alerts</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>Infostealer malware monitoring</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>Vishing preparedness</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>Instant file and link scanning</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>Connected app audit (OAuth)</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;<span>+ team admin</span></td><td>&#x2713;<span>+ team admin</span></td></tr><tr class="sec"><td colspan="6">Business features</td></tr><tr><td>Quarterly sweep reminder</td><td>&#x2014;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>Monthly security digest</td><td>&#x2014;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>Contractor / employee seats</td><td>&#x2014;</td><td>1 seat</td><td>1 seat<span>solo only</span></td><td>5 seats</td><td>10 seats</td></tr><tr><td>Team seat management</td><td>&#x2014;</td><td>&#x2014;</td><td>&#x2014;</td><td>&#x2713;</td><td>&#x2713;</td></tr><tr><td>Domain monitoring</td><td>&#x2014;</td><td>&#x2014;</td><td>&#x2713;<span>1 domain</span></td><td>&#x2713;<span>2 domains</span></td><td>&#x2713;<span>2 domains</span></td></tr></tbody></table>',
     links: [
       { text: 'Try free on Telegram', href: 'https://t.me/relayshield_bot', cls: 'btn btn-primary btn-sm' },
       { text: 'WhatsApp bot', href: 'https://wa.me/17407373961?text=SRC_wa-landing', cls: '' }
@@ -649,6 +681,7 @@ var PRODUCT_DETAILS = {
   var mSub = document.getElementById('mSub');
   var mBody = document.getElementById('mBody');
   var mList = document.getElementById('mList');
+  var mTable = document.getElementById('mTable');
   var mLinks = document.getElementById('mLinks');
   function openModal(key) {
     var d = PRODUCT_DETAILS[key];
@@ -663,6 +696,8 @@ var PRODUCT_DETAILS = {
       li.textContent = d.list[i];
       mList.appendChild(li);
     }
+    if (d.table) { mTable.innerHTML = d.table; mTable.style.display = 'block'; }
+    else { mTable.innerHTML = ''; mTable.style.display = 'none'; }
     mLinks.innerHTML = '';
     for (var j = 0; j < d.links.length; j++) {
       var a = document.createElement('a');

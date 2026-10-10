@@ -10555,9 +10555,135 @@ Agentic Attack Surface listing (`prod-kkvurtspreofy`). Names carry no internal b
 Andrew's rule that nothing a buyer or AWS reviewer reads says "Bundle D". Solution name
 `RelayShield Agentic Attack Surface API - FTR`, external title `RelayShield Agentic Attack Surface
 API`. Both are unverified against uniqueness: the form says each must be unique, so a collision with
+`RelayShield Agentic Attack Surface API` for BOTH the internal name and the external title (Andrew
+dropped the " - FTR" suffix I first suggested, 2026-10-08). Both are unverified against uniqueness: the form says each must be unique, so a collision with
 the four-product solution's name is possible and the form will say so.
 
 The Well-Architected review scope is the `api.relayshield.net` stack in account `239677749008`,
 region `us-east-1` (read from `deploy_lambdas.yml`), described by capability and with no corpus
 counts. Which lens AWS expects for the FTR is UNVERIFIED (docs.aws.amazon.com is egress-blocked):
 the Framework lens is the baseline, and the FTR Guide inside Partner Central is the authority.
+
+**Drift read 2026-10-08, `sh tools/handler_drift.sh relayshield_weekly_metrics.py`:** live
+`relayshield-weekly-metrics` (python3.12, handler `relayshield_weekly_metrics.lambda_handler`,
+LastModified 2026-09-28T23:52:37Z) is byte-identical to commit `a56ee4ad` and merely STALE: nothing
+live-only, nothing to recover. It lacks the three 2026-10-06 commits (channel breakdown, telemetry,
+email-checker rows) and the cumulative-plus-weekly indicator rows, and it is a single-file package.
+It is still in neither `deploy_lambdas.yml` nor the invoke policy, so a deploy is a hand
+`update-function-code` until it is mapped (the mapping commit must touch the `.py`).
+
+## 2026-10-08 (later): THE SIX MARKETPLACE SAAS PRODUCTS, BY ID, READ FROM `list-entities`
+
+Read by Andrew from AWS (`aws marketplace-catalog list-entities`, SaaSProduct), not recalled. **The
+Name column is the entity name, and it does NOT match the "Agentic Attack Surface" label this file
+has used for `prod-kkvurtspreofy`.**
+
+    prod-kkvurtspreofy   RelayShield - Consumption Security API Bundles            Public   (the old "Bundle D")
+    prod-szi2wdww3obry   RelayShield - Attack Surface & Supply Chain API            Public   (Bundle B, the live one)
+    prod-v5nr5gjtdnofi   RelayShield - Attack Surface & Supply Chain API            Restricted (duplicate)
+    prod-p3ei5nmgufnnq   RelayShield - Attack Surface & Supply Chain API            Restricted (duplicate)
+    prod-f5qkfsxlxs4qg   RelayShield - Core Identity Exposure API Bundle            Public   (Bundle A)
+    prod-kb3ftelx44wlk   RelayShield - Threat Intelligence & Identity Security API  Public   (TI product)
+
+**The Partner Central FTR solution ("RS Agentic Attack Surface API") was linked to a product Andrew
+picked by display name as "Agentic Attack Surface and Supply Chain API", a title that appears in NO row
+above.** The nearest match is the Attack Surface & Supply Chain API (Bundle B). Which entity it is
+linked to is UNVERIFIED until the solution's Products section is read. Select by id, not name: this is
+the seven-rejections lesson again, in a picker.
+
+**RESOLVED 2026-10-08 (screenshot of the solution's Products tab):** solution `soln-aicwx4eiyofnm` ("RS Agentic Attack Surface API") is linked to **`prod-szi2wdww3obry`**, the live Attack Surface & Supply Chain API (Bundle B), not `prod-kkvurtspreofy`. The Products tab has an **Edit products** button, so the link is changeable. Recommendation given: keep Bundle B (public, real agreement, fulfillment and metering proven in our account) and rewrite the use-case details to match its capabilities. The use-case texts drafted earlier the same day describe agent screening and identity exposure and no longer fit.
+
+**DECIDED 2026-10-08 (Andrew overruled the keep-Bundle-B recommendation):** the FTR solution is to be linked to **`prod-kkvurtspreofy`** ("RelayShield - Consumption Security API Bundles", the old Bundle D), on the grounds that it is the most attractive bundle to AWS partners. Steps: Products tab, Edit products, select by Product ID. The original agent-screening and identity-exposure use-case texts apply again, and the solution name "RS Agentic Attack Surface API" fits. **Known cost, recorded so it is not rediscovered:** this product's declared MCP endpoint is a Hugging Face Space outside AWS, so the architecture diagram and the WAFR scope must show the compute and data (API Gateway, Lambda, DynamoDB in 239677749008) as the workload and the Space as a thin proxy, and its Architecture details tab must be read before requesting validation.
+
+## 2026-10-09: WAFR READS FOUND A ROOT ACCESS KEY, AND THE OIDC TRUST IS TIGHT
+
+Read during the Well-Architected review for the AWS FTR, from Andrew's console and CLI output, not recalled.
+
+* **A root user access key exists** (key id ends `N2XZ`, created about 279 days before 2026-10-09). Console shows last used 279 days ago, us-east-2, s3, so it has not been used since the day it was made. Root MFA is on (one virtual device). `get-account-summary` printed `1 1`: `AccountMFAEnabled=1`, `AccountAccessKeysPresent=1`. The `relayshield` CLI profile is the IAM user `relayshield-deployer`, NOT root, so the key is not what the CLI uses. Plan: deactivate (reversible), wait about a week, then delete. Do not delete it first: deactivating costs nothing and tells us whether anything unknown used it.
+* **`relayshield-github-deploy`'s trust policy is scoped** to `repo:nzdsf2-gif/relayshield:ref:refs/heads/main` with `aud=sts.amazonaws.com`. The `sub` list names that same line twice, harmless but untidy. Only the main branch of this repo can assume the deploy role.
+* **IAM Access Analyzer is NOT enabled in us-east-1**: `list-analyzers` returned nothing. It may exist in another region, unchecked. An account-type analyzer is free.
+* `relayshield-deployer` is an IAM user, so its CLI credentials are long-lived keys, not temporary credentials.
+
+## 2026-10-09 (later): ROOT KEY DEACTIVATED, ACCESS ANALYZER ENABLED. CONFIRMED BY ANDREW'S OUTPUT.
+
+* **The root access key (ends `N2XZ`) was DEACTIVATED by Andrew on 2026-10-09**, not deleted. Delete it on or after 2026-10-16 if nothing has broken. Deactivation is reversible; deletion is not.
+* **IAM Access Analyzer is ENABLED in us-east-1**: `arn:aws:access-analyzer:us-east-1:239677749008:analyzer/relayshield-account-analyzer`, type ACCOUNT (free external-access analyzer), created by the `relayshield-deployer` identity, so that identity holds `access-analyzer:CreateAnalyzer`. It has produced no reviewed findings yet; the WAFR box for analysing public and cross-account access stays unticked until Andrew has read the first findings in the console.
+
+## 2026-10-10: WAFR SECURITY READS, AND KMS ROTATION TURNED ON. CONFIRMED BY ANDREW'S OUTPUT.
+
+Read during the Well-Architected review for the AWS FTR, from his CLI, not recalled. An AWS write that
+succeeds outside a session that can commit is invisible to every later session, so it is recorded here.
+
+* **KMS automatic rotation was OFF on both customer-managed keys and is now ON** (enabled by Andrew
+  2026-10-10, re-read `True` on both): `alias/relayshield-data-key` (`1479c3fa-88e9-4096-a736-32968ba5812f`)
+  and `alias/relayshield-dynamodb-key` (`2ece080e-0cb0-499e-b2d1-6a496bbb4a1a`).
+* **CloudTrail:** one multi-region trail, `relayshield-trail`, delivering to S3 bucket
+  `relayshield-config-logs`. Log file validation and encryption on it are UNVERIFIED.
+* **GuardDuty: no detector in us-east-1** (other regions unchecked). **Security Hub: not subscribed.**
+  AWS Config recorder status UNVERIFIED.
+* **No regional WAF web ACL found** (the first read printed nothing; the run had an extra output line, so
+  re-run `aws wafv2 list-web-acls --scope REGIONAL --region us-east-1` alone to be certain). One API Gateway
+  usage plan, `relayshield-growth`, throttles at 50 rps with burst 100, and applies to keyed requests only.
+* **Zero Lambda functions are VPC-attached.**
+* `.github/workflows/security_audit.yml` runs Bandit (fails on high), pip-audit and gitleaks on every push and
+  pull request. No Dependabot or CodeQL.
+* **Post-FTR improvement list:** regional WAF with a rate-based rule on the API, Lambda versions plus aliases
+  for rollback, GuardDuty and Security Hub, Dependabot, a written data classification scheme, tracing and
+  dashboards.
+* WAFR answers given so far are in the session transcript only; OPS 1-11 and SEC 1-8 are done, SEC 9 is next.
+
+## WHERE 2026-10-10 LEFT THINGS. THE AWS FTR WAFR IS HALF DONE. READ THIS FIRST FOR "WHAT IS NEXT".
+
+**State, from Andrew's console and CLI, not recalled.** AWS Partner Central solution `soln-aicwx4eiyofnm`
+("RS Agentic Attack Surface API") is linked to `prod-kkvurtspreofy`. The Well-Architected review is
+workload "RelayShield API", Production, us-east-1, account 239677749008, Framework lens, 57 questions.
+**Done: OPS 1-11 and SEC 1-11 (the whole Security pillar).** Next question: **REL 1**. About 40 remain
+across Reliability, Performance Efficiency, Cost Optimization and Sustainability. Paste-ready answers were
+given in chat only; the texts are not saved, so the rule for each remaining question is: tick only what
+we can back up, state gaps in Notes, never claim a tool or practice we have not verified.
+
+**How the review is evaluated (secondary sources; docs.aws.amazon.com is egress-blocked, the FTR Guide in
+Partner Central is the authority).** The WAFR is a self-assessment: unticked practices become flagged risks,
+nobody has a clean report. The FTR is the real review and uses the WAFR as evidence; AI-assisted, expert
+contact within about two weeks if it fails, resubmittable. UNVERIFIED: the FTR checklist itself, and whether
+unresolved high risks block approval. READ THAT SECTION OF THE FTR GUIDE BEFORE REQUESTING VALIDATION. An
+overclaimed answer is what fails, because the evidence upload will not match it.
+
+**What approval buys: credibility and co-sell eligibility (ACE), not a discovery flood.** Marketplace
+search is the discovery surface that already works. UNVERIFIED: exact badge wording and programme
+dependencies.
+
+**Dave Shapiro and a Partner Development Manager.** His own words were "self-service for early stage
+partners", so the likelier reason there is no PDM yet is that none is assigned at this stage, not that he is
+unfamiliar with onboarding. Andrew chose to finish the WAFR and submit the validation request FIRST, then
+write to Dave with the evidence. Ask WHO OWNS co-sell for early-stage ISVs, not for a PDM by name.
+
+### TODOS FOR THE NEXT SESSION, IN ORDER
+
+1. **Finish the WAFR: REL 1 onward.** Then Save milestone, Generate report (PDF under 3 MB).
+2. **Optional reads that sharpen answers, all read-only, none run yet:** AWS Config recorder
+   (`aws configservice describe-configuration-recorders`), and re-run `aws wafv2 list-web-acls --scope
+   REGIONAL --region us-east-1` ALONE to confirm no WAF (the earlier run had an extra output line).
+3. **Read Bundle D's Architecture details tab** (`prod-kkvurtspreofy`) in the Marketplace Management
+   Portal, then produce an architecture diagram showing the Hugging Face Space as a thin proxy over
+   API Gateway, Lambda and DynamoDB in 239677749008.
+4. **Request validation** on the solution (Validation tab) with the WAFR report. Do NOT click "Update
+   visibility" on the four-product solution.
+5. **Email Dave Shapiro** after item 4, specifics first: Software Path enrollment, the single-product
+   solution, the WAFR report attached, and the co-sell question. Claude drafts it.
+6. **Delete the deactivated root access key** (ends N2XZ) on or after 2026-10-16 if nothing has broken.
+7. **Decide on the Access Analyzer box in SEC 3** after reading the first findings in the console.
+8. **Fixes the review exposed, cheapest first:** regional WAF with a rate-based rule on the API; run the
+   test suite in CI (65 test files, none run by any workflow; some fail on clean main, so fix or exclude
+   those first); Lambda versions plus aliases for rollback; Dependabot; a one-page written incident
+   runbook (credential compromise, key leak, customer notification) if the Notes promised it; GuardDuty
+   and Security Hub; a written data classification scheme; the IAM role split beyond
+   `relayshield-intel-feed`.
+9. **Hand-deploy `relayshield_weekly_metrics.py`**; the drift read says live is merely stale, nothing
+   live-only. It is still in neither the deployer nor the invoke policy.
+10. **Confirm `tools/backfill_first_seen.py --apply` ran** (dry run measured 687,011 distinct indicators
+    on 2026-10-08).
+
+**Carried, unchanged:** the 2026-10-08 list above (VT fix proof, telemetry Lambda hand deploy, Hudson Rock
+terms, CS Mobile v1.7.0 build blocked on a JDK, Chrome Web Store review state, `support@relayshield.net`
+mailbox, the OpenAI listing's stale figures, `relayshield-signup-api` missing from the invoke policy).

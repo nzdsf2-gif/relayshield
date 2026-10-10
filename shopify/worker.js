@@ -627,11 +627,16 @@ async function handleDashboard(request, env) {
     ? auth.slice(7)
     : url.searchParams.get("id_token") || "";
   const shop = await verifySessionToken(env, bearer);
-  if (!shop) return new Response("Unauthorized", { status: 401 });
-  const screenings = (await kvGet(env, screeningsKey(shop))) || [];
+  // Serve the dashboard HTML even without a valid session token. Shopify's
+  // automated checks load the App URL directly (no session token), and the
+  // page acquires one client-side via window.shopify.idToken().
+  const screenings = shop ? ((await kvGet(env, screeningsKey(shop))) || []) : [];
   const host = url.searchParams.get("host") || "";
-  return new Response(renderDashboard(shop, screenings, env.SHOPIFY_API_KEY, host), {
-    headers: { "Content-Type": "text/html; charset=utf-8" },
+  return new Response(renderDashboard(shop || "", screenings, env.SHOPIFY_API_KEY, host), {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": "frame-ancestors https://*.myshopify.com https://admin.shopify.com;",
+    },
   });
 }
 

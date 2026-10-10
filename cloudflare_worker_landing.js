@@ -137,7 +137,7 @@ const HTML = `<!DOCTYPE html>
   .price-card .per { color: var(--muted); font-size: .9rem; margin-bottom: 20px; }
   .price-card ul { list-style: none; margin-bottom: 20px; }
   .price-card li { padding: 6px 0; color: var(--muted); font-size: .95rem; }
-  .price-card li::before { content: "\\2713  "; color: var(--green); font-weight: 700; }
+  .price-card li::before { content: "\\\\2713  "; color: var(--green); font-weight: 700; }
   .price-card .tos { font-size: .8rem; color: var(--muted); margin-bottom: 12px; }
   .plan-btn { display: block; text-align: center; margin-bottom: 8px; }
 
@@ -167,7 +167,7 @@ const HTML = `<!DOCTYPE html>
   .modal p.body { color: var(--muted); margin-bottom: 18px; }
   .modal ul { list-style: none; margin-bottom: 22px; }
   .modal li { padding: 7px 0; color: var(--text); font-size: .97rem; border-bottom: 1px solid #2c2c2c; }
-  .modal li::before { content: "\\25B8  "; color: var(--green); }
+  .modal li::before { content: "\\\\25B8  "; color: var(--green); }
   .modal .m-links { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .modal-close { position: absolute; top: 14px; right: 18px; background: transparent; border: none; color: var(--muted); font-size: 1.6rem; cursor: pointer; }
   .modal-close:hover { color: var(--green); }
@@ -239,6 +239,7 @@ const HTML = `<!DOCTYPE html>
         <div class="subsec">
       <h3><span class="accent">Agentic Commerce</span></h3>
       <p class="tagline">Verify every agent. Trust every transaction.</p>
+      <p style="color: var(--muted); max-width: 680px; margin: 12px auto 0; font-size: 0.95rem;">Powered by x402 agent-to-agent payments. Listed on <a href="https://www.coinbase.com/x402">Coinbase Bazaar</a> for agent discovery.</p>
     </div>
     <div class="grid">
       <div class="card" data-drill="tap">
@@ -289,7 +290,7 @@ const HTML = `<!DOCTYPE html>
         <span class="tag">Live</span>
         <div class="icon">&#x1F6D2;</div>
         <h3>Order Screening for Shopify</h3>
-        <p>Threat-intel layer for Shopify merchants: screens buyer identity against the RelayShield corpus to flag high-risk orders.</p>
+        <p>Reduce seller chargebacks by identifying buyer fraud. Threat-intel layer for Shopify merchants: screens buyer identity against the RelayShield corpus to flag high-risk orders before fulfillment.</p>
         <div class="links">
           <a class="btn btn-ghost btn-sm" href="https://api.relayshield.net/developers">$29/mo on the App Store</a>
         </div>
@@ -425,15 +426,29 @@ const HTML = `<!DOCTYPE html>
       <div class="price-card">
         <h3>Business Starter</h3>
         <div class="for">Sole proprietors and freelancers</div>
-        <div class="amount">One-click</div>
+        <div class="amount">$24.99</div>
         <div class="per">flat monthly pricing</div>
         <ul>
           <li>Everything in Personal Shield</li>
-          <li>Business monitoring coverage</li>
-          <li>Telegram and WhatsApp delivery</li>
+          <li>Quarterly sweep reminder</li>
+          <li>Monthly security digest</li>
+          <li>1 contractor/employee seat</li>
         </ul>
         <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
         <a class="btn btn-primary" href="https://buy.stripe.com/28EdRa2E61qB2mo3NJ0Ny0c">Subscribe</a>
+      </div>
+      <div class="price-card">
+        <h3>Business Starter + Domain</h3>
+        <div class="for">Sole proprietors with a business website</div>
+        <div class="amount">$24.99</div>
+        <div class="per">flat monthly pricing</div>
+        <ul>
+          <li>Everything in Business Starter</li>
+          <li>Domain monitoring (1 domain)</li>
+          <li>Brand impersonation alerts</li>
+        </ul>
+        <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
+        <a class="btn btn-primary" href="https://buy.stripe.com/eVqbJ26Um1qBbWY3NJ0Ny06">Subscribe</a>
       </div>
       <div class="price-card">
         <h3>More business plans</h3>
@@ -446,12 +461,10 @@ const HTML = `<!DOCTYPE html>
           <li>Contractor and employee seats</li>
         </ul>
         <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
-        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/eVqbJ26Um1qBbWY3NJ0Ny06">Business plan</a>
-        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/aFa8wQ3Iab1b8KM9830Ny03">Business plan</a>
-        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/8x24gA6Um2uF2mo9830Ny04">Business plan</a>
-        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/4gMdRa7Yq7OZf9aesn0Ny0g">Business plan</a>
-        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/5kQfZi7Yq4CNe56esn0Ny0k">Business plan</a>
-        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/aFa00k1A26KV7GIdoj0Ny0m">Business plan</a>
+        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/aFa8wQ3Iab1b8KM9830Ny03">Business Basic $89.99/mo</a>
+        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/8x24gA6Um2uF2mo9830Ny04">Business Shield $139.99/mo</a>
+        <a class="btn btn-ghost btn-sm plan-btn" href="https://buy.stripe.com/4gMdRa7Yq7OZf9aesn0Ny0g">Business Shield Pro $299.99/mo</a>
+        <p style="font-size: 0.85rem; color: var(--muted); margin-top: 12px;">Annual plans available on Stripe at checkout.</p>
       </div>
     </div>
   </div>
@@ -466,6 +479,20 @@ const HTML = `<!DOCTYPE html>
     <code>curl https://api.relayshield.net/v1/check/url -d '{"url":"..."}'</code>
     <br>
     <a class="btn btn-primary" href="https://api.relayshield.net/developers">api.relayshield.net/developers</a>
+    <div class="contact-grid" style="margin-top: 32px; text-align: left;">
+      <div class="contact-item">
+        <h4>Zapier Integration</h4>
+        <p>Automate threat checks in your Zapier workflows. 7 ready-made templates for breach monitoring, link screening, and alerts.</p>
+      </div>
+      <div class="contact-item">
+        <h4>N8n Integration</h4>
+        <p>Self-hosted workflow automation with RelayShield nodes. Screen URLs, wallets, and emails in your n8n pipelines.</p>
+      </div>
+      <div class="contact-item">
+        <h4>xSOAR Marketplace</h4>
+        <p>Live in the Palo Alto Cortex XSOAR marketplace. Threat intelligence enrichment for your SOC playbooks.</p>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -489,8 +516,12 @@ const HTML = `<!DOCTYPE html>
         <p><a href="https://docs.google.com/forms/d/e/1FAIpQLScEirvBRF-sYtGw7QZF7vY0YkaOD12DZznv4OwIdNyNxOeMfw/viewform?usp=publish-editor">Send us a message</a> and we will reply.</p>
       </div>
       <div class="contact-item">
-        <h4>Business plans</h4>
-        <p>Team protection for 1 to 10 seats, with domain monitoring. <a href="https://buy.stripe.com/28EdRa2E61qB2mo3NJ0Ny0c">Business Starter</a> and <a href="https://buy.stripe.com/14A8wQa6y1qB8KM2JF0Ny00">team gifting</a> available.</p>
+        <h4>Email checker</h4>
+        <p>Check any email address for breach exposure via the <a href="https://api.relayshield.net/developers">check_email API</a> or paste suspicious content into our WhatsApp bot.</p>
+      </div>
+      <div class="contact-item">
+        <h4>Telegram miniApp</h4>
+        <p>Run RelayShield checks inside Telegram with our miniApp. <a href="https://t.me/relayshield_bot">Open @relayshield_bot</a> and launch the miniApp.</p>
       </div>
     </div>
   </div>
@@ -502,10 +533,10 @@ const HTML = `<!DOCTYPE html>
     <div>RelayShield LLC</div>
     <div class="foot-links">
       <a href="https://blog.relayshield.net">Blog</a>
-      <a href="https://relayshield.hashnode.dev/archive">Archive</a>
+      <a href="https://mastodon.social/@relayshield">Mastodon</a>
       <a href="https://www.linkedin.com/company/112663616/admin/dashboard/">LinkedIn</a>
       <a href="https://www.facebook.com/profile.php?id=61590625257695">Facebook</a>
-      <a href="https://www.promptfrenzy.com/directory">Directory</a>
+      <a href="https://www.promptfrenzy.com/ai-tools/relayshield">Directory</a>
       <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a>
       <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>
     </div>
@@ -591,7 +622,7 @@ var PRODUCT_DETAILS = {
   tap: {
     tag: 'Live', title: 'TAP Verifier',
     sub: 'Cryptographic proof for agentic payments',
-    body: 'RelayShield verifies Visa Trusted Agent Protocol messages so merchants know the agent at checkout is who it claims to be. Each verification checks the RFC 9421 message signature, validates the signing key against the Visa JWKS, and screens the agent identity against the RelayShield threat corpus.',
+    body: 'RelayShield verifies Visa Trusted Agent Protocol messages so merchants know the agent at checkout is who it claims to be. Built for the x402 agent-to-agent economy and listed on Coinbase Bazaar. Each verification checks the RFC 9421 message signature, validates the signing key against the Visa JWKS, and screens the agent identity against the RelayShield threat corpus.',
     list: ['RFC 9421 message signature verification', 'Signing key validation against Visa JWKS', 'Intent mismatch detection on payment details', 'Agent identity screening against the 700K+ indicator corpus', 'Signed verification receipts'],
     links: [
       { text: '$49/mo flat', href: 'https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l', cls: 'btn btn-primary btn-sm' },

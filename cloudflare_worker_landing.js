@@ -233,7 +233,7 @@ const HTML = `<!DOCTYPE html>
 <section class="block panel active" id="products" data-panel="products">
   <div class="wrap">
     <div class="sec-head">
-      <h2>Pro<span class="accent">ducts</span></h2>
+      <h2>Products</h2>
       <p>Security layers for agents, merchants, developers, and the people behind them. Click any product for details.</p>
     </div>
         <div class="subsec">
@@ -342,7 +342,7 @@ const HTML = `<!DOCTYPE html>
         <h3>Business Monitoring</h3>
         <p>Team threat monitoring for sole proprietors, freelancers, and teams up to 10. Domain and brand monitoring, contractor and employee seats, delivered over Telegram and WhatsApp.</p>
         <div class="links">
-          <a class="btn btn-primary btn-sm" href="#pricing" data-goto-tab="pricing">See one-click plans</a>
+          <a class="btn btn-primary btn-sm" href="#" onclick="window.closeModal();document.querySelector('[data-tab="pricing"]').click();setTimeout(function(){document.getElementById('business-starter-card').scrollIntoView()},300);return false;">See one-click plans</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
@@ -363,7 +363,7 @@ const HTML = `<!DOCTYPE html>
 <section class="block panel" id="pricing" data-panel="pricing">
   <div class="wrap">
     <div class="sec-head">
-      <h2>Pri<span class="accent">cing</span></h2>
+      <h2>Pricing</h2>
       <p>Flat monthly pricing. No minimums, no surprises. API keys and full plans at the developers page.</p>
     </div>
     <div class="grid">
@@ -473,7 +473,7 @@ const HTML = `<!DOCTYPE html>
 <section class="block panel dev-cta" id="developers" data-panel="developers">
   <div class="wrap">
     <div class="sec-head">
-      <h2>Develo<span class="accent">pers</span></h2>
+      <h2>Developers</h2>
       <p>REST, MCP, and x402. Free checks with no signup, pay-per-call when you scale. Get your API key in minutes.</p>
     </div>
     <code>curl https://api.relayshield.net/v1/check/url -d '{"url":"..."}'</code>

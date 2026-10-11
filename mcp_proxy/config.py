@@ -103,6 +103,26 @@ class ProxyConfig:
             os.environ.get("MCP_PROXY_AUDIT_CAPACITY", "10000")
         )
 
+        # OPT-IN telemetry back to RelayShield. OFF BY DEFAULT: nothing is ever
+        # sent unless this is set deliberately.
+        #   off         nothing leaves the proxy (default)
+        #   counts      verdict counts by category and taxonomy id only
+        #   indicators  counts, PLUS the host of a flagged server and a SHA-256
+        #               of the flagged response. Public hostnames only; needs
+        #               RELAYSHIELD_API_KEY. Never arguments, tool names or
+        #               payloads.
+        mode = os.environ.get("MCP_PROXY_TELEMETRY", "off").strip().lower()
+        self.telemetry_mode = mode if mode in ("counts", "indicators") else "off"
+        self.telemetry_url = os.environ.get(
+            "MCP_PROXY_TELEMETRY_URL",
+            self.rs_api_base + "/v1/telemetry/mcp-proxy",
+        )
+        self.telemetry_interval = float(
+            os.environ.get("MCP_PROXY_TELEMETRY_INTERVAL", "3600"))
+        self.telemetry_id_file = os.environ.get(
+            "MCP_PROXY_TELEMETRY_ID_FILE",
+            os.path.join(os.path.expanduser("~"), ".relayshield", "proxy_install_id"))
+
     @property
     def block_level_set(self) -> set:
         return {lvl.strip().lower() for lvl in self.block_levels.split(",")}

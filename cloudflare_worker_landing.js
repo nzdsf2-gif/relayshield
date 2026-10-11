@@ -258,7 +258,7 @@ const HTML = `<!DOCTYPE html>
         <h3>MCP Proxy Firewall</h3>
         <p>Runtime security between AI agents and MCP servers. Screens every tool call and response, quarantines suspicious servers, and scores each verdict with confidence and cause codes.</p>
         <div class="links">
-          <a class="btn btn-primary btn-sm" href="https://api.relayshield.net/developers">$49/mo cloud</a>
+          <a class="btn btn-primary btn-sm" href="https://buy.stripe.com/28E6oI0vY4CN5yAac70Ny0n">$49/mo flat</a>
           <a class="btn btn-ghost btn-sm" href="https://api.relayshield.net/developers">Enterprise: white-glove from $3K - Contact us</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>

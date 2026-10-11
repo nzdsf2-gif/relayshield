@@ -137,7 +137,7 @@ const HTML = `<!DOCTYPE html>
   .price-card .per { color: var(--muted); font-size: .9rem; margin-bottom: 20px; }
   .price-card ul { list-style: none; margin-bottom: 20px; }
   .price-card li { padding: 6px 0; color: var(--muted); font-size: .95rem; }
-  .price-card li::before { content: "\\\\2713  "; color: var(--green); font-weight: 700; }
+  .price-card li::before { content: "\\2713  "; color: var(--green); font-weight: 700; }
   .price-card .tos { font-size: .8rem; color: var(--muted); margin-bottom: 12px; }
   .plan-btn { display: block; text-align: center; margin-bottom: 8px; }
 
@@ -167,7 +167,7 @@ const HTML = `<!DOCTYPE html>
   .modal p.body { color: var(--muted); margin-bottom: 18px; }
   .modal ul { list-style: none; margin-bottom: 22px; }
   .modal li { padding: 7px 0; color: var(--text); font-size: .97rem; border-bottom: 1px solid #2c2c2c; }
-  .modal li::before { content: "\\\\25B8  "; color: var(--green); }
+  .modal li::before { content: "\\25B8  "; color: var(--green); }
   .modal .m-links { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .modal-close { position: absolute; top: 14px; right: 18px; background: transparent; border: none; color: var(--muted); font-size: 1.6rem; cursor: pointer; }
   .modal-close:hover { color: var(--green); }
@@ -259,7 +259,7 @@ const HTML = `<!DOCTYPE html>
         <p>Runtime security between AI agents and MCP servers. Screens every tool call and response, quarantines suspicious servers, and scores each verdict with confidence and cause codes.</p>
         <div class="links">
           <a class="btn btn-primary btn-sm" href="https://api.relayshield.net/developers">$49/mo cloud</a>
-          <a class="btn btn-ghost btn-sm" href="https://api.relayshield.net/developers">Enterprise: custom from $3,000/mo</a>
+          <a class="btn btn-ghost btn-sm" href="https://api.relayshield.net/developers">Enterprise: white-glove from $3K - Contact us</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
@@ -636,7 +636,7 @@ var PRODUCT_DETAILS = {
     list: ['Free pre-deployment scanner: audits tool definitions before you connect, CI ready', 'Runtime screening of every tool call and tool response', 'Confidence scores with machine-readable cause codes on every verdict', 'Declarative allow and deny policy engine per agent, tool, and server', 'Server reputation graph that tracks repeat offenders over time', 'Complete audit trail for compliance and incident review', 'Behavioral baselining that flags novel attack patterns'],
     links: [
       { text: '$49/mo cloud', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' },
-      { text: 'On-premise: custom from $3,000/mo', href: 'https://api.relayshield.net/developers', cls: 'btn btn-ghost btn-sm' }
+      { text: 'On-premise: white-glove from $3K - Contact us', href: 'https://api.relayshield.net/developers', cls: 'btn btn-ghost btn-sm' }
     ]
   },
   ti: {

@@ -108,7 +108,7 @@ const HTML = `<!DOCTYPE html>
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
   .card { background: var(--card); border: 1px solid var(--purple-d); border-radius: 14px; padding: 32px; display: flex; flex-direction: column; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; box-shadow: 0 0 16px rgba(124,58,237,0.12); }
   .card:hover { transform: translateY(-3px); box-shadow: 0 0 30px rgba(168,85,247,0.35); }
-  .card .icon { font-size: 2rem; margin-bottom: 16px; }
+  .card .icon { font-size: 2rem; margin-bottom: 16px; filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.6)); }
   .card h3 { font-size: 1.3rem; margin-bottom: 10px; }
   .card p { color: var(--muted); font-size: .98rem; margin-bottom: 16px; flex: 1; }
   .card .tag { display: inline-block; font-size: .75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--green); border: 1px solid var(--green-dim); padding: 4px 10px; border-radius: 999px; margin-bottom: 14px; align-self: flex-start; }
@@ -609,9 +609,13 @@ const HTML = `<!DOCTYPE html>
   for (var k = 0; k < gotoLinks.length; k++) {
     gotoLinks[k].addEventListener('click', function (e) {
       e.preventDefault();
+      if (typeof window.closeModal === 'function') window.closeModal();
       activate(this.getAttribute('data-goto-tab'));
-      var bar = document.querySelector('.tabbar');
-      if (bar) { bar.scrollIntoView({ behavior: 'smooth' }); }
+      setTimeout(function() {
+        var el = document.getElementById('business-starter-card');
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        else { var bar = document.querySelector('.tabbar'); if (bar) { bar.scrollIntoView({ behavior: 'smooth' }); } }
+      }, 150);
     });
   }
   window.__activateTab = activate;
@@ -745,7 +749,7 @@ var PRODUCT_DETAILS = {
     overlay.classList.add('open');
     document.body.style.overflow = 'hidden';
   }
-  function closeModal() {
+  window.closeModal = function closeModal() {
     overlay.classList.remove('open');
     document.body.style.overflow = '';
   }

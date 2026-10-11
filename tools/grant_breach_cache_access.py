@@ -43,7 +43,17 @@ SID = "BreachCacheReadWrite"
 CACHE_SIDS = {
     "relayshield_breach_cache": "BreachCacheReadWrite",
     "relayshield_vt_url_cache": "VtUrlCacheReadWrite",
+    # Read-only reference table served by GET /v1/mcp-taxonomy.
+    "relayshield_mcp_taxonomy": "McpTaxonomyRead",
 }
+# The caches are read-through, so they need GetItem and PutItem. The taxonomy is
+# reference data that relayshield-api only ever SCANS (nine rows, cached in the
+# container), so it gets exactly that and no write at all.
+TABLE_ACTIONS = {"relayshield_mcp_taxonomy": ["dynamodb:Scan"]}
+
+
+def actions_for(table: str) -> list:
+    return list(TABLE_ACTIONS.get(table, ACTIONS))
 DEFAULT_POLICY = "relayshield-first-seen-write"
 SIZE_LIMIT = 6144  # managed policy, whitespace excluded
 
@@ -58,7 +68,7 @@ def merged_document(doc: dict, table: str = TABLE) -> dict:
     stmts = doc.get("Statement", [])
     stmts = list(stmts) if isinstance(stmts, list) else [stmts]
     stmts = [s for s in stmts if s.get("Sid") != sid]
-    stmts.append({"Sid": sid, "Effect": "Allow", "Action": list(ACTIONS), "Resource": table_arn(table)})
+    stmts.append({"Sid": sid, "Effect": "Allow", "Action": actions_for(table), "Resource": table_arn(table)})
     out = dict(doc)
     out["Statement"] = stmts
     return out
@@ -69,7 +79,7 @@ def compact_size(doc: dict) -> int:
 
 
 def simulate(iam, role_arn: str, table: str = TABLE) -> dict:
-    res = iam.simulate_principal_policy(PolicySourceArn=role_arn, ActionNames=ACTIONS,
+    res = iam.simulate_principal_policy(PolicySourceArn=role_arn, ActionNames=actions_for(table),
                                         ResourceArns=[table_arn(table)])["EvaluationResults"]
     return {r["EvalActionName"]: r["EvalDecision"] for r in res}
 

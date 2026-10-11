@@ -15885,6 +15885,66 @@ def handle_wallet_inbound(params: dict) -> dict:
     return _ok({"senders": senders, "tx_count": len(senders)})
 
 
+# ---------------------------------------------------------------------------
+# MCP attack-pattern taxonomy (reference data, read-only, public)
+# ---------------------------------------------------------------------------
+# The approved MCP attack-pattern entries (MCP-2026-008, MCP-2026-015, chained)
+# live in relayshield_mcp_taxonomy, loaded by tools/load_mcp_taxonomy.py. This
+# serves them so the MCP proxy, and anyone integrating one, can resolve a verdict
+# category to what the attack is and what to do about it.
+#
+# PUBLIC AND KEYLESS, and deliberately NOT in KEYLESS_SCAN_ENDPOINTS: it is a
+# handful of reference rows with no upstream vendor, so the per-IP scan quota and
+# the consumer onward-route advert that set belongs to would both be wrong here.
+# Reads are cached per warm container so traffic cannot become a table scan per
+# request, and the last good copy is served if DynamoDB is unreachable.
+MCP_TAXONOMY_TABLE = "relayshield_mcp_taxonomy"
+_TAXONOMY_TTL      = 300
+_TAXONOMY_CACHE    = {"at": 0.0, "items": None}
+
+
+def _load_mcp_taxonomy() -> list:
+    now = time.time()
+    if _TAXONOMY_CACHE["items"] is not None and now - _TAXONOMY_CACHE["at"] < _TAXONOMY_TTL:
+        return _TAXONOMY_CACHE["items"]
+    table, items, kwargs = dynamodb.Table(MCP_TAXONOMY_TABLE), [], {}
+    while True:
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+        if not resp.get("LastEvaluatedKey"):
+            break
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+    items.sort(key=lambda i: i.get("entry_id", ""))
+    _TAXONOMY_CACHE.update(at=now, items=items)
+    return items
+
+
+def handle_mcp_taxonomy(qp: dict) -> dict:
+    """GET /v1/mcp-taxonomy[?category=&disclosure=&fit=]"""
+    try:
+        items = _load_mcp_taxonomy()
+    except Exception as exc:
+        logger.error("mcp taxonomy read failed: %s", exc)
+        if _TAXONOMY_CACHE["items"] is None:
+            return _err("taxonomy temporarily unavailable", 503)
+        items = _TAXONOMY_CACHE["items"]
+    want = {"poison_category": (qp.get("category") or "").strip(),
+            "disclosure":      (qp.get("disclosure") or "").strip(),
+            "fit":             (qp.get("fit") or "").strip().upper()}
+    out = [i for i in items if all(not v or i.get(k) == v for k, v in want.items())]
+    resp = _ok({
+        "taxonomy": "mcp_attack_patterns",
+        "version":  items[0].get("taxonomy_version", "") if items else "",
+        "count":    len(out),
+        "entries":  [{k: i.get(k) for k in (
+            "entry_id", "disclosure", "fit", "poison_category", "attack_pattern",
+            "description", "indicators", "mitigation")} for i in out],
+    })
+    resp["headers"]["Access-Control-Allow-Origin"] = "*"
+    resp["headers"]["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
 ROUTES = {
     "/v1/breach":           handle_breach,
     "/v1/scan-url":         handle_scan_url,
@@ -16839,6 +16899,10 @@ def lambda_handler(event: dict, context) -> dict:
     # indexers and agent directories read to find our paid endpoints at all.
     if path in ("/.well-known/x402.json", "/.well-known/x402"):
         return handle_x402_manifest()
+
+    # MCP attack-pattern taxonomy: public reference data, see handle_mcp_taxonomy.
+    if method == "GET" and path == "/v1/mcp-taxonomy":
+        return handle_mcp_taxonomy(event.get("queryStringParameters") or {})
 
     # 402 Index domain verification. Proves we control api.relayshield.net, which
     # promotes our listings there from pending-review to searchable and covers

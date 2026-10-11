@@ -63,7 +63,10 @@ class NeighborRegistry:
             try:
                 indicators = {"urls": [url], "domains": [rep.domain],
                               "ips": []}
-                verdict = self._screener.screen_indicators(indicators)
+                # ssrf_check=False: the upstream URL is operator-configured
+                # infrastructure, not a caller-supplied tool argument.
+                verdict = self._screener.screen_indicators(
+                    indicators, ssrf_check=False)
                 if verdict.get("verdict") == "block":
                     self.flag(url, "upstream domain flagged by TI on "
                                    "registration",

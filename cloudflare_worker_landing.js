@@ -635,7 +635,7 @@ var PRODUCT_DETAILS = {
     body: 'A reverse proxy that sits between the AI agent and its MCP servers. Every tool call and every tool response passes through the proxy, where it is screened before reaching the agent. Suspicious calls are blocked or quarantined. Clean calls pass with negligible latency. Available as a $49/mo cloud service or a $3,000/mo on-premise deployment with white glove customization including dedicated support and policy configuration.',
     list: ['Free pre-deployment scanner: audits tool definitions before you connect, CI ready', 'Runtime screening of every tool call and tool response', 'Confidence scores with machine-readable cause codes on every verdict', 'Declarative allow and deny policy engine per agent, tool, and server', 'Server reputation graph that tracks repeat offenders over time', 'Complete audit trail for compliance and incident review', 'Behavioral baselining that flags novel attack patterns'],
     links: [
-      { text: '$49/mo cloud', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' },
+      { text: '$49/mo flat', href: 'https://buy.stripe.com/28E6oI0vY4CN5yAac70Ny0n', cls: 'btn btn-primary btn-sm' },
       { text: 'On-premise: white-glove from $3K - Contact us', href: 'https://api.relayshield.net/developers', cls: 'btn btn-ghost btn-sm' }
     ]
   },

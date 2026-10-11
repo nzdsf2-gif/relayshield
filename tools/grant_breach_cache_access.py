@@ -45,11 +45,18 @@ CACHE_SIDS = {
     "relayshield_vt_url_cache": "VtUrlCacheReadWrite",
     # Read-only reference table served by GET /v1/mcp-taxonomy.
     "relayshield_mcp_taxonomy": "McpTaxonomyRead",
+    # Write-only from the API's side: the telemetry ingest never reads back.
+    "relayshield_mcp_proxy_telemetry": "McpProxyTelemetryWrite",
 }
 # The caches are read-through, so they need GetItem and PutItem. The taxonomy is
 # reference data that relayshield-api only ever SCANS (nine rows, cached in the
 # container), so it gets exactly that and no write at all.
-TABLE_ACTIONS = {"relayshield_mcp_taxonomy": ["dynamodb:Scan"]}
+TABLE_ACTIONS = {
+    "relayshield_mcp_taxonomy": ["dynamodb:Scan"],
+    # PutItem for report rows, UpdateItem for candidates and the rate counter.
+    # No read, no delete: a leaked credential could add rows, not read or erase them.
+    "relayshield_mcp_proxy_telemetry": ["dynamodb:PutItem", "dynamodb:UpdateItem"],
+}
 
 
 def actions_for(table: str) -> list:

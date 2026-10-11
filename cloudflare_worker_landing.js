@@ -342,7 +342,7 @@ const HTML = `<!DOCTYPE html>
         <h3>Business Monitoring</h3>
         <p>Team threat monitoring for sole proprietors, freelancers, and teams up to 10. Domain and brand monitoring, contractor and employee seats, delivered over Telegram and WhatsApp.</p>
         <div class="links">
-          <a class="btn btn-primary btn-sm" href="#" onclick="window.closeModal();document.querySelector('[data-tab="pricing"]').click();setTimeout(function(){document.getElementById('business-starter-card').scrollIntoView()},300);return false;">See one-click plans</a>
+          <a class="btn btn-primary btn-sm" href="#" onclick="window.closeModal();document.querySelector('[data-tab="pricing"]').click();setTimeout(function(){var e=document.getElementById('business-starter-card');if(e){e.scrollIntoView({behavior:'smooth',block:'center'})}},600);return false;">See one-click plans</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>
@@ -423,10 +423,10 @@ const HTML = `<!DOCTYPE html>
         <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
         <a class="btn btn-primary" href="https://buy.stripe.com/fZucN6ceGglv3qs9830Ny0a">Subscribe</a>
       </div>
-      <div class="price-card">
+      <div class="price-card" id="business-starter-card">
         <h3>Business Starter</h3>
         <div class="for">Sole proprietors and freelancers</div>
-        <div class="amount">$24.99</div>
+        <div class="amount">$19.99</div>
         <div class="per">flat monthly pricing</div>
         <ul>
           <li>Everything in Personal Shield</li>

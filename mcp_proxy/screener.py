@@ -6,8 +6,11 @@ keyless composite-check API.
 """
 
 import json
+import ipaddress
 import logging
 import re
+import socket
+import threading
 import urllib.parse
 import urllib.request
 
@@ -49,6 +52,11 @@ def _confidence_for_result(categories, details):
         n = len(details.get("oauth_tampered_urls", []))
         signals.append({"code": "OAUTH_TAMPERING",
                         "detail": f"{n} tampered OAuth URL(s)"})
+    if "ssrf_internal_url" in categories:
+        hosts = details.get("ssrf_hosts", [])
+        shown = ", ".join(hosts[:3]) if hosts else "internal address"
+        signals.append({"code": "SSRF_INTERNAL_URL",
+                        "detail": f"tool argument URL targets {shown}"})
     if "pii_leak" in categories:
         pii = details.get("pii", {})
         parts = [f"{k}:{v}" for k, v in sorted(pii.items())]
@@ -87,6 +95,7 @@ POISON_SECRET_LEAK = "secret_leak"
 POISON_UNKNOWN_SYNTHETIC = "unknown_synthetic"
 POISON_OAUTH_TAMPERING = "oauth_tampering"
 POISON_CREDENTIAL_EXFILTRATION = "credential_exfiltration"
+POISON_SSRF = "ssrf_internal_url"
 POISON_BEHAVIORAL_ANOMALY = "behavioral_anomaly"
 POISON_ATTACK_CHAIN = "attack_chain"
 POISON_POLICY_DENY = "policy_deny"
@@ -103,10 +112,11 @@ _CATEGORY_RANK = {
     POISON_BEHAVIORAL_ANOMALY: 6,
     POISON_MALICIOUS_URL: 7,
     POISON_KIT_MATCH: 8,
-    POISON_ATTACK_CHAIN: 9,
-    POISON_CREDENTIAL_EXFILTRATION: 10,
-    POISON_POLICY_APPROVAL: 11,
-    POISON_POLICY_DENY: 12,
+    POISON_SSRF: 9,
+    POISON_ATTACK_CHAIN: 10,
+    POISON_CREDENTIAL_EXFILTRATION: 11,
+    POISON_POLICY_APPROVAL: 12,
+    POISON_POLICY_DENY: 13,
 }
 
 
@@ -255,6 +265,134 @@ def extract_indicators(obj, _depth=0, _seen=None) -> dict:
     }
 
 
+# Protocol pivoting (SSRF) detection. MCP servers that build outbound
+# requests from caller-supplied URLs let an attacker pivot the server
+# into internal infrastructure: cloud metadata endpoints, localhost
+# admin ports, and private subnets. This is the flaw class researcher
+# Syed Anas Mohiuddin disclosed across Google, JPMorgan, Weaviate,
+# Rapid7, France's DINUM, and Tangerang City government in 2026.
+# The check is local and deterministic: it runs before any TI API
+# fan-out in screen_indicators.
+_PRIVATE_V4_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("0.0.0.0/8"),
+]
+_PRIVATE_V6_NETWORKS = [
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("fc00::/7"),
+]
+
+# Hostnames that are never public infrastructure.
+_LOCALHOST_NAMES = {"localhost"}
+# Suffixes for mDNS / private intranet names. Heuristic: a tool
+# argument URL ending in one of these is aimed at the local network.
+_PRIVATE_HOST_SUFFIXES = (
+    ".localhost", ".local", ".internal", ".intranet",
+    ".lan", ".corp", ".home", ".private",
+)
+
+# Cap on DNS lookups per screen call; resolution is best-effort and
+# fail-open so a slow resolver never blocks screening.
+_SSRF_DNS_TIMEOUT = 2.0
+
+
+def _parse_ip_literal(host: str):
+    """Parse an IP literal, including SSRF bypass encodings.
+
+    Attackers dodge naive string checks with decimal (2130706433),
+    octal (0177.0.0.1), and hex (0x7f.0.0.1) forms of 127.0.0.1.
+    socket.inet_aton accepts all of these. Returns an ipaddress
+    object or None when the host is not an IP literal.
+    """
+    h = host.strip().strip("[]")
+    if "%" in h:  # IPv6 zone id, e.g. fe80::1%eth0
+        h = h.split("%", 1)[0]
+    if not h:
+        return None
+    try:
+        return ipaddress.ip_address(h)
+    except ValueError:
+        pass
+    try:
+        return ipaddress.IPv4Address(socket.inet_aton(h))
+    except (OSError, ValueError):
+        return None
+
+
+def _ip_is_internal(ip) -> bool:
+    """True for loopback, private, link-local, and metadata ranges."""
+    if isinstance(ip, ipaddress.IPv4Address):
+        return any(ip in net for net in _PRIVATE_V4_NETWORKS)
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        return _ip_is_internal(mapped)
+    return any(ip in net for net in _PRIVATE_V6_NETWORKS)
+
+
+def _resolve_host_ips(host: str, timeout: float = _SSRF_DNS_TIMEOUT) -> list:
+    """Best-effort DNS resolution with a hard timeout.
+
+    Runs getaddrinfo on a daemon thread so a hanging resolver cannot
+    stall screening. Returns a list of IP strings, possibly empty.
+    """
+    found = []
+
+    def _target():
+        try:
+            for _fam, _typ, _proto, _canon, sockaddr in socket.getaddrinfo(
+                    host, None):
+                found.append(sockaddr[0])
+        except Exception:
+            pass
+
+    worker = threading.Thread(target=_target, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    return found
+
+
+def _url_host(url: str) -> str:
+    """Host portion of a URL, lowercased, without brackets or userinfo."""
+    try:
+        host = urllib.parse.urlsplit(url).hostname or ""
+    except Exception:
+        return ""
+    return host.lower().rstrip(".")
+
+
+def _is_internal_url(url: str, resolve: bool = True) -> bool:
+    """True when a tool-argument URL targets internal infrastructure.
+
+    Checks IP literals (including decimal/octal/hex bypass forms),
+    localhost and private-intranet hostnames, and, when resolve is
+    True, whether the hostname resolves to a private address. DNS
+    failures fail open (return False).
+    """
+    host = _url_host(url)
+    if not host:
+        return False
+    if host in _LOCALHOST_NAMES or host.endswith(_PRIVATE_HOST_SUFFIXES):
+        return True
+    ip = _parse_ip_literal(host)
+    if ip is not None:
+        return _ip_is_internal(ip)
+    if not resolve:
+        return False
+    try:
+        for resolved in _resolve_host_ips(host):
+            rip = _parse_ip_literal(resolved)
+            if rip is not None and _ip_is_internal(rip):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _post_json(url: str, payload: dict, timeout: float, api_key: str = "") -> dict:
     """POST JSON and return the parsed response body."""
     data = json.dumps(payload).encode("utf-8")
@@ -272,7 +410,8 @@ class Screener:
     def __init__(self, api_base: str, api_key: str = "", timeout: float = 5.0,
                  block_levels: set = None, kit_lookup_enabled: bool = False,
                  pii_screening_enabled: bool = True,
-                 oauth_screening_enabled: bool = True):
+                 oauth_screening_enabled: bool = True,
+                 ssrf_screening_enabled: bool = True):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
@@ -288,13 +427,23 @@ class Screener:
         # providers and tool results are checked for credential
         # exfiltration toward non-IdP infrastructure.
         self.oauth_screening_enabled = oauth_screening_enabled
+        # When True, tool argument URLs are checked for internal /
+        # private targets (protocol pivoting / SSRF) before TI
+        # screening. Disable only in trusted environments where tools
+        # legitimately fetch intranet URLs.
+        self.ssrf_screening_enabled = ssrf_screening_enabled
 
-    def screen_indicators(self, indicators: dict) -> dict:
+    def screen_indicators(self, indicators: dict,
+                          ssrf_check: bool = True) -> dict:
         """Screen extracted indicators. Returns a verdict dict.
 
         Verdict: {"verdict": "allow"|"block"|"unknown",
                   "level": str, "score": int, "reasons": [...],
                   "poison_category": str, "screened": {...}}
+        ssrf_check: run the protocol-pivoting (internal URL) check.
+        Callers screening operator-configured infrastructure (e.g. the
+        upstream URL at registration) pass False: SSRF applies to
+        caller-supplied tool arguments, not trusted config.
         """
         urls = indicators.get("urls", [])
         if not urls:
@@ -309,6 +458,42 @@ class Screener:
                 "score": 0,
                 "reasons": ["no screenable indicators in tool arguments"],
                 "poison_category": POISON_CLEAN,
+                "screened": indicators,
+                "confidence": scored["confidence"],
+                "cause_codes": scored["cause_codes"],
+            }
+
+        # Protocol pivoting (SSRF): local and deterministic, so it runs
+        # before the TI API fan-out. A tool argument URL aimed at
+        # internal infrastructure means the MCP server would fetch it on
+        # the attacker's behalf.
+        ssrf_hosts = []
+        if ssrf_check and self.ssrf_screening_enabled:
+            for url in urls:
+                try:
+                    if _is_internal_url(url):
+                        host = _url_host(url)
+                        ssrf_hosts.append(host or "(unparseable host)")
+                except Exception as exc:
+                    log.warning("ssrf check failed for %s: %s", url, exc)
+        if ssrf_hosts:
+            hosts = sorted(set(ssrf_hosts))
+            scored = _confidence.score_verdict("BLOCK", [{
+                "code": "SSRF_INTERNAL_URL",
+                "detail": ("tool argument URL targets internal address: "
+                           + ", ".join(hosts[:5])),
+            }])
+            return {
+                "verdict": "block",
+                "level": "high",
+                "score": 95,
+                "reasons": [
+                    "ssrf_internal_url: tool argument URL targets internal "
+                    "infrastructure (%s); the MCP server would fetch it on "
+                    "the caller's behalf (protocol pivoting)"
+                    % ", ".join(hosts[:5]),
+                ],
+                "poison_category": POISON_SSRF,
                 "screened": indicators,
                 "confidence": scored["confidence"],
                 "cause_codes": scored["cause_codes"],

@@ -550,8 +550,20 @@ METERED_CREDIT_COSTS: dict[str, int] = {
 # and kept saying so after the allowance was raised to 100 on 2026-08-09.
 FREE_TIER_CALLS_LABEL = 100
 
+#
+# ADDED 2026-10-11: the two endpoints that make a PER-CALL TWILIO LOOKUP. The
+# paragraph above assumed a free call costs us "nothing": HIBP is a flat
+# subscription and GoPlus is free. phone-reputation (Twilio Lookup v2, about
+# $0.014 a call) and sim-swap were added later and that assumption was never
+# revisited, so any free-tier key -- minted from nothing but an email address --
+# could spend 100 Twilio lookups at zero revenue. Between 2026-10-03 and 10-10
+# 1,407 lookups ($19.79) were made that Andrew's two paying customers could not
+# have made, which is about fourteen free keys. A per-key hourly cap could not
+# have stopped that: the allowance (100) is no larger than the cap.
 FREE_TIER_EXCLUDED_ENDPOINTS = frozenset({
     "/v1/metered/bulk-identity-risk",
+    "/v1/metered/phone-reputation",
+    "/v1/metered/sim-swap",
 })
 
 
@@ -900,7 +912,10 @@ def _check_demo_quota(key_record: dict) -> bool:
 # Implemented on DEMO_QUOTA_TABLE (the existing abuse-guardrail table, so no
 # new infrastructure) with the hour encoded in the key: windows roll over with
 # no reset logic and no read-modify-write race — a single atomic ADD decides.
-PHONE_REP_KEY_HOURLY_CAP   = 100  # per API key,   /v1/metered/phone-reputation
+# 50, lowered from 100 on 2026-10-11. The cap is now a second line behind the
+# free-tier exclusion above, bounding what a PAID or subscribed key can spend:
+# 50 an hour is at most 1,200 lookups a day, about $17.
+PHONE_REP_KEY_HOURLY_CAP   = 50   # per API key,   /v1/metered/phone-reputation
 PHONE_REP_PAYER_HOURLY_CAP = 100  # per x402 payer, /v1/payg/phone-reputation
 
 
@@ -1635,6 +1650,15 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
                 # never had one is a different conversation, and one generic
                 # message for both leaves the developer guessing.
                 "error": (
+                    # An excluded endpoint is refused even with free calls left,
+                    # and "your free calls are used up" would be false there.
+                    "This endpoint is not included in the free tier because every "
+                    "call has a real per-call cost. Add a card to use it. You are "
+                    "billed only for the calls you make, with no minimum and no "
+                    "subscription fee."
+                    if path in FREE_TIER_EXCLUDED_ENDPOINTS
+                    and int(key_record.get("free_calls_remaining") or 0) > 0
+                    else
                     f"Your {FREE_TIER_CALLS_LABEL} free calls are used up. Add a card to keep going. "
                     "You are billed only for the calls you make, with no minimum "
                     "and no subscription fee."

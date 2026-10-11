@@ -69,6 +69,7 @@ import bisect as _bisect
 import concurrent.futures
 from decimal import Decimal
 import hashlib
+import ipaddress
 import json
 import html
 import logging
@@ -550,8 +551,20 @@ METERED_CREDIT_COSTS: dict[str, int] = {
 # and kept saying so after the allowance was raised to 100 on 2026-08-09.
 FREE_TIER_CALLS_LABEL = 100
 
+#
+# ADDED 2026-10-11: the two endpoints that make a PER-CALL TWILIO LOOKUP. The
+# paragraph above assumed a free call costs us "nothing": HIBP is a flat
+# subscription and GoPlus is free. phone-reputation (Twilio Lookup v2, about
+# $0.014 a call) and sim-swap were added later and that assumption was never
+# revisited, so any free-tier key -- minted from nothing but an email address --
+# could spend 100 Twilio lookups at zero revenue. Between 2026-10-03 and 10-10
+# 1,407 lookups ($19.79) were made that Andrew's two paying customers could not
+# have made, which is about fourteen free keys. A per-key hourly cap could not
+# have stopped that: the allowance (100) is no larger than the cap.
 FREE_TIER_EXCLUDED_ENDPOINTS = frozenset({
     "/v1/metered/bulk-identity-risk",
+    "/v1/metered/phone-reputation",
+    "/v1/metered/sim-swap",
 })
 
 
@@ -900,7 +913,10 @@ def _check_demo_quota(key_record: dict) -> bool:
 # Implemented on DEMO_QUOTA_TABLE (the existing abuse-guardrail table, so no
 # new infrastructure) with the hour encoded in the key: windows roll over with
 # no reset logic and no read-modify-write race — a single atomic ADD decides.
-PHONE_REP_KEY_HOURLY_CAP   = 100  # per API key,   /v1/metered/phone-reputation
+# 50, lowered from 100 on 2026-10-11. The cap is now a second line behind the
+# free-tier exclusion above, bounding what a PAID or subscribed key can spend:
+# 50 an hour is at most 1,200 lookups a day, about $17.
+PHONE_REP_KEY_HOURLY_CAP   = 50   # per API key,   /v1/metered/phone-reputation
 PHONE_REP_PAYER_HOURLY_CAP = 100  # per x402 payer, /v1/payg/phone-reputation
 
 
@@ -1635,6 +1651,15 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
                 # never had one is a different conversation, and one generic
                 # message for both leaves the developer guessing.
                 "error": (
+                    # An excluded endpoint is refused even with free calls left,
+                    # and "your free calls are used up" would be false there.
+                    "This endpoint is not included in the free tier because every "
+                    "call has a real per-call cost. Add a card to use it. You are "
+                    "billed only for the calls you make, with no minimum and no "
+                    "subscription fee."
+                    if path in FREE_TIER_EXCLUDED_ENDPOINTS
+                    and int(key_record.get("free_calls_remaining") or 0) > 0
+                    else
                     f"Your {FREE_TIER_CALLS_LABEL} free calls are used up. Add a card to keep going. "
                     "You are billed only for the calls you make, with no minimum "
                     "and no subscription fee."
@@ -15945,6 +15970,170 @@ def handle_mcp_taxonomy(qp: dict) -> dict:
     return resp
 
 
+# ---------------------------------------------------------------------------
+# MCP proxy opt-in telemetry
+# ---------------------------------------------------------------------------
+# Receives the reports an MCP proxy deployment sends when its operator sets
+# MCP_PROXY_TELEMETRY (see mcp_proxy/telemetry.py, which lists exactly what is and
+# is not sent). Counts and candidate indicators; never a payload.
+#
+# THE GUARD THAT MATTERS: THIS NEVER WRITES TO THE IOC CORPUS. The endpoint is
+# open to anyone who can send a POST, so an indicator it receives is a CLAIM, not
+# a finding. If it flowed into relayshield_intel_iocs, anyone could plant a
+# competitor's domain in every customer's blocklist. Indicators land in a
+# candidate row marked `unreviewed`, with the set of distinct reporting accounts,
+# and promotion is a separate reviewed step that does not exist here.
+#
+# Counts are accepted keyless (trend data, nothing to poison). The indicator tier
+# requires a VALID API KEY, so a claim is at least attributable to an account.
+#
+# STRICT VALIDATION, NO FREE TEXT: every field is matched against a closed set or
+# a fixed pattern and a report with ANY bad field is refused whole. This is an
+# open write endpoint; it must not become a free-text store.
+MCP_PROXY_TELEMETRY_TABLE = "relayshield_mcp_proxy_telemetry"
+_MCPT_CATEGORIES = frozenset({
+    "prompt_injection", "pii_leak", "malicious_url", "kit_match", "secret_leak",
+    "unknown_synthetic", "oauth_tampering", "credential_exfiltration",
+    "attack_chain", "behavioral_anomaly"})
+_MCPT_KINDS      = frozenset({"discovery", "result", "call"})
+_MCPT_MODES      = frozenset({"counts", "indicators"})
+_MCPT_INSTALL_RE = re.compile(r"^[0-9a-f]{32}$")
+_MCPT_TAXID_RE   = re.compile(r"^mcp_2026_[a-z0-9_]{1,60}$")
+_MCPT_HASH_RE    = re.compile(r"^[0-9a-f]{64}$")
+_MCPT_HOST_RE    = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
+_MCPT_INTERNAL   = (".local", ".internal", ".lan", ".corp", ".home", ".intranet",
+                    ".localdomain", ".test", ".example", ".invalid", ".localhost")
+_MCPT_MAX_COUNTS      = 100
+_MCPT_MAX_INDICATORS  = 50
+_MCPT_REPORTS_PER_HOUR = 12
+
+
+def _mcpt_public_host(h: str) -> bool:
+    """True only for a public hostname or global IP. A second copy of
+    mcp_proxy/telemetry.public_host: this package cannot import the proxy, so
+    test_mcp_proxy_telemetry_endpoint.py runs both on the same cases."""
+    if not isinstance(h, str) or not h or h != h.strip().lower() or len(h) > 253:
+        return False
+    try:
+        return ipaddress.ip_address(h).is_global
+    except ValueError:
+        pass
+    return bool("." in h and not h.endswith(_MCPT_INTERNAL) and _MCPT_HOST_RE.match(h))
+
+
+def _mcpt_validate(params: dict, authenticated: bool):
+    """-> (clean_report, None) or (None, reason). Reasons name a field, never a value."""
+    if not isinstance(params, dict):
+        return None, "body must be an object"
+    install_id, mode = params.get("install_id"), params.get("mode")
+    if not (isinstance(install_id, str) and _MCPT_INSTALL_RE.match(install_id)):
+        return None, "install_id"
+    if mode not in _MCPT_MODES:
+        return None, "mode"
+    counts = params.get("counts")
+    if not isinstance(counts, list) or len(counts) > _MCPT_MAX_COUNTS:
+        return None, "counts"
+    clean_counts = []
+    for c in counts:
+        if not isinstance(c, dict):
+            return None, "counts"
+        tid, n = c.get("taxonomy_id", ""), c.get("n")
+        if (c.get("category") not in _MCPT_CATEGORIES or c.get("kind") not in _MCPT_KINDS
+                or not (tid == "" or (isinstance(tid, str) and _MCPT_TAXID_RE.match(tid)))
+                or isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= 1_000_000):
+            return None, "counts"
+        clean_counts.append({"category": c["category"], "taxonomy_id": tid,
+                             "kind": c["kind"], "n": n})
+    clean_inds = []
+    if "indicators" in params:
+        if mode != "indicators":
+            return None, "indicators"
+        if not authenticated:
+            return None, "auth"
+        inds = params.get("indicators")
+        if not isinstance(inds, list) or len(inds) > _MCPT_MAX_INDICATORS:
+            return None, "indicators"
+        for i in inds:
+            if not isinstance(i, dict):
+                return None, "indicators"
+            tid = i.get("taxonomy_id", "")
+            if (not _mcpt_public_host(i.get("host"))
+                    or not (isinstance(i.get("payload_hash"), str) and _MCPT_HASH_RE.match(i["payload_hash"]))
+                    or i.get("category") not in _MCPT_CATEGORIES
+                    or not (tid == "" or (isinstance(tid, str) and _MCPT_TAXID_RE.match(tid)))):
+                return None, "indicators"
+            clean_inds.append({"host": i["host"], "payload_hash": i["payload_hash"],
+                               "category": i["category"], "taxonomy_id": tid})
+    version = params.get("taxonomy_version")
+    version = version if isinstance(version, str) and re.fullmatch(r"[0-9-]{1,16}", version) else ""
+    return {"install_id": install_id, "mode": mode, "counts": clean_counts,
+            "indicators": clean_inds, "taxonomy_version": version}, None
+
+
+def _mcpt_rate_ok(install_id: str) -> bool:
+    """At most _MCPT_REPORTS_PER_HOUR reports per install per hour. Fails OPEN:
+    this is a cost brake on an open endpoint, not a security control."""
+    window = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    try:
+        r = dynamodb.Table(MCP_PROXY_TELEMETRY_TABLE).update_item(
+            Key={"pk": f"RATE#{install_id}", "sk": window},
+            UpdateExpression="ADD n :one SET #t = if_not_exists(#t, :ttl)",
+            ExpressionAttributeNames={"#t": "ttl"},
+            ExpressionAttributeValues={":one": 1, ":ttl": int(time.time()) + 2 * 86400},
+            ReturnValues="UPDATED_NEW")
+        return int(r["Attributes"]["n"]) <= _MCPT_REPORTS_PER_HOUR
+    except Exception as exc:
+        logger.warning("mcp telemetry rate check failed: %s", exc)
+        return True
+
+
+def handle_mcp_proxy_telemetry(params: dict, api_key_record: dict | None = None) -> dict:
+    """POST /v1/telemetry/mcp-proxy"""
+    report, bad = _mcpt_validate(params, authenticated=bool(api_key_record))
+    if bad == "auth":
+        return _err("the indicator tier requires a valid API key (X-RS-API-KEY)", 401)
+    if bad:
+        return _err(f"invalid report: {bad}", 400)
+    if not report["counts"] and not report["indicators"]:
+        return _ok({"recorded": False, "reason": "empty"})
+    if not _mcpt_rate_ok(report["install_id"]):
+        return {"statusCode": 429,
+                "headers": {"Content-Type": "application/json", "Retry-After": "3600"},
+                "body": json.dumps({"ok": False, "error": "too many reports from this install"})}
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    table = dynamodb.Table(MCP_PROXY_TELEMETRY_TABLE)
+    try:
+        table.put_item(Item={
+            "pk": f"INSTALL#{report['install_id']}", "sk": f"REPORT#{now}",
+            "mode": report["mode"], "taxonomy_version": report["taxonomy_version"],
+            "counts": report["counts"], "n_indicators": len(report["indicators"]),
+            "ttl": int(time.time()) + 180 * 86400})
+        reporter = ""
+        if api_key_record:
+            reporter = hashlib.sha256(str(api_key_record.get("api_key", "")).encode()).hexdigest()[:16]
+        for i in report["indicators"]:
+            cid = hashlib.sha256(
+                f"{i['host']}|{i['payload_hash']}|{i['category']}|{i['taxonomy_id']}".encode()).hexdigest()
+            table.update_item(
+                Key={"pk": f"CAND#{cid}", "sk": "CAND"},
+                UpdateExpression=("SET host = :h, payload_hash = :p, category = :c, taxonomy_id = :t, "
+                                  "last_seen = :now, first_seen = if_not_exists(first_seen, :now), "
+                                  "#st = if_not_exists(#st, :unrev), #tt = :ttl "
+                                  "ADD report_count :one, reporters :r"),
+                ExpressionAttributeNames={"#st": "status", "#tt": "ttl"},
+                ExpressionAttributeValues={
+                    ":h": i["host"], ":p": i["payload_hash"], ":c": i["category"],
+                    ":t": i["taxonomy_id"], ":now": now, ":unrev": "unreviewed",
+                    ":ttl": int(time.time()) + 365 * 86400, ":one": 1, ":r": {reporter or "anon"}})
+    except Exception as exc:
+        logger.error("mcp telemetry write failed: %s", exc)
+        return _err("temporarily unavailable", 503)
+    logger.info("mcp proxy telemetry mode=%s counts=%d indicators=%d",
+                report["mode"], len(report["counts"]), len(report["indicators"]))
+    return _ok({"recorded": True, "counts": len(report["counts"]),
+                "indicators": len(report["indicators"])})
+
+
 ROUTES = {
     "/v1/breach":           handle_breach,
     "/v1/scan-url":         handle_scan_url,
@@ -16941,6 +17130,13 @@ def lambda_handler(event: dict, context) -> dict:
     # domain is a qualified account, which PyPI download totals can never show.
     if method == "POST" and path == "/v1/telemetry/rsscan-install":
         return handle_rsscan_install(_body(event))
+
+    # MCP proxy opt-in telemetry. Counts are keyless; the indicator tier needs a
+    # valid key. Never writes to the IOC corpus, see handle_mcp_proxy_telemetry.
+    if method == "POST" and path == "/v1/telemetry/mcp-proxy":
+        _th = event.get("headers") or {}
+        _tk = _header(_th, "X-RS-API-KEY") or _header(_th, "X-API-Key")
+        return handle_mcp_proxy_telemetry(_body(event), _verify_rs_api_key(_tk) if _tk else None)
 
     # Shareable report links (INTEL-8) — public view, no auth
     if method == "GET" and path.startswith("/v1/r/"):

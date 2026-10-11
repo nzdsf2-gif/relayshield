@@ -82,12 +82,12 @@ class McpTaxonomyGrant(unittest.TestCase):
     def test_the_caches_still_get_get_and_put(self):
         self.assertEqual(sorted(g.actions_for(g.TABLE)), ["dynamodb:GetItem", "dynamodb:PutItem"])
 
-    def test_all_three_grants_coexist(self):
+    def test_every_table_grant_coexists(self):
         doc = {"Statement": []}
         for t in g.CACHE_SIDS:
             doc = g.merged_document(doc, t)
-        self.assertEqual(len(doc["Statement"]), 3)
-        self.assertEqual(len({s["Sid"] for s in doc["Statement"]}), 3)
+        self.assertEqual(len(doc["Statement"]), len(g.CACHE_SIDS))
+        self.assertEqual(len({s["Sid"] for s in doc["Statement"]}), len(g.CACHE_SIDS))
 
     def test_idempotent(self):
         once = g.merged_document({"Statement": []}, self.TAX)
@@ -102,6 +102,36 @@ class McpTaxonomyGrant(unittest.TestCase):
         body = m.group(0)
         self.assertIn(".scan(", body)
         for banned in (".put_item(", ".get_item(", ".update_item(", ".delete_item(", ".query("):
+            self.assertNotIn(banned, body)
+
+
+class McpProxyTelemetryGrant(unittest.TestCase):
+    T = "relayshield_mcp_proxy_telemetry"
+
+    def test_write_only_put_and_update_on_the_exact_table(self):
+        st = g.merged_document({"Statement": []}, self.T)["Statement"][0]
+        self.assertEqual(sorted(st["Action"]), ["dynamodb:PutItem", "dynamodb:UpdateItem"])
+        self.assertEqual(st["Resource"], g.table_arn(self.T))
+
+    def test_no_read_or_delete(self):
+        acts = set(g.actions_for(self.T))
+        self.assertFalse(acts & {"dynamodb:GetItem", "dynamodb:Scan", "dynamodb:Query", "dynamodb:DeleteItem"})
+
+    def test_four_grants_coexist(self):
+        doc = {"Statement": []}
+        for t in g.CACHE_SIDS:
+            doc = g.merged_document(doc, t)
+        self.assertEqual(len({s["Sid"] for s in doc["Statement"]}), len(g.CACHE_SIDS))
+
+    def test_the_grant_matches_what_the_ingest_code_calls(self):
+        src = (ROOT / "relayshield_api.py").read_text()
+        m = re.search(r"def handle_mcp_proxy_telemetry\(.*?(?=\n\n\nROUTES)", src, re.S)
+        r = re.search(r"def _mcpt_rate_ok\(.*?(?=\n\n\ndef )", src, re.S)
+        self.assertTrue(m and r)
+        body = m.group(0) + r.group(0)
+        self.assertIn(".put_item(", body)
+        self.assertIn(".update_item(", body)
+        for banned in (".get_item(", ".scan(", ".query(", ".delete_item("):
             self.assertNotIn(banned, body)
 
 

@@ -16,6 +16,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .config import ProxyConfig
+from .discovery import DISCOVERY_METHODS, screen_discovery, taxonomy_evidence
+from .taxonomy import TAXONOMY_VERSION
 from .audit import AuditTrail
 from .behavior import BehaviorTracker
 from .neighbor import NeighborRegistry
@@ -244,7 +246,60 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Ensure the response carries our request id.
         if isinstance(upstream_resp, dict) and "id" not in upstream_resp:
             upstream_resp["id"] = req_id
+        # Discovery responses (initialize, tools/list, ...) are screened for the
+        # cacheScope / instructions-field attacks. Flag-only: the response is
+        # forwarded unchanged either way.
+        if method in DISCOVERY_METHODS:
+            self._screen_discovery(cfg.upstream_url, method, upstream_resp,
+                                   cfg, screener)
         return upstream_resp
+
+    def _screen_discovery(self, upstream_url: str, method: str,
+                          upstream_resp: dict, cfg: ProxyConfig,
+                          screener: Screener):
+        """Screen a discovery response; flag the server, never block."""
+        if not cfg.result_screening_enabled:
+            return
+        try:
+            verdict = screen_discovery(method, upstream_resp, screener)
+        except Exception as exc:
+            log.error("discovery screener error: %s", exc)
+            return
+        if verdict.get("verdict") != "flagged":
+            return
+        reasons = verdict["reasons"]
+        category = verdict["poison_category"]
+        ids = verdict["taxonomy_ids"]
+        evidence = [{"type": "ti_signal", "id": f"discovery-reason-{i}", "detail": r}
+                    for i, r in enumerate(reasons)]
+        # What makes the flag actionable: the matching taxonomy entries, with
+        # their mitigations, ride in the evidence of the signed verdict.
+        evidence += taxonomy_evidence(ids)
+        signed = self.server.signer.issue(
+            decision="flag", tool_name=method,
+            content_hash=content_hash_of(upstream_resp),
+            evidence=evidence, reasons=reasons, poison_category=category,
+            extra={"upstream": upstream_url, "taxonomy_ids": ids,
+                   "taxonomy_version": TAXONOMY_VERSION},
+        )
+        log.warning(json.dumps({
+            "event": "poisoned_discovery_detected",
+            "method": method, "upstream": upstream_url,
+            "poison_category": category, "reasons": reasons,
+            "taxonomy_ids": ids, "details": verdict["details"],
+            "verdict_signed": bool(signed.get("sig")),
+        }))
+        self.server.neighbors.flag(
+            upstream_url, f"poisoned {method} response",
+            [e["detail"] for e in evidence])
+        self.server.reputation.record_flag(upstream_url, f"{category}: {method}")
+        self.server.audit.record(
+            self.client_address[0], upstream_url, method, {},
+            decision="flag", poison_category=category,
+            reasons=reasons, evidence=evidence)
+        if self.server.quarantine.evaluate(upstream_url, evidence=evidence):
+            self.server.reputation.record_quarantine(
+                upstream_url, "auto-quarantine: poisoned discovery response")
 
     def _handle_tools_call(self, req: dict, req_id, cfg: ProxyConfig,
                            screener: Screener):

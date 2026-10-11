@@ -208,8 +208,35 @@ WHY
   python3 - "$REPO_FILE" "$OUT" <<'PYEOF'
 import re, sys
 
-def tokens(path):
+# THE DOWNLOAD IS NOT THE BUNDLE. The Workers API returns a multipart/form-data
+# BODY: a boundary line, Content-Disposition and Content-Type headers, the bundle,
+# and a closing boundary. wrangler/esbuild then adds its own `// <file>` banner, a
+# `var <stem>_default` name for the default export, a sourceMappingURL comment, and
+# escapes non-ASCII as \uXXXX / \xXX. None of that is hand-deployed code, and the
+# first version of this comparison reported all of it as "live carries something the
+# repo does not": on relayshield-privacy, 2026-10-11, eight names, every one of them
+# one of these. A check that cries wolf on a clean Worker gets ignored, and then the
+# day it is right nobody reads it.
+_MULTIPART = re.compile(
+    r"^(--[0-9A-Za-z'()+_,./:=?-]{16,}(--)?|Content-(Disposition|Type):.*|//# sourceMappingURL=.*)$")
+
+
+def clean_live(text, stem):
+    out = []
+    for line in text.splitlines():
+        if _MULTIPART.match(line.strip()):
+            continue
+        out.append(line)
+    text = "\n".join(out)
+    text = re.sub(r"^// " + re.escape(stem) + r"\.js\s*$", "", text, flags=re.M)
+    return text
+
+
+def tokens(path, live=False):
     src = open(path, encoding="utf-8", errors="replace").read()
+    if live:
+        import os
+        src = clean_live(src, os.path.basename(sys.argv[1]).rsplit(".", 1)[0])
     # Identifiers of 3+ characters: shorter ones are loop variables and noise.
     idents = set(re.findall(r"[A-Za-z_$][A-Za-z0-9_$]{2,}", src))
     # Quoted strings, both kinds, non-greedy and single-line. Template literals
@@ -222,7 +249,7 @@ def tokens(path):
 # list that always has four rows in it is a list nobody reads.
 #   __-prefixed  esbuild's own helpers (__toESM, __defProp, __commonJS)
 #   keywords     a keyword the source happens not to use is not drift
-BUNDLER = re.compile(r"^__")
+BUNDLER = re.compile(r"^(__|[ux][0-9A-Fa-f]{2,4}$)")  # esbuild helpers, and \\u2190 / \\xA9 escapes
 KEYWORDS = {
     "var", "let", "const", "function", "return", "typeof", "instanceof",
     "await", "async", "class", "extends", "super", "yield", "delete", "void",
@@ -233,10 +260,14 @@ KEYWORDS = {
 }
 
 def strip_noise(names):
-    return {n for n in names if not BUNDLER.match(n) and n not in KEYWORDS}
+    import os
+    stem = re.sub(r"[^A-Za-z0-9_$]", "_", os.path.basename(sys.argv[1]).rsplit(".", 1)[0])
+    # esbuild names the default export `<stem>_default`; a source map is `map`.
+    own = {stem, stem + "_default", "map", "sourceMappingURL"}
+    return {n for n in names if not BUNDLER.match(n) and n not in KEYWORDS and n not in own}
 
 r_id, r_str = tokens(sys.argv[1])
-l_id, l_str = tokens(sys.argv[2])
+l_id, l_str = tokens(sys.argv[2], live=True)
 r_id, l_id = strip_noise(r_id), strip_noise(l_id)
 
 only_id = sorted(l_id - r_id)

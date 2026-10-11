@@ -70,5 +70,40 @@ class SecondTable(unittest.TestCase):
         self.assertIn(self.VT, src)
 
 
+class McpTaxonomyGrant(unittest.TestCase):
+    TAX = "relayshield_mcp_taxonomy"
+
+    def test_read_only_scan_on_the_exact_table(self):
+        st = g.merged_document({"Statement": []}, self.TAX)["Statement"][0]
+        self.assertEqual(st["Action"], ["dynamodb:Scan"])
+        self.assertEqual(st["Resource"], g.table_arn(self.TAX))
+        self.assertNotIn("*", st["Resource"])
+
+    def test_the_caches_still_get_get_and_put(self):
+        self.assertEqual(sorted(g.actions_for(g.TABLE)), ["dynamodb:GetItem", "dynamodb:PutItem"])
+
+    def test_all_three_grants_coexist(self):
+        doc = {"Statement": []}
+        for t in g.CACHE_SIDS:
+            doc = g.merged_document(doc, t)
+        self.assertEqual(len(doc["Statement"]), 3)
+        self.assertEqual(len({s["Sid"] for s in doc["Statement"]}), 3)
+
+    def test_idempotent(self):
+        once = g.merged_document({"Statement": []}, self.TAX)
+        self.assertEqual(g.merged_document(once, self.TAX), once)
+
+    def test_the_grant_matches_what_the_endpoint_code_calls(self):
+        # IAM and code are two files that must agree. The reader scans and must
+        # never write; a get_item/put_item there would need a different grant.
+        src = (ROOT / "relayshield_api.py").read_text()
+        m = re.search(r"def _load_mcp_taxonomy\(.*?(?=\ndef )", src, re.S)
+        self.assertIsNotNone(m)
+        body = m.group(0)
+        self.assertIn(".scan(", body)
+        for banned in (".put_item(", ".get_item(", ".update_item(", ".delete_item(", ".query("):
+            self.assertNotIn(banned, body)
+
+
 if __name__ == "__main__":
     unittest.main()

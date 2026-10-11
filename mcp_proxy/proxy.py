@@ -25,6 +25,7 @@ from .policy import PolicyEngine
 from .quarantine import QuarantineManager
 from .reputation import ReputationStore
 from .screener import Screener
+from .telemetry import Telemetry
 from .verdicts import VerdictSigner, content_hash_of
 
 log = logging.getLogger(__name__)
@@ -297,6 +298,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.client_address[0], upstream_url, method, {},
             decision="flag", poison_category=category,
             reasons=reasons, evidence=evidence)
+        self.server.telemetry.record(category, "discovery", ids, upstream_url,
+                                     upstream_resp)
         if self.server.quarantine.evaluate(upstream_url, evidence=evidence):
             self.server.reputation.record_quarantine(
                 upstream_url, "auto-quarantine: poisoned discovery response")
@@ -494,6 +497,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "verdict_sig": signed.get("sig", "")[:16] + "..." if signed.get("sig") else "unsigned",
                 "signed": bool(signed.get("sig")),
             }))
+            # Counts only: an argument can carry the customer's own data.
+            self.server.telemetry.record(poison_category, "call")
             # Phase 4: audit the block decision.
             self.server.audit.record(
                 agent_id, upstream_url, tool_name, arguments,
@@ -605,6 +610,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "kit_ids": kit_ids,
             "verdict_signed": bool(signed.get("sig")),
         }))
+        self.server.telemetry.record(poison_category, "result", [], upstream_url,
+                                     upstream_resp)
         neighbors.flag(upstream_url,
                        f"poisoned tool result from '{tool_name}'",
                        [e["detail"] for e in evidence])
@@ -653,6 +660,8 @@ class ProxyServer(HTTPServer):
         self.policy = PolicyEngine(cfg.policy_file)
         self.audit = AuditTrail(capacity=cfg.audit_capacity,
                                 persist_path=cfg.audit_file)
+        # Opt-in telemetry; a no-op object unless MCP_PROXY_TELEMETRY is set.
+        self.telemetry = Telemetry.from_config(cfg)
         self.audit.signer = self.signer
         super().__init__(("0.0.0.0", cfg.listen_port), ProxyHandler)
         # Register (and TI-check) the upstream on startup.

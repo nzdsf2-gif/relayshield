@@ -55,6 +55,31 @@ MEDIUM yellow, LOW blue) with remediation advice for each. Exit code
 Fix what the scanner finds, then deploy the proxy for runtime
 protection of every tool call.
 
+## Tool-definition scanner (free)
+
+Scan before you connect. The tool scanner fetches a server's tool
+definitions over MCP (tools/list) and flags poisoning indicators in
+each definition:
+
+- Prompt-injection phrases in tool descriptions
+- Instruction-hijack phrasing ("you must now", "act as", ...)
+- Exfiltration instructions pairing verbs with external URLs
+- Dangerous capabilities implied by tool names (shell exec, delete)
+- Credential parameters (password, api_key, token) in input schemas
+- Missing descriptions and unconstrained input schemas
+
+```bash
+python3 -m mcp_proxy.tool_scanner --url https://server.example.com/mcp
+python3 -m mcp_proxy.tool_scanner --config /path/to/mcp.json
+python3 -m mcp_proxy.tool_scanner --url https://server.example.com/mcp --format json
+python3 -m mcp_proxy.tool_scanner --url https://server.example.com/mcp --ci
+```
+
+Same severity scale, colors, and exit codes as the config scanner.
+URL-based servers are scanned live; stdio servers in a config are
+reported as unscannable without launching them (connect those through
+the proxy for runtime screening instead).
+
 ## Demo
 
 Watch the proxy catch a poisoned neighbor in real time, no network

@@ -162,6 +162,87 @@ class TestDangerousTools(unittest.TestCase):
         self.assertTrue(any(f["check"] == "dangerous_tools" for f in findings))
 
 
+class TestPotentialSsrf(unittest.TestCase):
+    def test_fetch_server(self):
+        config = _cfg({
+            "fetch": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-fetch"],
+            }
+        })
+        findings = scan_config(config)
+        self.assertTrue(any(
+            f["check"] == "potential_ssrf" and f["severity"] == "MEDIUM"
+            for f in findings))
+
+    def test_curl_server(self):
+        config = _cfg({
+            "curl": {
+                "command": "uvx",
+                "args": ["curl-mcp"],
+            }
+        })
+        findings = scan_config(config)
+        self.assertTrue(any(f["check"] == "potential_ssrf" for f in findings))
+
+    def test_weather_server_ok(self):
+        config = _cfg({
+            "weather": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-weather"],
+            }
+        })
+        findings = scan_config(config)
+        self.assertFalse(any(f["check"] == "potential_ssrf" for f in findings))
+
+
+class TestInternalConfigUrls(unittest.TestCase):
+    def test_metadata_url_high(self):
+        config = _cfg({
+            "agent": {
+                "command": "node",
+                "args": ["server.js",
+                         "--webhook=http://169.254.169.254/latest/meta-data/"],
+            }
+        })
+        findings = scan_config(config)
+        self.assertTrue(any(
+            f["check"] == "internal_config_url" and f["severity"] == "HIGH"
+            for f in findings))
+
+    def test_localhost_url_medium(self):
+        config = _cfg({
+            "agent": {
+                "command": "node",
+                "args": ["server.js"],
+                "env": {"CALLBACK": "http://localhost:8080/hook"},
+            }
+        })
+        findings = scan_config(config)
+        self.assertTrue(any(
+            f["check"] == "internal_config_url" and f["severity"] == "MEDIUM"
+            for f in findings))
+
+    def test_decimal_bypass_form(self):
+        config = _cfg({
+            "agent": {
+                "command": "node",
+                "args": ["server.js", "http://2130706433/admin"],
+            }
+        })
+        findings = scan_config(config)
+        self.assertTrue(any(
+            f["check"] == "internal_config_url" for f in findings))
+
+    def test_public_url_ok(self):
+        config = _cfg({
+            "remote": {"url": "https://mcp.example.com/mcp"},
+        })
+        findings = scan_config(config)
+        self.assertFalse(any(
+            f["check"] == "internal_config_url" for f in findings))
+
+
 class TestMain(unittest.TestCase):
     def _write_config(self, config):
         tmp = tempfile.NamedTemporaryFile(

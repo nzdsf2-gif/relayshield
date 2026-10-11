@@ -889,6 +889,73 @@ def _check_demo_quota(key_record: dict) -> bool:
         return True
 
 
+# ---------------------------------------------------------------------------
+# PHONE-REPUTATION RATE LIMITS (added 2026-10-10)
+# ---------------------------------------------------------------------------
+# Twilio Lookup v2 costs ~$0.014 per call. 2026-10-03 -> 2026-10-10 saw 1,407
+# lookups ($19.79) that Andrew's two paying customers could not have made:
+# abuse of the keyed phone-reputation endpoints. These hourly caps stop one
+# key or one x402 payer from burning Twilio credit at that rate again.
+#
+# Implemented on DEMO_QUOTA_TABLE (the existing abuse-guardrail table, so no
+# new infrastructure) with the hour encoded in the key: windows roll over with
+# no reset logic and no read-modify-write race — a single atomic ADD decides.
+PHONE_REP_KEY_HOURLY_CAP   = 100  # per API key,   /v1/metered/phone-reputation
+PHONE_REP_PAYER_HOURLY_CAP = 100  # per x402 payer, /v1/payg/phone-reputation
+
+
+def _phone_rep_rate_limit_ok(bucket: str, cap: int) -> bool:
+    """Hourly rate limit for the Twilio-backed phone-reputation endpoints.
+
+    bucket: e.g. "phonerep#key#rs_live_abc" or "phonerep#payer#0xabc...".
+    Returns True if the call is allowed (counter already incremented).
+
+    Fails OPEN on a DynamoDB error, matching _check_demo_quota and
+    _check_keyless_ip_quota: this is a cost guardrail, not a security
+    control, and an infra blip must not break the endpoint for every
+    caller at once.
+    """
+    window    = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+    usage_key = f"{bucket}#{window}"
+    try:
+        table = dynamodb.Table(DEMO_QUOTA_TABLE)
+        resp  = table.update_item(
+            Key={"usage_key": usage_key},
+            UpdateExpression="ADD call_count :one SET expires_at = if_not_exists(expires_at, :ttl)",
+            ExpressionAttributeValues={":one": 1, ":ttl": int(time.time()) + 3 * 86400},
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(resp["Attributes"]["call_count"]) <= cap
+    except Exception as exc:
+        logger.error("phone-rep rate limit check failed bucket=%s error=%s", bucket, exc)
+        return True
+
+
+def _phone_rep_429(cap: int, scope: str) -> dict:
+    """429 for the phone-reputation abuse guard. CORS included: a browser must
+    be able to READ this response, or a legitimate caller sees a phantom
+    outage instead of an actionable "you hit the limit" (same lesson as the
+    keyless 429 comment above)."""
+    return {
+        "statusCode": 429,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Retry-After": "3600",
+        },
+        "body": json.dumps({
+            "ok":    False,
+            "error": (
+                f"Rate limit exceeded: {cap} phone-reputation lookups per hour "
+                f"per {scope}. This endpoint performs a live Twilio Lookup on "
+                f"every call. Slow down and retry in an hour, or contact "
+                f"support if you need a higher limit."
+            ),
+            "docs": "https://api.relayshield.net/developers",
+        }),
+    }
+
+
 # AWS Marketplace Bundle D usage dimensions — API identifiers must match
 # exactly what's configured in the AWS Marketplace pricing dimensions.
 # Only these 3 endpoints (of this file's routes) belong to Bundle D — the
@@ -1577,6 +1644,18 @@ def handle_metered_request(path: str, method: str, event: dict) -> dict:
                 "topup_url": "https://api.relayshield.net/developers",
             }),
         }
+
+    # Phone-reputation abuse guard (added 2026-10-10): per-key hourly cap on
+    # the Twilio-backed endpoint. Runs AFTER auth/billing so only callers with
+    # a valid key and credits/subscription are counted — and blocked abusers
+    # were already paying, so this is purely a cost brake, not a billing
+    # change. Abuse (key prefix, source IP, timestamp) is in the log line.
+    if path == "/v1/metered/phone-reputation":
+        _rl_ip = ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or ""
+        if not _phone_rep_rate_limit_ok(f"phonerep#key#{api_key_str}", PHONE_REP_KEY_HOURLY_CAP):
+            logger.warning("phone-rep rate limited key=%s ip=%s path=%s",
+                           api_key_str[:16], _rl_ip, path)
+            return _phone_rep_429(PHONE_REP_KEY_HOURLY_CAP, "API key")
 
     params = _body(event)
     try:
@@ -13516,6 +13595,19 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     handler = payg_routes.get(path)
     if not handler:
         return _err(f"unknown PAYG endpoint: {path}", 404)
+
+    # Phone-reputation abuse guard (added 2026-10-10): per-payer hourly cap on
+    # the Twilio-backed endpoint. Runs AFTER the x402 payment settled, so the
+    # abuser already paid for this call — this is purely a cost brake on the
+    # Twilio side, not a billing change. Abuse (payer, IP, timestamp) is in
+    # the log line.
+    if path == "/v1/payg/phone-reputation":
+        _payer   = settlement.get("payer", "") or "unknown-payer"
+        _payg_ip = ((event.get("requestContext") or {}).get("identity") or {}).get("sourceIp") or ""
+        if not _phone_rep_rate_limit_ok(f"phonerep#payer#{_payer}", PHONE_REP_PAYER_HOURLY_CAP):
+            logger.warning("phone-rep rate limited payer=%s ip=%s path=%s",
+                           _payer, _payg_ip, path)
+            return _phone_rep_429(PHONE_REP_PAYER_HOURLY_CAP, "payer address")
 
     params = _body(event)
     try:

@@ -58,6 +58,11 @@ CAUSE_CODES = {
         "kind": "threat",
         "description": "Threat-intel hit: high-risk URL in tool call or result",
     },
+    "SSRF_INTERNAL_URL": {
+        "weight": 88,
+        "kind": "threat",
+        "description": "Tool argument URL targets internal infrastructure (protocol pivoting)",
+    },
     "SECRET_LEAK": {
         "weight": 82,
         "kind": "threat",
@@ -246,6 +251,7 @@ CATEGORY_CAUSE_CODES = {
     "prompt_injection": ["PROMPT_INJECTION"],
     "kit_match": ["KIT_MATCH"],
     "malicious_url": ["MALICIOUS_URL_HIGH"],
+    "ssrf_internal_url": ["SSRF_INTERNAL_URL"],
     "secret_leak": ["SECRET_LEAK"],
     "credential_exfiltration": ["CREDENTIAL_EXFILTRATION"],
     "oauth_tampering": ["OAUTH_TAMPERING"],

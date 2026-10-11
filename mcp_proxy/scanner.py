@@ -18,10 +18,13 @@ Exit codes:
 
 import argparse
 import base64
+import ipaddress
 import json
 import os
 import re
+import socket
 import sys
+import urllib.parse
 
 SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW")
 
@@ -64,6 +67,38 @@ _DANGEROUS_TOOL_SERVERS = {
     "server-terminal": "exposes terminal command execution",
     "server-everything": "exposes a broad toolset including exec",
 }
+
+# Server packages whose tools fetch caller-supplied URLs at runtime.
+# Their tool schemas accept URL-like parameters (url, uri, link,
+# endpoint, path, webhook). Without validation, a caller-supplied
+# internal URL is fetched by the server: protocol pivoting (SSRF),
+# the flaw class disclosed across Google, JPMorgan, Weaviate, Rapid7,
+# France's DINUM, and Tangerang City government in 2026.
+_URL_FETCHING_SERVERS = {
+    "server-fetch": "fetches caller-supplied URLs",
+    "mcp-server-fetch": "fetches caller-supplied URLs",
+    "fetch-mcp": "fetches caller-supplied URLs",
+    "server-curl": "issues caller-supplied HTTP requests",
+    "curl-mcp": "issues caller-supplied HTTP requests",
+    "http-request": "issues caller-supplied HTTP requests",
+    "webhook": "delivers caller-supplied payloads to URLs",
+}
+
+# IPv4 networks that are never public infrastructure. A hardcoded
+# config URL aimed at one of these is a static SSRF indicator.
+_STATIC_INTERNAL_V4 = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("0.0.0.0/8"),
+]
+_STATIC_INTERNAL_SUFFIXES = (
+    ".localhost", ".local", ".internal", ".intranet",
+    ".lan", ".corp", ".home", ".private",
+)
+_CONFIG_URL_RE = re.compile(r"https?://[^\s\"'<>`]+", re.IGNORECASE)
 
 # Built-in advisory list: (package_substring, fixed_version, cve_or_ref, summary)
 # Versions are compared as dot-separated integers.
@@ -248,12 +283,107 @@ def _check_dangerous_tools(server_name, server_cfg, findings):
             break
 
 
+def _static_host_is_internal(url):
+    """True when a config URL points at internal infrastructure.
+
+    No DNS is performed: this is a static pre-deployment check, so
+    only IP literals (including decimal/octal/hex bypass forms),
+    localhost, and private-intranet suffixes are evaluated.
+    """
+    try:
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    except Exception:
+        return False, ""
+    host = host.rstrip(".")
+    if not host:
+        return False, ""
+    if host == "localhost" or host.endswith(_STATIC_INTERNAL_SUFFIXES):
+        return True, host
+    ip = None
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        try:
+            ip = ipaddress.IPv4Address(socket.inet_aton(host))
+        except (OSError, ValueError):
+            return False, ""
+    if isinstance(ip, ipaddress.IPv4Address):
+        internal = any(ip in net for net in _STATIC_INTERNAL_V4)
+    else:
+        internal = ip.is_loopback or ip.is_link_local or ip.is_private
+    return internal, host
+
+
+def _check_potential_ssrf(server_name, server_cfg, findings):
+    """Flag URL-fetching servers whose tools accept unvalidated URLs.
+
+    A static config cannot show the tool schema, so this flags servers
+    whose package identity means their tools take URL-like parameters
+    (url, uri, link, endpoint, path, webhook). Only runtime screening
+    can confirm whether caller input is validated, hence MEDIUM.
+    """
+    command = str(server_cfg.get("command", ""))
+    args = " ".join(str(a) for a in (server_cfg.get("args") or []))
+    blob = (command + " " + args).lower()
+    for pkg, reason in _URL_FETCHING_SERVERS.items():
+        if pkg in blob:
+            findings.append({
+                "severity": "MEDIUM",
+                "server": server_name,
+                "check": "potential_ssrf",
+                "detail": "%s %s. Its tools accept URL-like parameters "
+                           "(url, uri, link, endpoint, path, webhook); a "
+                           "caller-supplied internal URL would be fetched "
+                           "by the server (protocol pivoting / SSRF)."
+                           % (pkg, reason),
+                "remediation": "Validate caller-supplied URLs against an "
+                               "allowlist of public hosts and block private, "
+                               "link-local, and localhost targets. Deploy the "
+                               "RelayShield MCP Proxy Firewall to screen "
+                               "every tool call for internal URLs at runtime.",
+            })
+            break
+
+
+def _check_internal_config_urls(server_name, server_cfg, findings):
+    """Flag hardcoded internal URLs in server config values."""
+    candidates = []
+    if server_cfg.get("url"):
+        candidates.append(("url", str(server_cfg["url"])))
+    for i, arg in enumerate(server_cfg.get("args") or []):
+        candidates.append(("args[%d]" % i, str(arg)))
+    for key, value in (server_cfg.get("env") or {}).items():
+        candidates.append(("env:%s" % key, str(value)))
+    seen = set()
+    for where, value in candidates:
+        for m in _CONFIG_URL_RE.finditer(value):
+            url = m.group(0).rstrip(".,;:!?)")
+            internal, host = _static_host_is_internal(url)
+            if internal and host not in seen:
+                seen.add(host)
+                metadata = host.startswith("169.254.")
+                findings.append({
+                    "severity": "HIGH" if metadata else "MEDIUM",
+                    "server": server_name,
+                    "check": "internal_config_url",
+                    "detail": "%s contains a hardcoded URL aimed at internal "
+                               "infrastructure (host: %s)" % (where, host),
+                    "remediation": "Confirm this server must reach internal "
+                                   "infrastructure. A hardcoded cloud metadata "
+                                   "or intranet URL in config is a static "
+                                   "SSRF indicator; restrict the server to "
+                                   "the hosts it needs.",
+                })
+
+
 _CHECKS = [
     _check_secrets,
     _check_filesystem,
     _check_advisories,
     _check_remote_auth,
     _check_dangerous_tools,
+    _check_potential_ssrf,
+    _check_internal_config_urls,
 ]
 
 

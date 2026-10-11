@@ -16,6 +16,8 @@ import urllib.request
 
 from . import oauth
 from . import confidence as _confidence
+from .path_traversal import screen_tool_paths, POISON_PATH_TRAVERSAL
+from .ssrf_hardening import check_url_with_hardening
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +115,7 @@ _CATEGORY_RANK = {
     POISON_MALICIOUS_URL: 7,
     POISON_KIT_MATCH: 8,
     POISON_SSRF: 9,
+    POISON_PATH_TRAVERSAL: 9,
     POISON_ATTACK_CHAIN: 10,
     POISON_CREDENTIAL_EXFILTRATION: 11,
     POISON_POLICY_APPROVAL: 12,

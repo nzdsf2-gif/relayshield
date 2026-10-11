@@ -10687,3 +10687,63 @@ write to Dave with the evidence. Ask WHO OWNS co-sell for early-stage ISVs, not 
 **Carried, unchanged:** the 2026-10-08 list above (VT fix proof, telemetry Lambda hand deploy, Hudson Rock
 terms, CS Mobile v1.7.0 build blocked on a JDK, Chrome Web Store review state, `support@relayshield.net`
 mailbox, the OpenAI listing's stale figures, `relayshield-signup-api` missing from the invoke policy).
+
+## WHERE 2026-10-11 LEFT THINGS. THE TWILIO "FRAUD" CAUSE IS NOT SETTLED, AND MY FIRST THEORY WAS A COINCIDENCE.
+
+**2026-10-11.** After the PR #49 rate limit, I proposed that FREE-TIER KEYS reached the Twilio-backed
+endpoints (a free key is minted from an email address alone and carries 100 calls, and neither
+`/v1/metered/phone-reputation` nor `/v1/metered/sim-swap` was in `FREE_TIER_EXCLUDED_ENDPOINTS`). **That
+hole was real and is closed, but the claim that it caused the $19.79 rested on one thing: about 14 keys
+times 100 calls is about 1,407.** A number coincidence is a lead, not a finding, and Andrew's own
+investigation then pointed at the Telegram Mini App instead.
+
+**What is established, from the account and the code:**
+* The Mini App page and the widget call only `composite-check`, `link-check`, `wallet-risk` and the
+  watchlist routes. None reaches Twilio. Its only route to Twilio is through the bot it links to.
+* The SIM swap monitor accounted for **393 lookups** in 2026-10-03 to 10-10 (215 runs, 1 to 3 users per
+  run), **not 1,407**. 7 numbers are enrolled now, 1 consented in the window, 0 Telegram-delivered.
+* **215 runs in 7 days is about 31 a day against the documented `rate(4 hours)`, which is 6.** Something
+  ran it more often than its docstring says. The EventBridge list shows `rate(15 minutes)` rules (four
+  enabled, one disabled); which one targets the monitor is not yet read.
+* The figure "1,407" may be a VirusTotal count, not Twilio's. Andrew recalls one script attributing 1,407
+  calls to one source, believed to be the Mini App, which is the VT drain already fixed on 2026-10-08.
+  **Twilio's own usage page for the same dates settles it; nothing in AWS can.**
+
+**The diagnostic hung the first time, and it was a defect this file already recorded.** It counted API
+log lines with `filter-log-events`, which scans every stream. `tools/diagnose_twilio_spend.sh` now uses
+Logs Insights, with a per-day table and the monitor's actual schedule. **A lesson recorded in one file
+is still not a lesson the next file learns, for the fourth time.**
+
+### WAFR (AWS FTR) STATE: SEC DONE, REL ANSWERED, 4 PILLARS LEFT
+
+`tools/wafr_evidence.sh` read the account. The findings that matter, none previously recorded:
+* **Lambda account concurrency limit is 10** (unreserved 10), peak concurrency 10, **427 throttles in 7
+  days.** Reserved concurrency cannot even be set until it is raised. Quota code `L-B99A9384` is from
+  memory and UNVERIFIED; read it before requesting.
+* **11,227 errors against 70,202 invocations (16%)**, not yet split by function.
+* PITR off on 19 of 57 tables, deletion protection off on 50, no AWS Backup plan, no budgets.
+* 8 of 62 log groups have no retention, no X-Ray, no DLQs, one published version and no aliases on the
+  main function, API Gateway has no access logging because no CloudWatch role is set.
+* GuardDuty none, regional WAF none, one AWS Config recorder.
+Answers for REL 1 to 13 are in `wafr_answers_reliability_2026-10-11.md`. **Next: PERF, COST, SUS.**
+
+### BUILT 2026-10-11, ALL ON `claude/tender-cerf-ds0u0d`
+
+* **MCP proxy discovery screening** (`mcp_proxy/discovery.py`): `initialize`, `tools/list`, `prompts/list`
+  and `resources/list` were forwarded untouched, so MCP-2026-008 and 015 could not be seen. Flag-only,
+  fail-open; public `cacheScope` alone is not a finding. Verdicts carry the matching taxonomy entries
+  and mitigations from a generated snapshot (`mcp_proxy/taxonomy.py`, pinned to the JSON by test).
+* **`GET /v1/mcp-taxonomy`**, live, `"count": 9`. Table `relayshield_mcp_taxonomy`, loaded by
+  `tools/load_mcp_taxonomy.py`.
+* **Opt-in proxy telemetry**, off by default. `counts` and `indicators` levels; indicators need an API
+  key, send only public hostnames and a hash, and land as `unreviewed` candidates, **never in the IOC
+  corpus**: an open endpoint's indicator is a claim, not a finding. Table
+  `relayshield_mcp_proxy_telemetry` (not yet created), `tools/mcp_proxy_telemetry_report.py`.
+* **Privacy policy section 12** (Contact is now 13), retention figures pinned to the ingest TTLs by test.
+  **The proxy also sends each upstream server's domain to screening, which the first draft denied; the
+  test now reads `neighbor.py` for it.** `deploy_privacy.yml` is dispatch-only until the live Worker has
+  been diffed once.
+* **Free tier no longer reaches `phone-reputation` or `sim-swap`**; per-key hourly cap is 50.
+* Read-only tools: `diagnose_twilio_spend.sh`, `wafr_evidence.sh`, `lambda_errors_by_function.sh`,
+  `protect_dynamodb_tables.sh` (dry run by default).
+

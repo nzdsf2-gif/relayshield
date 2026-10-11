@@ -1,0 +1,57 @@
+name: Deploy Privacy Policy Worker
+
+# Deploys cloudflare_worker_privacy.js to privacy.relayshield.net.
+#
+# DISPATCH-ONLY ON PURPOSE. Unlike the blog and the Mini App, this Worker had no
+# deploy path until now, so every version that ever went live was pushed by hand,
+# and a hand-deployed Worker is exactly where an uncommitted edit survives. The
+# DRIFT RULE in CLAUDE.md is the most expensive lesson in this repo, and nothing
+# watches Workers for drift. A push trigger would replace the live page on the
+# first merge that touched it, without anybody having read what it replaces.
+#
+# So the first deploy is a deliberate act, after:
+#
+#     sh tools/recover_live_worker.sh relayshield-privacy cloudflare_worker_privacy.js
+#
+# and the diff has been read. Only once it shows the repo copy is the whole truth
+# is it safe to add a `push:` trigger with a `paths:` filter, as deploy_miniapp.yml
+# has.
+#
+# Requires the existing CLOUDFLARE_API_TOKEN repository secret.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-privacy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The page is a template literal holding an entire HTML document, so a
+      # stray backtick in it closes it early. Only a parser sees that.
+      - name: Worker parses
+        run: node --check cloudflare_worker_privacy.js
+
+      # What the policy says about the MCP proxy must match what the code does:
+      # retention figures against the ingest TTLs, the off-by-default claim, and
+      # the list of what is never sent.
+      - name: Policy matches the code
+        run: python3 test_mcp_proxy_privacy.py
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --config wrangler.privacy.toml

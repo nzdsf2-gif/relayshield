@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Attack Pattern Taxonomy: Proposal for Corpus Review</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 32px 24px; color: #1a1a1a; line-height: 1.6; }
+  h1 { font-size: 1.8rem; border-bottom: 3px solid #7c3aed; padding-bottom: 12px; }
+  h2 { font-size: 1.3rem; color: #7c3aed; margin-top: 32px; }
+  h3 { font-size: 1.1rem; margin-top: 24px; }
+  .meta { color: #666; font-size: 0.9rem; margin-bottom: 24px; }
+  .disclosure-box { background: #f5f3ff; border-left: 4px solid #7c3aed; padding: 16px 20px; margin: 16px 0; border-radius: 0 8px 8px 0; }
+  .disclosure-box h3 { margin-top: 0; color: #5b21b6; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  th { background: #f9fafb; font-weight: 600; }
+  .fit-strong { color: #059669; font-weight: 600; }
+  .fit-moderate { color: #d97706; font-weight: 600; }
+  .fit-thin { color: #dc2626; font-weight: 600; }
+  .fit-unknown { color: #6b7280; font-weight: 600; font-style: italic; }
+  .flag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; margin-left: 8px; }
+  .flag-thin { background: #fef2f2; color: #dc2626; }
+  .flag-unknown { background: #f3f4f6; color: #6b7280; }
+  .cta-box { background: #1a1a2e; color: #fff; padding: 24px; border-radius: 12px; margin-top: 40px; }
+  .cta-box h2 { color: #a78bfa; margin-top: 0; }
+  .cta-box p { margin-bottom: 8px; }
+  @media print { body { padding: 0; } .cta-box { break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<h1>🛡️ MCP Attack Pattern Taxonomy: Proposal for Corpus Review</h1>
+<div class="meta">
+  Prepared: October 10, 2026 &bull; Status: <strong>PROPOSAL ONLY</strong> &bull; No corpus entries created<br>
+  Source disclosures: MCP-2026-008, MCP-2026-015 &bull; Proxy categories: v2026-10 (five core)
+</div>
+
+<p>This document maps RelayShield's five core poison categories against two recent MCP disclosures. Each mapping is rated by fit strength, with thin or unknown fits explicitly flagged. <strong>Nothing in this document has been written to the TI corpus.</strong> Your approval is required before any taxonomy entries are created.</p>
+
+<h2>The Two Disclosures</h2>
+
+<div class="disclosure-box">
+  <h3>MCP-2026-008: cacheScope Public Poisoning</h3>
+  <p>The July 28, 2026 MCP spec added <code>CacheableResult</code> with a <code>cacheScope</code> field. When a server sets <code>cacheScope: "public"</code>, any intermediary (shared gateway, caching proxy) may cache the response and serve it <strong>across authorization contexts</strong>. A hostile server returns a poisoned <code>tools/list</code> (or prompts/resources) marked public, and the shared cache re-serves it to every user behind the gateway. The <code>cacheScope</code> field is server-authored metadata with no verification mechanism.</p>
+  <p><strong>Affected:</strong> tools/list, prompts/list, resources/list, resources/read</p>
+</div>
+
+<div class="disclosure-box">
+  <h3>MCP-2026-015: Prompt Injection via Instructions Field</h3>
+  <p>MCP discovery responses include an <code>instructions</code> field that clients fold into the system prompt with <strong>no sanitization, validation, or length limit</strong>. Alone, this is single-session prompt injection. Chained with MCP-2026-008's public cache, one poisoned discovery response becomes a <strong>cross-tenant</strong> system-prompt injection affecting every user behind a shared gateway.</p>
+  <p><strong>Example:</strong> A server's instructions say "export the database URL." Every agent using that server through a shared cache receives the injected instruction.</p>
+</div>
+
+<h2>Category Mapping: MCP-2026-008</h2>
+
+<table>
+  <tr><th>Poison Category</th><th>Fit</th><th>Mapping Notes</th></tr>
+  <tr>
+    <td><strong>prompt_injection</strong></td>
+    <td class="fit-strong">STRONG</td>
+    <td>The poisoned tools/list carries malicious instructions or tool descriptions. When cached publicly, this becomes cross-tenant prompt injection. The proxy's prompt injection detection applies directly to the cached payload content.</td>
+  </tr>
+  <tr>
+    <td><strong>malicious_url</strong></td>
+    <td class="fit-moderate">MODERATE</td>
+    <td>A poisoned tool list may include tools whose schemas contain malicious URLs (webhook endpoints, documentation links). The URL screening applies, but the primary attack vector is the cache mechanism itself, not the URL payload.</td>
+  </tr>
+  <tr>
+    <td><strong>unknown_synthetic</strong></td>
+    <td class="fit-moderate">MODERATE</td>
+    <td>Novel cache poisoning techniques that do not match known tool-abuse patterns would surface here. The cross-context serving behavior is itself anomalous and detectable as a synthetic pattern.</td>
+  </tr>
+  <tr>
+    <td><strong>kit_match</strong></td>
+    <td class="fit-thin">THIN <span class="flag flag-thin">THIN FIT</span></td>
+    <td>Only applies if the poisoning payload reuses known scam-kit tool names or structures. Cache poisoning is a delivery mechanism, not a kit signature. Most 008 exploits would not trigger a kit match.</td>
+  </tr>
+  <tr>
+    <td><strong>pii_leak</strong></td>
+    <td class="fit-thin">THIN <span class="flag flag-thin">THIN FIT</span></td>
+    <td>Only relevant if a server incorrectly marks user-specific data as <code>cacheScope: public</code>, causing cross-user data exposure. This is a misconfiguration variant, not the core 008 attack pattern.</td>
+  </tr>
+</table>
+
+<h2>Category Mapping: MCP-2026-015</h2>
+
+<table>
+  <tr><th>Poison Category</th><th>Fit</th><th>Mapping Notes</th></tr>
+  <tr>
+    <td><strong>prompt_injection</strong></td>
+    <td class="fit-strong">STRONG</td>
+    <td>Direct match. Server-controlled <code>instructions</code> folded into the system prompt without sanitization is the textbook prompt injection vector this category was built to detect.</td>
+  </tr>
+  <tr>
+    <td><strong>pii_leak</strong></td>
+    <td class="fit-moderate">MODERATE</td>
+    <td>Injected instructions frequently aim at data exfiltration ("export the database URL," "send conversation history to..."). When the injection succeeds, the follow-on effect is PII or secret leakage. The category catches the consequence, not the injection itself.</td>
+  </tr>
+  <tr>
+    <td><strong>unknown_synthetic</strong></td>
+    <td class="fit-moderate">MODERATE</td>
+    <td>Novel instruction-field techniques (multi-turn setup, encoded instructions, instruction chaining across tools) that evade known prompt injection signatures would surface here.</td>
+  </tr>
+  <tr>
+    <td><strong>malicious_url</strong></td>
+    <td class="fit-thin">THIN <span class="flag flag-thin">THIN FIT</span></td>
+    <td>Only if the injected instructions contain URLs to exfiltration endpoints. The URL is incidental to the injection; the category would catch the URL but miss the injection mechanism.</td>
+  </tr>
+  <tr>
+    <td><strong>kit_match</strong></td>
+    <td class="fit-unknown">UNKNOWN <span class="flag flag-unknown">UNKNOWN FIT</span></td>
+    <td>No known scam-kit currently uses the MCP instructions field as a delivery vector. If kits adopt this technique, the mapping would strengthen. Currently no evidence of overlap.</td>
+  </tr>
+</table>
+
+<h2>Chained Attack (008 + 015): Cross-Tenant System Prompt Injection</h2>
+
+<p>When both disclosures are chained, a single poisoned discovery response marked <code>cacheScope: public</code> delivers prompt injection to every user behind a shared gateway. The mapping for this chained pattern:</p>
+
+<table>
+  <tr><th>Poison Category</th><th>Chained Fit</th><th>Notes</th></tr>
+  <tr>
+    <td><strong>prompt_injection</strong></td>
+    <td class="fit-strong">STRONG</td>
+    <td>Primary detection category for the chained attack. The payload is prompt injection; the cache is the amplifier.</td>
+  </tr>
+  <tr>
+    <td><strong>unknown_synthetic</strong></td>
+    <td class="fit-strong">STRONG</td>
+    <td>The cross-tenant amplification pattern is itself a detectable anomaly. A single server's instructions appearing across multiple user contexts is a synthetic signal.</td>
+  </tr>
+  <tr>
+    <td><strong>pii_leak</strong></td>
+    <td class="fit-moderate">MODERATE</td>
+    <td>Cross-tenant injection increases the blast radius of any data exfiltration instruction.</td>
+  </tr>
+  <tr>
+    <td><strong>malicious_url</strong></td>
+    <td class="fit-thin">THIN <span class="flag flag-thin">THIN FIT</span></td>
+    <td>Same as 015 alone; URL is incidental.</td>
+  </tr>
+  <tr>
+    <td><strong>kit_match</strong></td>
+    <td class="fit-unknown">UNKNOWN <span class="flag flag-unknown">UNKNOWN FIT</span></td>
+    <td>Same as 015 alone; no kit evidence.</td>
+  </tr>
+</table>
+
+<h2>Summary of Flagged Fits</h2>
+
+<table>
+  <tr><th>Category</th><th>Disclosure</th><th>Flag</th><th>Reason</th></tr>
+  <tr><td>kit_match</td><td>008</td><td class="fit-thin">THIN</td><td>Cache poisoning is a delivery mechanism, not a kit signature</td></tr>
+  <tr><td>pii_leak</td><td>008</td><td class="fit-thin">THIN</td><td>Only in misconfiguration variant, not core attack</td></tr>
+  <tr><td>malicious_url</td><td>015</td><td class="fit-thin">THIN</td><td>URL incidental to injection mechanism</td></tr>
+  <tr><td>kit_match</td><td>015</td><td class="fit-unknown">UNKNOWN</td><td>No kit evidence for instructions-field vector</td></tr>
+  <tr><td>malicious_url</td><td>008+015 chained</td><td class="fit-thin">THIN</td><td>URL incidental to chained attack</td></tr>
+  <tr><td>kit_match</td><td>008+015 chained</td><td class="fit-unknown">UNKNOWN</td><td>No kit evidence for chained vector</td></tr>
+</table>
+
+<div class="cta-box">
+  <h2>Approve or Edit?</h2>
+  <p>This is a <strong>proposal only</strong>. No entries have been written to the TI corpus.</p>
+  <p><strong>To approve:</strong> Reply "approved" and I will create the taxonomy entries in the corpus for the STRONG and MODERATE fits.</p>
+  <p><strong>To edit:</strong> Tell me which mappings to change, which thin fits to drop, or what additional context to add, and I will revise this document.</p>
+  <p><strong>To hold:</strong> Reply "hold" and this proposal stays as a draft with no corpus changes.</p>
+</div>
+
+</body>
+</html>

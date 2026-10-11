@@ -147,6 +147,12 @@ def legit_oauth_response():
 # Demo helpers.
 # ---------------------------------------------------------------------------
 
+def path_traversal_attack():
+    return {"repo_path": "../../etc/passwd"}
+
+def ssrf_redirect_attack():
+    return {"url": "https://example.com/redirect-to-metadata"}
+
 def stream_result_checks(screener, result_obj):
     """Run each result check visibly, then return the real verdict.
 

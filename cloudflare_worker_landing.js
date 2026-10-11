@@ -267,7 +267,7 @@ const HTML = `<!DOCTYPE html>
 
     <div class="subsec">
       <h3><span class="accent">Threat Intelligence APIs</span></h3>
-      <p class="tagline">The corpus behind the verdicts. 700K+ indicators, 8.7M citations.</p>
+      <p class="tagline">OSINT-driven proactive defense. We monitor threat actor channels directly and acquire fresh intelligence, detecting attacks as they form, before the damage is done: account drain, data exfiltration, ransomware, LLMjacking. A proactive response layer for enterprises and MSPs.</p>
     </div>
     <div class="grid">
       <div class="card" data-drill="ti">
@@ -302,7 +302,7 @@ const HTML = `<!DOCTYPE html>
 
     <div class="subsec">
       <h3><span class="accent">Threat Monitoring</span></h3>
-      <p class="tagline">Know when you are exposed. Act before it is too late.</p>
+      <p class="tagline">24x7 identity threat monitoring, detection, and proactive response for individuals and SMBs.</p>
     </div>
     <div class="grid">
       <div class="card" data-drill="msg">

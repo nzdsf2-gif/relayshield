@@ -276,3 +276,26 @@ Try the new demo scenarios (10-12) in the interactive dashboard:
 python3 -m mcp_proxy.dashboard --demo
 # open http://127.0.0.1:8091/_rs/dashboard
 ```
+
+## Opt-in telemetry
+
+**Off by default.** With `MCP_PROXY_TELEMETRY` unset the proxy starts no reporting
+code and sends nothing beyond its screening requests. Set it deliberately:
+
+| Setting | What is sent |
+|---|---|
+| `counts` | Verdict counts by threat category, taxonomy entry and kind, an anonymous random install id, the proxy mode and the taxonomy version. |
+| `indicators` | Counts, plus the **public** hostname of a server that returned a flagged discovery or result response and a SHA-256 of that response. Needs `RELAYSHIELD_API_KEY`; without one it falls back to `counts`. |
+
+**Never sent, at either level:** tool arguments, tool names, agent identities,
+client IPs, response or instruction text, audit entries, or any private, internal
+or local host. Your own policy denials are not reported. An argument-level block
+is a count only.
+
+Other settings: `MCP_PROXY_TELEMETRY_URL`, `MCP_PROXY_TELEMETRY_INTERVAL` (seconds,
+default 3600, minimum 60), `MCP_PROXY_TELEMETRY_ID_FILE` (default
+`~/.relayshield/proxy_install_id`). A failed send is dropped; reporting can never
+delay or change a verdict. The privacy policy section 12 states the same terms.
+
+Reported hostnames are **unverified claims** on our side. They are held as
+candidates and are not added to the threat intelligence corpus unless confirmed.

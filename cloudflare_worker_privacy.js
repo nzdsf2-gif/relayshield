@@ -21,7 +21,7 @@ export default {
   <h1>Privacy Policy</h1>
   <p class="meta">Last updated: October 2026</p>
 
-  <p>RelayShield ("we", "us", or "our") operates relayshield.net, the RelayShield API, the CryptoShield mobile application, our Discord and Telegram bots, and the RelayShield Order Screening Shopify app. RelayShield is based in Massachusetts, United States. This policy explains how we collect, use, and protect your information.</p>
+  <p>RelayShield ("we", "us", or "our") operates relayshield.net, the RelayShield API, the CryptoShield mobile application, our Discord and Telegram bots, the RelayShield Order Screening Shopify app, and the RelayShield MCP proxy. RelayShield is based in Massachusetts, United States. This policy explains how we collect, use, and protect your information.</p>
 
   <h2>1. Information We Collect</h2>
   <p><strong>Account &amp; API:</strong> When you sign up, we collect the email address you provide, plus usage data (API call counts, timestamps, endpoint usage). We do not collect payment card data, billing address, or any other checkout details directly. Those are collected and processed entirely by Stripe, our payment processor, and are never transmitted to or stored in RelayShield's systems.</p>
@@ -72,7 +72,7 @@ export default {
   <p><strong>What we do with it.</strong> The buyer's email is sent to RelayShield's API for scoring. The score and its reasons are written back to your store as an order tag (relayshield-high-risk or relayshield-review) and a timeline note. The app never blocks, cancels, or refunds orders, and it never calls an order safe.</p>
   <p><strong>What we store.</strong> Buyer emails are SHA-256 hashed before storage; raw email addresses are never persisted. Screening records (order reference, score, level, timestamp) are kept to power the in-app dashboard history.</p>
   <p><strong>What we do not do.</strong> We do not use order or buyer data for any purpose other than scoring your orders. We do not sell it or share it with third parties for marketing.</p>
-  <p><strong>Your rights.</strong> Shopify's mandatory GDPR webhooks are supported: a customers/redact or shop/redact request deletes the stored records for that customer or shop. You may also contact us at any time at the address in section 12.</p>
+  <p><strong>Your rights.</strong> Shopify's mandatory GDPR webhooks are supported: a customers/redact or shop/redact request deletes the stored records for that customer or shop. You may also contact us at any time at the address in section 13.</p>
 
   <h2>7. Data Retention</h2>
   <p>API logs are retained for 90 days and then automatically deleted. The identifiers you submit for screening, such as an email address or phone number, are not written to those logs in a readable form: they are replaced with a one-way hash before anything is recorded. Account data is retained until you request deletion. An enrolled mobile number and its carrier history are retained only while the number stays enrolled, and are deleted when you remove it. Wallet addresses stored on-device are under your control and can be deleted at any time from the app.</p>
@@ -93,7 +93,21 @@ export default {
   <p><strong>How we store it.</strong> Your check history is stored locally in your browser (via browser storage) only. We do not have access to it; you can delete it by clearing browser data or removing the extension. SHA-256 hashes of submitted URLs and wallet addresses may be retained in our threat-intelligence corpus to improve detection; hashes cannot be reversed to recover the original data. We do not store raw email addresses, raw URLs, or raw wallet addresses beyond the duration of your check.</p>
   <p><strong>How we share it.</strong> We do not sell, rent, or share extension data with third parties for marketing or any other purpose. Screening requests pass through our infrastructure providers (Cloudflare, AWS) as described in section 3. We may disclose data if required by valid legal process.</p>
 
-  <h2>12. Contact</h2>
+  <h2>12. MCP Proxy (RelayShield MCP Firewall)</h2>
+  <p>The RelayShield MCP proxy is software that you run yourself, between your AI agents and the MCP servers they connect to. We do not operate it, and your agent traffic passes through your own infrastructure, not ours.</p>
+  <p><strong>What stays on your side.</strong> The proxy keeps its own audit trail on the machine where you run it. We do not receive that audit trail, your tool arguments, your tool names, your agent identities or the content of any response, except as described below.</p>
+  <p><strong>Screening requests.</strong> To screen traffic, the proxy sends links and domains it finds in that traffic, and the address of each MCP server it connects to, to our API and receives a verdict. We handle those requests like any other API request, as described in section 7.</p>
+  <p><strong>Optional telemetry, off by default.</strong> The proxy sends us nothing else unless you turn telemetry on, using a setting you choose deliberately. With telemetry off, nothing in this section applies and the proxy runs no reporting code. There are two levels:</p>
+  <ul>
+    <li><strong>Counts.</strong> How many times each kind of threat verdict occurred, by threat category and by the name of the known attack pattern it matched, together with a random identifier for your installation, the proxy setting and the version of our attack pattern list. Counts for a verdict triggered by what an agent sent are reported as a number only.</li>
+    <li><strong>Indicators.</strong> Everything in Counts, plus, when a server returned a response the proxy flagged, the public hostname of that server and a one-way hash of the response. This level requires your RelayShield API key, so that a report can be attributed to an account. We store only a one-way hash of the key alongside the report.</li>
+  </ul>
+  <p><strong>What is never sent, at either level.</strong> Tool arguments, tool names, agent identities, client IP addresses, the content of any response or instruction, audit entries, or any private, internal or local hostname or address. Your own policy decisions, such as a tool you chose to deny, are not reported. The installation identifier is generated at random on your machine and is not derived from your machine, your account or anything else. The hash cannot be reversed to recover the response.</p>
+  <p><strong>How we use it.</strong> Counts are used in aggregate to understand which attacks are occurring and to improve the proxy and our attack pattern list. A reported hostname is treated as an unverified claim from one source. It is not added to our threat intelligence corpus, and it is not shared with anyone, unless we have independently confirmed it. We do not sell this data and we do not use it for advertising or profiling.</p>
+  <p><strong>Retention.</strong> Count reports are deleted automatically after 180 days. Reported hostname claims are deleted automatically after 365 days unless we have independently confirmed them, in which case they are handled as threat intelligence rather than as personal data.</p>
+  <p><strong>Control.</strong> Turning telemetry off stops reporting immediately. To have reports deleted, email us the installation identifier stored on your machine and we will delete the reports linked to it. Data is stored in the United States, as described in section 9.</p>
+
+  <h2>13. Contact</h2>
   <p><a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
 
   <hr>

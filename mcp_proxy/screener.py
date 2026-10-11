@@ -600,6 +600,27 @@ class Screener:
 
     def screen_tool_call(self, tool_name: str, arguments: dict) -> dict:
         """Full screening for a tools/call invocation."""
+        # Path traversal: check raw arguments before indicator extraction.
+        if getattr(self, 'path_traversal_enabled', True):
+            ws_root = getattr(self, 'workspace_root', '/workspace')
+            pt_results = screen_tool_paths(arguments, workspace_root=ws_root)
+            for r in pt_results:
+                if r.verdict == "block":
+                    scored = _confidence.score_verdict("BLOCK", [{
+                        "code": "PATH_TRAVERSAL",
+                        "detail": "; ".join(r.reasons),
+                    }])
+                    return {
+                        "verdict": "block",
+                        "level": "high",
+                        "score": 95,
+                        "reasons": r.reasons,
+                        "poison_category": POISON_PATH_TRAVERSAL,
+                        "screened": {"arguments": arguments},
+                        "confidence": scored["confidence"],
+                        "cause_codes": scored["cause_codes"],
+                        "tool_name": tool_name,
+                    }
         indicators = extract_indicators(arguments)
         if self.oauth_screening_enabled:
             oauth_verdict = self._screen_oauth_arguments(indicators)

@@ -342,7 +342,7 @@ const HTML = `<!DOCTYPE html>
         <h3>Business Monitoring</h3>
         <p>Team threat monitoring for sole proprietors, freelancers, and teams up to 10. Domain and brand monitoring, contractor and employee seats, delivered over Telegram and WhatsApp.</p>
         <div class="links">
-          <a class="btn btn-primary btn-sm" href="#" onclick="window.closeModal();document.querySelector('[data-tab="pricing"]').click();setTimeout(function(){var e=document.getElementById('business-starter-card');if(e){e.scrollIntoView({behavior:'smooth',block:'center'})}},600);return false;">See one-click plans</a>
+          
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>

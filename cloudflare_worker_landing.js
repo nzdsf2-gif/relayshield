@@ -533,10 +533,10 @@ const HTML = `<!DOCTYPE html>
     <div>RelayShield LLC</div>
     <div class="foot-links">
       <a href="https://blog.relayshield.net">Blog</a>
-      <a href="https://mastodon.social/@relayshield">Mastodon</a>
+      <a href="https://infosec.exchange/@relayshieldadmin">Mastodon</a>
       <a href="https://www.linkedin.com/company/112663616/admin/dashboard/">LinkedIn</a>
       <a href="https://www.facebook.com/profile.php?id=61590625257695">Facebook</a>
-      <a href="https://www.promptfrenzy.com/ai-tools/relayshield">Directory</a>
+      <a href="https://www.promptfrenzy.com/directory" rel="noopener" target="_blank" title="Featured on PromptFrenzy AI Directory"><img src="https://www.promptfrenzy.com/badges/directory-mono-light.svg" alt="Featured on PromptFrenzy AI Directory" width="120" height="24" loading="lazy" /></a>
       <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a>
       <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>
     </div>

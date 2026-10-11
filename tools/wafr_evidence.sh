@@ -3,7 +3,7 @@
 # (Reliability, Performance Efficiency, Cost Optimization, Sustainability) ask for,
 # so each answer is ticked from evidence and never from memory.
 #
-#   AWS_PROFILE=relayshield sh tools/wafr_evidence.sh 2>&1 | tee /tmp/wafr_evidence.txt
+#   AWS_PROFILE=relayshield sh tools/wafr_evidence.sh 2>&1 | tee ~/wafr_evidence.txt
 #
 # Nothing here writes, creates or changes anything. It never prints Lambda
 # environment variables (they carry secrets) or secret values: it selects named

@@ -499,7 +499,7 @@ const HTML = `<!DOCTYPE html>
 <section class="block panel" id="contact" data-panel="contact">
   <div class="wrap">
     <div class="sec-head">
-      <h2>Con<span class="accent">tact</span></h2>
+      <h2>Contact</h2>
       <p>Partnerships, enterprise, press, or just questions.</p>
     </div>
     <div class="contact-grid">
@@ -603,7 +603,29 @@ const HTML = `<!DOCTYPE html>
     }
   }
   for (var i = 0; i < tabs.length; i++) {
-    tabs[i].addEventListener('click', function () { activate(this.getAttribute('data-tab')); });
+    (function(tab) {
+      tab.addEventListener('click', function () {
+        var name = tab.getAttribute('data-tab');
+        // Update tabs
+        for (var a = 0; a < tabs.length; a++) {
+          tabs[a].classList.toggle('active', tabs[a] === tab);
+        }
+        // Update panels - hide all, show matching
+        var allPanels = document.querySelectorAll('[data-panel]');
+        for (var b = 0; b < allPanels.length; b++) {
+          var p = allPanels[b];
+          if (p.getAttribute('data-panel') === name) {
+            p.classList.add('active');
+            p.style.display = 'block';
+          } else {
+            p.classList.remove('active');
+            p.style.display = 'none';
+          }
+        }
+        // Scroll to top of content
+        window.scrollTo({top: 0, behavior: 'smooth'});
+      });
+    })(tabs[i]);
   }
   var gotoLinks = document.querySelectorAll('[data-goto-tab]');
   for (var k = 0; k < gotoLinks.length; k++) {

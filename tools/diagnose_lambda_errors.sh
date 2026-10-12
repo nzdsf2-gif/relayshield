@@ -23,6 +23,7 @@ REGION=us-east-1
 ACCOUNT=239677749008
 FN="$1"
 DAYS="${DAYS:-7}"
+WIDTH="${WIDTH:-300}"
 [ -n "$FN" ] || { echo "usage: $0 <function-name>   (for example relayshield-api)" >&2; exit 2; }
 export AWS_PAGER=""
 aws() { command aws --profile "$PROFILE" --region "$REGION" --no-cli-pager "$@"; }
@@ -83,11 +84,30 @@ if not rows: print('   none recognised: see the recent lines below')
 for r in rows: print(f\"   {val(r,'n'):>7}  {val(r,'kind')}\")
 "
 
-show "recent error lines (5, cut to 300 characters)" \
+show "recent error lines (5, cut to $WIDTH characters; WIDTH=2000 shows more)" \
   'filter @message like /ERROR|Traceback|Unhandled error|Task timed out/ | fields @timestamp, @message | sort @timestamp desc | limit 5' \
   "
 if not rows: print('   none')
-for r in rows: print('   ' + val(r,'@timestamp')[:19] + '  ' + ' '.join(val(r,'@message').split())[:300])
+for r in rows: print('   ' + val(r,'@timestamp')[:19] + '  ' + ' '.join(val(r,'@message').split())[:int('$WIDTH')])
+"
+
+show "INIT FAILURES (the function could not start): which module, and exactly when" \
+  'filter @message like /Runtime\./ | parse @message /(?<kind>Runtime\.[A-Za-z]+)/ | parse @message /No module named .(?<missing>[A-Za-z0-9_.]+)/ | parse @message /Syntax error in module .(?<synmod>[A-Za-z0-9_.]+)/ | stats count(*) as n, min(@timestamp) as first, max(@timestamp) as last by kind, missing, synmod | sort n desc | limit 10' \
+  "
+if not rows: print('   none: no Runtime.* init failure in the window')
+for r in rows:
+    print(f\"   {val(r,'n'):>7}  {val(r,'kind')}  missing={val(r,'missing') or '-'}  syntax-in={val(r,'synmod') or '-'}\")
+    print(f\"            first {val(r,'first')[:19]}   last {val(r,'last')[:19]}\")
+"
+
+show "init failures per hour, newest 24 hours with any" \
+  'filter @message like /Runtime\.(ImportModuleError|UserCodeSyntaxError)/ | stats count(*) as n by bin(1h)' \
+  "
+rows=sorted(rows, key=lambda r: [f['value'] for f in r if f['field'].startswith('bin')][0])[-24:]
+if not rows: print('   none')
+for r in rows:
+    h=[f['value'] for f in r if f['field'].startswith('bin')][0][:16]
+    print(f\"   {h}  {val(r,'n'):>7}\")
 "
 
 printf '\n== how often is it invoked, and is the invoke count about 3x its schedule?\n'

@@ -99,7 +99,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         "detail": "Tool argument URL targets internal infrastructure"},
                     3: {"name": "Kit fingerprint", "tool": "render_widget",
                         "args": {"widget": "checkout"},
-                        "verdict": "FLAG", "category": "kit_match",
+                        "verdict": "BLOCK", "category": "kit_match",
                         "cause_codes": ["KIT_FINGERPRINT_MATCH"],
                         "detail": "Response matches known phishing kit fingerprint"},
                     4: {"name": "PII leak", "tool": "get_customer",

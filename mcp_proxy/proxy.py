@@ -77,6 +77,43 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        # Pre-deployment scanner endpoint
+        if self.path == "/_rs/scan":
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length).decode('utf-8')
+                data = json.loads(body)
+                url = data.get('url', '')
+                if not url:
+                    self._send_json({"error": "URL required"}, 400)
+                    return
+                from .tool_scanner import scan_tools, check_authentication
+                import urllib.request
+                # Check for unauthenticated access (CVE-2026-82456)
+                auth_finding = check_authentication(url)
+                # Fetch tools/list
+                req_data = json.dumps({
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "tools/list", "params": {}
+                }).encode('utf-8')
+                req = urllib.request.Request(
+                    url, data=req_data,
+                    headers={'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream'}
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                tools = result.get('result', {}).get('tools', [])
+                findings = scan_tools(tools, source=url)
+                if auth_finding:
+                    findings.insert(0, auth_finding)
+                self._send_json({
+                    "url": url,
+                    "tool_count": len(tools),
+                    "findings": findings
+                })
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
         cfg: ProxyConfig = self.server.cfg
         screener: Screener = self.server.screener
 

@@ -347,6 +347,32 @@ def _servers_from_config(path):
     return servers, None
 
 
+def check_authentication(url, timeout=15.0):
+    """Check if server accepts unauthenticated tools/list (CVE-2026-82456 pattern)."""
+    import urllib.request
+    import json
+    req_data = json.dumps({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        url, data=req_data,
+        headers={'Content-Type': 'application/json'}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            if 'result' in result and 'tools' in result.get('result', {}):
+                return {
+                    "severity": "CRITICAL",
+                    "tool": "*",
+                    "message": "Server accepts unauthenticated tools/list calls. "
+                               "Anyone can enumerate tools without credentials "
+                               "(CVE-2026-82456 pattern)."
+                }
+    except Exception:
+        pass
+    return None
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Scan MCP server tool definitions for poisoning "

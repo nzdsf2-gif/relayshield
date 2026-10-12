@@ -208,6 +208,49 @@
   <button class="spd-btn active" id="spd-normal" onclick="setSpeed(1200)">Normal</button>
   <button class="spd-btn" id="spd-fast" onclick="setSpeed(500)">Fast</button>
 </div>
+<div class="scan-section" style="margin-bottom: 18px; padding: 16px; background: #161b22; border: 1px solid #30363d; border-radius: 8px;">
+    <h3 style="margin-bottom: 10px; font-size: 16px;">Pre-Deployment Scanner</h3>
+    <p style="color: #8b949e; font-size: 13px; margin-bottom: 10px;">Scan an MCP server's tool definitions before connecting your agent.</p>
+    <div style="display: flex; gap: 8px;">
+      <input id="scan-url" type="text" placeholder="https://mcp-server.example.com/mcp"
+             style="flex: 1; padding: 8px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3;">
+      <button onclick="runScan()" style="padding: 8px 16px; background: #238636; border: none; border-radius: 6px; color: white; cursor: pointer;">Scan</button>
+    </div>
+    <div id="scan-results" style="margin-top: 12px; font-size: 13px;"></div>
+  </div>
+  <script>
+  async function runScan() {
+    const url = document.getElementById('scan-url').value;
+    const results = document.getElementById('scan-results');
+    results.innerHTML = '<span style="color: #8b949e;">Scanning...</span>';
+    try {
+      const resp = await fetch('/_rs/scan', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url})
+      });
+      const data = await resp.json();
+      if (data.error) {
+        results.innerHTML = '<span style="color: #f85149;">Error: ' + data.error + '</span>';
+      } else {
+        let html = '<div style="color: #3fb950;">Scanned ' + data.tool_count + ' tools from ' + data.url + '</div>';
+        if (data.findings && data.findings.length > 0) {
+          html += '<div style="margin-top: 8px;">';
+          data.findings.forEach(f => {
+            const color = f.severity === 'CRITICAL' ? '#f85149' : f.severity === 'HIGH' ? '#d29922' : '#8b949e';
+            html += '<div style="color: ' + color + '; margin: 4px 0;">[' + f.severity + '] ' + f.tool + ': ' + f.message + '</div>';
+          });
+          html += '</div>';
+        } else {
+          html += '<div style="color: #8b949e; margin-top: 8px;">No issues found.</div>';
+        }
+        results.innerHTML = html;
+      }
+    } catch (e) {
+      results.innerHTML = '<span style="color: #f85149;">Error: ' + e.message + '</span>';
+    }
+  }
+  </script>
 <div class="scenarios" id="scn-grid"></div>
 <div id="status"></div>
 

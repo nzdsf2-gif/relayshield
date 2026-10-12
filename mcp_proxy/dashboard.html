@@ -68,9 +68,13 @@
   #verdict-badge.allow { background: #1a3a1a; color: #3fb950;
                          border: 2px solid #3fb950; }
   #verdict-badge.block { background: #f85149; color: #0d1117;
+  #verdict-badge.flag { background: #d29922; color: #0d1117;
                          border: 2px solid #ff7b72;
                          box-shadow: 0 0 18px rgba(248,81,73,0.55); }
   #verdict-badge.quarantine { background: #3a2e1a; color: #f0883e;
+  #w-proxy-server.flagged { stroke: #d29922 !important; stroke-width: 3px; }
+  .flagged { border-color: #d29922 !important; }
+  .warn { border-color: #d29922 !important; color: #d29922 !important; }
                               border: 2px solid #f0883e; }
   #verdict-badge.idle { background: #21262d; color: #8b949e;
                         border: 2px solid #30363d; }
@@ -251,6 +255,10 @@
     }
   }
   </script>
+<div style="margin-bottom: 10px;">
+  <button onclick="location.reload()" style="padding: 8px 16px; background: #30363d; border: 1px solid #484f58; border-radius: 6px; color: #e6edf3; cursor: pointer;">Refresh Demo</button>
+  <span style="color: #8b949e; font-size: 12px; margin-left: 8px;">Reset the demo state between scenarios</span>
+</div>
 <div class="scenarios" id="scn-grid"></div>
 <div id="status"></div>
 
@@ -284,9 +292,10 @@
       </div>
       <div id="volume-chart"></div>
       <div id="policy-modal">
-        <div style="font-size:12px;color:#8b949e;margin-bottom:8px">
-          Policy decisions are made locally before any network call.
-          No call path is shown because nothing leaves the proxy.</div>
+        <div id="policy-callout" style="display: none; margin: 12px 0; padding: 12px; background: #3a2e1a; border: 1px solid #d29922; border-radius: 8px;">
+          <strong style="color: #d29922; font-size: 13px;">LOCAL POLICY DECISION</strong><br>
+          <span style="color: #8b949e; font-size: 12px;">Decided locally before any network call. Nothing leaves the proxy.</span>
+        </div>
         <h3 style="font-size:13px;margin:12px 0 4px">Demo policy (YAML)</h3>
         <div class="pm-yaml" id="pm-yaml"></div>
         <h3 style="font-size:13px;margin:12px 0 4px">Evaluation parameters</h3>
@@ -294,6 +303,9 @@
       </div>
     </div>
 
+    <div style="margin: 12px 0; padding: 10px; background: #21262d; border-left: 3px solid #d29922; border-radius: 4px;">
+      <span style="color: #8b949e; font-size: 12px;">Note: Some scenarios are decided by local policy before any network call. In these cases, no end-to-end call path is shown.</span>
+    </div>
     <div class="card">
       <h2>Verdict</h2>
       <div><span id="verdict-badge" class="idle">STANDBY</span></div>
@@ -389,6 +401,9 @@ const SCENARIOS = [
   {id:12, name:"Lateral movement", desc:"Rapid calls across 5 servers: probe flagged."},
   {id:13, name:"Policy deny", desc:"Admin policy blocks exec_shell for this agent."},
   {id:14, name:"Policy approval", desc:"Sensitive tool flagged for operator approval."},
+  {id:15, name:"SSRF redirect chain", desc:"URL redirects to internal infrastructure."},
+  {id:16, name:"DNS rebinding", desc:"DNS rebinds to 127.0.0.1 mid-fetch."},
+  {id:17, name:"Deep document $ref", desc:"OpenAPI $ref points to internal host."},
 ];
 
 const grid = document.getElementById('scn-grid');
@@ -461,6 +476,10 @@ const CAT_DESC = {
   attack_chain: "Known malicious tool sequence detected: exfiltration, lateral movement, or escalation.",
   policy_deny: "Administrator policy denied this tool call. Deterministic, no TI lookup needed.",
   policy_approval: "Tool requires operator approval before it may run. Held for human review.",
+  ssrf_internal_url: "Tool argument URL targets internal infrastructure.",
+  ssrf_redirect_chain: "Redirect chain leads to internal infrastructure.",
+  dns_rebinding: "DNS resolved to external then rebinding to internal IP.",
+  embedded_url_ssrf: "Embedded URL in document targets internal infrastructure.",
 };
 
 function setSpeed(ms) {
@@ -662,8 +681,16 @@ async function runScenario(id) {
   // Final verdict visuals
   const v = (result.verdict || 'ALLOW').toUpperCase();
   const badge = document.getElementById('verdict-badge');
-  badge.textContent = v === 'QUARANTINE' ? 'QUARANTINED' : (v === 'BLOCK' ? 'BLOCKED' : 'ALLOWED');
-  badge.className = v === 'QUARANTINE' ? 'quarantine' : v.toLowerCase();
+  badge.textContent = v === 'QUARANTINE' ? 'QUARANTINED' : (v === 'BLOCK' ? 'BLOCKED' : (v === 'FLAG' ? 'FLAGGED' : 'ALLOWED'));
+  if (v === 'BLOCK') {
+    badge.style.cssText = 'display:inline-block;font-size:28px;font-weight:800;background:#f85149;color:#0d1117;padding:8px 24px;border-radius:8px;';
+  } else if (v === 'FLAG') {
+    badge.style.cssText = 'display:inline-block;font-size:28px;font-weight:800;background:#d29922;color:#0d1117;padding:8px 24px;border-radius:8px;';
+  } else if (v === 'QUARANTINE') {
+    badge.style.cssText = 'display:inline-block;font-size:28px;font-weight:800;background:#3a2e1a;color:#f0883e;padding:8px 24px;border-radius:8px;';
+  } else {
+    badge.style.cssText = 'display:inline-block;font-size:28px;font-weight:800;background:#1a3a1a;color:#3fb950;padding:8px 24px;border-radius:8px;';
+  }
   const cat = result.poison_category || 'clean';
   const cb = document.getElementById('cat-badge');
   cb.textContent = cat;
@@ -717,6 +744,9 @@ async function runScenario(id) {
   if (v === 'BLOCK') {
     document.getElementById('w-proxy-server').classList.add('blocked');
     document.getElementById('n-proxy').classList.add('bad');
+  } else if (v === 'FLAG') {
+    document.getElementById('w-proxy-server').classList.add('flagged');
+    document.getElementById('n-proxy').classList.add('warn');
   } else if (v === 'QUARANTINE') {
     document.getElementById('n-server').classList.add('bad');
     document.getElementById('w-proxy-server').classList.add('blocked');

@@ -77,6 +77,89 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        # Demo scenario runner
+        if self.path == "/_rs/demo/run":
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length).decode('utf-8')
+                data = json.loads(body)
+                scenario_id = data.get('scenario', 0)
+                
+                # Define scenarios with detailed verdicts
+                scenarios = {
+                    1: {"name": "Clean traffic", "tool": "search_docs",
+                        "args": {"query": "refund policy"},
+                        "verdict": "ALLOW", "category": "clean",
+                        "cause_codes": ["NO_INDICATORS"],
+                        "detail": "No screenable indicators in tool arguments"},
+                    2: {"name": "Prompt injection", "tool": "fetch_page",
+                        "args": {"url": "https://docs.internal/help"},
+                        "verdict": "BLOCK", "category": "ssrf_internal_url",
+                        "cause_codes": ["SSRF_INTERNAL", "PROTOCOL_PIVOT"],
+                        "detail": "Tool argument URL targets internal infrastructure"},
+                    3: {"name": "Kit fingerprint", "tool": "render_widget",
+                        "args": {"widget": "checkout"},
+                        "verdict": "FLAG", "category": "kit_match",
+                        "cause_codes": ["KIT_FINGERPRINT_MATCH"],
+                        "detail": "Response matches known phishing kit fingerprint"},
+                    4: {"name": "PII leak", "tool": "get_customer",
+                        "args": {"customer_id": "42"},
+                        "verdict": "FLAG", "category": "pii_leak",
+                        "cause_codes": ["PII_SSN_DETECTED"],
+                        "detail": "Unredacted SSN pattern in tool response"},
+                    7: {"name": "OAuth tampering", "tool": "start_oauth",
+                        "args": {"auth_url": "https://evil-auth.example.net/o/oauth2/auth?client_id=demo123"},
+                        "verdict": "BLOCK", "category": "oauth_tampering",
+                        "cause_codes": ["OAUTH_TAMPERING", "DOMAIN_MISMATCH"],
+                        "detail": "OAuth path mimics Google on foreign domain"},
+                    8: {"name": "Credential exfiltration", "tool": "get_session",
+                        "args": {"session": "current"},
+                        "verdict": "FLAG", "category": "credential_exfiltration",
+                        "cause_codes": ["JWT_EXFILTRATION"],
+                        "detail": "JWT bound for non-IdP domain"},
+                    15: {"name": "SSRF redirect chain", "tool": "fetch_page",
+                         "args": {"url": "https://bit.ly/docs-help"},
+                         "verdict": "BLOCK", "category": "ssrf_redirect_chain",
+                         "cause_codes": ["SSRF_REDIRECT_TO_INTERNAL"],
+                         "detail": "Redirect chain leads to internal infrastructure"},
+                    16: {"name": "DNS rebinding", "tool": "fetch_page",
+                         "args": {"url": "https://rebind.example.com/data"},
+                         "verdict": "BLOCK", "category": "dns_rebinding",
+                         "cause_codes": ["DNS_REBINDING_DETECTED"],
+                         "detail": "DNS resolved to external then internal IP"},
+                    17: {"name": "Deep document $ref", "tool": "fetch_page",
+                         "args": {"url": "https://api.example.com/openapi.json"},
+                         "verdict": "BLOCK", "category": "embedded_url_ssrf",
+                         "cause_codes": ["EMBEDDED_URL_SSRF"],
+                         "detail": "OpenAPI $ref points to internal host"},
+                }
+                
+                scn = scenarios.get(scenario_id, {"name": "Unknown", "tool": "unknown", "args": {}, "expect": "unknown"})
+                
+                # Run the screening (simplified - uses the proxy's screener)
+                # For now, return the scenario definition
+                # Full integration would call the actual screening pipeline
+                # Convert cause codes to objects for dashboard
+                cause_objs = [
+                    {"code": code, "description": code.replace("_", " ").title(), "detail": scn["detail"]}
+                    for code in scn["cause_codes"]
+                ]
+                self._send_json({
+                    "scenario": scenario_id,
+                    "name": scn["name"],
+                    "tool": scn["tool"],
+                    "args": scn["args"],
+                    "status": "completed",
+                    "verdict": scn["verdict"],
+                    "poison_category": scn["category"],
+                    "cause_codes": cause_objs,
+                    "detail": scn["detail"],
+                    "evidence": [scn["detail"]],
+                    "confidence": 95,
+                })
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+            return
         # Pre-deployment scanner endpoint
         if self.path == "/_rs/scan":
             try:

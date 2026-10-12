@@ -10772,3 +10772,30 @@ Answers for REL 1 to 13 are in `wafr_answers_reliability_2026-10-11.md`. **Next:
   split by product (line type versus SIM swap), is the only count for the Telegram `/sim` command and the WhatsApp
   lookup, neither of which logs one line per lookup.
 
+## 2026-10-12: WHAT THE ERROR READS SHOWED. THE API HAD INIT OUTAGES, AND NOTHING ALARMED.
+
+* **`relayshield-api`'s 9,171 errors are overwhelmingly INIT failures**, not request errors: 5,956
+  `Runtime.UserCodeSyntaxError` and 3,667 `Runtime.ImportModuleError`, with the error-line count spiking on
+  **2026-10-05 (17,607)** and **2026-10-11 (10,777)** against about 285 a day otherwise. 10-05 is the
+  `relayshield_scamkit.py` syntax slip already recorded. **10-11 is a SECOND outage that was not noticed**: the
+  hand-deploy at 01:12 UTC replaced a good package, and the import probe that guards CI never ran on it. The
+  five CloudWatch alarms cover other functions and none covers the API, so a broken API raised nothing.
+  `tools/diagnose_lambda_errors.sh` now prints which module was missing and the first and last time, per hour.
+* **The ~285 a day baseline is `Badge score fetch failed ... ResourceNotFoundException` every five minutes**: a
+  badge route reads a DynamoDB table that does not exist. Logged as ERROR, handled, not a Lambda error.
+* **`relayshield-gas-monitor` has failed every run since at least 10-05 on a KMS permission, not a code bug**:
+  `relayshield-gas-monitor-role` was never allowed to use the customer-managed key on `relayshield_users`. It is
+  the same shape as the Stars and watchlist defects, a feature that could never run. `tools/grant_gas_monitor_kms.sh`
+  reads the key from the table, simulates, and grants only what is missing, through DynamoDB only. **Its proof is
+  the next scheduled run, not the simulation**, because the grant is conditioned on `kms:ViaService`.
+* **The SIM swap monitor schedule is AWS state and now has a script**, `tools/set_sim_swap_monitor_schedule.sh`.
+  Andrew confirmed hourly detection was never promised. **If it is run, record the date here**: the change lives
+  in no file, which is exactly how an hourly rule replaced a documented four-hourly one without a trace.
+* **A new Twilio clue, UNRESOLVED:** Andrew recalls the Mini App theory came from a Twilio count showing **one
+  user with 1,407 calls in an hour**. No Lambda of ours can have made that: Telegram webhook 19 invocations and
+  WhatsApp 22 in seven days, API Twilio paths zero. **If Twilio really shows that, the calls did not come from our
+  code, and the Twilio credentials should be treated as exposed until shown otherwise.** No SID or token appears
+  in any ref or in history. The check is Twilio Console, Monitor, Usage and the request logs, for the source of
+  those calls; the response, if they are not ours, is to rotate the auth token in Twilio and in the secret
+  `relayshield/twilio_auth_token`.
+

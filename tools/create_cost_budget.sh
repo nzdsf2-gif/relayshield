@@ -3,6 +3,7 @@
 #
 #   AWS_PROFILE=relayshield sh tools/create_cost_budget.sh                  # prints what it would create
 #   AMOUNT=75 AWS_PROFILE=relayshield sh tools/create_cost_budget.sh --apply
+#   Run again with a different AMOUNT to CHANGE an existing budget's limit (alerts untouched).
 #
 # WHY. tools/wafr_evidence.sh found NO budgets on the account (one cost anomaly monitor
 # exists). The Well-Architected cost questions ask for budgets, forecasts and
@@ -24,7 +25,7 @@ PROFILE=relayshield
 REGION=us-east-1
 ACCOUNT=239677749008
 NAME="${NAME:-relayshield-monthly-cost}"
-AMOUNT="${AMOUNT:-50}"
+AMOUNT="${AMOUNT:-10}"
 EMAIL="${EMAIL:-relayshieldadmin@gmail.com}"
 export AWS_PAGER=""
 aws() { command aws --profile "$PROFILE" --region "$REGION" --no-cli-pager "$@"; }
@@ -36,7 +37,23 @@ if [ "$GOT" != "$ACCOUNT" ]; then
 fi
 
 if aws budgets describe-budget --account-id "$ACCOUNT" --budget-name "$NAME" >/dev/null 2>&1; then
-  echo "budget '$NAME' already exists. Leaving it alone."
+  CUR=$(aws budgets describe-budget --account-id "$ACCOUNT" --budget-name "$NAME" --query 'Budget.BudgetLimit.Amount' --output text)
+  echo "budget '$NAME' already exists, limit USD $CUR per month."
+  if python3 -c "import sys; sys.exit(0 if float(sys.argv[1])==float(sys.argv[2]) else 1)" "$CUR" "$AMOUNT"; then
+    echo "Already at USD $AMOUNT. Nothing to do."
+    exit 0
+  fi
+  echo "Would change the limit to USD $AMOUNT. The existing alerts are left exactly as they are."
+  if [ "$1" != "--apply" ]; then
+    echo
+    echo "DRY RUN. Re-run with --apply to change it."
+    exit 0
+  fi
+  # update-budget replaces the budget definition and does not touch its notifications.
+  UPD=$(python3 -c "
+import json,sys
+print(json.dumps({'BudgetName':sys.argv[1],'BudgetLimit':{'Amount':sys.argv[2],'Unit':'USD'},'TimeUnit':'MONTHLY','BudgetType':'COST'}))" "$NAME" "$AMOUNT")
+  aws budgets update-budget --account-id "$ACCOUNT" --new-budget "$UPD" && echo "limit updated."
   aws budgets describe-budget --account-id "$ACCOUNT" --budget-name "$NAME" --query 'Budget.[BudgetName,BudgetLimit.Amount,BudgetLimit.Unit,TimeUnit]' --output text
   exit 0
 fi

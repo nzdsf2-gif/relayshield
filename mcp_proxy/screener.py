@@ -640,6 +640,30 @@ class Screener:
         for url in indicators.get("urls", []):
             if not oauth.is_oauth_url(url):
                 continue
+            # Check for suspicious scopes (Rill CVE pattern)
+            from urllib.parse import urlparse, parse_qs
+            try:
+                parsed = urlparse(url)
+                params = parse_qs(parsed.query)
+                scopes = params.get("scope", [""])[0].split()
+                bad_scopes = [s for s in scopes if s in _SUSPICIOUS_OAUTH_SCOPES]
+                if bad_scopes:
+                    scored = _confidence.score_verdict("BLOCK", [{
+                        "code": "OAUTH_SUSPICIOUS_SCOPE",
+                        "detail": f"Suspicious OAuth scopes: {', '.join(bad_scopes)}",
+                    }])
+                    return {
+                        "verdict": "block",
+                        "level": "high",
+                        "score": 90,
+                        "reasons": [f"oauth_suspicious_scope: {', '.join(bad_scopes)}"],
+                        "poison_category": POISON_OAUTH_TAMPERING,
+                        "screened": indicators,
+                        "confidence": scored["confidence"],
+                        "cause_codes": scored["cause_codes"],
+                    }
+            except Exception:
+                pass
             check = oauth.check_oauth_url(url)
             if check["status"] == "tampered":
                 scored = _confidence.score_verdict("BLOCK", [{

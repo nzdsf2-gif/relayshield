@@ -101,8 +101,8 @@ const HTML = `<!DOCTYPE html>
   .sec-head h2 { font-size: 2rem; font-weight: 800; margin-bottom: 12px; }
   .sec-head h2 .accent { color: var(--purple); }
   .sec-head p { color: var(--muted); max-width: 680px; margin: 0 auto; font-size: 1.05rem; }
-  .panel { display: none; }
-  .panel.active { display: block; }
+  .panel { display: none !important; }
+  .panel.active { display: block !important; }
 
   /* product cards */
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }

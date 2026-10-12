@@ -306,6 +306,10 @@
     <div style="margin: 12px 0; padding: 10px; background: #21262d; border-left: 3px solid #d29922; border-radius: 4px;">
       <span style="color: #8b949e; font-size: 12px;">Note: Some scenarios are decided by local policy before any network call. In these cases, no end-to-end call path is shown.</span>
     </div>
+    <div id="local-policy-note" style="display:none;margin:12px 0;padding:12px;background:#3a2e1a;border:1px solid #d29922;border-radius:8px;">
+      <strong style="color:#d29922;font-size:13px;">LOCAL POLICY DECISION</strong><br>
+      <span style="color:#8b949e;font-size:12px;">Decided locally before any network call. No end-to-end call path is shown.</span>
+    </div>
     <div class="card">
       <h2>Verdict</h2>
       <div><span id="verdict-badge" class="idle">STANDBY</span></div>
@@ -680,6 +684,21 @@ async function runScenario(id) {
 
   // Final verdict visuals
   const v = (result.verdict || 'ALLOW').toUpperCase();
+  // Toggle local policy note for scenario 4
+  var policyNote = document.getElementById('local-policy-note');
+  if (policyNote) {
+    policyNote.style.display = (id === 4) ? 'block' : 'none';
+  }
+  // Show local policy note for scenarios 4 (PII leak) and others decided locally
+  const localPolicyScenarios = [4];
+  const noteEl = document.getElementById('local-policy-note');
+  if (noteEl) {
+    if (localPolicyScenarios.includes(id)) {
+      noteEl.style.display = 'block';
+    } else {
+      noteEl.style.display = 'none';
+    }
+  }
   const badge = document.getElementById('verdict-badge');
   badge.textContent = v === 'QUARANTINE' ? 'QUARANTINED' : (v === 'BLOCK' ? 'BLOCKED' : (v === 'FLAG' ? 'FLAGGED' : 'ALLOWED'));
   if (v === 'BLOCK') {

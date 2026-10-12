@@ -10867,3 +10867,19 @@ leaving it, since a thief spends whatever is in the account. Run the schedule sc
     right-sizing trial; a load test and tracing; running the test suite in CI; Lambda versions and aliases for
     rollback; `relayshield-signup-api` missing from the invoke policy; the badge route table; read the Hudson
     Rock terms; CS Mobile v1.7.0 build blocked on a JDK; `tools/backfill_first_seen.py --apply` unconfirmed.
+
+## 2026-10-12: SIM SWAP MONITOR SCHEDULE MOVED TO `rate(4 hours)`. CONFIRMED BY ANDREW'S OUTPUT.
+
+`tools/set_sim_swap_monitor_schedule.sh --apply` ran on Andrew's Mac. The rule
+`relayshield-sim-swap-monitor-schedule` read `rate(1 hour)` before and `rate(4 hours)` ENABLED after, and the
+target is still `relayshield-sim-swap-monitor`. This change lives in AWS only and no commit carries it, which
+is why it is written down here.
+
+* **The rule's Description still says "Hourly SIM swap detection for all monitored numbers".** The script
+  deliberately passes the old description back, so the text is now wrong. Harmless, but whoever reads the
+  console will be misled; correct it next time the rule is touched.
+* **Expected effect:** about 42 lookups a day at 7 enrolled numbers instead of about 168. UNMEASURED: confirm
+  with Twilio's Lookups usage a few days from now, since the $0.014 per lookup figure is unverified.
+* **The WAFR "moved to four-hourly" sentences and the SUS 3 tick are now true** and may stay in the Notes.
+* Still not run: `tools/grant_gas_monitor_kms.sh`, `tools/create_cost_budget.sh`,
+  `tools/diagnose_lambda_errors.sh relayshield-api`.

@@ -10747,3 +10747,28 @@ Answers for REL 1 to 13 are in `wafr_answers_reliability_2026-10-11.md`. **Next:
 * Read-only tools: `diagnose_twilio_spend.sh`, `wafr_evidence.sh`, `lambda_errors_by_function.sh`,
   `protect_dynamodb_tables.sh` (dry run by default).
 
+## 2026-10-11 (later): WHAT THE READS SHOWED, AND THE TWILIO PICTURE CHANGED AGAIN
+
+* **The API path is cleared as the Twilio spender for 10-03 to 10-10.** Logs Insights counted ZERO
+  `phone-reputation keyed` lines, zero `free-tier call` lines for either Twilio endpoint, and zero rate-limit
+  hits. So neither the free-tier theory nor the keyed-abuse theory in PR #49 is supported by the logs.
+* **The SIM swap monitor runs `rate(1 hour)`, not the `rate(4 hours)` its docstring states.** 215 runs in 7 days,
+  and lookups per day rose 30, 31, 30, 41, 81, 90, 90 as enrolled users went from 1 to 3. **That is a structural
+  cost, not abuse:** every enrolled number is one lookup per hour, so at the 7 numbers enrolled now it is about
+  168 lookups a day. At the $0.014 per lookup quoted in PR #49 (UNVERIFIED against Twilio's price page) that is
+  about $70 a month, against about $12 at 4 hours. Cadence is a product decision; nobody has recorded who set it.
+* **Counts of "runs" include automatic retries.** A scheduled function that fails every run is invoked three
+  times per tick. `relayshield-gas-monitor` (a 15-minute schedule) shows 2,021 invocations in 7 days, about three
+  times its 672 ticks, and 2,021 errors: it has failed every time. Cause not yet read.
+* **`relayshield-api` errors on 19.7% of invocations (9,171 of 46,551) with 411 throttles.** Cause not yet read.
+  The account concurrency limit is 10 and adjustable, so throttling is real and customer-facing.
+* **The Worker drift check cried wolf on a clean Worker.** `tools/recover_live_worker.sh` reported eight
+  "live-only" names for `relayshield-privacy`. Every one was bundler output: the multipart wrapper of the API
+  download, esbuild's `<stem>_default` export, a sourceMappingURL comment and `\u2190` / `\xA9` escapes. It now
+  strips those, and a test against a clean and a hand-edited fixture shows it still flags real additions.
+  **The live privacy page was BEHIND the repo, not ahead:** it lacked the free-email-check disclosure added on
+  2026-10-06, so deploying it publishes that too.
+* **The monitor's lookups alone cannot be 1,407.** Twilio Console > Monitor > Usage > Lookups for the same dates,
+  split by product (line type versus SIM swap), is the only count for the Telegram `/sim` command and the WhatsApp
+  lookup, neither of which logs one line per lookup.
+

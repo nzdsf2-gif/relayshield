@@ -309,7 +309,7 @@ class EmailRendering(unittest.TestCase):
         html = wm._build_email(self._fixture())
         self.assertIn("Monitored Telegram marketplaces", html)
         self.assertIn("115", html)
-        self.assertIn("Unique indicators", html)
+        self.assertIn("Total unique IOCs (cumulative)", html)
         self.assertIn("512,345", html)
 
     def test_renders_cumulative_and_weekly_increment_together(self):

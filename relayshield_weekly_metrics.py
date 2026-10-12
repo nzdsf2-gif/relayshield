@@ -993,7 +993,7 @@ def _build_email(metrics: dict) -> str:
   <tr><td>Intel alerts (total)</td><td><b>{s['intel_alerts_total']}</b></td></tr>
   <tr><td>Intel alerts (this week)</td><td><b>{s['intel_alerts_new']}</b></td></tr>
   <tr><td>Monitored Telegram marketplaces (active)</td><td><b>{s['monitored_marketplaces']:,}</b></td></tr>
-  <tr><td>Unique indicators (cumulative, all-time)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
+  <tr><td>Total unique IOCs (cumulative)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
   <tr><td>&nbsp;&nbsp;New unique indicators (this week)</td><td><b>+{s['unique_indicators_new']:,}</b></td></tr>
   <tr><td>&nbsp;&nbsp;Of which backfilled from history (pre-{FIRST_SEEN_LIVE_SINCE})</td><td><b>{s.get('indicators_backfilled', 0):,}</b></td></tr>
   {_seed_warning(s)}

@@ -94,26 +94,56 @@ def main() -> int:
         print("  see this file's docstring for the create-table command")
         return 0
 
-    dst = ddb.Table(FIRST_SEEN)
-    # Written one at a time, not batched: batch_writer cannot express a
-    # condition, and unconditional writes here would overwrite a first_seen the
-    # live monitor already recorded with a LATER date from an older scan row.
-    written = skipped = failed = 0
-    for value, (ts, channel, category) in earliest.items():
+    # Written one conditional put per indicator, never batched: batch_writer
+    # cannot express a condition, and unconditional writes here would overwrite a
+    # first_seen the live monitor already recorded with a LATER date from an
+    # older scan row.
+    #
+    # Parallel, and with progress, since 2026-10-12. The first version wrote
+    # sequentially: at about 10 ms a put that is roughly 70 minutes for 430,000
+    # missing rows, silent the whole way, and an interrupted run left the table
+    # at 255,597 of ~687,000 indicators -- a plausible-looking partial count that
+    # the weekly report then printed as the all-time total. A client (not a
+    # resource) because boto3 clients are thread-safe and resources are not.
+    from concurrent.futures import ThreadPoolExecutor
+    from botocore.config import Config
+
+    client = boto3.client("dynamodb", config=Config(retries={"max_attempts": 10, "mode": "adaptive"}))
+    total = len(earliest)
+    print(f"writing up to {total} row(s), 16 at a time, progress every 25,000 "
+          f"(safe to re-run; rows already present are skipped):", file=sys.stderr, flush=True)
+
+    def put(item):
+        value, (ts, channel, category) = item
         try:
-            dst.put_item(
-                Item={"ioc_value": value, "first_seen": ts,
-                      "first_channel": channel, "first_category": category},
+            client.put_item(
+                TableName=FIRST_SEEN,
+                Item={"ioc_value": {"S": value}, "first_seen": {"S": ts},
+                      "first_channel": {"S": channel}, "first_category": {"S": category}},
                 ConditionExpression="attribute_not_exists(ioc_value)",
             )
-            written += 1
+            return "written", None
         except Exception as exc:
-            if type(exc).__name__ == "ConditionalCheckFailedException":
-                skipped += 1          # already recorded, by the live monitor or a prior run
+            if type(exc).__name__ == "ConditionalCheckFailedException" or \
+               getattr(exc, "response", {}).get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return "skipped", None      # already recorded, by the live monitor or a prior run
+            return "failed", f"{value[:28]}: {type(exc).__name__}: {exc}"
+
+    written = skipped = failed = done = 0
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        for outcome, detail in pool.map(put, earliest.items(), chunksize=1):
+            done += 1
+            if outcome == "written":
+                written += 1
+            elif outcome == "skipped":
+                skipped += 1
             else:
                 failed += 1
                 if failed <= 5:
-                    print(f"  failed {value[:28]}: {type(exc).__name__}: {exc}")
+                    print(f"  failed {detail}")
+            if done % 25_000 == 0:
+                print(f"  ...{done}/{total} processed ({written} written, {skipped} already present, "
+                      f"{failed} failed)", file=sys.stderr, flush=True)
     print(f"\nwrote {written}, skipped {skipped} already present, {failed} failure(s)")
     return 1 if failed else 0
 

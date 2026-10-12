@@ -11025,3 +11025,19 @@ tools), so `origin/main` now has `set_sim_swap_monitor_schedule.sh`, `grant_gas_
 * **Built:** "API keys by discovery surface". `relayshield_api_keys.source` already held the raw attribution key, and the report already counted keys per source, but as one ungrouped list with no weekly column and only for keys that had a signup. Keys are now grouped into discovery-surface groups (`SURFACE_GROUPS`), each with an all-time and a this-week column and its per-key detail, every group shown even at zero. `unmatched:` keys stay in their own red alarm.
 * **Guard:** `test_weekly_metrics.py` fails if any key registered in `_SOURCE_BANNERS`, `_SOURCE_ALIASES`, `miniapp_routes.json` or the default `SOURCES` falls into the unclassified group, so a new surface cannot be added without being grouped. Proven by deleting a prefix. 50 tests. The grouping lives in the weekly-metrics file rather than being imported, because that Lambda is a single-file package with no deploy path that could package a second module.
 * **NOT DEPLOYED.** Merging changes nothing in AWS. A hand deploy is required, and `sh tools/handler_drift.sh relayshield_weekly_metrics.py` is read first as always.
+
+## 2026-10-12 (later still): THE "255,580" WAS THE TABLE'S ROW COUNT, THE TABLE WAS INCOMPLETE, AND MY FIRST ANSWER FIXED THE WRONG THING
+
+**Andrew's reply to the first attempt, in his words: "You didn't change what I asked for. I want to see the cumulative IOC total each week. If we reached 700K that's what I want to see."** He was right. I added a warning row beside a wrong number instead of making the number right.
+
+**Measured, from his terminal 2026-10-12, not inferred:**
+* `relayshield_intel_first_seen` holds **255,597 rows** (`ScannedCount`), 194,987 of them dated before 2026-08-27. The email's 255,580 is this count. **The report was computing the right thing from an incomplete table.**
+* The distinct count in the sightings table is about **687,011 and rising** (2026-10-08). So roughly 430,000 indicators were missing from the table: an earlier `backfill_first_seen.py --apply` evidently stopped partway. It was sequential and silent, about 70 minutes for that many rows, which is how it dies unnoticed. The run's output was never pasted back, so nobody knew.
+* The live Lambda is `relayshield-weekly-metrics`, python3.12, `LastModified 2026-09-28T23:52:37Z`, **byte-identical to commit `a56ee4ad`** and merely stale (nothing live-only). It is missing five later commits, so the email Andrew received was the old report.
+
+**Fixes, all in the repo:**
+* `tools/backfill_first_seen.py --apply` now writes 16 rows at a time with a progress line every 25,000. It is still conditional on `attribute_not_exists`, so a re-run completes a partial table and never overwrites a row the live monitor wrote. `test_backfill_first_seen.py` (4 tests), proven by dropping the condition (3 failures) and by swallowing failures (1).
+* The report row is now labelled **"Total unique IOCs (cumulative)"**, with the weekly increment and the backfilled-rows check beneath it.
+* `tools/deploy_weekly_metrics.sh [--invoke] [--raise-timeout]` replaces a pasted deploy. It asserts the account, compiles the file, zips the one file, updates the code, waits, prints the timeout, and refuses to invoke if the timeout is under 300s unless told to raise it. **The report now scans the first-seen table three times and the unknown function timeout is a real risk: a timeout sends no email.** Exercised against a stub `aws` only, never real AWS.
+
+**Open until Andrew pastes the output:** that the apply finished with `0 failure(s)`, and the first email after deploy showing a total near 700K. The live monitor's first-seen writes are also worth checking: only about 60,600 rows exist from after 2026-08-27, which is less than the sightings table's growth suggests, so the monitor may have been failing to write for part of that window.

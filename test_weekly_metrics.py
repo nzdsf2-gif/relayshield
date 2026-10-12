@@ -40,6 +40,10 @@ class _FakeAttr:
         name, val = self.name, value
         return lambda item: (item.get(name) or "") >= val
 
+    def lt(self, value):
+        name, val = self.name, value
+        return lambda item: bool(item.get(name)) and item.get(name) < val
+
 
 def _stub_aws():
     boto3 = types.ModuleType("boto3"); boto3.__path__ = []
@@ -87,7 +91,7 @@ class _FakeTable:
                    if FilterExpression is None or FilterExpression(i)]
         start = (ExclusiveStartKey or {}).get("offset", 0)
         page = matched[start:start + self.PAGE_SIZE]
-        result = {"Count": len(page)}
+        result = {"Count": len(page), "Items": list(page)}
         if start + self.PAGE_SIZE < len(matched):
             result["LastEvaluatedKey"] = {"offset": start + self.PAGE_SIZE}
         return result
@@ -192,6 +196,8 @@ class LambdaHandlerWiring(unittest.TestCase):
                           "_unique_indicators")
         self.assertEqual(dict_keys_to_calls.get("unique_indicators_new"),
                           "_new_unique_indicators")
+        self.assertEqual(dict_keys_to_calls.get("indicators_backfilled"),
+                          "_indicators_backfilled")
 
 
 class CheckoutPlatformTag(unittest.TestCase):
@@ -269,6 +275,7 @@ class EmailRendering(unittest.TestCase):
             "monitored_marketplaces": 115,
             "unique_indicators": 512345,
             "unique_indicators_new": 4321,
+            "indicators_backfilled": 400000,
             "ioc_total": 7602575,
             "stolen_sessions": 0, "identity_graph": 0, "ransomware_victims": 0,
             "stripe": {"active_subscriptions": 0, "mrr_usd": 0.0,
@@ -451,6 +458,167 @@ class TelemetryWiring(unittest.TestCase):
         worker = re.sub(r"(?m)^\s*//.*$", "", worker)
         self.assertLess(worker.index("ctx.waitUntil(recordUse(sender, env))"),
                         worker.index("await rateLimited(env.CHECKEMAIL_RL, sender)"))
+
+
+class IndicatorSeeding(unittest.TestCase):
+    """The cumulative indicator figure is only all-time if the backfill ran. These
+    guard the signal that says whether it did (2026-10-12: a 255,580 figure was
+    read as a cumulative total against a measured 687,011)."""
+
+    def _table(self, rows):
+        wm.dynamodb = _FakeDynamo({"relayshield_intel_first_seen": _FakeTable(rows)})
+
+    def test_counts_only_rows_older_than_the_live_monitor(self):
+        self._table([{"first_seen": "2026-07-01T00:00:00+00:00"}] * 3
+                    + [{"first_seen": "2026-09-01T00:00:00+00:00"}] * 5)
+        self.assertEqual(wm._indicators_backfilled(), 3)
+
+    def test_a_table_with_no_history_reports_zero(self):
+        self._table([{"first_seen": "2026-09-01T00:00:00+00:00"}] * 4)
+        self.assertEqual(wm._indicators_backfilled(), 0)
+
+    def test_a_row_with_no_first_seen_is_not_history(self):
+        self._table([{"ioc_value": "x"}] * 4)
+        self.assertEqual(wm._indicators_backfilled(), 0)
+
+    def test_cutoff_is_the_date_the_monitor_began(self):
+        self.assertEqual(wm.FIRST_SEEN_LIVE_SINCE, "2026-08-27")
+
+    def test_warning_appears_when_nothing_was_backfilled(self):
+        self.assertIn("NOT ALL-TIME", wm._seed_warning({"indicators_backfilled": 0}))
+        self.assertIn("NOT ALL-TIME", wm._seed_warning({}))
+
+    def test_warning_absent_once_history_is_present(self):
+        self.assertEqual(wm._seed_warning({"indicators_backfilled": 1}), "")
+
+    def test_email_shows_the_warning_for_an_unseeded_table(self):
+        html = EmailRendering()._fixture(indicators_backfilled=0)
+        self.assertIn("NOT ALL-TIME", wm._build_email(html))
+
+    def test_email_is_quiet_for_a_seeded_table(self):
+        html = EmailRendering()._fixture(indicators_backfilled=400000)
+        out = wm._build_email(html)
+        self.assertNotIn("NOT ALL-TIME", out)
+        self.assertIn("400,000", out)
+
+
+def _registered_surface_keys():
+    """Every attribution key the landing page knows, plus the Mini App routes,
+    read with ast/json (no boto3 import) so a new surface cannot be added
+    without being grouped here."""
+    import json
+    tree = ast.parse((ROOT / "relayshield_developer_signup.py").read_text())
+    keys = set()
+    for n in tree.body:
+        target = None
+        if isinstance(n, ast.AnnAssign):
+            target = getattr(n.target, "id", "")
+        elif isinstance(n, ast.Assign):
+            target = getattr(n.targets[0], "id", "")
+        if target == "_SOURCE_BANNERS":
+            keys |= {k.value for k in n.value.keys}
+        elif target == "_SOURCE_ALIASES":
+            keys |= {k.value for k in n.value.keys}
+            keys |= {v.value for v in n.value.values}
+    routes = json.loads((ROOT / "miniapp_routes.json").read_text())
+    keys |= {r["key"] for r in routes["routes"] if r.get("key")}
+    keys |= {r["key"] for r in routes.get("loop_keys", [])}
+    return keys
+
+
+class SurfaceGrouping(unittest.TestCase):
+    def test_every_registered_key_is_grouped(self):
+        keys = _registered_surface_keys()
+        self.assertGreater(len(keys), 100, "key extraction scoped itself down to nothing")
+        loose = sorted(k for k in keys if wm._surface_group(k) == wm.OTHER_GROUP)
+        self.assertEqual(loose, [], "register these in SURFACE_GROUPS: %s" % loose)
+
+    def test_the_default_sources_are_grouped(self):
+        for k in wm.SOURCES:
+            self.assertNotEqual(wm._surface_group(k), wm.OTHER_GROUP, k)
+
+    def test_representative_keys(self):
+        g = wm._surface_group
+        self.assertEqual(g("tg-miniapp-tgapp"), "Mini App and its catalogues")
+        self.assertEqual(g("chrome-webstore"), "Developer tools and extensions")
+        self.assertEqual(g("storebot"), "Bots and chat (Telegram, Discord)")
+        self.assertEqual(g("aws"), "Marketplaces and SIEM/SOAR/automation")
+        self.assertEqual(g("xsoar-post"), "Marketplaces and SIEM/SOAR/automation")
+        self.assertEqual(g("npm-worm-devto"), "Blog and content campaigns")
+        self.assertEqual(g("direct"), wm.DIRECT_GROUP)
+        self.assertEqual(g(""), wm.DIRECT_GROUP)
+
+    def test_referer_keys_group_like_the_key_after_the_prefix(self):
+        self.assertEqual(wm._surface_group("referer:glama"), wm._surface_group("glama"))
+        self.assertEqual(wm._surface_group("referer:mcp-registry"),
+                          "Agent platforms and registries")
+
+    def test_short_stems_do_not_swallow_unrelated_keys(self):
+        # "hn" and "aws" are real stems; "hnxyz" and "awsome" are not them.
+        self.assertEqual(wm._surface_group("hnxyz"), wm.OTHER_GROUP)
+        self.assertEqual(wm._surface_group("awsome"), wm.OTHER_GROUP)
+
+    def test_an_unknown_key_is_other_not_direct(self):
+        self.assertEqual(wm._surface_group("brand-new-campaign"), wm.OTHER_GROUP)
+
+
+class SurfaceBreakdown(unittest.TestCase):
+    def test_sums_per_group_and_keeps_per_key_detail(self):
+        out = wm._surface_breakdown(
+            {"tg-miniapp-tgapp": 3, "tg-miniapp-tonapp": 2, "chrome-webstore": 4, "direct": 9},
+            {"tg-miniapp-tgapp": 1, "chrome-webstore": 2})
+        mini = out["Mini App and its catalogues"]
+        self.assertEqual((mini["total"], mini["week"]), (5, 1))
+        self.assertEqual(mini["keys"]["tg-miniapp-tonapp"], (2, 0))
+        self.assertEqual(out["Developer tools and extensions"]["total"], 4)
+        self.assertEqual(out[wm.DIRECT_GROUP]["total"], 9)
+
+    def test_unmatched_keys_are_left_to_their_own_alarm(self):
+        out = wm._surface_breakdown({"unmatched:nope": 7, "direct": 1}, {})
+        self.assertEqual(sum(v["total"] for v in out.values()), 1)
+
+    def test_every_surface_group_renders_even_at_zero(self):
+        html = wm._surface_rows({})
+        for name, _ in wm.SURFACE_GROUPS:
+            self.assertIn(name, html)
+
+    def test_other_group_is_called_out_only_when_present(self):
+        self.assertNotIn(wm.OTHER_GROUP, wm._surface_rows({}))
+        shown = wm._surface_rows({wm.OTHER_GROUP: {"total": 2, "week": 1,
+                                                    "keys": {"mystery": (2, 1)}}})
+        self.assertIn(wm.OTHER_GROUP, shown)
+        self.assertIn("mystery", shown)
+
+    def test_key_names_are_escaped(self):
+        shown = wm._surface_rows({wm.OTHER_GROUP: {"total": 1, "week": 0,
+                                                    "keys": {"<script>": (1, 0)}}})
+        self.assertNotIn("<script>", shown)
+
+    def test_api_key_stats_carries_the_breakdown(self):
+        old = "2026-01-01T00:00:00+00:00"
+        new = wm.datetime.now(wm.timezone.utc).isoformat()
+        wm.dynamodb = _FakeDynamo({"relayshield_api_keys": _FakeTable([
+            {"source": "tg-miniapp-tgapp", "created_at": new},
+            {"source": "tg-miniapp-tgapp", "created_at": old},
+            {"source": "chrome-webstore", "created_at": new},
+            {"created_at": old},
+        ])})
+        stats = wm._api_key_stats()
+        by = stats["by_surface"]
+        self.assertEqual(by["Mini App and its catalogues"]["total"], 2)
+        self.assertEqual(by["Mini App and its catalogues"]["week"], 1)
+        self.assertEqual(by["Developer tools and extensions"]["week"], 1)
+        self.assertEqual(by[wm.DIRECT_GROUP]["total"], 1)
+
+    def test_email_renders_the_section_with_totals_and_weekly_columns(self):
+        fx = EmailRendering()._fixture()
+        fx["api_keys"]["by_surface"] = {
+            "Mini App and its catalogues": {"total": 5, "week": 2,
+                                             "keys": {"tg-miniapp-tgapp": (5, 2)}}}
+        out = wm._build_email(fx)
+        self.assertIn("API keys by discovery surface", out)
+        self.assertIn("tg-miniapp-tgapp", out)
+        self.assertIn("+2", out)
 
 
 if __name__ == "__main__":

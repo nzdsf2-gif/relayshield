@@ -10995,3 +10995,33 @@ tools), so `origin/main` now has `set_sim_swap_monitor_schedule.sh`, `grant_gas_
   `kms:ViaService = dynamodb.us-east-1.amazonaws.com`. **Not yet applied.**
 * **Cost budget dry run read:** `relayshield-monthly-cost`, USD 50, alerts at 80% actual and 100% forecast to
   `relayshieldadmin@gmail.com`. **Not yet applied.** It does not see Twilio or VirusTotal.
+
+## 2026-10-12: GAS MONITOR KMS GRANT APPLIED, COST BUDGET CREATED AT $50 AND ORDERED DOWN TO $10
+
+**Applied by Andrew on 2026-10-12, confirmed from the scripts' own output:**
+* **`tools/grant_gas_monitor_kms.sh --apply`** printed `attached.` for inline policy `GasMonitorKmsViaDynamoDB` on
+  `relayshield-gas-monitor-role` (four KMS actions on key `2ece080e-0cb0-499e-b2d1-6a496bbb4a1a`, only `kms:ViaService =
+  dynamodb.us-east-1.amazonaws.com`). **The simulation printed `implicitDeny` on all four AFTER the attach, as the script
+  said it might, because the simulator cannot evaluate the `ViaService` condition.** That line is not the proof.
+  **THE PROOF IS NOT YET IN:** the gas monitor's next 15-minute runs must stop logging `AccessDeniedException`
+  (`sh tools/diagnose_lambda_errors.sh relayshield-gas-monitor`). Until that is read, this is "attached", not "fixed".
+* **`tools/create_cost_budget.sh --apply`** created `relayshield-monthly-cost` at **USD 50** (alerts at 80% actual and
+  100% forecast to `relayshieldadmin@gmail.com`). **Andrew's target is under USD 10 a month**, so the limit is to be lowered.
+  The script used to say "already exists, leaving it alone", which made a second run a silent no-op; it now CHANGES an
+  existing budget's limit with `update-budget` (alerts untouched), defaults to 10, and does nothing if it is already there.
+  Exercised against a stub `aws` for all three paths (dry run, apply, already-at-target). **The new limit is NOT applied until
+  Andrew runs it and the output reads USD 10.**
+* **The $10 budget covers AWS charges only.** Twilio was $24.28 for October 1 to 12 alone and VirusTotal is a separate
+  quota, and a budget alert tells Andrew AFTER the spend, it never stops it. Twilio's own usage trigger (Console, Monitor,
+  Usage, Triggers) is the control for the biggest line and is Andrew's click.
+* **`tools/setup_badge_cache.sh` dry run read:** table absent, role `relayshield-breach-check-role-1sapnwdl` `allowed` on
+  GetItem and PutItem, so no grant is needed. **Not yet applied.**
+
+## 2026-10-12 (later): LAMBDA CONCURRENCY QUOTA APPROVED; WEEKLY METRICS NOW SAYS WHETHER ITS "ALL-TIME" INDICATOR COUNT IS ALL-TIME
+
+* **AWS approved the Lambda concurrency quota increase to 1,000** (Andrew, 2026-10-12; case 1791763915000769). The WAFR REL notes that waited on it may now be ticked, and reserved concurrency can finally be set (it could not be while the account limit was 10). Nothing was changed in AWS by this session. Record the date a reserved-concurrency setting is applied, since it lives in AWS only.
+* **THE 255,580 FIGURE WAS READ AS A CUMULATIVE TOTAL AND IS NOT ONE.** The measured distinct-indicator count was **687,011 on 2026-10-08** (`tools/backfill_first_seen.py` scan of the sightings table, first-seen range 2026-06-21 to 2026-10-08), up from 661,609 on 2026-09-30. It grows by tens of thousands a week. What a report shows depends on two facts nobody could see from the repo: (a) whether the 2026-10-08 code was hand-deployed (the live function was stale then and `relayshield_weekly_metrics` has no CI deploy path), and (b) whether `tools/backfill_first_seen.py --apply` ever ran. **If it did not, `relayshield_intel_first_seen` holds only what the live monitor recorded since 2026-08-27, and a count of it is a plausible, partial number that looks like a total.** That is the most likely reading of 255,580 and it is UNVERIFIED: this session cannot read the email or AWS.
+* **Built:** `_indicators_backfilled()` counts first-seen rows dated before `FIRST_SEEN_LIVE_SINCE` (2026-08-27), which only the backfill can have written. The email prints it under the cumulative figure, and prints a red `NOT ALL-TIME` row when it is zero. A zero is now the report saying the backfill never ran, instead of a clean-looking number.
+* **Built:** "API keys by discovery surface". `relayshield_api_keys.source` already held the raw attribution key, and the report already counted keys per source, but as one ungrouped list with no weekly column and only for keys that had a signup. Keys are now grouped into discovery-surface groups (`SURFACE_GROUPS`), each with an all-time and a this-week column and its per-key detail, every group shown even at zero. `unmatched:` keys stay in their own red alarm.
+* **Guard:** `test_weekly_metrics.py` fails if any key registered in `_SOURCE_BANNERS`, `_SOURCE_ALIASES`, `miniapp_routes.json` or the default `SOURCES` falls into the unclassified group, so a new surface cannot be added without being grouped. Proven by deleting a prefix. 50 tests. The grouping lives in the weekly-metrics file rather than being imported, because that Lambda is a single-file package with no deploy path that could package a second module.
+* **NOT DEPLOYED.** Merging changes nothing in AWS. A hand deploy is required, and `sh tools/handler_drift.sh relayshield_weekly_metrics.py` is read first as always.

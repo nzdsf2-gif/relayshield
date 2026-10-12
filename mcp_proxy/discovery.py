@@ -48,7 +48,7 @@ _EXFIL_RE = re.compile(
     re.IGNORECASE | re.DOTALL)
 # Zero-width, bidi-control and Unicode tag characters: the same hiding places
 # the agent-bait skill reads for.
-_HIDDEN_RE = re.compile("[​-‏⁠⁦-⁩﻿\U000e0000-\U000e007f]")
+_HIDDEN_RE = re.compile("[​-‏⁠⁦-⁩﻿\U000e0000-\U000e007f]")  # nosec B613
 _BLOB_RE = re.compile(r"[A-Za-z0-9+/]{120,}={0,2}|[0-9a-fA-F]{120,}")
 _CHAIN_CUE_RE = re.compile(r"\b(always|first|must|before|after|then)\b", re.IGNORECASE)
 

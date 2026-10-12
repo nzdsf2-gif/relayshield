@@ -10961,3 +10961,37 @@ I said the three "still not run" tools were on `origin/main`. They are not: `gra
 `claude/tender-cerf-ds0u0d` only, and reached Andrew's clone through his unpushed local merge. That merge is exactly
 what "push local main" delivers. The schedule script ran for him because his local `main` carried it; `origin/main`
 did not.
+
+## 2026-10-12: SIM SWAP SCHEDULE IS NOW `rate(12 hours)`, CONFIRMED. `main` PUSHED. THE API ERROR READ CAME BACK.
+
+**Applied by Andrew on 2026-10-12, confirmed from the script's own `after` table:** rule
+`relayshield-sim-swap-monitor-schedule` reads `rate(12 hours)`, ENABLED, target still `relayshield-sim-swap-monitor`.
+The Description still says "Hourly SIM swap detection", which is wrong and harmless. The decision and the cost
+reasoning are in the section above. **Measure it:** Twilio SIM Swap Lookups should fall to about 2 per enrolled billable
+number per day from 10-13; if they do not, the rule is not what is driving them.
+
+Local `main` was pushed at `c916768` (it carried the tender-cerf work, the WAFR PERF/COST/SUS answers and the three
+tools), so `origin/main` now has `set_sim_swap_monitor_schedule.sh`, `grant_gas_monitor_kms.sh` and
+`create_cost_budget.sh`.
+
+**`tools/diagnose_lambda_errors.sh relayshield-api` (7 days), read:**
+
+* **10-11 is the missing module `relayshield_openapi_spec`**, first failure 01:14:26 UTC and last 20:47:38 UTC, 3,667
+  `Runtime.ImportModuleError`. The 01:12 UTC hand-deploy packaged `relayshield_api.py` without the file it imports.
+  Nothing failed on 10-12, so a later deploy fixed it. **About 19.5 hours of the API failing to start, and no alarm.**
+* **10-05 is the scamkit `Runtime.UserCodeSyntaxError` in `relayshield_api`**, 2,296, 13:02 to 20:23 UTC, already recorded.
+* **The ~285 a day baseline is the badge route**, every five minutes, `relayshield_badge_cache` GetItem
+  `ResourceNotFoundException`. **The table has never existed**, so the public badge has rendered "UNKNOWN" every time.
+  `iam/snapshots/relayshield-breach-check-role-1sapnwdl.json` line 122 already names its ARN, so no grant is expected.
+  `tools/setup_badge_cache.sh` (dry run by default, hash key `domain`, TTL on `ttl`) creates it. UNVERIFIED against real
+  AWS: only a stubbed dry run was exercised.
+* **UNEXPLAINED: 2,294 `AccessDeniedException` lines in the API's log group.** Not shown in the five recent lines, and
+  the count sits suspiciously near the 2,296 syntax-error count, so it may be the same events. Unread; settle it before
+  anyone calls the API's errors accounted for.
+* Invocations per day on the API: 3,279 (10-05), 11,370 (10-06), then 4,450 to 7,799. 10-06 matches the VirusTotal loop.
+* **Gas monitor KMS dry run read:** `relayshield_users` uses key `2ece080e-0cb0-499e-b2d1-6a496bbb4a1a`
+  (the `relayshield-dynamodb-key`), `relayshield_gas_state` has no customer-managed key, and the role is `implicitDeny` on
+  all four KMS actions. The proposed inline policy is the four actions on that one key, conditioned on
+  `kms:ViaService = dynamodb.us-east-1.amazonaws.com`. **Not yet applied.**
+* **Cost budget dry run read:** `relayshield-monthly-cost`, USD 50, alerts at 80% actual and 100% forecast to
+  `relayshieldadmin@gmail.com`. **Not yet applied.** It does not see Twilio or VirusTotal.

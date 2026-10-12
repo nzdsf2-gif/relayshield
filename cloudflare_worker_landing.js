@@ -222,10 +222,10 @@ const HTML = `<!DOCTYPE html>
 
 <div class="tabbar">
   <div class="wrap tabbar-inner">
-    <button class="tab active" data-tab="products">Products</button>
-    <button class="tab" data-tab="pricing">Pricing</button>
-    <button class="tab" data-tab="developers">Developers</button>
-    <button class="tab" data-tab="contact">Contact</button>
+    <button class="tab active" data-tab="products" onclick="switchTab('products')">Products</button>
+    <button class="tab" data-tab="pricing" onclick="switchTab('pricing')">Pricing</button>
+    <button class="tab" data-tab="developers" onclick="switchTab('developers')">Developers</button>
+    <button class="tab" data-tab="contact" onclick="switchTab('contact')">Contact</button>
   </div>
 </div>
 
@@ -795,6 +795,22 @@ var PRODUCT_DETAILS = {
     });
   }
 })();
+<script>
+function switchTab(name) {
+  var tabs = document.querySelectorAll('[data-tab]');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tab') === name);
+  }
+  var panels = document.querySelectorAll('[data-panel]');
+  for (var j = 0; j < panels.length; j++) {
+    var p = panels[j];
+    var isActive = p.getAttribute('data-panel') === name;
+    p.classList.toggle('active', isActive);
+    p.style.display = isActive ? 'block' : 'none';
+  }
+  window.scrollTo(0, 0);
+}
+</script>
 </script>
 </body>
 </html>

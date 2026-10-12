@@ -10867,3 +10867,97 @@ leaving it, since a thief spends whatever is in the account. Run the schedule sc
     right-sizing trial; a load test and tracing; running the test suite in CI; Lambda versions and aliases for
     rollback; `relayshield-signup-api` missing from the invoke policy; the badge route table; read the Hudson
     Rock terms; CS Mobile v1.7.0 build blocked on a JDK; `tools/backfill_first_seen.py --apply` unconfirmed.
+
+## 2026-10-12: SIM SWAP MONITOR SCHEDULE MOVED TO `rate(4 hours)`. CONFIRMED BY ANDREW'S OUTPUT.
+
+`tools/set_sim_swap_monitor_schedule.sh --apply` ran on Andrew's Mac. The rule
+`relayshield-sim-swap-monitor-schedule` read `rate(1 hour)` before and `rate(4 hours)` ENABLED after, and the
+target is still `relayshield-sim-swap-monitor`. This change lives in AWS only and no commit carries it, which
+is why it is written down here.
+
+* **The rule's Description still says "Hourly SIM swap detection for all monitored numbers".** The script
+  deliberately passes the old description back, so the text is now wrong. Harmless, but whoever reads the
+  console will be misled; correct it next time the rule is touched.
+* **Expected effect:** about 42 lookups a day at 7 enrolled numbers instead of about 168. UNMEASURED: confirm
+  with Twilio's Lookups usage a few days from now, since the $0.014 per lookup figure is unverified.
+* **The WAFR "moved to four-hourly" sentences and the SUS 3 tick are now true** and may stay in the Notes.
+* Still not run: `tools/grant_gas_monitor_kms.sh`, `tools/create_cost_budget.sh`,
+  `tools/diagnose_lambda_errors.sh relayshield-api`.
+
+## 2026-10-12: SIM SWAP POLLING DECIDED AT EVERY 12 HOURS, AND THE REAL COST PER LOOKUP IS $0.058, NOT $0.014
+
+**DECIDED by Andrew, 2026-10-12, on a cost-per-enrolled-number argument. APPLIED STATE IS NOT YET CONFIRMED:**
+the dry run was read (rule `relayshield-sim-swap-monitor-schedule` at `rate(4 hours)`, ENABLED, target
+`relayshield-sim-swap-monitor`), and the change is
+`NEW='rate(12 hours)' AWS_PROFILE=relayshield sh tools/set_sim_swap_monitor_schedule.sh --apply`. **Whoever sees the
+`after` table printing `rate(12 hours)` records the date here.** The schedule lives in AWS only, so no commit proves it.
+
+**The numbers, read off Andrew's Twilio usage summary (October 1 to 12, 12:33 UTC) and not estimated:**
+
+    SIM Swap Lookups        346    $17.30   = $0.05 each
+    Line Type Intelligence  663    $5.30    = $0.008 each
+    Number Format Lookups   664    $0.00    free
+    Lookup total           1673    $22.60   (all lookups), month total $24.28
+    September bill about $33.5, against about $2 to $2.70 a month from March to July
+
+**THE EARLIER "$0.014 PER LOOKUP" WAS A GUESS AND WAS 4x TOO LOW.** Every monitor lookup asks for both
+`sim_swap` and `line_type_intelligence`, so one lookup is about **$0.058**. The 2026-10-12 note above that says "about
+42 lookups a day at 7 enrolled numbers" is also wrong: scan runs see 1 to 3 users (`sim_swap_monitoring` AND `active`),
+not all 7 enrolled, and some enrolled numbers may be non-US (an errored SIM swap package is probably not billed;
+346 billed against about 393 observed monitor lookups hints at it, UNVERIFIED).
+
+**Cost per enrolled number per month, which is the number that matters:**
+
+    hourly 720 lookups $42    every 4h 180 lookups $10.50    every 12h 60 lookups $3.50    every 24h 30 lookups $1.75
+
+**WHY SEPTEMBER JUMPED.** Twilio approved SIM swap for the US on 2026-09-12, which lifted the 60606 self-gate, and the
+monitor then polled hourly. About one enrolled number for 19 days comes to about $26 plus other lookups. Consistent
+with the bill, INFERRED, not read from per-day data. All of October to date was billed at the hourly rate: the
+four-hour change ran on 10-12 at about 01:24 UTC.
+
+**WHY 12 HOURS LOSES NOTHING ON DETECTION.** The lookup returns `swapped_in_period`, "a swap in the last 24 hours" per
+the code's own docstring (NOT checked against Twilio's docs). A swap stays visible for 24 hours, so a 12-hour poll
+sees every swap and hourly polling only shortened the alert delay. Average delay is about 6 hours at 12h, about 2 at
+4h. The alert dedup window is 23 hours, so nothing there needs to change.
+
+**THE ECONOMICS THAT DECIDED IT.** CS Mobile is $10.99 a month and includes SIM swap. One enrolled subscriber costs
+about $10.50 at four hours, which is nearly all of the revenue, and $3.50 (about 32%) at twelve.
+
+### THE OPTION FOR FASTER ALERTS, UNBUILT. Sell it, do not give it away.
+
+If faster alerts are wanted, make them a paid tier instead of lowering the global interval. Two shapes, cheapest first:
+
+1. **Two EventBridge rules.** Keep the 12-hour rule as the default and add a second, `rate(4 hours)`, whose event
+   payload carries a tier filter, with `scan_sim_swap_users()` honouring it (`subscription_tier` is already on the
+   record). No new state. A user on the fast tier is scanned by both rules, so the filter must EXCLUDE the fast tier from
+   the 12-hour rule or it is billed twice.
+2. **One rule, per-user interval.** Run the rule at the fastest tier's rate and have `process_user` skip a user whose
+   stored `last_checked` is newer than their tier's interval. Needs one extra DynamoDB write per user per run and a new
+   attribute, and a skipped user must NOT count as a clean check.
+
+**Price it from the table above:** a 4-hour tier costs about $10.50 per number a month in Twilio fees alone, so it
+cannot be priced under about $15 a month for that number. An hourly tier is $42 and not a product at current prices.
+**Do NOT build either until a customer asks for faster alerts or the paid tier exists.** The honest value of a SIM swap
+alert is the response (lock the accounts), and 12 hours against 4 changes less than having it at all.
+
+### OTHER LEVERS, NOT TAKEN
+
+* **Unenrol Andrew's and test numbers.** Cheapest of all, and the diagnostic can list who is enrolled.
+* **Drop `line_type_intelligence` from the monitor's lookup** saves about 14% but supplies the MCC/MNC that port-out
+  detection compares, so it needs a code change and a test. Not done.
+* **About 317 lookups a month are not the monitor** (663 line type against 346 SIM swap): phone-reputation, `/phone`.
+  About $2.50, so not the problem. `tools/diagnose_twilio_spend.sh` splits them by code path.
+* **`relayshield_sim_swap_monitor.py`'s docstring still says "every 4 hours"** in three places. The schedule is AWS
+  state, so the docstring is not authoritative, which is exactly how an hourly rule replaced a documented four-hourly
+  one unnoticed. Left alone this turn because editing the file redeploys a live function; fix it with the next change
+  to that file.
+* **WAFR wording updated conditionally.** `wafr_answers_perf_cost_sus_2026-10-12.md` now says "twelve-hourly". Those
+  sentences are only true once the apply has run.
+
+### CORRECTION TO THIS SESSION'S OWN STATEMENTS ABOUT BRANCHES
+
+I said the three "still not run" tools were on `origin/main`. They are not: `grant_gas_monitor_kms.sh`,
+`create_cost_budget.sh`, `set_sim_swap_monitor_schedule.sh` and the 2026-10-12 sections were on
+`claude/tender-cerf-ds0u0d` only, and reached Andrew's clone through his unpushed local merge. That merge is exactly
+what "push local main" delivers. The schedule script ran for him because his local `main` carried it; `origin/main`
+did not.

@@ -19,7 +19,7 @@ differs.
 | Tick only after | Command | Unlocks |
 |---|---|---|
 | a budget exists | `AWS_PROFILE=relayshield sh tools/create_cost_budget.sh --apply` | COST 1 budgets, COST 1 monitor, and the budget sentence in the COST 1 Notes |
-| the SIM swap monitor is on four hours | `AWS_PROFILE=relayshield sh tools/set_sim_swap_monitor_schedule.sh --apply` | the "moved to four-hourly" sentences in COST 1, COST 5 and SUS 3, and the SUS 3 scheduled-jobs tick |
+| the SIM swap monitor is on twelve hours | `AWS_PROFILE=relayshield NEW='rate(12 hours)' sh tools/set_sim_swap_monitor_schedule.sh --apply` | the "moved to twelve-hourly" sentences in COST 1, COST 5 and SUS 3, and the SUS 3 scheduled-jobs tick |
 
 **Until each of those two is run, delete the sentence that depends on it.** They describe a change that
 has not happened yet, and the reviewer will check. Everything else below is true today.
@@ -158,7 +158,7 @@ has not happened yet, and the reviewer will check. Everything else below is true
 > AWS spend is currently very small (free tier and credits cover most services), so the material cost
 > risk is third-party usage: telephony lookups, a shared reputation API key and similar. Those are
 > controlled in the application with per-key, per-source and daily budgets, and a recent review moved
-> the highest-cost scheduled job from hourly to four-hourly after measuring it. [ONLY AFTER THE BUDGET EXISTS:] A monthly AWS cost
+> the highest-cost scheduled job from hourly to twelve-hourly after measuring it. [ONLY AFTER THE BUDGET EXISTS:] A monthly AWS cost
 > budget with email alerts and a cost anomaly monitor are in place. Cost ownership is a single
 > founder rather than a function.
 
@@ -221,7 +221,7 @@ has not happened yet, and the reviewer will check. Everything else below is true
 - Select software with cost effective licensing. *Open-source runtime and libraries.*
 - Select components of this workload to optimize cost in line with organization priorities
 - Perform cost analysis for different usage over time. *The SIM swap monitor cadence was costed at
-  hourly and four-hourly against the enrolled-user count.*
+  hourly and twelve-hourly against the enrolled-user count.*
 
 **LEAVE UNTICKED**
 - Analyze all components of the workload
@@ -230,7 +230,7 @@ has not happened yet, and the reviewer will check. Everything else below is true
 **Notes**
 > Serverless, on-demand services were chosen so cost tracks use. Third-party per-call costs are analysed
 > case by case when they surface (for example a scheduled lookup job was found to run six times more
-> often than documented and was moved to four-hourly). A systematic per-component cost analysis has not
+> often than documented and was moved to twelve-hourly). A systematic per-component cost analysis has not
 > been done.
 
 ## COST 6. How do you meet cost targets when you select resource type, size and number?
@@ -346,7 +346,7 @@ has not happened yet, and the reviewer will check. Everything else below is true
 
 **TICK**
 - Optimize software and architecture for asynchronous and scheduled jobs. *Batch work runs on
-  EventBridge schedules; an hourly job was moved to four-hourly (CONDITIONAL, see the table).*
+  EventBridge schedules; an hourly job was moved to twelve-hourly (CONDITIONAL, see the table).*
 - Use software patterns and architectures that best support data access and storage patterns. *Key
   lookups, caches and TTL expiry.*
 

@@ -10772,3 +10772,98 @@ Answers for REL 1 to 13 are in `wafr_answers_reliability_2026-10-11.md`. **Next:
   split by product (line type versus SIM swap), is the only count for the Telegram `/sim` command and the WhatsApp
   lookup, neither of which logs one line per lookup.
 
+## 2026-10-12: WHAT THE ERROR READS SHOWED. THE API HAD INIT OUTAGES, AND NOTHING ALARMED.
+
+* **`relayshield-api`'s 9,171 errors are overwhelmingly INIT failures**, not request errors: 5,956
+  `Runtime.UserCodeSyntaxError` and 3,667 `Runtime.ImportModuleError`, with the error-line count spiking on
+  **2026-10-05 (17,607)** and **2026-10-11 (10,777)** against about 285 a day otherwise. 10-05 is the
+  `relayshield_scamkit.py` syntax slip already recorded. **10-11 is a SECOND outage that was not noticed**: the
+  hand-deploy at 01:12 UTC replaced a good package, and the import probe that guards CI never ran on it. The
+  five CloudWatch alarms cover other functions and none covers the API, so a broken API raised nothing.
+  `tools/diagnose_lambda_errors.sh` now prints which module was missing and the first and last time, per hour.
+* **The ~285 a day baseline is `Badge score fetch failed ... ResourceNotFoundException` every five minutes**: a
+  badge route reads a DynamoDB table that does not exist. Logged as ERROR, handled, not a Lambda error.
+* **`relayshield-gas-monitor` has failed every run since at least 10-05 on a KMS permission, not a code bug**:
+  `relayshield-gas-monitor-role` was never allowed to use the customer-managed key on `relayshield_users`. It is
+  the same shape as the Stars and watchlist defects, a feature that could never run. `tools/grant_gas_monitor_kms.sh`
+  reads the key from the table, simulates, and grants only what is missing, through DynamoDB only. **Its proof is
+  the next scheduled run, not the simulation**, because the grant is conditioned on `kms:ViaService`.
+* **The SIM swap monitor schedule is AWS state and now has a script**, `tools/set_sim_swap_monitor_schedule.sh`.
+  Andrew confirmed hourly detection was never promised. **If it is run, record the date here**: the change lives
+  in no file, which is exactly how an hourly rule replaced a documented four-hourly one without a trace.
+* **A new Twilio clue, UNRESOLVED:** Andrew recalls the Mini App theory came from a Twilio count showing **one
+  user with 1,407 calls in an hour**. No Lambda of ours can have made that: Telegram webhook 19 invocations and
+  WhatsApp 22 in seven days, API Twilio paths zero. **If Twilio really shows that, the calls did not come from our
+  code, and the Twilio credentials should be treated as exposed until shown otherwise.** No SID or token appears
+  in any ref or in history. The check is Twilio Console, Monitor, Usage and the request logs, for the source of
+  those calls; the response, if they are not ours, is to rotate the auth token in Twilio and in the secret
+  `relayshield/twilio_auth_token`.
+
+
+## WHERE 2026-10-12 LEFT THINGS. THE WAFR IS ANSWERED AND SAVED, NOT SUBMITTED. READ THIS FIRST.
+
+**State, from Andrew's console, 2026-10-12 end of session.** All 57 Well-Architected questions were worked
+(OPS, SEC, REL, PERF, COST, SUS) and he used **Save and exit** with the overview reading **36 High Risks,
+15 Medium Risks and ONE question unanswered**. Which question is unanswered is NOT known: find it from each
+pillar's question list before anything else. Save and exit locks nothing (UNVERIFIED, from knowledge of the
+tool, docs are egress-blocked): the workload stays editable, ticking a practice removes its risk, and a
+milestone is only a snapshot. **The order is: fix, then re-tick and re-word Notes, then Save milestone, then
+generate the PDF (under 3 MB), then request FTR validation.** A report generated before the fixes carries the
+old risks. 36 High is the self-assessment working as designed (every unticked practice is a flagged risk); the
+FTR checklist itself is UNREAD, and whether unresolved highs block approval is UNVERIFIED. Read that section
+of the FTR Guide in Partner Central before requesting validation.
+
+The answers are in `wafr_answers_reliability_2026-10-11.md` and `wafr_answers_perf_cost_sus_2026-10-12.md`.
+The second has a CONDITIONAL table: the budget sentence, the "moved to four-hourly" sentences and the SUS 3
+tick are only true after the budget script and the schedule script have been run. Until then they must come
+out of the Notes. The Lambda concurrency increase to 1,000 is **PENDING** (AWS case 1791763915000769, an
+automated acknowledgement only, "under review"); nothing that depends on it gets ticked until it is approved.
+
+### THE FOUR FINDINGS FROM THE ERROR READS (also in the section above, restated so they are not lost)
+
+1. **The API had a second outage on 10-11 and nothing alarmed.** `relayshield-api`'s 9,171 errors are
+   init failures (5,956 `Runtime.UserCodeSyntaxError`, 3,667 `Runtime.ImportModuleError`), spiking on 10-05
+   (17,607 error lines, the scamkit slip) and **10-11 (10,777)**, against about 285 a day otherwise. The 10-11
+   cause is read as the 01:12 UTC hand-deploy replacing a good package; **which module was missing is still
+   unread** (`tools/diagnose_lambda_errors.sh relayshield-api` now prints it, with first and last time and
+   failures per hour). The five existing alarms cover other functions; none covers the API.
+2. **The gas monitor has failed every run since at least 10-05 on a missing KMS grant, not a code bug.**
+   `relayshield-gas-monitor-role` was never allowed to use the customer-managed key on `relayshield_users`.
+   `tools/grant_gas_monitor_kms.sh` (dry run by default) fixes it; its proof is the next 15-minute run, not the
+   simulation, because the grant is conditioned on `kms:ViaService`. Not yet run.
+3. **The ~285 a day error baseline is the badge route** logging `ResourceNotFoundException` every five minutes
+   because it reads a DynamoDB table that does not exist. Handled, so not a Lambda error, but it pollutes every
+   error count and should be fixed by creating the table or removing the read.
+4. **The Twilio credentials are unproven safe.** If Twilio really showed one user with 1,407 calls in an hour,
+   our code cannot have made them (Telegram webhook 19 invocations, WhatsApp 22, API Twilio paths zero in the
+   week). The check is Twilio Console, Monitor, Usage and the request logs for the source; if not ours, rotate
+   the auth token in Twilio and in the secret `relayshield/twilio_auth_token`.
+
+### TWILIO TOP-UP, ASKED 2026-10-12 WITH THE BALANCE UNDER $5
+
+Recommendation given (Andrew decides, it is his money): **top up the $20 minimum, because exposure is bounded
+by the balance, and a zero balance silently stops SIM swap and WhatsApp alerts to real customers.** Two
+conditions on it: auto-recharge OFF, and check Twilio's usage page for the last 24 hours by source before
+leaving it, since a thief spends whatever is in the account. Run the schedule script (4 hours) the same day.
+
+### TODOS FOR THE NEXT SESSION, IN ORDER
+
+1. **Find and answer the one unanswered WAFR question**, then work the 36 High risks cheapest first.
+2. **Run, in this order, each dry run read before `--apply`, and record the date of each here:**
+   `tools/set_sim_swap_monitor_schedule.sh` (back to `rate(4 hours)`), `tools/grant_gas_monitor_kms.sh`,
+   `tools/create_cost_budget.sh`, `tools/diagnose_lambda_errors.sh relayshield-api`. Every command carries
+   `AWS_PROFILE=relayshield` and the merge block first. None of these tools has run against real AWS.
+3. **Settle the Twilio question**: usage by product and source for 10-03 to 10-10, and the origin of "1,407 in
+   an hour". Rotate the token if the source is not ours. Confirm auto-recharge is off.
+4. **Alarm the API**: a CloudWatch alarm on `relayshield-api` errors, and a guard so a hand-deploy cannot replace
+   a package the import probe has not seen. Read the 10-11 missing module first.
+5. **Create or remove the badge route's missing table** so the 285 a day stops.
+6. **Confirm the concurrency quota approval** (PENDING at 1,000), then set reserved concurrency and update REL.
+7. **Click Actions, Deploy Privacy Policy Worker, Run workflow on main** (live was diffed and is safe).
+8. **After the fixes: re-tick and re-word the WAFR, Save milestone, generate the PDF, request FTR validation on
+   solution `soln-aicwx4eiyofnm`, then email Dave Shapiro** (ask who owns co-sell for early-stage ISVs).
+9. **Delete the deactivated root access key (ends N2XZ) on or after 2026-10-16** if nothing has broken.
+10. **Carried, not re-verified:** tag standardisation; retention on the 8 log groups with none; arm64 and
+    right-sizing trial; a load test and tracing; running the test suite in CI; Lambda versions and aliases for
+    rollback; `relayshield-signup-api` missing from the invoke policy; the badge route table; read the Hudson
+    Rock terms; CS Mobile v1.7.0 build blocked on a JDK; `tools/backfill_first_seen.py --apply` unconfirmed.

@@ -267,6 +267,27 @@ def _new_unique_indicators() -> int:
     return _new_this_week("relayshield_intel_first_seen", "first_seen")
 
 
+# The live monitor began writing relayshield_intel_first_seen on this date
+# (tools/setup_first_seen.sh, 2026-08-27). Every row dated EARLIER can only have
+# come from tools/backfill_first_seen.py, so the count of such rows says whether
+# the backfill ran -- see _indicators_backfilled().
+FIRST_SEEN_LIVE_SINCE = "2026-08-27"
+
+
+def _indicators_backfilled() -> int:
+    """Indicators in the first-seen table dated before the live monitor existed.
+
+    Why this is in the report: _unique_indicators() is only the true all-time
+    figure if tools/backfill_first_seen.py --apply has seeded the table from the
+    sightings history. Until then it is just what the live monitor has recorded
+    since 2026-08-27 -- a perfectly plausible number (255,580 against a measured
+    687,011 on 2026-10-08) that reads like a cumulative total and is not. Nothing
+    errors in that state, so the report has to say so itself: zero here means the
+    backfill never ran."""
+    return _filtered_count("relayshield_intel_first_seen",
+                            Attr("first_seen").lt(FIRST_SEEN_LIVE_SINCE))
+
+
 AWS_MARKETPLACE_TIER_PRICES = {
     "ti_starter":   499,
     "ti_unlimited": 999,
@@ -346,6 +367,68 @@ def _aws_marketplace_stats() -> dict:
 
 SOURCES = ["direct", "n8n", "tines", "hf-smolagents"]
 
+# Discovery surfaces, grouped. The api_keys `source` field holds the RAW key that
+# arrived on the landing page (n8n-offboarding, npm-worm-devto, tg-miniapp-tgapp),
+# so grouping is by prefix: first match wins, and `referer:<key>` is classified by
+# the key after the prefix. Anything no rule claims lands in OTHER, which is a
+# defect to fix rather than a bucket to live in -- test_weekly_metrics.py fails if
+# any key registered in relayshield_developer_signup.py or miniapp_routes.json
+# falls through to it, so a new surface cannot be added without being grouped.
+DIRECT_GROUP = "No attribution (direct)"
+OTHER_GROUP = "Other (unclassified)"
+SURFACE_GROUPS = [
+    ("Mini App and its catalogues", ("tg-miniapp", "miniapp")),
+    ("Bots and chat (Telegram, Discord)", ("tg-widget", "discord", "storebot", "botsarchive", "wa-")),
+    ("Developer tools and extensions", ("chrome-", "rsscan", "claude-skill", "pre-commit", "github",
+                                         "circleci", "docker", "zapier", "langchain", "pypi")),
+    ("Agent platforms and registries", ("mcp-registry", "huggingface", "hf", "hf_smolagents", "smolagents", "apify",
+                                         "muse", "openai", "glama", "smithery")),
+    ("Marketplaces and SIEM/SOAR/automation", ("aws", "awsmarketplace", "marketplace", "xsoar", "opencti", "elastic",
+                                                "sentinel", "n8n", "creators.n8n.io", "tines", "x402")),
+    ("Blog and content campaigns", ("blog", "post", "medium", "linkedin", "telegram", "llmjacking",
+                                     "session-hijack", "sessionhijack", "npm-worm", "fourth-party",
+                                     "ansible", "galaxy", "bluenoroff", "rapuncel", "gitlab-cve",
+                                     "agent-bait", "secret-scan", "secretscan", "metamask-snap",
+                                     "relayshield-net", "reddit", "hn")),
+]
+
+
+def _surface_group(key: str) -> str:
+    k = (key or "direct").strip().lower()
+    if k.startswith("referer:"):
+        k = k[len("referer:"):]
+    if k in ("direct", ""):
+        return DIRECT_GROUP
+    for name, prefixes in SURFACE_GROUPS:
+        for p in prefixes:
+            # "hf", "hn" and "aws" must not swallow unrelated keys that merely
+            # start with those letters, so short stems match a whole key or a
+            # hyphen-delimited family only.
+            if k == p or k.startswith(p if p.endswith(("-", ".")) else p + "-"):
+                return name
+            if len(p) > 3 and k.startswith(p):
+                return name
+    return OTHER_GROUP
+
+
+def _surface_breakdown(counted: dict, week_counted: dict) -> dict:
+    """Group per-key API key counts by discovery surface.
+
+    Returns {group: {"total": n, "week": n, "keys": {key: (total, week)}}}.
+    unmatched: keys are left out: they are reported separately as defects."""
+    out: dict = {}
+    for key, n in counted.items():
+        if key.startswith("unmatched:"):
+            continue
+        g = _surface_group(key)
+        slot = out.setdefault(g, {"total": 0, "week": 0, "keys": {}})
+        w = week_counted.get(key, 0)
+        slot["total"] += n
+        slot["week"] += w
+        slot["keys"][key] = (n, w)
+    return out
+
+
 def _api_key_stats() -> dict:
     table = dynamodb.Table("relayshield_api_keys")
     resp  = table.scan()
@@ -394,6 +477,7 @@ def _api_key_stats() -> dict:
         "apify_total":        apify_total,
         "apify_week":         apify_week,
         "unmatched_sources":  unmatched,
+        "by_surface":         _surface_breakdown(counted, week_counted),
     }
 
 
@@ -911,6 +995,8 @@ def _build_email(metrics: dict) -> str:
   <tr><td>Monitored Telegram marketplaces (active)</td><td><b>{s['monitored_marketplaces']:,}</b></td></tr>
   <tr><td>Unique indicators (cumulative, all-time)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
   <tr><td>&nbsp;&nbsp;New unique indicators (this week)</td><td><b>+{s['unique_indicators_new']:,}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;Of which backfilled from history (pre-{FIRST_SEEN_LIVE_SINCE})</td><td><b>{s.get('indicators_backfilled', 0):,}</b></td></tr>
+  {_seed_warning(s)}
   <tr><td>TI feed IOC sightings (total, incl. repeats)</td><td><b>{s['ioc_total']:,}</b></td></tr>
   <tr><td>Stolen session records</td><td><b>{s['stolen_sessions']:,}</b></td></tr>
   <tr><td>Identity graph correlations</td><td><b>{s['identity_graph']:,}</b></td></tr>
@@ -929,12 +1015,17 @@ def _build_email(metrics: dict) -> str:
   <tr><td>&nbsp;&nbsp;HF (smolagents)</td><td><b>${s['stripe']['mrr_by_source']['hf-smolagents']}</b></td></tr>
 </table>
 
+<h3 style="color: #e94560;">API keys by discovery surface</h3>
+<table border="0" cellpadding="4">
+  <tr><td></td><td style="color:#888;font-size:12px">all time</td><td style="color:#888;font-size:12px">this week</td></tr>
+  {_surface_rows(s['api_keys'].get('by_surface', {}))}
+</table>
+
 <h3 style="color: #e94560;">Signup attribution</h3>
 <table border="0" cellpadding="4">
   <tr><td>Apify signups (all time)</td><td><b>{s['api_keys']['apify_total']}</b></td></tr>
   <tr><td>Apify signups (this week)</td><td><b>{s['api_keys']['apify_week']}</b></td></tr>
-  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">All sources, all time</td></tr>
-  {_rows(s['api_keys']['by_source'])}
+  <tr><td colspan="2" style="padding-top:6px;color:#888;font-size:12px">Per-source detail is in the table above</td></tr>
   {_unmatched_rows(s['api_keys']['unmatched_sources'])}
 </table>
 
@@ -1151,6 +1242,42 @@ def _by_platform(counts: dict) -> str:
     return ", ".join(f"{k}: {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1]))
 
 
+def _surface_rows(by_surface: dict) -> str:
+    """One bold row per surface group, then its individual source keys.
+
+    Groups are listed in SURFACE_GROUPS order with the direct and unclassified
+    groups last, so the report reads the same week to week. Groups with no keys
+    are shown at zero: a surface going quiet should be visible, not absent."""
+    order = [g for g, _ in SURFACE_GROUPS] + [DIRECT_GROUP, OTHER_GROUP]
+    out = []
+    for g in order:
+        slot = by_surface.get(g)
+        if slot is None:
+            if g in (DIRECT_GROUP, OTHER_GROUP):
+                continue
+            slot = {"total": 0, "week": 0, "keys": {}}
+        colour = "#e94560" if g == OTHER_GROUP else "inherit"
+        out.append(f'<tr><td style="color:{colour}"><b>{g}</b></td>'
+                   f'<td><b>{slot["total"]}</b></td><td><b>+{slot["week"]}</b></td></tr>')
+        for key, (n, w) in sorted(slot["keys"].items(), key=lambda kv: -kv[1][0]):
+            out.append(f'<tr><td>&nbsp;&nbsp;{html.escape(key)}</td><td>{n}</td><td>+{w}</td></tr>')
+    return "".join(out)
+
+
+def _seed_warning(s: dict) -> str:
+    """Red row when the cumulative indicator figure cannot be trusted as all-time.
+
+    Zero backfilled rows means relayshield_intel_first_seen holds only what the
+    live monitor recorded since FIRST_SEEN_LIVE_SINCE, so unique_indicators is a
+    partial count that looks like a total."""
+    if s.get("indicators_backfilled", 0) > 0:
+        return ""
+    return ('<tr><td colspan="2" style="color:#e94560;font-size:12px">'
+            'NOT ALL-TIME: no history was backfilled, so the figure above only covers '
+            f'indicators first seen since {FIRST_SEEN_LIVE_SINCE}. Run '
+            'tools/backfill_first_seen.py --apply.</td></tr>')
+
+
 def _rows(by_source: dict) -> str:
     return "".join(
         f'<tr><td>&nbsp;&nbsp;{k}</td><td><b>{v}</b></td></tr>'
@@ -1229,6 +1356,7 @@ and includes this same section.</p>
         "monitored_marketplaces": _monitored_marketplaces(),
         "unique_indicators":    _unique_indicators(),
         "unique_indicators_new": _new_unique_indicators(),
+        "indicators_backfilled": _indicators_backfilled(),
         "lambda_health":        _scheduled_lambda_health(),
         "stolen_sessions":      _scan_count("relayshield_stolen_sessions"),
         "identity_graph":       _scan_count("relayshield_identity_graph"),

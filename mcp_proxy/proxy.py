@@ -11,6 +11,7 @@ Notifications (no id) are forwarded fire-and-forget.
 
 import json
 import logging
+import os
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -120,10 +121,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 html_path = os.path.join(
                     os.path.dirname(os.path.abspath(__file__)),
                     "dashboard.html")
+                print(f"DEBUG: Trying to read {html_path}", flush=True)
                 with open(html_path, "r", encoding="utf-8") as f:
                     html = f.read().encode("utf-8")
-            except OSError:
-                self._send_json({"error": "dashboard.html not found"}, 500)
+                print(f"DEBUG: Read {len(html)} bytes", flush=True)
+            except Exception as e:
+                print(f"DEBUG: Dashboard error: {type(e).__name__}: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+                self._send_json({"error": f"dashboard error: {e}"}, 500)
                 return
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

@@ -348,7 +348,7 @@ def _servers_from_config(path):
 
 
 def check_poppy_json(domain, timeout=15.0):
-    """Validate a business's poppy.json discovery document."""
+    """Validate a business's poppy.json discovery document (PAP draft 0.1)."""
     import urllib.request
     import json
     findings = []
@@ -361,35 +361,86 @@ def check_poppy_json(domain, timeout=15.0):
         return [{"severity": "HIGH", "tool": "poppy.json",
                  "message": f"Could not fetch poppy.json: {e}"}]
 
-    # Check required fields
-    if "organization" not in data:
-        findings.append({"severity": "HIGH", "tool": "poppy.json",
-                        "message": "Missing 'organization' field"})
-    elif data["organization"].get("domain") != domain:
-        findings.append({"severity": "CRITICAL", "tool": "poppy.json",
-                        "message": "organization.domain does not match serving domain"})
+    def add(sev, msg):
+        findings.append({"severity": sev, "tool": "poppy.json", "message": msg})
 
-    if "issuer" not in data:
-        findings.append({"severity": "HIGH", "tool": "poppy.json",
-                        "message": "Missing OAuth 'issuer'"})
+    want = domain.lower().lstrip("www.")
 
-    if "poppy_domains" not in data or not data["poppy_domains"]:
-        findings.append({"severity": "MEDIUM", "tool": "poppy.json",
-                        "message": "Missing or empty 'poppy_domains'"})
+    # 1. protocol_version (required, major.minor)
+    pv = data.get("protocol_version")
+    if not pv:
+        add("HIGH", "Missing required 'protocol_version' (draft 0.1)")
+    elif str(pv).split(".")[0] != "0":
+        add("MEDIUM", f"protocol_version '{pv}' is not draft 0.x; rules may not apply")
 
-    # Check for suspicious scopes
-    for scope in data.get("scopes", []):
-        if scope.startswith("poppy:") and scope not in ["poppy:read", "poppy:write"]:
-            findings.append({"severity": "MEDIUM", "tool": "poppy.json",
-                            "message": f"Suspicious scope: {scope}"})
+    # 2. organization (required); domain must match the host, ignoring leading www.
+    org = data.get("organization") or {}
+    org_domain = str(org.get("domain", "")).lower().lstrip("www.")
+    if not org.get("domain"):
+        add("HIGH", "Missing required 'organization.domain'")
+    elif org_domain != want:
+        add("CRITICAL", "organization.domain does not match serving domain")
+
+    # 3. auth.issuer: the OAuth issuer lives NESTED under "auth", not top level.
+    auth = data.get("auth") or {}
+    issuer = auth.get("issuer")
+    if not issuer:
+        add("HIGH", "Missing 'auth.issuer' (OAuth issuer is nested under 'auth')")
+    elif not str(issuer).startswith("https://"):
+        add("HIGH", f"auth.issuer is not an HTTPS URL: {issuer}")
+
+    # 4. At least one route is required: agent, apis, or web.
+    if not any(data.get(k) for k in ("agent", "apis", "web")):
+        add("HIGH", "poppy.json lists no route: needs at least one of 'agent', 'apis', 'web'")
+
+    # 5. Route endpoints must be HTTPS.
+    def check_https(value, label):
+        if isinstance(value, str) and value and not value.startswith("https://"):
+            add("MEDIUM", f"{label} is not HTTPS: {value}")
+
+    agent = data.get("agent") or {}
+    for p in (agent.get("protocols") or []):
+        check_https(p.get("endpoint"), "agent protocol endpoint")
+    for api in (data.get("apis") or []):
+        check_https(api.get("url"), "apis entry url")
+    web = data.get("web") or {}
+    check_https(web.get("browser_session_endpoint"), "web browser_session_endpoint")
+
+    # 6. Scopes: 'poppy:' prefix is reserved; only poppy:read/poppy:write allowed.
+    # Custom scopes are declared under auth.custom_scopes (keys), granted scopes
+    # under auth.<direct|device|mediated>.scopes.
+    custom = auth.get("custom_scopes") or {}
+    for scope in list(custom.keys()):
+        if str(scope).startswith("poppy:"):
+            add("MEDIUM", f"Custom scope '{scope}' uses reserved 'poppy:' prefix")
+    for signin in ("direct", "device", "mediated"):
+        entry = auth.get(signin) or {}
+        for scope in (entry.get("scopes") or []):
+            if str(scope).startswith("poppy:") and scope not in ("poppy:read", "poppy:write"):
+                add("MEDIUM", f"Suspicious scope '{scope}' under auth.{signin}")
+
+    # 7. poppy_domains is NOT a poppy.json field: it lives in the OAuth server's
+    # RFC 8414 metadata. Fetch it and verify the issuer match + domain membership.
+    if issuer and str(issuer).startswith("https://"):
+        try:
+            meta_url = issuer.rstrip("/") + "/.well-known/oauth-authorization-server"
+            req = urllib.request.Request(meta_url, headers={'Accept': 'application/json'})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                meta = json.loads(resp.read().decode('utf-8'))
+            if meta.get("issuer") != issuer:
+                add("CRITICAL", "OAuth metadata issuer does not match auth.issuer")
+            poppy_domains = [str(d).lower().lstrip("www.") for d in (meta.get("poppy_domains") or [])]
+            if want not in poppy_domains:
+                add("HIGH", f"OAuth metadata 'poppy_domains' does not list {domain}")
+        except Exception as e:
+            add("MEDIUM", f"Could not fetch OAuth server metadata: {e}")
 
     if not findings:
-        findings.append({"severity": "INFO", "tool": "poppy.json",
-                        "message": "poppy.json is valid"})
+        add("INFO", "poppy.json is valid per PAP draft 0.1 field guide")
     return findings
 
 def check_poppy_json(domain, timeout=15.0):
-    """Validate a business's poppy.json discovery document."""
+    """Validate a business's poppy.json discovery document (PAP draft 0.1)."""
     import urllib.request
     import json
     findings = []
@@ -402,31 +453,82 @@ def check_poppy_json(domain, timeout=15.0):
         return [{"severity": "HIGH", "tool": "poppy.json",
                  "message": f"Could not fetch poppy.json: {e}"}]
 
-    # Check required fields
-    if "organization" not in data:
-        findings.append({"severity": "HIGH", "tool": "poppy.json",
-                        "message": "Missing 'organization' field"})
-    elif data["organization"].get("domain") != domain:
-        findings.append({"severity": "CRITICAL", "tool": "poppy.json",
-                        "message": "organization.domain does not match serving domain"})
+    def add(sev, msg):
+        findings.append({"severity": sev, "tool": "poppy.json", "message": msg})
 
-    if "issuer" not in data:
-        findings.append({"severity": "HIGH", "tool": "poppy.json",
-                        "message": "Missing OAuth 'issuer'"})
+    want = domain.lower().lstrip("www.")
 
-    if "poppy_domains" not in data or not data["poppy_domains"]:
-        findings.append({"severity": "MEDIUM", "tool": "poppy.json",
-                        "message": "Missing or empty 'poppy_domains'"})
+    # 1. protocol_version (required, major.minor)
+    pv = data.get("protocol_version")
+    if not pv:
+        add("HIGH", "Missing required 'protocol_version' (draft 0.1)")
+    elif str(pv).split(".")[0] != "0":
+        add("MEDIUM", f"protocol_version '{pv}' is not draft 0.x; rules may not apply")
 
-    # Check for suspicious scopes
-    for scope in data.get("scopes", []):
-        if scope.startswith("poppy:") and scope not in ["poppy:read", "poppy:write"]:
-            findings.append({"severity": "MEDIUM", "tool": "poppy.json",
-                            "message": f"Suspicious scope: {scope}"})
+    # 2. organization (required); domain must match the host, ignoring leading www.
+    org = data.get("organization") or {}
+    org_domain = str(org.get("domain", "")).lower().lstrip("www.")
+    if not org.get("domain"):
+        add("HIGH", "Missing required 'organization.domain'")
+    elif org_domain != want:
+        add("CRITICAL", "organization.domain does not match serving domain")
+
+    # 3. auth.issuer: the OAuth issuer lives NESTED under "auth", not top level.
+    auth = data.get("auth") or {}
+    issuer = auth.get("issuer")
+    if not issuer:
+        add("HIGH", "Missing 'auth.issuer' (OAuth issuer is nested under 'auth')")
+    elif not str(issuer).startswith("https://"):
+        add("HIGH", f"auth.issuer is not an HTTPS URL: {issuer}")
+
+    # 4. At least one route is required: agent, apis, or web.
+    if not any(data.get(k) for k in ("agent", "apis", "web")):
+        add("HIGH", "poppy.json lists no route: needs at least one of 'agent', 'apis', 'web'")
+
+    # 5. Route endpoints must be HTTPS.
+    def check_https(value, label):
+        if isinstance(value, str) and value and not value.startswith("https://"):
+            add("MEDIUM", f"{label} is not HTTPS: {value}")
+
+    agent = data.get("agent") or {}
+    for p in (agent.get("protocols") or []):
+        check_https(p.get("endpoint"), "agent protocol endpoint")
+    for api in (data.get("apis") or []):
+        check_https(api.get("url"), "apis entry url")
+    web = data.get("web") or {}
+    check_https(web.get("browser_session_endpoint"), "web browser_session_endpoint")
+
+    # 6. Scopes: 'poppy:' prefix is reserved; only poppy:read/poppy:write allowed.
+    # Custom scopes are declared under auth.custom_scopes (keys), granted scopes
+    # under auth.<direct|device|mediated>.scopes.
+    custom = auth.get("custom_scopes") or {}
+    for scope in list(custom.keys()):
+        if str(scope).startswith("poppy:"):
+            add("MEDIUM", f"Custom scope '{scope}' uses reserved 'poppy:' prefix")
+    for signin in ("direct", "device", "mediated"):
+        entry = auth.get(signin) or {}
+        for scope in (entry.get("scopes") or []):
+            if str(scope).startswith("poppy:") and scope not in ("poppy:read", "poppy:write"):
+                add("MEDIUM", f"Suspicious scope '{scope}' under auth.{signin}")
+
+    # 7. poppy_domains is NOT a poppy.json field: it lives in the OAuth server's
+    # RFC 8414 metadata. Fetch it and verify the issuer match + domain membership.
+    if issuer and str(issuer).startswith("https://"):
+        try:
+            meta_url = issuer.rstrip("/") + "/.well-known/oauth-authorization-server"
+            req = urllib.request.Request(meta_url, headers={'Accept': 'application/json'})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                meta = json.loads(resp.read().decode('utf-8'))
+            if meta.get("issuer") != issuer:
+                add("CRITICAL", "OAuth metadata issuer does not match auth.issuer")
+            poppy_domains = [str(d).lower().lstrip("www.") for d in (meta.get("poppy_domains") or [])]
+            if want not in poppy_domains:
+                add("HIGH", f"OAuth metadata 'poppy_domains' does not list {domain}")
+        except Exception as e:
+            add("MEDIUM", f"Could not fetch OAuth server metadata: {e}")
 
     if not findings:
-        findings.append({"severity": "INFO", "tool": "poppy.json",
-                        "message": "poppy.json is valid"})
+        add("INFO", "poppy.json is valid per PAP draft 0.1 field guide")
     return findings
 
 def check_authentication(url, timeout=15.0):

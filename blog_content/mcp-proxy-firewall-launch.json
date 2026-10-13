@@ -1,0 +1,7 @@
+{
+  "slug": "mcp-proxy-firewall-launch",
+  "title": "Introducing the MCP Proxy Firewall: Stop Poisoned Neighbors Before They Poison You",
+  "date": "2026-10-13",
+  "excerpt": "MCP servers are the new attack surface. Our Proxy Firewall scans before you connect and screens every call at runtime.",
+  "html": "<p>The Model Context Protocol (MCP) lets AI agents connect to tools and data sources. But what happens when one of those tools is compromised?</p><p>We built the MCP Proxy Firewall to answer that question.</p><h2>The Problem: Poisoned Neighbors</h2><p>MCP servers are the new attack surface. A single poisoned server can inject hidden instructions, exfiltrate credentials, or leak PII.</p><h2>The Solution: Two Layers</h2><p><strong>1. Pre-Deployment Scanner</strong> (free) - Scan before you connect.</p><p><strong>2. Runtime Proxy Firewall</strong> - Screen every call and result.</p><p><a href='https://api.relayshield.net/developers'>Try it now</a></p>"
+}

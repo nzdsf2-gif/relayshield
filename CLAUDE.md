@@ -11025,3 +11025,34 @@ tools), so `origin/main` now has `set_sim_swap_monitor_schedule.sh`, `grant_gas_
 * **Built:** "API keys by discovery surface". `relayshield_api_keys.source` already held the raw attribution key, and the report already counted keys per source, but as one ungrouped list with no weekly column and only for keys that had a signup. Keys are now grouped into discovery-surface groups (`SURFACE_GROUPS`), each with an all-time and a this-week column and its per-key detail, every group shown even at zero. `unmatched:` keys stay in their own red alarm.
 * **Guard:** `test_weekly_metrics.py` fails if any key registered in `_SOURCE_BANNERS`, `_SOURCE_ALIASES`, `miniapp_routes.json` or the default `SOURCES` falls into the unclassified group, so a new surface cannot be added without being grouped. Proven by deleting a prefix. 50 tests. The grouping lives in the weekly-metrics file rather than being imported, because that Lambda is a single-file package with no deploy path that could package a second module.
 * **NOT DEPLOYED.** Merging changes nothing in AWS. A hand deploy is required, and `sh tools/handler_drift.sh relayshield_weekly_metrics.py` is read first as always.
+
+## 2026-10-13: THE MCP PROXY TELEMETRY TABLE IS LIVE. THIS FILE SAID "NOT YET CREATED" AND WAS STALE.
+
+Measured on Andrew's Mac, not recalled:
+* `relayshield_mcp_proxy_telemetry` **already existed** with TTL `ENABLED` on `ttl`
+  (`tools/setup_mcp_proxy_telemetry_table.sh` found it and left it alone).
+* `tools/grant_breach_cache_access.py --table relayshield_mcp_proxy_telemetry` reported
+  `dynamodb:PutItem` and `dynamodb:UpdateItem` already **allowed** for
+  `relayshield-breach-check-role-1sapnwdl`. Nothing to apply.
+* An unsigned counts-only `POST /v1/telemetry/mcp-proxy` returned HTTP 200 with
+  `{"ok": true, "data": {"recorded": true, "counts": 1, "indicators": 0}}`. That proves the
+  gateway route, the deployed Lambda code and the table write on the path a real proxy uses.
+  It left one test install row (`install_id` = `deadbeef` x4), TTL 180 days, so a report will
+  show it as 1 install.
+* The earlier line "`relayshield_mcp_proxy_telemetry` (not yet created)" is superseded. It was a
+  lead, not a fact, and nobody recorded the creation: an AWS write made outside a session that
+  can commit is invisible to every later session, the same shape as the Stars grant.
+
+**STILL UNPROVEN: the indicator tier** (`mode: indicators`, needs a valid API key). It is the
+only path that writes `CAND#` rows, uses `update_item` with a set `ADD`, and is the part the
+corpus work depends on. Probe it with a real key before relying on it.
+
+**STILL TRUE: nothing promotes a candidate into the IOC corpus.** The only reader of `CAND#`
+rows is `tools/mcp_proxy_telemetry_report.py`. Size and accuracy gains need a reviewed
+promotion step that does not exist yet.
+
+**Housekeeping found on the way:** Andrew's clone holds about 55 stashes, ~50 of them
+"pre-merge untracked", because the standard merge block's stash line runs on every merge. The
+stash line also swept up an uncommitted tracked edit to `mcp_proxy/proxy.py` (`git stash
+--include-untracked` stashes tracked changes too, not just untracked files). Read it with
+`git diff "stash@{0}^" "stash@{0}" -- mcp_proxy/proxy.py` before deciding anything.

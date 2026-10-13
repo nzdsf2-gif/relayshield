@@ -347,6 +347,88 @@ def _servers_from_config(path):
     return servers, None
 
 
+def check_poppy_json(domain, timeout=15.0):
+    """Validate a business's poppy.json discovery document."""
+    import urllib.request
+    import json
+    findings = []
+    url = f"https://{domain}/.well-known/poppy.json"
+    try:
+        req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        return [{"severity": "HIGH", "tool": "poppy.json",
+                 "message": f"Could not fetch poppy.json: {e}"}]
+
+    # Check required fields
+    if "organization" not in data:
+        findings.append({"severity": "HIGH", "tool": "poppy.json",
+                        "message": "Missing 'organization' field"})
+    elif data["organization"].get("domain") != domain:
+        findings.append({"severity": "CRITICAL", "tool": "poppy.json",
+                        "message": "organization.domain does not match serving domain"})
+
+    if "issuer" not in data:
+        findings.append({"severity": "HIGH", "tool": "poppy.json",
+                        "message": "Missing OAuth 'issuer'"})
+
+    if "poppy_domains" not in data or not data["poppy_domains"]:
+        findings.append({"severity": "MEDIUM", "tool": "poppy.json",
+                        "message": "Missing or empty 'poppy_domains'"})
+
+    # Check for suspicious scopes
+    for scope in data.get("scopes", []):
+        if scope.startswith("poppy:") and scope not in ["poppy:read", "poppy:write"]:
+            findings.append({"severity": "MEDIUM", "tool": "poppy.json",
+                            "message": f"Suspicious scope: {scope}"})
+
+    if not findings:
+        findings.append({"severity": "INFO", "tool": "poppy.json",
+                        "message": "poppy.json is valid"})
+    return findings
+
+def check_poppy_json(domain, timeout=15.0):
+    """Validate a business's poppy.json discovery document."""
+    import urllib.request
+    import json
+    findings = []
+    url = f"https://{domain}/.well-known/poppy.json"
+    try:
+        req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+    except Exception as e:
+        return [{"severity": "HIGH", "tool": "poppy.json",
+                 "message": f"Could not fetch poppy.json: {e}"}]
+
+    # Check required fields
+    if "organization" not in data:
+        findings.append({"severity": "HIGH", "tool": "poppy.json",
+                        "message": "Missing 'organization' field"})
+    elif data["organization"].get("domain") != domain:
+        findings.append({"severity": "CRITICAL", "tool": "poppy.json",
+                        "message": "organization.domain does not match serving domain"})
+
+    if "issuer" not in data:
+        findings.append({"severity": "HIGH", "tool": "poppy.json",
+                        "message": "Missing OAuth 'issuer'"})
+
+    if "poppy_domains" not in data or not data["poppy_domains"]:
+        findings.append({"severity": "MEDIUM", "tool": "poppy.json",
+                        "message": "Missing or empty 'poppy_domains'"})
+
+    # Check for suspicious scopes
+    for scope in data.get("scopes", []):
+        if scope.startswith("poppy:") and scope not in ["poppy:read", "poppy:write"]:
+            findings.append({"severity": "MEDIUM", "tool": "poppy.json",
+                            "message": f"Suspicious scope: {scope}"})
+
+    if not findings:
+        findings.append({"severity": "INFO", "tool": "poppy.json",
+                        "message": "poppy.json is valid"})
+    return findings
+
 def check_authentication(url, timeout=15.0):
     """Check if server accepts unauthenticated tools/list (CVE-2026-82456 pattern)."""
     import urllib.request

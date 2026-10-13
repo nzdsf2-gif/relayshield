@@ -11041,3 +11041,31 @@ tools), so `origin/main` now has `set_sim_swap_monitor_schedule.sh`, `grant_gas_
 * `tools/deploy_weekly_metrics.sh [--invoke] [--raise-timeout]` replaces a pasted deploy. It asserts the account, compiles the file, zips the one file, updates the code, waits, prints the timeout, and refuses to invoke if the timeout is under 300s unless told to raise it. **The report now scans the first-seen table three times and the unknown function timeout is a real risk: a timeout sends no email.** Exercised against a stub `aws` only, never real AWS.
 
 **Open until Andrew pastes the output:** that the apply finished with `0 failure(s)`, and the first email after deploy showing a total near 700K. The live monitor's first-seen writes are also worth checking: only about 60,600 rows exist from after 2026-08-27, which is less than the sightings table's growth suggests, so the monitor may have been failing to write for part of that window.
+
+## WHERE 2026-10-13 LEFT THINGS (Andrew rebooting his Mac). READ THIS FIRST, IT SUPERSEDES THE "WHAT IS NEXT" LISTS ABOVE FOR THE WEEKLY REPORT.
+
+**Branch `claude/determined-planck-o2wkii`, last commit `a0d24d9`, pushed and UNMERGED.** Nothing below has run against real AWS.
+
+**Andrew's request:** the Weekly Metrics email must show the cumulative unique-indicator total every week (about 700K now), like the citations figure, not an incremental add. Plus an "API keys by discovery surface" section. Both are built and tested (50 weekly-metrics tests, 4 backfill tests). Neither is live.
+
+**Why the email said 255,580:** that is the row count of `relayshield_intel_first_seen` (255,597 rows, 194,987 dated before 2026-08-27). The table is incomplete; the sightings table holds about 687,011 distinct indicators (2026-10-08). The live Lambda is also a stale copy of `a56ee4ad`. Two fixes were needed: fill the table, then deploy.
+
+**Andrew still has to run, after the reboot, in this order (the `&&` stops the deploy if the backfill reports any failure):**
+
+    cd ~/dev/relayshield
+    git checkout main
+    git --no-pager fetch origin claude/determined-planck-o2wkii
+    git rm -rf --cached -q --ignore-unmatch ansible-relayshield relayshield-snap
+    git stash push --include-untracked -m "pre-merge untracked"
+    git -c pull.rebase=false merge --no-edit FETCH_HEAD
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/backfill_first_seen.py --apply && AWS_PROFILE=relayshield sh tools/deploy_weekly_metrics.sh --invoke --raise-timeout
+
+EXPECT: the backfill scans for several minutes, prints progress every 25,000, ends `wrote ~430000, skipped ~255000 already present, 0 failure(s)`. The deploy prints the new LastModified and timeout (raised to 300s if lower), invokes once, and a new email arrives with "Total unique IOCs (cumulative)" near 700K and an "API keys by discovery surface" section. A conflict in CLAUDE.md alone: keep both sides. Any other file: stop and read. If the stuck-merge state from 2026-10-07 (`cloudflare_worker_privacy.js: needs merge`) is still present, resolve or `git merge --abort` first.
+
+**When he reports the output, record here:** the apply and deploy dates, whether it ended with 0 failures, the Lambda timeout, and the first email's cumulative figure.
+
+**Still open on this thread:**
+* Only about 60,600 first-seen rows date from after 2026-08-27, fewer than sightings growth suggests. The live monitor's first-seen writes may have failed for part of that window. If the cumulative total falls well behind the dry-run distinct count a week after the apply, chase it.
+* `relayshield_weekly_metrics` is still in neither `deploy_lambdas.yml` nor the invoke policy; every change needs a hand deploy until it is mapped (the mapping commit must touch the `.py`).
+
+**Other pending, unchanged by this session:** reserved concurrency now possible (quota approved to 1,000, record the date it is applied); lower the cost budget to $10 (`tools/create_cost_budget.sh` dry run then `--apply`); `tools/setup_badge_cache.sh --apply`; confirm the gas monitor stops logging AccessDenied after the KMS grant; Twilio usage trigger and the unexplained "1,407 in an hour" origin; 2,294 unexplained AccessDenied lines in the API log group; alarm on `relayshield-api` errors; remaining WAFR items (one question unanswered, 36 High); delete the deactivated root access key (ends N2XZ) on or after 2026-10-16.

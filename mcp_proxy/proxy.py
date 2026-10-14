@@ -170,11 +170,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if not url:
                     self._send_json({"error": "URL required"}, 400)
                     return
-                from .tool_scanner import scan_tools, check_authentication
+                from .tool_scanner import scan_tools, check_poppy_json
+                from urllib.parse import urlparse
                 import urllib.request
-                # Check for unauthenticated access (CVE-2026-82456)
-                auth_finding = check_authentication(url)
-                # Fetch tools/list
+                # Route domain-only URLs to poppy.json checker (PAP)
+                parsed = urlparse(url)
+                if not parsed.path or parsed.path == "/":
+                    domain = parsed.netloc or parsed.path
+                    domain = domain.split(":")[0]  # strip port
+                    findings = check_poppy_json(domain)
+                    self._send_json({
+                        "url": url,
+                        "tool_count": 0,
+                        "findings": findings
+                    })
+                    return
+                # Fetch tools/list for MCP servers
                 req_data = json.dumps({
                     "jsonrpc": "2.0", "id": 1,
                     "method": "tools/list", "params": {}
@@ -187,8 +198,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     result = json.loads(resp.read().decode('utf-8'))
                 tools = result.get('result', {}).get('tools', [])
                 findings = scan_tools(tools, source=url)
-                if auth_finding:
-                    findings.insert(0, auth_finding)
                 self._send_json({
                     "url": url,
                     "tool_count": len(tools),

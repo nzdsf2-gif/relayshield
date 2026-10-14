@@ -11061,3 +11061,67 @@ promotion step that does not exist yet.
 stash line also swept up an uncommitted tracked edit to `mcp_proxy/proxy.py` (`git stash
 --include-untracked` stashes tracked changes too, not just untracked files). Read it with
 `git diff "stash@{0}^" "stash@{0}" -- mcp_proxy/proxy.py` before deciding anything.
+
+## 2026-10-14: THE PROMOTION STEP IS BUILT. IT IS THE ONLY WAY A PROXY REPORT REACHES THE CORPUS.
+
+`tools/promote_mcp_candidates.py` (+ `test_promote_mcp_candidates.py`, 30 tests, 7 defects
+reintroduced and each fired its own guard). Review-and-approve, one candidate at a time:
+
+    AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/promote_mcp_candidates.py          # list
+    ... --all                                                                             # + why each is blocked
+    ... --approve ID8+ --reviewer NAME --evidence "what you checked" --confirm-host HOST  # dry run
+    ... same line plus --apply                                                            # writes
+    ... --reject ID8+ --reviewer NAME --reason "why"
+
+**A PROMOTED HOST FLAGS IMMEDIATELY, FOR EVERYONE.** `_assess_domain` treats ANY domain/url row in
+`relayshield_intel_iocs` as "appears in RelayShield's criminal IOC corpus" and reads no confidence or
+source field. The row is labelled `confidence: unverified, source: mcp_proxy_telemetry`, but that is a
+label, not a gate. A test fails if `_assess_domain` ever starts honouring either field, because the
+tool's warning would then be out of date. So a wrong promotion is a false positive served to every
+user, which is why a human approves each one and every blocker is re-checked at approval time.
+
+**TWO DESIGN FINDINGS, BOTH FROM READING HOW THE PROXY PRODUCES THE DATA, NOT FROM THE SCHEMA:**
+
+1. **THE REPORTED HOST IS THE UPSTREAM MCP SERVER, NOT A HOST IN THE CONTENT.** A tool RESULT can
+   relay third-party content (a repository, a document, an email) that carries an injection, so the
+   server is not the actor and promoting it would flag a legitimate server. Only DISCOVERY-time
+   findings (tools/list, prompts/list: metadata the server authors itself) are attributable.
+   The proxy records an approved-taxonomy id only for discovery and passes `[]` for results, so
+   **"no taxonomy id" is treated as "a tool result, not promotable"**. That coupling is implicit, so
+   `test_promote_mcp_candidates` reads `proxy.py` with `ast` and fails if it breaks. Proven by
+   passing ids on the result call.
+2. **`malicious_url` AND `kit_match` ARE ECHOES OF OUR OWN CORPUS.** The proxy decides them by calling
+   `/v1/composite-check` and `/v1/payg/scamkit-match`. Promoting them would feed our verdict back in as
+   independent evidence, so a false positive would look corroborated by the very installs it fooled.
+   **That is the loop hazard in "a perpetual fence", and it is closed by never promoting those two.**
+   Promotable: `prompt_injection`, `credential_exfiltration`, `oauth_tampering` only. Counts for the
+   rest are still collected and useful as trend data.
+
+**OTHER RULES:** distinct reporting ACCOUNTS (default 2, `anon` never counts) because a free key is minted
+from an email alone, so this is a threshold and not proof; reserved documentation names, brand official
+domains and shared-hosting platforms THEMSELVES are blocked (a tenant of one is allowed with a note); a
+host already in the corpus is blocked; all-zero hash is blocked, which is why the 2026-10-14 test
+candidate can never be promoted. The denylists are PARSED out of `relayshield_api.py` with `ast`, not
+retyped, with a floor so an empty parse refuses rather than passing everything.
+
+**`--evidence` IS REQUIRED (20+ characters) AND STORED ON THE ROW**, because privacy policy section 12
+promises a reported hostname "is not added to our threat intelligence corpus ... unless we have
+independently confirmed it". Two reporting accounts are corroboration; someone fetching the server's
+`tools/list` and reading it is confirmation. A test pins the policy sentence beside the requirement.
+
+**WRITE SAFETY:** claim (`unreviewed` -> `promoting`, conditional) -> one `put_item` -> `promoted`. A failed
+corpus write releases the claim; a failed release says so loudly. Two approvers cannot both win. It
+writes ONLY `relayshield_intel_iocs`, never `relayshield_intel_first_seen`: promoted rows must not enter
+the lead-time measurement (SPEED-1), and a test asserts the one `put_item` and no first-seen reference.
+
+**UNVERIFIED, and the first run settles it:** whether `relayshield-deployer` can `Scan` the telemetry table
+(the report tool already assumes so), `UpdateItem` it, and `PutItem` `relayshield_intel_iocs`. An
+AccessDenied is printed as itself. The tool was exercised end to end only against a stubbed boto3.
+
+**NOT BUILT, in order of value:**
+* **Reader-side wording.** A promoted row should say "reported by monitored MCP proxies", not "criminal
+  IOC corpus". Today it cannot, because `_assess_domain` ignores `source`.
+* **A `kind` field on indicators**, so discovery vs result is explicit instead of inferred from the
+  taxonomy id. Needs a proxy release and an endpoint change.
+* **Proxy adoption.** Telemetry is opt-in and off by default, so the loop is closed in code and empty in
+  fact until installs report. Until then the candidate list will read zero, which is the normal state.

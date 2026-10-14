@@ -11141,3 +11141,9 @@ and reject) and `PutItem` on `relayshield_intel_iocs` (needed by approve). Both 
 write, so the first real approval is also the first test of the deployer's write access to the corpus.
 Read it with `iam simulate-principal-policy` against the deployer user BEFORE the first approval, so a
 denied write is found by a read and not by a half-finished claim.
+
+**2026-10-14 (later): BOTH WRITES SIMULATE AS `allowed`.** `iam simulate-principal-policy` on
+`arn:aws:iam::239677749008:user/relayshield-deployer` returned `dynamodb:PutItem allowed` on
+`relayshield_intel_iocs` and `dynamodb:UpdateItem allowed` on `relayshield_mcp_proxy_telemetry`. A
+simulation is not the write, so the first real approval remains the final proof, but a missing grant is
+no longer the expected failure.

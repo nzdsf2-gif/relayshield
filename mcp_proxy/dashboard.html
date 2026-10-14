@@ -222,6 +222,39 @@
     </div>
     <div id="scan-results" style="margin-top: 12px; font-size: 13px;"></div>
   </div>
+  <div class="scan-section" style="margin-bottom: 18px; padding: 16px; background: #161b22; border: 1px solid #30363d; border-radius: 8px;">
+    <h3 style="margin-bottom: 10px; font-size: 16px;">PAP poppy.json Scanner</h3>
+    <p style="color: #8b949e; font-size: 13px; margin-bottom: 10px;">Validate a business's /.well-known/poppy.json discovery document (PAP draft 0.1).</p>
+    <div style="display: flex; gap: 8px;">
+      <input id="poppy-domain" type="text" placeholder="business.example.com" style="flex: 1; padding: 8px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9;" />
+      <button onclick="runPoppyScan()" style="padding: 8px 16px; background: #238636; border: none; border-radius: 6px; color: white; cursor: pointer;">Validate</button>
+    </div>
+    <div id="poppy-results" style="margin-top: 12px; font-size: 13px;"></div>
+  </div>
+  <script>
+  async function runPoppyScan() {
+    const domain = document.getElementById('poppy-domain').value;
+    const results = document.getElementById('poppy-results');
+    results.innerHTML = '<span style="color: #8b949e;">Validating...</span>';
+    try {
+      const resp = await fetch('/_rs/scan', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url: 'https://' + domain})});
+      const data = await resp.json();
+      if (data.error) { results.innerHTML = '<span style="color: #f85149;">Error: ' + data.error + '</span>'; }
+      else {
+        let html = '<div style="color: #3fb950;">Validated poppy.json for ' + domain + '</div>';
+        if (data.findings && data.findings.length > 0) {
+          html += '<div style="margin-top: 8px;">';
+          data.findings.forEach(f => {
+            const color = f.severity === 'CRITICAL' ? '#f85149' : f.severity === 'HIGH' ? '#d29922' : '#8b949e';
+            html += '<div style="color: ' + color + '; margin: 4px 0;">[' + f.severity + '] ' + f.tool + ': ' + f.message + '</div>';
+          });
+          html += '</div>';
+        } else { html += '<div style="color: #8b949e; margin-top: 8px;">No issues found.</div>'; }
+        results.innerHTML = html;
+      }
+    } catch (e) { results.innerHTML = '<span style="color: #f85149;">Error: ' + e.message + '</span>'; }
+  }
+  </script>
   <script>
   async function runScan() {
     const url = document.getElementById('scan-url').value;

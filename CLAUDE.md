@@ -11125,3 +11125,19 @@ AccessDenied is printed as itself. The tool was exercised end to end only agains
   taxonomy id. Needs a proxy release and an endpoint change.
 * **Proxy adoption.** Telemetry is opt-in and off by default, so the loop is closed in code and empty in
   fact until installs report. Until then the candidate list will read zero, which is the normal state.
+
+## 2026-10-14: THE PROMOTION TOOL RAN AGAINST REAL AWS. LIST MODE IS PROVEN; THE TWO WRITES ARE NOT.
+
+Andrew merged `claude/awesome-cannon-mer1x5` into his LOCAL main (not pushed) and ran
+`tools/promote_mcp_candidates.py --all` as `relayshield-deployer`. Output, not recalled:
+`1 candidate(s) ...: 0 eligible for review, 1 not`, the one being the `probe-test.example.com` test
+candidate, blocked on all five grounds (echo category, no taxonomy id, 1 reporter, all-zero hash, reserved
+documentation name). So the safety property holds on live data: the test row can never be promoted.
+
+**PROVEN by that run:** the deployer can `Scan` `relayshield_mcp_proxy_telemetry` and `Query`
+`relayshield_intel_iocs` (the corpus lookup runs for every candidate before evaluation, and an AccessDenied
+would have printed a traceback). **STILL UNPROVEN:** `UpdateItem` on the telemetry table (needed by approve
+and reject) and `PutItem` on `relayshield_intel_iocs` (needed by approve). Both are exercised only by a
+write, so the first real approval is also the first test of the deployer's write access to the corpus.
+Read it with `iam simulate-principal-policy` against the deployer user BEFORE the first approval, so a
+denied write is found by a read and not by a half-finished claim.

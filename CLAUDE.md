@@ -11043,9 +11043,14 @@ Measured on Andrew's Mac, not recalled:
   lead, not a fact, and nobody recorded the creation: an AWS write made outside a session that
   can commit is invisible to every later session, the same shape as the Stars grant.
 
-**STILL UNPROVEN: the indicator tier** (`mode: indicators`, needs a valid API key). It is the
-only path that writes `CAND#` rows, uses `update_item` with a set `ADD`, and is the part the
-corpus work depends on. Probe it with a real key before relying on it.
+**INDICATOR TIER PROVEN 2026-10-14.** A keyed `mode: indicators` POST returned 200
+`{"recorded": true, "counts": 0, "indicators": 1}`, so the `CAND#` write (`update_item` with a
+set `ADD`) works under the granted `UpdateItem`. It left ONE TEST CANDIDATE: host
+`probe-test.example.com`, payload hash 64 zeros, category `malicious_url`, `status: unreviewed`,
+key `CAND#2eeba7d775165d837c9b8bf581aae269c3a084aa2c461ead7862d6d591f192f3`, TTL 365 days. **Any future promotion step must exclude it** (host
+`probe-test.example.com`, or an all-zero hash); the API role cannot delete it. I predicted a 400
+for that host and was wrong: the internal-suffix blocklist matches a trailing `.example` TLD, and
+this host ends in `.com`.
 
 **STILL TRUE: nothing promotes a candidate into the IOC corpus.** The only reader of `CAND#`
 rows is `tools/mcp_proxy_telemetry_report.py`. Size and accuracy gains need a reviewed

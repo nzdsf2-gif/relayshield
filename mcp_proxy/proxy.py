@@ -17,6 +17,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .config import ProxyConfig
+from .schema_validator import SchemaStore, validate_arguments
 from .discovery import DISCOVERY_METHODS, screen_discovery, taxonomy_evidence
 from .taxonomy import TAXONOMY_VERSION
 from .audit import AuditTrail
@@ -394,6 +395,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                           upstream_resp: dict, cfg: ProxyConfig,
                           screener: Screener):
         """Screen a discovery response; flag the server, never block."""
+        # Store tool schemas for argument validation on tools/list
+        if method == "tools/list":
+            try:
+                tools = upstream_resp.get("result", {}).get("tools", [])
+                if tools and hasattr(self, 'schema_store'):
+                    self.schema_store.update_from_tools_list(tools)
+            except Exception:
+                pass
         if not cfg.result_screening_enabled:
             return
         try:
@@ -502,6 +511,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 poison_category=policy_result.get(
                     "poison_category", "policy_deny"),
             )
+
+        # Schema validation: check arguments against tool's declared JSON Schema.
+        # Catches malformed input that weak server-side validation would miss.
+        if hasattr(self.server, 'schema_store'):
+            schema = self.server.schema_store.get_schema(tool_name)
+            if schema:
+                is_valid, violations = validate_arguments(tool_name, arguments, schema)
+                blocking = [v for v in violations if v["severity"] in ("HIGH", "CRITICAL")]
+                if blocking:
+                    log.warning(json.dumps({
+                        "event": "tools_call_blocked_schema",
+                        "tool": tool_name,
+                        "violations": blocking,
+                    }))
+                    return _error_response(
+                        req_id, -32602,
+                        f"Blocked by RelayShield: argument validation failed: {blocking[0]['message']}",
+                        {"tool": tool_name, "violations": blocking},
+                    )
             log.warning(json.dumps({
                 "event": "tools_call_blocked_policy",
                 "tool": tool_name,
@@ -793,6 +821,7 @@ class ProxyServer(HTTPServer):
         # Phase 4: policy enforcement + signed audit trail. The audit
         # trail shares the verdict signer's identity.
         self.policy = PolicyEngine(cfg.policy_file)
+        self.schema_store = SchemaStore()
         self.audit = AuditTrail(capacity=cfg.audit_capacity,
                                 persist_path=cfg.audit_file)
         # Opt-in telemetry; a no-op object unless MCP_PROXY_TELEMETRY is set.

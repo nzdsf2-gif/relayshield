@@ -16134,6 +16134,39 @@ def handle_mcp_proxy_telemetry(params: dict, api_key_record: dict | None = None)
                 "indicators": len(report["indicators"])})
 
 
+def handle_verifier_config(method: str, params: dict, key_record: dict) -> dict:
+    """GET or POST /v1/verifiers/config -- the account-level telemetry opt-in for the
+    hosted verifiers (TAP now; PAP and x401 read the same flag).
+
+    DEFAULT OFF. The flag lives on the API key record and is written only as a strict
+    boolean, because relayshield_verifier_telemetry reads it with `is True`: a value that
+    is merely truthy (the string "false", the number 1) must never enable collection, and
+    cannot, because this handler refuses anything that is not a JSON true or false.
+
+    The key record is updated with attribute_exists so a stale key can never CREATE a
+    record. The response states the new state and nothing about the key."""
+    field = "verifier_telemetry_opt_in"
+    if method == "GET":
+        return _ok({"telemetry_opt_in": key_record.get(field) is True,
+                    "changed_at": key_record.get(field + "_at", "")})
+    value = params.get("telemetry_opt_in") if isinstance(params, dict) else None
+    if not isinstance(value, bool):
+        return _err("telemetry_opt_in must be true or false", 400)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        dynamodb.Table(API_KEYS_TABLE).update_item(
+            Key={"api_key": key_record["api_key"]},
+            UpdateExpression="SET #f = :v, #at = :now",
+            ConditionExpression="attribute_exists(api_key)",
+            ExpressionAttributeNames={"#f": field, "#at": field + "_at"},
+            ExpressionAttributeValues={":v": value, ":now": now})
+    except Exception as exc:
+        logger.error("verifier config update failed: %s", type(exc).__name__)
+        return _err("temporarily unavailable", 503)
+    logger.info("verifier telemetry opt-in set=%s", value)
+    return _ok({"telemetry_opt_in": value, "changed_at": now})
+
+
 ROUTES = {
     "/v1/breach":           handle_breach,
     "/v1/scan-url":         handle_scan_url,
@@ -17137,6 +17170,17 @@ def lambda_handler(event: dict, context) -> dict:
         _th = event.get("headers") or {}
         _tk = _header(_th, "X-RS-API-KEY") or _header(_th, "X-API-Key")
         return handle_mcp_proxy_telemetry(_body(event), _verify_rs_api_key(_tk) if _tk else None)
+
+    # Hosted-verifier telemetry opt-in (TAP now, PAP and x401 read the same flag).
+    # Needs an active key because the flag lives on the key's own record. No CORS on
+    # purpose: call it from your backend, not from a browser holding the key.
+    if method in ("GET", "POST") and path == "/v1/verifiers/config":
+        _vh = event.get("headers") or {}
+        _vk = _header(_vh, "X-RS-API-KEY") or _header(_vh, "X-API-Key")
+        _vr = _verify_rs_api_key(_vk) if _vk else None
+        if not _vr:
+            return _err("Active RS API key required. Pass it as X-RS-API-KEY.", 401)
+        return handle_verifier_config(method, _body(event), _vr)
 
     # Shareable report links (INTEL-8) — public view, no auth
     if method == "GET" and path.startswith("/v1/r/"):

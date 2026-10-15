@@ -135,5 +135,35 @@ class McpProxyTelemetryGrant(unittest.TestCase):
             self.assertNotIn(banned, body)
 
 
+class VerifierTelemetryGrant(unittest.TestCase):
+    T = "relayshield_verifier_telemetry"
+
+    def test_put_only_on_the_exact_table(self):
+        st = g.merged_document({"Statement": []}, self.T)["Statement"][0]
+        self.assertEqual(st["Action"], ["dynamodb:PutItem"])
+        self.assertEqual(st["Resource"], g.table_arn(self.T))
+        self.assertNotIn("*", st["Resource"])
+
+    def test_it_has_its_own_sid_so_it_cannot_replace_another_tables_grant(self):
+        sids = list(g.CACHE_SIDS.values())
+        self.assertEqual(len(sids), len(set(sids)))
+        doc = {"Statement": []}
+        for t in g.CACHE_SIDS:
+            doc = g.merged_document(doc, t)
+        self.assertEqual(len(doc["Statement"]), len(g.CACHE_SIDS))
+
+    def test_the_grant_matches_what_the_writer_calls(self):
+        src = (ROOT / "relayshield_verifier_telemetry.py").read_text()
+        self.assertIn(".put_item(", src)
+        for banned in (".update_item(", ".scan(", ".query(", ".delete_item("):
+            self.assertNotIn(banned, src)
+        self.assertIn(f'TABLE = "{self.T}"', src)
+
+    def test_the_verifier_lambda_can_be_named(self):
+        """The writer is not relayshield-api, so the tool must accept another function."""
+        self.assertIn("--function", (ROOT / "tools" / "grant_breach_cache_access.py").read_text())
+        self.assertEqual(g.FUNC, "relayshield-api")
+
+
 if __name__ == "__main__":
     unittest.main()

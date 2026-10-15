@@ -11246,3 +11246,72 @@ embedded-URL strings are emitted by the live screener (they were seen in demo sc
 then `_mcpt_validate` and the telemetry table writes (new fields optional, so old proxies keep working), then
 `telemetry.py`, then the production UI copy. **The UI must list only what has shipped**, because the earlier
 mismatch was a list promising fields that did not exist. Muse should hold the new items behind a flag.
+
+## WHERE 2026-10-15 LEFT THINGS. TOMORROW STARTS WITH THE PRIVACY POLICY, THEN THE LOCAL E2E TEST.
+
+**State, from Andrew's own output, not recalled.** `origin/main` is at `026fb5ca`, pushed 2026-10-15, and
+carries both 2026-10-15 CLAUDE.md sections above (the Muse UI record and the telemetry scope decisions).
+**Nothing in this session changed code.** The promotion tool (`tools/promote_mcp_candidates.py`) is on main,
+list mode is proven against real AWS, and both writes simulate `allowed`. The first real `--approve` has not
+happened and there is no real candidate to approve.
+
+### ORDER OF WORK (Andrew's, and it is load-bearing: the policy is the authority, everything else follows it)
+
+1. **Privacy policy section 12 in `cloudflare_worker_privacy.js`, with `test_mcp_proxy_privacy.py`.** Change the
+   policy and the test together, then deploy by manual dispatch (`deploy_privacy.yml`). What the new text must say:
+   * Sent, for PUBLIC upstream hosts only: the **tool name** on an indicator that already passed `public_host()`.
+     Tool ARGUMENTS stay out entirely.
+   * **SSRF categories become reportable.** A tool name may attach only where the SERVER'S OWN BEHAVIOUR is the
+     evidence. An argument-level `ssrf_internal_url` block stays a count with no tool name and no destination, and
+     an internal destination is never sent in any form.
+   * Also sent: **kit ids**, **neighbor reputation deltas** (public host only), and **hashes of URLs and wallet
+     addresses** found in a flagged response.
+   * **Not sent: region.** Timestamps are captured server side (rows are keyed by one), the client sends none.
+   * **Hash wording must differ.** A response hash cannot be reversed. A URL or wallet hash CAN be confirmed by
+     anyone who guesses the candidate, so the policy must NOT extend "cannot be reversed" to those two.
+   * Keep the retention figures pinned to the ingest TTLs (the existing test does this) and keep the sentence that a
+     reported hostname is not added to the corpus unless independently confirmed (the promotion tool's `--evidence`
+     rule depends on it).
+   * Also fix the prose that says tool names are never sent: `mcp_proxy/README.md` "Opt-in telemetry" (around lines
+     305-325) and the header docstring of `mcp_proxy/telemetry.py` ("WHAT IS NEVER SENT: tool arguments, tool names,
+     ..."). Three places state it and the privacy test pins them.
+2. **The local E2E test, against the REAL proxy, not the demo.** The demo does not report telemetry (Andrew). It runs
+   on his Mac against the live API. **Counts tier only**: the indicators tier needs a public test upstream, so it waits.
+   Read the proxy's actual start path first (`mcp_proxy/proxy.py`, `__main__` or the CLI entry) before writing the
+   tool, and print the body of what the API returns, not a summary. No EC2 hosted proxy until there are customers.
+3. Then, in this order: `_mcpt_validate` and the telemetry table writes (new fields OPTIONAL so old proxies keep
+   working), `mcp_proxy/telemetry.py`, the production UI copy, and a read-only super-user view of the review queue.
+
+### WHAT IS STILL UNVERIFIED, SO IT IS NOT TREATED AS FACT
+
+* **How `kit_ids` are derived in `proxy.py`.** They are computed locally and not sent today; read the derivation
+  before describing what a kit id discloses, because the policy sentence depends on it.
+* **Whether the live screener emits `ssrf_redirect_chain` and `embedded_url_ssrf`.** `ssrf_internal_url` is confirmed
+  in `screener.py` (`POISON_SSRF`); the other two were seen only in demo scenario dicts. Do not add a category the live
+  code never produces.
+* **What backs the Muse toggle.** `Plan FW Cloud` and `Account preview` look like a mock. For a proxy people run
+  themselves the setting is the environment variable `MCP_PROXY_TELEMETRY`.
+* **The review queue endpoint does not exist.** A Cloudflare Worker cannot read DynamoDB, so the super-user view needs
+  an admin-authenticated API route. Read-only first; approval stays in the CLI.
+* **Muse's page source is not in this repo.** Everything about it is read from screenshots.
+
+### THE PROMPT FOR MUSE (agreed in conversation 2026-10-15, recorded here because the chat is not a record)
+
+Copy changes only, no layout change. (1) Drive the sharing lists from two arrays, `SHARED_TODAY` and
+`SHARED_PENDING`, and render only `SHARED_TODAY`. Today that is: an anonymous random install ID; counts of flagged or
+blocked calls by threat category; and at the indicators level (needs an API key) the public hostname of an MCP server
+that returned a flagged response plus a one-way hash of that response. `SHARED_PENDING`, hidden until each item ships:
+tool names on public servers, scam-kit fingerprint IDs, URL and wallet hashes, neighbor reputation changes, SSRF
+findings. (2) "Never shared" reads exactly: tool arguments and prompts; response or instruction text; private,
+internal or local hostnames and addresses; API keys or account details; anything from calls that were allowed; your
+own policy decisions. (3) Remove "Raw URLs", "region" and "coarse timestamps" from every list, and make no claim that a
+hash "cannot be reversed" except for the response hash. (4) Remove the Corpus review queue from the customer tab
+entirely; it becomes a separate read-only admin view later. (5) Keep the OFF/ON toggle, default OFF, label it
+"Preview" until a backend setting exists, with one line under it: "Telemetry is optional and off by default.
+Self-hosted proxies use the MCP_PROXY_TELEMETRY setting." (6) Never mention corpus review or human approval in
+customer copy. **Move items from pending to today only after the policy, endpoint and reporter have shipped.**
+
+### CARRIED, NOT RE-VERIFIED THIS SESSION
+The first real `--approve`; reader-side wording for promoted rows (`_assess_domain` ignores `source`); an explicit
+`kind` field on indicators; proxy adoption; a startup log line stating the telemetry state; `Deploy Privacy Policy
+Worker` dispatch; and the whole 2026-10-12 WAFR/FTR list above, which this session did not touch.

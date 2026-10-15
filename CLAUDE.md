@@ -11204,3 +11204,45 @@ rows would be showing items the promotion step blocks by design.**
   UNVERIFIED whether such a service exists.
 * **Still no end-to-end test with a real running proxy**, and no real candidate, so the first
   `--approve` is still the first real write to `relayshield_intel_iocs`.
+
+## 2026-10-15 (later): TELEMETRY SCOPE DECIDED WITH ANDREW. SSRF IS NOT REPORTED AT ALL TODAY, WHICH IS BIGGER THAN THE TOOL-NAME QUESTION.
+
+**Found while checking Andrew's contention that tool names add value for SSRF detection.** The live screener
+(`mcp_proxy/screener.py`, `POISON_SSRF = "ssrf_internal_url"`) emits SSRF verdicts, and `proxy.py` passes the
+verdict category to `telemetry.record()`. **`ssrf_internal_url`, `ssrf_redirect_chain` and `embedded_url_ssrf`
+are in NEITHER `REPORTABLE_CATEGORIES` (`mcp_proxy/telemetry.py`) NOR `_MCPT_CATEGORIES` (`relayshield_api.py`),**
+so `record()` returns early and the endpoint would refuse them. The proxy's SSRF hardening, which exists because
+of the zotero-mcp SSRF, therefore contributes nothing to the corpus. UNVERIFIED: that the redirect-chain and
+embedded-URL strings are emitted by the live screener (they were seen in demo scenario dicts in `proxy.py`);
+`ssrf_internal_url` is confirmed in `screener.py`.
+
+### DECISIONS (Andrew, 2026-10-15). THE POLICY IS CHANGED FIRST, THEN THE ENDPOINT, THEN THE REPORTER, THEN THE UI.
+
+1. **Tool names are sent, for PUBLIC upstream hosts only**, attached to an indicator that already passed
+   `public_host()`. Length and character set validated on the endpoint. Tool ARGUMENTS stay out entirely.
+2. **SSRF categories become reportable.** Rule for what may carry a tool name: **only findings where the SERVER'S
+   OWN BEHAVIOUR is the evidence** (a redirect chain served by a public host that lands on internal
+   infrastructure, a discovery-time finding, a flagged result). **An argument-level `ssrf_internal_url` block stays
+   a COUNT with no tool name and no destination**: the agent chose that URL, our proxy refused it before the tool
+   ran, so naming the tool would accuse it of something it did not do. An internal destination is customer
+   topology and is never sent in any form.
+3. **Also sent:** kit ids already computed in `proxy.py` as `kit_ids` (host-to-kit association, UNVERIFIED how they
+   are derived), neighbor reputation deltas (public host only), and hashes of URLs and wallet addresses found in a
+   flagged response.
+4. **Not sent: region** (we log no IPs, so it would be self-reported, low value, one more disclosure). **Timestamps
+   are already captured server-side** (report rows are keyed by one), so the client sends none.
+5. **The hash wording must differ.** A response hash cannot be reversed. A URL or wallet hash CAN be confirmed by
+   anyone who guesses the candidate, because wallet addresses are public and URLs are guessable. Policy section 12
+   must not extend "cannot be reversed" to them.
+6. **Review queue: super-user only (Andrew), not shown to customers.** Read-only view first; approval stays in
+   `tools/promote_mcp_candidates.py`. The Worker cannot read DynamoDB, so it needs an admin-authenticated endpoint.
+7. **No EC2 hosted proxy until there are customers (Andrew).** The proxy is customer-run, so the E2E test runs
+   locally against the live API. **The demo does not report telemetry (Andrew), so the test must use the real
+   proxy.** Counts tier is testable locally; the indicators tier needs a public test upstream, so it is deferred.
+
+### WHAT HAS TO AGREE BEFORE ANY OF IT SHIPS
+
+`cloudflare_worker_privacy.js` section 12 and `test_mcp_proxy_privacy.py` first (deploy is a manual dispatch),
+then `_mcpt_validate` and the telemetry table writes (new fields optional, so old proxies keep working), then
+`telemetry.py`, then the production UI copy. **The UI must list only what has shipped**, because the earlier
+mismatch was a list promising fields that did not exist. Muse should hold the new items behind a flag.

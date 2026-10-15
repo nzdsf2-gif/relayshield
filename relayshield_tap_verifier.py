@@ -612,9 +612,24 @@ def lambda_handler(event, context):
     except Exception:
         return _http(400, {"decision": "reject",
                            "reasons": ["bad_request_body"]})
-    verdict = verify_tap_request(data if isinstance(data, dict) else {})
+    request = data if isinstance(data, dict) else {}
+    verdict = verify_tap_request(request)
+    _report_rejection(verdict, event, request)
     code = {"accept": 200, "review": 202, "reject": 403}[verdict.decision]
     return _http(code, verdict.to_dict())
+
+
+def _report_rejection(verdict, event, request):
+    """Opt-in threat telemetry. Runs AFTER the verdict is final, can change nothing in
+    it, and never raises. An accept or review returns before any lookup, so the opt-in
+    check costs nothing on the normal path. See relayshield_verifier_telemetry."""
+    if verdict.decision != "reject":
+        return
+    try:
+        import relayshield_verifier_telemetry as vt
+        vt.maybe_report("tap", verdict, event, request)
+    except Exception as exc:
+        logger.warning("verifier telemetry unavailable: %s", type(exc).__name__)
 
 
 def _http(status, obj):

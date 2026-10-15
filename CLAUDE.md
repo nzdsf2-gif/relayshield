@@ -11315,3 +11315,47 @@ customer copy. **Move items from pending to today only after the policy, endpoin
 The first real `--approve`; reader-side wording for promoted rows (`_assess_domain` ignores `source`); an explicit
 `kind` field on indicators; proxy adoption; a startup log line stating the telemetry state; `Deploy Privacy Policy
 Worker` dispatch; and the whole 2026-10-12 WAFR/FTR list above, which this session did not touch.
+
+## 2026-10-15 (third session): OPT-IN TELEMETRY FOR THE HOSTED VERIFIERS IS BUILT. NOTHING IS RUN OR DEPLOYED.
+
+Asked for from `tap_x401_solution_design` sections 2.3, 2.4 and 4 (phases 2 and 3), extended to TAP
+and PAP. Phase 1, the x401 verifier, is Muse's and not in this repo. Full detail, the run order and
+the Muse prompt are in `verifier_telemetry_handoff_2026-10-15.md`; this is the record.
+
+**Built, 52 + 16 tests, each guard proven by reintroducing its defect:**
+`relayshield_verifier_telemetry.py` (one core for TAP, PAP and x401), the TAP wiring, `GET` and `POST
+/v1/verifiers/config`, `tools/setup_verifier_telemetry_table.sh`, a PutItem-only grant (the grant tool
+gained `--function`), privacy policy section 13 (Contact is now 14), `test_verifier_telemetry_privacy.py`
+which reads policy and code together, and `tools/delete_verifier_reports.py`.
+
+**Where it differs from the design doc, and why it matters:** a `reporter_hash` was added, so the doc's
+"historical data is not deleted" is false and the policy promises deletion instead; nothing is called
+"anonymized"; `ip_prefix` is the AGENT's address and only if the merchant passes `agent_ip`, never the
+API caller's; the enum is nine values because that is what TAP really emits; `attack_pattern` records
+what was screened, not what matched; opt-in is per API KEY, not per account.
+
+**The one that changes the pricing story: the committed TAP `lambda_handler` passes no `ti_screen` and
+no `nonce_store`.** On main it does no threat-intel screening and has no replay protection across
+invocations, while the pricing card promises TI screening and "signed verification receipts" (that word
+is not in the file). Either live differs from main or the claims outrun the code. Read
+`sh tools/handler_drift.sh relayshield_tap_verifier.py` before anything else touches that Lambda. It is
+also in the deploy `paths:` trigger and NOT in `LAMBDA_MAP`, so a push deploys nothing.
+
+**There is no PAP verifier in this repo.** Only `check_poppy_json` inside the MCP proxy, already covered
+by section 12. And `/v1/tap/verify` is not routed in `relayshield_api.py`, so the Lambda's real name is
+unrecorded: the grant takes `--function`.
+
+**Order matters and is in the handoff:** merge and push (API route live, opting in stores a flag only),
+deploy the privacy Worker, create the table and grant, THEN hand-deploy the TAP Lambda with BOTH files
+in the zip. Collection starts at the last step, after the policy is live. A zip missing the telemetry
+module still verifies and silently reports nothing.
+
+**Not touched, and flagged:** section 3.3 pricing copy ("700K+ indicators" is a count that goes stale;
+"x401 mandate verification" must not appear before that verifier ships; the live card says 1,000 a month,
+the doc says 100 free) and the blog angles ("FinCEN recognition", "launched today" are unverified).
+The privacy section 12 amendments from the earlier 2026-10-15 session are STILL pending.
+
+**Tests that fail on clean `origin/main`, confirmed by stashing my changes, so not from this work:**
+`test_bundle_b_gating`, `test_corpus_provenance`, `test_url_malware_attribution`,
+`test_x402_manifest_completeness`, and `test_workflows_parse` (relayshield-signup-api missing from the
+invoke policy).

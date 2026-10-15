@@ -21,7 +21,7 @@ export default {
   <h1>Privacy Policy</h1>
   <p class="meta">Last updated: October 2026</p>
 
-  <p>RelayShield ("we", "us", or "our") operates relayshield.net, the RelayShield API, the CryptoShield mobile application, our Discord and Telegram bots, the RelayShield Order Screening Shopify app, and the RelayShield MCP proxy. RelayShield is based in Massachusetts, United States. This policy explains how we collect, use, and protect your information.</p>
+  <p>RelayShield ("we", "us", or "our") operates relayshield.net, the RelayShield API, the CryptoShield mobile application, our Discord and Telegram bots, the RelayShield Order Screening Shopify app, the RelayShield MCP proxy, and the RelayShield agent verifiers (TAP, PAP and x401). RelayShield is based in Massachusetts, United States. This policy explains how we collect, use, and protect your information.</p>
 
   <h2>1. Information We Collect</h2>
   <p><strong>Account &amp; API:</strong> When you sign up, we collect the email address you provide, plus usage data (API call counts, timestamps, endpoint usage). We do not collect payment card data, billing address, or any other checkout details directly. Those are collected and processed entirely by Stripe, our payment processor, and are never transmitted to or stored in RelayShield's systems.</p>
@@ -72,7 +72,7 @@ export default {
   <p><strong>What we do with it.</strong> The buyer's email is sent to RelayShield's API for scoring. The score and its reasons are written back to your store as an order tag (relayshield-high-risk or relayshield-review) and a timeline note. The app never blocks, cancels, or refunds orders, and it never calls an order safe.</p>
   <p><strong>What we store.</strong> Buyer emails are SHA-256 hashed before storage; raw email addresses are never persisted. Screening records (order reference, score, level, timestamp) are kept to power the in-app dashboard history.</p>
   <p><strong>What we do not do.</strong> We do not use order or buyer data for any purpose other than scoring your orders. We do not sell it or share it with third parties for marketing.</p>
-  <p><strong>Your rights.</strong> Shopify's mandatory GDPR webhooks are supported: a customers/redact or shop/redact request deletes the stored records for that customer or shop. You may also contact us at any time at the address in section 13.</p>
+  <p><strong>Your rights.</strong> Shopify's mandatory GDPR webhooks are supported: a customers/redact or shop/redact request deletes the stored records for that customer or shop. You may also contact us at any time at the address in section 14.</p>
 
   <h2>7. Data Retention</h2>
   <p>API logs are retained for 90 days and then automatically deleted. The identifiers you submit for screening, such as an email address or phone number, are not written to those logs in a readable form: they are replaced with a one-way hash before anything is recorded. Account data is retained until you request deletion. An enrolled mobile number and its carrier history are retained only while the number stays enrolled, and are deleted when you remove it. Wallet addresses stored on-device are under your control and can be deleted at any time from the app.</p>
@@ -107,7 +107,26 @@ export default {
   <p><strong>Retention.</strong> Count reports are deleted automatically after 180 days. Reported hostname claims are deleted automatically after 365 days unless we have independently confirmed them, in which case they are handled as threat intelligence rather than as personal data.</p>
   <p><strong>Control.</strong> Turning telemetry off stops reporting immediately. To have reports deleted, email us the installation identifier stored on your machine and we will delete the reports linked to it. Data is stored in the United States, as described in section 9.</p>
 
-  <h2>13. Contact</h2>
+  <h2>13. Verifier Threat Telemetry (TAP, PAP and x401 Verifiers)</h2>
+  <p>This section applies if you use the RelayShield agent verifiers that we host: the verifiers send us the request an AI agent made to your service, and we tell you whether to accept it. It is separate from section 12, which covers the MCP proxy you run yourself.</p>
+  <p><strong>Optional, off by default.</strong> A verifier works the same whether telemetry is on or off, and you never need to turn it on. It is an account setting that you change deliberately, by sending <code>telemetry_opt_in</code> to <code>/v1/verifiers/config</code> with your API key. With it off, nothing in this section applies and nothing is recorded.</p>
+  <p><strong>Only rejections.</strong> With telemetry on, we record one entry when a verification is rejected. We record nothing when a verification is accepted or sent for review.</p>
+  <p><strong>What is recorded in that entry.</strong></p>
+  <ul>
+    <li>A one-way hash of the agent's identifier. Agent identifiers such as key identifiers are often public, so anyone who already has an identifier can compute its hash and compare it with ours. We do not store the identifier itself.</li>
+    <li>If you passed us the agent's network address with the request, its network prefix only: the first three parts of an IPv4 address or the first three groups of an IPv6 address, and only for public addresses. Never the whole address, and never the address of the account that called our API.</li>
+    <li>The reason for the rejection, taken from a fixed list: bad signature, malformed request, expired, replayed, unknown key, intent mismatch, mandate exceeded, threat intelligence match, or other.</li>
+    <li>For a rejection caused by a threat intelligence match, whether a wallet address, a domain, or both were checked. The wallet address and the domain themselves are not recorded.</li>
+    <li>Which verifier rejected it (TAP, PAP, x401, or TAP and x401 together) and the time of the rejection.</li>
+    <li>For x401, a one-way hash of the identifier of the credential issuer.</li>
+    <li>A short one-way hash derived from your API key. It lets us find and delete your entries when you ask, and tell entries from different accounts apart. It is not your key.</li>
+  </ul>
+  <p><strong>What is never recorded.</strong> Transaction amounts, merchants, products, customer or cardholder data, any information about the person named in an x401 credential, the full agent identifier, a full IP address, the contents of the request, your API key, or any free text.</p>
+  <p><strong>How we use it.</strong> We use entries in aggregate to understand which attacks are occurring against agent payments and to improve detection for all customers. We may compare entries from different accounts to see whether the same agent hash was rejected more than once. An entry is an unverified claim from one source. It is not added to our threat intelligence corpus, and it is not shared with anyone, including other customers, unless we have independently confirmed it. We do not sell this data and we do not use it for advertising or profiling.</p>
+  <p><strong>Retention.</strong> Entries are deleted automatically after 90 days.</p>
+  <p><strong>Control.</strong> Turning telemetry off stops new entries immediately. Entries already recorded are linked to your account only by the hash of your API key. To have them deleted, email us from your account address and we will delete the entries linked to your key. Data is stored in the United States, as described in section 9.</p>
+
+  <h2>14. Contact</h2>
   <p><a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
 
   <hr>

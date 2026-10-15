@@ -47,6 +47,9 @@ CACHE_SIDS = {
     "relayshield_mcp_taxonomy": "McpTaxonomyRead",
     # Write-only from the API's side: the telemetry ingest never reads back.
     "relayshield_mcp_proxy_telemetry": "McpProxyTelemetryWrite",
+    # Written by the hosted verifiers (TAP now; PAP and x401 later), NOT by relayshield-api:
+    # pass --function with the verifier Lambda's name.
+    "relayshield_verifier_telemetry": "VerifierTelemetryWrite",
 }
 # The caches are read-through, so they need GetItem and PutItem. The taxonomy is
 # reference data that relayshield-api only ever SCANS (nine rows, cached in the
@@ -56,6 +59,9 @@ TABLE_ACTIONS = {
     # PutItem for report rows, UpdateItem for candidates and the rate counter.
     # No read, no delete: a leaked credential could add rows, not read or erase them.
     "relayshield_mcp_proxy_telemetry": ["dynamodb:PutItem", "dynamodb:UpdateItem"],
+    # One PutItem per rejection. No read, no update, no delete: a leaked credential could
+    # add rows, not read or erase them.
+    "relayshield_verifier_telemetry": ["dynamodb:PutItem"],
 }
 
 
@@ -96,6 +102,8 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--policy-name", default=DEFAULT_POLICY)
     ap.add_argument("--table", default=TABLE, choices=sorted(CACHE_SIDS))
+    ap.add_argument("--function", default=FUNC,
+                    help="the Lambda whose role needs the grant (default relayshield-api)")
     args = ap.parse_args()
     table = args.table
     import boto3
@@ -105,9 +113,9 @@ def main() -> int:
         print(f"STOP: credentials resolve to {got}, not {ACCOUNT}. Nothing changed.", file=sys.stderr)
         return 1
     role_arn = boto3.client("lambda", region_name=REGION).get_function_configuration(
-        FunctionName=FUNC)["Role"]
+        FunctionName=args.function)["Role"]
     role = role_arn.rsplit("/", 1)[-1]
-    print(f"== role {role}  table {table}")
+    print(f"== function {args.function}  role {role}  table {table}")
     before = simulate(iam, role_arn, table)
     print(f"   now: {before}")
     if all(v == "allowed" for v in before.values()):

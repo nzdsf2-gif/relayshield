@@ -216,7 +216,9 @@ const HTML = `<!DOCTYPE html>
   <div class="wrap metrics-inner">
     <div class="metric"><div class="num">125</div><div class="lbl">Monitored marketplaces</div></div>
     <div class="metric"><div class="num">700K+</div><div class="lbl">Threat indicators</div></div>
-    <div class="metric"><div class="num">8.7M</div><div class="lbl">Corpus citations</div></div>
+    <div class="metric"><div class="num">9M+</div><div class="lbl">Corpus citations</div></div>
+    <div class="metric"><div class="num">$2.4M</div><div class="lbl">Avg cost of AI insider incidents (Trellix)</div></div>
+    <div class="metric"><div class="num">17/20</div><div class="lbl">Injection techniques survive MCP (ClawSecure)</div></div>
   </div>
 </div>
 
@@ -245,8 +247,8 @@ const HTML = `<!DOCTYPE html>
       <div class="card" data-drill="tap">
         <span class="tag">Live</span>
         <div class="icon">&#x1F4E6;</div>
-        <h3>TAP Verifier</h3>
-        <p>Visa Trusted Agent Protocol verification for agentic commerce. One API call checks the agent signature, validates the signing key, and screens agent identity against the threat corpus.</p>
+        <h3>Agent Verifiers</h3>
+        <p>Transaction verification for agentic commerce at two levels. <strong>TAP Verifier</strong> for card-network transactions (Visa). <strong>PAP Verifier</strong> for merchant-level transactions (Stripe, Shopify, Meta). Both check cryptographic signatures, validate intent, and screen counterparties against 700K+ threat indicators.</p>
         <div class="links">
           <a class="btn btn-primary btn-sm" href="https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l">$49/mo flat</a>
         </div>
@@ -366,6 +368,11 @@ const HTML = `<!DOCTYPE html>
       <h2>Pricing</h2>
       <p>Flat monthly pricing. No minimums, no surprises. API keys and full plans at the developers page.</p>
     </div>
+    <div style="max-width: 800px; margin: 0 auto 32px; text-align: center; color: #8b949e;">
+      <h3 style="color: #fff; margin-bottom: 12px;">Two levels of verification</h3>
+      <p><strong style="color: #fff;">Network-level (TAP):</strong> When the payment runs on Visa's network, Visa verifies the transaction. Our TAP verifier independently validates the agent's cryptographic signature and screens the counterparty.</p>
+      <p style="margin-top: 8px;"><strong style="color: #fff;">Merchant-level (PAP):</strong> When the business runs its own checkout (Stripe, Shopify, Meta), there's no card network in the loop. Our PAP verifier validates the agent's session token, DPoP proof, and poppy.json identity directly.</p>
+    </div>
     <div class="grid">
       <div class="price-card featured">
         <h3>TAP Verifier</h3>
@@ -377,9 +384,38 @@ const HTML = `<!DOCTYPE html>
           <li>Intent mismatch detection</li>
           <li>Threat corpus screening</li>
           <li>Pay-as-you-go at $0.10 per verification</li>
+          <li>100 free verifications per month</li>
         </ul>
         <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
         <a class="btn btn-primary" href="https://buy.stripe.com/bJe28semO0mxf9adoj0Ny0l">Subscribe</a>
+      </div>
+      <div class="price-card">
+        <h3>PAP Verifier</h3>
+        <div class="for">Businesses accepting agent payments</div>
+        <div class="amount">$49</div>
+        <div class="per">flat monthly pricing</div>
+        <ul>
+          <li>PAP session token verification</li>
+          <li>DPoP proof validation</li>
+          <li>poppy.json discovery checks</li>
+          <li>Threat corpus screening</li>
+          <li>Pay-as-you-go at $0.10 per verification</li>
+          <li>100 free verifications per month</li>
+        </ul>
+      </div>
+      <div class="price-card featured">
+        <h3>Agent Verifiers Bundle</h3>
+        <div class="for">TAP + PAP verification together</div>
+        <div class="amount">$80</div>
+        <div class="per">flat monthly pricing (18% off)</div>
+        <ul>
+          <li>Everything in TAP Verifier</li>
+          <li>Everything in PAP Verifier</li>
+          <li>100 free verifications per month per verifier</li>
+          <li>Single API key for both</li>
+        </ul>
+        <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
+        <a class="btn btn-primary" href="https://api.relayshield.net/developers">Subscribe</a>
       </div>
       <div class="price-card">
         <h3>MCP Proxy Firewall Cloud</h3>
@@ -394,6 +430,20 @@ const HTML = `<!DOCTYPE html>
         </ul>
         <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
         <a class="btn btn-primary" href="https://api.relayshield.net/developers">Get started</a>
+      </div>
+      <div class="price-card featured">
+        <h3>MCP Proxy Firewall + Verifiers Bundle</h3>
+        <div class="for">Full agent security stack</div>
+        <div class="amount">$109</div>
+        <div class="per">flat monthly pricing (15% off)</div>
+        <ul>
+          <li>Everything in Firewall Cloud</li>
+          <li>Everything in Agent Verifiers Bundle</li>
+          <li>Unified dashboard at mcpfw.relayshield.net</li>
+          <li>Single API key for everything</li>
+        </ul>
+        <p class="tos">By subscribing you agree to our <a href="https://docs.google.com/document/d/e/2PACX-1vTuxkRdCZNeRghwIqhY8XH9-OzYCMNokKiqmQwQODuHGFYfc3htt_-2_se5YkWtEXLwwLclxCq_8KWz/pub">Terms of Service</a> and <a href="https://docs.google.com/document/d/e/2PACX-1vTu1KknanQip9yqLMXBzEPTU1uggFn2FVNFIcQzTT3D49rJMi0SzsKbFIlvVYfpJBbNOsxr7MIGx3m5/pub">Privacy Policy</a>.</p>
+        <a class="btn btn-primary" href="https://buy.stripe.com/eVqfZi5Qi1qBgdeesn0Ny0o">Subscribe</a>
       </div>
       <div class="price-card">
         <h3>MCP Proxy Firewall On-Premise</h3>
@@ -668,7 +718,7 @@ var PRODUCT_DETAILS = {
   ti: {
     tag: 'Live', title: 'Threat Intelligence APIs',
     sub: 'The corpus behind everything we build',
-    body: 'REST, MCP, and x402 pay-per-call access to the RelayShield corpus: 700K+ indicators and 8.7M citations across 125 monitored Telegram marketplaces and 20 authoritative feeds. Breach exposure, infostealer logs, SIM swap signals, wallet and domain reputation, and MCP registry risk. Now with live licenses on AWS Marketplace.',
+    body: 'REST, MCP, and x402 pay-per-call access to the RelayShield corpus: 700K+ indicators and 9M+ citations across 125 monitored Telegram marketplaces and 20 authoritative feeds. Breach exposure, infostealer logs, SIM swap signals, wallet and domain reputation, and MCP registry risk. Now with live licenses on AWS Marketplace.',
     list: ['Live licenses on AWS Marketplace', 'REST, MCP, STIX/TAXII, and x402 rails', 'Breach, infostealer, SIM swap, wallet, domain, and MCP registry coverage', 'Free checks with no signup', 'Pay per call when you scale'],
     links: [
       { text: 'Browse the API', href: 'https://api.relayshield.net/developers', cls: 'btn btn-primary btn-sm' },

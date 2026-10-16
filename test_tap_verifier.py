@@ -140,7 +140,7 @@ class TestCrypto(unittest.TestCase):
         # NOTE: this vector was signed over the ed25519 base; construct a
         # proper RSA test by verifying the primitive directly with a message
         # both sides agree on. We test the PSS math, not a specific vector.
-        self.assertTrue(tap._pss_verify(n, e, sig, base) or True)  # placeholder
+        # (superseded: see test_pss_verify.py, which signs fresh keys and checks both ways)
         # Real check: verify our own PSS implementation round-trips via the
         # pipeline test below (test_accept_ps256 uses live signing).
 
@@ -264,18 +264,19 @@ class TestVerifyPipeline(unittest.TestCase):
         self.assertEqual(v.decision, "accept")
 
     def test_accept_ps256(self):
-        # RSA-PSS pipeline: sign with cryptography lib, verify with our code.
-        # Uses a fixed keypair (not fresh) for determinism.
+        """A validly signed PS256 request must be ACCEPTED. This test used to allow
+        either outcome ("environment-specific RSA issue"), so it passed while the
+        verifier rejected every valid RSA-PSS signature."""
         priv, jwk = rsa_jwk()
         req = make_request(priv, jwk, "ps256")
-        # Debug: verify the signature directly first
-        from cryptography.hazmat.primitives.asymmetric import padding as cpad
-        from cryptography.hazmat.primitives import hashes as chashes
-        # If direct primitive fails, skip (environment issue, not code issue)
         v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
-        # Accept either accept (working) or reject with bad_signature
-        # (environment-specific RSA issue); the primitive is proven by vectors
-        self.assertIn(v.decision, ("accept", "reject"))
+        self.assertEqual(v.decision, "accept", v.reasons)
+
+    def test_tampered_ps256_is_rejected(self):
+        priv, jwk = rsa_jwk()
+        req = make_request(priv, jwk, "ps256", tamper_base=True)
+        v = tap.verify_tap_request(req, jwks={jwk["kid"]: jwk}, now=NOW)
+        self.assertEqual((v.decision, v.reasons), ("reject", ["bad_signature"]))
 
     def test_ti_high_rejects(self):
         priv, jwk = ed_jwk()

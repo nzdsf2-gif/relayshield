@@ -89,6 +89,7 @@ _EXACT = {
     "ti_flagged": "ti_match",
     "mandate_scope_exceeded": "mandate_exceeded",
     "mandate_exceeded": "mandate_exceeded",
+    "unknown_issuer": "unknown_key",
 }
 # Prefix rules for families of "the request was not well formed" reasons.
 _PREFIX = (("missing_", "malformed"), ("malformed_", "malformed"), ("bad_", "malformed"),
@@ -96,7 +97,9 @@ _PREFIX = (("missing_", "malformed"), ("malformed_", "malformed"), ("bad_", "mal
 
 # Reasons that mean OUR infrastructure failed, not that the caller attacked. Reporting
 # them would record an outage as an attack.
-NOT_AN_ATTACK = frozenset({"nonce_store_error", "ti_unavailable", "jwks_unavailable"})
+NOT_AN_ATTACK = frozenset({"nonce_store_error", "ti_unavailable", "jwks_unavailable",
+                           "x401_unavailable", "x401_issuers_unconfigured",
+                           "x401_internal_error"})
 
 
 def classify_reason(reasons):

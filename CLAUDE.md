@@ -11359,3 +11359,36 @@ The privacy section 12 amendments from the earlier 2026-10-15 session are STILL 
 `test_bundle_b_gating`, `test_corpus_provenance`, `test_url_malware_attribution`,
 `test_x402_manifest_completeness`, and `test_workflows_parse` (relayshield-signup-api missing from the
 invoke policy).
+
+## 2026-10-16: x401 IS RECONCILED WITH THE TELEMETRY HOOK, AND THE PS256 VERIFIER NEVER WORKED
+
+Detail and the open list are in `verifier_telemetry_handoff_2026-10-15.md` section 7. The record:
+
+* **Muse's x401 work was recovered from a stash.** The standard merge block's stash line swept
+  Andrew's uncommitted edit to `relayshield_tap_verifier.py` and a new untracked `x401_verifier.py`
+  into `stash@{0}`, so a session asked to "check again" could not see it. It is on branch
+  `x401-wip` (`10c29815`). **The stash line swallows tracked edits as well as untracked files**,
+  which this file said once and a block was handed over anyway. Anything uncommitted must be
+  committed or told apart before the merge block runs. `git stash branch` is the recovery, and it
+  drops the stash on success (the content is then on the branch).
+* **The branch had never been run.** Running it found five bugs in the handler (see the handoff),
+  most seriously that every mandate check was skipped when the transaction value was empty.
+  **A constraint that cannot be checked is a failure, not a pass.** That is the rule, and
+  `validate_mandate_scope` now follows it, including `nan` amounts and unreadable dates.
+* **`_pss_verify` rejected every valid RSA-PSS signature**, so no PS256 TAP request could ever have
+  been accepted. Its leading-bit check shifted the wrong way and it never cleared the top bits of
+  the data block. `test_accept_ps256` allowed `accept` OR `reject`, with the comment "environment-
+  specific RSA issue", and another test ended `or True  # placeholder`. **A test that accepts both
+  outcomes is not a test**, and a comment blaming the environment is a lead to run down, not a
+  reason to stop. 40 of 40 valid signatures now verify; `test_pss_verify.py` covers four modulus sizes.
+* **The token must not choose the scheme for a key.** `_x401_verify_sig` decides from the registry
+  key's type, so an Ed25519 key only ever verifies EdDSA and an RSA key only PS256. RS256 (PKCS#1
+  v1.5) is unsupported and fails rather than being checked with the wrong scheme.
+* **The trusted-issuer registry is empty and is Andrew's call.** Empty means every presentation is a
+  `review`; nothing is accepted. Nothing in this repo should invent which issuers to trust.
+* **Guards proven by reintroduction (8):** tx-value skip, nan, the old PSS shift, token-chosen alg,
+  unguarded import, empty-registry-as-accept, issuer not passed to telemetry, review overriding
+  reject. `test_x401_integration.py` (40), `test_pss_verify.py` (4); the TAP, telemetry and privacy
+  suites still pass. `test_workflows_parse` still fails on `relayshield-signup-api` missing from the
+  invoke policy, as it does on clean main.
+* **Not deployed, and the zip needs four files** (see the handoff). Nothing here has run against AWS.

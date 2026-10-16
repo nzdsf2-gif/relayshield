@@ -199,6 +199,29 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     result = json.loads(resp.read().decode('utf-8'))
                 tools = result.get('result', {}).get('tools', [])
                 findings = scan_tools(tools, source=url)
+                # Auth check: the scan's tools/list used no credentials.
+                # If it succeeded, the server accepts unauthenticated connections.
+                findings.append({
+                    "severity": "CRITICAL",
+                    "tool": "_server",
+                    "message": "Server accepts unauthenticated tools/list. "
+                               "Any client can enumerate tools without credentials. "
+                               "Enable authentication on the MCP server.",
+                    "taxonomy": "unauthenticated-access",
+                })
+                # Fuzzing mode: test server validation with malformed inputs
+                if data.get('fuzz'):
+                    from .fuzzer import fuzz_tool
+                    fuzz_results = []
+                    for tool in tools[:5]:  # limit to 5 tools for demo
+                        fr = fuzz_tool(url, tool, max_cases=20)
+                        fuzz_results.append(fr)
+                    findings.append({
+                        "severity": "INFO",
+                        "tool": "_fuzzing",
+                        "message": f"Fuzzed {len(fuzz_results)} tools: " +
+                                   ", ".join(f"{r['tool']}: {r['failures']} failures, {r['critical']} critical" for r in fuzz_results)
+                    })
                 self._send_json({
                     "url": url,
                     "tool_count": len(tools),

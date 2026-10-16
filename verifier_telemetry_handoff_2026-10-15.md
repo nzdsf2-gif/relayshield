@@ -183,17 +183,83 @@ and never reported as an attack.
 **ANDREW DECIDES: the trusted-issuer registry.** It is `x401_issuers.json` beside the module (ships
 `{"issuers": {}}`), or the `X401_TRUSTED_ISSUERS` environment variable holding the same JSON. Each
 entry is issuer id -> a public JWK (Ed25519 `OKP` or `RSA`; RSA keys verify PS256 only). Until it has
-entries every presentation is a `review`. Which issuers to trust is a business decision; Proof's
-published key is the obvious first entry, and it should be read from Proof, not from this repo.
+entries every presentation is a `review`. Which issuers to trust is a business decision. (An
+earlier version of this paragraph recommended "Proof's published key" as the first entry. That
+was unverified and wrong: see section 8, finding A.)
 **The zip must contain `relayshield_tap_verifier.py`, `x401_verifier.py`, `x401_issuers.json` and
 `relayshield_verifier_telemetry.py`.**
 
 **Still open, not fixed:**
-- Replay protection is an in-memory dict per Lambda container. It does not stop a replay that lands
-  on another container. It needs a DynamoDB nonce store, for TAP and x401 alike.
-- A credential with no `exp` is accepted forever. Recommend requiring `exp`.
-- `committed lambda_handler passes no ti_screen`: TAP does no threat-intel screening on main.
+- ~~Replay protection is per container~~ FIXED 2026-10-16, see section 8.
+- ~~A credential with no `exp` is accepted forever~~ FIXED 2026-10-16, see section 8.
+- ~~TAP passes no ti_screen~~ FIXED 2026-10-16 (behind an environment variable), see section 8.
 - The mandate's `agent` is compared with a merchant-supplied `agent_id`, not cross-bound to the TAP
   signing key. Binding them needs a defined mapping from the Visa key id to the mandate's agent.
 - Landing-page edits on `x401-wip` say "700K+ threat indicators" and sell a PAP verifier; neither
   has code behind it in this repo.
+
+## 8. UPDATE 2026-10-16 (later): THE THREE OPEN ITEMS ARE FIXED, AND x401 TARGETS THE WRONG DRAFT
+
+### A. FINDING THAT BLOCKS x401 GOING LIVE: the code implements the OLD draft, and "Proof's key" does not exist
+
+I read the current spec from its source (`raw.githubusercontent.com/proof/x401/main/spec.md`,
+reachable from the container; `x401.proof.com` itself is not).
+
+* **Headers.** The current draft uses `PROOF-REQUEST` (the verifier's requirement), `PROOF-RESPONSE`
+  (the agent's result) and `PROOF-RESULT` (errors). `PROOF-PRESENTATION` is the **0.1.0** name.
+  Muse's docstring says "Draft 0.2.0" and implements 0.1.0.
+* **What is carried.** Not a bare W3C Verifiable Presentation of JWT credentials. The current draft
+  has the VERIFIER compose and sign an OpenID4VP / DCQL request, and the agent returns a Result
+  Artifact `{request_id, credential_result: {protocol: "openid4vp-v1-signed", data}}`. Proof
+  Validation then requires the verifier to check the result against the request it composed, its
+  `nonce`, `client_id` and `expected_origins`, the DCQL query, and issuer trust. **A verifier that
+  never issues a request cannot do that**, so this is a different product, not a header rename.
+* **"Proof's published key" does not exist.** Proof is not an issuer with one key to trust. Issuer
+  trust is the verifier's own policy, expressed through DCQL `trusted_authorities` (OpenID
+  Federation, ETSI trusted lists). I recommended that entry without checking and it was wrong.
+  **No key was added. `x401_issuers.json` stays empty, and I will not put a key in it that I did not
+  read from the issuer.**
+
+**Recommendation (mine, overrule it):** leave x401 OFF. It is safe as it stands, because an empty
+registry means every presentation is a `review` and nothing is accepted. Do not advertise x401 on
+the pricing card. Choose later between (a) a documented bespoke "0.1.0-style" mode for a named
+customer who already issues those credentials, which needs only a registry entry for THAT issuer,
+or (b) implementing the current draft's relying-party flow, which is a multi-day build with its own
+request store. Muse should be told which draft it was meant to target.
+
+### B. The three items, fixed and tested (32 new tests, 9 defects reintroduced)
+
+1. **Replay protection.** Two bugs, not one. `verify_tap_request` built a fresh `MemoryNonceStore`
+   on EVERY call, so replay detection did nothing even within a container; it is one store per
+   process now. And nothing shared state across containers. `relayshield_verifier_nonces.py` is a
+   DynamoDB store: one conditional put per nonce (atomic, no get-then-put window), an expired row
+   counts as absent, and any other error RAISES (TAP answers `nonce_store_error`, which telemetry
+   does not count as an attack). Keys are hashed and scoped: `tap|<keyid>|<nonce>` and
+   `x401|<issuer>|<jti>`, because nonces are only unique per signer. Enabled by the environment
+   variable `VERIFIER_NONCE_TABLE`; unset keeps the per-process store.
+2. **`exp` is required** on every x401 credential, and must be a finite number. `nbf` too.
+3. **TI screening.** `relayshield_tap_ti.py` reuses `_assess_domain` and `handle_wallet_risk`
+   in-process (never the public HTTP door, which would throttle the Lambda against its own NAT
+   address). Levels are `high`, `medium` or `unknown`, never "low" or "clean". If it cannot answer
+   it raises and the verdict is `review` / `ti_unavailable`. Enabled by `VERIFIER_TI_SCREEN=1`.
+   If enabled and the module cannot load, the verdict is a visible review, not a silent skip.
+
+### C. Deployment, in this order. Nothing here has been run against AWS.
+
+1. Merge and push (this deploys only `relayshield-api`; the verifier Lambda is hand-deployed).
+2. Deploy the privacy Worker (Actions, "Deploy Privacy Policy Worker").
+3. `AWS_PROFILE=relayshield sh tools/setup_verifier_telemetry_table.sh`
+4. `AWS_PROFILE=relayshield sh tools/setup_verifier_nonces_table.sh`
+5. Find the verifier Lambda's name; grant BOTH tables (dry run first, then `--apply`):
+   `... python3 tools/grant_breach_cache_access.py --table relayshield_verifier_telemetry --function NAME`
+   `... python3 tools/grant_breach_cache_access.py --table relayshield_verifier_nonces --function NAME`
+6. Read the drift (`sh tools/handler_drift.sh relayshield_tap_verifier.py`), then hand-deploy a zip
+   with: `relayshield_tap_verifier.py`, `x401_verifier.py`, `x401_issuers.json`,
+   `relayshield_verifier_telemetry.py`, `relayshield_verifier_nonces.py`, `relayshield_tap_ti.py`.
+7. THEN set `VERIFIER_NONCE_TABLE=relayshield_verifier_nonces` (merge with the existing variables:
+   a bare update replaces them all). Setting it before step 5 makes every request answer
+   `nonce_store_error`.
+8. TI screening is separate and later: it also needs `relayshield_api.py` and its `relayshield_*`
+   dependencies in the zip and read access to the intel tables on the Lambda's role. Set
+   `VERIFIER_TI_SCREEN=1` only after a request with a known-bad test counterparty returns `reject`.
+   Each screened request costs one wallet-risk lookup, which calls third-party vendors.

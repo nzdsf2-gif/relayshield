@@ -386,7 +386,7 @@ class TapWiring(unittest.TestCase):
         for decision, code in (("accept", 200), ("review", 202)):
             calls = []
             with unittest.mock.patch.object(tap, "verify_tap_request",
-                                            lambda r, d=decision: tap.Verdict(d, ["x"])), \
+                                            lambda r, d=decision, **kw: tap.Verdict(d, ["x"])), \
                     unittest.mock.patch.object(vt, "maybe_report", lambda *a, **k: calls.append(a)):
                 resp = tap.lambda_handler(self._event({}), None)
             self.assertEqual(resp["statusCode"], code)

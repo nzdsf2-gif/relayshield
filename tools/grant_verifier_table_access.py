@@ -106,11 +106,19 @@ def main(argv=None):
             "--query", "Policy.Arn", "--output", "text")
         print(f"created {POLICY}")
     aws("iam", "attach-role-policy", "--role-name", role, "--policy-arn", policy_arn)
-    sim = json.loads(aws("iam", "simulate-principal-policy", "--policy-source-arn", role_arn,
-                         "--action-names", *ACTIONS, "--resource-arns", *arns,
-                         "--query", "EvaluationResults[].EvalDecision", "--output", "json").stdout)
-    print(f"IAM simulator: {', '.join(ACTIONS)} on both tables -> {sim}")
-    if not sim or any(d != "allowed" for d in sim) or len(sim) != len(arns):
+    # ONE CALL PER TABLE. simulate-principal-policy returns one EvaluationResult per ACTION, not one
+    # per resource, so asking about both ARNs at once yields a single aggregated row. The first
+    # version of this tool counted rows against tables and reported a granted, attached policy as
+    # a failure on its first real run; the stand-in aws it was tested against returned one row per
+    # ARN, which the real API does not. Per-table calls make each answer unambiguous.
+    sim = {}
+    for t, arn in zip(TABLES, arns):
+        out = json.loads(aws("iam", "simulate-principal-policy", "--policy-source-arn", role_arn,
+                             "--action-names", *ACTIONS, "--resource-arns", arn,
+                             "--query", "EvaluationResults[].EvalDecision", "--output", "json").stdout)
+        sim[t] = out[0] if len(out) == 1 else "no-answer"
+    print(f"IAM simulator: {', '.join(ACTIONS)} -> {sim}")
+    if any(d != "allowed" for d in sim.values()):
         print("STOP: the role still cannot write both tables.")
         return 4
     print("done. The proof is a real request after VERIFIER_NONCE_TABLE is set, not this simulation.")

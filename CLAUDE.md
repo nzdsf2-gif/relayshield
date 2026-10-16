@@ -11466,3 +11466,26 @@ Measured from Andrew's output, not recalled:
 * **UNCONFIRMED: the table setup scripts' completion.** Andrew's paste showed the nonce script print `created` output up
   to the table name and then nothing, and no telemetry-script output at all. A `set -e` abort at `wait table-exists` and
   a truncated paste look identical. The scripts are idempotent; the next step re-runs them and reads each table.
+
+## 2026-10-16 (later still): THE GRANT TOOL REPORTED A GRANTED POLICY AS A FAILURE. MY STAND-IN AWS HAD THE WRONG SHAPE.
+
+`tools/grant_verifier_table_access.py` created and attached `relayshield-verifier-tables-write` and then printed
+`IAM simulator: ... -> ['allowed']` followed by `STOP: the role still cannot write both tables.` The policy was fine. The
+tool asked the simulator about BOTH table ARNs in one call and compared the number of result rows to the number of tables,
+but `simulate-principal-policy` returns ONE row per ACTION however many resources were asked about, so one action always
+looked like a failure. **The tests passed because the stand-in `aws` returned one row per ARN, which the real API does not.**
+A fake that answers the way the author expects is a second implementation that agrees with the first.
+
+Fixed: one simulator call per table, each answer required to be `allowed`, and the fake now returns the real shape (one
+row per action) and records how it was asked. Run against the OLD code the new tests fail, and two further breakages are
+caught. `grant_x401_secret_access.py` has one resource and one action, so it was never affected.
+
+Also measured the same evening: the telemetry table's TTL is ENABLED (the script's `None` line is just the
+`update-time-to-live` response having no status field), the nonce table's TTL is ENABLED, and **`relayshield-tap-verifier` has
+NO environment variables at all** (`keys(Environment.Variables)` failed on null). So `VERIFIER_NONCE_TABLE` has nothing to
+be merged into and the merge tool's "preserved: (none)" is correct, not a warning.
+
+**x401 package deployed 2026-10-16 02:21 UTC**: `relayshield-tap-verifier`, sha256 `5ad58e35...`, 47,439 bytes. A challenge
+request for a policy that does not exist answers `404 unknown_policy`, which proves the new code loaded AND the signing key
+was read from Secrets Manager (a signer failure answers 503 before the policy lookup). **Not yet done:** the grant tool
+re-run, `VERIFIER_NONCE_TABLE`, a policy, a trusted issuer.

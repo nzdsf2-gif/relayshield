@@ -36,6 +36,14 @@ import re
 import time
 import urllib.request
 
+# The x401 relying party (current draft) and its network helper. Guarded for the same
+# reason: a package without them must still verify TAP.
+try:
+    import x401_rp as _rp
+    import x401_net as _net
+except Exception:
+    _rp = _net = None
+
 # x401 is an optional companion module. A package that lacks it must still verify
 # TAP requests: a hard import here would take the whole Lambda down.
 try:
@@ -791,6 +799,63 @@ def verify_x401_branch(request: dict, headers: dict) -> Verdict:
     return _reject(_x401.reason_code(res.get("reason")), x401_detail=res.get("reason"))
 
 
+def _rp_route(request: dict):
+    """(route, method) the x401 proof is bound to. The signed path/method of the request
+    being verified; `x401_route` overrides when the merchant verifies on another route's
+    behalf. Both must be present: a nonce bound to nothing is bound to everything."""
+    route = request.get("x401_route") or request.get("path")
+    method = request.get("x401_method") or request.get("method")
+    if isinstance(route, str) and route and isinstance(method, str) and method:
+        return route, method.upper()
+    return None, None
+
+
+def x401_challenge(policy_id, route, method):
+    """The PROOF-REQUEST for a route. -> dict. Raises _rp.X401Error."""
+    signer = _rp.load_signer()
+    policies = _rp.load_policies()
+    ch = _rp.create_challenge(policy_id, policies, route, str(method).upper(), signer)
+    return ch
+
+
+def verify_x401_rp(request: dict, headers: dict, agent_id=None):
+    """The current-draft relying party. -> (Verdict, claimed_issuer).
+
+    No PROOF-RESPONSE: a `reject` with reason `proof_required` and the fresh PROOF-REQUEST
+    in details, so ONE call from the merchant is a complete challenge. A PROOF-RESPONSE is
+    validated against the request this verifier signed. Our own failures (no key, no
+    module, a broken store) are `review`, never `accept` and never reported as an attack."""
+    if _rp is None:
+        return _review("x401_unavailable"), ""
+    policy_id = request.get("x401_policy")
+    if not isinstance(policy_id, str) or not policy_id:
+        return _reject("malformed_request", detail="x401_policy is required"), ""
+    route, method = _rp_route(request)
+    if route is None:
+        return _reject("malformed_request", detail="path and method are required"), ""
+    try:
+        if "proof-response" not in headers:
+            ch = x401_challenge(policy_id, route, method)
+            return _reject("proof_required", proof_request=ch["header"], request_id=ch["request_id"],
+                           expires_at=ch["expires_at"]), ""
+        signer = _rp.load_signer()
+        out = _rp.verify_result(
+            headers["proof-response"], policy_id=policy_id, policies=_rp.load_policies(),
+            issuers=_rp.load_issuers(), route=route, method=method, signer=signer,
+            store=_nonce_store(), agent_id=agent_id, fetch=_net.safe_fetch if _net else None)
+    except _rp.X401Error as exc:
+        if exc.code in ("verifier_not_configured",):
+            return _review(exc.code), ""
+        return _reject(exc.code, proof_result=_rp.error_header(exc.code, exc.description,
+                                                              getattr(exc, "request_id", None))), exc.issuer
+    except Exception as exc:
+        logger.warning("x401 relying party error: %s", type(exc).__name__)
+        return _review("x401_internal_error"), ""
+    return Verdict("accept", ["x401_valid"], {"x401": {
+        "request_id": out["request_id"], "satisfied_requirements": out["satisfied_requirements"],
+        "credentials": out["credentials"], "holder_key_thumbprint": out["holder_key_thumbprint"]}}), ""
+
+
 class AgentOutcome:
     """What lambda_handler needs: the verdict, which verifier(s) produced it, and
     the issuer the presentation claimed (telemetry only)."""
@@ -806,7 +871,14 @@ def _combine(tap_v: Verdict, x401_v: Verdict) -> Verdict:
     review. Reasons come only from the verdicts that decided the outcome, so the first
     reason (which telemetry classifies) names the cause rather than a passing half."""
     details = dict(tap_v.details)
-    details["x401"] = x401_v.details
+    # Same shape whether TAP ran or not: the x401 result under "x401" (never nested twice),
+    # and the two things a merchant acts on hoisted to the top, where an x401-only call
+    # already puts them.
+    inner = x401_v.details
+    details["x401"] = inner["x401"] if isinstance(inner.get("x401"), dict) else inner
+    for key in ("proof_request", "proof_result", "request_id", "expires_at"):
+        if key in inner:
+            details[key] = inner[key]
     for level in ("reject", "review"):
         deciding = [v for v in (tap_v, x401_v) if v.decision == level]
         if deciding:
@@ -818,18 +890,38 @@ def _combine(tap_v: Verdict, x401_v: Verdict) -> Verdict:
 def verify_agent_request(request: dict) -> AgentOutcome:
     """TAP, x401, or both, chosen by which credentials the agent presented.
 
-    No PROOF-PRESENTATION header: exactly the TAP verifier, unchanged. Header and TAP
-    signature: both must accept. Header alone: x401 only."""
+      * no x401 material                   -> exactly the TAP verifier, unchanged
+      * PROOF-RESPONSE, or `x401_policy`   -> the x401 relying party (current draft)
+      * PROOF-PRESENTATION                 -> the earlier bespoke verifier (0.1.0 style)
+
+    With a TAP signature present, BOTH must accept, and TAP runs FIRST: its verified key id
+    is the Agent Identifier an x401 policy can bind to, and a request TAP has refused never
+    reaches the x401 half, so it cannot burn a single-use nonce on a result that was going to
+    be rejected anyway."""
     raw = request.get("headers")
     headers = ({str(k).lower(): v for k, v in raw.items()} if isinstance(raw, dict) else {})
     if not isinstance(raw, dict):
         request = {**request, "headers": {}}   # verify_tap_request calls .items() on it
     tap_kw = {"nonce_store": _nonce_store(), "ti_screen": _ti_screen()}
-    if "proof-presentation" not in headers:
+    tap_present = "signature" in headers and "signature-input" in headers
+    want_rp = "proof-response" in headers or bool(request.get("x401_policy"))
+    legacy = "proof-presentation" in headers
+    if not want_rp and not legacy:
         return AgentOutcome(verify_tap_request(request, **tap_kw), "tap")
+    if want_rp:
+        tap_v, agent_id = None, None
+        if tap_present:
+            tap_v = verify_tap_request(request, **tap_kw)
+            if tap_v.decision != "accept":
+                return AgentOutcome(tap_v, "tap")
+            agent_id = tap_v.details.get("keyid")
+        x_v, issuer = verify_x401_rp(request, headers, agent_id)
+        if tap_v is None:
+            return AgentOutcome(x_v, "x401", issuer)
+        return AgentOutcome(_combine(tap_v, x_v), "tap+x401", issuer)
     issuer = _presentation_issuer(headers.get("proof-presentation"))
     x401_v = verify_x401_branch(request, headers)
-    if "signature" in headers and "signature-input" in headers:
+    if tap_present:
         return AgentOutcome(_combine(verify_tap_request(request, **tap_kw), x401_v), "tap+x401", issuer)
     return AgentOutcome(x401_v, "x401", issuer)
 
@@ -847,11 +939,38 @@ def lambda_handler(event, context):
         return _http(400, {"decision": "reject",
                            "reasons": ["bad_request_body"]})
     request = data if isinstance(data, dict) else {}
+    if request.get("action") == "x401_challenge":
+        return _challenge_response(request)
     outcome = verify_agent_request(request)
     verdict = outcome.verdict
     _report_rejection(verdict, event, request, outcome.verifier_type, outcome.issuer)
     code = {"accept": 200, "review": 202, "reject": 403}[verdict.decision]
+    if verdict.reasons == ["proof_required"]:
+        code = 401        # the merchant answers its agent with 401 + PROOF-REQUEST
     return _http(code, verdict.to_dict())
+
+
+def _challenge_response(request: dict):
+    """{"action": "x401_challenge", "x401_policy", "path", "method"} -> the PROOF-REQUEST.
+    Nothing is stored: the nonce carries its own state under an HMAC."""
+    if _rp is None:
+        return _http(503, {"error": "x401_unavailable"})
+    route, method = _rp_route(request)
+    policy_id = request.get("x401_policy")
+    if route is None or not isinstance(policy_id, str) or not policy_id:
+        return _http(400, {"error": "x401_policy, path and method are required"})
+    try:
+        ch = x401_challenge(policy_id, route, method)
+    except _rp.X401Error as exc:
+        status = {"unknown_policy": 404, "verifier_not_configured": 503}.get(exc.code, 400)
+        return _http(status, {"error": exc.code, "error_description": exc.description})
+    except Exception as exc:
+        logger.warning("x401 challenge error: %s", type(exc).__name__)
+        return _http(500, {"error": "x401_internal_error"})
+    resp = _http(200, {"proof_request": ch["header"], "request_id": ch["request_id"],
+                       "expires_at": ch["expires_at"],
+                       "headers": {"PROOF-REQUEST": ch["header"], "Cache-Control": "no-store"}})
+    return resp
 
 
 def _report_rejection(verdict, event, request, verifier_type="tap", issuer=None):

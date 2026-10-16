@@ -72,7 +72,7 @@ export default {
   <p><strong>What we do with it.</strong> The buyer's email is sent to RelayShield's API for scoring. The score and its reasons are written back to your store as an order tag (relayshield-high-risk or relayshield-review) and a timeline note. The app never blocks, cancels, or refunds orders, and it never calls an order safe.</p>
   <p><strong>What we store.</strong> Buyer emails are SHA-256 hashed before storage; raw email addresses are never persisted. Screening records (order reference, score, level, timestamp) are kept to power the in-app dashboard history.</p>
   <p><strong>What we do not do.</strong> We do not use order or buyer data for any purpose other than scoring your orders. We do not sell it or share it with third parties for marketing.</p>
-  <p><strong>Your rights.</strong> Shopify's mandatory GDPR webhooks are supported: a customers/redact or shop/redact request deletes the stored records for that customer or shop. You may also contact us at any time at the address in section 14.</p>
+  <p><strong>Your rights.</strong> Shopify's mandatory GDPR webhooks are supported: a customers/redact or shop/redact request deletes the stored records for that customer or shop. You may also contact us at any time at the address in section 15.</p>
 
   <h2>7. Data Retention</h2>
   <p>API logs are retained for 90 days and then automatically deleted. The identifiers you submit for screening, such as an email address or phone number, are not written to those logs in a readable form: they are replaced with a one-way hash before anything is recorded. Account data is retained until you request deletion. An enrolled mobile number and its carrier history are retained only while the number stays enrolled, and are deleted when you remove it. Wallet addresses stored on-device are under your control and can be deleted at any time from the app.</p>
@@ -126,7 +126,16 @@ export default {
   <p><strong>Retention.</strong> Entries are deleted automatically after 90 days.</p>
   <p><strong>Control.</strong> Turning telemetry off stops new entries immediately. Entries already recorded are linked to your account only by the hash of your API key. To have them deleted, email us from your account address and we will delete the entries linked to your key. Data is stored in the United States, as described in section 9.</p>
 
-  <h2>14. Contact</h2>
+  <h2>14. Credential Verification (x401 Verifier)</h2>
+  <p>This section applies if you use the x401 verifier that we host. Unlike section 13, it describes processing that happens whenever a credential is verified, whether or not you have opted in to telemetry.</p>
+  <p><strong>What we receive.</strong> The proof an AI agent presents on behalf of a person: a credential presentation containing only the claims the person chose to disclose, together with the request details you send us (the route and method being protected, and the policy you want applied).</p>
+  <p><strong>What we do with it.</strong> We check the signatures, the issuer, that the presentation is bound to the person's key and to the request we issued, that it has not expired or been revoked, and that it satisfies your policy. We then tell you the result. If it is accepted, we return to you the claims your policy asked for, and no others.</p>
+  <p><strong>What we keep.</strong> We do not store the presentation or the claims in it, and we do not write them to our logs. To stop the same proof being used twice, we keep a one-way hash of the request's single-use identifier for one hour, and then it is deleted automatically. It identifies neither the person nor the credential.</p>
+  <p><strong>Revocation checks.</strong> If a credential carries a status entry, we may download the issuer's published revocation list. The list is published for everyone and we download all of it, not an entry for one credential.</p>
+  <p><strong>Not used for anything else.</strong> We do not use disclosed claims for threat intelligence, analytics, advertising or profiling, and they are never part of the entry described in section 13. You decide what your policy requests, and you are responsible for how you use the claims we return to you.</p>
+  <p><strong>Where.</strong> Processing takes place in the United States, as described in section 9.</p>
+
+  <h2>15. Contact</h2>
   <p><a href="mailto:support@relayshield.net">support@relayshield.net</a></p>
 
   <hr>

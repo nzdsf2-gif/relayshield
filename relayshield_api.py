@@ -13159,6 +13159,33 @@ def _x402_manifest_entries(price_units_table, descriptions_table, build_requirem
     return entries
 
 
+def handle_did_document() -> dict:
+    """/.well-known/did.json: the did:web document holding the x401 verifier's PUBLIC key.
+
+    404 until relayshield_x401_pubkey.PUBLIC_JWK is set (tools/generate_x401_verifier_key.py).
+    A key that was never published is "the verifier is not configured", which a wallet can
+    see, rather than a document with a placeholder key that fails signature checks silently."""
+    try:
+        import relayshield_x401_pubkey as pk
+        jwk, kid = pk.PUBLIC_JWK, pk.KID
+    except Exception:
+        jwk, kid = None, ""
+    if not isinstance(jwk, dict) or "d" in jwk or not kid:
+        return _err("the x401 verifier key is not published", 404)
+    did = "did:web:api.relayshield.net"
+    doc = {
+        "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/jws-2020/v1"],
+        "id": did,
+        "verificationMethod": [{"id": kid, "type": "JsonWebKey2020", "controller": did, "publicKeyJwk": jwk}],
+        "authentication": [kid],
+        "assertionMethod": [kid],
+    }
+    return {"statusCode": 200,
+            "headers": {"Content-Type": "application/did+json", "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "public, max-age=300"},
+            "body": json.dumps(doc)}
+
+
 def handle_x402_manifest() -> dict:
     """Serve /.well-known/x402.json, the conventional discovery manifest.
 
@@ -17121,6 +17148,11 @@ def lambda_handler(event: dict, context) -> dict:
     # indexers and agent directories read to find our paid endpoints at all.
     if path in ("/.well-known/x402.json", "/.well-known/x402"):
         return handle_x402_manifest()
+
+    # did:web document for the x401 verifier's request-signing key. Public by design:
+    # a wallet resolves it to check the signature on our OpenID4VP request.
+    if method in ("GET", "HEAD") and path == "/.well-known/did.json":
+        return handle_did_document()
 
     # MCP attack-pattern taxonomy: public reference data, see handle_mcp_taxonomy.
     if method == "GET" and path == "/v1/mcp-taxonomy":

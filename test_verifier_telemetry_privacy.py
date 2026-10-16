@@ -57,8 +57,8 @@ class Section13(unittest.TestCase):
             self.assertIn(name, t)
 
     def test_contact_moved_to_14_and_the_reference_followed(self):
-        self.assertRegex(SRC, r"<h2>14\. Contact</h2>")
-        self.assertIn("address in section 14", SRC)
+        self.assertRegex(SRC, r"<h2>15\. Contact</h2>")
+        self.assertIn("address in section 15", SRC)
 
     def test_it_says_off_by_default_and_that_it_is_a_deliberate_setting(self):
         t = text(13)

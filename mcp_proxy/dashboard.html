@@ -218,10 +218,7 @@
     <div style="display: flex; gap: 8px;">
       <input id="scan-url" type="text" placeholder="https://mcp-server.example.com/mcp"
              style="flex: 1; padding: 8px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3;">
-      <label style="color: #8b949e; font-size: 12px; margin-left: 8px;">
-      <input type="checkbox" id="fuzz-check" style="margin-right: 4px;" /> Fuzz
-    </label>
-    <button onclick="runScan()" style="padding: 8px 16px; background: #238636; border: none; border-radius: 6px; color: white; cursor: pointer;">Scan</button>
+      <button onclick="runScan()" style="padding: 8px 16px; background: #238636; border: none; border-radius: 6px; color: white; cursor: pointer;">Scan</button>
     </div>
     <div id="scan-results" style="margin-top: 12px; font-size: 13px;"></div>
   </div>
@@ -267,7 +264,7 @@
       const resp = await fetch('/_rs/scan', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url: url, fuzz: document.getElementById('fuzz-check').checked})
+        body: JSON.stringify({url})
       });
       const data = await resp.json();
       if (data.error) {

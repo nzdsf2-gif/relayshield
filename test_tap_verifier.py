@@ -22,6 +22,15 @@ from cryptography.hazmat.primitives import hashes
 import relayshield_tap_verifier as tap
 
 
+class IsolatedTestCase(unittest.TestCase):
+    """Each test gets its own default replay store. The suite reuses nonces like "n1"
+    across tests, which used to pass only because verify_tap_request built a fresh
+    store on every call, so replay protection was doing nothing at all."""
+
+    def setUp(self):
+        tap._default_nonce_store = tap.MemoryNonceStore()
+
+
 def b64u(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
@@ -64,7 +73,7 @@ def make_request(priv, jwk, alg, label="sig1", created=NOW, expires=None,
     return req
 
 
-class TestB64U(unittest.TestCase):
+class TestB64U(IsolatedTestCase):
     def test_roundtrip(self):
         self.assertEqual(b64u_d(b64u(b"hello world")), b"hello world")
 
@@ -72,7 +81,7 @@ class TestB64U(unittest.TestCase):
         self.assertNotIn("=", b64u(b"abc"))
 
 
-class TestParsing(unittest.TestCase):
+class TestParsing(IsolatedTestCase):
     def test_signature_input_basic(self):
         v = ('sig1=("@authority" "@path");created=1790000000;'
              'keyid="k1";alg="ed25519";nonce="n1";tag="agent-payer-auth"')
@@ -101,7 +110,7 @@ class TestParsing(unittest.TestCase):
         self.assertIn('"@signature-params":', txt)
 
 
-class TestCrypto(unittest.TestCase):
+class TestCrypto(IsolatedTestCase):
     def test_ed25519_valid(self):
         priv = Ed25519PrivateKey.generate()
         pub = priv.public_key().public_bytes_raw()
@@ -192,7 +201,7 @@ def rsa_jwk(kid="rsa-k1"):
     return priv, {"kty": "RSA", "kid": kid, "n": b64u(n_b), "e": b64u(e_b)}
 
 
-class TestVerifyPipeline(unittest.TestCase):
+class TestVerifyPipeline(IsolatedTestCase):
     def test_missing_headers(self):
         v = tap.verify_tap_request({"headers": {}}, jwks={}, now=NOW)
         self.assertEqual(v.decision, "reject")
@@ -343,7 +352,7 @@ class TestVerifyPipeline(unittest.TestCase):
         self.assertEqual(body["decision"], "accept")
 
 
-class TestIntentMismatch(unittest.TestCase):
+class TestIntentMismatch(IsolatedTestCase):
     def test_browse_intent_pay_path_rejects(self):
         # Agent holds a browse token but attempts checkout: scope violation.
         priv, jwk = ed_jwk()

@@ -50,6 +50,7 @@ CACHE_SIDS = {
     # Written by the hosted verifiers (TAP now; PAP and x401 later), NOT by relayshield-api:
     # pass --function with the verifier Lambda's name.
     "relayshield_verifier_telemetry": "VerifierTelemetryWrite",
+    "relayshield_verifier_nonces": "VerifierNonceWrite",
 }
 # The caches are read-through, so they need GetItem and PutItem. The taxonomy is
 # reference data that relayshield-api only ever SCANS (nine rows, cached in the
@@ -62,6 +63,8 @@ TABLE_ACTIONS = {
     # One PutItem per rejection. No read, no update, no delete: a leaked credential could
     # add rows, not read or erase them.
     "relayshield_verifier_telemetry": ["dynamodb:PutItem"],
+    # One conditional PutItem per nonce; the store never reads, scans or deletes.
+    "relayshield_verifier_nonces": ["dynamodb:PutItem"],
 }
 
 

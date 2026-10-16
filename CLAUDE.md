@@ -11392,3 +11392,34 @@ Detail and the open list are in `verifier_telemetry_handoff_2026-10-15.md` secti
   suites still pass. `test_workflows_parse` still fails on `relayshield-signup-api` missing from the
   invoke policy, as it does on clean main.
 * **Not deployed, and the zip needs four files** (see the handoff). Nothing here has run against AWS.
+
+## 2026-10-16 (later): I RECOMMENDED "PROOF'S PUBLISHED KEY" WITHOUT CHECKING. THERE IS NONE, AND x401 TARGETS THE OLD DRAFT.
+
+Asked to add Proof's key to the issuer registry "as you suggest". The recommendation was mine and
+unverified. Reading the spec from `raw.githubusercontent.com/proof/x401/main/spec.md` (reachable;
+`x401.proof.com` is not) showed:
+
+* **Proof is not an issuer.** Issuer trust is the verifier's own policy via DCQL
+  `trusted_authorities`. There is no single key. **No key was added**; `x401_issuers.json` is empty.
+* **The code implements x401 0.1.0** (`PROOF-PRESENTATION`, a bare W3C VP of JWT credentials) while
+  its docstring says "0.2.0". The current draft uses `PROOF-REQUEST` / `PROOF-RESPONSE` /
+  `PROOF-RESULT` and an OpenID4VP/DCQL flow in which the VERIFIER composes and signs the request and
+  validates the result against it. That is a different product, not a rename.
+* **x401 stays off.** An empty registry means every presentation is a `review`. Do not put x401 on
+  the pricing card. The choice (a bespoke 0.1.0-style mode for a named customer, or the real
+  relying-party build) is in the handoff, section 8.
+
+**The rule, again: a recommendation that names a specific external artefact ("their published key",
+"their endpoint", "their header") is a claim about that artefact and needs the artefact read first.**
+This is the `_APIFY_BANNER` and MetaMask-Snap mistake with a recommendation on the end of it.
+
+The three open items from the reconcile are fixed (handoff section 8): replay protection (two bugs:
+a fresh store per call, and nothing shared across containers; now a DynamoDB conditional put behind
+`VERIFIER_NONCE_TABLE`), required `exp`, and TI screening (`relayshield_tap_ti.py`, behind
+`VERIFIER_TI_SCREEN=1`). **The new environment variables are off by default so that the table, the
+grant and the variable can be put in place in that order; setting the variable first makes every
+request answer `nonce_store_error`.**
+
+**A test that reuses a nonce was passing only because replay protection did nothing.** Seventeen
+existing TAP tests failed the moment the store persisted, because they all use nonce `n1`. They now
+get a fresh store each; that failure was the fix working.

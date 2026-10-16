@@ -358,6 +358,12 @@ class MemoryNonceStore:
         return False
 
 
+# One per process. It used to be built INSIDE verify_tap_request whenever no store was
+# passed, so every call started with an empty store and replay protection did nothing,
+# not even within a single container.
+_default_nonce_store = MemoryNonceStore()
+
+
 # ---------------------------------------------------------------------------
 # Intent scoping (Visa TAP intent-scoped tokens)
 # ---------------------------------------------------------------------------
@@ -514,8 +520,9 @@ def verify_tap_request(request: dict,
         return _reject("signature_expired")
 
     # Replay
-    nonce = str(params["nonce"])
-    store = nonce_store or MemoryNonceStore()
+    # Scoped by signer: a nonce is only unique per key, and two agents may both use "1".
+    nonce = f"tap|{params['keyid']}|{params['nonce']}"
+    store = nonce_store if nonce_store is not None else _default_nonce_store
     try:
         if store.seen(nonce, now):
             return _reject("replay_nonce")
@@ -615,6 +622,54 @@ def verify_tap_request(request: dict,
 
     return Verdict("accept", ["signature_valid", "fresh", "nonce_new",
                               "ti_clean"], details)
+
+
+NONCE_TABLE_ENV = "VERIFIER_NONCE_TABLE"
+TI_SCREEN_ENV = "VERIFIER_TI_SCREEN"
+_nonce_store_cache = {}
+
+
+def _nonce_store():
+    """Replay protection for this invocation. VERIFIER_NONCE_TABLE names the shared
+    DynamoDB table; with it unset the per-process store is used, which is the old
+    behaviour and does not stop a replay that lands on another container. Opting in is
+    an environment variable rather than automatic so the table, the grant and the
+    variable can be put in place in that order without a request failing in between."""
+    import os
+    table = os.environ.get(NONCE_TABLE_ENV, "").strip()
+    if not table:
+        return _default_nonce_store
+    if table not in _nonce_store_cache:
+        import relayshield_verifier_nonces as nonces
+        _nonce_store_cache[table] = nonces.DynamoNonceStore(table)
+    return _nonce_store_cache[table]
+
+
+def _x401_nonce_fn(store):
+    """Adapt a store's seen() to x401_verifier's (is_fresh, reason) shape."""
+    def fn(key, now):
+        if store.seen(f"x401|{key}", now):
+            return False, "nonce replay detected"
+        return True, "nonce fresh"
+    return fn
+
+
+def _ti_screen():
+    """The TI screen, or None when VERIFIER_TI_SCREEN is not "1". When it IS on but
+    cannot load, the returned function raises, so the verdict is `review` with
+    `ti_unavailable` and the outage is visible instead of silently screening nothing."""
+    import os
+    if os.environ.get(TI_SCREEN_ENV, "") != "1":
+        return None
+    try:
+        import relayshield_tap_ti
+        return relayshield_tap_ti.screen
+    except Exception as exc:
+        reason = type(exc).__name__
+
+        def unavailable(wallet=None, domain=None):
+            raise RuntimeError(f"ti screen failed to load: {reason}")
+        return unavailable
 
 
 X401_ISSUERS_ENV = "X401_TRUSTED_ISSUERS"
@@ -724,7 +779,7 @@ def verify_x401_branch(request: dict, headers: dict) -> Verdict:
         }
         res = _x401.verify_x401_presentation(
             presentation, transaction, issuer_keys=issuer_keys,
-            verify_sig_fn=_x401_verify_sig)
+            verify_sig_fn=_x401_verify_sig, nonce_fn=_x401_nonce_fn(_nonce_store()))
     except Exception as exc:
         logger.warning("x401 verification error: %s", type(exc).__name__)
         return _review("x401_internal_error")
@@ -769,12 +824,13 @@ def verify_agent_request(request: dict) -> AgentOutcome:
     headers = ({str(k).lower(): v for k, v in raw.items()} if isinstance(raw, dict) else {})
     if not isinstance(raw, dict):
         request = {**request, "headers": {}}   # verify_tap_request calls .items() on it
+    tap_kw = {"nonce_store": _nonce_store(), "ti_screen": _ti_screen()}
     if "proof-presentation" not in headers:
-        return AgentOutcome(verify_tap_request(request), "tap")
+        return AgentOutcome(verify_tap_request(request, **tap_kw), "tap")
     issuer = _presentation_issuer(headers.get("proof-presentation"))
     x401_v = verify_x401_branch(request, headers)
     if "signature" in headers and "signature-input" in headers:
-        return AgentOutcome(_combine(verify_tap_request(request), x401_v), "tap+x401", issuer)
+        return AgentOutcome(_combine(verify_tap_request(request, **tap_kw), x401_v), "tap+x401", issuer)
     return AgentOutcome(x401_v, "x401", issuer)
 
 

@@ -361,7 +361,8 @@ def check_nonce(nonce: str, now: float | None = None) -> tuple[bool, str]:
 def verify_x401_presentation(presentation_b64: str, transaction: dict,
                              issuer_keys: dict | None = None,
                              verify_sig_fn=None,
-                             now: float | None = None) -> dict:
+                             now: float | None = None,
+                             nonce_fn=None) -> dict:
     """
     Full x401 presentation verification.
 
@@ -374,6 +375,8 @@ def verify_x401_presentation(presentation_b64: str, transaction: dict,
         verify_sig_fn: Function(header, signing_input, sig_b64, pubkey, alg)
                        -> bool. Wire to your Ed25519/RSA implementation.
         now: Override current time (for testing)
+        nonce_fn: Function(key, now) -> (is_fresh, reason). Plug a shared replay store
+                  in here; None uses this process's own dict.
 
     Returns dict:
         {
@@ -442,13 +445,26 @@ def verify_x401_presentation(presentation_b64: str, transaction: dict,
         else:
             logger.warning("No verify function provided; skipping sig check")
 
-        # Check exp/nbf
+        # Check exp/nbf. `exp` is REQUIRED: a credential with no expiry is valid
+        # forever, so one stolen credential would be a permanent key. Both values
+        # must be finite numbers; `float("nan")` compares False against everything.
         exp = payload.get("exp")
         nbf = payload.get("nbf")
-        if exp and now > float(exp) + CLOCK_SKEW:
+        try:
+            exp_f = None if exp is None or isinstance(exp, bool) else float(exp)
+            nbf_f = None if nbf is None or isinstance(nbf, bool) else float(nbf)
+        except (TypeError, ValueError):
+            exp_f = nbf_f = float("nan")
+        if exp_f is None:
+            return {"valid": False, "mandate": None,
+                    "reason": "credential has no expiry", "assurance": None}
+        if not math.isfinite(exp_f) or (nbf_f is not None and not math.isfinite(nbf_f)):
+            return {"valid": False, "mandate": None,
+                    "reason": "credential expiry is not a readable time", "assurance": None}
+        if now > exp_f + CLOCK_SKEW:
             return {"valid": False, "mandate": None,
                     "reason": "credential expired", "assurance": None}
-        if nbf and now < float(nbf) - CLOCK_SKEW:
+        if nbf_f is not None and now < nbf_f - CLOCK_SKEW:
             return {"valid": False, "mandate": None,
                     "reason": "credential not yet valid", "assurance": None}
 
@@ -479,13 +495,19 @@ def verify_x401_presentation(presentation_b64: str, transaction: dict,
                 "assurance": assurance_reason}
 
     # Step 6: Nonce replay check (use VP nonce or jti)
+    # Scoped by issuer: a jti is only unique among one issuer's credentials, so a bare
+    # jti would let two issuers collide into a false replay. `nonce_fn(key, now)` is
+    # (is_fresh, reason) and is how a shared store is plugged in; the default is the
+    # per-process dict, which does NOT stop a replay that lands on another container.
     nonce = ""
+    nonce_issuer = ""
     for cred in verified:
         nonce = cred.get("nonce", "") or cred.get("jti", "")
         if nonce:
+            nonce_issuer = str(cred.get("iss", ""))
             break
     if nonce:
-        fresh, nonce_reason = check_nonce(nonce, now)
+        fresh, nonce_reason = (nonce_fn or check_nonce)(f"{nonce_issuer}|{nonce}", now)
         if not fresh:
             return {"valid": False, "mandate": mandate,
                     "reason": nonce_reason, "assurance": assurance_reason}
@@ -525,6 +547,8 @@ _REASON_CODES = (
     ("unknown issuer", "unknown_issuer"),
     ("signature verification error", "bad_signature"),
     ("credential signature invalid", "bad_signature"),
+    ("credential has no expiry", "malformed_credential"),
+    ("credential expiry is not", "malformed_credential"),
     ("credential expired", "signature_expired"),
     ("credential not yet valid", "signature_expired"),
     ("no credential asserts", "assurance_insufficient"),

@@ -37,7 +37,15 @@ if svc == "iam" and cmd == "create-policy":
     st["policy"] = json.loads(opt("--policy-document")); st["created"] = True; done("arn\n")
 if svc == "iam" and cmd == "attach-role-policy":
     st.setdefault("attached", []).append(opt("--role-name")); done()
-if svc == "iam" and cmd == "simulate-principal-policy": done(json.dumps(st["simulate"]))
+if svc == "iam" and cmd == "simulate-principal-policy":
+    arns = args[args.index("--resource-arns") + 1:]
+    arns = [a for a in arns if not a.startswith("--")][:1] if "--query" in args[args.index("--resource-arns"):] else arns
+    # the REAL api returns ONE row per action however many resources were asked about
+    st.setdefault("sim_calls", []).append(arns)
+    if len(arns) != 1:
+        done(json.dumps(["allowed"]))
+    name = arns[0].rsplit("/", 1)[-1]
+    done(json.dumps(st["simulate"].get(name, ["allowed"]) if isinstance(st["simulate"], dict) else st["simulate"]))
 done(rc=1, err="unexpected: " + " ".join(args))
 '''
 
@@ -51,7 +59,7 @@ class Case(unittest.TestCase):
         exe.write_text(FAKE_AWS.replace("__PY__", sys.executable))
         exe.chmod(0o755)
         self.sp = self.td / "state.json"
-        self.state = {"account": "239677749008", "simulate": ["allowed", "allowed"],
+        self.state = {"account": "239677749008", "simulate": {},
                       "tables": {"relayshield_verifier_nonces": "ACTIVE",
                                  "relayshield_verifier_telemetry": "ACTIVE"}}
 
@@ -110,11 +118,23 @@ class Grant(Case):
         self.assertNotIn("created", st)
         self.assertEqual(st["attached"], ["tap-role"])
 
-    def test_a_simulator_answer_that_is_not_allowed_for_both_fails_the_run(self):
-        for sim in (["allowed", "implicitDeny"], ["allowed"], []):
-            r, _ = self.run_tool("--apply", simulate=sim)
-            self.assertEqual(r.returncode, 4, (sim, r.stdout))
+    def test_the_simulator_is_asked_once_per_table_because_the_real_api_returns_one_row_per_action(self):
+        r, st = self.run_tool("--apply")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertEqual(len(st["sim_calls"]), 2)
+        self.assertTrue(all(len(c) == 1 for c in st["sim_calls"]))
+
+    def test_one_table_not_allowed_fails_the_run_and_names_which(self):
+        for bad in ("relayshield_verifier_nonces", "relayshield_verifier_telemetry"):
+            r, _ = self.run_tool("--apply", simulate={bad: ["implicitDeny"]})
+            self.assertEqual(r.returncode, 4, (bad, r.stdout))
             self.assertIn("STOP", r.stdout)
+            self.assertIn("implicitDeny", r.stdout)
+
+    def test_an_empty_simulator_answer_fails_the_run(self):
+        r, _ = self.run_tool("--apply", simulate={"relayshield_verifier_nonces": [],
+                                                   "relayshield_verifier_telemetry": []})
+        self.assertEqual(r.returncode, 4)
 
 
 class Source(unittest.TestCase):

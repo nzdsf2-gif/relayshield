@@ -1,6 +1,6 @@
 # RelayShield x401 relying party
 
-Status 2026-10-16: **built and tested, not deployed, not tested against a real wallet or a real issuer.**
+Status 2026-10-16: **built, tested and hand-deployed to `relayshield-tap-verifier` (steps 1-6 below ran). `VERIFIER_NONCE_TABLE` is not yet set, no policy or trusted issuer exists, and nothing has been tested against a real wallet or a real issuer.**
 Every signature in the tests is real (ES256, Ed25519, PS256); the only things stubbed are the clock and the network fetch.
 
 ## What it is

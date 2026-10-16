@@ -90,6 +90,20 @@ _EXACT = {
     "mandate_scope_exceeded": "mandate_exceeded",
     "mandate_exceeded": "mandate_exceeded",
     "unknown_issuer": "unknown_key",
+    # x401 relying party (current draft)
+    "invalid_signature": "bad_signature",
+    "holder_binding_failed": "bad_signature",
+    "untrusted_issuer": "unknown_key",
+    "replayed_nonce": "replay",
+    "invalid_nonce": "replay",
+    "credential_expired": "expired",
+    "credential_not_yet_valid": "expired",
+    "expired_request": "expired",
+    "claims_not_satisfied": "mandate_exceeded",
+    "credential_type_mismatch": "mandate_exceeded",
+    "invalid_response": "malformed",
+    "invalid_credential": "malformed",
+    "unsupported_protocol": "malformed",
 }
 # Prefix rules for families of "the request was not well formed" reasons.
 _PREFIX = (("missing_", "malformed"), ("malformed_", "malformed"), ("bad_", "malformed"),
@@ -99,7 +113,8 @@ _PREFIX = (("missing_", "malformed"), ("malformed_", "malformed"), ("bad_", "mal
 # them would record an outage as an attack.
 NOT_AN_ATTACK = frozenset({"nonce_store_error", "ti_unavailable", "jwks_unavailable",
                            "x401_unavailable", "x401_issuers_unconfigured",
-                           "x401_internal_error"})
+                           "x401_internal_error", "proof_required", "verifier_not_configured",
+                           "unknown_policy", "status_unavailable", "reference_unavailable"})
 
 
 def classify_reason(reasons):

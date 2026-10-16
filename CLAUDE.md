@@ -11423,3 +11423,25 @@ request answer `nonce_store_error`.**
 **A test that reuses a nonce was passing only because replay protection did nothing.** Seventeen
 existing TAP tests failed the moment the store persisted, because they all use nonce `n1`. They now
 get a fresh store each; that failure was the fix working.
+
+## 2026-10-16: THE x401 RELYING PARTY IS BUILT (NOT DEPLOYED). SEE `x401_relying_party.md`.
+
+Andrew was announcing a full-stack x401+TAP verifier and rejected my "leave x401 off" recommendation as
+lazy; he was right that the recommendation answered "is Muse's code safe" and not "can we ship the stack".
+Built from the x401 0.2.0 spec and OpenID4VP 1.0 (pulled from the vendor repos, not recalled): `x401_jose.py`,
+`x401_rp.py`, `x401_net.py`, wired into `relayshield_tap_verifier.py` (TAP first, then the credential).
+`x401_testkit.py` (issuer, wallet, agent) is test-only and NOT packaged. Muse's `x401_verifier.py` targets the
+old 0.1.0 draft and is no longer the path.
+
+Proof: 97 + 23 + 42 + 40 + 9 + 4 tests, `tools/x401_demo.py` runs the flow with six attacks, and each guard was
+mutation-proven. Two mutants are equivalent and documented, not hidden.
+
+**Not verified: any real wallet, any real issuer, wallet acceptance of the did:web client_id.** mso_mdoc,
+ldp_vc, response encryption and token exchange are refused by design. There is no "Proof published key"; the
+earlier claim was retracted in a previous section and the registry ships empty on purpose.
+
+**Deploy order and traps** (the function is NOT in `LAMBDA_MAP`; the zip must contain every module;
+`VERIFIER_NONCE_TABLE` is set LAST and merged, never replaced): see `x401_relying_party.md`. Privacy policy
+section 14 describes the processing; Contact moved to 15 and `test_verifier_telemetry_privacy.py` pins that.
+`test_x401_privacy.py` executes real credentials with a distinctive claim value and fails if it reaches a log
+or the nonce store, which holds only a SHA-256 key and an expiry of at most an hour.

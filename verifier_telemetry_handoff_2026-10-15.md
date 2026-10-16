@@ -263,3 +263,9 @@ request store. Muse should be told which draft it was meant to target.
    dependencies in the zip and read access to the intel tables on the Lambda's role. Set
    `VERIFIER_TI_SCREEN=1` only after a request with a known-bad test counterparty returns `reject`.
    Each screened request costs one wallet-risk lookup, which calls third-party vendors.
+
+## 9. UPDATE 2026-10-16 (third): THE FULL x401 RELYING PARTY IS BUILT
+
+Supersedes the "leave x401 off" advice in section 8. Full description, deployment order and limits are in
+`x401_relying_party.md`. Privacy policy section 14 (Credential Verification) now describes this processing;
+Contact is section 15. Nothing is deployed.

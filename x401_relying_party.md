@@ -52,7 +52,7 @@ An invalid policy is dropped, never loosened. A key containing a private member 
 2. `AWS_PROFILE=relayshield python3 tools/generate_x401_verifier_key.py` (dry run, then `--apply`).
 3. Commit the printed public JWK into `relayshield_x401_pubkey.py`; push (deploys `relayshield-api`, which serves `/.well-known/did.json`). Verify with `curl https://api.relayshield.net/.well-known/did.json`.
 4. `AWS_PROFILE=relayshield python3 tools/grant_x401_secret_access.py --function <name>`.
-5. Create the nonce and telemetry tables and their grants (`tools/setup_verifier_nonces_table.sh`, `tools/setup_verifier_telemetry_table.sh`).
+5. Create the nonce and telemetry tables (`tools/setup_verifier_nonces_table.sh`, `tools/setup_verifier_telemetry_table.sh`), then grant the verifier role PutItem on both with `AWS_PROFILE=relayshield ~/.rsvenv/bin/python tools/grant_verifier_table_access.py --function relayshield-tap-verifier` (dry run, then `--apply`). Not `grant_breach_cache_access.py`: that edits a shared policy the verifier's own role does not carry.
 6. Read drift first: `sh tools/handler_drift.sh relayshield_tap_verifier.py`. Then `python3 tools/package_verifier.py` and hand-deploy `dist/verifier.zip` (handler `relayshield_tap_verifier.lambda_handler`). The function is not in `LAMBDA_MAP`, so a push alone deploys nothing.
 7. Set `VERIFIER_NONCE_TABLE` last, merging into the existing environment (a bare `--environment` replaces it).
 8. Populate `x401_policies.json` and `x401_issuers.json`. **These are business decisions: which credentials, which issuers are trusted. No issuer key may be invented.**

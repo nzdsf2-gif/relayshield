@@ -11445,3 +11445,24 @@ earlier claim was retracted in a previous section and the registry ships empty o
 section 14 describes the processing; Contact moved to 15 and `test_verifier_telemetry_privacy.py` pins that.
 `test_x401_privacy.py` executes real credentials with a distinctive claim value and fails if it reaches a log
 or the nonce store, which holds only a SHA-256 key and an expiry of at most an hour.
+
+## 2026-10-16 (later): x401 DEPLOY STEPS 1-4 RAN. THE VERIFIER HAS ITS OWN ROLE, SO THE SHARED-POLICY GRANT TOOL DOES NOT APPLY.
+
+Measured from Andrew's output, not recalled:
+* **The signing key exists.** Secret `relayshield/x401_verifier_key` is created; the public half is in
+  `relayshield_x401_pubkey.py` (commit `7b452be1`, pushed to main) and `https://api.relayshield.net/.well-known/did.json`
+  answers 200 with the same `x`/`y`. The privacy Worker (section 14) deployed green.
+* **The verifier Lambda is `relayshield-tap-verifier`, role `relayshield-tap-verifier-role`** (python3.12, handler
+  `relayshield_tap_verifier.lambda_handler`). `relayshield-pap-verifier` is a separate function that x401 does not touch.
+  The role carries only `AWSLambdaBasicExecutionRole` and `relayshield-x401-secret-read` (created and attached today;
+  the simulator says `allowed` for the signing secret).
+* **Drift read: live is byte-identical to `10c29815`** (Muse's WIP, recovered from the stash), last modified
+  2026-10-16T00:45Z, and its package holds no other `relayshield_*.py`. Nothing live-only, so a deploy of the new
+  package loses nothing. Live still has the old behaviour (empty issuer registry, PS256 verifier that rejects every valid
+  signature, per-call nonce store).
+* **`tools/grant_breach_cache_access.py` STOPPED, as predicted:** `relayshield-first-seen-write` is not attached to the
+  verifier's role. The dedicated `tools/grant_verifier_table_access.py` (PutItem only, on exactly the nonce and telemetry
+  tables, refuses a missing table or the wrong account, 8 tests, six guards mutation-proven) replaces it for this role.
+* **UNCONFIRMED: the table setup scripts' completion.** Andrew's paste showed the nonce script print `created` output up
+  to the table name and then nothing, and no telemetry-script output at all. A `set -e` abort at `wait table-exists` and
+  a truncated paste look identical. The scripts are idempotent; the next step re-runs them and reads each table.

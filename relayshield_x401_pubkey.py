@@ -15,5 +15,13 @@ While PUBLIC_JWK is None the did:web document answers 404 and signed requests ca
 verified by any wallet: the verifier is "not configured", not "configured insecurely".
 """
 
-PUBLIC_JWK = None
+PUBLIC_JWK = {
+    "alg": "ES256",
+    "crv": "P-256",
+    "kid": "did:web:api.relayshield.net#x401-1",
+    "kty": "EC",
+    "use": "sig",
+    "x": "07-Kf7wReql3Zi5vL6fZUsxKV7Hd-vTyxTqrB8R8yAo",
+    "y": "6bs15FOP2sMkYU8rWBRPYV3Cy566vLYSeNgFlHTodEs"
+}
 KID = "did:web:api.relayshield.net#x401-1"

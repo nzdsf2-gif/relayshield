@@ -25,6 +25,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import time
 
 logger = logging.getLogger()
@@ -215,7 +216,16 @@ def validate_mandate_scope(mandate: dict, transaction: dict,
     Check that a transaction falls within the mandate scope.
 
     transaction should contain: agent_id, merchant, amount, currency,
-    action_category (all optional; only checked if present in mandate).
+    action_category.
+
+    FAIL CLOSED. A constraint the mandate sets must be checkable: if the
+    mandate limits the amount, the merchant, the action or the agent and the
+    transaction does not say which amount, merchant, action or agent it is,
+    that is a failure ("not supplied"), never a pass. The first version skipped
+    any check whose transaction value was empty, so a caller that sent no
+    transaction at all was verified against nothing. An unparseable date on
+    the mandate fails too, because a window that cannot be read cannot be
+    enforced.
 
     Returns (valid, reason).
     """
@@ -224,30 +234,45 @@ def validate_mandate_scope(mandate: dict, transaction: dict,
     # Agent must match
     mandate_agent = mandate.get("agent", "")
     tx_agent = transaction.get("agent_id", "")
-    if mandate_agent and tx_agent and mandate_agent != tx_agent:
-        return False, f"agent mismatch: mandate={mandate_agent}, tx={tx_agent}"
+    if mandate_agent:
+        if not tx_agent:
+            return False, "agent not supplied, mandate names one"
+        if mandate_agent != tx_agent:
+            return False, "agent mismatch"
 
     # Merchant must match (if mandate constrains it)
     mandate_merchant = mandate.get("merchant", "")
     tx_merchant = transaction.get("merchant", "")
-    if mandate_merchant and tx_merchant and mandate_merchant != tx_merchant:
-        return False, f"merchant mismatch"
+    if mandate_merchant:
+        if not tx_merchant:
+            return False, "merchant not supplied, mandate names one"
+        if mandate_merchant != tx_merchant:
+            return False, "merchant mismatch"
 
     # Amount must be within ceiling
     ceiling = mandate.get("amountCeiling")
     tx_amount = transaction.get("amount")
-    if ceiling is not None and tx_amount is not None:
+    if ceiling is not None:
+        if tx_amount is None or isinstance(tx_amount, bool):
+            return False, "amount not supplied, mandate sets a ceiling"
         try:
             # Handle {"value": 50, "currency": "USD"} or plain number
             if isinstance(ceiling, dict):
                 ceiling_val = float(ceiling.get("value", 0))
                 ceiling_cur = ceiling.get("currency", "")
                 tx_cur = transaction.get("currency", "")
-                if ceiling_cur and tx_cur and ceiling_cur != tx_cur:
-                    return False, f"currency mismatch: {tx_cur} vs {ceiling_cur}"
+                if ceiling_cur:
+                    if not tx_cur:
+                        return False, "currency not supplied, ceiling has one"
+                    if ceiling_cur != tx_cur:
+                        return False, f"currency mismatch: {tx_cur} vs {ceiling_cur}"
             else:
                 ceiling_val = float(ceiling)
-            if float(tx_amount) > ceiling_val:
+            amount_val = float(tx_amount)
+            # nan compares False against everything, so `nan > ceiling` would pass.
+            if not (math.isfinite(amount_val) and math.isfinite(ceiling_val)):
+                return False, "amount is not a finite number"
+            if amount_val > ceiling_val:
                 return False, f"amount {tx_amount} exceeds ceiling {ceiling_val}"
         except (ValueError, TypeError) as e:
             return False, f"amount validation error: {e}"
@@ -258,23 +283,24 @@ def validate_mandate_scope(mandate: dict, transaction: dict,
     if valid_from:
         try:
             from_ts = _parse_time(valid_from)
-            if now < from_ts - CLOCK_SKEW:
-                return False, "mandate not yet valid"
-        except ValueError:
-            pass  # Lenient on unparseable dates
+        except (ValueError, TypeError, AttributeError):
+            return False, "mandate validFrom is not a readable time"
+        if now < from_ts - CLOCK_SKEW:
+            return False, "mandate not yet valid"
     if valid_until:
         try:
             until_ts = _parse_time(valid_until)
-            if now > until_ts + CLOCK_SKEW:
-                return False, "mandate expired"
-        except ValueError:
-            pass
+        except (ValueError, TypeError, AttributeError):
+            return False, "mandate validUntil is not a readable time"
+        if now > until_ts + CLOCK_SKEW:
+            return False, "mandate expired"
 
     # Action category check
     mandate_action = mandate.get("actionCategory", "")
     tx_action = transaction.get("action_category", "")
-    if mandate_action and tx_action:
-        # Allow if tx action matches or is a subset
+    if mandate_action:
+        if not tx_action:
+            return False, "action not supplied, mandate limits it"
         if isinstance(mandate_action, list):
             if tx_action not in mandate_action:
                 return False, f"action {tx_action} not in mandate scope"
@@ -481,3 +507,37 @@ def detect_credential_types(headers: dict) -> dict:
     has_tap = "signature" in lower and "signature-input" in lower
     has_x401 = PROOF_PRESENTATION_HEADER in lower
     return {"tap": has_tap, "x401": has_x401}
+
+
+# ---------------------------------------------------------------------------
+# Machine-readable reason codes
+# ---------------------------------------------------------------------------
+
+# verify_x401_presentation returns a human sentence in "reason". Callers that
+# need to branch on it (the TAP wrapper, threat telemetry) use this instead of
+# parsing prose themselves. Order matters: the first prefix that matches wins.
+_REASON_CODES = (
+    ("presentation parse failed", "malformed_presentation"),
+    ("credential extraction failed", "malformed_presentation"),
+    ("jwt parse failed", "malformed_presentation"),
+    ("no credentials in presentation", "malformed_presentation"),
+    ("no verifiable credentials", "malformed_presentation"),
+    ("unknown issuer", "unknown_issuer"),
+    ("signature verification error", "bad_signature"),
+    ("credential signature invalid", "bad_signature"),
+    ("credential expired", "signature_expired"),
+    ("credential not yet valid", "signature_expired"),
+    ("no credential asserts", "assurance_insufficient"),
+    ("no scoped mandate", "malformed_mandate"),
+    ("mandate scope exceeded", "mandate_scope_exceeded"),
+    ("nonce replay detected", "replay_nonce"),
+)
+
+
+def reason_code(reason: str) -> str:
+    """Stable code for a verify_x401_presentation failure sentence."""
+    low = str(reason or "").strip().lower()
+    for prefix, code in _REASON_CODES:
+        if low.startswith(prefix):
+            return code
+    return "x401_other"

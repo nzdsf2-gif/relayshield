@@ -149,3 +149,51 @@ vt.maybe_report("tap+x401", verdict, api_event, request, issuer=issuer_did)
 the agent's request. Do not pass the agent's headers as `api_event`. Put the `import` inside a
 guarded helper, as `_report_rejection` does in the TAP verifier, so a package missing the file
 cannot break verification. Use the verifier type `x401` for x401-only and `tap+x401` for both.
+
+## 7. UPDATE 2026-10-16: x401 RECONCILED WITH THE TELEMETRY HOOK
+
+Muse's x401 work (recovered from a stash onto branch `x401-wip`, commit `10c29815`) is merged into
+`claude/ecstatic-davinci-wh8xxr` and fixed. Its unrelated landing-page and MCP-proxy edits stayed on
+`x401-wip` and are NOT on this branch.
+
+**What was wrong with it as committed, all found by running it:**
+1. A rejected x401 request returned a `Verdict` object, not an HTTP response (a 502 in production).
+2. The transaction was read from fields a proxied event does not have, and every mandate check was
+   skipped when its transaction value was empty, so a mandate was verified against nothing.
+3. A `null` `headers` crashed the handler.
+4. The issuer registry was `{}` with a TODO, so every presentation failed as "unknown issuer".
+5. A missing `x401_verifier.py` in the zip took down TAP verification as well.
+6. `nan` passed an amount ceiling, and an unreadable `validUntil` meant the mandate never expired.
+7. The token's own `alg` header chose the scheme for an issuer's key.
+8. **Pre-existing, not Muse's: `_pss_verify` rejected EVERY valid RSA-PSS (PS256) signature**
+   (the leading-bit check shifted the wrong way). TAP requests signed with PS256 could never have
+   been accepted. The TAP test for it allowed either outcome. Fixed and tested on four modulus sizes.
+
+**How a request is read now.** The agent's `PROOF-PRESENTATION` header comes from
+`request["headers"]`, exactly where the TAP signature headers are. The transaction being authorised
+is `request["transaction"]` = `{amount, currency, merchant, action_category, agent_id}`, with
+`agent_id`, `merchant_domain` and `authority` on the request used when it omits them. A constraint
+the mandate sets that the transaction does not supply FAILS. **Merchants must therefore send a
+`transaction` object**, and the API docs for the verifier need to say so.
+
+**Verdicts.** TAP only: unchanged. Presentation only: x401 decides. Both: both must accept; any
+reject wins, then any review. An empty registry or a missing module is a `review`, never an accept
+and never reported as an attack.
+
+**ANDREW DECIDES: the trusted-issuer registry.** It is `x401_issuers.json` beside the module (ships
+`{"issuers": {}}`), or the `X401_TRUSTED_ISSUERS` environment variable holding the same JSON. Each
+entry is issuer id -> a public JWK (Ed25519 `OKP` or `RSA`; RSA keys verify PS256 only). Until it has
+entries every presentation is a `review`. Which issuers to trust is a business decision; Proof's
+published key is the obvious first entry, and it should be read from Proof, not from this repo.
+**The zip must contain `relayshield_tap_verifier.py`, `x401_verifier.py`, `x401_issuers.json` and
+`relayshield_verifier_telemetry.py`.**
+
+**Still open, not fixed:**
+- Replay protection is an in-memory dict per Lambda container. It does not stop a replay that lands
+  on another container. It needs a DynamoDB nonce store, for TAP and x401 alike.
+- A credential with no `exp` is accepted forever. Recommend requiring `exp`.
+- `committed lambda_handler passes no ti_screen`: TAP does no threat-intel screening on main.
+- The mandate's `agent` is compared with a merchant-supplied `agent_id`, not cross-bound to the TAP
+  signing key. Binding them needs a defined mapping from the Visa key id to the mandate's agent.
+- Landing-page edits on `x401-wip` say "700K+ threat indicators" and sell a PAP verifier; neither
+  has code behind it in this repo.

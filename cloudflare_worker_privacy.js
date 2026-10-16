@@ -118,7 +118,7 @@ export default {
     <li>The reason for the rejection, taken from a fixed list: bad signature, malformed request, expired, replayed, unknown key, intent mismatch, mandate exceeded, threat intelligence match, or other.</li>
     <li>For a rejection caused by a threat intelligence match, whether a wallet address, a domain, or both were checked. The wallet address and the domain themselves are not recorded.</li>
     <li>Which verifier rejected it (TAP, PAP, x401, or TAP and x401 together) and the time of the rejection.</li>
-    <li>For x401, a one-way hash of the identifier of the credential issuer.</li>
+    <li>For x401, a one-way hash of the identifier of the credential issuer, as the credential itself states it (we do not need to have verified it, since the credential may have been rejected).</li>
     <li>A short one-way hash derived from your API key. It lets us find and delete your entries when you ask, and tell entries from different accounts apart. It is not your key.</li>
   </ul>
   <p><strong>What is never recorded.</strong> Transaction amounts, merchants, products, customer or cardholder data, any information about the person named in an x401 credential, the full agent identifier, a full IP address, the contents of the request, your API key, or any free text.</p>

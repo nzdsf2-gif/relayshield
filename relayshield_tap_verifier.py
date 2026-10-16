@@ -35,8 +35,13 @@ import logging
 import re
 import time
 import urllib.request
-from x401_verifier import verify_x401_presentation, detect_credential_types
 
+# x401 is an optional companion module. A package that lacks it must still verify
+# TAP requests: a hard import here would take the whole Lambda down.
+try:
+    import x401_verifier as _x401
+except Exception:  # ImportError, or a syntax error in the companion file
+    _x401 = None
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -49,15 +54,6 @@ VALID_TAGS = {"agent-browser-auth", "agent-payer-auth"}
 VALID_ALGS = {"ed25519", "ps256"}
 
 _jwks_cache = {"at": 0.0, "keys": {}}
-def x401_verify_sig(header, signing_input, sig_b64, pubkey, alg):
-    from x401_verifier import b64u_decode
-    sig = b64u_decode(sig_b64)
-    if alg in ("EdDSA", "Ed25519"):
-        return _ed_verify(pubkey, signing_input, sig)
-    elif alg in ("RS256", "PS256"):
-        n, e = pubkey
-        return _pss_verify(n, e, sig, signing_input)
-    return False
 
 # ---------------------------------------------------------------------------
 # base64url helpers
@@ -212,22 +208,32 @@ def _pss_verify(n: int, e: int, sig: bytes, msg: bytes,
     hlen = h().digest_size
     em_bits = n.bit_length() - 1
     em_len = (em_bits + 7) // 8
-    if len(sig) != em_len:
+    k = (n.bit_length() + 7) // 8          # modulus length in bytes: the signature length
+    if len(sig) != k:
         return False
-    try:
-        em_int = pow(int.from_bytes(sig, "big"), e, n)
-    except Exception:
+    sig_int = int.from_bytes(sig, "big")
+    if sig_int >= n:
+        return False
+    em_int = pow(sig_int, e, n)
+    if em_int.bit_length() > em_len * 8:
         return False
     em = em_int.to_bytes(em_len, "big")
-    if em[-1] != 0xBC:
+    if em_len < hlen + salt_len + 2 or em[-1] != 0xBC:
         return False
     masked_db = em[: em_len - hlen - 1]
     h_msg = em[em_len - hlen - 1: em_len - 1]
-    # check leading zero bits
-    if em[0] >> (8 * em_len - em_bits):
+    # RFC 8017 9.1.2 step 6: the leftmost (8*emLen - emBits) bits of maskedDB must be
+    # zero. The original test shifted the WRONG way (`em[0] >> zero_bits`), which checks
+    # that the REMAINING bits are zero, so it rejected essentially every valid signature.
+    zero_bits = 8 * em_len - em_bits
+    if zero_bits and (masked_db[0] >> (8 - zero_bits)):
         return False
     db_mask = _mgf1(h_msg, em_len - hlen - 1, h)
-    db = bytes(a ^ b for a, b in zip(masked_db, db_mask))
+    db = bytearray(a ^ b for a, b in zip(masked_db, db_mask))
+    # step 9: clear those same leftmost bits of DB before reading the padding.
+    if zero_bits:
+        db[0] &= 0xFF >> zero_bits
+    db = bytes(db)
     # db = PS(0x00 * pad_len) || 0x01 || salt, where
     # pad_len = em_len - hlen - salt_len - 2
     pad_len = em_len - hlen - salt_len - 2
@@ -611,33 +617,171 @@ def verify_tap_request(request: dict,
                               "ti_clean"], details)
 
 
+X401_ISSUERS_ENV = "X401_TRUSTED_ISSUERS"
+X401_ISSUERS_FILE = "x401_issuers.json"
+_x401_issuer_cache = {"keys": None}
+
+
+def _x401_verify_sig(header, signing_input, sig_b64, pubkey, alg):
+    """verify_sig_fn for x401_verifier. The KEY decides the algorithm, never the
+    token's own `alg` header: an Ed25519 key only verifies EdDSA and an RSA key only
+    PS256, so a credential cannot pick a weaker scheme for a key. RS256 (PKCS#1 v1.5)
+    is NOT supported and fails, rather than being verified with the wrong scheme."""
+    sig = b64u_decode(sig_b64)
+    alg = str(alg or "")
+    if isinstance(pubkey, (bytes, bytearray)):
+        return alg in ("EdDSA", "Ed25519") and _ed_verify(bytes(pubkey), signing_input, sig)
+    if isinstance(pubkey, tuple) and len(pubkey) == 2:
+        n, e = pubkey
+        return alg == "PS256" and _pss_verify(n, e, sig, signing_input)
+    return False
+
+
+def _x401_issuer_keys(env=None, path=None, refresh=False) -> dict:
+    """Trusted issuers: {issuer id: Ed25519 key bytes | (n, e)}.
+
+    Source is the X401_TRUSTED_ISSUERS environment variable (a JSON string) if set,
+    else x401_issuers.json beside this module. Both hold
+    {"issuers": {"<issuer DID or URI>": <JWK>, ...}}. An entry that is not a usable
+    Ed25519 or RSA JWK is skipped with a warning. EMPTY means "not configured": the
+    caller answers `review`, never `accept`, because nothing can be verified."""
+    import os
+    if _x401_issuer_cache["keys"] is not None and not refresh and env is None and path is None:
+        return _x401_issuer_cache["keys"]
+    raw = env if env is not None else os.environ.get(X401_ISSUERS_ENV, "")
+    if not raw:
+        file_path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), X401_ISSUERS_FILE)
+        try:
+            with open(file_path, "r", encoding="utf-8") as fh:
+                raw = fh.read()
+        except OSError:
+            raw = ""
+    keys = {}
+    try:
+        doc = json.loads(raw) if raw else {}
+        entries = doc.get("issuers", {}) if isinstance(doc, dict) else {}
+        entries = entries if isinstance(entries, dict) else {}
+    except ValueError:
+        logger.warning("x401 issuer registry is not valid JSON")
+        entries = {}
+    for issuer, jwk in (entries or {}).items():
+        try:
+            if not isinstance(issuer, str) or not issuer or not isinstance(jwk, dict):
+                raise ValueError("bad entry")
+            keys[issuer] = (_jwk_to_ed25519_pub(jwk) if jwk.get("kty") == "OKP"
+                            else _jwk_to_rsa_pub(jwk))
+        except Exception:
+            logger.warning("x401 issuer registry: skipping an unusable entry")
+    if env is None and path is None:
+        _x401_issuer_cache["keys"] = keys
+    return keys
+
+
+def _presentation_issuer(presentation) -> str:
+    """The `iss` the presentation CLAIMS for its first JWT credential, for telemetry
+    only. It is read without verifying anything, so on a rejected request it is the
+    attacker's claim, and it is only ever hashed."""
+    try:
+        vp = json.loads(b64u_decode(presentation).decode("utf-8"))
+        for cred in vp.get("verifiableCredential", []):
+            if isinstance(cred, str) and cred.count(".") == 2:
+                payload = json.loads(b64u_decode(cred.split(".")[1]).decode("utf-8"))
+                iss = payload.get("iss")
+                if isinstance(iss, str):
+                    return iss
+    except Exception:
+        pass
+    return ""
+
+
+def verify_x401_branch(request: dict, headers: dict) -> Verdict:
+    """The x401 half. `headers` are the AGENT's request headers, lower-cased, taken
+    from request["headers"] exactly as the TAP signature headers are.
+
+    The transaction being authorised comes from request["transaction"]
+    ({"amount", "currency", "merchant", "action_category", "agent_id"}); `agent_id`,
+    `merchant_domain` and `authority` on the request are used when it omits them.
+    The mandate's constraints are checked against these and a constraint that cannot
+    be checked fails (see x401_verifier.validate_mandate_scope)."""
+    if _x401 is None:
+        return _review("x401_unavailable")
+    try:
+        issuer_keys = _x401_issuer_keys()
+        if not issuer_keys:
+            return _review("x401_issuers_unconfigured")
+        presentation = headers.get("proof-presentation")
+        if not isinstance(presentation, str) or not presentation.strip():
+            return _reject("malformed_presentation")
+        tx = request.get("transaction")
+        tx = tx if isinstance(tx, dict) else {}
+        transaction = {
+            "agent_id": tx.get("agent_id") or request.get("agent_id") or "",
+            "merchant": tx.get("merchant") or request.get("merchant_domain")
+                        or request.get("authority") or "",
+            "amount": tx.get("amount"),
+            "currency": tx.get("currency") or "",
+            "action_category": tx.get("action_category") or "",
+        }
+        res = _x401.verify_x401_presentation(
+            presentation, transaction, issuer_keys=issuer_keys,
+            verify_sig_fn=_x401_verify_sig)
+    except Exception as exc:
+        logger.warning("x401 verification error: %s", type(exc).__name__)
+        return _review("x401_internal_error")
+    if res.get("valid"):
+        return Verdict("accept", ["x401_valid"],
+                       {"assurance": res.get("assurance")})
+    # The sentence in res["reason"] can carry request values, so it goes to the
+    # merchant under details only, and telemetry only ever sees the code.
+    return _reject(_x401.reason_code(res.get("reason")), x401_detail=res.get("reason"))
+
+
+class AgentOutcome:
+    """What lambda_handler needs: the verdict, which verifier(s) produced it, and
+    the issuer the presentation claimed (telemetry only)."""
+
+    def __init__(self, verdict, verifier_type, issuer=None):
+        self.verdict = verdict
+        self.verifier_type = verifier_type
+        self.issuer = issuer
+
+
+def _combine(tap_v: Verdict, x401_v: Verdict) -> Verdict:
+    """Both credentials were presented, so BOTH must accept. Any reject wins, then any
+    review. Reasons come only from the verdicts that decided the outcome, so the first
+    reason (which telemetry classifies) names the cause rather than a passing half."""
+    details = dict(tap_v.details)
+    details["x401"] = x401_v.details
+    for level in ("reject", "review"):
+        deciding = [v for v in (tap_v, x401_v) if v.decision == level]
+        if deciding:
+            reasons = [r for v in deciding for r in v.reasons]
+            return Verdict(level, reasons, details)
+    return Verdict("accept", list(tap_v.reasons) + list(x401_v.reasons), details)
+
+
+def verify_agent_request(request: dict) -> AgentOutcome:
+    """TAP, x401, or both, chosen by which credentials the agent presented.
+
+    No PROOF-PRESENTATION header: exactly the TAP verifier, unchanged. Header and TAP
+    signature: both must accept. Header alone: x401 only."""
+    raw = request.get("headers")
+    headers = ({str(k).lower(): v for k, v in raw.items()} if isinstance(raw, dict) else {})
+    if not isinstance(raw, dict):
+        request = {**request, "headers": {}}   # verify_tap_request calls .items() on it
+    if "proof-presentation" not in headers:
+        return AgentOutcome(verify_tap_request(request), "tap")
+    issuer = _presentation_issuer(headers.get("proof-presentation"))
+    x401_v = verify_x401_branch(request, headers)
+    if "signature" in headers and "signature-input" in headers:
+        return AgentOutcome(_combine(verify_tap_request(request), x401_v), "tap+x401", issuer)
+    return AgentOutcome(x401_v, "x401", issuer)
+
+
 def lambda_handler(event, context):
     """API Gateway entry point. Expects the inbound agent HTTP request
     described in the TAP spec, proxied as JSON."""
-    headers = {k.lower(): v for k, v in event.get("headers", {}).items()}
-    cred_types = detect_credential_types(headers)
-
-    tap_result = None
-    x401_result = None
-
-
-    if cred_types["x401"]:
-        presentation = headers.get("proof-presentation", "")
-        transaction = {
-            "agent_id": event.get("agent_id", ""),
-            "merchant": event.get("merchant", ""),
-            "amount": event.get("amount"),
-            "currency": event.get("currency", ""),
-            "action_category": event.get("action_category", ""),
-        }
-        x401_result = verify_x401_presentation(
-            presentation, transaction,
-            issuer_keys={},  # TODO: wire your trusted issuer registry
-            verify_sig_fn=x401_verify_sig,
-        )
-        if not x401_result.get("valid"):
-            return _reject(f"x401 verification failed: {x401_result.get('reason')}")
-    
+    event = event if isinstance(event, dict) else {}
     body = event.get("body") or "{}"
     if event.get("isBase64Encoded"):
         body = base64.b64decode(body).decode("utf-8")
@@ -647,13 +791,14 @@ def lambda_handler(event, context):
         return _http(400, {"decision": "reject",
                            "reasons": ["bad_request_body"]})
     request = data if isinstance(data, dict) else {}
-    verdict = verify_tap_request(request)
-    _report_rejection(verdict, event, request)
+    outcome = verify_agent_request(request)
+    verdict = outcome.verdict
+    _report_rejection(verdict, event, request, outcome.verifier_type, outcome.issuer)
     code = {"accept": 200, "review": 202, "reject": 403}[verdict.decision]
     return _http(code, verdict.to_dict())
 
 
-def _report_rejection(verdict, event, request):
+def _report_rejection(verdict, event, request, verifier_type="tap", issuer=None):
     """Opt-in threat telemetry. Runs AFTER the verdict is final, can change nothing in
     it, and never raises. An accept or review returns before any lookup, so the opt-in
     check costs nothing on the normal path. See relayshield_verifier_telemetry."""
@@ -661,7 +806,7 @@ def _report_rejection(verdict, event, request):
         return
     try:
         import relayshield_verifier_telemetry as vt
-        vt.maybe_report("tap", verdict, event, request)
+        vt.maybe_report(verifier_type, verdict, event, request, issuer=issuer)
     except Exception as exc:
         logger.warning("verifier telemetry unavailable: %s", type(exc).__name__)
 

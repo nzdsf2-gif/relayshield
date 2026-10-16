@@ -35,6 +35,8 @@ import logging
 import re
 import time
 import urllib.request
+from x401_verifier import verify_x401_presentation, detect_credential_types
+
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -47,7 +49,15 @@ VALID_TAGS = {"agent-browser-auth", "agent-payer-auth"}
 VALID_ALGS = {"ed25519", "ps256"}
 
 _jwks_cache = {"at": 0.0, "keys": {}}
-
+def x401_verify_sig(header, signing_input, sig_b64, pubkey, alg):
+    from x401_verifier import b64u_decode
+    sig = b64u_decode(sig_b64)
+    if alg in ("EdDSA", "Ed25519"):
+        return _ed_verify(pubkey, signing_input, sig)
+    elif alg in ("RS256", "PS256"):
+        n, e = pubkey
+        return _pss_verify(n, e, sig, signing_input)
+    return False
 
 # ---------------------------------------------------------------------------
 # base64url helpers
@@ -604,6 +614,30 @@ def verify_tap_request(request: dict,
 def lambda_handler(event, context):
     """API Gateway entry point. Expects the inbound agent HTTP request
     described in the TAP spec, proxied as JSON."""
+    headers = {k.lower(): v for k, v in event.get("headers", {}).items()}
+    cred_types = detect_credential_types(headers)
+
+    tap_result = None
+    x401_result = None
+
+
+    if cred_types["x401"]:
+        presentation = headers.get("proof-presentation", "")
+        transaction = {
+            "agent_id": event.get("agent_id", ""),
+            "merchant": event.get("merchant", ""),
+            "amount": event.get("amount"),
+            "currency": event.get("currency", ""),
+            "action_category": event.get("action_category", ""),
+        }
+        x401_result = verify_x401_presentation(
+            presentation, transaction,
+            issuer_keys={},  # TODO: wire your trusted issuer registry
+            verify_sig_fn=x401_verify_sig,
+        )
+        if not x401_result.get("valid"):
+            return _reject(f"x401 verification failed: {x401_result.get('reason')}")
+    
     body = event.get("body") or "{}"
     if event.get("isBase64Encoded"):
         body = base64.b64decode(body).decode("utf-8")

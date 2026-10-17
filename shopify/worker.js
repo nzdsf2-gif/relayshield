@@ -355,6 +355,69 @@ async function registerWebhooks(appOrigin, shop, token) {
   }
 }
 
+/* Managed installation (use_legacy_install_flow = false, which is what this
+ * app's Shopify config uses): Shopify installs the app itself and loads the
+ * App URL in the Admin iframe with a session token. /auth and /auth/callback
+ * are NEVER called, so the authorization-code route above cannot be the only
+ * way a shop gets an access token. Token exchange swaps the App Bridge session
+ * token for an expiring offline access token on first load, then registers the
+ * orders/create webhook exactly as the legacy callback did.
+ * UNVERIFIED against a live shop from the build container (shopify.dev is
+ * egress-blocked): parameter names follow Shopify's token-exchange reference,
+ * and `expiring` mirrors the authorization-code exchange above. */
+export async function exchangeSessionToken(env, shop, idToken) {
+  const resp = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: new URLSearchParams({
+      client_id: env.SHOPIFY_API_KEY,
+      client_secret: env.SHOPIFY_API_SECRET,
+      grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+      subject_token: idToken,
+      subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
+      requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
+      expiring: "1",
+    }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`token exchange -> ${resp.status}: ${text.slice(0, 120)}`);
+  }
+  const data = await resp.json();
+  if (!data.access_token) throw new Error("token exchange returned no access token");
+  return data;
+}
+
+function shopNeedsToken(rec) {
+  if (!rec || !rec.access_token) return true;
+  // An expired token with no refresh token can only be replaced by a new exchange.
+  return Boolean(rec.token_expires_at && Date.now() > rec.token_expires_at && !rec.refresh_token);
+}
+
+/* Never throws: a failed exchange must not break the dashboard, and the reason
+ * is logged, not returned to the browser. */
+export async function ensureInstalled(env, shop, idToken, appOrigin) {
+  try {
+    const rec = await getShopRecord(env, shop);
+    if (!shopNeedsToken(rec)) return { installed: true, fresh: false };
+    const data = await exchangeSessionToken(env, shop, idToken);
+    await kvPut(env, shopKey(shop), {
+      ...(rec || {}),
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || null,
+      token_expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+      rs_key_mode: (rec && rec.rs_key_mode) || "keyless",
+      installed_at: (rec && rec.installed_at) || new Date().toISOString(),
+      install_flow: "token_exchange",
+    });
+    await registerWebhooks(appOrigin, shop, data.access_token);
+    return { installed: true, fresh: true };
+  } catch (e) {
+    console.log(`ensureInstalled failed shop=${shop}: ${e.message}`);
+    return { installed: false, fresh: false };
+  }
+}
+
 /* Expiring offline tokens: the access token lives ~1h and must be
  * refreshed before expiry. Shopify rotates the refresh token on every
  * use and invalidates the old one immediately, so the rotated pair is
@@ -561,6 +624,14 @@ export function renderDashboard(shop, screenings, apiKey, host) {
               headers: { "Authorization": "Bearer " + token },
             }).then(function(r) {
               console.log("[RelayShield] session auth check:", r.status);
+              // The first load has no token, so the server rendered an empty
+              // dashboard. Reload once with the token; never loop.
+              var authed = document.body && document.body.getAttribute("data-shop");
+              if (r.status === 200 && !authed && !/[?&]id_token=/.test(location.search)) {
+                var u = new URL(location.href);
+                u.searchParams.set("id_token", token);
+                location.replace(u.toString());
+              }
             }).catch(function(e) {
               console.log("[RelayShield] session auth call failed:", e && e.message);
             });
@@ -601,7 +672,7 @@ export function renderDashboard(shop, screenings, apiKey, host) {
   .note { color: #5c5f62; font-size: 13px; margin-top: 16px; }
 </style>
 </head>
-<body>
+<body data-shop="${esc(shop)}">
 <div class="wrap">
   <h1>RelayShield Order Screening</h1>
   <p>Screening orders for <strong>${esc(shop)}</strong> against the RelayShield threat-intelligence corpus.</p>
@@ -627,9 +698,11 @@ async function handleDashboard(request, env) {
     ? auth.slice(7)
     : url.searchParams.get("id_token") || "";
   const shop = await verifySessionToken(env, bearer);
-  // Serve the dashboard HTML even without a valid session token. Shopify's
-  // automated checks load the App URL directly (no session token), and the
-  // page acquires one client-side via window.shopify.idToken().
+  // Serve the dashboard HTML even without a valid session token: the page
+  // acquires one client-side via window.shopify.idToken() and reloads itself
+  // with it. (Shopify's embedded-app checks are telemetry from real Admin
+  // sessions, not a crawler that loads this URL.)
+  if (shop) await ensureInstalled(env, shop, bearer, url.origin);
   const screenings = shop ? ((await kvGet(env, screeningsKey(shop))) || []) : [];
   const host = url.searchParams.get("host") || "";
   return new Response(renderDashboard(shop || "", screenings, env.SHOPIFY_API_KEY, host), {
@@ -689,7 +762,10 @@ export default {
         if (!shop) return new Response(JSON.stringify({ ok: false }), {
           status: 401, headers: { "Content-Type": "application/json" },
         });
-        return new Response(JSON.stringify({ ok: true, shop }), {
+        const inst = await ensureInstalled(env, shop, bearer, url.origin);
+        // Visible in `wrangler tail`: proves a session token arrived in an Authorization header.
+        console.log(`api/session ok shop=${shop} installed=${inst.installed} fresh=${inst.fresh}`);
+        return new Response(JSON.stringify({ ok: true, shop, installed: inst.installed }), {
           headers: { "Content-Type": "application/json" },
         });
       }

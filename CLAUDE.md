@@ -11489,3 +11489,112 @@ be merged into and the merge tool's "preserved: (none)" is correct, not a warnin
 request for a policy that does not exist answers `404 unknown_policy`, which proves the new code loaded AND the signing key
 was read from Secrets Manager (a signer failure answers 503 before the policy lookup). **Not yet done:** the grant tool
 re-run, `VERIFIER_NONCE_TABLE`, a policy, a trusted issuer.
+
+## WHERE 2026-10-17 (SECOND SESSION) LEFT THINGS. THE SHOPIFY APP IS SUBMITTED FOR REVIEW.
+
+**2026-10-17, "RelayShield Order Screening", Partner dashboard App Store review page: Submitted, "We're assigning a
+reviewer to your submission".** Review emails go to `relayshieldadmin@gmail.com`. The Submit button was greyed for ten days on
+the two Embedded app checks and went live the same afternoon. This supersedes the "SHOPIFY ORDER SCREENING: THE EMBEDDED APP
+CHECKS ARE STUCK" section of the 10-17 first-session record (that one lives on `claude/ecstatic-davinci-wh8xxr`).
+
+### WHAT UNBLOCKED THE CHECKS, AND WHAT IS NOT PROVEN
+
+* Andrew opened the app in a NEW Chrome profile with no extensions, reloaded it a few times and cancelled one order. About two
+  hours later the Embedded app checks row was ticked. **The cause is not proven:** it could be the clean profile (Shopify staff
+  advice, read only from forum snippets) or ordinary telemetry lag of up to two days. Nothing in our code changed between the
+  stuck state and the pass. I told him the two-hour wait would probably flip it with no basis for saying so, and he caught it.
+  **Do not repeat the claim that a clean profile fixes this; it is a hypothesis that happened to be followed by the result.**
+* The console evidence, from the clean profile, before the check turned: `[RelayShield] App Bridge session token acquired`
+  then `[RelayShield] session auth check: 200`. So App Bridge initialised and our backend saw the Bearer header. The code was
+  right all along, which is why waiting and escalating, not rebuilding, was the correct response.
+* **Do not post to the Shopify community forum.** Andrew's account was suspended on a first post and a repost was closed by a
+  moderator. The support ticket was the channel used; no reply from a person is recorded.
+* Chrome DevTools renamed the setting: it is **"Keep log on navigation"** (Console) and **"Keep log"** (Network), not "Preserve log".
+
+### THE DRIFT READ WAS A FALSE ALARM, THE SAME ONE AS THE PRIVACY WORKER. THE SCRIPT STILL CRIES WOLF.
+
+`sh tools/recover_live_worker.sh relayshield-order-screening shopify/worker.js` printed THEY DIFFER with 2 live-only identifiers
+(`configurable`, `target`) and 47 live-only strings (`hmacSha256`, `handleCallback`, `buildTimelineNote` and so on). Every one is
+esbuild's keep-names helper: wrangler bundles with `__name(fn, "fn")`, which writes each function name as a string, and the
+helper definition carries those two identifiers. **Reproduced, not assumed:** `esbuild --bundle --format=esm --keep-names` on the
+repo file, fed to the script's own comparison, gives exactly 2 and 47, and its opening lines match the live paste. Live was 26,076
+bytes against 25,905 for that build, the gap being the multipart wrapper. So live equalled the repo copy, comments aside.
+**The script does not filter `__name(...)` strings or those two identifiers yet.** Fix when convenient; it changes nothing about
+the Shopify submission. A "THEY DIFFER" from it on any wrangler-deployed Worker should be tested this way before it is believed.
+
+### WHAT WAS DEPLOYED, AND HOW TO REPEAT IT
+
+* `relayshield-order-screening`, version `eab0bfb6-ec2e-42ad-9255-f3be5f6057f2`, from the merged branch (token exchange for
+  managed installation). Tests first, on the merge: `node shopify/test_worker_session.mjs` (5 pass) and
+  `python3 test_shopify_worker.py`, against stubs only.
+* The KV namespace for the `RS_KV` binding is `d95c371db8754acd9e8e791e0a558915`, the only namespace titled `RS_KV`.
+  `shopify/wrangler.toml` on main still holds the placeholder; the id goes into the LOCAL copy only, then
+  `git checkout -- shopify/wrangler.toml`. `APP_URL` in that file is unused; the Worker reads only `RS_KV`, `SHOPIFY_API_KEY`,
+  `SHOPIFY_API_SECRET`.
+* **Deploy with `--keep-vars`.** A deploy replaces dashboard-set plain variables with the toml's; the flag keeps them.
+* **`wrangler kv key list` reads a LOCAL copy by default and printed `[]` for a namespace with data.** Every `wrangler kv`
+  read needs `--remote`. A read that is empty because it asked the wrong store looks exactly like a wrong id.
+* Rollback if needed: `npx wrangler rollback` from `shopify/`.
+* The local merge of `claude/ecstatic-davinci-wh8xxr` into Andrew's `main` was NOT pushed. Pushing `main` can trigger the Lambda
+  deploy workflow, so it is a separate decision.
+
+### THE FRESH-INSTALL TEST PASSED, WITH ONE HOLE
+
+Dev store `relayshield-fresh-test`, installed after the deploy and opened once BEFORE any order. `shop:relayshield-fresh-test...`
+appeared in KV (the token exchange stored a token), then order #1001 produced `screenings:relayshield-fresh-test...` (the webhook
+was registered and the Worker screened it; verdict `unknown`, 15/100). Under managed installation `/auth` is never called, so
+before the deploy a fresh install would have stored nothing; that was the reviewer-path risk and it is closed.
+
+**Not proven: the tag and timeline-note write with an exchanged token.** `verdictActions('unknown')` returns no tags and no note,
+so an `unknown` order never writes anything. The built-in fixture (`fixture-high-...@relayshield.net`) only fires on
+`relayshield-test.myshopify.com`. The screening service graded `@testsafebrowsing.appspot.com`, `@mailinator.com` and
+`@relayshield.net` all `unknown`, since the Worker sends only the buyer email and the shop URL. A reviewer's test orders will be
+`unknown` too, so they cannot reach that path either. The write failing would be logged and swallowed, not break the app. To prove
+it: allow the fresh store in the fixture, deploy, place a `fixture-high-` order, check the tag. **Do not deploy during review.**
+The scopes were granted on the install screen ("View and edit store data: Orders").
+
+### THE "DEPRECATED OFFLINE TOKEN" BANNER
+
+Dev Dashboard Overview shows a red banner, "Deprecated offline token · Fix overdue · Last detected October 3, 2026". After the
+fresh install it was unchanged and Installs read 2, so the new install is not being flagged. It is probably the old
+`relayshield-test` token, installed under the legacy flow. The deployed code sends `expiring: "1"` and refreshes the token.
+If a reviewer raises it, uninstall and reinstall the app on `relayshield-test`. Reinstalling may wipe that store's screenings
+record, which holds the listing screenshots' data, so look first.
+
+### WHERE THE SHOPIFY UI ACTUALLY IS. THIS COST THREE ROUNDS BECAUSE I GUESSED.
+
+* Creating a dev store: Partner dashboard (`partners.shopify.com`), not the store Admin. Name, plan **Basic**, tick
+  "Generate test data", leave "Test a feature preview" off.
+* Installing an unpublished app: **Dev Dashboard** (`dev.shopify.com/dashboard`), the app's Overview, **Install app** top right.
+  The store Admin's "Add apps" lists only published App Store apps. Seeing "Create app" means the wrong organisation or login,
+  and creating one would mint a different Client ID. Never create a second app.
+* I cannot reach any shopify.com page from the container, so I gave menu paths from memory twice and both were wrong. When a
+  vendor UI is unreachable, ask for a screenshot of where he is before naming a button.
+
+### THE SHOPIFY AI TOOLKIT HAS NO APP STORE REVIEW COMMAND IN THE VERSION INSTALLED
+
+`claude plugin install shopify-ai-toolkit@claude-plugins-official` installed 2.1.2 (the plugin's manifest on GitHub says 2.2.0).
+`/shopify-app-store-review` is unknown; the plugin shows 2 skills (the general `shopify-plugin:shopify` and a UCP shopping
+skill), and those run shell commands. Its manifest says scripts send usage telemetry to shopify.dev unless
+`OPT_OUT_INSTRUMENTATION=true`. The self-review was skipped; the submission page calls it optional and its row was already ticked.
+Plugin skills are namespaced `plugin:skill`, not bare. A local Claude Code session started with **auto mode on** and offered to scan
+shell history; both were declined.
+
+### TWO THINGS TO FIX ABOUT OUR OWN SETUP
+
+* **`/Users/andrewgibbs/dev/relayshield/CLAUDE.md` is over Claude Code's 150k-char limit (793k chars)**, so a local session on his
+  Mac probably reads only a fraction of this file, including the rules written for him. This file needs splitting or trimming.
+* `claude-plugins-official` is the same directory FD-12 (our own plugin) is waiting on; Shopify's toolkit is listed there.
+
+### TODOS FOR THE NEXT SESSION, IN ORDER
+
+1. **Read any Shopify review email, word for word, and answer fast.** No deploys to the Worker until a decision. Leave both dev
+   stores and the app installed.
+2. After the decision: prove the tag and note write (fixture for the fresh store), and decide the banner (reinstall the old store).
+3. Fix `tools/recover_live_worker.sh` to ignore keep-names strings and the two helper identifiers, with a test.
+4. Split or trim `CLAUDE.md`.
+5. Push `main` and merge this branch (CLAUDE.md conflicts keep both sides). Unmerged: the x401 pack and grant tool, the Shopify
+   Worker change is already deployed.
+6. Carried from the 10-17 first session, unchanged: x401 `VERIFIER_NONCE_TABLE`, the Proof form and Muse summary, the whole
+   2026-10-12 WAFR/FTR list, root key deletion (due from 2026-10-16), the first real MCP candidate `--approve`, CS Mobile v1.7.0
+   behind a missing JDK, `tools/backfill_first_seen.py --apply`.

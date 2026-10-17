@@ -11489,3 +11489,90 @@ be merged into and the merge tool's "preserved: (none)" is correct, not a warnin
 request for a policy that does not exist answers `404 unknown_policy`, which proves the new code loaded AND the signing key
 was read from Secrets Manager (a signer failure answers 503 before the policy lookup). **Not yet done:** the grant tool
 re-run, `VERIFIER_NONCE_TABLE`, a policy, a trusted issuer.
+
+## WHERE 2026-10-17 LEFT THINGS. TWO THREADS: x401 IS DEPLOYED BUT TRUSTS NOBODY, AND THE SHOPIFY CHECK IS STILL PENDING.
+
+**Branch `claude/ecstatic-davinci-wh8xxr`, last commit `ecde0bf`, pushed and NOT on `origin/main`.** Commits not on
+main: the verifier-table grant tool and its fix, the x401 announcement pack, and the Shopify Worker change with its
+tests. `origin/main` already carries the x401 relying party itself (`5d03e88`) and the published public key
+(`7b452be`). Andrew's local `main` has merged `f7119a7`; whether he pushed it is unknown, so check
+`git --no-pager log --oneline origin/main..main` before assuming.
+
+### x401 + TAP: DEPLOYED, REFUSES EVERYTHING, BY DESIGN
+
+* Deployed to `relayshield-tap-verifier` on 2026-10-16 (hand deploy, the function is not in `LAMBDA_MAP`). A challenge for an
+  unknown policy answers `404 unknown_policy`, which proves the new code loaded and the signing key was read.
+* **`VERIFIER_NONCE_TABLE` is still a PLAN, not applied.** His plan output was `before {}`, `after {"VERIFIER_NONCE_TABLE":
+  "<redacted>"}`, `preserved: (none)`. Until it is applied, replay protection is per container. `x401_issuers.json` is
+  `{"issuers": {}}` and `x401_policies.json` holds no policy, so nothing can be accepted.
+* **The issuer question, researched 2026-10-16 from secondary sources** (proof.com, x401.id and shopify-style vendor sites are all
+  egress-blocked): Proof is an issuer, not a trust anchor, so there is no key to add. It issues an IAL2 person credential
+  (`jwt_vc_json`, assurance levels VC-AL2 and VC-AL3, backed by an X.509 certificate from its own CA) and, with Enigma, Business
+  Certificates for verified businesses. No sandbox, issuer DID, JWKS or `vct` was found, and nothing names a category claim.
+  GLEIF vLEI is ACDC/KERI and EU PID is mostly mdoc, so neither fits our formats. **Unverified and decisive: whether Proof's
+  credentials are signed with a JWKS key or an `x5c` chain.** We verify against registry JWKS only (ES256, Ed25519, PS256).
+* **Decision (Andrew, 2026-10-17): use the x401 testkit issuer for the announcement.** That means `python3 tools/x401_demo.py`,
+  labelled as a simulated issuer. **Do not register a testkit key in the live registry**: its private half would be in a public
+  repo, so anyone could mint a credential the live verifier accepts. A live demo route needs its own policy guarding nothing real,
+  and that is a separate decision he has not made.
+* `x401_announcement_pack_2026-10-16.md` holds the Proof contact text (form at `https://www.proof.com/contact-x401`, fields
+  unread), the summary for Muse, and the list of claims the announcement can and cannot make. **Whether the Proof form was
+  submitted and the Muse summary sent is not recorded.**
+
+### SHOPIFY ORDER SCREENING: THE EMBEDDED APP CHECKS ARE STUCK AT "PENDING", AND NOBODY HAS ANSWERED
+
+App "RelayShield Order Screening", version `relayshield-order-screening-4` (released 2026-10-10), dev store
+`relayshield-test.myshopify.com`, Worker `relayshield-order-screening` on `relayshieldadmin.workers.dev`, code in `shopify/`.
+
+**What is established.**
+* Both embedded checks ("latest App Bridge from Shopify's CDN", "session tokens") show an EMPTY circle, not red: Shopify has
+  received no data, which is different from failing. Everything else on the submission list is green.
+* The app loads in the Admin iframe and shows the shop name, and that is only rendered when the Worker has verified a session
+  token, so tokens arrive and verify. That does NOT prove App Bridge initialised: the server reads the `id_token` URL parameter,
+  which needs no App Bridge. A wrong or empty `shopify-api-key` meta value fails silently and looks exactly like this.
+* Secondary evidence (forum snippets, Shopify pages unreachable): the checks are telemetry from App Bridge initialising in a real
+  Admin session on a dev store, every 2 hours, with up to 2 days of lag, and staff advise a browser with no extensions. Several
+  developers report the same stuck state with correct setups, and some were unblocked by staff after verification.
+* **A code comment in `shopify/worker.js` said the checks "load the App URL directly (no session token)". That was wrong** (the
+  checks are not a crawler) and is corrected.
+* **A real defect, not proven to be the cause:** managed installation (`use_legacy_install_flow = false`) never calls `/auth`, which
+  was the only place the Worker got a token or registered `orders/create`. The existing dev store works because it was installed under
+  the old flow (orders #1004 to #1010, Oct 4 to 10, mostly synthetic fixtures). A fresh install, which is what a reviewer does,
+  would be empty. The Worker now exchanges the session token on first authenticated load. **Written and tested against stubs
+  only, NOT deployed, and the token-exchange parameter names are from memory.**
+
+**Where it stands.** Andrew posted to the Shopify community and got no answer. His support ticket has been with an AI support
+agent for 10 days without reaching a person. He will retry from a browser with no extensions.
+
+### TODOS FOR THE NEXT SESSION, IN ORDER
+
+1. **Shopify console check, his result decides everything.** In a clean browser profile, open the app in Admin, Inspect, Console,
+   filter `RelayShield`. `session token acquired` then `session auth check: 200` means the code is fine and this is Shopify's side.
+   `session token unavailable` or `App Bridge not ready` means compare the `shopify-api-key` meta value with the Client ID in the
+   Dev Dashboard. No `[RelayShield]` lines means the live Worker is not the repo code. `401` means a wrong `SHOPIFY_API_SECRET`.
+   Ask for the exact lines, not a summary. Full table and the support text are in `shopify_embedded_check_2026-10-17.md`.
+2. **Shopify drift read BEFORE any deploy:** `sh tools/recover_live_worker.sh relayshield-order-screening shopify/worker.js`. Only
+   `IDENTICAL` makes a deploy safe. `shopify/wrangler.toml` holds a placeholder KV id, so a deploy needs the real id from
+   `npx wrangler kv namespace list` in the LOCAL copy only, then `git checkout shopify/wrangler.toml`. Then deploy and prove token
+   exchange on a SECOND, freshly installed dev store, because the existing one is left alone by design and proves nothing about it.
+3. **Get a human at Shopify.** The AI agent loop is the blocker, not the code. Options, each UNVERIFIED because shopify.com is
+   unreachable from here: reply on the ticket asking in plain words for a human agent and quoting the App ID and the ten-day age;
+   reply on the specific community thread for "embedded app checks stuck" with the paragraph from the analysis file; use any
+   Partner Support chat or phone route the Partner dashboard shows. Record which one worked here.
+4. **Run `/shopify-app-store-review`** from the Shopify AI Toolkit, which the last row of the submission page offers.
+5. **Merge and push** the branch's three unmerged pieces to `main` (standard merge block, CLAUDE.md conflicts keep both sides).
+6. **x401:** apply `VERIFIER_NONCE_TABLE` (read the plan, then `--apply`), re-run `grant_verifier_table_access.py` once more and
+   record its output, send the Proof form, send Muse the summary, and decide whether a live demo policy is wanted.
+7. **Carried, not re-verified this session:** the whole 2026-10-12 WAFR/FTR list (the unanswered question, 36 High risks, the API
+   alarm, the badge table, `tools/diagnose_lambda_errors.sh` and the budget at USD 10), the root key deletion on or after
+   2026-10-16, the first real `--approve` of an MCP candidate, the 2026-10-15 telemetry policy amendments, CS Mobile v1.7.0 behind a
+   missing JDK, and `tools/backfill_first_seen.py --apply`.
+
+### THREE THINGS FROM THIS SESSION WORTH NOT REPEATING
+
+* **A guess about a vendor's checker, written into a code comment, steered the build for ten days.** The "checks load the App URL"
+  comment justified serving the dashboard without a token. Read how a checker gets its data before building to pass it.
+* **A recommendation that named a specific vendor artefact ("Proof's published key") was wrong** and was retracted. It nearly went
+  into a registry that decides who is trusted.
+* **A stand-in `aws` that answers the way its author expects is a second implementation that agrees with the first.** The grant tool
+  reported a granted policy as a failure because the fake returned one row per ARN and the real API returns one per action.

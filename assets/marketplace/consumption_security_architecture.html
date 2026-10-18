@@ -16,10 +16,10 @@
     MCP endpoint     hf-space-mcp-server/app.py (forwards to api.relayshield.net)
     edge             wrangler.commerce.toml: api.relayshield.net points directly to API Gateway
 
+  SNS is included because `aws sns list-subscriptions` (Andrew, 2026-10-18) showed this
+  product's subscription and entitlement topics both invoke the fulfillment Lambda.
+
   DELIBERATELY ABSENT, because they could not be verified:
-    * Amazon SNS. The fulfillment module says SNS events do not arrive until the
-      subscription is created with this product's real topic ARN. Add it only after
-      `aws sns list-subscriptions` shows it.
     * Any claim about per-function IAM roles, key types or log redaction. Dozens of
       Lambdas still share one role, and a reviewer will check.
     * Third-party vendor names (house rule for anything a customer reads), the AWS
@@ -93,6 +93,8 @@
     <div class="box aws"><b>AWS Marketplace Metering</b><span><code>BatchMeterUsage</code> is called by the API functions at the point of use, once per call, against the usage dimension</span></div>
     <div class="arrow">&nbsp;</div>
     <div class="box aws"><b>AWS Marketplace Entitlement</b><span><code>GetEntitlements</code> confirms the monthly entitlement during fulfillment</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box aws"><b>Amazon SNS, AWS Marketplace notifications</b><span>Subscription and entitlement events invoke the fulfillment function, which deactivates the key when an entitlement lapses</span></div>
     <div class="arrow">&nbsp;</div>
     <div class="box rs"><b>Amazon EventBridge &rarr; AWS Lambda collectors</b><span>Scheduled functions refresh the indicator corpus in DynamoDB from public feeds and monitored sources</span></div>
     <div class="arrow">&#8595;</div>

@@ -612,3 +612,19 @@ x401 `VERIFIER_NONCE_TABLE`, the Proof form and the Muse summary.
 
 **Unchanged and still open:** the root access key (ends `N2XZ`) deletion, due on or after 2026-10-16; API alarm; badge
 table; x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.0 behind a missing JDK.
+
+### 2026-10-18 (later): Andrew's four reads, and the WAFR gap located
+
+* **Account Lambda concurrency: `1000`.** The approved increase is live, so the concurrency Notes in
+  `ftr_finish_2026-10-18.md` are true to paste.
+* **Budget `relayshield-monthly-cost`: USD 50.0.** It exists, so the COST 1 sentence is true. His target is USD 10 and
+  the limit is still 50: `AMOUNT=10 AWS_PROFILE=relayshield sh tools/create_cost_budget.sh --apply` lowers it.
+* **SIM swap schedule: `rate(12 hours)`**, confirmed from AWS.
+* **SNS: this product IS subscribed.** `aws sns list-subscriptions` returned six `lambda` subscriptions on topics owned by
+  AWS Marketplace (`aws-mp-subscription-notification-*` and `aws-mp-entitlement-notification-*`) for three product codes:
+  `46y72j0d99w7lyqkiqrakpc5k` (the Consumption Security API Bundles product, `prod-kkvurtspreofy`), `cvfvhwhmichl13kcuuutkbwmp`
+  (the Core Identity Exposure product) and `cmh79gzztkdtp0dlzbdepa643` (Attack Surface and Supply Chain). So the 09-17-era
+  worry that this product's SNS might not be wired was unfounded, and the diagram now carries the SNS box.
+* **WAFR: the unanswered question is in RELIABILITY (12/13).** Totals now: OPS 11/11, SEC 11/11, REL 12/13, PERF 5/5,
+  COST 11/11, SUS 6/6; 36 High and 15 Medium. The "Next risk to address: OPS 1" box on the overview is a pointer to the
+  next risk, not the gap. Its answer is in `wafr_answers_reliability_2026-10-11.md`.

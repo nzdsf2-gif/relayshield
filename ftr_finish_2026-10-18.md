@@ -135,11 +135,8 @@ item you cannot answer, send me the item.
 `.html` beside it, so a correction is an edit and a re-render. It reaches the Mac through the merge,
 not through chat, which re-encodes images to `.webp` and an upload dialog then cannot select them.
 
-It names the product by its listing name, shows the Hugging Face MCP endpoint and Cloudflare as
-**outside AWS** rather than hiding them, and **deliberately omits** three things:
-* **Amazon SNS.** The fulfillment module says SNS events do not arrive until a subscription exists
-  with this product's real topic ARN, and nothing records that it does. If Andrew's read shows the
-  fulfillment function is subscribed, add the box and re-render.
+It includes Amazon SNS: Andrew's read on 2026-10-18 showed this product's subscription and entitlement topics both invoke the fulfillment function. It names the product by its listing name, shows the Hugging Face MCP endpoint and Cloudflare as
+**outside AWS** rather than hiding them, and **deliberately omits** two things:
 * **Any claim about per-function IAM roles, key types or log redaction.** Dozens of Lambdas still
   share one role, and some handlers log values readably.
 * **Vendor names, the account number and corpus counts.**

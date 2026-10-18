@@ -563,3 +563,52 @@ The x401 announcement pack, `tools/grant_verifier_table_access.py` and the Shopi
 `origin/main`. The 10-17 item "merge and push the branch's unmerged pieces" is closed. Still open from 10-17,
 unchanged: the Shopify review email, the tag-and-note write proof, the "deprecated offline token" banner,
 x401 `VERIFIER_NONCE_TABLE`, the Proof form and the Muse summary.
+
+## WHERE 2026-10-18 (SECOND SESSION) LEFT THINGS. THE FTR IS READY FOR ANDREW'S CONSOLE STEPS; THREE CORRECTIONS FROM HIM.
+
+**Andrew merged the split cleanly (fast-forward, `OK` on the size check, 18 tests).** Branch
+`claude/bold-goldberg-9m0c9b`, new commits unmerged.
+
+### Corrections from Andrew, recorded as he gave them (not independently verified)
+
+* **TWILIO IS SETTLED. The "1,407 calls in an hour" thread above is closed, and the 10-12 advice to rotate the auth token
+  is withdrawn.** He says a recent session traced the spend to the SIM swap check frequency, and the cadence went from
+  hourly to once every 12 hours (the schedule rule reads `rate(12 hours)`, confirmed in the 10-12 record). My 10-18
+  summary listed Twilio as open because I read the stale 10-12 text, which is the "a doc recording an open item is a
+  lead, not a fact" rule in the direction it is least expected.
+* **Shopify: nothing to do.** The app is submitted and waiting on the App Store. The tag-and-note proof and the banner
+  both depend on the response, so they stay parked.
+* **AWS FTR: "finish now".**
+
+### What was built for the FTR (commit follows this entry)
+
+* `assets/marketplace/consumption_security_architecture.{html,png}`: the architecture diagram for
+  `prod-kkvurtspreofy`, named by its listing name so no internal bundle name appears in an upload. Every box is read
+  from code (`relayshield_bundle_fulfillment.py`, the metering calls in `relayshield_api.py` and
+  `relayshield_agentic_api.py`, `hf-space-mcp-server/app.py`). It shows the Hugging Face MCP endpoint, Cloudflare and the
+  data providers as OUTSIDE AWS. **Omitted deliberately: SNS** (the fulfillment module says events do not arrive until
+  the subscription exists with this product's real topic ARN, and nothing records that), per-function IAM roles, key
+  types, log redaction, vendor names, account number, counts.
+* **A real defect found and fixed on the way:** the Bundle B architecture description and diagram footer claimed
+  "every Lambda runs under its own least-privilege IAM role", "AWS-managed keys" and "identifiers hashed before they are
+  written". All three are untrue (dozens of Lambdas share one role, two customer-managed KMS keys exist, some handlers log
+  values readably). Nothing had been submitted with them, because the Bundle B form was one radio button. Corrected in
+  `bundle_b_architecture_details_2026-09-20.md` and the Bundle B diagram was re-rendered. No other customer-facing
+  surface carries the claim (grepped).
+* `ftr_finish_2026-10-18.md`: the ordered finish list, the nine Notes that went stale (concurrency 10 to 1,000, the
+  October init outages, the twelve-hour cadence), a Dave Shapiro email draft, and what Andrew sends back.
+
+### Needed from Andrew, in this order
+
+1. The four read-only AWS outputs (account concurrency, budget limit, SIM swap schedule, SNS subscriptions on
+   `bundle-fulfillment`). Every Note that cites a number waits on them.
+2. The pillar and number of the one unanswered WAFR question. All 57 have drafted answers, so which one is open cannot be
+   told from the repository. The OPS and SEC answers were given in chat and not saved.
+3. What THIS product's Architecture details tab in the Marketplace Management Portal currently says. For Bundle B the
+   honest answer was "None of the above" (not considered deployed on AWS) because endpoints depend on third-party data
+   providers. If the FTR needs an AWS-hosted product, that is the one thing that could stop validation. Read it, do not
+   change it in the same sitting.
+4. Any FTR checklist item he cannot answer. The FTR Guide is egress-blocked from the container and has never been read.
+
+**Unchanged and still open:** the root access key (ends `N2XZ`) deletion, due on or after 2026-10-16; API alarm; badge
+table; x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.0 behind a missing JDK.

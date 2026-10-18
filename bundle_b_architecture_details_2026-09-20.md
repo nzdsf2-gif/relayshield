@@ -83,6 +83,15 @@ not something to print on a public product page.
 
 ## 2. Architecture description
 
+**CORRECTED 2026-10-18. Three sentences were removed because they were not true, and a reviewer
+checks exactly this kind of claim.** (1) "Every AWS Lambda function runs under its own
+least-privilege IAM role": dozens of functions still share one console-generated role, and only a
+few have been split onto their own. (2) "encrypted with AWS-managed keys": two customer-managed KMS
+keys exist and are used for some tables. (3) "Customer request bodies are not retained" and
+"identifiers hashed before they are written": some handlers log values readably, so that is a
+claim to make only after the logging has been audited. The diagram footer made the first two claims
+as well and was re-rendered. Nothing here was submitted: the form turned out to be one radio button.
+
 Paste this into the description field. It is written to be readable as one block if the form has a
 single box, and it splits cleanly at the headings if it has several.
 
@@ -114,11 +123,9 @@ single box, and it splits cleanly at the headings if it has several.
 > entitlement changes, suspension and unsubscription. The same fulfillment Lambda function
 > consumes them and deactivates the customer's key when an entitlement lapses.
 >
-> **Security and operations.** Every AWS Lambda function runs under its own least-privilege IAM
-> role. All data in transit uses TLS 1.2 or later. All data at rest in DynamoDB and Secrets
-> Manager is encrypted with AWS-managed keys. Customer request bodies are not retained; operational
-> logs go to Amazon CloudWatch Logs with identifiers hashed before they are written. Availability
-> and scaling come from the managed services themselves, with no instances to patch or scale.
+> **Security and operations.** All data in transit uses TLS. DynamoDB and Secrets Manager encrypt
+> data at rest. Operational logs go to Amazon CloudWatch Logs. Availability and scaling come from
+> the managed services themselves, with no instances to patch or scale.
 
 **Services named, if the form asks for a list rather than prose:** Amazon API Gateway, AWS Lambda,
 Amazon DynamoDB, AWS Secrets Manager, Amazon SNS, Amazon SES, Amazon CloudWatch Logs, AWS Identity

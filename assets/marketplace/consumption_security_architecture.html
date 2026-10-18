@@ -1,0 +1,109 @@
+<!doctype html>
+<!--
+  AWS Marketplace / Partner Central architecture diagram for the FTR.
+  Product: RelayShield - Consumption Security API Bundles (prod-kkvurtspreofy).
+
+  Render it, never edit the PNG:
+
+    chromium --headless --no-sandbox --disable-gpu --hide-scrollbars \
+      --window-size=1600,900 \
+      --screenshot=assets/marketplace/consumption_security_architecture.png \
+      "file://$PWD/assets/marketplace/consumption_security_architecture.html"
+
+  Every box is read from code, not recalled:
+    fulfillment      relayshield_bundle_fulfillment.py (ResolveCustomer, GetEntitlements, SES)
+    metering         relayshield_api.py and relayshield_agentic_api.py (BatchMeterUsage at the point of use)
+    MCP endpoint     hf-space-mcp-server/app.py (forwards to api.relayshield.net)
+    edge             wrangler.commerce.toml: api.relayshield.net points directly to API Gateway
+
+  DELIBERATELY ABSENT, because they could not be verified:
+    * Amazon SNS. The fulfillment module says SNS events do not arrive until the
+      subscription is created with this product's real topic ARN. Add it only after
+      `aws sns list-subscriptions` shows it.
+    * Any claim about per-function IAM roles, key types or log redaction. Dozens of
+      Lambdas still share one role, and a reviewer will check.
+    * Third-party vendor names (house rule for anything a customer reads), the AWS
+      account number, and any corpus count (MEASUREMENT DOCTRINE).
+  No em-dashes: house style.
+
+  The PNG is TRACKED (.gitignore carries !assets/marketplace/*.png): an image sent
+  through chat arrives re-encoded as .webp, which an upload dialog filters out.
+-->
+<meta charset="utf-8">
+<title>RelayShield Consumption Security API Bundles - architecture</title>
+<style>
+  :root{--ink:#0f1b2d;--mut:#5a6b80;--line:#c7d2de;--bg:#fff;--aws:#ff9900;--rs:#1f6feb;--ext:#8a94a3;--box:#f6f9fc}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:1600px;height:900px;background:var(--bg);
+       font:400 15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+       color:var(--ink);padding:30px 48px}
+  h1{font-size:26px;font-weight:700;letter-spacing:-.2px}
+  .sub{color:var(--mut);font-size:14px;margin-top:4px}
+  .region{margin-top:20px;border:2px dashed var(--line);border-radius:14px;padding:16px 18px 14px;position:relative;height:536px}
+  .region>.tag,.outside>.tag{position:absolute;top:-12px;left:22px;background:var(--bg);padding:0 10px;
+        font-size:12px;font-weight:700;color:var(--mut);letter-spacing:.6px;text-transform:uppercase}
+  .cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;height:100%}
+  .col{display:flex;flex-direction:column;gap:7px}
+  .lane{font-size:12px;font-weight:700;color:var(--mut);letter-spacing:.7px;text-transform:uppercase;
+        padding-bottom:2px;border-bottom:1px solid var(--line)}
+  .box{border:1px solid var(--line);border-radius:10px;background:var(--box);padding:8px 12px}
+  .box.aws{border-left:4px solid var(--aws)} .box.rs{border-left:4px solid var(--rs)}
+  .box b{display:block;font-size:14px;font-weight:700} .box span{display:block;font-size:12.5px;color:var(--mut);margin-top:2px}
+  .arrow{font-size:12px;color:var(--mut);text-align:center;line-height:1}
+  .outside{margin-top:22px;border:2px dashed var(--ext);border-radius:14px;padding:16px 18px 14px;position:relative;
+           display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+  .box.ext{border-left:4px solid var(--ext);background:#fafbfc}
+  .foot{margin-top:10px;font-size:12.5px;color:var(--mut)}
+  code{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}
+</style>
+<h1>RelayShield Consumption Security API Bundles</h1>
+<div class="sub">SaaS, delivered as an HTTPS API and as an MCP endpoint. The API, the data and the billing run on AWS in one region (us-east-1) and one account.</div>
+
+<div class="region"><span class="tag">Single AWS account &nbsp;&middot;&nbsp; us-east-1</span>
+<div class="cols">
+
+  <div class="col">
+    <div class="lane">1 &middot; Subscribe and fulfill</div>
+    <div class="box aws"><b>AWS Marketplace</b><span>Buyer subscribes and is redirected to our fulfillment URL with the registration token</span></div>
+    <div class="arrow">&#8595; HTTPS</div>
+    <div class="box rs"><b>Amazon API Gateway</b><span>REST API behind <code>api.relayshield.net</code>, TLS</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>AWS Lambda, fulfillment</b><span>Calls <code>ResolveCustomer</code> and <code>GetEntitlements</code>, then issues the customer's API key</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>Amazon DynamoDB</b><span>Key record: customer identifier, product code, entitlement state. On-demand capacity</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>Amazon SES</b><span>Delivers the key to the buyer's registered address</span></div>
+  </div>
+
+  <div class="col">
+    <div class="lane">2 &middot; Serve a call</div>
+    <div class="box aws"><b>Customer application or AI agent</b><span>HTTPS with the issued API key, directly or through the MCP endpoint (below)</span></div>
+    <div class="arrow">&#8595; HTTPS</div>
+    <div class="box rs"><b>Amazon API Gateway</b><span>Metered endpoints under <code>/v1/metered/</code>: MCP and agent screening, identity risk, tech-stack CVE, LLM credential exposure</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>AWS Lambda, API functions</b><span>Authenticate the key, confirm the entitlement, run the check</span></div>
+    <div class="arrow">&#8595; &#8593;</div>
+    <div class="box rs"><b>Amazon DynamoDB</b><span>Indicator corpus, key records, usage counters</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>AWS Secrets Manager</b><span>Upstream data-source credentials, read at runtime</span></div>
+  </div>
+
+  <div class="col">
+    <div class="lane">3 &middot; Meter, collect, observe</div>
+    <div class="box aws"><b>AWS Marketplace Metering</b><span><code>BatchMeterUsage</code> is called by the API functions at the point of use, once per call, against the usage dimension</span></div>
+    <div class="arrow">&nbsp;</div>
+    <div class="box aws"><b>AWS Marketplace Entitlement</b><span><code>GetEntitlements</code> confirms the monthly entitlement during fulfillment</span></div>
+    <div class="arrow">&nbsp;</div>
+    <div class="box rs"><b>Amazon EventBridge &rarr; AWS Lambda collectors</b><span>Scheduled functions refresh the indicator corpus in DynamoDB from public feeds and monitored sources</span></div>
+    <div class="arrow">&#8595;</div>
+    <div class="box rs"><b>Amazon CloudWatch</b><span>Logs from every function. Error alarms on selected functions</span></div>
+  </div>
+
+</div></div>
+
+<div class="outside"><span class="tag">Outside AWS &nbsp;&middot;&nbsp; shown so the boundary is explicit</span>
+  <div class="box ext"><b>Hugging Face Space, optional MCP endpoint</b><span>A thin proxy: forwards each MCP tool call to <code>api.relayshield.net</code>. The checks, the data and the billing are in AWS</span></div>
+  <div class="box ext"><b>Cloudflare Workers, public web pages</b><span>Marketing, documentation and pricing pages. API traffic does not pass through them</span></div>
+  <div class="box ext"><b>Third-party data providers</b><span>Queried over HTTPS by some endpoints for enrichment. Their credentials are held in AWS Secrets Manager</span></div>
+</div>
+<div class="foot">Compute is AWS Lambda. DynamoDB tables use on-demand capacity. Metered calls are authenticated by API key.</div>

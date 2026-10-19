@@ -309,7 +309,11 @@ class EmailRendering(unittest.TestCase):
         html = wm._build_email(self._fixture())
         self.assertIn("Monitored Telegram marketplaces", html)
         self.assertIn("115", html)
-        self.assertIn("Unique indicators", html)
+        # Relabeled 2026-10-19: this row is the Telegram monitor's first-seen
+        # log, which the feed writers never touch, so it must not claim to be
+        # an all-time indicator count. The cumulative figure is the corpus row.
+        self.assertIn("Telegram-monitor first-seen log", html)
+        self.assertNotIn("Unique indicators (cumulative, all-time)", html)
         self.assertIn("512,345", html)
 
     def test_renders_cumulative_and_weekly_increment_together(self):
@@ -619,6 +623,214 @@ class SurfaceBreakdown(unittest.TestCase):
         self.assertIn("API keys by discovery surface", out)
         self.assertIn("tg-miniapp-tgapp", out)
         self.assertIn("+2", out)
+
+
+# --------------------------------------------------------------------------
+# 2026-10-19: the cumulative distinct-indicator figure, measured from sightings.
+# The first-seen log is written only by the Telegram monitor, so its count read
+# 256,779 against a measured 687,011. These run the real scan loop against a
+# fake low-level client that splits rows across segments and pages them.
+# --------------------------------------------------------------------------
+NOW = wm.datetime(2026, 10, 19, 12, 0, tzinfo=wm.timezone.utc)
+OLD_TS = "2026-09-01T00:00:00+00:00"
+NEW_TS = "2026-10-17T00:00:00+00:00"
+
+
+def _row(value, ts=NEW_TS, itype="domain", category="", channel="chan_a"):
+    def s(v):
+        return {"S": v}
+    item = {"ioc_value": s(value), "seen_ts": s(ts), "ioc_type": s(itype),
+            "channel": s(channel)}
+    if category:
+        item["category"] = s(category)
+    return item
+
+
+class _FakeLowLevelClient:
+    """Splits rows across segments the way DynamoDB does (every row lands in
+    exactly one segment) and pages each segment, so a scan that skips a segment
+    or drops a continuation shows up as a wrong total."""
+
+    PAGE = 3
+
+    def __init__(self, rows, fail_segment=None, on_page=None):
+        self.rows, self.fail_segment, self.on_page = rows, fail_segment, on_page
+        self.seen_kwargs = []
+
+    def scan(self, **kw):
+        self.seen_kwargs.append(kw)
+        if self.on_page:
+            self.on_page()
+        seg, total = kw["Segment"], kw["TotalSegments"]
+        if seg == self.fail_segment:
+            raise RuntimeError("throttled")
+        mine = [r for i, r in enumerate(self.rows) if i % total == seg]
+        start = (kw.get("ExclusiveStartKey") or {}).get("o", 0)
+        page = mine[start:start + self.PAGE]
+        out = {"Items": page, "ScannedCount": len(page)}
+        if start + self.PAGE < len(mine):
+            out["LastEvaluatedKey"] = {"o": start + self.PAGE}
+        return out
+
+
+def _far():
+    return wm.time.monotonic() + 60
+
+
+class DistinctCorpusCounter(unittest.TestCase):
+    def test_matches_a_naive_computation_on_random_data(self):
+        import random
+        rng = random.Random(7)
+        values = [f"v{n}.example" for n in range(300)]
+        truth = {}
+        counter = wm._DistinctCorpus()
+        for _ in range(4000):
+            v = rng.choice(values)
+            old, chan = rng.random() < 0.4, rng.random() < 0.3
+            counter.add(v, old, chan)
+            t = truth.setdefault(v, [False, False])
+            t[0] |= old
+            t[1] |= chan
+        got = counter.totals()
+        self.assertEqual(got["distinct"], len(truth))
+        self.assertEqual(got["week_ago"], sum(1 for o, _ in truth.values() if o))
+        self.assertEqual(got["channel_collected"],
+                         sum(1 for _, c in truth.values() if c))
+
+    def test_an_indicator_is_never_held_twice(self):
+        counter = wm._DistinctCorpus()
+        for old, chan in [(False, False), (True, False), (True, True),
+                          (False, False)]:
+            counter.add("a.example", old, chan)
+        self.assertEqual(counter.totals()["distinct"], 1)
+
+
+class MeasureCorpus(unittest.TestCase):
+    def test_counts_indicators_not_sightings(self):
+        rows = [_row("a.example")] * 5 + [_row("b.example")] * 4
+        out = wm._measure_corpus(_FakeLowLevelClient(rows), _far(), NOW)
+        self.assertTrue(out["measured"])
+        self.assertEqual(out["distinct"], 2)
+        self.assertEqual(out["rows"], 9)
+
+    def test_every_segment_is_scanned_and_every_page_followed(self):
+        rows = [_row(f"h{n}.example") for n in range(100)]
+        client = _FakeLowLevelClient(rows)
+        out = wm._measure_corpus(client, _far(), NOW)
+        self.assertEqual(out["distinct"], 100)
+        self.assertEqual({k["Segment"] for k in client.seen_kwargs},
+                         set(range(wm.CORPUS_SEGMENTS)))
+
+    def test_week_ago_excludes_indicators_first_seen_this_week(self):
+        rows = [_row("old.example", OLD_TS), _row("old.example", NEW_TS),
+                _row("new.example", NEW_TS)]
+        out = wm._measure_corpus(_FakeLowLevelClient(rows), _far(), NOW)
+        self.assertEqual(out["distinct"], 2)
+        self.assertEqual(out["week_ago"], 1)
+
+    def test_excluded_types_are_not_indicators(self):
+        rows = [_row("a.example"), _row("x@y.example", itype="email"),
+                _row("+15550100", itype="phone"), _row("ctl", itype="_control")]
+        out = wm._measure_corpus(_FakeLowLevelClient(rows), _far(), NOW)
+        self.assertEqual(out["distinct"], 1)
+
+    def test_splits_channel_collected_from_public_feeds(self):
+        rows = [_row("tg.example", channel="some_channel"),
+                _row("feed1.example", category="threat_feed", channel="x"),
+                _row("feed2.example", channel="urlhaus")]
+        out = wm._measure_corpus(_FakeLowLevelClient(rows), _far(), NOW)
+        self.assertEqual(out["distinct"], 3)
+        self.assertEqual(out["channel_collected"], 1)
+
+    def test_a_failed_segment_voids_the_total_instead_of_shrinking_it(self):
+        rows = [_row(f"h{n}.example") for n in range(40)]
+        out = wm._measure_corpus(
+            _FakeLowLevelClient(rows, fail_segment=3), _far(), NOW)
+        self.assertFalse(out["measured"])
+        self.assertNotIn("distinct", out)
+        self.assertIn("scan error", out["reason"])
+
+    def test_an_exhausted_budget_voids_the_total(self):
+        rows = [_row(f"h{n}.example") for n in range(40)]
+        out = wm._measure_corpus(
+            _FakeLowLevelClient(rows), wm.time.monotonic() - 1, NOW)
+        self.assertFalse(out["measured"])
+        self.assertNotIn("distinct", out)
+        self.assertIn("time budget", out["reason"])
+
+
+class CorpusBudget(unittest.TestCase):
+    class _Ctx:
+        def __init__(self, ms):
+            self._ms = ms
+
+        def get_remaining_time_in_millis(self):
+            return self._ms
+
+    def test_does_not_start_when_the_lambda_has_no_time_to_spare(self):
+        out = wm._corpus_distinct(self._Ctx(100 * 1000))
+        self.assertFalse(out["measured"])
+        self.assertIn("left", out["reason"])
+
+    def test_runs_when_there_is_time(self):
+        wm.dynamodb = types.SimpleNamespace(meta=types.SimpleNamespace(
+            client=_FakeLowLevelClient([_row("a.example"), _row("b.example")])))
+        out = wm._corpus_distinct(self._Ctx(600 * 1000))
+        self.assertTrue(out["measured"])
+        self.assertEqual(out["distinct"], 2)
+
+    def test_a_context_that_cannot_say_still_runs(self):
+        wm.dynamodb = types.SimpleNamespace(meta=types.SimpleNamespace(
+            client=_FakeLowLevelClient([_row("a.example")])))
+        self.assertTrue(wm._corpus_distinct(None)["measured"])
+
+    def test_handler_computes_it_last_with_the_context(self):
+        src = pathlib.Path(ROOT / "relayshield_weekly_metrics.py").read_text()
+        handler = next(n for n in ast.walk(ast.parse(src))
+                       if isinstance(n, ast.FunctionDef)
+                       and n.name == "lambda_handler")
+        entries = []
+        for node in ast.walk(handler):
+            if isinstance(node, ast.Dict):
+                found = [(k.value, v) for k, v in zip(node.keys, node.values)
+                         if isinstance(k, ast.Constant)]
+                if any(k == "users_total" for k, _ in found):
+                    entries = found     # the metrics dict, not the SES message
+        self.assertTrue(entries, "metrics dict not found")
+        self.assertEqual(entries[-1][0], "corpus")
+        call = entries[-1][1]
+        self.assertEqual(call.func.id, "_corpus_distinct")
+        self.assertEqual(call.args[0].id, "context")
+
+
+class CorpusEmailRows(unittest.TestCase):
+    MEASURED = {"measured": True, "distinct": 700000, "week_ago": 660000,
+                "channel_collected": 90000, "rows": 9500000, "seconds": 98.4}
+
+    def test_shows_the_cumulative_total_and_the_change(self):
+        out = wm._build_email(EmailRendering()._fixture(corpus=self.MEASURED))
+        self.assertIn("700,000", out)
+        self.assertIn("660,000", out)
+        self.assertIn("+40,000", out)
+        self.assertIn("610,000", out)      # public-feed share
+        self.assertNotIn("NOT MEASURED", out)
+
+    def test_a_negative_change_prints_its_sign(self):
+        c = dict(self.MEASURED, distinct=650000)
+        self.assertIn("-10,000", wm._corpus_rows(c))
+
+    def test_unmeasured_says_so_and_never_borrows_the_first_seen_count(self):
+        fx = EmailRendering()._fixture(
+            corpus={"measured": False, "reason": "time budget exhausted"})
+        out = wm._build_email(fx)
+        self.assertIn("NOT MEASURED", out)
+        self.assertIn("time budget exhausted", out)
+        self.assertIn("ti_demo_metrics.py --distinct", out)
+        row = out.split("Distinct indicators in corpus (cumulative)")[1][:140]
+        self.assertNotIn("512,345", row)
+
+    def test_a_missing_corpus_key_is_unmeasured_not_a_crash(self):
+        self.assertIn("NOT MEASURED", wm._corpus_rows(None))
 
 
 if __name__ == "__main__":

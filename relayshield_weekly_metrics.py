@@ -18,6 +18,9 @@ import html
 import json
 import logging
 import os
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -286,6 +289,188 @@ def _indicators_backfilled() -> int:
     backfill never ran."""
     return _filtered_count("relayshield_intel_first_seen",
                             Attr("first_seen").lt(FIRST_SEEN_LIVE_SINCE))
+
+
+# ---------------------------------------------------------------------------
+# Cumulative distinct indicators, MEASURED from the sightings table (2026-10-19).
+#
+# Why the first-seen row count above is not enough. Only the Telegram monitor
+# (relayshield_intel_monitor._record_first_seen) writes relayshield_intel_first_seen.
+# The public-feed writer, relayshield_intel_feed._write_ioc, puts sightings into
+# relayshield_intel_iocs and never records a first-seen, and the feeds are where
+# most new indicators come from. So the first-seen count is a monitor-only figure:
+# it read 255,580 on 2026-10-12 and 256,779 on 2026-10-19 (+1,199) while the
+# measured distinct count was 687,011 on 2026-10-08 and growing by tens of
+# thousands a week. Backfilling history would fix the past and nothing after it.
+#
+# So the report measures the corpus itself, the same definition as
+# tools/ti_demo_metrics.py --distinct (one indicator per ioc_value, email, phone
+# and _control rows excluded). The cost is a full scan of a ~9.5M-row table, so
+# it is bounded: it runs last, inside whatever time the Lambda has left, and when
+# it cannot finish it says so rather than printing a partial count as a total.
+#
+# What it counts is indicators still INSIDE RETENTION (feed rows live 365 days,
+# Telegram rows 90), because sightings expire. That is the same population
+# tools/ti_demo_metrics.py measures, so the two reconcile.
+# ---------------------------------------------------------------------------
+CORPUS_TABLE = "relayshield_intel_iocs"
+CORPUS_SEGMENTS = 8
+CORPUS_MIN_BUDGET_S = 45        # below this, do not start: it cannot finish
+CORPUS_RESERVE_S = 60           # left over for rendering and sending the email
+CORPUS_DEFAULT_BUDGET_S = 240   # when the Lambda context cannot say
+# Mirrors tools/export_intel_sample.py. Not imported: this Lambda is a
+# single-file package with no deploy path that could ship a second module.
+CORPUS_EXCLUDED_TYPES = {"email", "phone", "_control"}
+CORPUS_FEED_CATEGORY = "threat_feed"
+CORPUS_FEED_CHANNELS = {
+    "_system", "cisa_kev", "threatfox", "urlhaus",
+    "feodo_tracker", "feodo_aggressive",
+}
+_CORPUS_PROJECTION = "#v, #t, #y, #c, #h"
+_CORPUS_NAMES = {"#v": "ioc_value", "#t": "seen_ts", "#y": "ioc_type",
+                 "#c": "category", "#h": "channel"}
+
+
+class _DistinctCorpus:
+    """Distinct indicators with two facts kept per indicator, in ONE set.
+
+    The corpus is ~700K distinct values behind ~9.5M sightings, and this runs
+    inside a Lambda whose memory setting nobody can read from the repo. So each
+    indicator is an 8-byte hash with two flag bits packed into the low bits of
+    the same integer: bit 0 = it has a sighting older than a week, bit 1 = at
+    least one sighting came from RelayShield's own channel collection rather
+    than a public feed. Updating a flag swaps the entry in place, so the set
+    never holds an indicator twice. Eight bytes makes a collision across 700K
+    values about a one-in-a-hundred-million event, which is below the noise of
+    the number it feeds."""
+
+    OLD = 1
+    CHANNEL = 2
+
+    def __init__(self):
+        self._s = set()
+
+    @staticmethod
+    def _key(value: str) -> int:
+        # Python's str hash is a 64-bit SipHash, randomised per process and
+        # stable within one, which is all a single scan needs. hashlib would be
+        # ~10x slower per row and this runs ~9.5M times.
+        return (hash(value) & 0xFFFFFFFFFFFFFFFF) << 2
+
+    def add(self, value: str, old: bool, channel: bool) -> None:
+        key = self._key(value)
+        flags = (self.OLD if old else 0) | (self.CHANNEL if channel else 0)
+        s = self._s
+        # Fast path: ~13 sightings per indicator means almost every row lands
+        # on a state that is already recorded exactly.
+        if (key | flags) in s:
+            return
+        for cur in range(4):
+            if (key | cur) in s:
+                if cur | flags != cur:
+                    s.discard(key | cur)
+                    s.add(key | cur | flags)
+                return
+        s.add(key | flags)
+
+    def totals(self) -> dict:
+        total = len(self._s)
+        old = sum(1 for x in self._s if x & self.OLD)
+        channel = sum(1 for x in self._s if x & self.CHANNEL)
+        return {"distinct": total, "week_ago": old, "channel_collected": channel}
+
+
+def _measure_corpus(client, deadline: float, now: datetime = None) -> dict:
+    """Full parallel scan of the sightings table, collapsed to distinct
+    indicators. Reads the LOW-LEVEL client's {"S": "..."} items directly: the
+    resource layer's type conversion is the slow part of reading millions of
+    rows, and this reads all of them. Values are used as stored (both writers
+    lowercase them). Never raises and never returns a partial count as a total: any
+    failure, or the deadline passing, yields measured=False with a reason."""
+    started = time.monotonic()
+    cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=7)).isoformat()
+    counter = _DistinctCorpus()
+    excluded, feed_cat = CORPUS_EXCLUDED_TYPES, CORPUS_FEED_CATEGORY
+    feed_chans = CORPUS_FEED_CHANNELS
+    lock = threading.Lock()
+    stop = threading.Event()
+    failure = []
+    rows = [0]
+
+    def _segment(seg: int) -> None:
+        kwargs = {"TableName": CORPUS_TABLE, "Segment": seg,
+                  "TotalSegments": CORPUS_SEGMENTS,
+                  "ProjectionExpression": _CORPUS_PROJECTION,
+                  "ExpressionAttributeNames": _CORPUS_NAMES}
+        while not stop.is_set():
+            if time.monotonic() > deadline:
+                failure.append("time budget exhausted")
+                stop.set()
+                return
+            page = client.scan(**kwargs)
+            batch = []
+            empty = {}
+            for it in page.get("Items", []):
+                value = (it.get("ioc_value") or empty).get("S")
+                if not value:
+                    continue
+                if (it.get("ioc_type") or empty).get("S", "").lower() in excluded:
+                    continue
+                ts = (it.get("seen_ts") or empty).get("S", "")
+                feed = ((it.get("category") or empty).get("S") == feed_cat
+                        or (it.get("channel") or empty).get("S") in feed_chans)
+                batch.append((value, bool(ts) and ts < cutoff, not feed))
+            with lock:
+                rows[0] += page.get("ScannedCount", len(page.get("Items", [])))
+                for value, old, channel in batch:
+                    counter.add(value, old, channel)
+            key = page.get("LastEvaluatedKey")
+            if not key:
+                return
+            kwargs["ExclusiveStartKey"] = key
+
+    def _guarded(seg: int) -> None:
+        try:
+            _segment(seg)
+        except Exception as exc:  # noqa: BLE001 -- one bad segment voids the total
+            logger.warning("corpus scan segment %s failed: %s", seg, exc)
+            failure.append(f"scan error: {type(exc).__name__}")
+            stop.set()
+
+    with ThreadPoolExecutor(max_workers=CORPUS_SEGMENTS) as pool:
+        list(pool.map(_guarded, range(CORPUS_SEGMENTS)))
+
+    seconds = round(time.monotonic() - started, 1)
+    if failure:
+        return {"measured": False, "reason": failure[0], "seconds": seconds}
+    out = counter.totals()
+    out.update({"measured": True, "rows": rows[0], "seconds": seconds})
+    return out
+
+
+def _corpus_distinct(context=None) -> dict:
+    """The measurement, sized to the time the Lambda actually has left.
+
+    Called LAST when the metrics dict is built, so by then every other figure
+    already exists and the budget is what is genuinely spare."""
+    left = None
+    getter = getattr(context, "get_remaining_time_in_millis", None)
+    if callable(getter):
+        try:
+            left = getter() / 1000.0
+        except Exception:  # noqa: BLE001
+            left = None
+    budget = CORPUS_DEFAULT_BUDGET_S if left is None else left - CORPUS_RESERVE_S
+    if budget < CORPUS_MIN_BUDGET_S:
+        return {"measured": False, "seconds": 0,
+                "reason": f"only {max(left or 0, 0):.0f}s of Lambda time left"}
+    try:
+        client = dynamodb.meta.client
+        return _measure_corpus(client, time.monotonic() + budget)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("corpus measurement failed: %s", exc)
+        return {"measured": False, "seconds": 0,
+                "reason": f"scan error: {type(exc).__name__}"}
 
 
 AWS_MARKETPLACE_TIER_PRICES = {
@@ -993,8 +1178,9 @@ def _build_email(metrics: dict) -> str:
   <tr><td>Intel alerts (total)</td><td><b>{s['intel_alerts_total']}</b></td></tr>
   <tr><td>Intel alerts (this week)</td><td><b>{s['intel_alerts_new']}</b></td></tr>
   <tr><td>Monitored Telegram marketplaces (active)</td><td><b>{s['monitored_marketplaces']:,}</b></td></tr>
-  <tr><td>Unique indicators (cumulative, all-time)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;New unique indicators (this week)</td><td><b>+{s['unique_indicators_new']:,}</b></td></tr>
+  {_corpus_rows(s.get('corpus'))}
+  <tr><td>Telegram-monitor first-seen log (cumulative since {FIRST_SEEN_LIVE_SINCE}, never expires)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
+  <tr><td>&nbsp;&nbsp;New this week</td><td><b>+{s['unique_indicators_new']:,}</b></td></tr>
   <tr><td>&nbsp;&nbsp;Of which backfilled from history (pre-{FIRST_SEEN_LIVE_SINCE})</td><td><b>{s.get('indicators_backfilled', 0):,}</b></td></tr>
   {_seed_warning(s)}
   <tr><td>TI feed IOC sightings (total, incl. repeats)</td><td><b>{s['ioc_total']:,}</b></td></tr>
@@ -1264,8 +1450,37 @@ def _surface_rows(by_surface: dict) -> str:
     return "".join(out)
 
 
+def _corpus_rows(c) -> str:
+    """The cumulative distinct-indicator figure, as measured by _measure_corpus.
+
+    When it could not be measured the row says so in red and names the command
+    that measures it by hand. It never falls back to the first-seen count: that
+    figure is a monitor-only log, and presenting it as the total is the defect
+    this block exists to end."""
+    if not c or not c.get("measured"):
+        reason = html.escape((c or {}).get("reason") or "no measurement was made")
+        return ('<tr><td>Distinct indicators in corpus (cumulative)</td>'
+                '<td><b style="color:#e94560">NOT MEASURED</b></td></tr>'
+                '<tr><td colspan="2" style="color:#e94560;font-size:12px">'
+                f'{reason}. Measure it by hand: AWS_PROFILE=relayshield '
+                '~/.rsvenv/bin/python tools/ti_demo_metrics.py --distinct'
+                '</td></tr>')
+    total, prior = c["distinct"], c["week_ago"]
+    channel = c["channel_collected"]
+    return (
+        f'<tr><td>Distinct indicators in corpus (cumulative)</td><td><b>{total:,}</b></td></tr>'
+        f'<tr><td>&nbsp;&nbsp;One week ago</td><td><b>{prior:,}</b></td></tr>'
+        f'<tr><td>&nbsp;&nbsp;Net change this week</td><td><b>{total - prior:+,}</b></td></tr>'
+        f'<tr><td>&nbsp;&nbsp;Collected by RelayShield channels</td><td><b>{channel:,}</b></td></tr>'
+        f'<tr><td>&nbsp;&nbsp;Ingested from public feeds</td><td><b>{total - channel:,}</b></td></tr>'
+        '<tr><td colspan="2" style="color:#888;font-size:12px">'
+        f'Measured from {c.get("rows", 0):,} sightings in {c.get("seconds", 0)}s. Counts indicators '
+        'still inside retention (feeds 365 days, Telegram 90), so it can fall as old '
+        'sightings expire. Internal figure: never quote it externally.</td></tr>')
+
+
 def _seed_warning(s: dict) -> str:
-    """Red row when the cumulative indicator figure cannot be trusted as all-time.
+    """Red row when the first-seen log cannot be trusted as covering history.
 
     Zero backfilled rows means relayshield_intel_first_seen holds only what the
     live monitor recorded since FIRST_SEEN_LIVE_SINCE, so unique_indicators is a
@@ -1369,6 +1584,9 @@ and includes this same section.</p>
         "x402":                 _x402_stats(),
         "hf_mcp":               _hf_mcp_stats(),
         "cs_mobile_feedback":   _feedback_sentiment_stats(),
+        # LAST on purpose: it spends whatever Lambda time is left, so every
+        # other figure must already exist by the time it starts.
+        "corpus":               _corpus_distinct(context),
     }
 
     html = _build_email(metrics)

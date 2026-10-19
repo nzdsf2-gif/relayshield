@@ -773,16 +773,16 @@ class CorpusBudget(unittest.TestCase):
         self.assertIn("left", out["reason"])
 
     def test_runs_when_there_is_time(self):
-        wm.dynamodb = types.SimpleNamespace(meta=types.SimpleNamespace(
-            client=_FakeLowLevelClient([_row("a.example"), _row("b.example")])))
-        out = wm._corpus_distinct(self._Ctx(600 * 1000))
+        fake = _FakeLowLevelClient([_row("a.example"), _row("b.example")])
+        with unittest.mock.patch.object(wm, "_lowlevel_client", lambda: fake):
+            out = wm._corpus_distinct(self._Ctx(600 * 1000))
         self.assertTrue(out["measured"])
         self.assertEqual(out["distinct"], 2)
 
     def test_a_context_that_cannot_say_still_runs(self):
-        wm.dynamodb = types.SimpleNamespace(meta=types.SimpleNamespace(
-            client=_FakeLowLevelClient([_row("a.example")])))
-        self.assertTrue(wm._corpus_distinct(None)["measured"])
+        fake = _FakeLowLevelClient([_row("a.example")])
+        with unittest.mock.patch.object(wm, "_lowlevel_client", lambda: fake):
+            self.assertTrue(wm._corpus_distinct(None)["measured"])
 
     def test_handler_computes_it_last_with_the_context(self):
         src = pathlib.Path(ROOT / "relayshield_weekly_metrics.py").read_text()
@@ -855,6 +855,41 @@ class CorpusProgressAndTool(unittest.TestCase):
         self.assertEqual(calls[-1], (50, 50))
         self.assertEqual(out["rows"], 50)
 
+    def test_a_resource_style_client_fails_with_a_plain_reason(self):
+        """2026-10-19: dynamodb.meta.client returns plain values, not {"S": ..},
+        and the first version died with "'str' object has no attribute 'get'"
+        on Andrew's Mac while 67 tests passed against a fake that returned the
+        low-level shape. The wrong client must now say what is wrong."""
+        class Deserialised(_FakeLowLevelClient):
+            def scan(self, **kw):
+                page = super().scan(**kw)
+                page["Items"] = [{k: v["S"] for k, v in i.items()}
+                                 for i in page["Items"]]
+                return page
+        out = wm._measure_corpus(Deserialised([_row("a.example")] * 4),
+                                 _far(), NOW)
+        self.assertFalse(out["measured"])
+        self.assertIn("boto3.client('dynamodb')", out["reason"])
+
+    def test_the_corpus_scan_never_borrows_the_resources_client(self):
+        for name in ("relayshield_weekly_metrics.py", "tools/corpus_distinct.py"):
+            src = (ROOT / name).read_text()
+            code = "\n".join(l for l in src.splitlines()
+                            if not l.strip().startswith(("#", "NOT ", "boto3.client('")))
+            self.assertNotIn("dynamodb.meta.client", code.replace(
+                "NOT dynamodb.meta.client", ""), name)
+
+    def test_the_lowlevel_client_is_a_plain_dynamodb_client(self):
+        calls = []
+        with unittest.mock.patch.object(wm, "_LOWLEVEL", []), \
+                unittest.mock.patch.object(
+                    wm.boto3, "client",
+                    lambda *a, **k: calls.append((a, k)) or object()):
+            wm._lowlevel_client()
+            wm._lowlevel_client()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], ("dynamodb",))
+
     def test_the_tool_refuses_the_wrong_account(self):
         tool = self._tool()
         with unittest.mock.patch.object(sys.modules["boto3"], "client") as c:
@@ -867,12 +902,13 @@ class CorpusProgressAndTool(unittest.TestCase):
     def test_the_tool_prints_the_cumulative_total(self):
         import io
         tool = self._tool()
-        wm.dynamodb = types.SimpleNamespace(meta=types.SimpleNamespace(
-            client=_FakeLowLevelClient(
-                [_row("old.example", OLD_TS), _row("new.example", NEW_TS),
-                 _row("new.example", NEW_TS)])))
+        fake = _FakeLowLevelClient(
+            [_row("old.example", OLD_TS), _row("new.example", NEW_TS),
+             _row("new.example", NEW_TS)])
         buf = io.StringIO()
-        with unittest.mock.patch.object(tool, "_guard_account"), \
+        with unittest.mock.patch.object(sys.modules["boto3"], "client",
+                                        lambda *a, **k: fake), \
+                unittest.mock.patch.object(tool, "_guard_account"), \
                 unittest.mock.patch.object(tool, "_approx_rows",
                                            return_value=3), \
                 unittest.mock.patch.object(sys, "argv", ["corpus_distinct"]), \
@@ -886,11 +922,11 @@ class CorpusProgressAndTool(unittest.TestCase):
     def test_the_tool_prints_no_total_when_the_scan_fails(self):
         import io
         tool = self._tool()
-        wm.dynamodb = types.SimpleNamespace(meta=types.SimpleNamespace(
-            client=_FakeLowLevelClient([_row("a.example")] * 20,
-                                       fail_segment=1)))
+        fake = _FakeLowLevelClient([_row("a.example")] * 20, fail_segment=1)
         buf = io.StringIO()
-        with unittest.mock.patch.object(tool, "_guard_account"), \
+        with unittest.mock.patch.object(sys.modules["boto3"], "client",
+                                        lambda *a, **k: fake), \
+                unittest.mock.patch.object(tool, "_guard_account"), \
                 unittest.mock.patch.object(tool, "_approx_rows",
                                            return_value=None), \
                 unittest.mock.patch.object(sys, "argv", ["corpus_distinct"]), \

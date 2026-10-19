@@ -151,27 +151,38 @@ product's tab says the same and the FTR needs an "AWS-hosted" product, that is t
 could stop validation, and it is better found now than after the request. Read it and tell me what
 it says; **do not change it in the same sitting.**
 
-## 7. Email to Dave Shapiro. SEND THIS NOW; IT NO LONGER WAITS ON THE REQUEST
+## 7. The question to AWS goes through support, not through Dave. SEND THIS NOW.
 
-Rewritten 2026-10-19: the validation request cannot be submitted until every prerequisite is complete (section 10), so this email is what unblocks it.
+**Andrew's rule, 2026-10-19: Dave Shapiro is not the right person for this (not his business line), and he is
+messaged only when there is a result to share.** The question goes to AWS's own support route. Two routes,
+in this order:
 
-> Subject: RelayShield: FTR prerequisite "deployed on AWS" is incomplete, and how to resolve it
->
-> Dave, we are enrolled in the Software Path and completed a Well-Architected review for our API
-> workload. On solution soln-aicwx4eiyofnm (linked to our public Marketplace product prod-kkvurtspreofy)
-> the validation prerequisite "AWS Marketplace product is deployed on AWS" shows Incomplete, because our
-> hosting pattern is "None of the above". Our API, data and billing run on AWS in one account. Three of the
-> product's five usage endpoints pass the customer's input (a domain, an email or a technology name) to
-> third-party data services outside AWS; the other two have no external calls.
->
-> Could you tell us: (1) which of those dependencies count under the hosting-pattern rules, in particular
-> public registry and public-data lookups; (2) whether a pattern fits a product where third-party data is
-> replicated into AWS ahead of time; and (3) whether we should scope the FTR to a narrower product.
-> Separately, who owns co-sell and ACE onboarding for early-stage ISVs?
->
-> Andrew Gibbs, RelayShield
+1. **The "Contact us for details" link beside "No, this product is not fully deployed on AWS"** on the
+   product's Architecture details tab. It is attached to exactly the assessment that fails, so it reaches the
+   team that owns it. UNVERIFIED where it leads (the page is not reachable from the container).
+2. **A Partner Central support case**, if the link only offers a form without a free-text box or if nobody
+   answers in a few business days. Look for the FTR or AWS Marketplace category; the Validation tab may
+   also carry its own link.
 
-Ask who owns co-sell, not for a person by name, as agreed.
+Paste this as the case text (no names, so it can be routed to whoever owns it):
+
+> Our Partner Central solution soln-aicwx4eiyofnm (linked to Marketplace SaaS product prod-kkvurtspreofy)
+> cannot request Foundational Technical Review validation because the prerequisite "AWS Marketplace
+> product is deployed on AWS" is Incomplete. Our listing's hosting pattern is "None of the above", and the
+> Architecture details tab reads "not fully deployed on AWS". Our API, data and billing run on AWS in one
+> account. Three of the product's five usage endpoints pass the customer's input (a domain, an email or a
+> technology name) to third-party data services outside AWS; the other two make no external calls.
+>
+> Please tell us: (1) which of those dependencies count under the hosting-pattern rules, in particular
+> lookups of public registry or public-data sources; (2) whether any hosting pattern fits a product whose
+> third-party data is replicated into AWS ahead of time; (3) whether the FTR can be scoped to the
+> AWS-hosted workload, with the external services declared; and (4) separately, what we need to do to clear
+> the Partner Revenue Measurement prerequisite for a SaaS product.
+
+**Dave Shapiro, later and only with a result:** when the FTR is requested or approved, a two-line note is
+enough. The co-sell and PDM question can go in that note. Nothing is sent to him before then.
+
+---
 
 ## 8. What to send back
 

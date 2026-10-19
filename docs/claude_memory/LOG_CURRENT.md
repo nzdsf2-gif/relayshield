@@ -660,3 +660,12 @@ table; x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.
 * **Next:** email AWS today (rewritten in `ftr_finish_2026-10-18.md` section 7), read the Architecture guidelines page and the
   four hosting-pattern options, start PRM; decide the product change only after those answers. `docs.aws.amazon.com` is
   unreachable from the container, WebFetch included.
+
+### 2026-10-19: DAVE SHAPIRO IS NOT THE ROUTE. ANDREW'S RULE.
+
+**Andrew, 2026-10-19: "He's not the right person to ask. Not his business line. I only want to message him when we have a
+result to share."** I had drafted three emails to him across two sessions (the FTR eligibility question, the PDM intro,
+the co-sell question), each presented as a courtesy when two of them were really requests for support he does not provide.
+The FTR hosting-pattern and PRM questions now go through the "Contact us for details" link on the Architecture details tab,
+or a Partner Central support case, with text in `ftr_finish_2026-10-18.md` section 7. Dave gets a short note only when the
+FTR is requested or approved. Do not draft him a question again.

@@ -383,6 +383,20 @@ class _DistinctCorpus:
         return {"distinct": total, "week_ago": old, "channel_collected": channel}
 
 
+_LOWLEVEL = []
+
+
+def _lowlevel_client():
+    """A plain boto3.client("dynamodb"), whose items come back as {"S": "..."}.
+
+    NOT dynamodb.meta.client: the resource's client has the type conversion
+    wired in and returns plain Python values, which is what broke the first
+    version of this on 2026-10-19 ('str' object has no attribute 'get')."""
+    if not _LOWLEVEL:
+        _LOWLEVEL.append(boto3.client("dynamodb", region_name="us-east-1"))
+    return _LOWLEVEL[0]
+
+
 def _measure_corpus(client, deadline: float, now: datetime = None,
                     progress=None) -> dict:
     """Full parallel scan of the sightings table, collapsed to distinct
@@ -418,6 +432,10 @@ def _measure_corpus(client, deadline: float, now: datetime = None,
             page = client.scan(**kwargs)
             batch = []
             empty = {}
+            first = (page.get("Items") or [None])[0]
+            if first is not None and not isinstance(first.get("ioc_value"), dict):
+                raise TypeError("scan items are already deserialised: pass "
+                                "boto3.client('dynamodb'), not resource.meta.client")
             for it in page.get("Items", []):
                 value = (it.get("ioc_value") or empty).get("S")
                 if not value:
@@ -444,7 +462,7 @@ def _measure_corpus(client, deadline: float, now: datetime = None,
             _segment(seg)
         except Exception as exc:  # noqa: BLE001 -- one bad segment voids the total
             logger.warning("corpus scan segment %s failed: %s", seg, exc)
-            failure.append(f"scan error: {type(exc).__name__}")
+            failure.append(f"scan error: {type(exc).__name__}: {str(exc)[:90]}")
             stop.set()
 
     with ThreadPoolExecutor(max_workers=CORPUS_SEGMENTS) as pool:
@@ -475,8 +493,7 @@ def _corpus_distinct(context=None) -> dict:
         return {"measured": False, "seconds": 0,
                 "reason": f"only {max(left or 0, 0):.0f}s of Lambda time left"}
     try:
-        client = dynamodb.meta.client
-        return _measure_corpus(client, time.monotonic() + budget)
+        return _measure_corpus(_lowlevel_client(), time.monotonic() + budget)
     except Exception as exc:  # noqa: BLE001
         logger.warning("corpus measurement failed: %s", exc)
         return {"measured": False, "seconds": 0,

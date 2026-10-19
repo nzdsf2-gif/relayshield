@@ -373,6 +373,9 @@ class _DistinctCorpus:
                 return
         s.add(key | flags)
 
+    def __len__(self) -> int:
+        return len(self._s)
+
     def totals(self) -> dict:
         total = len(self._s)
         old = sum(1 for x in self._s if x & self.OLD)
@@ -380,13 +383,18 @@ class _DistinctCorpus:
         return {"distinct": total, "week_ago": old, "channel_collected": channel}
 
 
-def _measure_corpus(client, deadline: float, now: datetime = None) -> dict:
+def _measure_corpus(client, deadline: float, now: datetime = None,
+                    progress=None) -> dict:
     """Full parallel scan of the sightings table, collapsed to distinct
     indicators. Reads the LOW-LEVEL client's {"S": "..."} items directly: the
     resource layer's type conversion is the slow part of reading millions of
     rows, and this reads all of them. Values are used as stored (both writers
     lowercase them). Never raises and never returns a partial count as a total: any
-    failure, or the deadline passing, yields measured=False with a reason."""
+    failure, or the deadline passing, yields measured=False with a reason.
+
+    `progress`, when given, is called as progress(rows_so_far, distinct_so_far)
+    after every page, under the lock. The Lambda passes nothing; the by-hand tool
+    (tools/corpus_distinct.py) uses it so a multi-minute scan is never silent."""
     started = time.monotonic()
     cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=7)).isoformat()
     counter = _DistinctCorpus()
@@ -424,6 +432,8 @@ def _measure_corpus(client, deadline: float, now: datetime = None) -> dict:
                 rows[0] += page.get("ScannedCount", len(page.get("Items", [])))
                 for value, old, channel in batch:
                     counter.add(value, old, channel)
+                if progress:
+                    progress(rows[0], len(counter))
             key = page.get("LastEvaluatedKey")
             if not key:
                 return

@@ -663,3 +663,17 @@ called for. Recommendation given: let it expire. Open checks handed to Andrew: w
 Entra app registrations and the Tenant ID (the tenant, the Power Platform connector and the Partner Center
 account sit outside the subscription), and the `sentinel_qa` API key still to revoke. **Not yet confirmed
 by anyone: that the tenant survives the subscription's deletion.**
+
+**2026-10-19, same day, two corrections against my own work.**
+* **`ti_demo_metrics.py --distinct` was the wrong command to hand over.** It holds every sighting row in one
+  list (`_scan_live`), so a ~9.5M-row table needs several GB. On Andrew's Mac it printed its "FULL SCAN"
+  warning and returned to the prompt with no result. I recommended it without reading its memory profile.
+  Replaced by `tools/corpus_distinct.py`: one 8-byte hash per indicator (~60 MB), a heartbeat every 10 seconds,
+  an account guard, and it runs the SAME `_measure_corpus` the Lambda runs, so its timing is the evidence for
+  whether the Lambda can do this. (The backfill's dry run, `backfill_first_seen.py` without `--apply`, is the
+  other tool that produced 687,011 on 2026-10-08, but it is the same file that writes with `--apply`.)
+* **The live `relayshield-weekly-metrics` is Timeout 120 s, Memory 256 MB** (read by Andrew, last modified
+  2026-09-28). At that size the in-Lambda scan cannot run: the guard needs 45 s plus a 60 s reserve and the
+  report's existing scans already use most of 120 s, so the email would print `NOT MEASURED`. 256 MB is also
+  ~0.14 vCPU, and the scan is CPU-bound on response parsing. Do not deploy it onto that config and expect a
+  number. Drift read the same day: live is byte-identical to commit `a56ee4ad` (stale, nothing to recover).

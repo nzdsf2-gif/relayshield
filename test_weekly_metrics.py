@@ -833,5 +833,74 @@ class CorpusEmailRows(unittest.TestCase):
         self.assertIn("NOT MEASURED", wm._corpus_rows(None))
 
 
+class CorpusProgressAndTool(unittest.TestCase):
+    """The by-hand command (tools/corpus_distinct.py) exists because the first
+    one handed out, ti_demo_metrics.py --distinct, loads all ~9.5M sightings
+    into memory and ended without a result on a laptop (2026-10-19)."""
+
+    def _tool(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "corpus_distinct", ROOT / "tools" / "corpus_distinct.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_progress_reports_monotonic_rows_ending_at_the_total(self):
+        rows = [_row(f"h{n}.example") for n in range(50)]
+        calls = []
+        out = wm._measure_corpus(_FakeLowLevelClient(rows), _far(), NOW,
+                                  progress=lambda r, d: calls.append((r, d)))
+        self.assertTrue(calls)
+        self.assertEqual(calls[-1], (50, 50))
+        self.assertEqual(out["rows"], 50)
+
+    def test_the_tool_refuses_the_wrong_account(self):
+        tool = self._tool()
+        with unittest.mock.patch.object(sys.modules["boto3"], "client") as c:
+            c.return_value.get_caller_identity.return_value = {
+                "Account": "620534471984"}
+            with self.assertRaises(SystemExit) as ctx:
+                tool._guard_account("us-east-1")
+        self.assertIn("AWS_PROFILE=relayshield", str(ctx.exception))
+
+    def test_the_tool_prints_the_cumulative_total(self):
+        import io
+        tool = self._tool()
+        wm.dynamodb = types.SimpleNamespace(meta=types.SimpleNamespace(
+            client=_FakeLowLevelClient(
+                [_row("old.example", OLD_TS), _row("new.example", NEW_TS),
+                 _row("new.example", NEW_TS)])))
+        buf = io.StringIO()
+        with unittest.mock.patch.object(tool, "_guard_account"), \
+                unittest.mock.patch.object(tool, "_approx_rows",
+                                           return_value=3), \
+                unittest.mock.patch.object(sys, "argv", ["corpus_distinct"]), \
+                unittest.mock.patch("sys.stdout", buf), \
+                unittest.mock.patch("sys.stderr", io.StringIO()):
+            rc = tool.main()
+        self.assertEqual(rc, 0)
+        self.assertRegex(buf.getvalue(), r"cumulative\)\s+2\b")
+        self.assertIn("+1", buf.getvalue())
+
+    def test_the_tool_prints_no_total_when_the_scan_fails(self):
+        import io
+        tool = self._tool()
+        wm.dynamodb = types.SimpleNamespace(meta=types.SimpleNamespace(
+            client=_FakeLowLevelClient([_row("a.example")] * 20,
+                                       fail_segment=1)))
+        buf = io.StringIO()
+        with unittest.mock.patch.object(tool, "_guard_account"), \
+                unittest.mock.patch.object(tool, "_approx_rows",
+                                           return_value=None), \
+                unittest.mock.patch.object(sys, "argv", ["corpus_distinct"]), \
+                unittest.mock.patch("sys.stdout", buf), \
+                unittest.mock.patch("sys.stderr", io.StringIO()):
+            rc = tool.main()
+        self.assertEqual(rc, 1)
+        self.assertIn("NOT MEASURED", buf.getvalue())
+        self.assertNotIn("cumulative)", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

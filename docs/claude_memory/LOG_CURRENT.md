@@ -612,3 +612,54 @@ x401 `VERIFIER_NONCE_TABLE`, the Proof form and the Muse summary.
 
 **Unchanged and still open:** the root access key (ends `N2XZ`) deletion, due on or after 2026-10-16; API alarm; badge
 table; x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.0 behind a missing JDK.
+
+## 2026-10-19: THE WEEKLY REPORT'S "ALL-TIME" INDICATOR COUNT WAS A MONITOR-ONLY LOG. IT NOW MEASURES THE CORPUS. AZURE: LET IT EXPIRE, WITH CHECKS.
+
+**Weekly metrics. Read from Andrew's own inbox (Gmail connector), not recalled.** The 2026-10-19 email
+printed `Unique indicators (all-time, distinct) | 256,779`, and the 2026-10-12 email `255,580`. Two facts
+follow from that and neither was in the repo:
+
+* **The live Lambda is still the 2026-09-28 build.** Its label is `all-time, distinct`; the repo's label has
+  said `cumulative, all-time` since 2026-10-11 and has carried the new-this-week, backfilled and red
+  `NOT ALL-TIME` rows since 2026-10-12. None of those rows is in the live email. So none of the
+  2026-10-06 / 08 / 11 / 12 changes to `relayshield_weekly_metrics.py` has reached AWS (it is in neither
+  `deploy_lambdas.yml` nor `lambda_drift_check.yml`; a hand `update-function-code` is the only route).
+* **The figure was never going to be cumulative, even after `backfill_first_seen.py --apply`.** Only
+  `relayshield_intel_monitor._record_first_seen` writes `relayshield_intel_first_seen`.
+  `relayshield_intel_feed._write_ioc`, which writes the public-feed sightings that are most new indicators,
+  never does. Evidence: +1,199 in a week against a corpus that grows by tens of thousands a week
+  (687,011 distinct on 2026-10-08, 661,609 on 09-30). A backfill fixes the past and nothing after it.
+  This corrects the 2026-10-08 entry's "a small figure means the table was under-seeded": true, and
+  incomplete, because the table is structurally monitor-only.
+
+**Built (`relayshield_weekly_metrics.py`, 67 tests pass, `test_weekly_metrics.py`):**
+`_measure_corpus` scans `relayshield_intel_iocs` in 8 parallel segments and collapses to distinct
+indicators, same definition as `tools/ti_demo_metrics.py --distinct` (email, phone, `_control` excluded). The
+email now leads with `Distinct indicators in corpus (cumulative)`, one week ago, net change, and the split
+between RelayShield-channel collection and public feeds (MEASUREMENT DOCTRINE: the split is what is
+defensible). The old row is relabelled `Telegram-monitor first-seen log (cumulative since 2026-08-27, never
+expires)` and keeps its own red warning. **It runs LAST in the metrics dict and inside the Lambda's remaining
+time. If it cannot finish it prints `NOT MEASURED` with the reason and the manual command; it never prints a
+partial count and never falls back to the first-seen figure.** Each of three reintroduced defects (no dedup,
+failed segment ignored, a segment skipped) was caught by tests.
+
+**Retention caveat, printed in the email itself:** sightings expire (feeds 365 days, Telegram 90), so this
+counts indicators still inside retention and can fall. It is the same population `--distinct` measures. A true
+forever-count needs the feed writers to record first-seen too: PutItem on `relayshield_intel_first_seen` for
+the feed Lambda's role (an IAM change on a full shared role, so a customer-managed policy) plus a conditional
+write per new indicator. NOT built, because it touches ingestion; it is the correct long-term fix.
+
+**NOT DEPLOYED, and UNVERIFIED whether the Lambda can afford it.** The scan loop is ~4.8 us/row in a sandbox
+benchmark (~45s of compute for 9.5M rows at full CPU). Not measurable from here: botocore's response parsing,
+and the Lambda's memory and timeout, which decide how much CPU it gets. The function's configuration has to be
+READ first. If it cannot finish, the first email says `NOT MEASURED: time budget exhausted` and nothing breaks.
+
+**Azure.** Andrew's portal screenshot: signed in as the work account `andrew@relayshieldad...` in
+DEFAULT DIRECTORY, showing "Don't have a subscription?". That reproduces the archive_01 note (no subscription
+visible to this identity) and does not contradict the expiry notice: "Azure subscription 1" belongs to the
+`relayshieldadmin@gmail.com` login. Nothing in production depends on Azure (no workflow, Lambda or deploy path
+calls it); the only Azure resource was the throwaway Sentinel QA workspace, whose teardown MS-1b already
+called for. Recommendation given: let it expire. Open checks handed to Andrew: which resource groups exist,
+Entra app registrations and the Tenant ID (the tenant, the Power Platform connector and the Partner Center
+account sit outside the subscription), and the `sentinel_qa` API key still to revoke. **Not yet confirmed
+by anyone: that the tenant survives the subscription's deletion.**

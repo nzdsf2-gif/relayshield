@@ -642,3 +642,21 @@ table; x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.
 * **Next, all Andrew's:** Save milestone, Generate report (PDF under 3 MB), Request validation on `soln-aicwx4eiyofnm`
   uploading the report and `assets/marketplace/consumption_security_architecture.png`, then send the Dave email. Optional:
   `AMOUNT=10 AWS_PROFILE=relayshield sh tools/create_cost_budget.sh --apply` (limit is still 50).
+
+### 2026-10-19: THE FTR IS BLOCKED ON TWO PREREQUISITES. THE 10-18 "PROCEED" RECOMMENDATION WAS WRONG.
+
+* Partner Central, solution `soln-aicwx4eiyofnm`, Validation tab, five prerequisites run in sequence. **Complete:** exactly one
+  Marketplace product; no non-Marketplace products; a software product. **Incomplete:** "AWS Marketplace product is deployed
+  on AWS" and "Partner Revenue Measurement (PRM) enabled". FTR status "Blocked".
+* **I recommended proceeding on 10-18 on the theory that the "deployed on AWS" designation was only a search badge. It is a
+  hard FTR prerequisite.** The 10-08 record had already flagged exactly this risk and I weakened it. Andrew caught it by
+  reading the screen; the rule that earned it is "a doc recording an open item is a lead" in the direction of my own earlier
+  inference.
+* **Why the product fails it (static code audit, secondary guidelines):** 3 of 5 usage endpoints send customer input to
+  third parties (tech-stack-cve: GitHub search; mcp-registry-risk: RDAP; bulk-identity-risk: breach and infostealer data
+  providers); llm-credential-exposure and prompt-injection-breach make no outbound calls. "None of the above" is therefore
+  accurate and stays.
+* **PRM is independent and slow** (reported up to 7 days of lag, tagging or user-agent method for SaaS). Start it first.
+* **Next:** email AWS today (rewritten in `ftr_finish_2026-10-18.md` section 7), read the Architecture guidelines page and the
+  four hosting-pattern options, start PRM; decide the product change only after those answers. `docs.aws.amazon.com` is
+  unreachable from the container, WebFetch included.

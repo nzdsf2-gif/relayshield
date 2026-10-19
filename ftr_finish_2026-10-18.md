@@ -151,22 +151,23 @@ product's tab says the same and the FTR needs an "AWS-hosted" product, that is t
 could stop validation, and it is better found now than after the request. Read it and tell me what
 it says; **do not change it in the same sitting.**
 
-## 7. Email to Dave Shapiro, after the validation request is submitted
+## 7. Email to Dave Shapiro. SEND THIS NOW; IT NO LONGER WAITS ON THE REQUEST
 
-Draft. Send only after step 5, and replace the bracketed date.
+Rewritten 2026-10-19: the validation request cannot be submitted until every prerequisite is complete (section 10), so this email is what unblocks it.
 
-> Subject: RelayShield: FTR validation requested, and a question on co-sell
+> Subject: RelayShield: FTR prerequisite "deployed on AWS" is incomplete, and how to resolve it
 >
-> Dave, following your note that onboarding is self-service for early-stage partners: we are
-> enrolled in the Software Path and have completed a Well-Architected review for our API workload
-> (report attached). We requested Foundational Technical Review validation on solution
-> soln-aicwx4eiyofnm on [date], linked to our public Marketplace product prod-kkvurtspreofy.
+> Dave, we are enrolled in the Software Path and completed a Well-Architected review for our API
+> workload. On solution soln-aicwx4eiyofnm (linked to our public Marketplace product prod-kkvurtspreofy)
+> the validation prerequisite "AWS Marketplace product is deployed on AWS" shows Incomplete, because our
+> hosting pattern is "None of the above". Our API, data and billing run on AWS in one account. Three of the
+> product's five usage endpoints pass the customer's input (a domain, an email or a technology name) to
+> third-party data services outside AWS; the other two have no external calls.
 >
-> Two questions. First, our Marketplace listing's hosting pattern reads "None of the above" because
-> some endpoints query third-party data providers, so AWS shows it as not fully deployed on AWS. Our API,
-> data and billing run on AWS in one account. Does that designation affect FTR eligibility, or is the
-> FTR scoped to the AWS-hosted workload? Second, who owns co-sell and ACE onboarding for early-stage
-> ISVs, and is there a partner development manager we should be introduced to once validation completes?
+> Could you tell us: (1) which of those dependencies count under the hosting-pattern rules, in particular
+> public registry and public-data lookups; (2) whether a pattern fits a product where third-party data is
+> replicated into AWS ahead of time; and (3) whether we should scope the FTR to a narrower product.
+> Separately, who owns co-sell and ACE onboarding for early-stage ISVs?
 >
 > Andrew Gibbs, RelayShield
 
@@ -198,3 +199,40 @@ The FTR is described as a review of the AWS-hosted workload against best practic
 diagram both describe exactly that workload and show what is outside AWS. My recommendation, mine to be
 overruled: proceed with the validation request, and put the eligibility question to AWS in the Dave
 email (draft above) rather than guessing. A failed review is reported as resubmittable.
+
+## 10. CORRECTION, 2026-10-19: "deployed on AWS" IS A HARD FTR PREREQUISITE. SECTION 9'S RECOMMENDATION WAS WRONG.
+
+Partner Central's Validation tab lists five prerequisites, run in sequence. Three are Complete (exactly one
+Marketplace product, no non-Marketplace products, a software product). **Two are Incomplete: "AWS
+Marketplace product is deployed on AWS" and "Partner Revenue Measurement (PRM) enabled".** Section 9 said the
+designation probably did not matter for the FTR and recommended proceeding. It does matter: the prerequisite
+reads the Architecture details assessment. Nothing can be submitted until both pass.
+
+**Why this product fails it, from the code (static audit, one level of calls, so a dynamically built URL
+could be missed).** Of the five usage endpoints:
+* No outbound calls found: `llm-credential-exposure`, `prompt-injection-breach`.
+* Customer input goes to a third party: `tech-stack-cve` (GitHub search), `mcp-registry-risk` (an RDAP domain
+  lookup), `bulk-identity-risk` (breach and infostealer data providers).
+
+AWS's guidelines, as summarised by secondary sources (docs.aws.amazon.com is unreachable from here), require
+third-party services that process application data to run on AWS as well, with carve-outs for CDNs, DNS and
+corporate identity providers. So "None of the above" is the true answer today and must not be changed to
+clear the check.
+
+**PRM, separately.** Reported as clearing when the product appears as onboarded in the Attributed revenue
+dashboard, with up to seven days of lag after enabling, and for SaaS through resource tagging or a
+user-agent string rather than Marketplace Metering. Secondary again: the PRM onboarding guide is the
+authority. It is independent of the hosting question, so **start it now: the lag is the longest item.**
+
+**Options, with my lean, mine to be overruled:**
+1. **Ask AWS first (cheap, today):** the email above, and the "Contact us for details" link on the Architecture
+   tab. It settles which dependencies count before anything is rebuilt.
+2. **Read the rubric (Andrew, 10 minutes):** the "Architecture guidelines" link on that tab, and the exact text of
+   the four hosting-pattern options under Request changes, then Update architecture details (open it, do not
+   submit). One option may describe replicating third-party data into AWS.
+3. **Only then decide the product change:** make the three endpoints AWS-only where the data is public (a
+   pre-fetched copy of registry data in DynamoDB), narrow this product to the two clean endpoints, or run the
+   FTR on a new narrower product. Each is a real build or a change set against a live listing, so none starts
+   before steps 1 and 2 answer.
+
+The WAFR, the milestone and the diagram are not wasted: every route needs them.

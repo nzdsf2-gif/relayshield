@@ -65,6 +65,7 @@ def main() -> int:
     _guard_account(args.region)
     approx = _approx_rows(args.region)
 
+    import boto3
     import relayshield_weekly_metrics as wm
 
     est = f"about {approx:,} rows" if approx else "a large table"
@@ -86,7 +87,7 @@ def main() -> int:
 
     try:
         out = wm._measure_corpus(
-            wm.dynamodb.meta.client,
+            boto3.client("dynamodb", region_name=args.region),
             time.monotonic() + args.max_minutes * 60,
             progress=beat)
     except KeyboardInterrupt:

@@ -677,3 +677,16 @@ by anyone: that the tenant survives the subscription's deletion.**
   report's existing scans already use most of 120 s, so the email would print `NOT MEASURED`. 256 MB is also
   ~0.14 vCPU, and the scan is CPU-bound on response parsing. Do not deploy it onto that config and expect a
   number. Drift read the same day: live is byte-identical to commit `a56ee4ad` (stale, nothing to recover).
+* **THIRD CORRECTION, SAME DAY: `tools/corpus_distinct.py` failed on its first real run** with
+  `'str' object has no attribute 'get'` on all 8 segments, after 1.7 s. Cause: `_measure_corpus` parses
+  low-level `{"S": "..."}` items, but both the tool and the Lambda path passed `dynamodb.meta.client`, the
+  RESOURCE's client, which has the type conversion wired in and returns plain Python values. Proven with real
+  boto3 1.43 and `botocore.stub.Stubber` (`resource.meta.client` -> `{'ioc_value': 'a.example'}`;
+  `boto3.client('dynamodb')` -> `{'ioc_value': {'S': 'a.example'}}`). **Why 67 green tests did not catch it:
+  the fake client returned the shape my code wanted, so it tested my assumption against itself.** Fixed:
+  `_lowlevel_client()` returns a plain `boto3.client("dynamodb")`, the tool builds its own, and a client that
+  returns deserialised items now fails with "pass boto3.client('dynamodb'), not resource.meta.client".
+  Verified this time by running the REAL module against real boto3 with Stubber's response validation (a
+  throwaway venv in the scratchpad, not part of the repo suite: the repo's tests stub boto3 out). **Lesson:
+  when code parses another library's wire format, the test needs that library's real output, not a hand-built
+  stand-in.** It was still not run against real DynamoDB; the next run on Andrew's Mac is that test.

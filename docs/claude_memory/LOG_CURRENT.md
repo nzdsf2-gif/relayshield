@@ -628,3 +628,17 @@ table; x401 `VERIFIER_NONCE_TABLE`, Proof form and Muse summary; CS Mobile v1.7.
 * **WAFR: the unanswered question is in RELIABILITY (12/13).** Totals now: OPS 11/11, SEC 11/11, REL 12/13, PERF 5/5,
   COST 11/11, SUS 6/6; 36 High and 15 Medium. The "Next risk to address: OPS 1" box on the overview is a pointer to the
   next risk, not the gap. Its answer is in `wafr_answers_reliability_2026-10-11.md`.
+
+### 2026-10-18 (end): WAFR COMPLETE, ARCHITECTURE TAB READ
+
+* **WAFR is 57/57 answered** (Reliability went 12/13 to 13/13 after REL 13 was answered with "None of these"; the gap was
+  an all-unticked question, which the console counts as unanswered until that option is chosen). 37 High, 15 Medium. All
+  nine stale Notes were updated by Andrew: REL 1, 7, 8, 10, 12, 13, PERF 2, PERF 5, COST 9, SUS 3.
+* **The Architecture details tab for `prod-kkvurtspreofy` reads "None of the above" and AWS's assessment is "not fully deployed
+  on AWS".** That is accurate: AWS's designation requires third-party services that process application data to run on AWS
+  too, and ours query external data providers. The page's own banner says publishing is allowed regardless. **Whether the
+  FTR requires the designation is NOT established**; no source found states an FTR eligibility rule. Decision (mine, to be
+  overruled): proceed, and ask AWS in the Dave Shapiro email. Section 9 of `ftr_finish_2026-10-18.md` has the detail.
+* **Next, all Andrew's:** Save milestone, Generate report (PDF under 3 MB), Request validation on `soln-aicwx4eiyofnm`
+  uploading the report and `assets/marketplace/consumption_security_architecture.png`, then send the Dave email. Optional:
+  `AMOUNT=10 AWS_PROFILE=relayshield sh tools/create_cost_budget.sh --apply` (limit is still 50).

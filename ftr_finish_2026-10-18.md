@@ -162,8 +162,11 @@ Draft. Send only after step 5, and replace the bracketed date.
 > (report attached). We requested Foundational Technical Review validation on solution
 > soln-aicwx4eiyofnm on [date], linked to our public Marketplace product prod-kkvurtspreofy.
 >
-> One question: who owns co-sell and ACE onboarding for early-stage ISVs, and is there a partner
-> development manager we should be introduced to once validation completes?
+> Two questions. First, our Marketplace listing's hosting pattern reads "None of the above" because
+> some endpoints query third-party data providers, so AWS shows it as not fully deployed on AWS. Our API,
+> data and billing run on AWS in one account. Does that designation affect FTR eligibility, or is the
+> FTR scoped to the AWS-hosted workload? Second, who owns co-sell and ACE onboarding for early-stage
+> ISVs, and is there a partner development manager we should be introduced to once validation completes?
 >
 > Andrew Gibbs, RelayShield
 
@@ -175,3 +178,23 @@ Ask who owns co-sell, not for a person by name, as agreed.
 2. The pillar and number of the unanswered question (and the question text if it is OPS or SEC).
 3. What this product's Architecture details tab currently says.
 4. Any FTR checklist item you cannot answer.
+
+## 9. What the Architecture details tab said (read 2026-10-18)
+
+Hosting pattern **"None of the above"**, and AWS's assessment reads **"No, this product is not fully
+deployed on AWS. Contact us for details."** The product page's own banner says a product can be
+published with any architecture and that matching a hosting pattern only earns a "deployed on AWS"
+designation in search results.
+
+**What AWS's SaaS guidelines say about that designation** (read through search results quoting
+https://docs.aws.amazon.com/marketplace/latest/userguide/saas-guidelines.html, which is egress-blocked
+here, so secondary): the application and control planes must run entirely on AWS, and third-party services
+that transmit, store or process application data must also run on AWS, with carve-outs for CDNs, DNS and
+corporate identity providers. Our endpoints query third-party data providers, so "None of the above" is the
+accurate answer and stays. **Do not change it to get the badge.**
+
+**Not established: whether the FTR requires the designation.** No result stated an FTR eligibility rule.
+The FTR is described as a review of the AWS-hosted workload against best practices; the WAFR and the
+diagram both describe exactly that workload and show what is outside AWS. My recommendation, mine to be
+overruled: proceed with the validation request, and put the eligibility question to AWS in the Dave
+email (draft above) rather than guessing. A failed review is reported as resubmittable.

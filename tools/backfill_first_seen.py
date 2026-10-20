@@ -36,8 +36,10 @@ A TTL here would delete the evidence the lead-time claim rests on.
 import argparse
 import sys
 
+REQUIRED_ACCOUNT = "239677749008"
 IOCS = "relayshield_intel_iocs"
 FIRST_SEEN = "relayshield_intel_first_seen"
+WRITE_WORKERS = 32
 
 
 def main() -> int:
@@ -46,6 +48,15 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
+
+    # 620534471984 is the pre-audit account and the shell default, so a missing
+    # AWS_PROFILE does not error: it quietly aims a WRITE at the wrong account.
+    who = boto3.client("sts").get_caller_identity()["Account"]
+    if who != REQUIRED_ACCOUNT:
+        print(f"Refusing to run: credentials resolve to account {who}, not "
+              f"{REQUIRED_ACCOUNT}. Prefix the command with AWS_PROFILE=relayshield.",
+              file=sys.stderr)
+        return 2
 
     ddb = boto3.resource("dynamodb")
     src = ddb.Table(IOCS)
@@ -94,26 +105,60 @@ def main() -> int:
         print("  see this file's docstring for the create-table command")
         return 0
 
-    dst = ddb.Table(FIRST_SEEN)
-    # Written one at a time, not batched: batch_writer cannot express a
-    # condition, and unconditional writes here would overwrite a first_seen the
-    # live monitor already recorded with a LATER date from an older scan row.
-    written = skipped = failed = 0
-    for value, (ts, channel, category) in earliest.items():
-        try:
-            dst.put_item(
-                Item={"ioc_value": value, "first_seen": ts,
-                      "first_channel": channel, "first_category": category},
-                ConditionExpression="attribute_not_exists(ioc_value)",
-            )
-            written += 1
-        except Exception as exc:
-            if type(exc).__name__ == "ConditionalCheckFailedException":
-                skipped += 1          # already recorded, by the live monitor or a prior run
-            else:
-                failed += 1
-                if failed <= 5:
-                    print(f"  failed {value[:28]}: {type(exc).__name__}: {exc}")
+    # Written as CONDITIONAL single puts, not batched: batch_writer cannot express a
+    # condition, and unconditional writes here would overwrite a first_seen the live
+    # monitor already recorded with a LATER date from an older scan row.
+    #
+    # In parallel, with a heartbeat. Written serially this was ~470,000 round trips
+    # from a laptop, about two hours with no output at all, and a tool that goes
+    # quiet for that long is indistinguishable from a hung one. It was apparently
+    # never run to completion (2026-10-19: the live first-seen table still held only
+    # the monitor's ~257K rows against ~724K distinct indicators).
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    client = ddb.meta.client            # thread-safe, and takes plain Python values
+    items = list(earliest.items())
+    lock = threading.Lock()
+    tally = {"written": 0, "skipped": 0, "failed": 0, "last": time.monotonic()}
+    started = time.monotonic()
+    print(f"\nwriting up to {len(items):,} first-seen row(s), {WRITE_WORKERS} in "
+          f"parallel, progress about every 15 seconds:", file=sys.stderr)
+
+    def _put(chunk):
+        for value, (ts, channel, category) in chunk:
+            try:
+                client.put_item(
+                    TableName=FIRST_SEEN,
+                    Item={"ioc_value": value, "first_seen": ts,
+                          "first_channel": channel, "first_category": category},
+                    ConditionExpression="attribute_not_exists(ioc_value)",
+                )
+                key = "written"
+            except Exception as exc:
+                if type(exc).__name__ == "ConditionalCheckFailedException":
+                    key = "skipped"   # already recorded, by the live monitor or a prior run
+                else:
+                    key = "failed"
+                    with lock:
+                        if tally["failed"] < 5:
+                            print(f"  failed {value[:28]}: {type(exc).__name__}: {exc}",
+                                  file=sys.stderr)
+            with lock:
+                tally[key] += 1
+                now = time.monotonic()
+                if now - tally["last"] >= 15:
+                    tally["last"] = now
+                    done = tally["written"] + tally["skipped"] + tally["failed"]
+                    print(f"  {now - started:6.0f}s  {done:>9,} / {len(items):,}  "
+                          f"wrote {tally['written']:,}, already present "
+                          f"{tally['skipped']:,}, failed {tally['failed']:,}",
+                          file=sys.stderr, flush=True)
+
+    with ThreadPoolExecutor(max_workers=WRITE_WORKERS) as pool:
+        list(pool.map(_put, [items[i::WRITE_WORKERS] for i in range(WRITE_WORKERS)]))
+    written, skipped, failed = tally["written"], tally["skipped"], tally["failed"]
     print(f"\nwrote {written}, skipped {skipped} already present, {failed} failure(s)")
     return 1 if failed else 0
 

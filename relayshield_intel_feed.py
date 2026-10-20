@@ -27,11 +27,13 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import urllib.request
 import urllib.error
 import urllib.parse
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
 import boto3
@@ -171,6 +173,130 @@ def _send_telegram(token: str, chat_id: int, text: str) -> None:
         logger.warning("Telegram notify failed: %s", exc)
 
 
+# ---------------------------------------------------------------------------
+# First-seen recording for feed indicators (2026-10-20).
+#
+# relayshield_intel_first_seen is meant to hold ONE row per indicator, ever, with
+# no TTL: sightings expire (feeds 365 days), first-seen must not. Until now only
+# the Telegram monitor wrote it, so it covered ~16K of ~724K indicators and the
+# feeds, where almost every new indicator comes from, never appeared in it. That
+# is why the weekly report's "all-time" count read 256,779 against a measured
+# 723,810.
+#
+# DESIGN. A first-seen write is a second network round trip per indicator, and
+# several sources below already call _write_ioc once per row inside a 900-second
+# Lambda budget (see the AbuseIPDB comment). So nothing here touches the network
+# per indicator: _write_ioc and _batch_write_iocs only NOTE the value in memory,
+# and ONE bounded, parallel flush runs at the end of the invocation, inside
+# whatever time is left. It is fail-open: first-seen is an enrichment and must
+# never stop collection.
+#
+# OFF BY DEFAULT, and the switch is the environment variable below. Do not turn it
+# on until tools/backfill_first_seen.py --apply has finished. The writes are
+# conditional, first writer wins, so a feed that records an old indicator BEFORE
+# the backfill stamps it with today's date permanently and the backfill can never
+# correct it. That is the lead-time claim's worst failure, "first seen today" for
+# something seen months ago, and it is invisible once done.
+# ---------------------------------------------------------------------------
+FIRST_SEEN_TABLE            = "relayshield_intel_first_seen"
+FIRST_SEEN_FLAG             = "FIRST_SEEN_FEED_ENABLED"
+FIRST_SEEN_WORKERS          = 16
+FIRST_SEEN_RESERVE_S        = 90     # left for the summary and the return
+FIRST_SEEN_DEFAULT_BUDGET_S = 240    # when the Lambda context cannot say
+_FIRST_SEEN_PENDING: dict = {}       # ioc_value -> (source, ingest time)
+
+
+def _first_seen_enabled() -> bool:
+    return os.environ.get(FIRST_SEEN_FLAG, "") == "1"
+
+
+def _note_first_seen(ioc_value: str, source: str) -> None:
+    """Remember that this indicator was ingested. In memory only, no I/O."""
+    if not _first_seen_enabled() or ioc_value in _FIRST_SEEN_PENDING:
+        return
+    _FIRST_SEEN_PENDING[ioc_value] = (source, datetime.now(timezone.utc).isoformat())
+
+
+def _flush_first_seen(context=None) -> dict:
+    """Write one conditional first-seen row per noted indicator, in parallel.
+
+    Returns counts and never raises. `new` is indicators that were genuinely new
+    to the corpus, `known` is the expected common case (already recorded),
+    `skipped` is anything not attempted or failed. An AccessDenied stops the
+    whole flush at once, so a missing grant costs one warning and not 60,000
+    failing calls."""
+    pending = dict(_FIRST_SEEN_PENDING)
+    _FIRST_SEEN_PENDING.clear()
+    stats = {"pending": len(pending), "new": 0, "known": 0, "skipped": 0, "error": ""}
+    if not pending:
+        return stats
+    try:
+        left = None
+        getter = getattr(context, "get_remaining_time_in_millis", None)
+        if callable(getter):
+            left = getter() / 1000.0
+        budget = (FIRST_SEEN_DEFAULT_BUDGET_S if left is None
+                  else left - FIRST_SEEN_RESERVE_S)
+        if budget <= 0:
+            stats.update(skipped=len(pending), error="no Lambda time left")
+            logger.warning("first-seen flush skipped: no Lambda time left")
+            return stats
+        deadline = time.monotonic() + budget
+        client = _dynamodb.meta.client
+        items = list(pending.items())
+        lock, stop = threading.Lock(), threading.Event()
+
+        def work(chunk):
+            new = known = skipped = 0
+            err = ""
+            for i, (value, (source, when)) in enumerate(chunk):
+                if stop.is_set() or time.monotonic() > deadline:
+                    skipped += len(chunk) - i
+                    break
+                try:
+                    client.put_item(
+                        TableName=FIRST_SEEN_TABLE,
+                        Item={"ioc_value": value, "first_seen": when,
+                              "first_channel": source,
+                              "first_category": "threat_feed"},
+                        ConditionExpression="attribute_not_exists(ioc_value)")
+                    new += 1
+                except Exception as exc:  # noqa: BLE001 -- fail open
+                    code = (getattr(exc, "response", None) or {}).get(
+                        "Error", {}).get("Code", "")
+                    tag = type(exc).__name__ + code
+                    if "ConditionalCheckFailed" in tag:
+                        known += 1          # seen before: the normal case
+                    elif "AccessDenied" in tag:
+                        err = ("AccessDenied: grant dynamodb:PutItem on "
+                               f"{FIRST_SEEN_TABLE} to this function's role")
+                        skipped += len(chunk) - i
+                        stop.set()
+                        break
+                    else:
+                        skipped += 1
+                        err = err or type(exc).__name__
+            with lock:
+                stats["new"] += new
+                stats["known"] += known
+                stats["skipped"] += skipped
+                stats["error"] = stats["error"] or err
+
+        with ThreadPoolExecutor(max_workers=FIRST_SEEN_WORKERS) as pool:
+            list(pool.map(work, [items[i::FIRST_SEEN_WORKERS]
+                                 for i in range(FIRST_SEEN_WORKERS)]))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("first-seen flush failed: %s", exc)
+        stats["error"] = stats["error"] or type(exc).__name__
+        stats["skipped"] = stats["pending"] - stats["new"] - stats["known"]
+    log = logger.warning if stats["error"] else logger.info
+    log("first-seen: pending=%d new=%d known=%d skipped=%d error=%s",
+        stats["pending"], stats["new"], stats["known"], stats["skipped"],
+        stats["error"] or "-")
+    return stats
+
+
+
 def _write_ioc(table, ioc_value: str, ioc_type: str, source: str, malware: str = "") -> bool:
     """Write a single IOC to DynamoDB. Returns True if new, False if duplicate."""
     now_ts = datetime.now(timezone.utc).isoformat()
@@ -196,6 +322,7 @@ def _write_ioc(table, ioc_value: str, ioc_type: str, source: str, malware: str =
         item["malware"] = normalise_malware(malware)
     try:
         table.put_item(Item=item, ConditionExpression="attribute_not_exists(ioc_value)")
+        _note_first_seen(item["ioc_value"], source)
         return True
     except _dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
         return False  # duplicate
@@ -230,6 +357,7 @@ def _batch_write_iocs(table, items: list) -> int:
         deduped.append((ioc_value, ioc_type, source, malware))
 
     written = 0
+    noted = []
     try:
         with table.batch_writer() as batch:
             for ioc_value, ioc_type, source, malware in deduped:
@@ -245,6 +373,11 @@ def _batch_write_iocs(table, items: list) -> int:
                     item["malware"] = normalise_malware(malware)
                 batch.put_item(Item=item)
                 written += 1
+                noted.append((item["ioc_value"], source))
+        # Only after the batch_writer has flushed cleanly: a failed flush may
+        # not have stored these, and a failed write must not be recorded.
+        for value, source in noted:
+            _note_first_seen(value, source)
     except Exception as exc:
         logger.warning("Batch write error after %d items: %s", written, exc)
     return written
@@ -1207,6 +1340,8 @@ def lambda_handler(event, context):
         return {"statusCode": 200, "probe": "ok"}
 
     logger.info("INTEL-FEED starting")
+    # A warm container keeps module state between invocations.
+    _FIRST_SEEN_PENDING.clear()
     table     = _dynamodb.Table(INTEL_IOCS_TABLE)
     bot_token = _get_bot_token()
 
@@ -1279,6 +1414,13 @@ def lambda_handler(event, context):
                      + tr["fetched"] + pw["fetched"] + mp["fetched"] + bv["fetched"] + ps["fetched"]
                      + gh["fetched"])
 
+    fs = _flush_first_seen(context)
+    fs_line = ""
+    if fs["pending"] or fs["error"]:
+        fs_line = (f"First-seen: {fs['new']} new indicators, {fs['known']} already known"
+                   + (f", {fs['skipped']} skipped ({fs['error']})" if fs["error"] else "")
+                   + "\n")
+
     ab_note = " (skipped — already ran today)" if ab.get("skipped") else ""
     summary = (
         f"<b>RelayShield INTEL-FEED</b>\n"
@@ -1305,6 +1447,7 @@ def lambda_handler(event, context):
         f"Botvrij: {bv['fetched']} fetched / {bv['written']} new\n"
         f"Paste sites (paste.ee + pastehub): {ps['fetched']} fetched / {ps['written']} new\n"
         f"GitHub tool repos: {gh['fetched']} fetched / {gh['written']} new (review candidates, not auto-alerted)\n"
+        f"{fs_line}"
         f"Total new IOCs: {total_written}"
     )
     _send_telegram(bot_token, ADMIN_CHAT_ID, summary)
@@ -1314,6 +1457,7 @@ def lambda_handler(event, context):
         "statusCode":       200,
         "total_fetched":    total_fetched,
         "total_written":    total_written,
+        "first_seen":       fs,
         "threatfox":        tf,
         "urlhaus":          uh,
         "spamhaus":         sh,

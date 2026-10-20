@@ -690,3 +690,12 @@ by anyone: that the tenant survives the subscription's deletion.**
   throwaway venv in the scratchpad, not part of the repo suite: the repo's tests stub boto3 out). **Lesson:
   when code parses another library's wire format, the test needs that library's real output, not a hand-built
   stand-in.** It was still not run against real DynamoDB; the next run on Andrew's Mac is that test.
+
+**MEASURED 2026-10-19/20 on Andrew's Mac, `tools/corpus_distinct.py` (real DynamoDB, first working run):**
+**723,810 distinct indicators** (697,502 a week earlier, **+26,308**), of which **15,765 collected by RelayShield
+channels** and 708,045 ingested from public feeds. 9,538,567 sightings scanned in **284.2 s** (~33.6K rows/s,
+CPU-bound on response parsing). It reconciles with the 2026-10-08 measurement (687,011) at ~+26K/week. Andrew's
+reaction, verbatim in substance: this is the row he wants in the weekly report. That figure is the evidence for
+the Lambda sizing: a Mac core did it in under five minutes, so `relayshield-weekly-metrics` (Timeout 120 s,
+Memory 256 MB, last modified 2026-09-28) needs Timeout 900 s and Memory 1769 MB (one full vCPU) before the
+in-Lambda scan can finish. Rollback is those two values back to 120/256 and the 2026-09-28 file (`a56ee4ad`).

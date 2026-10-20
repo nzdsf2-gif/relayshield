@@ -123,5 +123,36 @@ class TestIocContract(unittest.TestCase):
                              f"{field} lost its {ioc_type} mapping again")
 
 
+class ImportProbeGuard(unittest.TestCase):
+    """deploy_lambdas.yml invokes each deployed function with
+    {"source": "ci.import-probe"}. On 2026-10-20 this handler had no guard, so the
+    probe ran a full Telegram poll (123 s) and held the single-flight lock."""
+
+    def _handler(self):
+        return _function(_module(), "lambda_handler")
+
+    def test_probe_returns_before_the_lock_is_taken(self):
+        fn = self._handler()
+        probe_line = lock_line = None
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Constant) and node.value == "ci.import-probe":
+                probe_line = node.lineno if probe_line is None else min(probe_line, node.lineno)
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_acquire_lock":
+                lock_line = node.lineno
+        self.assertIsNotNone(probe_line, "lambda_handler does not recognise ci.import-probe")
+        self.assertIsNotNone(lock_line)
+        self.assertLess(probe_line, lock_line, "the probe check must precede _acquire_lock()")
+
+    def test_probe_branch_returns_without_touching_anything(self):
+        fn = self._handler()
+        guard = next(n for n in fn.body if isinstance(n, ast.If)
+                     and "ci.import-probe" in ast.dump(n.test))
+        self.assertTrue(any(isinstance(n, ast.Return) for n in guard.body))
+        called = {getattr(c.func, "id", getattr(c.func, "attr", ""))
+                  for n in guard.body for c in ast.walk(n) if isinstance(c, ast.Call)}
+        self.assertFalse(called - {"info", "dumps"},
+                         f"the probe branch does real work: {sorted(called)}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

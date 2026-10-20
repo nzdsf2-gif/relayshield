@@ -699,3 +699,49 @@ reaction, verbatim in substance: this is the row he wants in the weekly report. 
 the Lambda sizing: a Mac core did it in under five minutes, so `relayshield-weekly-metrics` (Timeout 120 s,
 Memory 256 MB, last modified 2026-09-28) needs Timeout 900 s and Memory 1769 MB (one full vCPU) before the
 in-Lambda scan can finish. Rollback is those two values back to 120/256 and the 2026-09-28 file (`a56ee4ad`).
+
+## 2026-10-20: THE FEED NOW NOTES FIRST-SEEN (OFF BY DEFAULT); THE BACKFILL WAS A TWO-HOUR SILENCE; AZURE IS EMPTY.
+
+**Deployed by Andrew's own paste (read, not assumed):** `relayshield-weekly-metrics` is now **Timeout 900 s,
+Memory 1769 MB**, code modified 2026-10-20T00:24:53Z, 24,481 bytes. The corpus row has NOT yet been seen in an
+email: Andrew still has to invoke it, and the first email's `Measured from N sightings in Ns` line is the
+real in-Lambda timing.
+
+**Azure, settled by Andrew's screenshots 2026-10-20.** Subscription `c2a7909e-923e-4282-b883-90886c36a6f7`
+("Azure subscription 1"): Status **Disabled**, "Your free credit has expired", current cost 0.00, Owner is the
+`relayshieldadmin@gmail.com` login, **no resource groups, no resources**. Entra tenant `Default Directory`,
+**Tenant ID `4abf9bc4-9257-4c71-8b6b-a8afc934b4a5`**, primary domain `relayshieldadmingmail.onmicrosoft.com`,
+Entra ID Free, **2 users, 0 groups, 0 applications, 0 devices**. So nothing was lost to the subscription
+expiring, and there is no Entra application registration for MS-3 to depend on (it must be created fresh if
+Security Store is ever pursued). Not confirmed by anyone: that the tenant survives the subscription's deletion
+(it has users and no subscription dependency, so it should). Still open: revoke the `sentinel_qa` API key.
+
+**Feed first-seen (Andrew approved: "I'm ok to make the Lambda record first-seen too").**
+`relayshield_intel_feed.py` now NOTES each ingested indicator in memory (`_write_ioc`, `_batch_write_iocs`,
+after a clean flush only) and runs ONE parallel conditional-put flush (`_flush_first_seen`, 16 workers) just
+before the Telegram summary, inside the Lambda's remaining time minus 90 s. Fail-open; an AccessDenied stops the
+flush after one warning and names the grant. **OFF BY DEFAULT: it only records when `FIRST_SEEN_FEED_ENABLED=1`.**
+Reason, and it is the whole point of the flag: the writes are conditional and first writer wins, so a feed
+that records an old indicator BEFORE `tools/backfill_first_seen.py --apply` has run stamps it with today's date
+permanently and the backfill can never correct it. Turn it on only after the backfill finished. Verified against
+real boto3 with Stubber (the resource client takes plain Python values; a real conditional failure counts as
+known; a real AccessDeniedException is recognised). 18 tests in `test_intel_feed_first_seen.py`, each of three
+reintroduced defects caught.
+* **Why a flush and not a write per indicator:** several sources already call `_write_ioc` once per row inside a
+  900 s budget (see the AbuseIPDB comment), so a second round trip per call would have doubled their cost.
+* **Which role the feed runs under is NOT established.** `relayshield-intel-feed` is absent from the shared
+  role's `functions_using_this_role`, so it probably has its own role and needs `dynamodb:PutItem` on
+  `relayshield_intel_first_seen`. Read it with `iam simulate-principal-policy` before enabling.
+* **Not covered:** `relayshield_intel_kev.py` and `relayshield_intel_substack.py` also write sightings and do not
+  record first-seen. Both are low volume and run on the shared role, which already has PutItem on the table.
+
+**`tools/backfill_first_seen.py` fixed.** Its `--apply` wrote ~470,000 rows ONE AT A TIME with no output, about two
+hours of silence from a laptop, and was apparently never run to completion (the live table held ~257K rows against
+~724K distinct). Now 32 parallel conditional writers with a heartbeat, and it refuses to run against account
+`620534471984` (it had no account guard and it WRITES). 7 tests in `test_backfill_first_seen.py`. The scan phase
+is unchanged (sequential, resource layer, several minutes).
+
+**Sequence, enforced where it can be:** (1) invoke the weekly report and read the email, (2) run the backfill with
+`--apply`, (3) read the feed role's PutItem decision and grant if denied, (4) push `main` (CI deploys the feed
+with the flag off, so the deploy is inert), (5) set `FIRST_SEEN_FEED_ENABLED=1` through `lambda_env_set.yml`,
+(6) then relabel the weekly report's first-seen row, which stops being "Telegram-monitor" only at that point.

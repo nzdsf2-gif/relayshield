@@ -745,3 +745,30 @@ is unchanged (sequential, resource layer, several minutes).
 `--apply`, (3) read the feed role's PutItem decision and grant if denied, (4) push `main` (CI deploys the feed
 with the flag off, so the deploy is inert), (5) set `FIRST_SEEN_FEED_ENABLED=1` through `lambda_env_set.yml`,
 (6) then relabel the weekly report's first-seen row, which stops being "Telegram-monitor" only at that point.
+
+**2026-10-20 (later): FIRST REAL WEEKLY EMAIL WITH THE CORPUS ROW, AND WHAT IT SHOWED.** Andrew's screenshot of the
+9:01 PM report: `Distinct indicators in corpus (cumulative) 723,787`, one week ago 697,479, **net +26,308**,
+15,742 collected by RelayShield channels, 708,045 from public feeds, **measured from 9,538,540 sightings in
+494.1 s inside the Lambda** (Timeout 900, Memory 1769). The corpus row works.
+* **He still said "the unique indicators is still incremental".** The row he was reading was almost certainly the
+  first-seen log beneath it (257,696, +1,399 this week, 194,987 seeded), which was labelled "(cumulative since
+  2026-08-27, never expires)" and so looked like a competing total. It is 36% of the corpus. **Demoted:** it is now
+  a muted diagnostic, "First-seen log (diagnostic, not the total above)", showing its size as a percentage of the
+  measured corpus, and its note says it is still being seeded. A test makes exactly ONE row in the section call itself
+  cumulative, proven by relabelling the log row. Needs a hand redeploy of the weekly Lambda (same zip block).
+* **194,987 pre-2026-08-27 rows already existed in the first-seen table**, i.e. an earlier `backfill_first_seen.py
+  --apply` had been started and stopped partway (consistent with it being a two-hour serial silence). The new
+  backfill skips those and writes the rest.
+* **GROWTH WARNING, so it is not rediscovered as a failure.** The sightings table grows ~430K rows a week (9,108,658
+  to 9,537,878 between 10-12 and 10-19) and will keep growing until retention (feeds 365 days) starts expiring
+  rows, around June 2027. The in-Lambda scan time scales with rows: 494 s now, and the guard's budget is roughly
+  Timeout minus the other metrics minus 60 s reserve, so it will hit `NOT MEASURED: time budget exhausted` in
+  roughly 10 to 12 weeks (around the new year). That degrades gracefully, it does not break the email. **The
+  durable fix is the first-seen log itself:** once the backfill has completed and the feed recorder is on, its
+  row COUNT is a cheap, never-expiring, forever-cumulative figure, and the headline should switch to it.
+* **The feed's role cannot write the table yet.** `relayshield-intel-feed` runs under
+  `arn:aws:iam::239677749008:role/relayshield-intel-feed-role` and `simulate-principal-policy` returned
+  `implicitDeny` for PutItem on `relayshield_intel_first_seen`. `tools/grant_feed_first_seen_write.py` reads the
+  decision and, with `--apply`, adds ONE new inline policy `relayshield-first-seen-put` (PutItem on that table only),
+  refusing if a policy of that name exists, if the role is the full shared role, or if the account is wrong.
+  8 tests, and the real tool was run against real botocore clients under Stubber to validate every request.

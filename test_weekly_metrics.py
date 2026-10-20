@@ -309,10 +309,10 @@ class EmailRendering(unittest.TestCase):
         html = wm._build_email(self._fixture())
         self.assertIn("Monitored Telegram marketplaces", html)
         self.assertIn("115", html)
-        # Relabeled 2026-10-19: this row is the Telegram monitor's first-seen
-        # log, which the feed writers never touch, so it must not claim to be
-        # an all-time indicator count. The cumulative figure is the corpus row.
-        self.assertIn("Telegram-monitor first-seen log", html)
+        # Relabeled 2026-10-19 and demoted 2026-10-20: the first-seen log is a
+        # diagnostic, not the total. It was read as the cumulative figure
+        # (257,696 against a corpus of 723,787), so it must not claim to be one.
+        self.assertIn("First-seen log (diagnostic", html)
         self.assertNotIn("Unique indicators (cumulative, all-time)", html)
         self.assertIn("512,345", html)
 
@@ -828,6 +828,42 @@ class CorpusEmailRows(unittest.TestCase):
         self.assertIn("ti_demo_metrics.py --distinct", out)
         row = out.split("Distinct indicators in corpus (cumulative)")[1][:140]
         self.assertNotIn("512,345", row)
+
+    def test_only_the_corpus_row_claims_to_be_cumulative(self):
+        """2026-10-19: Andrew read the first-seen log (257,696, +1,399) as the
+        cumulative indicator count. Exactly one row may call itself cumulative."""
+        out = wm._build_email(EmailRendering()._fixture(corpus=self.MEASURED))
+        alerts = out.split("Alerts Fired")[1].split("Revenue")[0]
+        self.assertEqual(alerts.count("(cumulative)"), 1)
+        self.assertEqual(alerts.lower().count("cumulative"), 1)
+        self.assertLess(alerts.index("Distinct indicators in corpus (cumulative)"),
+                        alerts.index("First-seen log"))
+
+    def test_the_log_is_muted_and_says_it_is_not_the_total(self):
+        row = wm._first_seen_rows(EmailRendering()._fixture(corpus=self.MEASURED))
+        self.assertIn("not the total above", row)
+        self.assertIn('color:#888', row)
+        self.assertNotIn("<b>", row)
+
+    def test_the_log_states_how_much_of_the_corpus_it_covers(self):
+        fx = EmailRendering()._fixture(corpus=self.MEASURED,
+                                        unique_indicators=257696)
+        self.assertIn("257,696 = 37% of the corpus", wm._first_seen_rows(fx))
+        self.assertIn("still being seeded", wm._first_seen_rows(fx))
+
+    def test_a_complete_log_says_so(self):
+        fx = EmailRendering()._fixture(corpus=self.MEASURED,
+                                        unique_indicators=699000)
+        self.assertIn("Covers the corpus.", wm._first_seen_rows(fx))
+        self.assertNotIn("still being seeded", wm._first_seen_rows(fx))
+
+    def test_coverage_is_omitted_when_the_corpus_was_not_measured(self):
+        fx = EmailRendering()._fixture(corpus={"measured": False, "reason": "x"})
+        self.assertNotIn("% of the corpus", wm._first_seen_rows(fx))
+
+    def test_the_seed_warning_still_appears_for_an_unseeded_log(self):
+        fx = EmailRendering()._fixture(indicators_backfilled=0)
+        self.assertIn("NOT ALL-TIME", wm._first_seen_rows(fx))
 
     def test_a_missing_corpus_key_is_unmeasured_not_a_crash(self):
         self.assertIn("NOT MEASURED", wm._corpus_rows(None))

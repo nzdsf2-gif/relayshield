@@ -3631,6 +3631,17 @@ def _queue_discovered_channels(mentions: list[str], source_channel: str) -> int:
 # ---------------------------------------------------------------------------
 
 def lambda_handler(event, context):
+    # deploy_lambdas.yml invokes every function it deploys with this payload to
+    # prove the module imported. Without this guard the probe ran a FULL poll of
+    # every channel on the live Telethon session (123 s on 2026-10-20, against
+    # ~2 s for the other handlers), held the single-flight lock so a scheduled
+    # run could skip, and sent an admin digest. relayshield_intel_feed.py and
+    # relayshield_intel_kev.py carry the same guard for the same reason. It
+    # sits before the lock on purpose.
+    if isinstance(event, dict) and event.get("source") == "ci.import-probe":
+        logger.info("ci.import-probe — module imported, returning without polling")
+        return {"statusCode": 200, "probe": "ok"}
+
     stats = {
         "channels_checked":       0,
         "channels_attempted":     0,

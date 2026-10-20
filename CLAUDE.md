@@ -1403,6 +1403,26 @@ the dropdown, the shape validator, the moved step, the preflight. If a turn prod
 CLAUDE.md section and no change that makes the failure impossible, it has not delivered
 anything -- it has written down an apology and billed a round for it.
 
+## A TEST THAT BUILDS THE INPUT IT EXPECTS PROVES NOTHING. RUN CODE THAT PARSES A LIBRARY'S OUTPUT AGAINST THAT LIBRARY.
+
+**2026-10-20, and it cost Andrew a round.** `tools/corpus_distinct.py` shipped with 67 green tests and died on its first real
+run with `'str' object has no attribute 'get'`. The code parsed DynamoDB's low-level `{"S": "text"}` items. It was handed
+`dynamodb.meta.client`, the resource's client, which returns plain Python values. **The fake client in the tests returned
+`{"S": ...}`, because that is what I had written the code to expect**, so the suite tested my assumption against itself and
+could not fail.
+
+**THE RULE.** When code parses the output of boto3, botocore, an HTTP API or any library, at least one check must use THAT
+LIBRARY'S real output, not a stand-in written by the same hand as the code. For boto3 this is cheap and needs no AWS:
+`botocore.stub.Stubber` validates every request AND response against the real service model. A throwaway venv in the
+scratchpad is enough (`python3 -m venv`, `pip install boto3`), and it caught two further mistakes in the same session
+(the wrong request-parameter form, and a probe that reused a mutated dict). The repo's own suites stub `boto3` out, so this
+check lives outside them: say so, and say what it covered.
+
+**The same session, second half of the lesson:** before handing Andrew a command that scans a large table, read its memory
+profile. `ti_demo_metrics.py --distinct` holds every sighting row in one list (~9.5M rows) and ended on his Mac with no
+result. And a tool that writes in bulk must not be serial and silent: `backfill_first_seen.py --apply` was ~470K one-at-a-time
+writes with no output, about two hours, and had been started and abandoned (194,987 rows were already there).
+
 ## 2026-10-06: NO THIRD-PARTY ATTRIBUTION IN ANYTHING A CUSTOMER READS. I BROKE IT ONE TURN AFTER WRITING THE PRIVACY POLICY.
 
 **Andrew's rule of thumb, restated 2026-10-06: we never name a third-party data partner in our

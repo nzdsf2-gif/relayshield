@@ -1206,10 +1206,7 @@ def _build_email(metrics: dict) -> str:
   <tr><td>Intel alerts (this week)</td><td><b>{s['intel_alerts_new']}</b></td></tr>
   <tr><td>Monitored Telegram marketplaces (active)</td><td><b>{s['monitored_marketplaces']:,}</b></td></tr>
   {_corpus_rows(s.get('corpus'))}
-  <tr><td>Telegram-monitor first-seen log (cumulative since {FIRST_SEEN_LIVE_SINCE}, never expires)</td><td><b>{s['unique_indicators']:,}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;New this week</td><td><b>+{s['unique_indicators_new']:,}</b></td></tr>
-  <tr><td>&nbsp;&nbsp;Of which backfilled from history (pre-{FIRST_SEEN_LIVE_SINCE})</td><td><b>{s.get('indicators_backfilled', 0):,}</b></td></tr>
-  {_seed_warning(s)}
+  {_first_seen_rows(s)}
   <tr><td>TI feed IOC sightings (total, incl. repeats)</td><td><b>{s['ioc_total']:,}</b></td></tr>
   <tr><td>Stolen session records</td><td><b>{s['stolen_sessions']:,}</b></td></tr>
   <tr><td>Identity graph correlations</td><td><b>{s['identity_graph']:,}</b></td></tr>
@@ -1504,6 +1501,38 @@ def _corpus_rows(c) -> str:
         f'Measured from {c.get("rows", 0):,} sightings in {c.get("seconds", 0)}s. Counts indicators '
         'still inside retention (feeds 365 days, Telegram 90), so it can fall as old '
         'sightings expire. Internal figure: never quote it externally.</td></tr>')
+
+
+def _first_seen_rows(s: dict) -> str:
+    """The first-seen log, shown as a muted DIAGNOSTIC beneath the corpus total.
+
+    It used to sit directly under the headline as "(cumulative ...)" with its own
+    weekly increment, and on 2026-10-19 it was read as the cumulative figure: it
+    said 257,696 and +1,399 while the corpus held 723,787. It is not the total.
+    It records each indicator's first sighting and never expires, but until the
+    backfill has run and the feed recorder is on it covers only part of the
+    corpus, so its size and its weekly change describe the log, not the corpus.
+    Where the corpus was measured it says how much of it the log covers, which
+    also shows the seeding catching up."""
+    n = s["unique_indicators"]
+    c = s.get("corpus") or {}
+    muted = 'style="color:#888"'
+    cover = ""
+    if c.get("measured") and c.get("distinct"):
+        cover = f' = {n / c["distinct"]:.0%} of the corpus'
+    note = ("Covers the corpus." if cover and n >= 0.95 * c["distinct"] else
+            "Records each indicator's first sighting and never expires. It is still being "
+            "seeded, so it is smaller than the total above and its weekly change is not "
+            "the corpus's growth.")
+    return (
+        f'<tr><td {muted}>First-seen log (diagnostic, not the total above)</td>'
+        f'<td {muted}>{n:,}{cover}</td></tr>'
+        f'<tr><td {muted}>&nbsp;&nbsp;Added to the log this week</td>'
+        f'<td {muted}>+{s["unique_indicators_new"]:,}</td></tr>'
+        f'<tr><td {muted}>&nbsp;&nbsp;Seeded from history (pre-{FIRST_SEEN_LIVE_SINCE})</td>'
+        f'<td {muted}>{s.get("indicators_backfilled", 0):,}</td></tr>'
+        f'<tr><td colspan="2" style="color:#888;font-size:12px">{note}</td></tr>'
+        + _seed_warning(s))
 
 
 def _seed_warning(s: dict) -> str:

@@ -1084,6 +1084,14 @@ def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
         )
         chain_requirements = _tw_requirements
 
+    # thirdweb's /verify also requires a top-level `network` on the
+    # payment payload (ZodError on the V2 envelope, whose network
+    # normally lives inside `accepted`). Inject the selected
+    # requirement's network when thirdweb is the facilitator and the
+    # payload does not already carry one. Added 2026-10-21.
+    if facilitator_base == THIRDWEB_FACILITATOR_URL and chain == "evm" and "network" not in payment_payload_dict:
+        payment_payload_dict["network"] = chain_requirements.get("network")
+
     request_body = json.dumps({
         "x402Version": 2 if is_v2 else 1, "paymentPayload": payment_payload_dict, "paymentRequirements": chain_requirements,
     }).encode("utf-8")

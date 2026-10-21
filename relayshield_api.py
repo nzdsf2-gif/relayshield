@@ -190,6 +190,16 @@ CDP_API_KEY_SECRET   = os.environ.get("CDP_API_KEY_SECRET", "")
 CDP_FACILITATOR_HOST = "api.cdp.coinbase.com"
 CDP_FACILITATOR_URL  = f"https://{CDP_FACILITATOR_HOST}/platform/v2/x402"
 
+# thirdweb facilitator - opt-in via env, used to seed thirdweb's discovery
+# index (ported from relayshield_agentic_api.py on 2026-10-21). thirdweb
+# settles through server wallets inside the project: EVM
+# 0x5838cC4dBEC0fD44680b4F227e125adf0d7a4e3C and Solana
+# HU6yQtoPHj17oPJ7mQYfqbAbgJFkTXV7dZd2RckJzBC. Mainnet settlement also
+# requires billing enabled on the thirdweb account (paymaster).
+THIRDWEB_FACILITATOR_URL = "https://api.thirdweb.com/v1/payments/x402"
+THIRDWEB_SECRET_KEY      = os.environ.get("THIRDWEB_SECRET_KEY", "")
+X402_FACILITATOR_OVERRIDE = os.environ.get("RELAYSHIELD_X402_FACILITATOR", "").strip().lower()
+
 USDC_BASE_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC on Base
 USDC_SOL_ADDRESS     = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # USDC on Solana mainnet
 BASE_CHAIN_ID        = "base"           # V1 named network
@@ -12971,12 +12981,7 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
     ),
     # Scam-kit fingerprinting (added 2026-09-24).
     "/v1/payg/scamkit-fingerprint": (
-        "Fingerprint a suspected phishing/smishing kit from a live URL (static HTML fetch only "
-        "in v1 — no JS rendering in the Lambda; submit caller-rendered HTML via the html field "
-        "for JS-heavy kits) or from caller-supplied kit HTML. Returns a stable kit_<sha256> ID, "
-        "extracted kit signals, corpus evidence, and a best-effort family match. Per-victim "
-        "nonces and credentials are stripped before hashing, so the same kit fingerprints "
-        "identically across sightings. Call to turn one suspicious link into a matchable kit identity."
+        "Fingerprint a suspected phishing or smishing kit from a live URL (static HTML fetch only in v1; no JS rendering in the Lambda, so submit caller-rendered HTML via the html field for JS-heavy kits) or from caller-supplied kit HTML. Returns a stable kit_<sha256> ID, extracted signals, corpus evidence, and a best-effort family match."
     ),
     "/v1/payg/scamkit-match": (
         "Match an existing kit_<sha256> fingerprint ID against the kit corpus. Returns the kit "
@@ -13386,6 +13391,24 @@ def _select_facilitator(verify_path: str, settle_path: str, fallback_url: str) -
     return fallback_url, plain_headers, plain_headers
 
 
+def _select_facilitator_with_override(verify_path: str, settle_path: str, fallback_url: str, chain: str) -> tuple[str, dict, dict]:
+    """Facilitator selection with the env override used to seed third-party
+    discovery indexes. RELAYSHIELD_X402_FACILITATOR=thirdweb routes both
+    EVM and Solana settlements through thirdweb (requires
+    THIRDWEB_SECRET_KEY); =payai forces the PayAI fallback even when CDP
+    is configured. Unset, this returns exactly what _select_facilitator
+    returns."""
+    if X402_FACILITATOR_OVERRIDE == "thirdweb" and THIRDWEB_SECRET_KEY:
+        logger.info("x402 facilitator override active: thirdweb")
+        tw_headers = {"Content-Type": "application/json", "x-secret-key": THIRDWEB_SECRET_KEY}
+        return THIRDWEB_FACILITATOR_URL, tw_headers, tw_headers
+    if X402_FACILITATOR_OVERRIDE == "payai":
+        logger.info("x402 facilitator override active: payai")
+        plain_headers = {"Content-Type": "application/json"}
+        return fallback_url, plain_headers, plain_headers
+    return _select_facilitator(verify_path, settle_path, fallback_url)
+
+
 def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
     """Verifies AND settles the x402 payment. Returns the settlement
     response dict on success (encoded into the PAYMENT-RESPONSE header),
@@ -13471,9 +13494,52 @@ def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
     }).encode("utf-8")
 
     fallback_url = SOL_FACILITATOR_URL if chain == "solana" else X402_FACILITATOR_URL
-    facilitator_base, verify_headers, settle_headers = _select_facilitator(
-        "/platform/v2/x402/verify", "/platform/v2/x402/settle", fallback_url,
+    facilitator_base, verify_headers, settle_headers = _select_facilitator_with_override(
+        "/platform/v2/x402/verify", "/platform/v2/x402/settle", fallback_url, chain,
     )
+
+    # api.thirdweb.com sits behind Cloudflare, whose Browser Integrity
+    # Check bans urllib's default User-Agent signature (error code
+    # 1010). Send a descriptive User-Agent on every facilitator call.
+    _facilitator_defaults = {
+        "User-Agent": "RelayShield-x402/1.0 (+https://relayshield.net)",
+        "Accept": "application/json",
+    }
+    verify_headers = {**_facilitator_defaults, **verify_headers}
+    settle_headers = {**_facilitator_defaults, **settle_headers}
+
+    # thirdweb's /verify validates the V1 shapes strictly (ZodErrors
+    # confirmed 2026-10-21): paymentRequirements must carry
+    # maxAmountRequired, resource, description and mimeType, and the
+    # payment payload must carry a top-level `network`. When thirdweb
+    # is selected for EVM, present both in that complete shape,
+    # reusing the builder's own values, and rebuild request_body
+    # (this file serializes it before facilitator selection). Other
+    # facilitators keep the payloads exactly as built.
+    if facilitator_base == THIRDWEB_FACILITATOR_URL and chain == "evm":
+        _tw_resource = requirements.get("resource") or {}
+        _tw_requirements = dict(chain_requirements)
+        _tw_requirements.setdefault(
+            "maxAmountRequired",
+            chain_requirements.get("amount") or str(price_units),
+        )
+        _tw_requirements.setdefault(
+            "resource", _tw_resource.get("url") or f"{PUBLIC_BASE_URL}{path}",
+        )
+        _tw_requirements.setdefault(
+            "description", _tw_resource.get("description") or "",
+        )
+        _tw_requirements.setdefault(
+            "mimeType", _tw_resource.get("mimeType") or "application/json",
+        )
+        chain_requirements = _tw_requirements
+        if "network" not in payment_payload_dict:
+            payment_payload_dict["network"] = chain_requirements.get("network")
+        request_body = json.dumps({
+            "x402Version":         2 if is_v2 else 1,
+            "paymentPayload":      payment_payload_dict,
+            "paymentRequirements": chain_requirements,
+        }).encode("utf-8")
 
     # Step 1: verify — well-formed + funded check only, does not move funds.
     verify_url = f"{facilitator_base}/verify"
@@ -13503,13 +13569,20 @@ def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
 
     # Step 2: settle — actually submits the transaction on-chain and moves funds.
     settle_url = f"{facilitator_base}/settle"
+    settle_body = request_body
+    if facilitator_base == THIRDWEB_FACILITATOR_URL:
+        # thirdweb accepts waitUntil on settle; "confirmed" gives finality
+        # before the paid response goes out.
+        _sb = json.loads(request_body)
+        _sb["waitUntil"] = "confirmed"
+        settle_body = json.dumps(_sb).encode("utf-8")
     req = urllib.request.Request(
-        settle_url, data=request_body, headers=settle_headers, method="POST",
+        settle_url, data=settle_body, headers=settle_headers, method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             settle_result = json.loads(resp.read())
-            if not settle_result.get("success", False):
+            if not (settle_result.get("success", False) or ("success" not in settle_result and settle_result.get("transaction"))):
                 logger.error("x402 settlement failed — chain=%s path=%s result=%s", chain, path, settle_result)
                 return None
             logger.info("x402 payment settled — chain=%s path=%s tx=%s",

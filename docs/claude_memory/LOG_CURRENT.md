@@ -875,3 +875,84 @@ From Andrew's own pastes (read, not assumed):
 * **Fixed:** the probe guard is now the first thing in `lambda_handler`, before the lock. `test_relayshield_intel_monitor_contract.py::ImportProbeGuard` checks it precedes `_acquire_lock()` and does no work; proven by changing the string and watching it fail. Deploys with the next push to main that touches the file.
 * **NOT established:** which invocation produced the Errors datapoint at 23:31. The first read filtered on `ERROR/Traceback/Runtime/Task timed out` and showed no failing invocation. Next read: the `REPORT RequestId` lines (Status, Duration, Max Memory) for 23:25 to 23:45.
 * **Side finding:** `@cti_vn` is private or the account is banned from it. It will log an ERROR every run until removed from `relayshield_intel_channels`.
+
+## WHERE 2026-10-21 LEFT THINGS. THE FIRST-SEEN BACKFILL, GRANT AND CODE ARE DONE; THE FLAG IS STILL OFF; THE intel-monitor ALARM WAS THE CI PROBE. READ THIS FIRST.
+
+**This section supersedes the 2026-10-20 "WHERE ... LEFT THINGS" list for section A and the monitor alarm. Its sections B (WAFR/FTR) and C (carried items) are
+carried UNCHANGED: read them in that entry.** Written 2026-10-21 (Andrew's clock) from his pastes and the Actions logs, not recalled.
+
+### HOW TO LAND THIS BRANCH. ANOTHER SESSION IS PUSHING TO main IN PARALLEL.
+
+This entry is on `claude/exciting-bell-t98uu8` and is **NOT on `main`**: Andrew asked for it to be merged by tomorrow's session, because a different session
+was pushing the OpenAPI spec (`48f4fef`, `a7dc941`) at the same time, and `--ff-only` failed twice in a row when `main` moved under it. So:
+
+* **Use a plain merge, never `--ff-only`, in any block handed over**: `git -c pull.rebase=false merge --no-edit FETCH_HEAD`. It fast-forwards when it can and makes a
+  merge commit when `main` has moved.
+* **Expected conflicts are docs only**: `docs/claude_memory/LOG_CURRENT.md`, `docs/claude_memory/INDEX.md`, possibly `CLAUDE.md`. Keep both sides with
+  `python3 tools/resolve_md_conflict.py docs/claude_memory/LOG_CURRENT.md --write`; regenerate the index with `python3 tools/claude_memory.py --index --write`;
+  `CLAUDE.md` is keep-both by hand. A conflict in a `.py` is not expected and means two sessions edited the same code: stop and say which.
+* **Before the block, run `git fetch --all --prune` and `git --no-pager log --oneline origin/main..origin/claude/exciting-bell-t98uu8`**, so the block is written
+  against what `main` is NOW. Last night `main` was `a7dc941` plus this branch's `c58c8d8`; it will have moved.
+* **LOG_CURRENT.md is near its cap (about 87,000 of 90,000 characters).** Run `python3 tools/claude_memory.py --rotate` (dry run) then `--rotate --write` early in
+  the session, before appending anything.
+
+### Where each thread stands
+
+* **First-seen backfill: DONE.** `wrote 471322, skipped 255553 already present, 0 failure(s)`, 726,875 rows in total, scan range to 2026-10-19 21:50 UTC.
+* **Feed role grant: DONE.** `relayshield-first-seen-put` added to `relayshield-intel-feed-role`; re-simulation `allowed`.
+* **Weekly metrics: REDEPLOYED by hand** at 2026-10-20 23:26:31Z (24,985 bytes, 900 s, 1769 MB) from a tree whose `relayshield_weekly_metrics.py` is byte-identical
+  (blob 33d3b84) to `origin/main`. It carries the demoted first-seen row. Next scheduled email is the check.
+* **Feed first-seen code: ON `main` AND DEPLOYED, FLAG OFF.** It landed on `main` as rebased copies (`984d1c9`, `84061e2`), not the branch's `452437e` / `587ebf5`.
+  The live feed's environment holds only `ADMIN_CHAT_ID`; **`FIRST_SEEN_FEED_ENABLED` is not set.** Nothing from the feed is recorded until it is.
+* **intel-monitor alarm (`relayshield-intel-monitor-errors`, ALARM 2026-10-20 23:41:56Z): CAUSE ESTABLISHED, FIX DEPLOYED.**
+  Andrew hand-dispatched "Deploy Changed Lambdas to AWS" at 23:27:57 (run 209). **A `workflow_dispatch` deploys ALL 27 mapped functions, a push deploys only what
+  changed.** The deploy's import probe invokes each function with `{"source":"ci.import-probe"}`. `relayshield_intel_monitor.lambda_handler` ignored it and ran a
+  FULL Telegram poll: CloudWatch REPORT lines show request `b9557b72` ran 300,000 ms, `Status: timeout` (the Errors datapoint), the same request that logged the
+  `@cti_vn` error. The AWS CLI's 120 s read timeout retried, and the retry hit the single-flight lock and returned in 82 ms, so the probe step printed
+  "imports cleanly" over a function that had timed out. **Fixed** in `d1ab8bc`: the guard is the first statement in `lambda_handler`, before the lock, with
+  `ImportProbeGuard` in `test_relayshield_intel_monitor_contract.py` (proven by breaking it). **It is on `main` and deployed: run 212 (push, 22 s, green), probe
+  step 1 s.** NOT CHECKED: that run's job log, and that the alarm has returned to OK.
+* **`@cti_vn`:** private or banned, a caught per-channel error logged every run, not a Lambda error. Left alone on purpose: the monitor counts `consecutive_failures`
+  and never disables a channel itself because channels come back. Removal is a human call once that number is high and steady.
+
+### TODOS FOR THE NEXT SESSION, IN ORDER
+
+**A. Close the first-seen sequence.**
+1. **Check the alarm and run 212.** Alarm state is OK? Read run 212's job log: did it deploy `relayshield-intel-monitor` only, and did the monitor probe return in
+   about a second? (`mcp__github__get_job_logs`, job 118985983041.)
+2. **Set the flag.** ANDREW CLICKS: Actions, "Set one Lambda env var (merge, never replace)", function `relayshield-intel-feed`, key `FIRST_SEEN_FEED_ENABLED`,
+   value `1`, mode `plan` first (it must keep `ADMIN_CHAT_ID` and add only this key), then `apply`. Nothing blocks it any more.
+3. **Read the feed's first Telegram summary** for `First-seen: N new indicators, M already known`. If that line is absent the flush is not running.
+4. **Watch the weekly email** (Monday): the `First-seen log` row should read about 100% of the corpus, shown as a muted diagnostic.
+5. **Switch the report headline to the first-seen row count once coverage is about 100%**, keeping the corpus scan as a cross-check. The scan has about 10 to 12
+   weeks of headroom from 2026-10-20 (494 s of ~740 s, table growing ~430K rows a week): do it before about the new year or the row prints `NOT MEASURED`.
+6. **Put `relayshield_weekly_metrics.py` on a CI deploy path and in `lambda_drift_check.yml`**; the map entry must ship in a push that touches the `.py`.
+   It is a hand deploy today and was stale for three weeks unnoticed. Also a WAFR OPS finding with evidence.
+7. **Fix `relayshield-signup-api` in the deploy-invoke policy**: `python3 tools/check_deploy_invoke_policy.py --write`, then `sh tools/apply_deploy_invoke_policy.sh`.
+   `test_workflows_parse.py` fails on it today (pre-existing).
+8. **Revoke the `sentinel_qa` API key.**
+
+**B. Audit every other mapped handler for the import-probe defect (new, from run 209).** Only `relayshield_intel_feed`, `relayshield_intel_kev`,
+   `relayshield_intel_monitor` and `relayshield_watchlist` short-circuit `ci.import-probe`; 24 mapped sources do not. Probe durations from run 209: most 1 to 5 s,
+   **`relayshield-breach-monitor` 71 s (23:31:44 to 23:32:55)**, which looks like a real pass (UNVERIFIED: not read from its REPORT lines or code), and
+   `relayshield-intel-monitor` 123 s before the fix. Recommended: read breach-monitor's handler and its REPORT line for that window; if it ran a real sweep, add the
+   same guard and an AST test; then generalise the test so **every handler in `LAMBDA_MAP` either has a guard or is listed with a measured probe time under a few
+   seconds**, so a new handler cannot ship unguarded. Also worth making the probe step fail when the CLI timed out and retried, since that is how it printed a false pass.
+
+**C. `@cti_vn`.** Leave. When considering removal, read its `consecutive_failures` first (read-only `get-item` on `relayshield_intel_channels`, key `username` = `cti_vn`).
+
+**D. Andrew's Mac, two things nobody has looked at.** (1) `git stash list` holds `pre-merge untracked`, containing a modification to
+   `cloudflare_worker_landing.js` that nobody here wrote or has read: ask before popping or dropping it. (2) The embedded repos `developers-agent-toolkit/` and
+   `gemini-relayshield-scam-checker/` show as untracked: never `git add -A` (rule A2).
+
+**E. WAFR / FTR and the carried items:** unchanged, see sections B and C of the 2026-10-20 entry. Still first: Andrew pastes Amazon's WAFR response, because
+   nothing in the repo or his Gmail records it.
+
+### Lessons from this session (the standing ones are in CLAUDE.md)
+* **A merge block written for yesterday's `main` fails today.** `--ff-only` failed twice because another session moved `main`. Plain merge, and fetch first.
+* **I told Andrew "dispatching a deploy by hand redeploys everything" and then asked him not to click Run workflow, in a sentence he could not parse as an instruction.**
+  He had to ask "am I clicking Run workflow or not". An instruction not to do a thing needs the same label as an instruction to do one: say "DO NOT CLICK" and
+  what happens instead. The label rule is for negatives too.
+* **I recommended holding the flag over an alarm I had not yet investigated.** It was unrelated; the hold cost nothing here but it was a guess presented as a precaution.
+* **Check the Actions job log before reasoning about a deploy.** The log answered in one read what three rounds of inference could not: the run was a dispatch, and
+  the probe's own timing was in it.

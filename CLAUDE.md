@@ -1446,3 +1446,16 @@ exempt on purpose: the rule is about what a customer reads.
 Free community APIs sometimes REQUIRE attribution as the condition of free use. If theirs does, the
 rule and the licence cannot both be kept, and the answer is a call for Andrew, not a guess. Read their
 terms before the free check is promoted.
+
+## A `workflow_dispatch` OF deploy_lambdas.yml REDEPLOYS EVERY FUNCTION. EVERY MAPPED HANDLER MUST SHORT-CIRCUIT `ci.import-probe`.
+
+**2026-10-20.** Andrew clicked Run workflow on "Deploy Changed Lambdas to AWS" and it deployed all 27 mapped functions, then probed each with
+`{"source":"ci.import-probe"}`. `relayshield_intel_monitor` ignored the payload, ran a FULL Telegram poll, timed out at 300 s, and fired
+`relayshield-intel-monitor-errors`. The probe step still printed "imports cleanly" because the CLI's read-timeout retry hit the single-flight lock and returned in
+82 ms. **A probe that can run real work is a production run with no schedule.** Evidence was in the job log and CloudWatch REPORT lines, not in the code.
+
+* **A push deploys only what changed; the Run workflow button deploys all of it.** Never hand Andrew "run the workflow" for this one. If a redeploy of everything is
+  really wanted, say so and say what it will touch. When telling him NOT to do something, label it plainly (`DO NOT CLICK`) and say what happens instead.
+* **Every handler in `LAMBDA_MAP` returns before doing any work when `event.get("source") == "ci.import-probe"`**, before any lock or network call. Only four do today
+  (feed, kev, intel-monitor, watchlist); the audit is a standing ToDo in `LOG_CURRENT.md`.
+* **Merge blocks: no `--ff-only`.** Another session may move `main` while yours runs; fetch, then plain `merge --no-edit`.

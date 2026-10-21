@@ -110,6 +110,16 @@ CDP_API_KEY_ID       = os.environ.get("CDP_API_KEY_ID", "")
 CDP_API_KEY_SECRET   = os.environ.get("CDP_API_KEY_SECRET", "")
 CDP_FACILITATOR_HOST = "api.cdp.coinbase.com"
 CDP_FACILITATOR_URL  = f"https://{CDP_FACILITATOR_HOST}/platform/v2/x402"
+
+# thirdweb facilitator - opt-in via env, used to seed thirdweb's discovery
+# index (a route is indexed once a payment settles through a facilitator).
+# thirdweb settles through server wallets inside the project: EVM
+# 0x5838cC4dBEC0fD44680b4F227e125adf0d7a4e3C (smart wallet, gas handled by
+# thirdweb) and Solana HU6yQtoPHj17oPJ7mQYfqbAbgJFkTXV7dZd2RckJzBC (needs a
+# little SOL for network fees). Added 2026-10-20.
+THIRDWEB_FACILITATOR_URL = "https://api.thirdweb.com/v1/payments/x402"
+THIRDWEB_SECRET_KEY      = os.environ.get("THIRDWEB_SECRET_KEY", "")
+X402_FACILITATOR_OVERRIDE = os.environ.get("RELAYSHIELD_X402_FACILITATOR", "").strip().lower()
 USDC_BASE_ADDRESS    = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 USDC_SOL_ADDRESS     = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 BASE_CHAIN_ID        = "base"
@@ -950,6 +960,25 @@ def _select_facilitator(verify_path: str, settle_path: str, fallback_url: str) -
     return fallback_url, plain_headers, plain_headers
 
 
+def _select_facilitator_with_override(verify_path: str, settle_path: str, fallback_url: str, chain: str) -> tuple[str, dict, dict]:
+    """Facilitator selection with the env override used to seed third-party
+    discovery indexes. RELAYSHIELD_X402_FACILITATOR=thirdweb routes both
+    EVM and Solana settlements through thirdweb (requires
+    THIRDWEB_SECRET_KEY); =payai forces the PayAI fallback even when CDP
+    is configured. The chain argument is retained for future per-chain
+    routing. Unset, this returns exactly what _select_facilitator
+    returns."""
+    if X402_FACILITATOR_OVERRIDE == "thirdweb" and THIRDWEB_SECRET_KEY:
+        logger.info("x402 facilitator override active: thirdweb")
+        tw_headers = {"Content-Type": "application/json", "x-secret-key": THIRDWEB_SECRET_KEY}
+        return THIRDWEB_FACILITATOR_URL, tw_headers, tw_headers
+    if X402_FACILITATOR_OVERRIDE == "payai":
+        logger.info("x402 facilitator override active: payai")
+        plain_headers = {"Content-Type": "application/json"}
+        return fallback_url, plain_headers, plain_headers
+    return _select_facilitator(verify_path, settle_path, fallback_url)
+
+
 def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
     """Verifies AND settles the x402 payment. Returns the settlement
     response dict on success (to be encoded into the PAYMENT-RESPONSE
@@ -999,8 +1028,8 @@ def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
         )
 
     fallback_url = SOL_FACILITATOR_URL if chain == "solana" else X402_FACILITATOR_URL
-    facilitator_base, verify_headers, settle_headers = _select_facilitator(
-        "/platform/v2/x402/verify", "/platform/v2/x402/settle", fallback_url,
+    facilitator_base, verify_headers, settle_headers = _select_facilitator_with_override(
+        "/platform/v2/x402/verify", "/platform/v2/x402/settle", fallback_url, chain,
     )
 
     # First attempt (2026-07-16) at this fix injected a bare string as
@@ -1047,13 +1076,21 @@ def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
 
     # Step 2: settle — actually submits the transaction on-chain and moves funds.
     settle_url = f"{facilitator_base}/settle"
+    settle_body = request_body
+    if facilitator_base == THIRDWEB_FACILITATOR_URL:
+        # thirdweb accepts waitUntil on settle; "confirmed" gives finality
+        # before the paid response goes out, matching the synchronous
+        # semantics the CDP/PayAI path already has in practice.
+        _sb = json.loads(request_body)
+        _sb["waitUntil"] = "confirmed"
+        settle_body = json.dumps(_sb).encode("utf-8")
     req = urllib.request.Request(
-        settle_url, data=request_body, headers=settle_headers, method="POST",
+        settle_url, data=settle_body, headers=settle_headers, method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             settle_result = json.loads(resp.read())
-            if not settle_result.get("success", False):
+            if not (settle_result.get("success", False) or ("success" not in settle_result and settle_result.get("transaction"))):
                 logger.error("x402 settlement failed — chain=%s path=%s result=%s", chain, path, settle_result)
                 return None
             logger.info("x402 payment settled — chain=%s path=%s tx=%s",

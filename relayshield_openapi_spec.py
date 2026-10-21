@@ -3015,6 +3015,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
         'summary': "Check a phone number's criminal-corpus reputation",
         'description': "Assess a stranger's phone number (a caller or smishing sender) by fusing RelayShield criminal-corpus sightings and attack-graph paths with Twilio Lookup SIM-swap and line-type intelligence into one verdict. The verdict ceiling is unknown: an absence of flags is not proof of safety. Call before trusting a call, text, or account action from an unknown number.",
         'price_units': 50000,
+        'x402_version': 1,
         'body': {'type': 'object',
                  'properties': {'phone': {'type': 'string', 'description': 'Phone number in E.164 format'}},
                  'required': ['phone']},

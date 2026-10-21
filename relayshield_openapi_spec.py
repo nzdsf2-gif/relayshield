@@ -2754,6 +2754,17 @@ def _operation(ep):
 # ---------------------------------------------------------------------------
 
 PAYG_ENDPOINTS: dict[str, dict] = {
+    '/v1/payg/agent-bait-scan': {
+        'summary': "Scan a repository's agent-facing instructions for hostile directives",
+        'description': "Reads the instructions an agent is given (README, AGENTS.md, CLAUDE.md, .cursorrules, MCP manifests and tool descriptions) and reports what they would cause an agent to do: fetch and execute remote scripts, ignore prior instructions, or touch credential files. Every referenced domain is checked against RelayShield's criminal indicator corpus. Call before connecting an agent to an MCP server or installing a tool it found on its own.",
+        'price_units': 500000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+                 'properties': {'repository': {'type': 'string', 'description': 'GitHub repository URL or owner/repo whose agent-facing files should be scanned (aliases: target, server_url)'}},
+                 'required': ['repository']},
+        'example': {'repository': 'https://github.com/example/agent-tool'},
+        'output_example': {'ok': True, 'data': {'repository': 'example/agent-tool', 'verdict': 'LOW', 'findings': [], 'note': 'No hostile instructions found in the files that were read.'}},
+    },
     '/v1/payg/breach': {
         'summary': 'Check an email address against known data breaches',
         'description': 'Check whether an email address appears in known data breaches. Returns breach count, source names, dates, and exposed data types (passwords, emails, etc). Call before trusting a new user identity or granting elevated access.',
@@ -2999,6 +3010,16 @@ PAYG_ENDPOINTS: dict[str, dict] = {
                             'revoke_url': 'https://github.com/settings/applications'}],
           'recommendation': 'Revoke OAuth access for matched apps immediately.',
           'checked_at': '2026-05-19T10:00:00+00:00'}},
+    },
+    '/v1/payg/phone-reputation': {
+        'summary': "Check a phone number's criminal-corpus reputation",
+        'description': "Assess a stranger's phone number (a caller or smishing sender) by fusing RelayShield criminal-corpus sightings and attack-graph paths with Twilio Lookup SIM-swap and line-type intelligence into one verdict. The verdict ceiling is unknown: an absence of flags is not proof of safety. Call before trusting a call, text, or account action from an unknown number.",
+        'price_units': 50000,
+        'body': {'type': 'object',
+                 'properties': {'phone': {'type': 'string', 'description': 'Phone number in E.164 format'}},
+                 'required': ['phone']},
+        'example': {'phone': '+14155551234'},
+        'output_example': {'ok': True, 'data': {'target': '+14155551234', 'level': 'unknown', 'flagged': False, 'reasons': [], 'signals': {'corpus_sightings': {'count': 0, 'most_recent': None}, 'attack_paths': [], 'sim_swap': {'checked': True, 'swapped': False}, 'line_type': {'checked': True, 'line_type': 'mobile'}}, 'note': "Phone reputation from RelayShield's criminal IOC corpus, attack-graph pivots, and (keyed tier) Twilio Lookup v2 SIM-swap and line-type intelligence. An absence of flags is not proof of safety."}},
     },
     '/v1/payg/prompt-injection-breach': {
         'summary': 'Find exposure from breaches that look AI-agent-sourced',

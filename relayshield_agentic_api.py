@@ -1059,6 +1059,31 @@ def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
     if is_v2 and requirements.get("resource"):
         payment_payload_dict["resource"] = requirements["resource"]
 
+    # thirdweb's /verify validates paymentRequirements against the
+    # V1 shape and rejects V2 accept entries outright (ZodError on
+    # 2026-10-21: maxAmountRequired, resource, description, mimeType
+    # all required). When thirdweb is the selected facilitator,
+    # present the accept entry in that complete shape, reusing the
+    # values the requirements builder already computed. Other
+    # facilitators keep the entry exactly as built. Added 2026-10-21.
+    if facilitator_base == THIRDWEB_FACILITATOR_URL and chain == "evm":
+        _tw_resource = requirements.get("resource") or {}
+        _tw_requirements = dict(chain_requirements)
+        _tw_requirements.setdefault(
+            "maxAmountRequired",
+            chain_requirements.get("amount") or str(price_units),
+        )
+        _tw_requirements.setdefault(
+            "resource", _tw_resource.get("url") or f"{API_BASE_URL}{path}",
+        )
+        _tw_requirements.setdefault(
+            "description", _tw_resource.get("description") or "",
+        )
+        _tw_requirements.setdefault(
+            "mimeType", _tw_resource.get("mimeType") or "application/json",
+        )
+        chain_requirements = _tw_requirements
+
     request_body = json.dumps({
         "x402Version": 2 if is_v2 else 1, "paymentPayload": payment_payload_dict, "paymentRequirements": chain_requirements,
     }).encode("utf-8")

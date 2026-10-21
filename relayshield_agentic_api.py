@@ -733,6 +733,15 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
         },
         output_example={"ok": True, "data": {"found": False, "session_count": 0}},
     ),
+    "/v1/payg/agent-bait-scan": _bazaar_body_ext(
+        input_example={"repository": "https://github.com/example/agent-tool"},
+        input_schema={
+            "type": "object",
+            "properties": {"repository": {"type": "string", "description": "GitHub repository URL or owner/repo whose agent instruction files (README, AGENTS.md, CLAUDE.md, .cursorrules, MCP manifests and tool descriptions) to scan for bait instructions"}},
+            "required": ["repository"],
+        },
+        output_example={"ok": True, "data": {"verdict": "LOW", "findings": []}},
+    ),
 }
 
 # Rich descriptions for CDP Bazaar semantic search — same fix as

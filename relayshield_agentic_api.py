@@ -1032,6 +1032,18 @@ def _verify_and_settle_x402_payment(x_payment: str, path: str) -> dict | None:
         "/platform/v2/x402/verify", "/platform/v2/x402/settle", fallback_url, chain,
     )
 
+    # api.thirdweb.com sits behind Cloudflare, whose Browser Integrity
+    # Check bans urllib's default User-Agent signature (error code
+    # 1010); mcp-registry-risk verify calls were blocked at the edge
+    # on 2026-10-21 before thirdweb saw the payment. Send a
+    # descriptive User-Agent on every facilitator call. Added 2026-10-21.
+    _facilitator_defaults = {
+        "User-Agent": "RelayShield-x402/1.0 (+https://relayshield.net)",
+        "Accept": "application/json",
+    }
+    verify_headers = {**_facilitator_defaults, **verify_headers}
+    settle_headers = {**_facilitator_defaults, **settle_headers}
+
     # First attempt (2026-07-16) at this fix injected a bare string as
     # "resource" onto payment_payload_dict — broke /verify outright in
     # relayshield_api.py's identical code, caught before /settle ran so no

@@ -286,10 +286,17 @@ def _ed25519ph_verify(public_key: bytes, message: bytes, signature: bytes) -> bo
 def _ed25519ph_sign_prehashed(seed: bytes, digest: bytes) -> bytes:
     """Ed25519ph signature over a precomputed SHA-512 digest.
 
-    This mirrors exactly what AWS KMS computes for ED25519_PH_SHA_512
-    with MessageType=DIGEST. The module never signs this way in
-    production (KMS does); the implementation exists as the reference
-    construction, and so tests can emulate KMS faithfully.
+    The RFC 8032 reference construction when the caller already holds
+    PH(M) = SHA-512(M): both hashes inside the signature use the digest
+    in place of the message. The module never signs this way in
+    production (KMS does, via the RAW flow in KmsPassportSigner).
+
+    Caution, learned live on 2026-10-22: this construction does NOT
+    mirror what AWS KMS returns for MessageType=DIGEST. Real KMS
+    treats the supplied digest as the message and pre-hashes it again,
+    so a DIGEST signature verifies only against PH = SHA-512(digest),
+    a nonstandard form no third-party RFC 8032 verifier reproduces.
+    That is why the signer uses RAW.
     """
     if len(digest) != 64:
         raise ValueError("Ed25519ph digest must be 64 bytes (SHA-512)")
@@ -404,16 +411,22 @@ def raw_public_key_from_spki(der: bytes) -> bytes:
 class KmsPassportSigner:
     """Issue passport signatures through an AWS KMS Ed25519 key.
 
-    The private key never leaves KMS. Signing uses the pre-hash flow:
-    MessageType=DIGEST with SigningAlgorithm ED25519_PH_SHA_512 over the
-    SHA-512 digest of the canonical payload bytes. The alternative RAW
-    flow (ED25519_SHA_512) caps the message at 4096 bytes; a passport
-    is usually smaller, but nothing in the format guarantees it stays
-    under that cap as verifications, references, and future fields
-    grow, so issuance pre-hashes and payload size is never a signing
-    constraint. The resulting signatures are Ed25519ph (RFC 8032
-    section 5.1, empty context); verify_passport accepts that variant
-    alongside pure Ed25519, so no other behavior changes.
+    The private key never leaves KMS. Signing uses MessageType=RAW
+    with SigningAlgorithm ED25519_PH_SHA_512 over the canonical
+    payload bytes themselves: KMS computes the SHA-512 pre-hash
+    internally and returns a textbook RFC 8032 Ed25519ph signature
+    (section 5.1, empty context), which is what lets any third-party
+    verifier check a passport offline. verify_passport accepts that
+    variant alongside pure Ed25519, so no other behavior changes.
+
+    The DIGEST flow is deliberately NOT used: measured against real
+    KMS on 2026-10-22, a supplied digest is treated as the message
+    and pre-hashed a second time, yielding signatures that verify
+    only under a double-hash rule and fail every standard verifier.
+    The price of RAW is the KMS 4096-byte message cap, which sign()
+    enforces as a hard format bound; a canonical passport payload is
+    a few hundred bytes and the schema has no free-form bulk fields,
+    so the cap is not reachable in practice.
 
     boto3 is imported lazily, only when a KMS call is actually made, so
     importing this module and using local keys needs no AWS SDK and no
@@ -479,11 +492,16 @@ class KmsPassportSigner:
 
     def sign(self, message: bytes) -> bytes:
         """Sign message bytes via KMS and return the 64-byte signature."""
-        digest = hashlib.sha512(message).digest()
+        if len(message) > 4096:
+            raise ValueError(
+                "passport payload exceeds the 4096-byte KMS RAW signing "
+                "limit; the DIGEST flow is not a fallback (see class "
+                "docstring), so the document itself must shrink"
+            )
         response = self._kms().sign(
             KeyId=self._key_id,
-            Message=digest,
-            MessageType="DIGEST",
+            Message=message,
+            MessageType="RAW",
             SigningAlgorithm=_KMS_SIGNING_ALGORITHM,
         )
         signature = response["Signature"]

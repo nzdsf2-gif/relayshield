@@ -16,6 +16,7 @@ on:
       # resolves that by walking imports; these entries just make the push
       # actually trigger the workflow.
       - 'relayshield_openapi_spec.py'
+      - 'relayshield_passport.py'
       # Recovered from the live package on 2026-08-23: it was deployed by hand
       # and had never been in the repo, so nothing here listed it and no deploy
       # could ever have shipped a change to it. relayshield_api.py imports it,

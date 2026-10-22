@@ -2588,6 +2588,47 @@ ENDPOINTS = [
             "not miss."
         ),
     },
+    {
+        "path": "/v1/passport/check",
+        "price_cents": 0,
+        "tag": "Agent and MCP security",
+        "summary": "Verify a signed agent reputation passport",
+        "description": (
+            "Free hosted verification for a RelayShield agent passport. Runs the same five "
+            "checks a local verifier runs (structure, version, signature, issuer, expiry) "
+            "against the RelayShield issuer key, then adds the one fact only RelayShield "
+            "can know: whether the passport has been revoked since issuance. A valid result "
+            "means the passport is genuine, unexpired, unrevoked, and records no flags found "
+            "in RelayShield screening as of its issuance; it is not a guarantee about future "
+            "behavior, and it never replaces a per-transaction TAP or PAP verification."
+        ),
+        "request": {
+            "props": {
+                "compact": _str("The passport transport string: base64url payload, a dot, base64url signature."),
+            },
+            "required": ["compact"],
+            "example": {"compact": "<base64url payload>.<base64url signature>"},
+        },
+        "response": {
+            "props": {
+                "valid": _bool("True only when every check passes and the passport is not revoked."),
+                "status": _str("`valid`, a failing stage (`malformed`, `unsupported_version`, `invalid_signature`, `issuer_mismatch`, `expired`), or `revoked`.",
+                               enum=["valid", "malformed", "unsupported_version", "invalid_signature", "issuer_mismatch", "expired", "revoked"]),
+                "revoked": _bool("True when the registry records this passport as revoked."),
+                "registry_status": _str("Registry state for the passport_id: `active`, `revoked`, `not_found`, or `unknown` when the registry could not be read.",
+                                        enum=["active", "revoked", "not_found", "unknown"]),
+                "passport": _obj("The passport document, when it could be parsed.", {}),
+            },
+            "example": {"valid": True, "status": "valid", "revoked": False,
+                        "registry_status": "active",
+                        "passport": {"passport_id": "rsp_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+                                     "issuer": "relayshield.net"}},
+        },
+        "auth": [],
+        "notes": ("No API key required. Local verification against the published issuer "
+                  "key covers the cryptographic checks; the hosted check exists for "
+                  "callers who also need revocation state."),
+    },
 ]
 
 
@@ -3527,6 +3568,40 @@ PAYG_ENDPOINTS: dict[str, dict] = {
             },
         },
     },
+    '/v1/passport/issue': {
+        'summary': "Issue a signed agent reputation passport",
+        'description': "Issue a signed RelayShield reputation passport for an agent identity. The caller asserts the subject, its TAP and PAP verification outcomes, and its screening aggregates; RelayShield validates their shape, signs the record with its KMS-held Ed25519 issuer key, and registers it for status and revocation lookups. The agent carries the returned compact form and presents it to any marketplace, which can verify it offline against the published issuer key or with the free hosted check. A passport records verification and screening history as of issuance; it does not replace a per-transaction TAP or PAP verification.",
+        'price_units': 500000,
+        'x402_version': 2,
+        'body': {'type': 'object',
+                 'properties': {
+                     'subject': {'type': 'object', 'description': 'The agent the passport is about: agent_id plus a wallet or a did.',
+                                 'properties': {'agent_id': {'type': 'string', 'description': 'Agent identifier in the presenting ecosystem'},
+                                                'wallet': {'type': 'string', 'description': 'Payment wallet address (EVM 0x... or Solana base58)'},
+                                                'did': {'type': 'string', 'description': 'Decentralized identifier, if the agent has one'}},
+                                 'required': ['agent_id']},
+                     'verifications': {'type': 'object', 'description': 'Asserted TAP/PAP outcomes keyed by protocol (tap, pap). Each entry: status (verified, rejected, or not_performed), verified_at (required when verified), optional reference.'},
+                     'screening': {'type': 'object', 'description': 'Asserted screening aggregates for the identity.',
+                                   'properties': {'checks_total': {'type': 'integer', 'description': 'Total screening checks recorded for this identity'},
+                                                  'flags_total': {'type': 'integer', 'description': 'How many of those checks produced a threat flag'},
+                                                  'last_screened_at': {'type': 'string', 'description': 'Most recent screening time, ISO 8601 UTC'}}},
+                 },
+                 'required': ['subject', 'verifications', 'screening']},
+        'example': {'subject': {'agent_id': 'agent_42', 'wallet': '0x1234567890abcdef1234567890abcdef12345678'},
+                    'verifications': {'tap': {'status': 'verified', 'verified_at': '2026-10-22T12:00:00Z', 'reference': 'tap-verify-123'}},
+                    'screening': {'checks_total': 342, 'flags_total': 1, 'last_screened_at': '2026-10-22T12:00:05Z'}},
+        'output_example': {'ok': True, 'data': {'passport': {'version': '1.0',
+                                                            'passport_id': 'rsp_9f8e7d6c5b4a39281706f5e4d3c2b1a0',
+                                                            'issuer': 'relayshield.net',
+                                                            'subject': {'agent_id': 'agent_42', 'wallet': '0x1234567890abcdef1234567890abcdef12345678'},
+                                                            'verifications': {'tap': {'status': 'verified', 'verified_at': '2026-10-22T12:00:00Z', 'reference': 'tap-verify-123'}},
+                                                            'screening': {'checks_total': 342, 'flags_total': 1, 'last_screened_at': '2026-10-22T12:00:05Z'},
+                                                            'issued_at': '2026-10-22T12:00:10Z',
+                                                            'expires_at': '2026-11-21T12:00:10Z',
+                                                            'signing_key': '11111111-2222-3333-4444-555555555555'},
+                                                'compact': '<base64url payload>.<base64url signature>',
+                                                'status_url': 'https://api.relayshield.net/v1/passport/rsp_9f8e7d6c5b4a39281706f5e4d3c2b1a0/status'}},
+    },
 }
 
 _PAYG_TAG = "x402 pay-per-call"
@@ -3547,7 +3622,11 @@ def _payg_operation(path, ep, price_units):
     is the kind of thing that makes a generated client send an empty API key
     header and get a confusing answer.
     """
-    op_id = "payg_" + path.removeprefix("/v1/payg/").replace("-", "_")
+    # /v1/passport/issue is the first payable route outside /v1/payg/:
+    # strip the /v1/ prefix as well and fold the remaining slashes, so
+    # its operationId is a valid identifier. Ids for /v1/payg/* routes
+    # are unchanged.
+    op_id = "payg_" + path.removeprefix("/v1/payg/").removeprefix("/v1/").replace("/", "_").replace("-", "_")
     price_usd = round(price_units / 1_000_000, 6)
     price_str = f"${price_usd:.2f}"
 
@@ -3800,6 +3879,70 @@ MISP-compatible REST surface at `/v1/intel/misp`, and an x402 pay-per-call surfa
 """.strip()
 
 
+# The passport status route is the spec's one GET operation. ENDPOINTS and
+# PAYG_ENDPOINTS both render POSTs, and the method is not a detail a
+# generated client can afford to get wrong, so this path item is written
+# out in full here and merged in by build_spec.
+_PASSPORT_STATUS_PATH_ITEM = {
+    "get": {
+        "operationId": "passport_status",
+        "summary": "Passport status and revocation lookup",
+        "description": (
+            "Free. Returns the registry state of one passport: `active`, `revoked`, "
+            "`expired` (computed from its expires_at at read time), or `not_found`. "
+            "State is carried in the response body with a 200, mirroring the "
+            "/v1/result polling routes. This endpoint is the revocation source of "
+            "truth for verifiers that check at transaction time."
+        ),
+        "tags": ["Agent and MCP security"],
+        "security": [],
+        "parameters": [
+            {
+                "name": "passport_id",
+                "in": "path",
+                "required": True,
+                "description": "Passport ID, of the form `rsp_` plus 32 hex characters.",
+                "schema": {"type": "string"},
+            },
+        ],
+        "responses": {
+            "200": {
+                "description": "Success. `ok` is true and `data` holds the status.",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["ok", "data"],
+                            "properties": {
+                                "ok": {"type": "boolean", "const": True},
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "passport_id": _str("The passport ID that was looked up."),
+                                        "status": _str("Registry state.", enum=["active", "revoked", "expired", "not_found"]),
+                                        "issued_at": _str("ISO 8601 UTC issuance time, or null when not found."),
+                                        "expires_at": _str("ISO 8601 UTC expiry time, or null when not found."),
+                                    },
+                                },
+                            },
+                        },
+                        "example": {"ok": True, "data": {"passport_id": "rsp_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+                                                         "status": "active",
+                                                         "issued_at": "2026-10-22T12:00:00Z",
+                                                         "expires_at": "2026-11-21T12:00:00Z"}},
+                    },
+                },
+            },
+            "500": {
+                "description": "The registry could not be read.",
+                "content": {"application/json": {"schema": _ERROR_SCHEMA_REF,
+                                                 "example": {"ok": False, "error": "Passport status lookup failed."}}},
+            },
+        },
+    },
+}
+
+
 def build_spec(base_url="https://api.relayshield.net", payg_prices=None):
     """Return the complete OpenAPI 3.1 document as a dict.
 
@@ -3817,6 +3960,7 @@ def build_spec(base_url="https://api.relayshield.net", payg_prices=None):
     for path, ep in PAYG_ENDPOINTS.items():
         price = (payg_prices or {}).get(path, ep["price_units"])
         paths[path] = _payg_operation(path, ep, price)
+    paths["/v1/passport/{passport_id}/status"] = _PASSPORT_STATUS_PATH_ITEM
 
     return {
         "openapi": "3.1.0",

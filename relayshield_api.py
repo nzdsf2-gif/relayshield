@@ -100,6 +100,12 @@ import relayshield_phone_reputation as _phone_reputation  # v1: keyed + keyless-
 import relayshield_scamkit
 import relayshield_scamkit_fetch as _scamkit_fetch  # v1b: TLS/redirect/header telemetry (stdlib only)
 
+# Signed agent reputation passports (added 2026-10-22). Pure stdlib plus
+# lazy boto3 on the KMS path only; packaged via the same transitive
+# relayshield_* import resolution. The relayshield_* name is load-bearing:
+# the deploy import walk only follows modules with that prefix.
+import relayshield_passport as _passport
+
 # Corpus cross-correlation for verdicts ("seen in N criminal marketplaces,
 # linked to M wallets, kit family X"). Lazy boto3 inside; packaged into the
 # deployment zip via the same transitive relayshield_* import resolution.
@@ -280,6 +286,9 @@ X402_V2_ENABLED_PATHS: set[str] = {
     "/v1/payg/scamkit-fingerprint",
     "/v1/payg/scamkit-match",
     "/v1/payg/campaign-scan",
+    # Agent passport issuance (added 2026-10-22): v2 from launch. The path
+    # lives outside /v1/payg/ but is settled by the same PAYG dispatcher.
+    "/v1/passport/issue",
     # Launched 2026-07-31, after every batch above had already closed
     # (last one 2026-07-21) -- missed the migration by ten days rather than
     # being deliberately held back like domain/supply-chain were. No prior
@@ -330,6 +339,7 @@ PAYG_PRICE_UNITS: dict[str, int] = {
     "/v1/payg/scamkit-fingerprint":  500000,   # $0.50 — kit fingerprint from URL or HTML
     "/v1/payg/scamkit-match":        100000,   # $0.10 — match a kit_<sha256> against the corpus
     "/v1/payg/campaign-scan":       5500000,   # $5.50 flat — composite over the TI endpoints
+    "/v1/passport/issue":           500000,   # $0.50 — signed agent reputation passport issuance (KMS-signed, registered for status/revocation)
 }
 
 GOPLUS_BASE_URL        = "https://api.gopluslabs.io/api/v1/address_security"
@@ -12741,6 +12751,61 @@ BAZAAR_EXTENSIONS: dict[str, dict] = {
             },
         },
     ),
+    # Agent passport issuance (added 2026-10-22).
+    "/v1/passport/issue": _bazaar_body_ext(
+        input_example={
+            "subject": {"agent_id": "agent_42", "wallet": "0x1234567890abcdef1234567890abcdef12345678"},
+            "verifications": {"tap": {"status": "verified", "verified_at": "2026-10-22T12:00:00Z", "reference": "tap-verify-123"}},
+            "screening": {"checks_total": 342, "flags_total": 1, "last_screened_at": "2026-10-22T12:00:05Z"},
+        },
+        input_schema={
+            "type": "object",
+            "properties": {
+                "subject": {
+                    "type": "object",
+                    "description": "The agent the passport is about: agent_id plus a wallet or a did.",
+                    "properties": {
+                        "agent_id": {"type": "string", "description": "Agent identifier in the presenting ecosystem"},
+                        "wallet": {"type": "string", "description": "Payment wallet address (EVM 0x... or Solana base58)"},
+                        "did": {"type": "string", "description": "Decentralized identifier, if the agent has one"},
+                    },
+                    "required": ["agent_id"],
+                },
+                "verifications": {
+                    "type": "object",
+                    "description": "Asserted TAP/PAP outcomes keyed by protocol (tap, pap): a status of verified, rejected or not_performed, verified_at required when verified, optional reference.",
+                },
+                "screening": {
+                    "type": "object",
+                    "description": "Asserted screening aggregates for the identity.",
+                    "properties": {
+                        "checks_total": {"type": "integer", "description": "Total screening checks recorded for this identity"},
+                        "flags_total": {"type": "integer", "description": "How many of those checks produced a threat flag"},
+                        "last_screened_at": {"type": "string", "description": "Most recent screening time, ISO 8601 UTC"},
+                    },
+                },
+            },
+            "required": ["subject", "verifications", "screening"],
+        },
+        output_example={
+            "ok": True,
+            "data": {
+                "passport": {
+                    "version": "1.0",
+                    "passport_id": "rsp_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+                    "issuer": "relayshield.net",
+                    "subject": {"agent_id": "agent_42", "wallet": "0x1234567890abcdef1234567890abcdef12345678"},
+                    "verifications": {"tap": {"status": "verified", "verified_at": "2026-10-22T12:00:00Z", "reference": "tap-verify-123"}},
+                    "screening": {"checks_total": 342, "flags_total": 1, "last_screened_at": "2026-10-22T12:00:05Z"},
+                    "issued_at": "2026-10-22T12:00:10Z",
+                    "expires_at": "2026-11-21T12:00:10Z",
+                    "signing_key": "11111111-2222-3333-4444-555555555555",
+                },
+                "compact": "<base64url payload>.<base64url signature>",
+                "status_url": "https://api.relayshield.net/v1/passport/rsp_9f8e7d6c5b4a39281706f5e4d3c2b1a0/status",
+            },
+        },
+    ),
     # Scam-kit fingerprinting (added 2026-09-24).
     "/v1/payg/scamkit-fingerprint": _bazaar_body_ext(
         input_example={"url": "https://example.com/login"},
@@ -12998,6 +13063,13 @@ PAYG_DESCRIPTIONS: dict[str, str] = {
         "families, cross-indicator links (shared exfil hosts, shared kit fingerprints), and an "
         "aggregate risk score with corpus citations. Call for campaign-level takedown intel."
     ),
+    # Agent passport issuance (added 2026-10-22).
+    "/v1/passport/issue": (
+        "Issue a signed RelayShield reputation passport for an agent identity: a portable "
+        "Ed25519-signed record of its TAP/PAP verification outcomes and screening history "
+        "that any marketplace can verify offline or via the free hosted check. Call when an "
+        "agent needs a reusable trust credential instead of repeating verifications."
+    ),
 }
 
 # SDK discovery tags (CDPX-4a) — up to 5 per endpoint per the bazaar spec,
@@ -13026,6 +13098,7 @@ PAYG_TAGS: dict[str, list[str]] = {
     "/v1/payg/scamkit-fingerprint": ["phishing-kit", "smishing", "threat-intelligence"],
     "/v1/payg/scamkit-match":       ["phishing-kit", "smishing", "threat-intelligence"],
     "/v1/payg/campaign-scan":       ["campaign-analysis", "threat-intelligence", "takedown-intel"],
+    "/v1/passport/issue":           ["agent-identity", "identity-verification", "reputation"],
 }
 
 
@@ -13718,6 +13791,9 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
         "/v1/payg/scamkit-fingerprint":  handle_scamkit_fingerprint,
         "/v1/payg/scamkit-match":        handle_scamkit_match,
         "/v1/payg/campaign-scan":        handle_campaign_scan,
+        # Agent passport issuance (added 2026-10-22): admitted to this
+        # dispatcher by the passport branch in lambda_handler.
+        "/v1/passport/issue":           handle_passport_issue,
     }
     handler = payg_routes.get(path)
     if not handler:
@@ -13751,6 +13827,180 @@ def handle_payg_request(path: str, method: str, event: dict) -> dict:
     result["headers"]["PAYMENT-RESPONSE"] = encoded_settlement
     result["headers"]["Access-Control-Expose-Headers"] = "PAYMENT-RESPONSE"
     return result
+
+
+# ---------------------------------------------------------------------------
+# Agent passport: POST /v1/passport/issue, POST /v1/passport/check,
+# GET /v1/passport/{passport_id}/status
+# ---------------------------------------------------------------------------
+# The signed agent reputation passport (module: relayshield_passport.py;
+# design: the passport SPEC). Issuance is PAYG ($0.50 in
+# PAYG_PRICE_UNITS) and v2 from launch; it reaches handle_payg_request
+# through the passport branch in lambda_handler because the path lives
+# outside /v1/payg/. Check and status are free.
+#
+# Signing is KMS-only in production: RELAYSHIELD_PASSPORT_KMS_KEY_ID
+# names the issuer key (alias/relayshield-passport-prod) and the private
+# key never leaves KMS. With the env var unset there is deliberately no
+# local-key fallback: issue and check answer 503.
+
+PASSPORTS_TABLE = "relayshield_passports"
+
+_PASSPORT_SIGNER = None
+
+
+def _passport_signer():
+    """The process-wide KMS passport signer, or None when unconfigured.
+
+    Cached because the signer caches the issuer public key after a
+    single GetPublicKey call; verification then needs no AWS round trip.
+    """
+    global _PASSPORT_SIGNER
+    if _PASSPORT_SIGNER is None and os.environ.get(_passport.KMS_KEY_ID_ENV):
+        _PASSPORT_SIGNER = _passport.KmsPassportSigner()
+    return _PASSPORT_SIGNER
+
+
+def _passport_registry_get(passport_id: str):
+    """Registry record for a passport_id, or None.
+
+    Deliberately does not swallow DynamoDB errors, unlike the caches in
+    this file: revocation state is a trust decision, so a failed read
+    must surface as an error at the call site, never as 'not revoked'.
+    """
+    return dynamodb.Table(PASSPORTS_TABLE).get_item(
+        Key={"passport_id": passport_id}).get("Item")
+
+
+def handle_passport_issue(params: dict) -> dict:
+    """POST /v1/passport/issue: issue a signed agent reputation passport.
+
+    Runs inside the PAYG dispatcher, so the $0.50 x402 payment has
+    already settled when this is called. The subject, verifications and
+    screening in the body are the calling customer's ASSERTED record
+    (passport SPEC, open decision 8.4): v1 validates their vocabulary
+    and shape with relayshield_passport's own validation and signs them
+    as presented. It does not re-run TAP/PAP and does not require a
+    wallet-control proof; stronger binding is a later decision, not a
+    silent change to make here.
+    """
+    signer = _passport_signer()
+    if signer is None:
+        return _err("Passport issuance is not configured on this deployment.", 503)
+    params = params or {}
+    try:
+        issued = _passport.issue_passport(
+            None,
+            signer=signer,
+            subject=params.get("subject") or {},
+            verifications=params.get("verifications") or {},
+            screening=params.get("screening") or {},
+        )
+    except ValueError as exc:
+        return _err(str(exc), 400)
+    document = issued["passport"]
+
+    # Registry first, response second: a passport missing from the
+    # registry would answer not_found on the status endpoint for its
+    # whole life, so a failed write fails the issuance outright.
+    try:
+        dynamodb.Table(PASSPORTS_TABLE).put_item(Item={
+            "passport_id": document["passport_id"],
+            "agent_id":    document["subject"]["agent_id"],
+            "wallet":      document["subject"].get("wallet", ""),
+            "did":         document["subject"].get("did", ""),
+            "issued_at":   document["issued_at"],
+            "expires_at":  document["expires_at"],
+            "status":      "active",
+            "signing_key": document.get("signing_key", ""),
+        })
+    except Exception as exc:
+        logger.exception("passport registry write failed for %s: %s",
+                         document["passport_id"], exc)
+        return _err("The passport could not be registered, so it was not issued.", 500)
+
+    return _ok({
+        "passport":   document,
+        "compact":    issued["compact"],
+        "status_url": f"{PUBLIC_BASE_URL}/v1/passport/{document['passport_id']}/status",
+    })
+
+
+def handle_passport_check(params: dict) -> dict:
+    """POST /v1/passport/check: free hosted verification of a passport.
+
+    The same verdict relayshield_passport.verify_passport returns
+    locally, plus the one fact only the hosted check knows: revocation
+    state from the registry. Revocation downgrades only a passport that
+    passed every cryptographic check; a tampered or expired passport
+    keeps its own failing status.
+    """
+    signer = _passport_signer()
+    if signer is None:
+        return _err("Passport verification is not configured on this deployment.", 503)
+    params = params or {}
+    compact = params.get("compact")
+    if not isinstance(compact, str) or not compact:
+        return _err("compact is required: the passport transport string.", 400)
+    verdict = _passport.verify_passport(compact, signer.public_key())
+    data = {
+        "valid":           verdict["valid"],
+        "status":          verdict["status"],
+        "checks":          verdict["checks"],
+        "passport":        verdict["passport"],
+        "revoked":         False,
+        "registry_status": "unknown",
+    }
+    document = verdict["passport"]
+    if document is not None:
+        try:
+            record = _passport_registry_get(document["passport_id"])
+            if record is None:
+                data["registry_status"] = "not_found"
+            else:
+                data["registry_status"] = record.get("status", "active")
+                if record.get("status") == "revoked" and verdict["valid"]:
+                    data["valid"]   = False
+                    data["status"]  = "revoked"
+                    data["revoked"] = True
+        except Exception as exc:
+            logger.warning("passport registry read failed for %s: %s",
+                           document["passport_id"], exc)
+    return _ok(data)
+
+
+def handle_passport_status(passport_id: str) -> dict:
+    """GET /v1/passport/{passport_id}/status: free revocation lookup.
+
+    State is carried in the body with a 200, mirroring the /v1/result
+    polling routes. 'expired' is computed from expires_at at read time;
+    a read never rewrites the record.
+    """
+    if not passport_id or "/" in passport_id:
+        return _err("passport_id is required.", 400)
+    try:
+        record = _passport_registry_get(passport_id)
+    except Exception as exc:
+        logger.warning("passport status lookup failed for %s: %s", passport_id, exc)
+        return _err("Passport status lookup failed.", 500)
+    if record is None:
+        return _ok({
+            "passport_id": passport_id,
+            "status":      "not_found",
+            "issued_at":   None,
+            "expires_at":  None,
+        })
+    status = record.get("status", "active")
+    expires_at = record.get("expires_at")
+    if status != "revoked" and expires_at:
+        expires = _passport._parse_timestamp(expires_at)
+        status = "expired" if datetime.now(timezone.utc) >= expires else "active"
+    return _ok({
+        "passport_id": passport_id,
+        "status":      status,
+        "issued_at":   record.get("issued_at"),
+        "expires_at":  expires_at,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -17259,6 +17509,16 @@ def lambda_handler(event: dict, context) -> dict:
     # PAYG routes (x402 payment verified inside Lambda)
     if path.startswith("/v1/payg/"):
         return handle_payg_request(path, method, event)
+
+    # Agent passport routes (added 2026-10-22). Issue is x402 pay-per-call
+    # like the routes above but lives outside /v1/payg/, so it is admitted
+    # to the PAYG dispatcher explicitly; check and status are free.
+    if path == "/v1/passport/issue":
+        return handle_payg_request(path, method, event)
+    if method == "POST" and path == "/v1/passport/check":
+        return handle_passport_check(_body(event))
+    if method == "GET" and path.startswith("/v1/passport/") and path.endswith("/status"):
+        return handle_passport_status(path[len("/v1/passport/"):-len("/status")])
 
     # Subscription: GET /v1/result/{analysis_id}
     if method == "GET" and path.startswith("/v1/result/"):

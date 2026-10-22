@@ -291,12 +291,15 @@ def _ed25519ph_sign_prehashed(seed: bytes, digest: bytes) -> bytes:
     in place of the message. The module never signs this way in
     production (KMS does, via the RAW flow in KmsPassportSigner).
 
-    Caution, learned live on 2026-10-22: this construction does NOT
-    mirror what AWS KMS returns for MessageType=DIGEST. Real KMS
-    treats the supplied digest as the message and pre-hashes it again,
-    so a DIGEST signature verifies only against PH = SHA-512(digest),
-    a nonstandard form no third-party RFC 8032 verifier reproduces.
-    That is why the signer uses RAW.
+    How this relates to AWS KMS, learned live on 2026-10-22: KMS
+    accepts only MessageType=DIGEST for ED25519_PH_SHA_512 (RAW is
+    rejected with a ValidationException), and it signs the supplied
+    digest AS the message: its output equals _ed25519ph_sign(seed,
+    digest), standard Ed25519ph over the digest bytes, NOT this
+    prehashed construction over the original message. The passport
+    format therefore defines the signed message as the SHA-512 digest
+    of the canonical payload (see KmsPassportSigner), and
+    verify_passport checks exactly that form.
     """
     if len(digest) != 64:
         raise ValueError("Ed25519ph digest must be 64 bytes (SHA-512)")
@@ -411,22 +414,20 @@ def raw_public_key_from_spki(der: bytes) -> bytes:
 class KmsPassportSigner:
     """Issue passport signatures through an AWS KMS Ed25519 key.
 
-    The private key never leaves KMS. Signing uses MessageType=RAW
-    with SigningAlgorithm ED25519_PH_SHA_512 over the canonical
-    payload bytes themselves: KMS computes the SHA-512 pre-hash
-    internally and returns a textbook RFC 8032 Ed25519ph signature
-    (section 5.1, empty context), which is what lets any third-party
-    verifier check a passport offline. verify_passport accepts that
-    variant alongside pure Ed25519, so no other behavior changes.
-
-    The DIGEST flow is deliberately NOT used: measured against real
-    KMS on 2026-10-22, a supplied digest is treated as the message
-    and pre-hashed a second time, yielding signatures that verify
-    only under a double-hash rule and fail every standard verifier.
-    The price of RAW is the KMS 4096-byte message cap, which sign()
-    enforces as a hard format bound; a canonical passport payload is
-    a few hundred bytes and the schema has no free-form bulk fields,
-    so the cap is not reachable in practice.
+    The private key never leaves KMS. Signing uses MessageType=DIGEST
+    with SigningAlgorithm ED25519_PH_SHA_512 over the SHA-512 digest
+    of the canonical payload bytes, because DIGEST is the only
+    message type KMS accepts for this algorithm (RAW is rejected
+    with a ValidationException, proven in production 2026-10-22).
+    KMS signs the supplied digest as the message, so the signature
+    is standard Ed25519ph (RFC 8032 section 5.1, empty context) over
+    the digest bytes. The format accordingly defines the signed
+    message as the SHA-512 digest of the canonical payload: a
+    verifier hashes the payload once and runs a completely standard
+    Ed25519ph verification over the digest. verify_passport accepts
+    that variant alongside pure Ed25519, so no other behavior
+    changes. Because only the 64-byte digest ever crosses the KMS
+    boundary, payload size is never a signing constraint.
 
     boto3 is imported lazily, only when a KMS call is actually made, so
     importing this module and using local keys needs no AWS SDK and no
@@ -492,16 +493,11 @@ class KmsPassportSigner:
 
     def sign(self, message: bytes) -> bytes:
         """Sign message bytes via KMS and return the 64-byte signature."""
-        if len(message) > 4096:
-            raise ValueError(
-                "passport payload exceeds the 4096-byte KMS RAW signing "
-                "limit; the DIGEST flow is not a fallback (see class "
-                "docstring), so the document itself must shrink"
-            )
+        digest = hashlib.sha512(message).digest()
         response = self._kms().sign(
             KeyId=self._key_id,
-            Message=message,
-            MessageType="RAW",
+            Message=digest,
+            MessageType="DIGEST",
             SigningAlgorithm=_KMS_SIGNING_ALGORITHM,
         )
         signature = response["Signature"]
@@ -750,15 +746,17 @@ def verify_passport(
         verdict["errors"].append(f"unsupported version: {document['version']}")
         return verdict
 
-    # Locally issued passports carry pure Ed25519 signatures; KMS-issued
-    # ones carry Ed25519ph signatures (KMS signs Ed25519 keys with the
-    # pre-hashed variant). Both are signatures by the issuer key over
-    # these exact bytes, so accept whichever variant verifies. The
-    # document's signing_key field tells the verifier which key to use;
-    # it does not change this check.
+    # Locally issued passports carry pure Ed25519 signatures over these
+    # exact bytes. KMS-issued ones carry Ed25519ph signatures over the
+    # SHA-512 digest of these bytes: the digest is the format's signed
+    # message, because KMS accepts only a digest for ED25519_PH_SHA_512
+    # and signs it as the message (see KmsPassportSigner). Accept
+    # whichever variant verifies. The document's signing_key field
+    # tells the verifier which key to use; it does not change this
+    # check.
     payload = canonical_json(document)
     signature_ok = _ed25519_verify(pub, payload, signature) or _ed25519ph_verify(
-        pub, payload, signature
+        pub, hashlib.sha512(payload).digest(), signature
     )
     verdict["checks"]["signature"] = signature_ok
     if not signature_ok:

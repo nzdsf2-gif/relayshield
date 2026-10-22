@@ -1884,7 +1884,7 @@ ENDPOINTS = [
         "summary": "Register assets and sweep them against the IOC corpus",
         "description": (
             "A watchlist scoped to your API key. `register` adds domains and IPs, `sweep` checks "
-            "them against the IOC corpus (8.3M+ citations, from 123 monitored criminal Telegram "
+            "them against the IOC corpus (9M+ citations, from 129 monitored criminal Telegram "
             "marketplaces and authoritative feeds), `list` returns what is registered, `remove` "
             "deletes entries. Once a webhook is configured, new matches against registered assets "
             "are pushed to you automatically."
@@ -3015,7 +3015,7 @@ PAYG_ENDPOINTS: dict[str, dict] = {
         'summary': "Check a phone number's criminal-corpus reputation",
         'description': "Assess a stranger's phone number (a caller or smishing sender) by fusing RelayShield criminal-corpus sightings and attack-graph paths with Twilio Lookup SIM-swap and line-type intelligence into one verdict. The verdict ceiling is unknown: an absence of flags is not proof of safety. Call before trusting a call, text, or account action from an unknown number.",
         'price_units': 50000,
-        'x402_version': 1,
+        'x402_version': 2,
         'body': {'type': 'object',
                  'properties': {'phone': {'type': 'string', 'description': 'Phone number in E.164 format'}},
                  'required': ['phone']},
@@ -3669,8 +3669,8 @@ Identity-compromise and threat-intelligence checks over a plain REST API. Every 
 `POST`, takes a JSON body, and returns a JSON envelope. Pay per call in USDC over x402 with no
 signup and no API key, or use a key with prepaid credits and a free tier of 100 calls. Screen a
 counterparty wallet, a token contract, an MCP server, a domain or an email against a corpus
-collected continuously from 123 monitored criminal Telegram marketplaces, infostealer log dumps
-and authoritative public indicator feeds -- more than 8.3 million citations to date.
+collected continuously from 129 monitored criminal Telegram marketplaces, infostealer log dumps
+and authoritative public indicator feeds -- more than 9 million citations to date.
 
 ## Authentication
 

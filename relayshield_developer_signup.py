@@ -2753,6 +2753,9 @@ print(f<span class="str">"Breaches: {breach.get('breach_count', 0)}"</span>)
       <img src="https://x402-list.com/badge/relayshield.svg?data=uptime&amp;period=30d" alt="RelayShield on x402-list.com: continuously monitored" style="height:20px;vertical-align:middle" />
     </a>
   </p>
+  <p style="margin-top:.6rem">
+    <a href="https://zplatform.ai/" target="_blank" rel="noopener" title="Featured on zPlatform.ai"><img src="https://zplatform.ai/badges/zplatform-featured.png" alt="Featured on zPlatform" width="250" height="60" loading="lazy" /></a>
+  </p>
 </footer>
 
 <script>

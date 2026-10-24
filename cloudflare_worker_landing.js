@@ -313,6 +313,7 @@ const HTML = `<!DOCTYPE html>
         <div class="links">
           <a class="btn btn-primary btn-sm" href="https://t.me/relayshield_bot">Try free on Telegram</a>
           <a class="more" href="https://wa.me/17407373961?text=SRC_wa-landing">WhatsApp bot</a>
+          <a class="more" href="https://relayshield.net/check">Free scam check, no signup</a>
         </div>
         <div class="drill-hint">Click for details &#x25B8;</div>
       </div>

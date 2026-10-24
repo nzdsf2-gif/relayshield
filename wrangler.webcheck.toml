@@ -1,0 +1,50 @@
+name = "relayshield-webcheck"
+main = "cloudflare_worker_webcheck.js"
+compatibility_date = "2026-09-01"
+
+# Route: relayshield.net/check and everything under it. This pattern is more
+# specific than the landing Worker's relayshield.net/*, so Cloudflare routes
+# /check* here and everything else to the landing page. Verify after deploy:
+# GET https://relayshield.net/check must return this Worker's page, not the
+# landing page.
+routes = [
+  { pattern = "relayshield.net/check*", zone_name = "relayshield.net" },
+]
+
+# workers_dev = true so /check/health is reachable on the workers.dev URL
+# before the custom route is verified, following the checkemail pattern.
+workers_dev = true
+
+# NO npm dependencies and NO node_modules: the Worker imports nothing.
+# jsQR for the browser decode loads from CDN in the page itself.
+
+# ---------------------------------------------------------------------------
+# KV. COMMENTED OUT FOR THE FIRST DEPLOY, following the checkemail pattern:
+# a binding naming a namespace id that does not exist makes `wrangler
+# deploy` fail outright. The code fails OPEN without it: rate limiting is
+# off and metrics are unavailable, but checks still work. Create the
+# namespace in the Cloudflare dashboard (Storage & Databases -> KV), then
+# uncomment, paste the real id, and redeploy. Verify after that deploy:
+# GET /check/health reports kv: true.
+# ---------------------------------------------------------------------------
+# [[kv_namespaces]]
+# binding = "WEBCHECK_KV"
+# id = "PASTE_REAL_NAMESPACE_ID_HERE"
+
+# TURNSTILE_SITE_KEY is a public var (not a secret): it is embedded in the
+# page so the widget can render. Replace REPLACE_ME with the real site key
+# from the Cloudflare dashboard (Turnstile) before launch. Until then the
+# page hides the widget and submits without a token.
+[vars]
+TURNSTILE_SITE_KEY = "REPLACE_ME"
+# API_BASE is overridable for staging; production default is
+# https://api.relayshield.net (see the Worker source).
+# API_BASE = "https://api.relayshield.net"
+
+# SECRETS (set with `wrangler secret put`, never committed here):
+#   TURNSTILE_SECRET_KEY: Turnstile secret key; without it the server
+#     skips token verification (page still works, rate limiter backstops).
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY: scoped IAM credentials with
+#     ONLY rekognition:DetectText, for the upload screenshot-OCR fallback.
+#     Without them uploads still validate, but OCR returns "not configured"
+#     instead of reading image text.

@@ -500,12 +500,16 @@ def _heuristic_url_check(url: str) -> dict:
 # no parse-failure mode, unlike Telegram's 400, so the WA risk was always
 # cosmetic only; the span removes even that.) An embedded backtick would
 # break the span, so it becomes an apostrophe first.
+# v1.2 (2026-10-24): footer gains a web-check line (relayshield.net/check)
+# below the bot link line, in the same card only, so a forwarded card
+# reaches recipients without Telegram or WhatsApp.
 # ---------------------------------------------------------------------------
 
 WA_CARD_HEADER = "🛡️ RelayShield Verdict"
 WA_CARD_FOOTER_CORPUS = "Checked against a growing threat intelligence corpus with over 129 monitored marketplaces."
 WA_CARD_FORWARD_LINK = "↗ Forward this verdict to anyone who received the same link."
 WA_CARD_BOT_LINK = "Try it yourself: https://wa.me/17407373961"
+WA_CARD_WEBCHECK_LINK = "Try it on the web: https://relayshield.net/check"
 
 
 def _wa_code_span(text: str) -> str:
@@ -567,6 +571,7 @@ def build_verdict_response(stats: dict | None, heuristics: dict, target_label: s
         WA_CARD_FOOTER_CORPUS,
         WA_CARD_FORWARD_LINK,
         WA_CARD_BOT_LINK,
+        WA_CARD_WEBCHECK_LINK,
     ])
 
 
